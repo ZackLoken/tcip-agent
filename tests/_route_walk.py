@@ -1,5 +1,6 @@
-"""The app's routes walked through the frontend route generator's own walk of its router tree,
-and the state-changing ones among them.
+"""The app's routes, and the state-changing ones among them.
+
+The routes are walked through the frontend route generator's own walk of its router tree.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ GENERATOR = REPO_ROOT / "tools" / "generate_frontend_routes.py"
 
 
 def route_generator():
-    """``tools/generate_frontend_routes.py`` loaded as a module, the walk CI regenerates with."""
+    """Load ``tools/generate_frontend_routes.py`` as a module and return it."""
     spec = importlib.util.spec_from_file_location(
         "tcip_frontend_route_generator", GENERATOR
     )
@@ -26,8 +27,9 @@ def route_generator():
 
 
 def state_changing_routes(target) -> list[APIRoute]:
-    """Every route of the app ``target`` declaring a method in
-    ``trust_boundary.STATE_CHANGING_METHODS``.
+    """Return every route of the app ``target`` declaring a state-changing method.
+
+    A state-changing method is one in ``trust_boundary.STATE_CHANGING_METHODS``.
     """
     return [
         route

@@ -1,16 +1,9 @@
-"""One Ray cluster at a time across xdist workers.
+"""One ``ray_cluster``-marked test at a time across xdist workers.
 
-A test marked ``ray_cluster`` starts a Ray cluster of its own. Left unserialized, two workers
-can start two within seconds of each other, and beside the suite's own workers that has
-exhausted this machine's memory and stalled a leg. The mark takes a file lock, shared by every
-worker of one xdist session through the run id xdist exports, for the whole of the test's
-protocol, so at most one cluster runs at a time; without xdist there is one process and
-nothing to serialize. The wrapper runs outside pytest-timeout's, so time spent waiting for the
-lock never counts against the test's own timeout. xdist's ``--dist loadgroup`` would serialize
-the same tests, but that scheduler hands every worker one test at a time with a controller
-round trip between, which halved the suite's throughput when measured here.
-``tests/conftest.py`` imports the hook, and a run outside the suite loads it with
-``-p tests.ray_cluster_lock``.
+Under xdist, a test marked ``ray_cluster`` runs its whole protocol holding a file lock named by
+the run id xdist exports, which every worker of the session shares; without xdist or the mark no
+lock is taken. The protocol hook is a ``tryfirst`` wrapper. A run outside the suite loads it
+with ``-p tests.ray_cluster_lock``.
 """
 
 from __future__ import annotations

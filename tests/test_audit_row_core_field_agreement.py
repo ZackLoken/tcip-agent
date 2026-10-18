@@ -1,8 +1,7 @@
-"""Rows the GUI routes append to an audit log parse the same way as the platform writer's rows.
+"""A GUI route's audit row and the platform writer's carry their core fields alike.
 
-Both writers append to the same scope's log, so a consumer reads a single stream: every row is
-a mapping carrying a timezone-aware UTC timestamp, the tool that acted, its arguments, and a
-status drawn from one vocabulary, whichever writer produced it.
+One row from each writer lands in one scope's log; each carries a UTC timestamp, the tool that
+acted and its arguments as a mapping, and the two rows' statuses are equal.
 """
 
 from __future__ import annotations

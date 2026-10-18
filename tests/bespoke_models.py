@@ -1,10 +1,8 @@
-"""Bespoke builders and a custom training loop the tests name by dotted reference.
+"""Bespoke model builders and training sources importable by dotted reference.
 
-(a) a from-scratch ``GroupNorm`` backbone and tiny FPN feeding a torchvision Faster R-CNN whose
-    ``AnchorGenerator`` is built at the geometry the dataset's own GT boxes derive
-    (``pipelines.derivations.derive_detector_geometry``); and
-
-(b) a custom ``train(ctx)`` loop (``train_bespoke``) that trains through the ``ctx`` sinks.
+Among them are (a) a from-scratch ``GroupNorm`` backbone and tiny FPN feeding a torchvision
+Faster R-CNN whose ``AnchorGenerator`` is built at the anchor geometry it is handed, and (b) a
+custom ``train(ctx)`` loop (``train_bespoke``) that trains through the ``ctx`` sinks.
 """
 
 from __future__ import annotations
@@ -21,7 +19,7 @@ from tcip_mcp.pipelines.model_build import METRICS_KEY, STATE_DICT_KEY
 
 
 class _GNBlock(nn.Module):
-    """Conv -> GroupNorm -> ReLU."""
+    """A block of a convolution, a GroupNorm and a ReLU, in that order."""
 
     def __init__(self, cin: int, cout: int, stride: int, groups: int) -> None:
         super().__init__()
@@ -38,8 +36,7 @@ class _GNBlock(nn.Module):
 class _GNBackboneFPN(nn.Module):
     """From-scratch backbone + minimal top-down FPN, fully GroupNorm (batch-independent).
 
-    Returns a single fused feature map; torchvision's GeneralizedRCNN wraps a bare tensor as the
-    one-level feature dict ``{"0": ...}`` the detector's anchors / RoI pool are configured for.
+    Its forward returns one fused feature map, a tensor.
     """
 
     def __init__(
@@ -75,8 +72,10 @@ class _GNBackboneFPN(nn.Module):
 
 
 class _HeldDetector(nn.Module):
-    """A torchvision detector held as ``.detector``: a loss dict in train mode, ``list[dict]``
-    predictions in eval mode, a batched tensor split into its images first.
+    """A torchvision detector held as ``.detector``.
+
+    Its forward splits a batched tensor into its images and returns ``.detector``'s answer over
+    them, with ``targets`` passed too in train mode when given.
     """
 
     detector: nn.Module
@@ -90,7 +89,7 @@ class _HeldDetector(nn.Module):
 
 
 class _FreezesBackbone:
-    """``freeze_backbone`` over a ``.backbone`` that may declare ``freeze_to``."""
+    """A mixin giving ``freeze_backbone`` over a ``.backbone`` that may declare ``freeze_to``."""
 
     backbone: nn.Module
 
@@ -120,10 +119,11 @@ def build_bespoke_detector(
     out_channels: int = 64,
     gn_groups: int = 8,
 ) -> BespokeGNDetector:
-    """Build the bespoke detector with a GroupNorm backbone/FPN at the geometry and statistics
-    its model source records, its one fused level's anchors at the base size and its next two
-    doublings. Deterministic in its inputs, so re-importing the builder at inference rebuilds the
-    identical architecture and the trained ``state_dict`` loads cleanly.
+    """Build the bespoke detector with a GroupNorm backbone/FPN.
+
+    The Faster R-CNN is built at ``min_size``, ``max_size``, ``image_mean`` and ``image_std``,
+    its one fused level's anchors at ``anchor_base_size`` and its next two doublings over
+    ``aspect_ratios``.
     """
     from torchvision.models.detection import FasterRCNN
     from torchvision.models.detection.rpn import AnchorGenerator
@@ -156,9 +156,11 @@ def build_bespoke_detector(
 
 
 def train_bespoke(ctx) -> None:
-    """A from-scratch training loop composing the envelope's craft utilities (``build_optimizer`` /
-    ``build_scheduler`` / ``evaluate``) that records every metric and checkpoint through the ctx
-    sinks, its best epoch's weights saved once as ``model_best`` when the loop ends.
+    """Train from scratch, composing the envelope's craft utilities.
+
+    The loop composes ``build_optimizer`` / ``build_scheduler`` / ``evaluate`` and records every
+    metric and checkpoint through the ctx sinks; when the loop ends its best epoch's weights are
+    saved as ``model_best`` and its last weights as ``model_final``.
     """
     ctx.set_seed()
     device = ctx.device
@@ -226,10 +228,11 @@ def train_bespoke(ctx) -> None:
 
 
 def save_built_weights(ctx) -> None:
-    """A training body that takes no step: logs each of the config's ``fixture_rows`` (an
-    ``epoch`` plus its metrics) through the run's own metrics log, then saves the model its config
-    builds, as built under the run's own seed, as the run's final weights, carrying the config's
-    ``fixture_metrics`` as the checkpoint's metrics when it states any.
+    """Save the model the config builds as the run's final weights, taking no training step.
+
+    Each of the config's ``fixture_rows`` (an ``epoch`` plus its metrics) is logged through the
+    run's own metrics log first; the model is saved as built under the run's own seed, carrying
+    the config's ``fixture_metrics`` as the checkpoint's metrics when it states any.
     """
     own = ctx.spec.model_extra
     for row in own.get("fixture_rows") or []:
@@ -248,9 +251,11 @@ SECOND_CHECKPOINT_TAG = "second"
 
 
 def save_built_weights_and_a_second_checkpoint(ctx) -> None:
-    """:func:`save_built_weights`, then the model its config builds saved again under
-    :data:`SECOND_CHECKPOINT_TAG`, beside the config's ``fixture_state`` when it states any: a
-    checkpoint the run wrote beside the deliverable its completion registers.
+    """Run :func:`save_built_weights`, then save the built model again as a second checkpoint.
+
+    The second save is under :data:`SECOND_CHECKPOINT_TAG`, beside the config's
+    ``fixture_state`` when it states any: a checkpoint the run wrote beside the deliverable its
+    completion registers.
     """
     save_built_weights(ctx)
     ctx.save_checkpoint(
@@ -296,8 +301,9 @@ def _resnet18(in_chans: int = 3):
 
 
 class BespokeComposed(_FreezesBackbone, nn.Module):
-    """Backbone + neck + task head over images normalized by the per-band ``image_mean`` and
-    ``image_std`` its model source records.
+    """Backbone + neck + task head over normalized images.
+
+    The images are normalized by the per-band ``image_mean`` and ``image_std`` it is built with.
     """
 
     def __init__(
@@ -356,8 +362,9 @@ class BespokeComposed(_FreezesBackbone, nn.Module):
 
 
 class BespokeDetection(_FreezesBackbone, _HeldDetector):
-    """Real backbone + FPN fed into a torchvision detector via ``BackboneNeckAdapter``:
-    the detection / instance-seg sibling of the removed ``DetectionModel``.
+    """Real backbone + FPN fed into a torchvision detector via ``BackboneNeckAdapter``.
+
+    It serves detection and, with ``detector="mask_rcnn"``, instance segmentation.
     """
 
     def __init__(
@@ -486,9 +493,10 @@ def build_bespoke_detection(
 
 
 class _OneConvDetector(nn.Module):
-    """A detector whose one parameter is a 1x1 convolution, carrying ``score_thresh`` and
-    ``detections_per_img`` on itself; :meth:`zero_loss` is its training forward's answer and
-    :meth:`governed` its eval forward's output kept to both knobs.
+    """A detector whose one parameter is a 1x1 convolution.
+
+    It carries ``score_thresh`` and ``detections_per_img`` on itself; :meth:`zero_loss` is its
+    training forward's answer and :meth:`governed` its eval forward's output kept to both knobs.
     """
 
     def __init__(self, in_chans: int = 3) -> None:
@@ -504,7 +512,10 @@ class _OneConvDetector(nn.Module):
         }
 
     def governed(self, out: dict) -> dict:
-        """``out``'s rows scoring at least ``score_thresh``, the ``detections_per_img`` highest."""
+        """Return ``out``'s rows scoring at least ``score_thresh``, at most ``detections_per_img``.
+
+        The rows kept are the highest-scoring ones.
+        """
         order = torch.argsort(out["scores"], descending=True)
         keep = order[out["scores"][order] >= self.score_thresh][
             : self.detections_per_img
@@ -513,9 +524,11 @@ class _OneConvDetector(nn.Module):
 
 
 class FixedMaskSegmenter(_OneConvDetector):
-    """An instance segmenter whose eval forward returns, per image, one detection scored 0.9 over
-    ``box`` (``[x0, y0, x1, y1]``), its mask holding ``value`` over each of ``regions`` (rects of
-    the same shape) and nothing elsewhere, nothing at all for an empty list.
+    """An instance segmenter whose eval forward offers one fixed detection per image.
+
+    The detection is scored 0.9 at ``box`` (``[x0, y0, x1, y1]``), its mask the frame-sized
+    :func:`~tests._producer_fixtures.painted_array` of ``regions`` at ``value`` over 0, and it
+    passes through :meth:`governed`.
     """
 
     def __init__(
@@ -566,9 +579,10 @@ def build_fixed_mask_instance_seg(
     box: list,
     **_handed,
 ):
-    """``model_source`` builder for :class:`FixedMaskSegmenter` at ``regions``, ``value`` and
-    ``box``, its fixed boxes reading none of the detector geometry or statistics the platform
-    hands it.
+    """Build a :class:`FixedMaskSegmenter` at ``regions``, ``value`` and ``box``.
+
+    A ``model_source`` builder; its fixed boxes read none of the detector geometry or statistics
+    the platform hands it.
     """
     return FixedMaskSegmenter(
         in_chans=in_chans, regions=regions, value=value, box=box
@@ -577,8 +591,10 @@ def build_fixed_mask_instance_seg(
 
 # A non-torchvision detector, no .detector to route through.
 class BareScoreThreshDetector(_OneConvDetector):
-    """A hand-rolled detector with no ``.detector``: exposes both knobs on itself and honors them
-    in its own eval-mode forward over one fixed box per image.
+    """A hand-rolled detector with no ``.detector``.
+
+    In eval its forward offers, per image, one box over the frame's middle half scored 0.9,
+    passed through :meth:`governed`; in train it answers :meth:`zero_loss`.
     """
 
     def forward(self, images):
@@ -634,8 +650,9 @@ class BareNoKnobDetector(nn.Module):
 def build_bare_score_thresh_detector(
     *, in_chans: int = 3, num_classes: int = 1, **_handed
 ):
-    """``model_source`` builder for :class:`BareScoreThreshDetector`, reading none of the
-    detector geometry or statistics the platform hands it.
+    """Build a :class:`BareScoreThreshDetector` as a ``model_source`` builder.
+
+    It reads none of the detector geometry or statistics the platform hands it.
     """
     return BareScoreThreshDetector(in_chans=in_chans)
 
@@ -643,16 +660,17 @@ def build_bare_score_thresh_detector(
 def build_bare_no_knob_detector(
     *, in_chans: int = 3, num_classes: int = 1, **_handed
 ):
-    """``model_source`` builder for :class:`BareNoKnobDetector`, reading none of the detector
-    geometry or statistics the platform hands it.
+    """Build a :class:`BareNoKnobDetector` as a ``model_source`` builder.
+
+    It reads none of the detector geometry or statistics the platform hands it.
     """
     return BareNoKnobDetector(in_chans=in_chans)
 
 
 class DivergingDetection(nn.Module):
-    """Wraps ``BespokeDetection``, adding one parameter whose loss term drives the training loss
-    to ``nan`` a few optimizer steps in: the fixture ``overfit_check``'s non-finite-loss rendering
-    guards against, since a real training pass can diverge exactly this way.
+    """A ``BespokeDetection`` whose training losses add a ``diverge`` term, ``log(w)``.
+
+    ``w`` is one extra parameter, starting at 0.02.
     """
 
     def __init__(self, num_classes: int = 1, **kwargs) -> None:
@@ -686,11 +704,12 @@ def build_diverging_detection(
 class BrightRegionDetector(nn.Module):
     """A detector whose box geometry is analytic and whose confidence is learned.
 
-    Finds the bright region of a frame and reports its extent as one box, beside one low-scored
-    decoy, so a conf sweep has two score levels to choose between and a count-unbiased operating
-    point exists between them. The learned ``logit`` scales the confidence the true box carries,
-    fit against the labels, so a training pass is a real optimization over real data while the
-    geometry stays fixed and a chain measured over this model's counts is measuring the chain.
+    It reports the extent of a frame's pixels whose band mean exceeds ``bright`` as one box scored
+    by the sigmoid of the learned ``logit``, beside a decoy box, that extent with every
+    coordinate plus one, scored ``decoy_score``, keeping the boxes scoring at least
+    ``score_thresh``, at most ``detections_per_img``; a frame with no such pixel gets no box.
+    In training its loss is the squared distance of that confidence from the batch's mean label
+    presence.
     """
 
     def __init__(
@@ -707,7 +726,7 @@ class BrightRegionDetector(nn.Module):
         self.detections_per_img = 100
 
     def _extent(self, image):
-        """The bounding box of the frame's bright pixels, or ``None`` when it holds none."""
+        """Return the bounding box of the frame's bright pixels, or ``None`` when it holds none."""
         mask = image.mean(dim=0) > self.bright
         ys, xs = torch.nonzero(mask, as_tuple=True)
         if xs.numel() == 0:
@@ -783,9 +802,10 @@ def build_bright_region_detector(
     decoy_score: float = 0.03,
     **_handed,
 ) -> BrightRegionDetector:
-    """``model_source`` builder for :class:`BrightRegionDetector`, deterministic in its inputs,
-    its analytic boxes reading none of the detector geometry or statistics the platform hands
-    it.
+    """Build a :class:`BrightRegionDetector` as a ``model_source`` builder.
+
+    It passes ``in_chans``, ``bright`` and ``decoy_score`` and reads none of the detector
+    geometry or statistics the platform hands it.
     """
     return BrightRegionDetector(
         in_chans=in_chans, bright=bright, decoy_score=decoy_score
@@ -793,16 +813,18 @@ def build_bright_region_detector(
 
 
 class BrightBlobDetector(nn.Module):
-    """One detection per connected bright blob of a frame, labeled the one subject and scored by
-    a learned confidence (0.5 untrained) plus the fraction of the frame the blob covers, capped
-    at 1, with the blob's own soft mask when ``with_masks``. A blob is bright where the band mean
-    exceeds 0.5; with ``attributes`` (the count of attributes it is built at) it is bright where
-    one band exceeds 0.5, and carries that band's index as its first attribute's id and 0 for
-    every other. A training step's loss is the squared distance of the confidence from each
-    frame's label presence (one when it holds a labeled object, zero when not). An inference
-    forward keeps each frame's blobs scoring at least ``score_thresh``, the ``detections_per_img``
-    highest, and records each input's channel count in ``seen_channels`` and its per-band peak
-    value in ``seen_band_peaks``.
+    """A detector offering one detection per 4-connected bright blob of a frame.
+
+    Each detection is labeled 1 and scored by the sigmoid of a learned logit (0 when built) plus
+    the fraction of the frame the blob covers, capped at 1, with the blob's 0/1 mask when
+    ``with_masks``. A blob is bright where the band mean exceeds 0.5; with ``attributes``
+    (the count of attributes it is built at) it is bright where one band exceeds 0.5, and
+    carries that band's index as its first attribute's id and 0 for every other. A training
+    step's loss is the mean squared distance of the confidence from each frame's label presence
+    (one when its target holds a box, zero when not). An inference forward keeps each frame's
+    blobs scoring at least ``score_thresh``, the ``detections_per_img`` highest, and records each
+    input's channel count in ``seen_channels`` and its per-band peak value in
+    ``seen_band_peaks``.
     """
 
     def __init__(
@@ -897,8 +919,9 @@ def build_bright_blob_detector(
     attributes: tuple = (),
     **_handed,
 ) -> BrightBlobDetector:
-    """``model_source`` builder for :class:`BrightBlobDetector`, at the attributes the platform
-    hands it, its blobs reading none of the detector geometry or statistics.
+    """Build a :class:`BrightBlobDetector` at the attributes the platform hands it.
+
+    A ``model_source`` builder; its blobs read none of the detector geometry or statistics.
     """
     return BrightBlobDetector(
         in_chans=in_chans, with_masks=with_masks, attributes=len(attributes)
@@ -906,8 +929,10 @@ def build_bright_blob_detector(
 
 
 class WholeBlobDetector(BrightBlobDetector):
-    """A :class:`BrightBlobDetector` whose first attribute's id says whether the frame holds the
-    blob whole: 1 for a blob clear of every border, 0 for one a border cuts.
+    """A :class:`BrightBlobDetector` whose first attribute marks a box clear of the frame border.
+
+    In eval its first attribute's id is 1 for a box with ``x1 > 0``, ``y1 > 0``, ``x2`` below the
+    width and ``y2`` below the height, and 0 otherwise.
     """
 
     def forward(self, images, targets=None):
@@ -930,7 +955,8 @@ def build_whole_blob_detector(
     attributes: tuple = (),
     **_handed,
 ) -> WholeBlobDetector:
-    """``model_source`` builder for :class:`WholeBlobDetector`, at the attributes the platform
-    hands it, reading none of the detector geometry or statistics.
+    """Build a :class:`WholeBlobDetector` at the attributes the platform hands it.
+
+    A ``model_source`` builder reading none of the detector geometry or statistics.
     """
     return WholeBlobDetector(in_chans=in_chans, attributes=len(attributes))

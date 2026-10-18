@@ -1,14 +1,7 @@
-"""Shared dense-reference fixture builder for operating-point gate tests.
+"""Evaluation records built from stated boxes, with no randomness.
 
-Some gate conditions (a dispersion/localization floor, a reference-sufficiency and equivalence
-criterion) cannot be exercised by a 1-2 object toy fixture: the failure modes are specifically
-about per-image variance and tail behavior across a realistic, dense
-reference (tens to hundreds of objects per image, the density these gate
-conditions are shaped around). ``dense_records`` builds such a reference with
-an exactly hand-verifiable per-image miss/false-positive pattern (deterministic, not randomized) so
-every derived statistic (count_bias_mean/std, count_error_at_quantile, precision/recall) can be
-reasoned about directly from ``miss_pattern``/``fp_pattern`` rather than pinned by re-running the
-code under test.
+``dense_records`` lays ground truth on a grid and leaves out or adds detections per image by
+``miss_pattern`` and ``fp_pattern``.
 """
 
 from __future__ import annotations
@@ -40,25 +33,13 @@ def dense_records(
     miss_pattern: list[int] | None = None,
     fp_pattern: list[int] | None = None,
 ) -> list[dict]:
-    """``n_images`` records, each with ``objects_per_image`` GT laid out on a grid (spaced well
-    outside the ~half-class-avg-size center-match tolerance these 20x20 boxes derive, so there is no
-    accidental cross-matching between neighboring GT).
+    """Return ``n_images`` records, each with ``objects_per_image`` 20 px GT boxes on a grid.
 
-    Per image ``i``: the first ``miss_pattern[i]`` GT boxes get no matching detection (false
-    negatives); every other GT gets an exactly-matching detection at ``score``; ``fp_pattern[i]``
-    extra, unmatched detections (at ``fp_score``, defaulting to ``score``; pass a distinct, lower
-    value to model a realistic detector whose spurious detections skew low-confidence) are added far
-    outside the grid (false positives). Per-image bias is therefore exactly ``fp_pattern[i] -
-    miss_pattern[i]``, tp = ``objects_per_image - miss_pattern[i]``, fn = ``miss_pattern[i]``,
-    fp = ``fp_pattern[i]``, hand-verifiable without re-running the sweep. ``shift`` offsets every GT
-    box's center by that many px; the matching detection's center is not shifted, so it stays put at
-    the original (unshifted) grid position, leaving miss/FP placement geometry unaffected, so a
-    holdout fixture carries content genuinely distinct from calibration's for a content-overlap
-    gate. A caller must not raise ``shift`` past the center-match tolerance without also shifting
-    the paired detection to match: past that point every "match" becomes a miss (the shifted GT)
-    plus an unmatched detection (the un-shifted one) instead of a true positive, silently turning
-    a clean fixture into an fp+fn pair. The default (0.0) applies no shift at all; only a caller
-    that passes a nonzero value takes on that constraint.
+    The grid's points are ``spacing`` px apart. Per image ``i``: the first ``miss_pattern[i]``
+    grid points get no detection; every other point gets a detection at ``score`` on the grid
+    point; ``fp_pattern[i]`` further detections (at ``fp_score``, defaulting to ``score``) are
+    placed at grid rows numbered past the GT's. ``shift`` is added to every GT box's x, not to
+    the detections'. Patterns whose length is not ``n_images`` raise ``ValueError``.
     """
     miss_pattern = (
         list(miss_pattern) if miss_pattern is not None else [0] * n_images
@@ -102,15 +83,16 @@ def dense_records(
 
 
 def gt_only(boxes: list[tuple[float, float, float, float]]) -> list[dict]:
-    """One record holding ``boxes`` as ground truth and nothing else."""
+    """Return one record holding ``boxes`` as ground truth and nothing else."""
     return [{"gt": [gt_record(list(b), 0, 0) for b in boxes]}]
 
 
 def ann(
     cx: float, cy: float, cid: int = 0, score: float | None = None
 ) -> dict:
-    """A 20px square of category ``cid`` centered at (``cx``, ``cy``): a detection record
-    scored ``score`` when one is given, else a ground-truth record.
+    """Return a 20px square of category ``cid`` centered at (``cx``, ``cy``).
+
+    It is a detection record scored ``score`` when one is given, else a ground-truth record.
     """
     if score is not None:
         return dt_record(_box(cx, cy), cid, score)
@@ -118,10 +100,11 @@ def ann(
 
 
 def toy_records(id_prefix: str = "c", *, shift: float = 0.0) -> list[dict]:
-    """Two 400x400 records whose count-unbiased conf is 0.6 and F1-max conf 0.9: image A has one
-    GT, a correct detection at 0.9 and a spurious far one at 0.6; image B has two GT, correct
-    detections at 0.9 and 0.3. ``shift`` offsets every GT center by that many px, inside the
-    center-match tolerance, leaving the detections in place.
+    """Return two 400x400 records of 20 px boxes.
+
+    Image A has one GT at (100, 100) and detections at (100, 100) scored 0.9 and (300, 300)
+    scored 0.6; image B has GT at (100, 100) and (200, 200) and detections there scored 0.9 and
+    0.3. ``shift`` is added to every GT's x, not to the detections'.
     """
     a = prediction_record(
         [ann(100, 100, score=0.9), ann(300, 300, score=0.6)],
@@ -145,8 +128,10 @@ def toy_records(id_prefix: str = "c", *, shift: float = 0.0) -> list[dict]:
 
 
 def shifted_cal_holdout() -> tuple[list[dict], list[dict]]:
-    """A dense calibration/holdout pair on one grid, the holdout's GT shifted 5px: a good detector
-    with one low-conf spurious detection per image, whose count-unbiased pick lands at 0.9.
+    """Return a calibration/holdout pair of :func:`dense_records`, the holdout's GT shifted 5 px.
+
+    Each side is 20 images of 80 grid points, none missed, detections at 0.9 and one further
+    detection per image at 0.05.
     """
     n_images, objects_per_image = 20, 80
     miss, fp = [0] * n_images, [1] * n_images
@@ -175,10 +160,11 @@ def shifted_cal_holdout() -> tuple[list[dict], list[dict]]:
 def good_cal_holdout(
     *, fp_score: float = 0.05
 ) -> tuple[list[dict], list[dict]]:
-    """A dense calibration/holdout pair: a good detector with one spurious detection per image at
-    ``fp_score``, whose count-unbiased pick lands at 0.9 with zero bias on the holdout. The holdout
-    lies on its own grid (fewer objects, wider spacing), so no record's content matches
-    calibration's.
+    """Return a calibration/holdout pair of :func:`dense_records`.
+
+    Each side is 20 images, none missed, detections at 0.9 and one further detection per image
+    at ``fp_score``; calibration has 80 grid points at the default spacing and the holdout 72 at
+    5 px more.
     """
     n_images = 20
     objects_per_image = 80

@@ -1,9 +1,8 @@
-"""What the backend records about the harness that pushed a panel event.
+"""What the events route broadcasts about the harness that posted a panel event.
 
-The MCP tools' one HTTP push carries the agent identity as headers; the events route copies what
-was declared onto the broadcast payload, so a browser and the replay can say which harness steered
-the GUI. A push without the headers is answered as it always was, the fields empty rather than
-guessed. The header names are one map shared with the client, read here through the backend.
+A post carrying the four identity headers is broadcast with their values in the identity fields;
+one without them is answered ok and broadcast with those fields empty; one carrying only the
+client name is broadcast with that field alone set.
 """
 
 from __future__ import annotations
@@ -29,8 +28,10 @@ def _post_and_capture_broadcast(
     data: dict,
     headers: dict | None = None,
 ) -> tuple[Any, dict]:
-    """Post a panel event for the open project, whose id is ``project_id``, while subscribed to
-    its live broadcast, returning the HTTP response and what the broadcast carried.
+    """Post a panel event for the open project while subscribed to its live broadcast.
+
+    The open project's id is ``project_id``. Returns the HTTP response and what the broadcast
+    carried.
     """
     from tcip_web.state import store
 

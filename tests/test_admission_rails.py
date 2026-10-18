@@ -1,5 +1,6 @@
-"""The admission rails: which samples a place holding ground truth admits, and why each one that
-is dropped was dropped.
+"""The admission rails over a place holding ground truth.
+
+Which samples the place admits, and why each one that is dropped was dropped.
 
 Covers the one shape read over a run's ground truth (``ground_truth_shape``), the label
 documents' own subject-scoped admission and their completion marks, and the targets the loaders
@@ -38,21 +39,19 @@ def _make_images(images_dir, stems):
 
 
 def _label(images_dir, stem, annotations, **kwargs):
-    """``annotations`` as the label document of the 100px image ``<stem>.jpg`` of
-    ``images_dir``.
-    """
+    """Write ``annotations`` as the label document of ``images_dir``'s 100px ``<stem>.jpg``."""
     label_image(images_dir / f"{stem}.jpg", annotations, 100, 100, **kwargs)
 
 
 def _poly(points, *, subject=BUD, **attrs):
-    """A one-ring polygon annotation: the ordinary case, one contour."""
+    """Return a one-ring polygon annotation of ``subject`` over ``points``."""
     return Annotation(
         subject=subject, geometry=Polygon([points]), attributes=dict(attrs)
     )
 
 
 def _multi_poly(rings, *, subject=BUD, **attrs):
-    """One occlusion-split instance: several disjoint rings, still a single annotation."""
+    """Return one annotation of ``subject`` whose polygon holds each of ``rings``."""
     return Annotation(
         subject=subject, geometry=Polygon(list(rings)), attributes=dict(attrs)
     )
@@ -81,8 +80,10 @@ def test_ground_truth_shape_reads_masks_and_tables(tmp_path):
 
 
 def test_ground_truth_shape_refuses_a_directory_holding_no_mask(tmp_path):
-    """A directory with no ``<stem>.png`` in it names no ground truth a run reads: label documents
-    are records of the images' own dataset, never files a run is pointed at.
+    """``ground_truth_shape`` refuses a directory holding no ``<stem>.png``.
+
+    Such a directory names no ground truth a run reads: label documents are records of the
+    images' own dataset, never files a run is pointed at.
     """
     from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
 
@@ -96,8 +97,10 @@ def test_ground_truth_shape_refuses_a_directory_holding_no_mask(tmp_path):
 
 
 def test_a_document_with_no_image_is_not_admitted(tmp_path):
-    """Membership is the images the place holds ground truth for. A document whose image was
-    deleted or renamed names nothing to train on, so it never enters the run.
+    """A label document whose image is absent is not admitted.
+
+    Membership is the images the place holds ground truth for; a document whose image is gone
+    names no member.
     """
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["kept"])
@@ -116,9 +119,7 @@ def test_a_document_with_no_image_is_not_admitted(tmp_path):
 def test_a_noncanonical_labelme_record_refuses_rather_than_reading_as_empty(
     tmp_path,
 ):
-    """A record in another tool's schema is unreadable ground truth, not an empty one: reading
-    it as empty would train a labeled image as entirely background.
-    """
+    """A record in another tool's schema is refused as unreadable ground truth."""
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["a"])
     ts.replace(
@@ -160,11 +161,11 @@ def test_detection_reads_its_samples_own_documents(tmp_path):
 def test_a_point_document_is_admitted_and_trains_through_the_builder_that_reads_points(
     tmp_path,
 ):
-    """Admission asks whether the document carries the subject at all, so a document carrying it
-    as a point is admitted; which geometries answer for a measurement is the selected loader's own
-    fact, so the detection loader refuses that sample by name rather than training the image as
-    background, while a builder that reads points is handed those same samples and trains over the
-    coordinates their own documents record.
+    """A document carrying the subject as a point is admitted and trains through a point builder.
+
+    Two documents carrying the subject as points are admitted; the detection loader refuses them
+    naming geometries it does not read, while a builder that reads points is handed both samples
+    and reads the coordinates their own documents record, its loss falling over three steps.
     """
     import math
 
@@ -223,8 +224,10 @@ def test_a_point_document_is_admitted_and_trains_through_the_builder_that_reads_
 
 
 def test_class_distribution_counts_only_this_loaders_own_samples(tmp_path):
-    """Two loaders over two sides of one dataset report their own distributions, never the
-    dataset's unsplit whole: each reads the documents its own samples name.
+    """Each loader's class distribution counts only its own samples' documents.
+
+    Two loaders over two halves of one dataset's samples each report the box count of its own
+    half, not the dataset's total.
     """
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
 
@@ -278,7 +281,7 @@ LOBE_B = [(60, 10), (80, 10), (80, 30), (60, 30)]
 
 
 def _assert_one_mask_over_both_lobes(target) -> None:
-    """A 2-ring instance is one mask covering both lobes, not two instances, not one lobe."""
+    """Assert a 2-ring instance is one mask covering both lobes, not two instances, not one lobe."""
     assert target["masks"].shape[0] == 1, (
         "a multi-ring instance must not split into several"
     )
@@ -297,8 +300,10 @@ def _assert_one_mask_over_both_lobes(target) -> None:
 
 
 def test_instance_seg_rasterizes_a_two_ring_instance_into_one_mask(tmp_path):
-    """An occlusion-split instance (a bud behind a branch) is one object with two regions, and
-    every ring of it rasterizes into that instance's single mask.
+    """A two-ring instance rasterizes into one mask covering both rings.
+
+    An occlusion-split instance (a bud behind a branch) is one object with two regions, and both
+    rings rasterize into that instance's single mask.
     """
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["img0"])
@@ -310,8 +315,10 @@ def test_instance_seg_rasterizes_a_two_ring_instance_into_one_mask(tmp_path):
 
 
 def test_instance_seg_two_single_ring_instances_stay_two_masks(tmp_path):
-    """The rail admits the ordinary case too: the same two lobes authored as separate annotations
-    are two instances with two masks; multi-ring support must not merge distinct objects.
+    """Two single-ring annotations stay two instances with two masks.
+
+    Two lobes authored as separate annotations give two masks, their boxes the two lobes'
+    extents.
     """
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["img0"])
@@ -357,8 +364,9 @@ def test_count_label_lines_reads_a_documents_instances(tmp_path):
 
 
 def _rail_fixture(tmp_path):
-    """One annotated image, one empty-unconfirmed, one with no label document, one confirmed
-    negative.
+    """Write an annotated, an empty-unconfirmed, an unlabeled and a confirmed-negative image.
+
+    The unlabeled image has no label document. Returns their directory.
     """
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["ann", "empty", "nolabel", "neg"])
@@ -370,8 +378,10 @@ def _rail_fixture(tmp_path):
 
 
 def test_only_annotated_and_confirmed_negatives_train(tmp_path):
-    """Samples come from the annotated set, never from an image list: a project where the breeder
-    labeled 30 of 400 images must not train on the other 370 asserted to be empty.
+    """Only the annotated image and the confirmed negative are admitted.
+
+    Samples come from the annotated set, never from an image list: the empty unconfirmed image
+    and the image with no label document are not admitted.
     """
     images = _rail_fixture(tmp_path)
 
@@ -383,8 +393,10 @@ def test_only_annotated_and_confirmed_negatives_train(tmp_path):
 
 
 def test_a_corrupt_confirmed_negative_refuses_the_admission(tmp_path):
-    """A stored 'negative' whose label document is not a document must never train as a
-    zero-object negative: the admission raises rather than reading it as empty.
+    """A confirmed negative whose label document is not a document refuses the admission.
+
+    The admission raises ``UnreadableLabelDocumentError`` on a stored 'negative' whose label
+    document is not a document.
     """
     images = _rail_fixture(tmp_path)
     ts.replace(image_label_key(images / "neg.jpg"), ["not", "a", "document"])
@@ -394,8 +406,10 @@ def test_a_corrupt_confirmed_negative_refuses_the_admission(tmp_path):
 
 
 def test_caller_supplied_members_are_filtered_too(tmp_path):
-    """A narrowed candidate set goes through the same gate, otherwise a narrowing reintroduces the
-    fabrications.
+    """Caller-supplied members are filtered to the annotated image and the confirmed negative.
+
+    A narrowed candidate set naming the empty unconfirmed and the unlabeled images goes through
+    the admission's checks, which leave both out.
     """
     images = _rail_fixture(tmp_path)
     admitted = admit_over(
@@ -430,8 +444,10 @@ def test_instance_seg_applies_the_same_rail(tmp_path):
 def test_instance_seg_admits_a_partially_assessed_stem_on_its_subject_marks(
     tmp_path,
 ):
-    """An image with an instance never assessed for an attribute is admitted on its subject's
-    marks alone, every attribute of the registry read into the scope.
+    """A partially assessed image is admitted on its subject's marks alone.
+
+    Beside a fully assessed image, an image holding an instance with no value for the
+    registry's attribute is admitted, and the scope carries the registry's attributes.
     """
     root = tmp_path / "ds"
     images_dir = root / "images" / UNDATED_BUCKET
@@ -463,8 +479,9 @@ def test_instance_seg_admits_a_partially_assessed_stem_on_its_subject_marks(
 
 
 def _write_registry_for(root, *, attribute=None, values=()):
-    """The dataset's own subjects.json declaring ``attribute`` over ``values`` on :data:`BUD`
-    (no attribute when ``None``), which an admission reads its attributes from.
+    """Write the dataset's own subjects.json declaring ``attribute`` over ``values`` on :data:`BUD`.
+
+    No attribute is declared when ``attribute`` is ``None``. Returns the registry.
     """
     attrs = (
         (Attribute(name=attribute, type="categorical", values=tuple(values)),)
@@ -479,7 +496,7 @@ def _write_registry_for(root, *, attribute=None, values=()):
 def test_semantic_seg_requires_a_mask_but_admits_an_all_background_one(
     tmp_path,
 ):
-    """Existence is the whole rail for masks: an all-background mask is a real annotation."""
+    """A semantic segmentation loader admits an all-background mask and drops a maskless image."""
     import numpy as np
     from PIL import Image as _Image
 
@@ -505,8 +522,10 @@ def test_semantic_seg_requires_a_mask_but_admits_an_all_background_one(
 def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(
     tmp_path,
 ):
-    """ "Annotate this" and "confirm this empty one" are different jobs: the count must say which,
-    each tally the state its ground truth reads as, or absent.
+    """The admission's tallies tell an unannotated image from an unconfirmed empty one.
+
+    Over the rail fixture the tallies count one partial, one negative, one absent and one
+    unannotated image.
     """
     images = _rail_fixture(tmp_path)
     admitted = admit_over(images, subject=BUD)
@@ -519,9 +538,7 @@ def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(
 
 
 def test_a_confirmation_does_not_leak_across_subjects(tmp_path):
-    """A Complete is a statement about one trait. Re-applying it elsewhere trains an image full of
-    bushes as containing no bushes.
-    """
+    """A completion mark for one subject does not admit the image as a negative of another."""
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["ann", "shared"])
     # Every subject's annotation records share one per-image document; subject is a field in it.
@@ -547,8 +564,10 @@ def test_a_confirmation_does_not_leak_across_subjects(tmp_path):
 
 
 def test_a_negative_mark_dies_with_an_edit_of_its_subject(tmp_path):
-    """A mark names its subject's annotations when it was made: once a bud is drawn on a marked
-    negative, the mark no longer holds and the image trains as annotated, never as a negative.
+    """An edit of a marked negative's subject clears the mark, and the image tallies as annotated.
+
+    Writing a box over the marked negative's document leaves it no marks, and the admission
+    tallies two partial images and no negative.
     """
     images = _rail_fixture(tmp_path)
     neg = image_label_key(images / "neg.jpg")
@@ -565,7 +584,9 @@ def test_a_negative_mark_dies_with_an_edit_of_its_subject(tmp_path):
 def test_json_det_targets_marks_an_unassessed_row_and_refuses_an_undeclared_value(
     tmp_path,
 ):
-    """The loader's own per-image target reader keeps an unassessed instance as a row whose
+    """``json_det_targets`` keeps an unassessed row and refuses an undeclared value.
+
+    The loader's own per-image target reader keeps an unassessed instance as a row whose
     attribute column carries the unassessed mark, while a value its attribute does not declare
     refuses.
     """
@@ -624,9 +645,10 @@ def test_json_det_targets_marks_an_unassessed_row_and_refuses_an_undeclared_valu
 
 
 def test_detection_and_its_tiles_keep_a_partially_assessed_stem(tmp_path):
-    """A stem with an instance unassessed for an attribute reaches the loader and the tiler whole,
-    its unassessed row carried in step with its box through every row filter, so no real object
-    trains as background.
+    """A partially assessed image reaches the detection loader and the tiler whole.
+
+    The loader's target keeps the unassessed instance's row beside its box, and each tile carries
+    one attribute row per box.
     """
     root = tmp_path / "ds"
     images_dir = root / "images" / UNDATED_BUCKET

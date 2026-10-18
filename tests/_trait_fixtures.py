@@ -1,7 +1,9 @@
-"""Trait entries a test needs, proposed with ``traits.propose_trait`` and confirmed with
-``traits.confirm_revision``: a crossing trait delivering bloom dates, a count trait delivering a
-stem count, the vocabulary phenotypes the aggregate deliveries ship under, and ``bud_opening``,
-whose name is not the ``bud`` subject it measures.
+"""Sample trait entries, proposed and confirmed through the platform's trait doors.
+
+They are proposed with ``traits.propose_trait`` and confirmed with ``traits.confirm_revision``:
+a crossing trait delivering bloom dates, a count trait delivering a stem count, the vocabulary
+phenotypes the aggregate deliveries ship under, and ``bud_opening``, whose name is not the
+``bud`` subject it measures.
 """
 
 from __future__ import annotations
@@ -15,8 +17,10 @@ from tcip_mcp.traits import TraitEntry, TraitRevision
 
 
 def entry(name: str, delivers: Sequence[str], **fields: Any) -> TraitEntry:
-    """A complete fixture entry: ``fields`` over an entry that authors nothing beyond its name and
-    what it delivers.
+    """Return a ``TraitEntry`` validated from ``name``, ``delivers`` and ``fields``.
+
+    Every other field is empty, except a ``half_class_avg_size`` localization tolerance at 0.5;
+    ``fields`` are merged over them all.
     """
     return TraitEntry.model_validate(
         {
@@ -52,7 +56,7 @@ def entry(name: str, delivers: Sequence[str], **fields: Any) -> TraitEntry:
 
 
 def with_fields(base: TraitEntry, **fields: Any) -> TraitEntry:
-    """``base`` with ``fields`` replaced, validated as a new entry."""
+    """Return ``base`` with ``fields`` replaced, validated as a new entry."""
     return TraitEntry.model_validate({**base.model_dump(), **fields})
 
 
@@ -101,8 +105,7 @@ _FLOORS: dict[str, Any] = {
     "crossing_rule": CROSSING_RULE,
     "plant_aggregation": PLANT_AGGREGATION,
 }
-"""Every floor filled with a fixture value, so one entry serves whichever delivery kind a test
-exercises."""
+"""Fixture values for the criterion floors, the crossing rule and the plant aggregation."""
 
 COUNT_SPEC = entry(COUNT_TRAIT, ("stem_count",), **_FLOORS)
 
@@ -113,9 +116,7 @@ IOU_MARGIN = 0.05
 
 
 def with_floors(base: TraitEntry) -> TraitEntry:
-    """``base`` with each criterion field it leaves unauthored filled from :data:`_FLOORS`, so an
-    operationalization proposed on it states every field its kind rests on.
-    """
+    """Return ``base`` with each criterion field it leaves unauthored taken from :data:`_FLOORS`."""
     return with_fields(
         base,
         **{
@@ -149,8 +150,7 @@ DELIVERY_SPECS = (
         )
     ),
 )
-"""Every trait the count and aggregate delivery tests ship under; no phenotype is delivered by two
-of them, since a phenotype two traits deliver has no one operationalization behind it."""
+"""The count trait and four vocabulary phenotypes' traits, each delivering its own phenotype."""
 
 DELIVERY_TRAIT_BY_PHENOTYPE = {
     phenotype: spec.name
@@ -175,7 +175,7 @@ def propose(
 def confirm(
     project_root: Path, revision: TraitRevision, *, user: str = "grüne"
 ) -> TraitRevision:
-    """Confirm ``revision`` the way the Setup tab posts it: by number and the hash it showed."""
+    """Confirm ``revision`` by its number and entry hash, as the person ``user``."""
     from tcip_mcp.identity import actor
 
     return traits.confirm_revision(
@@ -198,28 +198,26 @@ def propose_and_confirm(
 def confirm_bare(
     project_root: Path, name: str, **fields: Any
 ) -> TraitRevision:
-    """Confirm a minimal trait delivering one dimension at ``project_root``, stating nothing
-    beyond ``fields``.
-    """
+    """Propose and confirm ``entry(name, ("leaf_length",), **fields)`` at ``project_root``."""
     return propose_and_confirm(
         project_root, entry(name, ("leaf_length",), **fields)
     )
 
 
 def latest(trait: str, project_root: Path) -> TraitEntry:
-    """The entry of ``trait``'s latest revision, confirmed or not, to build the next one from."""
+    """Return the entry of ``trait``'s latest revision, confirmed or not."""
     return traits.read_trait(trait, project_root).latest.entry
 
 
 def count_revision(project_root: Path) -> TraitRevision:
-    """The count trait's latest confirmed revision, the one a count delivery ships under."""
+    """Return the count trait's latest confirmed revision."""
     from tcip_mcp.operationalization import latest_confirmed
 
     return latest_confirmed(COUNT_TRAIT, project_root)
 
 
 def operationalization(**fields: Any) -> dict[str, Any]:
-    """One operationalization, its three texts filled with fixture wording unless given."""
+    """Return an operationalization of fixture texts and :data:`COUNT_SUBJECT`, ``fields`` over."""
     return {
         "statement": "the number the breeder records for one plant",
         "mechanism": "the calibrated model at the derived operating point",
@@ -233,7 +231,7 @@ def operationalization(**fields: Any) -> dict[str, Any]:
 def with_operationalization(
     base: TraitEntry, kind: str, **fields: Any
 ) -> TraitEntry:
-    """``base`` with an operationalization for ``kind`` added or replaced."""
+    """Return ``base`` with an operationalization for ``kind`` added or replaced."""
     stated = {k: v.model_dump() for k, v in base.operationalizations.items()}
     stated[kind] = operationalization(**fields)
     return with_fields(base, operationalizations=stated)
@@ -242,9 +240,11 @@ def with_operationalization(
 def seed_positive_class(
     project_root: Path, subject_name: str, state: traits.PositiveState | None
 ) -> cr.SubjectRegistry:
-    """Ensure the project's subject registry declares ``state``'s attribute on ``subject_name``,
-    listing ``state``'s value, adding the subject, the attribute and the value on first mention and
-    leaving an existing declaration alone; returns the registry as stored.
+    """Ensure the project's subject registry declares ``state``'s attribute on ``subject_name``.
+
+    The subject is rebuilt from its name and its existing attributes, ``state``'s attribute
+    added as categorical over its value or its value appended where missing, and the registry
+    replaced through :func:`~tests._producer_fixtures.registry_over`. Returns the new registry.
     """
     from tests._producer_fixtures import registry_over
 
@@ -277,10 +277,12 @@ def seed_positive_class(
 def seed_confirmed_crossing(
     project_root: Path, trait: str, **fields: Any
 ) -> TraitRevision:
-    """Confirm a revision of ``trait`` (already proposed at this root) stating a crossing
-    operationalization, declaring its positive state for the measured subject in the project's
-    own subject registry first. ``fields`` override the operationalization's defaults: the
-    measured subject is the trait's own name and the phenotypes are everything it delivers.
+    """Confirm a revision of ``trait`` stating a crossing operationalization.
+
+    ``trait`` must be proposed at this root first. Its positive state is declared for the measured
+    subject in the project's own subject registry first. ``fields`` override the
+    operationalization's defaults: the measured subject is the trait's own name and the
+    phenotypes are everything it delivers.
     """
     base = with_floors(latest(trait, project_root))
     stated = {
@@ -302,8 +304,9 @@ def seed_confirmed_crossing(
 def seed_confirmed_count(
     project_root: Path, *, measured_subject: str = COUNT_SUBJECT, **fields: Any
 ) -> TraitRevision:
-    """Confirm the count trait at this root with a per-image-count operationalization measuring
-    ``measured_subject``, the subject the delivery's buckets recorded detecting.
+    """Confirm the count trait at this root with a per-image-count operationalization.
+
+    The operationalization measures ``measured_subject``.
     """
     return propose_and_confirm(
         project_root,
@@ -318,7 +321,7 @@ def seed_confirmed_count(
 
 
 def seed_delivery_traits(project_root: Path) -> Path:
-    """Propose and confirm every trait the count and aggregate delivery tests deliver under."""
+    """Propose and confirm each of :data:`DELIVERY_SPECS`; return the project path."""
     for spec in DELIVERY_SPECS:
         propose_and_confirm(project_root, spec)
     return Path(project_root)
@@ -332,8 +335,10 @@ def seed_confirmed_aggregate(
     delivery_kind: str = traits.PER_PLANT_COUNT_AGGREGATE,
     **fields: Any,
 ) -> TraitRevision:
-    """Confirm a revision of the trait delivering ``delivered_phenotype`` stating the aggregate
-    operationalization ``delivery_kind``, covering that phenotype and ``value_keys``.
+    """Confirm a revision of the trait delivering ``delivered_phenotype``.
+
+    It adds a ``delivery_kind`` operationalization over the trait's latest entry with its floors
+    filled, passing that phenotype, ``value_keys`` and fixture wording, with ``fields`` over them.
     """
     (trait,) = [
         name

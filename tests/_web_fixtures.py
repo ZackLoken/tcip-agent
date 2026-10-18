@@ -1,5 +1,7 @@
-"""Starting the web backend over a scratch workspace, making a test directory a project, and
-opening it in the web backend the way the picker does.
+"""Web backend fixtures over a scratch workspace.
+
+They start the web backend over a scratch workspace, make a test directory a project, and open it
+in the web backend.
 """
 
 from __future__ import annotations
@@ -27,9 +29,7 @@ INVARIANCES = CaptureInvariances(
     intensity=True,
     scale=True,
 )
-"""A sample breeder's answer: every capture transform leaves the trait's measurement unchanged,
-so every augmentation a test states is admitted unless the test states another answer.
-"""
+"""A sample breeder's answer: every capture transform leaves the trait's measurement unchanged."""
 
 
 def named_project(
@@ -38,10 +38,11 @@ def named_project(
     *,
     invariances: CaptureInvariances = INVARIANCES,
 ) -> OpenProject:
-    """Make ``path`` a project named ``display_name`` through the platform's own creation door
-    (``initialize_project``), its record holding an id, that name, a site and ``invariances``
-    (the sample :data:`INVARIANCES` unless stated); the project as the backend's open takes it.
-    Refuses (by assertion) when ``path`` already records another name, site or invariances.
+    """Make ``path`` a project named ``display_name`` through the platform's own creation door.
+
+    ``initialize_project`` writes its record, holding an id, that name, the site "north orchard"
+    and ``invariances`` (the sample :data:`INVARIANCES` unless stated), and the call is asserted
+    to return no error. Returns an ``OpenProject`` of ``path`` and the id.
     """
     from tcip_mcp.tools.project_tools import initialize_project
     from tcip_web.state import OpenProject
@@ -55,11 +56,12 @@ def named_project(
 
 @contextmanager
 def backend_session(workspace: Path) -> Iterator[TestClient]:
-    """The web backend serving ``workspace`` as a process entry point starts it, and a loopback
-    client of it: the store bound, ``TCIP_WORKSPACE`` naming ``workspace`` and
-    ``TCIP_IMAGE_ROOTS`` unset, the backend configured with the workspace and no additive image
-    roots. On every exit, however the body ends, the open project is closed, the bound store's
-    connections are closed and both environment variables are restored.
+    """Start the web backend serving ``workspace`` and yield a loopback client of it.
+
+    The backend starts with the store bound, ``TCIP_WORKSPACE`` naming ``workspace`` and
+    ``TCIP_IMAGE_ROOTS`` unset, configured with the workspace and no additive image roots. On
+    exit, by return or by exception, the open project is closed, the bound store's connections
+    are closed and both environment variables are restored.
     """
     from fastapi.testclient import TestClient
 
@@ -90,8 +92,9 @@ def backend_session(workspace: Path) -> Iterator[TestClient]:
 
 
 def bound_to(project: OpenProject) -> BoundProject:
-    """``project`` as an MCP server started for it binds it, under the workspace this process
-    names (``TCIP_WORKSPACE``).
+    """Return a ``BoundProject`` of ``project``'s root and id.
+
+    The binding is under the workspace this process names (``TCIP_WORKSPACE``).
     """
     from tcip_mcp.workspace import BoundProject, workspace_from_environment
 
@@ -119,9 +122,11 @@ BROWSER = {"Origin": "http://127.0.0.1"}
 def acknowledged_post(
     client, url: str, body: dict, *, reason: str, user: str = "breeder"
 ):
-    """Post ``body`` to ``url`` as ``user`` ships an unvalidated result from the screen: refused
-    first, then posted again from the browser acknowledging, for ``reason``, the result the
-    refusal names; the second response.
+    """Post ``body`` to ``url`` as ``user``, refused, then again under an acknowledgment.
+
+    The first post is asserted to answer 400 naming a result hash; the second carries the
+    browser headers and an acknowledgment of that hash for ``reason``. Returns the second
+    response.
     """
     body = {**body, "user": user}
     refused = client.post(url, json=body)

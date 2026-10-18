@@ -1,10 +1,9 @@
 """Per-plant aggregation over a cohort of several plants, through to the delivery CSV.
 
-A delivery is normally many plants with genuinely different statistics, so these fixtures keep the
-per-plant groups distinguishable from each other and from the cohort as a whole: every plant's
-value, observation count and identity-provenance must describe that plant's own records. The gate
-is exercised here only where the kind an assessment measured could be mistaken for the kind a
-delivery ships.
+The fixtures give each plant statistics distinct from the other plants' and from the cohort's,
+and the tests compare each plant's value, observation count and identity provenance with its own
+records. The gate cases deliver a per-plant count under a per-plant and under a per-image count
+assessment.
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ from tests._training_values import (
 
 @pytest.fixture(autouse=True)
 def _recorded_meaning(tmp_path):
-    """Every delivery below ships under a trait whose delivered number has a confirmed meaning."""
+    """Confirm the delivery traits and ``stem_count``'s per-plant count meaning of ``bud``."""
     fx.seed_delivery_traits(tmp_path)
     # The count measures what the chain's unassessed bucket detects.
     fx.seed_confirmed_aggregate(
@@ -34,8 +33,9 @@ def _recorded_meaning(tmp_path):
 
 
 def _by_plant(rows: list[dict]) -> dict[str, dict]:
-    """Index summary dicts (or CSV rows) by plant_id, asserting the cohort is neither empty nor
-    collapsed: a per-plant assertion means nothing if the rows it quantifies over do not exist.
+    """Index summary dicts (or CSV rows) by plant_id, asserting more than one distinct plant.
+
+    The assertion also requires every row's plant_id to be distinct.
     """
     indexed = {r["plant_id"]: r for r in rows}
     assert len(indexed) == len(rows) > 1
@@ -46,9 +46,10 @@ def _by_plant(rows: list[dict]) -> dict[str, dict]:
 
 
 def test_each_plants_summary_describes_only_that_plants_records():
-    """Three plants with deliberately different count distributions, none of which equals the
-    cohort-wide statistic: a summary attributed to a plant must be computed over that plant's group,
-    not over the whole delivery, which would ship one cohort number under every plant_id.
+    """Each plant's median and image count are computed over that plant's own records.
+
+    Three plants have deliberately different count distributions, none of which equals the
+    cohort-wide statistic.
     """
     results = [
         {"image": "a1", "plant_id": "PLANT_A", "count": 2},
@@ -73,9 +74,11 @@ def test_each_plants_summary_describes_only_that_plants_records():
 
 
 def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort():
-    """One plant resolved from a single source, another from two, a third with no provenance at all.
-    Mixing these across the cohort would report every plant as 'mixed' and give a well-resolved
-    plant another plant's worst assignment distance.
+    """Each plant's identity provenance is summarized over its own records.
+
+    One plant is resolved from a single source, another from two, a third with no provenance at
+    all: each reports its own source and its own worst assignment distance, and the third
+    reports neither.
     """
     results = [
         {
@@ -120,9 +123,11 @@ def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort():
 
 
 def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
-    """The whole path a delivery takes, per-image records to the CSV: every CSV row's value,
-    n_images and identity columns belong to the plant named in that row. A cohort-wide number in
-    n_images tells the breeder a single-image plant was measured from six.
+    """Each delivery CSV row carries its own plant's value and image count.
+
+    The delivery runs from per-image records to the CSV; each of three rows carries its plant's
+    value and n_images, PLANT_A its maximum distance, PLANT_B its source and an empty distance,
+    and PLANT_C an empty source.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import deliver_acknowledged
@@ -200,8 +205,9 @@ def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
 
 
 def test_each_plants_mean_describes_only_that_plants_records():
-    """Skewed samples, where each plant's mean and median are several units apart, so a mean
-    computed over the wrong group or under the wrong statistic shows.
+    """Each plant's mean is computed over that plant's own records.
+
+    The samples are skewed, each plant's mean and median several units apart.
     """
     results = [
         {"image": "a1", "plant_id": "PLANT_A", "value": 1.0},
@@ -220,8 +226,10 @@ def test_each_plants_mean_describes_only_that_plants_records():
 
 
 def test_summed_areas_stay_within_their_own_plant():
-    """The sum statistic over plants with different numbers of contributing images: a cohort-wide
-    sum would give every plant the delivery's total area.
+    """Each plant's summed area is taken over its own images.
+
+    The plants have different numbers of contributing images, and each reports its own image
+    count.
     """
     results = [
         {"image": "a1", "plant_id": "PLANT_A", "area_mm2": 100.0},
@@ -242,8 +250,10 @@ def test_summed_areas_stay_within_their_own_plant():
 
 
 def _assessed(project, kind: str, experiment_id: str):
-    """A bucket published under an assessment of ``kind``, the count trait confirmed first with both
-    its per-image and its per-plant count operationalizations; the bucket as recorded.
+    """Return a bucket published under an assessment of ``kind``, as recorded.
+
+    The count trait is confirmed first with both its per-image and its per-plant count
+    operationalizations.
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
@@ -332,8 +342,10 @@ def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(
 def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(
     tmp_path,
 ):
-    """The per-image count the assessment measured is not the per-plant number the delivery ships:
-    the gate refuses, naming both kinds, rather than lend one measurement to another.
+    """A per-plant delivery under a per-image count assessment is refused, naming both kinds.
+
+    The per-image count the assessment measured is not the per-plant number the delivery ships:
+    the gate refuses, and no file is written.
     """
     pytest.importorskip("torch")
     from tcip_mcp.delivery import DeliveryRefusedError

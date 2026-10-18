@@ -1,6 +1,8 @@
-"""The measurement chain's producers: ingest a synthetic capture, draw a reference selection,
-train a tiny detector on it (one bright square per frame, found at conf 0.5), confirm the count
-trait, assess the checkpoint and publish its predictions under the assessment.
+"""The measurement chain's producers.
+
+They ingest a synthetic capture, draw a reference selection, train a tiny detector on it (one
+bright square per frame, found at conf 0.5), confirm the count trait, assess the checkpoint and
+publish its predictions under the assessment.
 """
 
 from __future__ import annotations
@@ -31,30 +33,26 @@ if TYPE_CHECKING:
 
 
 def chain_pass() -> Stated:
-    """The untiled pass the chain's detectors publish at without an assessment: the conf their
-    one bright square is found at.
-    """
+    """Return an untiled pass at conf 0.5 stating :data:`RATIONALE`."""
     return Stated(tile=False, conf=0.5, rationale=RATIONALE)
 
 
 BESPOKE_MODELS = str(Path(__file__).with_name("bespoke_models.py"))
-"""The file of ``tests.bespoke_models``, which a config naming one of its builders or loops
-declares under ``model_source.source_files``; a run imports it as the top-level module
-``bespoke_models`` from the suite's own directory, so no package of this repository joins a
-run's plan."""
+"""The path of ``tests/bespoke_models.py``, a ``model_source.source_files`` entry that imports as
+the top-level module ``bespoke_models``."""
 IMG = 64
 SUBJECT = "bud"
 DATE = "2026-02-11"
 STEMS = tuple(f"s{i:02d}" for i in range(40))
 BESPOKE_DETECTION = "bespoke_models:build_bespoke_detection"
-"""The torchvision bespoke detector's builder, its sizes left to each caller."""
+"""The torchvision bespoke detector's builder, its further keywords passed to the detector."""
 BESPOKE_CLASSIFIER = "bespoke_models:build_bespoke_classifier"
 BESPOKE_SEMANTIC_SEG = "bespoke_models:build_bespoke_semantic_seg"
 BESPOKE_INSTANCE_SEG = "bespoke_models:build_bespoke_instance_seg"
 BESPOKE_ORDINAL = "bespoke_models:build_bespoke_ordinal"
 BESPOKE_REGRESSOR = "bespoke_models:build_bespoke_regressor"
 GT_ANCHOR_DETECTOR = "bespoke_models:build_bespoke_detector"
-"""The GroupNorm detector built at the geometry its model source's record derives."""
+"""The GroupNorm detector's builder, taking its anchor geometry as keywords."""
 BARE_SCORE_THRESH_DETECTOR = "bespoke_models:build_bare_score_thresh_detector"
 BARE_NO_KNOB_DETECTOR = "bespoke_models:build_bare_no_knob_detector"
 SAVE_BUILT_WEIGHTS = "bespoke_models:save_built_weights"
@@ -95,8 +93,10 @@ BLOB_BUILDER = {
 
 
 def detector_geometry(frame: tuple[int, int] = (64, 64)):
-    """The ``schemas.DetectorGeometry`` ``derivations.derive_detector_geometry`` gives for
-    ``frame`` over objects a quarter and an eighth of its short edge across.
+    """Return the ``schemas.DetectorGeometry`` derived for ``frame``.
+
+    ``derivations.derive_detector_geometry`` gives it over two boxes, one a square a quarter of
+    the frame's short edge across and one an eighth of that edge wide by a quarter tall.
     """
     import numpy as np
 
@@ -114,8 +114,9 @@ def detector_geometry(frame: tuple[int, int] = (64, 64)):
 
 
 def stated_detector_geometry(frame: tuple[int, int] = (64, 64)) -> dict:
-    """A ``model_source.detector_geometry`` a detector over a dataset its own builder serves
-    states: :func:`detector_geometry`'s values with :data:`RATIONALE`.
+    """Return :func:`detector_geometry`'s values as a ``model_source.detector_geometry`` record.
+
+    The record's source states :data:`RATIONALE`.
     """
     return {
         **detector_geometry(frame).handed(),
@@ -124,8 +125,9 @@ def stated_detector_geometry(frame: tuple[int, int] = (64, 64)) -> dict:
 
 
 def band_statistics(bands: int = 3) -> dict:
-    """The ``image_mean`` and ``image_std`` of the band statistics of :func:`noise_frames` at
-    ``bands``, as their record hands them to a builder.
+    """Return the ``image_mean`` and ``image_std`` of :func:`noise_frames` at ``bands``.
+
+    They are the band statistics as their record hands them to a builder.
     """
     from tcip_mcp.pipelines.schemas import Normalization
 
@@ -135,15 +137,18 @@ def band_statistics(bands: int = 3) -> dict:
 
 
 def detector_values(frame: tuple[int, int] = (64, 64), bands: int = 3) -> dict:
-    """The keyword values a direct build of a torchvision detector in a test takes:
-    :func:`detector_geometry`'s and :func:`band_statistics` at ``bands``.
+    """Return :func:`detector_geometry`'s keywords for ``frame`` and :func:`band_statistics`'.
+
+    The band statistics are taken at ``bands``.
     """
     return {**detector_geometry(frame).handed(), **band_statistics(bands)}
 
 
 def frame_statistics(images: list, bands: int) -> dict:
-    """The ``normalization`` record of the band statistics of every one of ``images`` read whole
-    at ``bands`` (``derivations.band_normalization_stats``), in JSON form.
+    """Return the ``normalization`` record of the band statistics of ``images``, in JSON form.
+
+    ``derivations.band_normalization_stats`` takes them at ``bands`` over all of ``images``, at
+    seed 0.
     """
     from tcip_mcp.pipelines.derivations import band_normalization_stats
 
@@ -155,8 +160,10 @@ def frame_statistics(images: list, bands: int) -> dict:
 
 
 def weights_normalization() -> dict:
-    """The normalization record, in JSON form, of the pretrained weights of the timm tag
-    ``resnet18.a1_in1k`` (``derivations.pretrained_normalization``), sourced by those weights.
+    """Return the normalization record of the timm tag ``resnet18.a1_in1k``, in JSON form.
+
+    The record is the pretrained weights' own (``derivations.pretrained_normalization``),
+    sourced by those weights.
     """
     from tcip_mcp.pipelines.derivations import pretrained_normalization
     from tcip_mcp.pipelines.schemas import PretrainedWeights
@@ -166,16 +173,18 @@ def weights_normalization() -> dict:
 
 
 def weights_statistics(model_source: dict) -> dict:
-    """``model_source`` normalizing by :func:`weights_normalization`."""
+    """Return ``model_source`` normalizing by :func:`weights_normalization`."""
     return {**model_source, "normalization": weights_normalization()}
 
 
 def own_statistics(config: dict, project: Path) -> dict:
-    """``config`` with a :data:`FRAME_STATISTICS` normalization replaced by the band statistics
-    (:func:`frame_statistics`) of the train side of the partition its data section resolves to
-    under ``project``, at the band count that resolution records: the resolution a run's own
-    makes (``split_construction.auto_train_val``, through ``_producer_fixtures.train_val``).
-    Every refusal of the resolution or the derivation propagates. A ``config`` stating any other
+    """Return ``config`` with a :data:`FRAME_STATISTICS` normalization made the frames' own.
+
+    The normalization becomes the band statistics (:func:`frame_statistics`) of the train side
+    of the partition ``config``'s data section resolves to under ``project``, at the band count
+    that resolution records (``split_construction.auto_train_val``, through
+    ``_producer_fixtures.train_val``). Every
+    refusal of the resolution or the derivation propagates. A ``config`` stating any other
     normalization is returned as it is.
     """
     from tests._producer_fixtures import train_val
@@ -193,8 +202,9 @@ def own_statistics(config: dict, project: Path) -> dict:
 
 
 def train_sources(partition: dict) -> list[str]:
-    """The sources of the train side of a resolved ``partition``
-    (``split_construction.partition_samples``), in its order.
+    """Return the sources of the train side of a resolved ``partition``, in its order.
+
+    The samples are read through ``split_construction.partition_samples``.
     """
     from tcip_mcp.pipelines.data.split_construction import partition_samples
 
@@ -211,8 +221,10 @@ exit."""
 
 
 def noise_frames(bands: int = 3) -> list:
-    """The paths of two ``bands``-band frames of seeded uniform noise, written once per session
-    to a temporary directory removed at exit.
+    """Return the paths of two TIFFs of ``(32, 32, bands)`` uint8 values drawn at seed ``bands``.
+
+    The files are written by ``tifffile.imwrite`` once per ``bands`` for the session, to a
+    temporary directory removed at exit.
     """
     import tempfile
 
@@ -231,9 +243,7 @@ def noise_frames(bands: int = 3) -> list:
 
 
 def object_at(index: int) -> tuple[int, int, int]:
-    """Where frame ``index``'s single object sits, and how big it is. Every frame differs in both,
-    so no two frames are the same pixels.
-    """
+    """Return the top-left corner and edge length of frame ``index``'s object, set by ``index``."""
     x0 = 4 + (index % 5) * 8
     y0 = 4 + ((index // 5) % 5) * 8
     size = 14 + (index % 3) * 4
@@ -241,8 +251,11 @@ def object_at(index: int) -> tuple[int, int, int]:
 
 
 def synthetic_capture(root: Path, *, date: str = DATE) -> Path:
-    """Ingest one capture date of dim frames through ``ingest_images``, each holding one bright
-    square its label document names; the capture's image directory.
+    """Ingest one capture date of painted frames through ``ingest_images``.
+
+    Each of :data:`STEMS` is painted with a :data:`~tests._producer_fixtures.BRIGHT` square at
+    :func:`object_at` of its index, ingested, and labeled with that square. Returns the capture's
+    image directory.
     """
     from datetime import datetime
 
@@ -287,8 +300,9 @@ def synthetic_capture(root: Path, *, date: str = DATE) -> Path:
 
 
 def draw_reference_selection(project: Path, root: Path, out: Path):
-    """Draw ``root``'s labels into train, val, calibration and holdout sides with
-    ``draw_splits``; the selection as recorded.
+    """Draw ``root``'s labels into train, val, calibration and holdout sides with ``draw_splits``.
+
+    Returns the selection as recorded.
     """
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
@@ -316,8 +330,9 @@ def run_config(
     model_source: dict = REGION_BUILDER,
     **overrides: Any,
 ) -> dict:
-    """A :func:`training_config` of ``model_source`` with ``overrides`` that binds ``project``'s
-    drawn selection at ``selection_dir`` rather than drawing a partition of its own.
+    """Return a :func:`training_config` binding ``project``'s drawn selection at ``selection_dir``.
+
+    The config names ``model_source`` and that selection, with ``overrides`` over its keys.
     """
     return training_config(
         project,
@@ -330,16 +345,13 @@ def run_config(
 def training_config(
     project: Path, model_source: dict, data: dict, **overrides: Any
 ) -> dict:
-    """A one-epoch seeded CPU run of ``project`` of ``model_source`` over the ``data`` section
-    (drawing the sample split of ``tests._training_values.drawn_split`` when it states none),
-    every other key the toy detectors train at (the optimizer, schedule, stop rule and
-    evaluation blocks the sample ones of ``tests._training_values``, an instance segmentation
-    run's evaluation cutting its masks at the sample threshold, the schedule's one-epoch
-    horizon ending the stage), with a copy of each of ``overrides`` in place of its key. Its one
-    stage trains every parameter at one rate, since the toy detectors expose neither a backbone
-    to freeze nor parameter groups. A :data:`FRAME_STATISTICS` normalization becomes the
-    statistics of the frames the run trains on, resolved under ``project``
-    (:func:`own_statistics`).
+    """Return a run config of ``project`` over a copy of ``model_source`` and ``data``.
+
+    The config states ``data`` over a ``tests._training_values.drawn_split`` block, seed 0, CPU,
+    batch size 2, one :func:`~tests._training_values.stage` at 0, the sample stop rule, SGD
+    optimizer and evaluation block (with the sample mask cut for an ``instance_seg`` task), and a
+    cosine schedule at a one-epoch horizon, with a copy of each of ``overrides`` in place of its
+    key. The result passes through :func:`own_statistics` under ``project``.
     """
     import copy
 
@@ -371,11 +383,12 @@ def training_config(
 
 
 def built_model(config: dict, detector=None):
-    """The model a run over ``config`` builds: its validated ``model_source``, imported from the
-    layout its admission stages with this repository as its project
-    (``model_build.staged_sources``), at the dims its data block records
-    (``model_build.recorded_model_dims``) and, for a detector, the geometry ``detector`` (a
-    ``schemas.DetectorGeometry``) a resolution would have recorded.
+    """Return the model a run over ``config`` builds.
+
+    The model is its validated ``model_source``, imported from the layout its admission stages
+    with this repository as its project (``model_build.staged_sources``), at the dims its data
+    block records (``model_build.recorded_model_dims``) and, for a detector, at the geometry
+    ``detector`` (a ``schemas.DetectorGeometry``).
     """
     from tcip_mcp.pipelines.model_build import (
         build_from_model_source,
@@ -399,8 +412,9 @@ def built_model(config: dict, detector=None):
 def train_on(
     selection_dir: Path, project_root: Path, experiment_id: str
 ) -> str:
-    """Train the tiny detector over the selection's train side through the child's own entry,
-    whose completion registers the checkpoint; the checkpoint's path.
+    """Train the tiny detector over the selection's train side through the child's own entry.
+
+    The entry's completion registers the checkpoint. Returns the checkpoint's path.
     """
     from tcip_mcp.experiments import observe
     from tests._verified_checkpoint_fixtures import worker_run
@@ -418,8 +432,10 @@ def train_on(
 
 
 def confirm_count_trait(project_root: Path, **fields: Any):
-    """Propose the count trait stating its per-image count of :data:`SUBJECT`, with ``fields``
-    over the fixture floors, and confirm it as the breeder would.
+    """Propose the count trait and confirm it as the user ``chain-breeder``.
+
+    The trait states its per-image count of :data:`SUBJECT`, with ``fields`` over the fixture
+    floors.
     """
     from tcip_mcp import traits
     from tests import _trait_fixtures as fx
@@ -444,9 +460,10 @@ def assess(
     device: str | None = None,
     **stated: Any,
 ) -> dict:
-    """``assess_checkpoint`` of the count trait's per-image count over ``selection_dir`` under the
-    sample collection pass with the ``stated`` execution values over it, at the sample count test
-    settings.
+    """Assess the count trait's per-image count over ``selection_dir`` with ``assess_checkpoint``.
+
+    The assessment runs under the sample collection pass with the ``stated`` execution values
+    over it, at the sample count test settings.
     """
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
     from tests import _trait_fixtures as fx
@@ -467,8 +484,9 @@ def assess(
 
 @dataclass
 class Chain:
-    """What one run of the flow leaves behind, for a test to deliver from or disturb: ``bucket``
-    is the name its predictions are published under ``root``.
+    """What one run of the flow leaves behind.
+
+    ``bucket`` is the name its predictions are published under ``root``.
     """
 
     root: Path
@@ -480,7 +498,7 @@ class Chain:
     published: dict
 
     def read(self):
-        """The chain's published bucket, as its record states it."""
+        """Return the chain's published bucket, as its record states it."""
         from tcip_mcp.buckets import read_bucket
 
         return read_bucket(self.root, self.bucket)
@@ -489,8 +507,9 @@ class Chain:
 def unassessed_bucket(
     project: Path, *, experiment_id: str, bucket_name: str = "plain"
 ):
-    """A bucket published under no assessment: ingest, draw, train and publish under ``project``;
-    the bucket.
+    """Return a bucket published under no assessment.
+
+    Ingests, draws, trains and publishes under ``project``.
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
@@ -519,10 +538,12 @@ def acknowledged(
     by: str = "user:breeder",
     reason: str = "fixture: shipped before any assessment",
 ) -> Any:
-    """Run ``deliver``, a delivery taking a recorded acknowledgment's id, as a breeder ships an
-    unvalidated result: refused first, the refused result acknowledged
-    (:func:`~tcip_mcp.delivery.record_acknowledgment`), then delivered under that acknowledgment;
-    what the second call returns. A refusal no acknowledgment can answer propagates.
+    """Run ``deliver`` refused, then again under a recorded acknowledgment by ``by``.
+
+    ``deliver`` is a delivery taking a recorded acknowledgment's id. It is refused first, the
+    refused result acknowledged (:func:`~tcip_mcp.delivery.record_acknowledgment`), then
+    delivered under that acknowledgment; returns what the second call returns. A refusal no
+    acknowledgment can answer propagates.
     """
     import pytest
 
@@ -552,10 +573,11 @@ def deliver_acknowledged(
     buckets: list | None = None,
     **kwargs: Any,
 ):
-    """``deliver_per_plant_aggregate`` of the per-image ``records``' ``value_key`` for the plants
-    they carry, over ``buckets`` (by default a bucket published under no assessment,
-    :func:`unassessed_bucket`), shipped unvalidated under the breeder's acknowledgment
-    (:func:`acknowledged`).
+    """Deliver the per-image ``records``' ``value_key`` per plant, under an acknowledgment.
+
+    ``deliver_per_plant_aggregate`` runs for the plants the records carry, over ``buckets`` (by
+    default a bucket published under no assessment, :func:`unassessed_bucket`), shipped
+    unvalidated under the breeder's acknowledgment (:func:`acknowledged`).
     """
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         deliver_per_plant_aggregate,
@@ -586,10 +608,12 @@ def deliver_acknowledged(
 
 
 def predicted(image: Path, values: list[str], attributes: tuple = ()) -> dict:
-    """One predictor result for the image at ``image``: a detection of the subject per entry of
-    ``values``, each carrying that value's id under the first of ``attributes`` (the scope's
-    attribute records) and the first value of every other; no ``attributes`` row for none. Its
-    frame's cap is one more than it kept.
+    """Return one predictor result for the image at ``image``.
+
+    The result holds one 3 px box labeled 1 and scored 0.9 per entry of ``values``, each
+    carrying that value's index under the first of ``attributes`` (the scope's attribute
+    records) and 0 under every other; no ``attributes`` row for none. Its count is the number
+    of boxes and its cap one more.
     """
     result = {
         "image": str(image),
@@ -620,10 +644,11 @@ def published(
     registry: Any = None,
     raster_path: Path | None = None,
 ) -> Any:
-    """``results`` published as the bucket named ``name`` (:func:`~tcip_mcp.buckets.publish`)
-    under their images' dataset root, under the untiled pass a registered checkpoint stating
-    ``scope`` runs (its frames' dataset declaring ``registry``), over the raster ``raster_path``
-    when one is named; the bucket.
+    """Publish ``results`` as the bucket named ``name`` and return the bucket.
+
+    :func:`~tcip_mcp.buckets.publish` writes it under their images' dataset root, under an
+    untiled pass prepared, not run, for a registered checkpoint stating ``scope`` (its frames'
+    dataset declaring ``registry``), over the raster ``raster_path`` when one is named.
     """
     from tcip_mcp.buckets import pass_documents, publish, source_root
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -683,17 +708,14 @@ PLANTS = {"PLANT_A": (43.19700, -90.05800), "PLANT_B": (43.19700, -90.05780)}
 """Where each plant of the attributed chain's registry stands (WGS84 lat, lon), about 16 m
 apart."""
 REFERENCE_SITE = (43.20300, -90.05000)
-"""Where the labeled reference frames of each date were taken, about 900 m from every plant, so
-the mapping attributes none of them."""
+"""Where the labeled reference frames of each date were taken, about 900 m from every plant."""
 SERIES_POSITION_ERROR_M = 3.0
 """The horizontal positioning error (meters) every photograph of the attributed series reports,
 sample data well under the spacing of :data:`PLANTS`."""
 
 
 def blob_boxes(values: list[str], index: int) -> list[tuple[str, BBox]]:
-    """One box per entry of ``values`` on a grid of 16 px cells, beside its value; ``index``
-    varies the sizes so no two frames share pixels.
-    """
+    """Return one square box per entry of ``values`` beside its value, sized by ``index``."""
     out = []
     for k, value in enumerate(values):
         x0, y0 = 2 + (k % 4) * 16, 2 + (k // 4) * 16
@@ -703,7 +725,10 @@ def blob_boxes(values: list[str], index: int) -> list[tuple[str, BBox]]:
 
 
 def blob_frame(values: list[str], index: int):
-    """A dim frame holding each blob :func:`blob_boxes` places, bright in its value's band."""
+    """Return a painted frame of a gray shade set by ``index``, with each :func:`blob_boxes` box.
+
+    Each box is painted 230 in its value's band of :data:`VALUES` and 20 in the others.
+    """
     from tests._producer_fixtures import painted_frame
 
     shade = 20 + (index % 11)
@@ -727,8 +752,9 @@ def blob_frame(values: list[str], index: int):
 def write_attributed_registry(
     *roots: Path, attributes: tuple | None = None
 ) -> None:
-    """Declare :data:`SUBJECT` with ``attributes`` (by default :data:`ATTRIBUTE`, categorical over
-    :data:`VALUES`) in each root's subject registry.
+    """Declare :data:`SUBJECT` with ``attributes`` in each root's subject registry.
+
+    ``attributes`` is by default :data:`ATTRIBUTE`, categorical over :data:`VALUES`.
     """
     from tcip_mcp import subject_registry as cr
     from tests._producer_fixtures import registry_over
@@ -752,8 +778,11 @@ def write_attributed_registry(
 
 
 def confirm_crossing_trait(project_root: Path, **fields: Any):
-    """Confirm ``bud_opening`` stating its crossing dates over :data:`SUBJECT`, every criterion
-    field authored at the fixture floors unless ``fields`` states it.
+    """Confirm ``bud_opening`` stating its crossing dates over :data:`SUBJECT`.
+
+    Over ``_trait_fixtures.BUD_OPENING``, ``count_bias_tolerance_frac`` is authored at 0.1,
+    ``count_error_tolerance`` at 1.0 and ``classifier_agreement_floor`` at 0.6, with ``fields``
+    over them.
     """
     from tcip_mcp import traits
     from tests import _trait_fixtures as fx
@@ -780,9 +809,11 @@ def confirm_crossing_trait(project_root: Path, **fields: Any):
 
 @dataclass
 class Series:
-    """What the attributed chain leaves behind: its dataset, the checkpoint, the assessment (when
-    one was run), the plant mapping, the name of one published bucket per date and the project as
-    the web backend opened it.
+    """What the attributed chain leaves behind.
+
+    It holds the chain's dataset, the checkpoint, the assessment (when one was run), the plant
+    mapping, the name of one published bucket per date and the project as the web backend opened
+    it.
     """
 
     root: Path
@@ -794,7 +825,7 @@ class Series:
     trait: str = "bud_opening"
 
     def body(self, **extra: Any) -> dict:
-        """The request body a phenology door takes over this series."""
+        """Return the request body a phenology door takes over this series."""
         return {
             "mapping_name": self.mapping_name,
             "trait": self.trait,
@@ -806,8 +837,9 @@ class Series:
 
 
 def deliver_milestones(project: Path, body: dict, out_csv: Path) -> dict:
-    """``deliver_phenology_milestones`` over a phenology door's request ``body`` (a
-    :meth:`Series.body`), writing ``out_csv``.
+    """Run ``deliver_phenology_milestones`` over a phenology door's request ``body``.
+
+    ``body`` is a :meth:`Series.body`; the delivery writes ``out_csv``.
     """
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
@@ -834,20 +866,20 @@ def attributed_series(
     model_source: dict | None = None,
     stated: Any = None,
 ) -> Series:
-    """Ingest a geotagged series of :data:`PLANTS` over ``len(fractions)`` of
-    :data:`SERIES_DATES`, each date beside labeled reference frames taken at
-    :data:`REFERENCE_SITE`; draw the labeled frames into a selection, train ``model_source``
-    (by default the blob detector) on it, confirm the crossing trait, assess it when ``assessed``,
-    publish one bucket per date under the ``stated`` execution values (under the assessment when
-    there is one, :func:`chain_pass` when neither is given), build the plant mapping, and open
-    ``project`` in the web backend.
+    """Ingest, train, assess and publish an attributed series, then open ``project``.
 
-    The registry declares ``attributes`` on :data:`SUBJECT` (:func:`write_attributed_registry`),
-    one of them :data:`ATTRIBUTE` over :data:`VALUES`; every labeled object carries a value of
-    each, :data:`ATTRIBUTE`'s the band its blob is bright in. On each date every plant's frames
-    hold ``detections`` blobs of which ``fractions[i]`` are open; half the labeled frames hold as
-    many and the rest one or two, so the reference's densest frames are as dense as the frames it
-    answers for.
+    It ingests a geotagged series of :data:`PLANTS` over ``len(fractions)`` of
+    :data:`SERIES_DATES`, each date beside labeled reference frames taken at
+    :data:`REFERENCE_SITE`; draws the labeled frames into a selection, trains ``model_source``
+    (by default the blob detector) on it, confirms the crossing trait, assesses it when
+    ``assessed``, publishes one bucket per date under the ``stated`` execution values (under the
+    assessment when there is one, :func:`chain_pass` when neither is given), builds the plant
+    mapping, and opens ``project`` in the web backend.
+
+    The registry declares ``attributes`` on :data:`SUBJECT` (:func:`write_attributed_registry`).
+    Series and reference frames are :func:`blob_frame` images over values built from
+    ``fractions`` and ``detections``, and each reference frame is labeled with its
+    :func:`blob_boxes`.
     """
     from datetime import datetime, timedelta
 
@@ -1028,7 +1060,7 @@ def attributed_series(
 def run_the_chain(
     project: Path, *, experiment_id: str, bucket_name: str = "chain"
 ) -> Chain:
-    """Ingest, train, confirm, assess and publish under ``project``; the assessment passes."""
+    """Ingest, train, confirm, assess and publish under ``project``; the assessment must pass."""
     from tcip_mcp.tools.inference_tools import run_inference
 
     root = project / "ds"

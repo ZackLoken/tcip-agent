@@ -24,9 +24,11 @@ PHOTO_POSITION_ERROR_M = 1.0
 def write_plant_csv(
     path: Path, plants: list[dict], *, extra: tuple[str, ...] = ()
 ) -> Path:
-    """A plant-locations CSV at ``path``, one row per entry of ``plants``: its ``plot``,
-    ``accession``, ``lat`` and ``lon`` under the registry's column names, then each ``extra``
-    column it carries under that name. Returns ``path``.
+    """Write a plant-locations CSV at ``path``, one row per entry of ``plants``.
+
+    Each row carries its ``plot``, ``accession``, ``lon`` and ``lat`` under ``plant_id``,
+    ``accession_name``, ``WGS84_centroid_x`` and ``WGS84_centroid_y``, then each ``extra`` column
+    it carries under that name. Returns ``path``.
     """
     with path.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
@@ -60,9 +62,10 @@ def register_plant_registry_for(
     crop: str = "currant",
     site: str = "orchard",
 ) -> str:
-    """Register ``csv_paths`` under ``name`` in ``project`` through ``register_plant_registry``,
-    and return ``name``. Idempotent under the same content: a second call with the same paths
-    under the same name is a no-op.
+    """Register ``csv_paths`` under ``name`` in ``project`` and return ``name``.
+
+    The registration goes through ``register_plant_registry`` at ``crop`` and ``site``,
+    asserting it returned no error.
     """
     from tcip_mcp.tools.phenology_tools import register_plant_registry
 
@@ -84,9 +87,11 @@ def map_captures(
     *,
     name: str = "valley",
 ) -> dict[str, list[Path]]:
-    """Register ``dataset_root`` in ``project``, write one geolocated capture of each of
-    :data:`PLOTS` on each of ``dates`` under its ``images/``, and map them under ``name``
-    (``register_plant_registry`` then ``build_plant_mapping``); each date's captures.
+    """Register ``dataset_root`` in ``project`` and map geolocated captures under ``name``.
+
+    :func:`~tests._image_fixtures.write_geo_image` writes one image per entry of :data:`PLOTS` on
+    each of ``dates`` at ``images/<date>/<plot>_<yyyymmdd>.jpg`` under the root, and they are mapped
+    (``register_plant_registry`` then ``build_plant_mapping``). Returns each date's captures.
     """
     from datetime import datetime, timedelta
 

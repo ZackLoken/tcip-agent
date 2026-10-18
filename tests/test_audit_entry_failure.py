@@ -1,5 +1,6 @@
-"""What an audited tool does when its own audit entry cannot be appended: a body that returned
-raises the unwritten line, and a body that raised keeps its own exception.
+"""What an audited tool does when its own audit entry cannot be appended.
+
+A body that returned raises the unwritten line, and a body that raised keeps its own exception.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from tests._audit_fixtures import audit_rows, refuse_audit_appends
 
 
 class _AppendRefusedError(RuntimeError):
-    """Stands in for whatever stops a real append: a busy lock, a refused root, a bad key."""
+    """The error a refused audit append raises here."""
 
 
 def _refuse_append(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -28,7 +29,11 @@ def test_append_failure_after_a_successful_body_refuses_and_names_the_committed_
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A committed mutation with no audit line is told to the caller, not left to a log line."""
+    """A body that returned but whose audit line fails raises, naming the committed call.
+
+    The error is ``MutationCommittedWithoutAuditLineError``, names the tool, tells the caller not
+    to retry blind, and carries the append's failure as its cause.
+    """
 
     @audited
     def stage_something(project: Path, count: int) -> dict:
@@ -54,7 +59,7 @@ def test_a_failed_body_keeps_its_own_exception_when_the_audit_of_it_cannot_be_wr
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The audit-of-failure is the decorator's business; the failure itself is the caller's."""
+    """A failed body keeps its own exception when its audit line cannot be written."""
 
     @audited
     def stage_something(project: Path) -> dict:
@@ -69,7 +74,7 @@ def test_a_failed_body_keeps_its_own_exception_when_the_audit_of_it_cannot_be_wr
 def test_an_ordinary_call_against_a_healthy_log_returns_its_result_and_writes_one_entry(
     tmp_path: Path,
 ) -> None:
-    """The rail admits the work it exists beside: nothing about a healthy call changes."""
+    """A call against a healthy log returns its result and writes one ``ok`` entry."""
 
     @audited
     def stage_something(project: Path, count: int) -> dict:
@@ -86,7 +91,7 @@ def test_an_ordinary_call_against_a_healthy_log_returns_its_result_and_writes_on
 def test_a_failing_body_against_a_healthy_log_still_records_the_call_and_re_raises(
     tmp_path: Path,
 ) -> None:
-    """The other half of admitting valid work: a refusing tool is audited and stays refusing."""
+    """A body raising against a healthy log re-raises and writes one ``exception`` entry."""
 
     @audited
     def stage_something(project: Path) -> dict:
@@ -116,7 +121,11 @@ def test_record_event_or_raise_raises_audit_entry_not_written_when_the_append_fa
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A confirmation that already committed must not be reported as silently unrecorded."""
+    """``record_event_or_raise`` raises ``AuditEntryNotWrittenError`` when the append fails.
+
+    The error names the tool, tells the caller not to retry blind, and carries the append's
+    failure as its cause.
+    """
     _refuse_append(monkeypatch)
 
     with pytest.raises(audit_module.AuditEntryNotWrittenError) as caught:
@@ -132,7 +141,7 @@ def test_record_event_or_raise_raises_audit_entry_not_written_when_the_append_fa
 def test_record_event_or_raise_against_a_healthy_log_writes_one_entry_and_returns_silently(
     tmp_path: Path,
 ) -> None:
-    """The rail admits the work it exists beside: a healthy append lands one line."""
+    """``record_event_or_raise`` against a healthy log writes one entry with its arguments."""
     audit_module.record_event_or_raise(
         "confirm_something",
         {"trait": "bloom"},

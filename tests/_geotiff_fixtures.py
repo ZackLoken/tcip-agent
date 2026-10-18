@@ -20,8 +20,10 @@ PIXEL_SCALE = 0.5  # native-CRS units (m) per pixel
 def build_geokeys(
     *, model_type: int = 1, projected_epsg: int | None = UTM_15N_EPSG
 ) -> tuple[int, ...]:
-    """A ``GeoKeyDirectoryTag``'s flat uint16 array naming ``model_type`` (1 == Projected) and,
-    when given, a projected CRS by EPSG code.
+    """Return a ``GeoKeyDirectoryTag`` tuple assembled from ``model_type`` and ``projected_epsg``.
+
+    It is the header ``(1, 1, 0, <key count>)`` followed by key 1024 at ``model_type`` and, when
+    ``projected_epsg`` is not ``None``, key 3072 at ``projected_epsg``.
     """
     entries: list[int] = [1024, 0, 1, model_type]
     if projected_epsg is not None:
@@ -51,16 +53,15 @@ def write_geotiff(
     random: bool = False,
     rowsperstrip: int | None = None,
 ) -> None:
-    """A striped GeoTIFF at ``path`` carrying real georeferencing tags, or a deliberately
-    incomplete/rotated set for a refusal test.
+    """Write a uint8 array to a TIFF at ``path`` with georeferencing tags, through ``tifffile``.
 
-    ``shape`` (height, width, channels) is the base frame; ``width``/``height`` override its
-    first two dimensions when given (the small-fixture callers that never need a fourth channel).
-    ``geokeys`` overrides the whole ``GeoKeyDirectoryTag`` array directly, for a caller building
-    one by hand (an out-of-line key, say); ``model_type``/``projected_epsg`` build one through
-    :func:`build_geokeys` otherwise. A channel count above 3 gets an unassociated-alpha
-    ``extrasamples`` tag per extra channel, since ``photometric="rgb"`` alone leaves them
-    undeclared.
+    The array is zeros of ``shape`` (height, width, channels), or values drawn at seed 0 when
+    ``random``; ``width``/``height`` replace its first two dimensions when given. It is written
+    with ``photometric="rgb"``, ``extrasamples`` of ``"unassalpha"`` for each channel past 3
+    and ``rowsperstrip`` when given. The tags are the pixel scale, the tiepoint and the
+    ``GeoKeyDirectoryTag`` array: ``geokeys`` when given, else :func:`build_geokeys` of
+    ``model_type`` and ``projected_epsg``. ``include_transformation_tag`` adds a
+    ``ModelTransformationTag``.
     """
     if width is not None or height is not None:
         h = height if height is not None else shape[0]
@@ -100,8 +101,10 @@ def write_geotiff(
 
 
 def geotransform_of_file(path: Path):
-    """The geotransform ``path``'s header states, read through the platform's one header read;
-    raises the reason that read refused.
+    """Return the geotransform ``path``'s header states.
+
+    The header is read through ``raster_source.SourceHeader``; raises the reason that read
+    refused.
     """
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         OrthomosaicGeoreference,
@@ -123,8 +126,10 @@ def write_canonical_dataset_raster(
     crop: str = "chestnut",
     channels: int = 3,
 ) -> Path:
-    """A georeferenced raster at ``<dataset_root>/images/<date>/<stem>.tif``, its dataset
-    registered (``register_dataset``) under ``crop``; the raster's path.
+    """Run :func:`write_geotiff` at ``<dataset_root>/images/<date>/<stem>.tif``.
+
+    The shape passed is ``(height, width, channels)``. ``dataset_root`` is then registered
+    (``register_dataset``) under ``crop``. Returns the raster's path.
     """
     from tcip_mcp.tools.project_tools import register_dataset
 

@@ -1,5 +1,7 @@
-"""Audit lines read back through the store seam, the shape a line may take, a fault injected
-into the log's append, and a record's lock held by another writer.
+"""Audit fixtures shared by the tests.
+
+Audit lines read back through the store seam, the shape a line may take, a fault injected into
+the log's append, and a record's lock held by another writer.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ AUDIT_ENTRY_KEYS = frozenset(
 
 
 def audit_rows(scope: Path, tool: str | None = None) -> list[dict]:
-    """Every line in the log ``scope`` names, or only ``tool``'s lines when one is named."""
+    """Return every line in the log ``scope`` names, or ``tool``'s lines when one is named."""
     return [
         row
         for row in ts.read_log(audit_log_key(scope)).records
@@ -36,8 +38,9 @@ def refuse_audit_appends(
     error: BaseException | None = None,
     landing: int = 0,
 ) -> None:
-    """Let the first ``landing`` audit appends land, then raise ``error`` (by default a
-    ``RuntimeError`` naming an unwritable log) from every later one.
+    """Let the first ``landing`` audit appends land, then fail every later one.
+
+    Each later append raises ``error``, by default a ``RuntimeError`` naming an unwritable log.
     """
     import tcip_mcp.audit as audit_module
 

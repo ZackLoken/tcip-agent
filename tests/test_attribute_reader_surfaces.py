@@ -1,6 +1,8 @@
-"""Reader-side surfaces that hold a bucket to its own recorded scope: ``count_by_class`` under a
-scope declaring no attribute of the positive state, a bucket record that no longer decodes, the
-COCO reader's ``attributes`` handling, and the prediction render's legend.
+"""Reader-side surfaces that hold a bucket to its own recorded scope.
+
+They are ``count_by_class`` under a scope declaring no attribute of the positive state, a bucket
+record that does not decode, the COCO reader's ``attributes`` handling, and the prediction
+render's legend.
 """
 
 from __future__ import annotations
@@ -23,8 +25,9 @@ GRADE = cr.Attribute("grade", "ordinal", ("low", "high"))
 
 
 def _scope(tmp_path: Path, *attributes: cr.Attribute) -> ClassScope:
-    """The class space the admission reads for :data:`SUBJECT` over a dataset declaring
-    ``attributes`` on it.
+    """Return ``registry_scope`` for :data:`SUBJECT` over ``tmp_path``'s images.
+
+    The dataset under ``tmp_path`` is made to declare ``attributes`` on it first.
     """
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tests._producer_fixtures import registry_over
@@ -39,7 +42,7 @@ def _scope(tmp_path: Path, *attributes: cr.Attribute) -> ClassScope:
 
 
 def _document(tmp_path: Path):
-    """The key of a prediction document of the bucket ``m`` under ``tmp_path``."""
+    """Return the key of a prediction document of the bucket ``m`` under ``tmp_path``."""
     from tcip_mcp.dataset_layout import prediction_key
 
     return prediction_key(tmp_path, "m", "img")
@@ -48,9 +51,10 @@ def _document(tmp_path: Path):
 def test_count_by_class_under_a_scope_declaring_no_attribute_of_the_state_counts_none_positive(
     tmp_path: Path,
 ) -> None:
-    """A bucket whose scope declares no attribute the positive state names never counts a
-    positive, even where a record happens to carry that attribute's name and value: only a bucket
-    whose model classified that attribute assessed the state at all.
+    """``count_by_class`` counts no positive under a scope declaring no attribute of the state.
+
+    Under a scope declaring only ``color``, a record carrying the state's ``grade`` value counts
+    as one object, no positive and one unclassified.
     """
     p = _document(tmp_path)
     json_io.write_label_document(
@@ -79,8 +83,10 @@ def test_count_by_class_under_a_scope_declaring_no_attribute_of_the_state_counts
 def test_count_by_class_reads_the_states_own_attribute_among_several(
     tmp_path: Path,
 ) -> None:
-    """Under a scope declaring two attributes, the positive state's own attribute decides, never
-    the other one; a record carrying no value under it refuses by name.
+    """``count_by_class`` reads the positive state's own attribute among several.
+
+    Under a scope declaring ``color`` and ``grade``, the state's own ``grade`` decides, not
+    ``color``; a record carrying no ``grade`` value refuses by name.
     """
     p = _document(tmp_path)
     json_io.write_label_document(
@@ -129,8 +135,9 @@ def test_count_by_class_reads_the_states_own_attribute_among_several(
 def test_an_undecodable_bucket_record_refuses_by_name_rather_than_reading_as_unclassified(
     tmp_path: Path,
 ) -> None:
-    """A published bucket whose record no longer decodes has no scope to read its documents
-    under: reading it refuses naming the record.
+    """Reading a bucket whose record does not decode is refused naming the record.
+
+    Such a bucket has no scope to read its documents under.
     """
     pytest.importorskip("torch")
     import sqlite3

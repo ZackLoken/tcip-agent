@@ -1,9 +1,7 @@
-"""Importable builders for the active-learning scorer tests, and the predictor they are read
-through.
+"""Importable builders of small fixed-output models, and a predictor built over one.
 
-Each builder returns a small ``nn.Module`` whose outputs a scorer test asserts on. A test reaches
-it the way every scorer caller does: the module is saved as a bespoke checkpoint, registered, and
-loaded through ``load_registered_checkpoint`` and ``GenericPredictor``. Not a ``test_*`` module.
+Each builder returns a small ``nn.Module`` with fixed outputs; :func:`predictor_for` loads one
+through a registered checkpoint.
 """
 
 from __future__ import annotations
@@ -15,7 +13,7 @@ import torch
 
 
 class EmptyThenLowDetector(torch.nn.Module):
-    """Returns an empty frame on the first call, a low-confidence detection on the second."""
+    """A detector answering no box on its first call and boxes scored 0.3 and 0.4 after."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -44,7 +42,7 @@ class TwoHeadClassifier(torch.nn.Module):
 
 
 class ConvBackbone(torch.nn.Module):
-    """A model exposing a ``.backbone`` the diversity scorer embeds through."""
+    """A model whose ``.backbone`` is one 3-to-8-channel 3x3 convolution."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -52,7 +50,7 @@ class ConvBackbone(torch.nn.Module):
 
 
 class ScorelessDetector(torch.nn.Module):
-    """Returns one box and its label and no ``scores``."""
+    """A detector answering one box and its label and no ``scores``."""
 
     def forward(self, imgs):
         return [
@@ -84,8 +82,10 @@ def build_linear(**_: Any) -> torch.nn.Module:
 
 
 def predictor_for(tmp_path: Path, builder: str, task: str) -> Any:
-    """The predictor a scorer reads, built from ``scorer_models:<builder>`` through the
-    platform's own checkpoint registration, load and ``GenericPredictor``.
+    """Return a ``GenericPredictor`` over a registered checkpoint of ``scorer_models:<builder>``.
+
+    A ``task`` run over the builder completes and registers the checkpoint, which is loaded
+    through ``load_registered_checkpoint``.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor

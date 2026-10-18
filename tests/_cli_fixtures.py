@@ -1,4 +1,4 @@
-"""The ``tcip`` console commands run the way an operator runs them: in their own process."""
+"""The ``tcip`` console commands, each run in a process of its own."""
 
 from __future__ import annotations
 
@@ -14,8 +14,9 @@ def run_tcip(
     cwd: Path | None = None,
     timeout: float = 120,
 ) -> subprocess.CompletedProcess:
-    """``tcip <command> <args>`` through the console dispatcher in a child process started in
-    ``cwd``; the finished process with its output as text.
+    """Run ``tcip <command> <args>`` through the console dispatcher in a child process.
+
+    The child starts in ``cwd``. Returns the finished process with its output as text.
     """
     return subprocess.run(
         [sys.executable, "-m", "tcip_web.cli", command, *args],

@@ -1,9 +1,9 @@
 """The audit log records mutations and nothing else.
 
-A read-only door (a status poll a browser drives once a second, a listing, a knowledge document
-served back) leaves no line; a mutating door still leaves exactly one. The decorator infers
-nothing from a body's return value: a body that returned reads ``ok`` whatever dict it
-answered, and only a body that raised reads ``exception``.
+A read-only door (a status poll, a listing, a knowledge document served back) leaves no line; a
+mutating door leaves exactly one. A body that returned an answer
+reads ``ok``, a body that returned a refusal leaves no line, and a body that raised reads
+``exception``.
 """
 
 from __future__ import annotations
@@ -24,9 +24,11 @@ def _rows(project: Path) -> list[dict]:
 def test_a_successful_monitor_result_audits_nothing_and_carries_no_refusal_key(
     tmp_path: Path,
 ) -> None:
-    """The stream's own read: a run whose status carries ``status_error: None`` polled through
-    ``monitor_training`` leaves the log exactly as it found it, and its row carries no ``error``
-    key a refusal check could misread.
+    """A successful ``monitor_training`` poll audits nothing and carries no refusal key.
+
+    The stream's own read: a run whose status carries ``status_error: None`` polled through
+    ``monitor_training`` leaves the log's line count as it found it, and neither its answer nor
+    its row carries an ``error`` key.
     """
     from tcip_mcp.tools.training_tools import monitor_training
     from tests._verified_checkpoint_fixtures import (
@@ -90,8 +92,10 @@ def test_read_only_doors_leave_no_line(tmp_path: Path) -> None:
 def test_a_phenology_look_on_screen_leaves_no_line(
     tmp_path: Path, client
 ) -> None:
-    """The Results tab's measurement door computes and shows; it ships nothing and writes nothing,
-    so the project's log reads the same before and after a successful look.
+    """A phenology measurement shown on screen leaves no audit line.
+
+    The Results tab's measurement door answers milestone rows and leaves the project's log as it
+    found it.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import attributed_series
@@ -109,8 +113,10 @@ def test_a_phenology_look_on_screen_leaves_no_line(
 def test_ranking_a_review_queue_leaves_no_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Ranking candidates for review reads a checkpoint and a manifest and writes nothing, so a
-    successful ranking through a registered run leaves the project's log as it found it.
+    """Ranking a review queue leaves no audit line.
+
+    A successful ranking through a registered run answers a queue and leaves the project's log
+    as it found it.
     """
     from tcip_mcp.tools.feedback_tools import prioritize_review_queue
     from tests.test_feedback_tools import _bound_checkpoint, _stub_scorer
@@ -144,9 +150,7 @@ def test_ranking_a_review_queue_leaves_no_line(
 
 
 def test_a_mutating_door_still_leaves_one_line(tmp_path: Path) -> None:
-    """The rail admits the work it exists for: a mutation through the platform's own door leaves
-    exactly one line, status ok, after the record it wrote landed.
-    """
+    """A mutation through the platform's own door leaves exactly one audit line, status ok."""
     from tcip_mcp.tools.meta_tools import report_friction
 
     before = len(_rows(tmp_path))
@@ -164,8 +168,10 @@ def test_a_mutating_door_still_leaves_one_line(tmp_path: Path) -> None:
 def test_a_return_is_ok_a_raise_is_an_exception_and_a_refusal_is_no_line(
     tmp_path: Path,
 ) -> None:
-    """A refusal returned as the error dict every tool returns is no act and leaves no line; a
-    dict whose ``error`` is null is an ordinary answer.
+    """A return audits as ok, a raise as an exception, and a returned refusal leaves no line.
+
+    A refusal returned as the tools' error dict is no act and leaves no line; a dict whose
+    ``error`` is null is an ordinary answer.
     """
     from tcip_mcp.audit import audited
 

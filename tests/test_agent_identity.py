@@ -1,5 +1,6 @@
-"""The identity holder on its own: what a run establishes, what each projection says, and that a
-run's end forgets it.
+"""The identity holder on its own.
+
+What a run establishes, what each projection says, and that a run's end forgets it.
 """
 
 from __future__ import annotations
@@ -50,9 +51,10 @@ def test_a_handshake_mints_a_session_and_carries_the_declaration(
 def test_the_identity_fields_are_declared_once_and_carry_no_harness_export(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The record's fields are the identity's own attributes, and the field tuple, the header map
-    and the projection derive from them; a harness exporting its session and effort to the
-    server it spawns lands on none of them.
+    """The identity's declared fields, field tuple, header map and projection agree.
+
+    They name the same four fields, and a harness exporting its session and effort to the server
+    it spawns lands in neither the audit fields nor the headers.
     """
     import dataclasses
 
@@ -157,8 +159,10 @@ def test_a_server_run_forgets_the_identity_on_its_way_out() -> None:
 def test_a_caller_cannot_hand_an_audit_line_another_identity(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The identity is applied after a caller's extra facts, so ``record_event_or_raise(...,
-    agent_session=...)`` records the handshake's session, not the caller's.
+    """An audit line records the handshake's identity over the caller's own identity keys.
+
+    ``record_event_or_raise(..., agent_session=...)`` records the handshake's session and client
+    name, not the caller's.
     """
     import tcip_mcp.audit as audit_module
     import tcip_store as ts
@@ -204,9 +208,10 @@ def test_a_declared_name_travels_as_an_ascii_header_and_comes_back_whole(
 def test_a_caller_cannot_supply_an_identity_key_the_handshake_left_absent(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The identity keys are reserved even where the handshake set nothing: with no handshake a
-    forged session does not land, and under a launch that declared no terminal session a forged
-    terminal_session does not land either.
+    """An identity key the handshake left absent is not recorded from a caller.
+
+    With no handshake a forged ``agent_session`` is not recorded, and after a handshake with no
+    terminal session in the environment a forged ``terminal_session`` is not recorded either.
     """
     import tcip_mcp.audit as audit_module
     from tests._audit_fixtures import audit_rows
@@ -234,9 +239,7 @@ def test_a_caller_cannot_supply_an_identity_key_the_handshake_left_absent(
 def test_the_declaration_is_taken_on_the_first_message_that_carries_it_whatever_its_method() -> (
     None
 ):
-    """A client that sends a request before notifications/initialized (the SDK serves one) still
-    gets its declaration recorded on that first request.
-    """
+    """A client whose first message is a ``tools/call`` request gets its declaration recorded."""
     import types
 
     info = types.SimpleNamespace(name="antigravity-like", version="1.1.17")

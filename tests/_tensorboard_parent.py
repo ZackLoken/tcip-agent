@@ -1,7 +1,9 @@
-"""A parent process that launches a TensorBoard stand-in through the manager and prints, on one
-line, the pid ``launch_tensorboard`` returned and the stand-in's own pid; then sleeps until killed
-or exits, by its ``mode`` argument. ``--no-tie`` disables the platform lifetime tie before the
-launch; ``--thread`` launches from a background thread that has finished before the pids print.
+"""A parent process that launches a TensorBoard stand-in through the manager.
+
+It prints, on one line, the pid ``launch_tensorboard`` returned and the stand-in's own pid; then
+sleeps until killed or exits, by its ``mode`` argument. ``--no-tie`` disables the platform
+lifetime tie before the launch; ``--thread`` launches from a background thread that has finished
+before the pids print.
 """
 
 from __future__ import annotations
@@ -16,19 +18,12 @@ def _sleep_argv(logdir: str, port: int) -> list[str]:
 
 
 def _standin_pid(returned_pid: int, guardian_expected: bool) -> int:
-    """The TensorBoard stand-in's own pid.
+    """Return the TensorBoard stand-in's own pid.
 
-    When a guardian is expected (POSIX with the tie enabled) the returned pid is the guardian's
-    and its one child is the stand-in; this waits up to five seconds for that child to appear,
-    since the guardian may not have spawned it yet, and exits naming the condition if it never
-    settles on exactly one. A guardian that has already died is not a separate case: it stays a
-    zombie, still resolvable and reporting zero children, until reaped by its own caller, which
-    has neither polled nor waited on it since the launch's own startup check, so that outcome
-    also reaches the five-second diagnosis below. Otherwise (Windows, or the tie disabled under
-    ``--no-tie``) nothing sits in front of the stand-in, so the returned pid is used directly and
-    children are never consulted. This is called both from the standalone script's own ``main``
-    and directly by a pytest test; the ``SystemExit`` it raises on failure is accepted in the
-    latter case too, since it fails the calling test the same as any exception.
+    When ``guardian_expected``, ``returned_pid`` is the guardian's and the stand-in is its one
+    child: the guardian's children are polled for up to five seconds and the one child's pid is
+    returned, or ``SystemExit`` is raised naming the child count and the guardian's status.
+    Otherwise ``returned_pid`` is returned as it is.
     """
     if not guardian_expected:
         return returned_pid

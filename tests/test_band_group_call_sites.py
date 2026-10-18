@@ -1,11 +1,7 @@
-"""Every enumeration/resolution call site routed onto ``list_logical_images``/
-``resolve_image_source``, exercised against a grouped-capture folder: datasets.py, splits.py,
-annotation_tools.py, vision_tools.py.
+"""Enumeration and resolution call sites read against a grouped-capture folder.
 
-A minimal synthetic 2-band group (two tiny single-band TIFFs + a manifest) stands in for a real
-capture in most of these: the mechanism under test is "does the call site fold the group and
-route pixels through image_utils", which the real DJI sample already proves at the band_groups
-layer in test_band_groups.py / test_band_group_image_utils.py.
+The call sites are in datasets.py, splits.py, annotation_tools.py and vision_tools.py. Most cases
+read a synthetic 2-band group: two tiny single-band TIFFs and a manifest.
 """
 
 from __future__ import annotations
@@ -38,8 +34,9 @@ def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
 
 @pytest.fixture
 def grouped_dataset(tmp_path: Path) -> Path:
-    """A minimal dataset root: one grouped capture + one plain photo, each with a detection GT
-    label document, under the canonical images/ layout ``build_dataset`` reads.
+    """Return a minimal dataset root holding one grouped capture and one plain photo.
+
+    Each has a detection GT label document, under ``images/2026-04-01/``.
     """
     from PIL import Image
 
@@ -75,9 +72,10 @@ def grouped_dataset(tmp_path: Path) -> Path:
 def test_a_group_is_named_by_its_manifest_wherever_a_name_is_read(
     grouped_dataset,
 ):
-    """The one naming primitive every by-name reader resolves a capture under: a grouped
-    capture answers with its own manifest filename, the file a name store holds it by, never
-    one of its sibling band files.
+    """A grouped capture is named by its manifest filename, a plain photo by its own file.
+
+    ``logical_image_name`` answers a grouped capture with its own manifest filename, the file a
+    name store holds it by, not one of its sibling band files.
     """
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.image_utils import (
@@ -92,8 +90,10 @@ def test_a_group_is_named_by_its_manifest_wherever_a_name_is_read(
 
 
 def test_detection_dataset_trains_on_a_grouped_capture(grouped_dataset):
-    """The grouped capture alone: this bucket also holds a plain RGB source, and one model reads
-    one band count, so a run over both refuses rather than reading either at the other's count.
+    """A detection loader over the grouped capture alone reads its two bands stacked.
+
+    The bucket also holds a plain RGB source; the loader is limited to the grouped capture, and
+    it expects two channels, the group's band count.
     """
     torch = pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import image_dir
@@ -132,11 +132,7 @@ def test_the_channel_probe_derives_2_for_the_grouped_sample(grouped_dataset):
 def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaulting(
     tmp_path,
 ):
-    """A broad ``except Exception: return default`` must not swallow ``BandGroupIncompleteError``
-    along with genuinely unexpected errors and silently default to 3 channels: a
-    confidently-wrong value on exactly the parameter 'derive, don't pin' exists to guard
-    against.
-    """
+    """The channel probe raises ``BandGroupIncompleteError`` on a stale manifest, not a default."""
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
     from tcip_mcp.pipelines.data.band_groups import (
         BandGroupIncompleteError,
@@ -220,8 +216,10 @@ def test_display_read_composites_a_group_into_rgb_pixels(grouped_dataset):
 def test_display_read_of_a_plain_photo_is_the_files_own_pixels(
     grouped_dataset,
 ):
-    """A photographic file is read, never stretched: what the renderer draws on is what the
-    file holds.
+    """A plain photo's display read is the file's own pixels.
+
+    A photographic file is read, never stretched: what the renderer draws on is what the file
+    holds.
     """
     from PIL import Image
 
@@ -239,8 +237,10 @@ def test_display_read_of_a_plain_photo_is_the_files_own_pixels(
 def test_display_read_of_a_plain_3band_rgb_geotiff_keeps_its_true_colors(
     tmp_path,
 ):
-    """An ordinary 3-band RGB .tif is a real, pre-existing supported format: it must reach the
-    renderer as its own pixels, not as a synthetic per-channel min-max stretch of them.
+    """A plain 3-band RGB GeoTIFF's display read keeps its own pixels.
+
+    ``_display_of`` over a 3-band RGB .tif with two ramped channels returns the written array
+    unchanged.
     """
     from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.tools.vision_tools import _display_of
@@ -260,9 +260,7 @@ def test_display_read_of_a_plain_3band_rgb_geotiff_keeps_its_true_colors(
 
 
 def test_display_read_still_stretches_a_genuinely_multiband_geotiff(tmp_path):
-    """The scoping above must not swallow the real non-standard case: a raster with more bands
-    than any true-color reading covers is composited to three display bands and stretched.
-    """
+    """A six-band GeoTIFF's display read is three uint8 bands spanning 0 to 255."""
     from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.tools.vision_tools import _display_of
 
@@ -339,9 +337,10 @@ def test_viz_dataset_sample_folds_a_grouped_capture_into_one_entry(
 def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(
     tmp_path, grouped_dataset
 ):
-    """A drawn selection names a grouped capture by the manifest sitting beside its bands, and
-    that path resolves back to the whole group in place: the group's bands are read where they
-    were captured, never copied into a side's own directory.
+    """A drawn selection records a grouped capture by its own manifest path.
+
+    The recorded source is the ``.bandgroup`` manifest in the capture's image directory, and it
+    resolves to a ``BandGroupRef`` whose band files exist.
     """
     from PIL import Image
 
@@ -397,8 +396,10 @@ def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(
 def test_scan_dataset_counts_a_grouped_capture_once_not_once_per_band_file(
     grouped_dataset,
 ):
-    """``_scan_dataset``'s image census is built through ``list_logical_images``: a grouped
-    capture is one logical image, its own manifest, never one entry per sibling band file.
+    """``_scan_dataset`` counts a grouped capture once, never once per band file.
+
+    Its image census is built through ``list_logical_images``: a grouped capture is one logical
+    image, its own manifest, never one entry per sibling band file.
     """
     from tcip_mcp.tools.data_tools import _scan_dataset
 

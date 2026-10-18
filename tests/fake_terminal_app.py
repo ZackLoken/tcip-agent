@@ -1,12 +1,11 @@
-"""A stand-in agent for the terminal tests, run under a real PTY.
+"""A stand-in agent program for a terminal session.
 
 Prints a banner naming the terminal session id it inherited, echoes each input line back as
 ``echo:<line>`` with any bracketed-paste markers removed, and exits on ``exit``. With
 ``FAKE_TERMINAL_ARGV_FILE`` set it first writes its arguments there as JSON. With
 ``FAKE_TERMINAL_PASTE_AFTER_S`` set it waits that many seconds, prints ``EARLY_INPUT`` if input
-arrived meanwhile, then turns bracketed paste on and writes ``FAKE_TERMINAL_COMPOSER_READY``, the
-marker configured for its stand-in row. Run with ``fail`` as its
-first argument it exits 3 at once, standing as a launch preparation that failed.
+arrived meanwhile, then turns bracketed paste on and writes ``FAKE_TERMINAL_COMPOSER_READY``.
+Run with ``fail`` as its first argument it exits 3 immediately.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from pathlib import Path
 
 
 def _input_arrives_within(seconds: float) -> bool:
-    """Whether any input is waiting on stdin before ``seconds`` pass, consuming none of it."""
+    """Return whether input is waiting on stdin before ``seconds`` pass, consuming none of it."""
     if os.name == "nt":
         import msvcrt
 

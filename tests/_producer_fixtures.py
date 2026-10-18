@@ -1,5 +1,6 @@
-"""Label documents written and loaders built through the platform's own producers
-(``label_queries.admit``, ``write_label_document``, the one label save).
+"""Label documents written and loaders built through the platform's own producers.
+
+The producers are ``label_queries.admit``, ``write_label_document`` and the one label save.
 """
 
 from __future__ import annotations
@@ -14,9 +15,10 @@ from tests._training_values import drawn_split
 def label_image(
     image_path, annotations, width: int, height: int, **kwargs: Any
 ):
-    """``annotations`` written as the label document of the image at ``image_path``
-    (:func:`~tcip_annotation.json_io.write_label_document` at the image's own key); the new
-    version.
+    """Write ``annotations`` as the label document of the image at ``image_path``.
+
+    The document is written by :func:`~tcip_annotation.json_io.write_label_document` at the
+    image's own key. Returns the new version.
     """
     from tcip_annotation.json_io import write_label_document
 
@@ -35,8 +37,9 @@ def box_annotation(
     score: float | None = None,
     **attributes: str,
 ):
-    """An annotation of ``subject`` boxed at pixel ``(x1, y1, x2, y2)`` carrying ``attributes``;
-    a prediction when ``score`` is given.
+    """Return an annotation of ``subject`` boxed at pixel ``(x1, y1, x2, y2)``.
+
+    It carries ``attributes``, and is a prediction when ``score`` is given.
     """
     from tcip_annotation.state import Annotation, BBox
 
@@ -49,7 +52,7 @@ def box_annotation(
 
 
 def saved_annotations(image) -> list:
-    """The annotations of the label document of the image at ``image``."""
+    """Return the annotations of the label document of the image at ``image``."""
     from tcip_annotation.json_io import read_label_document
 
     return read_label_document(image_label_key(image)).annotations
@@ -60,8 +63,9 @@ def write_image(
     size: tuple[int, int] = (100, 80),
     color: tuple[int, int, int] = (0, 0, 0),
 ):
-    """A flat ``color`` three-band ``size`` image written at ``path``, its directory made;
-    ``path``.
+    """Save ``Image.new("RGB", size, color)`` at ``path``, its directory made.
+
+    Returns ``path``.
     """
     from PIL import Image
 
@@ -71,22 +75,27 @@ def write_image(
 
 
 def gray_frame(where, size: int = 128, name: str = "img.png") -> str:
-    """A flat gray ``size``px square ``name`` in ``where`` (:func:`write_image`); its path."""
+    """Write ``name`` in ``where``, ``size`` square at (120, 120, 120), and return its path.
+
+    The image is written by :func:`write_image`.
+    """
     return str(write_image(where / name, (size, size), (120, 120, 120)))
 
 
 def blank_image(
     root, name: str = "IMG_0001.JPG", size: tuple[int, int] = (100, 80)
 ):
-    """:func:`write_image` of ``name`` in ``root``'s undated capture."""
+    """Write ``name`` into ``root``'s undated capture with :func:`write_image`; return its path."""
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
     return write_image(root / "images" / UNDATED_BUCKET / name, size)
 
 
 def one_labeled_capture(root):
-    """``root`` holding one image in its ``2026-03-04`` capture with an empty label document over
-    it, and the subject registry that decodes it; ``root``.
+    """Write a three-byte JPEG stub ``a_1.jpg`` into ``root``'s ``2026-03-04`` capture.
+
+    The stub has a kept empty label document over an 8 by 8 frame, and ``root``'s subject
+    registry declares ``bud``. Returns ``root``.
     """
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
 
@@ -99,15 +108,16 @@ def one_labeled_capture(root):
 
 
 BRIGHT = (230, 230, 230)
-"""The color a painted object is bright in, past every bright-pixel threshold the toy detectors
-read."""
+"""The color a painted object is bright in, 230 of 255 in each band."""
 
 
 def painted_frame(
     width: int, height: int, background, extents, mode: str = "RGB"
 ):
-    """A ``mode`` image of ``width`` by ``height`` in ``background``, each of ``extents`` (a
-    half-open pixel box ``(x1, y1, x2, y2)`` beside its color) filled in its color.
+    """Return a ``mode`` image of ``width`` by ``height`` in ``background`` with painted extents.
+
+    Each of ``extents`` (a half-open pixel box ``(x1, y1, x2, y2)`` beside its color) is filled
+    in its color.
     """
     from PIL import Image, ImageDraw
 
@@ -121,9 +131,7 @@ def painted_frame(
 def painted_array(
     width: int, height: int, extents, *, background=0, mode: str = "L"
 ):
-    """The :func:`painted_frame` of ``extents`` as a writable numpy array (``uint8`` in mode
-    ``L``, ``float32`` in mode ``F``), ``height`` rows by ``width`` columns.
-    """
+    """Return ``np.array`` of :func:`painted_frame` over ``extents``, ``background``, ``mode``."""
     import numpy as np
 
     return np.array(
@@ -139,9 +147,11 @@ def labeled_frame(
     background: tuple[int, int, int],
     **kwargs: Any,
 ):
-    """A :func:`painted_frame` of the dim ``background`` written at ``path``, :data:`BRIGHT`
-    over the extent of each of ``annotations`` that has one and is no crowd region, and labeled
-    with ``annotations`` (:func:`label_image`, ``kwargs`` its own); ``path``.
+    """Write a labeled :func:`painted_frame` of ``background`` at ``path``.
+
+    The frame is :data:`BRIGHT` over the extent of each of ``annotations`` that has one and is no
+    crowd region, and labeled with ``annotations`` (:func:`label_image`, ``kwargs`` its own).
+    Returns ``path``.
     """
     from tcip_annotation.state import Point, bbox_of
 
@@ -164,9 +174,10 @@ def labeled_frame(
 def seed_labeled_images(
     images_dir, annotations, *, n: int, width: int, height: int
 ):
-    """Make ``images_dir``, a capture of a dataset image tree, and write ``n``
-    :func:`labeled_frame` images ``img<i>.png`` of ``width`` by ``height``, each holding
-    ``annotations``; ``images_dir``.
+    """Make ``images_dir``, a capture of a dataset image tree, and write ``n`` labeled frames.
+
+    The frames are :func:`labeled_frame` images ``img<i>.png`` of ``width`` by ``height``, each
+    holding ``annotations``. Returns ``images_dir``.
     """
     images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n):
@@ -183,10 +194,11 @@ def seed_labeled_images(
 def big_single_source(
     root: Path, width: int, height: int, *, polygons: bool = False
 ) -> tuple[Path, str]:
-    """One ``width`` by ``height`` noise mosaic under ``root``'s undated capture with a scatter
-    of 20 px ``bud`` boxes (``polygons``: squares) every 200 px, labeled at its real size: a
-    single-image dataset large enough to hold a spatial split. Returns its image directory and
-    stem.
+    """Write one ``width`` by ``height`` noise mosaic under ``root``'s undated capture.
+
+    The mosaic is unseeded uniform noise below 0.3, labeled at its real size with 20 px
+    ``bud`` boxes (``polygons``: squares) every 200 px from (20, 20).
+    Returns its image directory and stem.
     """
     import torch
     from torchvision.utils import save_image
@@ -223,8 +235,9 @@ def seed_bud_images(
     size: int = 128,
     box: tuple[float, float, float, float] = (10, 10, 40, 40),
 ):
-    """:func:`seed_labeled_images` of ``n`` square ``size``px images, each holding one ``bud``
-    box at ``box``.
+    """Write ``n`` square ``size``px images through :func:`seed_labeled_images`.
+
+    Each holds one ``bud`` box at ``box``.
     """
     from tcip_annotation.state import Annotation, BBox
 
@@ -240,10 +253,12 @@ def seed_bud_images(
 def small_detection_config(
     images_dir, model_source: dict | None = None, *, project, **data: Any
 ) -> dict:
-    """A :func:`~tests._chain_fixtures.training_config` of ``project`` of ``model_source`` (by
-    default the bespoke torchvision detector,
-    :data:`~tests._verified_checkpoint_fixtures.BUILT_DETECTOR`) over ``images_dir``'s ``bud``
-    boxes, drawing its split at seed 0, with ``data``'s keys in its data section.
+    """Return a :func:`~tests._chain_fixtures.training_config` of ``project`` over ``images_dir``.
+
+    It passes ``model_source`` (by default
+    :data:`~tests._verified_checkpoint_fixtures.BUILT_DETECTOR`) and a data section of
+    ``images_dir``, scope ``bud`` and a drawn split at validation ratio 0.15 grouped by tile
+    prefix, with ``data``'s keys over it.
     """
     from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
@@ -261,8 +276,10 @@ def small_detection_config(
 
 
 def registry_over(dataset_root, registry) -> None:
-    """``dataset_root``'s subject registry replaced by ``registry`` through the platform's own save
-    (:func:`~tcip_mcp.subject_registry.replace_registry`), whatever it held before.
+    """Replace ``dataset_root``'s subject registry by ``registry``.
+
+    The replacement goes through the platform's own save
+    (:func:`~tcip_mcp.subject_registry.replace_registry`).
     """
     from tcip_mcp.subject_registry import replace_registry
 
@@ -285,10 +302,11 @@ def mark_complete(
     proposals_hidden: bool = False,
     by: str = "user:tester",
 ):
-    """``subject`` marked complete over ``rect`` (the whole image when ``None``) on the label
-    document of the image at ``image_path`` through the platform's one save door, the document's
-    annotations kept as they are; an image with no annotation of ``subject`` reads as a confirmed
-    negative. Returns the new version.
+    """Mark ``subject`` complete over ``rect`` on the label document of the image at ``image_path``.
+
+    The mark goes through ``dataset_layout.save_label_document`` as ``by``, with gestures of
+    ``rect`` and ``proposals_hidden``, passing the document's stored annotations back as client
+    annotations. Returns the new version.
     """
     from tcip_annotation.json_io import (
         client_annotation,
@@ -323,10 +341,11 @@ def admit_over(
     subject: str | None = None,
     members: list[str] | None = None,
 ):
-    """The admission over the images of ``images_dir`` and their ground truth (their own label
-    documents when ``ground_truth`` is ``None``) under the class space their registry answers for
-    ``subject`` (:func:`~tcip_mcp.pipelines.data.label_queries.registry_scope`), refusing an empty
-    one by name.
+    """Return the admission of ``images_dir`` under its registry's scope for ``subject``.
+
+    ``label_queries.admit`` runs over ``images_dir``, ``ground_truth`` and ``members`` at
+    ``registry_scope(images_dir, subject)``, and ``require_admitted`` refuses an empty
+    admission.
     """
     from tcip_mcp.pipelines.data.label_queries import (
         admit,
@@ -345,9 +364,7 @@ def admit_over(
 
 
 def checkpoint_admission(checkpoint, images_dir, ground_truth=None):
-    """The admission ``evaluate_model`` measures ``checkpoint`` over: the images of
-    ``images_dir`` and their ground truth under the class space the checkpoint records.
-    """
+    """Return ``admit`` of ``images_dir``, ``ground_truth`` at the checkpoint's recorded scope."""
     from tcip_mcp.pipelines.data.label_queries import admit
 
     return admit(
@@ -362,7 +379,7 @@ def samples_over(
     subject: str | None = None,
     members: list[str] | None = None,
 ):
-    """Every admitted member of one place as samples, each on the training side."""
+    """Return :func:`admit_over`'s ``every_sample()`` over ``images_dir``."""
     return admit_over(
         images_dir, ground_truth, subject=subject, members=members
     ).every_sample()
@@ -380,16 +397,15 @@ def run_over(
     dataset_source: Any = None,
     transforms: Any = None,
 ):
-    """A loader for ``task`` over one place holding ground truth and the data section a run over
-    it records (its ``scope`` and sizes), both through the producer.
+    """Return a loader for ``task`` over one place holding ground truth, and its data section.
 
-    ``stated`` is what a config would state about the sizes (a band count, a class count),
-    ``tiling`` its ``data.tiling`` block and ``dataset_source`` its bespoke builder beside the
-    layout it imports from (``datasets.BespokeSource``, the layout ``model_build.staged_sources``
-    stages); the rest are resolved off the admitted samples the way a run resolves them, its
-    tiling block through ``split_construction._with_lattice``, the loader built from that block
-    at ``transforms`` as a run's training side is (``split_construction.recorded_datasets``). The
-    data section is in the form a run's record holds it.
+    The samples are the admission's ``every_sample()``. The data section is ``run_sizes`` over a
+    :func:`drawn_split` block with ``stated`` (a band count, a class count), ``tiling`` (its
+    ``data.tiling`` block) and ``dataset_source``'s source over it, given its lattice by
+    ``split_construction._with_lattice``; ``dataset_source`` pairs a ``datasets.BespokeSource``
+    with the layout it imports from. The loader is the training dataset
+    ``split_construction.recorded_datasets`` builds at ``transforms``, and the data section is
+    returned as its ``record()``.
     """
     from tcip_mcp.pipelines.data.split_construction import (
         _with_lattice,
@@ -431,8 +447,10 @@ def run_over(
 
 
 def served_regions(dataset: Any) -> list:
-    """Each item ``dataset`` serves, its target's objects over its image's pixels
-    (``datasets.object_region``): the regions a stand-in detection dataset exposes.
+    """Return the regions a stand-in detection ``dataset`` exposes, one per item it serves.
+
+    Each region is the item's target's objects over its image's pixels
+    (``datasets.object_region``).
     """
     from tcip_mcp.pipelines.data.datasets import object_region
 
@@ -443,9 +461,10 @@ def served_regions(dataset: Any) -> list:
 
 
 def staged_layout(project, data: Any):
-    """The layout a run of ``project`` of the bespoke detector over the data block ``data`` (a
-    dict, or a ``DataSpec``) imports from at its admission (``model_build.staged_sources``).
-    The layout reads no data, so its model source normalizes by the weights it names
+    """Return ``model_build.staged_sources``'s layout for a config of ``project`` over ``data``.
+
+    ``data`` is a data block (a dict, or a ``DataSpec``). The config's model source is
+    ``_chain_fixtures.DETECTION_SOURCE`` normalized by its weights' statistics
     (``_chain_fixtures.weights_statistics``).
     """
     from tcip_mcp.pipelines.model_build import staged_sources
@@ -471,9 +490,10 @@ def staged_layout(project, data: Any):
 
 
 def train_val(project, task: str, data_cfg: dict, transforms: Any = None):
-    """``split_construction.auto_train_val`` for a ``task`` run of ``project`` over ``data_cfg``
-    validated as a run's data block of ``project``, a dataset builder it declares imported
-    from :func:`staged_layout`: ``(train_ds, val_ds, partition, resolved)``.
+    """Run ``split_construction.auto_train_val`` for a ``task`` run of ``project``.
+
+    ``data_cfg`` is validated as a run's data block of ``project``, a dataset builder it declares
+    imported from :func:`staged_layout`. Returns ``(train_ds, val_ds, partition, resolved)``.
     """
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.pipelines.schemas import DataSpec
@@ -487,15 +507,16 @@ def train_val(project, task: str, data_cfg: dict, transforms: Any = None):
 
 
 def dataset_over(task: str, images_dir, ground_truth=None, **kwargs: Any):
-    """The loader :func:`run_over` builds."""
+    """Return the loader :func:`run_over` builds."""
     return run_over(task, images_dir, ground_truth, **kwargs)[0]
 
 
 def fake_popen(monkeypatch, captured: list[list[str]]) -> type:
-    """Replace ``subprocess.Popen`` with a class recording each argv into ``captured`` and
-    starting nothing, and ``launch_tensorboard`` with one starting no TensorBoard, so a launch
-    door is driven through its own records without a child process. Returns the stand-in
-    class, whose ``pid`` every launch it answers reports.
+    """Replace ``subprocess.Popen`` and ``launch_tensorboard`` with stand-ins starting nothing.
+
+    The ``Popen`` stand-in records each argv into ``captured`` and starts no process, and the
+    ``launch_tensorboard`` one returns an empty mapping. Returns the ``Popen`` stand-in class,
+    whose instances share one ``pid``.
     """
     import subprocess
 
