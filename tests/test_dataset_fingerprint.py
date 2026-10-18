@@ -1,10 +1,8 @@
 """The whole-dataset content fingerprint (dataset identity).
 
-Pins: the fingerprint reuses ``ground_truth_digest`` for its label term (no second
-label-hasher); it is pixel-aware (a re-encode under the same filename changes it, a gap a
-labels-only digest leaves open); registry order matters but whitespace doesn't; it is
-content-addressed (enumeration-order- and path-independent, so a moved dataset keeps its
-identity); and it is ``None`` for a bespoke dataset.
+Pins: the fingerprint reuses ``ground_truth_digest`` for its label term; it is pixel-aware (a
+re-encode under an unchanged filename changes it); registry order matters but whitespace
+doesn't; a moved dataset keeps its fingerprint; and it is ``None`` for a bespoke dataset.
 """
 
 from __future__ import annotations
@@ -32,7 +30,7 @@ from tests._producer_fixtures import label_image, registry_over
 def _make_dataset(
     root: Path, *, pixel=(120, 120, 120), bud_box=(10, 10, 40, 40), ext="jpg"
 ) -> None:
-    """A minimal nested-schema dataset: one dated image + its bud label + a registry."""
+    """Write a minimal nested-schema dataset: one dated image + its bud label + a registry."""
     date = "2026-02-11"
     (root / "images" / date).mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (64, 64), color=pixel).save(
@@ -83,7 +81,9 @@ def test_a_label_edit_changes_the_fingerprint(tmp_path):
 
 
 def test_pixel_reencode_under_same_filename_changes_the_fingerprint(tmp_path):
-    """A BMP re-encoded with other pixels at the same file name and byte size, its labels
+    """A pixel re-encode under the same file name changes the fingerprint.
+
+    A BMP re-encoded with other pixels at the same file name and byte size, its labels
     untouched, changes the fingerprint and not the labels term.
     """
     _make_dataset(tmp_path, pixel=(120, 120, 120), ext="bmp")
@@ -105,8 +105,10 @@ def test_pixel_reencode_under_same_filename_changes_the_fingerprint(tmp_path):
 def test_an_image_rewritten_at_its_size_and_mtime_changes_the_fingerprint(
     tmp_path,
 ):
-    """The image term reads every file's bytes on every call: a rewrite that keeps the file's
-    size and modification time still moves the fingerprint.
+    """An image rewritten at its size and modification time changes the fingerprint.
+
+    A rewrite with other pixels that keeps the file's size and modification time moves the
+    fingerprint.
     """
     import os
 
@@ -179,10 +181,11 @@ def test_registry_value_order_matters_but_whitespace_does_not(tmp_path):
 def test_an_admitted_sample_enters_at_its_admitted_version_under_the_root_as_spelled(
     tmp_path, monkeypatch
 ):
-    """A dataset root spelled through a ``..`` segment: each admitted sample's label document
-    enters the labels term at the version its admission read, never digested again, since the
-    term lists the documents under the root as the caller spelled it, the spelling the samples'
-    own keys carry.
+    """An admitted sample enters the labels term at its admitted version, under the root as spelled.
+
+    With a dataset root spelled through a ``..`` segment, the fingerprint over the admitted
+    samples is unchanged when ``ground_truth_digest`` refuses every call, so no label document
+    is digested again.
     """
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.data.split_construction import admitted_membership
@@ -215,8 +218,9 @@ def test_fingerprint_is_content_addressed_move_preserves_it(tmp_path):
 
 
 def test_the_labels_term_keys_each_document_by_its_capture(tmp_path):
-    """One stem's document under two different captures is two different label sets: the term
-    hashes each document's capture beside its stem.
+    """The labels term keys each document by its capture beside its stem.
+
+    One stem's document under two different captures is two different label sets.
     """
     undated, dated = tmp_path / "undated", tmp_path / "dated"
     box = [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))]
@@ -236,8 +240,9 @@ def test_the_labels_term_keys_each_document_by_its_capture(tmp_path):
 def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_own_determinism(
     tmp_path,
 ):
-    """Fixed image bytes, one label document and a registry fingerprint to the value one run of
-    ``dataset_fingerprint`` over them recorded.
+    """An RGB nested dataset fingerprints to the value one run of ``dataset_fingerprint`` recorded.
+
+    The dataset holds fixed image bytes, one label document and a registry.
     """
     date = "2026-02-11"
     (tmp_path / "images" / date).mkdir(parents=True)
@@ -261,9 +266,11 @@ def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_
 def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(
     tmp_path,
 ):
-    """.bandgroup is hashed as its own bytes, like any other file, so changing the manifest
-    alone, with its named band files held byte-for-byte fixed, must change the fingerprint; it
-    also fingerprints deterministically across two calls.
+    """A band group's manifest file is hashed itself, not only its member bands.
+
+    .bandgroup is hashed as its own bytes: changing the manifest alone, with its named band
+    files held byte-for-byte fixed, changes the fingerprint; it fingerprints identically across
+    two calls.
     """
     date = "2026-02-11"
     images = tmp_path / "images" / date
@@ -306,8 +313,10 @@ def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(
 def test_a_malformed_registry_refuses_the_fingerprint_and_an_absent_one_admits_it(
     tmp_path,
 ):
-    """A registry whose bytes will not decode refuses the fingerprint rather than reading as no
-    registry; a dataset holding no registry still fingerprints, unlike one holding a registry.
+    """A malformed registry refuses the fingerprint, and an absent one admits it.
+
+    A registry whose bytes will not decode raises ``RegistryError``; a dataset holding no
+    registry fingerprints to a value other than its registered one.
     """
     import pytest
 

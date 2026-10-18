@@ -88,7 +88,7 @@ SHAPES = [
 
 
 def _other_project(tmp_path: Path) -> OpenProject:
-    """A second workspace project beside ``tmp_path`` (``tests._web_fixtures.named_project``)."""
+    """Return a second workspace project beside ``tmp_path``, built by ``named_project``."""
     from tests._web_fixtures import named_project
 
     return named_project(tmp_path.parent / "other_project", "Other project")
@@ -114,8 +114,9 @@ def test_a_push_naming_another_project_is_answered_as_a_mismatch_and_writes_noth
     opened_project,
     tmp_path,
 ):
-    """The backend compares the project a push names with the one it has open: a push built for
-    another project answers 409 naming the open one, and nothing lands under either.
+    """A push built for another project answers 409 naming the open one.
+
+    The canvas meta record stays absent under both projects.
     """
     other = _other_project(tmp_path)
 
@@ -132,7 +133,7 @@ def test_a_push_naming_another_project_is_answered_as_a_mismatch_and_writes_noth
 def test_a_push_naming_the_open_project_is_admitted(
     client, opened, opened_project, tmp_path
 ):
-    """The admitting half: the same push, built for the project the backend has open, lands."""
+    """A push built for the project the backend has open lands."""
     _other_project(tmp_path)
 
     r = client.post(
@@ -158,8 +159,10 @@ def test_a_push_while_no_project_is_open_is_answered_as_a_mismatch(
 def test_a_push_naming_no_one_is_refused_before_anything_is_written(
     client, opened, opened_project
 ):
-    """A push must name its person: a name naming no one is refused before the geometry or the
-    meta document is written.
+    """A push whose name names no one is refused, and no canvas document is written.
+
+    A push must name its person; neither the geometry nor the meta document is written for one
+    that does not.
     """
     for name in REFUSED_NAMES:
         r = client.post(
@@ -202,9 +205,7 @@ def test_a_push_naming_a_person_is_stored_under_that_person(
 def test_a_push_naming_a_project_root_refuses_as_an_unknown_field(
     client, opened, opened_project
 ):
-    """The write destination is the open project, never anything the client names: a body that
-    names a root refuses outright (extra='forbid') rather than being silently ignored.
-    """
+    """A push body that names a project root is refused as an unknown field, answering 422."""
     body = _payload(opened.id, A_IMG, shapes=SHAPES)
     r = client.post(
         "/api/canvas/state", json={**body, "project_root": str(opened_project)}
@@ -213,10 +214,7 @@ def test_a_push_naming_a_project_root_refuses_as_an_unknown_field(
 
 
 def test_cut_armed_flag_rides_the_meta_push(client, opened, opened_project):
-    """A client fact like dirty or mode: the completed-cut and refusal cases both leave the flag
-    set but clear the mirrored pending segment, so the meta document has to carry the flag itself
-    for the mirror to read as armed rather than disarmed.
-    """
+    """The cut-armed flag a push carries lands in the meta document."""
     r = client.post(
         "/api/canvas/state",
         json=_payload(opened.id, A_IMG, shapes=SHAPES, cut_armed=True),
@@ -255,8 +253,8 @@ def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(
     """A push takes the meta record's lock, so it cannot overwrite what a holder is editing.
 
     The push runs on its own thread while another thread holds the key, and is observed still
-    waiting; once the holder lets go the push completes and its document is what the record
-    holds. Both halves matter: waiting alone would be a push that never lands.
+    waiting; when the holder lets go the push completes and its document is what the record
+    holds.
     """
     import threading
 
@@ -307,11 +305,7 @@ def _make_image(tmp_path: Path) -> str:
 
 
 def _pixels(image_path: str, region=None, scale: float = 1.0):
-    """The pixels a caller reads for the canvas render: a region of the image at ``scale``.
-
-    Stands in for the raster read ``capture_live_canvas`` performs, so a renderer test exercises
-    placement and nothing else.
-    """
+    """Return the image's RGB pixels, cropped to ``region`` when given and resized by ``scale``."""
     import numpy as np
 
     with Image.open(image_path) as im:
@@ -330,14 +324,15 @@ def _pixels(image_path: str, region=None, scale: float = 1.0):
 
 
 def _red_over_green(rendered: Image.Image, xy: tuple[int, int]) -> int:
-    """How far red exceeds green at pixel ``xy`` of ``rendered``."""
+    """Return how far red exceeds green at pixel ``xy`` of ``rendered``."""
     red, green, _ = rendered.getpixel(xy)
     return red - green
 
 
 def test_render_places_a_shape_at_its_offset_inside_a_cropped_region(tmp_path):
-    """A shape's native coordinate lands where the crop origin puts it, not where it sat in the
-    full frame: the placement the viewport read replaced the renderer's own crop with.
+    """A shape's native coordinate lands where the crop origin puts it inside a cropped region.
+
+    It does not land where it sat in the full frame.
     """
     from tcip_annotation.viz import render_canvas_state
 
@@ -409,11 +404,10 @@ def test_render_two_pass_fill_does_not_erase_outlines(tmp_path):
 
 
 def test_render_draws_a_point_shape_and_never_widens_it_to_a_box(tmp_path):
-    """A pushed point must reach the agent's view as a mark: not be dropped, not become a box.
+    """A pushed point reaches the agent's view as a mark with a tick, and no box around it.
 
-    The GUI can now author point annotations, so a shape kind the renderer skips would show the
-    agent a canvas with fewer annotations than the annotator sees. Widening it into a box is the
-    other failure: that invents an extent the annotation does not claim (see state.Point/bbox_of).
+    The core sits on the coordinate and a radial tick lies above it; nothing is drawn 40 px
+    away.
     """
     from tcip_annotation.viz import render_canvas_state
 
@@ -447,8 +441,10 @@ def test_render_draws_a_point_shape_and_never_widens_it_to_a_box(tmp_path):
 def test_render_draws_the_focused_shape_with_a_halo_under_its_own_stroke(
     tmp_path,
 ):
-    """The GUI's focus is a halo, never a recolor: a focused shape reaches the agent's view with a
-    wider white stroke beneath its own color, and an unfocused one with nothing around it.
+    """A focused shape renders with a halo beneath its stroke, which keeps the shape's own color.
+
+    A focused shape reaches the agent's view with a wider white stroke beneath its own color, and
+    an unfocused one with nothing around it.
     """
     from tcip_annotation.viz import render_canvas_state
 
@@ -486,15 +482,14 @@ _MIRROR = json.loads(
     ).read_text(encoding="utf-8")
 )
 """The shapes the frontend's ``buildAnnotateShapes`` produced for a tool-authored polygon, a
-tool-authored point and the first vertex of a polygon in progress; ``canvasSync.test.ts`` asserts
-the producer still emits exactly this file."""
+tool-authored point and the first vertex of a polygon in progress."""
 (TOOL_POLYGON,) = _MIRROR["tool_polygon"]
 (TOOL_POINT,) = _MIRROR["tool_point"]
 (FIRST_VERTEX,) = _MIRROR["first_vertex"]
 
 
 def _wide_render(tmp_path: Path, shape: dict, *, dashed: bool) -> Image.Image:
-    """``shape`` rendered on a 1400-pixel frame, where the render's stroke is two pixels wide."""
+    """Render ``shape`` on a 1400 by 200 px frame, its ``dash`` dropped unless ``dashed``."""
     from tcip_annotation.viz import render_canvas_state
     from tests._producer_fixtures import write_image
 
@@ -510,7 +505,7 @@ def _wide_render(tmp_path: Path, shape: dict, *, dashed: bool) -> Image.Image:
 
 
 def _ink(rendered: Image.Image, xy: tuple[int, int]) -> int:
-    """How far pixel ``xy`` differs from the frame's untouched corner."""
+    """Return the largest channel difference between pixel ``xy`` and pixel (2, 197)."""
     return max(
         abs(a - b)
         for a, b in zip(rendered.getpixel(xy), rendered.getpixel((2, 197)))
@@ -518,15 +513,17 @@ def _ink(rendered: Image.Image, xy: tuple[int, int]) -> int:
 
 
 def _red_in_rows(rendered: Image.Image, x: int, rows) -> int:
-    """The most ink the pixels of column ``x`` in ``rows`` carry."""
+    """Return the largest :func:`_ink` over the pixels of column ``x`` in ``rows``."""
     return max(_ink(rendered, (x, y)) for y in rows)
 
 
 def test_render_lays_a_dash_down_in_stroke_widths_at_the_renders_own_stroke(
     tmp_path,
 ):
-    """The two-pixel stroke of a 1400-pixel frame makes [1, 3] two pixels on, six off: a render
-    that left the pattern unscaled would be one on, three off and light the gap's pixels.
+    """A dash pattern is laid down in stroke widths at the render's own stroke.
+
+    The two-pixel stroke of a 1400-pixel frame makes [1, 3] two pixels on, six off: the gap
+    after a dash is dark where a solid outline lights it.
     """
     dashed = _wide_render(tmp_path, TOOL_POLYGON, dashed=True)
     solid = _wide_render(tmp_path, TOOL_POLYGON, dashed=False)
@@ -540,8 +537,10 @@ def test_render_lays_a_dash_down_in_stroke_widths_at_the_renders_own_stroke(
 
 
 def test_render_dashes_a_points_ticks_as_it_does_any_outline(tmp_path):
-    """A tool's point reaches the agent dotted, as the browser draws it: the tick above the core
-    has its one dash near the core and a gap beyond, where a solid tick would still be drawn.
+    """A tool's point renders dotted.
+
+    The tick above the core has its one dash near the core and a gap beyond, which the solid
+    render draws.
     """
     dashed = _wide_render(tmp_path, TOOL_POINT, dashed=True)
     solid = _wide_render(tmp_path, TOOL_POINT, dashed=False)
@@ -575,7 +574,7 @@ def test_render_admits_the_one_vertex_polyline_a_drawing_in_progress_pushes(
 def test_render_dots_a_polylines_vertices_unless_it_says_it_is_a_tail(
     tmp_path,
 ):
-    """A draft's laid stroke dots each vertex; its tail to the cursor, which says so, dots none."""
+    """A draft's laid stroke inks beside its second vertex; with ``vertices=False`` it does not."""
 
     def stroke(**over) -> dict:
         return {
@@ -666,8 +665,9 @@ def test_render_refuses_a_dash_that_is_not_a_pattern_naming_the_shape(
     ],
 )
 def test_render_refuses_a_malformed_shape_naming_it(tmp_path, bad):
-    """A shape the canvas push could not have drawn refuses naming its index, never renders a
-    canvas the human is not seeing; the well-formed shapes beside it admit.
+    """A malformed canvas shape is refused naming its index.
+
+    The well-formed shape renders on its own.
     """
     from tcip_annotation.viz import render_canvas_state
 
@@ -703,8 +703,10 @@ def _write_state(
     shapes_tab: str | None = None,
     cut_armed: bool | None = None,
 ) -> None:
-    """The two documents the push route writes, in the shape it writes them: the image path
-    spelled against the project the way the route stores it.
+    """Write the canvas geometry document, unless ``shapes`` is ``None``, and the meta document.
+
+    Each image path is spelled against the project through ``stored_path``; the meta carries a
+    200 by 100 viewport at the origin.
     """
     from tcip_mcp.audit import now_iso
     from tcip_mcp.registry_paths import stored_path
@@ -771,10 +773,7 @@ def test_capture_live_canvas_renders_pushed_state(project, bound):
 
 
 def test_capture_live_canvas_names_the_armed_cut(project, bound):
-    """The mirror's armed state must be readable beside the mode it names, not just implied by
-    the pending-segment polyline (which a completed cut or a refusal both clear while the flag
-    stays set).
-    """
+    """The live canvas capture reports the armed cut its meta document records."""
     img = _make_image(project)
     _write_state(project, img, cut_armed=True)
 
@@ -787,8 +786,9 @@ def test_capture_live_canvas_names_the_armed_cut(project, bound):
 def test_capture_live_canvas_renders_exactly_the_viewport_region(
     project, bound
 ):
-    """The tool reads the visible rectangle and renders that, so the artifact is the region the
-    human sees rather than the whole frame.
+    """The live canvas capture reports itself cropped to the viewport, at the viewport's size.
+
+    The artifact of a 100 px viewport is 100 by 100.
     """
     img = _make_image(project)
     _write_state(project, img)
@@ -819,9 +819,7 @@ def test_capture_live_canvas_full_frame_downscales_to_max_edge(project, bound):
 def test_capture_live_canvas_reads_a_multiband_raster_without_writing_a_preview(
     project, bound
 ):
-    """A raster PIL has no true-color mode for is composited in memory for the render: the capture
-    path writes no throwaway preview file beside the artifact.
-    """
+    """A six-band raster captures as an RGB artifact, with no band-preview directory written."""
     import numpy as np
     import tifffile
 
@@ -847,7 +845,10 @@ def test_capture_live_canvas_reads_a_multiband_raster_without_writing_a_preview(
 def test_capture_live_canvas_identity_stale_shapes_do_not_render(
     project, bound
 ):
-    """Geometry left over from a previous image must not render under the current one."""
+    """Geometry left over from a previous image is reported missing under the current one.
+
+    The capture renders the image, with no shape counted.
+    """
     img = _make_image(project)
     _write_state(
         project, img, shapes_image="C:/img/other.jpg"

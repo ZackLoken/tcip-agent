@@ -1,10 +1,7 @@
-"""One harness returning nothing must not destroy the other families' answers.
+"""The cross-family runner keeps each family's answer when one harness returns nothing.
 
-The cross-family runner poses one question to several agent harnesses concurrently and writes each
-one's transcript. A harness that produces no stdout must not raise inside the worker: an exception
-there would escape the result-collection loop and lose the sibling families' completed runs with
-it. That loss is the failure to avoid: the runs that succeeded are the artifact, and a harness
-that returns nothing is a normal outcome rather than a programming error.
+The runner poses one question to several agent harnesses concurrently and writes each one's
+transcript. A harness that produces no stdout does not raise inside the worker.
 """
 
 from __future__ import annotations
@@ -38,9 +35,7 @@ def runner():
 def test_a_model_id_that_states_its_effort_is_the_effort_whatever_the_flag_said(
     runner,
 ):
-    """One invocation naming every family can carry one --effort: a family whose model id
-    carries the effort records the id's own, never refusing and never passing the flag on.
-    """
+    """A model id that states its effort takes it, with the --effort flag medium or unset."""
     assert (
         runner.effective_effort("antigravity", "gemini-3.1-pro-high", "medium")
         == "high"
@@ -59,7 +54,7 @@ def test_an_effort_claude_would_ignore_is_refused_by_name(runner):
 
 
 def _stub_run(stdout, stderr=""):
-    """A subprocess.run replacement returning the given streams verbatim."""
+    """Return a subprocess.run replacement returning the given streams verbatim."""
 
     def _run(*_args, **_kwargs):
         return subprocess.CompletedProcess(
@@ -73,7 +68,7 @@ def _stub_run(stdout, stderr=""):
 def test_a_harness_returning_no_usable_stdout_still_records_its_run(
     runner, tmp_path, monkeypatch, stdout
 ):
-    """A None or bytes stdout is written as text rather than raising TypeError."""
+    """A harness returning None or bytes stdout gets its stdout and meta files written."""
     monkeypatch.setattr(runner.subprocess, "run", _stub_run(stdout))
     monkeypatch.setattr(
         runner, "harness_version", lambda *a, **k: "stub-version"
@@ -104,7 +99,11 @@ def test_a_harness_returning_no_usable_stdout_still_records_its_run(
 def test_one_familys_failure_leaves_the_others_results_intact(
     runner, tmp_path, monkeypatch
 ):
-    """The collection loop records a failed run and keeps every sibling's result."""
+    """A raising harness is recorded as a runner error while the surviving family's answer is kept.
+
+    The run exits non-zero, the surviving family's response holds its answer, and the summary
+    rows carry the survivor's clean exit and the raising family's error text.
+    """
 
     def _explode(*_args, **_kwargs):
         raise RuntimeError("harness blew up")
@@ -182,7 +181,7 @@ def test_one_familys_failure_leaves_the_others_results_intact(
 def test_a_prompt_file_with_a_byte_order_mark_reaches_the_harness_without_it(
     runner, tmp_path, monkeypatch
 ) -> None:
-    """An editor-saved BOM is an encoding artifact, not part of the question text."""
+    """A prompt file's byte order mark is absent from the question ``run_one`` receives."""
     seen: list[str] = []
 
     real_run_one = runner.run_one
@@ -232,8 +231,9 @@ def test_a_prompt_file_with_a_byte_order_mark_reaches_the_harness_without_it(
 
 
 def test_a_codex_agent_message_stream_yields_the_last_message(runner):
-    """Real codex JSONL carries the answer inside item.completed/agent_message events, not
-    at the top level, so the stream fallback must know that shape before it falls further.
+    """A codex agent-message stream yields its last agent message as the answer.
+
+    The stream carries its answers inside item.completed/agent_message events.
     """
     lines = [
         json.dumps(
@@ -276,8 +276,9 @@ def test_a_codex_agent_message_stream_yields_the_last_message(runner):
 
 
 def test_an_oversized_raw_stream_is_a_failed_extraction_not_an_answer(runner):
-    """A stream past the size bound is dumped nowhere near a real answer; it reads as failed
-    extraction rather than as a 100k-character reply.
+    """An oversized raw stream reads as a failed extraction, not an answer.
+
+    A stream past the size bound yields no text and the ``extraction_failed`` source.
     """
     huge = "not json, just noise " * 6000
     assert len(huge.strip()) > runner.MAX_RAW_STREAM_CHARS
@@ -288,7 +289,10 @@ def test_an_oversized_raw_stream_is_a_failed_extraction_not_an_answer(runner):
 def test_an_oversized_raw_stream_through_main_fails_the_run(
     runner, tmp_path, monkeypatch
 ):
-    """The exit gate must not read a run whose stream could not be extracted as clean."""
+    """A run whose oversized stream could not be extracted fails through main.
+
+    Its meta records the ``extraction_failed`` response source.
+    """
     huge = "not json, just noise " * 6000
     monkeypatch.setattr(runner.subprocess, "run", _stub_run(huge))
     monkeypatch.setattr(
@@ -337,8 +341,10 @@ def test_an_oversized_raw_stream_through_main_fails_the_run(
 def test_a_payload_with_only_empty_recognized_keys_reads_as_an_empty_response(
     runner,
 ):
-    """The antigravity SUCCESS-with-empty-answer shape: a recognized key is present but blank,
-    so the payload is a genuinely empty answer, not an unknown shape to dump whole.
+    """A payload whose only recognized keys are empty reads as an empty response.
+
+    An antigravity SUCCESS payload whose ``response`` is blank yields no text and the
+    ``empty_response`` source.
     """
     stdout = json.dumps(
         {
@@ -363,7 +369,7 @@ def test_a_payload_with_only_empty_recognized_keys_reads_as_an_empty_response(
 def test_an_empty_response_through_main_fails_the_run(
     runner, tmp_path, monkeypatch
 ):
-    """An empty recognized answer must not read as a clean run through the exit gate."""
+    """A run whose recognized answer is empty fails through main."""
     stdout = json.dumps({"status": "SUCCESS", "response": "  "})
     monkeypatch.setattr(runner.subprocess, "run", _stub_run(stdout))
     monkeypatch.setattr(
@@ -407,9 +413,10 @@ def test_an_empty_response_through_main_fails_the_run(
 def test_completely_empty_stdout_does_not_read_as_a_clean_run(
     runner, tmp_path, monkeypatch
 ):
-    """A harness that writes nothing at all falls through extraction to a raw, empty string,
-    a response-source name the exit gate never special-cased; the check has to be on the
-    character count itself, not on a list of the names known to produce an empty one.
+    """Completely empty stdout does not read as a clean run.
+
+    A harness whose stdout is the empty string fails the run, and its meta records a fault under
+    the ``raw_stdout`` response source.
     """
     monkeypatch.setattr(runner.subprocess, "run", _stub_run(""))
     monkeypatch.setattr(
@@ -466,9 +473,9 @@ def test_completely_empty_stdout_does_not_read_as_a_clean_run(
 def test_a_whitespace_only_agent_message_stream_is_a_failed_run_not_a_clean_one(
     runner, tmp_path, monkeypatch
 ):
-    """A codex stream whose only captured agent message is whitespace is not an answer:
-    response_chars counts the stripped text, so this run must classify as a fault, not a clean
-    zero-content success.
+    """A codex stream whose only agent message is whitespace fails the run.
+
+    The run's meta records zero response characters and a fault.
     """
     lines = [
         json.dumps(
@@ -532,8 +539,10 @@ def test_a_whitespace_only_agent_message_stream_is_a_failed_run_not_a_clean_one(
 def test_a_runs_own_fault_verdict_is_recorded_in_its_meta_json(
     runner, tmp_path, monkeypatch
 ):
-    """The record a later reader inspects on its own must already carry why a run failed, not
-    only the aggregate table printed at the end of this process's own stdout.
+    """A run's own fault verdict is recorded in its meta.json.
+
+    A clean run's ``fault`` verdict, empty, is in the meta it returns and in its meta.json on
+    disk.
     """
     monkeypatch.setattr(
         runner.subprocess, "run", _stub_run("a real answer from the harness")
@@ -570,7 +579,7 @@ def test_a_runs_own_fault_verdict_is_recorded_in_its_meta_json(
 def test_a_small_plain_text_stdout_still_returns_as_a_raw_stdout_answer_through_main(
     runner, tmp_path, monkeypatch
 ):
-    """Hardening the extraction must not turn an ordinary short answer into a failure."""
+    """A short plain-text stdout returns as a full-length ``raw_stdout`` answer through main."""
     monkeypatch.setattr(
         runner.subprocess, "run", _stub_run("a short plain-text answer")
     )
@@ -621,8 +630,9 @@ def test_a_small_plain_text_stdout_still_returns_as_a_raw_stdout_answer_through_
 def test_a_dict_payload_with_no_recognized_keys_still_returns_whole_payload(
     runner,
 ):
-    """An unknown shape with none of the recognized keys still dumps whole: that recovery
-    path for shapes this runner has not learned yet must stay intact.
+    """A dict with unrecognized keys yields the ``whole_payload`` source.
+
+    Its text names ``unexpected_field``.
     """
     stdout = json.dumps(
         {"unexpected_field": "some value", "another_field": 42}
@@ -633,8 +643,9 @@ def test_a_dict_payload_with_no_recognized_keys_still_returns_whole_payload(
 
 
 def test_a_non_string_answer_value_still_dumps_the_whole_payload(runner):
-    """A recognized key holding a non-string (a content-block list, a null) is an unknown
-    shape carrying possible data, never a confirmed-empty answer to discard.
+    """A non-string value under a recognized key yields the ``whole_payload`` source.
+
+    A content-block list and a null under a recognized key each yield that source.
     """
     stdout = json.dumps(
         {"content": [{"type": "text", "text": "the real answer"}]}
@@ -652,7 +663,7 @@ def test_a_non_string_answer_value_still_dumps_the_whole_payload(runner):
 def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_child(
     runner, tmp_path, monkeypatch
 ) -> None:
-    """The child gets utf-8 stdin and its utf-8 stdout decodes intact, whatever the locale."""
+    """A box-drawing character reaches a stdin child as utf-8 and its stdout decodes intact."""
     echo_child = [
         sys.executable,
         "-c",
@@ -693,7 +704,7 @@ def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_c
 def test_an_unnamed_codex_model_with_no_config_is_refused_before_launch(
     runner, tmp_path, monkeypatch
 ):
-    """A run on the harness's built-in default would record no model, so it is refused by name."""
+    """An unnamed codex model with no config is refused by name."""
     monkeypatch.setattr(
         runner, "CODEX_CONFIG", tmp_path / "absent" / "config.toml"
     )
@@ -719,10 +730,10 @@ def test_the_codex_model_is_read_from_the_config_and_its_source_recorded(
 def test_a_run_with_no_usable_answer_says_so_in_words_at_the_end_of_its_output(
     runner, tmp_path, monkeypatch, capsys
 ):
-    """The exit code is not the only signal a refused run gets.
+    """A run with no usable answer prints a RUN FAILED verdict naming the family, in words.
 
-    A caller that pipes this script somewhere takes the pipeline's status from the last command,
-    so the refusal has to be legible in the output itself, at the end, where a tail still shows it.
+    The verdict appears on stdout and stderr beside the non-zero exit, and the output's last line
+    says nothing is reviewable.
     """
     monkeypatch.setattr(
         runner.subprocess,
@@ -805,7 +816,7 @@ def test_load_tcip_mcp_config_refuses_when_the_tcip_block_is_missing(
 def test_a_run_whose_families_all_answered_says_so_rather_than_staying_silent(
     runner, tmp_path, monkeypatch, capsys
 ):
-    """The verdict must admit a good run too, not only refuse a bad one."""
+    """A run whose families all answered prints a RUN OK verdict and no RUN FAILED."""
     monkeypatch.setattr(
         runner.subprocess, "run", _stub_run("a real answer from the harness")
     )
@@ -853,10 +864,11 @@ def test_a_run_whose_families_all_answered_says_so_rather_than_staying_silent(
 def test_an_attached_image_reaches_codex_as_a_flag_and_the_other_families_in_the_prompt(
     runner, tmp_path
 ):
-    """Every family is vision-capable and takes an image its own way: codex through exec -i, each
-    flag closed by the next option so the trailing stdin marker survives the variadic option;
-    antigravity through an @path in the prompt; Claude Code through a named path its own file
-    reader opens. A run with no image builds exactly as before.
+    """An attached image reaches codex as a flag and antigravity and Claude Code in the prompt.
+
+    Codex takes the image through ``-i``, the flag followed by the next option and the trailing
+    stdin marker kept; antigravity takes an @path in the prompt; Claude Code takes a named path
+    in the prompt. A run with no image carries no image flag and no preface.
     """
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
@@ -891,8 +903,10 @@ def test_an_attached_image_reaches_codex_as_a_flag_and_the_other_families_in_the
 def test_an_attached_image_prefaces_the_prompt_and_is_recorded_in_the_runs_meta(
     runner, tmp_path, monkeypatch
 ):
-    """The preface sits ahead of the byte-identical question, the builder receives the resolved
-    paths, and meta.json names the images so a later reader knows what the family saw.
+    """An attached image prefaces the prompt and is recorded in the run's meta.json.
+
+    The preface sits ahead of the question, the builder receives the resolved paths, and
+    meta.json names the images.
     """
     monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
     monkeypatch.setattr(
@@ -938,8 +952,10 @@ def test_an_attached_image_prefaces_the_prompt_and_is_recorded_in_the_runs_meta(
 def test_a_family_prompt_override_replaces_the_shared_prompt_for_that_family_alone(
     runner, tmp_path, monkeypatch
 ):
-    """--family-prompt swaps the prompt text for one family and records which file it came
-    from; a family with no override still gets the shared --prompt-file.
+    """A family prompt override replaces the shared prompt for that family alone.
+
+    --family-prompt swaps the prompt text for one family and records which file it came from; a
+    family with no override gets the shared --prompt-file.
     """
     monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
     monkeypatch.setattr(
@@ -1017,7 +1033,7 @@ def test_a_family_prompt_override_replaces_the_shared_prompt_for_that_family_alo
 def test_a_malformed_family_prompt_flag_is_refused_before_any_family_launches(
     runner, tmp_path, monkeypatch, bad_flag
 ):
-    """A flag with no '=' and a flag naming an unknown family both refuse rather than launch."""
+    """A flag with no '=' and a flag naming an unknown family refuse, and no family launches."""
     launched = []
     monkeypatch.setattr(runner, "run_one", lambda *a, **k: launched.append(a))
     monkeypatch.setattr(
@@ -1088,8 +1104,11 @@ def test_a_family_prompt_flag_naming_a_missing_file_is_refused(
 def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_intact(
     runner, tmp_path, monkeypatch
 ):
-    """Re-running one family under a question id already carrying both families' results must
-    not touch the other family's recorded run, and must say of itself that it is a rerun.
+    """A single-family rerun marks itself a rerun and keeps both families' summary rows.
+
+    Re-running codex under a question id that holds both families' results leaves antigravity's
+    meta.json unchanged when read as UTF-8 text and both families in the summary, and the rerun's
+    meta says it is a rerun where the first run's did not.
     """
     monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
     monkeypatch.setattr(
@@ -1182,9 +1201,10 @@ def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_in
 def test_a_malformed_prior_summary_loses_only_itself_not_the_current_run(
     runner, tmp_path, monkeypatch
 ):
-    """A summary.json a prior run left mid-write, or otherwise not valid JSON, must not crash the
-    merge: the current run's own rows still land, starting from an empty prior set rather than
-    raising out of the merge step.
+    """A malformed prior summary loses itself, not the current run's rows.
+
+    Over a summary.json that is not valid JSON, the run exits zero and the summary holds the
+    current run's own rows.
     """
     monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
     monkeypatch.setattr(
@@ -1232,9 +1252,7 @@ def test_a_malformed_prior_summary_loses_only_itself_not_the_current_run(
 def test_a_missing_image_is_refused_before_any_family_launches(
     runner, tmp_path, monkeypatch
 ):
-    """A family told to review an image that is not there would answer about nothing; the
-    runner refuses by name instead of launching.
-    """
+    """A missing image is refused, and no family launches."""
     launched = []
     monkeypatch.setattr(runner, "run_one", lambda *a, **k: launched.append(a))
     monkeypatch.setattr(

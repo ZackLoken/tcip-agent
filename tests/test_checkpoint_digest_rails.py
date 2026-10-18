@@ -1,6 +1,8 @@
-"""The checkpoint digest rail: every door that loads a checkpoint recomputes the sha256 of the bytes
-it loaded and refuses one no completed run of the project and no registry entry names, before
-anything in it is unpickled.
+"""The checkpoint digest rail at the doors that load a checkpoint.
+
+Inference, evaluation, assessment, the web inference worker, triage and the review-priority
+worker each refuse a checkpoint no completed run of the project and no registry entry names, and
+``run_inference`` refuses a side-effect payload with its unpickling marker left unwritten.
 """
 
 from __future__ import annotations
@@ -59,8 +61,9 @@ def _register(
 
 
 def _infer(tmp_path: Path, ckpt: str, bucket: str = "preds") -> dict:
-    """``run_inference`` of ``ckpt`` over one image, untiled, publishing the bucket named
-    ``bucket`` under ``tmp_path``.
+    """Run ``run_inference`` of ``ckpt`` over one image, untiled, and return its result.
+
+    The call names ``bucket`` as its bucket and ``tmp_path`` as its project.
     """
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
@@ -177,8 +180,10 @@ def test_triage_predictions_refuses_an_unregistered_checkpoint(tmp_path):
 
 
 def test_triage_predictions_refuses_by_the_project_it_acts_on(tmp_path):
-    """The project the call acts on is where the load looks: registered under a project the call
-    does not name, the checkpoint still refuses, naming the project it did name.
+    """Triage refuses a checkpoint registered under another project, naming the one it acts on.
+
+    The project the call acts on is where the load looks: registered under a project the call
+    does not name, the checkpoint refuses, naming the project it did name.
     """
     registered_root = tmp_path / "registered"
     registered_root.mkdir()
@@ -201,9 +206,7 @@ def test_triage_predictions_refuses_by_the_project_it_acts_on(tmp_path):
 def test_triage_predictions_admits_a_checkpoint_registered_under_the_project_it_acts_on(
     tmp_path,
 ):
-    """The admitting direction, roles reversed: acting on the project the checkpoint really is
-    registered under lets the same call through.
-    """
+    """Triage admits a checkpoint registered under the project the call acts on."""
     registered_root = tmp_path / "registered"
     registered_root.mkdir()
     ckpt = secondary_checkpoint(registered_root)
@@ -221,8 +224,10 @@ def test_triage_predictions_admits_a_checkpoint_registered_under_the_project_it_
 def test_review_priority_route_worker_fails_the_job_on_an_unregistered_checkpoint(
     tmp_path,
 ):
-    """The review-priority route's own worker, driven directly, fails its job on a checkpoint
-    nothing registered.
+    """The review-priority route's worker fails its job on a checkpoint nothing registered.
+
+    The worker is driven directly, and the failed job names ``register_model`` and queues
+    nothing.
     """
     pytest.importorskip("fastapi")
     from tcip_web.routes.annotate import PriorityQueueJob, _pq_worker
@@ -250,9 +255,7 @@ def test_review_priority_route_worker_completes_the_job_with_a_registered_checkp
     tmp_path,
     monkeypatch,
 ):
-    """The admitting half: a checkpoint a run of the job's own project completed runs
-    _pq_worker to a completed job rather than a failed one.
-    """
+    """With its scorer stubbed, ``_pq_worker`` completes the job over a registered checkpoint."""
     pytest.importorskip("fastapi")
     from types import SimpleNamespace
 
@@ -315,9 +318,9 @@ def test_run_inference_refuses_a_registered_checkpoint_replaced_by_rename(
 
 
 def _identical_runs_data(tmp_path) -> dict:
-    """One data section over which runs of one id and seed, one in each of two projects, train
-    identical bytes, outside both projects, so each checkpoint spells its locations the same
-    way.
+    """Return one detection data section in a directory beside ``tmp_path``.
+
+    The images lie under ``<tmp_path name>-shared`` next to ``tmp_path``.
     """
     from tests._verified_checkpoint_fixtures import (
         SCOPED_DATA,
@@ -351,9 +354,11 @@ def test_a_foreign_registration_after_its_run_completed_leaves_the_run_its_one_o
 def test_a_foreign_registration_before_its_run_completed_leaves_the_run_its_one_owner(
     tmp_path,
 ):
-    """The same bytes registered as foreign first and then named by a run's completion resolve
-    to one entry, the run's. A run of the same id in another project trains them: each
-    checkpoint names its run's snapshot by the run's own directory under its project.
+    """Bytes registered as foreign before a run's completion names them resolve to the run's entry.
+
+    Bytes a run of the same id and seed in another project saved are registered as foreign
+    first; when this project's run completes with identical bytes, the registry holds one entry,
+    the run's, and a load of the foreign copy names the run.
     """
     from tcip_mcp.experiments import observe
     from tcip_mcp.model_registry import (
@@ -391,9 +396,10 @@ def test_a_foreign_registration_before_its_run_completed_leaves_the_run_its_one_
 def test_two_foreign_registrations_of_one_sha256_resolve_to_one_entry(
     tmp_path,
 ):
-    """The registry is keyed by a checkpoint's bytes: the same foreign bytes registered twice,
-    from two paths under two names, leave one entry for those bytes, the later registration's,
-    and a load of either copy resolves to that one entry.
+    """Two foreign registrations of one sha256 leave one entry, the later registration's.
+
+    The same foreign bytes registered twice, from two paths under two names, leave one entry for
+    those bytes, the later registration's, and a load of either copy resolves to that one entry.
     """
     from tcip_mcp.model_registry import (
         load_registered_checkpoint,
@@ -427,7 +433,7 @@ def _touch_marker(marker_path: str) -> _SideEffectOnUnpickle:
 
 
 class _SideEffectOnUnpickle:
-    """Its unpickling writes a marker file, so a load that unpickles is visible on disk."""
+    """An object whose ``__reduce__`` makes unpickling call ``_touch_marker`` on ``marker_path``."""
 
     def __init__(self, marker_path: str) -> None:
         self._marker_path = marker_path
@@ -493,7 +499,9 @@ def test_run_inference_admits_the_same_checkpoint_copied_to_another_path(
 def test_run_inference_admits_a_second_checkpoint_of_a_run_registered_under_a_distinct_name(
     tmp_path,
 ):
-    """A checkpoint a run saved beside the deliverable its completion registered
+    """A run's second checkpoint registered under a distinct name is admitted by its own digest.
+
+    A checkpoint a run saved beside the deliverable its completion registered
     (``secondary_checkpoint``) is registered explicitly under a distinct name and admitted under
     its own digest, its entry naming no producing run.
     """
@@ -544,8 +552,10 @@ def test_registration_digest_and_load_digest_agree(tmp_path):
 def test_a_completed_runs_final_status_and_the_load_agree_on_its_digest(
     tmp_path,
 ):
-    """The completion's recorded digest and the load's recomputed one are one digest, and the
-    metrics a ranking reads are the ones the checkpoint's own payload carries.
+    """A completed run's recorded digest and the load's recomputed one are one digest.
+
+    The registry entry's metrics are the ones the checkpoint's own payload carries, sourced
+    ``training_source``.
     """
     from tcip_mcp.experiments import observe
     from tcip_mcp.model_registry import (
@@ -566,7 +576,7 @@ def test_a_completed_runs_final_status_and_the_load_agree_on_its_digest(
 
 
 def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path):
-    """An ordinary bespoke state, through a real ctx.save_checkpoint call."""
+    """``ctx.save_checkpoint`` writes an ordinary bespoke state naming no reserved key."""
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.run_registry import observed_run

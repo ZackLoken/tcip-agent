@@ -1,8 +1,9 @@
-"""What the trainer does with a run whose loss goes non-finite: the count of consecutive full
-training passes with no finite batch loss its stop rule states (``nonfinite_passes``) stops the
-run as failed, uniform across loader shapes and reset at every stage boundary; anything short
-of that (fewer bad epochs, a single finite loss inside an otherwise-bad epoch, a healthy run)
-must never trip the same check.
+"""What ``generic_trainer.train`` does with a run whose loss goes non-finite.
+
+The count of consecutive full training passes with no finite batch loss the stop rule states
+(``nonfinite_passes``) stops the run as failed at both loader shapes, and a stage boundary resets
+the count; fewer bad epochs, a single finite loss inside an epoch of nan losses, and a healthy
+run do not trip the check.
 """
 
 from __future__ import annotations
@@ -42,12 +43,12 @@ def _trained(
     experiment_id: str | None = None,
     nonfinite_passes: int = 2,
 ):
-    """A regression run of ``builder`` over six training frames and no validation side, whose
-    stage the schedule's ``horizon`` ends, its stop rule (``_training_values.stop_rule``) stopping
-    it after ``nonfinite_passes`` diverged passes at a patience past that horizon, opened by the
-    launcher's own producer and trained over its own loader: its ``batch_size`` sets the
-    batches-per-epoch shape a test reasons about (2 -> three batches/epoch, 6 -> one
-    batch/epoch).
+    """Train a regression run of ``builder`` over six frames with no validation side; return it.
+
+    The config passes ``horizon``, ``batch_size``, ``builder`` with ``builder_kwargs``, and the
+    stop rule ``_training_values.stop_rule(nonfinite_passes=...)``; ``stages`` replaces the
+    config's own when given. The run is opened by the launcher's own producer under
+    ``experiment_id`` and trained by ``generic_trainer.train`` over its own loader.
     """
     data = frames_data(
         tmp_path / "ds",
@@ -77,9 +78,10 @@ def _trained(
 def test_a_run_whose_loss_never_recovers_stops_after_two_diverged_epochs(
     tmp_path, batch_size
 ):
-    """Every batch is non-finite, at two different loader shapes: the trigger is two consecutive
-    full passes with no finite loss, never a batch-count-derived threshold, so both shapes stop
-    at exactly the same epoch with the same wording.
+    """A run whose loss never recovers stops after two diverged epochs, at either loader shape.
+
+    Every batch is non-finite, and at both loader shapes the run fails at epoch two naming two
+    consecutive full passes.
     """
     run = _trained(
         tmp_path, ALWAYS_DIVERGED_MODEL, {}, horizon=30, batch_size=batch_size
@@ -92,7 +94,9 @@ def test_a_run_whose_loss_never_recovers_stops_after_two_diverged_epochs(
 
 
 def test_a_run_stops_at_the_diverged_pass_count_its_stop_rule_states(tmp_path):
-    """A stop rule stating three diverged passes stops an always-diverged run at its third epoch
+    """A run stops at the diverged-pass count its stop rule states.
+
+    A stop rule stating three diverged passes stops an always-diverged run at its third epoch
     naming the count, and lets a run diverged for two passes, one short of it, recover and
     complete.
     """
@@ -120,8 +124,10 @@ def test_a_run_stops_at_the_diverged_pass_count_its_stop_rule_states(tmp_path):
 
 
 def test_a_healthy_run_never_trips_the_divergence_check(tmp_path):
-    """A run whose loss stays finite throughout completes normally and carries no divergence
-    text, proving the counter never fires on a model that never produces a bad batch.
+    """A healthy run does not trip the divergence check.
+
+    A run whose loss stays finite throughout completes its three epochs and carries no
+    divergence text.
     """
     run = _trained(
         tmp_path, MEAN_INTENSITY_REGRESSOR, {"init_weight": 0.0}, horizon=3
@@ -133,8 +139,10 @@ def test_a_healthy_run_never_trips_the_divergence_check(tmp_path):
 
 
 def test_one_fully_diverged_epoch_followed_by_recovery_completes(tmp_path):
-    """One fully diverged epoch, short of the two-pass rule, followed by a recovery to finite
-    losses completes the run: the counter resets on the first epoch with a finite loss.
+    """One fully diverged epoch followed by recovery completes the run.
+
+    One fully diverged epoch, short of the two-pass rule, followed by a recovery to finite
+    losses completes all three epochs.
     """
     run = _trained(
         tmp_path,
@@ -151,10 +159,10 @@ def test_one_fully_diverged_epoch_followed_by_recovery_completes(tmp_path):
 def test_a_single_finite_loss_among_bad_batches_does_not_count_the_epoch_as_diverged(
     tmp_path,
 ):
-    """One finite loss inside an otherwise-nan epoch must keep that epoch off the two-pass
-    count: a second, fully diverged epoch right after would only stop the run if the first
-    (wrongly) counted too. Neither epoch's mean loss is finite, so the run then ends as having
-    no selectable epoch, not as diverged.
+    """A single finite loss among bad batches keeps the epoch off the diverged count.
+
+    With one finite loss among the first epoch's nan losses and a fully diverged second epoch,
+    the run is not stopped as diverged; it fails after two epochs as having no selectable epoch.
     """
     # Epoch 1's middle batch only, at three batches/epoch.
     run = _trained(
@@ -168,8 +176,10 @@ def test_a_single_finite_loss_among_bad_batches_does_not_count_the_epoch_as_dive
 
 
 def test_stage_boundary_resets_the_diverged_epoch_counter(tmp_path):
-    """One fully diverged epoch at the end of stage 0 and another at the start of stage 1 must
-    not stop the run: the counter resets at every stage boundary, so the two never add up.
+    """A stage boundary resets the diverged-epoch counter.
+
+    One fully diverged epoch at the end of stage 0 and another at the start of stage 1 do not
+    stop the run, which completes four epochs.
     """
     # Three batches/epoch, twelve calls total across four epochs.
     run = _trained(
@@ -187,8 +197,10 @@ def test_stage_boundary_resets_the_diverged_epoch_counter(tmp_path):
 def test_cancel_requested_during_the_second_diverged_epoch_still_ends_failed(
     tmp_path,
 ):
-    """Divergence is judged before cancellation: a run whose cancel is requested partway through
-    the epoch that trips the two-pass rule ends failed, not canceled.
+    """A cancel requested during the second diverged epoch ends the run failed, not canceled.
+
+    A run whose cancel is requested partway through the epoch that trips the two-pass rule ends
+    failed at epoch two, naming the diverged stop.
     """
     out_dir = str(experiment_dir("diverged-and-canceled", project=tmp_path))
     kwargs = {"cancel_at_call": 5, "cancel_output_dir": out_dir}
@@ -209,11 +221,10 @@ def test_cancel_requested_during_the_second_diverged_epoch_still_ends_failed(
 def test_launch_training_real_subprocess_reports_the_diverged_stop(
     tmp_path, monkeypatch
 ):
-    """A model that passes the preflight contract on the synthetic (random) batch, then divides
-    by a real batch's zero spread across bands once real training starts (gray frames of
-    different intensities, so the data's band statistics exist and are alike), must be caught
-    by a real launch_training subprocess: monitor_training names the diverged stop, not a
-    silent hang or the launch-time placeholder.
+    """A real ``launch_training`` subprocess reports the diverged stop.
+
+    A model dividing by its batch's spread across bands, over gray frames of different
+    intensities, launched through a real subprocess ends failed, naming the diverged stop.
     """
     pytest.importorskip("torchvision")
     from tcip_mcp.tools.training_tools import launch_training

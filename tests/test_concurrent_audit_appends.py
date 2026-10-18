@@ -1,5 +1,6 @@
-"""Concurrent appenders to one audit log, in threads and in separate processes: every append
-that returned is in the log exactly once, and every append that raised is reported.
+"""Concurrent appenders to one audit log, in threads and in separate processes.
+
+Every append returns, and each is in the log exactly once.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from tcip_store.sqlite_backend import SqliteBackend
 
 
 def _generous_lock_timeout_s() -> float:
-    """The lock wait these tests bind their backend with: four times the store's default."""
+    """Return four times the store's default lock timeout, in seconds."""
     from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S
 
     return 4 * DEFAULT_LOCK_TIMEOUT_S
@@ -26,7 +27,7 @@ def _generous_lock_timeout_s() -> float:
 
 @pytest.fixture
 def unstarved_backend():
-    """Bind this test's backend with the generous lock wait, and close it on the way out."""
+    """Bind a sqlite backend at four times the default lock timeout, yield it, then close it."""
     backend = ts.bind(SqliteBackend(lock_timeout_s=_generous_lock_timeout_s()))
     yield backend
     backend.close()
@@ -92,7 +93,11 @@ finally:
 def test_concurrent_processes_no_torn_or_lost_lines(
     tmp_path, unstarved_backend
 ):
-    """Two separate processes (mirroring the terminal + sidecar MCP instances)."""
+    """Appends from two separate processes all land, none torn or lost.
+
+    Each process returns cleanly, the log holds no corrupt line, and its records are exactly the
+    appends both processes report.
+    """
     per_process = 50
     timeout_s = _generous_lock_timeout_s()
     procs = [
@@ -127,7 +132,7 @@ def test_concurrent_processes_no_torn_or_lost_lines(
 
 
 def test_an_ordinary_event_lands_in_the_log_its_scope_names(tmp_path):
-    """The rail admits the plain call: one event, recorded whole, in the named root's log."""
+    """An ordinary event lands as one whole record in the log of the root its scope names."""
     record_event_or_raise(
         "save_label_document",
         {"n_annotations": 3},

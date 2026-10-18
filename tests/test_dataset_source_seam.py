@@ -1,9 +1,8 @@
-"""The ``dataset_source`` bespoke seam, mirroring ``model_source``.
+"""The ``dataset_source`` bespoke seam.
 
 An agent-supplied importable builder produces a torch ``Dataset`` for a task the built-in loaders
-do not cover, built over the producer's own samples (``build_from_dataset_source``, which a run's
-loaders and ``ctx.build_dataset`` route to), the known loaders stay the factory's, and the builder
-source is snapshotted for provenance.
+do not cover, built over the producer's own samples (``build_from_dataset_source``), the known
+loaders stay the factory's, and the builder source is snapshotted for provenance.
 """
 
 from __future__ import annotations
@@ -27,10 +26,11 @@ from torch.utils.data import Dataset  # noqa: E402
 
 
 class _CountingDataset(Dataset):
-    """A trivially-bespoke dataset: one item per sample the producer named, echoing the context it
-    was built with, each a black 8 px frame holding one object named by its stem and valued zero,
-    a target a detector and a regressor both read. ``rows`` is the builder's own configuration,
-    which a direct construction with no producer behind it stands on instead.
+    """A trivially-bespoke dataset of one item per sample the producer named.
+
+    It echoes the context it was built with, each item a black 8 px frame holding one object
+    named by its stem and valued zero. ``rows`` is the builder's own configuration, the items of
+    a construction given no samples.
     """
 
     def __init__(
@@ -62,29 +62,27 @@ class _CountingDataset(Dataset):
 
     @property
     def regions(self):
-        """Each frame's served object."""
+        """The dataset's regions, one per frame, holding the object it serves."""
         from tests._producer_fixtures import served_regions
 
         return served_regions(self)
 
 
 def build_bespoke_ds(**kwargs) -> _CountingDataset:
-    """Agent-authored dataset builder (importable, no exec)."""
+    """Build a :class:`_CountingDataset`, as an importable agent-authored builder does."""
     return _CountingDataset(**kwargs)
 
 
 BESPOKE_DS = "test_dataset_source_seam:build_bespoke_ds"
 """The ``dataset_source`` builder of :func:`build_bespoke_ds`."""
 BESPOKE_DS_FILE = str(REPO_ROOT / "tests" / "test_dataset_source_seam.py")
-"""The file :data:`BESPOKE_DS` is defined in, which its ``source_files`` declare; never this
-module's own ``__file__``, which names a run's snapshot copy once a run has bound the module
-there."""
+"""The source file defining :data:`BESPOKE_DS`."""
 
 
 class _PointDataset(Dataset):
-    """A bespoke keypoint dataset over the samples the producer named: each item is one sample's
-    own image and the point coordinates its own label document records, which is ground truth no
-    built-in loader reads.
+    """A bespoke keypoint dataset over the samples the producer named.
+
+    Each item is one sample's own image and the first point its own label document records.
     """
 
     def __init__(self, *, samples=None, transforms=None, **_ignored):
@@ -115,7 +113,7 @@ class _PointDataset(Dataset):
 
 
 def build_point_ds(**kwargs) -> _PointDataset:
-    """Agent-authored builder for a task whose ground truth is a placed point."""
+    """Build a :class:`_PointDataset` for a task whose ground truth is a placed point."""
     return _PointDataset(**kwargs)
 
 
@@ -127,15 +125,17 @@ DATASET_SOURCE = {
 
 
 def _source(stated: dict):
-    """``stated`` validated as a run's ``data.dataset_source``."""
+    """Return ``stated`` validated as a run's ``data.dataset_source``."""
     from tcip_mcp.pipelines.schemas import DatasetSourceSchema
 
     return DatasetSourceSchema.model_validate(stated)
 
 
 def _bespoke(stated: dict):
-    """``stated`` validated as a run's ``data.dataset_source`` with the layout a run declaring it
-    imports from, this repository as its project (``datasets.BespokeSource``).
+    """Return ``stated`` validated as a run's ``data.dataset_source``, and its layout.
+
+    The layout is the one a run declaring it imports from, this repository as its project
+    (``datasets.BespokeSource``).
     """
     from tests._producer_fixtures import staged_layout
 
@@ -145,8 +145,9 @@ def _bespoke(stated: dict):
 
 
 def _admitted_samples(root: Path):
-    """Two samples, admitted the way every run's own membership is, each frame its object bright
-    on a dim ground.
+    """Return two labeled samples, admitted through ``samples_over``.
+
+    Each frame holds its object bright on a dim ground.
     """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
@@ -176,8 +177,9 @@ def _admitted_samples(root: Path):
 
 
 def _scope():
-    """The class space :func:`_admitted_samples` admits its samples under, a registry declaring
-    no attribute on its subject.
+    """Return the class space :func:`_admitted_samples` admits its samples under.
+
+    It is a registry's, declaring no attribute on its subject.
     """
     from tcip_mcp.pipelines.data.label_queries import registry_scope
 
@@ -185,9 +187,11 @@ def _scope():
 
 
 def _ctx(root: Path, task: str, data: dict):
-    """A training body's context over a run of ``root`` of ``task``, opened by the launcher's own
-    producer, whose data block states ``data`` beside the place :func:`_admitted_samples` admits
-    there and the class space it admits under, training on every sample; and those samples.
+    """Return a training body's context over a run of ``root`` of ``task``, and its samples.
+
+    The run is opened by the launcher's own producer, its data block stating ``data`` beside the
+    place :func:`_admitted_samples` admits there and the class space it admits under, with no
+    validation side.
     """
     from dataclasses import asdict
 
@@ -216,14 +220,16 @@ def _ctx(root: Path, task: str, data: dict):
 
 
 def _bespoke_ctx(root: Path):
-    """:func:`_ctx` over a run whose loaders :data:`DATASET_SOURCE` builds."""
+    """Return :func:`_ctx` over a run whose loaders :data:`DATASET_SOURCE` builds."""
     return _ctx(root, "grape_bunch_count", {"dataset_source": DATASET_SOURCE})
 
 
 def test_a_bodys_platform_loader_reads_at_the_runs_sizes_and_lattice(
     tmp_path: Path,
 ):
-    """On a run whose data block names no ``dataset_source``, a training body's
+    """A body's platform loader reads at the run's recorded band count and lattice.
+
+    On a run whose data block names no ``dataset_source``, a training body's
     ``ctx.build_dataset`` builds the platform's loader over the subset of samples it was handed,
     at the band count and the lattice the run's data block records.
     """
@@ -244,7 +250,9 @@ def test_a_bodys_platform_loader_reads_at_the_runs_sizes_and_lattice(
 def test_a_bodys_loader_on_a_bespoke_run_builds_through_its_builder_over_the_subset(
     tmp_path: Path,
 ):
-    """On a run whose data block names a ``dataset_source``, a training body's
+    """A body's loader on a bespoke run builds through its builder over the subset handed it.
+
+    On a run whose data block names a ``dataset_source``, a training body's
     ``ctx.build_dataset`` imports that builder from the run's layout and hands it the subset of
     samples it was given and the run's recorded class space; the builder's own configuration
     rides in ``builder_kwargs``.
@@ -271,10 +279,10 @@ def test_a_bodys_loader_on_a_bespoke_run_builds_through_its_builder_over_the_sub
 def test_a_bodys_door_takes_the_samples_and_the_augmentation_and_nothing_else(
     tmp_path: Path,
 ):
-    """``ctx.build_dataset`` takes the samples and the augmentation and refuses every other
-    keyword by name, a builder, a class space, a tiling and sizes included: the run's own block
-    states each, and a loader given another could answer for a membership, a class space, a
-    format or a lattice this run's record does not state.
+    """``ctx.build_dataset`` takes the samples and the augmentation and refuses other keywords.
+
+    Each keyword tried, a builder, a class space, a tiling and sizes among them, is refused by
+    name, and a call with the samples and the augmentation builds the run's own dataset.
     """
     from tcip_mcp.pipelines.schemas import TilingSpec
 
@@ -299,10 +307,10 @@ def test_a_bodys_door_takes_the_samples_and_the_augmentation_and_nothing_else(
 
 
 def test_builder_kwargs_may_not_restate_what_the_producer_named():
-    """``samples`` and ``scope`` are the producer's, and ``task``/``transforms`` the run's: a
-    builder given a second value for one of them would build over membership or a class space the
-    run's own record does not describe, so the dataset source refuses it by name where the config
-    is validated.
+    """``builder_kwargs`` restating a value the producer or the run names is refused by name.
+
+    The context's fields are ``task``, ``samples``, ``scope`` and ``transforms``, and a
+    ``builder_kwargs`` entry for any of them is refused naming it.
     """
     from tcip_mcp.pipelines.schemas import DatasetContext
 
@@ -331,9 +339,10 @@ def test_known_task_registry_stays_the_default(tmp_path: Path):
 
 
 def test_builder_kwargs_configure_the_builder(tmp_path: Path):
-    """The builder's own configuration is its ``builder_kwargs`` and nothing else: the lowest
-    boundary requires the dataset source with the layout it imports from, the task, the samples,
-    the scope and the transforms.
+    """The builder's own configuration is its ``builder_kwargs`` and nothing else.
+
+    The lowest boundary requires the dataset source with the layout it imports from, the task,
+    the samples, the scope and the transforms.
     """
     import inspect
 
@@ -370,9 +379,11 @@ def test_builder_kwargs_configure_the_builder(tmp_path: Path):
 def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(
     tmp_path: Path,
 ):
-    """A bespoke builder does not exempt a run from naming its data: the platform's own producer
-    admits its samples whatever loads them, so a config naming no place refuses here by naming the
-    missing key, the one refusal every route shares.
+    """Preflight requires the data place a bespoke run is admitted from.
+
+    A bespoke config naming no place is refused naming ``data.images_dir``, the same config over
+    a labeled place passes, and a builder no declared file holds is refused naming
+    ``source_files``.
     """
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._chain_fixtures import training_config
@@ -425,8 +436,10 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(
 def test_snapshot_copies_the_dataset_builders_module_as_that_module(
     tmp_path: Path,
 ):
-    """The dataset builder's module, declared under its ``source_files``, is copied at its path
-    under its import root; a dataset builder none of them holds refuses the snapshot by name.
+    """The snapshot copies the dataset builder's module as that module.
+
+    The module, declared under its ``source_files``, is copied at its path under its import
+    root; a dataset builder none of them holds refuses the snapshot by name.
     """
     from tcip_mcp.pipelines.model_build import snapshot_model_source
     from tcip_mcp.pipelines.schemas import train_config

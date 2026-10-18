@@ -1,17 +1,11 @@
-"""Operating-point counting semantics: which detection is a hit, and which side of the ratio it
-lands on.
+"""Operating-point counting semantics: which detection is a hit, and which ratio side it lands on.
 
-Two properties the symmetric fixtures elsewhere in the suite cannot separate:
+Two properties, each over an asymmetric fixture:
 
-* precision and recall answer different questions (how much of what the model reported is real,
-  versus how much of what is real the model reported), so a reference whose false-positive burden
-  differs from its false-negative burden must produce two different numbers, each attached to the
-  right denominator;
+* a reference whose false positives and misses differ gives a precision over everything reported
+  and a recall over everything real, two different numbers;
 * the center-match matcher consumes a ground-truth object when a detection claims it, so a cluster
-  of detections on one object contributes one true positive and the rest as false positives. The
-  per-image count bias cannot see that failure at all (``fp - fn`` is the raw detection-minus-truth
-  difference whatever the matcher does with the pairing), so the tp/fp/fn split is the only place a
-  double-counted object is recorded.
+  of detections on one object contributes one true positive and the rest as false positives.
 """
 
 from __future__ import annotations
@@ -36,12 +30,11 @@ CENTER_MATCH_TOLERANCE = 10.0
 
 
 def _asymmetric_iou_records() -> list[dict]:
-    """Two frames of different shapes whose hit rate and hallucination rate genuinely differ.
+    """Return two frames of different shapes, all boxes of class 1.
 
-    Frame one (640x400): three ground-truth boxes of three aspect ratios, two matched exactly and
-    three detections placed well clear of any of them. Frame two (300x500): two ground-truth boxes,
-    one matched, nothing spurious. Pooled that is tp=3, fp=3, fn=2, so precision (3/6) and recall
-    (3/5) are distinct numbers and neither equals the F1 they combine into.
+    Frame one (640x400): three ground-truth boxes of three aspect ratios, a detection on the very
+    box of two of them, and three detections overlapping no ground-truth box. Frame two
+    (300x500): two ground-truth boxes and one detection, on the very box of the first.
     """
     wide_gt = gt_record([50, 60, 40, 20], 1, 0)
     tall_gt = gt_record([200, 100, 30, 60], 1, 0)
@@ -77,8 +70,10 @@ def _asymmetric_iou_records() -> list[dict]:
 
 
 def test_precision_and_recall_are_not_interchangeable():
-    """On a reference with three false positives and two misses the two ratios differ, and each
-    must be reported against its own denominator: precision over everything reported, recall over
+    """Precision and recall differ on an asymmetric reference, each over its own denominator.
+
+    On a reference with three false positives and two misses the two ratios differ, and each is
+    reported against its own denominator: precision over everything reported, recall over
     everything real.
     """
     m = detection_metrics(
@@ -99,8 +94,10 @@ def test_precision_and_recall_are_not_interchangeable():
 
 
 def test_extra_false_positives_move_precision_and_leave_recall_alone():
-    """Hallucinated detections cost precision only. Nothing about how much of the ground truth was
-    found changes when a detector reports more objects that are not there.
+    """Extra false positives move precision and leave recall alone.
+
+    Two more spurious detections add two false positives, lower precision, and leave the true
+    positives, the misses and recall as they were.
     """
     base = _asymmetric_iou_records()
     noisier = _asymmetric_iou_records()
@@ -130,12 +127,11 @@ def test_extra_false_positives_move_precision_and_leave_recall_alone():
 
 
 def _clustered_center_match_records() -> list[dict]:
-    """Two frames where one object attracts two detections inside the match tolerance.
+    """Return two frames where one object has two detections centered near its center.
 
-    Frame one (500x300) holds two objects: the first draws detections at distance 0 and about
-    5.8 px, both inside the 10 px tolerance, the second draws one. Frame two (800x600) holds three
-    objects, only one of them detected, so the reference also carries plain misses. Class id 7,
-    a sparse id, so nothing rests on ids being dense or zero-based.
+    Frame one (500x300) holds two objects: the first has detections centered 0 and about 5.8 px
+    from its center, the second one detection centered on its own. Frame two (800x600) holds
+    three objects and one detection, centered on the first. Every box carries class id 7.
     """
     one_dt = [
         {"category_id": 7, "bbox": [90, 94, 20, 12], "score": 0.90},
@@ -170,9 +166,10 @@ def _clustered_center_match_records() -> list[dict]:
 
 
 def test_second_detection_of_one_object_is_a_false_positive():
-    """A ground-truth object is claimed once. The runner-up detection on an already-matched object
-    is a false positive, so five objects and four detections leave tp=3, fp=1, fn=2 rather than a
-    fourth true positive and a negative miss count.
+    """A second detection of one ground-truth object is a false positive.
+
+    A ground-truth object is claimed by one detection. The runner-up detection on a matched
+    object is a false positive, so five objects and four detections leave tp=3, fp=1, fn=2.
     """
     records = _clustered_center_match_records()
     criterion = {"kind": "center_match", "tolerance": CENTER_MATCH_TOLERANCE}
@@ -189,10 +186,10 @@ def test_second_detection_of_one_object_is_a_false_positive():
 
 
 def test_sweep_records_a_doubly_detected_object_as_one_hit_and_one_false_alarm():
-    """The conf sweep counts through the same matcher, so a cluster on one object reads as one hit
-    plus a false alarm at every conf that keeps the cluster. The signed count bias is blind to this
-    (it is detections minus objects however the pairing resolves), which is why the tp/fp/fn split
-    is what the entry has to be read on.
+    """The conf sweep records a doubly detected object as one hit and one false alarm.
+
+    A cluster on one object reads as one hit plus a false alarm at the confs that keep the
+    cluster, 0.5 and 0.85 among them.
     """
     sweep = derive_operating_point_curve(
         _clustered_center_match_records(),
@@ -213,8 +210,10 @@ def test_sweep_records_a_doubly_detected_object_as_one_hit_and_one_false_alarm()
 
 
 def test_uncontested_detections_all_match():
-    """The tolerance still admits every detection that has its own object: one detection per object,
-    each within tolerance, is all true positives with nothing left over.
+    """Uncontested detections within tolerance all match.
+
+    One detection per object, each within tolerance, counts as all true positives with nothing
+    left over, an F1 of one.
     """
     dt = [
         {"category_id": 7, "bbox": [90, 94, 20, 12], "score": 0.90},

@@ -1,5 +1,7 @@
-"""The integer geometry a display read is sized and planned with (``display_bounds``), and its
-agreement with the geometry the raster reader admits (``raster_source``).
+"""The integer geometry a display read is sized and planned with (``display_bounds``).
+
+The cases also cover its agreement with the geometry the raster reader admits
+(``raster_source``).
 """
 
 from __future__ import annotations
@@ -63,8 +65,10 @@ def test_with_no_level_fitting_the_plan_reads_the_coarsest_within_the_cap():
 
 
 def test_an_edge_limited_plan_names_the_coarser_level_it_comes_off():
-    """A one-row output far below the fitting level's resolution reads the coarsest level still
-    holding it, not the finer one whose window fit.
+    """An edge-limited plan names the coarser level it comes off.
+
+    A 1024 by 13 output of a 5000 by 64 window over overviews of 32, 16 and 8 rows is planned
+    on level 2.
     """
     plan = plan_read(
         Rect(0, 0, 5000, 64),
@@ -93,9 +97,10 @@ LEVELS = [(1024, 1024), (512, 512)]
 def test_a_crop_is_planned_on_the_window_the_reader_opens(
     rect, max_pixels, owed
 ):
-    """A one-pixel-wide crop's window on every level is one pixel wide, never a fraction of one,
-    and an offset crop's window takes its origin rounded down and its end up, so the plan picks
-    the level a reader can open within the cap and names it.
+    """A crop is planned on the window ``level_window`` gives at the planned level.
+
+    For a one-pixel-wide crop and an offset crop alike, that window holds the planned size, and
+    a plan marked ``fits`` keeps the window within the pixel cap.
     """
     from tcip_mcp.pipelines.raster_source import level_window
 

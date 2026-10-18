@@ -15,9 +15,7 @@ torch = pytest.importorskip("torch")
 class TestBackboneOrdering:
     """The wrapper renames stages so pyramid order survives into the necks.
 
-    The necks rebuild order with ``sorted(features.keys())``. A module that emits its own names
-    would be consumed alphabetically, and with uniform stage widths there is no shape error to
-    catch it, so the finest map silently lands where a detector assigns the smallest anchors.
+    The renamed stages run finest first, and an FPN's sorted output keys run finest to coarsest.
     """
 
     def _staged(self):
@@ -255,9 +253,10 @@ class TestLosses:
         assert len(combined.losses) == 2
 
     def test_combined_loss_receives_class_weighting(self):
-        """The weighting context must reach a combined loss's weightable term: the `+` branch
-        forwards class_distribution on every recursion, so imbalance handling never silently
-        vanishes for a combined loss.
+        """Class weighting reaches a combined loss's weightable term.
+
+        The cross-entropy term of ``cross_entropy+dice`` carries one weight per class, the
+        majority class down-weighted.
         """
         from tcip_mcp.pipelines.components.losses import build_loss
 
@@ -274,7 +273,7 @@ class TestLosses:
         assert weights[0] < weights[2]  # the majority class is down-weighted
 
     def test_combined_loss_refuses_unusable_class_weighting(self):
-        """A class_distribution no term can consume must raise, not be silently discarded."""
+        """A class_distribution no term can consume raises a ValueError about weightable terms."""
         from tcip_mcp.pipelines.components.losses import build_loss
 
         with pytest.raises(ValueError, match="weightable"):

@@ -1,11 +1,9 @@
 """A detection assessment reads its reference under the run's own recorded subject, or refuses.
 
 A run admitted by the ground-truth shape its bespoke builder reads (mask rasters here) records no
-subject, so nothing says which reference records its detections are of. The run is trained one
-epoch through the platform's own path and registered; asked to assess it over a drawn document
-reference, ``assess_checkpoint`` refuses it by name before any assessment is recorded. The
-admitting half is the measurement chain's assessed run (``test_end_to_end_measurement_chain``),
-which records the subject it was trained on.
+subject, so nothing says which reference records its detections are of. The run is trained to
+completion through the platform's own worker and registered; asked to assess it over a drawn
+document reference, ``assess_checkpoint`` refuses it by name, and no assessment is recorded.
 """
 
 from __future__ import annotations
@@ -30,8 +28,10 @@ BOX = (8, 10, 30, 34)
 
 
 class _MaskBoxDataset(Dataset):
-    """A bespoke detection dataset over the producer's mask samples: one box per mask, the
-    extent of its foreground, as a builder an agent writes for ground truth no registry scopes.
+    """A bespoke detection dataset over the producer's mask samples.
+
+    Each item is the sample's image and a target of the box bounding its mask's nonzero pixels,
+    labeled 1.
     """
 
     def __init__(self, *, samples=None, transforms=None, **_ignored):
@@ -64,7 +64,7 @@ class _MaskBoxDataset(Dataset):
 
     @property
     def regions(self):
-        """Each frame's served objects over its pixel area."""
+        """The dataset's regions, one per frame, holding its served objects over its pixel area."""
         from tests._producer_fixtures import served_regions
 
         return served_regions(self)
@@ -75,7 +75,7 @@ def build_mask_box_ds(**kwargs) -> _MaskBoxDataset:
 
 
 def _capture(root: Path) -> tuple[Path, Path]:
-    """Frames holding one bright square, and its mask raster."""
+    """Write frames each holding one bright box, and its mask raster; return both directories."""
     from tests._producer_fixtures import BRIGHT, painted_frame
 
     images, masks = root / "images" / UNDATED_BUCKET, root / "masks"
@@ -93,10 +93,11 @@ def _capture(root: Path) -> tuple[Path, Path]:
 
 
 def _train_and_register(data_cfg: dict, project_root: Path) -> dict:
-    """Train a detector over ``data_cfg`` in a run of ``project_root`` the launcher's own
-    producer opened and the child's own entry ran, which registers its checkpoint by completing:
-    ``{"checkpoint", "data"}``, the data block the run resolved in the form its record holds
-    it. Its builder serves the frames, so the detector states its geometry at theirs.
+    """Train a detector over ``data_cfg`` in a run of ``project_root`` and return its outputs.
+
+    The run is ``worker_run`` over ``training_config`` of :data:`REGION_BUILDER`, its detector
+    geometry stated at the 48 px square, and ``data_cfg``. Returns ``{"checkpoint", "data"}``:
+    the observed checkpoint's path and the data block its record holds as resolved.
     """
     from tcip_mcp.experiments import observe
     from tests._chain_fixtures import (

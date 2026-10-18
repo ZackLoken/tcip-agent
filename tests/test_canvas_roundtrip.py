@@ -1,4 +1,4 @@
-"""Canvas round-trip tests: verify annotation pipeline end-to-end.
+"""Canvas round-trip tests of the annotation pipeline, end to end.
 
 These tests simulate what the annotation canvas webview does:
 1. Load image → read existing labels
@@ -22,7 +22,7 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key, prediction_key
 
 
 def _write(key, annotations) -> list[Annotation]:
-    """``annotations`` written as the 640x480 document ``key`` names, and read back."""
+    """Write ``annotations`` as the 640x480 document ``key`` names and return them read back."""
     write_label_document(key, annotations, 640, 480)
     return read_label_document(key).annotations
 
@@ -32,7 +32,7 @@ def _write(key, annotations) -> list[Annotation]:
 
 @pytest.fixture
 def img_dir(tmp_path: Path) -> Path:
-    """Minimal image dataset directory structure."""
+    """Write one 640x480 image under ``images/`` and return the dataset root."""
     images = tmp_path / "images"
     images.mkdir()
 
@@ -56,10 +56,10 @@ def _prediction(root: Path):
 
 
 class TestBoxRoundtrip:
-    """Load → draw boxes → save → read back."""
+    """The box round trip: load, draw boxes, save, read back."""
 
     def test_draw_save_reload(self, img_dir: Path) -> None:
-        """Draw two boxes, save, reload and verify."""
+        """Two drawn boxes come back with their subjects and corners less than 2 px off."""
         # Draw boxes (simulating canvas click-drag)
         annotations = [
             Annotation(
@@ -85,9 +85,10 @@ class TestBoxRoundtrip:
     def test_five_distinct_subjects_survive_the_round_trip(
         self, img_dir: Path
     ) -> None:
-        """Coverage: five box annotations of five distinct subjects, written and read back
-        through the same per-image label document, all five subjects and the count surviving the
-        round trip.
+        """Five box annotations of five distinct subjects survive the label document round trip.
+
+        They are written to and read back from one per-image label document, all five subjects
+        and the count surviving.
         """
         subjects = ["bud", "shoot", "leaf", "nut", "bush"]
         annotations = [
@@ -107,10 +108,10 @@ class TestBoxRoundtrip:
 
 
 class TestPolygonRoundtrip:
-    """Load → draw polygons → save → read back."""
+    """The polygon round trip: load, draw polygons, save, read back."""
 
     def test_draw_polygon_save_reload(self, img_dir: Path) -> None:
-        """Draw a polygon, save, reload and verify."""
+        """A drawn triangle comes back as one polygon, its subject kept, vertices under 2 px off."""
         # Draw a triangle polygon (simulating canvas vertex clicks)
         poly = Polygon(rings=[[(100.0, 50.0), (250.0, 200.0), (50.0, 200.0)]])
 
@@ -130,7 +131,7 @@ class TestPolygonRoundtrip:
             assert abs(oy - ly) < 2
 
     def test_multi_class_polygon(self, img_dir: Path) -> None:
-        """Multiple polygons with different subjects."""
+        """Two polygons of different subjects both come back with their subjects."""
         annotations = [
             Annotation(
                 subject="bud",
@@ -153,8 +154,10 @@ class TestPolygonRoundtrip:
     def test_occlusion_split_prediction_survives_the_round_trip(
         self, img_dir: Path
     ) -> None:
-        """A model-predicted mask the editor overlays can be occlusion-split: one instance, two
-        contours. Both rings must come back so the person sees the whole object.
+        """An occlusion-split predicted mask comes back as one instance with both its rings.
+
+        A model-predicted mask the editor overlays can be occlusion-split: one instance, two
+        contours. Both rings come back on the one instance, with its score.
         """
         rings = [
             [(100.0, 50.0), (150.0, 50.0), (150.0, 200.0), (100.0, 200.0)],
@@ -179,10 +182,10 @@ class TestPolygonRoundtrip:
 
 
 class TestSingleDocumentSave:
-    """The canvas saves every subject, boxes and polygons alike, into one per-image document."""
+    """Boxes and polygons of different subjects saved into one per-image document."""
 
     def test_box_and_polygon_single_document(self, img_dir: Path) -> None:
-        """Save a box and a polygon together, verify both survive in one document."""
+        """A box and a polygon saved together both come back from one document."""
         annotations = [
             Annotation(
                 subject="bud", geometry=BBox(x1=50, y1=50, x2=200, y2=150)
@@ -209,10 +212,10 @@ class TestSingleDocumentSave:
 
 
 class TestPredictionOverlay:
-    """Verify that proposals load correctly and pair with the annotation they overlap."""
+    """Proposals loaded beside annotations and paired with the one they overlap."""
 
     def test_prediction_overlay_pairing(self, img_dir: Path) -> None:
-        """Load annotations + proposals, pair them, verify overlay data."""
+        """A loaded proposal pairs with the annotation it overlaps."""
         loaded_gt = _write(
             _label(img_dir),
             [

@@ -1,8 +1,7 @@
-"""What each count scan_dataset reports actually counts.
+"""What each count scan_dataset reports counts.
 
-The tool's whole output is a census, so a count that quietly measures a different collection
-than its name claims (labels counted as images, a bucket's record counted as a prediction, the
-unlabeled remainder taken off the wrong total) is invisible to the reader.
+Labels are not counted as images, a bucket's record is not counted as a prediction, and the
+scan leaves the dataset's file names, sizes and label versions unchanged.
 """
 
 from __future__ import annotations
@@ -23,11 +22,9 @@ SUBJECT = "bud"
 
 
 def _lopsided_dataset(root: Path) -> Path:
-    """Five images, three label documents, two of which pair with an image.
+    """Write five images and three label documents, two of which pair with an image; return root.
 
-    Deliberately asymmetric: the image count, the label count, the paired count and the
-    unlabeled remainder are four different numbers, and the frame is not square, so a count
-    computed off the wrong collection cannot coincide with the right one.
+    Three images have no label and one label has no image; each frame is 96 by 64 px.
     """
     images_dir = root / "images" / DATE
     for stem in (
@@ -51,9 +48,11 @@ def _lopsided_dataset(root: Path) -> Path:
 def test_scan_reports_four_distinct_counts_over_a_lopsided_dataset(
     tmp_path: Path,
 ):
-    """image_count, labels_count, paired_images and unlabeled_images each measure their own
-    collection: the unlabeled remainder is the images no label pairs with, never the labels
-    no image pairs with.
+    """The scan reports four distinct counts over a lopsided dataset.
+
+    image_count, labels_count, paired_images and unlabeled_images each measure their own
+    collection: the unlabeled remainder is the images no label pairs with, not the labels no
+    image pairs with.
     """
     root = _lopsided_dataset(tmp_path / "ds")
 
@@ -76,8 +75,10 @@ def test_scan_reports_four_distinct_counts_over_a_lopsided_dataset(
 
 
 def test_a_buckets_record_is_not_counted_as_a_prediction(tmp_path: Path):
-    """A published bucket holds its per-image documents beside its own record; only the
-    documents are predictions, and documents in no bucket are none.
+    """A bucket's record is not counted as a prediction.
+
+    A bucket published over two images, beside a document no bucket names, counts two
+    predictions.
     """
     pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import bucket_key, prediction_key
@@ -115,8 +116,10 @@ def test_a_buckets_record_is_not_counted_as_a_prediction(tmp_path: Path):
 
 
 def test_scan_writes_nothing_into_the_dataset(tmp_path: Path):
-    """The census is a read of the dataset, so its files outside the store and every label
-    record are identical afterwards.
+    """The scan leaves the dataset's file names, sizes and label versions unchanged.
+
+    The files outside the store keep their names and sizes, and each label record keeps its
+    version.
     """
     root = _lopsided_dataset(tmp_path / "ds")
 

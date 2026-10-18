@@ -1,5 +1,6 @@
-"""The exact bytes of the documents a human or a tool reads as files: a file's on the file its
-producer writes, a record's on the file the read-only dump writes for it.
+"""The exact bytes of the documents the platform lands as files.
+
+A file's bytes are those its producer writes, and a record's those the store dump writes for it.
 """
 
 from __future__ import annotations
@@ -85,7 +86,7 @@ RETROSPECTIVE_BYTES = (
 
 
 def _dumped(project: Path, store: str) -> bytes:
-    """The bytes of the one file the dump writes for ``project``'s one record in ``store``."""
+    """Return the bytes of the file the dump writes for ``project``'s one record in ``store``."""
     (written,) = (
         path
         for path in dump_store(project, project.parent / "dump")
@@ -97,8 +98,10 @@ def _dumped(project: Path, store: str) -> bytes:
 def test_the_subject_registry_lands_as_the_ordered_json_document_labels_are_decoded_by(
     tmp_path,
 ):
-    """Written through ``replace_registry``, which encodes with the canonical record codec: the
-    subject and attribute sequences keep their declared order rather than being sorted.
+    """The subject registry lands as its ordered JSON document, byte for byte.
+
+    Written through ``replace_registry``, the subject and attribute sequences keep their
+    declared order.
     """
     from tcip_mcp import subject_registry
     from tcip_mcp.dataset_layout import subjects_path
@@ -118,7 +121,11 @@ def test_the_dataset_identity_document_lands_as_the_json_every_citing_record_rea
     tmp_path,
     monkeypatch,
 ):
-    """Written through ``register_dataset``, its minted id and computed fingerprint held still."""
+    """The dataset identity document lands as the exact JSON bytes the fixture pins.
+
+    It is written through ``register_dataset``, its minted id and computed fingerprint held
+    still.
+    """
     from tcip_mcp import project_record
     from tcip_mcp.dataset_layout import dataset_identity_path
     from tcip_mcp.pipelines.data import dataset_fingerprint
@@ -143,8 +150,9 @@ def test_the_dataset_identity_document_lands_as_the_json_every_citing_record_rea
 def test_a_band_group_manifest_lands_as_the_json_the_image_enumerators_parse(
     tmp_path,
 ):
-    """A ``.bandgroup`` is itself an enumerated logical image, so its bytes are what the
-    enumerators read; written through ``write_band_group_manifest``.
+    """A band-group manifest lands as its expected JSON document, byte for byte.
+
+    The manifest is written through ``write_band_group_manifest``.
     """
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
@@ -171,7 +179,10 @@ def test_a_friction_report_dumps_as_the_json_document_every_reader_of_the_corpus
     tmp_path,
     monkeypatch,
 ):
-    """Written through ``report_friction``, its clock and id suffix held still."""
+    """A friction report dumps as the exact JSON bytes the fixture pins.
+
+    It is written through ``report_friction``, its clock and id suffix held still.
+    """
     from tcip_mcp.tools import meta_tools
 
     monkeypatch.setattr(meta_tools, "now_iso", lambda: NOW)
@@ -191,8 +202,9 @@ def test_a_retrospective_dumps_as_its_markdown_text_spelled_as_one_json_string(
     tmp_path,
     monkeypatch,
 ):
-    """Written through ``write_retrospective``, its clock held still: the text itself, as one
-    JSON string.
+    """A retrospective dumps as its markdown text spelled as one JSON string.
+
+    It is written through ``write_retrospective``, its clock held still.
     """
     from tcip_mcp.tools import meta_tools
 

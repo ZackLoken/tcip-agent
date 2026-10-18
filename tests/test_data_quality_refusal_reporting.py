@@ -1,8 +1,7 @@
-"""tcip doctor's check_data_quality: what it reports, and what it must never quietly claim.
+"""tcip doctor's check_data_quality: the findings it reports and the level of each.
 
-Two standing facts the caller relies on. First, a label document the one per-image reader refuses
-is a named finding for that document, never a reason to stop looking at the others. Second, the
-finding's own vocabulary is load bearing: a warning and an error are not interchangeable.
+A label document the per-image reader refuses is a named finding for that document, and the
+check goes on to the remaining documents. A warning and an error are distinct levels.
 """
 
 from __future__ import annotations
@@ -45,9 +44,10 @@ def _label(
 
 
 def test_an_unreadable_label_record_is_an_error_per_document(tmp_path: Path):
-    """Label records of a shape the reader refuses are an error per document, naming the refusal;
-    a dataset with no label documents at all yields no error, only the count of unlabeled
-    images.
+    """An unreadable label record is an error per document, naming the refusal.
+
+    Two label records of a shape the reader refuses are two errors; a dataset with no label
+    documents yields one info-level finding and no error.
     """
     root = tmp_path / "unreadable"
     for stem in ("plotA_0_0", "plotA_0_1"):
@@ -92,8 +92,9 @@ def test_a_label_with_no_matching_image_is_an_error(tmp_path: Path):
 
 
 def test_an_unreadable_first_label_hides_no_later_finding(tmp_path: Path):
-    """The census reads each document on its own, so an unreadable label sorting first is one
-    finding and the orphan after it is still reported.
+    """An unreadable first label hides no later finding.
+
+    An unreadable label sorting first and the orphan after it are each reported.
     """
     root = tmp_path / "ds"
     write_image(root / "images" / DATE / "0_bad.jpg", (96, 64))
@@ -111,9 +112,7 @@ def test_an_unreadable_first_label_hides_no_later_finding(tmp_path: Path):
 
 
 def test_an_empty_label_not_marked_complete_is_an_error(tmp_path: Path):
-    """A platform-written empty document is not an absent one, so a presence check never catches
-    it; an empty label no person marked complete is unannotated, not a negative.
-    """
+    """An empty label no person marked complete is the one error, naming it not marked complete."""
     root = tmp_path / "ds"
     write_image(root / "images" / DATE / "plotA_0_0.jpg", (96, 64))
     _label(root, "plotA_0_0", [], keep_empty=True)
@@ -125,8 +124,9 @@ def test_an_empty_label_not_marked_complete_is_an_error(tmp_path: Path):
 
 
 def test_a_confirmed_negative_empty_label_stays_clean(tmp_path: Path):
-    """The rail this suppression exists for: a human's Complete-with-nothing must not be flagged
-    as though nobody had looked.
+    """An empty label a person marked complete stays clean, a confirmed negative.
+
+    A human's Complete-with-nothing yields no finding at all.
     """
     from tests._producer_fixtures import mark_complete
 
@@ -142,8 +142,9 @@ def test_a_confirmed_negative_empty_label_stays_clean(tmp_path: Path):
 def test_an_unreadable_label_is_a_finding_beside_a_readable_one(
     tmp_path: Path,
 ):
-    """Coverage, not a guard: the refusal surfaces as a per-document finding beside a readable
-    document of the same capture, never propagating out of the walk.
+    """An unreadable label is one finding beside a readable label of the same capture.
+
+    The refusal surfaces as one error-level finding and no warning.
     """
     root = tmp_path / "ds"
     write_image(root / "images" / DATE / "plotA_0_0.jpg", (96, 64))

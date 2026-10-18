@@ -1,6 +1,7 @@
-"""Label and prediction documents as records of their dataset root: each door that writes them
-commits whole or not at all, training reads them by key, and a person reading the dump reads the
-records the platform reads.
+"""Label and prediction documents as records of their dataset root.
+
+Each door that writes them commits whole or not at all, a detection loader reads each document
+of a capture by its key, and the dump decodes to the records the platform reads.
 """
 
 from __future__ import annotations
@@ -39,8 +40,9 @@ BUD = "bud"
 
 
 def _capture(root: Path) -> list[Path]:
-    """Three frames of capture :data:`DATE` under ``root``'s image tree, its registry declaring
-    :data:`BUD`.
+    """Write three frames of capture :data:`DATE` under ``root``'s image tree and return them.
+
+    The root's registry declares :data:`BUD`.
     """
     registry_over(
         root,
@@ -145,7 +147,7 @@ def test_a_save_commits_its_verdicts_and_its_document_together_or_neither(
 
 
 def _coco(where: Path, images: list[Path]) -> Path:
-    """An external COCO document listing ``images``, one :data:`BUD` box on each."""
+    """Write an external COCO document listing ``images``, one :data:`BUD` box on each."""
     document = where / "external.json"
     document.write_text(
         json.dumps(
@@ -179,8 +181,10 @@ def _coco(where: Path, images: list[Path]) -> Path:
 def test_a_coco_import_writes_every_document_or_none(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """The import's line is appended after its documents are written, inside the one commit: a
-    line that will not encode leaves none of the documents written before it.
+    """A COCO import writes every document or none.
+
+    An audit line that will not encode raises and leaves no document and no import line; the
+    same import with an encodable line writes all three documents and one line.
     """
     import tcip_mcp.audit as audit
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
@@ -220,8 +224,10 @@ def test_a_coco_import_writes_every_document_or_none(
 def test_an_import_refuses_over_a_present_record_whatever_it_holds(
     tmp_path: Path,
 ) -> None:
-    """Presence is the store's: a label record holding ``null`` is present, and the import
-    writes over it no more than over a document.
+    """An import refuses over a present label record, even one holding ``null``.
+
+    Presence is the store's: a label record holding ``null`` is present, and the import writes
+    over it no more than over a document.
     """
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
@@ -248,9 +254,10 @@ def test_an_import_refuses_over_a_present_record_whatever_it_holds(
 
 
 def test_a_document_its_bucket_names_is_required(tmp_path: Path) -> None:
-    """A document a bucket record names and the store no longer holds refuses where it is
-    counted, never reads as an image with no detections; a bucket record holding ``null`` is a
-    published bucket.
+    """A document its bucket names is required where it is counted.
+
+    A document a bucket record names and the store does not hold refuses where it is counted,
+    and a bucket record holding ``null`` is a published bucket.
     """
     pytest.importorskip("torch")
     from tcip_mcp.buckets import (

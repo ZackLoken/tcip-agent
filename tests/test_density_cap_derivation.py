@@ -1,13 +1,7 @@
-"""The derived object density is the 0.99 quantile of the densities of the counted regions
-holding at least one object.
+"""The derived object density is the 0.99 quantile of the occupied counted regions' densities.
 
-``derive_object_density`` is the one formula behind every frame's detection cap (the density
-times the frame's pixels, rounded up). It reads the tail of the reference's density distribution,
-not its bulk: on a skewed distribution the two are an order of magnitude apart. A frame denser
-than the quantile can still exceed its cap.
-
-The fixtures here are deliberately skewed. On a uniform distribution every quantile is the same
-number, so no fixture of that shape can distinguish the two.
+The quantile is taken over the counted regions holding at least one object. Each case reads the
+density as a cap, the density times one frame's pixels.
 """
 
 from __future__ import annotations
@@ -23,20 +17,22 @@ FRAME = 512.0 * 512.0
 
 
 def _frames(counts: list[int]) -> list:
-    """One region of :data:`FRAME` pixels per count, holding that many objects."""
+    """Return one region of :data:`FRAME` pixels per count, holding that many objects."""
     from tests._verified_checkpoint_fixtures import objects_over
 
     return [objects_over([[0.0, 0.0, 1.0, 1.0]] * n, FRAME) for n in counts]
 
 
 def _cap(counts: list[int]) -> float:
-    """The detection count the derived density gives one frame of :data:`FRAME` pixels."""
+    """Return the detection count the derived density gives one frame of :data:`FRAME` pixels."""
     return derive_object_density(_frames(counts)) * FRAME
 
 
 def test_the_density_admits_the_crowded_decile_of_a_skewed_count_distribution():
-    """Ninety ordinary scenes at 100 objects and ten crowded ones at 1000: a frame's cap has to
-    clear the crowded ones, which sit ten times above the bulk of the distribution.
+    """The density admits the crowded decile of a skewed count distribution.
+
+    With ninety ordinary scenes at 100 objects and ten crowded ones at 1000, one frame's cap is
+    1000, ten times the bulk of the distribution.
     """
     counts = [100] * 90 + [1000] * 10
 
@@ -44,16 +40,19 @@ def test_the_density_admits_the_crowded_decile_of_a_skewed_count_distribution():
 
 
 def test_the_density_on_a_uniform_count_distribution_is_unchanged_by_the_tail_rule():
-    """The companion obligation: reading the tail must not inflate the density for an ordinary
-    reference whose images all carry about the same number of objects; no floor raises a sparse
-    one.
+    """The density of a uniform count distribution is unchanged by the tail rule.
+
+    Reading the tail does not inflate the density of a reference whose images each carry 100
+    objects, and no floor raises one whose images each carry 2.
     """
     assert _cap([100] * 100) == pytest.approx(100)
     assert _cap([2] * 20) == pytest.approx(2)
 
 
 def test_the_density_reaches_toward_the_densest_image_of_a_skewed_reference():
-    """Nine sparse images (5 objects each) and one crowded one (300): the density is the 0.99
+    """The density reaches toward the densest image of a skewed reference, short of it.
+
+    Over nine sparse images (5 objects each) and one crowded one (300), the density is the 0.99
     quantile of the ten, most of the way toward the crowded image and short of it.
     """
     counts = [5] * 9 + [300]
@@ -62,7 +61,7 @@ def test_the_density_reaches_toward_the_densest_image_of_a_skewed_reference():
 
 
 def test_an_empty_reference_derives_no_density_and_refuses():
-    """No regions leave no object-bearing one, the basis a frame's cap rests on."""
+    """An empty reference derives no density and refuses, having no object-bearing region."""
     with pytest.raises(
         ValueError, match="none of the 0 counted regions is object-bearing"
     ):

@@ -1,6 +1,8 @@
-"""Launch asks each task for the data locations its own loader reads: a classification config
-names its images and its CSV and nothing else, and a detection config names its images alone,
-their own label documents answering for them.
+"""Each task's config names the data locations its loader reads.
+
+A classification config naming only its images and CSV launches and completes, one naming a
+missing CSV is refused by name, and a detection config naming its images alone passes preflight
+with no issue.
 """
 
 from __future__ import annotations
@@ -25,9 +27,10 @@ def test_a_classification_config_launches_with_images_and_csv_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The batch the loader trains on comes from ``images_dir`` and ``csv_path``
-    (``ClassificationDataset``), so a config naming only those launches through the platform's
-    own launcher, trains in the worker process and completes.
+    """A classification config naming only its images and CSV launches and completes.
+
+    It launches through the platform's own launcher, trains in a process other than this one
+    and completes.
     """
     import os
 

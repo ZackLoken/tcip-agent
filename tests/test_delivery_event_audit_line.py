@@ -1,6 +1,7 @@
-"""``deliver_csv`` writes the project-scoped ``delivery_events`` record first and the
-delivery's one audit line after it: the line names the record's ``event_id`` and nothing else,
-and a failed append raises ``AuditEntryNotWrittenError`` with the record already written.
+"""``deliver_csv`` writes one ``delivery_events`` record and one audit line naming it.
+
+The record is project-scoped. The line names the record's ``event_id`` and nothing else, and a
+failed append raises ``AuditEntryNotWrittenError`` with the record in place.
 """
 
 from __future__ import annotations
@@ -18,15 +19,17 @@ from tests.test_delivery_events import _bucket, _record
 
 
 class _AppendRefusedError(RuntimeError):
-    """Stands in for whatever stops a real append: a busy lock, a refused root, a bad key."""
+    """An append failure standing in for a busy lock, a refused root or a bad key."""
 
 
 def test_a_failed_audit_append_raises_with_the_delivery_events_record_already_written(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The record is the delivery's evidence and is written before the audit line; a dropped
-    append still reaches the caller as a raise.
+    """A failed audit append raises, with the delivery's events record in place.
+
+    The delivery raises ``AuditEntryNotWrittenError`` for ``delivery_event``, caused by the append
+    failure, and the one events record is in place.
     """
     revision = seed_confirmed_count(tmp_path / "trait_project")
     bucket = _bucket(tmp_path)
@@ -48,8 +51,10 @@ def test_a_failed_audit_append_raises_with_the_delivery_events_record_already_wr
 def test_the_audit_line_names_the_records_event_id_and_nothing_else(
     tmp_path: Path,
 ) -> None:
-    """An ordinary delivery writes one record and one audit line, a generic ``delivery_event``
-    operation whose only fact is the record's ``event_id``: the door lives in the record alone.
+    """A delivery's audit line names the record's ``event_id`` and nothing else.
+
+    An ordinary delivery writes one record, naming its door, and one audit line, a
+    ``delivery_event`` operation whose arguments hold the record's ``event_id`` alone.
     """
     from tcip_mcp import agent_identity
 

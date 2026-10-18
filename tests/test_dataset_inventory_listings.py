@@ -1,6 +1,7 @@
-"""What the resolver reports a dataset contains: capture-date buckets, the published prediction
-buckets of each date, and the difference between the subjects a registry declares and the
-subjects a date's labels hold.
+"""What the resolver reports a dataset contains.
+
+It reports capture-date buckets, the published prediction buckets of each date, and the
+difference between the subjects a registry declares and the subjects a date's labels hold.
 """
 
 from __future__ import annotations
@@ -26,8 +27,9 @@ from tests._producer_fixtures import registry_over
 def test_only_published_buckets_are_listed_under_the_date_their_record_states(
     tmp_path: Path,
 ) -> None:
-    """A prediction document no bucket record names (a half-written or staged one) is no bucket:
-    listing it would offer the breeder a model with nothing published behind it.
+    """Only published buckets are listed, each under the date its record states.
+
+    A prediction document no bucket record names is not listed.
     """
     pytest.importorskip("torch")
     from tcip_mcp.buckets import buckets_by_date
@@ -66,8 +68,8 @@ def test_capture_dates_are_the_bucket_directories_not_loose_images(
 ) -> None:
     """A date bucket is a directory under ``images/``; an image sitting directly there is not one.
 
-    The flat layout (``images/<stem>.<ext>``) is a legitimate non-dated dataset, so a loose image
-    file must never be reported as a capture date to anything that iterates dates.
+    A loose image file under ``images/`` is not listed as a capture date, and a missing dataset
+    lists none.
     """
     root = tmp_path
     (root / "images" / "2026-02-11").mkdir(parents=True)
@@ -79,7 +81,7 @@ def test_capture_dates_are_the_bucket_directories_not_loose_images(
 
 
 def _registry(root: Path) -> None:
-    """A registry declaring three subjects in an order that is not alphabetical."""
+    """Write a registry declaring three subjects in an order that is not alphabetical."""
     registry_over(
         root,
         SubjectRegistry(
@@ -93,8 +95,9 @@ def _registry(root: Path) -> None:
 
 
 def test_registry_subjects_keep_their_declared_order(tmp_path: Path) -> None:
-    """``list_subjects`` reports the registry's declared order, which is the order class ids are
-    assigned in; re-ordering it would reindex a training run's classes against its labels.
+    """``list_subjects`` reports the registry's subjects in their declared order.
+
+    A missing dataset lists none.
     """
     root = tmp_path
     _registry(root)
@@ -105,12 +108,7 @@ def test_registry_subjects_keep_their_declared_order(tmp_path: Path) -> None:
 def test_a_registry_that_will_not_decode_is_not_reported_as_no_subjects(
     tmp_path: Path,
 ) -> None:
-    """Absence and corruption are different answers on the subject registry.
-
-    Reading unreadable bytes as an empty registry hands every caller a dataset that declares
-    no subjects, which is indistinguishable from one that genuinely has none: the labels under
-    it are name-based and undecodable without it, so the read refuses instead.
-    """
+    """A subject registry that will not decode raises ``RegistryError`` from ``list_subjects``."""
     root = tmp_path
     _registry(root)
     subjects_path(root).write_bytes(b"{ this is not a registry")
@@ -124,8 +122,8 @@ def test_declared_subjects_and_subjects_labeled_on_a_date_are_not_interchangeabl
 ) -> None:
     """The date's own labels, not the registry, decide what a date offers.
 
-    A subject the registry declares but that nobody has labeled on the selected date lands the
-    user on an empty canvas, so the two lists are different facts and each has its own source.
+    The registry declares three subjects, and each date offers only the subjects its own labels
+    carry, none for a date with no labels.
     """
     root = tmp_path
     _registry(root)

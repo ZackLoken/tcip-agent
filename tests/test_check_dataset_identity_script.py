@@ -1,5 +1,7 @@
-"""Tests for tcip check-dataset-identity's outcomes: OK, CHANGED, NEVER-RECORDED, and the identity
-read at the path the project's registry holds: MOVED and GONE.
+"""Tests for the outcomes of ``tcip check-dataset-identity``.
+
+The outcomes are OK, CHANGED, NEVER-RECORDED, and the identity read at the path the project's
+registry holds: MOVED and GONE.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ def _real_dataset(root: Path) -> None:
 def _registered(
     tmp_path: Path, *, content: bool = True
 ) -> tuple[Path, Path, dict]:
-    """A project and a dataset beside it registered to it through ``register_dataset``."""
+    """Return a project and a dataset beside it registered to it through ``register_dataset``."""
     project = new_project(tmp_path / "project").root
     root = tmp_path / "dataset"
     root.mkdir()
@@ -81,8 +83,9 @@ def test_a_never_recorded_fingerprint_is_its_own_outcome(tmp_path):
 
 
 def test_the_same_identity_at_another_path_is_reported_moved(tmp_path):
-    """The identity read at the registered path is the one the checked copy carries, so the
-    dataset the registry names now also lives here.
+    """A copy carrying the identity read at the registered path is reported MOVED.
+
+    The report names the id and the path it is registered at.
     """
     project, root, result = _registered(tmp_path)
     copy = tmp_path / "copied"
@@ -99,8 +102,10 @@ def test_the_same_identity_at_another_path_is_reported_moved(tmp_path):
 
 
 def test_a_registered_path_holding_no_identity_is_reported_gone(tmp_path):
-    """The registered path is read, not compared: a dataset moved away leaves nothing readable
-    there, which is its own outcome.
+    """A registered path holding no identity is reported GONE.
+
+    A dataset moved away from its registered path is reported GONE, naming the id and that
+    path.
     """
     project, root, result = _registered(tmp_path)
     moved = tmp_path / "moved"

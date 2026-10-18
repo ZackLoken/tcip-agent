@@ -1,17 +1,8 @@
-"""Minimal end-to-end smoke tests for each task type via bespoke ``model_source`` builders.
+"""Minimal end-to-end smoke tests for each task type via ``model_source`` builders.
 
-The existing ``test_full_pipeline.py`` covers classification (synthetic) and
-detection (gated on real sample data). This file locks the
-build_model -> build_dataset -> train contract for the task types that were
-otherwise untested, on tiny synthetic data, CPU, one epoch. The assertion is
-deliberately weak: the pipeline runs to completion and produces finite losses
-and a checkpoint. That is enough to catch the regressions this repo is prone to
-(e.g. a dataset/head/collate shape mismatch).
-
-Each smoke drives one of the sibling bespoke builders in ``tests.bespoke_models``.
-
-Kept tiny (a handful of 64x64 images, 1 epoch) to stay well under the CI
-per-test timeout.
+Each training smoke runs one builder through build_model, build_dataset and train over a handful
+of 64 by 64 synthetic images on CPU, and asserts the run completes one epoch with a finite loss
+and a checkpoint; the derivation cases check the rank and class counts a CSV gives.
 """
 
 from __future__ import annotations
@@ -87,9 +78,10 @@ def _train_config(
 def _trained(
     model_source: dict, data: dict, tmp_path: Path, *, batch_size: int = 2
 ):
-    """The observation of a run of ``tmp_path`` over :func:`_train_config` at ``batch_size``,
-    opened by the launcher's own producer over the places ``data`` names with no validation side
-    and trained to its end by the child's own entry.
+    """Train a run of ``tmp_path`` over :func:`_train_config` and return its observation.
+
+    The run trains at ``batch_size``, opened by the launcher's own producer over the places
+    ``data`` names with no validation side and trained to its end by the child's own entry.
     """
     from tcip_mcp.experiments import observe
     from tests._verified_checkpoint_fixtures import worker_run
@@ -229,9 +221,10 @@ def test_ordinal_e2e(tmp_path: Path):
 
 
 def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
-    """A rank scale of 7 ranks must derive its count from the CSV, never truncate to a narrower
-    bound. crops.yml's kernel_pellicle trait is a real 1-7 scale (ranks 0-6, 7 ranks) once
-    0-indexed.
+    """An ordinal run derives its rank count from the data and trains.
+
+    A rank scale of 7 ranks derives a rank count of 7 from the CSV and no class count, and the
+    run trains to completion.
     """
     images_dir, csv_path = write_regression_dataset(
         tmp_path,
@@ -256,9 +249,9 @@ def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
 
 
 def test_ordinal_num_ranks_stated_raises(tmp_path: Path):
-    """A caller-configured num_ranks raises: the rank count is the CSV's own, so a stated one
-    (here too small, which would train the excess ranks as silent duplicates of the top rank)
-    is refused rather than compared.
+    """A caller-stated ``num_ranks`` is refused naming it.
+
+    Over a CSV of seven ranks, a stated count of five is refused.
     """
     images_dir, csv_path = write_regression_dataset(
         tmp_path,
@@ -275,9 +268,7 @@ def test_ordinal_num_ranks_stated_raises(tmp_path: Path):
 
 
 def test_classification_derives_num_classes_from_data(tmp_path: Path):
-    """A label range of 4 classes must derive its count from the CSV, never truncate to a
-    narrower bound.
-    """
+    """A label range of 4 classes derives a class count of 4 from the CSV and no rank count."""
     images_dir, csv_path = write_regression_dataset(
         tmp_path, [0.2, 0.2, 0.8, 0.8], [0, 1, 2, 3], height=IMG, width=IMG
     )

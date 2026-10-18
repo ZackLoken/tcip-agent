@@ -1,11 +1,9 @@
 """An external dataset-level COCO document becomes the dataset's per-image label documents.
 
-The imported images train through the ordinary producer with the targets the document stated, a
-crowd region keeping its flag and a run-length mask arriving as rings; every fault found before
-writing is reported together and refuses with nothing written, and the writes after that commit
-as one unit or not at all, the audit event naming what was written. The COCO documents
-here are hand-written because they are the external input the door exists for; every image,
-registry and band group they refer to comes from the platform's own producers.
+The ordinary producer's loaders serve the imported images with the targets the document stated, a
+crowd region keeping its flag and a run-length mask arriving as rings; the faults a document
+carries are reported together in one refusal with no document written, and the writes commit as
+one unit or not at all, the audit event naming what was written.
 """
 
 from __future__ import annotations
@@ -35,9 +33,10 @@ RING = [30.0, 30.0, 50.0, 30.0, 50.0, 54.0, 30.0, 54.0]
 
 
 def _dataset(tmp_path: Path, stems=STEMS) -> OpenProject:
-    """A project (``tests._web_fixtures.named_project``) holding images brought in through
-    ``ingest_images`` under one capture bucket, and a registry declaring the subject, written
-    through its own door.
+    """Return a project holding one capture bucket of images and a registry of the subject and leaf.
+
+    The project is built by ``tests._web_fixtures.named_project``, its images brought in
+    through ``ingest_images`` and its registry written through its own door.
     """
     from datetime import datetime
 
@@ -73,7 +72,12 @@ def _dataset(tmp_path: Path, stems=STEMS) -> OpenProject:
 def _document(
     path: Path, *, images=None, annotations=None, categories=None
 ) -> Path:
-    """An external COCO document: two burs as a box, one as a polygon, one image unannotated."""
+    """Write an external COCO document at ``path`` and return the path.
+
+    ``images``, ``annotations`` and ``categories`` default to the three :data:`STEMS` at
+    ``IMG`` px, a box on image 1 and a polygon on image 2 in category 7, and category 7 named the
+    subject.
+    """
     doc = {
         "images": images
         if images is not None
@@ -116,12 +120,12 @@ def _document(
 
 
 def _label(root: Path, stem: str):
-    """The key of the label document of the capture's image ``stem``."""
+    """Return the key of the label document of the capture's image ``stem``."""
     return label_key(root, DATE, stem)
 
 
 def _written(root: Path) -> list[str]:
-    """The stems of every label document the capture holds."""
+    """Return the stems of every label document the capture holds."""
     return [key.parts[-1] for key in capture_label_keys(root, DATE)]
 
 
@@ -134,7 +138,7 @@ def _import(document: Path, root: Path) -> dict:
 
 
 def _loader(task: str, root: Path):
-    """The loader the ordinary producer builds over the dataset's imported documents."""
+    """Return the loader the ordinary producer builds over the dataset's imported documents."""
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.pipelines.schemas import DataSpec
     from tests._training_values import drawn_split
@@ -155,7 +159,7 @@ def _loader(task: str, root: Path):
 
 
 def _targets(task: str, root: Path) -> dict:
-    """Each admitted image's target, read off the loader the ordinary producer builds."""
+    """Return each admitted image's target by member, off the ordinary producer's loader."""
     loader = _loader(task, root)
     return {
         loader.sample_of(key).member: loader[i][1]
@@ -164,7 +168,7 @@ def _targets(task: str, root: Path) -> dict:
 
 
 def _person_label() -> list:
-    """One leaf a person drew, stamped as the save door stamps it."""
+    """Return one leaf box stamped by ``json_io.stamped`` as drawn by ``user:breeder``."""
     return [
         json_io.stamped(
             [
@@ -182,9 +186,10 @@ def _person_label() -> list:
 def test_an_imported_documents_images_train_with_the_boxes_it_stated(
     tmp_path: Path,
 ):
-    """A detection loader over the imported documents reads back the box and the polygon's
-    extent the COCO document stated; the image it gave no annotation gets no document, so it is
-    not admitted as a negative.
+    """A detection loader over the imported documents reads back the boxes the document stated.
+
+    The loader reads back the box and the polygon's extent the COCO document stated; the image
+    it gave no annotation gets no document, so it is not admitted as a negative.
     """
     pytest.importorskip("torch")
 
@@ -205,8 +210,10 @@ def test_an_imported_documents_images_train_with_the_boxes_it_stated(
 def test_images_sitting_flat_under_images_are_no_capture_to_import_into(
     tmp_path: Path,
 ):
-    """Images placed by hand in the flat ``images/`` root are no capture: the import refuses
-    naming the capture it was given, and writes nothing.
+    """Images sitting flat under ``images/`` are no capture, and the import into them refuses.
+
+    Images placed by hand in the flat ``images/`` root are no capture: the import refuses
+    naming the capture it was given, and no label document is written.
     """
     from PIL import Image
 
@@ -240,8 +247,9 @@ def test_images_sitting_flat_under_images_are_no_capture_to_import_into(
 def test_an_imported_documents_images_train_with_the_polygons_it_stated(
     tmp_path: Path,
 ):
-    """An instance_seg loader over the imported documents rasterizes exactly the polygon the COCO
-    document stated for each image.
+    """An instance_seg loader over the imported documents rasterizes each polygon as stated.
+
+    The loader rasterizes exactly the polygon the COCO document stated for each image.
     """
     pytest.importorskip("torch")
     import numpy as np
@@ -299,9 +307,10 @@ def test_an_imported_record_keeps_the_provenance_the_document_carried_and_gains_
 def test_the_import_leaves_one_row_with_the_documents_path_and_digest(
     tmp_path: Path,
 ):
-    """Every row the import leaves in the dataset's log is counted, and there is one: the
-    library's import event. The digest is recomputed here from the document's bytes by the stated
-    convention, ``sha256(bytes)``, never through the code under test.
+    """The import leaves one log row, its event, carrying the document's path and digest.
+
+    The rows the import leaves in the dataset's log are one, the library's import event. The
+    digest is recomputed here as ``sha256`` of the document's bytes.
     """
     import hashlib
 
@@ -333,8 +342,10 @@ def test_the_import_leaves_one_row_with_the_documents_path_and_digest(
 def test_the_digest_names_the_bytes_the_labels_came_from(
     tmp_path: Path, monkeypatch
 ):
-    """The document is read once: replacing it while the import writes leaves the event's digest
-    the one of the bytes the labels were decoded from, never of a second read.
+    """The import event's digest names the bytes the labels were decoded from.
+
+    Replacing the document while the import writes leaves the event's digest that of the bytes
+    the labels were decoded from, not of the replacement.
     """
     import hashlib
 
@@ -362,8 +373,10 @@ def test_the_digest_names_the_bytes_the_labels_came_from(
 
 
 def test_every_declared_category_must_be_registered(tmp_path: Path):
-    """A category the document declares but no record uses is still a declaration the registry
-    must be able to name, and the import refuses on it by name, writing nothing.
+    """A declared category the registry cannot name is refused by name, even unused.
+
+    A category the document declares but no record uses is checked against the registry, and
+    the import refuses on it by name and writes no label document.
     """
     root = _dataset(tmp_path).root
     document = _document(
@@ -384,8 +397,10 @@ def test_every_declared_category_must_be_registered(tmp_path: Path):
 def test_a_category_name_no_subject_can_carry_is_refused_by_the_registry(
     tmp_path: Path, name
 ):
-    """A declared name is the subject its records take, so the registry answers for it: one no
-    subject can carry is named in the import's refusal, whatever its shape.
+    """A category name no subject can carry is named in the import's refusal.
+
+    An empty, a null and a list name are each refused as no subject, and no label document is
+    written.
     """
     root = _dataset(tmp_path).root
     document = _document(
@@ -426,8 +441,9 @@ def test_an_image_not_under_the_dataset_refuses_the_whole_import(
 def test_an_ordinary_image_is_named_by_its_own_file_name(
     tmp_path: Path, file_name: str
 ):
-    """Only a ``.bandgroup`` capture is tied by stem; an ordinary image the document names by
-    another file name is not the dataset's image of that stem.
+    """An ordinary image named by another file name is not the dataset's image of that stem.
+
+    The import refuses naming the file name, and no label document is written.
     """
     root = _dataset(tmp_path).root
     images = [
@@ -446,7 +462,10 @@ def test_an_ordinary_image_is_named_by_its_own_file_name(
 def test_an_existing_per_image_document_refuses_the_whole_import(
     tmp_path: Path,
 ):
-    """A label a person may have edited is never replaced by an import."""
+    """An import onto an image holding a label document refuses whole, naming the image.
+
+    The person's label document keeps its version, and the import writes no document of its own.
+    """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     made = _dataset(tmp_path)
@@ -470,8 +489,10 @@ def test_an_existing_per_image_document_refuses_the_whole_import(
 
 
 def test_an_unannotated_images_faults_still_refuse_the_import(tmp_path: Path):
-    """Validation is over every listed image, not only the annotated ones: the unannotated third
-    image's wrong frame refuses by name, and the document a person saved on it is kept.
+    """An unannotated image's fault refuses the import.
+
+    The unannotated third image's wrong frame refuses by name, and the document a person saved
+    on it is kept.
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
@@ -506,8 +527,10 @@ def test_an_unannotated_images_faults_still_refuse_the_import(tmp_path: Path):
 def test_an_unannotated_images_existing_document_is_kept_and_admits_the_import(
     tmp_path: Path,
 ):
-    """An image the document gives no annotation writes nothing, so a person's document on it
-    stands beside the import's own documents.
+    """A person's document on an image the import leaves unannotated is kept unchanged.
+
+    The import writes its two annotated images, and the person's document on the third keeps
+    its version.
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
@@ -530,7 +553,10 @@ def test_an_unannotated_images_existing_document_is_kept_and_admits_the_import(
 def test_a_frame_the_image_does_not_have_refuses_the_whole_import(
     tmp_path: Path,
 ):
-    """A document stating another size for an image drew its geometry in another pixel frame."""
+    """A document stating another frame size for an image refuses the import, naming the image.
+
+    Its geometry was drawn in another pixel frame, and no label document is written.
+    """
     root = _dataset(tmp_path).root
     images = [
         {
@@ -551,7 +577,9 @@ def test_a_frame_the_image_does_not_have_refuses_the_whole_import(
 
 
 def test_a_repeated_image_reports_every_fault_it_carries(tmp_path: Path):
-    """A second record naming the same capture, stated at another frame, is reported as both
+    """A repeated image stated at another frame is reported with both its faults.
+
+    A second record naming the same capture, stated at another frame, is reported as both
     faults: naming one does not stop the pass from asking the rest.
     """
     root = _dataset(tmp_path).root
@@ -605,8 +633,10 @@ def test_image_and_category_ids_listed_twice_refuse_by_name(tmp_path: Path):
 
 
 def test_a_record_the_writer_refuses_writes_nothing(tmp_path: Path):
-    """Every image is encoded by the writer's one encoder before the first write, so a box the
-    stored grid collapses on the second image leaves the first image unwritten too.
+    """A record the writer refuses on one image leaves no label document written.
+
+    A box the stored grid collapses on the second image refuses the import naming that image,
+    and neither image is written.
     """
     root = _dataset(tmp_path).root
     annotations = [
@@ -628,8 +658,9 @@ def test_a_record_the_writer_refuses_writes_nothing(tmp_path: Path):
 
 
 def _label_placed_before_the_writes(monkeypatch, key, annotations) -> None:
-    """A person's label landing on the document ``key`` names after the validation pass and
-    before the import's transaction opens.
+    """Arrange a person's label to land on the document ``key`` names as a transaction opens.
+
+    The patched ``ts.transaction`` writes the label on its first call, then restores itself.
     """
     real_transaction = ts.transaction
 
@@ -647,9 +678,11 @@ def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
     tmp_path: Path,
     monkeypatch,
 ):
-    """The import's writes commit as one unit: a person's label landing on the second document
+    """An import whose second document conflicts leaves no document written.
+
+    The import's writes commit as one unit: a person's label landing on the second document
     between the validation pass and the writes refuses the whole import, the label is kept, the
-    first document is never written, and no event is left.
+    first document is not written, and no event is left.
     """
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
@@ -684,8 +717,10 @@ def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
 def test_a_pass_whose_document_fails_to_encode_publishes_nothing(
     tmp_path: Path, monkeypatch
 ):
-    """A failure encoding the second document of a pass leaves no document, no bucket record and
-    no publication line: the publication commits whole or not at all.
+    """A pass whose second document fails to encode publishes nothing.
+
+    The failure leaves no document, no bucket record and no publication line: the publication
+    commits whole or not at all.
     """
     pytest.importorskip("torch")
     import tcip_mcp.pipelines.postprocessing.export as export
@@ -737,9 +772,10 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(
 def test_an_import_that_committed_no_document_leaves_no_event(
     tmp_path: Path, monkeypatch
 ):
-    """An act that committed nothing leaves no line: a valid document whose images carry no
-    annotation writes nothing, and one whose first document was claimed has written nothing
-    either.
+    """An import that committed no document leaves no import event.
+
+    A valid document whose images carry no annotation, and one whose first document is already
+    held, each leave no import line.
     """
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
@@ -797,8 +833,10 @@ def test_an_annotation_naming_no_listed_image_refuses_the_whole_import(
     "date", ["../elsewhere", "2025-09-15"], ids=["not_a_name", "no_bucket"]
 )
 def test_a_date_that_names_no_capture_refuses(tmp_path: Path, date: str):
-    """A date names the capture the images sit in; a name that is no bucket of the dataset, well
-    formed or not, has nothing to import into.
+    """A date that names no capture bucket of the dataset is refused, well formed or not.
+
+    A date names the capture the images sit in; a name that is no bucket of the dataset has
+    nothing to import into.
     """
     from tcip_mcp.tools.ingest_tools import import_coco
 
@@ -850,7 +888,9 @@ def test_a_malformed_annotations_container_refuses_by_name_through_the_tool(
 def test_a_band_grouped_capture_resolves_by_the_stem_the_document_names(
     tmp_path: Path,
 ):
-    """An external document names a grouped capture by one of its own file names; the import ties
+    """A band-grouped capture is resolved by the stem of the file name the document names.
+
+    An external document names a grouped capture by one of its own file names; the import ties
     it by stem to the ``.bandgroup`` manifest, and the written document is the capture's own.
     """
     import numpy as np
@@ -890,7 +930,7 @@ CROWD = [36.0, 34.0, 20.0, 18.0]
 
 
 def _crowd_document(tmp_path: Path) -> Path:
-    """One bur as a box and one crowd region of burs on the first image."""
+    """Write a COCO document of one bur box and one crowd region on the first image; return it."""
     return _document(
         tmp_path / "external.json",
         annotations=[
@@ -915,9 +955,11 @@ def _crowd_document(tmp_path: Path) -> Path:
 def test_a_crowd_region_imports_and_reaches_training_and_evaluation_as_one(
     tmp_path: Path,
 ):
-    """The crowd flag the document stated is written, read back, carried on the detection
-    loader's target under ``iscrowd``, and carried onto the evaluation ground truth both builders
-    form; the built-in heads are handed the target with the crowd row removed.
+    """An imported crowd region reaches the loader targets and evaluation records as one region.
+
+    The crowd flag the document stated is written, read back, carried on the detection loader's
+    target under ``iscrowd``, and carried onto the evaluation ground truth both builders form;
+    ``instance_targets`` returns the target with the crowd row removed.
     """
     torch = pytest.importorskip("torch")
     from tcip_mcp.pipelines.data.datasets import (
@@ -978,7 +1020,7 @@ def test_a_crowd_region_imports_and_reaches_training_and_evaluation_as_one(
 
 
 def _uncompressed_counts(mask) -> list[int]:
-    """COCO's uncompressed run lengths of ``mask``: column-major, starting with a run of zeros."""
+    """Return COCO's uncompressed run lengths of ``mask``, column-major, starting with zeros."""
     flat = mask.flatten(order="F").tolist()
     counts, value, run = [], 0, 0
     for pixel in flat:
@@ -1058,7 +1100,9 @@ def test_a_run_length_mask_that_yields_no_ring_refuses_by_record(
 
 
 def test_every_fault_the_document_carries_is_reported_together(tmp_path: Path):
-    """A duplicate category, an unmapped category, a wrong frame and a missing image are each
+    """Every fault the document carries is reported together in one refusal.
+
+    A duplicate category, an unmapped category, a wrong frame and a missing image are each
     independent of the others, and one refusal names all four.
     """
     root = _dataset(tmp_path).root

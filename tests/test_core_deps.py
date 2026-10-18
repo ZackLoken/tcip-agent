@@ -1,9 +1,6 @@
-"""CI trust: core runtime dependencies must be importable, not silently skipped.
+"""Core runtime dependencies import, and an absent one fails its test.
 
-If any of these is missing, the bulk of the suite would module-level ``importorskip``
-while CI still reported green (a smaller-than-expected suite passing). These tests fail
-(not skip) so a broken/incomplete environment is loud. The set mirrors tcip-mcp's declared
-dependencies: anything CI's ``pip install -e tcip-mcp[dev]`` is expected to provide.
+These tests fail, not skip, on a missing dependency.
 """
 
 import importlib
