@@ -319,7 +319,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # The PowerShell script under tools, on the host that runs it.
+  # The PowerShell script under tools, on the host that runs it. PSScriptAnalyzer is a module
+  # the windows runner image ships, so the job reads it from the image and not from the gallery.
   powershell:
     runs-on: windows-latest
     steps:
@@ -327,6 +328,4 @@ jobs:
 
       - name: PSScriptAnalyzer
         shell: pwsh
-        run: |
-          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
-          Invoke-ScriptAnalyzer -Path tools -Recurse -EnableExit
+        run: Invoke-ScriptAnalyzer -Path tools -Recurse -EnableExit
