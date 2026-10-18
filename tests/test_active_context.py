@@ -1,5 +1,7 @@
-"""view_gui_state: the agent reads the GUI state the web backend persisted for the project it acts
-on, through the same decoder the backend reopens it with.
+"""The agent reads the GUI state the web backend persisted through ``view_gui_state``.
+
+The dataset selection the agent reads for the project it acts on equals the one a reopened
+backend store holds.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ if TYPE_CHECKING:
 
 
 def _persist_a_selection(project: OpenProject) -> None:
-    """The backend's own producer: open ``project``, select a date's second image, persist."""
+    """Open ``project``, select a date's second image and persist, by the backend's own producer."""
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.web_client import selection_for
     from tcip_web.state import StateStore

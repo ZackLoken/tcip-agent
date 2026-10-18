@@ -1,10 +1,8 @@
-"""The display band-statistics primitive: the 8-bit stretch every band render goes through, the
-exact per-band ranges the bands endpoint reports, and the sampled ranges a raster too large to
-decode whole is described by.
+"""The display band-statistics primitive.
 
-The stretch tests hold the primitive to the arithmetic the band-composite route and the band
-preview renderer each display, written out here independently so the check is against the
-expression, never against the primitive itself.
+It holds the 8-bit stretch, the exact per-band ranges, and the sampled ranges of a raster read in
+windows. The stretch tests compare the primitive with the stretch arithmetic written out in this
+module.
 """
 
 from __future__ import annotations
@@ -31,8 +29,11 @@ from tcip_mcp.pipelines.band_stats import (
 
 
 def _composite_route_stretch(band, mode, orig_dtype):
-    """The per-band stretch a band composite is displayed through, band by band and independently:
-    the ``uint8`` pixels the primitive has to reproduce byte for byte.
+    """Return ``band`` stretched to uint8 under ``mode``, written out apart from the primitive.
+
+    ``none`` divides by the integer dtype's maximum, or for a float band by its maximum when
+    positive, else its negated minimum when negative, else 1; ``percent_clip`` spans the 2nd to
+    98th percentiles, and any other mode the band's min-max; the result is clipped to 0..255.
     """
     raw = band.astype(np.float64)
     if mode == "none":
@@ -55,10 +56,7 @@ def _composite_route_stretch(band, mode, orig_dtype):
 
 
 def _preview_renderer_stretch(band):
-    """The per-band stretch a throwaway band preview is written with: a min-max span with no clip
-    of its own, which is the same pixels as the composite route's ``minmax`` because a band's own
-    values can never leave its own min-max span.
-    """
+    """Return ``band`` min-max stretched to 0..255 and cast to uint8, with no clip of its own."""
     raw = band.astype(np.float64)
     lo, hi = float(raw.min()), float(raw.max())
     stretched = (
@@ -68,9 +66,10 @@ def _preview_renderer_stretch(band):
 
 
 def _bands() -> dict[str, np.ndarray]:
-    """One band per case the stretch has to survive: each integer width, a float raster, a band
-    with no spread at all, a float band whose values are negative, a float band with both signs,
-    and an all-zero float band.
+    """Return seven 7 by 5 bands, by name.
+
+    They are seeded uniform uint8 and uint16 bands, float32 standard normals scaled by 100, less
+    5 and scaled by 5, a uint16 band constant at 321, and an all-zero float32 band.
     """
     rng = np.random.default_rng(0)
     return {
@@ -104,9 +103,7 @@ def test_stretch_band_is_byte_identical_to_the_composite_display_expression(
 
 
 def test_a_none_stretch_of_an_all_negative_float_band_renders_black():
-    """A band with no positive data divides by a positive number (the magnitude of its own
-    minimum), so every pixel is negative before the clip and the render is uniformly black.
-    """
+    """A ``none`` stretch of an all-negative float band renders uniformly black."""
     band = BANDS["float32_negative"]
     assert np.array_equal(
         stretch_band(band, "none", band.dtype),
@@ -139,8 +136,11 @@ def test_stretch_band_refuses_a_mode_it_does_not_implement():
 
 
 def _derived_bounds(band, mode, orig_dtype) -> tuple[float, float]:
-    """The ``(low, high)`` a mode reads off the band itself, written out independently of the
-    primitive: what passing bounds in has to reproduce exactly.
+    """Return the ``(low, high)`` a mode reads off the band itself, written out on its own.
+
+    ``none`` reads 0 to the integer dtype's maximum, or a float band's own minimum and maximum;
+    ``percent_clip`` reads the band's :data:`DISPLAY_CLIP_PERCENTILES`; any other mode its minimum
+    and maximum.
     """
     raw = band.astype(np.float64)
     if mode == "none":
@@ -171,8 +171,10 @@ def test_bounds_in_stretch_reproduces_the_stretch_that_derives_its_own_bounds(
 def test_a_region_stretched_against_the_whole_bands_bounds_matches_that_bands_own_stretch(
     mode,
 ):
-    """The property region serving needs: two regions of one raster stretched against one bounds
-    pair are the pixels that raster's whole-view stretch would have shown there.
+    """A region stretched against the whole band's bounds matches the whole band's stretch there.
+
+    Two regions of one raster stretched against one bounds pair are the pixels that raster's
+    whole-view stretch shows there.
     """
     band = BANDS["uint16"]
     bounds = _derived_bounds(band, mode, band.dtype)
@@ -194,8 +196,9 @@ def test_a_none_stretch_of_an_integer_band_keeps_its_dtype_ceiling_whatever_boun
 
 
 def test_a_none_stretch_of_a_float_band_divides_by_the_maximum_it_is_handed():
-    """A float raster has no dtype ceiling, so a region renders against the sampled maximum of the
-    whole raster instead of against its own local one.
+    """A ``none`` stretch of a float band divides by the maximum it is handed.
+
+    Handed twice the band's own maximum, the stretch scales by that value and not the band's.
     """
     band = BANDS["float32"]
     sampled_max = float(band.max()) * 2.0
@@ -261,8 +264,10 @@ def _multiband_strip_tiff(
     channels: int = 4,
     rowsperstrip: int = 6,
 ) -> np.ndarray:
-    """A small multi-band raster the windowed strip backend serves: strip-based, contiguous
-    samples, one page, with per-band value levels a range check can tell apart.
+    """Write a seeded ``(height, width, channels)`` uint16 array to ``path`` and return it.
+
+    The values are drawn below 4096 at seed 7 and written by ``tifffile.imwrite`` at
+    ``rowsperstrip``.
     """
     rng = np.random.default_rng(7)
     arr = rng.integers(0, 4096, size=(height, width, channels)).astype(
@@ -275,8 +280,10 @@ def _multiband_strip_tiff(
 def test_the_multiband_render_input_is_the_preview_expression_band_for_band(
     tmp_path: Path,
 ):
-    """Same check for the pixels the visualization tools hand a renderer for a multi-band raster:
-    the first three bands through the preview expression, composited in memory.
+    """A multi-band raster's display pixels are its first three bands, each min-max stretched.
+
+    ``_display_of`` over a six-band raster returns the first three bands through
+    :func:`_preview_renderer_stretch`.
     """
     from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.tools.vision_tools import _display_of
@@ -293,9 +300,7 @@ def test_the_multiband_render_input_is_the_preview_expression_band_for_band(
 
 
 def _multiband_array(channels: int = 4, dtype="uint16") -> np.ndarray:
-    """A small multi-band array with a different value level per band, so a band selection that
-    reorders or repeats bands is visible in the composite.
-    """
+    """Return seeded values below 4096 plus 17 times the band index, cast to ``dtype``."""
     rng = np.random.default_rng(21)
     arr = rng.integers(0, 4096, size=(6, 5, channels))
     return (arr + np.arange(channels) * 17).astype(dtype)
@@ -396,9 +401,7 @@ def test_a_composite_refuses_a_selection_it_cannot_display():
 
 
 def _sampled(path: Path, num_channels: int, **kwargs) -> SampledBandRanges:
-    """``sampled_band_ranges`` over ``path`` opened at ``num_channels``, as the image route
-    opens it.
-    """
+    """Return ``sampled_band_ranges`` over ``path`` opened by ``raster_source.open_raster``."""
     with raster_source.open_raster(path, num_channels) as src:
         return sampled_band_ranges(src, **kwargs)
 
@@ -482,8 +485,10 @@ def test_sampled_band_ranges_repeat_exactly_for_the_same_seed(tmp_path: Path):
 def test_sampled_clip_bounds_are_exact_when_the_reservoir_holds_every_pixel_walked(
     tmp_path: Path,
 ):
-    """A reservoir at least as large as the pixels the windows cover keeps all of them, so the cut
-    points are that band's own percentiles and not an estimate of them.
+    """Sampled clip bounds are exact when the reservoir holds every pixel walked.
+
+    With a reservoir the size of the raster and windows covering all of it, each band's cut points
+    equal ``clip_bounds`` over the whole band.
     """
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
@@ -528,8 +533,10 @@ def test_sampled_clip_bounds_answer_the_percentiles_they_were_asked_for(
 def test_the_clip_reservoir_holds_at_most_the_size_it_was_given(
     tmp_path: Path, monkeypatch
 ):
-    """The bound that lets one seeded pass describe a raster of any size: the values each band's
-    cut points are read off number the reservoir's size, never the pixels the windows cover.
+    """A clip reservoir sized 500 holds 500 values of a band covering more pixels.
+
+    Over a full-coverage pass of a raster 160 wide by 200 high, each of its three bands' cut
+    points are read off 500 values.
     """
     from tcip_mcp.pipelines import band_stats
 

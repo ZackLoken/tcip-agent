@@ -1,11 +1,11 @@
 """What a record says about the harness that wrote it, proven through the real server.
 
 The MCP server learns which harness connected from the initialize handshake and mints a session id
-of its own; every audit line the process then writes carries both, and the
-tools' one HTTP push sends them as headers. These cases run the real ``tcip-pipeline`` server in
+of its own; the audit lines the process then writes carry both, and the tools' one HTTP push
+sends them as headers. These cases run the real ``tcip-pipeline`` server in
 memory over the SDK's own streams with a client that declares a name and version, call the tools
-through that handshake, and read what landed. A call made with no handshake at all is the control:
-it writes the same records with no identity, rather than a guessed one.
+through that handshake, and read what landed. A call made with no handshake at all writes its
+records with no identity.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ DECLARED = mcp_types.Implementation(name="reviewing-harness", version="1.2.3")
 
 
 def _body(result: Any) -> dict:
-    """The tool's own return value, as the server serialized it."""
+    """Return the tool's own return value, as the server serialized it."""
     if (
         isinstance(result.structured_content, dict)
         and "result" not in result.structured_content
@@ -49,8 +49,9 @@ def call_through_handshake(
     *,
     bound: BoundProject | None,
 ) -> list[dict]:
-    """Run the real server in memory for ``bound``, complete a handshake as ``declared``, make
-    ``calls`` in order, and hand back each tool's return value.
+    """Make ``calls`` in order through a handshake as ``declared`` and return each tool's value.
+
+    The real server runs in memory for ``bound``.
     """
     return [
         _body(result)
@@ -64,9 +65,10 @@ def results_through_handshake(
     *,
     bound: BoundProject | None,
 ) -> list[Any]:
-    """Run the real server in memory, built for ``bound`` (``None``: for no project), complete a
-    handshake as ``declared``, make ``calls`` in order, and hand back each call's result as the
-    server sent it, a refused call's error included.
+    """Make ``calls`` in order through a handshake as ``declared`` and return each call's result.
+
+    The real server runs in memory, built for ``bound`` (``None``: for no project). Each result
+    is returned as the server sent it, a refused call's error included.
     """
 
     async def run() -> list[Any]:
@@ -149,9 +151,7 @@ def test_two_handshakes_in_two_runs_mint_two_sessions(
 
 
 def test_a_call_with_no_handshake_records_no_identity(project: Path) -> None:
-    """The control: the web backend, a script and this test process import the tools without a
-    handshake, and their lines keep the shape they always had.
-    """
+    """A call with no handshake writes an audit line carrying no identity field."""
     from tcip_mcp.tools.meta_tools import report_friction
 
     report_friction(project, "unexpected_behavior", "no handshake")
@@ -167,7 +167,9 @@ def test_a_trait_proposed_through_a_handshake_is_named_by_its_audit_line(
     project: Path,
     bound,
 ) -> None:
-    """The entry travels as the tool's declared input schema, JSON over the real server; the
+    """A trait proposed through a handshake is named by its audit line, never by its revision.
+
+    The entry travels as the tool's declared input schema, JSON over the real server; the
     proposal's own audit line names the harness, and the revision carries no copy of it.
     """
     entry = fx.with_operationalization(
@@ -220,8 +222,9 @@ class _CapturingResponse:
 
 @pytest.fixture
 def captured_requests(monkeypatch: pytest.MonkeyPatch, project: Path) -> list:
-    """Every ``urllib`` request the tools' push makes, with a backend recorded as serving the
-    workspace and answered as up.
+    """Return the list every ``urllib`` request the tools' push makes is captured into.
+
+    A backend is recorded as serving the workspace, and every request is answered as up.
     """
     import urllib.request
 

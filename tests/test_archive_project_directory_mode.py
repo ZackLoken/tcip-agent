@@ -1,5 +1,7 @@
-"""``archive_project``'s directory-tree mode: the same bundle ``output_path`` zips, written
-instead as a directory an ``import_project`` run reads back exactly like a ZIP.
+"""``archive_project``'s directory-tree mode.
+
+It writes the bundle ``output_path`` zips as a directory, which ``import_project`` reads back
+like a ZIP.
 """
 
 from __future__ import annotations
@@ -42,9 +44,11 @@ def test_archive_project_refuses_a_zip_destination_inside_the_project_or_already
     tmp_path,
     monkeypatch,
 ):
-    """The ZIP form takes the directory form's refusals: a destination inside the project would
-    bundle its own truncated self, and a written archive is never written over; a relative path
-    names a location under the project, never under wherever the process runs.
+    """``archive_project`` refuses a ZIP destination inside the project or over a written archive.
+
+    The ZIP form takes the directory form's refusals: a destination inside the project is
+    refused, and a written archive is left byte for byte as it was; a relative path names a
+    location under the project, not under the process's working directory.
     """
     root = one_labeled_capture(tmp_path / "project")
     outside = tmp_path / "bundle.zip"
@@ -94,8 +98,9 @@ def test_archive_project_directory_mode_admits_valid_work(tmp_path):
 def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_trip(
     tmp_path,
 ):
-    """A bundle written as a tree and imported recovers a project, its band-group manifest and
-    its multi-band-file capture included.
+    """A bundle written as a tree and imported recovers the project's records and files.
+
+    The recovered project includes its band-group manifest and its multi-band-file capture.
     """
     from tcip_mcp.tools.project_tools import (
         initialize_project,
@@ -166,9 +171,10 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
 
 
 def _populate_project(src: Path) -> tuple[Path, Path]:
-    """Populate an already-initialized project with a minimal image/label/registry, a
-    multispectral capture's band-group manifest, and a sensor's own multi-band file, without
-    re-creating ``.tcip``. Returns the manifest path and the multi-band file path.
+    """Populate an initialized project without re-creating ``.tcip``.
+
+    It writes a minimal image/label/registry, a multispectral capture's band-group manifest, and
+    a sensor's own multi-band file. Returns the manifest path and the multi-band file path.
     """
     from PIL import Image
 

@@ -1,7 +1,8 @@
-"""Run and checkpoint fixtures built through the platform's own producers: a run the launcher's
-own producer resolves and opens, run by the child's own entry to the final status it writes (whose
-completion registers its checkpoint), and a foreign checkpoint registered through
-``register_model``.
+"""Run and checkpoint fixtures built through the platform's own producers.
+
+They hold a run the launcher's own producer resolves and opens, run by the child's own entry to
+the final status it writes (whose completion registers its checkpoint), and a foreign checkpoint
+registered through ``register_model``.
 """
 
 from __future__ import annotations
@@ -33,8 +34,8 @@ SCOPED_DATA = {
     "scope": {"subject": "bud"},
     "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
 }
-"""A three-band detection run's data section, stating the one subject it is scoped to and the
-seed its own draw is made at; the admission reads the attributes the registry declares for it."""
+"""A three-band detection run's data section, scoped to ``bud`` and drawing its own split at a
+0.15 validation ratio grouped by tile prefix."""
 
 BUILT_DETECTOR: dict[str, Any] = {
     "builder": BESPOKE_DETECTION,
@@ -51,14 +52,12 @@ SAVE_A_SECOND_CHECKPOINT = (
 
 
 def built_detector(**builder_kwargs: Any) -> dict:
-    """:data:`BUILT_DETECTOR` with ``builder_kwargs`` as its builder keywords."""
+    """Return :data:`BUILT_DETECTOR` with ``builder_kwargs`` as its builder keywords."""
     return {**BUILT_DETECTOR, "builder_kwargs": builder_kwargs}
 
 
 def detector_declaring(*files: str) -> dict:
-    """:data:`BUILT_DETECTOR` whose ``source_files`` also declare ``files``, the modules of the
-    loop a test's run names beside it.
-    """
+    """Return :data:`BUILT_DETECTOR` whose ``source_files`` also declare ``files``."""
     return {
         **BUILT_DETECTOR,
         "source_files": [*BUILT_DETECTOR["source_files"], *files],
@@ -74,10 +73,12 @@ def detection_images(
     values: dict[str, str] | None = None,
     registry: Any = None,
 ) -> dict:
-    """A tiny detection dataset rooted at ``where``: ``n`` three-band frames, each label document
-    holding one box (``polygons``: one square polygon) of ``scope``'s subject, carrying
-    ``values`` as its attribute values, and ``registry`` as the dataset's subject registry when
-    one is given. Returns the ``images_dir`` a data section names it by.
+    """Write ``n`` labeled frames under ``where`` through ``seed_labeled_images``.
+
+    The frames go to ``where/images/<undated>`` at 64 by 48, each labeled with one annotation of
+    ``scope``'s subject on the box (8, 8, 24, 24), or that square as a polygon when
+    ``polygons``, carrying ``values`` as its attributes. ``registry``, when given, first
+    replaces ``where``'s subject registry. Returns ``{"images_dir": ...}``.
     """
     from tcip_annotation.state import Annotation, BBox, Polygon
     from tests._producer_fixtures import registry_over, seed_labeled_images
@@ -105,9 +106,11 @@ def detection_images(
 
 
 def table_images(where: Path, *, n: int = 2) -> dict:
-    """The ``images_dir`` and ``labels_dir`` a data section names a tiny table-labeled dataset
-    under ``where`` by: ``n`` 64x48 frames of distinct intensities, labeled alternately 0 and 1
-    (:func:`~tests.tiny_trainer_fixtures.write_regression_dataset`).
+    """Write a tiny table-labeled dataset under ``where``.
+
+    :func:`~tests.tiny_trainer_fixtures.write_regression_dataset` writes ``n`` frames 64 wide by
+    48 high at ``distinct_intensities(n)``, labeled ``i % 2``. Returns its ``images_dir`` and
+    ``labels_dir``.
     """
     from tests.tiny_trainer_fixtures import (
         distinct_intensities,
@@ -132,10 +135,11 @@ def detection_config(
     split: dict | None = None,
     **config: Any,
 ) -> dict:
-    """A :func:`~tests._chain_fixtures.training_config` of ``model_source`` (by default
-    :data:`BUILT_DETECTOR`) under ``project`` over two :func:`detection_images` frames under
-    ``where``, scoped as :data:`SCOPED_DATA` and drawing ``split`` when one is given, with
-    ``config``'s keys in place of their own.
+    """Return a :func:`~tests._chain_fixtures.training_config` over two detection frames.
+
+    The config names ``model_source`` (by default :data:`BUILT_DETECTOR`) under ``project``
+    over two :func:`detection_images` frames under ``where``, scoped as :data:`SCOPED_DATA` and
+    drawing ``split`` when one is given, with ``config``'s keys in place of their own.
     """
     from tests._chain_fixtures import training_config
 
@@ -152,10 +156,7 @@ def detection_config(
 
 
 def fixture_data_dir(root: str | Path, name: str) -> Path:
-    """Where a fixture run under the project ``root`` keeps the images it trains on: a directory
-    beside the project named after it, so the project's own tree holds only what the platform
-    wrote.
-    """
+    """Return ``<root>-data/<name>``, a directory beside the project ``root`` for fixture images."""
     base = Path(root)
     return base.parent / f"{base.name}-data" / name
 
@@ -167,9 +168,10 @@ def opened_run(
     experiment_id: str | None = None,
     **facts: Any,
 ) -> Path:
-    """A run directory under the project ``root`` over ``config`` validated, its sources staged
-    once (``model_build.staged_sources``), resolved by the launcher's own producer
-    (``split_construction.resolve_run``) and opened by its own writer
+    """Open a run directory under the project ``root`` over ``config`` validated.
+
+    Its sources are staged a single time (``model_build.staged_sources``), resolved by the
+    launcher's own producer (``split_construction.resolve_run``) and opened by its own writer
     (``training_tools.open_run``); ``facts`` are ``open_run``'s other keywords. Returns the
     directory.
     """
@@ -208,9 +210,10 @@ arguments."""
 
 
 def opened_sweep(root: str | Path, base_config: dict, **given: Any) -> Path:
-    """A sweep directory under the project ``root`` opened by the sweep door's own producer
-    (``training_tools.open_sweep``) over ``base_config``, :data:`SWEEP_ARGUMENTS` with ``given``
-    laid over them. Returns the directory; its trials open through ``training_tools.open_trial``.
+    """Open a sweep directory under the project ``root`` through the sweep door's own producer.
+
+    ``training_tools.open_sweep`` opens it over ``base_config``, :data:`SWEEP_ARGUMENTS` with
+    ``given`` laid over them. Returns the directory.
     """
     from tcip_mcp.tools.training_tools import open_sweep
 
@@ -227,8 +230,9 @@ def opened_sweep(root: str | Path, base_config: dict, **given: Any) -> Path:
 
 
 def partition_side(partition: dict, side: str) -> list[str]:
-    """The members a resolved partition records on ``side``, sorted, read through the platform's
-    own partition reader.
+    """Return the members a resolved partition records on ``side``, sorted.
+
+    They are read through ``split_construction.partition_samples``.
     """
     from tcip_mcp.pipelines.data.split_construction import partition_samples
 
@@ -263,21 +267,21 @@ def finished_run(
     registry: Any = None,
     **config: Any,
 ) -> Path:
-    """A run under ``root`` opened by :func:`opened_run` over two frames of its own (unless
-    ``data`` names its own ``images_dir``): :func:`detection_images` of its scope for a detection
-    model, polygons for an ``instance_seg`` one, and :func:`table_images` for any other task; run
-    by the child's own entry
-    (``subprocess_worker.run_directory``) to the
-    final status it writes. ``training_source`` is its body, by default one logging ``rows``
-    (each an ``epoch`` plus its metrics) and saving the model its config builds under its seed
-    with ``metrics`` as its checkpoint metrics, which completes it; ``seed`` states that seed
-    (the sample config's when unset); ``wall_clock_passed`` launches it with a wall clock it has
-    passed by the time it ends, and ``cancel_requested`` requests its cancellation before it
-    starts.
+    """Open a run under ``root`` and run it by the child's own entry to its final status.
+
+    :func:`opened_run` opens it over two frames of its own (unless ``data`` names its own
+    ``images_dir``): :func:`detection_images` of its scope for a detection model, polygons for an
+    ``instance_seg`` one, and :func:`table_images` for any other task; the child's own entry
+    (``subprocess_worker.run_directory``) runs it to the final status it writes.
+    ``training_source`` is its body, by default one logging ``rows`` (each an ``epoch`` plus its
+    metrics) and saving the model its config builds under its seed with ``metrics`` as its
+    checkpoint metrics; ``seed`` states that seed (the sample config's when unset);
+    ``wall_clock_passed`` opens it with ``max_wall_clock_seconds`` 1e-9, and
+    ``cancel_requested`` requests its cancellation before the entry runs it.
     ``model_source`` defaults to :data:`BUILT_DETECTOR` and ``data`` to :data:`SCOPED_DATA` for a
     detection or instance_seg model, three bands otherwise; ``registry`` is the subject registry
-    its own frames' dataset declares, so its admission records that registry's attributes. A run
-    drawing its own split draws it at ``data.split.seed`` 0 unless ``data`` states one, and
+    its own frames' dataset declares. A run naming no selection draws its split at validation
+    ratio 0.15, grouped by tile prefix, at seed 0, with ``data.split`` over that, and
     ``config``'s keys take the place of its config's own. Returns the run directory.
     """
     from tcip_mcp import experiments
@@ -342,9 +346,10 @@ def resolved_run(
     task: str = "detection",
     experiment_id: str | None = None,
 ) -> Path:
-    """A run under ``root`` of a ``task`` model (:func:`unbuilt_source`) opened by
-    :func:`opened_run` over ``data``, whose launch record holds the data section, partition and
-    trait revision the launcher's producer resolved; no body runs. Returns the run directory.
+    """Open a run under ``root`` of a ``task`` model (:func:`unbuilt_source`) and run no body.
+
+    :func:`opened_run` opens it over a :func:`~tests._chain_fixtures.training_config` with
+    ``data`` as its data section. Returns the run directory.
     """
     return opened_run(
         root,
@@ -354,9 +359,10 @@ def resolved_run(
 
 
 def unbuilt_source(task: str) -> dict:
-    """The ``model_source`` of a ``task`` run no body ever builds a model for: the tiny detection
-    builder named for a run that only resolves and records, normalizing by the statistics of
-    the frames it trains on (:data:`~tests._chain_fixtures.FRAME_STATISTICS`).
+    """Return a ``task`` ``model_source`` naming the tiny detection builder.
+
+    Its normalization is the statistics of the train side's frames
+    (:data:`~tests._chain_fixtures.FRAME_STATISTICS`).
     """
     return {
         "builder": BESPOKE_DETECTION,
@@ -369,9 +375,10 @@ def unbuilt_source(task: str) -> dict:
 def worker_run(
     root: str | Path, config: dict, *, experiment_id: str | None = None
 ) -> Path:
-    """A run under ``root`` opened by :func:`opened_run` over ``config`` and run in-process
-    through the child's own entry (``subprocess_worker.run_directory``): its loaders built from
-    its record, its body run, its final status written. Returns the run directory.
+    """Open a run under ``root`` over ``config`` and run it in-process through the child's entry.
+
+    :func:`opened_run` opens it and ``subprocess_worker.run_directory`` runs it: its loaders
+    built from its record, its body run, its final status written. Returns the run directory.
     """
     from tcip_mcp.pipelines.training.subprocess_worker import run_directory
 
@@ -383,8 +390,10 @@ def worker_run(
 def run_to_end(
     project: str | Path, experiment_id: str, *, seconds: float = 120
 ) -> dict:
-    """The row ``monitor_training`` answers for ``experiment_id`` once its state is terminal,
-    polled for at most ``seconds``; fails the test naming the last row read otherwise.
+    """Return the row ``monitor_training`` answers for ``experiment_id`` when it is terminal.
+
+    The row is polled for at most ``seconds``; the test fails naming the last row read
+    otherwise.
     """
     import time
 
@@ -404,8 +413,9 @@ def run_to_end(
 
 
 def registered_checkpoint(project_root: str | Path, **kwargs: Any) -> str:
-    """The path of the checkpoint a :func:`finished_run` under ``project_root`` registered by
-    completing (``kwargs`` are its own).
+    """Return the path of the checkpoint a :func:`finished_run` registered by completing.
+
+    The run is under ``project_root``; ``kwargs`` are its own.
     """
     from tcip_mcp.experiments import observe
 
@@ -418,9 +428,10 @@ def registered_checkpoint(project_root: str | Path, **kwargs: Any) -> str:
 def foreign_checkpoint(
     project_root: str | Path, *, name: str | None = None
 ) -> str:
-    """A :func:`secondary_checkpoint` of ``project_root`` registered into it under ``name`` (by
-    default one naming the run that saved it) through ``register_model``'s explicit mode, so its
-    registry entry names no producing run; its path.
+    """Register a :func:`secondary_checkpoint` of ``project_root`` into it and return its path.
+
+    It is registered under ``name`` (by default ``model-<run directory name>``) through
+    ``register_model``'s explicit mode.
     """
     path = secondary_checkpoint(Path(project_root))
     register_checkpoint(
@@ -430,11 +441,12 @@ def foreign_checkpoint(
 
 
 def secondary_checkpoint(project_root: Path, **config: Any) -> str:
-    """The path of a checkpoint no completion registered: the second one a :func:`finished_run`
-    of ``project_root`` (``config``'s keys taking the place of its config's own) saved through its
-    own writer (``TrainContext.save_checkpoint``) beside the deliverable its completion
-    registered. It builds wherever that run is, in ``project_root`` or a project the run is
-    carried into whole.
+    """Return the path of a checkpoint no completion registered.
+
+    It is the second one a :func:`finished_run` of ``project_root`` (``config``'s keys taking
+    the place of its config's own) saved through its own writer
+    (``TrainContext.save_checkpoint``) under :data:`~tests.bespoke_models.SECOND_CHECKPOINT_TAG`,
+    beside the deliverable its completion registered.
     """
     from tcip_mcp.pipelines.training.generic_trainer import checkpoint_path
     from tests.bespoke_models import SECOND_CHECKPOINT_TAG
@@ -450,10 +462,11 @@ _PRODUCED: dict[str, bytes] = {}
 
 
 def produced_checkpoint(path: Path, content: str) -> Path:
-    """A checkpoint at ``path`` that a run completed under a root of its own
-    (:func:`registered_checkpoint`), one run per ``content`` for the session: equal content
-    writes equal bytes, distinct content distinct bytes. Its config binds that run's snapshot,
-    which no project holds, so its spec refuses wherever it is registered. Returns ``path``.
+    """Write at ``path`` a checkpoint that a run completed under a root of its own.
+
+    The bytes are a :func:`registered_checkpoint`'s from a temporary project, produced once per
+    ``content`` for the session and reused for the same ``content``; ``content`` itself is not
+    written into them. Returns ``path``.
     """
     import tempfile
 
@@ -473,8 +486,9 @@ def produced_checkpoint(path: Path, content: str) -> Path:
 def register_checkpoint(
     project_root: str | Path, path: str, *, name: str
 ) -> None:
-    """Register the checkpoint at ``path`` into ``project_root`` under ``name`` through
-    ``register_model``'s explicit mode, asserting it admitted it.
+    """Register the checkpoint at ``path`` into ``project_root`` under ``name``.
+
+    The registration goes through ``register_model``'s explicit mode, asserting it admitted it.
     """
     from tcip_mcp.tools.model_tools import register_model
 
@@ -486,8 +500,9 @@ _PROJECT_CHECKPOINTS: dict[str, str] = {}
 
 
 def project_checkpoint(project_root: str | Path, **kwargs: Any) -> str:
-    """One :func:`registered_checkpoint` per project root and ``kwargs``, made on first call and
-    answered again after.
+    """Return one :func:`registered_checkpoint` per project root and ``kwargs``.
+
+    It is made on first call and answered again after.
     """
     root = Path(project_root)
     key = f"{root}|{sorted(kwargs.items())!r}"
@@ -497,7 +512,7 @@ def project_checkpoint(project_root: str | Path, **kwargs: Any) -> str:
 
 
 def verified_checkpoint(project_root: str | Path, **kwargs: Any):
-    """The registry's own ``VerifiedCheckpoint`` over :func:`project_checkpoint`'s checkpoint."""
+    """Return the registry's own ``VerifiedCheckpoint`` over :func:`project_checkpoint`'s."""
     from tcip_mcp.model_registry import load_registered_checkpoint
 
     return load_registered_checkpoint(
@@ -506,30 +521,31 @@ def verified_checkpoint(project_root: str | Path, **kwargs: Any):
 
 
 SAMPLE_CROSS_TILE_NMS = 0.45
-"""A sample IoU cross-tile merge threshold a test's tiled pass states."""
+"""A sample IoU cross-tile merge threshold for a tiled pass."""
 SAMPLE_CONF = 0.4
-"""A sample confidence a test's detector pass states."""
+"""A sample confidence for a detector pass."""
 SAMPLE_OVERLAP = 0.25
-"""A sample tile overlap a test's tiled pass states."""
+"""A sample tile overlap for a tiled pass."""
 SAMPLE_DETECTOR_PASS = {
     "conf": SAMPLE_CONF,
     "postprocess": "nms",
     "cross_tile_nms": SAMPLE_CROSS_TILE_NMS,
     "rationale": RATIONALE,
 }
-"""The execution values a test's detector pass states, by ``execution.Stated`` field."""
+"""Sample execution values for a detector pass, by ``execution.Stated`` field."""
 SAMPLE_INSTANCE_SEG_PASS = {
     **SAMPLE_DETECTOR_PASS,
     "masks": True,
     "mask_cut": MASK_CUT,
 }
-"""The execution values a test's instance segmentation pass states: a detector's, that it
-collects masks, and the mask cut it cuts them by."""
+"""Sample execution values for an instance segmentation pass: a detector's, ``masks`` on, and
+the sample mask cut."""
 
 
 def objects_over(boxes: list[list[float]], area: float):
-    """The region ``datasets.object_region`` makes of one-class objects at the xyxy ``boxes``, none
-    a crowd region, over ``area`` pixels.
+    """Return the region ``datasets.object_region`` makes of one-class objects at ``boxes``.
+
+    ``boxes`` are xyxy, none a crowd region, over ``area`` pixels.
     """
     from tcip_mcp.pipelines.data.datasets import object_region
 
@@ -551,10 +567,11 @@ def tiled_record(
     tile_resize: tuple[int, int] | None = None,
     cross_tile_nms: float = SAMPLE_CROSS_TILE_NMS,
 ):
-    """A detector's tiled execution record at ``tile_size``, ``overlap`` and ``tile_resize``
-    (each stated), at ``conf``, merging by NMS at the stated ``cross_tile_nms``, its density
-    derived from a reference counting a hundred objects in one tile, built by the producer a pass
-    builds its own with (``execution.execution_record``).
+    """Return a detector's tiled execution record at ``tile_size``, ``overlap`` and ``tile_resize``.
+
+    Each of those is stated; the record states ``conf`` and a merge by NMS at the stated
+    ``cross_tile_nms``, its density derived from a reference counting a hundred objects in one
+    tile, built by ``execution.execution_record``.
     """
     from types import SimpleNamespace
 
@@ -595,9 +612,10 @@ def predicted_over(
     device: str | None = None,
     **stated: Any,
 ):
-    """The pass ``run_inference`` prepares for the detector registered at ``checkpoint_path``
-    over ``images_dir`` (``execution.prepare`` under the ``stated`` execution values over
-    :data:`SAMPLE_DETECTOR_PASS`, its density the checkpoint's own), run without publishing:
+    """Prepare and run a pass of the detector registered at ``checkpoint_path``, publishing nothing.
+
+    The pass reads ``images_dir`` (``execution.prepare`` under the ``stated`` execution values
+    over :data:`SAMPLE_DETECTOR_PASS`) and predicts each of its paths. Returns
     ``(pass, results)``.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -613,8 +631,10 @@ def predicted_over(
 
 
 def completed_checkpoint(run_dir: Path) -> dict | None:
-    """The checkpoint ``run_dir``'s final status completed with, its ``path`` beside what it says
-    of itself (``model_registry.entry_facts``), or ``None`` when the run did not complete one.
+    """Return the checkpoint ``run_dir``'s final status completed with.
+
+    The checkpoint's ``path`` stands beside what it says of itself
+    (``model_registry.entry_facts``); ``None`` when the run did not complete one.
     """
     from tcip_mcp.experiments import observe, project_of_run
     from tcip_mcp.model_registry import entry_facts, run_entry

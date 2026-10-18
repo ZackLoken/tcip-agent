@@ -1,6 +1,8 @@
-"""The test suite, the root of the repository its tests read files from, the launcher of a child
-test session, the browser's sources, the names the person rule is tested on, and the reader of the
-CSV files its tests deliver.
+"""The test suite and the helpers its tests share.
+
+It carries the root of the repository its tests read files from, the launcher of a child test
+session, the browser's sources, the names the person rule is tested on, and the reader of the CSV
+files its tests deliver.
 """
 
 import csv
@@ -20,12 +22,11 @@ def child_pytest(
     timeout: float,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
-    """Run pytest in a child process over ``test_file`` with ``pytest_args``, from the repository
-    root, under ``env`` (the parent's when ``None``), bounded by ``timeout`` seconds, its output
-    captured as text.
+    """Run pytest in a child process over ``test_file`` with ``pytest_args``.
 
-    The child's root is ``tmp_path`` and its temporary root :func:`child_basetemp`, both inside
-    the calling test's own. The cache provider is off.
+    The child runs from the repository root, under ``env`` (the parent's when ``None``), bounded
+    by ``timeout`` seconds, its output captured as text. The child's root is ``tmp_path`` and
+    its temporary root :func:`child_basetemp` of ``tmp_path``. The cache provider is off.
     """
     return subprocess.run(
         [
@@ -51,7 +52,7 @@ def child_pytest(
 
 
 def child_basetemp(tmp_path: Path) -> Path:
-    """The temporary root :func:`child_pytest` pins a child session under ``tmp_path`` to."""
+    """Return ``tmp_path / "child-basetemp"``, a child session's temporary root."""
     return tmp_path / "child-basetemp"
 
 
@@ -64,13 +65,13 @@ _PERSON_NAMES = json.loads(
 ADMITTED_NAMES: list[tuple[str, str]] = [
     (s, r) for s, r in _PERSON_NAMES["admitted"]
 ]
-"""Each name the person rule admits, with the name it records; the browser's tests read the
-same list."""
+"""The names the browser's ``test/personNames.json`` lists as admitted, each with the name it
+records."""
 REFUSED_NAMES: list[str] = _PERSON_NAMES["refused"]
-"""Each string the person rule refuses as naming no one."""
+"""The strings the browser's ``test/personNames.json`` lists as refused for naming no one."""
 
 
 def csv_rows(path: str | Path) -> list[dict]:
-    """The rows of the UTF-8 CSV file at ``path``, each keyed by its header."""
+    """Return the rows of the UTF-8 CSV file at ``path``, each keyed by its header."""
     with Path(path).open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))

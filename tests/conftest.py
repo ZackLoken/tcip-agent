@@ -27,7 +27,7 @@ __all__ = [
 
 @pytest.fixture(scope="session", autouse=True)
 def _pin_torch_single_thread():
-    """Pin torch to one intra-op thread for the test session, when torch is installed."""
+    """Default ``OMP_NUM_THREADS`` to 1 and pin torch, when installed, to one intra-op thread."""
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     try:
         import torch
@@ -38,10 +38,7 @@ def _pin_torch_single_thread():
 
 @pytest.fixture(scope="session", autouse=True)
 def _import_ray_before_any_popen_substitute():
-    """Import Ray's process launcher, when Ray is installed, before the session's first test
-    replaces ``subprocess.Popen``, so the ``Popen`` subclass it defines at import binds the
-    real class for the rest of the worker.
-    """
+    """Import ``ray._private.services`` at the session's start, when Ray is installed."""
     try:
         import ray._private.services  # noqa: F401
     except ImportError:
@@ -59,12 +56,9 @@ def _stop_leaked_tensorboards():
 
 
 def pytest_collection_modifyitems(config, items):
-    """Guardrail: fail loudly when far fewer tests collect than expected.
+    """Refuse a collection of fewer items than ``TCIP_MIN_TESTS`` names, when it is set.
 
-    Catches the failure mode where a missing dependency makes ~15 files module-level
-    ``importorskip`` at collection time, shrinking the suite, while CI still reports
-    green. CI sets ``TCIP_MIN_TESTS`` to a floor safely below the real count; a large
-    shortfall means a core dep (torch/torchvision/pycocotools/...) is absent.
+    The refusal is a ``pytest.UsageError`` naming the count collected and the floor.
     """
     floor = os.environ.get("TCIP_MIN_TESTS")
     if floor and len(items) < int(floor):
@@ -78,11 +72,11 @@ def pytest_collection_modifyitems(config, items):
 def _backend(
     tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRequest
 ) -> Iterator[tuple[Path, TestClient]]:
-    """Each test's own fresh workspace and a client of the web backend serving it
-    (``tests._web_fixtures.backend_session``). The workspace's root is removed of its contents
-    after a test that passed under the ``failed`` retention policy, the way pytest's own
-    ``tmp_path`` is, and kept after one that failed; the emptied root itself stays, so a
-    numbered name is never handed to a second test in the session.
+    """Yield each test's own fresh workspace and a client of the web backend serving it.
+
+    The backend is ``tests._web_fixtures.backend_session``'s. The workspace's root is emptied
+    after a test that passed under the ``failed`` retention policy and kept whole after one that
+    failed; the emptied root itself stays.
     """
     from _pytest.tmpdir import tmppath_result_key
 
@@ -106,11 +100,7 @@ def _backend(
 
 @pytest.fixture
 def tmp_path(_backend: tuple[Path, TestClient]) -> Path:
-    """Each test's ``tmp_path`` is ``<workspace>/project`` inside its own workspace
-    (:func:`_backend`). A refusal case uses a directory beside the workspace
-    (``tmp_path_factory.mktemp``); a test of the additive roots starts the backend with them
-    itself.
-    """
+    """Make and return ``<workspace>/project`` in :func:`_backend`'s workspace as ``tmp_path``."""
     project = _backend[0] / "project"
     project.mkdir()
     return project
@@ -118,16 +108,14 @@ def tmp_path(_backend: tuple[Path, TestClient]) -> Path:
 
 @pytest.fixture(autouse=True)
 def _own_workspace(tmp_path: Path) -> None:
-    """Give every test its own workspace, whether or not it names ``tmp_path``, so a record kept
-    under the workspace root (the backend's port, the last-opened pointer) never reaches the next
-    test.
-    """
+    """Give every test its own workspace, whether or not it names ``tmp_path``."""
 
 
 @pytest.fixture
 def made(tmp_path: Path):
-    """``tmp_path`` made a project through the platform's own creation door
-    (``tests._web_fixtures.new_project``).
+    """Make ``tmp_path`` a project through the platform's own creation door.
+
+    The door is reached through ``tests._web_fixtures.new_project``.
     """
     from tests._web_fixtures import new_project
 
@@ -136,13 +124,13 @@ def made(tmp_path: Path):
 
 @pytest.fixture
 def project(made) -> Path:
-    """:func:`made`'s directory."""
+    """Return :func:`made`'s directory."""
     return made.root
 
 
 @pytest.fixture
 def bound(made):
-    """:func:`made` as an MCP server started for it binds it (``tests._web_fixtures.bound_to``)."""
+    """Return :func:`made` as a ``BoundProject`` (``tests._web_fixtures.bound_to``)."""
     from tests._web_fixtures import bound_to
 
     return bound_to(made)
@@ -150,8 +138,9 @@ def bound(made):
 
 @pytest.fixture
 def opened(tmp_path: Path):
-    """``tmp_path`` made a project and open in the web backend, the way the picker's open
-    leaves it (``tests._web_fixtures.open_new_project``).
+    """Make ``tmp_path`` a project and open it in the web backend.
+
+    It is opened by ``tests._web_fixtures.open_new_project``.
     """
     from tests._web_fixtures import open_new_project
 
@@ -160,27 +149,28 @@ def opened(tmp_path: Path):
 
 @pytest.fixture
 def opened_project(opened) -> Path:
-    """:func:`opened`'s directory."""
+    """Return :func:`opened`'s directory."""
     return opened.root
 
 
 @pytest.fixture
 def client(_backend: tuple[Path, TestClient]) -> TestClient:
-    """A client of the web backend serving this test's workspace (:func:`_backend`), at the
-    loopback address a browser on this machine uses.
+    """Return a client of the web backend serving this test's workspace (:func:`_backend`).
+
+    The client's base URL is ``http://127.0.0.1``.
     """
     return _backend[1]
 
 
 @pytest.fixture
 def opened_client(opened_project: Path, client):
-    """:func:`client` with :func:`opened_project` open in the backend."""
+    """Return :func:`client` with :func:`opened_project` open in the backend."""
     return client
 
 
 @pytest.fixture
 def tb_launches(monkeypatch) -> list[str]:
-    """Record every logdir handed to ``launch_tensorboard`` instead of starting a real one."""
+    """Record every logdir handed to ``launch_tensorboard``, starting no TensorBoard."""
     calls: list[str] = []
 
     def fake_launch(logdir: str) -> dict:
@@ -203,10 +193,7 @@ def tb_launches(monkeypatch) -> list[str]:
 
 @pytest.fixture
 def seed_bud_trait_spec(tmp_path: Path):
-    """Propose and confirm ``tests/_trait_fixtures.BUD_OPENING`` in this test's ``tmp_path``
-    project, so measurement readers of ``bud_opening`` resolve. Not autouse: an unrelated
-    test's project stays empty.
-    """
+    """Propose and confirm ``tests/_trait_fixtures.BUD_OPENING`` in ``tmp_path``'s project."""
     from tests._trait_fixtures import BUD_OPENING, propose_and_confirm
 
     propose_and_confirm(tmp_path, BUD_OPENING)
@@ -214,9 +201,9 @@ def seed_bud_trait_spec(tmp_path: Path):
 
 @pytest.fixture
 def seed_bud_operationalization(tmp_path: Path, seed_bud_trait_spec):
-    """Confirm a revision of bud_opening stating a ``state_crossing_dates`` operationalization of
-    the subject ``bud``, in the same root. Never autouse, so a test of the refusal gets a root
-    without one.
+    """Confirm a revision of bud_opening stating a ``state_crossing_dates`` operationalization.
+
+    The operationalization measures the subject ``bud``, in ``tmp_path``'s project.
     """
     from tests._trait_fixtures import seed_confirmed_crossing
 
@@ -225,9 +212,10 @@ def seed_bud_operationalization(tmp_path: Path, seed_bud_trait_spec):
 
 @pytest.fixture
 def confirmed_count_aggregate(tmp_path: Path) -> None:
-    """Confirm, in this test's ``tmp_path`` project, every delivery trait of
-    ``tests/_trait_fixtures`` and the per-plant aggregate meaning of the one delivering
-    ``stem_count``.
+    """Confirm every delivery trait of ``tests/_trait_fixtures`` and one aggregate meaning.
+
+    The project is ``tmp_path``; the aggregate meaning confirmed is the per-plant one of the
+    trait delivering ``stem_count``.
     """
     from tests import _trait_fixtures as fx
 
@@ -237,11 +225,12 @@ def confirmed_count_aggregate(tmp_path: Path) -> None:
 
 @pytest.fixture
 def hpo_base_config_at(tmp_path: Path):
-    """The producer of a base config of ``tmp_path`` the sweep door's own preflight admits,
-    given the seed its split draws at: an importable builder and a data section over two
-    labeled frames of its subject (``_verified_checkpoint_fixtures.detection_images``), at the
-    sample regime and the statistics of the frames that draw trains on
-    (``_chain_fixtures.training_config``).
+    """Return a producer of ``tmp_path``'s base configs, one per split seed.
+
+    The producer takes the seed its split draws at; each config holds an importable builder and
+    a data section over two labeled frames of its subject
+    (``_verified_checkpoint_fixtures.detection_images``), at the sample regime and the statistics
+    of the draw's train side (``_chain_fixtures.training_config``).
     """
     from tests._chain_fixtures import training_config
     from tests._training_values import drawn_split
@@ -270,7 +259,7 @@ def hpo_base_config_at(tmp_path: Path):
 
 @pytest.fixture
 def real_hpo_base_config(hpo_base_config_at) -> dict:
-    """The base config :func:`hpo_base_config_at` produces at seed 0."""
+    """Return the base config :func:`hpo_base_config_at` produces at seed 0."""
     return hpo_base_config_at(0)
 
 
@@ -282,11 +271,12 @@ DATA_DIR_BUCKET = "live/2-11-26"
 
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
-    """A minimal dataset in the canonical layout: name-based per-image labels + a registry.
+    """Write three labeled images of capture ``2-11-26``, a registry and a published bucket.
 
-    One label document per image of capture ``2-11-26`` holding every subject (here one detection
-    subject, ``bud``), a published bucket named ``live/2-11-26``, and one nested
-    ``subjects.json``. Geometry is two boxes per image on a 640x480 frame.
+    The registry declares the one subject ``bud``. Each image is 640x480 gray, its label
+    document holding boxes (288, 216, 352, 264) and (176, 132, 208, 156); the bucket
+    ``live/2-11-26`` publishes boxes (288, 216, 352, 264) at 0.9 and (496, 372, 528, 396) at 0.7
+    on each.
     """
     from PIL import Image
 

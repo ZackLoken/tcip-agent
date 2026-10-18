@@ -1,14 +1,13 @@
-"""An agent-authored detector with modified internals and a custom train(ctx) loop, run end to
-end through the audited envelope.
+"""An agent-authored detector with modified internals and a custom train(ctx) loop, end to end.
 
-Proves the whole CV-scientist vision at once:
+The run goes through the audited envelope. The test checks that:
   * (a) architecture modifications take effect end to end: the ``AnchorGenerator`` uses the
-    aspect ratios and base size ``derivations.derive_detector_geometry`` derives from the
-    synthetic GT, and every norm layer is GroupNorm (no BatchNorm);
-  * (b) the custom ``train(ctx)`` loop (not ``ctx.default_train``) had its metrics, checkpoint and
-    audit bracket recorded by the envelope, the source and environment in the launch record, and
-    the model registered by completing;
-  * the module actually learns (``overfit_check``), and its predictor answers a detection record.
+    aspect ratios and base size the checkpoint records under ``DETECTOR_GEOMETRY_DERIVATION``,
+    and the model holds GroupNorm layers and no BatchNorm;
+  * (b) the custom ``train(ctx)`` loop had its metrics, checkpoint and audit bracket recorded by
+    the envelope, the source and environment in the launch record, and the model registered by
+    completing;
+  * the module passes ``overfit_check``, and its predictor answers a detection record.
 """
 
 from __future__ import annotations

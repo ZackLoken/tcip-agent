@@ -95,8 +95,10 @@ def test_audited_positional_binding_fills_unstated_defaults(tmp_path):
 
 
 def test_audited_call_that_does_not_bind_raises_before_the_body_runs(tmp_path):
-    """A call-site bug (wrong arity) raises the binding's own TypeError: without a bound
-    ``project`` there is no log to record it in, and the body never runs.
+    """An audited call that does not bind raises, runs no body and records nothing.
+
+    A call with the wrong arity raises ``TypeError``; the body does not run and the project's log
+    holds no line.
     """
     from tcip_mcp.audit import audited
 
@@ -207,7 +209,7 @@ def test_get_experiment_lineage(tmp_path):
 
 
 def _entry(project: Path, sha256: str) -> dict:
-    """The one foreign entry ``project``'s registry holds for ``sha256``."""
+    """Return the one foreign entry ``project``'s registry holds for ``sha256``."""
     from tcip_mcp.model_registry import registered_entries
 
     [entry] = [e for e in registered_entries(project) if e["sha256"] == sha256]
@@ -221,9 +223,10 @@ def _ckpt(project: Path, name: str, content: bytes) -> str:
 
 
 def test_a_first_registration_and_a_replacement_each_leave_one_row(tmp_path):
-    """The same bytes registered again under another name replace their one entry, the row
-    naming the name it superseded; other bytes under the first name are an entry of their
-    own.
+    """A first registration and a replacement each leave one audit row.
+
+    The same bytes registered again under another name replace their one entry, the row naming
+    the name it superseded; other bytes under the first name are an entry of their own.
     """
     from tcip_mcp.model_registry import ModelRegistry
 
@@ -254,8 +257,10 @@ def test_a_first_registration_and_a_replacement_each_leave_one_row(tmp_path):
 
 
 def test_the_register_model_door_leaves_only_the_registrys_own_rows(tmp_path):
-    """Through the door: one row per registry write that changed content, the registry's,
-    and none for the door on top of it or for an idempotent re-registration.
+    """The ``register_model`` door leaves only the registry's own audit rows.
+
+    Through the door: one row per registry write that changed content, the registry's, and none
+    for the door on top of it or for an idempotent re-registration.
     """
     from tcip_mcp.tools.model_tools import register_model
 
@@ -307,8 +312,10 @@ def test_reregistering_an_identical_entry_changes_nothing_and_leaves_no_row(
 def test_the_same_weights_under_new_tags_change_the_entry_and_leave_one_row(
     tmp_path,
 ):
-    """A write is decided by the entry it would store, never by the weights' digest alone:
-    the same checkpoint re-registered under new tags changes the entry and leaves its line.
+    """The same weights registered under new tags change the entry and leave one row.
+
+    The checkpoint re-registered with identical weights and new tags gets the new tags on its
+    entry and a second ``model_registered`` row.
     """
     from tcip_mcp.model_registry import ModelRegistry
 
@@ -327,9 +334,10 @@ def test_the_same_weights_under_new_tags_change_the_entry_and_leave_one_row(
 def test_replace_raises_and_stays_committed_when_its_audit_line_fails(
     tmp_path, monkeypatch
 ):
-    """The transaction has already replaced the entry by the time the audit line is
-    attempted, so a failed append must not be swallowed: the caller is told through
-    AuditEntryNotWrittenError, and the registry keeps the replace regardless.
+    """A replacement whose audit line fails raises and stays committed.
+
+    The caller is told through ``AuditEntryNotWrittenError`` naming ``model_registered``, and
+    the registry keeps the replace.
     """
     import tcip_mcp.audit as audit_mod
     from tcip_mcp.model_registry import ModelRegistry

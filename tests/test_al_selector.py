@@ -1,6 +1,6 @@
 """Active learning selector: review_queue / unscoreable partitioning.
 
-Covers the GenericPredictor output contract: detection dicts carry ``scores``;
+The fixtures follow the GenericPredictor output contract: detection dicts carry ``scores``;
 classification/ordinal checkpoints (ComposedModel -> ``_format_other``) carry
 ``head{i}_confidences``, never an ``output`` key; regression checkpoints carry only
 ``head{i}_values``, no confidence-bearing key at all.
@@ -13,7 +13,7 @@ from tcip_mcp.pipelines.active_learning.selector import (
 
 
 def _cls_pred(image: str, conf: float) -> dict:
-    """A _format_other-shaped classification prediction (single image)."""
+    """Return a _format_other-shaped classification prediction (single image)."""
     return {
         "image": image,
         "width": 640,
@@ -25,7 +25,10 @@ def _cls_pred(image: str, conf: float) -> dict:
 
 
 def _ordinal_pred(image: str, rank: int, conf: float) -> dict:
-    """A _format_other-shaped ordinal prediction: OrdinalHead.decode's derived confidence."""
+    """Return a _format_other-shaped ordinal prediction of ``rank`` at confidence ``conf``.
+
+    Its two cumulative probabilities both equal ``conf``.
+    """
     return {
         "image": image,
         "width": 640,
@@ -37,9 +40,7 @@ def _ordinal_pred(image: str, rank: int, conf: float) -> dict:
 
 
 def _reg_pred(image: str, value: float) -> dict:
-    """A _format_other-shaped regression prediction: RegressionHead.decode emits only "values",
-    no confidence-bearing key, deliberately (a point estimate has no distributional output).
-    """
+    """Return a _format_other-shaped regression prediction whose only head key is its values."""
     return {
         "image": image,
         "width": 640,
@@ -49,7 +50,7 @@ def _reg_pred(image: str, value: float) -> dict:
 
 
 def _seg_pred(image: str) -> dict:
-    """A _format_other-shaped semantic-seg prediction (no confidences)."""
+    """Return a _format_other-shaped semantic-seg prediction (no confidences)."""
     return {
         "image": image,
         "width": 4,
@@ -122,10 +123,7 @@ class TestReviewQueue:
 
 class TestUnscoreable:
     def test_regression_prediction_has_no_confidence_signal(self):
-        """A regression prediction can't be partitioned by review_queue at all (it silently
-        excludes it, unchanged); unscoreable() is what catches that it needs explicit routing
-        instead of vanishing.
-        """
+        """A regression prediction is left out of review_queue and returned by unscoreable."""
         pred = _reg_pred("val.png", 0.42)
         assert review_queue([pred], low=0.0, high=1.0) == []
         assert unscoreable([pred]) == [pred]
@@ -136,9 +134,9 @@ class TestUnscoreable:
         assert unscoreable([pred]) == [pred]
 
     def test_detection_negative_is_not_unscoreable(self):
-        """scores=[] (zero boxes found) is a complete, unambiguous signal, not an architecture
-        gap; it must stay excluded from unscoreable the same way review_queue already excludes
-        it, checked by key presence, not truthiness.
+        """A detection with no boxes is not unscoreable.
+
+        scores=[] (zero boxes found) is a complete signal, and unscoreable leaves it out.
         """
         assert unscoreable([{"image": "neg.png", "scores": []}]) == []
 

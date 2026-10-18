@@ -1,7 +1,7 @@
 """Code provenance for a bespoke (model_source) run.
 
-Locks: snapshot_model_source (copy source files + sha256), a pass rebuilding a bespoke model from
-its importable builder (no exec) and predicting, and a completed run's registry entry carrying
+It covers snapshot_model_source (copy source files + sha256), a pass rebuilding a bespoke model from
+its importable builder and predicting, and a completed run's registry entry carrying
 its metrics and digest.
 """
 
@@ -39,10 +39,11 @@ def _model_source() -> dict:
 
 
 def _snapshot(model_source: dict, project: Path) -> tuple[dict, dict]:
-    """``snapshot_model_source`` over a run of ``project`` of ``model_source`` over no data
-    (:func:`~tests._chain_fixtures.training_config`), validated: its record and its copies.
-    A run over no data normalizes by the weights it names
-    (``_chain_fixtures.weights_normalization``).
+    """Return ``snapshot_model_source``'s record and copies for a run of ``model_source``.
+
+    The run is ``project``'s (:func:`~tests._chain_fixtures.training_config`), validated, its
+    data section a drawn split alone and its source normalized by
+    ``_chain_fixtures.weights_normalization``.
     """
     from tcip_mcp.pipelines.schemas import train_config
     from tests._chain_fixtures import training_config
@@ -66,9 +67,11 @@ _DATA = {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}
 def test_snapshot_model_source_copies_each_declared_file_at_its_path_in_its_tree(
     tmp_path,
 ):
-    """Each declared file is keyed by its stored path and copied at its path under the import
-    root of the declared module holding it, else under the project, so a helper lands beside the
-    module that imports it.
+    """``snapshot_model_source`` copies each declared file at its path in its own tree.
+
+    Each declared file is keyed by its stored path and copied at its path under the import root
+    of the declared module holding it, else under the project, with its digest and size
+    recorded.
     """
     helper = tmp_path / "agent_code" / "helpers.py"
     helper.parent.mkdir()
@@ -130,8 +133,10 @@ def test_snapshot_model_source_refuses_a_builder_no_declared_file_holds(
 def test_a_declared_file_of_the_builders_stem_that_is_not_python_holds_no_module(
     tmp_path,
 ):
-    """A declared ``review.txt`` is no module, so the plan of a builder ``review:build`` it is
-    declared for refuses, though a ``review`` module of that name is already loaded.
+    """A declared non-Python file of the builder's stem holds no module, and the plan refuses.
+
+    A declared ``review.txt`` is no module, so the plan of a builder ``review:build`` it is
+    declared for refuses, though a ``review`` module of that name is loaded in the process.
     """
     import sys
     import types
@@ -170,9 +175,11 @@ def test_a_declared_file_of_the_builders_stem_that_is_not_python_holds_no_module
 def test_snapshot_model_source_refuses_a_file_outside_every_tree_it_can_place(
     tmp_path,
 ):
-    """A declared file outside the project and under no declared module's import root has no
-    path in the run's snapshot, so the snapshot refuses it, naming it and the roots it could have
-    been placed under.
+    """``snapshot_model_source`` refuses a file outside every tree it can place it in.
+
+    A declared file outside the project and under no declared module's import root has no path
+    in the run's snapshot, so the snapshot refuses it, naming it and the roots it could have been
+    placed under.
     """
     from tests import REPO_ROOT
 
@@ -193,8 +200,10 @@ def test_snapshot_model_source_refuses_a_file_outside_every_tree_it_can_place(
 
 
 def test_snapshot_model_source_refuses_two_files_landing_on_one_copy(tmp_path):
-    """The project's own ``bespoke_models.py`` and the builder's module of that path under its
-    import root would be one copy; the snapshot refuses rather than keep either.
+    """``snapshot_model_source`` refuses two declared files landing on one copy.
+
+    The project's own ``bespoke_models.py`` and the builder's module of that path under its
+    import root land on one copy, and the snapshot refuses.
     """
     shadow = tmp_path / "bespoke_models.py"
     shadow.write_text("", encoding="utf-8")
@@ -210,8 +219,10 @@ def test_snapshot_model_source_refuses_two_files_landing_on_one_copy(tmp_path):
 def test_a_project_file_beside_an_external_builder_named_like_the_standard_library_refuses(
     tmp_path,
 ):
-    """A project-local ``code.py`` declared beside a builder from another tree is placed under
-    the one snapshot root as ``code`` once copied, so the plan refuses it by that name.
+    """A project file named like a standard-library module beside an external builder refuses.
+
+    A project-local ``code.py`` declared beside a builder from another tree is refused by the
+    plan as the standard-library module ``code``.
     """
     from tcip_mcp.pipelines.model_build import module_plan
     from tcip_mcp.pipelines.schemas import train_config
@@ -239,8 +250,10 @@ def test_a_project_file_beside_an_external_builder_named_like_the_standard_libra
 def test_a_preflight_over_a_declared_standard_library_name_imports_nothing(
     tmp_path,
 ):
-    """The preflight places a config's declared files before it imports any of them, so a
-    declared ``code.py`` is refused and the loaded ``code`` module is never replaced.
+    """A preflight reports a declared standard-library name and keeps the loaded module.
+
+    The preflight reports the declared ``code.py`` as a standard-library name, and the loaded
+    ``code`` module stays the one in ``sys.modules``.
     """
     import code
     import sys
@@ -280,8 +293,9 @@ def test_a_preflight_over_a_declared_standard_library_name_imports_nothing(
 
 
 def test_a_run_whose_snapshot_refuses_leaves_no_run_directory(tmp_path):
-    """A declared file that cannot be read refuses the run before its directory exists, so no
-    half-opened run is left behind.
+    """A run whose snapshot refuses leaves no run directory.
+
+    A declared file that cannot be read refuses the run, and no run directory exists after.
     """
     from tcip_mcp.experiments import experiment_dir
     from tests._verified_checkpoint_fixtures import (
@@ -311,9 +325,10 @@ def test_a_run_whose_snapshot_refuses_leaves_no_run_directory(tmp_path):
 def test_a_declared_file_named_like_the_standard_library_refuses_before_a_run_opens(
     tmp_path,
 ):
-    """A declared ``code.py`` beside the builder would import as the standard library's
-    ``code`` once the run binds its declared files, so the snapshot refuses it by name and no
-    run directory is left.
+    """A declared file named like a standard-library module refuses and leaves no run directory.
+
+    A declared ``code.py`` beside the builder names the standard library's ``code`` module, so
+    the snapshot refuses it and no run directory is left.
     """
     from tcip_mcp.experiments import experiment_dir
     from tests._verified_checkpoint_fixtures import (
@@ -347,9 +362,7 @@ def test_a_declared_file_named_like_the_standard_library_refuses_before_a_run_op
 
 
 def test_snapshot_model_source_keeps_files_sharing_a_name_apart(tmp_path):
-    """Two declared files sharing a basename land at their own paths, each with its own
-    content.
-    """
+    """Two declared files sharing a basename land at their own paths, each with its own content."""
     for name in ("a", "b"):
         (tmp_path / name).mkdir()
         (tmp_path / name / "model.py").write_text(
@@ -411,9 +424,10 @@ def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(tmp_path):
 
 
 def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
-    """The width a run records on its data section is the one its model was built at, and the
-    predictor reads that checkpoint's images at it: a two-band run loads at two channels, not a
-    silent default of 3.
+    """A predictor loads at the two channels its run recorded and predicts at them.
+
+    A run over two-band frames records two channels; the predictor its checkpoint prepares has
+    ``in_chans`` 2 and predicts over a two-band image.
     """
     import csv
 

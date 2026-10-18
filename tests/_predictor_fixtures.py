@@ -10,12 +10,13 @@ BOX = (10.0, 10.0, 30.0, 30.0)
 
 
 class StubPredictor:
-    """A predictor answering the same detections for every image it is handed: ``boxes`` scored
-    ``scores``, each labeled 1, on a ``width`` by ``height`` frame, with ``attributes`` when
-    given and the frame ``cap`` as stated (one above the count unless given). It states the
-    recorded training geometry a predictor exposes (none unless given), and every other keyword
-    becomes an attribute a caller reads off a predictor (``task``, ``in_chans``). Counts its
-    calls, and keeps each execution it ran under and the checkpoint it was built for.
+    """A predictor answering the same detections for every image it is handed.
+
+    The detections are ``boxes`` scored ``scores``, each labeled 1, on a ``width`` by ``height``
+    frame, with ``attributes`` when given and the frame ``cap`` as stated (one above the count
+    unless given). It carries a recorded training geometry (none unless given), and every other
+    keyword becomes an attribute of its own (``task``, ``in_chans``). It counts its calls and
+    keeps each execution it ran under and the checkpoint it was built for.
     """
 
     def __init__(
@@ -55,7 +56,7 @@ class StubPredictor:
         self.checkpoint = None
 
     def built(self, checkpoint_path=None, **kwargs: Any) -> StubPredictor:
-        """This predictor, as ``GenericPredictor(checkpoint_path, ...)`` would build one."""
+        """Return this predictor, keeping ``checkpoint_path``'s path as its checkpoint."""
         self.checkpoint = getattr(checkpoint_path, "path", checkpoint_path)
         return self
 

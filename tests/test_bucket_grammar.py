@@ -1,7 +1,7 @@
-"""One bucket grammar, owned by the layout, for every reader of ``images/``.
+"""Which directories under ``images/`` read as buckets.
 
-A directory name is a bucket (a date, ``UNDATED_BUCKET``, or a literal like a plot name) unless it
-starts with a dot; a dot-prefixed directory is platform or editor cruft, never a capture.
+A date, ``UNDATED_BUCKET`` and a literal like a plot name are buckets; a dot-prefixed, empty or
+path-separated name is not.
 """
 
 from __future__ import annotations
@@ -53,8 +53,9 @@ def test_list_dates_admits_a_literal_and_the_undated_bucket(tmp_path):
 def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """The tree route and the project-picker summary both derive dates from the layout's one
-    grammar, so a hidden directory under ``images/`` is invisible to both alike.
+    """The tree route and the project-picker summary agree on dates over a hidden directory.
+
+    Beside a dated directory under ``images/``, a hidden one adds no date to either.
     """
     from tcip_mcp.project_record import record_fields
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
@@ -78,8 +79,10 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
 def test_the_tree_and_the_project_summary_list_only_published_buckets_alike(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """Both read a bucket off its own record: a published bucket lists by name under the date its
-    record states.
+    """The tree route and the project-picker summary list a published bucket alike.
+
+    A published bucket lists by name under its date in the tree, and the summary's buckets by
+    date equal the tree's.
     """
     pytest.importorskip("torch")
     from tcip_mcp.project_record import record_fields

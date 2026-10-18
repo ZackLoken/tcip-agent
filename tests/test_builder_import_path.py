@@ -1,7 +1,8 @@
-"""A bespoke builder that lives outside the interpreter's search path imports through its run's
-layout: the declared files, staged until a run holds them, lead ``sys.path`` at the one import
-site, no child process inherits that root, and a run naming such a builder launches and trains in
-the platform's training worker from its own snapshot.
+"""A bespoke builder outside the interpreter's search path imports through its run's layout.
+
+The declared files, staged into a layout, lead ``sys.path`` when the builder imports, no child
+process inherits that root, and a run naming such a builder launches in a process of its own and
+completes.
 """
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ PROBE_BUILDER = f"{PROBE_MODULE}:build_probe"
 
 
 def _builder_dir(tmp_path: Path) -> Path:
-    """A directory outside the interpreter's path holding :data:`PROBE_MODULE`; the directory."""
+    """Return a directory outside the interpreter's path holding :data:`PROBE_MODULE`."""
     src = tmp_path / "agent_project" / "models"
     src.mkdir(parents=True)
     (src / f"{PROBE_MODULE}.py").write_text(
@@ -62,9 +63,10 @@ def _builder_dir(tmp_path: Path) -> Path:
 
 
 def _packaged_builder(tmp_path: Path, package: str) -> tuple[Path, list[str]]:
-    """``<tmp>/agent_project/<package>/model.py`` holding ``build`` beside its package's
-    initializer: the project directory is the import root, one level above the file. The project
-    and the two files a run declares.
+    """Write ``<tmp>/agent_project/<package>/model.py`` holding ``build`` beside its initializer.
+
+    The project directory is the import root, one level above the file. Returns the project and
+    the two files a run declares.
     """
     project = tmp_path / "agent_project"
     pkg = project / package
@@ -76,8 +78,9 @@ def _packaged_builder(tmp_path: Path, package: str) -> tuple[Path, list[str]]:
 
 
 def _layout(builder: str, files: list[str], project: Path):
-    """The layout the admission of a classification run of ``project`` naming ``builder`` and
-    declaring ``files``, over no data, stages (``model_build.staged_sources``).
+    """Return the layout a classification run's admission stages for ``builder`` and ``files``.
+
+    The run is ``project``'s, over no data, staged by ``model_build.staged_sources``.
     """
     from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.schemas import train_config
@@ -114,10 +117,12 @@ def test_a_builder_outside_the_interpreters_path_imports_from_its_layout_no_chil
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The builder imports from its layout's root, first on ``sys.path``; a child process
-    launched with ``child_pythonpath`` inherits no layout root, however the inherited
-    ``PYTHONPATH`` spells it (as placed, with forward slashes, or with its case swapped where the
-    platform's paths ignore case), so it binds its own.
+    """A builder outside the interpreter's path imports from its layout, which no child inherits.
+
+    The builder imports from its layout's root, first on ``sys.path``; a child process launched
+    with ``child_pythonpath`` inherits no layout root, whether the inherited ``PYTHONPATH``
+    spells it as placed, with forward slashes or, on Windows, with its case swapped, and the
+    module does not import there.
     """
     from tcip_mcp.pipelines.model_build import (
         child_pythonpath,
@@ -152,8 +157,9 @@ def test_a_builder_outside_the_interpreters_path_imports_from_its_layout_no_chil
 
 
 def test_a_builder_imports_in_a_fresh_interpreter(tmp_path: Path) -> None:
-    """The one import site serves a process that has loaded nothing of ``importlib.util`` yet:
-    the layout is laid out here, and a fresh child holding only the importer imports and builds
+    """A fresh interpreter that has loaded no ``importlib.util`` imports and builds the builder.
+
+    The layout is laid out here, and a fresh child holding only the importer imports and builds
     the declared builder from it.
     """
     import tcip_mcp
@@ -201,9 +207,10 @@ def test_a_builder_imports_in_a_fresh_interpreter(tmp_path: Path) -> None:
 def test_a_builder_imports_each_declared_module_from_its_own_tree_however_deep(
     tmp_path, monkeypatch
 ):
-    """A builder importing a helper that imports a dependency, all three declared, loaded once
-    from one tree and then from another: every module, the dependency the helper reaches
-    included, comes from the second tree, whatever order the files are declared in.
+    """A builder, its helper and the helper's dependency import from the layout being loaded.
+
+    The three modules, all declared, are loaded from one tree and then from another; the second
+    load builds the value the second tree's dependency holds.
     """
     import uuid
 
@@ -247,9 +254,7 @@ def test_a_builder_imports_each_declared_module_from_its_own_tree_however_deep(
 def test_a_declared_file_edited_between_two_loads_imports_as_edited(
     tmp_path, monkeypatch
 ):
-    """A declared builder rewritten between two loads in one process builds what the second
-    load's file says.
-    """
+    """A declared builder rewritten between two loads in one process builds as rewritten."""
     import uuid
 
     from tcip_mcp.pipelines.model_build import import_source_builder
@@ -275,8 +280,9 @@ def test_a_declared_file_edited_between_two_loads_imports_as_edited(
 def test_the_last_plan_imported_leads_the_path_and_no_other_plan_stays_on_it(
     tmp_path, monkeypatch
 ):
-    """Plans A, B, A imported in turn leave A's root first on ``sys.path`` and B's root off it,
-    so a module B's builder reaches undeclared is never found in A's layout.
+    """The last plan imported leads ``sys.path``, and no other plan's root stays on it.
+
+    Plans A, B, A imported in turn leave A's root first on ``sys.path`` and B's root off it.
     """
     import uuid
 
@@ -307,8 +313,10 @@ def test_the_last_plan_imported_leads_the_path_and_no_other_plan_stays_on_it(
 def test_an_import_takes_off_the_path_only_the_layout_roots_imports_put_there(
     tmp_path, monkeypatch
 ):
-    """A layout's import takes every earlier layout root off ``sys.path`` and leaves every entry
-    no import put there, a directory of the caller's own named like a snapshot included.
+    """A second layout's import removes the first layout's root and keeps the caller's entry.
+
+    The second layout's root leads ``sys.path``, the first layout's root is gone from it, and the
+    caller's own directory named like a snapshot stays on it.
     """
     import uuid
 
@@ -341,9 +349,11 @@ def test_an_import_takes_off_the_path_only_the_layout_roots_imports_put_there(
 def test_a_plan_imports_the_declared_helper_never_one_beside_the_builder(
     tmp_path, monkeypatch
 ):
-    """A builder from another tree importing ``helper`` imports the project's declared
-    ``helper``, as the run's snapshot lays them out, never an undeclared one beside the builder
-    in its own tree.
+    """A plan imports the declared helper, never an undeclared one beside the builder.
+
+    A builder from another tree importing ``helper`` imports the project's declared ``helper``,
+    as the run's snapshot lays them out, never an undeclared one beside the builder in its own
+    tree.
     """
     import uuid
 
@@ -373,9 +383,10 @@ def test_a_plan_imports_the_declared_helper_never_one_beside_the_builder(
 def _resaved(
     project: Path, checkpoint: str, source_files: list[str] | None, name: str
 ) -> str:
-    """The checkpoint at ``checkpoint`` saved again under ``project`` with its config's
-    ``model_source.source_files`` replaced by ``source_files``, registered under ``name``
-    (``register_model``); its path.
+    """Save the checkpoint at ``checkpoint`` again under ``project`` and return its new path.
+
+    Its config's ``model_source.source_files`` is replaced by ``source_files``, and the copy is
+    registered under ``name`` (``register_model``).
     """
     import torch
 
@@ -394,9 +405,11 @@ def _resaved(
 def test_a_checkpoints_layout_is_its_runs_record_whatever_its_files_are_named(
     tmp_path, monkeypatch
 ):
-    """A checkpoint of a run whose packaged builder reads a declared data file named ``run.json``
-    beside it imports from its run's snapshot exactly as that run's record places it, rooted
-    above the package rather than at the declared files' directory, and its predictor builds.
+    """A checkpoint's layout is its run's recorded layout, with a declared data file beside it.
+
+    A checkpoint of a run whose packaged builder reads a declared data file named ``run.json``
+    beside it loads with its run's recorded layout, and its predictor builds with the settings
+    that file states.
     """
     pytest.importorskip("torch")
     from tcip_mcp.experiments import observe
@@ -442,16 +455,17 @@ MARK = {mark}
 def build(**kwargs):
     return build_mean_intensity_classifier(**kwargs)
 """
-"""A builder whose module states ``MARK``, so two projects' copies of one file name differ."""
+"""A builder module's source stating ``MARK``, filled in per copy."""
 
 
 def test_a_checkpoint_moved_alone_beside_a_run_of_its_paths_but_not_its_sources_refuses(
     tmp_path, monkeypatch
 ):
-    """Projects A and B each hold a run of one name declaring one builder file name, the two
-    builders' bytes differing. A's checkpoint builds in A; the same bytes copied alone into B and
-    registered there refuse at the predictor, naming how a checkpoint comes to have a run, though
-    B's run names the same copies.
+    """A checkpoint copied alone beside a run of its paths but not its sources refuses to build.
+
+    Projects A and B each hold a run of one name declaring one builder file name, the two
+    builders' bytes differing. A's checkpoint builds in A; its bytes copied alone into B and
+    registered there refuse at the predictor with an error naming ``launch_training``.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
@@ -504,8 +518,10 @@ def test_a_checkpoint_moved_alone_beside_a_run_of_its_paths_but_not_its_sources_
 def test_a_checkpoint_registered_by_name_builds_beside_its_run_and_where_the_run_is_carried(
     tmp_path,
 ):
-    """A checkpoint registered by name (``foreign_checkpoint``) builds in the project holding
-    the run that saved it, and again in a fresh project after ``archive_project`` then
+    """A checkpoint registered by name builds beside its run and where the run is carried.
+
+    A checkpoint registered by name (``foreign_checkpoint``) builds in the project holding the
+    run that saved it, and again in a fresh project after ``archive_project`` then
     ``import_project`` carries that project there whole.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -544,9 +560,11 @@ def test_a_checkpoint_registered_by_name_builds_beside_its_run_and_where_the_run
 def test_a_checkpoint_whose_source_files_lie_under_no_run_refuses_to_build(
     tmp_path,
 ):
-    """A produced checkpoint saved again naming copies of its declared files laid out in a
+    """A checkpoint whose source files lie under no run refuses to build.
+
+    A produced checkpoint saved again naming copies of its declared files laid out in a
     directory of the project no run holds (a mutated location) refuses at its predictor, naming
-    how a checkpoint comes to have a run, never importing from the copies' own directory.
+    how a checkpoint comes to have a run.
     """
     import shutil
 
@@ -584,7 +602,9 @@ def test_a_checkpoint_whose_source_files_lie_under_no_run_refuses_to_build(
 def test_a_checkpoint_declaring_no_source_file_has_no_run_and_refuses(
     tmp_path, source_files
 ):
-    """A produced checkpoint saved again declaring no source file (a mutated declaration) has no
+    """A checkpoint declaring no source file has no run, and its predictor refuses.
+
+    A produced checkpoint saved again declaring no source file (a mutated declaration) has no
     owning run, so its predictor refuses naming how a checkpoint comes to have one.
     """
     from tcip_mcp.experiments import observe
@@ -615,10 +635,11 @@ with no ``__init__.py``): the file a tree holds it in and the line a builder imp
 def _trees_with_helper(
     tmp_path: Path, shape: str, values: dict[str, int | None]
 ):
-    """A builder module of one fresh name in a tree per ``values`` key, importing a helper of
-    ``shape`` (:data:`HELPER_SHAPES`) whose ``VALUE`` it builds; a tree whose value is not
-    ``None`` also holds that helper. The builder, its trees, and each tree's layout declaring
-    the files it holds.
+    """Write a builder module of one fresh name in a tree per ``values`` key.
+
+    Each builder imports a helper of ``shape`` (:data:`HELPER_SHAPES`) whose ``VALUE`` it
+    builds; a tree whose value is not ``None`` also holds that helper. Returns the builder, the
+    helper's name, its trees, and each tree's layout declaring the files it holds.
     """
     import uuid
 
@@ -648,9 +669,11 @@ def _trees_with_helper(
 def test_a_module_an_earlier_layout_loaded_is_not_reachable_from_a_later_one(
     tmp_path, monkeypatch, shape
 ):
-    """Layout A declares its builder and helper; layout B declares only a builder that imports
-    that helper when it is imported. B refuses, at the import and at a real preflight of its
-    config, as its run's snapshot refuses in a fresh process, though A loaded the helper.
+    """A module an earlier layout loaded is not reachable from a later layout.
+
+    Layout A declares its builder and helper; layout B declares only a builder that imports that
+    helper when it is imported. B refuses, at the import and at a real preflight of its config,
+    though A loaded the helper.
     """
     from tcip_mcp.pipelines.model_build import import_source_builder
     from tcip_mcp.tools.training_tools import preflight_config
@@ -692,8 +715,10 @@ def test_a_module_an_earlier_layout_loaded_is_not_reachable_from_a_later_one(
 def test_layouts_declaring_one_helper_each_import_their_own_in_turn(
     tmp_path, monkeypatch, shape
 ):
-    """Layouts A and B each declare their own helper under one name; importing A, B, then A
-    builds each layout's own helper every time.
+    """Layouts declaring one helper name each import their own helper in turn.
+
+    Layouts A and B each declare their own helper under one name; importing A, B, then A builds
+    each layout's own helper every time.
     """
     from tcip_mcp.pipelines.model_build import import_source_builder
 
@@ -711,9 +736,10 @@ def test_layouts_declaring_one_helper_each_import_their_own_in_turn(
 def test_a_project_directory_named_like_a_snapshot_imports_only_what_it_declares(
     tmp_path, monkeypatch
 ):
-    """A project keeping its sources in a directory of its own named ``model_src`` imports what
-    it declares and nothing beside it: an undeclared helper next to the declared builder refuses
-    at the admission's import, as it does from the run's own snapshot.
+    """A project directory named like a snapshot imports no undeclared helper beside the builder.
+
+    In a project keeping its sources in a directory of its own named ``model_src``, an
+    undeclared helper next to the declared builder refuses at the admission's import.
     """
     import uuid
 
@@ -744,9 +770,11 @@ def test_a_project_directory_named_like_a_snapshot_imports_only_what_it_declares
 
 
 def test_the_admissions_import_reads_the_files_its_run_holds(tmp_path):
-    """The layout an admission imports from and the layout of the run opened from that admission
-    are one layout, their places and snapshot digest included, under two roots holding the same
-    files: what preflight imported is what the run imports.
+    """The admission's import layout and its run's layout agree and hold the same files.
+
+    With its root and directory set to the run's, the admission's layout equals the layout of
+    the run opened from it, and the two roots hold the same ``.py`` files byte for byte, the
+    declared helper among them.
     """
     import dataclasses
 
@@ -805,8 +833,10 @@ def test_the_admissions_import_reads_the_files_its_run_holds(tmp_path):
 def test_a_model_built_from_one_layout_still_answers_after_another_layout_imports(
     tmp_path, monkeypatch
 ):
-    """A model built from layout A answers after layout B's import evicts A's modules and takes
-    A's root off ``sys.path``: what the model's module bound at import stays bound.
+    """A model built from one layout still answers after another layout imports.
+
+    Layouts A and B each hold a module of one name scaling by 3 and by 5; after B's import, A's
+    model answers 6 for 2 and B's answers 10.
     """
     import uuid
 
@@ -837,9 +867,10 @@ def test_a_model_built_from_one_layout_still_answers_after_another_layout_import
 def test_a_module_inside_an_undeclared_regular_package_refuses_at_the_plan(
     tmp_path,
 ):
-    """Declaring ``pkg/child.py`` while ``pkg/__init__.py`` lies beside it undeclared leaves the
-    package the module belongs to unbound, so the plan refuses naming the initializer; declaring
-    it admits the run.
+    """A module inside an undeclared regular package refuses at the plan, naming the initializer.
+
+    Declaring ``pkgundeclared/child.py`` alone, its ``__init__.py`` beside it, raises
+    ``ValueError`` naming ``__init__.py``; declaring the initializer too builds a layout.
     """
     pkg = tmp_path / "pkgundeclared"
     pkg.mkdir()
@@ -858,8 +889,10 @@ def test_a_module_inside_an_undeclared_regular_package_refuses_at_the_plan(
 
 
 def test_a_builder_its_source_files_do_not_hold_refuses_though_it_imports_by_name():
-    """A builder binds only through the file its source declares for its module: one the
-    environment imports by name, its module declared nowhere, refuses naming source_files.
+    """A builder its source files do not hold refuses, naming source_files, though it imports.
+
+    ``tests.bespoke_models:build_bespoke_detection``, importable by name, with no source file
+    declared raises ``ValueError`` naming ``source_files``.
     """
     from tests import REPO_ROOT
 
@@ -871,8 +904,10 @@ def test_a_packaged_builder_imports_from_its_project_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``pkg.model:build`` at ``project/pkg/model.py`` imports from ``project``, never from the
-    file's own directory, which would make ``pkg`` itself unimportable.
+    """A packaged builder imports from its project root.
+
+    ``pkg.model:build`` at ``project/pkg/model.py`` imports from the layout root holding
+    ``pkg``, and the file's own directory is not on ``sys.path``.
     """
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.model_build import import_source_builder
@@ -893,8 +928,10 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The run names only the builder and its package's files; the launcher's preflight imports
-    it, the worker process builds it, and the run completes.
+    """A packaged builder outside the path launches and trains to completion in the worker.
+
+    The run names only the builder and its package's files; it launches in a process of its own
+    and completes.
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import launch_training
@@ -942,8 +979,10 @@ def test_preflight_imports_a_builder_through_its_source_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The one import site serves preflight too: a config naming its builder's file passes the
-    importability check without the agent putting the directory on the path by hand.
+    """Preflight imports a builder through its declared source files.
+
+    A config naming its builder's file passes preflight's importability check without the
+    directory put on the path by hand.
     """
     from tcip_mcp.tools.training_tools import preflight_config
 

@@ -15,9 +15,7 @@ def _deg_to_dms(value: float) -> tuple[float, float, float]:
 
 
 def capture_exif(when: Any) -> Any:
-    """A PIL EXIF block stating ``when`` (a ``datetime``) as the image's DateTimeOriginal, the
-    date ``ingest_images`` buckets the image by.
-    """
+    """Return a PIL EXIF block stating ``when`` (a ``datetime``) as the image's DateTimeOriginal."""
     from PIL import Image
 
     exif = Image.Exif()
@@ -35,10 +33,12 @@ def write_geo_image(
     h_pos_err: float | None = None,
     omit: tuple[int, ...] = (),
 ) -> None:
-    """A JPEG at ``path`` carrying EXIF DateTimeOriginal ``when``, GPS ``lat``/``lon`` and, when
-    given, ``h_pos_err`` as its GPSHPositioningError (meters), less the GPS tags ``omit`` names
-    (``0x0001`` the latitude's hemisphere, ``0x0003``/``0x0004`` the longitude's): the PIL
-    ``image`` given, else a tiny black frame.
+    """Save an image at ``path`` with EXIF DateTimeOriginal ``when`` and GPS ``lat``/``lon``.
+
+    The EXIF also carries ``h_pos_err``, when given, as GPSHPositioningError (meters), less the
+    GPS tags ``omit`` names (``0x0001`` the latitude's hemisphere, ``0x0003``/``0x0004`` the
+    longitude's). The image saved is the PIL ``image`` given, else an 8 by 8 black RGB frame, at
+    quality 100 with no chroma subsampling.
     """
     from PIL import Image, TiffImagePlugin
 
@@ -62,8 +62,10 @@ def write_geo_image(
 def write_noise_image(
     path: Path, size: int, bright: bool = False, span: float = 0.3
 ) -> None:
-    """A ``size`` by ``size`` RGB image of uniform noise at ``path``, its parent created: values
-    in [0, ``span``), or offset by 0.7 when ``bright``.
+    """Save unseeded uniform noise as a ``size`` by ``size`` image at ``path``, its parent made.
+
+    The tensor saved through ``torchvision.utils.save_image`` is ``torch.rand(3, size, size)``
+    times ``span``, plus 0.7 when ``bright``.
     """
     import torch
     from torchvision.utils import save_image

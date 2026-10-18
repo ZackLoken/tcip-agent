@@ -1,6 +1,8 @@
-"""Per-plant aggregation: every record carries its ``plant_id``, the assignment rows'
-``source``/``distance_m`` pass through, the units column comes from ``crops.yml``, each statistic
-aggregates, and a delivery aggregates per-image records under its trait's ``plant_aggregation``.
+"""Per-plant aggregation and its delivery.
+
+A record must carry its ``plant_id``, the assignment rows' ``source``/``distance_m`` pass
+through, the units column comes from ``crops.yml``, each statistic aggregates, and a delivery
+aggregates per-image records under its trait's ``plant_aggregation``.
 """
 
 from __future__ import annotations
@@ -23,7 +25,11 @@ from tests import _trait_fixtures as fx, csv_rows
 
 @pytest.fixture(autouse=True)
 def _recorded_meaning(tmp_path):
-    """Every delivery below ships under a trait whose delivered number has a confirmed meaning."""
+    """Confirm the delivery traits and three per-plant aggregate meanings.
+
+    They are ``stem_count``'s count of ``bud``, and ``plant_surface_area``'s and
+    ``bark_thickness``'s regressions.
+    """
     fx.seed_delivery_traits(tmp_path)
     # The count measures what the chain's unassessed bucket detects.
     fx.seed_confirmed_aggregate(
@@ -54,7 +60,7 @@ def _deliver(
     buckets=None,
     **kwargs,
 ):
-    """The acknowledged per-plant delivery (``_chain_fixtures.deliver_acknowledged``)."""
+    """Run the acknowledged per-plant delivery (``_chain_fixtures.deliver_acknowledged``)."""
     if buckets is None:
         pytest.importorskip("torch")
     from tests._chain_fixtures import deliver_acknowledged
@@ -84,8 +90,10 @@ def _deliver(
     ],
 )
 def test_a_record_carrying_no_plant_id_refuses_naming_the_mapping(record):
-    """A record whose ``plant_id`` is absent, empty or ``None`` (an unmapped assignment) refuses,
-    naming the primitive that assigns plants, and never groups under a missing key.
+    """A record carrying no ``plant_id`` is refused naming the primitive that assigns plants.
+
+    A record whose ``plant_id`` is absent, empty or ``None`` (an unmapped assignment) never
+    groups under a missing key.
     """
     with pytest.raises(ValueError, match="build_plant_mapping"):
         _per_plant([record], plant_aggregation="median", value_key="count")
@@ -106,10 +114,12 @@ def test_records_group_by_their_plant_id():
 
 
 def _mapped_rows(project, *assigned: tuple[str, float]) -> list[dict]:
-    """Per-image count rows carrying the assignment rows ``MappingBuild.rows`` produces for a
-    mapping built through the platform's own producers (``map_captures``, one capture of each of
-    its two plots), each produced assignment restated with one ``(source, distance_m)`` of
-    ``assigned`` and counted toward one plant.
+    """Return per-image count rows carrying the assignment rows of a produced mapping.
+
+    The rows are the ones ``MappingBuild.rows`` produces for a mapping built through the
+    platform's own producers (``map_captures``, one capture of each of its two plots), each
+    produced assignment restated with one ``(source, distance_m)`` of ``assigned`` and counted
+    toward one plant.
     """
     from dataclasses import replace
 
@@ -181,7 +191,9 @@ def test_plant_id_source_absent_when_never_supplied():
 def test_each_statistic_is_its_plants_value_over_the_records_carrying_one(
     plant_aggregation, value
 ):
-    """A record missing the value key is a missing observation: it counts toward the plant's
+    """Each statistic is taken over the records carrying a value, the rest counted as images.
+
+    A record missing the value key is a missing observation: it counts toward the plant's
     observations and never enters the statistic as a zero.
     """
     records = [
@@ -199,9 +211,7 @@ def test_each_statistic_is_its_plants_value_over_the_records_carrying_one(
 
 
 def test_the_per_plant_delivery_names_its_phenotype_in_the_crop_vocabulary_sense():
-    """The vocabulary-sense parameter is delivered_phenotype; trait_name (the registry sense the
-    rest of the trait-facing surface keeps) is no valid keyword here.
-    """
+    """The per-plant delivery takes ``delivered_phenotype`` and no ``trait_name`` keyword."""
     import inspect
 
     params = inspect.signature(deliver_per_plant_aggregate).parameters
@@ -211,8 +221,10 @@ def test_the_per_plant_delivery_names_its_phenotype_in_the_crop_vocabulary_sense
 
 @pytest.mark.parametrize("door", ["delivery", "tool"])
 def test_a_per_plant_delivery_names_its_value_key_with_no_default(door):
-    """The key every record's value sits under is required by both doors' signatures: a call
-    omitting it is a ``TypeError``, never a guess at ``count``.
+    """Both per-plant delivery doors require ``value_key`` with no default.
+
+    The key every record's value sits under is required by both doors' signatures: a call
+    omitting it is a ``TypeError`` naming ``value_key``.
     """
     import inspect
 
@@ -270,7 +282,9 @@ def test_a_per_plant_count_delivery_writes_its_population_one_row_each(
 def test_a_delivery_aggregates_under_the_statistic_its_trait_confirms(
     tmp_path, statistic
 ):
-    """The per-plant number is the confirmed revision's ``plant_aggregation`` over the plant's
+    """A delivery aggregates under the statistic its trait's confirmed revision states.
+
+    The per-plant number is the confirmed revision's ``plant_aggregation`` over the plant's
     per-image values: records whose mean and median differ deliver the one the entry states.
     """
     from tcip_mcp import traits
@@ -327,9 +341,9 @@ def test_a_delivery_refuses_rows_that_omit_or_disagree_on_plant_attribution(
 def test_a_dimensional_value_key_labels_its_units_squared_for_an_area(
     tmp_path,
 ):
-    """A dimensional value_key (mask_geometry-style, area_mm2) labels the units column mm2,
-    derived from the key that produced the number, never a caller-asserted string. Squared, not the
-    bare linear unit: an area labeled "mm" understates its own dimensionality.
+    """An area value key labels the delivery's units column with its squared unit.
+
+    A record valued under ``area_mm2`` delivers with mm2 in the units column.
     """
     out_path = tmp_path / "out.csv"
     _deliver(
@@ -353,8 +367,9 @@ def test_a_dimensional_value_key_labels_its_units_squared_for_an_area(
 def test_a_count_delivery_of_a_dimensional_value_refuses_without_a_physical_scale(
     tmp_path,
 ):
-    """A detector delivery in a physical unit names the scale assessment that answers for the
-    unit, or the gate refuses it outright, before any acknowledgment could clear it.
+    """A count delivery of a physical-unit value with no scale assessment is refused, unwritten.
+
+    The gate refuses it through the acknowledged delivery, naming ``calibrate_physical_scale``.
     """
     fx.seed_confirmed_aggregate(
         tmp_path,
@@ -381,9 +396,7 @@ def test_a_count_delivery_of_a_dimensional_value_refuses_without_a_physical_scal
 
 
 def test_a_delivery_refuses_a_unit_mismatched_against_crops_yml(tmp_path):
-    """A trait crops.yml declares in one unit must not ship under a different unit implied by the
-    aggregated values' own key: that's the exact failure mode this column exists to prevent.
-    """
+    """A delivery whose value key's unit differs from the unit crops.yml declares is refused."""
     from tcip_mcp.traits import crops_units
 
     units = crops_units()
@@ -416,9 +429,10 @@ def test_a_delivery_refuses_a_unit_mismatched_against_crops_yml(tmp_path):
 
 
 def test_a_delivery_never_labels_a_pixel_value_with_crops_yml_units(tmp_path):
-    """A px-suffixed value_key does not inherit crops.yml's declared physical unit: the units
-    column is blank, not the declared unit, whenever the value's own key implies no physical
-    unit.
+    """A delivery of a px-suffixed value leaves its units column blank.
+
+    A ``principal_axis_extent_px`` value of 124.0 for a trait crops.yml declares in mm delivers
+    with a blank units column and the value 124.0.
     """
     from tcip_mcp.traits import crops_units
 
@@ -446,8 +460,10 @@ def test_a_delivery_never_labels_a_pixel_value_with_crops_yml_units(tmp_path):
 
 
 def test_units_never_fall_back_with_an_empty_value_key():
-    """An empty value_key resolves no unit outside a scalar delivery: crops.yml's declared unit is
-    not inherited when nothing names the quantity it would describe.
+    """An empty value key resolves no unit outside a scalar delivery.
+
+    crops.yml's declared unit is not inherited when nothing names the quantity it would
+    describe.
     """
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
     from tcip_mcp.traits import crops_units
@@ -460,9 +476,10 @@ def test_units_never_fall_back_with_an_empty_value_key():
     "value_key", ["plant_id", "detections_total", "open_fraction", "pct_open"]
 )
 def test_unit_from_value_key_never_fabricates_from_an_unrelated_key(value_key):
-    """Only a trailing token that is one of crops.yml's own declared units (or a
-    mechanically-squared form of one) may imply a unit: 'id'/'total'/'fraction'/'open' are none
-    of those, regardless of what precedes them.
+    """``unit_from_value_key`` reads no unit off a key whose trailing token is no declared unit.
+
+    ``plant_id``, ``detections_total``, ``open_fraction`` and ``pct_open`` each resolve to no
+    unit.
     """
     from tcip_mcp.pipelines.measurement.mask_geometry import (
         unit_from_value_key,
@@ -472,11 +489,11 @@ def test_unit_from_value_key_never_fabricates_from_an_unrelated_key(value_key):
 
 
 def test_unit_from_value_key_is_vocabulary_driven_not_a_field_name_whitelist():
-    """The unit vocabulary is driven by crops.yml's own declared units, not a hardcoded whitelist of
-    mask_geometry field names, so a bespoke agent-composed measurement (arc length, a landmark
-    distance, anything outside mask_geometry) is still recognized when its value_key is a sensible
-    '{name}_{unit}'. Any key ending in one of crops.yml's declared units (or its squared form) is
-    recognized, regardless of what module produced it.
+    """``unit_from_value_key`` reads a unit off bespoke keys as it does off mask_geometry's own.
+
+    Keys such as ``length_cm``, ``width_m``, ``nut_diameter_mm``, ``arc_length_cm`` and
+    ``leaf_area_mm2`` resolve to their units as mask_geometry's ``area_mm2`` and
+    ``perimeter_mm`` do, and a ``_px`` key resolves to none.
     """
     from tcip_mcp.pipelines.measurement.mask_geometry import (
         unit_from_value_key,
@@ -496,10 +513,9 @@ def test_unit_from_value_key_is_vocabulary_driven_not_a_field_name_whitelist():
 
 
 def test_unit_from_value_key_refuses_an_area_key_missing_its_squared_suffix():
-    """A value_key that names 'area' but whose trailing unit isn't squared (area_mm instead of
-    area_mm2) is a real dimensional-mismatch bug in the producing code, not a case to guess
-    through. An area is length^2, and silently labeling it with a bare linear unit is exactly the
-    kind of wrong number this function exists to prevent from shipping quietly.
+    """``unit_from_value_key`` refuses an area key whose trailing unit is not squared.
+
+    ``area_mm`` and ``leaf_area_cm`` each raise ``ValueError``.
     """
     from tcip_mcp.pipelines.measurement.mask_geometry import (
         unit_from_value_key,
@@ -514,9 +530,11 @@ def test_unit_from_value_key_refuses_an_area_key_missing_its_squared_suffix():
 
 
 def test_resolve_units_squares_area_but_cross_checks_the_linear_declared_unit():
-    """area_mm2 must resolve to units='mm2' in the CSV, but crops.yml's cross-check declares only
-    the linear unit ('mm'), so the cross-check itself must still compare against that linear unit.
-    Comparing 'mm2' to 'mm' directly would never match.
+    """``_resolve_units`` squares an area's label but cross-checks its linear unit.
+
+    ``area_mm2`` resolves to the label 'mm2' and the linear basis 'mm' and a linear key stays
+    'mm'; for a trait crops.yml declares in mm, when one exists, the declared 'mm' is returned
+    beside the squared label.
     """
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
@@ -550,10 +568,10 @@ def test_resolve_units_squares_area_but_cross_checks_the_linear_declared_unit():
 
 
 def test_resolve_units_recognizes_a_bespoke_non_mask_geometry_value_key():
-    """The generalized vocabulary win end to end: a trait the agent measured with its own bespoke
-    code (a caliper-style diameter, never mask_geometry's field names) still gets a real units
-    column instead of shipping blank, as long as it names itself '{name}_{unit}' in a
-    crops.yml-real unit.
+    """``_resolve_units`` resolves the unit of a bespoke value key outside mask_geometry.
+
+    A bespoke value key named '{name}_{unit}' in a crops.yml unit (``nut_diameter_mm``, a
+    caliper-style diameter) resolves to that unit.
     """
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
@@ -565,9 +583,7 @@ def test_resolve_units_recognizes_a_bespoke_non_mask_geometry_value_key():
 
 
 def test_resolve_units_propagates_the_area_squared_mismatch_refusal():
-    """The refusal in unit_from_value_key must reach the delivery's own caller, not be swallowed: a
-    delivery CSV must never ship silently mislabeled because of a naming bug upstream.
-    """
+    """``_resolve_units`` raises the unsquared-area refusal ``unit_from_value_key`` raises."""
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
     with pytest.raises(ValueError):
@@ -575,12 +591,9 @@ def test_resolve_units_propagates_the_area_squared_mismatch_refusal():
 
 
 def test_delivery_skill_documents_the_real_csv_schema(tmp_path):
-    """The delivery skill's Per-Plant CSV Schema table must be the schema the writer actually
-    writes.
+    """The delivery skill's Per-Plant CSV Schema table lists the header the writer writes.
 
-    The table is what the agent reads before building a deliverable; a stale one (it listed seven of
-    the columns for a while) teaches a schema the breeder's file does not have. Compared against the
-    real written header, not against a second copy of the list.
+    The table's columns equal the header of a CSV the per-plant delivery writes.
     """
     from tcip_mcp.knowledge import document_path
 

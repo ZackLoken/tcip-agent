@@ -1,8 +1,8 @@
 """An audited tool's entry lands in the one log its scope names.
 
 A tool that mutates a record traveling with the dataset records in that dataset's own audit
-log, so the provenance moves with the data; every other call stays in the project's log. Exactly
-one log receives each entry, and a project entry keeps the shape it always had.
+log and not the project's; a call that declares no scope records in the project's log, and a
+project entry carries its core fields and no other.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ STUB_ENGINE = "tests.proposal_stub:factory"
 
 
 def _entries(root: Path) -> list[dict]:
-    """Every audit row scoped to ``root``, or none when that scope's log holds nothing yet."""
+    """Return every audit row scoped to ``root``, or none when that scope's log holds nothing."""
     return list(ts.read_log(audit_module.audit_log_key(root)).records)
 
 
@@ -31,7 +31,7 @@ def _rows_for(root: Path, tool: str) -> list[dict]:
 
 @pytest.fixture
 def dataset_root(tmp_path: Path) -> Path:
-    """A dataset carrying one capture, its own root distinct from the project's."""
+    """Return a dataset carrying one capture, its own root distinct from the project's."""
     root = tmp_path / "orchard_dataset"
     capture = root / "images" / CAPTURE_DATE
     capture.mkdir(parents=True)
@@ -70,7 +70,10 @@ def test_registry_write_records_in_the_dataset_named_by_its_root_argument(
 def test_label_write_records_in_the_dataset_holding_the_image_it_names(
     project: Path, bound, dataset_root: Path
 ) -> None:
-    """The label path lies inside the dataset, not at its root."""
+    """A label write records in the dataset holding its image, not in the project's log.
+
+    The label path lies inside the dataset, not at its root.
+    """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     image = dataset_root / "images" / CAPTURE_DATE / "IMG_0001.JPG"
@@ -89,9 +92,10 @@ def test_label_write_records_in_the_dataset_holding_the_image_it_names(
 def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_against(
     project: Path, dataset_root: Path
 ) -> None:
-    """A proposal run is scoped like its sibling ``stage_proposals``: to the dataset the image
-    belongs to, not the project's log, driven through a dotted ``module:factory`` engine so the
-    test needs no torch.
+    """``propose_annotations`` records in the dataset holding the image it ran against.
+
+    A proposal run through a dotted ``module:factory`` engine records one line in the dataset the
+    image belongs to and none in the project's log.
     """
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
@@ -109,8 +113,10 @@ def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_ag
 def test_propose_annotations_staging_nothing_leaves_no_audit_line(
     project: Path, tmp_path: Path
 ) -> None:
-    """A location that resolves to no dataset is never guessed into one: the call still succeeds,
-    stages nothing, and so records no act in any log.
+    """``propose_annotations`` staging nothing leaves no audit line in any log.
+
+    For an image under no dataset the call succeeds, stages nothing, and leaves no line in the
+    project's log or beside the image.
     """
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
@@ -132,9 +138,7 @@ def test_propose_annotations_staging_nothing_leaves_no_audit_line(
 def test_unscoped_mutating_tool_records_in_the_project_log_with_the_entry_shape(
     project: Path, dataset_root: Path
 ) -> None:
-    """A mutating tool that declares no scope records in the project's log, and its row grows no
-    new field.
-    """
+    """An unscoped mutating tool records in the project's log, its row growing no new field."""
     from tcip_mcp.tools.meta_tools import report_friction
 
     report_friction(project, "unexpected_behavior", "a project event")
@@ -155,8 +159,10 @@ def test_unscoped_mutating_tool_records_in_the_project_log_with_the_entry_shape(
 def test_a_label_write_of_an_image_under_no_dataset_refuses_and_records_nothing(
     project: Path, bound, tmp_path: Path
 ) -> None:
-    """An image under no dataset image tree has no label document to write: the save refuses
-    rather than guessing a dataset for it, and no log receives a line.
+    """A label write of an image under no dataset is refused and records nothing.
+
+    An image under no dataset image tree has no label document to write: the save refuses it as
+    no capture, and no log receives a line.
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
@@ -195,7 +201,9 @@ def test_scope_argument_left_unset_leaves_the_call_in_the_project(
 def test_relative_scope_argument_resolves_against_the_project_not_the_process_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A relative dataset location is read against the project the call acts on; a same-named
+    """A relative scope argument resolves against the project, never the process cwd.
+
+    A relative dataset location is read against the project the call acts on; a same-named
     directory under the process cwd stands in for the wrong answer.
     """
     from tcip_mcp.audit import audited
@@ -226,8 +234,9 @@ def test_a_scope_resolution_that_raises_refuses_rather_than_filing_the_event_in_
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A declared dataset event whose destination cannot be worked out is not rerouted: an entry
-    filed in the project's log on a resolver failure is one nobody tracing that dataset finds.
+    """A scope resolution that raises refuses the call and files nothing in the project's log.
+
+    The call raises ``MutationCommittedWithoutAuditLineError``, caused by the resolver's failure.
     """
     from tcip_mcp.audit import audited
 
@@ -255,9 +264,11 @@ def test_two_spellings_of_a_root_reach_one_log_and_a_relative_spelling_refuses(
     dataset_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A line written under one spelling of a root reads back under another, since the store
-    locates a root's log by its canonical path; a relative spelling names no directory until a
-    working directory is chosen, so the store refuses it rather than reading the process's.
+    """Two spellings of a root reach one audit log, and a relative spelling is refused.
+
+    A line written under one spelling of a root (through ``images/..``) reads back under the
+    root's plain spelling, and on Windows under its upper-cased spelling; a relative spelling is
+    refused as not an absolute path.
     """
     import os
 
@@ -282,7 +293,7 @@ def test_two_spellings_of_a_root_reach_one_log_and_a_relative_spelling_refuses(
 
 
 def test_scope_argument_naming_no_parameter_is_refused_at_decoration() -> None:
-    """A rail against a typo that would silently record every call in the project's log."""
+    """A ``scope_arg`` naming no parameter is refused at decoration."""
     from tcip_mcp.audit import audited
 
     with pytest.raises(ValueError, match="names no parameter"):

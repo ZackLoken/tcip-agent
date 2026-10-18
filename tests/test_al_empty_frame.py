@@ -1,4 +1,4 @@
-"""An empty-detection frame must not flood the uncertainty queue with a max (1.0) score."""
+"""The uncertainty scorer gives an empty-detection frame 0.0 and a low-confidence one more."""
 
 from __future__ import annotations
 

@@ -11,9 +11,11 @@ if TYPE_CHECKING:
 def called_through_the_server(
     tool: str, arguments: dict, *, bound: BoundProject | None = None
 ) -> Any:
-    """``tool`` called with ``arguments`` through ``build_server(bound)``, a server started for
-    ``bound`` or, by default, for no project: the tool error's text when the call is refused, or
-    the answer the server sends, decoded from its JSON text, when it is admitted.
+    """Call ``tool`` with ``arguments`` through ``build_server(bound)``.
+
+    The server is started for ``bound`` or, by default, for no project. Returns the tool error's
+    text when the call is refused, or the answer the server sends, decoded from its JSON text,
+    when it is admitted.
     """
     import asyncio
     import json

@@ -1,16 +1,10 @@
-"""End a hung test from a thread that needs no interpreter lock.
+"""A ``faulthandler`` watchdog standing in for pytest-timeout's ``thread`` timer.
 
-pytest-timeout's ``thread`` method, its only method where SIGALRM does not exist (Windows), is a
-Python ``threading.Timer``: its callback runs only once it holds the GIL, so a test blocked in a
-C call that never releases the lock (Ray's driver waiting on its raylet, a ctypes call through
-``PyDLL``) outlives its timeout for as long as the call does. ``faulthandler``'s watchdog is a C
-thread that waits, dumps every thread's stack and exits the process without the GIL, so it ends
-exactly those hangs. Wired through pytest-timeout's own ``pytest_timeout_set_timer`` hook, it
-takes the timeout that plugin resolved for the item (command line, ini or marker) and claims only
-the ``thread`` method; ``signal`` stays the plugin's own, since that one fails the single test and
-lets the run go on. Under xdist the controller names the test the dead worker was running; alone,
-the dumped stack names it. ``tests/conftest.py`` imports the hook, and a run outside the suite
-loads it with ``-p tests.hung_test_watchdog``.
+Through pytest-timeout's ``pytest_timeout_set_timer`` hook it takes the timeout that plugin
+resolved for the item and, for the ``thread`` method outside a debugger, arms
+``faulthandler.dump_traceback_later`` with it, which dumps every thread's stack and exits the
+process when the timeout passes; the item's finish cancels it. Any other method is left to the
+plugin. A run outside the suite loads it with ``-p tests.hung_test_watchdog``.
 """
 
 from __future__ import annotations

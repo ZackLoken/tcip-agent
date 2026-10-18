@@ -1,5 +1,6 @@
-"""An inverted or zero-extent box is refused wherever a writer builds one: the save doors, the
-per-image writer and the prediction encoder.
+"""An inverted or zero-extent box is refused wherever a writer builds one.
+
+The writers are the save doors, the per-image writer and the prediction encoder.
 """
 
 from __future__ import annotations
@@ -24,8 +25,11 @@ from tests._producer_fixtures import image_label_key, write_image
 
 
 def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid(tmp_path):
-    """A box that rounds to no width, and a mask whose rings have none, are no detection: the
-    encoding keeps the one detection with extent, and the count it reports is the document's.
+    """The prediction encoding keeps only the detection with extent on the stored grid.
+
+    Of three detections, the one whose mask lies past the frame's right edge and the one whose
+    box is 0.004 px wide are dropped: the document holds the 0.8-scored one, and the result's
+    count becomes 1.
     """
     from tcip_annotation.mask_contours import mask_to_polygon_rings
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
@@ -133,8 +137,10 @@ def test_the_writer_admits_an_ordered_box(tmp_path):
 
 
 def test_the_writer_refuses_a_collinear_polygon(tmp_path):
-    """A polygon whose points all sit on one line has a derived bbox with no real extent either:
-    the same boundary check catches it, not only a bare BBox.
+    """The per-image writer refuses a collinear polygon and writes nothing.
+
+    A polygon whose three points sit on one horizontal line raises ``ValueError``, and no label
+    document is stored.
     """
     key = label_key(tmp_path, UNDATED_BUCKET, "img")
     with pytest.raises(ValueError):
@@ -254,8 +260,9 @@ def test_annotate_save_admits_an_ordered_box(
 def _seed_review_dataset(
     tmp_path: Path, *, pred_box=(10, 10, 20, 20), gt_box=None
 ):
-    """The label document of one image and the bucket ``m`` proposing ``pred_box`` on it; the
-    label document's key.
+    """Write one image's label document and a bucket ``m`` proposing ``pred_box`` on it.
+
+    Returns the label document's key.
     """
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import label_image, registry_over
@@ -362,8 +369,10 @@ def test_a_corrected_geometry_is_checked_as_any_saved_shape_is(
     tmp_path: Path,
     shape,
 ) -> None:
-    """A geometry correction is a save like any other, so every value the corrected shape carries
-    is checked, whichever geometry it resolves to.
+    """The save door refuses a malformed corrected geometry and keeps the document.
+
+    A one-vertex contour, one beside a valid box, and string coordinates in a box or a ring are
+    each refused, and the document keeps its box.
     """
     gt = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
 
@@ -450,9 +459,9 @@ def test_encode_predictions_drops_a_degenerate_box_and_reports_the_count():
 
 
 def test_encode_predictions_drops_a_box_that_rounds_to_zero_extent():
-    """A box with real pre-round extent that collapses to nothing at the document's stored
-    2-decimal quantum is dropped here, the same as an already-zero-extent box: the encoder must
-    never be handed a box it would refuse and fail the whole run over.
+    """``encode_predictions`` drops a box that rounds to zero extent and reports it.
+
+    A box 0.003 px across is dropped and counted, and the other box, 10 px across, is encoded.
     """
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
@@ -514,8 +523,10 @@ def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(
 def test_stage_proposals_refuses_a_shape_stating_no_confidence(
     tmp_path, shape
 ):
-    """A staged shape is a prediction, so it states the confidence its producer reported; one
-    stating none is refused by name, never staged at a confidence nobody reported.
+    """``stage_proposals`` refuses a shape stating no confidence, naming the field.
+
+    A staged shape is a prediction, so it states the confidence its producer reported; a box
+    or a polygon stating none is refused.
     """
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
@@ -549,8 +560,10 @@ def test_stage_proposals_refuses_a_shape_stating_no_confidence(
 def test_stage_proposals_refuses_a_shape_stating_no_subject_by_its_index(
     tmp_path, shape
 ):
-    """Every staged shape states its own subject; one stating none is refused naming the shape's
-    index and the missing field, never staged under an empty subject.
+    """``stage_proposals`` refuses a shape stating no subject, naming its index and the field.
+
+    A box or a polygon stating no subject is refused with an error starting at its index and
+    naming ``subject`` as a required field.
     """
     from tcip_mcp.tools.proposal_tools import stage_proposals
 

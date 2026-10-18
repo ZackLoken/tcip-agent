@@ -1,13 +1,9 @@
-"""Store names and the child-process bodies the storage-contract suite drives.
+"""Store names and the storage-contract cases' child-process commands.
 
-The contract's isolation and durability cases are only real across OS processes: threads in
-one interpreter share a lock registry, so a same-process check would pass against a store that
-has no cross-process exclusion at all. This module is both the child script those cases spawn
-(``python tests/_store_worker.py <command> ...``) and the parent's source of the store names, so
-both sides address exactly the same records.
+Run as ``python tests/_store_worker.py <command> ...`` it executes one command against a store;
+imported, it provides the store names its commands write under.
 
-Two weakened variants exist, each selected by its own environment variable, each what a set of
-cases is observed failing against, and neither reachable from any shipped code path:
+Two weakened variants are each selected by its own environment variable:
 ``TCIP_STORE_CONTRACT_IGNORES_EXPECT=1`` swaps in a backend that never compares ``expect``, and
 ``TCIP_STORE_CONTRACT_COMMITS_EACH_WRITE=1`` makes :class:`PausingCommitBackend` commit each write
 of a transaction on its own.
@@ -32,16 +28,14 @@ LOG = "contract_log"
 
 
 def blob_path(root: str | Path, name: str) -> Path:
-    """The file the suite's blob cases write ``name`` to under ``root``."""
+    """Return ``<root>/blobs/<name>.bin``."""
     return Path(root, "blobs", f"{name}.bin")
 
 
 class IgnoredExpectBackend(SqliteBackend):
-    """A backend whose writes never compare ``expect``, for observing what it holds up.
+    """A ``SqliteBackend`` whose ``replace`` and ``delete`` never compare ``expect``.
 
-    Everything else is the shipped path: the same transaction, the same rows, the same version
-    derived from the stored bytes. Only the comparison is gone, which is the difference between
-    a stale writer refused and one that lands on top of a committed write.
+    Its other behavior is ``SqliteBackend``'s.
     """
 
     def replace(self, key, value, *, expect=None):
@@ -52,13 +46,11 @@ class IgnoredExpectBackend(SqliteBackend):
 
 
 class PausingCommitBackend(SqliteBackend):
-    """A backend that pauses after the first write of a transaction has executed, so a kill lands
-    with real uncommitted rows in the transaction rather than before any of them.
+    """A ``SqliteBackend`` that pauses after its first write.
 
-    ``pause_marker`` is written once the first write has run, which is what lets the parent wait
-    until there is something for a rollback to take back before killing this process. With
-    ``TCIP_STORE_CONTRACT_COMMITS_EACH_WRITE=1`` each write is committed on its own instead, which
-    is the shape a kill cannot take back and what the crash case is observed failing against.
+    After its first ``_put`` it writes ``pause_marker`` and sleeps ``pause_s`` seconds. With
+    ``TCIP_STORE_CONTRACT_COMMITS_EACH_WRITE=1`` each ``_put`` is followed by a commit and a new
+    ``begin immediate``.
     """
 
     def __init__(
@@ -81,14 +73,17 @@ class PausingCommitBackend(SqliteBackend):
 
 
 def make_backend(**kwargs) -> SqliteBackend:
-    """The backend this process writes through, weakened when the environment says so."""
+    """Return an ``IgnoredExpectBackend`` when the environment asks, else a ``SqliteBackend``.
+
+    The environment asks with ``TCIP_STORE_CONTRACT_IGNORES_EXPECT=1``; ``kwargs`` are passed on.
+    """
     if os.environ.get("TCIP_STORE_CONTRACT_IGNORES_EXPECT") == "1":
         return IgnoredExpectBackend(**kwargs)
     return SqliteBackend(**kwargs)
 
 
 def wait_for(path: Path, timeout_s: float = 30.0) -> None:
-    """Block until another process creates ``path``."""
+    """Block until ``path`` exists, raising ``TimeoutError`` after ``timeout_s`` seconds."""
     deadline = time.monotonic() + timeout_s
     while not path.exists():
         if time.monotonic() > deadline:
@@ -229,9 +224,7 @@ def _cmd_write_blob_after(
 def _cmd_pause_before_commit(
     root: str, first: str, second: str, marker: str, pause_s: str
 ) -> None:
-    """Write both keys through a transaction that pauses once the first row is in it, so a kill
-    lands on an open transaction holding uncommitted rows rather than on an empty one.
-    """
+    """Bind a :class:`PausingCommitBackend` and write both keys in one transaction."""
     ts.bind(
         PausingCommitBackend(pause_marker=Path(marker), pause_s=float(pause_s))
     )

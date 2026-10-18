@@ -1,8 +1,8 @@
-"""The assessment's rails, each beside the legitimate call it must still admit.
+"""The assessment's disjointness, criterion, revision and gate checks.
 
-The chain's own producers build every record here: a capture ingested, a selection drawn, a tiny
-detector trained on it, the trait confirmed, the assessment run and the bucket published. A
-reference is re-sided only through the admission's own sample producer, never hand-written.
+The chain's own producers build the chain's records here: a capture ingested, a selection drawn,
+a tiny detector trained on it, the trait confirmed, the assessment run and the bucket published. A
+reference is re-sided only through the admission's own sample producer.
 """
 
 from __future__ import annotations
@@ -46,8 +46,9 @@ from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS  # noqa: E4
 
 
 def _trained(project: Path, experiment_id: str):
-    """A capture, its drawn selection and a checkpoint trained on the selection's train side;
-    ``(images_dir, selection, selection_dir, checkpoint_path)``.
+    """Ingest a capture, draw its selection and train a checkpoint on the selection's train side.
+
+    Returns ``(images_dir, selection, selection_dir, checkpoint_path)``.
     """
     root = project / "ds"
     images_dir = synthetic_capture(root)
@@ -64,8 +65,10 @@ def _trained(project: Path, experiment_id: str):
 def _add_frame(
     images_dir: Path, stem: str, *, like: str, same_pixels: bool
 ) -> None:
-    """Add frame ``stem`` labelled exactly as frame ``like``: its image a byte copy of ``like``'s
-    when ``same_pixels``, else a frame of its own (another shade) holding the same box.
+    """Add frame ``stem`` labeled with frame ``like``'s stored annotations.
+
+    Its image is a byte copy of ``like``'s when ``same_pixels``, else a frame painted on its own
+    background with a square at :func:`object_at` of ``like``'s index.
     """
     from tests._producer_fixtures import (
         image_label_key,
@@ -96,9 +99,11 @@ def _add_frame(
 def _resided(
     project: Path, images_dir: Path, drawn, extra: dict[str, str], out: Path
 ) -> Path:
-    """A reference selection of its own: the drawn selection's calibration and holdout sides with
-    the added frames ``extra`` (member to side) joined to them, sided and grouped by the admission's
-    own sample producer under the draw's own policy; its dir.
+    """Write a reference selection of its own at ``out`` and return ``out``.
+
+    It holds the drawn selection's calibration and holdout sides with the added frames ``extra``
+    (member to side) joined to them, sided and grouped by the admission's own sample producer
+    under the draw's own policy.
     """
     from tcip_mcp.pipelines.data.label_queries import admit
     from tcip_mcp.pipelines.data.selection import (
@@ -142,7 +147,9 @@ def _a_train_member(selection) -> str:
 def test_a_distinct_image_holding_a_training_frames_boxes_is_a_legitimate_reference(
     tmp_path,
 ):
-    """Two different images can carry identical boxes: the second is not the first, so a reference
+    """A distinct image holding a training frame's boxes is a disjoint reference.
+
+    Two different images can carry identical boxes: the second is not the first, so a reference
     holding it is held out. Identity is the image's content, never the geometry drawn on it.
     """
     images_dir, drawn, _sel, checkpoint = _trained(tmp_path, "exp-twin")
@@ -171,8 +178,10 @@ def test_a_distinct_image_holding_a_training_frames_boxes_is_a_legitimate_refere
 def test_a_training_image_copied_under_a_new_name_into_the_reference_fails_disjointness(
     tmp_path,
 ):
-    """A byte copy of a training frame under another name is the same image: the reference holding
-    it shares its content with training, whatever it is called or grouped under.
+    """A training image copied under a new name into the reference fails disjointness.
+
+    A reference holding a byte copy of a training frame under another name fails with
+    ``reference_shares_training``.
     """
     images_dir, drawn, _sel, checkpoint = _trained(tmp_path, "exp-dup")
     confirm_count_trait(tmp_path)
@@ -200,8 +209,11 @@ def test_a_training_image_copied_under_a_new_name_into_the_reference_fails_disjo
 def test_a_reference_frame_in_a_training_group_fails_even_when_its_pixels_are_its_own(
     tmp_path,
 ):
-    """A tile of a training source is not held out from it: a reference frame grouped with a
-    training frame fails on the group alone, its own pixels notwithstanding.
+    """A reference frame in a training group fails disjointness on the group alone.
+
+    A holdout frame ``<member>_5_5`` of its own pixels, grouped by tile prefix with a training
+    member, fails with ``reference_shares_training``: one shared group and no shared source
+    digest.
     """
     images_dir, drawn, _sel, checkpoint = _trained(tmp_path, "exp-group")
     confirm_count_trait(tmp_path)
@@ -231,7 +243,9 @@ def test_a_reference_frame_in_a_training_group_fails_even_when_its_pixels_are_it
 
 
 def test_a_mosaic_reference_band_is_held_out_only_inside_a_non_training_region():
-    """Against a within-image split's recorded regions, a reference rect is held out when it lies
+    """A mosaic reference rect is held out only inside a non-training region.
+
+    Against a within-image split's recorded regions, a reference rect is held out when it lies
     wholly inside one non-training region; one straddling the training boundary is not.
     """
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
@@ -286,7 +300,9 @@ def test_an_accurate_reference_passes_the_count_criterion():
 
 
 def test_a_known_count_bias_fails_the_outcome_tolerance_with_no_dispersion_at_all():
-    """Every held-out image over-counts by the same ten objects: the bias is certain, its spread
+    """A known count bias with no dispersion fails the outcome tolerance.
+
+    Every held-out image over-counts by the same ten objects: the bias is certain, its spread
     zero, and the count is still wrong.
     """
     from tcip_mcp.pipelines.operating_point import count_criterion
@@ -328,7 +344,9 @@ def test_an_agreeing_classifier_passes_the_classifier_criterion():
 
 
 def test_compensating_classification_errors_cannot_validate_through_pooled_counts():
-    """Each image's two positives called negative and two negatives called positive: its positive
+    """Compensating classification errors fail the classifier agreement floor.
+
+    Each image's two positives called negative and two negatives called positive: its positive
     count is exactly right, and every call is wrong.
     """
     from tcip_mcp.pipelines.operating_point import classifier_criterion
@@ -349,8 +367,10 @@ def test_compensating_classification_errors_cannot_validate_through_pooled_count
 def test_an_unauthored_tolerance_refuses_the_revision_with_the_breeders_question(
     tmp_path,
 ):
-    """No default stands in for a tolerance the criterion compares against: a count revision that
-    leaves one unauthored is refused when proposed, asking the breeder, and none is recorded.
+    """A count revision leaving a tolerance unauthored is refused with the breeder's question.
+
+    With ``count_bias_tolerance_frac`` unset, the proposal raises ``UnauthoredFieldError`` naming
+    the field and its question, and the trait is not recorded.
     """
     from tcip_mcp.traits import QUESTIONS, UnauthoredFieldError, trait_names
 
@@ -365,7 +385,9 @@ def test_an_unauthored_tolerance_refuses_the_revision_with_the_breeders_question
 def test_an_iou_match_operationalization_is_proposed_only_with_its_jitter_and_margin(
     tmp_path,
 ):
-    """The fields an IoU match compares by are part of the criterion a count operationalization
+    """An ``iou_match`` proposal is refused without its jitter and margin and recorded with them.
+
+    The fields an IoU match compares by are part of the criterion a count operationalization
     rests on: a proposal selecting ``iou_match`` without them is refused asking the breeder, and
     one stating them is recorded.
     """
@@ -439,8 +461,10 @@ def test_a_delivery_under_another_revision_than_the_assessments_refuses_naming_b
 
 
 def test_one_producer_clears_the_gate_and_a_series_of_two_refuses(tmp_path):
-    """Two checkpoints over the same capture are two measurements: a delivery naming buckets from
-    both refuses outright, naming each, while either one alone clears.
+    """The gate clears one producer's bucket and refuses a series of two, naming each.
+
+    Two checkpoints publish over one capture: the assessed one's bucket alone validates, and the
+    two together refuse as more than one checkpoint, naming both buckets.
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.delivery import DeliveryRefusedError, Result, gate
@@ -485,8 +509,10 @@ def test_one_producer_clears_the_gate_and_a_series_of_two_refuses(tmp_path):
 def test_an_assessment_whose_retained_reference_is_gone_answers_for_nothing(
     tmp_path,
 ):
-    """An assessment whose retained reference copies are removed reads as a changed reference,
-    so the gate refuses the bucket it validated.
+    """The gate refuses a bucket whose assessment's retained reference is gone.
+
+    An assessment whose retained reference copies are removed reads as a changed reference, so
+    the gate refuses the bucket it validated.
     """
     from tcip_mcp.assessment import REFERENCE_DIR, assessment_dir
     from tcip_mcp.delivery import DeliveryRefusedError, Result, gate
@@ -511,8 +537,10 @@ def test_an_assessment_whose_retained_reference_is_gone_answers_for_nothing(
 def test_a_reference_source_edited_after_the_assessment_answers_for_nothing(
     tmp_path,
 ):
-    """The pixels an assessment measured are part of its reference: a source image edited after
-    it refuses the bucket it validated, naming the image, which cleared before the edit.
+    """The gate refuses a bucket whose reference source was edited after its assessment.
+
+    The pixels an assessment measured are part of its reference: a source image edited after it
+    refuses the bucket it validated, naming the image, which cleared before the edit.
     """
     from PIL import Image
 
@@ -645,9 +673,11 @@ def test_a_polygon_that_fails_to_rasterize_refuses_rather_than_training_an_empty
 def test_an_instance_segmentation_assessment_reads_its_reference_through_polygons(
     tmp_path,
 ):
-    """Guard. An instance-segmentation checkpoint's count fit reads its reference through its own
-    task's loader: a reference holding the subject as polygons is fitted, and one holding it
-    only as boxes refuses by name, where a box detector's loader would have read the boxes.
+    """An instance segmentation count fit reads polygons and refuses a box-only reference.
+
+    An instance-segmentation checkpoint's count fit reads its reference through its own task's
+    loader: a reference holding the subject as polygons is fitted, and one holding it only as
+    boxes refuses by name.
     """
     from tcip_mcp import assessment
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -712,7 +742,9 @@ def test_an_instance_segmentation_assessment_reads_its_reference_through_polygon
 def test_an_assessment_records_the_test_settings_and_the_reason_it_states(
     tmp_path,
 ):
-    """The equivalence multiplier and the dispersion quantile a count assessment states are the
+    """An assessment records the test settings and the reason it states, no door defaulting them.
+
+    The equivalence multiplier and the dispersion quantile a count assessment states are the
     ones its record carries beside its reason, and neither door holds a value for any of them.
     """
     import inspect
@@ -744,9 +776,11 @@ def test_an_assessment_records_the_test_settings_and_the_reason_it_states(
 def test_a_detector_assessment_collects_at_the_conf_it_states_and_records_it_as_the_floor(
     tmp_path, monkeypatch
 ):
-    """Guard. Every prediction a detector assessment collects runs at the conf its statement
-    carries, that conf is the floor its evidence records, and a statement carrying no conf
-    refuses naming the field.
+    """A detector assessment collects at the conf it states and records it as the floor.
+
+    Every prediction a detector assessment collects runs at the conf its statement carries, that
+    conf is the floor its evidence records, and a statement carrying no conf refuses naming the
+    field.
     """
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
@@ -795,8 +829,10 @@ def test_a_detector_assessment_collects_at_the_conf_it_states_and_records_it_as_
 def test_the_assess_tools_take_a_dispersion_quantile_within_zero_and_one(
     tool, bands
 ):
-    """The MCP call refuses a dispersion quantile outside [0, 1] by the parameter's own type,
-    and admits either end.
+    """The assess tools refuse a dispersion quantile of -0.1 or 1.5 by name, and not 0.0 or 1.0.
+
+    Called through the MCP server, the answer at -0.1 and 1.5 names ``dispersion_quantile``, and
+    the answer at 0.0 and 1.0 does not.
     """
     from tests._server_calls import called_through_the_server
 

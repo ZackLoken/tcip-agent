@@ -1,8 +1,8 @@
-"""The sample blocks a test config states, since the platform ships no default for any of them:
-the optimizer, schedule, stop rule and evaluation blocks ``_chain_fixtures.training_config``
-builds its run from (and a test states over it as an override), the drawn split and tiling
-blocks a data section states, and a sample search space and search; beside them the sample
-settings an assessment and a failure-case ranking state.
+"""Sample run-config, assessment and ranking blocks.
+
+They are a run's optimizer, schedule, stop rule and evaluation blocks, a data section's drawn
+split and tiling blocks, a sample search space and search, and the sample settings of an
+assessment and a failure-case ranking.
 """
 
 from typing import Any
@@ -23,14 +23,11 @@ COUNT_TEST = {
 }
 """The sample count test settings, by ``operating_point.count_criterion`` parameter."""
 COLLECTION_CONF = 0.01
-"""A sample conf a detector assessment states its predictions are collected at, low enough that
-hesitant detections survive to be swept."""
+"""A sample conf a detector assessment states its predictions are collected at."""
 
 
 def collection_pass(**stated: Any) -> Stated:
-    """A detector assessment's execution statement: its predictions collected at
-    :data:`COLLECTION_CONF`, stating :data:`RATIONALE`, with ``stated`` over it.
-    """
+    """Return a ``Stated`` of :data:`COLLECTION_CONF` and :data:`RATIONALE`, ``stated`` over."""
     return Stated(
         **{"conf": COLLECTION_CONF, "rationale": RATIONALE, **stated}
     )
@@ -41,11 +38,11 @@ TRIAGE_WEIGHTS = {
     "surplus_weight": 1.0,
     "confidence_weight": 1.0,
 }
-"""Sample failure-case ranking weights a test states, by door parameter."""
+"""Sample failure-case ranking weights, by door parameter."""
 COMBINED_SCORER = ScorerSpec.model_validate(
     {"name": "combined", "uncertainty_weight": 0.6, "diversity_weight": 0.4}
 )
-"""A sample review-queue scorer block a test states."""
+"""A sample review-queue scorer block."""
 
 SCHEDULE_SETTINGS: dict[str, dict[str, Any]] = {
     "cosine": {"eta_min": 1e-6, "horizon_epochs": 3},
@@ -76,8 +73,10 @@ SCHEDULE_SETTINGS: dict[str, dict[str, Any]] = {
 
 
 def schedule(kind: str, **stated) -> dict:
-    """A ``scheduler`` block of type ``kind`` stating its own sample settings
-    (:data:`SCHEDULE_SETTINGS`) and :data:`RATIONALE`, with ``stated`` over them.
+    """Return a ``scheduler`` block for ``kind``.
+
+    It merges ``type`` ``kind``, ``SCHEDULE_SETTINGS[kind]``, :data:`RATIONALE` and then
+    ``stated``.
     """
     return {
         "type": kind,
@@ -90,10 +89,7 @@ def schedule(kind: str, **stated) -> dict:
 def stop_rule(
     patience: int = 50, min_delta: float = 0.0, nonfinite_passes: int = 2
 ) -> dict:
-    """An ``early_stopping`` block; the sample patience sits past the horizons
-    :data:`SCHEDULE_SETTINGS` states, so a sample stage under a horizon-bound schedule ends at
-    its horizon unless the test states a longer one.
-    """
+    """Return an ``early_stopping`` block of its three arguments and :data:`RATIONALE`."""
     return {
         "patience": patience,
         "min_delta": min_delta,
@@ -103,12 +99,12 @@ def stop_rule(
 
 
 def stage(freeze_to: int = 0, **stated) -> dict:
-    """A ``stages`` entry at ``freeze_to`` stating :data:`RATIONALE`, with ``stated`` over it."""
+    """Return a ``stages`` entry at ``freeze_to`` stating :data:`RATIONALE`, ``stated`` over it."""
     return {"freeze_to": freeze_to, "rationale": RATIONALE, **stated}
 
 
 def adamw_optimizer(**stated) -> dict:
-    """A sample AdamW ``optimizer`` block, with ``stated`` over it."""
+    """Return a sample AdamW ``optimizer`` block, with ``stated`` over it."""
     return {
         "name": "adamw",
         "backbone_lr": 1e-4,
@@ -120,7 +116,7 @@ def adamw_optimizer(**stated) -> dict:
 
 
 def sgd_optimizer(**stated) -> dict:
-    """A sample SGD ``optimizer`` block, its momentum stated, with ``stated`` over it."""
+    """Return a sample SGD ``optimizer`` block, its momentum stated, with ``stated`` over it."""
     return {
         "name": "sgd",
         "backbone_lr": 1e-3,
@@ -133,9 +129,10 @@ def sgd_optimizer(**stated) -> dict:
 
 
 def drawn_split(**stated) -> dict:
-    """A drawn ``data.split`` block, and ``draw_splits``'s statement of a draw: half the members
-    on the validation side, no reserved side, one group per member, balanced by foreground count,
-    at seed 0, with ``stated`` over it.
+    """Return a drawn ``data.split`` block, and ``draw_splits``'s statement of a draw.
+
+    It states seed 0, validation ratio 0.5, calibration and holdout ratios 0, stem grouping,
+    foreground stratification and :data:`RATIONALE`, with ``stated`` merged over them.
     """
     return {
         "seed": 0,
@@ -150,19 +147,20 @@ def drawn_split(**stated) -> dict:
 
 
 def tiling_block(**stated) -> dict:
-    """A ``data.tiling`` block keeping object-free tiles, with ``stated`` over it."""
+    """Return a ``data.tiling`` block: ``skip_empty`` False, :data:`RATIONALE`, ``stated`` over."""
     return {"skip_empty": False, "rationale": RATIONALE, **stated}
 
 
 def augmentation(**transforms) -> dict:
-    """An ``augmentation`` block of ``transforms``, each a transform's name to its values,
-    stating :data:`RATIONALE`.
+    """Return an ``augmentation`` block of :data:`RATIONALE` with ``transforms`` merged over it.
+
+    Each of ``transforms`` maps a transform's name to its values.
     """
     return {"rationale": RATIONALE, **transforms}
 
 
 def sampler(name: str, **values) -> dict:
-    """A ``sampler`` block naming ``name`` at ``values``, stating :data:`RATIONALE`."""
+    """Return a ``sampler`` block of ``name`` and :data:`RATIONALE`, ``values`` merged over them."""
     return {"name": name, "rationale": RATIONALE, **values}
 
 
@@ -174,15 +172,14 @@ MASK_BINARIZE = 0.5
 at."""
 
 VERTEX_SPACING = 4.0
-"""A sample number of pixels of each ring's perimeter per vertex an instance segmentation pass,
-validation or COCO import states its mask rings are simplified to."""
+"""A sample ``vertex_spacing``: pixels of a mask ring's perimeter per vertex it is simplified to."""
 
 MASK_CUT = MaskCut(mask_binarize=MASK_BINARIZE, vertex_spacing=VERTEX_SPACING)
-"""The sample mask cut an instance segmentation pass or validation states."""
+"""The sample mask cut, at :data:`MASK_BINARIZE` and :data:`VERTEX_SPACING`."""
 
 
 IOU_THRESHOLD = 0.5
-"""A sample IoU a match must reach under the IoU convention, handed to ``evaluate`` directly."""
+"""A sample IoU a match must reach under the IoU convention."""
 
 
 SCORE_WEIGHTS = {"loss": 0.5, "f1": 0.3, "map50": 0.2}
@@ -190,8 +187,10 @@ SCORE_WEIGHTS = {"loss": 0.5, "f1": 0.3, "map50": 0.2}
 
 
 def evaluation_block(**stated) -> dict:
-    """An ``evaluation`` block selecting on the composite objective at :data:`VALIDATION_CONF`,
-    weighting it by :data:`SCORE_WEIGHTS`, with ``stated`` over it.
+    """Return an ``evaluation`` block, ``stated`` merged over its sample settings.
+
+    The settings are ``selection_metric`` ``objective``, :data:`VALIDATION_CONF`, a copy of
+    :data:`SCORE_WEIGHTS` and :data:`RATIONALE`.
     """
     return {
         "selection_metric": "objective",
@@ -203,27 +202,33 @@ def evaluation_block(**stated) -> dict:
 
 
 def sweep_space() -> dict:
-    """A fresh copy of the sample search space: the head learning rate, sampled log-uniformly."""
+    """Return a fresh copy of the sample search space.
+
+    The space is the head learning rate, sampled log-uniformly.
+    """
     return {
         "optimizer.head_lr": {"type": "loguniform", "low": 1e-4, "high": 1e-2}
     }
 
 
 def fifo_scheduler() -> dict:
-    """A trial ``scheduler`` block that runs every trial to completion."""
+    """Return a ``fifo`` trial ``scheduler`` block."""
     return {"name": "fifo"}
 
 
 def fifo_search() -> dict:
-    """A sweep's sample ``search_alg`` and ``scheduler``: random sampling, every trial run to
-    completion.
+    """Return a sweep's sample ``search_alg`` and ``scheduler``.
+
+    They are random sampling and the ``fifo`` scheduler.
     """
     return {"search_alg": "random", "scheduler": fifo_scheduler()}
 
 
 def asha_scheduler(**stated) -> dict:
-    """A sample ``asha`` trial ``scheduler`` block stating every setting its Ray class takes,
-    with ``stated`` over them.
+    """Return a sample ``asha`` trial ``scheduler`` block, ``stated`` merged over its settings.
+
+    The settings are ``time_attr``, ``max_t``, ``grace_period``, ``reduction_factor``,
+    ``brackets`` and ``stop_last_trials``.
     """
     return {
         "name": "asha",
@@ -238,9 +243,10 @@ def asha_scheduler(**stated) -> dict:
 
 
 def tune_arguments(**stated) -> dict:
-    """``hpo.tune_search``'s arguments for a sample one-trial random search scheduling nothing
-    and seeking the lowest ``objective``, with ``stated`` over them; ``objective_fn``,
-    ``param_space`` and ``sweep_dir`` are the caller's own.
+    """Return sample keyword arguments for ``hpo.tune_search``, ``stated`` merged over them.
+
+    They state metric ``objective`` at mode ``min``, one sample, random search, the ``fifo``
+    scheduler, seed 0, one concurrent trial and one split draw.
     """
     return {
         "metric": "objective",

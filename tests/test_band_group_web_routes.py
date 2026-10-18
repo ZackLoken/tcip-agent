@@ -1,7 +1,9 @@
-"""Web routes for band-grouped captures: the GUI's own gallery (routes/dataset.py) folding
-sibling band files into one grouped entry, the review and annotate routes reading a grouped
-capture's real stacked frame, and the live band-composite serving +
-``/api/images/bands`` endpoint (routes/images.py).
+"""Web routes for band-grouped captures.
+
+They are the dataset selection (routes/dataset.py) listing sibling band files as one grouped
+entry, the annotate labels route measuring a grouped capture's frame, the band-composite image
+serving and ``/api/images/bands`` endpoint (routes/images.py), and an inference job over a
+grouped capture.
 """
 
 from __future__ import annotations
@@ -18,9 +20,10 @@ from tests._training_values import RATIONALE
 
 
 def _write_group(images_dir: Path, stem: str, base=(111, 222, 333)) -> None:
-    """Each band gets a distinct base level plus a horizontal gradient (never a flat fill): a
-    constant array makes min==max, so a min-max stretch would flatten every channel to black and
-    a channel reorder would be indistinguishable from the original.
+    """Write band TIFFs for group ``stem`` into ``images_dir`` and pass them to the manifest writer.
+
+    For each pair of ``zip(("Green", "Red", "NIR"), base)`` a 20 by 24 uint16 TIFF is written
+    from the ``base`` entry and one horizontal gradient.
     """
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
@@ -92,16 +95,14 @@ def test_annotate_labels_route_measures_a_grouped_captures_real_frame(
 
 
 def _view(path: Path, **params) -> dict:
-    """An image request for ``path`` from a display every image here fits whole: a fixture value."""
+    """Return the image request for ``path`` at a 3840 by 2160 display, ``params`` over it."""
     return {"path": str(path), "display_pixels": 3840 * 2160, **params}
 
 
 def test_serve_image_plain_photo_unaffected_by_new_params(
     client: TestClient, grouped_dataset: Path
 ):
-    """The band params spelled at their defaults serve the plain photo exactly as omitting them
-    does.
-    """
+    """The band params at their defaults serve a plain photo exactly as omitting them does."""
     plain = grouped_dataset / "images" / "2026-05-01" / "plain_002.jpg"
     baseline = client.get("/api/images", params=_view(plain))
     with_defaults = client.get(
@@ -115,8 +116,10 @@ def test_serve_image_plain_photo_unaffected_by_new_params(
 def test_serve_image_refuses_a_band_members_own_path_naming_its_manifest(
     client: TestClient, grouped_dataset: Path
 ):
-    """A band of a grouped capture is no image of its own at the serve door either: its path
-    answers 404 naming the manifest, never a single-band render.
+    """The serve door answers a band member's own path with a 404 naming its manifest.
+
+    A band of a grouped capture is no image of its own: its path answers 404 naming the
+    manifest, not a single-band render.
     """
     member = grouped_dataset / "images" / "2026-05-01" / "cap_001_NIR.tif"
     resp = client.get("/api/images", params=_view(member))
@@ -222,9 +225,10 @@ def test_get_bands_endpoint_never_decodes_pixels_for_a_plain_rgb_photo(
     grouped_dataset: Path,
     monkeypatch,
 ):
-    """/api/images/bands must not do a full pixel decode for ordinary RGB, only for genuine
-    multi-band sources. Spy on the raster factory itself (every decode route opens a source
-    through it) and assert nothing opens one for a plain 3-band photo.
+    """``/api/images/bands`` opens no raster for a plain RGB photo.
+
+    The raster factory is spied on, and the endpoint answers a plain 3-band photo without
+    calling it.
     """
     from tcip_mcp.pipelines import raster_source
 
@@ -262,8 +266,10 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     tmp_path,
     monkeypatch,
 ):
-    """A grouped capture in images_dir reaches the web door's predictor decoded through the
-    channel-aware loader, never as a stringified BandGroupRef.
+    """The inference worker hands its predictor a grouped capture as a ``BandGroupRef``.
+
+    The job completes with one image done, and the published bucket names the capture by its
+    manifest.
     """
     pytest.importorskip("torch")
 
@@ -284,8 +290,9 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     seen = []
 
     class ObservingPredictor(StubPredictor):
-        """The stub's empty prediction, named by each source's display path as the real predictor
-        names it, recording every source it is handed.
+        """A stub predictor recording every source it is handed.
+
+        It answers the stub's empty prediction, each named by its source's ``source_path_of``.
         """
 
         def predict_batch(self, paths, execution=None, **kw):

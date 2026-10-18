@@ -1,5 +1,6 @@
-"""A mosaic's own reserved calibration and test regions assessed directly, without a separate
-held-out image set (``assessment.assess_reserved_regions``).
+"""A mosaic's own reserved calibration and test regions, assessed directly.
+
+``assessment.assess_reserved_regions`` assesses them without a separate held-out image set.
 
 Covers: the completion-mark gate (refuses unmarked, admits marked), the sub-banding and
 halo running real tiled inference over real bands under the one execution record the assessment
@@ -45,7 +46,7 @@ BOX_STEP = 40
 
 @pytest.fixture(autouse=True)
 def _count_trait(tmp_path):
-    """The count trait confirmed in this test's project, measuring the mosaic's subject."""
+    """Confirm the count trait in this test's project, measuring the mosaic's subject."""
     fx.seed_confirmed_count(tmp_path, measured_subject="bud")
 
 
@@ -92,9 +93,10 @@ _BLOCK_MODEL_SOURCE = {
 
 
 def _completed_over(project: Path, data_cfg: dict, experiment_id: str) -> dict:
-    """The run ``experiment_id`` over ``data_cfg`` in ``project``, run through the child's own
-    entry with a body saving the model as built: its checkpoint path and the spatial manifest its
-    resolved record carries.
+    """Run ``experiment_id`` over ``data_cfg`` in ``project`` through the child's own entry.
+
+    The run's body saves the model as built. Returns its checkpoint path and the spatial
+    manifest its resolved record carries.
     """
     from tcip_mcp.experiments import observe
     from tests._verified_checkpoint_fixtures import worker_run
@@ -127,13 +129,12 @@ def _build_experiment(
     experiment_id: str = "exp_block",
     plant_csv_paths: list[str] | None = None,
 ) -> dict:
-    """A real 4-way spatial-strip split over a real raster, resolved and recorded by a real run
-    whose completed checkpoint is the one the reserved regions are assessed for.
+    """Write and label a mosaic, run :func:`_completed_over` over it, and return what it left.
 
-    ``plant_csv_paths`` (when given) writes a georeferenced mosaic (the plant-pitch derivation
-    needs a real geotransform to convert real-world plant spacing to pixels) and threads the
-    paths into ``data.plant_csv_paths``, the config field the band scale reads to prefer
-    plant pitch over ground-truth object spacing.
+    The mosaic is ``_write_mosaic``'s, georeferenced when ``plant_csv_paths`` is given, labeled
+    with a row of 15 by 30 ``bud`` boxes. The run's data section tiles at ``TILE`` with overlap
+    0.2 and draws a tile-prefix split at seed 1 with validation ratio 0.2, holdout ratio 0.15 and
+    ``calibration_ratio``, stating ``plant_csv_paths`` when given.
     """
     root = tmp_path / "ds"
     images_dir = root / "images" / UNDATED_BUCKET
@@ -181,8 +182,9 @@ def _attest_regions_complete(
     *,
     subject: str = "bud",
 ) -> None:
-    """Mark every rect of ``regions`` complete for ``subject`` in the mosaic's label document,
-    through the editor's own save door, one mark per rect.
+    """Mark every rect of ``regions`` complete for ``subject`` in the mosaic's label document.
+
+    Each mark goes through ``_producer_fixtures.mark_complete``, one mark per rect.
     """
     from tests._producer_fixtures import mark_complete
 
@@ -196,7 +198,7 @@ def _attest_regions_complete(
 
 
 def _attested(tmp_path: Path, **kwargs) -> dict:
-    """:func:`_build_experiment` with both reserved regions attested complete."""
+    """Run :func:`_build_experiment` and attest both reserved regions complete; return it."""
     exp = _build_experiment(tmp_path, **kwargs)
     manifest = exp["spatial_manifest"]
     _attest_regions_complete(
@@ -208,11 +210,13 @@ def _attested(tmp_path: Path, **kwargs) -> dict:
 
 
 def _assess(exp: dict, *, k_cal: int = 3, k_test: int = 3, **stated) -> dict:
-    """``assess_reserved_regions`` of the count trait's per-image count for ``exp``'s checkpoint
-    in ``k_cal`` and ``k_test`` bands under the sample collection pass with the ``stated``
-    execution values over it (an NMS merge at the sample threshold unless they name one, ``None``
-    leaving the threshold to the calibration bands), at the sample count test settings, answered
-    as its door answers it.
+    """Assess the count trait's per-image count over ``exp``'s reserved regions.
+
+    ``assess_reserved_regions`` runs for ``exp``'s checkpoint in ``k_cal`` and ``k_test`` bands
+    under the sample collection pass with the ``stated`` execution values over it (an NMS merge
+    at the sample threshold unless they name one, ``None`` leaving the threshold to the
+    calibration bands), at the sample count test settings, answered through
+    ``calibration_tools._answer``.
     """
     from tcip_mcp.assessment import assess_reserved_regions
     from tcip_mcp.tools.calibration_tools import _answer
@@ -264,8 +268,10 @@ def test_an_assessment_refuses_while_the_reserved_regions_are_unattested(
 
 
 def test_a_mark_over_one_region_leaves_the_other_unattested(tmp_path: Path):
-    """The check reads each mark's rect: a mark over the calibration region attests that region
-    alone, so the assessment refuses naming the holdout region and only it.
+    """A mark over the calibration region leaves the holdout region unattested and named.
+
+    With the calibration region alone marked, the assessment refuses naming only the holdout
+    region as not marked complete.
     """
     from tcip_mcp.assessment import AssessmentRefusedError
 
@@ -284,8 +290,10 @@ def test_a_mark_over_one_region_leaves_the_other_unattested(tmp_path: Path):
 
 
 def test_completeness_is_checked_before_feasibility(tmp_path: Path):
-    """A region both incomplete and, at this band count, infeasible names the completeness gap:
-    the feasibility message never gets a chance to fire.
+    """An incomplete and infeasible case reports the completeness gap, not feasibility.
+
+    At this band count the regions are both unmarked and infeasible; the refusal names them as
+    not marked complete and carries no feasibility message.
     """
     from tcip_mcp.assessment import AssessmentRefusedError
 
@@ -300,8 +308,10 @@ def test_completeness_is_checked_before_feasibility(tmp_path: Path):
 def test_a_stated_tile_edge_other_than_the_splits_refuses_naming_both(
     tmp_path: Path,
 ):
-    """The reserved regions and the published mosaic are tiled at one edge: a stated edge the run
-    did not resolve refuses before any band is read, naming both.
+    """A stated tile edge other than the split's refuses, naming both.
+
+    Stating twice the run's tile edge raises ``ValueError`` naming the stated and the resolved
+    edge.
     """
     exp = _attested(tmp_path)
 
@@ -316,9 +326,10 @@ def test_every_band_runs_under_the_execution_record_the_assessment_records(
     tmp_path: Path,
     monkeypatch,
 ):
-    """The bands are predicted under the stated slicing and merge and at the merge threshold,
-    density and floor the recorded execution states; the record the assessment keeps is the
-    record the bands ran.
+    """The bands' passes agree with the assessment's recorded execution on five fields.
+
+    Across the six recorded passes, overlap, postprocessor and merge threshold equal the stated
+    and recorded ones, density equals the recorded density, and conf equals the recorded floor.
     """
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
@@ -360,8 +371,10 @@ def test_every_band_runs_under_the_execution_record_the_assessment_records(
 def test_the_document_retained_is_the_document_measured(
     tmp_path: Path, monkeypatch
 ):
-    """A document emptied after the assessment read it and before it retains it changes neither:
-    the bands are measured from the one read, and that read is what the reference keeps.
+    """A source document emptied just before retention leaves both measurement and copy nonempty.
+
+    The label document is emptied when the assessment reaches its retention step; the bands still
+    count ground truth, and the retained copy still holds annotations.
     """
     import tcip_store
     from tcip_mcp import assessment
@@ -389,9 +402,11 @@ def test_the_document_retained_is_the_document_measured(
 
 
 def test_an_attested_mosaic_is_assessed_and_recorded(tmp_path: Path):
-    """Once every reserved cell is attested complete, the call that refused above records an
-    assessment: one reference sample per band on each side, ground truth in both, no band inside
-    a training region, and the mosaic's content identity as its scope.
+    """An attested mosaic is assessed and recorded.
+
+    With both reserved regions attested complete, the record holds three reference samples on
+    each of the calibration and holdout sides, ground truth counted on both, no disjointness
+    finding, the mosaic's raster width and the producing run.
     """
     from tcip_mcp.assessment import read_assessment
 
@@ -441,9 +456,10 @@ def test_a_run_with_no_reserved_region_refuses_naming_the_remedy(
 def test_a_recorded_mosaic_size_other_than_the_file_refuses_by_name(
     tmp_path: Path, width: int
 ):
-    """The run's recorded mosaic dimensions are checked against the raster read now: a manifest
-    recorded against a replaced or truncated file refuses rather than scoring a sub-area or
-    addressing pixels past the edge.
+    """A recorded mosaic size other than the file's refuses by name.
+
+    The run's recorded mosaic dimensions are checked against the raster as read at assessment: a
+    recorded width larger or smaller than the file's refuses.
     """
     from tcip_mcp.assessment import AssessmentRefusedError
     from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
@@ -465,9 +481,11 @@ def test_a_recorded_mosaic_size_other_than_the_file_refuses_by_name(
 def test_band_counts_and_spacing_count_objects_not_crowd_regions(
     tmp_path: Path,
 ):
-    """The same mosaic assessed twice, its boxes plain and then every other one marked a crowd
-    region: the bands count fewer objects and the objects' spacing widens, since a crowd region is
-    no object to count or to space.
+    """Band counts and object spacing count objects, never crowd regions.
+
+    The same mosaic is assessed twice, its boxes plain and then every other one marked a crowd
+    region: with the crowd regions, the bands count fewer objects and the objects' spacing
+    widens.
     """
     records = []
     for crowd_every_other in (False, True):
@@ -539,9 +557,10 @@ def test_the_band_scale_falls_back_to_object_spacing_with_no_plant_files(
 def test_a_saturated_band_cap_surfaces_as_cap_saturated_provenance(
     tmp_path: Path, monkeypatch
 ):
-    """A band whose raw detection count reaches the applied cap is recorded as saturated: the
-    derived density is forced so low that every band's cap is one, so every band with more than
-    one raw detection is truncated.
+    """A band whose raw detection count reaches the applied cap is recorded as saturated.
+
+    The derived density is forced low enough that the applied cap is reached, and the
+    calibration side records a saturated fraction above zero.
     """
     import tcip_mcp.pipelines.derivations as derivations_module
 
@@ -559,9 +578,10 @@ def test_a_saturated_band_cap_surfaces_as_cap_saturated_provenance(
 def test_the_recorded_density_is_derived_from_the_calibration_bands_alone(
     tmp_path: Path,
 ):
-    """The recorded density is fitted on the calibration bands' densities only: ground truth made
-    dense inside the test region alone, which a pooled derivation would follow, leaves it where
-    the calibration side puts it.
+    """The recorded density is derived from the calibration bands alone.
+
+    Ground truth is made dense inside the test region alone, so a derivation pooled over both
+    sides differs from the calibration-only one, and the recorded density equals the latter.
     """
     from tcip_mcp.pipelines.derivations import derive_object_density
 
@@ -619,9 +639,10 @@ def test_the_recorded_density_is_derived_from_the_calibration_bands_alone(
 def test_the_recorded_density_caps_the_whole_mosaic_at_its_own_pixels(
     tmp_path: Path,
 ):
-    """The pass the assessment records publishes the whole mosaic as one frame of the same rule:
-    its cap is the calibration bands' density times the mosaic's own pixels, so a mosaic holding
-    more objects than any one band is not truncated at publication.
+    """The cap the recorded density gives the whole mosaic covers the mosaic's objects.
+
+    The mosaic holds more objects than its densest calibration band, and the detection cap of the
+    recorded density over the mosaic's own pixels is at least that object count.
     """
     from tcip_mcp.pipelines.derivations import detection_cap
 
@@ -642,8 +663,9 @@ def test_the_recorded_density_caps_the_whole_mosaic_at_its_own_pixels(
 def test_an_unstated_merge_threshold_derives_from_the_calibration_bands(
     tmp_path: Path,
 ):
-    """Each object gains an overlapping neighbor, so the ground-truth tail derives a merge
-    threshold; the record states it as derived.
+    """An unstated merge threshold is recorded with the cross-tile NMS derivation as its source.
+
+    Each object in the ground truth has an overlapping neighbor.
     """
     from tcip_mcp.pipelines.derivations import CROSS_TILE_NMS_DERIVATION
 
@@ -680,8 +702,10 @@ def test_an_unstated_merge_threshold_derives_from_the_calibration_bands(
 def test_the_assessment_records_the_band_counts_and_test_settings_it_ran_under(
     tmp_path: Path,
 ):
-    """The band counts, the equivalence multiplier and the dispersion quantile an assessment
-    states are each recorded on it beside its reason, and the door takes none of them by default.
+    """The assessment records the band counts and test settings it ran under, none defaulted.
+
+    The band counts, the equivalence multiplier and the dispersion quantile an assessment states
+    are each recorded on it beside its reason, and the door takes none of them by default.
     """
     import inspect
 
@@ -725,8 +749,10 @@ def test_the_assessment_records_the_band_counts_and_test_settings_it_ran_under(
 def test_a_raster_pass_stamps_its_stated_conf_and_refuses_an_omitted_one(
     tmp_path: Path,
 ):
-    """A raster pass without an assessment runs at the conf it states, recorded as stated, and
-    one stating none refuses naming it before anything is published.
+    """A raster pass records the conf it states, and one stating none is refused naming it.
+
+    A raster pass without an assessment records the conf it states with an explicit source, and
+    one stating none refuses naming ``conf``.
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.pipelines.execution import Stated
@@ -768,8 +794,10 @@ def test_a_raster_pass_stamps_its_stated_conf_and_refuses_an_omitted_one(
 
 
 def test_band_ground_truth_keeps_what_is_centered_in_the_band_at_full_extent():
-    """A box centered inside the band is kept at full extent, translated to local coordinates; a
-    box centered outside is dropped, even one that overlaps the band substantially.
+    """Band ground truth keeps each box centered in the band, at full extent.
+
+    A box centered inside the band is kept at full extent, translated to local coordinates; a box
+    centered outside is dropped, the two such boxes here each overlapping the band by 10 px.
     """
     import numpy as np
 
@@ -823,9 +851,10 @@ def test_band_ground_truth_keeps_what_is_centered_in_the_band_at_full_extent():
 
 
 def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
-    """A band's reference forms a crowd region's ground truth as a crowd region, read off the row
-    it came from, never as one more object in the band, each box on the stored grid its document
-    holds.
+    """Band records carry each ground-truth row's crowd flag.
+
+    Of a plain box and a crowd region, the band's ground truth flags the second as a crowd
+    region; the plain box and the detection keep the coordinates their sources state.
     """
     from types import SimpleNamespace
 
@@ -904,7 +933,9 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
 def test_a_band_record_states_the_frame_its_forward_ran_on_and_the_band_it_scores(
     tmp_path: Path, monkeypatch
 ):
-    """Through a real assessment, each band's record is the halo its tiled pass ran on: that
+    """A band record states the frame its forward ran on and the band it scores.
+
+    Through a real assessment, each band's record is the halo its tiled pass ran on: that
     frame's width, height and the cap the pass's density gives it, a count within it, the band
     inside it as the scored region, and only detections and ground truth centered in it.
     """
@@ -953,9 +984,10 @@ def test_a_band_record_states_the_frame_its_forward_ran_on_and_the_band_it_score
 
 
 def test_band_rects_are_reported_in_full_mosaic_coordinates():
-    """Sub-banding recurses the strip split over the region's own local extent, so every returned
-    rect is translated back by the region's origin: a region not starting at (0, 0) is the only
-    fixture that tells the two apart.
+    """Band rects are reported in full-mosaic coordinates.
+
+    Over a region whose origin is (500, 60), the three bands lie inside the region and do not
+    overlap along x.
     """
     from tcip_mcp.pipelines.block_calibration import band_rects
 
@@ -975,8 +1007,10 @@ def test_band_rects_are_reported_in_full_mosaic_coordinates():
 
 
 def test_density_outlier_bands_are_flagged_against_their_own_siblings():
-    """A band far sparser or far denser than its siblings is named; empty bands carry no density
-    signal and are never flagged, since the feasibility gate speaks for them.
+    """Density-outlier bands are flagged against their own siblings, empty bands never.
+
+    Among counts 10, 11, 1, 60 and 0, the bands at 1 and 60 are named and the band at 0 is not;
+    counts 10, 11 and 9 flag none.
     """
     from tcip_mcp.pipelines.block_calibration import density_uniformity_flags
 
@@ -1007,8 +1041,10 @@ def _build_attribute_scoped_experiment(
     labeled_value: str,
     experiment_id: str = "exp_block_attribute",
 ) -> dict:
-    """An experiment whose subject declares a categorical attribute, with the dataset's registry
-    reordered after the run resolved and recorded its own attributes.
+    """Run an experiment whose subject declares a categorical attribute, then reorder it.
+
+    The dataset's registry is reordered after the run resolved and recorded its own attributes,
+    and both reserved regions are attested complete. Returns what the experiment left.
     """
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
@@ -1088,9 +1124,10 @@ def _build_attribute_scoped_experiment(
 def test_ground_truth_decodes_through_the_checkpoints_own_recorded_attributes(
     tmp_path: Path,
 ):
-    """The mosaic's ground truth is read through the attributes the training run recorded, never
-    a live re-read of the dataset's registry: the registry reorders the values after the run, and
-    the assessment still reads the reference in the order the run trained.
+    """An assessment still counts ground truth after the registry reorders the run's values.
+
+    The run records its attribute values in one order and the live registry is reordered after
+    it; the assessment's bands still count objects.
     """
     from tcip_mcp.subject_registry import read_registry
 
@@ -1127,8 +1164,9 @@ def test_a_recorded_scope_needs_no_registry_on_disk(tmp_path: Path):
 def test_regions_marked_through_the_editors_save_admit_the_assessment(
     tmp_path: Path, client
 ):
-    """The completeness gate reads the record the breeder's own gesture writes: each reserved
-    region marked complete through the save the Annotate canvas posts to.
+    """Regions marked complete through the editor's save admit the assessment.
+
+    Both reserved regions are marked complete through posts to ``/api/annotate/labels``.
     """
     from tests._web_fixtures import open_new_project
 
