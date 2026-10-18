@@ -1,12 +1,12 @@
-"""The native-size ratio tile tier: a checkpoint that trained untiled on frames that all shared
-one square size justifies tiling at that frame's own size, with each tile run through the resize
-that run's recorded augmentation config applied to a training frame.
+"""Tests for the native-size ratio tile tier.
 
-The coordinate hazard these tests exist for: a detector's own ``GeneralizedRCNNTransform`` already
-resizes the tensor it is handed and maps its boxes back to that tensor's coordinate space, so the
-tier's rescale must undo its own resize and nothing else. A test whose model has no internal
-transform, or whose ``min_size`` happens to equal the tile edge, cannot tell a correct rescale from
-a doubled one.
+A checkpoint that trained untiled on frames that all shared one square size justifies tiling at
+that frame's own size, with each tile run through the resize that run's recorded augmentation
+config applied to a training frame.
+
+A detector's own ``GeneralizedRCNNTransform`` itself resizes the tensor it is handed and maps its
+boxes back to that tensor's coordinate space, so the tier's rescale undoes its own resize and
+nothing else.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ _RUN_DATA = {"num_channels": 3, "scope": {"subject": "bud"}}
 
 
 class _GeometryStub:
-    """Only the geometry facts ``resolve_tile_geometry`` reads off a predictor."""
+    """A predictor stub holding the four ``train_*`` geometry attributes it is given."""
 
     def __init__(
         self,
@@ -64,10 +64,10 @@ class _GeometryStub:
 
 
 class _MiddleHalfDetector(torch.nn.Module):
-    """Proposes one box over the middle half of whatever tensor it is handed, through torchvision's
-    own ``GeneralizedRCNNTransform`` so the box makes the same internal-resize round trip a real
-    detector's boxes make. Its output is therefore exactly the middle half of the *input* tile
-    tensor, whatever ``min_size`` is, which is what makes a doubled correction visible.
+    """A detector stub returning one box per image, scored 0.9, via ``GeneralizedRCNNTransform``.
+
+    The box is the middle half of each image as the transform at ``min_size`` and ``max_size``
+    resized it, mapped back by the transform's own ``postprocess``.
     """
 
     def __init__(
@@ -126,8 +126,10 @@ def _stub_predictor(model, *, task: str = "detection") -> GenericPredictor:
 
 
 def _sliced(pred, source, *, tile_resize, **kwargs) -> dict:
-    """``predict_sliced`` at this module's lattice: ``TILE`` edge, no overlap, NMS at the sample
-    merge threshold (``tiled_record``'s).
+    """Run ``predict_sliced`` at this module's lattice.
+
+    The lattice is a ``TILE`` edge, no overlap, and NMS at the sample merge threshold
+    (``tiled_record``'s).
     """
     from tests._verified_checkpoint_fixtures import tiled_record
 
@@ -142,7 +144,7 @@ def _sliced(pred, source, *, tile_resize, **kwargs) -> dict:
 
 
 def _expected_middle_half_boxes() -> set[tuple[float, float, float, float]]:
-    """The middle half of every tile on a gapless 2x2 lattice, in image pixel space."""
+    """Return the middle half of every tile on a gapless 2x2 lattice, in image pixel space."""
     return {
         (x + TILE * 0.25, y + TILE * 0.25, x + TILE * 0.75, y + TILE * 0.75)
         for x in (0, TILE)
@@ -154,10 +156,7 @@ def _expected_middle_half_boxes() -> set[tuple[float, float, float, float]]:
 
 
 def test_square_untiled_training_frame_yields_a_tile_edge():
-    """A run that trained untiled on frames that all shared one square size justifies tiling at
-    that frame: an object in such a tile reaches the model at the scale a whole training frame
-    presented it at.
-    """
+    """A run trained untiled on one square frame size yields that size as its tile edge."""
     assert _geometry(_GeometryStub(train_native_size=[512, 512])) == (
         512,
         "native_ratio",
@@ -165,9 +164,10 @@ def test_square_untiled_training_frame_yields_a_tile_edge():
 
 
 def test_rectangular_untiled_training_frame_yields_no_tile_edge():
-    """Tile geometry is a single square edge everywhere it travels, and no square edge reproduces a
-    rectangular frame's scale on both axes. Refuse, rather than pick an edge that silently
-    mis-scales one axis.
+    """A rectangular untiled training frame yields no tile edge.
+
+    Tile geometry is a single square edge, and no square edge reproduces a rectangular frame's
+    scale on both axes, so the geometry is unavailable.
     """
     assert _geometry(_GeometryStub(train_native_size=[1024, 768])) == (
         None,
@@ -182,9 +182,7 @@ def test_persisted_tile_geometry_outranks_the_native_frame():
 
 
 def test_explicit_tile_size_outranks_the_native_frame():
-    """On an untiled pass a stated edge is a fact the resolver records as stated; a tiled pass
-    checks it against the native frame instead (the contradiction tests below).
-    """
+    """On an untiled pass the resolver records a stated edge as stated over the native frame."""
     stub = _GeometryStub(train_native_size=[512, 512])
 
     assert _geometry(stub, tile_size=320, tiled=False) == (320, "explicit")
@@ -201,9 +199,7 @@ def test_no_native_frame_yields_no_tile_edge():
     "native_size", [[512], [0, 0], ["wide", "tall"], 512, [-4, -4]]
 )
 def test_a_geometry_record_refuses_a_native_size_that_is_no_frame(native_size):
-    """A checkpoint's recorded geometry is read through its one schema, so a native size that is
-    not two positive pixel counts refuses where the record is read, never reaching a reader.
-    """
+    """``TrainGeometry`` refuses a native size that is not two positive pixel counts, by name."""
     from pydantic import ValidationError
 
     from tcip_mcp.pipelines.schemas import TrainGeometry
@@ -218,14 +214,14 @@ def test_a_geometry_record_refuses_a_native_size_that_is_no_frame(native_size):
 
 
 def _admitted(config):
-    """``config``, an ``augmentation`` block, as the schema admits it."""
+    """Return ``config``, an ``augmentation`` block, as the schema admits it."""
     from tcip_mcp.pipelines.schemas import AugmentationSpec
 
     return AugmentationSpec.model_validate(config)
 
 
 def _resize(config):
-    """The recorded resize of the ``augmentation`` block ``config`` once the schema admits it."""
+    """Return the recorded resize of the ``augmentation`` block ``config`` as admitted."""
     from tcip_mcp.pipelines.data.augmentations import recorded_resize
 
     return recorded_resize(_admitted(config))
@@ -240,7 +236,7 @@ def test_a_config_with_no_resize_records_no_resize():
 
 
 def test_a_recorded_resize_is_read_through_the_builders_own_chain():
-    """The size the last resize of the chain the config builds states, the dict form's own."""
+    """The recorded resize is the dict-form resize's size, alone or beside a flip."""
     assert _resize(augmentation(resize={"size": [320, 240]})) == (320, 240)
     assert _resize(
         augmentation(resize={"size": [800, 600]}, horizontal_flip={"p": 0.5})
@@ -260,16 +256,20 @@ def test_a_recorded_resize_is_read_through_the_builders_own_chain():
 def test_an_unbuildable_recorded_config_raises_rather_than_reading_as_no_resize(
     config, refusal
 ):
-    """A config the schema or the builder refuses (an unknown transform, a shorthand, a preset
-    name, no reason) raises its refusal here too, never read as a run that pinned no size.
+    """A recorded config the schema or the builder refuses raises when its resize is read.
+
+    An unknown transform, a shorthand, a preset name and a missing reason each raise their
+    refusal.
     """
     with pytest.raises(ValueError, match=refusal):
         _resize(config)
 
 
 def test_the_recorded_resize_travels_only_with_a_native_frame_tile_edge():
-    """An explicit or persisted-geometry tile edge means the tile as it stands, which is what every
-    count already produced at those tiers was measured at.
+    """The recorded resize travels only with a native-frame tile edge.
+
+    An untiled pass, an explicit tile edge and a persisted-geometry tile edge each carry no
+    resize: those edges mean the tile as it stands.
     """
     from tcip_mcp.pipelines.slicing import resolve_tile_geometry
 
@@ -321,8 +321,9 @@ def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(
 
 
 def test_tiles_at_native_size_with_no_recorded_resize(tmp_path):
-    """The common case: the recorded chain pins no size, so the tier is tiling at the native frame
-    size and nothing else. Boxes land in image pixel space untouched by any rescale.
+    """A recorded chain that pins no size tiles at the native frame size and nothing else.
+
+    Boxes land in image pixel space untouched by any rescale.
     """
     pred = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333))
 
@@ -334,11 +335,11 @@ def test_tiles_at_native_size_with_no_recorded_resize(tmp_path):
 def test_a_recorded_resize_is_undone_per_axis_and_not_confused_with_the_detectors_own(
     tmp_path,
 ):
-    """``min_size`` (800) is deliberately unlike both the tile edge (64) and the resize target
-    (128x96), and the target is deliberately not square. Boxes must land exactly where the
-    no-resize pass puts them: the detector's internal transform already maps its own boxes back to
-    the tensor it was handed, so only the tier's own stretch is left to undo, and undoing it with
-    one scalar factor instead of two would displace every y coordinate.
+    """A recorded resize is undone per axis, apart from the detector's own internal resize.
+
+    ``min_size`` (800) differs from both the tile edge (64) and the resize target (128x96), and
+    the target is not square. Rounded to four decimals, the boxes equal
+    ``_expected_middle_half_boxes()``.
     """
     pred = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333))
 
@@ -349,10 +350,11 @@ def test_a_recorded_resize_is_undone_per_axis_and_not_confused_with_the_detector
 
 
 def test_a_windowed_raster_source_is_resized_and_undone_the_same_way():
-    """The windowed path hands each tile over as an array, not a PIL image, and the same
-    ``to_pil_if_faithful`` rule the training loader uses decides whether the recorded resize applies
-    to it; a uint8 three-band window is faithfully PIL, so it does, and the boxes come back in
-    full-raster pixel space all the same.
+    """A windowed raster source's boxes come back in full-raster pixel space under a resize.
+
+    The windowed path hands each tile over as an array, not a PIL image, and
+    ``to_pil_if_faithful`` decides whether the recorded resize applies to it; a uint8 three-band
+    window is faithfully PIL, so the resize applies and is undone.
     """
     import numpy as np
 
@@ -374,8 +376,10 @@ def test_a_windowed_raster_source_is_resized_and_undone_the_same_way():
 
 
 def test_a_windowed_alpha_tagged_source_is_resized_and_undone_the_same_way():
-    """A windowed 4-band reader whose ``band_interpretations`` declares the 4th band alpha gets
-    the recorded resize applied and undone as the 3-band case does.
+    """A windowed 4-band reader declaring its 4th band alpha gets the recorded resize and undo.
+
+    The reader's ``band_interpretations`` declares the 4th band alpha, so its boxes come back in
+    full-raster pixel space at the middle half of every tile.
     """
     import numpy as np
 
@@ -401,9 +405,10 @@ def test_a_windowed_alpha_tagged_source_is_resized_and_undone_the_same_way():
 
 
 def test_a_windowed_undeclared_fourth_band_source_refuses_the_recorded_resize():
-    """A windowed 4-band reader with no band_interpretations fact (an .npy-backed reader, or a
-    GDAL file whose 4th band carries no alpha tag) is never guessed into RGBA, so the recorded
-    resize refuses by name rather than skip.
+    """A windowed 4-band reader with no band interpretations refuses the recorded resize by name.
+
+    Such a reader (an .npy-backed reader, or a GDAL file whose 4th band carries no alpha tag) is
+    not guessed into RGBA, so the resize refuses.
     """
     import numpy as np
 
@@ -425,8 +430,9 @@ def test_a_windowed_undeclared_fourth_band_source_refuses_the_recorded_resize():
 
 
 def test_a_tile_no_pil_mode_represents_refuses_the_recorded_resize(tmp_path):
-    """The training loader refuses an augmentation over such a frame, so a recorded resize over a
-    tile no PIL mode takes refuses by name rather than serve it unresized.
+    """A recorded resize over a tile no PIL mode takes refuses by name.
+
+    A 3-band uint16 tile has no PIL mode to resize through, so the pass refuses naming its pixels.
     """
     import numpy as np
 
@@ -445,10 +451,10 @@ def test_a_tile_no_pil_mode_represents_refuses_the_recorded_resize(tmp_path):
 def _trained_checkpoint(
     tmp_path: Path, tiling: dict | None, *, size: int = TILE, **config
 ) -> str:
-    """The checkpoint a run under ``tmp_path`` completed over two square ``size`` px bud frames of
-    its own, its tiny detector at the statistics and geometry those frames derive, under
-    ``tiling`` (``None`` for an untiled run) and with ``config``'s keys in place of its config's
-    own; registered by completing.
+    """Return the checkpoint ``registered_checkpoint`` completes over two ``size`` px frames.
+
+    ``seed_bud_images`` writes the frames under ``tmp_path``; the run is of ``BESPOKE_DETECTION``
+    at ``FRAME_STATISTICS``, under ``tiling``, with ``config``'s keys passed through.
     """
     from tests._producer_fixtures import seed_bud_images
     from tests._verified_checkpoint_fixtures import (
@@ -479,7 +485,7 @@ def _trained_checkpoint(
 def _native_frame_checkpoint(
     tmp_path: Path, augmentation: dict | None = None
 ) -> str:
-    """:func:`_trained_checkpoint` of an untiled run, under ``augmentation`` when given."""
+    """Return :func:`_trained_checkpoint` of an untiled run, under ``augmentation`` when given."""
     return _trained_checkpoint(
         tmp_path,
         None,
@@ -490,10 +496,11 @@ def _native_frame_checkpoint(
 def test_a_tiled_pass_over_a_native_frame_checkpoint_says_what_it_rests_on(
     tmp_path,
 ):
-    """The rail admits the work: a caller who asks to tile a checkpoint whose only geometry is its
-    untiled training frame gets a real pass at that frame's edge, its record naming that basis and
-    the recorded resize each tile runs through; an untiled frame records no overlap, so the caller
-    states one.
+    """A tiled pass over a native-frame checkpoint runs and records the basis it rests on.
+
+    A tiled pass at a stated overlap, over a checkpoint whose only geometry is its untiled
+    training frame, runs at that frame's edge, its record naming that basis and the recorded
+    resize.
     """
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_OVERLAP,
@@ -523,8 +530,10 @@ def test_a_tiled_pass_over_a_native_frame_checkpoint_says_what_it_rests_on(
 
 
 def test_a_native_frame_checkpoint_stays_untiled_unless_asked(tmp_path):
-    """``tile`` unset follows the checkpoint's own regime, and an untiled-trained checkpoint's
-    regime is untiled: the tier is a capability a caller opts into, never a silent upgrade.
+    """A native-frame checkpoint runs untiled when ``tile`` is unset.
+
+    ``tile`` unset follows the checkpoint's own regime, and an untiled-trained checkpoint's regime
+    is untiled.
     """
     from tests._verified_checkpoint_fixtures import predicted_over
 
@@ -542,10 +551,9 @@ def test_a_native_frame_checkpoint_stays_untiled_unless_asked(tmp_path):
 
 
 def _native_frame_gt(images_dir: Path) -> None:
-    """A single 128x128 image, ground truth at exactly the middle half of every tile on a gapless
-    2x2 TILE-edge lattice: what ``_MiddleHalfDetector`` reports whatever intermediate resize a
-    tile is run through, so a perfect-match reference isolates the geometry reproduction this
-    admits-valid-work proof is about from any unrelated matching noise.
+    """Write a single 128x128 image labeled at the middle half of every tile of a 2x2 lattice.
+
+    The lattice is gapless at the TILE edge, and the labels are ``_expected_middle_half_boxes()``.
     """
     from PIL import Image
 
@@ -574,9 +582,9 @@ def _persisted_regime_predictor():
 
 
 def _native_frame_regime_predictor():
-    """Only the checkpoint's own uniform untiled training frame, with a recorded chain that pins a
-    resize to a different edge than the tile itself, so the reproduction below exercises the
-    resize/rescale round trip rather than comparing two identical no-op calls.
+    """Return a predictor whose only tiling basis is its uniform untiled training frame.
+
+    Its recorded chain pins a resize to twice the tile edge.
     """
     p = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333))
     p.train_tile_size, p.train_overlap = None, 0.0
@@ -590,11 +598,12 @@ def _native_frame_regime_predictor():
 def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_the_persisted_one(
     tmp_path, monkeypatch
 ):
-    """A checkpoint whose only tiling basis is its own
-    uniform untiled training frame reaches the delivery-grade gate and produces the identical
-    counts, metrics and box coordinates a persisted tiled regime already trusted would, even though
-    its recorded augmentation chain pins a real resize the native-frame regime alone must run each
-    tile through and undo, so the two runs are not merely two identical no-resize calls.
+    """A native-frame basis passes delivery-grade evaluation and matches a persisted regime.
+
+    A checkpoint whose only tiling basis is its own uniform untiled training frame reaches the
+    delivery-grade gate and produces the identical counts, metrics and box coordinates a persisted
+    tiled regime produces, while its recorded augmentation chain pins a resize to twice the tile
+    edge that the native-frame regime carries.
     """
     import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.execution import Stated, execution_record
@@ -700,9 +709,7 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
 def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict_sliced(
     tmp_path, monkeypatch
 ):
-    """A native-frame checkpoint whose recorded chain pins a resize reaches ``predict_sliced``
-    with it, so the evaluation door never silently runs each tile at its own native size.
-    """
+    """Delivery-grade evaluation hands ``predict_sliced`` a native-frame checkpoint's resize."""
     import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.pipelines.training.eval_runners import (
@@ -781,7 +788,7 @@ def test_an_explicit_edge_contradicting_the_native_frame_refuses():
 
 
 def test_an_untiled_call_with_a_contradicting_stated_edge_is_inert():
-    """The edge never governs a count when the run doesn't tile, so it is never checked."""
+    """An untiled call keeps a stated edge that contradicts the persisted geometry, as explicit."""
     from tcip_mcp.pipelines.slicing import resolve_tile_geometry
 
     stub = _GeometryStub(train_tile_size=128)
@@ -812,7 +819,7 @@ def test_an_explicit_edge_equal_to_the_native_frame_clears():
 
 
 def test_an_explicit_edge_on_a_checkpoint_recording_no_geometry_clears():
-    """The foreign-checkpoint case: nothing to contradict, so any stated edge stands."""
+    """A stated edge on a checkpoint recording no geometry stands as explicit on a tiled call."""
     from tcip_mcp.pipelines.slicing import resolve_tile_geometry
 
     stub = _GeometryStub()
@@ -823,7 +830,7 @@ def test_an_explicit_edge_on_a_checkpoint_recording_no_geometry_clears():
 
 
 def _tiled_checkpoint(tmp_path: Path, tile_size: int) -> str:
-    """:func:`_trained_checkpoint` of a run tiled at ``tile_size`` over frames of that size."""
+    """Return :func:`_trained_checkpoint` of a run tiled at ``tile_size`` over frames that size."""
     return _trained_checkpoint(  # sliver_frac stated: one box per frame derives no spread
         tmp_path,
         tiling_block(tile_size=tile_size, overlap=0.2, sliver_frac=0.5),
@@ -845,9 +852,10 @@ def _tiled_checkpoint(tmp_path: Path, tile_size: int) -> str:
 def test_a_stated_edge_contradicting_the_checkpoints_geometry_refuses_the_pass(
     tmp_path, make, recorded
 ):
-    """A caller-typed tile edge that differs from the checkpoint's own persisted training geometry,
-    or from its recorded untiled training frame when it persists none, is a real contradiction,
-    never a caller override to trust blindly.
+    """A stated tile edge contradicting the checkpoint's geometry refuses the pass.
+
+    A caller-typed edge that differs from the checkpoint's own persisted training geometry, or
+    from its recorded untiled training frame when it persists none, refuses naming both edges.
     """
     from tcip_mcp.pipelines.execution import ExecutionRefusedError
     from tests._verified_checkpoint_fixtures import predicted_over
@@ -870,7 +878,10 @@ def test_a_stated_edge_contradicting_the_checkpoints_geometry_refuses_the_pass(
 def test_a_stated_edge_matching_persisted_geometry_is_admitted_as_stated(
     tmp_path,
 ):
-    """The rail refuses a contradiction, not an explicit edge that simply agrees."""
+    """A stated tile edge agreeing with the persisted geometry is admitted and recorded as stated.
+
+    An explicit edge equal to the checkpoint's persisted geometry is no contradiction.
+    """
     from tests._verified_checkpoint_fixtures import predicted_over
 
     ckpt = _tiled_checkpoint(tmp_path, TILE)

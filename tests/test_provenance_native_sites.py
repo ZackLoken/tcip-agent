@@ -1,5 +1,6 @@
-"""Native provenance stamping at the non-web write sites and the read path that carries it back
-out.
+"""Tests of native provenance stamping at the non-web write sites and on the read path.
+
+The read path is the one that carries the stamped provenance back out.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from tests._producer_fixtures import blank_image
 
 
 def _records(img) -> list[dict]:
-    """The records of ``img``'s label document as stored."""
+    """Return the records of ``img``'s label document as stored."""
     import tcip_store
     from tests._producer_fixtures import image_label_key
 
@@ -18,8 +19,9 @@ def _records(img) -> list[dict]:
 
 
 def test_save_annotations_takes_no_producer_and_names_itself(tmp_path, bound):
-    """Every saved record carries a producer and its time: the tool's own, which no caller
-    states.
+    """``save_annotations`` takes no producer and stamps each record with its own and a time.
+
+    The producer is the tool's own, which no caller states.
     """
     import inspect
 
@@ -38,7 +40,7 @@ def test_save_annotations_takes_no_producer_and_names_itself(tmp_path, bound):
 
 
 def test_save_annotations_never_reads_provenance_off_a_shape(tmp_path, bound):
-    """A shape's own ``created_by`` is not an author: every new shape carries the door's."""
+    """A shape's own ``created_by`` is not an author: both new shapes carry the door's."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = blank_image(tmp_path)
@@ -64,9 +66,10 @@ def test_save_annotations_never_reads_provenance_off_a_shape(tmp_path, bound):
 
 
 def test_the_read_path_carries_authorship_out_of_the_record():
-    """``client_annotation`` is what ``read_annotations`` returns per annotation. Reference
-    admissibility turns on created_by and accepted_by, so a read path that dropped them would leave
-    a stamped author knowable only by opening the label file.
+    """``client_annotation`` carries a record's authorship out on the read path.
+
+    ``client_annotation`` is what ``read_annotations`` returns per annotation; it carries the
+    record's created_by, accepted_by, created_at and accepted_at.
     """
     from tcip_annotation.json_io import client_annotation
     from tcip_annotation.state import Annotation, BBox
@@ -89,9 +92,7 @@ def test_the_read_path_carries_authorship_out_of_the_record():
 
 
 def test_the_read_path_omits_provenance_a_record_does_not_carry():
-    """An unattributed label reads back unattributed, not with null authorship keys that a reader
-    could mistake for a recorded absence.
-    """
+    """An unattributed label reads back with no ``created_by`` or ``accepted_by`` key."""
     from tcip_annotation.json_io import client_annotation
     from tcip_annotation.state import Annotation, BBox
 

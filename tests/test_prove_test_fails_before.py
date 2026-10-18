@@ -1,14 +1,14 @@
-"""Tests for tools/prove_test_fails_before.py's test_file resolution, run by subprocess
-against the repository's own history.
+"""Tests for tools/prove_test_fails_before.py's test_file resolution.
 
-An absolute test_file path must name the file in the tree pytest actually runs in, not the
-working checkout's own file: a relative and an absolute path naming the same file under tests/
-must report the same verdict, and a path outside tests/ must refuse rather than be materialized
-anywhere.
+They run by subprocess against the repository's own history.
+
+An absolute test_file path names the file in the tree pytest actually runs in: a relative and an
+absolute path naming the same file under tests/ report the same verdict, and a path outside
+tests/ refuses.
 
 The two guard checks run against the real baseline commit ``BASELINE``, so the checkout they run
-in must carry the repository's history: CI's python job checks out with ``fetch-depth: 0`` for
-this module, and a depth-1 clone makes both report REFUSED rather than GUARDS.
+in carries the repository's history: CI's python job checks out with ``fetch-depth: 0`` for this
+module.
 """
 
 from __future__ import annotations
@@ -75,9 +75,10 @@ def test_a_path_outside_tests_is_refused_by_name():
 
 
 def test_a_relative_and_absolute_dotdot_path_outside_tests_are_both_refused():
-    """A relative spelling that reads as inside tests/ before its ".." segments collapse
-    (tests/../tools/x.py) must refuse the same way its absolute spelling does, not be
-    materialized as if it were a real tests/ path.
+    """A relative and an absolute ".." path outside tests/ are both refused.
+
+    A relative spelling that reads as inside tests/ before its ".." segments collapse
+    (tests/../tools/x.py) and its absolute spelling each exit 3, REFUSED as outside tests/.
     """
     relative = "tests/../tools/prove_test_fails_before.py"
     absolute = str(

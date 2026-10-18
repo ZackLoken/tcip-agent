@@ -1,10 +1,11 @@
-"""The proposal staging record: an image's staged run is addressed by its place in the dataset
-and carries the content identity of the pixels the engine ran on.
+"""Tests of the proposal staging record.
+
+An image's staged run is addressed by its place in the dataset and carries the content identity
+of the pixels the engine ran on.
 
 ``propose_annotations`` writes the record; ``stage_proposals`` reads it back through the same
-address and refuses when the image no longer matches the identity that run recorded. Every test
-here drives both tools for real, through a stub engine installed at
-``tcip_mcp.pipelines.proposal.resolve_proposer``, never a hand-written envelope.
+address and refuses when the image does not match the identity that run recorded. Both tools run
+over a stub engine installed at ``tcip_mcp.pipelines.proposal.resolve_proposer``.
 """
 
 from __future__ import annotations
@@ -21,8 +22,9 @@ from tests._producer_fixtures import write_image
 def _install_stub(
     monkeypatch: pytest.MonkeyPatch, candidates: list[dict]
 ) -> None:
-    """A proposal engine that hands ``candidates`` back verbatim, installed through the
-    platform's own engine-resolution seam.
+    """Install a proposal engine that hands ``candidates`` back verbatim.
+
+    The engine is installed by patching ``proposal.resolve_proposer``.
     """
     from tcip_mcp.pipelines import proposal
 
@@ -36,9 +38,7 @@ def _install_stub(
 
 
 def _candidate(candidate_id: int, x0: float) -> dict:
-    """One candidate box at ``x0``, distinguishable from another by position alone so a staged
-    annotation's geometry says which run it came from.
-    """
+    """Return one 20 px candidate box at ``x0``, with its ring, scored 0.9."""
     x1 = x0 + 20.0
     return {
         "candidate_id": candidate_id,
@@ -56,7 +56,7 @@ def _make_image(path: Path, fill: tuple[int, int, int] = (50, 50, 50)) -> None:
 
 
 def _staged(root: Path, bucket: str, stem: str):
-    """The key of ``stem``'s document in the staged bucket ``bucket`` under ``root``."""
+    """Return the key of ``stem``'s document in the staged bucket ``bucket`` under ``root``."""
     from tcip_mcp.dataset_layout import prediction_key
 
     return prediction_key(root, bucket, stem)
@@ -72,8 +72,10 @@ def test_two_dated_buckets_with_the_same_stem_stage_and_read_back_independently(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Two images sharing a stem in different capture-date buckets have their own record: the
-    second run's candidates must never answer for the first.
+    """Two dated buckets with the same stem stage and read back independently.
+
+    Two images sharing a stem in different capture-date buckets have their own record: accepting
+    the first stages the first run's candidate, not the second's.
     """
     from tcip_mcp.tools.proposal_tools import (
         propose_annotations,
@@ -117,8 +119,9 @@ def test_an_assignment_naming_no_subject_is_refused_never_skipped(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An assigned candidate is an annotation, refused by construction when it names no subject,
-    the refusal naming the assignment; it is never dropped while the rest are staged.
+    """An assignment naming no subject refuses by its index, and nothing is staged.
+
+    An assigned candidate is an annotation, refused by construction when it names no subject.
     """
     from tcip_mcp.tools.proposal_tools import (
         propose_annotations,
@@ -151,9 +154,10 @@ def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_r
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A rewrite under the same name after propose_annotations ran means the staged candidates no
-    longer describe what stage_proposals would be confirming; the refusal is answered before any
-    pixel of the changed image is read for display.
+    """Accept refuses when the image's content changed since the proposal ran.
+
+    After a rewrite under the same name, the accept refuses naming the image, and no pixel of the
+    changed image is read for display.
     """
     from tcip_mcp.tools import vision_tools
     from tcip_mcp.tools.proposal_tools import (
@@ -193,8 +197,10 @@ def test_the_envelope_carries_image_identity_at_the_dataset_rooted_location(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The record sits at a key naming the dataset root, capture date and stem, which name the
-    image, and its envelope carries the identity of the pixels it was staged from.
+    """The staging envelope carries image identity at the dataset-rooted location.
+
+    The record sits at a key naming the dataset root, capture date and stem, which name the image,
+    and its envelope carries the identity of the pixels it was staged from.
     """
     import tcip_store as ts
     from tcip_mcp.tools.proposal_tools import (
@@ -229,8 +235,10 @@ def test_propose_outside_a_dataset_tree_runs_the_engine_and_stages_nothing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A path with no dataset address to stage under still gets a real proposal run and a real
-    render; it just can never be accepted, which was already true before it could be staged.
+    """A proposal outside a dataset tree runs the engine and stages nothing.
+
+    A path with no dataset address to stage under still gets a real proposal run and a real
+    render, and no staging record is written.
     """
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
@@ -287,8 +295,10 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A band-grouped capture is addressed by its manifest path on both sides, and resolves to
-    the same BandGroupRef for the proposal run and for the accepted image dimensions.
+    """Propose then accept work through a band group's manifest path.
+
+    A band-grouped capture is addressed by its manifest path on both sides: the proposal stages,
+    and the accept writes one annotation into the capture's bucket.
     """
     import tifffile
 
@@ -337,8 +347,10 @@ def test_propose_on_a_band_groups_member_path_refuses_naming_the_manifest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A band of a grouped capture is no logical image of its own: proposing on its path refuses
-    naming the manifest, stages nothing, and the manifest's own path admits the proposal.
+    """Proposing on a band group's member path refuses, naming the manifest.
+
+    A band of a grouped capture is no logical image of its own: proposing on its path stages
+    nothing, and the manifest's own path admits the proposal.
     """
     import tifffile
 
@@ -382,8 +394,9 @@ def test_a_second_accept_of_the_same_staged_run_refuses_and_keeps_the_first(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The first accept's document is written once, so a second accept for the same image refuses
-    naming it and the first document is unchanged.
+    """A second accept of the same staged run refuses as already accepted and keeps the first.
+
+    The staged document's version is the one the first accept wrote.
     """
     import tcip_store
     from tcip_mcp.tools.proposal_tools import (
@@ -422,7 +435,7 @@ def test_a_second_proposal_run_replaces_the_first_and_accept_reads_the_newest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """last_writer_wins: a re-run overwrites the previous record rather than merging into it."""
+    """A second proposal run replaces the first, and accept stages the newest candidates."""
     from tcip_mcp.tools.proposal_tools import (
         propose_annotations,
         stage_proposals,
@@ -459,8 +472,10 @@ def test_a_re_run_finding_nothing_clears_the_previous_runs_record(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A run that proposes zero candidates must not leave a prior run's record readable: a later
-    accept would otherwise stage that stale run's candidates as if this run had proposed them.
+    """A re-run finding nothing clears the previous run's record.
+
+    A run that proposes zero candidates stages nothing, and a later accept refuses pointing to
+    ``propose_annotations``.
     """
     from tcip_mcp.tools.proposal_tools import (
         propose_annotations,
@@ -497,8 +512,10 @@ def test_a_first_run_finding_nothing_leaves_no_audit_line_and_a_clearing_run_lea
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Only a removal is an act: an image with no staged record that the engine finds nothing on
-    records nothing, and a run that clears a prior run's record records that clearing.
+    """A first run finding nothing leaves no audit line, and a clearing run leaves one.
+
+    An image with no staged record that the engine finds nothing on records no act; a run that
+    clears a prior run's record adds a second act, staging zero.
     """
     from tcip_mcp.audit import acts_of
     from tcip_mcp.tools.proposal_tools import propose_annotations
@@ -526,9 +543,9 @@ def test_accept_reports_an_unsampleable_image_as_an_error_dict(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A source that opens but cannot be sampled (``raster_content_identity``'s own refusal) must
-    reach the caller the same way a mismatched or missing record does: a returned ``error``, not
-    an uncaught exception out of the tool.
+    """Accept reports an unsampleable image as a returned ``error``.
+
+    With ``raster_content_identity`` raising for the image, the accept returns an error naming it.
     """
     from tcip_mcp.pipelines import raster_source
     from tcip_mcp.tools.proposal_tools import (
@@ -565,9 +582,10 @@ def test_a_region_proposal_and_its_accept_each_open_the_image_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A proposal's region crop, its render and its recorded identity read one reader, and the
-    accept verifies the identity and renders through one reader: a phase that opened the image
-    again for itself would be a second open.
+    """A region proposal and its accept each open the image once.
+
+    The proposal, with its region crop, render and recorded identity, opens the image once, and
+    the accept, verifying the identity and rendering, opens it once.
     """
     from tcip_mcp.pipelines import raster_source
     from tcip_mcp.tools.proposal_tools import (
@@ -612,9 +630,10 @@ def test_a_staging_is_one_publication_with_one_audit_line(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Staging publishes through the one publication, which owns every document's write-once and
-    takes encoded documents, never a writer of the caller's; the publication's own line is the
-    staging's only one.
+    """A staging is one publication with one audit line.
+
+    ``publish`` takes encoded ``Document`` values and no callable writer, and the staging writes
+    one ``prediction_bucket_published`` audit line and no ``stage_proposals`` line.
     """
     import inspect
 

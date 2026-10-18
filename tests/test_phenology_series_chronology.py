@@ -1,13 +1,10 @@
-"""Phenology milestones on curves that are not tidy: noisy series, exact-on-target first
-observations, a positive value past an unused one, and a bucket written by the real prediction
-writer.
+"""Tests of phenology milestones on curves that are not tidy.
 
-A positive-fraction curve measured from real imagery moves up and down: weather, occlusion and
-sampling noise all push a plant's fraction back down between captures. The milestone a breeder
-reads off such a curve is only defensible if the crossing was computed on the series as it happened
-in time, and if a date the observations only bound is delivered as a bound rather than as a
-measurement. These pin both, at the module's own boundary and through the delivery tool, plus the
-agreement between the writer that produces a prediction bucket and the readers here that count it.
+Covered: noisy series, exact-on-target first observations, a positive value past an unused one,
+and a bucket written by the real prediction writer.
+
+A crossing is computed on the series in capture order, and a date the observations bound but do
+not fix is delivered as a bound, by the module and by the delivery tool.
 """
 
 from __future__ import annotations
@@ -45,10 +42,11 @@ def _states(n_positive: int, n_negative: int) -> list[str]:
 
 
 def test_crossing_uses_the_bracket_that_exists_in_time():
-    """The crossing is read off the two neighboring captures that straddle the target in calendar
-    order, so its date lies inside that bracket and the gap it reports is the real number of days
-    between them. A series whose fraction order differs from its capture order (the ordinary case
-    for a noisy curve) must not be re-ordered into a bracket that never happened.
+    """A crossing is read off the bracket of captures that straddles the target in calendar order.
+
+    The crossing is read off the two neighboring captures that straddle the target in calendar
+    order, so over a series whose fraction order differs from its capture order its date lies
+    inside that bracket and the gap it reports is the bracket's four days.
     """
     series = [
         ("2026-03-09", 0.30),
@@ -66,9 +64,10 @@ def test_crossing_uses_the_bracket_that_exists_in_time():
 
 
 def test_crossing_above_target_at_the_first_capture_stays_left_censored_when_the_curve_dips():
-    """A curve whose first capture is already past the target and which later falls back below it
-    still crosses only once, before the watching began. The later dip and recovery is not a second,
-    later crossing to deliver in its place.
+    """A curve past the target at its first capture stays left-censored when it later dips.
+
+    A curve whose first capture is already past the target, and which later falls back below it
+    and recovers, crosses at the first capture, left-censored.
     """
     series = [("2026-03-01", 0.60), ("2026-03-05", 0.20), ("2026-03-09", 0.80)]
 
@@ -79,8 +78,9 @@ def test_crossing_above_target_at_the_first_capture_stays_left_censored_when_the
 
 
 def test_positive_onset_is_the_earliest_capture_with_any_positive_observation():
-    """Onset is the first date in calendar order carrying a positive observation, not the date
-    carrying the smallest positive fraction.
+    """Onset is the first date in calendar order carrying a positive observation.
+
+    It is not the date carrying the smallest positive fraction.
     """
     series = [("2026-03-01", 0.0), ("2026-03-05", 0.40), ("2026-03-09", 0.10)]
 
@@ -88,9 +88,9 @@ def test_positive_onset_is_the_earliest_capture_with_any_positive_observation():
 
 
 def test_first_capture_exactly_on_the_target_is_an_upper_bound():
-    """A first observation sitting exactly on the target met it before anyone looked, so the date is
-    an upper bound on the true crossing and carries no bracket to report a gap for. Delivering it as
-    an interpolated or exact crossing claims a precision the observations do not support.
+    """A first capture exactly on the target is an upper bound with no gap.
+
+    The date is the first capture's, left-censored, with no gap.
     """
     series = [("2026-03-01", 0.50), ("2026-03-05", 0.90)]
 
@@ -102,8 +102,10 @@ def test_first_capture_exactly_on_the_target_is_an_upper_bound():
 
 
 def test_first_capture_exactly_on_the_target_keeps_its_date_when_the_curve_falls_back():
-    """The upper-bound reading holds when the fraction drops after that first capture: the crossing
-    is still bounded by the first observation, never moved forward to a later re-crossing.
+    """A first capture exactly on the target keeps its date when the curve falls back.
+
+    The crossing is still bounded by the first observation, not moved forward to a later
+    re-crossing.
     """
     series = [("2026-03-01", 0.50), ("2026-03-05", 0.20), ("2026-03-09", 0.80)]
 
@@ -116,9 +118,11 @@ def test_first_capture_exactly_on_the_target_keeps_its_date_when_the_curve_falls
 def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture_order(
     tmp_path,
 ):
-    """Two plants observed on the same four dates, one whose fraction dips mid-season and one that
-    rises steadily, get their milestones from their own series in capture order. The mapping's dates
-    are supplied out of order, as an assembled mapping file has them, which changes no result.
+    """A noisy plant's and a steady plant's milestones are each read in capture order.
+
+    Two plants observed on the same four dates, one whose fraction dips mid-season and one that
+    rises steadily, get their milestones from their own series. The mapping's dates are supplied
+    out of order, as an assembled mapping file has them.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
@@ -180,9 +184,10 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
 def test_positive_detections_are_the_named_value_not_a_fixed_position(
     tmp_path,
 ):
-    """The positive state is whichever value the trait names, wherever it sits in its attribute's
-    declared order. An attribute whose positive value sits at id 2 with no record at id 1 counts
-    the same as one whose values are all in use.
+    """Positive detections are the value the trait names, wherever it sits in declared order.
+
+    An attribute whose positive value sits at id 2 with no record at id 1 counts two positive
+    detections of three, none unclassified.
     """
     from tcip_mcp.dataset_layout import prediction_key
     from tcip_mcp.pipelines.data.label_queries import registry_scope
@@ -227,10 +232,11 @@ def test_positive_detections_are_the_named_value_not_a_fixed_position(
 def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes(
     tmp_path,
 ):
-    """A bucket published through the real publication reads back through the readers here with
-    the values the run decoded through: the record's attribute and each detection's own decoded
-    value have to line up, or a bucket whose every detection carries the state's attribute counts
-    as unassessed.
+    """A bucket the real publication produced reads back with the values the run decoded.
+
+    The bucket is published through the real publication and read back through the readers here:
+    its record declares the state's attribute, and its detections count three, two positive, none
+    unclassified.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
@@ -259,9 +265,10 @@ def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes
 def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(
     tmp_path: Path,
 ):
-    """A plant already at half its buds on the first capture ships that date with its bound, so a
-    breeder reading the CSV can tell an upper bound from a date the observations measured. The later
-    dip below the target does not move the delivered date to the re-crossing.
+    """The delivered CSV marks a milestone met on the first capture as left-censored.
+
+    A plant already at half its buds on the first capture ships that date with its left-censored
+    bound, and the later dip below the target does not move the delivered date.
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones

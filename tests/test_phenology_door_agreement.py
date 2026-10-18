@@ -1,5 +1,7 @@
-"""The two phenology delivery doors, the web export route and ``deliver_phenology_milestones``,
-deliver the same majority-crossing column and name the same trait revision on their events.
+"""The two phenology delivery doors deliver one majority-crossing column and one trait revision.
+
+The doors are the web export route and ``deliver_phenology_milestones``; they deliver the same
+majority-crossing column and name the same trait revision on their events.
 """
 
 from __future__ import annotations

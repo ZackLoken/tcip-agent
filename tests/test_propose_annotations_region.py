@@ -1,11 +1,9 @@
 """Region-scoped `propose_annotations`: crop-and-offset, entirely on the tcip-mcp side.
 
 `propose_annotations` takes an optional `grid_cells`/`tile_size`/`overlap` region: when given, the
-tool crops the source image to the named cells' bounding rect, hands the engine only that crop, and
-offsets the returned candidates back to the source image's full-frame coordinates.
-
-These tests drive the real crop/offset code with an engine that reads a red patch out of whatever
-pixels it is handed, so the crop the tool writes is what decides the answer.
+tool crops the source image to the named cells' bounding rect, runs the engine on that crop, and
+offsets the returned candidates back to the source image's full-frame coordinates. The engine here
+reports a red patch in the pixels it is handed.
 """
 
 from __future__ import annotations
@@ -21,9 +19,7 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 
 class PatchProposer:
-    """Reports the red patch in whatever pixels it is handed, so the crop is what decides the
-    answer.
-    """
+    """A proposer that reports the red patch in the pixels it is handed."""
 
     def propose(self, image_path, **params):
         arr = np.asarray(Image.open(image_path).convert("RGB"))
@@ -52,7 +48,7 @@ TILE_SIZE = 60  # cols at x=0/60/120/180 (4), rows at y=0/60 (2); PATCH_BOX span
 
 
 def _upright_frame() -> Image.Image:
-    """The as-viewed canvas: a dark background with a solid red patch at ``PATCH_BOX``."""
+    """Return the as-viewed canvas: a dark background with a solid red patch at ``PATCH_BOX``."""
     from tests._producer_fixtures import painted_frame
 
     return painted_frame(
@@ -62,10 +58,7 @@ def _upright_frame() -> Image.Image:
 
 @pytest.fixture
 def exif_rotated_source(tmp_path: Path) -> Path:
-    """A JPEG whose stored (raw sensor) pixels are the upright frame rotated 90 degrees, tagged
-    EXIF orientation 6 ("rotate 90 CW to correct"), so the upright, as-viewed frame only exists
-    after EXIF correction is applied, exactly like a real camera's landscape/portrait JPEG.
-    """
+    """Write a JPEG of the upright frame rotated 90 degrees and tagged EXIF orientation 6."""
     upright = _upright_frame()
     raw = upright.rotate(
         90, expand=True
@@ -81,9 +74,10 @@ def exif_rotated_source(tmp_path: Path) -> Path:
 def test_fixture_rotation_is_actually_reversed_by_exif_orientation(
     exif_rotated_source: Path,
 ) -> None:
-    """Sanity check on the fixture itself: opening the raw file and applying
-    ``auto_orient_image`` must reproduce the upright frame this test's expectations are stated in
-    terms of, or the rest of this module is testing nothing real.
+    """The fixture's rotation is reversed by its EXIF orientation.
+
+    Opening the raw file and applying ``auto_orient_image`` gives the upright frame's shape, its
+    dark background and its red patch.
     """
     from tcip_annotation.utils import auto_orient_image
 
@@ -104,9 +98,10 @@ def test_region_crop_carries_no_exif_orientation_tag(
     exif_rotated_source: Path,
     tmp_path: Path,
 ) -> None:
-    """The crop `propose_annotations` writes for the engine to read must carry no EXIF
-    orientation tag of its own: it is taken from the already-oriented frame, and an engine that
-    honored a tag on it would rotate a second time and displace every coordinate.
+    """The region crop `propose_annotations` writes for the engine carries no EXIF orientation tag.
+
+    The source opens at the upright frame's size, and the crop written from it has no orientation
+    tag.
     """
     from tcip_mcp.pipelines.raster_source import open_raster
     from tcip_mcp.pipelines.reference_grid import reference_cells
@@ -139,10 +134,11 @@ def test_region_scoped_proposal_lands_at_the_full_frame_coordinates(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The load-bearing test: an EXIF-rotated source, cropped to a region, proposed against, and
-    offset back, must report the patch at its true upright full-frame location, not a crop-local
-    or a wrongly-re-rotated one. The region's grid states its overlap: the same call naming none
-    refuses naming it.
+    """A region-scoped proposal lands at the full-frame coordinates.
+
+    An EXIF-rotated source, cropped to a region, proposed against, and offset back, reports one
+    candidate at the patch's upright full-frame box, and no temp region crop is left. The same
+    call naming no overlap refuses naming it.
     """
     from tcip_mcp.pipelines import proposal
     from tcip_mcp.tools.proposal_tools import propose_annotations
@@ -180,7 +176,7 @@ def test_region_scoped_proposal_cleans_up_temp_crop_on_engine_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The temp crop must be deleted even when the engine raises, not only on the success path."""
+    """The temp region crop is deleted when the engine raises."""
     from tcip_mcp.pipelines import proposal
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
@@ -209,16 +205,14 @@ def test_region_scoped_proposal_cleans_up_temp_crop_on_engine_failure(
 
 
 def _region_cells() -> list:
-    """The fixture frame's cells at ``TILE_SIZE``: columns A-D, rows 1-2."""
+    """Return the fixture frame's cells at ``TILE_SIZE``: columns A-D, rows 1-2."""
     from tcip_mcp.pipelines.reference_grid import reference_cells
 
     return reference_cells(UPRIGHT_W, UPRIGHT_H, TILE_SIZE, 0.0, clamp=True)
 
 
 class TestRegionCellNamesResolveThroughTheOneLookup:
-    """A region's cell names resolve through the one cell-name lookup
-    (``tcip_annotation.grid.grid_to_rect``): every accepted cell shape, every refused reference.
-    """
+    """Tests that a region's cell names resolve to the named cells' rect, or refuse."""
 
     def test_named_cells_bound_their_combined_rect(self) -> None:
         from tcip_mcp.tools.proposal_tools import _region_rect_from_cells
@@ -235,7 +229,7 @@ class TestRegionCellNamesResolveThroughTheOneLookup:
         ) == _region_rect_from_cells(cells, ["B1", "C1"])
 
     def test_cell_dicts_are_accepted(self) -> None:
-        """The plain dicts a JSON route serves are a cell list too, not only cell objects."""
+        """Plain cell dicts, as a JSON route serves them, resolve to the named cells' rect."""
         from tcip_mcp.tools.proposal_tools import _region_rect_from_cells
 
         cells = [
@@ -261,8 +255,9 @@ class TestRegionCellNamesResolveThroughTheOneLookup:
 def _write_rgb_band_group(
     images_dir: Path, stem: str, frame: np.ndarray
 ) -> Path:
-    """A ``.bandgroup`` capture whose three sibling single-band TIFFs hold ``frame``'s R, G and B
-    planes, the manifest declaring them in that order.
+    """Write a ``.bandgroup`` capture of ``frame``'s R, G and B planes and return its manifest.
+
+    Three sibling single-band TIFFs hold the planes, the manifest declaring them in that order.
     """
     import tifffile
 
@@ -283,18 +278,17 @@ def _write_rgb_band_group(
 
 
 class TestRegionFrameIsTheResolvedImageSources:
-    """The region path measures and crops the logical image the enumeration primitive resolves,
-    the one every other reference-grid consumer measures.
-    """
+    """Tests that the region path measures and crops the logical image enumeration resolves."""
 
     def test_a_grouped_capture_crops_its_own_stacked_frame(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A ``.bandgroup`` manifest names a capture whose pixels live in sibling files, so the
-        region's cells and its crop both come from the stacked frame, never from the manifest file
-        read as if it were a photograph.
+        """A grouped capture's region cells and crop come from its own stacked frame.
+
+        A ``.bandgroup`` manifest names a capture whose pixels live in sibling files; the patch is
+        found at its full-frame place in that stacked frame.
         """
         from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools.proposal_tools import propose_annotations
@@ -325,8 +319,9 @@ class TestRegionFrameIsTheResolvedImageSources:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A crop reaches the engine as an RGB image file, so a source that has no such frame is
-        told what it reads as instead of reaching the writer as an unwritable array.
+        """A source with no RGB frame is refused before the engine runs.
+
+        A two-band uint16 group refuses saying it reads as 2 band(s) of uint16.
         """
         import tifffile
 
@@ -379,7 +374,9 @@ class TestRegionFrameIsTheResolvedImageSources:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """An RGB TIFF one pixel high and far wider than it has bands: its cells are measured in
+        """A crop is read in the frame its cells were measured in.
+
+        For an RGB TIFF one pixel high and far wider than it has bands, its cells are measured in
         the frame its header's axes describe, the crop is read in that same frame, and the engine
         receives an RGB crop of the named cell.
         """
@@ -433,9 +430,7 @@ class TestRegionFrameIsTheResolvedImageSources:
 
 
 class TestWholeFrameDefaultIsUnaffected:
-    """``grid_cells=None`` (the default) takes the whole-frame path: the offset step never
-    runs.
-    """
+    """Tests that ``grid_cells=None`` (the default) takes the whole-frame path, no offset step."""
 
     def test_offset_helper_is_never_called_without_grid_cells(
         self,
@@ -528,8 +523,10 @@ class TestWholeFrameDefaultIsUnaffected:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A bespoke engine returns its own dicts, so what a segmenter hands back natively
-        (an array, a numpy scalar) is named instead of being staged as a repr of itself.
+        """A candidate the store cannot hold is reported by name and not staged.
+
+        A bespoke engine's candidate carrying a numpy array as its bbox refuses naming
+        ``candidates[0].bbox``.
         """
         import numpy as np
 
@@ -577,8 +574,10 @@ class TestWholeFrameDefaultIsUnaffected:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """An engine's rings are held to the polygon rule where they arrive, so a ring too short
-        to be a shape is named then, never drawn on the overlay and refused later at staging.
+        """A candidate whose rings are no polygon is refused by name where it arrives.
+
+        An engine's rings are held to the polygon rule where they arrive: a ring too short to be a
+        shape refuses the proposal, naming the minimum point count, and nothing is staged.
         """
         import tcip_store as ts
         from tcip_mcp.pipelines import proposal
@@ -665,9 +664,7 @@ class TestWholeFrameDefaultIsUnaffected:
         self,
         tmp_path: Path,
     ) -> None:
-        """A candidate stating no confidence is refused by name where it arrives and is not
-        staged.
-        """
+        """A candidate stating no confidence is refused by name where it arrives, and not staged."""
         import tcip_store as ts
         from tcip_mcp.pipelines.proposal import register_proposal_engine
         from tcip_mcp.tools import proposal_tools

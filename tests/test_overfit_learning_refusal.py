@@ -1,8 +1,7 @@
 """``overfit_check`` refuses a model whose loss never moves, and admits one that learns.
 
-The check is the cheap proof a from-scratch model actually optimizes, so a flat loss curve (a
-frozen or disconnected learnable path, an optimizer stepping nothing) is the failure it exists to
-report. An unchanged loss is a refusal, never a pass.
+A flat loss curve, from a disconnected learnable path or a model with nothing to optimize, fails
+the check.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ class _DisconnectedParameter(torch.nn.Module):
     """A learnable parameter the loss does not actually depend on.
 
     Every gradient is zero, so the optimizer moves nothing and each step returns the identical
-    loss: the shape of a model that reports a learnable path it cannot train through.
+    loss.
     """
 
     def __init__(self) -> None:
@@ -36,7 +35,7 @@ class _DisconnectedParameter(torch.nn.Module):
 
 
 class _LinearProbe(torch.nn.Module):
-    """A small but genuinely learnable classifier over channel means."""
+    """A linear classifier over the image's channel means."""
 
     def __init__(self, num_classes: int = 2, in_chans: int = 3) -> None:
         super().__init__()
@@ -54,7 +53,7 @@ class _LinearProbe(torch.nn.Module):
 
 
 def test_a_model_whose_loss_never_moves_is_refused():
-    """A loss identical at the last step and the first one is no evidence of optimization."""
+    """``overfit_check`` fails a model whose loss is identical at its last and first steps."""
     report = overfit_check(
         _DisconnectedParameter(),
         "classification",
@@ -71,7 +70,7 @@ def test_a_model_whose_loss_never_moves_is_refused():
 
 
 def test_a_model_that_really_learns_passes():
-    """The rail admits valid work: a real learnable path drives the loss down and passes."""
+    """A model with a real learnable path drives the loss down and passes the overfit check."""
     report = overfit_check(
         _LinearProbe(),
         "classification",
@@ -86,7 +85,7 @@ def test_a_model_that_really_learns_passes():
 
 
 class _AllFrozen(torch.nn.Module):
-    """A legitimate stage-0 configuration: every parameter frozen, nothing to optimize."""
+    """A stage-0 classifier with every parameter frozen, so nothing to optimize."""
 
     def __init__(self, num_classes: int = 2, in_chans: int = 3) -> None:
         super().__init__()
@@ -106,8 +105,9 @@ class _AllFrozen(torch.nn.Module):
 
 
 def test_an_all_frozen_model_reports_rather_than_raises():
-    """Adam raises on an empty parameter list; the check builds it inside its own try, so the
-    empty-parameter case reaches the report instead of escaping the function.
+    """An all-frozen model yields a failed overfit report naming the empty parameter list.
+
+    The report records no losses and no initial or final loss.
     """
     report = overfit_check(
         _AllFrozen(),

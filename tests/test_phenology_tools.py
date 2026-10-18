@@ -1,12 +1,10 @@
-"""Tests for the phenology MCP tools (build_plant_mapping + deliver_phenology_milestones).
+"""Tests for the phenology MCP tools, ``build_plant_mapping`` and ``deliver_phenology_milestones``.
 
-The tools are the agent-facing surface for the per-plant phenology pipeline. These tests pin:
-(1) build_plant_mapping wraps build + persist and reports a compact summary + error paths;
-(2) deliver_phenology_milestones writes the canonical column schema from buckets whose scope
-declares the positive state's attribute and a persisted plant mapping, validated when every
-bucket was published under an assessment that answers for the delivery and refused otherwise (the
-tool takes no acknowledgment); and (3) its measurement-integrity guard refuses to deliver a CSV
-when no bucket's scope declares the positive state's attribute.
+``build_plant_mapping`` builds and persists a mapping and reports a compact summary or an error.
+``deliver_phenology_milestones`` writes the column schema over a persisted plant mapping from
+buckets whose scope declares the positive state's attribute. It delivers when each bucket was
+published under an assessment that answers for the delivery, and refuses when one was not or when
+no bucket's scope declares the attribute.
 """
 
 from __future__ import annotations
@@ -205,9 +203,7 @@ def test_an_unassessed_series_refuses_at_the_door_that_takes_no_acknowledgment(
 
 
 def test_an_unreadable_prediction_document_is_reported_by_name(tmp_path: Path):
-    """A present, unreadable document is an error naming it, never a raise through the tool
-    boundary and never read as this plant's date contributing nothing.
-    """
+    """A present, unreadable prediction document is returned as an error naming its stem."""
     pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import prediction_key
     from tests._chain_fixtures import attributed_series
@@ -231,8 +227,10 @@ def test_an_unreadable_prediction_document_is_reported_by_name(tmp_path: Path):
 def test_predictions_that_never_classified_the_positive_state_refuse(
     tmp_path: Path,
 ):
-    """Detector buckets over the same captures carry no opening axis at all: the delivery refuses
-    rather than reporting full coverage.
+    """Predictions that classify no positive state refuse.
+
+    Detector buckets over the same captures carry no opening axis at all, so the delivery refuses
+    saying they classify no ``opening='open'``, and writes no CSV.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import attributed_series, predicted, published
@@ -258,9 +256,10 @@ def test_predictions_that_never_classified_the_positive_state_refuse(
 def test_each_bucket_stands_for_the_date_its_record_states_and_two_on_one_date_refuse(
     tmp_path: Path,
 ):
-    """The date a bucket stands for is the capture its own record states, whatever it is named: a
-    bucket published under a name naming another date delivers as its recorded date, and two
-    buckets recording one date refuse naming both.
+    """Each bucket stands for the date its record states, and two on one date refuse.
+
+    A bucket published under a name naming another date delivers as the date its record states,
+    and two buckets recording one date refuse naming that shared date, writing no CSV.
     """
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.execution import Stated

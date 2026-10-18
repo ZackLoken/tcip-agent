@@ -1,5 +1,7 @@
-"""Tests for the project record: its minted id, display name, site and capture invariances, its
-create-only write, and its readers.
+"""Tests for the project record.
+
+Covered: its minted id, display name, site and capture invariances, its create-only write, and
+its readers.
 """
 
 from __future__ import annotations
@@ -75,9 +77,7 @@ def test_create_record_mints_an_id_and_writes_an_absent_record(tmp_path: Path):
 def test_create_record_answers_the_existing_record_when_offered_it_again(
     tmp_path: Path,
 ):
-    """Creating a project that already records the same name, site and invariances keeps its
-    id.
-    """
+    """Creating a project that records the same name, site and invariances keeps its id."""
     from tcip_mcp.project_record import create_record
 
     first = create_record(
@@ -304,7 +304,7 @@ def test_replace_site_refuses_a_project_with_no_record(tmp_path: Path):
 def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no_store(
     tmp_path: Path,
 ):
-    """Names the creating door; a read of an absent record never publishes a database."""
+    """Reading an absent record raises naming ``initialize_project`` and creates no database."""
     from tcip_mcp.project_record import ProjectRecordMissingError, read_record
     from tcip_store.file_backend import database_file
 

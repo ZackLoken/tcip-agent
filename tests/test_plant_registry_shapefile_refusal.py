@@ -1,8 +1,8 @@
-"""register_plant_registry refuses a shapefile's own parts by suffix, naming the conversion
-command, rather than letting an unguarded UnicodeDecodeError escape the door as an exception; and
-refuses a binary file under any other suffix (a ``.csv`` included) the same way. The admits-valid-
-work case: a shapefile converted first, then registered, answers the same record a hand-authored
-CSV would.
+"""register_plant_registry refuses a shapefile or binary file, naming the conversion command.
+
+It refuses a shapefile's own parts by suffix, and a binary file under any other suffix (a
+``.csv`` included), as a returned error. A shapefile converted first, then registered, registers
+its plants.
 """
 
 from __future__ import annotations
@@ -91,8 +91,9 @@ def test_register_plant_registry_admits_a_shapefile_converted_first(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A shapefile is never registered directly; converted through the platform's own command
-    first, the resulting CSV registers exactly as a hand-authored one would.
+    """A shapefile converted first through the platform's own command registers its plants.
+
+    The CSV the conversion writes registers with one plant per converted feature.
     """
     from tcip_mcp.cli.shp_to_plant_csv import convert_shp_to_plant_csv
 

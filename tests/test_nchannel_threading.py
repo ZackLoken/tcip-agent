@@ -1,6 +1,7 @@
-"""N-channel threading: sensor->in_chans, backbones accept in_chans, a train-start channel
-guard, and dataset channel metadata. Multi-channel *readers* are separate; here the plumbing
-carries channel counts and validates them.
+"""Tests for N-channel threading through the training and inference plumbing.
+
+Covered: sensor->in_chans, backbones accept in_chans, a train-start channel guard, and dataset
+channel metadata. The plumbing carries channel counts and validates them.
 """
 
 import pytest
@@ -50,9 +51,7 @@ def test_compose_and_forward_4_channel_model():
 
 
 def test_train_start_channel_guard():
-    """A loader handing the model a batch at a width other than the run's recorded one (a bespoke
-    dataset composing its own bands) refuses at the first batch; a matching one trains.
-    """
+    """A first batch at a width other than the run's recorded one refuses; a matching one passes."""
     from tcip_mcp.pipelines.training.generic_trainer import (
         _validate_input_channels,
     )
@@ -64,7 +63,11 @@ def test_train_start_channel_guard():
 
 
 def _nchan_adapter(in_chans: int):
-    """A detector-ready backbone+neck adapter at ``in_chans`` channels."""
+    """Return a ``BackboneNeckAdapter`` over a timm resnet18 at ``in_chans`` and a 64-wide FPN.
+
+    The backbone is ``timm.create_model("resnet18", features_only=True)`` without pretrained
+    weights, wrapped in ``BackboneWrapper``.
+    """
     import timm
 
     from tcip_mcp.pipelines.components.backbones import BackboneWrapper
@@ -83,9 +86,7 @@ def _nchan_adapter(in_chans: int):
 
 
 def test_n_channel_detector_builds_and_trains():
-    """The documented multispectral claim, exercised on the detection path: a five-band detector
-    builds, normalizes at five bands and takes a training step.
-    """
+    """A five-band detector builds, normalizes at five bands and returns finite training losses."""
     from tcip_mcp.pipelines.components.detectors import build_detector
 
     adapter = _nchan_adapter(5)
@@ -137,11 +138,10 @@ def test_normalization_length_and_channel_count_are_validated():
 
 
 def test_explicit_in_chans_wins_over_the_registration_order_probe():
-    """The probe is a hint. Only the caller knows the band count, so it may not be overruled.
+    """A stated ``in_chans`` builds the detector where the registration-order probe disagrees.
 
-    An adapter that registers its neck before its backbone, or band-projects N bands through a
-    1x1 conv into a pretrained 3-channel stem, reports a first-conv width that is not the image's
-    band count. Letting that veto the caller blocks correct builds and admits wrong ones.
+    An adapter that registers its neck before its backbone reports a first-conv width that is not
+    the image's band count; the stated three-band build still succeeds at three-band statistics.
     """
     import torch.nn as nn
 
@@ -230,11 +230,10 @@ def test_torchvision_constructor_kwargs_forward_but_typos_raise():
 def test_band_normalization_stats_matches_the_tensors_the_model_is_fed(
     tmp_path, dtype, scale
 ):
-    """The statistic must be of the tensor the loader yields, not of a scale re-derived here.
+    """Band statistics equal the mean and std of the tensors the loader yields.
 
-    `pil_to_tensor` decides [0,1] scaling from dtype. A derivation that decides from pixel values
-    lands in a different unit system silently, and worst on the float rasters multispectral
-    imagery actually ships as.
+    `pil_to_tensor` decides [0,1] scaling from dtype; the statistics read every raster and match
+    its tensors for uint8, uint16, unit float and large float pixels.
     """
     import numpy as np
 
@@ -273,7 +272,7 @@ def test_band_normalization_stats_matches_the_tensors_the_model_is_fed(
 
 
 def _sampling(stats):
-    """The sampling record a band statistics record names as its source."""
+    """Return the sampling record a band statistics record names as its source."""
     from tcip_mcp.pipelines.schemas import ImageStatsSampling
 
     assert isinstance(stats.source, ImageStatsSampling), stats.source
@@ -295,9 +294,10 @@ def test_band_normalization_stats_admits_underivable(tmp_path):
 def test_band_normalization_stats_draw_their_capped_sample_from_the_stated_seed(
     tmp_path,
 ):
-    """At most the stated number of rasters is read, drawn at random from the stated seed: one
-    seed reads the same rasters twice and another seed others, the record naming the cap and the
-    seed beside what was read; neither sibling takes a cap or a seed by default.
+    """Band statistics read at most the stated number of rasters, drawn from the stated seed.
+
+    One seed reads the same rasters twice and another seed others, the record naming the cap and
+    the seed beside what was read; neither sibling takes a cap or a seed by default.
     """
     import inspect
 
@@ -337,8 +337,10 @@ def test_band_normalization_stats_draw_their_capped_sample_from_the_stated_seed(
 
 
 def _strip_tiff_raster(path, *, height=24, width=20, channels=4):
-    """A small multi-band strip raster both band-normalization siblings can read: the exact one by
-    decoding it whole, the sampled one by reading pixel windows out of it.
+    """Write a seeded ``(height, width, channels)`` uint8 array to ``path``; return the array.
+
+    The array is drawn from ``default_rng(5)`` and written by ``tifffile.imwrite`` in six-row
+    strips.
     """
     import numpy as np
     import tifffile
@@ -353,9 +355,9 @@ def _strip_tiff_raster(path, *, height=24, width=20, channels=4):
 def test_sampled_band_normalization_stats_over_full_coverage_match_the_exact_sibling(
     tmp_path,
 ):
-    """Reading every window of the grid is reading every pixel, so the sampled sibling lands on the
-    exact sibling's own numbers: the two differ in which pixels they read, never in the arithmetic
-    or the [0, 1] unit system they read them into.
+    """Sampled band statistics over every window match the exact sibling's numbers.
+
+    The sampled statistics record a pixel fraction of 1 and equal the exact mean and std.
     """
     from tcip_mcp.pipelines.derivations import (
         band_normalization_stats,
@@ -459,8 +461,10 @@ def test_build_dataset_sets_expected_channels(tmp_path):
 def _classification_data(
     tmp_path, *, num_channels: int | None
 ) -> tuple[dict, str]:
-    """Four three-band sources under ``tmp_path`` and their label table, as a run's data section
-    states them, with ``data.num_channels`` stated when given: the section and one source.
+    """Return a data section over four sources under ``tmp_path``, and one source's path.
+
+    ``write_regression_dataset`` writes the 32 px sources and their label table; the section names
+    both, with ``num_channels`` stated when given.
     """
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
@@ -479,8 +483,10 @@ def _classification_data(
 
 
 def _classification_run(tmp_path, *, num_channels: int | None):
-    """A run bound through the producer over :func:`_classification_data`: returns the data block
-    it resolved, in the form its record holds it, once its loaders are built.
+    """Bind a run through the producer over :func:`_classification_data`.
+
+    Return the data block it resolved, in the form its record holds it, after its loaders are
+    built, with its training dataset and one source.
     """
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.pipelines.schemas import DataSpec
@@ -498,9 +504,10 @@ def _classification_run(tmp_path, *, num_channels: int | None):
 
 
 def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
-    """A model is built at the width its run resolved, so that recorded width is what every later
-    reader reads at: the builder, the contract dims and the predictor all take the run's own one
-    channel over three-band sources rather than assuming RGB.
+    """A checkpoint's later readers all read images at the width its run recorded.
+
+    A model is built at the width its run resolved: the builder, the contract dims and the
+    predictor all take the run's own one channel over three-band sources.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
@@ -541,9 +548,7 @@ def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
 def test_a_run_that_states_no_width_records_the_one_its_sources_carry(
     tmp_path,
 ):
-    """Admits valid work: a run that states nothing records the width its own sources carry, and
-    a checkpoint of that run reads at it.
-    """
+    """A run stating no width records its sources' three channels in its dataset and model dims."""
     data_cfg, train_ds, _image = _classification_run(
         tmp_path, num_channels=None
     )
@@ -564,8 +569,9 @@ def test_a_run_that_states_no_width_records_the_one_its_sources_carry(
 def test_a_source_whose_band_count_cannot_be_read_refuses_rather_than_defaulting(
     tmp_path,
 ):
-    """A run's input channels are derived from its own sources, so a probe that fails refuses by
-    name: a confidently-wrong count sizes the model wrong for every image the run reads.
+    """A source whose band count cannot be read refuses, naming the band count.
+
+    A run's input channels are derived from its own sources.
     """
     import pytest
     from PIL import Image

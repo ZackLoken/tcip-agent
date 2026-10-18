@@ -1,8 +1,7 @@
 """A phenology delivery is for the plants its caller names, by one producer.
 
-The CSV carries one row per plant in the population and no other, a plant the mapping never
-covers included; dates whose buckets were produced by different checkpoints refuse rather than
-splice two models into one series.
+The CSV carries one row per plant in the population and no other, a plant the mapping does not
+cover included; dates whose buckets were produced by different checkpoints refuse.
 """
 
 from __future__ import annotations
@@ -17,9 +16,11 @@ pytest.importorskip("torch")
 
 
 def test_the_csv_row_count_equals_the_population(tmp_path: Path) -> None:
-    """The mapping names PLANT_A and PLANT_B; a population of PLANT_A and a plant the mapping
-    never covers delivers exactly those two rows, in that order, and never PLANT_B; the uncovered
-    plant is imaged on none of the delivered dates, so it is incomplete on every one.
+    """The CSV row count equals the population.
+
+    The mapping names PLANT_A and PLANT_B; a population of PLANT_A and an unmapped plant delivers
+    exactly those two rows, in that order. The unmapped plant misses images on all four of its
+    dates, so it is incomplete and its milestone date is empty.
     """
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
     from tests._chain_fixtures import attributed_series
@@ -52,9 +53,10 @@ def test_the_csv_row_count_equals_the_population(tmp_path: Path) -> None:
 def test_the_delivered_plant_ids_are_the_registrys_plant_ids(
     tmp_path: Path,
 ) -> None:
-    """A registry CSV's ``plant_id`` column, read by the registry, assigned by the mapping and
-    delivered by the phenology door, is the delivered ``plant_id`` column: every registry plant
-    is delivered under its own identity with an image on every date.
+    """The delivered plant ids are the registry CSV's own ``plant_id`` column.
+
+    The column is read by the registry, assigned by the mapping and delivered by the phenology
+    door: every registry plant is delivered under its own identity with an image on every date.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
     from tests._chain_fixtures import (
@@ -121,8 +123,10 @@ def test_the_web_route_delivers_the_population_it_was_given(
 
 
 def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
-    """Two dates published by two checkpoints are two producers: the tool refuses naming each
-    bucket's producer and writes nothing, while the same dates from one producer deliver.
+    """Dates published by differing checkpoints refuse, naming the second producer's bucket.
+
+    Two dates published by two checkpoints are two producers: the tool refuses and writes nothing,
+    while the same dates from one producer deliver.
     """
     from tcip_mcp.experiments import observe
     from tcip_mcp.tools.inference_tools import run_inference

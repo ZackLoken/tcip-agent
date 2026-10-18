@@ -1,10 +1,8 @@
 """What a sampled raster identity claims about how much of the raster it read.
 
-``RasterIdentity.pixel_fraction`` is the coverage claim that travels beside the checksum: it says
-what share of the raster's pixels the checksum was computed over, so a later reader knows whether
-an identity match is a claim about the whole file or about a sample of it. The claim is only
-usable if it counts each sampled window's area, which these fixtures exercise on grids whose cells
-are not square.
+``RasterIdentity.pixel_fraction`` is the coverage claim that travels beside the checksum: the share
+of the raster's pixels the checksum was computed over, counted by each sampled window's area, on
+grids whose cells are not square.
 """
 
 from __future__ import annotations
@@ -22,7 +20,7 @@ from tcip_mcp.pipelines.raster_source import (
 
 
 def _identity(path: Path, *, seed: int, window_size: int, max_windows: int):
-    """``raster_content_identity`` of the three-band ``path`` opened once."""
+    """Open the three-band ``path`` and return its ``raster_content_identity``."""
     with open_raster(path, 3) as src:
         return raster_content_identity(
             src, seed=seed, window_size=window_size, max_windows=max_windows
@@ -41,9 +39,10 @@ def _content_array(height: int, width: int) -> np.ndarray:
 def test_a_sample_that_takes_every_grid_cell_claims_the_whole_raster(
     tmp_path: Path,
 ) -> None:
-    """A window budget at or above the grid's own cell count reads every pixel exactly once, so
-    the recorded coverage is the whole raster even though the grid's edge cells are short and
-    none of them is square.
+    """A sample that takes every grid cell claims the whole raster.
+
+    A window budget at or above the grid's own cell count takes every cell, and the recorded
+    coverage is the whole raster though the grid includes cells that are not square.
     """
     height, width, window_size = 20, 30, 16
     path = tmp_path / "content.npy"
@@ -64,7 +63,9 @@ def test_a_sample_that_takes_every_grid_cell_claims_the_whole_raster(
 def test_a_partial_sample_claims_only_the_share_of_pixels_it_read(
     tmp_path: Path,
 ) -> None:
-    """A raster whose grid is three equal cells, two of them sampled, records two thirds: the
+    """A partial sample claims only the share of pixels it read.
+
+    A raster whose grid is three equal cells, two of them sampled, records two thirds: the
     coverage claim tracks the sampled area, not the window edge it was cut on.
     """
     height, width, window_size = 12, 48, 16
@@ -84,9 +85,11 @@ def test_a_partial_sample_claims_only_the_share_of_pixels_it_read(
 def test_a_taller_than_wide_sample_claims_the_same_share_as_its_transpose(
     tmp_path: Path,
 ) -> None:
-    """Two rasters of the same pixel count sampled over the same grid geometry, one standing and
-    one lying down, make the same coverage claim: the share is an area, so it cannot depend on
-    which of a window's two edges is the long one.
+    """A taller-than-wide sample claims the same share as its transpose.
+
+    Two rasters of the same pixel count sampled over the same grid geometry, one standing and one
+    lying down, make the same coverage claim: the share is an area, so it cannot depend on which
+    of a window's two edges is the long one.
     """
     window_size = 16
     tall_path, wide_path = tmp_path / "tall.npy", tmp_path / "wide.npy"

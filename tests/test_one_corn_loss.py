@@ -1,5 +1,7 @@
-"""The CORN loss has one body: the ordinal head trains by it and the loss registry builds it, so
-the two routes answer one value for one batch.
+"""The CORN loss has one body that the ordinal head and the loss registry share.
+
+The ordinal head trains by it and the loss registry builds it, so the two routes answer one
+value for one batch.
 """
 
 from __future__ import annotations

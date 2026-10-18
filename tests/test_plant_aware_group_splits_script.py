@@ -3,8 +3,8 @@
 Over per-stem georeferenced GeoTIFFs at known real-world offsets from two plants, the derived
 ``{stem: group_key}`` map: same physical plant -> same group key regardless of
 which "date" (source raster) the stem came from, a plant far outside tolerance -> a named refusal,
-an ungeoreferenced source -> a named refusal, and the map ``draw_splits(grouping=...)``
-actually accepts, keeping every group's stems on one split side.
+an ungeoreferenced source -> a named refusal, and a map ``draw_splits(grouping=...)`` accepts,
+keeping every group's stems on one split side.
 """
 
 from __future__ import annotations
@@ -41,9 +41,10 @@ def _write_geotiff(
     shape: tuple[int, int, int] = SHAPE,
     planar: bool = False,
 ) -> None:
-    """A ``shape`` GeoTIFF whose pixel (0, 0) sits at real-world ``(native_x, native_y)`` in UTM
-    15N; ``planar`` stores its bands separately, so its first page is band-first and not the
-    frame.
+    """Write a zero-valued ``shape`` RGB GeoTIFF whose pixel (0, 0) sits at the UTM 15N tiepoint.
+
+    The tiepoint is ``(native_x, native_y)``. ``planar`` writes the bands channel-first under
+    ``planarconfig='separate'``.
     """
     arr = np.zeros(shape, dtype=np.uint8)
     if planar:
@@ -70,8 +71,10 @@ def _write_ungeoreferenced_tiff(path: Path) -> None:
 def _center_latlon(
     native_x: float, native_y: float, shape: tuple[int, int, int] = SHAPE
 ) -> tuple[float, float]:
-    """The (lat, lon) the center pixel of a ``shape`` GeoTIFF at this tiepoint resolves to,
-    computed through pyproj so a fixture plant sits exactly at the raster's own center.
+    """Return the (lat, lon) of a ``shape`` GeoTIFF's geometric center at this tiepoint.
+
+    The center lies half the width east and half the height south of the tiepoint at
+    ``PIXEL_SCALE``, transformed from UTM 15N through pyproj.
     """
     import pyproj
 
@@ -100,7 +103,7 @@ FAR_TIEPOINT = (
 def _plant_at(
     plot: str, accession: str, tiepoint: tuple[float, float]
 ) -> dict:
-    """A plant sitting at the center of a raster tiled at ``tiepoint``."""
+    """Return a plant at the geometric center of a ``SHAPE`` raster tied at ``tiepoint``."""
     lat, lon = _center_latlon(*tiepoint)
     return {"plot": plot, "accession": accession, "lat": lat, "lon": lon}
 
@@ -118,9 +121,7 @@ def two_plant_csv(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def four_plant_csv(tmp_path: Path) -> Path:
-    """Four plants, so a manifest write over their capture dates clears the foreground floor
-    (one each for train/val, two for calibration) while still exercising group cohesion.
-    """
+    """Return a plant CSV of four plants, each at the center of its own tiepoint's raster."""
     return write_plant_csv(
         tmp_path / "plants4.csv",
         [
@@ -160,10 +161,10 @@ def test_same_plant_two_capture_dates_share_one_group_key(
     tmp_path: Path,
     two_plant_csv: Path,
 ) -> None:
-    """The actual value this script exists for: two differently-named stems (different capture
-    dates) of the same physical plant must land under the identical group key, so a split can
-    never put one date's photo of a plant in train and another date's photo of the same plant in
-    val/test.
+    """Two capture dates of one plant share one group key.
+
+    Two differently-named stems (different capture dates) of the same physical plant land under
+    the identical group key, and another plant's stem under a different one.
     """
     date1 = tmp_path / "p1_2026-02-01.tif"
     date2 = tmp_path / "p1_2026-03-01.tif"
@@ -186,9 +187,10 @@ def test_same_plant_two_capture_dates_share_one_group_key(
 
 
 def test_a_planar_raster_is_located_by_its_own_frame(tmp_path: Path) -> None:
-    """A wide planar GeoTIFF's center is measured in the frame its header describes, not in its
-    band-first first page: the plant at its true center is found, and no plant stands where a
-    page-shaped reading would put the center.
+    """A planar raster is located by the frame its header describes.
+
+    A wide planar GeoTIFF's center is measured in that frame: the plant at its true center is the
+    one its stem's group key names.
     """
     wide = (4, 40, 3)
     raster = tmp_path / "wide_planar.tif"
@@ -235,9 +237,7 @@ def test_a_malformed_tiff_is_named_and_does_not_kill_the_whole_batch(
     tmp_path: Path,
     two_plant_csv: Path,
 ) -> None:
-    """A malformed file beside a good stem is named in the refusal as the one failing stem; the
-    good stem is still resolved rather than lost to an exception escaping the batch.
-    """
+    """A malformed TIFF beside a good stem is named in the refusal as the failing stem."""
     good = tmp_path / "good.tif"
     _write_geotiff(good, *P1_TIEPOINT)
     malformed = tmp_path / "malformed.tif"
@@ -405,8 +405,9 @@ def test_the_command_locates_its_dataset_root_once(
     four_plant_csv: Path,
     monkeypatch,
 ) -> None:
-    """The dataset root arrives once for the whole command: the census and the draw read the
-    location the command established, and no step locates it again.
+    """The command locates its dataset root once.
+
+    Over the whole command, ``registry_paths.located`` answers the dataset root once.
     """
     import tcip_mcp.registry_paths as registry_paths
     import tcip_mcp.tools.data_tools as data_tools
@@ -445,9 +446,10 @@ def test_the_cli_and_the_tool_draw_one_selection_at_the_stated_shares(
     project: Path,
     four_plant_csv: Path,
 ) -> None:
-    """Stated one draw, the CLI and ``draw_splits`` draw one selection: the two place every
-    member on the same side, all four sides drawn, and each records the shares, the
-    stratification and the reason it was stated.
+    """Stated one draw, the CLI and ``draw_splits`` draw one selection at the stated shares.
+
+    The two place every member on the same side, all four sides drawn, and each records the
+    shares, the stratification and the reason it was stated.
     """
     from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.pipelines.data.selection import read_selection
@@ -525,8 +527,9 @@ def test_the_cli_and_the_tool_draw_one_selection_at_the_stated_shares(
 def test_main_cli_without_a_seed_refuses(
     tmp_path: Path, project: Path, four_plant_csv: Path
 ) -> None:
-    """Guard. The seed, each share, the stratification and the reason have no default: omitting
-    any refuses via argparse naming it before anything is written.
+    """Omitting the seed, a share, the stratification or the reason refuses via argparse.
+
+    None of them has a default, and no output is written.
     """
     dataset_root = _four_plant_dataset(tmp_path)
     out_dir = tmp_path / "cli_defaults_out"

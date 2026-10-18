@@ -1,8 +1,7 @@
-"""A published prediction bucket is readable by the reader every delivery uses.
+"""A published prediction bucket is readable by ``buckets.read_bucket``.
 
 This drives the real writer (``run_inference``'s publication) and the real reader
-(``buckets.read_bucket``) against each other, so a record the writer produces but the reader cannot
-take back whole is a failure here rather than downstream.
+(``buckets.read_bucket``) against each other.
 """
 
 from __future__ import annotations
@@ -13,9 +12,7 @@ torch = pytest.importorskip("torch")
 
 
 def _publish(tmp_path, monkeypatch, **stated) -> dict:
-    """``run_inference`` over one dated capture of the dataset ``dataset``, its predictor
-    stubbed.
-    """
+    """Run ``run_inference`` over one dated capture of the dataset ``dataset``, stubbed."""
     from PIL import Image
 
     from tcip_mcp.pipelines.execution import Stated

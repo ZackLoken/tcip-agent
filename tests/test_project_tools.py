@@ -26,7 +26,7 @@ from tests._web_fixtures import INVARIANCES
 
 
 def _make_dataset(root: Path) -> None:
-    """A minimal nested-schema dataset (image + label + registry) for identity tests."""
+    """Write a minimal nested-schema dataset (image + label + registry) under ``root``."""
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
@@ -43,7 +43,7 @@ def _make_dataset(root: Path) -> None:
 
 
 def _initialized(path: Path) -> dict:
-    """``path`` made a project through the platform's own creation door; its record."""
+    """Make ``path`` a project through the platform's own creation door; return its record."""
     result = initialize_project(
         str(path), "Test project", "north orchard", INVARIANCES
     )
@@ -359,9 +359,10 @@ def test_external_dataset_paths_names_an_external_registry_entry(
 
 
 def test_archive_project_includes_bespoke_model_source(tmp_path: Path):
-    """A bespoke run's snapshotted .py source (model_src/, written by snapshot_model_source) must
-    travel with the archive, or a published/archived project bundles the provenance manifest
-    without the code it describes and can't rerun its own pipeline from the archive alone.
+    """The archive carries a bespoke run's snapshotted model source.
+
+    A bespoke run's snapshotted .py source (model_src/, written by snapshot_model_source) and its
+    manifest are entries of the archive.
     """
     src = tmp_path / "src_project"
     _initialized(src)
@@ -419,10 +420,11 @@ def test_archive_project_reports_checkpoints_excluded_by_default(
 def test_archive_project_includes_a_registered_run_checkpoint_outside_tcip_models(
     tmp_path: Path,
 ):
-    """A completed run's checkpoint sits in its own run directory,
-    ``.tcip/experiments/<experiment_id>/model_final.pt``, not under ``.tcip/models/``.
-    ``include_models=True`` must bundle it there too, or a breeder who trusts the flag gets an
-    archive with no model in it at all.
+    """``include_models=True`` bundles a registered run checkpoint outside ``.tcip/models/``.
+
+    A completed run's checkpoint sits in its own run directory,
+    ``.tcip/experiments/<experiment_id>/model_final.pt``, not under ``.tcip/models/``, and the
+    archive carries it.
     """
     from tests._verified_checkpoint_fixtures import finished_run
 
@@ -449,9 +451,10 @@ def test_archive_project_includes_a_registered_run_checkpoint_outside_tcip_model
 def test_import_project_admits_a_bundle_holding_a_registered_run_checkpoint(
     tmp_path: Path,
 ):
-    """archive_project(include_models=True) bundles a completed run's checkpoint from its run
-    directory, and import_project admits it: the restored run's final status still names it,
-    and the registry the restored project reads lists it.
+    """import_project admits a bundle holding a completed run's registered checkpoint.
+
+    archive_project(include_models=True) bundles the checkpoint from its run directory, and after
+    import the restored run's final status still names it and the restored registry lists it.
     """
     from tcip_mcp.experiments import experiment_dir, observe
     from tcip_mcp.model_registry import ModelRegistry
@@ -480,7 +483,7 @@ def test_import_project_admits_a_bundle_holding_a_registered_run_checkpoint(
 
 
 def _internal_foreign_checkpoint(src: Path) -> Path:
-    """A foreign checkpoint registered from inside the project's own tree."""
+    """Register a foreign checkpoint from inside the project's own tree; return its path."""
     from tcip_mcp.model_registry import ModelRegistry
     from tests._verified_checkpoint_fixtures import produced_checkpoint
 
@@ -494,11 +497,10 @@ def _internal_foreign_checkpoint(src: Path) -> Path:
 def test_import_project_admits_a_registered_checkpoint_with_no_disclosure(
     tmp_path: Path,
 ):
-    """A checkpoint registered under the project's own tree comes back from an archive/import
-    round trip with nothing to disclose: the writer already spelled it relative to the
-    registry's scope root, so the moved tree's registry still resolves under it. The stored
-    entry itself stays relative; the resolved response is absolute; weights load by digest
-    either way, since loading never reads the stored path.
+    """A checkpoint registered under the project's tree round-trips with nothing to disclose.
+
+    The import reports no unresolved dataset or checkpoint and no external checkpoint; the stored
+    entry stays relative, and the resolved path is absolute and names an existing file.
     """
     from tcip_mcp.model_registry import (
         ModelRegistry,
@@ -544,11 +546,12 @@ def test_import_project_admits_a_registered_checkpoint_with_no_disclosure(
 def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries_no_checkpoint(
     tmp_path: Path,
 ):
-    """A relative registry entry whose weights the archive legitimately dropped
-    (``include_models=False``) must come back still relative and disclosed as unresolved: the
-    staging conform's no-match fallback must never write the entry's own staging directory's
-    absolute path over it, which would misfile an internal-but-absent entry as designed-external
-    and leave a path into a directory the door is about to delete permanently in the registry.
+    """Import keeps a relative entry relative when the archive carries no checkpoint.
+
+    A relative registry entry whose weights the archive legitimately dropped
+    (``include_models=False``) comes back with its stored path unchanged, disclosed as unresolved
+    and not as an external checkpoint; the registry holds no path into the import's staging
+    directory, which the door deletes.
     """
     from tcip_mcp.model_registry import read_registry_index, registry_index_key
 
@@ -580,10 +583,10 @@ def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries
 def test_import_project_discloses_a_designed_external_checkpoint_separately_from_unresolved(
     tmp_path: Path,
 ):
-    """A registry entry that is a genuine designed-external claim (outside the project tree
-    entirely) must appear in ``external_checkpoints``, never counted toward
-    ``checkpoint_paths_unresolved``, which names only an entry expected to resolve under the
-    tree that does not.
+    """Import discloses a designed-external checkpoint apart from the unresolved entries.
+
+    A registry entry outside the project tree appears in ``external_checkpoints`` as existing,
+    and ``checkpoint_paths_unresolved`` is empty.
     """
     from tcip_mcp.model_registry import ModelRegistry
     from tests._verified_checkpoint_fixtures import produced_checkpoint
@@ -624,8 +627,10 @@ def test_import_project_discloses_a_designed_external_checkpoint_separately_from
 def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(
     tmp_path: Path,
 ):
-    """A checkpoint sitting under .tcip/models/ that is also a registry entry is one file to
-    the two checkpoint arms that recognize it; it lands in the bundle once.
+    """A registered checkpoint under ``.tcip/models/`` lands in the archive bundle once.
+
+    The checkpoint is both a file under ``.tcip/models/`` and a registry entry, and the archive
+    bundles it as one file.
     """
     from tcip_mcp.model_registry import ModelRegistry, checkpoint_files
     from tests._verified_checkpoint_fixtures import produced_checkpoint
@@ -655,9 +660,10 @@ def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(
 def test_a_checkpoint_registered_from_anywhere_in_the_project_travels_only_with_models(
     tmp_path: Path,
 ):
-    """A checkpoint registered from a directory of the project's own, neither ``.tcip/models``
-    nor a run's, is a checkpoint: ``include_models=False`` leaves it out and counts it, and
-    ``include_models=True`` carries it.
+    """A checkpoint registered from a project directory of its own travels only with models.
+
+    For a checkpoint registered from a directory that is neither ``.tcip/models`` nor a run's,
+    ``include_models=False`` leaves it out and counts it, and ``include_models=True`` carries it.
     """
     import zipfile
 
@@ -692,10 +698,7 @@ def test_a_checkpoint_registered_from_anywhere_in_the_project_travels_only_with_
 
 
 def test_archive_project_admits_a_symlink_spelled_project(tmp_path: Path):
-    """A project reached through a symlink and established once (``existing_project``) archives
-    rather than raising ValueError out of the door: the established root serves both
-    member.relative_to and the include_models comparison.
-    """
+    """A project reached through a symlink and ``existing_project`` archives its files."""
     from tcip_mcp.project_record import existing_project
     from tests._web_fixtures import new_project
 
@@ -718,12 +721,7 @@ def test_archive_project_admits_a_symlink_spelled_project(tmp_path: Path):
 
 
 class _BarrierId(str):
-    """A dataset id that parks at a barrier the first time it is rendered for the registry's sort.
-
-    The rendering sits after the registry has been read and before it is written back, which is
-    the window a lost update opens in, so a writer holding no lock across that pair waits there
-    until every other writer has read the same state it did.
-    """
+    """A dataset id whose first string conversion waits at the class's ``barrier``."""
 
     barrier: threading.Barrier
 
@@ -738,9 +736,10 @@ class _BarrierId(str):
 
 
 def test_concurrent_registrations_both_survive_in_the_registry(tmp_path: Path):
-    """Two writers adding different datasets at once both land. Each reads the whole list,
-    drops one entry and writes the list back, so a pair that is not serialized writes lists
-    assembled before the other's entry existed and one dataset's identity disappears.
+    """Two writers adding different datasets at once both land in the registry.
+
+    Both writers park at a barrier between reading and writing the registry, both succeed, and
+    the registry lists both dataset ids.
     """
     project = tmp_path / "proj"
     project.mkdir()
@@ -773,9 +772,7 @@ def test_concurrent_registrations_both_survive_in_the_registry(tmp_path: Path):
 def test_an_undecodable_dataset_registry_refuses_and_an_absent_one_reads_empty(
     tmp_path: Path,
 ):
-    """A registry read as empty would make the next registration write a one-entry list and drop
-    every other dataset identity the project had recorded, so corruption is not absence here.
-    """
+    """An undecodable dataset registry raises ``DecodeError``, and an absent one reads empty."""
     from tcip_mcp.tools.project_tools import dataset_registry_key
 
     project = tmp_path / "proj"
@@ -796,13 +793,11 @@ def test_an_undecodable_dataset_registry_refuses_and_an_absent_one_reads_empty(
 def test_an_identity_minted_while_this_registration_ran_is_adopted_not_overwritten(
     tmp_path: Path, monkeypatch
 ):
-    """A dataset's id is minted once. Two first-time registrations both read no identity, so the
-    write has to be conditional on there still being none: the loser adopts what committed instead
-    of stamping its own id over an id other records may already cite.
+    """An identity minted while this registration ran is adopted, not overwritten.
 
-    The window is between reading the absent identity and writing the minted one, which is exactly
-    where the id is drawn. A competing identity lands there, so the second write conflicts, the
-    call re-reads the committed document, and the id it reports and registers is that one.
+    A competing identity is committed between reading the absent identity and writing the minted
+    one: the registration reports and registers the committed id, and the document's id stays the
+    committed one.
     """
     import json
     import uuid as uuid_module
@@ -836,8 +831,9 @@ def test_an_identity_minted_while_this_registration_ran_is_adopted_not_overwritt
 def test_an_undecodable_identity_document_refuses_rather_than_minting_a_fresh_id(
     tmp_path: Path,
 ):
-    """Minting a new id over an identity that will not decode severs every experiment, split and
-    delivered number citing the old one, so the tool refuses and names the document.
+    """An undecodable identity document refuses, named, and stays byte for byte as it was.
+
+    No dataset is registered.
     """
     src = tmp_path / "proj"
     _make_dataset(src)
@@ -854,8 +850,10 @@ def test_an_undecodable_identity_document_refuses_rather_than_minting_a_fresh_id
 
 
 def test_initializing_twice_leaves_what_the_first_run_created(tmp_path: Path):
-    """A second creation with the same display name and site keeps the record's id and touches
-    nothing the first run created.
+    """Initializing twice keeps the record's id, the models directory and an artifact file.
+
+    The second creation has the same display name and site; a file written into the artifacts
+    directory between the two keeps its content.
     """
     first = _initialized(tmp_path)
     (tmp_path / ".tcip" / "artifacts" / "kept.txt").write_text(
@@ -892,9 +890,11 @@ def test_initialize_project_records_the_id_display_name_site_and_invariances(
 def test_initialize_project_refuses_unstated_invariances_and_one_unstated_invariance_by_type(
     tmp_path: Path,
 ):
-    """The invariances are required by the door's signature and each of the six by the
-    record's model; a stated block is read back whole by ``inspect_project`` and
-    ``record_fields``, a rotation stated as 5 read back as 5.0 degrees.
+    """``initialize_project`` refuses an absent invariances block, and one lacking ``scale``.
+
+    Both refusals are validation errors naming what is missing, and nothing is created; a whole
+    stated block is read back by ``inspect_project`` and ``record_fields``, a rotation stated as 5
+    read back as the float 5.0.
     """
     from tcip_mcp.project_record import record_fields
 
@@ -952,8 +952,9 @@ def test_initialize_project_refuses_unstated_invariances_and_one_unstated_invari
 def test_initialize_project_refuses_a_rotation_angle_outside_its_range_by_type(
     tmp_path: Path, angle, refusal
 ):
-    """A rotation invariance that is not a finite angle from 0 to 180 degrees is refused by the
-    record's type naming the field, and nothing is written.
+    """A rotation outside a finite 0 to 180 degrees is refused by type, and nothing is written.
+
+    The record's type names the field in the refusal.
     """
     project = tmp_path / "refused"
     arguments = {
@@ -1024,8 +1025,9 @@ def test_initialize_project_refuses_a_different_display_name_than_the_one_alread
 def test_initialize_project_refuses_an_empty_site_leaving_nothing_on_disk(
     tmp_path: Path,
 ):
-    """A refused site is validated before anything is created: the destination is left exactly
-    as it was, not half-scaffolded.
+    """``initialize_project`` refuses an empty site and leaves nothing on disk.
+
+    The refusal is an error, and the destination does not exist afterward.
     """
     dest = tmp_path / "fresh_project"
 
@@ -1049,8 +1051,10 @@ def test_initialize_project_refuses_an_empty_display_name_leaving_nothing_on_dis
 def test_initialize_project_refuses_a_relative_path_and_scaffolds_nothing(
     tmp_path: Path, monkeypatch
 ):
-    """A door that holds no project has no root to read a relative project_path against: it
-    refuses naming the absolute spelling, and nothing is scaffolded under the process's cwd.
+    """``initialize_project`` refuses a relative path, naming the absolute spelling.
+
+    A door that holds no project has no root to read a relative project_path against, and nothing
+    is scaffolded under the process's cwd.
     """
     monkeypatch.chdir(tmp_path)
 
@@ -1065,7 +1069,7 @@ def test_initialize_project_refuses_a_relative_path_and_scaffolds_nothing(
 def test_initialize_project_refuses_a_present_but_invalid_record(
     tmp_path: Path,
 ):
-    """The door surfaces the reader's own refusal rather than the store's raw exception."""
+    """``initialize_project`` over a present but invalid record returns the reader's refusal."""
     from tcip_mcp.project_record import project_record_key
 
     key = project_record_key(tmp_path)
@@ -1082,7 +1086,7 @@ def test_initialize_project_refuses_a_present_but_invalid_record(
 
 
 def test_initialize_project_refuses_an_undecodable_record(tmp_path: Path):
-    """The store's own DecodeError is a StoreError, caught and returned as the door's error."""
+    """``initialize_project`` over an undecodable record returns the decode failure as its error."""
     from tcip_mcp.project_record import project_record_key
 
     record = _initialized(tmp_path)
@@ -1099,10 +1103,10 @@ def test_initialize_project_refuses_an_undecodable_record(tmp_path: Path):
 def test_initialize_project_records_on_a_directory_that_gained_tcip_with_no_creating_door(
     tmp_path: Path,
 ):
-    """The reachable state a store write with no door leaves (``report_friction`` on a bare
-    directory): ``initialize_project`` on it afterward records the project the same way it would
-    on a truly fresh directory, since the writer's create-only write does not distinguish the
-    two.
+    """``initialize_project`` records on a directory that gained ``.tcip`` with no creating door.
+
+    That state is the one a store write with no door leaves (``report_friction`` on a bare
+    directory); ``initialize_project`` on it afterward records the project with its site.
     """
     from tcip_mcp.tools.meta_tools import report_friction
 
@@ -1117,8 +1121,10 @@ def test_initialize_project_records_on_a_directory_that_gained_tcip_with_no_crea
 def test_inspect_project_reports_the_record_fields_across_project_states(
     tmp_path: Path,
 ):
-    """A path with no record carries the absent-record problem text; a project with a record
-    carries its fields and no problem.
+    """``inspect_project`` reports the record's fields, or its absence, across project states.
+
+    A path with no record carries the absent-record problem text; a project with a record carries
+    its fields and no problem.
     """
     from tcip_mcp.tools.meta_tools import report_friction
 
@@ -1157,9 +1163,10 @@ def test_inspect_project_reports_an_invalid_record(tmp_path: Path):
 
 
 def test_archive_and_import_carry_the_project_record(tmp_path: Path):
-    """initialize_project -> archive_project -> import_project round-trips a project's record,
-    its id included, inside the database the archive copies, with no operator step between the
-    two doors.
+    """Archive and import carry the project record, its id included.
+
+    initialize_project -> archive_project -> import_project round-trips a project's record inside
+    the database the archive copies, with no operator step between the two doors.
     """
     src = tmp_path / "src_project"
     record = _initialized(src)
@@ -1189,7 +1196,9 @@ def test_archive_and_import_carry_the_project_record(tmp_path: Path):
 def test_an_archive_of_an_open_database_carries_every_record_and_entry_it_holds(
     tmp_path: Path,
 ):
-    """The project's database is open, its latest commits still in its write-ahead log, when the
+    """An archive of an open database carries every record and log entry it holds.
+
+    The project's database is open, its latest commits still in its write-ahead log, when the
     archive runs; the imported project's dump holds every record the source's did, byte for
     byte, and every log entry, the import's own line after them.
     """

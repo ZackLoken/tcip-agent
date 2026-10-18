@@ -1,5 +1,7 @@
-"""The orthomosaic tools: tiled inference over a whole raster published as one bucket, then
-per-plant delivery from that bucket plus a registered plant registry.
+"""Tests of the orthomosaic tools.
+
+Covered: tiled inference over a whole raster published as one bucket, then per-plant delivery
+from that bucket plus a registered plant registry.
 """
 
 from __future__ import annotations
@@ -75,11 +77,9 @@ def _write_geo_raster(
     tiepoint_x: float = TIEPOINT_NATIVE_X,
     seed: int = 0,
 ) -> np.ndarray:
-    """A raster carrying both real georeferencing tags and real (random, decodable) pixel
-    content, so it works for both the header's georeference read and a tiling inference pass.
+    """Write a raster carrying georeferencing tags and seeded random uint8 pixels; return its array.
 
-    ``tiepoint_x``/``seed`` vary the two halves independently, so a caller can write a
-    pixel-identical copy at a moved tiepoint, or different content at the same one.
+    ``tiepoint_x`` sets the tiepoint's x and ``seed`` sets the pixel content.
     """
     rng = np.random.default_rng(seed)
     arr = rng.integers(0, 255, size=(height, width, channels), dtype=np.uint8)
@@ -102,8 +102,10 @@ def _write_geo_raster(
 
 
 def _bespoke_detection_checkpoint(tmp_path: Path, *, in_chans: int = 3) -> str:
-    """The checkpoint an untiled bespoke detection run under ``tmp_path`` completed over frames
-    of its own, registered in that project's model registry by completing.
+    """Return the checkpoint an untiled bespoke detection run under ``tmp_path`` completed.
+
+    The run completed over frames of its own, registering the checkpoint in that project's model
+    registry.
     """
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -144,8 +146,9 @@ def _plant_registry(
 def _plants_csv_at(
     tmp_path: Path, raster_path: Path, rows: list[tuple[str, float, float]]
 ) -> Path:
-    """A registry CSV naming ``rows`` (plant_id, pixel_x, pixel_y) each projected to WGS84
-    through this raster's own georeferencing.
+    """Write a registry CSV naming ``rows`` (plant_id, pixel_x, pixel_y) and return its path.
+
+    Each row is projected to WGS84 through this raster's own georeferencing.
     """
     entries = []
     for i, (name, px, py) in enumerate(rows):
@@ -182,9 +185,7 @@ _GRID = ["plot0", "plot1", "plot2", "plot3"]
 
 
 def _raster(project: Path) -> Path:
-    """Where the raster of a test that needs no registered dataset sits: the undated capture of
-    ``project``'s dataset ``ds``.
-    """
+    """Return the raster path in the undated capture of ``project``'s dataset ``ds``."""
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
     return project / "ds" / "images" / UNDATED_BUCKET / "mosaic.tif"
@@ -197,8 +198,10 @@ def _raster_bucket(
     *,
     name: str = "preds",
 ):
-    """A whole-raster bucket ``<name>/2026-01-01`` published over ``raster_path`` holding one
-    detection per box, through the platform's own publication (``_chain_fixtures.published``).
+    """Publish a whole-raster bucket ``<name>/2026-01-01`` over ``raster_path`` and return it.
+
+    The bucket holds one detection per box and is published through the platform's own
+    publication (``_chain_fixtures.published``).
     """
     from tests._chain_fixtures import published
 
@@ -224,8 +227,9 @@ def _raster_bucket(
 def _deliver(
     project: Path, bucket, registry: str, plants: list[str], **kwargs
 ) -> dict:
-    """``orthomosaic_plant_counts`` shipped under a breeder's acknowledgment (these buckets are
-    unassessed), a refusal answering ``{"error": ...}``.
+    """Ship ``orthomosaic_plant_counts`` under a breeder's acknowledgment and return its answer.
+
+    A refusal answers ``{"error": ...}``.
     """
     from tcip_mcp.delivery import DeliveryRefusedError
     from tcip_mcp.operationalization import OperationalizationRefusedError
@@ -272,8 +276,10 @@ def _rows(project: Path) -> dict[str, dict]:
 def test_run_inference_over_a_raster_publishes_one_document_and_the_raster_it_ran_on(
     tmp_path,
 ):
-    """An explicit tile_size runs the pass; the bucket holds one document for the whole raster and
-    a record naming the raster, its content identity and the execution record.
+    """A raster pass publishes one document and a record naming the raster it ran on.
+
+    An explicit tile_size runs the pass; the bucket holds one document for the whole raster and a
+    record naming the raster, its content identity and the execution record.
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
@@ -378,8 +384,10 @@ def test_a_missing_checkpoint_or_raster_refuses_cleanly_with_nothing_written(
 def test_a_raster_pass_with_no_basis_for_its_tile_edge_refuses_before_writing(
     tmp_path,
 ):
-    """No persisted training geometry and no explicit tile_size: an always-tiled pass has no edge
-    to tile at, so it refuses unconditionally, never crashing mid-pass.
+    """A raster pass with no basis for its tile edge refuses and publishes nothing.
+
+    With no persisted training geometry and no explicit tile_size, the pass refuses naming the
+    missing tile_size.
     """
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -432,8 +440,10 @@ def test_an_unassessed_raster_bucket_refuses_at_the_door_that_takes_no_acknowled
 def test_detections_are_counted_to_their_nearest_plant_at_detection_granularity(
     tmp_path,
 ):
-    """Two detections near plot0, one near plot2, none near plot1 or plot3: every population plant
-    gets a row, an explicit zero included, attributed per detection.
+    """Detections are counted to their nearest plant, one detection at a time.
+
+    Two detections near plot0, one near plot2, none near plot1 or plot3: every population plant
+    gets a row, an explicit zero included.
     """
     from tcip_mcp.delivery import read_delivery_events
 
@@ -476,8 +486,9 @@ def test_detections_are_counted_to_their_nearest_plant_at_detection_granularity(
 def test_a_delivery_reads_the_rasters_georeferencing_once(
     tmp_path, monkeypatch
 ):
-    """The identity check and the pixel-to-world mapping read the raster's georeferencing tags
-    through one header read: the reader the check opened carries what the mapping needs.
+    """An acknowledged delivery constructs the raster's ``tifffile.TiffFile`` twice in all.
+
+    The two constructions span the attempt refused for its acknowledgment and the acknowledged one.
     """
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
@@ -504,8 +515,9 @@ def test_a_delivery_reads_the_rasters_georeferencing_once(
 def test_a_delivery_reads_the_confirmed_revision_once_per_act(
     tmp_path, monkeypatch
 ):
-    """The per-plant statistic and the binding come from one read of the confirmed revision, the
-    delivery's own: the door hands its per-plant records over and reads none itself.
+    """An acknowledged delivery calls ``confirmed_revision`` twice in all.
+
+    The two calls span the attempt refused for its acknowledgment and the acknowledged one.
     """
     from tcip_mcp import operationalization
 
@@ -556,9 +568,7 @@ def test_a_far_detection_is_counted_to_no_plant(tmp_path):
 def test_a_raster_whose_georeferencing_cannot_be_read_refuses_cleanly(
     tmp_path,
 ):
-    """A ModelTransformationTag raster refuses through the georeference reader, not as an
-    uncaught exception.
-    """
+    """A ModelTransformationTag raster refuses as a returned error naming the tag."""
     raster_path = _raster(tmp_path)
     rng = np.random.default_rng(0)
     arr = rng.integers(0, 255, size=(64, 64, 3), dtype=np.uint8)
@@ -612,9 +622,11 @@ def test_a_raster_whose_georeferencing_cannot_be_read_refuses_cleanly(
 def test_the_delivery_event_discloses_the_registry_raster_and_tolerance_it_matched_under(
     tmp_path,
 ):
-    """A whole-raster frame carries no walked mapping, so the event names the registry it read,
-    the raster identity, the tolerance and its source, and this delivery's unattributed count; a
-    stated tolerance is recorded as stated rather than as the grid-pitch derivation.
+    """The delivery event discloses the registry, raster and tolerance it matched under.
+
+    A whole-raster frame carries no walked mapping, so the event names the registry it read, the
+    raster identity, the tolerance and its source, and this delivery's unattributed count; a
+    stated tolerance is recorded as stated.
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.delivery import read_delivery_events
@@ -710,9 +722,11 @@ def test_an_unchanged_registry_csv_delivers(tmp_path):
 def test_a_plant_outside_the_raster_is_named_and_an_edge_detection_is_not_given_to_it(
     tmp_path,
 ):
-    """A registry plant outside the raster's own frame is named on the delivery, never counted,
-    and a detection at the raster's edge nearer to it than to any in-frame plant stays
-    unattributed; naming the outside plant in the population refuses, naming why.
+    """A plant outside the raster is named, and an edge detection is not given to it.
+
+    A registry plant outside the raster's own frame is named on the delivery and not counted, and
+    a detection at the raster's edge nearer to it than to any in-frame plant stays unattributed;
+    naming the outside plant in the population refuses, naming why.
     """
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)  # 64x64
@@ -780,9 +794,7 @@ def test_a_registry_naming_a_plant_twice_or_not_at_all_refuses(
 
 
 def _canopy_setup(tmp_path, boxes) -> tuple:
-    """A raster in a registered dataset and its bucket, for the canopy regime's own
-    dataset-binding check.
-    """
+    """Return a dataset root, a 64 by 64 raster registered in it, and the raster's bucket."""
     from tests._geotiff_fixtures import write_canonical_dataset_raster
 
     dataset_root = tmp_path / "ds"
@@ -802,8 +814,9 @@ def _write_canopy_document(
     *,
     subject: str = "canopy",
 ) -> None:
-    """A hand-traced canopy boundary document, ``raster_path``'s own label document, one
-    rectangle per ``boxes`` entry, under a person's identity.
+    """Write ``raster_path``'s label document at a 64 by 64 frame, one rectangle per ``boxes``.
+
+    Each rectangle is a ``subject`` polygon created by ``user:breeder``.
     """
     from tcip_annotation.state import Annotation, Polygon
     from tests._producer_fixtures import label_image
@@ -906,7 +919,9 @@ def test_canopy_segments_attribute_by_containment_and_name_every_gap(tmp_path):
 def test_a_plant_within_the_position_error_is_disclosed_as_such_and_its_segment_holds_a_plant(
     tmp_path,
 ):
-    """A plant half a meter inside its segment's boundary, under a 1 m position error, leaves its
+    """A plant within the position error is disclosed as such, and its segment holds a plant.
+
+    A plant half a meter inside its segment's boundary, under a 1 m position error, leaves its
     segment untied: the delivery names it within the position error, counts its segment as one
     holding a plant, and names why the detection inside that segment went unattributed.
     """

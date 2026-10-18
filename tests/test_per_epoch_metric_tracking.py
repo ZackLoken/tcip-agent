@@ -1,6 +1,7 @@
-"""Coverage: TensorBoard event files carry train and validation loss (and accuracy where the
-task defines one) at every epoch step, through the run's one writer, on both the default
-trainer's path and the sweep-trial body an HPO run executes each trial through.
+"""TensorBoard event files carry train and validation loss at every epoch step.
+
+They carry accuracy as well where the task defines one, through the run's one writer, on both the
+default trainer's path and the sweep-trial body an HPO run executes each trial through.
 """
 
 from __future__ import annotations
@@ -96,9 +97,7 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
 def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(
     tmp_path, caplog
 ):
-    """The one-line-per-epoch summary a breeder or an operator tails must name accuracy and F1,
-    not only the loss a plain reader would take for the whole story.
-    """
+    """Each of a two-epoch run's console lines names validation accuracy and F1."""
     import logging
 
     ctx = run_context(

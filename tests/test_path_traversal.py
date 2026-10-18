@@ -1,5 +1,6 @@
-"""Path-traversal validation: the allowed-root image guard and the route-level run id and path
-guards.
+"""Tests of path-traversal validation.
+
+Covered: the allowed-root image guard and the route-level run id and path guards.
 """
 
 import pytest
@@ -25,10 +26,10 @@ def test_assert_path_allowed_admits_the_workspace_and_refuses_a_sibling(
 
 
 def test_training_stream_closes_on_run_id_traversal(opened_project, client):
-    """A run_id carrying a path separator (BadKeyError) closes the stream rather than resolving to a
-    path component. A backslash, not a ``..`` segment, since a URL client normalizes dot segments
-    before the request is even sent. The socket is accepted once a project is open, so the
-    disconnect surfaces on the first read.
+    """A run_id carrying a path separator closes the training stream.
+
+    For a run_id holding a backslash, the stream closes with code 1008 naming the run_id as not a
+    single directory name.
     """
     from starlette.websockets import WebSocketDisconnect
 
@@ -67,8 +68,9 @@ def test_annotate_labels_route_blocks_outside_allowed_root(
 def test_images_route_blocks_outside_allowed_root(
     tmp_path, tmp_path_factory: pytest.TempPathFactory
 ):
-    """images.py's own ``_checked`` guard, exercised on a route that still calls it (the annotate
-    route above guards a different module's copy).
+    """The images route serves a path inside the workspace and refuses one outside with 403.
+
+    The guard exercised is images.py's own ``_checked``, through ``get_bands``.
     """
     pytest.importorskip("fastapi")
     from fastapi import HTTPException

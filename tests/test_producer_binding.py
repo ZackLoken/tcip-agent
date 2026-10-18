@@ -3,9 +3,8 @@
 A bucket's record names the assessment it was published under, and a delivery reads that
 assessment and compares what it measured (the checkpoint, the execution record, the captures of
 its reference) against what the bucket states. A record edited after publication, one naming an
-assessment nobody ran, and a capture the reference never covered each refuse with the sentence
-naming why; the untouched flow beside them delivers validated
-(``tests/test_end_to_end_measurement_chain.py``).
+assessment nobody ran, and a capture outside the reference each refuse with the sentence naming
+why.
 """
 
 from __future__ import annotations
@@ -30,9 +29,7 @@ def _deliver(project: Path, root: Path, bucket: str, out: Path) -> dict:
 
 
 def _edit_record(root: Path, bucket: str, edit) -> None:
-    """Rewrite ``bucket``'s record through ``edit`` past the publication, the way a hand edit
-    after publication reaches it.
-    """
+    """Read ``bucket``'s published record, apply ``edit`` to it, and replace it in the store."""
     import tcip_store
     from tcip_mcp.dataset_layout import bucket_key
 
@@ -45,7 +42,9 @@ def _edit_record(root: Path, bucket: str, edit) -> None:
 def test_a_bucket_record_edited_to_another_execution_answers_for_nothing(
     tmp_path: Path,
 ):
-    """The assessment measured one execution record; a bucket stating another, under the same
+    """A bucket record edited to another execution refuses delivery under its assessment.
+
+    The assessment measured one execution record; a bucket stating another, under the same
     assessment id, was not produced by what the assessment measured.
     """
     chain = run_the_chain(tmp_path, experiment_id="exp-binding-execution")
@@ -95,7 +94,9 @@ def test_a_bucket_record_naming_an_assessment_nobody_ran_answers_for_nothing(
 def test_a_capture_outside_the_assessments_reference_answers_for_nothing(
     tmp_path: Path,
 ):
-    """The checkpoint and execution are the assessed ones, but the capture is not among those the
+    """A capture outside the assessment's reference refuses delivery, naming its date.
+
+    The checkpoint and execution are the assessed ones, but the capture is not among those the
     reference held out, so the assessment says nothing about it.
     """
     from tcip_mcp.pipelines.execution import Stated

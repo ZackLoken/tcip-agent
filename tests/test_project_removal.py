@@ -1,9 +1,9 @@
 """Removing a project: ``tcip_mcp.workspace.remove_project`` and ``POST /api/projects/remove``.
 
 One call archives the project, models included, into the workspace's ``.removed/``, moves its
-directory there, and records one ``project_removed`` line in the moved project's own log. Every
-project is made through the platform's own creation door under this test's workspace
-(``tmp_path.parent``; ``conftest.py`` lays ``tmp_path`` out as ``<workspace>/project``).
+directory there, and records one ``project_removed`` line in the moved project's own log.
+Projects are made through the platform's own creation door under the workspace
+``tmp_path.parent`` (``conftest.py`` lays ``tmp_path`` out as ``<workspace>/project``).
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 
 def _project(ws: Path, directory: str, display_name: str) -> OpenProject:
-    """A project made through the creation door (``named_project``), with one image."""
+    """Make a project through the creation door (``named_project``), with one image."""
     made = named_project(ws / directory, display_name)
     images = made.root / "images" / "2026-03-04"
     images.mkdir(parents=True)
@@ -34,8 +34,9 @@ def _project(ws: Path, directory: str, display_name: str) -> OpenProject:
 
 
 def test_removal_archives_moves_and_records_one_line(client, tmp_path):
-    """The removal's whole trace in the project's log is one ``project_removed`` line: the
-    archive it writes records nothing of its own.
+    """A removal archives, moves, and leaves one ``project_removed`` line as its whole trace.
+
+    The archive the removal writes records nothing of its own.
     """
     ws = tmp_path.parent
     made = _project(ws, "valley_block", "Valley block")
@@ -88,8 +89,10 @@ def test_an_archive_that_refuses_leaves_the_project_where_it_was_and_still_open(
     tmp_path,
     monkeypatch,
 ):
-    """The archive is written before anything lets go of the project or moves it, so a refused
-    archive leaves the directory, the open project and the log exactly as they were.
+    """A refused archive leaves the project where it was and still open.
+
+    The removal answers 409 carrying the archive's refusal; the project stays at its directory and
+    open, nothing is moved into the removed directory, and the log is unchanged.
     """
     from tcip_mcp.tools import project_tools
 

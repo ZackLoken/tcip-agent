@@ -1,5 +1,7 @@
-"""Center-match count-unbiased operating-point sweep, the in-model operating-point seam, the
-detection cap, and the cross-tile merge threshold a tiled pass derives.
+"""Tests of the operating point and the values a pass derives beside it.
+
+Covered: the center-match count-unbiased operating-point sweep, the in-model operating-point
+seam, the detection cap, and the cross-tile merge threshold a tiled pass derives.
 """
 
 from __future__ import annotations
@@ -186,8 +188,10 @@ def test_set_detector_operating_point_one_stage():
 
 
 def test_the_object_density_is_its_quantile_over_the_object_bearing_regions():
-    """The 0.99 quantile of the objects per pixel of the counted regions holding an object, with
-    no floor and no multiplier over it: a sparse reference whose one object-bearing region sits
+    """The object density of uniformly dense regions is their objects per pixel, empty ones skipped.
+
+    Regions of 80 or 2 objects a frame, or 10 over a tenfold frame, derive that density within
+    ``pytest.approx``'s default tolerance; a sparse reference whose one object-bearing region sits
     among empty ones derives that region's density, and a reference with no object-bearing region
     refuses naming them.
     """
@@ -217,7 +221,10 @@ def test_the_object_density_is_its_quantile_over_the_object_bearing_regions():
 
 
 def _overlap_records(idp="d"):
-    """Records whose GT boxes overlap (20px, offset 8px), so the merge threshold is derivable."""
+    """Return records ``{idp}_0`` and ``{idp}_1``, each of three 20 px GT boxes 8 px apart.
+
+    Each GT box is detected at 0.9.
+    """
     from tcip_mcp.pipelines.training.evaluation import prediction_record
 
     centers = [100, 108, 116]  # neighbor IoU ~0.43
@@ -236,7 +243,7 @@ def _overlap_records(idp="d"):
 
 
 def _regions(records):
-    """Each record's ground truth as the region of its objects over its frame."""
+    """Return each record's ground truth as the region of its objects over its frame."""
     from tests._verified_checkpoint_fixtures import objects_over
 
     return [
@@ -267,8 +274,9 @@ def test_no_overlapping_ground_truth_derives_no_merge_threshold():
 
 
 def _tiled_pass(tmp_path, records, **stated):
-    """The tiled pass of a verified checkpoint at the sample conf merging by NMS, made runnable
-    from ``records``' ground truth.
+    """Return a verified checkpoint's tiled pass, made runnable from ``records``' ground truth.
+
+    The pass runs at the sample conf and merges by NMS.
     """
     from tcip_mcp.pipelines.execution import Reference, Stated, prepare
     from tests._training_values import RATIONALE
@@ -305,7 +313,9 @@ def test_a_tiled_pass_records_its_derived_merge_threshold_by_the_derivations_nam
 def test_a_tiled_passs_derived_merge_threshold_is_the_method_its_label_names(
     tmp_path,
 ):
-    """Over a spread of neighbor overlaps, the threshold a tiled pass records is the labeled
+    """A tiled pass's derived merge threshold is the method its label names.
+
+    Over a spread of neighbor overlaps, the threshold a tiled pass records is the labeled
     percentile of the tail plus the labeled margin.
     """
     import re

@@ -1,5 +1,7 @@
-"""Coverage for the same-name ``build_plant_mapping`` rebuild that supersedes rather than
-silently replaces a mapping a delivery event still cites.
+"""Tests of a same-name ``build_plant_mapping`` rebuild over a cited mapping.
+
+A rebuild over a mapping a delivery event cites refuses unless it supersedes, archiving the old
+record.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ if TYPE_CHECKING:
 def _deliver(
     project: Path, preds_by_date: dict[str, str], out_csv: Path
 ) -> dict:
-    """The delivery over the buckets of :func:`_dataset`'s default root."""
+    """Deliver over the buckets of :func:`_dataset`'s default root and return the answer."""
     return _deliver_through(
         project,
         trait="currant_bloom",
@@ -43,9 +45,10 @@ def _deliver(
 
 
 def _cited_mapping(tmp_path: Path) -> tuple[OpenProject, str, dict[str, str]]:
-    """``tmp_path`` made a project holding a mapping built, delivered from (so a delivery event
-    cites its digest), and the plant CSV it was built over, for a rebuild under the same name to
-    then be tried against; the project, the images root and the buckets by date.
+    """Make ``tmp_path`` a project holding a mapping named ``valley`` that a delivery cites.
+
+    The mapping is built, delivered from (so a delivery event cites its digest), and kept beside
+    the plant CSV it was built over. Return the project, the images root and the buckets by date.
     """
     project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
@@ -70,8 +73,10 @@ def _cited_mapping(tmp_path: Path) -> tuple[OpenProject, str, dict[str, str]]:
 def test_a_cited_rebuild_refuses_naming_the_citing_events(
     tmp_path: Path,
 ) -> None:
-    """A guard: a same-name rebuild whose current record a delivery event cites refuses unless
-    supersede=True.
+    """A same-name rebuild of a cited record refuses, naming the citing events.
+
+    A same-name rebuild whose current record a delivery event cites refuses with every citing
+    event named, and the cited record stays untouched.
     """
     _, images_root, _ = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
@@ -108,10 +113,11 @@ def test_a_cited_rebuild_refuses_naming_the_citing_events(
 def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_readable(
     tmp_path: Path,
 ) -> None:
-    """Admits valid work: supersede=True archives the current record under
-    <name>@<digest[:12]>, the new record's own supersedes names the archived digest, the
-    archived record stays readable on its own build's receipt, the supersede writing one receipt
-    alone, and plant_mapping_names never lists it.
+    """A cited rebuild with supersede=True archives the old record and keeps it readable.
+
+    supersede=True archives the current record under <name>@<digest[:12]>, the new record's own
+    supersedes names the archived digest, the archived record stays readable on its own build's
+    receipt, the supersede writing one receipt alone, and plant_mapping_names does not list it.
     """
     from tcip_mcp.audit import audit_log_key
 
@@ -164,8 +170,10 @@ def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_rea
 def test_resolved_mapping_key_for_citation_names_the_archive_once_superseded(
     tmp_path: Path,
 ) -> None:
-    """Coverage: a delivery event's own cited digest resolves to the current name while
-    unmoved, and to the archived key once a supersede rebuild has moved the name on.
+    """A cited digest resolves to the current name, then to the archive after a supersede.
+
+    A delivery event's own cited digest resolves to the current name while unmoved, and to the
+    archived key after a supersede rebuild has moved the name on.
     """
     _, images_root, _ = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
@@ -200,8 +208,10 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
     tmp_path: Path,
     client,
 ) -> None:
-    """The panel route's own plant_mapping_resolved_key names the archive once a supersede
-    rebuild has moved the cited name on, and the plain name while it has not.
+    """The delivery-events route resolves a superseded citation to the archive.
+
+    The panel route's own plant_mapping_resolved_key names the plain name while the cited name
+    has not moved, and the archive after a supersede rebuild has moved it on.
     """
     import asyncio
 
@@ -238,7 +248,10 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
 
 
 def _built(tmp_path: Path) -> tuple[Path, str]:
-    """A mapping ``valley`` built through the platform's own door; its images root and registry."""
+    """Build a mapping ``valley`` through the platform's own door.
+
+    Return its images root and registry.
+    """
     _init(tmp_path)
     images_root, plant_csv, _ = _write_scene(
         _dataset(tmp_path), dates=[DATES[0]]
@@ -270,8 +283,9 @@ def test_a_rebuild_over_a_record_that_will_not_decode_proceeds_on_its_raw_digest
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    """The record being replaced is identified by its raw digest, whatever its shape: the rebuild
-    asks the citation check about that digest and lands.
+    """A rebuild over a record that will not decode proceeds on its raw digest.
+
+    The rebuild asks the citation check about the malformed record's raw digest, once, and lands.
     """
     images_root, registry = _built(tmp_path)
     key = plant_mapping.plant_mapping_key(tmp_path, "valley")

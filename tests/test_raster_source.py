@@ -1,8 +1,8 @@
 """The raster reading layer: which backend serves which source, and what each one guarantees.
 
 Covers the factory's dispatch (GDAL-first with the tifffile series cross-check), the windowed
-GDAL backend's pixel behavior, the copy-on-return, bounds and target-size contracts every backend
-shares, and the process-local pool of open sources.
+GDAL backend's pixel behavior, the backends' copy-on-return, bounds and target-size contracts, and
+the process-local pool of open sources.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from tcip_mcp.pipelines.raster_source import Rect, TiffWholeSource, open_raster
 
 @pytest.fixture(autouse=True)
 def _empty_source_pool():
-    """Each test starts and ends with an empty pool: it is process-global state."""
+    """Clear the process-global source pool before and after yielding."""
     raster_source.close_source_pool()
     yield
     raster_source.close_source_pool()
@@ -29,7 +29,11 @@ def _empty_source_pool():
 def _distinctive_array(
     height: int, width: int, channels: int = 3
 ) -> np.ndarray:
-    """Each pixel encodes its own row/col so a returned sub-array can be checked exactly."""
+    """Return a uint8 array whose planes hold the row, the column and their sum, each modulo 256.
+
+    ``channels`` is at least 2; the sum plane is written when it is above 2, and planes past the
+    third stay zero.
+    """
     arr = np.zeros((height, width, channels), dtype=np.uint8)
     for row in range(height):
         for col in range(width):
@@ -55,7 +59,7 @@ def _write_striped_tiff(
 def _write_planar_tiff(
     path: Path, arr: np.ndarray, *, rowsperstrip: int = 8
 ) -> None:
-    """A genuine planar (band-separate) file: tifffile takes the pixels channel-first."""
+    """Write channel-last ``arr`` as a band-separate RGB TIFF, bands past three as extra samples."""
     extrasamples = (
         ["unassalpha"] * (arr.shape[-1] - 3) if arr.shape[-1] > 3 else None
     )
@@ -87,8 +91,9 @@ def _gdal_tiff(tmp_path: Path):
 
 
 def _whole_tiff(tmp_path: Path):
-    """A channel-last 5-band raster: tifffile stores it one row-block per page, a stacked layout
-    GDAL's first-IFD data model misreads, so the factory sends it to the whole decode.
+    """Write a five-plane array by ``tifffile.imwrite``; return its path and the count 5.
+
+    The array is ``_distinctive_array(20, 14, channels=5)``.
     """
     path = tmp_path / "multipage.tif"
     tifffile.imwrite(str(path), _distinctive_array(20, 14, channels=5))
@@ -156,8 +161,9 @@ def test_open_raster_picks_the_backend_each_source_needs(
 def test_a_photographic_extension_at_a_count_pil_has_no_mode_for_refuses(
     tmp_path: Path,
 ) -> None:
-    """The same refusal, wording included, a caller asking for band data out of a photograph gets:
-    the count is a routing hint, and there is no PIL mode for 5 channels.
+    """A photographic extension at a count PIL has no mode for refuses.
+
+    The refusal says a 5-channel image cannot be loaded from a ``.png``.
     """
     source, _ = _photographic(tmp_path)
     with pytest.raises(
@@ -170,9 +176,11 @@ def test_a_photographic_extension_at_a_count_pil_has_no_mode_for_refuses(
 def test_single_dataset_tiff_layouts_are_served_windowed(
     tmp_path: Path, layout: str
 ) -> None:
-    """Striped, internally tiled, and planar (band-separate) single-dataset TIFFs all read
-    through the windowed GDAL backend, and the pixels served are the source array's own
-    regardless of the on-disk layout.
+    """Striped, tiled and planar single-dataset TIFFs are served windowed with their own pixels.
+
+    Striped, internally tiled, and planar (band-separate) single-dataset TIFFs all read through
+    the windowed GDAL backend, and the pixels served are the source array's own regardless of the
+    on-disk layout.
     """
     arr = _distinctive_array(32, 40, channels=3)
     path = tmp_path / f"{layout}.tif"
@@ -193,9 +201,10 @@ def test_single_dataset_tiff_layouts_are_served_windowed(
 def test_a_planar_raster_read_at_a_mismatched_count_still_reads_as_stored(
     tmp_path: Path,
 ) -> None:
-    """A planar file is channel-first by its own header (tifffile's SYX series axes), so its real
-    frame and band count survive whatever channel count the caller routes with; it must be served
-    windowed in that frame, never whole-decoded into the raw band-first array.
+    """A planar raster read at a mismatched count still reads as stored.
+
+    A four-band planar file opened at three channels serves its own 40x32 frame and four bands,
+    and its full region equals the stored array.
     """
     arr = _distinctive_array(32, 40, channels=4)
     path = tmp_path / "planar4.tif"
@@ -208,9 +217,10 @@ def test_a_planar_raster_read_at_a_mismatched_count_still_reads_as_stored(
 
 
 def test_a_stacked_multipage_tiff_still_reads_whole(tmp_path: Path) -> None:
-    """The multi-page stacks tifffile writes (one row-block or one band per page) have no
-    single-frame GDAL reading, so they decode whole and return exactly what ``tifffile.imread``
-    does, rather than being refused or served from the first page's wrong geometry.
+    """A stacked multi-page TIFF still reads whole, exactly as ``tifffile.imread`` does.
+
+    The multi-page stack tifffile writes (one row-block per page) opens through the whole decode,
+    and its full region equals ``tifffile.imread``'s array.
     """
     path, num_channels = _whole_tiff(tmp_path)
     with tifffile.TiffFile(str(path)) as tif:
@@ -227,8 +237,10 @@ def test_a_whole_decoded_tiff_is_opened_once_and_never_through_gdal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A stacked TIFF's header already says the whole decode serves it, so opening and reading
-    it acquires the file once through tifffile, decodes off that handle, and never opens GDAL.
+    """A whole-decoded TIFF is opened once and never through GDAL.
+
+    Opening and reading a stacked TIFF constructs one ``tifffile.TiffFile`` and opens no GDAL
+    dataset.
     """
     path, num_channels = _whole_tiff(tmp_path)
     tiffs: list = []
@@ -250,9 +262,10 @@ def test_a_whole_decoded_tiff_is_opened_once_and_never_through_gdal(
 
 
 def test_an_array_reader_materializes_the_layout_it_is_handed() -> None:
-    """The decoded shape and axis order an array reader serves are its layout's, never a second
-    reading of the array's own shape: a layout stating a 12x8 decode of 96 values is the frame
-    served.
+    """An array reader materializes the layout it is handed.
+
+    The decoded shape and axis order an array reader serves are its layout's: a layout stating a
+    12x8 decode of 96 values stored 8x12 is the frame served.
     """
     values = np.arange(96, dtype=np.uint8).reshape(8, 12)
     layout = raster_source._array_layout((12, 8), 1, Path("stack.npz"))
@@ -265,9 +278,10 @@ def test_an_array_reader_materializes_the_layout_it_is_handed() -> None:
 def test_a_shape_the_whole_decode_would_transpose_is_not_served_windowed(
     tmp_path: Path,
 ) -> None:
-    """The whole decode reads a channel-first-looking shape into channel-last order and
-    ``image_dimensions`` applies the same reading to the header, so a raster the reinterpretation
-    fires on has to go whole; served windowed it would report one frame and measure as another.
+    """A three-row, four-band TIFF opened at three channels is not served windowed.
+
+    The whole decode serves it as a 20x4x3 frame, matching ``image_dimensions``; opened at four
+    channels, GDAL serves it as stored, 3x20x4.
     """
     from tcip_mcp.pipelines.image_utils import image_dimensions
 
@@ -294,9 +308,7 @@ def test_a_shape_the_whole_decode_would_transpose_is_not_served_windowed(
 
 
 def _one_row_rgb(tmp_path: Path):
-    """An RGB TIFF one pixel high and far wider than it has bands: the header's ``YXS`` axes are
-    the only thing that says which of its two small axes is the band axis.
-    """
+    """Write a 1 by 200,000 three-plane array as an RGB TIFF; return its path and the count 3."""
     path = tmp_path / "rgb_row.tif"
     tifffile.imwrite(
         str(path),
@@ -313,8 +325,10 @@ def _planar(tmp_path: Path):
 
 
 def _palette(tmp_path: Path):
-    """A one-band palette-color TIFF, which serves as the three channels its color table
-    names.
+    """Write a 23 by 17 palette-color TIFF; return its path and the channel count 3.
+
+    Its indices are row-major ``arange % 256``, and its table maps index ``i`` to
+    ``(i, 255 - i, 7 * i % 256)``.
     """
     from PIL import Image
 
@@ -346,10 +360,11 @@ def test_the_probe_and_the_frame_read_one_band_count_off_a_tiff_header(
     tmp_path: Path,
     name: str,
 ) -> None:
-    """``probe_channels`` and ``image_dimensions`` read the header the same way: the probe's count
-    is the count the file serves at, the frame served at that count is the one measured, and it
-    is the frame the header's own layout states with no hint, for a one-row RGB, a palette, a
-    planar, a striped and a stacked TIFF.
+    """``probe_channels`` and ``image_dimensions`` read one band count off a TIFF header.
+
+    The two read the header the same way: the probe's count is the count the file serves at, the
+    frame served at that count is the one measured, and it is the frame the header's own layout
+    states with no hint, for a one-row RGB, a palette, a planar, a striped and a stacked TIFF.
     """
     from tcip_mcp.pipelines.derivations import probe_channels
     from tcip_mcp.pipelines.image_utils import image_dimensions
@@ -369,8 +384,10 @@ def test_a_tiff_series_that_is_not_a_2d_image_is_refused_by_name(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A four-axis series has no frame this platform reads; the probe, the frame and the open
-    refuse it naming its shape, and the open refuses before any GDAL handle is acquired.
+    """A TIFF series that is not a 2D image is refused, naming its shape.
+
+    A four-axis series has no frame this platform reads; the probe, the frame and the open refuse
+    it, and the open refuses before any GDAL handle is acquired.
     """
     from tcip_mcp.pipelines.derivations import probe_channels
 
@@ -398,8 +415,10 @@ def test_the_whole_decode_serves_the_frame_the_header_describes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A TIFF the whole decode serves, because GDAL cannot open it or the hint reinterprets it,
-    comes out in the header's frame: a planar file channel-last at its own count and at a
+    """The whole decode serves the frame the header describes.
+
+    A TIFF the whole decode serves, because GDAL cannot open it or the hint reinterprets it, comes
+    out in the header's frame: a planar file channel-last at its own count and at a
     mismatched one, a palette file expanded through its table, each equal to the pixels GDAL
     serves for the same file.
     """
@@ -432,8 +451,10 @@ def test_the_whole_decode_serves_the_frame_the_header_describes(
 def test_a_palette_row_reinterpreted_by_its_hint_serves_its_expanded_pixels(
     tmp_path: Path,
 ) -> None:
-    """A one-row palette TIFF opened at hint 1 reads channel-first, so it goes whole; the frame
-    it serves is the header's and its pixels are the expanded colors, never the raw indices.
+    """A palette row reinterpreted by its hint serves its expanded pixels.
+
+    A one-row, 20-pixel palette TIFF opened at hint 1 is served whole at the header's 3 by 20
+    frame, one channel, and its region is PIL's expanded colors transposed channel-first.
     """
     from PIL import Image
 
@@ -455,9 +476,10 @@ def test_a_palette_row_reinterpreted_by_its_hint_serves_its_expanded_pixels(
 
 
 def _cut_colormap_to_six_entries(path: Path) -> None:
-    """``path``'s ``ColorMap`` tag cut to six values in place: only the IFD entry's count field
-    is rewritten (tag 320, SHORT, 768 values, little-endian), so the indices and every other tag
-    stay as written and the table reads back short.
+    """Cut ``path``'s ``ColorMap`` tag to six values in place.
+
+    Only the IFD entry's count field is rewritten (tag 320, SHORT, 768 values, little-endian); the
+    helper asserts the file holds exactly one such entry.
     """
     data = bytearray(path.read_bytes())
     entry = b"\x40\x01\x03\x00\x00\x03\x00\x00"
@@ -472,9 +494,10 @@ def _cut_colormap_to_six_entries(path: Path) -> None:
 def test_a_palette_tiff_the_table_cannot_expand_is_refused_everywhere(
     tmp_path: Path,
 ) -> None:
-    """A palette image whose color table holds fewer entries than its uint8 indices address is
-    refused by the probe, the frame and the open alike, never served as one band of indices or
-    as colors padded in for the missing entries.
+    """A palette TIFF its table cannot expand is refused by the probe, the frame and the open.
+
+    The image's color table holds fewer entries than its uint8 indices address, and each of the
+    three refuses saying it holds no RGB palette.
     """
     from tcip_mcp.pipelines.derivations import probe_channels
 
@@ -494,9 +517,7 @@ def test_a_palette_tiff_the_table_cannot_expand_is_refused_everywhere(
 
 
 def test_an_unreadable_tiff_fails_naming_the_file(tmp_path: Path) -> None:
-    """A file tifffile cannot open is refused naming it by the probe, the frame and the open:
-    no reader serves a frame for a header that could not be read.
-    """
+    """An unreadable TIFF is refused, named, by the probe, the frame and the open."""
     from tcip_mcp.pipelines.derivations import probe_channels
 
     path = tmp_path / "broken.tif"
@@ -510,7 +531,7 @@ def test_an_unreadable_tiff_fails_naming_the_file(tmp_path: Path) -> None:
 
 
 def test_a_plain_read_serves_full_resolution(tmp_path: Path) -> None:
-    """Without a ``target_size`` every read is native resolution, resampled by nothing."""
+    """A read without a ``target_size`` is native resolution, resampled by nothing."""
     source, num_channels = _gdal_tiff(tmp_path)
     with open_raster(source, num_channels) as src:
         region, spec = src.read_region(Rect(0, 0, 4, 4))
@@ -525,8 +546,9 @@ def test_a_plain_read_serves_full_resolution(tmp_path: Path) -> None:
 def test_a_returned_region_is_a_copy_a_caller_may_mutate(
     tmp_path: Path, name: str
 ) -> None:
-    """Mutating a returned region must not corrupt what a later read of the same region returns,
-    whichever backend served it.
+    """A returned region is a copy a caller may mutate, whichever backend served it.
+
+    Mutating it does not corrupt what a later read of the same region returns.
     """
     build = _BACKENDS[name][0]
     source, num_channels = build(tmp_path)
@@ -571,9 +593,9 @@ def test_read_window_full_extent_matches_source(tmp_path: Path) -> None:
 def test_read_window_is_rows_first_and_matches_the_numpy_slice(
     tmp_path: Path,
 ) -> None:
-    """``read_window(y0, y1, x0, x1)`` is exactly ``arr[y0:y1, x0:x1]``, row-first against
-    ``Rect``'s x-first order, on a deliberately asymmetric window a silent transposition could
-    not survive.
+    """``read_window(y0, y1, x0, x1)`` is exactly ``arr[y0:y1, x0:x1]``.
+
+    The window is row-first against ``Rect``'s x-first order, checked on a 10 by 8 window.
     """
     arr = _distinctive_array(23, 17)
     path = tmp_path / "win.tif"
@@ -603,8 +625,10 @@ def test_read_window_out_of_bounds_raises(tmp_path: Path) -> None:
 
 
 def test_windowed_and_whole_decodes_of_one_tiff_agree(tmp_path: Path) -> None:
-    """The load-bearing equivalence between the two TIFF backends: the same file assembled from
-    windowed reads, decoded whole, and read by tifffile itself must be the same pixels.
+    """Windowed and whole decodes of one TIFF agree with tifffile's own read.
+
+    The same file assembled from windowed reads, decoded whole, and read by tifffile itself is the
+    same pixels.
     """
     arr = _distinctive_array(23, 17)
     path = tmp_path / "win.tif"
@@ -630,8 +654,10 @@ def test_windowed_and_whole_decodes_of_one_tiff_agree(tmp_path: Path) -> None:
 
 
 def test_read_window_returns_a_copy_not_a_cached_view(tmp_path: Path) -> None:
-    """A caller that mutates its returned window must not corrupt what a later read of the same
-    window, served from whatever cache the backend keeps, reads back.
+    """``read_window`` returns a copy, not a cached view.
+
+    After a returned window is overwritten, a later read of the same window equals the stored
+    pixels.
     """
     arr = _distinctive_array(23, 17)
     path = tmp_path / "win.tif"
@@ -667,8 +693,9 @@ def test_a_single_band_raster_serves_with_a_trailing_channel_axis(
 def test_a_palette_tiff_expands_through_its_color_table_like_pil(
     tmp_path: Path,
 ) -> None:
-    """A palette-color TIFF must serve the colors its own table names, exactly the pixels PIL's
-    palette decode produced, never the raw one-band table indices.
+    """A palette TIFF expands through its color table exactly as PIL's palette decode does.
+
+    GDAL serves it as three uint8 channels, its region and a window equal to PIL's colors.
     """
     from PIL import Image
 
@@ -697,8 +724,10 @@ def test_a_palette_tiff_expands_through_its_color_table_like_pil(
 
 
 def test_band_interpretations_name_each_served_channel(tmp_path: Path) -> None:
-    """A source names each served channel's declared color interpretation, so an alpha band is
-    told from a spectral one; a palette source reports the three channels its expansion serves.
+    """A source's band interpretations name each served channel's declared interpretation.
+
+    An RGBA TIFF names its fourth band alpha; a palette source names the three channels its
+    expansion serves.
     """
     from PIL import Image
 
@@ -738,9 +767,11 @@ def test_a_raster_serves_its_own_dtype(tmp_path: Path) -> None:
 
 
 def test_a_target_size_read_downsamples_through_gdal(tmp_path: Path) -> None:
-    """A GDAL-served ``target_size`` read returns the reduced buffer directly, with the
-    ``ReadSpec`` recording average resampling; at an exact 2x decimation every output pixel is its
-    2x2 block's mean.
+    """A GDAL-served ``target_size`` read downsamples by averaging.
+
+    The read returns the reduced buffer, with the ``ReadSpec`` recording average resampling; at an
+    exact 2x decimation the output agrees with the 2x2 block means within ``np.allclose`` at
+    ``atol=1.0``.
     """
     arr = _distinctive_array(32, 40)
     path = tmp_path / "down.tif"
@@ -758,8 +789,10 @@ def test_a_target_size_read_downsamples_through_gdal(tmp_path: Path) -> None:
 def test_a_target_size_read_downsamples_an_array_backend_by_area(
     tmp_path: Path,
 ) -> None:
-    """A backend with no overview machinery slices native and area-downsamples, recording the
-    requested size with its own resampling name.
+    """An array backend's ``target_size`` read slices native and downsamples by area.
+
+    The read records ``area`` resampling, and the output agrees with the 2x2 block means within
+    ``np.allclose`` at ``atol=1.0``.
     """
     arr = _distinctive_array(32, 40, channels=5)
     path = tmp_path / "bands.npy"
@@ -776,9 +809,7 @@ def test_a_target_size_read_downsamples_an_array_backend_by_area(
 
 @pytest.mark.parametrize("name", ["gdal_tiff", "npy"])
 def test_a_distorting_target_size_refuses(tmp_path: Path, name: str) -> None:
-    """``target_size`` must preserve the region's aspect ratio: a resample in this layer never
-    silently changes a raster's geometry.
-    """
+    """A ``target_size`` that distorts the region's aspect ratio refuses, naming the ratio."""
     build, _ = _BACKENDS[name]
     source, num_channels = build(tmp_path)
     with open_raster(source, num_channels) as src:
@@ -793,7 +824,7 @@ def test_a_distorting_target_size_refuses(tmp_path: Path, name: str) -> None:
 
 
 def _pooled(source, num_channels: int):
-    """``pooled_source`` of ``source`` through a fresh header."""
+    """Return ``pooled_source`` of ``source`` through a fresh header."""
     return raster_source.pooled_source(
         raster_source.SourceHeader(source), num_channels
     )
@@ -812,8 +843,10 @@ def test_the_pool_serves_one_open_source_per_file_and_channel_count(
 def test_the_pool_holds_no_reader_for_a_source_that_decodes_whole(
     tmp_path: Path,
 ) -> None:
-    """A whole-decode source answers no reader and leaves the pool empty, so no decoded pixels
-    sit resident there.
+    """The pool holds no reader for a source that decodes whole.
+
+    A whole-decode source answers no reader and leaves the pool empty, so no decoded pixels sit
+    resident there.
     """
     path, num_channels = _whole_tiff(tmp_path)
     assert _pooled(path, num_channels) is None
@@ -877,9 +910,7 @@ def test_the_pool_evicts_the_least_recently_used_source_over_budget(
 
 
 def test_a_gdal_source_accounts_no_resident_pixels(tmp_path: Path) -> None:
-    """A GDAL source holds only a dataset handle; its decoded blocks live in GDAL's own budgeted
-    block cache, so the pool accounts it at zero resident bytes rather than double-counting.
-    """
+    """A GDAL source accounts zero resident bytes."""
     path, _ = _gdal_tiff(tmp_path)
     with open_raster(path, 3) as src:
         assert isinstance(src, raster_source.GdalSource)
@@ -889,9 +920,9 @@ def test_a_gdal_source_accounts_no_resident_pixels(tmp_path: Path) -> None:
 def test_a_photographic_source_accounts_its_peak_resident_frames(
     tmp_path: Path,
 ) -> None:
-    """read_region materializes an ndarray copy beside the PIL frame; the pool records
-    resident_bytes once at insert, so the value must already cover that peak, and it must not
-    change after the copy exists or the pool's byte accounting drifts.
+    """A photographic source accounts its peak resident frames from the start.
+
+    Its resident bytes cover at least two frames and are unchanged by a full ``read_region``.
     """
     path, _ = _photographic(tmp_path)
     with open_raster(path, 3) as src:
@@ -908,10 +939,12 @@ def test_a_photographic_source_accounts_its_peak_resident_frames(
 def test_the_header_opens_windowed_only_the_backends_that_open_without_decoding(
     tmp_path: Path, name: str
 ) -> None:
-    """Only GDAL-served rasters and memory-mapped .npy come back as a windowed reader, the backend
-    ``open_raster`` serves them through; a band group answers none whatever its members open
-    through, as does every backend that decodes every pixel at construction time. Every source's
-    header frame is the frame its open reader serves.
+    """The header opens windowed only the backends that open without decoding.
+
+    Of the six backends, a GDAL-served TIFF and a memory-mapped .npy come back as a windowed
+    reader of the backend ``open_raster`` serves them through, at its frame with no levels; a band
+    group, an .npz, a photograph and a whole-decoded TIFF come back as none. Each source's header
+    frame is the frame its open reader serves.
     """
     build, backend = _BACKENDS[name]
     source, num_channels = build(tmp_path)
@@ -931,9 +964,7 @@ def test_the_header_opens_windowed_only_the_backends_that_open_without_decoding(
 def test_the_header_refuses_an_unopenable_tiff_naming_it(
     tmp_path: Path,
 ) -> None:
-    """The header read raises its own refusal; it never answers a frame for a file it could not
-    read.
-    """
+    """The header's frame question refuses an unopenable TIFF, naming it."""
     path = tmp_path / "broken.tif"
     path.write_bytes(b"II*\x00garbage")
     with pytest.raises(ValueError, match=r"broken\.tif"):
@@ -946,8 +977,9 @@ def test_the_header_refuses_an_unopenable_tiff_naming_it(
 def test_a_five_band_geotiff_opened_at_three_channels_still_reads_five_bands(
     tmp_path: Path,
 ) -> None:
-    """The channel count routes; it never asserts anything about the file. A 5-band raster read at
-    3 is still 5 bands, and the caller is the one who compares.
+    """A five-band GeoTIFF opened at three channels still reads five bands.
+
+    The load returns tifffile's own five-band array.
     """
     from tcip_mcp.pipelines.image_utils import load_image
 
@@ -962,8 +994,9 @@ def test_a_five_band_geotiff_opened_at_three_channels_still_reads_five_bands(
 def test_image_dimensions_of_a_two_band_group_at_any_channel_count(
     tmp_path: Path,
 ) -> None:
-    """A group's frame comes from its bands, so a count of 3 never has to match the two bands it
-    actually holds.
+    """A two-band group's image dimensions come from its bands when asked at three channels.
+
+    A count of 3 need not match the two bands the group actually holds.
     """
     from tcip_mcp.pipelines.image_utils import image_dimensions
 
@@ -974,8 +1007,10 @@ def test_image_dimensions_of_a_two_band_group_at_any_channel_count(
 def test_a_band_group_whose_members_disagree_on_the_frame_refuses(
     tmp_path: Path,
 ) -> None:
-    """A member larger than the group's frame must refuse like a smaller one always has, never be
-    silently cropped down to fit: stacking bands that disagree on the frame is not a raster.
+    """A band group whose members disagree on the frame refuses.
+
+    A 12x12 member beside an 8x8 one makes the open refuse, saying the members disagree on the
+    frame.
     """
     from tcip_mcp.pipelines.data.band_groups import (
         read_band_group_manifest,
@@ -1005,8 +1040,9 @@ def test_a_band_group_whose_members_disagree_on_the_frame_refuses(
 def test_a_channel_first_shaped_npy_is_left_alone_at_a_mismatched_count(
     tmp_path: Path,
 ) -> None:
-    """The channel-first transpose fires only when the leading axis matches the count asked for:
-    a (5, 40, 24) array read at 3 channels stays exactly as it was stored.
+    """A channel-first-shaped .npy read at a mismatched count stays exactly as stored.
+
+    A (5, 40, 24) array read at 3 channels comes back untransposed.
     """
     from tcip_mcp.pipelines.image_utils import load_image
 
@@ -1024,8 +1060,10 @@ def test_a_channel_first_shaped_npy_is_left_alone_at_a_mismatched_count(
 def test_region_view_reports_the_rects_own_extent_not_the_parents(
     tmp_path: Path,
 ) -> None:
-    """The dims invariant this class exists to hold: height/width always report the rect it was
-    constructed over, never the full parent source's own dims.
+    """A region view reports its rect's own extent, not the parent's.
+
+    ``_RegionView``'s height/width report the rect it was constructed over, not the full parent
+    source's own dims.
     """
     from tcip_mcp.pipelines.raster_source import _RegionView
 
@@ -1058,10 +1096,10 @@ def test_region_view_read_window_translates_into_the_parents_coordinate_space(
 def test_region_view_refuses_a_read_past_its_own_declared_bounds(
     tmp_path: Path,
 ) -> None:
-    """The one place this design could silently read real pixels beyond the region a caller
-    asked for: the parent source has plenty of real pixels past this rect (unlike a true
-    raster edge, which zero-pads), so the view's own bounds must be enforced explicitly, not
-    left as an emergent property of what happens to call it today.
+    """A region view refuses a read past its own declared bounds.
+
+    A window one row past the view's height, and one column past its width, each refuse, though
+    both lie inside the 40 by 30 parent.
     """
     from tcip_mcp.pipelines.raster_source import _RegionView
 
@@ -1092,8 +1130,9 @@ def test_region_view_construction_refuses_a_rect_outside_the_parents_own_bounds(
 def test_region_view_forwards_the_parents_band_interpretations(
     tmp_path: Path,
 ) -> None:
-    """A view carries its parent's declared color interpretations, so a read through it tells an
-    alpha band from a spectral one the same way a read of the whole file does.
+    """A region view forwards its parent's declared band interpretations.
+
+    The view's interpretations equal its parent's, the fourth band named alpha.
     """
     from tcip_mcp.pipelines.raster_source import _RegionView
 
@@ -1118,8 +1157,10 @@ def test_region_view_forwards_the_parents_band_interpretations(
 def test_region_view_reports_no_band_interpretations_for_a_parent_that_carries_none(
     tmp_path: Path,
 ) -> None:
-    """A .npy-backed parent carries no color-interpretation metadata at all; the view must not
-    fabricate one, same as raster_content_identity's own getattr convention.
+    """A region view reports no band interpretations for a parent that carries none.
+
+    A .npy-backed parent carries no color-interpretation metadata at all, and the view fabricates
+    none.
     """
     from tcip_mcp.pipelines.raster_source import _RegionView
 
@@ -1145,7 +1186,7 @@ def _identity(
     window_size: int,
     max_windows: int,
 ):
-    """``raster_content_identity`` of ``path`` opened at ``num_channels``."""
+    """Return ``raster_content_identity`` of ``path`` opened at ``num_channels``."""
     from tcip_mcp.pipelines.raster_source import raster_content_identity
 
     with open_raster(path, num_channels) as src:
@@ -1155,8 +1196,10 @@ def _identity(
 
 
 def _matches(recorded: dict, path: Path) -> bool:
-    """Whether ``open_as_recorded`` of ``path`` answers the fresh identity, which then is the
-    recorded one, beside a reader opened at the recorded count.
+    """Return whether ``open_as_recorded`` of ``path`` answers a fresh identity.
+
+    It asserts the reader opens at the recorded channel count and that a fresh identity it
+    answers equals the recorded one.
     """
     from dataclasses import asdict
 
@@ -1172,9 +1215,10 @@ def _matches(recorded: dict, path: Path) -> bool:
 def test_raster_content_identity_agrees_across_gdal_and_npy_backends_for_same_content(
     tmp_path: Path,
 ) -> None:
-    """Two entirely different backends (a GDAL-served GeoTIFF, a memory-mapped .npy) reading the
-    same pixel content resolve the same identity: the checksum is the discriminating term, never
-    a GDAL-only attribute.
+    """GDAL and .npy backends resolve one content identity for the same pixels.
+
+    Two entirely different backends (a GDAL-served GeoTIFF, a memory-mapped .npy) reading the same
+    pixel content resolve the same checksum and dtype.
     """
     arr = _distinctive_array(24, 20)
     tif_path = tmp_path / "content.tif"
@@ -1214,8 +1258,10 @@ def test_raster_content_identity_differs_for_different_content_same_dimensions(
 def test_raster_content_identity_deterministic_under_matching_recorded_parameters(
     tmp_path: Path,
 ) -> None:
-    """Two calls agree when both recompute under the identity's own recorded seed, window size
-    and window count: the parameters that travel with the identity.
+    """Content identity is deterministic under matching recorded parameters.
+
+    Two calls agree when both recompute under the identity's own recorded seed, window size and
+    window count: the parameters that travel with the identity.
     """
     path = tmp_path / "content.npy"
     np.save(str(path), _distinctive_array(30, 22))
@@ -1252,8 +1298,9 @@ def test_raster_content_identity_band_interpretations_present_only_on_gdal(
 def test_raster_content_identity_geotransform_optional_never_load_bearing(
     tmp_path: Path,
 ) -> None:
-    """A raster with no georeferencing tags (every fixture this module writes) still resolves a
-    fully usable identity: the geotransform term is absent, the checksum is not.
+    """A raster with no georeferencing tags still resolves a fully usable content identity.
+
+    The geotransform term is absent, the checksum is not.
     """
     tif_path = tmp_path / "content.tif"
     _write_striped_tiff(tif_path, _distinctive_array(24, 20), rowsperstrip=4)
@@ -1276,8 +1323,10 @@ def test_an_identity_reads_its_geotransform_off_the_open_reader(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A georeferenced GeoTIFF's identity carries the geotransform its tags state, and records it
-    without opening the file again: the header the reader was opened from already holds it.
+    """An identity reads its geotransform off the open reader.
+
+    A georeferenced GeoTIFF's identity carries the geotransform its tags state, and records it
+    without opening the file again: the header the reader was opened from holds it.
     """
     import tifffile as tifffile_module
 
@@ -1319,8 +1368,11 @@ def test_a_georeferenced_mismatch_check_computes_one_identity(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Checking a raster against its recorded identity and georeferencing samples it once: the
-    geotransform compared is the one the content check's own fresh identity carries.
+    """A georeferenced mismatch check computes one identity.
+
+    Opening a raster as recorded computes its content identity once, and the georeferenced check
+    over that fresh identity finds no mismatch; a recorded identity with no geotransform raises
+    ``KeyError``.
     """
     from dataclasses import asdict
 
@@ -1355,8 +1407,10 @@ def test_a_frame_question_opens_no_gdal_dataset(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The frame of a GDAL-served TIFF, at a stated count or at the route's, comes off its header
-    alone: no dataset is opened to measure it.
+    """A frame question opens no GDAL dataset.
+
+    The frame of a GDAL-served TIFF, at a stated count or at the route's, comes off its header
+    alone.
     """
     from tcip_mcp.pipelines.image_utils import image_dimensions
 
@@ -1374,7 +1428,7 @@ def test_a_frame_question_opens_no_gdal_dataset(
 
 
 def _distinctive_gray(height: int, width: int) -> np.ndarray:
-    """A single-band 2-D array, distinctive the same way :func:`_distinctive_array` is."""
+    """Return a single-band uint8 array of ``(row + col) % 256``."""
     arr = np.zeros((height, width), dtype=np.uint8)
     for row in range(height):
         for col in range(width):
@@ -1385,9 +1439,7 @@ def _distinctive_gray(height: int, width: int) -> np.ndarray:
 def test_the_route_count_expands_a_grayscale_photograph_to_three(
     tmp_path: Path,
 ) -> None:
-    """A grayscale photographic frame opens at three channels on a plain serve (PIL's own RGB
-    expansion).
-    """
+    """A grayscale photograph's header reports one channel and a route count of three."""
     from PIL import Image
 
     path = tmp_path / "gray.png"
@@ -1401,8 +1453,10 @@ def test_a_photographs_header_and_its_decode_share_one_open(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reading a photograph's count and frame and then opening it at the route count opens the
-    file through PIL once: the reader decodes the image the header opened.
+    """A photograph's header and its decode share one PIL open.
+
+    Reading a photograph's frame and then opening it at the route count calls ``PIL.Image.open``
+    once.
     """
     import PIL.Image
 
@@ -1425,8 +1479,10 @@ def test_a_photographs_header_and_its_decode_share_one_open(
 def test_a_grayscale_with_alpha_photograph_is_served_at_the_route_count(
     tmp_path: Path,
 ) -> None:
-    """A two-band photograph (PIL's ``LA``) has no PIL mode at its own count, so the route opens
-    it at three like every photograph; its display frame is the one that reader serves.
+    """A grayscale-with-alpha photograph is served at the route count of three.
+
+    A two-band photograph (PIL's ``LA``) reports two channels and a route count of three, and the
+    reader at the route count serves its 16x20 display frame at three channels.
     """
     from PIL import Image
 
@@ -1442,8 +1498,9 @@ def test_a_grayscale_with_alpha_photograph_is_served_at_the_route_count(
 def test_the_route_count_leaves_an_array_container_at_its_own_band_count(
     tmp_path: Path,
 ) -> None:
-    """A non-photographic container (an .npy raster) is never subject to the photographic
-    override: its own probed band count is what a plain serve opens it at.
+    """The route count leaves an array container at its own band count.
+
+    A single-band .npy raster's route count is 1.
     """
     path = tmp_path / "single_band.npy"
     np.save(str(path), _distinctive_gray(20, 16))
@@ -1478,9 +1535,10 @@ def test_raster_identity_matches_false_for_different_content(
 def test_raster_identity_matches_recomputes_under_the_recorded_parameters_not_a_new_default(
     tmp_path: Path,
 ) -> None:
-    """A match recomputes under the recorded sampling parameters: a different seed and window
-    size give a different checksum of the same raster, so the match holds only because the
-    recorded parameters drove the comparison.
+    """An identity match recomputes under the recorded parameters, not a new default.
+
+    A different seed and window size give a different checksum of the same raster, and the match
+    against the recorded identity holds.
     """
     from dataclasses import asdict
 

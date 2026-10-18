@@ -1,11 +1,9 @@
-"""A state trait's positive state is an attribute and a value the delivered dataset's registry
-declares.
+"""A state trait's positive state is an attribute and value the dataset's registry declares.
 
-A crossing operationalization names a subject and a positive state the delivered dataset never
-chose for itself; the registry is where the dataset says what a subject's instances can be called.
-These cases pin the predicate that answers whether a state is declared, the proposal's registry
-check with the tool's ``dataset_root`` resolution, and the delivery-time refusal a registry that
-stops declaring the state produces.
+A crossing operationalization names a subject and a positive state; the dataset's registry
+declares what a subject's instances can be called. Covered: the predicate that answers whether a
+state is declared, the proposal's registry check with the tool's ``dataset_root`` resolution, and
+the delivery-time refusal when a registry stops declaring the state.
 """
 
 from __future__ import annotations
@@ -120,9 +118,7 @@ def test_the_tool_resolves_the_project_roots_own_registry_when_unambiguous(
 
 
 def test_a_count_entry_needs_no_registry(tmp_path: Path) -> None:
-    """Only a crossing operationalization is checked against a registry; a project with none
-    still takes a count entry.
-    """
+    """A project with no registry still takes a count entry."""
     result = propose_trait(
         tmp_path,
         fx.with_operationalization(fx.COUNT_SPEC, PER_IMAGE_COUNT),
@@ -240,7 +236,9 @@ def test_a_confirmed_crossing_whose_registry_still_declares_the_class_delivers(
 def test_a_crossing_delivery_reads_the_registry_of_its_buckets_dataset_root(
     tmp_path: Path,
 ) -> None:
-    """deliver_phenology_milestones resolves its registry from the dataset root its buckets are
+    """A crossing delivery reads the registry of its buckets' dataset root.
+
+    deliver_phenology_milestones resolves its registry from the dataset root its buckets are
     published under, not from the project root: a registry written there is what a crossing
     delivery's positive-class check reads.
     """

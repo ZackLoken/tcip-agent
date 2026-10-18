@@ -1,5 +1,6 @@
-"""An operator command that runs a tool function outside the MCP server acts on the project its
-``--project`` names, and refuses one that names no project.
+"""An operator command acts on the project its ``--project`` names and refuses naming none.
+
+The command runs a tool function outside the MCP server.
 
 Exercised as the real process entry point (a subprocess, the way an operator runs it), through
 overlay-reference-grid, a render that leaves no audit line.
@@ -20,7 +21,9 @@ def _image(tmp_path: Path) -> Path:
 
 
 def test_a_render_command_leaves_no_audit_line_anywhere(tmp_path):
-    """A render is a read: the named project's log gains no line, and the operator's cwd and the
+    """A render command adds no audit line and leaves no state in the cwd or image directory.
+
+    A render is a read: the named project's log gains no line, and the operator's cwd and the
     image's directory get no state.
     """
     import tcip_store as ts

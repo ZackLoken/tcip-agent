@@ -1,7 +1,9 @@
-"""A mapping's match radius: each date's derived from the positioning errors its photographs
-report and checked against the figure numpy computes from the same errors, a stated one recorded
-as stated, a date whose photographs report none refused naming the argument; and the
-nearest-neighbor tolerance an orthomosaic attribution resolves, bounded by half the grid pitch.
+"""Tests of a mapping's match radius and an orthomosaic attribution's tolerance.
+
+Each date's radius is derived from the positioning errors its photographs report and checked
+against the figure numpy computes from the same errors, a stated one recorded as stated, a date
+whose photographs report none refused naming the argument; and the nearest-neighbor tolerance an
+orthomosaic attribution resolves is bounded by half the grid pitch.
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ GEOD = Geod(ellps="WGS84")
 
 
 def _east(meters: float, north: float = 0.0) -> tuple[float, float]:
-    """``(lat, lon)`` ``meters`` east of :data:`ROW_ORIGIN`, then ``north`` meters north."""
+    """Return the ``(lat, lon)`` ``meters`` east of :data:`ROW_ORIGIN`, then ``north`` north."""
     lon, lat, _ = GEOD.fwd(ROW_ORIGIN[1], ROW_ORIGIN[0], 90, meters)
     if north:
         lon, lat, _ = GEOD.fwd(lon, lat, 0, north)
@@ -52,9 +54,11 @@ STRAY_NORTH_M = 4.0
 
 
 def _build(tmp_path: Path, errors, match_radius: StatedRadius | None = None):
-    """A date of photographs, one at each of the first three plants and one
-    :data:`STRAY_NORTH_M` north of the last, taken in that order with ``errors`` as their
-    reported positioning errors, mapped through ``build_mapping``.
+    """Map a date of up to four photographs through ``build_mapping`` and return the build.
+
+    One photograph sits at each of the first three plants and one :data:`STRAY_NORTH_M` north of
+    the last, taken in that order; ``errors`` gives each its reported positioning error, and only
+    as many photographs as ``errors`` has entries are written.
     """
     images_root = tmp_path / "ds" / "images"
     positions = [(PLANTS[i]["lat"], PLANTS[i]["lon"]) for i in range(3)] + [
@@ -150,9 +154,7 @@ def test_a_stated_radius_is_recorded_as_stated_with_its_reason(
 def test_a_stated_radius_is_recorded_on_a_date_with_no_positioned_capture(
     tmp_path: Path,
 ) -> None:
-    """A caller's statement reaches the record on every date the build walked, a date whose one
-    photograph carries no position included.
-    """
+    """A stated radius is recorded on every walked date, one with no positioned capture included."""
     from PIL import Image
 
     unpositioned = tmp_path / "ds" / "images" / "2026-02-12" / "nofix.jpg"
@@ -184,8 +186,10 @@ def test_the_nn_tolerance_derives_as_half_the_grid_pitch(
 def test_the_grid_pitch_is_numpys_median_of_unequal_neighbor_distances(
     tmp_path: Path,
 ) -> None:
-    """Four plants 0, 1, 10 and 30 meters east of the origin, whose nearest-neighbor distances
-    are about 1, 1, 9 and 20 meters: the pitch is their median, 5.
+    """The grid pitch is numpy's median of unequal nearest-neighbor distances.
+
+    Four plants 0, 1, 10 and 30 meters east of the origin have nearest-neighbor distances of about
+    1, 1, 9 and 20 meters: the pitch is their median, 5.
     """
     plants = _plants(
         tmp_path,

@@ -1,5 +1,7 @@
-"""The raster-georeferencing-to-meters-per-pixel resolver: what it accepts, what it refuses, and
-the short clause it names a refusal by (never a filesystem path).
+"""Tests of the resolver from raster georeferencing to meters per pixel.
+
+Covered: what it accepts, what it refuses, and the short clause, holding no filesystem path, it
+names a refusal by.
 """
 
 from __future__ import annotations
@@ -26,8 +28,9 @@ def _write_geotiff(
     model_type: int = 1,
     include_transformation_tag: bool = False,
 ) -> None:
-    """A striped GeoTIFF written the way tests/test_orthomosaic_mapping.py's own fixtures are,
-    through the shared writer every GeoTIFF-fixture-needing suite calls.
+    """Write a 5 by 5, three-band GeoTIFF at ``path`` through the shared GeoTIFF fixture writer.
+
+    The four keyword arguments pass through to that writer.
     """
     _write_shared_geotiff(
         path,
@@ -42,12 +45,12 @@ def _write_geotiff(
 
 
 def resolve_pixel_size(path: Path):
-    """The resolver over ``path``'s header."""
+    """Resolve the pixel size of ``path``'s header."""
     return _resolve_header(SourceHeader(path))
 
 
 def _refused(path: Path) -> str:
-    """The clause ``path`` resolves no pixel size for."""
+    """Return the clause ``path`` resolves no pixel size for."""
     size, reason = resolve_pixel_size(path)
     assert size is None
     return reason
@@ -90,9 +93,10 @@ class TestRasterPixelSize:
     def test_a_geographic_model_type_is_refused_by_the_tag_reads_own_check(
         self, tmp_path
     ):
-        """Distinct from the projected-model-type-but-geographic-CRS case below: here
-        GTModelTypeGeoKey itself names the geographic model type (2), so the header's
-        georeference read refuses before this module ever reaches pyproj.
+        """A geographic model type is refused by the header's own georeference read.
+
+        GTModelTypeGeoKey itself names the geographic model type (2), so the clause is the tag
+        read's incomplete-tags refusal.
         """
         path = tmp_path / "geographic_model_type.tif"
         _write_geotiff(path, model_type=2)
@@ -111,9 +115,11 @@ class TestRasterPixelSize:
     def test_a_geographic_crs_under_a_projected_model_type_has_no_pixel_size(
         self, tmp_path
     ):
-        """The raster's own GTModelTypeGeoKey says Projected (the tag read admits it), but the
-        EPSG it names resolves to a geographic CRS: a disagreement this module's own is_projected
-        check catches, distinct from the tag read's own model-type refusal.
+        """A geographic CRS under a projected model type has no pixel size.
+
+        The raster's own GTModelTypeGeoKey says Projected (the tag read admits it), but the EPSG it
+        names resolves to a geographic CRS: a disagreement this module's own is_projected check
+        catches.
         """
         path = tmp_path / "geo.tif"
         _write_geotiff(path, projected_epsg=4326)

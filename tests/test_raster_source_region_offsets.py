@@ -1,11 +1,8 @@
 """Offset reads through a region view: which pixels of the parent a windowed pass actually gets.
 
-A calibration/holdout block is read as an ordinary windowed source through ``_RegionView``, so the
-translation from the view's local coordinates into the parent's own space is the whole measurement
-claim: a displaced translation serves real training pixels through the offset and nothing
-downstream can tell. These fixtures give the block an origin whose row and column differ and
-pixel content that differs along the two axes, so a translation that mixes the two axes lands on
-different pixels.
+A calibration/holdout block is read as an ordinary windowed source through ``_RegionView``, which
+translates the view's local coordinates into the parent's own space. These fixtures give the
+block an origin whose row and column differ, over pixel planes holding the row and the column.
 """
 
 from __future__ import annotations
@@ -27,8 +24,10 @@ _BLOCK = Rect(7, 3, 27, 18)
 def _axis_distinct_array(
     height: int, width: int, channels: int = 3
 ) -> np.ndarray:
-    """Pixel content that differs along the two axes, so no two distinct rectangles of the same
-    shape hold the same pixels.
+    """Return the first ``channels`` of three uint8 planes built from the row and column indices.
+
+    The planes are the row, the column and ``5 * row + 3 * col``, each computed in uint16 and
+    then taken modulo 251.
     """
     rows = np.arange(height, dtype=np.uint16)[:, None]
     cols = np.arange(width, dtype=np.uint16)[None, :]
@@ -52,8 +51,10 @@ def _parent_path(tmp_path: Path, backend: str, arr: np.ndarray) -> Path:
 def test_a_region_view_serves_the_block_its_rect_names(
     tmp_path: Path, backend: str
 ) -> None:
-    """A full-extent read through the view is the parent's own ``[y0:y1, x0:x1]`` slice for the
-    rect the view was built over, whichever backend the parent is.
+    """A region view serves the block its rect names, whichever backend the parent is.
+
+    A full-extent read through the view is the parent's own ``[y0:y1, x0:x1]`` slice for the rect
+    the view was built over.
     """
     arr = _axis_distinct_array(_HEIGHT, _WIDTH)
     assert arr[0, 1, 2] != arr[1, 0, 2], (
@@ -75,9 +76,10 @@ def test_a_region_view_window_lands_at_its_own_origin_plus_the_local_offset(
     tmp_path: Path,
     backend: str,
 ) -> None:
-    """A window inside the view is the parent's slice offset by the rect's row origin in rows and
-    its column origin in columns, never the two exchanged: a tiled pass over the block asks for
-    local windows and every one of them must land inside the block it named.
+    """A region view's window lands at its own origin plus the local offset.
+
+    A window inside the view is the parent's slice offset by the rect's row origin in rows and its
+    column origin in columns, not the two exchanged.
     """
     arr = _axis_distinct_array(_HEIGHT, _WIDTH)
     local_y0, local_y1, local_x0, local_x1 = 2, 11, 4, 17
@@ -97,8 +99,10 @@ def test_a_region_view_window_lands_at_its_own_origin_plus_the_local_offset(
 def test_every_window_of_a_tiled_pass_over_a_region_view_stays_inside_the_block(
     tmp_path: Path,
 ) -> None:
-    """The traversal a windowed inference pass actually performs: the block reassembled from its
-    own local tiles is the block, so no tile of the pass read pixels from outside it.
+    """A tiled pass over a region view reassembles the parent's slice for the block.
+
+    The view's 6-pixel local tiles, over several rows and columns of tiles, concatenate to the
+    parent's ``[y0:y1, x0:x1]`` slice for the block's rect.
     """
     arr = _axis_distinct_array(_HEIGHT, _WIDTH)
     tile = 6

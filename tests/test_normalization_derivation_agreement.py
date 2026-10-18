@@ -1,6 +1,7 @@
-"""The statistics a model normalizes by, each against the reference that publishes them: the
-pretrained weights' own as timm and torchvision publish them, the data's own as numpy computes
-them over the frames, and the weights statement every model source makes.
+"""Tests of the statistics a model normalizes by, each against the reference that publishes them.
+
+The references are the pretrained weights' own as timm and torchvision publish them, the data's
+own as numpy computes them over the frames, and the weights statement a model source makes.
 """
 
 from __future__ import annotations
@@ -23,8 +24,10 @@ read from the enum's metadata without fetching them."""
 
 
 def test_timm_weights_yield_the_created_models_own_pretrained_statistics():
-    """Agreement with timm: the record holds the mean and std of the ``pretrained_cfg`` a model
-    created at those weights carries, also when created ``features_only``.
+    """The record holds the mean and std of the timm model created at those weights.
+
+    The statistics are those of the created model's ``pretrained_cfg``, also when created
+    ``features_only``.
     """
     import timm
 
@@ -45,8 +48,9 @@ def test_timm_weights_yield_the_created_models_own_pretrained_statistics():
 
 
 def test_torchvision_weights_yield_the_statistics_their_preset_normalizes_by():
-    """Agreement with torchvision: the record's mean and std are the ones the weights' own preset
-    transform applies to pixels, read back from what it makes of a black and a white frame.
+    """The record's mean and std are those the torchvision weights' own preset applies to pixels.
+
+    They are read back from what the preset transform makes of a black and a white frame.
     """
     from torchvision.models import get_weight
 
@@ -64,8 +68,9 @@ def test_torchvision_weights_yield_the_statistics_their_preset_normalizes_by():
 
 
 def test_the_data_route_yields_the_numpy_mean_and_std_of_the_frames(tmp_path):
-    """Agreement with numpy: with no weights, the band statistics are ``numpy.mean`` and
-    ``numpy.std`` of every frame's pixels, read with PIL and scaled to [0, 1].
+    """With no weights, the band statistics are numpy's mean and std of every frame's pixels.
+
+    The frames are read with PIL and scaled to [0, 1] before ``numpy.mean`` and ``numpy.std``.
     """
     import numpy as np
     from PIL import Image
@@ -93,8 +98,10 @@ def test_the_data_route_yields_the_numpy_mean_and_std_of_the_frames(tmp_path):
 
 
 def test_a_band_of_one_value_has_no_statistics_to_normalize_by(tmp_path):
-    """A frame whose bands each hold one value has a std of zero, which no normalization
-    divides by: the record's type refuses it where the derivation produces it.
+    """A frame whose bands each hold one value is refused by the record's type.
+
+    Its std is zero, which no normalization divides by, so the refusal comes where the derivation
+    produces the record.
     """
     from PIL import Image
     from pydantic import ValidationError
@@ -109,9 +116,10 @@ def test_a_band_of_one_value_has_no_statistics_to_normalize_by(tmp_path):
 def test_every_model_source_records_its_normalization_and_the_weights_it_names(
     tmp_path,
 ):
-    """The normalization record is required: an omitted one is refused by the field's type. The
-    weights a builder loads are read off its source: none for the data's band statistics, the
-    weights themselves for their own statistics.
+    """A model source requires its normalization record and names the weights it loads.
+
+    An omitted record is refused by the field's type. The weights a builder loads are read off its
+    source: none for the data's band statistics, the weights themselves for their own statistics.
     """
     from pydantic import ValidationError
 

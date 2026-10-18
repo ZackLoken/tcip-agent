@@ -1,5 +1,6 @@
-"""One read of each document, each bucket record and each ground-truth table per act: the
-admission's read is the one its loaders, their targets, their class counts, every item and the
+"""One read of each document, each bucket record and each ground-truth table per act.
+
+The admission's read is the one its loaders, their targets, their class counts, every item and the
 assessment's retained copy consume, and the scoring's read is the one its renderers draw.
 """
 
@@ -29,9 +30,10 @@ _READ_STORES = (
 
 
 def _counting_reads(monkeypatch, files: tuple[str, ...] = ()) -> Counter:
-    """Every read at the store boundary of a record of :data:`_READ_STORES`, and every open for
-    reading of a file whose suffix is among ``files`` by whatever route opens it, counted by what
-    was read.
+    """Count reads at the store boundary and file opens, keyed by what was read.
+
+    Counted are each ``SqliteBackend.read_versioned`` of a record of :data:`_READ_STORES` and each
+    ``builtins.open`` or ``io.open`` for reading of a file whose suffix is among ``files``.
     """
     import builtins
     import io
@@ -64,7 +66,7 @@ def _counting_reads(monkeypatch, files: tuple[str, ...] = ()) -> Counter:
 
 
 def _consume(*datasets) -> None:
-    """Every class count and every item of each loader, the reads a run makes of it."""
+    """Read the class distribution and each item of each loader."""
     for ds in datasets:
         ds.class_distribution
         for i in range(len(ds)):
@@ -172,9 +174,10 @@ def test_a_recorded_table_changed_under_its_digest_refuses_by_name(
 def test_an_assessment_reads_each_reference_document_once(
     tmp_path: Path, monkeypatch
 ):
-    """The assessment measures the snapshot its own re-admission read, at the version that read
-    answered: a document emptied before that re-admission refuses as unannotated, and one emptied
-    after it is measured as read, from the copy retained at that version.
+    """An assessment reads each reference document once and retains what that read answered.
+
+    A document emptied after the assessment's re-admission read is measured as read: the
+    assessment succeeds and its retained digests are those the re-admission answered.
     """
     import tcip_mcp.pipelines.data.label_queries as label_queries
     from tcip_annotation import json_io
@@ -338,8 +341,9 @@ def test_a_reserved_regions_assessment_reads_its_mosaic_document_once(
 
 
 def _published_frames(root: Path) -> list[Path]:
-    """Two labeled frames of one capture under ``root``, each with its predictions published as
-    the bucket ``published``; their image paths.
+    """Return the image paths of two labeled frames of one capture under ``root``.
+
+    Each frame has its predictions published as the bucket ``published``.
     """
     from PIL import Image
 
@@ -382,7 +386,7 @@ def _published_frames(root: Path) -> list[Path]:
 
 
 def _counting_scans(monkeypatch) -> Counter:
-    """Every scan of an image directory for its logical images, counted by directory."""
+    """Count every scan of an image directory for its logical images, keyed by directory."""
     from tcip_mcp.pipelines import image_utils
 
     scans: Counter = Counter()
@@ -397,7 +401,7 @@ def _counting_scans(monkeypatch) -> Counter:
 
 
 def _counting_resolutions(monkeypatch) -> Counter:
-    """Every path resolved to its logical image, counted by path."""
+    """Count every path resolved to its logical image, keyed by path."""
     from tcip_mcp.pipelines import image_utils
 
     resolutions: Counter = Counter()
