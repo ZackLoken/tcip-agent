@@ -1,5 +1,7 @@
-"""run_inference publishes a bucket once: one prediction document per image and the bucket's
-record under the images' dataset root, in one commit, never over a bucket that exists.
+"""run_inference publishes a bucket and refuses one that exists.
+
+It publishes one prediction document per image and the bucket's record under the images' dataset
+root.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from tests._verified_checkpoint_fixtures import (  # noqa: E402
 UNTILED = Stated(
     tile=False, conf=SAMPLE_CONF, rationale="a sample reason the test states"
 )
-"""The execution values every untiled run here states."""
+"""The stated execution values of an untiled run at the sample confidence."""
 
 BUCKET = "out/2026-01-01"
 
@@ -90,8 +92,10 @@ def test_run_inference_publishes_each_document_the_record_and_one_audit_line(
 def test_a_second_run_into_a_published_bucket_refuses_and_leaves_it(
     tmp_path, monkeypatch
 ):
-    """A bucket is published once: a second run naming the same bucket refuses, leaving the first
-    bucket's documents and record as they were, and a new bucket admits the same run.
+    """A second run into a published bucket refuses and leaves the bucket as it was.
+
+    A second run naming the same bucket refuses, leaving the first bucket's documents and record
+    as they were, and a new bucket admits the same run.
     """
     from tcip_mcp.dataset_layout import PREDICTION_DOCUMENTS
     from tcip_mcp.tools.inference_tools import run_inference
@@ -169,8 +173,10 @@ def test_a_run_over_an_empty_images_directory_refuses_and_publishes_nothing(
 def test_an_images_dir_that_is_no_capture_refuses_naming_it(
     tmp_path, monkeypatch, where
 ):
-    """A pass over images publishes its capture, so a directory that is no capture
-    (``<root>/images/<capture>``) refuses at the door naming it, before any prediction.
+    """An images directory that is no capture is refused at the door naming it.
+
+    A directory that is no capture (``<root>/images/<capture>``) refuses at the door naming it,
+    and no bucket is published.
     """
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -190,9 +196,7 @@ def test_an_images_dir_that_is_no_capture_refuses_naming_it(
 
 
 def test_a_raster_outside_a_capture_is_admitted(tmp_path, monkeypatch):
-    """A raster is the one source published outside a capture: one under the image tree but in no
-    capture directory reaches the pass.
-    """
+    """A raster under the image tree but in no capture directory is admitted."""
     import numpy as np
     import tifffile
 
@@ -217,7 +221,7 @@ def test_a_raster_outside_a_capture_is_admitted(tmp_path, monkeypatch):
 
 
 def test_a_dry_run_previews_the_both_sources_refusal(tmp_path):
-    """A preview previews the same refusal a real call would hit."""
+    """A dry run naming both an images directory and a raster is refused, naming the rule."""
     from tcip_mcp.tools.inference_tools import run_inference
 
     images_dir = tmp_path / "images"

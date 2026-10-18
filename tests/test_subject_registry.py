@@ -1,9 +1,7 @@
 """The nested subject registry, whose declared value order is every value's id.
 
-A reordered value list ships predictions that decode to the wrong value: a confident-wrong
-phenotype that passes every downstream test. These pin that an id is the value's *declared*
-position (never sorted, which would corrupt ordinal rank) and that the order survives a file
-round-trip.
+These pin that an id is the value's declared position, not its sorted one, and that the order
+survives a file round-trip.
 """
 
 from __future__ import annotations
@@ -26,7 +24,7 @@ from tests._producer_fixtures import registry_over
 
 
 def _version(dataset_root):
-    """The version ``dataset_root``'s stored registry reads at, beside its content."""
+    """Return the version ``dataset_root``'s stored registry reads at."""
     return read_versioned_registry(dataset_root)[1]
 
 
@@ -50,8 +48,10 @@ def _bud_bush() -> SubjectRegistry:
 
 
 def test_a_stored_subject_stating_no_description_refuses_and_a_request_s_states_an_empty_one():
-    """A stored subject carries the description its writer wrote, so one without it refuses
-    rather than reading as described by nothing; an authoring request may leave it out.
+    """A stored subject with no description refuses; an authoring request states an empty one.
+
+    A stored subject missing ``description`` refuses naming the field; an authoring request may
+    leave it out and reads as an empty description.
     """
     from tcip_mcp.subject_registry import registry_from_request
 
@@ -80,8 +80,9 @@ def test_dict_and_file_roundtrip_preserve_the_registry(tmp_path):
 
 
 def _scope(tmp_path, registry, subject):
-    """The class space the admission reads for ``subject`` over a dataset declaring
-    ``registry``.
+    """Return the class space the admission reads for ``subject`` over ``registry``.
+
+    The dataset under ``tmp_path`` declares ``registry``.
     """
     from tcip_mcp.pipelines.data.label_queries import registry_scope
 
@@ -244,8 +245,9 @@ def test_absent_or_null_attributes_valid_but_falsy_malformed_refused():
 def test_a_present_but_undecodable_registry_refuses_and_an_absent_one_says_so(
     tmp_path,
 ):
-    """Absence and corruption are different answers, and neither is an empty registry: reading an
-    undecodable one as empty leaves every name-based label under it with nothing to resolve against.
+    """An undecodable registry refuses, and an absent one says it is absent.
+
+    An undecodable registry raises ``RegistryError`` and an absent one ``FileNotFoundError``.
     """
     path = tmp_path / "subjects.json"
     path.write_bytes(
@@ -265,8 +267,10 @@ def test_a_present_but_undecodable_registry_refuses_and_an_absent_one_says_so(
 def test_a_copied_registry_declares_the_same_document_in_the_same_order(
     tmp_path,
 ):
-    """A registry placed beside another dataset's data declares exactly what its source declares,
-    so a digest or an id assignment taken against either one reads the same declared order.
+    """A copied registry declares the same document in the same order.
+
+    A registry copied beside another dataset's data holds its source's bytes and reads back its
+    subjects in the source's order.
     """
     from tcip_mcp.subject_registry import copy_registry
 
@@ -299,8 +303,10 @@ def test_a_copied_registry_declares_the_same_document_in_the_same_order(
 def test_copy_registry_refuses_when_the_destination_already_holds_one(
     tmp_path,
 ):
-    """A materialization or split re-run must not replace a destination registry silently: the
-    first copy is create-only, and a second copy attempt over the same destination refuses.
+    """``copy_registry`` refuses when the destination already holds a registry.
+
+    A copy over a destination holding its own registry raises ``RegistryError``, and the
+    destination's registry still declares ``bush`` and does not declare ``bud``.
     """
     from tcip_mcp.subject_registry import copy_registry
 
@@ -320,8 +326,9 @@ def test_copy_registry_refuses_when_the_destination_already_holds_one(
 
 
 def _leaf_bush() -> SubjectRegistry:
-    """A generic two-subject registry (a subject declaring no attribute, one declaring one), for the
-    registry-write tests below.
+    """Return a generic two-subject registry.
+
+    One subject declares no attribute and the other declares one.
     """
     return SubjectRegistry(
         subjects=(
@@ -631,7 +638,7 @@ def test_replace_registry_allow_removals_alone_does_not_admit_a_type_flip(
 
 
 def test_replace_registry_admits_a_type_flip_with_allow_type_changes(tmp_path):
-    """A flip lands under the flag."""
+    """``replace_registry`` with ``allow_type_changes`` lands a categorical-to-ordinal flip."""
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
@@ -679,8 +686,9 @@ def test_replace_registry_admits_a_type_flip_with_allow_type_changes(tmp_path):
 def test_replace_registry_admits_a_values_only_growth_and_a_same_type_resave(
     tmp_path,
 ):
-    """The type-flip refusal never fires over a growth or a re-save that restates the same
-    type.
+    """``replace_registry`` admits a values-only growth and a same-type re-save.
+
+    The type-flip refusal does not fire over a growth or a re-save that restates the same type.
     """
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version

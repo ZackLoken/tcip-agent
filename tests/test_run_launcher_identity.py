@@ -1,6 +1,8 @@
-"""Who launched a run, as its launch event states it (the agent identity the ``launch_training``
-line naming the run carries, empty outside an MCP handshake), and the launch's refusals before
-and after its directory exists.
+"""Who launched a run, as its launch event states it, and the launch's refusals.
+
+The launch event carries the agent identity on the ``launch_training`` line naming the run, empty
+outside an MCP handshake; a launch record that cannot be written leaves no run directory, and a
+spawn failure leaves one that reads interrupted.
 """
 
 from __future__ import annotations
@@ -55,8 +57,10 @@ def _row(project, experiment_id: str) -> dict:
 def test_a_launch_no_agent_declared_itself_to_shows_an_empty_declaration(
     tmp_path, monkeypatch
 ):
-    """A launch outside an MCP handshake leaves its launch event carrying no identity, and that
-    is what the run's row shows: the fact available, never a guess about who.
+    """A launch outside an MCP handshake shows an empty identity on the run's row.
+
+    The run's row shows an empty launch identity, and the launch record carries no
+    ``launched_by``.
     """
     from tcip_mcp.tools import training_tools
 
@@ -80,8 +84,10 @@ def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_
     tmp_path,
     monkeypatch,
 ):
-    """A launch made while an MCP handshake is in force shows the connected agent's identity,
-    read off the launch event that names the run, never off the run's own record.
+    """A launch inside an MCP handshake shows the connected agent's identity from its event.
+
+    The run's row shows the agent's name, version and session, and the run's own record carries
+    no ``launched_by``.
     """
     monkeypatch.delenv("TCIP_TERMINAL_SESSION", raising=False)
     from tcip_mcp import agent_identity
@@ -112,8 +118,9 @@ def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_
 def test_launch_refuses_when_the_launch_record_cannot_be_written(
     tmp_path, monkeypatch
 ):
-    """A launch record that cannot be written refuses the launch by name before the subprocess,
-    and leaves no directory that reads as a run.
+    """A launch whose launch record cannot be written is refused, spawning no worker.
+
+    The refusal names the failure and leaves no directory that reads as a run.
     """
     from tcip_mcp import experiments as experiments_mod
     from tcip_mcp.experiments import run_dirs
@@ -145,9 +152,7 @@ def test_launch_refuses_when_the_launch_record_cannot_be_written(
 
 
 def test_a_launch_records_the_seed_its_config_states(tmp_path, monkeypatch):
-    """The config's stated seed is the one its ``run.json`` records, the one record the child
-    trains from.
-    """
+    """A launch records the seed its config states in ``run.json``."""
     from tcip_mcp.tools import training_tools
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -167,8 +172,10 @@ def test_a_launch_records_the_seed_its_config_states(tmp_path, monkeypatch):
 def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(
     tmp_path, monkeypatch
 ):
-    """A Popen failure after the launch record propagates out of launch_training, and the one
-    directory it opened reads interrupted once its heartbeat window has passed.
+    """A spawn failure propagates and leaves a directory that reads interrupted.
+
+    A Popen failure after the launch record propagates out of launch_training, and the one
+    directory it opened reads interrupted when its heartbeat window has passed.
     """
     from tcip_mcp import experiments as experiments_mod
     from tcip_mcp.experiments import observe, run_dirs

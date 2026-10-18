@@ -1,8 +1,8 @@
-"""Per-plant attribution by canopy segment: loading a canopy boundary document, tying its
-segments to registry plants, and assigning detections to a tie's own segments.
+"""Per-plant attribution by canopy segment.
 
-Coverage: each function's own admitting and refusing shapes, on synthetic segments over a real
-registered-dataset raster (:mod:`tests._geotiff_fixtures`).
+Loading a canopy boundary document, tying its segments to registry plants, and assigning
+detections to a tie's own segments, each through its own admitting and refusing shapes, on
+synthetic segments over a real registered-dataset raster (:mod:`tests._geotiff_fixtures`).
 """
 
 from __future__ import annotations
@@ -44,15 +44,16 @@ def _setup(tmp_path: Path) -> tuple[Path, Path, OrthomosaicGeoreference, dict]:
 
 
 def _stored(raster_path: Path) -> LabelDocument:
-    """The raster's own label document, read by its key."""
+    """Return the raster's own label document, read by its key."""
     return read_label_document(image_label_key(raster_path))
 
 
 def _write_document(
     raster_path: Path, annotations: list[Annotation], width: int = WIDTH
 ) -> LabelDocument:
-    """``annotations`` saved as the raster's label document at ``width`` by ``HEIGHT``; the
-    document as read back.
+    """Save ``annotations`` as the raster's label document and return it as read back.
+
+    The document is saved at ``width`` by ``HEIGHT``.
     """
     label_image(raster_path, annotations, width, HEIGHT, keep_empty=True)
     return _stored(raster_path)
@@ -222,8 +223,10 @@ def test_load_canopy_segments_refuses_a_point_naming_the_record(
 def test_load_canopy_segments_refuses_a_geometry_less_annotation(
     tmp_path: Path,
 ) -> None:
-    """An image-level label of the stated subject (a subject with no geometry at all) names no
-    region, same as a Point, and must not reach the box-to-polygon conversion.
+    """An image-level canopy label with no geometry is refused as naming no region.
+
+    An image-level label of the stated subject, with no geometry at all, is refused as an
+    image-level label naming no region.
     """
     _, raster_path, _georef, identity = _setup(tmp_path)
     data = _write_document(
@@ -344,8 +347,9 @@ def test_load_canopy_segments_admits_a_proposed_polygon_accepted_through_the_sav
     client,
     opened_project: Path,
 ) -> None:
-    """A staged polygon proposal accepted through the editor's save door delivers: the platform's
-    own producer of a person's ``accepted_by``, never a hand-written provenance pair.
+    """A polygon proposal accepted through the editor's save door loads as a canopy segment.
+
+    The save door is the platform's own producer of a person's ``accepted_by``.
     """
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
@@ -436,9 +440,11 @@ def test_tie_segments_to_plants_ties_two_disjoint_segments_each_to_one_plant(
 def test_tie_segments_to_plants_leaves_a_plant_within_the_position_error_untied(
     tmp_path: Path,
 ) -> None:
-    """A plant whose projected position clears its segment's boundary by less than the stated
-    position error is not tied: a displaced position could have put it in a neighbor's canopy.
-    The bound is the project's; a negative one refuses.
+    """A plant within the position error of its segment's boundary is left untied.
+
+    A plant whose projected position clears its segment's boundary by less than the stated
+    position error is not tied, and a detection in its segment is attributed to no plant. A
+    negative, NaN or infinite bound refuses.
     """
     _, raster_path, georef, _identity = _setup(tmp_path)
     segments_data = _write_document(
@@ -516,8 +522,9 @@ def _one_segment_tie(
     segment: Polygon,
     position_error_m: float,
 ):
-    """The tie of ``segment`` to one plant at pixel ``plant_px`` under the georeference
-    ``transform`` states, on a 100-pixel frame.
+    """Return the tie of ``segment`` to one plant at pixel ``plant_px``.
+
+    The tie is made under the georeference ``transform`` states, on a 100-pixel frame.
     """
     from tcip_mcp.pipelines.postprocessing.segment_attribution import (
         CanopySegment,
@@ -535,7 +542,9 @@ def _one_segment_tie(
 
 
 def test_the_clearance_is_measured_in_meters_on_a_raster_in_feet():
-    """EPSG:2263 states its coordinates in US survey feet: a plant two feet (0.61 m) inside its
+    """The clearance is measured in meters on a raster whose units are feet.
+
+    EPSG:2263 states its coordinates in US survey feet: a plant two feet (0.61 m) inside its
     segment's boundary is within a 1 m position error, not two units clear of it.
     """
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
@@ -570,7 +579,9 @@ def test_the_clearance_is_measured_in_meters_on_a_raster_in_feet():
 
 
 def test_the_clearance_is_the_nearest_boundary_in_meters_on_anisotropic_pixels():
-    """Pixels 10 m wide and 1 m tall: a plant 2 pixels (20 m) from the segment's left edge and 5
+    """The clearance is the nearest boundary in meters on anisotropic pixels.
+
+    Pixels 10 m wide and 1 m tall: a plant 2 pixels (20 m) from the segment's left edge and 5
     pixels (5 m) from its top edge clears the boundary by 5 m, so a 10 m bound leaves it untied.
     """
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (

@@ -1,13 +1,16 @@
-"""The registry's producer binding: a run's own final status names the digest it produced, and
-nothing else can name a producer for weights the run did not complete with.
+"""The registry's producer binding.
+
+A run's own final status names the digest it produced, and nothing else can name a producer for
+weights the run did not complete with.
 """
 
 from __future__ import annotations
 
 
 def test_two_runs_each_produce_only_their_own_weights(tmp_path):
-    """A run resumed into a new run directory completes with its own weights; each checkpoint
-    loads naming the run whose final status names its digest, never the other.
+    """Each of two runs' checkpoints loads naming the run that produced it.
+
+    Each checkpoint loads naming the run whose final status names its digest, never the other.
     """
     from tcip_mcp.experiments import observe
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -30,9 +33,11 @@ def test_two_runs_each_produce_only_their_own_weights(tmp_path):
 
 
 def test_a_tag_naming_a_run_never_makes_that_run_a_producer(tmp_path):
-    """A foreign checkpoint, one a run completed under another root, registered with an
-    ``experiment:<id>`` tag naming a run of this project that never completed with it, loads
-    naming no producing run: the tag is caller metadata no producer resolver reads.
+    """A foreign checkpoint tagged with a run's id loads naming no producing run.
+
+    The checkpoint, one a run completed under another root, is registered with an
+    ``experiment:<id>`` tag naming a run of this project that did not complete with it, and it
+    loads with no producing run.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.model_tools import register_model
@@ -99,7 +104,9 @@ def test_caller_tag_still_round_trips_and_filters(tmp_path):
 def test_a_checkpoint_carrying_no_weights_refuses_at_registration_naming_the_field(
     tmp_path,
 ):
-    """A checkpoint is admitted for the weights it loads: a payload carrying none refuses at
+    """A checkpoint payload carrying no weights is refused at registration naming the field.
+
+    A checkpoint is admitted for the weights it loads: a payload carrying none refuses at
     registration, naming the field, and registers nothing; one carrying weights registers.
     """
     import pytest
@@ -126,7 +133,9 @@ def test_a_checkpoint_carrying_no_weights_refuses_at_registration_naming_the_fie
 def test_an_indexed_checkpoint_carrying_no_weights_refuses_at_load_naming_the_field(
     tmp_path,
 ):
-    """The load boundary states the weights rail itself: an index entry naming a weightless
+    """An indexed weightless checkpoint is refused at load naming the field.
+
+    The load boundary states the weights rail itself: an index entry naming a weightless
     payload's digest, written past registration, refuses at ``load_registered_checkpoint``
     naming the field, while a registered checkpoint carrying weights loads.
     """

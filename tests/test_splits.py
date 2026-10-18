@@ -20,7 +20,7 @@ from tcip_mcp.pipelines.data.splits import (
 from tcip_mcp.pipelines.slicing import slice_lattice
 
 SIDES = ("train", "val", "holdout")
-"""The three sides most strip splits here lay out."""
+"""The train, val and holdout sides of a three-way split."""
 
 
 def test_default_group_key_strips_tile_offset():
@@ -41,8 +41,10 @@ _SIDES = {"train": 0.6, "val": 0.2, "calibration": 0.2}
 def _split(
     stems, *, counts=None, splits=_SIDES, seed=1, weighted=True, minimums=None
 ):
-    """The draw over ``stems`` grouped by tile prefix, every member counted (one each unless
-    ``counts`` says otherwise), at a minimum of one foreground group per side unless stated.
+    """Return the draw over ``stems`` grouped by tile prefix.
+
+    Each member is counted (one each when ``counts`` is None), at a minimum of one foreground
+    group per side when ``minimums`` is None.
     """
     return group_balanced_split(
         stems,
@@ -94,9 +96,7 @@ def test_group_split_foreground_stratification():
 
 
 def test_group_split_refuses_a_member_with_no_measured_count():
-    """A member the counts do not name refuses at the algorithm rather than balancing as a
-    background member.
-    """
+    """A member with no measured count is refused at the group split, naming the missing count."""
     stems = _grouped(4)
     counts = {s: 1 for s in stems[1:]}
     with pytest.raises(ValueError, match="no foreground count"):
@@ -104,10 +104,10 @@ def test_group_split_refuses_a_member_with_no_measured_count():
 
 
 def test_group_split_calibration_side_gets_its_stated_minimum():
-    """Over six foreground groups at a skewed (0.6, 0.2, 0.2) ratio, a one-per-side minimum
-    lands 4/1/1 (train's floor absorbs every group the balancing pass would otherwise give the
-    smaller sides); stating a per-side minimum of two for the third side raises its own floor to
-    two groups, taking from train's share instead.
+    """A stated per-side minimum raises the calibration side's floor.
+
+    Over six foreground groups at a skewed (0.6, 0.2, 0.2) ratio, a one-per-side minimum
+    lands 4/1/1, and stating a minimum of two for the calibration side gives it two groups.
     """
     stems = _grouped(6)
 
@@ -157,8 +157,10 @@ def test_refuse_insufficient_foreground_groups_names_the_sides_and_the_shortfall
 
 
 def test_refuse_insufficient_foreground_groups_carries_the_callers_own_remedy():
-    """The caller states what to add, since what counts as foreground differs by the ground
-    truth a draw reads.
+    """The foreground-group refusal carries the remedy it is handed.
+
+    The message carries the stated remedy, annotating or confirming more foreground groups, and
+    never suggests dropping a side.
     """
     from tcip_mcp.pipelines.data.splits import (
         refuse_insufficient_foreground_groups,
@@ -214,8 +216,10 @@ def test_resolve_group_key_fn_named_policy_still_works():
 
 
 def _kept_tiles(split, width, height):
-    """Every kept tile's rect, tagged with the side whose region contains it, recomputed
-    independently of the split's own kept-tile counters.
+    """Return the lattice tiles each side's regions contain, keyed by side name.
+
+    The tiles are ``slice_lattice(height, width, split.tile_size, split.overlap)``; a tile is
+    listed under every side one of whose rects contains it.
     """
     from tcip_mcp.pipelines.raster_source import rect_contains_rect
 
@@ -269,13 +273,9 @@ def test_spatial_strip_split_no_tile_shared_and_buffer_respected():
 
 
 def test_center_out_order_ties_resolve_in_declared_order():
-    """Coverage of ``_center_out_order`` directly: this documents ``_center_out_order`` itself
-    rather than guarding a regression; the property is proven through
-    :func:`spatial_strip_split` in the test below.
+    """``_center_out_order`` resolves equal-share slots center-out in their declared order.
 
-    Two equal-share slots resolve center-out in the order they were given, whichever order
-    that is: swapping the input order swaps which cardinal side each lands on, so the tie is
-    the caller's declared order, never a coin flip.
+    Swapping the input order of two equal-share slots swaps which cardinal side each lands on.
     """
     from tcip_mcp.pipelines.data.splits import _center_out_order
 
@@ -289,7 +289,9 @@ def test_center_out_order_ties_resolve_in_declared_order():
 
 
 def test_spatial_strip_split_tied_shares_place_by_declared_order():
-    """Coverage of the fixed tie-break: equal shares resolve center-out by their position in
+    """Tied shares in a spatial strip split place by their declared order.
+
+    Equal shares resolve center-out by their position in
     the declared ``split_names`` order, so permuting which of the two tied names comes second
     swaps which cardinal side that name lands on, mirroring the swap in the declared order, and
     the returned split carries no ``seed`` field.
@@ -437,7 +439,9 @@ def test_stem_of_spatial_identity_passes_through_a_non_spatial_string():
 def test_label_document_extent_reads_the_frame_off_the_document_it_is_handed(
     tmp_path,
 ):
-    """The extent is the frame the stored document records; a document stating none refuses
+    """``label_document_extent`` reads the frame off the document it is handed.
+
+    The extent is the frame the stored document records; a document stating none refuses
     naming where it was read.
     """
     from tcip_annotation import json_io
@@ -466,7 +470,9 @@ def test_label_document_extent_reads_the_frame_off_the_document_it_is_handed(
 def test_count_label_lines_counts_every_instance_of_the_subject_assessed_or_not(
     tmp_path,
 ):
-    """Every record of the scope's subject is foreground, whether or not it carries a value for
+    """``count_label_lines`` counts every instance of the subject, assessed or not.
+
+    Every record of the scope's subject is foreground, whether or not it carries a value for
     each attribute the registry declares; another subject's record is not.
     """
     from tcip_annotation import json_io

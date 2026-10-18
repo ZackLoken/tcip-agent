@@ -1,11 +1,9 @@
-"""A run is a directory, and every state it reads as comes from what its own process wrote there.
+"""A run is a directory, and the state it reads as comes from what its own process wrote there.
 
 The launched cases go through the real launcher (``launch_training``) and a real child process,
-so the facts are the ones a run directory actually carries across the process boundary: the
-launch record the parent writes once, the final status the child writes once, and the heartbeat
-that stands in for a process nobody can ask. The HPO trial cases run the sweep's own trial body
-(``_run_hpo_trial``) in this process, over the same launch writer and child entry a launched run
-uses.
+so the facts are the ones a run directory carries across the process boundary: the launch record
+the parent writes, the final status the child writes, and the heartbeat. The HPO trial cases run
+the sweep's own trial body (``_run_hpo_trial``) in this process.
 """
 
 from __future__ import annotations
@@ -27,14 +25,14 @@ from tests._training_values import (  # noqa: E402
 )
 
 ONE_RATE = {"optimizer.backbone_lr": 0.01, "optimizer.head_lr": 0.01}
-"""A trial point moving both rates together, since the one-weight regressors train every
-parameter at one rate."""
+"""A trial point setting the backbone and head rates to one value, 0.01."""
 
 
 @pytest.fixture
 def children(monkeypatch) -> list:
-    """Every training child a launch in this test spawned (a process handed ``--run-dir``), each
-    a real process.
+    """Return the training children the launches spawned, each a real process.
+
+    A training child is a process handed ``--run-dir``.
     """
     spawned: list = []
     real_popen = subprocess.Popen
@@ -51,9 +49,11 @@ def children(monkeypatch) -> list:
 
 @pytest.fixture
 def launch(tmp_path, monkeypatch, children):
-    """``launch_training`` in the project ``tmp_path``, over a tiny regression dataset, with
-    its stage ending at its schedule's ``horizon`` and any other top-level keys; TensorBoard is
-    not started.
+    """Return a ``launch_training`` caller in the project ``tmp_path`` over a tiny dataset.
+
+    Each launch is over the regression dataset written under ``tmp_path / "ds"``, drawing 0.15
+    onto validation, at ``horizon`` (1 by default), with ``extra``'s keys passed to the config
+    and ``resume_from`` to the launch; TensorBoard is not started.
     """
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
@@ -90,8 +90,9 @@ def launch(tmp_path, monkeypatch, children):
 
 
 def _until(what: str, answer, deadline_s: float = 120):
-    """``answer()`` once it is truthy, polled until ``deadline_s`` passes; the child's own state
-    is what each caller waits on.
+    """Poll ``answer()`` every 0.1 s and return its first truthy value, raising past ``deadline_s``.
+
+    The ``AssertionError`` raised names ``what``.
     """
     deadline = time.monotonic() + deadline_s
     while time.monotonic() < deadline:
@@ -103,7 +104,7 @@ def _until(what: str, answer, deadline_s: float = 120):
 
 
 def _wait_final(run_dir: Path) -> dict:
-    """The run's final status once its child has written one."""
+    """Wait for the final status the run's child writes and return it."""
     from tcip_mcp.experiments import observe
 
     return _until(
@@ -152,8 +153,9 @@ def test_a_launched_run_completes_and_its_completion_is_its_registration(
 
 
 def test_a_cancel_requested_by_id_ends_the_child_canceled(launch, tmp_path):
-    """A cancel requested once the child is training (its first epoch row logged) ends it
-    canceled, completing no checkpoint.
+    """A cancel requested by id ends a training child canceled, completing no checkpoint.
+
+    The cancel is requested after the child logs its first epoch row.
     """
     from tcip_mcp.experiments import METRICS_FILE, observe, read_rows
     from tcip_mcp.tools.training_tools import cancel_training
@@ -207,8 +209,10 @@ def test_a_resume_is_a_new_directory_that_leaves_its_source_untouched(
 def test_a_child_killed_before_its_final_status_reads_running_then_interrupted(
     launch, children, monkeypatch
 ):
-    """Killed while it runs, the child writes no final status: once the process has exited the
-    run reads running while its last sign of life is fresh, and interrupted once that sign of
+    """A child killed while it runs reads running, then interrupted.
+
+    Killed while it runs, the child writes no final status: after the process has exited the
+    run reads running while its last sign of life is fresh, and interrupted when that sign of
     life is older than the heartbeat window.
     """
     from tcip_mcp import experiments
@@ -229,7 +233,9 @@ def test_a_child_killed_before_its_final_status_reads_running_then_interrupted(
 def test_progress_logged_after_the_final_status_never_reopens_the_run(
     launch, tmp_path
 ):
-    """Once the child wrote its final status the run's metrics writer refuses a row, leaving the
+    """A metrics row logged after the final status is refused and the run stays completed.
+
+    After the child wrote its final status the run's metrics writer refuses a row, leaving the
     log and the final status as they were; the completed run's summary is the best selection over
     its own rows under its recorded objective.
     """
@@ -272,8 +278,10 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(
 def test_a_reader_never_sees_a_final_status_before_its_bytes_are_whole(
     tmp_path, monkeypatch
 ):
-    """Read while the final status's bytes are being written, the run reads as it did before
-    that write began: no final status and still running, never a partial record.
+    """A reader never sees a final status before its bytes are whole.
+
+    Read by a spy inside the write of the final status, the run has no final status and reads
+    running; after the write it reads failed.
     """
     from tcip_mcp import experiments
     from tests._verified_checkpoint_fixtures import (
@@ -305,9 +313,10 @@ def test_a_reader_never_sees_a_final_status_before_its_bytes_are_whole(
 def _refusing_final_status(
     monkeypatch, times: float, winerror: int | None = None
 ) -> list[Path]:
-    """Make the next ``times`` reads of any final-status record fail with a ``PermissionError``
-    carrying ``winerror`` (by default a Windows sharing violation); the paths refused, in
-    order.
+    """Make the next ``times`` final-status reads fail, and return the paths refused, in order.
+
+    Each refused read raises a ``PermissionError`` carrying ``winerror`` (by default a Windows
+    sharing violation).
     """
     from tcip_mcp.experiments import FINAL_STATUS_FILE
     from tcip_store.file_backend import SHARING_VIOLATION
@@ -335,8 +344,9 @@ def test_a_final_status_a_sharing_violation_refuses_once_is_read_on_the_retry(
     tmp_path,
     monkeypatch,
 ):
-    """A completed run's final status refused once by a sharing violation is read again and the
-    run observes as completed, rather than one unlucky poll failing the observation.
+    """A final status refused once by a sharing violation is read on the retry.
+
+    The run observes as completed after one refused read.
     """
     from tcip_mcp.experiments import observe
     from tests._verified_checkpoint_fixtures import finished_run
@@ -351,9 +361,7 @@ def test_a_final_status_a_sharing_violation_refuses_once_is_read_on_the_retry(
 def test_a_final_status_a_sharing_violation_keeps_refusing_raises(
     tmp_path, monkeypatch
 ):
-    """A sharing violation that outlasts the retry budget is raised, never read as a run with no
-    final status.
-    """
+    """A sharing violation that outlasts the retry budget is raised after more than one read."""
     import math
 
     from tcip_mcp.experiments import observe
@@ -370,8 +378,9 @@ def test_a_final_status_a_sharing_violation_keeps_refusing_raises(
 def test_a_final_status_denied_for_another_reason_raises_without_a_retry(
     tmp_path, monkeypatch
 ):
-    """Only a sharing violation is retried: a read denied for any other reason (here Windows'
-    access denied, 5) raises on its first refusal.
+    """A final-status read denied for a reason other than sharing raises without a retry.
+
+    A read denied with Windows' access-denied code (5) raises on its first refusal.
     """
     import math
 
@@ -387,8 +396,10 @@ def test_a_final_status_denied_for_another_reason_raises_without_a_retry(
 
 
 def test_no_retry_starts_after_the_budget_is_spent(monkeypatch):
-    """A denied action that would succeed only after the budget is never run: a wait that wakes
-    late, past the deadline, ends in the denial being raised rather than in another attempt.
+    """No retry of a denied action starts after the retry budget is spent.
+
+    An action denied until past the 0.12 s budget starts at 0, 0.051 and 0.102 s only: the wait
+    that wakes late, past the deadline, ends with the denial raised.
     """
     from tcip_store import file_backend
 
@@ -414,8 +425,10 @@ def test_no_retry_starts_after_the_budget_is_spent(monkeypatch):
 
 
 def test_a_completed_run_missing_its_checkpoint_refuses_naming_it(tmp_path):
-    """A completed run's checkpoint is read by whatever loads it; with that file gone the load
-    refuses naming it rather than answering from anything else.
+    """Loading a completed run's checkpoint whose file is gone refuses naming the file.
+
+    With the checkpoint file the run recorded deleted, ``checkpoint_payload`` raises
+    ``FileNotFoundError`` naming it.
     """
     from tcip_mcp.experiments import observe
     from tcip_mcp.model_registry import checkpoint_payload
@@ -434,8 +447,10 @@ def test_a_completed_run_missing_its_checkpoint_refuses_naming_it(tmp_path):
 def test_a_config_naming_its_run_refuses_naming_the_key_and_writes_nothing(
     launch, tmp_path
 ):
-    """The platform mints every run's id: a config stating ``experiment_id`` refuses naming the
-    key, whatever name it states, and no directory is made; the launch it leaves out mints one.
+    """A config stating ``experiment_id`` is refused naming the key and makes no directory.
+
+    A launch with no ``experiment_id`` names its directory by the id it answers; a config stating
+    that id or a name of its own refuses naming the key, and no directory is made.
     """
     from tcip_mcp.experiments import run_dirs
 
@@ -456,9 +471,11 @@ def test_a_name_is_reserved_by_the_directory_that_takes_it_first(
     tmp_path,
     real_hpo_base_config,
 ):
-    """A directory created before its record is written already holds its name: a second
-    creation under it refuses, and a run under a sweep's name refuses naming its directory. A
-    run, a sweep and one of its trials are each found once by name.
+    """A name is reserved by the directory that takes it first.
+
+    A directory created with no record written already holds its name: a second creation under
+    it refuses, and a run under a sweep's name refuses naming its directory. A run, a sweep and
+    one of its trials are each found by name.
     """
     from tcip_mcp.experiments import (
         RunDirectoryExistsError,
@@ -503,7 +520,9 @@ def test_a_name_is_reserved_by_the_directory_that_takes_it_first(
 def test_the_live_run_conflict_reads_the_projects_one_listing(
     tmp_path, monkeypatch
 ):
-    """A running run is the conflict the listing shows it as, and a listing showing nothing
+    """The live-run conflict reads the project's one training listing.
+
+    A running run is the conflict the listing shows it as, and a listing showing nothing
     running is no conflict.
     """
     from tcip_mcp import experiments
@@ -530,10 +549,12 @@ def test_the_live_run_conflict_reads_the_projects_one_listing(
 def _trial(
     tmp_path, point: dict | None = None, **extra
 ) -> tuple[Path, list[float]]:
-    """One HPO trial of a sweep over a tiny regression dataset at ``point`` (by default a
-    learning rate), run through the sweep's own trial body under the sweep's objective
-    (``loss``, lower better), its model source declaring this module beside the regressor's for
-    a loop of its own; its run directory and every value it reported.
+    """Run one HPO trial and return its run directory and the values it reported, in order.
+
+    The trial ``a`` is of a sweep over a regression dataset written under ``tmp_path``, drawing
+    0.34 onto validation at seed 3, at ``point`` (by default :data:`ONE_RATE`), run through the
+    sweep's own trial body (``_run_hpo_trial``); the model source lists this module beside the
+    regressor's files, and ``extra`` passes further config keys.
     """
     from tcip_mcp.experiments import run_dirs
     from tcip_mcp.tools.training_tools import _run_hpo_trial
@@ -567,7 +588,7 @@ def _trial(
 
 
 def _trial_row(project: Path, trial_dir: Path) -> dict:
-    """The row the project's listing reads for ``trial_dir``, under its sweep."""
+    """Return the row the project's listing reads for ``trial_dir``, under its sweep."""
     from tcip_mcp.experiments import training_listing
 
     (sweep,) = training_listing(project).sweeps
@@ -579,7 +600,9 @@ def _trial_row(project: Path, trial_dir: Path) -> dict:
 def test_an_hpo_trial_is_a_run_directory_reporting_the_sweeps_one_selection(
     tmp_path,
 ):
-    """A trial is a run directory like any launched run's, its sampled point and what it resolved
+    """An HPO trial is a run directory reporting its config's one selection metric.
+
+    A trial is a run directory like any launched run's, its sampled point and what it resolved
     on its launch record, and it reports its config's selection each epoch; its result is the
     best of what it reported, in that metric's direction (``loss``, lower better).
     """
@@ -600,7 +623,9 @@ def test_an_hpo_trial_is_a_run_directory_reporting_the_sweeps_one_selection(
 def test_a_trial_whose_resolution_fails_is_a_directory_whose_final_status_names_it(
     tmp_path,
 ):
-    """A trial whose sampled point cannot resolve still opens its run directory, and its final
+    """A trial whose resolution fails is a directory whose final status names why.
+
+    A trial whose sampled point cannot resolve still opens its run directory, and its final
     status is ``failed`` naming why; the sweep's listing reads it as a row with no best value
     and no metric name.
     """
@@ -625,8 +650,10 @@ def test_a_trial_whose_resolution_fails_is_a_directory_whose_final_status_names_
 
 
 def _reports_only(ctx):
-    """A bespoke body that reports its selection value through ``ctx.report_objective`` alone
-    and saves a checkpoint carrying no metrics.
+    """Report 0.25 through ``ctx.report_objective`` and save ``model_final``.
+
+    Pass ``{STATE_DICT_KEY: ctx.build_model().state_dict()}`` to ``ctx.save_checkpoint`` under
+    ``model_final``.
     """
     ctx.report_objective(0.25)
     ctx.save_checkpoint(
@@ -635,8 +662,9 @@ def _reports_only(ctx):
 
 
 def test_a_report_only_trial_projects_the_value_it_reported(tmp_path):
-    """A bespoke trial reporting only through ``report_objective`` projects that value as its
-    result, the same value the sweep's scheduler saw.
+    """A trial reporting through ``report_objective`` alone projects that value as its result.
+
+    The trial completes, reports 0.25, and its listing row's best metric is 0.25.
     """
     from tcip_mcp.experiments import observe
 
@@ -657,12 +685,15 @@ RESOLVED_KEYS = {"data", "geometry", "partition", "trait_revision"}
 def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_the_configs(
     tmp_path, monkeypatch, real_hpo_base_config
 ):
-    """Guard. A run opened through the launcher's own producer (``run_context``) and a sweep
-    opened by ``open_sweep`` with its one trial record no selection metric and no direction,
-    only the trait revision beside what they resolved, the sweep's and its trial's one revision;
-    every reader answers the config's own metric: the run's summary and the selection row its
-    body reports, the trial's summary, and the sweep's search direction and outcome. The trial's
-    body is not run.
+    """Run and sweep records carry no selection metric, and their readers answer the config's.
+
+    A run opened through the launcher's own producer (``run_context``) and a sweep
+    opened by ``open_sweep`` with its one trial record no selection metric and no direction:
+    their resolved keys are the data, geometry, partition and trait revision, the sweep's record
+    holds its creation time, trait revision and input, and the trial's revision is the sweep's.
+    The run's summary and the selection row its body reports, the trial's summary, and the
+    sweep's search direction and outcome each answer the config's own metric. The trial's body is
+    not run.
     """
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.experiments import (
@@ -769,9 +800,10 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
 def test_a_context_for_an_ended_run_is_refused_and_writes_nothing(
     tmp_path, monkeypatch
 ):
-    """A run whose final status is written takes no more writes: running it again refuses before
-    anything is written, and a context built from its record refuses a save, leaving its
-    directory byte-identical.
+    """A context for an ended run is refused and writes nothing.
+
+    For a run whose final status is written, running it again refuses and a context built from
+    its record refuses a save, leaving its directory byte-identical.
     """
     from tcip_mcp.experiments import RunEndedError, observe
     from tcip_mcp.pipelines.training.subprocess_worker import (

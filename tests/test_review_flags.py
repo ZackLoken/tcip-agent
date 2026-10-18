@@ -1,6 +1,7 @@
-"""Review flags through the one label save: a comment raised on a place, a proposal or the
-image, the reply that resolves it, the removal that resolves it, and what the editor reads
-back.
+"""Review flags through the one label save.
+
+Covers a comment raised on a place, a proposal or the image, the reply that resolves it, the
+removal that resolves it, and what the editor reads back.
 """
 
 from __future__ import annotations
@@ -160,8 +161,11 @@ def test_a_malformed_flag_refuses_before_any_write(
 def test_a_flag_or_a_resolution_by_no_person_refuses_before_any_write(
     tmp_path: Path,
 ) -> None:
-    """A flag's ``by`` and ``resolved_by`` name a person; a producer that names none, as an
-    agent's save names itself, neither raises a flag nor resolves one by removing its annotation.
+    """A flag raised or resolved by no person is refused, and nothing is written.
+
+    A save whose producer names no person, as an agent's save names itself, neither raises a
+    flag nor resolves one by removing its annotation; the document and the audit log are
+    unchanged.
     """
     image = _image(tmp_path)
     box = [{"subject": "bud", "bbox": BOX}]
@@ -294,8 +298,10 @@ def test_removing_the_flagged_annotation_resolves_its_flag_and_no_other(
 def test_moving_a_flagged_annotation_off_its_flag_resolves_it_as_removed(
     tmp_path: Path,
 ) -> None:
-    """The flag marks a place: an annotation corrected so far that it no longer covers the place
-    leaves nothing there to look at twice.
+    """Moving a flagged annotation off its flag's place resolves the flag as removed.
+
+    A small correction leaves the flag open, and a correction that no longer covers the flag's
+    place resolves it as removed.
     """
     image = _image(tmp_path)
     _save(

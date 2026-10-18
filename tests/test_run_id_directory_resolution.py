@@ -1,7 +1,7 @@
 """A run named by its own id is monitored, canceled and streamed from its directory alone.
 
-There is one id: a training run's id is its directory's name, so any process reaches a run it
-never launched by that id, straight off the directory, with no resolver and no second id.
+A training run's id is its directory's name, and a process other than its launcher reaches it by
+that id, off the directory.
 """
 
 from __future__ import annotations

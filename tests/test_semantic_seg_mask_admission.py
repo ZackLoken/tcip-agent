@@ -1,6 +1,7 @@
-"""A semantic-segmentation sample is an image plus exactly ``<stem>.png`` in the labels
-directory. A same-stem entry in any other format refuses by name, and no sample ever trains
-with a fabricated all-background mask.
+"""A semantic-segmentation sample is an image plus exactly ``<stem>.png`` in the labels directory.
+
+A same-stem entry in any other format refuses by name, and an image with no mask is left out of
+the dataset and tallied absent.
 """
 
 from __future__ import annotations
@@ -66,9 +67,10 @@ def test_a_same_stem_non_png_entry_refuses(tmp_path: Path) -> None:
 def test_the_class_count_is_derived_from_the_masks_the_run_was_handed(
     tmp_path: Path,
 ) -> None:
-    """The head is sized for the classes this run's own masks hold, never a pinned two: masks
-    reaching id 2 derive three, and a caller stating any count, the derived one included, refuses
-    by name: the count is the masks' own, never an input compared against them.
+    """The class count is derived from the run's own masks, and a stated count is refused.
+
+    Masks reaching id 2 derive three classes, and a caller stating a count of 2, 3 or 5, the
+    derived one included, refuses naming ``num_classes``.
     """
     images_dir, masks_dir = _dataset(tmp_path)
     painted_frame(
@@ -91,8 +93,10 @@ def test_the_class_count_is_derived_from_the_masks_the_run_was_handed(
 def test_the_class_count_and_a_served_sample_read_one_mask_the_same_way(
     tmp_path, monkeypatch
 ):
-    """Both the run's class count and the sample the loader serves come through one mask read:
-    two reads of the same file could disagree about what it holds.
+    """The class count and a served sample read their masks through ``read_mask``.
+
+    Building the dataset reads each mask through ``BaseImageDataset.read_mask``, and serving
+    the first sample reads its mask through the same function.
     """
     from tcip_mcp.pipelines.data.datasets import BaseImageDataset
 

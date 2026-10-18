@@ -1,8 +1,8 @@
-"""Subject names in the subject registry are exact and are never normalized or folded together.
+"""Subject names in the subject registry are kept exactly as written.
 
-A label references its subject by name, so two names that differ at all name two subjects: the
-registry keeps them apart rather than merging them, a record carrying no usable name contributes
-nothing to a registry derived from labels, and a new name stays addable alongside the existing ones.
+A label references its subject by name: names differing in case alone are kept as two subjects,
+a label document whose record carries an empty name is reported unreadable, and a new name is
+addable alongside the saved ones.
 """
 
 from __future__ import annotations
@@ -24,8 +24,10 @@ DATE = "2026-03-02"
 def test_subject_names_differing_only_by_case_stay_distinct(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """Nothing case-folds a subject name on the way in, so a name typed a second way is stored as
-    its own subject with its own description rather than silently absorbed into the first.
+    """Subject names differing in case alone stay two subjects.
+
+    A save of ``bud`` and ``Bud`` stores and loads each as its own subject with its own
+    description.
     """
     save = client.post(
         "/api/subjects/save",
@@ -58,7 +60,9 @@ def test_subject_names_differing_only_by_case_stay_distinct(
 def test_registry_derived_from_labels_keeps_each_name_exactly_as_labeled(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """With no saved registry, the discovered names are the ones a readable label document
+    """A registry derived from labels keeps each name exactly as labeled.
+
+    With no saved registry, the discovered names are the ones a readable label document
     actually carries, each unchanged.
     """
     label_image(
@@ -84,9 +88,10 @@ def test_registry_derived_from_labels_keeps_each_name_exactly_as_labeled(
 def test_registry_derivation_reports_a_document_it_cannot_read(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A record whose subject name is empty makes its own document unreadable: the draft
-    registry still derives from the readable documents, and names the unreadable one by stem
-    rather than silently deriving nothing from it.
+    """Registry derivation names a label document it cannot read.
+
+    A record whose subject name is empty makes its own document unreadable: the draft
+    registry derives from the readable documents and names the unreadable one by stem.
     """
     from tcip_store import encode_record
     from tests._record_damage_fixtures import damage_record
@@ -122,8 +127,10 @@ def test_registry_derivation_reports_a_document_it_cannot_read(
 def test_a_new_subject_is_addable_alongside_the_saved_ones(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """Authoring a subject stays open: a later save adds the new name and updates the existing one
-    in place, leaving one entry per name rather than a duplicate.
+    """A new subject is addable alongside the saved ones.
+
+    A later save adds the new name and updates the existing one in place, leaving one entry per
+    name.
     """
     first = client.post(
         "/api/subjects/save",

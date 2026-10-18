@@ -76,9 +76,10 @@ def _model_source():
 
 
 def _cfg(project, data: tuple[str, str], stages, horizon: int = 1, **extra):
-    """A classifier config of ``project`` of ``stages``, each ending at its cosine schedule's
-    ``horizon``, training on every one of ``data``'s frames by its table with no validation
-    side, at the statistics of those frames.
+    """Return a classifier config of ``project`` over ``stages`` and ``data``'s frames and table.
+
+    Its split draws no validation side, its optimizer is AdamW under a cosine schedule over
+    ``horizon`` epochs, it selects on ``loss``, and ``extra`` passes further top-level keys.
     """
     from tests._chain_fixtures import training_config
 
@@ -100,17 +101,18 @@ def _cfg(project, data: tuple[str, str], stages, horizon: int = 1, **extra):
 
 
 def _run_dir(project: Path, name: str) -> Path:
-    """The directory of the run of ``project`` named ``name``."""
+    """Return the directory of the run of ``project`` named ``name``."""
     from tcip_mcp.experiments import experiment_dir
 
     return experiment_dir(name, project=project)
 
 
 def _trained(project: Path, cfg: dict, name: str, **kwargs):
-    """The run named ``name`` of ``project`` over ``cfg``, opened by the launcher's own producer
-    and trained through the training loader the platform builds for it
-    (``generic_trainer.run_loaders``) over the frames and table its data section names;
-    ``kwargs`` are ``train``'s.
+    """Open and train the run named ``name`` of ``project`` over ``cfg`` and return it.
+
+    The run is opened by the launcher's own producer and trained through the training loader
+    the platform builds for it (``generic_trainer.run_loaders``) over the frames and table its
+    data section names; ``kwargs`` are ``train``'s.
     """
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
@@ -167,11 +169,10 @@ def test_resume_skips_completed_stage_and_restores_optimizer(tmp_path):
 
 
 def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
-    """Resuming must restore the RNG stream positions, not just reseed from scratch: a resumed
-    epoch's loss must match the straight-through run's epoch at the same point, even if the
-    global RNG is deliberately corrupted between save and resume. The run's loader shuffles
-    from a generator of its own seeded from the run's config, whose position the checkpoint
-    captures beside the global streams.
+    """A resume restores the RNG stream positions its checkpoint captured.
+
+    The checkpoint carries ``torch_rng_state``, and with the global streams reseeded between
+    save and resume, the resumed epoch's loss matches the straight-through run's second epoch.
     """
     data = _classification_data(tmp_path)
     cfg = _cfg(tmp_path, data, [stage(-1)], 2, seed=11)
@@ -201,9 +202,7 @@ def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
 def test_resume_from_a_checkpoint_missing_a_resume_key_refuses_naming_it(
     tmp_path,
 ):
-    """A checkpoint lacking a key the resume reads fails the run naming that key, rather than
-    resuming from a guessed default.
-    """
+    """A resume from a checkpoint lacking a key it reads fails the run naming that key."""
     data = _classification_data(tmp_path)
     cfg = _cfg(tmp_path, data, [stage(-1)], 2)
 
@@ -260,7 +259,7 @@ def test_a_resume_whose_optimizer_restore_raises_fails_the_run(
 
 
 def _draws() -> tuple:
-    """One draw from each of the four generator streams a checkpoint carries."""
+    """Return one draw from each of the four generator streams a checkpoint carries."""
     import random
 
     import numpy as np
@@ -277,9 +276,10 @@ def _draws() -> tuple:
     not torch.cuda.is_available(), reason="needs a CUDA device"
 )
 def test_a_cuda_resume_restores_the_rng_streams(tmp_path, monkeypatch):
-    """The streams a CUDA resume continues from are the ones the checkpoint captured: the draws
-    taken just after the trainer's restore equal the draws the captured states yield when set
-    through the four RNG APIs directly, independent of the restore under test.
+    """A CUDA resume continues from the RNG streams the checkpoint captured.
+
+    The draws taken just after the trainer's restore equal the draws the captured states yield
+    when set through the four RNG APIs directly, independent of the restore under test.
     """
     import tcip_mcp.pipelines.training.generic_trainer as trainer
 
@@ -315,9 +315,7 @@ def test_a_cuda_resume_restores_the_rng_streams(tmp_path, monkeypatch):
 
 
 def test_seeded_loader_kwargs_reproducible_shuffle():
-    """The platform's own DataLoader construction sites are seeded: two loaders built
-    from the same seed shuffle identically.
-    """
+    """Two ``seeded_loader_kwargs`` generators built from one seed shuffle identically."""
     from tcip_mcp.pipelines.training.generic_trainer import (
         seeded_loader_kwargs,
     )
@@ -330,9 +328,7 @@ def test_seeded_loader_kwargs_reproducible_shuffle():
 
 
 def test_loader_worker_init_fn_is_picklable():
-    """Windows spawn pickles worker_init_fn to every DataLoader worker, so a closure here
-    breaks every num_workers > 0 run on this platform.
-    """
+    """The loader's ``worker_init_fn`` survives a pickle round trip."""
     import pickle
 
     from tcip_mcp.pipelines.training.generic_trainer import (
@@ -344,9 +340,11 @@ def test_loader_worker_init_fn_is_picklable():
 
 
 def test_loader_worker_init_configures_gdal_cache_and_seeds(monkeypatch):
-    """Every spawned worker starts on GDAL's stock cache default, so the init fn must apply
-    the platform budget in the worker and seed numpy and random from the seed torch gave that
-    worker (``torch.initial_seed`` inside it, set here as torch sets it).
+    """The loader's worker init configures GDAL's cache and seeds numpy and random.
+
+    The init fn calls ``configure_gdal_cache`` once and seeds numpy and random from the seed
+    torch gave that worker (``torch.initial_seed`` inside it, set here as torch sets it), modulo
+    2**32.
     """
     from tcip_mcp.pipelines import raster_source
     from tcip_mcp.pipelines.training.generic_trainer import (

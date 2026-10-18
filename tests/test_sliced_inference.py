@@ -1,5 +1,7 @@
-"""Sliced inference through SAHI: one lattice, one merge, both source kinds, and one execution
-record from the assessment through the bucket published under it.
+"""Sliced inference through SAHI.
+
+Covers one lattice, one merge, both source kinds, and one execution record from the assessment
+through the bucket published under it.
 """
 
 from __future__ import annotations
@@ -38,8 +40,7 @@ BLOBS = (SEAM_BLOB, INNER_BLOB, WIDE_BLOB)
 
 
 TRAINING_HEIGHT = 180
-"""The height of a training frame: :data:`FRAME` cropped short of square, every blob kept whole,
-so an untiled run records no square frame edge a stated tile edge could contradict."""
+"""The height of a training frame: :data:`FRAME` cropped short of square, its blobs kept whole."""
 
 
 def _checkpoint(
@@ -50,11 +51,14 @@ def _checkpoint(
     by_band: bool = False,
     tiling: dict | None = None,
 ):
-    """The bright-blob checkpoint a run under ``tmp_path`` completed over two ``in_chans``-band
-    frames of its own holding :data:`BLOBS`, each labeled (with ``with_masks``, by polygon),
-    tiled as ``tiling`` states and otherwise untiled; registered by completing, its path and its
-    load through the platform's own loader. With ``by_band`` its frames' registry declares the
-    attribute whose value is the band a blob is bright in, as the blob detector calls it.
+    """Return a checkpoint's path and its load through the platform's own loader.
+
+    Two frames, ``_frame(bands=in_chans)`` cut to :data:`TRAINING_HEIGHT` rows, are written
+    with a ``bud`` annotation per :data:`BLOBS` entry (a polygon with ``with_masks``, else a
+    box), and a run under ``tmp_path`` of ``BLOB_BUILDER`` over them, with ``tiling`` passed
+    through, registers the checkpoint by completing. With ``by_band`` the frames' registry
+    declares a categorical ``color`` attribute (red, green, blue) and every annotation is
+    labeled ``red``.
     """
     import tifffile
 
@@ -112,8 +116,10 @@ def _checkpoint(
 
 
 def _frame(bands: int = 3, *, value=255, blobs=BLOBS) -> np.ndarray:
-    """A black ``bands``-band frame holding each of ``blobs`` at ``value`` (one per band, or one
-    for every band).
+    """Return a :data:`FRAME` square array with ``bands`` bands stacked on the last axis.
+
+    Each band is ``painted_array`` over ``blobs`` at that band's ``value``; ``value`` is one per
+    band, or one broadcast to all bands.
     """
     from tests._producer_fixtures import painted_array
 
@@ -127,10 +133,11 @@ def _frame(bands: int = 3, *, value=255, blobs=BLOBS) -> np.ndarray:
 
 
 def _pass(checkpoint, reference=None, **stated):
-    """The tiled pass ``checkpoint`` runs at the fixture's tile edge and overlap, merging by NMM
-    at 0.5, keeping every score and, for an instance segmentation checkpoint, collecting masks
-    cut at the sample threshold, with ``stated`` over those, made runnable from ``reference``
-    when one is given.
+    """Return the tiled pass for ``checkpoint`` at the fixture's tile edge and overlap.
+
+    The pass merges by NMM at 0.5 at conf 0.0 and, for an instance segmentation
+    checkpoint, collects masks cut at the sample threshold, with ``stated`` over those, made
+    runnable from ``reference`` when one is given.
     """
     from tcip_mcp.pipelines.execution import prepare
 
@@ -161,8 +168,10 @@ def _sliced(p, source, **kwargs):
 
 
 def _whole(p, source) -> dict:
-    """The untiled record of ``source`` under the pass's own conf, mask collection and mask cut
-    and the checkpoint's density.
+    """Return the untiled record of ``source`` under the pass's own execution values.
+
+    The values are the pass's own conf, mask collection and mask cut and the checkpoint's
+    density.
     """
     from tcip_mcp.pipelines.execution import execution_record
 
@@ -224,7 +233,9 @@ def test_slice_lattice_states_sahis_own_boxes(height, width, tile, overlap):
 def test_objects_across_a_seam_predict_once_through_both_source_kinds(
     tmp_path,
 ):
-    """The whole-decode path and the windowed path merge to the same boxes, the wide blob no slice
+    """Objects across a seam predict once through both source kinds.
+
+    The whole-decode path and the windowed path merge to the same boxes, the wide blob no slice
     holds whole predicted once over its full extent.
     """
     from tcip_mcp.pipelines.raster_source import open_raster
@@ -245,7 +256,11 @@ def test_objects_across_a_seam_predict_once_through_both_source_kinds(
 
 
 def test_a_five_band_slice_reaches_the_model_with_every_band(tmp_path):
-    """Every band reaches the model with its own values, never one band repeated or dropped."""
+    """A five-band slice reaches the model with five channels and its bands' values.
+
+    All eight model calls see five channels, at least one call's per-band peaks equal the five
+    band values over 255, and the whole-source pass predicts one box per blob.
+    """
     from tcip_mcp.pipelines.raster_source import open_raster
 
     band_values = [255, 200, 150, 100, 60]
@@ -280,9 +295,11 @@ def _mask_extents(record: dict) -> list[tuple]:
 def test_instance_masks_merged_across_a_seam_are_one_polygon_per_object_whatever_its_values(
     tmp_path,
 ):
-    """Calls of one footprint wider than any slice, differing in their attribute value: every
+    """Instance masks merged across a seam are one polygon per object across differing values.
+
+    Calls of one footprint wider than any slice, differing in their attribute value: every
     slice's partial masks merge into one polygon spanning the whole object, carrying one value of
-    its attribute, since the merge compares the one subject and never its attribute values.
+    its attribute.
     """
     _path, checkpoint = _checkpoint(tmp_path, with_masks=True, by_band=True)
     x0, y0, x1, y1 = WIDE_BLOB
@@ -317,9 +334,7 @@ def test_an_untiled_record_carries_the_polygons_the_sliced_record_does(
 def test_a_predicted_mask_carries_the_rings_the_shared_extractor_draws(
     tmp_path,
 ):
-    """A predictor's masks and SAM-assisted ground truth describe one object through one
-    extractor.
-    """
+    """A predicted mask carries the rings ``mask_to_polygon_rings`` draws from the same mask."""
     from tcip_annotation.mask_contours import mask_to_polygon_rings
 
     _path, checkpoint = _checkpoint(tmp_path, with_masks=True)
@@ -342,9 +357,12 @@ def test_a_predicted_mask_carries_the_rings_the_shared_extractor_draws(
 
 
 def test_masks_are_cut_at_the_stated_threshold_the_record_names(tmp_path):
-    """Guard. A pass cuts every mask at the ``mask_binarize`` its statement's ``mask_cut``
-    carries, and its execution record names the block's values as stated: cut at zero, every
-    detection's mask covers the whole frame, so all share one ring the blobs' own cut does not.
+    """A pass cuts masks at the stated threshold its execution record names.
+
+    At the sample cut the masks carry as many distinct rings as there are blobs; cut at a
+    ``mask_binarize`` of zero, they carry one ring, none of the sample cut's, and the execution
+    record names the stated cut with ``mask_binarize`` and ``vertex_spacing`` sourced
+    ``explicit``.
     """
     from tcip_mcp.pipelines.execution import MaskCut
 
@@ -373,9 +391,11 @@ def test_masks_are_cut_at_the_stated_threshold_the_record_names(tmp_path):
 def test_an_instance_segmentation_pass_collecting_no_masks_evaluates_by_box(
     tmp_path,
 ):
-    """Guard. An instance segmentation checkpoint evaluated under a statement collecting no
-    masks scores its boxes by box, the choice its execution record carries, and one collecting
-    them scores by mask.
+    """An instance segmentation pass collecting no masks evaluates by box.
+
+    An instance segmentation checkpoint evaluated under a statement collecting no masks scores
+    its boxes by box, the choice its execution record carries, and one collecting them scores
+    by mask.
     """
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._training_values import IOU_THRESHOLD, collection_pass
@@ -415,8 +435,10 @@ def test_an_untiled_detector_record_carries_no_masks(tmp_path):
 def test_a_windowed_pass_resumed_mid_raster_matches_an_uninterrupted_one(
     tmp_path, with_masks
 ):
-    """The recorded progress carries each slice's shifted predictions whole, so a resumed pass
-    merges the seeded predictions, masks included, exactly as the uninterrupted pass does.
+    """A windowed pass resumed mid-raster matches an uninterrupted one.
+
+    A pass interrupted with two slices recorded, resumed, runs the model on the remaining two
+    slices and answers the uninterrupted pass's result, every mask carrying a segmentation.
     """
     from tcip_mcp.pipelines.raster_source import open_raster
 
@@ -452,8 +474,10 @@ def test_a_windowed_pass_resumed_mid_raster_matches_an_uninterrupted_one(
 
 
 def test_training_and_inference_slice_one_frame_on_one_lattice(tmp_path):
-    """The tiled training dataset's slices and a sliced inference pass's recorded slices over the
-    same frame, each read whole off its own route's record.
+    """Training and inference slice one frame on one lattice.
+
+    The tiled training dataset's slices and a sliced inference pass's recorded slices over the
+    same frame agree, each read whole off its own route's record.
     """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.raster_source import open_raster
@@ -503,7 +527,9 @@ def test_a_postprocess_outside_the_vocabulary_refuses_by_name(tmp_path):
 
 
 def test_a_tiled_pass_stating_no_merge_refuses_naming_postprocess(tmp_path):
-    """No merge is chosen for a tiled pass: one stating none refuses naming ``postprocess``, and
+    """A tiled pass stating no merge refuses naming ``postprocess``.
+
+    No merge is chosen for a tiled pass: one stating none refuses naming ``postprocess``, and
     the record of one stating it keeps the merge with no source label beside it.
     """
     from tcip_mcp.pipelines.execution import ExecutionRefusedError
@@ -521,9 +547,7 @@ def test_a_tiled_pass_stating_no_merge_refuses_naming_postprocess(tmp_path):
 def test_the_merge_leaves_the_process_environment_as_it_found_it(
     tmp_path, monkeypatch
 ):
-    """SAHI's torchvision backend selects its device by writing ``CUDA_VISIBLE_DEVICES`` into the
-    process, which a training launch's child would inherit; the platform's merge never does.
-    """
+    """The sliced merge leaves ``CUDA_VISIBLE_DEVICES`` unset in the process environment."""
     import os
 
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
@@ -551,10 +575,12 @@ def test_a_stated_merge_threshold_never_reaches_the_detectors_own_nms(
 def test_an_iou_merge_derives_its_threshold_and_an_ios_merge_states_one(
     tmp_path,
 ):
-    """A box nested in another overlaps it at IoU 0.25 and IoS 1: suppression by IoU derives,
-    from a reference the caller holds, a threshold the pair stays apart under, and a pass holding
-    no reference refuses it unstated; a merge by IoS has no derivation, so the pass refuses one
-    stated without a threshold and merges the pair under the threshold stated for it.
+    """An IoU merge derives its threshold from a reference; an IoS merge refuses one unstated.
+
+    A box nested in another overlaps it at IoU 0.25 and IoS 1: suppression by IoU derives,
+    from a reference the pass is handed, a threshold the pair stays apart under, and a pass holding
+    no reference refuses it unstated; a merge by IoS stated without a threshold refuses with or
+    without a reference, and merges the pair under the threshold stated for it.
     """
     from sahi.prediction import ObjectPrediction
 
@@ -596,10 +622,13 @@ def test_an_iou_merge_derives_its_threshold_and_an_ios_merge_states_one(
 def test_a_preparation_runs_nothing_and_its_pass_merges_at_the_threshold_it_resolved(
     tmp_path, monkeypatch
 ):
-    """``prepare`` readies a checkpoint and holds no pass: nothing it returns predicts. Made
-    runnable, its pass carries the merge threshold resolved once, stated or derived from the
-    reference, and the real merger receives that threshold on every prediction; a threshold with
-    no statement and no reference, or one the reference cannot derive, refuses naming it.
+    """A preparation exposes no ``predict``, and its pass merges at the threshold it resolved.
+
+    ``prepare`` returns a ``Preparation`` with no ``predict`` attribute and no ``Pass`` among
+    its attributes. Made runnable, its pass carries the merge threshold it resolved, stated (0.5)
+    or derived from an overlapping reference, and predicting two sources builds the merger with
+    that threshold for each; a threshold with no statement and no reference, or one a reference
+    of two apart boxes cannot derive, refuses naming ``cross_tile_nms``.
     """
     import tcip_mcp.pipelines.slicing as slicing
     from tcip_mcp.pipelines.derivations import CROSS_TILE_NMS_DERIVATION
@@ -717,10 +746,10 @@ N_CALIBRATION_IMAGES = 20
 
 
 def _blob_capture(project: Path) -> Path:
-    """Frames of 20px blobs in three rows of four, each image shifted a pixel further right so no
-    two share ground truth, labeled with 32px boxes that overlap their row neighbors by 10px (a
-    neighbor tail an IoU threshold derives from), ingested as one capture date of the
-    dataset ``ds``; its images directory.
+    """Ingest a capture of blob frames into the dataset ``ds`` and return its images directory.
+
+    It writes :data:`N_CALIBRATION_IMAGES` blob frames, each labeled ``bud`` by one box per
+    blob, ingests them into ``project / "ds"`` and states them one capture date.
     """
     import datetime
 
@@ -762,7 +791,9 @@ def _blob_capture(project: Path) -> Path:
 def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(
     tmp_path, monkeypatch
 ):
-    """A tiled assessment merging by IoS at its stated threshold merges every reference slice and
+    """An assessed tiled pass and the bucket published under it run one merge.
+
+    A tiled assessment merging by IoS at its stated threshold merges every reference slice and
     every slice of the bucket published under it at that one value, and the bucket records the
     assessment's execution.
     """
@@ -846,10 +877,12 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(
 def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(
     tmp_path, with_masks
 ):
-    """A tiled record read back from its published bucket states its lattice and the merge it
-    names, and that name builds SAHI's postprocess of that type over that type's metric: a
-    tile-trained checkpoint of either task that tiles predicts at its recorded lattice when a pass
-    states none.
+    """A published bucket records the slice geometry its checkpoint derived.
+
+    For a checkpoint of either task recording a tiling, a pass stating no tile publishes a bucket
+    whose record states the checkpoint's lattice and its stated NMM merge, which builds SAHI's
+    NMM postprocess by IoS at 0.6; a merge stated without its threshold refuses naming
+    ``cross_tile_nms``.
     """
     import sahi
     from sahi.predict import POSTPROCESS_NAME_TO_CLASS

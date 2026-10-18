@@ -1,5 +1,7 @@
-"""Every POST, PUT, PATCH and DELETE route declares a JSON body model, so it refuses every content
-type a browser simple request can send and only application/json reaches its handler.
+"""Every POST, PUT, PATCH and DELETE route declares a JSON body model.
+
+A missing body, a form-encoded body and a headerless JSON-shaped body each answer 422, and an
+empty JSON object reaches the handler.
 """
 
 from __future__ import annotations
@@ -21,10 +23,10 @@ EMPTY_BODY_ROUTES = ("/api/training/runs/does-not-exist/tensorboard",)
 
 
 def declares_json_body(route: APIRoute) -> bool:
-    """Whether a route's declared body is JSON and required: a form or multipart route declares a
-    body field of another media type, and a defaulted JSON body model is substituted on an empty
-    body instead of validated, so only a required JSON model refuses the browser simple-request
-    shape before the handler runs.
+    """Return whether a route's declared body is JSON and required.
+
+    It answers whether ``route.body_field`` exists, its media type is ``application/json``, and
+    it is required.
     """
     field = route.body_field
     return (
@@ -35,9 +37,7 @@ def declares_json_body(route: APIRoute) -> bool:
 
 
 def test_every_state_changing_route_declares_a_json_body_model() -> None:
-    """Every state-changing route declares a required JSON body; one taking only path
-    parameters, and a form or multipart route, fail this.
-    """
+    """Every state-changing route declares a required JSON body."""
     routes = state_changing_routes(app)
     assert routes, (
         "no state-changing routes found; the route walk itself is broken"
@@ -53,8 +53,10 @@ def test_every_state_changing_route_declares_a_json_body_model() -> None:
 def test_a_declared_body_model_admits_an_empty_json_object(
     client: TestClient, opened_project
 ) -> None:
-    """A route that carries no fields of its own accepts the ``{}`` its real caller sends and
-    reaches the handler's own outcome: with a project open, an unknown run is a 404.
+    """A body model with no fields admits an empty JSON object and reaches the handler.
+
+    A route that carries no fields of its own accepts ``{}`` and reaches the handler's own
+    outcome: with a project open, an unknown run is a 404.
     """
     resp = client.post(
         "/api/training/runs/does-not-exist/tensorboard", json={}
@@ -63,15 +65,13 @@ def test_a_declared_body_model_admits_an_empty_json_object(
 
 
 def test_a_missing_body_is_refused(client: TestClient) -> None:
-    """No body at all fails the body model rather than reaching the handler."""
+    """A request with no body fails the body model with 422."""
     reached = {url: client.post(url).status_code for url in EMPTY_BODY_ROUTES}
     assert reached == dict.fromkeys(EMPTY_BODY_ROUTES, 422)
 
 
 def test_a_form_encoded_body_is_refused(client: TestClient) -> None:
-    """A form submission is exactly the browser simple-request shape this rail exists to close;
-    it must fail the body model, not fall through to the handler.
-    """
+    """A form-encoded body fails the body model with 422."""
     reached = {
         url: client.post(url, data={"id": "does-not-exist"}).status_code
         for url in EMPTY_BODY_ROUTES
@@ -80,9 +80,10 @@ def test_a_form_encoded_body_is_refused(client: TestClient) -> None:
 
 
 def test_a_headerless_json_shaped_body_is_refused(client: TestClient) -> None:
-    """A JSON-shaped body with no ``Content-Type`` header (what a cross-origin ``fetch`` of an
-    empty-type ``Blob`` sends, a CORS simple request with no preflight) is not parsed as JSON
-    and fails the body model rather than reaching the handler.
+    """A JSON-shaped body with no ``Content-Type`` header fails the body model.
+
+    A request built with the body ``{}`` and no ``Content-Type`` header answers 422 on each
+    empty-body route.
     """
     for url in EMPTY_BODY_ROUTES:
         request = client.build_request("POST", url, content=b"{}")
@@ -99,7 +100,9 @@ def test_a_headerless_json_shaped_body_is_refused(client: TestClient) -> None:
 
 
 def test_the_guard_rejects_the_shapes_it_exists_to_catch() -> None:
-    """The predicate refuses a route with no body, a form route, a multipart route and a
+    """The JSON-body predicate refuses bodiless, form, multipart and defaulted-JSON routes.
+
+    The predicate refuses a route with no body, a form route, a multipart route and a
     defaulted JSON body model, and admits a required JSON body model.
     """
     from typing import Annotated

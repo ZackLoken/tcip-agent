@@ -1,10 +1,7 @@
-"""CI guardrail: crop skills must not assert traits outside crops.yml.
+"""Crop skills assert no trait outside crops.yml.
 
-Per-crop skills can fabricate plausible-looking trait names that aren't in crops.yml, and review
-(human or LLM) is not guaranteed to catch it; only a deterministic check reliably does. It's
-pinned here as a permanent gate: any crop / crop-science SKILL.md that backticks a snake_case
-token which is neither a crops.yml trait nor an allow-listed platform token fails the build, so
-the drift can't recur.
+Any crop or crop-science document that backticks a snake_case token which is neither a crops.yml
+trait nor an allow-listed platform token fails.
 """
 
 from __future__ import annotations
@@ -76,11 +73,10 @@ def test_skill_asserts_no_off_crop_traits(name: str, crop_key: str) -> None:
 
 
 def test_backtick_regex_catches_no_underscore_and_mixed_case_names() -> None:
-    """The backtick regex requires an underscore, so single-word trait names (`dbh`, `sex`,
-    `ploidy`, ...) and mixed-case segments (`fruit_juice_TA`, `fruit_juice_pH`) never match,
-    invisible to both checks. That's deliberate, to avoid flooding on bare code identifiers, so
-    single-word names stay a fabrication-detection blind spot by design; the membership-search
-    check below is what actually catches them for the off-crop case.
+    """The backtick regex matches mixed-case snake names and no single-word name.
+
+    Mixed-case segments (`fruit_juice_TA`, `fruit_juice_pH`) and `plant_height` match, and a
+    single-word name does not.
     """
     text = "See `fruit_juice_TA` and `fruit_juice_pH` and `plant_height` here."
     toks = guardrail.extract_backtick_snake(text)
@@ -94,9 +90,7 @@ def test_backtick_regex_catches_no_underscore_and_mixed_case_names() -> None:
 
 
 def test_mentioned_trait_names_finds_single_word_traits() -> None:
-    """`mentioned_trait_names` is membership search, not regex extraction: it finds `dbh` even
-    though `extract_backtick_snake` (the fabrication-check regex) structurally cannot.
-    """
+    """`mentioned_trait_names` finds the single-word trait `dbh` in a sentence."""
     allnames, _ = guardrail.load_vocab()
     found = guardrail.mentioned_trait_names(
         "Measure `dbh` on the standing tree.", allnames
@@ -107,9 +101,10 @@ def test_mentioned_trait_names_finds_single_word_traits() -> None:
 def test_the_guardrail_checks_the_vocabulary_the_registry_itself_loads(
     monkeypatch,
 ) -> None:
-    """One read of the controlled vocabulary serves both the runtime registry and this check.
-    Two reads can disagree, and the disagreement shows up as a skill passing a check the platform
-    would fail on the same name, so the vocabulary the guardrail sees is the registry's.
+    """The guardrail checks against the vocabulary the trait registry loads.
+
+    With the registry's trait list replaced, the guardrail's names and crop assignments are the
+    replacement's, and a token outside it reads as unknown.
     """
     from tcip_mcp import traits
 
@@ -128,7 +123,9 @@ def test_the_guardrail_checks_the_vocabulary_the_registry_itself_loads(
 
 
 def test_a_readable_vocabulary_is_checked() -> None:
-    """The real controlled vocabulary loads, carries its crop assignments, and a clean skill comes
+    """The real controlled vocabulary loads with its crop assignments and checks clean text clean.
+
+    The real controlled vocabulary loads, carries its crop assignments, and a clean skill comes
     back clean.
     """
     allnames, by_crop = guardrail.load_vocab()
@@ -143,8 +140,9 @@ def test_a_readable_vocabulary_is_checked() -> None:
 
 
 def test_off_crop_tokens_catches_single_word_mis_assignment() -> None:
-    """A single-word real trait referenced on the wrong crop's skill is caught by
-    `off_crop_tokens`. `dbh` is a real crops.yml trait not assigned to currant.
+    """`off_crop_tokens` catches a single-word real trait on the wrong crop's skill.
+
+    `dbh` is a real crops.yml trait not assigned to currant.
     """
     allnames, by_crop = guardrail.load_vocab()
     assert "dbh" in allnames

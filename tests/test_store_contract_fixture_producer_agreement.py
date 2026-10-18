@@ -1,5 +1,6 @@
-"""Records the platform's producers write, checked against a golden of their shape or against
-the shape their readers require.
+"""Records the platform's producers write, checked against a golden of their shape.
+
+Each record is checked against a golden of its shape or against the shape its readers require.
 """
 
 from __future__ import annotations
@@ -116,9 +117,11 @@ it shipped and its plant mapping's disclosure."""
 def test_a_selection_record_carries_each_sample_s_own_source_label_group_and_side(
     tmp_path,
 ):
-    """A selection's record, as ``draw_splits`` writes it over real images and their label
-    documents, is its sample list: each entry names its own source and label rather than a
-    shared root, with no per-date members block or bare id list.
+    """A selection record's first sample carries member, source, ground truth, group and side keys.
+
+    In the record ``draw_splits`` writes over real images and their label documents, the first
+    stored sample holds at least those keys, and the record holds no ``members``, ``splits`` or
+    ``date`` key.
     """
     import tcip_store as ts
     from tcip_mcp.pipelines.data import selection
@@ -154,7 +157,9 @@ def test_a_selection_record_carries_each_sample_s_own_source_label_group_and_sid
 def test_the_delivery_events_golden_carries_every_key_a_delivery_records(
     tmp_path,
 ):
-    """A real phenology delivery through a plant mapping, every record of it made by the
+    """The delivery-event golden carries every key a real phenology delivery records.
+
+    A real phenology delivery through a plant mapping, every record of it made by the
     platform's own producers, leaves an event whose keys are exactly the golden's: at the event,
     its bucket finding, its producer and its plant mapping's disclosure.
     """
@@ -203,9 +208,10 @@ def test_the_delivery_events_golden_carries_every_key_a_delivery_records(
 def test_the_traits_golden_carries_every_field_the_proposing_and_confirming_producers_write(
     tmp_path,
 ):
-    """The record ``propose_trait`` and ``confirm_revision`` leave on the store carries exactly
-    the golden's keys, at the record, the revision, the entry and the operationalization, so a
-    field added to the schema is caught here.
+    """The traits golden carries every field the proposing and confirming producers write.
+
+    The record ``propose_trait`` and ``confirm_revision`` leave on the store carries exactly
+    the golden's keys, at the record, the revision, the entry and the operationalization.
     """
     import tcip_store as ts
     from tcip_mcp import traits

@@ -1,8 +1,6 @@
 """A reference has to be a measurement, not the model's own output.
 
-Point an assessment's reference at the model's own predictions and every numeric criterion
-clears, because the model agrees with itself. The provenance the records carry is the only thing
-that can catch it, so the reference's label documents are refused whole
+The reference's label documents are refused whole
 (:func:`~tcip_annotation.json_io.require_reference_ground_truth`) when a record carries a
 prediction score, when an agent authored it and no reviewer accepted it, or when it carries a
 rule-based admission nobody signed off. Ordinary ground truth, ground truth a person authored, a
@@ -24,8 +22,9 @@ PRODUCER = "model:m_best@c9f632ba98b2"  # the shape a publication stamps on ever
 
 
 def _documents(root: Path, stems, annotations) -> list[Annotation]:
-    """One label document per stem holding ``annotations(stem)``; every annotation they hold,
-    read back.
+    """Write one label document per stem and return the annotations they hold, read back.
+
+    Each document holds ``annotations(stem)``.
     """
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
 
@@ -84,7 +83,7 @@ def test_a_mixed_reference_refuses_whole_rather_than_keeping_its_clean_subset(
 
 
 def test_ground_truth_an_agent_authored_that_nobody_ruled_on_refuses(tmp_path):
-    """The same output with its score dropped: no reviewer took responsibility for any of it."""
+    """Ground truth an agent authored and no reviewer accepted is refused whole, naming it."""
     documents = _documents(
         tmp_path,
         STEMS,
@@ -148,7 +147,7 @@ def test_ground_truth_a_person_stands_behind_is_a_reference(tmp_path, record):
 def test_the_assessment_refuses_a_reference_of_the_models_own_predictions(
     tmp_path,
 ):
-    """The rail runs inside the assessment, before any inference over the reference."""
+    """The assessment refuses a reference holding a prediction-scored record."""
     pytest.importorskip("torch")
     from tests._chain_fixtures import (
         assess,

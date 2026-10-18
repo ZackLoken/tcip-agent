@@ -1,7 +1,9 @@
-"""``run_inference``'s images regime, publishing a bucket end to end: the checkpoint's own recorded
-``scope`` decodes every detection's attribute ids into the ground-truth shape and the bucket's
-record states the same scope, read back through ``read_bucket``. A detector whose scope declares
-no attribute writes its subject alone the same way.
+"""``run_inference``'s images regime, publishing a bucket end to end.
+
+The checkpoint's own recorded ``scope`` decodes the detections' attribute ids into named values
+on the subject, and the bucket's scope, read back through ``read_bucket``, carries the same
+attributes. A detector whose scope declares no attribute writes its detection's subject with no
+attributes, and its bucket's scope carries none.
 """
 
 from __future__ import annotations
@@ -24,8 +26,9 @@ GRADE = cr.Attribute("grade", "ordinal", ("low", "mid", "high"))
 
 
 def _checkpoint(tmp_path: Path, *attributes: cr.Attribute) -> str:
-    """The checkpoint a run of ``tmp_path`` registered by completing, its dataset declaring
-    ``attributes`` on :data:`SUBJECT`.
+    """Return the checkpoint a run of ``tmp_path`` registered by completing.
+
+    The run's dataset declares ``attributes`` on :data:`SUBJECT`.
     """
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -39,7 +42,7 @@ def _checkpoint(tmp_path: Path, *attributes: cr.Attribute) -> str:
 
 
 def _attributed_predictor() -> StubPredictor:
-    """A predictor over :data:`COLOR` and :data:`GRADE`: two detections, different values."""
+    """Return a ``StubPredictor`` of two boxes with attribute ids ``[0, 2]`` and ``[1, 0]``."""
     return StubPredictor(
         boxes=(BOX, (40.0, 40.0, 60.0, 60.0)),
         scores=(0.9, 0.8),
@@ -48,8 +51,9 @@ def _attributed_predictor() -> StubPredictor:
 
 
 def _published(tmp_path: Path, checkpoint: str, images_dir: Path):
-    """``run_inference`` over ``images_dir`` into the bucket ``out/2026-01-01``; the bucket and
-    the records of its one document.
+    """Run inference over ``images_dir`` into the bucket ``out/2026-01-01``.
+
+    Return the bucket and the annotations read from its ``img`` document.
     """
     import tcip_store
     from tcip_mcp.buckets import read_bucket

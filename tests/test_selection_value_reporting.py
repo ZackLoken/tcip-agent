@@ -1,9 +1,8 @@
 """The number an epoch reports under ``selection`` is the objective the checkpoint was chosen by.
 
-``metrics.jsonl``, the TensorBoard row, the in-memory history and the HPO ``epoch_callback`` all
-carry the same ``selection`` field, and a reader takes it for the value that drove
-``model_best.pt`` and early stopping. These runs keep the training loss far away from the
-selection objective, so a record carrying the training loss under that key is visible.
+``metrics.jsonl``, the in-memory history and the HPO ``epoch_callback`` carry one ``selection``
+field, the value ``model_best.pt`` was chosen by. These runs keep the training loss far from the
+selection objective.
 """
 
 from __future__ import annotations
@@ -30,9 +29,10 @@ from tests.tiny_trainer_fixtures import (
 def _config(
     tmp_path, evaluation: dict | None = None, *, validated: bool = True
 ) -> dict:
-    """A regression config over opposed frames under ``tmp_path`` (``validated``), or over the
-    training frames alone with no validation side, ``evaluation`` stated over its sample
-    evaluation block.
+    """Return a regression config over frames under ``tmp_path``.
+
+    The config is over opposed frames (``validated``), or over the training frames alone with no
+    validation side, ``evaluation`` stated over its sample evaluation block.
     """
     data = (
         opposed_regression_data(
@@ -61,7 +61,9 @@ def _config(
 def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(
     tmp_path,
 ):
-    """The chosen epoch's recorded ``selection``, the copy embedded in ``model_best.pt``, the
+    """An epoch's recorded ``selection`` is the value the best checkpoint was chosen by.
+
+    The chosen epoch's recorded ``selection``, the copy embedded in ``model_best.pt``, the
     ``metrics.jsonl`` line and the callback payload all carry ``run.best_metric``.
     """
     from tcip_mcp.experiments import METRICS_FILE, partition_rows, read_rows
@@ -114,9 +116,11 @@ def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(
 def test_the_plateau_schedule_reduces_the_rate_where_torch_does_over_the_selection_values(
     tmp_path,
 ):
-    """Agreement with torch: a run selecting on a higher-is-better metric reduces its rate at
-    the epochs ``ReduceLROnPlateau`` in ``max`` mode, stepped here over the selection values the
-    run recorded, reduces its own.
+    """The plateau schedule reduces the rate where torch's ``ReduceLROnPlateau`` does.
+
+    A run selecting on a higher-is-better metric reduces its rate at the epochs
+    ``ReduceLROnPlateau`` in ``max`` mode, stepped here over the selection values the run
+    recorded, reduces its own.
     """
     from tests._training_values import SCHEDULE_SETTINGS, schedule, stop_rule
 
@@ -148,7 +152,9 @@ def test_the_plateau_schedule_reduces_the_rate_where_torch_does_over_the_selecti
 
 
 def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
-    """An explicit ``evaluation.selection_metric`` drives both the checkpoint objective and the
+    """An epoch's recorded ``selection`` follows a configured selection metric.
+
+    An explicit ``evaluation.selection_metric`` drives both the checkpoint objective and the
     reported ``selection``, so the two still name the same number.
     """
     ctx = run_context(tmp_path, _config(tmp_path, {"selection_metric": "mae"}))
@@ -177,8 +183,10 @@ def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
 
 
 def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
-    """``f1`` is higher-is-better; model_best.pt must hold the epoch with the highest val f1,
-    not the lowest.
+    """A run selecting on ``f1`` keeps its highest-f1 epoch as ``model_best.pt``.
+
+    Over a run whose val f1 varies, ``model_best.pt`` holds the epoch with the highest val f1,
+    and the run's best metric is that value.
     """
     ctx = run_context(
         tmp_path,
@@ -213,9 +221,10 @@ def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
 def test_a_run_selecting_on_a_metric_its_task_does_not_produce_fails_naming_both(
     tmp_path,
 ):
-    """``f1`` is declared (a detection/classification metric) but regression's own ``evaluate()``
-    never produces it; the run must fail naming the requested metric and the keys validation did
-    produce, not silently fall back to the training loss under a name nobody chose.
+    """A run selecting on a metric its task does not produce fails naming both.
+
+    A regression run selecting on ``f1`` fails naming ``f1``, ``val_f1`` and the keys its
+    validation did produce (``val_loss``, ``val_mae``).
     """
     ctx = run_context(tmp_path, _config(tmp_path, {"selection_metric": "f1"}))
     run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
@@ -229,8 +238,10 @@ def test_a_run_selecting_on_a_metric_its_task_does_not_produce_fails_naming_both
 def test_a_loss_selected_run_with_no_validation_loader_still_completes_and_selects_its_lowest_loss(
     tmp_path,
 ):
-    """No validation loader means no metric but the training loss exists; a run selecting on the
-    training loss must still complete and choose the lowest-loss epoch.
+    """A loss-selected run with no validation loader completes and keeps its lowest loss.
+
+    With no validation loader, every epoch selects on ``loss`` and records no ``val_loss``, and
+    the run completes with its lowest selection value as its best.
     """
     ctx = run_context(tmp_path, _config(tmp_path, validated=False))
     assert ctx.val_loader is None

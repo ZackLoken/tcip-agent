@@ -1,7 +1,8 @@
-"""Tests for the web backend's start: ``python -m tcip_web``'s ``main`` resolves the workspace once,
-publishes the port under it and configures the backend with it, refusing an unset
-``TCIP_WORKSPACE``; the lifespan opens the project the last-opened pointer names; every test runs
-its backend on its own scratch workspace.
+"""The web backend's start.
+
+``python -m tcip_web``'s ``main`` publishes the port under the workspace and configures the
+backend with it, refusing an unset ``TCIP_WORKSPACE``; the lifespan opens the project the
+last-opened pointer names; in the suite the backend runs on a scratch workspace of each test's own.
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ def test_the_backend_refuses_to_start_with_no_workspace(monkeypatch):
 
 
 def _answer(url: str) -> tuple[int, dict]:
-    """The status and JSON body ``url`` answers with, a refusal included."""
+    """Return the status and JSON body ``url`` answers with, a refusal included."""
     try:
         with urllib.request.urlopen(url, timeout=5) as response:
             return response.status, json.loads(response.read())
@@ -52,8 +53,10 @@ def _answer(url: str) -> tuple[int, dict]:
 def test_main_publishes_the_port_and_configures_the_backend_on_one_workspace(
     tmp_path_factory,
 ):
-    """``python -m tcip_web``, run as an operator runs it, records under its workspace the port it
-    then serves on, and serves the backend configured with that workspace and its image roots: a
+    """``main`` publishes the port and configures the backend on one workspace.
+
+    ``python -m tcip_web``, run as an operator runs it, records under its workspace the port it
+    serves on, and serves the backend configured with that workspace and its image roots: a
     tool process resolving the port under the same workspace reaches it, the listing names the
     workspace, and an image under the image root is read while one under neither root is
     refused.

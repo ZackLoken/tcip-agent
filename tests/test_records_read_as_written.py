@@ -1,6 +1,7 @@
-"""Each record here is written by the platform's own producer and read back by its reader, which
-reads every key the producer writes as stated: a key the producer stopped writing fails the read by
-name (``KeyError``) rather than being tolerated with a default.
+"""Records written by the platform's own producers read back through their readers as stated.
+
+Each record here is written by the platform's own producer and read back by its reader, and a
+record missing a key its reader reads fails the read by name.
 """
 
 from __future__ import annotations
@@ -109,7 +110,9 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
     real_hpo_base_config: dict,
     monkeypatch,
 ) -> None:
-    """The final status the sweep launch itself writes reads back as its state; the same record
+    """A sweep's final status reads back its state, and fails by name with ``state`` removed.
+
+    The final status the sweep launch itself writes reads back as its state; the same record
     with ``state`` removed fails the read by name.
     """
     import pytest

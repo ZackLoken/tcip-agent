@@ -1,5 +1,7 @@
-"""The review queue routes: a launched job runs ``prioritize_review_queue`` over the open project
-and the subject the request named, and its status reports the tool's result or refusal.
+"""The review queue routes.
+
+A launched job runs ``prioritize_review_queue`` over the open project and the subject the request
+named, and its status reports the tool's result or refusal.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ QUEUE = {
 
 @pytest.fixture(autouse=True)
 def _no_queue_jobs():
-    """Start each test with no queue job held by the backend."""
+    """Clear the queue jobs the backend's annotate routes hold."""
     import tcip_web.routes.annotate as annotate_mod
 
     annotate_mod._pq_registry.jobs.clear()
@@ -192,8 +194,10 @@ def test_job_completes_and_carries_the_tool_s_own_queue(
 def test_job_fails_honestly_on_the_tool_s_own_refusal(
     opened_client, tmp_path: Path, monkeypatch
 ):
-    """The operation's soft ``{"error": ...}`` (an unresolvable scorer name, say) surfaces as the
-    job's ``failed`` status with the same message, never swallowed or completed empty.
+    """A queue job reports the operation's own refusal as its ``failed`` status.
+
+    The operation's soft ``{"error": ...}`` (an unresolvable scorer name, say) surfaces as the
+    job's ``failed`` status with the same message and an empty queue.
     """
     ckpt = tmp_path / "model.pt"
     ckpt.write_bytes(b"not a real checkpoint")

@@ -1,6 +1,7 @@
-"""``tools/smoke_terminal_e2e.py`` must never run against the machine's own workspace: it sets
-``TCIP_WORKSPACE`` to a workspace it is given before the served app resolves anything, so a run
-beside a developer's real projects never opens or audits into one.
+"""``tools/smoke_terminal_e2e.py`` runs against the workspace it is given.
+
+It sets ``TCIP_WORKSPACE`` to the workspace it is given, and a run beside a live project opens
+nothing and adds nothing to that project's log.
 """
 
 from __future__ import annotations
@@ -28,9 +29,11 @@ def _load():
 def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
     tmp_path, monkeypatch
 ):
-    """A live workspace whose last-opened pointer names a real project must not decide what this
-    run touches: the run sees the workspace it was given, opens nothing for a row that cannot
-    launch, and leaves the live project's log as it was.
+    """The smoke run uses the workspace it is given, not the last-opened project.
+
+    Beside a workspace whose last-opened pointer names a project, the run binds the workspace
+    it was given, opens nothing for a row that cannot launch, and leaves that project's audit
+    record count unchanged.
     """
     import tcip_store
     from tcip_mcp import workspace
@@ -66,7 +69,9 @@ def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
 def test_the_signal_is_a_friction_report_of_the_open_project_carrying_the_token(
     opened_project, opened_client
 ):
-    """``reported`` answers only while ``report_friction`` has recorded, in the open project,
+    """The smoke signal is one friction report of the open project carrying the token.
+
+    ``reported`` answers only while ``report_friction`` has recorded, in the open project,
     exactly one report whose detail carries the token, of the requested category: the token
     anywhere else, a report of another category, or a second call is not it.
     """

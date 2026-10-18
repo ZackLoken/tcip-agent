@@ -1,6 +1,4 @@
-"""Every state-changing route refuses a cross-site Origin before it reaches a handler, the check
-``TrustBoundaryMiddleware`` makes ahead of routing.
-"""
+"""Every state-changing route refuses a cross-site Origin with 403."""
 
 from __future__ import annotations
 
@@ -18,14 +16,12 @@ _PARAM_RE = re.compile(r"\{[^}]*\}")
 
 
 def _filled_path(route: APIRoute) -> str:
-    """``route.path`` with each ``{param}`` segment replaced by a placeholder no record
-    resolves; the check runs before routing, so what fills the placeholder never matters.
-    """
+    """Return ``route.path`` with each ``{param}`` replaced by ``does-not-exist``."""
     return _PARAM_RE.sub("does-not-exist", route.path)
 
 
 def _state_changing_calls() -> list[tuple[str, str]]:
-    """(method, filled path) for every state-changing route, one entry per declared method."""
+    """Return (method, filled path) for every state-changing route, one per declared method."""
     calls = []
     for route in state_changing_routes(app):
         path = _filled_path(route)
@@ -43,8 +39,9 @@ def test_the_walk_itself_is_non_empty() -> None:
 def test_every_state_changing_route_refuses_a_foreign_origin(
     client: TestClient,
 ) -> None:
-    """A foreign Origin never reaches a handler: the check runs before routing, so this fails
-    at the first enumerated path whether or not that path resolves to a real record.
+    """Every state-changing route refuses a foreign Origin with 403, never 422.
+
+    Each enumerated method and placeholder path answers 403 naming the origin as not allowed.
     """
     for method, path in _state_changing_calls():
         resp = client.request(
@@ -88,9 +85,10 @@ def test_a_foreign_origin_post_to_a_path_no_route_serves_still_refuses(
 def test_a_permitted_origin_still_reaches_the_handler(
     client: TestClient,
 ) -> None:
-    """A request from the backend's own origin, from the Vite dev server's origin, and with no
-    Origin header reaches the handler's own outcome: both origins are loopback hosts, and a
-    missing Origin is a non-browser client.
+    """A request from a permitted origin, or with no Origin, reaches the handler.
+
+    A request from the backend's own origin, from the Vite dev server's origin, and with no
+    Origin header reaches the handler's own outcome.
     """
     body = ActiveTabPayload(active_tab="annotate").model_dump()
     for origin in ("http://127.0.0.1", "http://127.0.0.1:5173", None):

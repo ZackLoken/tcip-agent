@@ -1,6 +1,8 @@
-"""The storage seam's contract, through the ``store`` fixture. Isolation cases run across real OS
-processes, and also against a weakened backend (``TCIP_STORE_CONTRACT_IGNORES_EXPECT=1``, or
-``TCIP_STORE_CONTRACT_COMMITS_EACH_WRITE=1`` for the crash case) where they fail.
+"""The storage seam's contract, through the ``store`` fixture.
+
+Isolation cases run across real OS processes, and also against a weakened backend
+(``TCIP_STORE_CONTRACT_IGNORES_EXPECT=1``, or ``TCIP_STORE_CONTRACT_COMMITS_EACH_WRITE=1`` for
+the crash case) where they fail.
 """
 
 from __future__ import annotations
@@ -51,13 +53,13 @@ class Harness:
         return ts.Key(store, str(self.root), tuple(parts))
 
     def connect(self) -> sqlite3.Connection:
-        """A connection of this test's own to the root's database, for reaching behind the seam."""
+        """Open a SQLite connection in autocommit mode directly to the root's database file."""
         return sqlite3.connect(
             str(database_file(str(self.root))), isolation_level=None
         )
 
     def damage_record(self, key: ts.Key, data: bytes) -> None:
-        """Put bytes that will not decode behind a record."""
+        """Replace the stored value of the record ``key`` names with ``data``."""
         conn = self.connect()
         try:
             conn.execute(
@@ -70,7 +72,7 @@ class Harness:
     def damage_log_entry(
         self, key: ts.Key, position: int, data: bytes
     ) -> None:
-        """Replace one committed log entry's bytes with bytes that will not decode."""
+        """Replace the stored bytes of the log entry at ``position`` under ``key`` with ``data``."""
         conn = self.connect()
         try:
             ids = [
@@ -128,8 +130,10 @@ def store(tmp_path):
 def test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other(
     store,
 ):
-    """``release_root`` releases what a read of one root opened, on one thread, so that root can
-    be renamed, and leaves another root's handle open.
+    """``release_root`` releases one root so it can be renamed, and keeps another root open.
+
+    The released root, renamed, reads back its record; on Windows the other root still refuses
+    a rename, and it reads back its own record.
     """
     key = store.key(LWW, "before-close")
     other_root = store.root.parent / f"{store.root.name}-other"
@@ -160,7 +164,9 @@ def test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_ot
 
 
 def test_release_root_waits_for_an_operation_in_flight_on_that_root(store):
-    """A release issued while another thread is inside a transaction on the root returns only
+    """``release_root`` waits for a transaction in flight on that root.
+
+    A release issued while another thread is inside a transaction on the root returns only
     once that transaction has committed, and the commit lands.
     """
     import threading
@@ -201,7 +207,7 @@ def test_release_root_waits_for_an_operation_in_flight_on_that_root(store):
 
 
 def _journal_mode(db: Path) -> str:
-    """The journal mode a database reports, read without changing it."""
+    """Return the journal mode a database reports, read without changing it."""
     conn = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
     try:
         return str(conn.execute("pragma journal_mode").fetchone()[0]).lower()
@@ -210,9 +216,7 @@ def _journal_mode(db: Path) -> str:
 
 
 def test_the_first_write_publishes_a_database_already_in_wal(store):
-    """The installed file is converted while the transition lock still excludes every other
-    opener, so it is in WAL before anything opens it for use.
-    """
+    """After the first write and a release, the database file reports WAL mode."""
     ts.replace(store.key(LWW, "first"), {"n": 1})
     ts.release_root(store.root)
 
@@ -222,8 +226,9 @@ def test_the_first_write_publishes_a_database_already_in_wal(store):
 def test_an_opener_arriving_beside_another_connection_still_gets_a_usable_database(
     store,
 ):
-    """A second connection is open when an opener arrives: since publication already converted
-    the journal mode, the opener reads it and proceeds rather than being refused.
+    """An opener arriving beside another connection gets a usable WAL database.
+
+    A second connection is open when an opener arrives, and the opener's connection reports WAL.
     """
     ts.replace(store.key(LWW, "first"), {"n": 1})
     ts.release_root(store.root)
@@ -256,7 +261,7 @@ def test_a_refusal_reports_the_wait_it_measured_rather_than_a_configured_timeout
 
 
 def test_every_connection_commits_at_full_synchronous(store):
-    """A committed write survives a power loss: the connection a write commits on is at FULL."""
+    """The connection a write commits on runs at FULL synchronous."""
     ts.replace(store.key(LWW, "durable"), {"n": 1})
     with store.backend._connection(str(store.root), create=False) as conn:  # noqa: SLF001
         assert conn.execute("pragma synchronous").fetchone()[0] == 2
@@ -265,7 +270,7 @@ def test_every_connection_commits_at_full_synchronous(store):
 def test_a_read_of_a_root_with_no_database_answers_absence_and_creates_none(
     store,
 ):
-    """Reading never creates a database: a root nothing has written answers absence."""
+    """A read, a key listing and a log read of an unwritten root answer absence, creating no db."""
     key = store.key(LWW, "never-written")
 
     assert ts.read(key, default=None) is None
@@ -318,7 +323,11 @@ def test_a_failed_encode_leaves_the_previous_value_and_no_artifact(store):
 
 
 def test_a_stale_writer_cannot_clobber_a_committed_transaction(store):
-    """A compare-and-set writer that read before another process's transaction committed."""
+    """A stale compare-and-set writer is refused after another process's transaction commits.
+
+    The writer read before the holder's transaction committed; it waits for the holder, answers
+    ``VersionConflictError`` and leaves the holder's value in place.
+    """
     key = store.key(CAS, "contended")
     ts.replace(key, {"who": "seed"}, expect=ts.Version.ABSENT)
     ready_reader = store.root / "reader.ready"
@@ -359,7 +368,7 @@ def test_a_stale_writer_cannot_clobber_a_committed_transaction(store):
 
 
 def test_an_unconditional_writer_waits_for_a_transaction_and_then_wins(store):
-    """The unconditional form of the same race: it waits for the holder, then lands."""
+    """An unconditional writer waits for another process's transaction, then lands."""
     key = store.key(LWW, "contended")
     ts.replace(key, {"who": "seed"})
     ready_writer = store.root / "writer.ready"
@@ -491,7 +500,9 @@ def test_a_record_delete_from_a_current_token_lands_and_a_stale_one_is_refused(
 def test_a_crash_mid_transaction_leaves_the_old_records_and_wedges_no_successor(
     store,
 ):
-    """A process killed after its transaction's first write executed, before the commit, leaves
+    """A crash mid-transaction leaves the old records and does not strand the next writer.
+
+    A process killed after its transaction's first write executed, before the commit, leaves
     both records as they were, and the lock it held does not strand the next writer.
     """
     first = store.key(LWW, "alpha")
@@ -519,8 +530,10 @@ def test_a_crash_mid_transaction_leaves_the_old_records_and_wedges_no_successor(
 
 
 def test_a_transaction_over_a_record_and_a_log_commits_both_or_neither(store):
-    """A raise inside the body leaves the record and the log as they were; a clean exit lands
-    the write and every append together.
+    """A transaction over a record and a log commits both or neither.
+
+    A raise inside the body leaves the record and the log as they were; a clean exit lands
+    the write and its appends together.
     """
     record = store.key(LWW, "decided")
     log = store.key(LOG, "decisions")
@@ -545,7 +558,9 @@ def test_a_transaction_over_a_record_and_a_log_commits_both_or_neither(store):
 def test_a_verdict_that_will_not_encode_lands_none_of_the_save_s_verdicts(
     store,
 ):
-    """``record_verdicts`` appends a save's verdicts inside the save's one transaction: one that
+    """A verdict that will not encode lands none of the save's verdicts.
+
+    ``record_verdicts`` appends a save's verdicts inside the save's one transaction: one that
     will not encode, after another already appended, leaves the shard holding neither.
     """
     from datetime import datetime, timezone
@@ -573,7 +588,7 @@ def test_a_verdict_that_will_not_encode_lands_none_of_the_save_s_verdicts(
 
 
 def _record_verdicts(key, decided) -> None:
-    """``decided`` appended to the shard ``key`` names in a transaction of its own."""
+    """Append ``decided`` to the shard ``key`` names, in a transaction of its own."""
     with ts.transaction(key) as txn:
         verdicts.record_verdicts(txn, key, decided)
 
@@ -581,8 +596,11 @@ def _record_verdicts(key, decided) -> None:
 def test_a_module_level_write_inside_a_transaction_is_refused_and_lands_outside_it(
     store,
 ):
-    """A write that is not the transaction's own would commit apart from it, so it refuses and
-    names the transaction's own operations; the same append outside the transaction lands.
+    """A module-level write inside a transaction is refused, and lands outside it.
+
+    Inside a transaction a module-level append refuses, naming the transaction's own operations,
+    and a module-level log clear refuses; the transaction's own record write lands, and an
+    append outside the transaction lands as the log's one entry.
     """
     record = store.key(LWW, "under-transaction")
     log = store.key(LOG, "appended-to")
@@ -785,8 +803,10 @@ def test_a_key_with_no_root_or_an_empty_store_or_part_refuses_and_a_whole_one_is
 
 
 def test_absence_and_corruption_are_different_answers(store):
-    """A record that will not decode raises ``DecodeError`` whatever ``default`` says; an absent
-    one answers the default.
+    """An absent record and a corrupt one are different answers.
+
+    A record that will not decode raises ``DecodeError`` with a ``default`` stated; an absent one
+    raises ``NotFoundError`` naming ``default=`` when none is stated and answers it when one is.
     """
     key = store.key(LWW, "sometimes-there")
     with pytest.raises(ts.NotFoundError) as raised:
@@ -804,8 +824,11 @@ def test_absence_and_corruption_are_different_answers(store):
 def test_a_relative_root_is_refused_before_it_resolves_against_a_working_directory(
     store,
 ):
-    """The store refuses first and canonicalizes second, or the refusal turns into a guess about
-    which directory the process happened to be started in; enumeration refuses alongside.
+    """A relative root is refused by read, replace, exists and keys; an absolute root is admitted.
+
+    Under a relative root each of the four raises ``BadKeyError``, the read and the listing
+    naming an absolute root; under an absolute root ``replace``, ``read`` and ``keys`` write,
+    read back and list the key.
     """
     relative_root = "not/an/absolute/root"
     relative = ts.Key(LWW, relative_root, ("x",))
@@ -910,8 +933,10 @@ def test_a_transaction_refuses_every_form_that_would_escape_it(store):
 def test_a_transaction_refuses_two_roots_and_admits_two_spellings_of_one(
     store,
 ):
-    """One transaction is one root's database, so keys from two roots refuse before anything is
-    held; two spellings of one directory are one root.
+    """A transaction refuses keys from two roots and admits two spellings of one.
+
+    Keys from two roots refuse naming both roots, and nothing is written; two spellings of one
+    directory are one root.
     """
     elsewhere = store.root / "elsewhere"
     elsewhere.mkdir()
@@ -961,8 +986,10 @@ def test_two_spellings_of_one_root_address_one_database(store):
 
 
 def test_traits_shares_the_state_database_rather_than_gaining_its_own(store):
-    """Writing a ``traits`` record beside a ``delivery_events`` record creates exactly one
-    database under the project's state root, never a second, nested one.
+    """The ``traits`` store writes into the project's one state database.
+
+    Writing a ``traits`` record beside a ``delivery_events`` record leaves exactly one database
+    under the project's state root.
     """
     ts.replace(
         traits.trait_key(store.root, "bud_opening"),
@@ -1110,8 +1137,9 @@ def test_a_non_finite_number_is_refused_rather_than_written_as_a_word_json_has_n
 def test_a_value_with_a_non_string_key_is_refused_rather_than_merged_with_its_spelling(
     store,
 ):
-    """JSON names an object's keys with strings, so ``1`` and ``"1"`` would land as one key and
-    one of the two values would vanish; both writers refuse, and the string-keyed value stores.
+    """A value keyed by both ``1`` and ``"1"`` is refused by the record and the log writer.
+
+    Neither writer stores anything, and the string-keyed value alone stores.
     """
     record = store.key(LWW, "keyed")
     log = store.key(LOG, "keyed")
@@ -1134,8 +1162,10 @@ def test_a_value_with_a_non_string_key_is_refused_rather_than_merged_with_its_sp
 def test_a_file_write_inside_a_record_transaction_refuses_and_lands_outside_it(
     store,
 ):
-    """A file write inside a record transaction would commit apart from it, so it refuses and the
-    record transaction rolls back whole; the same write outside lands.
+    """A file write inside a record transaction is refused, and lands outside it.
+
+    A file write inside a record transaction refuses, the record keeps its prior value and no
+    file is written; the same write outside lands its bytes.
     """
     record = store.key(LWW, "beside-a-file")
     path = blob_path(store.root, "beside-a-record")
@@ -1155,7 +1185,7 @@ def test_a_file_write_inside_a_record_transaction_refuses_and_lands_outside_it(
 def test_a_file_that_is_not_a_database_at_the_database_s_path_refuses_naming_it(
     store,
 ):
-    """Something else holding the database's name refuses by name before a row is read."""
+    """A non-database file holding the database's name refuses a read, naming the file."""
     path = database_file(str(store.root))
     path.parent.mkdir(parents=True)
     path.write_bytes(b"not a database, only bytes under its name" * 100)
@@ -1167,7 +1197,9 @@ def test_a_file_that_is_not_a_database_at_the_database_s_path_refuses_naming_it(
 
 
 def test_enumerating_review_verdicts_answers_identities_that_read_back(store):
-    """``keys`` answers the shard's own key, which reads the shard back, though its names carry
+    """Enumerating review verdicts answers shard keys that read back.
+
+    ``keys`` answers the shard's own key, which reads the shard back, though its names carry
     separators.
     """
     key = verdicts.verdict_key(store.root, "live/2026-03-04", "a/b")
@@ -1184,7 +1216,9 @@ def test_enumerating_review_verdicts_answers_identities_that_read_back(store):
 
 
 def test_a_cleared_log_enumerates_as_absent(store):
-    """A log that holds entries is enumerated once, however many it holds, and one cleared of
+    """A cleared log enumerates as absent.
+
+    A log that holds entries is enumerated once, however many it holds, and one cleared of
     them is not enumerated at all.
     """
     kept = verdicts.verdict_key(store.root, "live/2026-03-04", "a")
