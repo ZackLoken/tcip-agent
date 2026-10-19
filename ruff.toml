@@ -15,8 +15,8 @@ docstring-code-format = true
 preview = true
 
 # E, W: pycodestyle. N: pep8-naming. F: pyflakes. B033: a duplicate set value. I: import order.
-# UP: the modern syntax for the Python this runs on. D: pydocstyle. ANN is the owner's next gate.
-select = ["E", "W", "N", "F", "B033", "I", "UP", "D"]
+# UP: the modern syntax for the Python this runs on. D: pydocstyle. ANN: every signature typed.
+select = ["E", "W", "N", "F", "B033", "I", "UP", "D", "ANN"]
 
 [lint.pydocstyle]
 convention = "pep257"
