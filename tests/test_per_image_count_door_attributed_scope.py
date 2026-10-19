@@ -17,7 +17,7 @@ SUBJECT = (
 
 
 @pytest.fixture(autouse=True)
-def _recorded_meaning(tmp_path):
+def _recorded_meaning(tmp_path: Path) -> None:
     fx.seed_delivery_traits(tmp_path)
     fx.seed_confirmed_count(tmp_path, measured_subject=SUBJECT)
 
@@ -34,7 +34,9 @@ def test_an_attributed_bucket_delivers_its_object_count_not_its_value_count(
 
     posture = cr.Attribute("posture", "categorical", ("upright", "lodged"))
     registry = cr.SubjectRegistry(
-        subjects=(cr.Subject(name=SUBJECT, attributes=(posture,)),)
+        subjects=(
+            cr.Subject(name=SUBJECT, description="", attributes=(posture,)),
+        )
     )
     image = tmp_path / "ds" / "images" / "2026-05-20" / "img1.jpg"
     bucket = published(

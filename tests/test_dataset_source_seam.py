@@ -1,6 +1,6 @@
 """The ``dataset_source`` bespoke seam.
 
-An agent-supplied importable builder produces a torch ``Dataset`` for a task the built-in loaders
+An agent-supplied importable builder produces a ``BaseDataset`` for a task the built-in loaders
 do not cover, built over the producer's own samples (``build_from_dataset_source``), the known
 loaders stay the factory's, and the builder source is snapshotted for provenance.
 """
@@ -8,6 +8,7 @@ loaders stay the factory's, and the builder source is snapshotted for provenance
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,8 +25,21 @@ torch = pytest.importorskip("torch")
 
 from torch.utils.data import Dataset  # noqa: E402
 
+from tcip_mcp.pipelines.data.datasets import BaseDataset
 
-class _CountingDataset(Dataset):
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from PIL import Image
+    from torch import Tensor
+
+    from tcip_mcp.pipelines.data.datasets import BespokeSource
+    from tcip_mcp.pipelines.data.selection import ClassScope, Sample
+    from tcip_mcp.pipelines.schemas import DatasetSourceSchema
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+
+
+class _CountingDataset(BaseDataset):
     """A trivially-bespoke dataset of one item per sample the producer named.
 
     It echoes the context it was built with, each item a black 8 px frame holding one object
@@ -36,21 +50,22 @@ class _CountingDataset(Dataset):
     def __init__(
         self,
         *,
-        samples=None,
-        scope=None,
-        rows=None,
+        samples: Sequence[Sample] | None = None,
+        scope: ClassScope | None = None,
+        rows: list[str] | None = None,
         marker: str = "",
-        **_ignored,
-    ):
+        **_ignored: object,
+    ) -> None:
         self.samples = list(samples or [])
         self.scope = scope
         self.rows = list(rows or [])
         self.marker = marker
 
-    def __len__(self):
+    @property
+    def num_samples(self) -> int:
         return len(self.samples) or len(self.rows)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> tuple[Tensor, dict[str, str | Tensor]]:
         named = self.samples or self.rows
         return torch.zeros(3, 8, 8), {
             "stem": str(named[idx]),
@@ -61,16 +76,43 @@ class _CountingDataset(Dataset):
         }
 
     @property
-    def regions(self):
+    def regions(self) -> list:
         """The dataset's regions, one per frame, holding the object it serves."""
         from tests._producer_fixtures import served_regions
 
         return served_regions(self)
 
 
-def build_bespoke_ds(**kwargs) -> _CountingDataset:
+def build_bespoke_ds(
+    **kwargs: str
+    | Sequence[Sample]
+    | ClassScope
+    | list[str]
+    | Callable[[Image.Image, dict], tuple[Tensor, dict]]
+    | None,
+) -> _CountingDataset:
     """Build a :class:`_CountingDataset`, as an importable agent-authored builder does."""
     return _CountingDataset(**kwargs)
+
+
+class _PlainDataset(Dataset):
+    """A torch dataset that is no ``BaseDataset``, holding one item per sample it was handed."""
+
+    def __init__(
+        self, *, samples: Sequence[Sample] | None = None, **_ignored: object
+    ) -> None:
+        self.samples = list(samples or [])
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, idx: int) -> tuple[Tensor, dict]:
+        return torch.zeros(3, 8, 8), {}
+
+
+def build_plain_ds(**kwargs: object) -> _PlainDataset:
+    """Build a :class:`_PlainDataset`, a builder returning what the seam refuses."""
+    return _PlainDataset(**kwargs)
 
 
 BESPOKE_DS = "test_dataset_source_seam:build_bespoke_ds"
@@ -79,13 +121,20 @@ BESPOKE_DS_FILE = str(REPO_ROOT / "tests" / "test_dataset_source_seam.py")
 """The source file defining :data:`BESPOKE_DS`."""
 
 
-class _PointDataset(Dataset):
+class _PointDataset(BaseDataset):
     """A bespoke keypoint dataset over the samples the producer named.
 
     Each item is one sample's own image and the first point its own label document records.
     """
 
-    def __init__(self, *, samples=None, transforms=None, **_ignored):
+    def __init__(
+        self,
+        *,
+        samples: Sequence[Sample] | None = None,
+        transforms: Callable[[Image.Image, dict], tuple[Tensor, dict]]
+        | None = None,
+        **_ignored: object,
+    ) -> None:
         from tcip_annotation import json_io
         from tcip_annotation.state import Point
 
@@ -102,17 +151,26 @@ class _PointDataset(Dataset):
             for sample in self.samples
         ]
 
-    def __len__(self):
+    @property
+    def num_samples(self) -> int:
         return len(self.samples)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> tuple[Tensor, dict]:
         from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 
         image = pil_to_tensor(load_image(self.samples[idx].image, 3))
-        return image, torch.tensor(self.points[idx], dtype=torch.float32)
+        return image, {
+            "point": torch.tensor(self.points[idx], dtype=torch.float32)
+        }
 
 
-def build_point_ds(**kwargs) -> _PointDataset:
+def build_point_ds(
+    **kwargs: str
+    | Sequence[Sample]
+    | ClassScope
+    | Callable[[Image.Image, dict], tuple[Tensor, dict]]
+    | None,
+) -> _PointDataset:
     """Build a :class:`_PointDataset` for a task whose ground truth is a placed point."""
     return _PointDataset(**kwargs)
 
@@ -124,14 +182,14 @@ DATASET_SOURCE = {
 }
 
 
-def _source(stated: dict):
+def _source(stated: dict) -> DatasetSourceSchema:
     """Return ``stated`` validated as a run's ``data.dataset_source``."""
     from tcip_mcp.pipelines.schemas import DatasetSourceSchema
 
     return DatasetSourceSchema.model_validate(stated)
 
 
-def _bespoke(stated: dict):
+def _bespoke(stated: dict) -> BespokeSource:
     """Return ``stated`` validated as a run's ``data.dataset_source``, and its layout.
 
     The layout is the one a run declaring it imports from, this repository as its project
@@ -144,7 +202,7 @@ def _bespoke(stated: dict):
     )
 
 
-def _admitted_samples(root: Path):
+def _admitted_samples(root: Path) -> list[Sample]:
     """Return two labeled samples, admitted through ``samples_over``.
 
     Each frame holds its object bright on a dim ground.
@@ -161,7 +219,9 @@ def _admitted_samples(root: Path):
 
     images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
+    registry_over(
+        root, SubjectRegistry(subjects=(Subject(name="leaf", description=""),))
+    )
     for stem in ("s0", "s1"):
         painted_frame(16, 16, (40, 60, 80), [((2, 2, 8, 8), BRIGHT)]).save(
             images_dir / f"{stem}.png"
@@ -176,7 +236,7 @@ def _admitted_samples(root: Path):
     return samples_over(images_dir, subject="leaf")
 
 
-def _scope():
+def _scope() -> ClassScope:
     """Return the class space :func:`_admitted_samples` admits its samples under.
 
     It is a registry's, declaring no attribute on its subject.
@@ -186,7 +246,9 @@ def _scope():
     return registry_scope(Path(__file__).parent, "leaf")
 
 
-def _ctx(root: Path, task: str, data: dict):
+def _ctx(
+    root: Path, task: str, data: dict
+) -> tuple[TrainContext, list[Sample]]:
     """Return a training body's context over a run of ``root`` of ``task``, and its samples.
 
     The run is opened by the launcher's own producer, its data block stating ``data`` beside the
@@ -219,14 +281,14 @@ def _ctx(root: Path, task: str, data: dict):
     return run_context(root, config), samples
 
 
-def _bespoke_ctx(root: Path):
+def _bespoke_ctx(root: Path) -> tuple[TrainContext, list[Sample]]:
     """Return :func:`_ctx` over a run whose loaders :data:`DATASET_SOURCE` builds."""
     return _ctx(root, "grape_bunch_count", {"dataset_source": DATASET_SOURCE})
 
 
 def test_a_bodys_platform_loader_reads_at_the_runs_sizes_and_lattice(
     tmp_path: Path,
-):
+) -> None:
     """A body's platform loader reads at the run's recorded band count and lattice.
 
     On a run whose data block names no ``dataset_source``, a training body's
@@ -249,7 +311,7 @@ def test_a_bodys_platform_loader_reads_at_the_runs_sizes_and_lattice(
 
 def test_a_bodys_loader_on_a_bespoke_run_builds_through_its_builder_over_the_subset(
     tmp_path: Path,
-):
+) -> None:
     """A body's loader on a bespoke run builds through its builder over the subset handed it.
 
     On a run whose data block names a ``dataset_source``, a training body's
@@ -278,7 +340,7 @@ def test_a_bodys_loader_on_a_bespoke_run_builds_through_its_builder_over_the_sub
 
 def test_a_bodys_door_takes_the_samples_and_the_augmentation_and_nothing_else(
     tmp_path: Path,
-):
+) -> None:
     """``ctx.build_dataset`` takes the samples and the augmentation and refuses other keywords.
 
     Each keyword tried, a builder, a class space, a tiling and sizes among them, is refused by
@@ -306,7 +368,23 @@ def test_a_bodys_door_takes_the_samples_and_the_augmentation_and_nothing_else(
     assert built.samples == list(samples) and built.scope == _scope()
 
 
-def test_builder_kwargs_may_not_restate_what_the_producer_named():
+def test_a_builder_returning_no_base_dataset_is_refused_naming_it(
+    tmp_path: Path,
+) -> None:
+    """A run whose builder returns a dataset that is no ``BaseDataset`` refuses naming the builder.
+
+    The launcher's own producer builds the run's loaders through the builder, and the seam
+    refuses the plain torch dataset it returns, naming the builder and the class it must return.
+    """
+    plain = {
+        "builder": "test_dataset_source_seam:build_plain_ds",
+        "source_files": [BESPOKE_DS_FILE],
+    }
+    with pytest.raises(ValueError, match="build_plain_ds.*_PlainDataset"):
+        _ctx(tmp_path, "grape_bunch_count", {"dataset_source": plain})
+
+
+def test_builder_kwargs_may_not_restate_what_the_producer_named() -> None:
     """``builder_kwargs`` restating a value the producer or the run names is refused by name.
 
     The context's fields are ``task``, ``samples``, ``scope`` and ``transforms``, and a
@@ -325,7 +403,7 @@ def test_builder_kwargs_may_not_restate_what_the_producer_named():
             _source(stated)
 
 
-def test_known_task_registry_stays_the_default(tmp_path: Path):
+def test_known_task_registry_stays_the_default(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     # No dataset_source -> the closed-registry refusal stays the honest signal for a bad name.
@@ -338,7 +416,7 @@ def test_known_task_registry_stays_the_default(tmp_path: Path):
         )
 
 
-def test_builder_kwargs_configure_the_builder(tmp_path: Path):
+def test_builder_kwargs_configure_the_builder(tmp_path: Path) -> None:
     """The builder's own configuration is its ``builder_kwargs`` and nothing else.
 
     The lowest boundary requires the dataset source with the layout it imports from, the task,
@@ -378,7 +456,7 @@ def test_builder_kwargs_configure_the_builder(tmp_path: Path):
 
 def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(
     tmp_path: Path,
-):
+) -> None:
     """Preflight requires the data place a bespoke run is admitted from.
 
     A bespoke config naming no place is refused naming ``data.images_dir``, the same config over
@@ -435,7 +513,7 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(
 
 def test_snapshot_copies_the_dataset_builders_module_as_that_module(
     tmp_path: Path,
-):
+) -> None:
     """The snapshot copies the dataset builder's module as that module.
 
     The module, declared under its ``source_files``, is copied at its path under its import

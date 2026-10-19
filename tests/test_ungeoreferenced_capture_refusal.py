@@ -22,6 +22,9 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     Assignment,
     MappingBuild,
     MatchRadius,
+    PlantRegistry,
+    PlantRegistryReference,
+    RegistryCsv,
 )
 from tcip_mcp.tools.phenology_tools import (
     build_plant_mapping,
@@ -46,6 +49,8 @@ from tests.test_plant_mapping_binding import (
 from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
 if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+
     from tcip_web.state import OpenProject
 
 DATE = "2026-02-11"
@@ -120,7 +125,7 @@ def test_build_plant_mapping_names_the_unreadable_capture_before_the_position_cl
 
 def test_build_route_refuses_when_every_capture_carries_no_position(
     tmp_path: Path,
-    client,
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tcip_web.state import store
@@ -152,7 +157,7 @@ def test_build_route_refuses_when_every_capture_carries_no_position(
 
 def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_an_empty_mapping(
     tmp_path: Path,
-    client,
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The build route refuses a selected date with no captures.
@@ -193,7 +198,7 @@ def _persist_synthetic_mapping(
     dataset_root: Path,
     name: str,
     *,
-    plant_csvs: list[dict],
+    plant_csvs: list[RegistryCsv],
     assignments: dict[str, list[Assignment]],
 ) -> MappingBuild:
     """Persist and return a hand-composed ``MappingBuild`` through ``persist_mapping``.
@@ -208,15 +213,17 @@ def _persist_synthetic_mapping(
     registry_name, registry_digest = f"{name}-registry", "0" * 64
     ts.replace(
         plant_mapping.plant_registry_key(project_root, registry_name),
-        {
-            "name": registry_name,
-            "crop": "currant",
-            "site": "test",
-            "csvs": plant_csvs,
-            "n_plants": sum(e["n_plants"] for e in plant_csvs),
-            "digest": registry_digest,
-            "registered_at": "2026-02-11T00:00:00+00:00",
-        },
+        plant_mapping._PLANT_REGISTRY.dump_python(
+            PlantRegistry(
+                name=registry_name,
+                crop="currant",
+                site="test",
+                csvs=plant_csvs,
+                n_plants=sum(e["n_plants"] for e in plant_csvs),
+                digest=registry_digest,
+                registered_at="2026-02-11T00:00:00+00:00",
+            )
+        ),
         expect=ts.Version.ABSENT,
     )
     build = MappingBuild(
@@ -234,7 +241,9 @@ def _persist_synthetic_mapping(
             )
             for d in assignments
         },
-        plant_registry={"name": registry_name, "digest": registry_digest},
+        plant_registry=PlantRegistryReference(
+            name=registry_name, digest=registry_digest
+        ),
         capture_digests={d: {} for d in assignments},
         unreadable={d: [] for d in assignments},
         assignments=assignments,
@@ -272,7 +281,7 @@ def _delivery_scene(
 
 
 def _assert_all_doors_refuse(
-    client,
+    client: TestClient,
     project: OpenProject,
     dataset_root: Path,
     preds_by_date: dict[str, str],
@@ -322,7 +331,7 @@ def _assert_all_doors_refuse(
 
 def test_delivery_refuses_naming_a_date_recorded_with_no_capture_at_all(
     tmp_path: Path,
-    client,
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, dataset_root, preds_by_date = _delivery_scene(
@@ -331,7 +340,7 @@ def test_delivery_refuses_naming_a_date_recorded_with_no_capture_at_all(
     plant_csv = tmp_path / "plants.csv"
     write_plant_csv(plant_csv, PLANTS)
     plant_csvs = [
-        {"path": str(plant_csv), "sha256": "0" * 64, "n_plants": len(PLANTS)}
+        RegistryCsv(path=str(plant_csv), sha256="0" * 64, n_plants=len(PLANTS))
     ]
     _persist_synthetic_mapping(
         tmp_path,
@@ -353,7 +362,7 @@ def test_delivery_refuses_naming_a_date_recorded_with_no_capture_at_all(
 
 def test_delivery_refuses_naming_the_plant_csvs_when_none_parsed_a_plant(
     tmp_path: Path,
-    client,
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, dataset_root, preds_by_date = _delivery_scene(
@@ -379,7 +388,7 @@ def test_delivery_refuses_naming_the_plant_csvs_when_none_parsed_a_plant(
 
 def test_delivery_refuses_with_the_ungeoreferenced_sentence_when_every_distance_is_none(
     tmp_path: Path,
-    client,
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, dataset_root, preds_by_date = _delivery_scene(
@@ -388,7 +397,7 @@ def test_delivery_refuses_with_the_ungeoreferenced_sentence_when_every_distance_
     plant_csv = tmp_path / "plants.csv"
     write_plant_csv(plant_csv, PLANTS)
     plant_csvs = [
-        {"path": str(plant_csv), "sha256": "0" * 64, "n_plants": len(PLANTS)}
+        RegistryCsv(path=str(plant_csv), sha256="0" * 64, n_plants=len(PLANTS))
     ]
     _persist_synthetic_mapping(
         tmp_path,
@@ -410,7 +419,7 @@ def test_delivery_refuses_with_the_ungeoreferenced_sentence_when_every_distance_
 
 def test_delivery_refuses_naming_the_match_distance_when_every_position_is_too_far(
     tmp_path: Path,
-    client,
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, dataset_root, preds_by_date = _delivery_scene(
@@ -419,7 +428,7 @@ def test_delivery_refuses_naming_the_match_distance_when_every_position_is_too_f
     plant_csv = tmp_path / "plants.csv"
     write_plant_csv(plant_csv, PLANTS)
     plant_csvs = [
-        {"path": str(plant_csv), "sha256": "0" * 64, "n_plants": len(PLANTS)}
+        RegistryCsv(path=str(plant_csv), sha256="0" * 64, n_plants=len(PLANTS))
     ]
     _persist_synthetic_mapping(
         tmp_path,
@@ -527,7 +536,7 @@ def _delivered_disclosure(
 
 def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     tmp_path: Path,
-    client,
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A partly positioned scene builds and delivers with its unattributed count disclosed.

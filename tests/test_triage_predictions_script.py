@@ -8,11 +8,19 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 from tests._cli_fixtures import run_tcip
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def test_refuses_a_run_naming_no_project_and_plants_no_store(tmp_path):
+    import pytest
+
+
+def test_refuses_a_run_naming_no_project_and_plants_no_store(
+    tmp_path: Path,
+) -> None:
     images = tmp_path / "images"
     images.mkdir()
     cwd = tmp_path / "operator_cwd"
@@ -30,8 +38,10 @@ def test_refuses_a_run_naming_no_project_and_plants_no_store(tmp_path):
 
 
 def test_triages_with_the_checkpoint_registered_in_the_named_project(
-    project, monkeypatch, capsys
-):
+    project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     import tcip_mcp.pipelines.inference.generic_predictor as predmod
     from tcip_mcp.cli.triage_predictions import main
     from tests._verified_checkpoint_fixtures import registered_checkpoint
@@ -74,8 +84,8 @@ def test_triages_with_the_checkpoint_registered_in_the_named_project(
 
 
 def test_the_band_and_the_ranking_settings_are_required_on_every_command(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Three console commands each refuse a call leaving their stated settings out, naming them.
 
     The settings are triage's band and its reason, the failure-case ranking's top-k and

@@ -14,6 +14,7 @@ from __future__ import annotations
 import csv
 import math
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -21,6 +22,12 @@ from tcip_annotation.state import Annotation, BBox, Polygon
 from tests import _trait_fixtures as fx, csv_rows
 from tests._producer_fixtures import label_image
 from tests._training_values import drawn_split
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from tcip_mcp.pipelines.data.selection import Sample
+    from tcip_store import Key, Versioned
 
 DATE = "2026-01-01"
 PX_PER_MM = (
@@ -30,7 +37,7 @@ SUBJECT = "cal_bar"
 
 
 @pytest.fixture(autouse=True)
-def _traits(tmp_path):
+def _traits(tmp_path: Path) -> None:
     fx.seed_delivery_traits(tmp_path)
 
 
@@ -78,7 +85,10 @@ def _reference(
     images = root / "images" / DATE
     images.mkdir(parents=True)
     registry_over(
-        root, cr.SubjectRegistry(subjects=(cr.Subject(name=SUBJECT),))
+        root,
+        cr.SubjectRegistry(
+            subjects=(cr.Subject(name=SUBJECT, description=""),)
+        ),
     )
     assert "error" not in register_dataset(
         project, str(root), crop=sorted(registered_crops())[0]
@@ -126,7 +136,9 @@ def _reference(
 
 
 def _write_csv(
-    path: Path, rows, header=("image_stem", "physical_extent", "unit")
+    path: Path,
+    rows: Sequence[tuple[str | float, ...]],
+    header: tuple[str, ...] = ("image_stem", "physical_extent", "unit"),
 ) -> None:
     with open(path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -160,8 +172,8 @@ def _calibrate(
 
 
 def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A passing scale assessment covering the delivered capture answers for an mm2 area.
 
     The delivery names it, and the same delivery with no scale named refuses.
@@ -200,7 +212,7 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
         {"plant_id": "p1", "area_mm2": 12.5, "plant_attribution": "image"}
     ]
 
-    def deliver(out: Path, **kw):
+    def deliver(out: Path, **kw: str | dict | None) -> dict:
         return acknowledged(
             tmp_path,
             lambda ack: deliver_per_plant_aggregate(
@@ -233,8 +245,8 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
 
 
 def test_a_bar_annotated_at_45_degrees_implies_the_same_scale_as_an_axis_aligned_one(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     _author_tolerance(tmp_path)
     selection, csv_path = _reference(
         tmp_path, angles={i: 45.0 for i in range(0, 8, 2)}
@@ -247,8 +259,8 @@ def test_a_bar_annotated_at_45_degrees_implies_the_same_scale_as_an_axis_aligned
 
 
 def test_a_box_reference_refuses_rather_than_reading_a_projected_extent(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The scale assessment refuses a box reference, naming the polygon a reference needs."""
     _author_tolerance(tmp_path)
     selection, csv_path = _reference(tmp_path)
@@ -266,8 +278,8 @@ def test_a_box_reference_refuses_rather_than_reading_a_projected_extent(
 
 
 def test_an_image_with_two_reference_annotations_refuses_rather_than_picking_one(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     _author_tolerance(tmp_path)
     selection, csv_path = _reference(tmp_path)
     for image in (tmp_path / "ds" / "images" / DATE).glob("*.png"):
@@ -292,8 +304,8 @@ def test_an_image_with_two_reference_annotations_refuses_rather_than_picking_one
 
 
 def test_a_reference_image_the_csv_names_no_extent_for_refuses_naming_it(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     _author_tolerance(tmp_path)
     selection, csv_path = _reference(tmp_path)
     _write_csv(csv_path, [])
@@ -304,8 +316,8 @@ def test_a_reference_image_the_csv_names_no_extent_for_refuses_naming_it(
 
 
 def test_an_unauthored_tolerance_refuses_asking_the_breeders_question(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     fx.propose_and_confirm(
         tmp_path,
         fx.with_fields(
@@ -320,7 +332,7 @@ def test_an_unauthored_tolerance_refuses_asking_the_breeders_question(
     assert "scale_tolerance_frac" in result["error"]
 
 
-def test_a_unit_that_is_no_length_refuses_naming_it(tmp_path):
+def test_a_unit_that_is_no_length_refuses_naming_it(tmp_path: Path) -> None:
     _author_tolerance(tmp_path)
     selection, csv_path = _reference(tmp_path, unit="g")
 
@@ -329,7 +341,9 @@ def test_a_unit_that_is_no_length_refuses_naming_it(tmp_path):
     assert "'g'" in result["error"]
 
 
-def test_too_few_references_on_a_side_fail_as_unreplicated(tmp_path):
+def test_too_few_references_on_a_side_fail_as_unreplicated(
+    tmp_path: Path,
+) -> None:
     _author_tolerance(tmp_path)
     selection, csv_path = _reference(tmp_path, n=4)
 
@@ -342,8 +356,8 @@ def test_too_few_references_on_a_side_fail_as_unreplicated(tmp_path):
 
 
 def test_a_reference_set_disagreeing_with_itself_beyond_the_tolerance_fails(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A reference set whose implied scales span 0.05 to 0.5 mm/px fails the assessment."""
     _author_tolerance(tmp_path, tolerance_frac=0.05)
     selection, csv_path = _reference(
@@ -356,8 +370,8 @@ def test_a_reference_set_disagreeing_with_itself_beyond_the_tolerance_fails(
 
 
 def test_a_holdout_image_identical_to_a_calibration_image_fails_disjointness(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A holdout image identical to a calibration image fails disjointness, named.
 
     The scale is checked on images it was not derived from: a holdout frame byte for byte a
@@ -380,7 +394,7 @@ def test_a_holdout_image_identical_to_a_calibration_image_fails_disjointness(
 # ── the reference CSV reader: read by name, refuse rather than guess ──────
 
 
-def test_the_reference_csv_is_read_by_column_name(tmp_path):
+def test_the_reference_csv_is_read_by_column_name(tmp_path: Path) -> None:
     from tcip_mcp.assessment import _read_reference_csv
 
     path = tmp_path / "reference.csv"
@@ -411,8 +425,8 @@ def test_the_reference_csv_is_read_by_column_name(tmp_path):
     ids=["non-numeric", "duplicate-stem", "short-row", "negative", "zero"],
 )
 def test_a_malformed_reference_csv_refuses_naming_its_line(
-    tmp_path, rows, match
-):
+    tmp_path: Path, rows: list[tuple[str, ...]], match: str
+) -> None:
     from tcip_mcp.assessment import AssessmentRefusedError, _read_reference_csv
 
     path = tmp_path / "reference.csv"
@@ -421,7 +435,9 @@ def test_a_malformed_reference_csv_refuses_naming_its_line(
         _read_reference_csv(path.read_bytes(), str(path))
 
 
-def test_the_scale_is_measured_from_the_retained_table(tmp_path, monkeypatch):
+def test_the_scale_is_measured_from_the_retained_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The scale is measured from the retained copy of the breeder's table.
 
     A table that changes as the assessment reads it is measured as it was read and retained, and
@@ -434,7 +450,9 @@ def test_the_scale_is_measured_from_the_retained_table(tmp_path, monkeypatch):
     selection, csv_path = _reference(tmp_path)
     read = module._reference_reads
 
-    def changed_as_it_is_read(samples, extra=()):
+    def changed_as_it_is_read(
+        samples: list[Sample], extra: tuple[str, ...] = ()
+    ) -> dict[Key | str, Versioned]:
         _write_csv(csv_path, [(f"r{i}", 20.0, "mm") for i in range(8)])
         return read(samples, extra)
 

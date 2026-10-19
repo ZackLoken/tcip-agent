@@ -7,11 +7,17 @@ custom ``train(ctx)`` loop (``train_bespoke``) that trains through the ``ctx`` s
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch
 import torch.nn as nn
 from torch.nn import functional
 
 from tcip_mcp.pipelines.model_build import METRICS_KEY, STATE_DICT_KEY
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.components.detectors import DetectorOutput
+    from tcip_mcp.pipelines.training.envelope import TrainContext
 
 # ---------------------------------------------------------------------------
 # (a) architecture with modified internals: GroupNorm backbone/FPN + GT anchors
@@ -29,7 +35,7 @@ class _GNBlock(nn.Module):
         self.norm = nn.GroupNorm(groups, cout)
         self.act = nn.ReLU(inplace=True)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.act(self.norm(self.conv(x)))
 
 
@@ -61,7 +67,7 @@ class _GNBackboneFPN(nn.Module):
         self.act = nn.ReLU(inplace=True)
         self.out_channels = out_channels  # torchvision FasterRCNN reads this
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         c2 = self.c2(self.stem(x))
         c3 = self.c3(c2)
         p2 = self.lat2(c2) + functional.interpolate(
@@ -80,7 +86,11 @@ class _HeldDetector(nn.Module):
 
     detector: nn.Module
 
-    def forward(self, images, targets=None):
+    def forward(
+        self,
+        images: torch.Tensor | list[torch.Tensor],
+        targets: list[dict] | None = None,
+    ) -> DetectorOutput:
         if isinstance(images, torch.Tensor):
             images = [images[i] for i in range(images.shape[0])]
         if self.training and targets is not None:
@@ -155,7 +165,7 @@ def build_bespoke_detector(
 # ---------------------------------------------------------------------------
 
 
-def train_bespoke(ctx) -> None:
+def train_bespoke(ctx: TrainContext) -> None:
     """Train from scratch, composing the envelope's craft utilities.
 
     The loop composes ``build_optimizer`` / ``build_scheduler`` / ``evaluate`` and records every
@@ -227,7 +237,7 @@ def train_bespoke(ctx) -> None:
     )
 
 
-def save_built_weights(ctx) -> None:
+def save_built_weights(ctx: TrainContext) -> None:
     """Save the model the config builds as the run's final weights, taking no training step.
 
     Each of the config's ``fixture_rows`` (an ``epoch`` plus its metrics) is logged through the
@@ -250,7 +260,7 @@ SECOND_CHECKPOINT_TAG = "second"
 """The tag :func:`save_built_weights_and_a_second_checkpoint` saves its second checkpoint under."""
 
 
-def save_built_weights_and_a_second_checkpoint(ctx) -> None:
+def save_built_weights_and_a_second_checkpoint(ctx: TrainContext) -> None:
     """Run :func:`save_built_weights`, then save the built model again as a second checkpoint.
 
     The second save is under :data:`SECOND_CHECKPOINT_TAG`, beside the config's
@@ -287,7 +297,7 @@ from tcip_mcp.pipelines.components.heads import (
 from tcip_mcp.pipelines.components.necks import FPN, GlobalAvgPoolNeck
 
 
-def _resnet18(in_chans: int = 3):
+def _resnet18(in_chans: int = 3) -> BackboneWrapper:
     import timm
 
     m = timm.create_model(
@@ -320,7 +330,9 @@ class BespokeComposed(_FreezesBackbone, nn.Module):
         self.heads = nn.ModuleList([head])
         self.image_mean, self.image_std = image_mean, image_std
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: torch.Tensor, targets: dict | None = None
+    ) -> dict[str, torch.Tensor]:
         from torchvision.transforms.functional import normalize
 
         images = normalize(images, self.image_mean, self.image_std)
@@ -373,7 +385,7 @@ class BespokeDetection(_FreezesBackbone, _HeldDetector):
         *,
         in_chans: int = 3,
         detector: str = "faster_rcnn",
-        **det_kwargs,
+        **det_kwargs: object,
     ) -> None:
         super().__init__()
         self.backbone = _resnet18(in_chans)
@@ -401,7 +413,7 @@ def build_bespoke_classifier(
     image_std: list[float],
     in_chans: int = 3,
     dropout: float = 0.0,
-):
+) -> BespokeComposed:
     bb = _resnet18(in_chans)
     neck = GlobalAvgPoolNeck(bb.out_channels)
     return BespokeComposed(
@@ -419,7 +431,7 @@ def build_bespoke_ordinal(
     image_mean: list[float],
     image_std: list[float],
     in_chans: int = 3,
-):
+) -> BespokeComposed:
     bb = _resnet18(in_chans)
     neck = GlobalAvgPoolNeck(bb.out_channels)
     return BespokeComposed(
@@ -433,7 +445,7 @@ def build_bespoke_ordinal(
 
 def build_bespoke_regressor(
     *, image_mean: list[float], image_std: list[float], in_chans: int = 3
-):
+) -> BespokeComposed:
     bb = _resnet18(in_chans)
     neck = GlobalAvgPoolNeck(bb.out_channels)
     return BespokeComposed(
@@ -447,7 +459,7 @@ def build_bespoke_semantic_seg(
     image_mean: list[float],
     image_std: list[float],
     in_chans: int = 3,
-):
+) -> BespokeComposed:
     bb = _resnet18(in_chans)
     neck = FPN(bb.out_channels, out_channels=256)
     return BespokeComposed(
@@ -461,8 +473,8 @@ def build_bespoke_instance_seg(
     image_std: list[float],
     num_classes: int = 1,
     in_chans: int = 3,
-    **det_kwargs,
-):
+    **det_kwargs: object,
+) -> BespokeDetection:
     return BespokeDetection(
         num_classes,
         in_chans=in_chans,
@@ -480,8 +492,8 @@ def build_bespoke_detection(
     num_classes: int = 1,
     in_chans: int = 3,
     detector: str = "faster_rcnn",
-    **det_kwargs,
-):
+    **det_kwargs: object,
+) -> BespokeDetection:
     return BespokeDetection(
         num_classes,
         in_chans=in_chans,
@@ -505,7 +517,7 @@ class _OneConvDetector(nn.Module):
         self.score_thresh = 0.0
         self.detections_per_img = 100
 
-    def zero_loss(self, images) -> dict:
+    def zero_loss(self, images: list[torch.Tensor]) -> dict:
         return {
             "loss": sum(self.conv(im.unsqueeze(0)).sum() for im in images)
             * 0.0
@@ -537,7 +549,9 @@ class FixedMaskSegmenter(_OneConvDetector):
         super().__init__(in_chans=in_chans)
         self.regions, self.value, self.box = regions, value, box
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: list[torch.Tensor], targets: list[dict] | None = None
+    ) -> DetectorOutput:
         from tests._producer_fixtures import painted_array
 
         if self.training:
@@ -577,8 +591,8 @@ def build_fixed_mask_instance_seg(
     regions: list,
     value: float,
     box: list,
-    **_handed,
-):
+    **_handed: object,
+) -> FixedMaskSegmenter:
     """Build a :class:`FixedMaskSegmenter` at ``regions``, ``value`` and ``box``.
 
     A ``model_source`` builder; its fixed boxes read none of the detector geometry or statistics
@@ -597,7 +611,7 @@ class BareScoreThreshDetector(_OneConvDetector):
     passed through :meth:`governed`; in train it answers :meth:`zero_loss`.
     """
 
-    def forward(self, images):
+    def forward(self, images: list[torch.Tensor]) -> DetectorOutput:
         if self.training:
             return self.zero_loss(images)
         results = []
@@ -625,7 +639,7 @@ class BareNoKnobDetector(nn.Module):
         super().__init__()
         self.conv = nn.Conv2d(in_chans, 1, 1)
 
-    def forward(self, images):
+    def forward(self, images: list[torch.Tensor]) -> DetectorOutput:
         if self.training:
             return {
                 "loss": sum(self.conv(im.unsqueeze(0)).sum() for im in images)
@@ -648,8 +662,8 @@ class BareNoKnobDetector(nn.Module):
 
 
 def build_bare_score_thresh_detector(
-    *, in_chans: int = 3, num_classes: int = 1, **_handed
-):
+    *, in_chans: int = 3, num_classes: int = 1, **_handed: object
+) -> BareScoreThreshDetector:
     """Build a :class:`BareScoreThreshDetector` as a ``model_source`` builder.
 
     It reads none of the detector geometry or statistics the platform hands it.
@@ -658,8 +672,8 @@ def build_bare_score_thresh_detector(
 
 
 def build_bare_no_knob_detector(
-    *, in_chans: int = 3, num_classes: int = 1, **_handed
-):
+    *, in_chans: int = 3, num_classes: int = 1, **_handed: object
+) -> BareNoKnobDetector:
     """Build a :class:`BareNoKnobDetector` as a ``model_source`` builder.
 
     It reads none of the detector geometry or statistics the platform hands it.
@@ -673,16 +687,20 @@ class DivergingDetection(nn.Module):
     ``w`` is one extra parameter, starting at 0.02.
     """
 
-    def __init__(self, num_classes: int = 1, **kwargs) -> None:
+    def __init__(self, num_classes: int = 1, **kwargs: object) -> None:
         super().__init__()
         self.inner = BespokeDetection(num_classes, **kwargs)
         self.w = nn.Parameter(torch.tensor(0.02))
 
     @property
-    def detector(self):
+    def detector(self) -> nn.Module:
         return self.inner.detector
 
-    def forward(self, images, targets=None):
+    def forward(
+        self,
+        images: torch.Tensor | list[torch.Tensor],
+        targets: list[dict] | None = None,
+    ) -> DetectorOutput:
         out = self.inner(images, targets)
         if self.training and targets is not None:
             out = dict(out)
@@ -696,8 +714,8 @@ class DivergingDetection(nn.Module):
 
 
 def build_diverging_detection(
-    *, num_classes: int = 1, in_chans: int = 3, **det_kwargs
-):
+    *, num_classes: int = 1, in_chans: int = 3, **det_kwargs: object
+) -> DivergingDetection:
     return DivergingDetection(num_classes, in_chans=in_chans, **det_kwargs)
 
 
@@ -725,7 +743,7 @@ class BrightRegionDetector(nn.Module):
         self.nms_thresh = 0.5
         self.detections_per_img = 100
 
-    def _extent(self, image):
+    def _extent(self, image: torch.Tensor) -> torch.Tensor | None:
         """Return the bounding box of the frame's bright pixels, or ``None`` when it holds none."""
         mask = image.mean(dim=0) > self.bright
         ys, xs = torch.nonzero(mask, as_tuple=True)
@@ -742,7 +760,11 @@ class BrightRegionDetector(nn.Module):
             device=image.device,
         )
 
-    def forward(self, images, targets=None):
+    def forward(
+        self,
+        images: torch.Tensor | list[torch.Tensor],
+        targets: list[dict] | None = None,
+    ) -> DetectorOutput:
         if isinstance(images, torch.Tensor):
             images = [images[i] for i in range(images.shape[0])]
         confidence = torch.sigmoid(self.logit)
@@ -800,7 +822,7 @@ def build_bright_region_detector(
     num_classes: int = 1,
     bright: float = 0.5,
     decoy_score: float = 0.03,
-    **_handed,
+    **_handed: object,
 ) -> BrightRegionDetector:
     """Build a :class:`BrightRegionDetector` as a ``model_source`` builder.
 
@@ -842,7 +864,9 @@ class BrightBlobDetector(nn.Module):
         self.seen_channels: list[int] = []
         self.seen_band_peaks: list[list[float]] = []
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: list[torch.Tensor], targets: list[dict] | None = None
+    ) -> DetectorOutput:
         import cv2
         import numpy as np
 
@@ -917,7 +941,7 @@ def build_bright_blob_detector(
     num_classes: int = 1,
     with_masks: bool = False,
     attributes: tuple = (),
-    **_handed,
+    **_handed: object,
 ) -> BrightBlobDetector:
     """Build a :class:`BrightBlobDetector` at the attributes the platform hands it.
 
@@ -935,7 +959,9 @@ class WholeBlobDetector(BrightBlobDetector):
     width and ``y2`` below the height, and 0 otherwise.
     """
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: list[torch.Tensor], targets: list[dict] | None = None
+    ) -> DetectorOutput:
         results = super().forward(images, targets)
         if self.training:
             return results
@@ -953,7 +979,7 @@ def build_whole_blob_detector(
     in_chans: int = 3,
     num_classes: int = 1,
     attributes: tuple = (),
-    **_handed,
+    **_handed: object,
 ) -> WholeBlobDetector:
     """Build a :class:`WholeBlobDetector` at the attributes the platform hands it.
 

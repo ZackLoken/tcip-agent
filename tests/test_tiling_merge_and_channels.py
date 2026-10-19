@@ -2,14 +2,24 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._producer_fixtures import dataset_over, label_image, painted_array  # noqa: E402
 from tests._training_values import tiling_block
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def _patched(width=40, height=24, bands=5, patch=(28, 12)) -> np.ndarray:
+
+def _patched(
+    width: int = 40,
+    height: int = 24,
+    bands: int = 5,
+    patch: tuple[int, int] = (28, 12),
+) -> np.ndarray:
     """Return ``bands`` copies, stacked last, of one ``painted_array`` band.
 
     The band is ``width`` by ``height``, painted 255 over the 6 by 6 rectangle whose corner is
@@ -21,8 +31,12 @@ def _patched(width=40, height=24, bands=5, patch=(28, 12)) -> np.ndarray:
 
 
 def _multiband_detection_fixture(
-    tmp_path, width=40, height=24, bands=5, patch=(28, 12)
-):
+    tmp_path: Path,
+    width: int = 40,
+    height: int = 24,
+    bands: int = 5,
+    patch: tuple[int, int] = (28, 12),
+) -> Path:
     """Write :func:`_patched`'s array as ``a.tif`` with one ``bud`` box over the patch rectangle.
 
     The TIFF sits under ``images/<undated bucket>``, written by ``tifffile`` with no
@@ -49,8 +63,8 @@ def _multiband_detection_fixture(
 
 
 def test_tiled_detection_reads_multiband_and_keeps_boxes_on_their_pixels(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Tiles of a five-band raster keep five bands and each box over its bright patch.
 
     Each tile is 5 by 16 by 16, and each kept box's region of its tile holds a pixel above 0.5.
@@ -90,7 +104,9 @@ def test_tiled_detection_reads_multiband_and_keeps_boxes_on_their_pixels(
             )
 
 
-def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
+def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(
+    tmp_path: Path,
+) -> None:
     """The tiled dataset refuses labels authored in a different frame, naming both frames.
 
     The label document is authored in a frame other than the one the raster decodes in (here
@@ -139,8 +155,8 @@ def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
 
 
 def test_the_authored_frame_raises_on_a_corrupt_label_rather_than_reading_as_no_frame(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A present, unreadable label raises when the tiled dataset is built.
 
     The error is ``UnreadableLabelDocumentError``.
@@ -169,7 +185,7 @@ def test_the_authored_frame_raises_on_a_corrupt_label_rather_than_reading_as_no_
         )
 
 
-def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
+def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path: Path) -> None:
     """A ``TiledDetectionDataset`` built over a five-band base expects five channels."""
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
@@ -185,7 +201,7 @@ def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
     )
 
 
-def test_tiled_detection_handles_channel_first_rasters(tmp_path):
+def test_tiled_detection_handles_channel_first_rasters(tmp_path: Path) -> None:
     """Tiles of a channel-first five-band raster are 5 by 16 by 16, each box over a bright pixel."""
     import tifffile
 

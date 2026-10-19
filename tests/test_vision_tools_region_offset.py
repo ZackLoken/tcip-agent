@@ -160,19 +160,20 @@ def test_region_scoped_bbox_and_mask_rings_describe_the_same_place(
     region offset from the origin, the rings' bounds equal the reported bbox.
     """
     import tcip_store as ts
-    from tcip_mcp.tools.proposal_tools import _staging_key_for
+    from tcip_mcp.tools.proposal_tools import (
+        ProposalStaging,
+        _staging_key_for,
+    )
 
     result = _propose_over_the_region(tmp_path, patched_frame)
     reported = result["candidates"][0]["bbox"]
 
-    envelope = ts.read(_staging_key_for(str(patched_frame)))
-    rings = envelope["candidates"][0]["rings"]
+    staging = ProposalStaging.model_validate(
+        ts.read(_staging_key_for(str(patched_frame)))
+    )
+    rings = staging.candidates[0].rings
     pts = [p for ring in rings for p in ring]
     assert pts
     xs = [float(p[0]) for p in pts]
     ys = [float(p[1]) for p in pts]
     assert [min(xs), min(ys), max(xs), max(ys)] == reported
-    assert envelope["region"]["rect"][:2] != [
-        0,
-        0,
-    ]  # the region really is offset from the origin

@@ -18,10 +18,23 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch import device as torch_device
+
+    from tcip_mcp.buckets import Bucket
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.execution import Execution
+    from tcip_mcp.pipelines.inference.generic_predictor import (
+        WindowedRasterReader,
+    )
 
 torch = pytest.importorskip(
     "torch"
@@ -51,7 +64,7 @@ from tests._trait_fixtures import BUD_OPENING  # noqa: E402
 # ── 1. conf operating-point sweep + count-unbiased pick + the count criterion ──
 
 
-def test_golden_sweep_curve_exact():
+def test_golden_sweep_curve_exact() -> None:
     recs = _sweep_records()
     assert gt_class_avg_size(recs) == pytest.approx(20.0)
     tol = 0.5 * gt_class_avg_size(recs)
@@ -113,7 +126,7 @@ def test_golden_sweep_curve_exact():
     assert at06["f1"] == pytest.approx(2 / 3)
 
 
-def test_golden_pick_count_unbiased_and_f1_max():
+def test_golden_pick_count_unbiased_and_f1_max() -> None:
     recs = _sweep_records()
     sweep = derive_operating_point_curve(
         recs,
@@ -131,7 +144,7 @@ def test_golden_pick_count_unbiased_and_f1_max():
     assert by_conf[0.0]["count_bias_mean"] == pytest.approx(0.5)
 
 
-def test_golden_count_criterion_over_a_dense_distinct_reference():
+def test_golden_count_criterion_over_a_dense_distinct_reference() -> None:
     """The count criterion over a dense, distinct reference admits at the count-unbiased pick.
 
     The p99 object density over the reference's frames, times one frame's pixels, is the
@@ -188,7 +201,7 @@ _PHENO_SERIES = [
 _RULE = BUD_OPENING.crossing_rule
 
 
-def test_golden_crossing_dates_interpolated():
+def test_golden_crossing_dates_interpolated() -> None:
     # The return is a Crossing record (date + evidentiary bound), not a bare string.
     # 0.05 lies midway 0.0 to 0.10, 10 days
     assert (
@@ -222,7 +235,7 @@ def test_golden_crossing_dates_interpolated():
     )  # no observations at all -> still None
 
 
-def test_golden_plant_milestones_shape_and_values():
+def test_golden_plant_milestones_shape_and_values() -> None:
     ms = phenology_mod.plant_milestones(_PHENO_SERIES, BUD_OPENING)
     assert ms["bud_05per_date"] == "2026-02-15"
     assert ms["bud_50per_date"] == "2026-03-01"
@@ -231,16 +244,20 @@ def test_golden_plant_milestones_shape_and_values():
     assert ms["bud_majority_date"] == "2026-03-12"
 
 
-def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
+def test_golden_per_plant_phenology_series_and_milestones(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp import subject_registry as cr
     from tests._chain_fixtures import predicted, published
 
     opening = cr.Attribute("opening", "categorical", ("closed", "open"))
     registry = cr.SubjectRegistry(
-        subjects=(cr.Subject(name="bud", attributes=(opening,)),)
+        subjects=(
+            cr.Subject(name="bud", description="", attributes=(opening,)),
+        )
     )
 
-    def bucket(date: str, stem: str, values: list[str]):
+    def bucket(date: str, stem: str, values: list[str]) -> Bucket:
         image = tmp_path / "ds" / "images" / date / f"{stem}.png"
         return published(
             tmp_path,
@@ -258,13 +275,21 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
             "2026-03-09", "P1_b", ["open", "open", "open", "closed"]
         ),
     }
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import Assignment
+
     mapping = {
-        "2026-02-11": [
-            {"stem": "P1_a", "plant_id": "P1", "accession_name": "acc-9"}
-        ],
-        "2026-03-09": [
-            {"stem": "P1_b", "plant_id": "P1", "accession_name": "acc-9"}
-        ],
+        date: [
+            Assignment(
+                image=f"{stem}.png",
+                stem=stem,
+                date_folder=date,
+                plant_id="P1",
+                accession_name="acc-9",
+                source="sequence",
+                distance_m=0.0,
+            )
+        ]
+        for date, stem in (("2026-02-11", "P1_a"), ("2026-03-09", "P1_b"))
     }
     res = phenology_mod.per_plant_phenology(
         mapping, buckets, BUD_OPENING, ["P1"]
@@ -291,8 +316,8 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
 
 
 def test_golden_execution_record_of_an_untiled_pass_runs_at_what_it_states(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A prepared untiled pass's execution record carries each value with its source.
 
     The record of an untiled detector pass carries the conf it states, sourced ``explicit``, and
@@ -315,16 +340,16 @@ def test_golden_execution_record_of_an_untiled_pass_runs_at_what_it_states(
             Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE),
         )
         .runnable()
-        .execution.record()
+        .execution
     )
 
-    assert (record["conf"], record["density"]) == (
+    assert (record.conf, record.density) == (
         SAMPLE_CONF,
         checkpoint.geometry.object_density,
     )
-    assert record["sources"] == {"conf": "explicit", "density": "derived"}
-    assert record["rationale"] == RATIONALE
-    assert record["tile_size"] is None and record["cross_tile_nms"] is None
+    assert record.sources == {"conf": "explicit", "density": "derived"}
+    assert record.rationale == RATIONALE
+    assert record.tile_size is None and record.cross_tile_nms is None
     with pytest.raises(ExecutionRefusedError, match="conf"):
         prepare(checkpoint, Stated(tile=False, rationale=RATIONALE)).runnable()
 
@@ -333,8 +358,8 @@ def test_golden_execution_record_of_an_untiled_pass_runs_at_what_it_states(
 
 
 def test_golden_no_operating_point_default_survives_and_each_door_takes_stated_values(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     # No module carries an inference operating-point default: each value is stated, derived from
     # a reference the caller holds, or refused, and every door hands its stated values on whole.
     from tcip_mcp.pipelines import (
@@ -417,8 +442,8 @@ def test_golden_no_operating_point_default_survives_and_each_door_takes_stated_v
 
 
 def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_none(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Each ``evaluate_model`` regime reports the stated conf and refuses with none.
 
     Each of the three regimes (a tiling block for the tile-level run, nothing for the single
@@ -437,7 +462,7 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
         registered_checkpoint,
     )
 
-    def _dataset(root):
+    def _dataset(root: Path) -> Path:
         images_dir = root / "images" / UNDATED_BUCKET
         images_dir.mkdir(parents=True)
         Image.new("RGB", (64, 64), color=(120, 120, 120)).save(
@@ -454,7 +479,7 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
     from PIL import Image
 
     class _DummyModel:
-        def to(self, device):
+        def to(self, device: torch_device) -> _DummyModel:
             return self
 
     class _StubPredictor:
@@ -466,7 +491,16 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
         dims = {"in_chans": 3, "num_classes": 1}
         model = _DummyModel()
 
-        def predict_sliced(self, path, **kw):
+        def predict_sliced(
+            self,
+            path: str | Path | BandGroupRef | WindowedRasterReader,
+            **kw: Execution
+            | int
+            | str
+            | dict
+            | Callable[[int, int, dict], None]
+            | None,
+        ) -> dict:
             return {
                 "width": 64,
                 "height": 64,
@@ -542,7 +576,7 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
 # ══════════════════════════════════════════════════════════════════════════
 
 
-def _iou_records():
+def _iou_records() -> list[dict]:
     """Return two 100 px frames of 20 px ground-truth boxes and their detections.
 
     The first frame holds two ground-truth boxes, a 0.95 detection on the first's box, a 0.85
@@ -551,10 +585,12 @@ def _iou_records():
     """
     from tcip_mcp.pipelines.training.evaluation import gt_record
 
-    def gt(x, y, w, h, cid=1):
+    def gt(x: float, y: float, w: float, h: float, cid: int = 1) -> dict:
         return gt_record([float(x), float(y), float(w), float(h)], cid, 0)
 
-    def dt(x, y, w, h, score, cid=1):
+    def dt(
+        x: float, y: float, w: float, h: float, score: float, cid: int = 1
+    ) -> dict:
         return {
             "category_id": cid,
             "bbox": [float(x), float(y), float(w), float(h)],
@@ -586,7 +622,7 @@ def _metrics(iou_threshold: float) -> dict:
     )
 
 
-def test_golden_coco_metrics_at_iou_050():
+def test_golden_coco_metrics_at_iou_050() -> None:
     m = _metrics(0.5)
     assert m["tp"] == 2
     assert m["fp"] == 1
@@ -598,7 +634,7 @@ def test_golden_coco_metrics_at_iou_050():
     assert m["map"] == pytest.approx(0.46732673267326735, abs=1e-6)
 
 
-def test_golden_coco_matching_is_iou_threshold_sensitive():
+def test_golden_coco_matching_is_iou_threshold_sensitive() -> None:
     # The same predictions score differently at 0.75, proof the criterion is IoU-thresholded.
     m = _metrics(0.75)
     assert (m["tp"], m["fp"], m["fn"]) == (1, 2, 2)

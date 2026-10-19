@@ -1,6 +1,9 @@
 """The web inference worker, with the pipeline's ``GenericPredictor`` building a stub."""
 
+from __future__ import annotations
+
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -9,10 +12,13 @@ from tcip_mcp.pipelines.schemas import AugmentationSpec
 from tests._predictor_fixtures import BOX, StubPredictor, install
 from tests._training_values import RATIONALE, augmentation
 
+if TYPE_CHECKING:
+    from tcip_web.routes.inference import InferenceJob
+
 BUCKET = "out/2026-01-01"
 
 
-def _checkpoint(project: Path, **kwargs) -> Path:
+def _checkpoint(project: Path, **kwargs: object) -> Path:
     """Return the checkpoint ``project_checkpoint`` registers in ``project``, passing ``kwargs``."""
     from tests._verified_checkpoint_fixtures import project_checkpoint
 
@@ -36,11 +42,11 @@ def _one_image(project: Path, *stems: str) -> Path:
 def _job(
     job_id: str,
     project: Path,
-    ckpt,
+    ckpt: Path,
     images_dir: Path,
     stated: Stated,
     bucket: str = BUCKET,
-):
+) -> InferenceJob:
     from tcip_web.routes.inference import InferenceJob
 
     return InferenceJob(
@@ -59,15 +65,19 @@ def _annotations(
     project: Path, stem: str = "img", bucket: str = BUCKET
 ) -> list[dict]:
     """Return the records of ``stem``'s published prediction document under ``bucket``."""
+    from pydantic import JsonValue, TypeAdapter
+
     import tcip_store
     from tcip_mcp.dataset_layout import prediction_key
 
-    return tcip_store.read(prediction_key(project, bucket, stem))[
-        "annotations"
-    ]
+    document = tcip_store.read(prediction_key(project, bucket, stem))
+    assert isinstance(document, dict)
+    return TypeAdapter(list[dict[str, JsonValue]]).validate_python(
+        document["annotations"]
+    )
 
 
-def test_encode_predictions_roundtrip_and_negative(tmp_path):
+def test_encode_predictions_roundtrip_and_negative(tmp_path: Path) -> None:
     from tcip_annotation import json_io
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
@@ -113,8 +123,8 @@ def test_encode_predictions_roundtrip_and_negative(tmp_path):
 
 
 def test_web_worker_uses_generic_predictor_and_publishes_its_documents(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     pytest.importorskip("fastapi")
     import hashlib
 
@@ -170,8 +180,8 @@ def test_web_worker_uses_generic_predictor_and_publishes_its_documents(
 
 
 def test_web_worker_prefers_the_checkpoints_own_recorded_scope(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The GUI inference worker decodes through the checkpoint's own recorded scope.
 
     No subjects.json exists over the images; the object's attribute decodes to ``open``, and
@@ -188,7 +198,9 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_scope(
         tmp_path,
         data={"num_channels": 3, "scope": {"subject": "bud"}},
         registry=cr.SubjectRegistry(
-            subjects=(cr.Subject(name="bud", attributes=(opening,)),)
+            subjects=(
+                cr.Subject(name="bud", description="", attributes=(opening,)),
+            )
         ),
     )
 
@@ -219,8 +231,8 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_scope(
 
 
 def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An instance_seg checkpoint launched tiled from the GUI hands its predictor a tiled pass.
 
     The job completes stating tile, the bucket's execution records a tiled pass, and the
@@ -266,8 +278,8 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(
 
 
 def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_resize(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The GUI worker hands its predictor a native-frame tile scale and the recorded resize.
 
     For a checkpoint whose geometry is its untiled 64x64 training frame, the predictor's one
@@ -321,8 +333,8 @@ def _sources(project: Path) -> dict:
 
 
 def test_web_worker_stamps_the_stated_conf_explicit_and_the_checkpoints_density(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The GUI worker records a stated conf's source as explicit and the density's as derived.
 
     The job completes with one published annotation, and the recorded sources read
@@ -357,8 +369,8 @@ def test_web_worker_stamps_the_stated_conf_explicit_and_the_checkpoints_density(
 
 
 def test_web_worker_fails_a_job_stating_no_conf_naming_it(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A GUI inference job stating no conf fails, naming it.
 
     The job's status reads failed, and its error names conf.
@@ -383,9 +395,9 @@ def test_web_worker_fails_a_job_stating_no_conf_naming_it(
 
 
 def test_web_worker_dropped_boxes_agree_with_the_published_document_on_a_degenerate_box(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The job's dropped-box count agrees with the published document on a degenerate box.
 
     Of the model's two raw detections, one has zero width: the job counts one dropped box, and
@@ -427,7 +439,7 @@ def test_web_worker_dropped_boxes_agree_with_the_published_document_on_a_degener
     assert len(_annotations(tmp_path)) == 1
 
 
-def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path):
+def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path: Path) -> None:
     """The GUI worker fails the job on a stem collision.
 
     The worker's pass enumerates through ``image_utils.list_logical_images``: a capture holding

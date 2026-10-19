@@ -8,6 +8,7 @@ states those semantics on their own terms.
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -19,8 +20,18 @@ from tcip_mcp.pipelines.data.datasets import (
 )
 from tcip_mcp.pipelines.slicing import slice_lattice
 
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
-def _clip_reference(boxes, tile_x, tile_y, tile_w, tile_h, min_box_size):
+
+def _clip_reference(
+    boxes: np.ndarray,
+    tile_x: int,
+    tile_y: int,
+    tile_w: int,
+    tile_h: int,
+    min_box_size: float,
+) -> tuple[NDArray[np.float32], NDArray[np.int64]]:
     """Clip ``boxes`` to the tile one box at a time; return the kept tile-local xyxy and rows.
 
     Each box is intersected with the tile, an empty intersection is dropped, and a box crossing
@@ -46,7 +57,12 @@ def _clip_reference(boxes, tile_x, tile_y, tile_w, tile_h, min_box_size):
     )
 
 
-def _clip(boxes, tile, min_box_size, rows=None):
+def _clip(
+    boxes: np.ndarray,
+    tile: tuple[int, int, int, int],
+    min_box_size: float,
+    rows: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Clip ``boxes`` as box rows to ``tile``; return the kept boxes and rows.
 
     The clip runs through :func:`clip_rows_to_tile`.
@@ -60,7 +76,9 @@ def _clip(boxes, tile, min_box_size, rows=None):
     return kept, kept_rows
 
 
-def _assert_identical(got, want):
+def _assert_identical(
+    got: tuple[np.ndarray, np.ndarray], want: tuple[np.ndarray, np.ndarray]
+) -> None:
     (gb, gr), (wb, wr) = got, want
     assert gb.dtype == wb.dtype
     assert np.array_equal(gb, wb), f"boxes differ: {gb} vs {wb}"
@@ -99,7 +117,9 @@ _ADVERSARIAL = [
 ]
 
 
-def test_clip_matches_the_per_box_reference_on_adversarial_geometries():
+def test_clip_matches_the_per_box_reference_on_adversarial_geometries() -> (
+    None
+):
     for boxes in _ADVERSARIAL:
         _assert_identical(
             _clip(boxes, (200, 200, 264, 264), 3.0),
@@ -107,7 +127,7 @@ def test_clip_matches_the_per_box_reference_on_adversarial_geometries():
         )
 
 
-def test_clip_matches_the_per_box_reference_on_random_geometries():
+def test_clip_matches_the_per_box_reference_on_random_geometries() -> None:
     rng = np.random.default_rng(11)
     for _ in range(40):
         n = int(rng.integers(0, 200))
@@ -126,7 +146,7 @@ def test_clip_matches_the_per_box_reference_on_random_geometries():
         )
 
 
-def test_a_rectangular_tile_clips_against_its_own_extent():
+def test_a_rectangular_tile_clips_against_its_own_extent() -> None:
     """A rectangular tile clips a box against its own extent.
 
     A box's visible part is a 54x40 sliver against a 64-wide square tile (dropped at
@@ -141,7 +161,9 @@ def test_a_rectangular_tile_clips_against_its_own_extent():
     assert np.allclose(rect[0][0], [10.0, 10.0, 150.0, 50.0])
 
 
-def test_the_candidates_clipped_equal_every_row_clipped_over_a_lattice():
+def test_the_candidates_clipped_equal_every_row_clipped_over_a_lattice() -> (
+    None
+):
     rng = np.random.default_rng(31)
     height, width, tile_size = 500, 700, 128
     slices = slice_lattice(height, width, tile_size, 0.2)
@@ -159,7 +181,7 @@ def test_the_candidates_clipped_equal_every_row_clipped_over_a_lattice():
             )
 
 
-def test_each_slice_gets_its_own_candidate_array():
+def test_each_slice_gets_its_own_candidate_array() -> None:
     """Each empty slice gets its own candidate array.
 
     Resizing one empty slice's candidates leaves another's shape unchanged.
@@ -173,7 +195,9 @@ def test_each_slice_gets_its_own_candidate_array():
     assert empties[1].shape == (0,)
 
 
-def test_candidate_cost_scales_with_incidences_not_positions_times_boxes():
+def test_candidate_cost_scales_with_incidences_not_positions_times_boxes() -> (
+    None
+):
     """Candidates for 50,000 small boxes over a dense 56,000-pixel lattice finish within 60 s.
 
     Each lattice position gets a candidate list, and the candidate rows number at least the

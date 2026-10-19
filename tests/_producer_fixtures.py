@@ -6,15 +6,43 @@ The producers are ``label_queries.admit``, ``write_label_document`` and the one 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tcip_mcp.dataset_layout import label_key_of as image_label_key
 from tests._training_values import drawn_split
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+
+    import numpy as np
+    import pytest
+    from PIL import Image
+    from torch.utils.data import Dataset
+
+    from tcip_annotation.json_io import LabelDocument
+    from tcip_annotation.state import Annotation
+    from tcip_mcp.model_registry import VerifiedCheckpoint
+    from tcip_mcp.pipelines.data.augmentations import Transforms
+    from tcip_mcp.pipelines.data.datasets import BespokeSource
+    from tcip_mcp.pipelines.data.label_queries import Admission
+    from tcip_mcp.pipelines.data.selection import Sample
+    from tcip_mcp.pipelines.data.split_construction import Partition
+    from tcip_mcp.pipelines.model_build import SourceLayout
+    from tcip_mcp.pipelines.schemas import DataSpec
+    from tcip_mcp.subject_registry import SubjectRegistry
+    from tcip_store import Version
+
+    Color = float | tuple[int, ...]
+    """A paint color: one value for every band, or one value per band."""
+
 
 def label_image(
-    image_path, annotations, width: int, height: int, **kwargs: Any
-):
+    image_path: str | Path,
+    annotations: Iterable[Annotation],
+    width: int,
+    height: int,
+    **kwargs: object,
+) -> Version | None:
     """Write ``annotations`` as the label document of the image at ``image_path``.
 
     The document is written by :func:`~tcip_annotation.json_io.write_label_document` at the
@@ -36,7 +64,7 @@ def box_annotation(
     subject: str = "bud",
     score: float | None = None,
     **attributes: str,
-):
+) -> Annotation:
     """Return an annotation of ``subject`` boxed at pixel ``(x1, y1, x2, y2)``.
 
     It carries ``attributes``, and is a prediction when ``score`` is given.
@@ -51,7 +79,7 @@ def box_annotation(
     )
 
 
-def saved_annotations(image) -> list:
+def saved_annotations(image: str | Path) -> list:
     """Return the annotations of the label document of the image at ``image``."""
     from tcip_annotation.json_io import read_label_document
 
@@ -59,10 +87,10 @@ def saved_annotations(image) -> list:
 
 
 def write_image(
-    path,
+    path: Path,
     size: tuple[int, int] = (100, 80),
     color: tuple[int, int, int] = (0, 0, 0),
-):
+) -> Path:
     """Save ``Image.new("RGB", size, color)`` at ``path``, its directory made.
 
     Returns ``path``.
@@ -74,7 +102,7 @@ def write_image(
     return path
 
 
-def gray_frame(where, size: int = 128, name: str = "img.png") -> str:
+def gray_frame(where: Path, size: int = 128, name: str = "img.png") -> str:
     """Write ``name`` in ``where``, ``size`` square at (120, 120, 120), and return its path.
 
     The image is written by :func:`write_image`.
@@ -83,15 +111,15 @@ def gray_frame(where, size: int = 128, name: str = "img.png") -> str:
 
 
 def blank_image(
-    root, name: str = "IMG_0001.JPG", size: tuple[int, int] = (100, 80)
-):
+    root: Path, name: str = "IMG_0001.JPG", size: tuple[int, int] = (100, 80)
+) -> Path:
     """Write ``name`` into ``root``'s undated capture with :func:`write_image`; return its path."""
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
     return write_image(root / "images" / UNDATED_BUCKET / name, size)
 
 
-def one_labeled_capture(root):
+def one_labeled_capture(root: Path) -> Path:
     """Write a three-byte JPEG stub ``a_1.jpg`` into ``root``'s ``2026-03-04`` capture.
 
     The stub has a kept empty label document over an 8 by 8 frame, and ``root``'s subject
@@ -103,7 +131,9 @@ def one_labeled_capture(root):
     image.parent.mkdir(parents=True, exist_ok=True)
     image.write_bytes(b"\xff\xd8\xff")
     label_image(image, [], 8, 8, keep_empty=True)
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(
+        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
+    )
     return root
 
 
@@ -112,8 +142,12 @@ BRIGHT = (230, 230, 230)
 
 
 def painted_frame(
-    width: int, height: int, background, extents, mode: str = "RGB"
-):
+    width: int,
+    height: int,
+    background: Color,
+    extents: Iterable[tuple[tuple[float, float, float, float], Color]],
+    mode: str = "RGB",
+) -> Image.Image:
     """Return a ``mode`` image of ``width`` by ``height`` in ``background`` with painted extents.
 
     Each of ``extents`` (a half-open pixel box ``(x1, y1, x2, y2)`` beside its color) is filled
@@ -129,8 +163,13 @@ def painted_frame(
 
 
 def painted_array(
-    width: int, height: int, extents, *, background=0, mode: str = "L"
-):
+    width: int,
+    height: int,
+    extents: Iterable[tuple[tuple[float, float, float, float], Color]],
+    *,
+    background: Color = 0,
+    mode: str = "L",
+) -> np.ndarray:
     """Return ``np.array`` of :func:`painted_frame` over ``extents``, ``background``, ``mode``."""
     import numpy as np
 
@@ -140,13 +179,13 @@ def painted_array(
 
 
 def labeled_frame(
-    path,
-    annotations,
+    path: Path,
+    annotations: Sequence[Annotation],
     width: int,
     height: int,
     background: tuple[int, int, int],
-    **kwargs: Any,
-):
+    **kwargs: object,
+) -> Path:
     """Write a labeled :func:`painted_frame` of ``background`` at ``path``.
 
     The frame is :data:`BRIGHT` over the extent of each of ``annotations`` that has one and is no
@@ -172,8 +211,13 @@ def labeled_frame(
 
 
 def seed_labeled_images(
-    images_dir, annotations, *, n: int, width: int, height: int
-):
+    images_dir: Path,
+    annotations: Sequence[Annotation],
+    *,
+    n: int,
+    width: int,
+    height: int,
+) -> Path:
     """Make ``images_dir``, a capture of a dataset image tree, and write ``n`` labeled frames.
 
     The frames are :func:`labeled_frame` images ``img<i>.png`` of ``width`` by ``height``, each
@@ -229,12 +273,12 @@ def big_single_source(
 
 
 def seed_bud_images(
-    images_dir,
+    images_dir: Path,
     *,
     n: int = 3,
     size: int = 128,
     box: tuple[float, float, float, float] = (10, 10, 40, 40),
-):
+) -> Path:
     """Write ``n`` square ``size``px images through :func:`seed_labeled_images`.
 
     Each holds one ``bud`` box at ``box``.
@@ -251,7 +295,11 @@ def seed_bud_images(
 
 
 def small_detection_config(
-    images_dir, model_source: dict | None = None, *, project, **data: Any
+    images_dir: str | Path,
+    model_source: dict | None = None,
+    *,
+    project: Path,
+    **data: object,
 ) -> dict:
     """Return a :func:`~tests._chain_fixtures.training_config` of ``project`` over ``images_dir``.
 
@@ -275,7 +323,7 @@ def small_detection_config(
     )
 
 
-def registry_over(dataset_root, registry) -> None:
+def registry_over(dataset_root: str | Path, registry: SubjectRegistry) -> None:
     """Replace ``dataset_root``'s subject registry by ``registry``.
 
     The replacement goes through the platform's own save
@@ -294,14 +342,14 @@ def registry_over(dataset_root, registry) -> None:
 
 
 def mark_complete(
-    image_path,
+    image_path: str | Path,
     subject: str,
     *,
-    project,
-    rect=None,
+    project: Path,
+    rect: tuple[float, float, float, float] | None = None,
     proposals_hidden: bool = False,
     by: str = "user:tester",
-):
+) -> tuple[Version, LabelDocument, dict[int, int]]:
     """Mark ``subject`` complete over ``rect`` on the label document of the image at ``image_path``.
 
     The mark goes through ``dataset_layout.save_label_document`` as ``by``, with gestures of
@@ -335,12 +383,12 @@ def mark_complete(
 
 
 def admit_over(
-    images_dir,
-    ground_truth=None,
+    images_dir: str | Path,
+    ground_truth: str | Path | None = None,
     *,
     subject: str | None = None,
     members: list[str] | None = None,
-):
+) -> Admission:
     """Return the admission of ``images_dir`` under its registry's scope for ``subject``.
 
     ``label_queries.admit`` runs over ``images_dir``, ``ground_truth`` and ``members`` at
@@ -363,7 +411,11 @@ def admit_over(
     return admitted
 
 
-def checkpoint_admission(checkpoint, images_dir, ground_truth=None):
+def checkpoint_admission(
+    checkpoint: VerifiedCheckpoint,
+    images_dir: str | Path,
+    ground_truth: str | Path | None = None,
+) -> Admission:
     """Return ``admit`` of ``images_dir``, ``ground_truth`` at the checkpoint's recorded scope."""
     from tcip_mcp.pipelines.data.label_queries import admit
 
@@ -373,12 +425,12 @@ def checkpoint_admission(checkpoint, images_dir, ground_truth=None):
 
 
 def samples_over(
-    images_dir,
-    ground_truth=None,
+    images_dir: str | Path,
+    ground_truth: str | Path | None = None,
     *,
     subject: str | None = None,
     members: list[str] | None = None,
-):
+) -> list[Sample]:
     """Return :func:`admit_over`'s ``every_sample()`` over ``images_dir``."""
     return admit_over(
         images_dir, ground_truth, subject=subject, members=members
@@ -387,16 +439,16 @@ def samples_over(
 
 def run_over(
     task: str,
-    images_dir,
-    ground_truth=None,
+    images_dir: str | Path,
+    ground_truth: str | Path | None = None,
     *,
     subject: str | None = None,
     members: list[str] | None = None,
     stated: dict[str, Any] | None = None,
     tiling: dict | None = None,
-    dataset_source: Any = None,
-    transforms: Any = None,
-):
+    dataset_source: BespokeSource | None = None,
+    transforms: Transforms | None = None,
+) -> tuple[Dataset, dict]:
     """Return a loader for ``task`` over one place holding ground truth, and its data section.
 
     The samples are the admission's ``every_sample()``. The data section is ``run_sizes`` over a
@@ -446,7 +498,7 @@ def run_over(
     return dataset, data.record()
 
 
-def served_regions(dataset: Any) -> list:
+def served_regions(dataset: Dataset) -> list:
     """Return the regions a stand-in detection ``dataset`` exposes, one per item it serves.
 
     Each region is the item's target's objects over its image's pixels
@@ -460,7 +512,7 @@ def served_regions(dataset: Any) -> list:
     ]
 
 
-def staged_layout(project, data: Any):
+def staged_layout(project: str | Path, data: dict | DataSpec) -> SourceLayout:
     """Return ``model_build.staged_sources``'s layout for a config of ``project`` over ``data``.
 
     ``data`` is a data block (a dict, or a ``DataSpec``). The config's model source is
@@ -489,7 +541,12 @@ def staged_layout(project, data: Any):
     ).layout
 
 
-def train_val(project, task: str, data_cfg: dict, transforms: Any = None):
+def train_val(
+    project: Path,
+    task: str,
+    data_cfg: dict,
+    transforms: Transforms | None = None,
+) -> tuple[Dataset, Dataset | None, Partition, DataSpec]:
     """Run ``split_construction.auto_train_val`` for a ``task`` run of ``project``.
 
     ``data_cfg`` is validated as a run's data block of ``project``, a dataset builder it declares
@@ -506,12 +563,19 @@ def train_val(project, task: str, data_cfg: dict, transforms: Any = None):
     )
 
 
-def dataset_over(task: str, images_dir, ground_truth=None, **kwargs: Any):
+def dataset_over(
+    task: str,
+    images_dir: str | Path,
+    ground_truth: str | Path | None = None,
+    **kwargs: str | list[str] | dict | BespokeSource | Transforms | None,
+) -> Dataset:
     """Return the loader :func:`run_over` builds."""
     return run_over(task, images_dir, ground_truth, **kwargs)[0]
 
 
-def fake_popen(monkeypatch, captured: list[list[str]]) -> type:
+def fake_popen(
+    monkeypatch: pytest.MonkeyPatch, captured: list[list[str]]
+) -> type:
     """Replace ``subprocess.Popen`` and ``launch_tensorboard`` with stand-ins starting nothing.
 
     The ``Popen`` stand-in records each argv into ``captured`` and starts no process, and the
@@ -525,7 +589,7 @@ def fake_popen(monkeypatch, captured: list[list[str]]) -> type:
     class _RecordedChild:
         pid = 424242
 
-        def __init__(self, argv, **kwargs) -> None:
+        def __init__(self, argv: list[str], **kwargs: object) -> None:
             captured.append(argv)
 
     monkeypatch.setattr(subprocess, "Popen", _RecordedChild)

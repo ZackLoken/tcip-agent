@@ -7,6 +7,7 @@ The output shapes of the tools that push are part of the subject.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,9 +15,13 @@ from fastapi.testclient import TestClient
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.web_client import VALID_PANELS
 
+if TYPE_CHECKING:
+    from tcip_mcp.workspace import BoundProject
+    from tcip_web.state import OpenProject
+
 
 @pytest.fixture
-def project_id(opened) -> str:
+def project_id(opened: OpenProject) -> str:
     """Return the open project's id."""
     return opened.id
 
@@ -246,9 +251,9 @@ class TestPostPanelEventRoute:
 
     def test_the_focus_tool_answers_the_event_channels_refusal_whole(
         self,
-        opened,
+        opened: OpenProject,
         data_dir: Path,
-        monkeypatch,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The focus tool answers the event channel's refusal whole.
 
@@ -284,9 +289,9 @@ class TestPostPanelEventRoute:
     def test_the_focus_tools_own_annotate_event_reaches_the_advisory_state(
         self,
         opened_client: TestClient,
-        opened,
+        opened: OpenProject,
         data_dir: Path,
-        monkeypatch,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The event ``focus_human_attention`` posts sets the advisory state it names."""
         from tcip_mcp import web_client
@@ -295,7 +300,9 @@ class TestPostPanelEventRoute:
 
         posted: dict = {}
 
-        def _capture(target, panel: str, event_type: str, data: dict) -> dict:
+        def _capture(
+            target: BoundProject, panel: str, event_type: str, data: dict
+        ) -> dict:
             posted.update(
                 project_id=target.id,
                 panel=panel,
@@ -336,7 +343,7 @@ class TestPushPanelDataTool:
     """Tests of ``push_panel_event``, which posts over HTTP and answers without raising."""
 
     def test_no_subscribers_when_backend_down(
-        self, bound, monkeypatch
+        self, bound: BoundProject, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """With no backend running, ``push_panel_event`` answers naming the panel."""
         from tcip_mcp.tools.gui_tools import push_panel_event
@@ -351,7 +358,7 @@ class TestPushPanelDataTool:
         # Panel name preserved in result
         assert result.get("panel") == "training"
 
-    def test_invalid_panel_rejected(self, bound) -> None:
+    def test_invalid_panel_rejected(self, bound: BoundProject) -> None:
         """``push_panel_event`` answers an unknown panel name with an error."""
         from tcip_mcp.tools.gui_tools import push_panel_event
 
@@ -363,7 +370,7 @@ class TestPortDiscovery:
     """Tests of the client's read of the port the backend recorded under the workspace."""
 
     def test_the_recorded_port_is_read_whatever_the_environment_requests(
-        self, tmp_path: Path, monkeypatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import tcip_store as ts
         from tcip_mcp.web_client import backend_port_key, resolve_web_port
@@ -373,7 +380,7 @@ class TestPortDiscovery:
         assert resolve_web_port(tmp_path.parent) == 34567
 
     def test_no_recorded_port_refuses_naming_what_records_one(
-        self, tmp_path: Path, monkeypatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """With no recorded port, an environment port refuses, naming the recording command."""
         from tcip_mcp.web_client import NoBackendPortError, resolve_web_port
@@ -383,7 +390,7 @@ class TestPortDiscovery:
             resolve_web_port(tmp_path.parent)
 
     def test_an_unreadable_recorded_port_raises_and_names_it(
-        self, tmp_path: Path, monkeypatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A recorded port that does not read as a port raises naming it, not read as absent."""
         import tcip_store as ts
@@ -391,7 +398,7 @@ class TestPortDiscovery:
 
         ts.replace(backend_port_key(tmp_path.parent), "not a port")
         monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
-        with pytest.raises(ValueError, match="does not read as a port"):
+        with pytest.raises(ValueError, match="valid integer"):
             resolve_web_port(tmp_path.parent)
 
     def test_the_port_handoff_is_one_declaration_that_both_packages_reach(
@@ -451,7 +458,7 @@ class TestTrainingToolOutputSchema:
     def test_launch_training_returns_the_experiment_id_its_artifacts_are_nested_under(
         self,
         tmp_path: Path,
-        monkeypatch,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A launch answers its registered run's id and that run's own output directory."""
         pytest.importorskip("torchvision")
@@ -533,7 +540,7 @@ class TestInferenceToolOutputSchema:
     def test_run_inference_reports_back_the_operating_point_it_was_handed(
         self,
         tmp_path: Path,
-        monkeypatch,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A dry run reports each operating-point dimension as its statement names it."""
         from tcip_mcp.pipelines.execution import Stated
@@ -632,7 +639,9 @@ class TestHpoToolOutputSchema:
 # ── Port fallback chain + pytest hermeticity ──────────
 
 
-def test_post_panel_event_suppressed_under_pytest(bound, monkeypatch):
+def test_post_panel_event_suppressed_under_pytest(
+    bound: BoundProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``post_panel_event`` under pytest is suppressed and delivers nothing.
 
     Pytest itself sets PYTEST_CURRENT_TEST.
@@ -650,7 +659,9 @@ def test_post_panel_event_suppressed_under_pytest(bound, monkeypatch):
     }
 
 
-def test_post_panel_event_opt_in_bypasses_suppression(bound, monkeypatch):
+def test_post_panel_event_opt_in_bypasses_suppression(
+    bound: BoundProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import tcip_store as ts
     from tcip_mcp.web_client import backend_port_key, post_panel_event
 
@@ -666,8 +677,8 @@ def test_post_panel_event_opt_in_bypasses_suppression(bound, monkeypatch):
 
 
 def test_post_panel_event_returns_the_backends_response_body(
-    opened, monkeypatch
-):
+    opened: OpenProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``post_panel_event`` answers a served backend's response body.
 
     Against a served backend it answers with the backend's response body, and after the

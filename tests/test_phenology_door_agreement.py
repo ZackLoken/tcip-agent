@@ -9,15 +9,19 @@ from __future__ import annotations
 import csv
 from io import StringIO
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 pytest.importorskip("torch")
 
 
 def test_the_web_and_mcp_deliveries_agree_on_the_majority_column_and_the_revision(
     tmp_path: Path,
-    client,
+    client: TestClient,
 ) -> None:
     from tcip_mcp.delivery import read_delivery_events
     from tcip_mcp.operationalization import latest_confirmed

@@ -7,8 +7,12 @@ a three-channel checkpoint is refused by name.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.execution import MaskCut, Pass
 
 torch = pytest.importorskip("torch")
 np = pytest.importorskip("numpy")
@@ -31,8 +35,13 @@ def _five_band_raster(images_dir: Path) -> str:
 
 
 def _predicted(
-    tmp_path, images_dir: Path, *, in_chans, normalization=None, **stated
-):
+    tmp_path: Path,
+    images_dir: Path,
+    *,
+    in_chans: int,
+    normalization: dict | None = None,
+    **stated: bool | int | float | str | MaskCut | None,
+) -> tuple[Pass, list[dict]]:
     """Return the pass of a real checkpoint built at ``in_chans`` and its results.
 
     The pass runs over ``images_dir``, normalizing by ``normalization`` when given.
@@ -57,8 +66,8 @@ def _predicted(
 
 
 def test_a_source_with_no_coercion_is_refused_at_the_models_own_band_count(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A source with no coercion to the model's band count is refused by name.
 
     A five-band raster under a three-channel checkpoint refuses, naming the truncation it
@@ -80,7 +89,9 @@ def test_a_source_with_no_coercion_is_refused_at_the_models_own_band_count(
         )
 
 
-def test_a_photographic_source_the_model_reads_is_predicted(tmp_path):
+def test_a_photographic_source_the_model_reads_is_predicted(
+    tmp_path: Path,
+) -> None:
     """An RGB capture under a one-channel checkpoint is predicted."""
     from tcip_mcp.pipelines.derivations import band_normalization_stats
 

@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from datetime import datetime
+
+    from PIL import Image
 
 
 def _deg_to_dms(value: float) -> tuple[float, float, float]:
@@ -14,7 +19,7 @@ def _deg_to_dms(value: float) -> tuple[float, float, float]:
     return (float(d), float(m), round((m_full - m) * 60, 4))
 
 
-def capture_exif(when: Any) -> Any:
+def capture_exif(when: datetime) -> Image.Exif:
     """Return a PIL EXIF block stating ``when`` (a ``datetime``) as the image's DateTimeOriginal."""
     from PIL import Image
 
@@ -27,8 +32,8 @@ def write_geo_image(
     path: Path,
     lat: float,
     lon: float,
-    when: Any,
-    image: Any = None,
+    when: datetime,
+    image: Image.Image | None = None,
     *,
     h_pos_err: float | None = None,
     omit: tuple[int, ...] = (),

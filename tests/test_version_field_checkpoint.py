@@ -6,6 +6,8 @@ dict.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 pytest.importorskip("torch")
@@ -14,10 +16,13 @@ pytest.importorskip("torchvision")
 from tcip_mcp.pipelines.model_build import STATE_DICT_KEY  # noqa: E402
 from tests._verified_checkpoint_fixtures import registered_checkpoint  # noqa: E402
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 def test_a_version_one_checkpoint_loads_through_the_platforms_own_registration(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.model_registry import load_registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)

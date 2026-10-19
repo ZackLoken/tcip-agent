@@ -38,7 +38,9 @@ ENTRY = fx.with_fields(
 the per-class conditioning is what these cases isolate."""
 
 
-def _criterion(cal, hold):
+def _criterion(
+    cal: list[dict], hold: list[dict]
+) -> tuple[float, dict, list[str]]:
     return count_criterion(
         cal,
         hold,
@@ -49,7 +51,14 @@ def _criterion(cal, hold):
     )
 
 
-def _gt_records(prefix, n, *, swap_classes, classes=(1, 2), offset=0.0):
+def _gt_records(
+    prefix: str,
+    n: int,
+    *,
+    swap_classes: bool,
+    classes: tuple[int, int] = (1, 2),
+    offset: float = 0.0,
+) -> list[dict]:
     """Return ``n`` per-image :func:`_record` entries of eight 40 px boxes each.
 
     The first four boxes are given ``classes[0]`` and the rest ``classes[1]``, each with a 0.9
@@ -74,7 +83,7 @@ def _gt_records(prefix, n, *, swap_classes, classes=(1, 2), offset=0.0):
     return recs
 
 
-def _record(prefix, i, gt, dt):
+def _record(prefix: str, i: int, gt: list[dict], dt: list[dict]) -> dict:
     return prediction_record(
         dt,
         gt,
@@ -86,7 +95,9 @@ def _record(prefix, i, gt, dt):
     )
 
 
-def test_a_class_compensating_reference_the_pooled_bias_calls_unbiased_fails_per_class():
+def test_a_class_compensating_reference_the_pooled_bias_calls_unbiased_fails_per_class() -> (
+    None
+):
     _conf, evidence, failures = _criterion(
         _gt_records("cal", 4, swap_classes=True),
         _gt_records("hold", 4, swap_classes=True, offset=5000.0),
@@ -101,7 +112,7 @@ def test_a_class_compensating_reference_the_pooled_bias_calls_unbiased_fails_per
     assert failures == ["count_bias_exceeds_tolerance_per_class"]
 
 
-def test_the_same_geometry_called_correctly_passes():
+def test_the_same_geometry_called_correctly_passes() -> None:
     _conf, evidence, failures = _criterion(
         _gt_records("cal", 4, swap_classes=False),
         _gt_records("hold", 4, swap_classes=False, offset=5000.0),
@@ -112,7 +123,7 @@ def test_the_same_geometry_called_correctly_passes():
     assert evidence["holdout_missing_classes"] == []
 
 
-def test_a_single_class_reference_is_unaffected_by_the_conditioning():
+def test_a_single_class_reference_is_unaffected_by_the_conditioning() -> None:
     """A single-class reference is unaffected by conditioning the count criterion on class.
 
     With one detection class, conditioning on class is a no-op, the one class's statistics
@@ -147,7 +158,9 @@ def test_a_single_class_reference_is_unaffected_by_the_conditioning():
         assert hb["per_class"]["1"][key] == pytest.approx(hb[key])
 
 
-def test_a_class_the_holdout_never_carries_cannot_pass_by_its_absence():
+def test_a_class_the_holdout_never_carries_cannot_pass_by_its_absence() -> (
+    None
+):
     """A class the holdout never carries fails the criterion as missing from the holdout.
 
     The model confuses classes 1 and 2 in calibration and the holdout holds only class 1: each
@@ -166,14 +179,14 @@ def test_a_class_the_holdout_never_carries_cannot_pass_by_its_absence():
     assert "insufficient_holdout_images_per_class" not in failures
 
 
-def test_a_class_scarce_in_the_holdout_cannot_be_diluted_to_a_pass():
+def test_a_class_scarce_in_the_holdout_cannot_be_diluted_to_a_pass() -> None:
     """A class scarce in the holdout cannot be diluted to a pass by the images lacking it.
 
     Class 2 is present on 2 of 20 holdout images and missed outright both times: its bias is -4
     over the two images that carry it, and it fails.
     """
 
-    def calibration(prefix, n, offset):
+    def calibration(prefix: str, n: int, offset: float) -> list[dict]:
         recs = []
         for i in range(n):
             gt, dt = [], []
@@ -184,7 +197,7 @@ def test_a_class_scarce_in_the_holdout_cannot_be_diluted_to_a_pass():
             recs.append(_record(prefix, i, gt, dt))
         return recs
 
-    def holdout(prefix, n, offset):
+    def holdout(prefix: str, n: int, offset: float) -> list[dict]:
         recs = []
         for i in range(n):
             gt, dt = [], []
@@ -219,7 +232,7 @@ def test_a_class_scarce_in_the_holdout_cannot_be_diluted_to_a_pass():
     assert "count_bias_exceeds_tolerance_per_class" in failures
 
 
-def test_no_conf_in_the_sweep_escapes_a_wholesale_class_swap():
+def test_no_conf_in_the_sweep_escapes_a_wholesale_class_swap() -> None:
     """No conf in the sweep escapes a wholesale class swap.
 
     For a model that calls every class-1 object class 2, each conf on the curve leaves some
@@ -263,7 +276,9 @@ def test_no_conf_in_the_sweep_escapes_a_wholesale_class_swap():
         )
 
 
-def _three_class_records(prefix, offset, *, background: int):
+def _three_class_records(
+    prefix: str, offset: float, *, background: int
+) -> list[dict]:
     """Return six records of classes 1, 2 and 3, the layout shifted by ``offset`` in x.
 
     Classes 1 and 2 each hold one object with a 0.95 detection on its box and a second 0.95
@@ -316,7 +331,9 @@ def _three_class_records(prefix, offset, *, background: int):
     return recs
 
 
-def test_the_pick_serves_the_worst_class_and_a_sparse_reference_still_fails_it():
+def test_the_pick_serves_the_worst_class_and_a_sparse_reference_still_fails_it() -> (
+    None
+):
     """The pick serves the worst class, and a sparse reference fails the criterion at that pick.
 
     At conf 0.95 the pooled bias is 0 while class 3 sits at -2; at 0.4 every class's bias is at
@@ -352,7 +369,7 @@ def test_the_pick_serves_the_worst_class_and_a_sparse_reference_still_fails_it()
     } == {"1", "2", "3"}
 
 
-def test_the_same_pick_passes_once_every_class_is_dense_enough():
+def test_the_same_pick_passes_once_every_class_is_dense_enough() -> None:
     """The 0.4 pick passes when each class holds two hundred always-found objects.
 
     The objects make each class's one permanent miscount per image a small fraction of its
@@ -367,13 +384,13 @@ def test_the_same_pick_passes_once_every_class_is_dense_enough():
     assert failures == []
 
 
-def test_the_effective_tolerance_floor_governs_a_near_zero_fraction():
+def test_the_effective_tolerance_floor_governs_a_near_zero_fraction() -> None:
     tolerance = _effective_count_bias_tolerance(0.01, typical_count=1.0, n=5)
     assert tolerance == pytest.approx(0.2)
     assert tolerance > 0.01 * 1.0
 
 
-def test_the_effective_tolerance_floor_shrinks_as_evidence_grows():
+def test_the_effective_tolerance_floor_shrinks_as_evidence_grows() -> None:
     assert _effective_count_bias_tolerance(
         0.0, typical_count=0.0, n=5
     ) == pytest.approx(0.2)
@@ -382,20 +399,24 @@ def test_the_effective_tolerance_floor_shrinks_as_evidence_grows():
     ) == pytest.approx(0.02)
 
 
-def test_the_effective_tolerance_floor_stays_at_or_below_one_half_at_two_or_more_images():
+def test_the_effective_tolerance_floor_stays_at_or_below_one_half_at_two_or_more_images() -> (
+    None
+):
     for n in range(2, 60):
         assert (
             _effective_count_bias_tolerance(0.0, typical_count=0.0, n=n) <= 0.5
         )
 
 
-def test_the_fraction_term_governs_a_dense_reference():
+def test_the_fraction_term_governs_a_dense_reference() -> None:
     assert _effective_count_bias_tolerance(
         0.01, typical_count=100.0, n=40
     ) == pytest.approx(1.0)
 
 
-def test_a_sparse_classes_recorded_tolerance_is_the_floor_not_the_fraction_term():
+def test_a_sparse_classes_recorded_tolerance_is_the_floor_not_the_fraction_term() -> (
+    None
+):
     """A sparse class's recorded tolerance is the floor, not the fraction term.
 
     Class 2 holds two objects per image and one spurious detection on one of five images: its
@@ -403,7 +424,7 @@ def test_a_sparse_classes_recorded_tolerance_is_the_floor_not_the_fraction_term(
     (0.01 * 2).
     """
 
-    def build(prefix, offset):
+    def build(prefix: str, offset: float) -> list[dict]:
         recs = []
         for i in range(5):
             gt, dt = [], []
@@ -431,14 +452,16 @@ def test_a_sparse_classes_recorded_tolerance_is_the_floor_not_the_fraction_term(
     assert evidence["per_class"]["2"]["tolerance"] == pytest.approx(0.2)
 
 
-def test_a_class_present_on_exactly_one_holdout_image_cannot_pass_on_it_alone():
+def test_a_class_present_on_exactly_one_holdout_image_cannot_pass_on_it_alone() -> (
+    None
+):
     """A class present on exactly one holdout image is refused as insufficient evidence.
 
     Class 2 shows up on one image of ten, in a dense frame, and the criterion reports
     ``insufficient_holdout_images_per_class``.
     """
 
-    def build(prefix, offset):
+    def build(prefix: str, offset: float) -> list[dict]:
         recs = []
         for i in range(10):
             gt, dt = [], []

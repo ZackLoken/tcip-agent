@@ -10,12 +10,17 @@ import subprocess
 import sys
 import threading
 from collections import Counter
+from typing import TYPE_CHECKING
 
 import pytest
 
 import tcip_store as ts
 from tcip_mcp.audit import audit_log_key, record_event_or_raise
 from tcip_store.sqlite_backend import SqliteBackend
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
 
 
 def _generous_lock_timeout_s() -> float:
@@ -26,14 +31,16 @@ def _generous_lock_timeout_s() -> float:
 
 
 @pytest.fixture
-def unstarved_backend():
+def unstarved_backend() -> Iterator[SqliteBackend]:
     """Bind a sqlite backend at four times the default lock timeout, yield it, then close it."""
     backend = ts.bind(SqliteBackend(lock_timeout_s=_generous_lock_timeout_s()))
     yield backend
     backend.close()
 
 
-def test_concurrent_threads_no_torn_or_lost_lines(tmp_path, unstarved_backend):
+def test_concurrent_threads_no_torn_or_lost_lines(
+    tmp_path: Path, unstarved_backend: SqliteBackend
+) -> None:
     n_threads, per_thread = 16, 40
     appended: list[tuple[int, int]] = []
     refusals: list[str] = []
@@ -91,8 +98,8 @@ finally:
 
 
 def test_concurrent_processes_no_torn_or_lost_lines(
-    tmp_path, unstarved_backend
-):
+    tmp_path: Path, unstarved_backend: SqliteBackend
+) -> None:
     """Appends from two separate processes all land, none torn or lost.
 
     Each process returns cleanly, the log holds no corrupt line, and its records are exactly the
@@ -131,7 +138,9 @@ def test_concurrent_processes_no_torn_or_lost_lines(
     assert Counter((r["tag"], r["i"]) for r in page.records) == appended
 
 
-def test_an_ordinary_event_lands_in_the_log_its_scope_names(tmp_path):
+def test_an_ordinary_event_lands_in_the_log_its_scope_names(
+    tmp_path: Path,
+) -> None:
     """An ordinary event lands as one whole record in the log of the root its scope names."""
     record_event_or_raise(
         "save_label_document",

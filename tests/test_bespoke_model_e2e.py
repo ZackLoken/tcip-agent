@@ -59,15 +59,14 @@ def _audit_events(root: Path, tool: str = "training_run") -> list[dict]:
     return [record for record in page.records if record.get("tool") == tool]
 
 
-def test_bespoke_detector_end_to_end(tmp_path: Path):
+def test_bespoke_detector_end_to_end(tmp_path: Path) -> None:
     from dataclasses import asdict
 
     from tcip_mcp.experiments import (
         METRICS_FILE,
-        RUN_FILE,
         observe,
-        read_record,
         read_rows,
+        read_run,
     )
     from tcip_mcp.model_registry import (
         ModelRegistry,
@@ -122,7 +121,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
 
     # ---- the custom loop completed through the envelope ----
     final = observe(out).final
-    assert final is not None and final["state"] == "completed", final
+    assert final is not None and final.state == "completed", final
     ckpt = out / "model_best.pt"
     assert ckpt.is_file()
 
@@ -163,12 +162,10 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     best = torch.load(ckpt, weights_only=False)
     assert best[CONFIG_KEY]["model_source"]["builder"] == GT_ANCHOR_DETECTOR
 
-    launch = read_record(out / RUN_FILE)
-    assert launch["environment"]["torch"]
-    assert launch["config"]["training_source"] == TRAIN_BESPOKE
-    [entry] = launch["source"][
-        "files"
-    ].values()  # source snapshotted with sha256
+    launch = read_run(out)
+    assert launch.environment["torch"]
+    assert launch.config["training_source"] == TRAIN_BESPOKE
+    [entry] = launch.source["files"].values()  # source snapshotted with sha256
     copy = out / entry["file"]
     assert copy.read_bytes() == Path(src_file).read_bytes()
     assert entry["sha256"] == hashlib.sha256(copy.read_bytes()).hexdigest()
@@ -185,12 +182,12 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert events[-1]["arguments"]["experiment_id"] == "expBespoke"
 
     # ---- completion registered the bespoke model into the immutable registry ----
-    [entry] = [
-        m
+    [registered] = [
+        m.entry
         for m in ModelRegistry(str(tmp_path)).list_models()
-        if m["experiment_id"] == "expBespoke"
+        if m.entry.experiment_id == "expBespoke"
     ]
-    assert entry["sha256"] and len(entry["sha256"]) == 64
+    assert registered.sha256 and len(registered.sha256) == 64
 
     # ---- the module actually learns, and its predictor answers a detection record ----
     from tests._chain_fixtures import built_model

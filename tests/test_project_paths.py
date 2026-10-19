@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import tcip_mcp.project_paths as pp
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_repo_root_finds_the_marker() -> None:
@@ -15,7 +19,7 @@ def test_repo_root_finds_the_marker() -> None:
 
 
 def test_repo_root_climbs_past_a_package_level_claude_md(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The repo-root climb passes a package-level CLAUDE.md and stops at the root's .mcp.json."""
     root = tmp_path / "repo"

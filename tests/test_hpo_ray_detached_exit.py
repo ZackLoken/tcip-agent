@@ -13,8 +13,12 @@ import subprocess
 import sys
 import textwrap
 import time
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = [
     pytest.mark.skipif(
@@ -109,8 +113,8 @@ _SUBPROCESS_SCRIPT = textwrap.dedent(
 
 
 def test_a_detached_console_free_sweep_exits_cleanly_and_leaves_no_ray_daemon_behind(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A detached console-free sweep exits cleanly and leaves no Ray daemon behind.
 
     Asserts the subprocess exits 0 having written its sweep directory, and that the table

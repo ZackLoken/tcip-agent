@@ -9,10 +9,15 @@ The fixtures give the two sides different object scales.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from tests import _trait_fixtures as fx
 from tests._training_values import COUNT_TEST
+
+if TYPE_CHECKING:
+    from tcip_mcp.traits import TraitEntry
 
 pytest.importorskip("torch")
 
@@ -69,7 +74,9 @@ def _records(
     return recs
 
 
-def _criterion(cal, hold, entry=ENTRY):
+def _criterion(
+    cal: list[dict], hold: list[dict], entry: TraitEntry = ENTRY
+) -> tuple[float, dict, list[str]]:
     return count_criterion(
         cal,
         hold,
@@ -80,7 +87,9 @@ def _criterion(cal, hold, entry=ENTRY):
     )
 
 
-def test_a_holdout_of_smaller_objects_is_judged_at_its_own_object_scale():
+def test_a_holdout_of_smaller_objects_is_judged_at_its_own_object_scale() -> (
+    None
+):
     """A holdout of smaller objects is judged at its own object scale.
 
     Calibration carries 80 px objects, the holdout 20 px ones, and each holdout detection sits
@@ -112,7 +121,9 @@ def test_a_holdout_of_smaller_objects_is_judged_at_its_own_object_scale():
     assert "localization_quality_floor_failed" in failures
 
 
-def test_the_same_displacement_passes_when_both_sides_carry_the_same_object_scale():
+def test_the_same_displacement_passes_when_both_sides_carry_the_same_object_scale() -> (
+    None
+):
     """A 30 px displacement passes with 80 px objects on both sides.
 
     The holdout's true positives equal its object count with no false positive or miss, and
@@ -129,7 +140,7 @@ def test_the_same_displacement_passes_when_both_sides_carry_the_same_object_scal
     assert failures == []
 
 
-def test_an_authored_floor_the_holdout_does_not_clear_fails_by_name():
+def test_an_authored_floor_the_holdout_does_not_clear_fails_by_name() -> None:
     """A floor stricter than what the reference's own precision and recall reach fails by name."""
     cal = _records("c", size=80.0, x0=0.0, det_offset=0.0)
     hold = _records("h", size=20.0, x0=100000.0, det_offset=DET_OFFSET)

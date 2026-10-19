@@ -8,10 +8,18 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.model_registry import ModelRegistry, load_registered_checkpoint
+from tcip_mcp.model_registry import (
+    ModelRegistry,
+    Producer,
+    load_registered_checkpoint,
+)
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 # Checkpoints of distinct content, so an entry can never be matched by accident.
 _RUNS = {
@@ -31,7 +39,7 @@ def _checkpoint(path: Path, content: str) -> Path:
     return produced_checkpoint(path, content)
 
 
-def _doctor():
+def _doctor() -> ModuleType:
     """Return the ``tcip_mcp.cli.doctor`` module."""
     from tcip_mcp.cli import doctor
 
@@ -61,7 +69,7 @@ def polluted_project(tmp_path: Path) -> tuple[Path, ModelRegistry]:
 
 
 def test_doctor_flags_every_registry_entry_the_registry_wrote(
-    polluted_project,
+    polluted_project: tuple[Path, ModelRegistry],
 ) -> None:
     """The doctor's registry check names every entry the registry wrote, with its checkpoint.
 
@@ -69,7 +77,7 @@ def test_doctor_flags_every_registry_entry_the_registry_wrote(
     model and its checkpoint path.
     """
     root, reg = polluted_project
-    registered = reg.list_models()
+    registered = [m.entry for m in reg.list_models()]
     assert len(registered) == len(_RUNS)
 
     findings: list[tuple[str, str]] = []
@@ -79,9 +87,9 @@ def test_doctor_flags_every_registry_entry_the_registry_wrote(
     assert len(errors) == len(_RUNS)
     for entry in registered:
         assert any(
-            entry["name"] in msg and entry["checkpoint_path"] in msg
+            entry.name in msg and entry.checkpoint_path in msg
             for msg in errors
-        ), f"no doctor finding names the registered model {entry['name']}"
+        ), f"no doctor finding names the registered model {entry.name}"
 
 
 def test_doctor_reports_nothing_for_a_project_with_no_registered_models(
@@ -122,10 +130,10 @@ def test_identity_resolution_matches_a_registered_checkpoint_by_content(
     delivered.write_bytes(trained.read_bytes())
 
     checkpoint = load_registered_checkpoint(delivered, project=root)
-    assert checkpoint.producer == {
-        "checkpoint_sha256": hashlib.sha256(trained.read_bytes()).hexdigest(),
-        "experiment_id": "bud_run3",
-    }
+    assert checkpoint.producer == Producer(
+        checkpoint_sha256=hashlib.sha256(trained.read_bytes()).hexdigest(),
+        experiment_id="bud_run3",
+    )
 
 
 def test_doctor_reports_an_index_that_will_not_decode_rather_than_reading_it_as_no_models(
@@ -150,7 +158,7 @@ def test_doctor_reports_an_index_that_will_not_decode_rather_than_reading_it_as_
 
 
 def test_a_readable_index_is_still_read_entry_by_entry(
-    polluted_project,
+    polluted_project: tuple[Path, ModelRegistry],
 ) -> None:
     """The decode refusal is scoped to an index that will not parse.
 
@@ -164,5 +172,5 @@ def test_a_readable_index_is_still_read_entry_by_entry(
     _doctor().check_registry(root, findings)
     assert len(findings) == len(_RUNS)
     assert not any("decode" in message for _, message in findings)
-    for entry in reg.list_models():
-        assert any(entry["name"] in message for _, message in findings)
+    for listed in reg.list_models():
+        assert any(listed.entry.name in message for _, message in findings)

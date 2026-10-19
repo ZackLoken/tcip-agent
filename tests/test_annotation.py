@@ -13,12 +13,12 @@ from tcip_annotation.json_io import (
 from tcip_annotation.matching import iou_matrix, pair_proposals
 
 
-def test_bbox_creation():
+def test_bbox_creation() -> None:
     b = BBox(x1=10, y1=20, x2=50, y2=60)
     assert (b.x1, b.y1, b.x2, b.y2) == (10, 20, 50, 60)
 
 
-def test_label_document_reads_the_name_based_record():
+def test_label_document_reads_the_name_based_record() -> None:
     # A label document is the name-based per-image record: bbox is pixel xywh, subject by name.
     anns = label_document(
         {
@@ -36,7 +36,7 @@ def test_label_document_reads_the_name_based_record():
     assert {a.subject for a in anns} == {"bud"}
 
 
-def test_write_and_read_roundtrip(tmp_path: Path):
+def test_write_and_read_roundtrip(tmp_path: Path) -> None:
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
 
     anns = [
@@ -58,7 +58,7 @@ def test_write_and_read_roundtrip(tmp_path: Path):
         assert abs(orig.geometry.y1 - read.geometry.y1) < 2
 
 
-def test_iou_matrix():
+def test_iou_matrix() -> None:
     iou = iou_matrix(
         [[0, 0, 10, 10]], [[0, 0, 10, 10], [5, 5, 15, 15], [20, 20, 30, 30]]
     )
@@ -67,7 +67,7 @@ def test_iou_matrix():
     assert iou[0, 2] == 0.0
 
 
-def test_pair_proposals():
+def test_pair_proposals() -> None:
     gt = [Annotation(subject="bud", geometry=BBox(x1=0, y1=0, x2=10, y2=10))]
     preds = [
         Annotation(
@@ -82,7 +82,7 @@ def test_pair_proposals():
     ).pairs == [(0, 0)]
 
 
-def test_score_predictions_single_image(data_dir: Path):
+def test_score_predictions_single_image(data_dir: Path) -> None:
     from tcip_mcp.tools.annotation_tools import score_predictions
 
     img = data_dir / "images" / "2-11-26" / "img_001.jpg"

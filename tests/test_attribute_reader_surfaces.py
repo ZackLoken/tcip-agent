@@ -8,6 +8,7 @@ render's legend.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -18,6 +19,9 @@ from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing import phenology
 from tcip_mcp.traits import PositiveState
 from tests._training_values import VERTEX_SPACING
+
+if TYPE_CHECKING:
+    from tcip_store import Key
 
 SUBJECT = "object"
 COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
@@ -35,13 +39,17 @@ def _scope(tmp_path: Path, *attributes: cr.Attribute) -> ClassScope:
     registry_over(
         tmp_path,
         cr.SubjectRegistry(
-            subjects=(cr.Subject(name=SUBJECT, attributes=attributes),)
+            subjects=(
+                cr.Subject(
+                    name=SUBJECT, description="", attributes=attributes
+                ),
+            )
         ),
     )
     return registry_scope(tmp_path / "images", SUBJECT)
 
 
-def _document(tmp_path: Path):
+def _document(tmp_path: Path) -> Key:
     """Return the key of a prediction document of the bucket ``m`` under ``tmp_path``."""
     from tcip_mcp.dataset_layout import prediction_key
 

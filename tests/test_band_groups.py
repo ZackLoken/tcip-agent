@@ -11,10 +11,14 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 import tifffile
+
+if TYPE_CHECKING:
+    from tcip_store import Version
 
 REAL_DJI_DIR = Path(
     r"C:\Users\breeder\tcip-projects\currant_multispectral_valley-farm-2023\images\2023-05-23"
@@ -54,7 +58,7 @@ def _write_band_file(
     band_name: str,
     wavelength: float,
     fill: int = 100,
-    shape=(4, 4),
+    shape: tuple[int, int] = (4, 4),
 ) -> None:
     arr = np.full(shape, fill, dtype=np.uint16)
     tifffile.imwrite(
@@ -110,7 +114,7 @@ def _write_band_file_with_identity(
     lat: float,
     lon: float,
     fill: int = 100,
-    shape=(4, 4),
+    shape: tuple[int, int] = (4, 4),
 ) -> None:
     arr = np.full(shape, fill, dtype=np.uint16)
     tifffile.imwrite(
@@ -149,7 +153,7 @@ def dji_copy(tmp_path: Path) -> Path:
 
 
 @requires_real_dji_data
-def test_detects_all_16_captures_from_real_dji_data(dji_copy):
+def test_detects_all_16_captures_from_real_dji_data(dji_copy: Path) -> None:
     from tcip_mcp.pipelines.data.band_groups import (
         detect_and_write_band_groups,
     )
@@ -165,7 +169,7 @@ def test_detects_all_16_captures_from_real_dji_data(dji_copy):
 
 
 @requires_real_dji_data
-def test_real_data_manifest_records_true_wavelengths(dji_copy):
+def test_real_data_manifest_records_true_wavelengths(dji_copy: Path) -> None:
     from tcip_mcp.pipelines.data.band_groups import (
         detect_and_write_band_groups,
         read_band_group_manifest,
@@ -184,7 +188,7 @@ def test_real_data_manifest_records_true_wavelengths(dji_copy):
 
 
 @requires_real_dji_data
-def test_real_data_detection_is_idempotent(dji_copy):
+def test_real_data_detection_is_idempotent(dji_copy: Path) -> None:
     from tcip_mcp.pipelines.data.band_groups import (
         detect_and_write_band_groups,
     )
@@ -202,7 +206,9 @@ def test_real_data_detection_is_idempotent(dji_copy):
 
 
 @requires_real_dji_data
-def test_real_data_stale_manifest_recovers_by_deleting_it(dji_copy):
+def test_real_data_stale_manifest_recovers_by_deleting_it(
+    dji_copy: Path,
+) -> None:
     """A stale manifest refuses to resolve, and deleting it lets the survivors re-form.
 
     With one sibling's file deleted, deleting the stem's .bandgroup lets the next detection pass
@@ -303,7 +309,9 @@ def _assert_tolerances_agree(images_dir: Path) -> None:
 
 
 @requires_real_dji_data
-def test_real_data_tolerance_agrees_with_the_samples_own_gap(dji_copy):
+def test_real_data_tolerance_agrees_with_the_samples_own_gap(
+    dji_copy: Path,
+) -> None:
     from tcip_mcp.pipelines.data.band_groups import (
         detect_and_write_band_groups,
     )
@@ -314,7 +322,9 @@ def test_real_data_tolerance_agrees_with_the_samples_own_gap(dji_copy):
     _assert_tolerances_agree(dji_copy)
 
 
-def test_tolerance_agrees_with_a_synthetic_buckets_own_gap(tmp_path):
+def test_tolerance_agrees_with_a_synthetic_buckets_own_gap(
+    tmp_path: Path,
+) -> None:
     """Each synthetic capture forms, recording the identity gap the test recomputes.
 
     Three two-band captures are taken seconds apart along a row, each band's time and fix offset
@@ -350,8 +360,8 @@ def test_tolerance_agrees_with_a_synthetic_buckets_own_gap(tmp_path):
 
 
 def test_a_lone_capture_forms_recording_that_its_identity_had_no_reference(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.data.band_groups import (
         detect_and_write_band_groups,
     )
@@ -382,7 +392,9 @@ def test_a_lone_capture_forms_recording_that_its_identity_had_no_reference(
 # ── duplicate-band-identity guard (synthetic, the real sample never hits this case) ──────
 
 
-def test_duplicate_band_identity_is_refused_not_silently_overwritten(tmp_path):
+def test_duplicate_band_identity_is_refused_not_silently_overwritten(
+    tmp_path: Path,
+) -> None:
     """A capture holding one band twice is refused, never one file overwriting the other.
 
     The three files carry agreeing identity tags, and the refusal names the duplicated band and
@@ -441,8 +453,8 @@ def test_duplicate_band_identity_is_refused_not_silently_overwritten(tmp_path):
 
 
 def test_two_unrelated_captures_sharing_a_group_id_are_refused_not_spliced(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Two unrelated captures sharing a group id are refused, not spliced; a genuine one forms.
 
     Two disjoint-band-name captures (A_G/A_NIR, B_R/B_RE) sharing one group id, taken about two
@@ -524,8 +536,8 @@ def test_two_unrelated_captures_sharing_a_group_id_are_refused_not_spliced(
 
 
 def test_a_colliding_group_id_with_no_identity_signal_at_all_is_refused(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A colliding group id with no identity signal at all is refused.
 
     Four files sharing a group id with every identity-check tag absent form no group and write no
@@ -552,7 +564,9 @@ def test_a_colliding_group_id_with_no_identity_signal_at_all_is_refused(
     assert refusal["band"] is None
 
 
-def test_a_genuine_capture_with_identity_tags_still_forms_normally(tmp_path):
+def test_a_genuine_capture_with_identity_tags_still_forms_normally(
+    tmp_path: Path,
+) -> None:
     """4 files sharing a group id and agreeing timestamp/GPS (one capture) form a group."""
     from tcip_mcp.pipelines.data.band_groups import (
         detect_and_write_band_groups,
@@ -590,7 +604,9 @@ def test_a_genuine_capture_with_identity_tags_still_forms_normally(tmp_path):
     ]
 
 
-def test_no_metadata_and_no_manifest_leaves_files_independent(tmp_path):
+def test_no_metadata_and_no_manifest_leaves_files_independent(
+    tmp_path: Path,
+) -> None:
     """Files with no correlation metadata and no manifest stay independent, no group guessed.
 
     A file with no embedded correlation metadata and no explicit manifest forms no group; there
@@ -610,7 +626,7 @@ def test_no_metadata_and_no_manifest_leaves_files_independent(tmp_path):
     assert result == {"formed": [], "refused": [], "manifests": []}
 
 
-def test_a_lone_file_with_a_group_id_forms_no_group(tmp_path):
+def test_a_lone_file_with_a_group_id_forms_no_group(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.band_groups import (
         detect_and_write_band_groups,
     )
@@ -627,8 +643,8 @@ def test_a_lone_file_with_a_group_id_forms_no_group(tmp_path):
 
 
 def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An ingest refuses a group whose stem a standalone file holds, naming the file.
 
     Through ingest_images: a group whose own canonical stem a raw file in the ingest holds is
@@ -696,8 +712,8 @@ def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(
 
 
 def test_explicit_group_id_equal_to_one_of_its_own_members_stem_forms(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An explicit group whose id equals one of its own members' stems forms.
 
     The collision check excludes the members the group claims.
@@ -724,8 +740,8 @@ def test_explicit_group_id_equal_to_one_of_its_own_members_stem_forms(
 
 
 def test_two_explicit_group_ids_folding_to_one_key_form_one_and_refuse_the_other(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.data.band_groups import (
         detect_and_write_band_groups,
     )
@@ -751,8 +767,8 @@ def test_two_explicit_group_ids_folding_to_one_key_form_one_and_refuse_the_other
 
 
 def test_a_group_that_claims_a_members_stem_lets_a_later_group_form_under_it(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A group claiming a member's stem lets a later group in the pass form under that stem.
 
     A second group in one pass whose stem equals a member the first group claims (``y.tif``)
@@ -784,7 +800,9 @@ def test_a_group_that_claims_a_members_stem_lets_a_later_group_form_under_it(
 # ── explicit-manifest strategy ──────────────────────────────────────────────────────────
 
 
-def test_explicit_manifest_groups_a_sensor_with_no_embedded_metadata(tmp_path):
+def test_explicit_manifest_groups_a_sensor_with_no_embedded_metadata(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.data.band_groups import (
         detect_and_write_band_groups,
     )
@@ -814,7 +832,7 @@ def test_explicit_manifest_groups_a_sensor_with_no_embedded_metadata(tmp_path):
     assert recorded["central_wavelength_nm"] is None
 
 
-def test_explicit_manifest_drops_a_group_missing_files(tmp_path):
+def test_explicit_manifest_drops_a_group_missing_files(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.band_groups import (
         groups_from_explicit_mapping,
     )
@@ -835,7 +853,7 @@ def test_explicit_manifest_drops_a_group_missing_files(tmp_path):
 # ── manifest read/write round trip ─────────────────────────────────────────────────────
 
 
-def test_manifest_round_trip(tmp_path):
+def test_manifest_round_trip(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.band_groups import (
         read_band_group_manifest,
         write_band_group_manifest,
@@ -868,7 +886,7 @@ def test_manifest_round_trip(tmp_path):
     assert ref.central_wavelength_nm == {"Red": 650.0, "Blue": 470.0}
 
 
-def test_manifest_with_missing_bands_key_is_rejected(tmp_path):
+def test_manifest_with_missing_bands_key_is_rejected(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.band_groups import read_band_group_manifest
 
     bad = tmp_path / "bad.bandgroup"
@@ -881,7 +899,9 @@ def test_manifest_with_missing_bands_key_is_rejected(tmp_path):
 
 
 @requires_real_dji_data
-def test_ingest_images_groups_real_dji_bucket(tmp_path, monkeypatch):
+def test_ingest_images_groups_real_dji_bucket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "workspace"))
     from tcip_mcp.tools.ingest_tools import ingest_images
 
@@ -901,8 +921,8 @@ def test_ingest_images_groups_real_dji_bucket(tmp_path, monkeypatch):
 
 
 def test_an_ingest_of_per_band_captures_forms_their_groups(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An ingest of per-band captures forms their groups with nothing stated about them."""
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "workspace"))
     from tcip_mcp.tools.ingest_tools import ingest_images
@@ -931,8 +951,8 @@ def test_an_ingest_of_per_band_captures_forms_their_groups(
 
 
 def test_a_manifest_recorded_mid_detection_is_kept_rather_than_overwritten(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A manifest recorded mid-detection is kept, not overwritten.
 
     A competing manifest is written as the pass's own manifest write begins: the recorded bytes
@@ -954,7 +974,12 @@ def test_a_manifest_recorded_mid_detection_is_kept_rather_than_overwritten(
     original = band_groups.write_band_group_manifest
     raced: list[str] = []
 
-    def racing_writer(images_dir, stem, bands, **kwargs):
+    def racing_writer(
+        images_dir: Path,
+        stem: str,
+        bands: dict[str, Path],
+        **kwargs: dict[str, float] | str | dict[str, dict] | Version | None,
+    ) -> Path:
         if not raced:
             raced.append(stem)
             manifest_path.write_bytes(recorded)

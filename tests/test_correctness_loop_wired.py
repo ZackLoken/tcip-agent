@@ -8,6 +8,7 @@ broken builder, and ``TrainContext`` exposes the checks and craft primitives to 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
@@ -31,13 +32,21 @@ from tests._training_values import (
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from torch.utils.data import Dataset  # noqa: E402
-
+from tcip_mcp.pipelines.data.datasets import BaseDataset  # noqa: E402
 from tcip_mcp.pipelines.model_build import resolve_contract_dims  # noqa: E402
 from tcip_mcp.pipelines.schemas import TrainGeometry  # noqa: E402
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
 
-def _broken_builder(**kwargs):
+    from PIL import Image
+    from torch import Tensor, nn
+
+    from tcip_mcp.pipelines.data.selection import ClassScope, Sample
+    from tcip_mcp.pipelines.schemas import TrainConfigSchema
+
+
+def _broken_builder(**kwargs: object) -> nn.Module:
     """Return an 'agent-written' model whose eval-mode forward returns a bare tensor.
 
     In training it returns a ``loss`` from one linear layer over random input.
@@ -49,7 +58,9 @@ def _broken_builder(**kwargs):
             super().__init__()
             self.lin = nn.Linear(4, 4)
 
-        def forward(self, images, targets=None):
+        def forward(
+            self, images: list[Tensor], targets: list[dict] | None = None
+        ) -> dict[str, Tensor] | Tensor:
             if self.training:
                 return {"loss": self.lin(torch.rand(1, 4)).sum()}
             return torch.rand(
@@ -59,24 +70,29 @@ def _broken_builder(**kwargs):
     return _Broken()
 
 
-class _ValuesDataset(Dataset):
+class _ValuesDataset(BaseDataset):
     """Four blank 32 px images, each target its index as a scalar value."""
 
-    def __len__(self):
+    @property
+    def num_samples(self) -> int:
         return 4
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> tuple[Tensor, dict[str, Tensor]]:
         return torch.zeros(3, 32, 32), {"values": torch.tensor(float(idx))}
 
 
-def _bespoke_task_dataset(**_kwargs):
+def _bespoke_task_dataset(**_kwargs: object) -> _ValuesDataset:
     """Return an agent-authored dataset for a task the platform does not enumerate."""
     return _ValuesDataset()
 
 
 def _strict_bespoke_dataset(
-    samples=None, scope=None, transforms=None, task=None
-):
+    samples: Sequence[Sample] | None = None,
+    scope: ClassScope | None = None,
+    transforms: Callable[[Image.Image, dict], tuple[Tensor, dict]]
+    | None = None,
+    task: str | None = None,
+) -> _ValuesDataset:
     """Return a :class:`_ValuesDataset`, accepting the four named builder arguments.
 
     The helper's signature names ``samples``, ``scope``, ``transforms`` and ``task`` and has no
@@ -85,27 +101,31 @@ def _strict_bespoke_dataset(
     return _ValuesDataset()
 
 
-def _unbuildable_dataset(**_kwargs):
+def _unbuildable_dataset(**_kwargs: object) -> NoReturn:
     raise RuntimeError("cannot open the source for this task")
 
 
 def _bespoke_classification_dataset(
-    samples=None, scope=None, transforms=None, task=None
-):
+    samples: Sequence[Sample] | None = None,
+    scope: ClassScope | None = None,
+    transforms: Callable[[Image.Image, dict], tuple[Tensor, dict]]
+    | None = None,
+    task: str | None = None,
+) -> BaseDataset:
     """Return a dataset of ``len(samples)`` blank 32 px images, each labeled its index modulo 3."""
-    from torch.utils.data import Dataset
 
-    class _DS(Dataset):
-        def __len__(self):
+    class _DS(BaseDataset):
+        @property
+        def num_samples(self) -> int:
             return len(samples)
 
-        def __getitem__(self, idx):
+        def __getitem__(self, idx: int) -> tuple[Tensor, dict[str, int]]:
             return torch.zeros(3, 32, 32), {"labels": idx % 3}
 
     return _DS()
 
 
-def _admitted_tree(tmp_path):
+def _admitted_tree(tmp_path: Path) -> Path:
     """Return an images directory whose label documents the platform's producer admits."""
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
@@ -114,7 +134,9 @@ def _admitted_tree(tmp_path):
     root = tmp_path / "ds"
     imgs = root / "images" / UNDATED_BUCKET
     imgs.mkdir(parents=True)
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
+    registry_over(
+        root, SubjectRegistry(subjects=(Subject(name="leaf", description=""),))
+    )
     for stem in ("a", "b", "c", "d"):
         labeled_frame(
             imgs / f"{stem}.png",
@@ -131,7 +153,7 @@ TASK_MODEL = f"{Path(__file__).stem}:_bespoke_task_model"
 """The ``model_source`` builder of :func:`_bespoke_task_model`."""
 
 
-def _bespoke_task_model(**_kwargs):
+def _bespoke_task_model(**_kwargs: object) -> nn.Module:
     """Return an agent-authored model for the bespoke task, regressing each image's ``values``."""
     import torch.nn as nn
 
@@ -140,7 +162,7 @@ def _bespoke_task_model(**_kwargs):
             super().__init__()
             self.head = nn.Linear(3 * 32 * 32, 1)
 
-        def forward(self, images, targets=None):
+        def forward(self, images: Tensor, targets: dict | None = None) -> dict:
             pred = self.head(images.flatten(1)).squeeze(-1)
             if self.training:
                 return {"loss": ((pred - targets["values"]) ** 2).mean()}
@@ -154,7 +176,7 @@ def _bespoke_task_model(**_kwargs):
 # --------------------------------------------------------------------------
 
 
-def _spec(task: str, data: dict):
+def _spec(task: str, data: dict) -> TrainConfigSchema:
     """Return a validated config of a ``task`` model of this repository over ``data``.
 
     The data section is a default ``drawn_split()`` with ``data`` merged over it, and the model
@@ -173,7 +195,7 @@ def _spec(task: str, data: dict):
     )
 
 
-def test_resolve_contract_dims_reads_the_frame_the_run_resolved():
+def test_resolve_contract_dims_reads_the_frame_the_run_resolved() -> None:
     """The contract's smoke frame is the frame the run resolved, and nothing when it resolved none.
 
     The smoke frame is the square tile a tiled run resolved, else the frame an untiled run's
@@ -203,7 +225,7 @@ def test_resolve_contract_dims_reads_the_frame_the_run_resolved():
     )
 
 
-def test_model_dims_states_only_what_the_run_holds():
+def test_model_dims_states_only_what_the_run_holds() -> None:
     """The model's dimensions state only what the run holds.
 
     A run that records no width refuses naming ``data.num_channels``; a run that
@@ -238,7 +260,9 @@ def test_model_dims_states_only_what_the_run_holds():
     }
 
 
-def test_model_dims_hands_the_admitted_subject_and_every_attribute(tmp_path):
+def test_model_dims_hands_the_admitted_subject_and_every_attribute(
+    tmp_path: Path,
+) -> None:
     """A scoped run's model dimensions carry the admitted subject and every declared attribute."""
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.model_build import model_dims
@@ -252,7 +276,9 @@ def test_model_dims_hands_the_admitted_subject_and_every_attribute(tmp_path):
     registry_over(
         tmp_path,
         SubjectRegistry(
-            subjects=(Subject(name="bud", attributes=attributes),)
+            subjects=(
+                Subject(name="bud", description="", attributes=attributes),
+            )
         ),
     )
     scope = registry_scope(tmp_path / "images", "bud")
@@ -269,7 +295,9 @@ def test_model_dims_hands_the_admitted_subject_and_every_attribute(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
+def test_preflight_smoke_blocks_broken_builder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -303,8 +331,8 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
 
 
 def test_preflight_smokes_a_tiled_run_at_the_edge_its_resolution_derived(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A tiled run stating no tile edge smokes at the edge its own resolution derives.
 
     The synthetic smoke batch has the run resolution's ``tile_size`` as its edge.
@@ -347,8 +375,8 @@ def test_preflight_smokes_a_tiled_run_at_the_edge_its_resolution_derived(
 
 
 def test_preflight_smokes_an_untiled_run_of_mixed_frames_on_a_real_batch(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An untiled run of mixed frame sizes smokes on one real batch off its own dataset.
 
     With frames of 64 by 64 and 48 by 40 px, the smoke reports a dataset batch and no
@@ -390,7 +418,9 @@ def test_preflight_smokes_an_untiled_run_of_mixed_frames_on_a_real_batch(
     )
 
 
-def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
+def test_preflight_smoke_passes_valid_builder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
@@ -420,8 +450,8 @@ def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
 
 
 def test_preflight_builds_and_smokes_at_the_count_the_run_resolved(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Preflight builds and smokes the model at the class and band counts the run resolved.
 
     Over masks of three classes, the smoke dims carry three classes and three bands.
@@ -455,8 +485,8 @@ def test_preflight_builds_and_smokes_at_the_count_the_run_resolved(
 
 
 def test_preflight_smokes_a_single_class_run_within_its_own_count(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A single-class run's synthetic smoke batch is shaped within the count the run resolved.
 
     An all-background mask run smokes a synthetic batch at one class and passes, and the model
@@ -517,8 +547,8 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(
     spec = train_config(cfg)
     layout = staged_sources(spec, tmp_path).layout
     resolution = resolve_run(spec, layout, project=tmp_path)
-    batch, why = _one_real_batch("semantic_seg", resolution.train_ds)
-    assert batch is not None, why
+    batch = _one_real_batch("semantic_seg", resolution.train_ds)
+    assert not isinstance(batch, str), batch
     smoked = synthetic["smoke"]["dims"]
     model = build_from_model_source(
         spec.model_source,
@@ -531,7 +561,9 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(
     ]
 
 
-def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
+def test_preflight_smokes_bespoke_task_on_a_real_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A bespoke task run smokes and overfit-checks on a real batch from its own dataset.
 
     The smoke reports a dataset batch and a train loss, and the overfit check passes.
@@ -575,8 +607,8 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
 
 
 def test_preflight_smoke_batch_matches_what_the_run_will_build(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The smoke batch comes from the dataset the run's own resolution builds.
 
     A bespoke builder whose signature names only the producer's own four keywords yields one
@@ -613,12 +645,13 @@ def test_preflight_smoke_batch_matches_what_the_run_will_build(
         spec, staged_sources(spec, tmp_path).layout, project=tmp_path
     )
 
-    batch, why = _one_real_batch("bunch_compactness", resolution.train_ds)
-    assert why is None, why
-    assert batch is not None
+    batch = _one_real_batch("bunch_compactness", resolution.train_ds)
+    assert not isinstance(batch, str), batch
 
 
-def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
+def test_preflight_blocks_when_no_batch_can_be_built(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A dataset that cannot produce an item blocks preflight, naming the builder's own reason."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
@@ -655,7 +688,7 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------
 
 
-def _table_tree(tmp_path) -> tuple[Path, Path]:
+def _table_tree(tmp_path: Path) -> tuple[Path, Path]:
     """Write four 32 px frames and a table labeling them 0, 1, 2, 0 under ``tmp_path / "ds"``.
 
     Returns their images directory and the table.
@@ -671,7 +704,9 @@ def _table_tree(tmp_path) -> tuple[Path, Path]:
     )
 
 
-def _bespoke_classification_data(imgs: Path, table: Path, **sizes) -> dict:
+def _bespoke_classification_data(
+    imgs: Path, table: Path, **sizes: int
+) -> dict:
     """Return the data block of a run over ``imgs`` labeled by ``table``, drawing its own split.
 
     Its loaders are built by :func:`_bespoke_classification_dataset`, and the block states
@@ -689,7 +724,7 @@ def _bespoke_classification_data(imgs: Path, table: Path, **sizes) -> dict:
     }
 
 
-def test_ctx_check_contract_and_overfit_check(tmp_path):
+def test_ctx_check_contract_and_overfit_check(tmp_path: Path) -> None:
     """The run context's contract and overfit checks build the model at what the run recorded.
 
     The run records three bands, three classes and the 32 px frame its untiled sources share.
@@ -729,8 +764,8 @@ def test_ctx_check_contract_and_overfit_check(tmp_path):
 
 
 def test_ctx_overfit_check_seeds_at_the_runs_own_seed_and_determinism(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The overfit diagnostic seeds at the seed and determinism its run's config states.
 
     It seeds once, at those values, and at no value of its own.
@@ -771,8 +806,8 @@ def test_ctx_overfit_check_seeds_at_the_runs_own_seed_and_determinism(
 
 
 def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A bespoke dataset run is smoked at the class count its data section states.
 
     The run records three bands beside the three classes its data section states, and the
@@ -808,7 +843,9 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(
     assert over["issue"] is None, over
 
 
-def test_a_classification_record_stating_no_class_count_builds_no_model():
+def test_a_classification_record_stating_no_class_count_builds_no_model() -> (
+    None
+):
     """A classification record stating no class count is refused by name.
 
     ``recorded_model_dims`` refuses the record naming ``num_classes``.
@@ -821,7 +858,7 @@ def test_a_classification_record_stating_no_class_count_builds_no_model():
         )
 
 
-def test_ctx_apply_stage_freeze_matches_trainer_guard(tmp_path):
+def test_ctx_apply_stage_freeze_matches_trainer_guard(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.training.generic_trainer import apply_stage_freeze
     from tests._verified_checkpoint_fixtures import unbuilt_source
     from tests.tiny_trainer_fixtures import frames_data, run_context

@@ -403,7 +403,7 @@ def test_the_command_locates_its_dataset_root_once(
     tmp_path: Path,
     project: Path,
     four_plant_csv: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The command locates its dataset root once.
 
@@ -416,7 +416,7 @@ def test_the_command_locates_its_dataset_root_once(
     real = registry_paths.located
     answered: list[Path] = []
 
-    def counted(path, root):
+    def counted(path: str | Path, root: str | Path | None) -> Path:
         answered.append(real(path, root))
         return answered[-1]
 
@@ -584,7 +584,7 @@ def test_main_cli_reports_refusal_and_nonzero_exit(
 
 
 def test_main_cli_exits_one_naming_a_plant_csv_with_zero_rows(
-    tmp_path: Path, project: Path, capsys
+    tmp_path: Path, project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     dataset_root = _four_plant_dataset(tmp_path)
 

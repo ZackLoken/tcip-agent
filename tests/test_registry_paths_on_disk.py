@@ -10,7 +10,7 @@ from pathlib import Path
 
 def test_archive_then_import_lands_a_registry_naming_the_restored_files(
     tmp_path: Path,
-):
+) -> None:
     """An archive and import round trip lands a registry naming the restored checkpoints.
 
     A foreign entry stays relative and the restored run's own entry names the checkpoint under
@@ -47,10 +47,12 @@ def test_archive_then_import_lands_a_registry_naming_the_restored_files(
     assert "error" not in imported, imported
 
     entries = read_registry_index(dest)
-    assert [e["name"] for e in entries] == ["foreign"]
-    assert not Path(entries[0]["checkpoint_path"]).is_absolute()
-    listed = {m["name"]: m for m in ModelRegistry(str(dest)).list_models()}
+    assert [e.name for e in entries] == ["foreign"]
+    assert not Path(entries[0].checkpoint_path).is_absolute()
+    listed = {
+        m.entry.name: m.entry for m in ModelRegistry(str(dest)).list_models()
+    }
     assert "foreign" in listed
     run_entry = listed["exp1"]
-    assert Path(run_entry["checkpoint_path"]).is_file()
-    assert Path(run_entry["checkpoint_path"]).is_relative_to(dest)
+    assert Path(run_entry.checkpoint_path).is_file()
+    assert Path(run_entry.checkpoint_path).is_relative_to(dest)

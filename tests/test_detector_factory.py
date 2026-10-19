@@ -3,6 +3,10 @@
 Bespoke model code imports them directly (no registry).
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -17,9 +21,14 @@ from tests._chain_fixtures import (  # noqa: E402
     detector_values,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from tcip_mcp.pipelines.components.detectors import BackboneNeckAdapter
+
 
 @pytest.mark.parametrize("detector", ["faster_rcnn", "fcos", "retinanet"])
-def test_build_each_builtin_detector(detector):
+def test_build_each_builtin_detector(detector: str) -> None:
     model = bespoke_models.build_bespoke_detection(
         num_classes=1, detector=detector, **detector_values()
     )
@@ -39,7 +48,7 @@ def test_build_each_builtin_detector(detector):
     assert torch.isfinite(sum(loss.values()))
 
 
-def test_build_detector_unknown_name_raises():
+def test_build_detector_unknown_name_raises() -> None:
     from tcip_mcp.pipelines.components.detectors import build_detector
 
     with pytest.raises(ValueError, match="Unknown detector 'does_not_exist'"):
@@ -86,7 +95,9 @@ class _PassThroughNeck(nn.Module):
         return features
 
 
-def _unprobable_adapter(in_chans: int, out_channels: int = 32):
+def _unprobable_adapter(
+    in_chans: int, out_channels: int = 32
+) -> BackboneNeckAdapter:
     """Return a ``BackboneNeckAdapter`` over a linear patch backbone, asserting no probed width."""
     from tcip_mcp.pipelines.components.detectors import (
         BackboneNeckAdapter,
@@ -103,7 +114,9 @@ def _unprobable_adapter(in_chans: int, out_channels: int = 32):
     return adapter
 
 
-def test_a_detector_stating_no_statistics_is_refused_by_its_signature():
+def test_a_detector_stating_no_statistics_is_refused_by_its_signature() -> (
+    None
+):
     """A detector stating no normalization statistics is refused by the builder's signature.
 
     A build stating no statistics over a five-band backbone refuses naming ``image_mean``.
@@ -122,8 +135,8 @@ def test_a_detector_stating_no_statistics_is_refused_by_its_signature():
 
 
 def test_a_detector_over_that_backbone_builds_from_its_datasets_own_band_statistics(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A detector over an unprobable backbone builds from its dataset's own band statistics.
 
     Per-band statistics derived from the run's own admitted sources build the detector and

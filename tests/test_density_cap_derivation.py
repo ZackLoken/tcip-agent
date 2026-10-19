@@ -28,7 +28,9 @@ def _cap(counts: list[int]) -> float:
     return derive_object_density(_frames(counts)) * FRAME
 
 
-def test_the_density_admits_the_crowded_decile_of_a_skewed_count_distribution():
+def test_the_density_admits_the_crowded_decile_of_a_skewed_count_distribution() -> (
+    None
+):
     """The density admits the crowded decile of a skewed count distribution.
 
     With ninety ordinary scenes at 100 objects and ten crowded ones at 1000, one frame's cap is
@@ -39,7 +41,9 @@ def test_the_density_admits_the_crowded_decile_of_a_skewed_count_distribution():
     assert _cap(counts) == pytest.approx(1000)
 
 
-def test_the_density_on_a_uniform_count_distribution_is_unchanged_by_the_tail_rule():
+def test_the_density_on_a_uniform_count_distribution_is_unchanged_by_the_tail_rule() -> (
+    None
+):
     """The density of a uniform count distribution is unchanged by the tail rule.
 
     Reading the tail does not inflate the density of a reference whose images each carry 100
@@ -49,7 +53,9 @@ def test_the_density_on_a_uniform_count_distribution_is_unchanged_by_the_tail_ru
     assert _cap([2] * 20) == pytest.approx(2)
 
 
-def test_the_density_reaches_toward_the_densest_image_of_a_skewed_reference():
+def test_the_density_reaches_toward_the_densest_image_of_a_skewed_reference() -> (
+    None
+):
     """The density reaches toward the densest image of a skewed reference, short of it.
 
     Over nine sparse images (5 objects each) and one crowded one (300), the density is the 0.99
@@ -60,7 +66,7 @@ def test_the_density_reaches_toward_the_densest_image_of_a_skewed_reference():
     assert _cap(counts) == pytest.approx(5 + 0.91 * 295)
 
 
-def test_an_empty_reference_derives_no_density_and_refuses():
+def test_an_empty_reference_derives_no_density_and_refuses() -> None:
     """An empty reference derives no density and refuses, having no object-bearing region."""
     with pytest.raises(
         ValueError, match="none of the 0 counted regions is object-bearing"

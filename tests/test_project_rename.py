@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import tcip_store as ts
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
@@ -18,6 +19,10 @@ from tcip_mcp.identity import actor
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._web_fixtures import named_project
+
+if TYPE_CHECKING:
+    import pytest
+    from fastapi.testclient import TestClient
 
 
 def _files(root: Path) -> dict[str, bytes]:
@@ -49,9 +54,9 @@ def _held(root: Path, *, but: set[str]) -> dict[tuple, object]:
 
 
 def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_as_they_were(
-    client,
-    tmp_path,
-):
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.experiments import run_rows
     from tcip_mcp.project_record import read_record
     from tcip_mcp.tools.project_tools import read_datasets, register_dataset
@@ -115,8 +120,8 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
 
 
 def test_a_display_name_the_record_refuses_answers_400_and_changes_nothing(
-    client, tmp_path
-):
+    client: TestClient, tmp_path: Path
+) -> None:
     from tcip_mcp.project_record import read_record
 
     made = named_project(tmp_path.parent / "valley_block", "Valley block")
@@ -131,7 +136,9 @@ def test_a_display_name_the_record_refuses_answers_400_and_changes_nothing(
     assert audit_rows(made.root, "project_record_corrected") == []
 
 
-def test_a_rename_naming_no_one_changes_nothing(client, tmp_path):
+def test_a_rename_naming_no_one_changes_nothing(
+    client: TestClient, tmp_path: Path
+) -> None:
     from tcip_mcp.project_record import read_record
 
     made = named_project(tmp_path.parent / "valley_block", "Valley block")
@@ -146,7 +153,9 @@ def test_a_rename_naming_no_one_changes_nothing(client, tmp_path):
     assert audit_rows(made.root, "project_record_corrected") == []
 
 
-def test_an_id_no_project_holds_answers_404(client, tmp_path):
+def test_an_id_no_project_holds_answers_404(
+    client: TestClient, tmp_path: Path
+) -> None:
     named_project(tmp_path.parent / "valley_block", "Valley block")
 
     resp = client.post(
@@ -158,9 +167,9 @@ def test_an_id_no_project_holds_answers_404(client, tmp_path):
 
 
 def test_a_project_moved_after_training_resolves_every_path_its_records_name(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A project moved after training resolves the in-project paths its records name.
 
     A project whose directory moves resolves its resumed run's checkpoint, its completed run's
@@ -173,15 +182,17 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     from tcip_mcp.experiments import (
         RUN_FILE,
         SWEEP_FILE,
+        SweepInput,
+        SweepRecord,
         create_run_directory,
         experiment_dir,
         find_run,
         find_sweep,
-        observe,
+        observe_run,
+        observe_sweep,
         write_record,
     )
     from tcip_mcp.model_registry import ModelRegistry
-    from tcip_mcp.pipelines.data.split_construction import partition_samples
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.pipelines.training.subprocess_worker import (
         prepare_run_context,
@@ -197,7 +208,9 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     ws = tmp_path.parent
     project = named_project(ws / "valley_block", "Valley block").root
     first = finished_run(project, experiment_id="exp-first")
-    checkpoint = Path(observe(first).checkpoint["path"])
+    first_checkpoint = observe_run(first).checkpoint
+    assert first_checkpoint is not None
+    checkpoint = Path(first_checkpoint.path)
     opened_run(
         project,
         detection_config(project / "data", project=project),
@@ -217,20 +230,31 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     sweep = create_run_directory(experiment_dir("study", project=project))
     write_record(
         sweep / SWEEP_FILE,
-        {
-            "input": {
-                "base_config": {
-                    "data": {"images_dir": str(project / "data" / "images")}
-                },
-                "baseline_params": {"data.images_dir": other_images},
-                "param_space": {
+        SweepRecord(
+            created="2026-01-01T00:00:00+00:00",
+            trait_revision=None,
+            input=SweepInput(
+                n_trials=1,
+                search_alg="random",
+                scheduler={"name": "fifo"},
+                max_concurrent=1,
+                baseline_params={"data.images_dir": other_images},
+                resources_per_trial=None,
+                param_space={
                     "data.labels_dir": {
                         "type": "categorical",
                         "choices": [other_images],
                     }
                 },
-            }
-        },
+                base_config={
+                    "data": {"images_dir": str(project / "data" / "images")}
+                },
+                relaunched_from=None,
+                split_draw_seeds=None,
+                search_seed=0,
+                trial_budget=None,
+            ),
+        ),
     )
 
     moved = ws / "valley_block_moved"
@@ -243,7 +267,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
             run_file
         )
 
-    observed = observe(find_run("exp-resumed", project=moved))
+    observed = observe_run(find_run("exp-resumed", project=moved))
     resumed = prepare_run_context(observed)
     assert (
         Path(resumed.resume_from)
@@ -251,30 +275,30 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     )
     assert Path(resumed.resume_from).is_file()
     for data in (
-        observed.record["config"]["data"],
-        observed.record["resolved"]["data"],
+        observed.record.spec.data,
+        observed.record.resolution.data,
     ):
-        assert Path(data["images_dir"]).is_dir()
-        assert Path(data["images_dir"]).is_relative_to(moved.resolve())
-    partition = observed.record["resolved"]["partition"]
-    for sample in partition_samples(partition):
+        assert data.images_dir is not None
+        assert Path(data.images_dir).is_dir()
+        assert Path(data.images_dir).is_relative_to(moved.resolve())
+    for sample in observed.record.resolution.partition.samples:
         assert Path(sample.source).is_file() and ts.exists(sample.ground_truth)
         assert Path(sample.ground_truth.root).is_relative_to(moved.resolve())
 
-    moved_checkpoint = Path(
-        observe(find_run("exp-first", project=moved)).checkpoint["path"]
-    )
+    moved_run_checkpoint = observe_run(
+        find_run("exp-first", project=moved)
+    ).checkpoint
+    assert moved_run_checkpoint is not None
+    moved_checkpoint = Path(moved_run_checkpoint.path)
     assert moved_checkpoint.is_file() and moved_checkpoint.is_relative_to(
         moved
     )
     (entry,) = [
-        m
+        m.entry
         for m in ModelRegistry(str(moved)).list_models()
-        if m["name"] == "exp-first"
+        if m.entry.name == "exp-first"
     ]
-    assert (
-        Path(entry["checkpoint_path"]).resolve() == moved_checkpoint.resolve()
-    )
+    assert Path(entry.checkpoint_path).resolve() == moved_checkpoint.resolve()
 
     record = read_bucket(moved / "data", bucket)
     assert record.document_keys and all(
@@ -282,9 +306,11 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     )
 
     moved_other = str(moved.resolve() / "data" / "other")
-    swept = observe(find_sweep("study", project=moved)).record["input"]
-    assert swept["base_config"]["data"]["images_dir"] == str(
-        moved.resolve() / "data" / "images"
-    )
-    assert swept["baseline_params"] == {"data.images_dir": moved_other}
-    assert swept["param_space"]["data.labels_dir"]["choices"] == [moved_other]
+    swept = observe_sweep(find_sweep("study", project=moved)).record.input
+    swept_data = swept.base_config["data"]
+    assert isinstance(swept_data, dict)
+    assert swept_data["images_dir"] == str(moved.resolve() / "data" / "images")
+    assert swept.baseline_params == {"data.images_dir": moved_other}
+    labels_axis = swept.param_space["data.labels_dir"]
+    assert isinstance(labels_axis, dict)
+    assert labels_axis["choices"] == [moved_other]

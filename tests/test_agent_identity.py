@@ -5,14 +5,22 @@ What a run establishes, what each projection says, and that a run's end forgets 
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import anyio
 import pytest
 
 from tcip_mcp import agent_identity
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
+
+    from mcp.server.context import ServerRequestContext
+
 
 @pytest.fixture(autouse=True)
-def _forget_between_tests():
+def _forget_between_tests() -> Iterator[None]:
     agent_identity.end()
     yield
     agent_identity.end()
@@ -157,7 +165,7 @@ def test_a_server_run_forgets_the_identity_on_its_way_out() -> None:
 
 
 def test_a_caller_cannot_hand_an_audit_line_another_identity(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An audit line records the handshake's identity over the caller's own identity keys.
 
@@ -206,7 +214,7 @@ def test_a_declared_name_travels_as_an_ascii_header_and_comes_back_whole(
 
 
 def test_a_caller_cannot_supply_an_identity_key_the_handshake_left_absent(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An identity key the handshake left absent is not recorded from a caller.
 
@@ -250,7 +258,7 @@ def test_the_declaration_is_taken_on_the_first_message_that_carries_it_whatever_
         ),
     )
 
-    async def call_next(c):  # noqa: ANN001
+    async def call_next(c: ServerRequestContext) -> dict[str, str]:
         return {"seen": agent_identity.current().agent_client_name}
 
     result = anyio.run(agent_identity.record_connecting_client, ctx, call_next)

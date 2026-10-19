@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from tcip_mcp.dataset_layout import list_dates
 
 
-def test_is_bucket_name_admits_a_date_an_undated_token_and_a_literal():
+def test_is_bucket_name_admits_a_date_an_undated_token_and_a_literal() -> None:
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, is_bucket_name
 
     assert is_bucket_name("2026-03-02")
@@ -22,7 +22,7 @@ def test_is_bucket_name_admits_a_date_an_undated_token_and_a_literal():
     assert is_bucket_name("plot_14")
 
 
-def test_is_bucket_name_refuses_a_dot_prefixed_or_unsafe_name():
+def test_is_bucket_name_refuses_a_dot_prefixed_or_unsafe_name() -> None:
     from tcip_mcp.dataset_layout import is_bucket_name
 
     assert not is_bucket_name(".hidden")
@@ -32,14 +32,16 @@ def test_is_bucket_name_refuses_a_dot_prefixed_or_unsafe_name():
     assert not is_bucket_name("")
 
 
-def test_list_dates_excludes_a_hidden_directory(tmp_path):
+def test_list_dates_excludes_a_hidden_directory(tmp_path: Path) -> None:
     images = tmp_path / "images"
     (images / "2026-03-02").mkdir(parents=True)
     (images / ".DS_Store").mkdir(parents=True)
     assert list_dates(tmp_path) == ["2026-03-02"]
 
 
-def test_list_dates_admits_a_literal_and_the_undated_bucket(tmp_path):
+def test_list_dates_admits_a_literal_and_the_undated_bucket(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
     images = tmp_path / "images"
@@ -65,7 +67,7 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
     root = tmp_path / "Valley_Farm"
     (root / "images" / "2026-03-02").mkdir(parents=True)
     (root / "images" / ".hidden").mkdir(parents=True)
-    registry_over(root, SubjectRegistry((Subject("leaf"),)))
+    registry_over(root, SubjectRegistry((Subject("leaf", ""),)))
 
     tree = client.get(
         "/api/dataset/tree", params={"dataset_root": str(root)}

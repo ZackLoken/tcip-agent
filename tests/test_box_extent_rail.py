@@ -6,12 +6,14 @@ The writers are the save doors, the per-image writer and the prediction encoder.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
 
 import tcip_store as ts
 from tcip_annotation.json_io import (
+    annotation_object,
     label_document,
     read_label_document,
     write_label_document,
@@ -21,10 +23,16 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
 from tcip_mcp.pipelines.data.label_queries import registry_scope
 from tests._producer_fixtures import image_label_key, write_image
 
+if TYPE_CHECKING:
+    from tcip_mcp.workspace import BoundProject
+    from tcip_store import Key
+
 # ── the shared constructor ──────────────────────────────────────────────────
 
 
-def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid(tmp_path):
+def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid(
+    tmp_path: Path,
+) -> None:
     """The prediction encoding keeps only the detection with extent on the stored grid.
 
     Of three detections, the one whose mask lies past the frame's right edge and the one whose
@@ -76,21 +84,21 @@ def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid(tmp_path):
     assert kept.score == written["scores"][0] == 0.8
 
 
-def test_check_box_extent_refuses_an_inverted_box():
+def test_check_box_extent_refuses_an_inverted_box() -> None:
     from tcip_annotation.json_io import check_box_extent
 
     with pytest.raises(ValueError, match="leaf"):
         check_box_extent(BBox(10, 10, 5, 5), where="subject 'leaf'")
 
 
-def test_check_box_extent_refuses_a_zero_extent_box():
+def test_check_box_extent_refuses_a_zero_extent_box() -> None:
     from tcip_annotation.json_io import check_box_extent
 
     with pytest.raises(ValueError):
         check_box_extent(BBox(10, 10, 10, 20), where="subject 'leaf'")
 
 
-def test_check_box_extent_admits_an_ordered_box():
+def test_check_box_extent_admits_an_ordered_box() -> None:
     from tcip_annotation.json_io import check_box_extent
 
     check_box_extent(
@@ -98,7 +106,9 @@ def test_check_box_extent_admits_an_ordered_box():
     )  # must not raise
 
 
-def test_a_corner_box_is_refused_and_admitted_through_the_save_conversion():
+def test_a_corner_box_is_refused_and_admitted_through_the_save_conversion() -> (
+    None
+):
     from tcip_annotation.json_io import annotation_from_payload
 
     with pytest.raises(ValueError, match="positive extent"):
@@ -112,7 +122,7 @@ def test_a_corner_box_is_refused_and_admitted_through_the_save_conversion():
 # ── the persistence boundary: the one writer covers every writer at once ──
 
 
-def test_the_writer_refuses_an_inverted_box(tmp_path):
+def test_the_writer_refuses_an_inverted_box(tmp_path: Path) -> None:
     key = label_key(tmp_path, UNDATED_BUCKET, "img")
     with pytest.raises(ValueError):
         write_label_document(
@@ -124,7 +134,7 @@ def test_the_writer_refuses_an_inverted_box(tmp_path):
     assert ts.read(key, default=None) is None
 
 
-def test_the_writer_admits_an_ordered_box(tmp_path):
+def test_the_writer_admits_an_ordered_box(tmp_path: Path) -> None:
     # admits valid work: every existing writer builds an ordered box.
     key = label_key(tmp_path, UNDATED_BUCKET, "img")
     write_label_document(
@@ -133,10 +143,12 @@ def test_the_writer_admits_an_ordered_box(tmp_path):
         200,
         150,
     )
-    assert ts.read(key)["annotations"][0]["bbox"] == [5, 5, 5, 15]
+    assert read_label_document(key).annotations[0].geometry == BBox(
+        5, 5, 10, 20
+    )
 
 
-def test_the_writer_refuses_a_collinear_polygon(tmp_path):
+def test_the_writer_refuses_a_collinear_polygon(tmp_path: Path) -> None:
     """The per-image writer refuses a collinear polygon and writes nothing.
 
     A polygon whose three points sit on one horizontal line raises ``ValueError``, and no label
@@ -158,7 +170,7 @@ def test_the_writer_refuses_a_collinear_polygon(tmp_path):
     assert ts.read(key, default=None) is None
 
 
-def test_the_writer_admits_a_real_polygon(tmp_path):
+def test_the_writer_admits_a_real_polygon(tmp_path: Path) -> None:
     # admits valid work: a polygon with real area is unaffected by the collinear-polygon refusal.
     key = label_key(tmp_path, UNDATED_BUCKET, "img")
     write_label_document(
@@ -172,7 +184,11 @@ def test_the_writer_admits_a_real_polygon(tmp_path):
         200,
         150,
     )
-    assert "bbox" not in ts.read(key)["annotations"][0]
+    document = ts.read(key)
+    assert isinstance(document, dict)
+    records = document["annotations"]
+    assert isinstance(records, list)
+    assert "bbox" not in annotation_object(records[0])
     assert read_label_document(key).annotations[0].geometry == Polygon(
         rings=[[(5, 10), (15, 10), (15, 20)]]
     )
@@ -181,7 +197,9 @@ def test_the_writer_admits_a_real_polygon(tmp_path):
 # ── the MCP save door ────────────────────────────────────────────────────────
 
 
-def test_save_annotations_refuses_an_inverted_box(tmp_path, bound):
+def test_save_annotations_refuses_an_inverted_box(
+    tmp_path: Path, bound: BoundProject
+) -> None:
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
@@ -197,7 +215,9 @@ def test_save_annotations_refuses_an_inverted_box(tmp_path, bound):
     assert ts.read(image_label_key(img), default=None) is None
 
 
-def test_save_annotations_admits_an_ordered_box(tmp_path, bound):
+def test_save_annotations_admits_an_ordered_box(
+    tmp_path: Path, bound: BoundProject
+) -> None:
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
@@ -258,8 +278,11 @@ def test_annotate_save_admits_an_ordered_box(
 
 
 def _seed_review_dataset(
-    tmp_path: Path, *, pred_box=(10, 10, 20, 20), gt_box=None
-):
+    tmp_path: Path,
+    *,
+    pred_box: tuple[float, float, float, float] = (10, 10, 20, 20),
+    gt_box: tuple[float, float, float, float] | None = None,
+) -> Key:
     """Write one image's label document and a bucket ``m`` proposing ``pred_box`` on it.
 
     Returns the label document's key.
@@ -272,7 +295,8 @@ def _seed_review_dataset(
     img = dataset_root / "images" / UNDATED_BUCKET / "img_001.jpg"
     write_image(img, (200, 150))
     registry_over(
-        dataset_root, SubjectRegistry(subjects=(Subject(name="leaf"),))
+        dataset_root,
+        SubjectRegistry(subjects=(Subject(name="leaf", description=""),)),
     )
     gt_annotations = (
         [Annotation(subject="leaf", geometry=BBox(*gt_box))]
@@ -321,7 +345,9 @@ def _seed_review_dataset(
     return image_label_key(img)
 
 
-def _save(dataset_root: Path, annotations: list, **gestures) -> dict:
+def _save(
+    dataset_root: Path, annotations: list, **gestures: str | list[int]
+) -> dict:
     return {
         "image_path": str(
             dataset_root / "images" / UNDATED_BUCKET / "img_001.jpg"
@@ -343,7 +369,7 @@ def test_the_save_door_refuses_an_inverted_box(
     )
 
     assert resp.status_code == 400
-    assert ts.read(gt)["annotations"][0]["bbox"] == [1, 1, 2, 2]
+    assert read_label_document(gt).annotations[0].geometry == BBox(1, 1, 3, 3)
 
 
 @pytest.mark.parametrize(
@@ -367,7 +393,7 @@ def test_the_save_door_refuses_an_inverted_box(
 def test_a_corrected_geometry_is_checked_as_any_saved_shape_is(
     client: TestClient,
     tmp_path: Path,
-    shape,
+    shape: dict,
 ) -> None:
     """The save door refuses a malformed corrected geometry and keeps the document.
 
@@ -382,7 +408,7 @@ def test_a_corrected_geometry_is_checked_as_any_saved_shape_is(
     )
 
     assert resp.status_code == 400, resp.text
-    assert ts.read(gt)["annotations"][0]["bbox"] == [1, 1, 2, 2]
+    assert read_label_document(gt).annotations[0].geometry == BBox(1, 1, 3, 3)
 
 
 def test_the_save_door_admits_an_ordered_corrected_box(
@@ -396,7 +422,9 @@ def test_the_save_door_admits_an_ordered_corrected_box(
     )
 
     assert resp.status_code == 200
-    assert ts.read(gt)["annotations"][0]["bbox"] == [5, 5, 5, 15]
+    assert read_label_document(gt).annotations[0].geometry == BBox(
+        5, 5, 10, 20
+    )
 
 
 def test_the_save_door_refuses_accepting_a_degenerate_proposal(
@@ -412,7 +440,7 @@ def test_the_save_door_refuses_accepting_a_degenerate_proposal(
     )
 
     assert resp.status_code == 400, resp.text
-    assert ts.read(gt)["annotations"] == []
+    assert read_label_document(gt).annotations == []
 
 
 def test_the_save_door_admits_accepting_an_ordered_proposal(
@@ -426,7 +454,9 @@ def test_the_save_door_admits_accepting_an_ordered_proposal(
     )
 
     assert resp.status_code == 200, resp.text
-    assert ts.read(gt)["annotations"][0]["bbox"] == [10, 10, 10, 10]
+    assert read_label_document(gt).annotations[0].geometry == BBox(
+        10, 10, 20, 20
+    )
 
 
 # ── prediction writers drop a degenerate box and report it, rather than fail ─
@@ -436,7 +466,9 @@ LEAF = registry_scope(Path(__file__).parent, "leaf")
 """The class space a dataset with no registry reads ``leaf`` under: the subject, no attributes."""
 
 
-def test_encode_predictions_drops_a_degenerate_box_and_reports_the_count():
+def test_encode_predictions_drops_a_degenerate_box_and_reports_the_count() -> (
+    None
+):
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
     result = {
@@ -458,7 +490,7 @@ def test_encode_predictions_drops_a_degenerate_box_and_reports_the_count():
     assert len(data["annotations"]) == 1
 
 
-def test_encode_predictions_drops_a_box_that_rounds_to_zero_extent():
+def test_encode_predictions_drops_a_box_that_rounds_to_zero_extent() -> None:
     """``encode_predictions`` drops a box that rounds to zero extent and reports it.
 
     A box 0.003 px across is dropped and counted, and the other box, 10 px across, is encoded.
@@ -482,8 +514,8 @@ def test_encode_predictions_drops_a_box_that_rounds_to_zero_extent():
 
 
 def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     images_dir = tmp_path / "images" / "2026-01-01"
@@ -521,8 +553,8 @@ def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(
 
 @pytest.mark.parametrize("shape", ["box", "polygon"])
 def test_stage_proposals_refuses_a_shape_stating_no_confidence(
-    tmp_path, shape
-):
+    tmp_path: Path, shape: str
+) -> None:
     """``stage_proposals`` refuses a shape stating no confidence, naming the field.
 
     A staged shape is a prediction, so it states the confidence its producer reported; a box
@@ -558,8 +590,8 @@ def test_stage_proposals_refuses_a_shape_stating_no_confidence(
 
 @pytest.mark.parametrize("shape", ["box", "polygon"])
 def test_stage_proposals_refuses_a_shape_stating_no_subject_by_its_index(
-    tmp_path, shape
-):
+    tmp_path: Path, shape: str
+) -> None:
     """``stage_proposals`` refuses a shape stating no subject, naming its index and the field.
 
     A box or a polygon stating no subject is refused with an error starting at its index and

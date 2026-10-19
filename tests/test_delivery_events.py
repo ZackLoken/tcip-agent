@@ -8,6 +8,7 @@ and a look on screen records none.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -19,8 +20,18 @@ from tests._chain_fixtures import deliver_milestones
 from tests._mapping_fixtures import POSITION_ERROR_M
 from tests._trait_fixtures import COUNT_SUBJECT, seed_confirmed_count
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
-def _bucket(project: Path):
+    from fastapi.testclient import TestClient
+    from pydantic import JsonValue
+
+    from tcip_mcp.buckets import Bucket
+    from tcip_mcp.traits import TraitRevision
+    from tcip_store import Key, Version
+
+
+def _bucket(project: Path) -> Bucket:
     """Publish an unassessed bucket of one document detecting nothing and return it.
 
     The bucket counts the count trait's measured subject.
@@ -36,7 +47,12 @@ def _bucket(project: Path):
     )
 
 
-def _cleared(project: Path, revision, bucket, result):
+def _cleared(
+    project: Path,
+    revision: TraitRevision,
+    bucket: Bucket,
+    result: delivery.Result,
+) -> delivery.Clearance:
     """Return the gate's clearance of ``result``, shipped under a breeder's acknowledgment of it.
 
     ``result`` is a per-image count delivery under ``revision`` over the unassessed ``bucket``.
@@ -57,7 +73,12 @@ def _cleared(project: Path, revision, bucket, result):
     )
 
 
-def _record(project: Path, revision, bucket=None, **disclosed) -> dict:
+def _record(
+    project: Path,
+    revision: TraitRevision,
+    bucket: Bucket | None = None,
+    **disclosed: dict | None,
+) -> dict:
     """Run ``deliver_csv`` of an empty per-image count delivery under ``revision``.
 
     The delivery is over ``bucket`` (by default a fresh :func:`_bucket`), shipped under a
@@ -85,8 +106,8 @@ def _record(project: Path, revision, bucket=None, **disclosed) -> dict:
 
 
 def test_a_completed_crossing_delivery_writes_the_gates_finding_for_every_bucket(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     from tests._chain_fixtures import attributed_series
 
@@ -124,8 +145,8 @@ def test_a_completed_crossing_delivery_writes_the_gates_finding_for_every_bucket
 
 
 def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     from tests._chain_fixtures import attributed_series
 
@@ -147,8 +168,8 @@ def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
 
 
 def test_a_web_route_writes_its_delivery_event_under_the_open_project_only(
-    tmp_path, client
-):
+    tmp_path: Path, client: TestClient
+) -> None:
     """A web delivery lands its event record under the open project and none under a second one."""
     pytest.importorskip("torch")
     from tests._chain_fixtures import attributed_series
@@ -175,8 +196,8 @@ def test_a_web_route_writes_its_delivery_event_under_the_open_project_only(
 
 
 def test_a_look_on_screen_records_no_delivery_event_and_no_audit_line(
-    tmp_path, client
-):
+    tmp_path: Path, client: TestClient
+) -> None:
     """``phenology_measurement`` answers a number with no delivery event and no new log line."""
     pytest.importorskip("torch")
     from tcip_mcp.audit import audit_log_key
@@ -211,7 +232,9 @@ def test_a_record_that_cannot_be_written_raises_before_any_audit_line(
     clearance = _cleared(tmp_path, revision, _bucket(tmp_path), result)
     replace = ts.replace
 
-    def _event_write_fails(key, *a, **kw):
+    def _event_write_fails(
+        key: Key, *a: JsonValue, **kw: Version | None
+    ) -> Version:
         if key.store == delivery.DELIVERY_EVENTS_STORE:
             raise OSError("disk full")
         return replace(key, *a, **kw)
@@ -238,7 +261,7 @@ def test_a_record_that_cannot_be_written_raises_before_any_audit_line(
 
 def test_a_plant_mapping_missing_a_disclosure_key_raises_and_writes_nothing(
     tmp_path: Path,
-):
+) -> None:
     """A ``plant_mapping`` missing a required disclosure key raises and writes no CSV or event."""
     from pydantic import ValidationError
 
@@ -264,7 +287,7 @@ def test_a_plant_mapping_missing_a_disclosure_key_raises_and_writes_nothing(
     assert not (tmp_path / "out" / "counts.csv").exists()
 
 
-def _delivered_disclosure(project: Path, deliver) -> dict:
+def _delivered_disclosure(project: Path, deliver: Callable[[], dict]) -> dict:
     """Return the ``plant_mapping`` disclosure the one delivery ``deliver()`` records, as JSON.
 
     The delivery records under ``project``, its delivered ``stem_count`` confirmed there first.
@@ -382,7 +405,7 @@ DELIVERY_EVENTS_ROUTE = "/api/results/delivery-events"
 
 def test_delivery_events_route_lists_a_recorded_event_with_its_revision(
     opened_project: Path,
-    client,
+    client: TestClient,
 ) -> None:
     revision = seed_confirmed_count(opened_project)
     _record(opened_project, revision)
@@ -401,7 +424,7 @@ def test_delivery_events_route_lists_a_recorded_event_with_its_revision(
 
 
 def test_delivery_events_route_refuses_while_no_project_is_open(
-    client,
+    client: TestClient,
 ) -> None:
     resp = client.get(DELIVERY_EVENTS_ROUTE)
 
@@ -410,7 +433,7 @@ def test_delivery_events_route_refuses_while_no_project_is_open(
 
 def test_delivery_events_route_serves_a_delivered_plant_mapping_disclosure_unchanged(
     tmp_path: Path,
-    client,
+    client: TestClient,
 ) -> None:
     """The delivery-events route serves a phenology delivery's mapping disclosure unchanged.
 

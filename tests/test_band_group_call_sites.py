@@ -7,6 +7,7 @@ read a synthetic 2-band group: two tiny single-band TIFFs and a manifest.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -15,8 +16,13 @@ import tifffile
 from tests._producer_fixtures import dataset_over, label_image, registry_over  # noqa: E402
 from tests._training_values import IOU_THRESHOLD, drawn_split  # noqa: E402
 
+if TYPE_CHECKING:
+    from tcip_mcp.workspace import BoundProject
 
-def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
+
+def _write_group(
+    images_dir: Path, stem: str, fill: tuple[int, int] = (111, 222)
+) -> None:
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
     band_a = images_dir / f"{stem}_G.tif"
@@ -70,8 +76,8 @@ def grouped_dataset(tmp_path: Path) -> Path:
 
 
 def test_a_group_is_named_by_its_manifest_wherever_a_name_is_read(
-    grouped_dataset,
-):
+    grouped_dataset: Path,
+) -> None:
     """A grouped capture is named by its manifest filename, a plain photo by its own file.
 
     ``logical_image_name`` answers a grouped capture with its own manifest filename, the file a
@@ -89,7 +95,9 @@ def test_a_group_is_named_by_its_manifest_wherever_a_name_is_read(
     assert names["plain_002"] == "plain_002.jpg"
 
 
-def test_detection_dataset_trains_on_a_grouped_capture(grouped_dataset):
+def test_detection_dataset_trains_on_a_grouped_capture(
+    grouped_dataset: Path,
+) -> None:
     """A detection loader over the grouped capture alone reads its two bands stacked.
 
     The bucket also holds a plain RGB source; the loader is limited to the grouped capture, and
@@ -116,7 +124,9 @@ def test_detection_dataset_trains_on_a_grouped_capture(grouped_dataset):
     assert target["boxes"].shape[0] == 1
 
 
-def test_the_channel_probe_derives_2_for_the_grouped_sample(grouped_dataset):
+def test_the_channel_probe_derives_2_for_the_grouped_sample(
+    grouped_dataset: Path,
+) -> None:
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.data.datasets import _band_count
     from tests._producer_fixtures import samples_over
@@ -130,8 +140,8 @@ def test_the_channel_probe_derives_2_for_the_grouped_sample(grouped_dataset):
 
 
 def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaulting(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The channel probe raises ``BandGroupIncompleteError`` on a stale manifest, not a default."""
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
     from tcip_mcp.pipelines.data.band_groups import (
@@ -170,7 +180,9 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
 # ── image_utils.image_path_dimensions ───────────────────────────────────────────────────
 
 
-def test_image_path_dimensions_of_a_grouped_capture_path(grouped_dataset):
+def test_image_path_dimensions_of_a_grouped_capture_path(
+    grouped_dataset: Path,
+) -> None:
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.image_utils import image_path_dimensions
 
@@ -181,8 +193,8 @@ def test_image_path_dimensions_of_a_grouped_capture_path(grouped_dataset):
 
 
 def test_focus_annotate_lands_on_the_grouped_capture_by_manifest_name(
-    grouped_dataset, bound
-):
+    grouped_dataset: Path, bound: BoundProject
+) -> None:
     from tcip_mcp.tools.gui_tools import focus_human_attention
 
     res = focus_human_attention(
@@ -198,7 +210,9 @@ def test_focus_annotate_lands_on_the_grouped_capture_by_manifest_name(
 # ── vision_tools.py ─────────────────────────────────────────────────────────────────────
 
 
-def test_display_read_composites_a_group_into_rgb_pixels(grouped_dataset):
+def test_display_read_composites_a_group_into_rgb_pixels(
+    grouped_dataset: Path,
+) -> None:
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.pipelines.raster_source import SourceHeader
@@ -214,8 +228,8 @@ def test_display_read_composites_a_group_into_rgb_pixels(grouped_dataset):
 
 
 def test_display_read_of_a_plain_photo_is_the_files_own_pixels(
-    grouped_dataset,
-):
+    grouped_dataset: Path,
+) -> None:
     """A plain photo's display read is the file's own pixels.
 
     A photographic file is read, never stretched: what the renderer draws on is what the file
@@ -235,8 +249,8 @@ def test_display_read_of_a_plain_photo_is_the_files_own_pixels(
 
 
 def test_display_read_of_a_plain_3band_rgb_geotiff_keeps_its_true_colors(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A plain 3-band RGB GeoTIFF's display read keeps its own pixels.
 
     ``_display_of`` over a 3-band RGB .tif with two ramped channels returns the written array
@@ -259,7 +273,9 @@ def test_display_read_of_a_plain_3band_rgb_geotiff_keeps_its_true_colors(
     assert np.array_equal(_display_of(SourceHeader(path)).pixels, rgb)
 
 
-def test_display_read_still_stretches_a_genuinely_multiband_geotiff(tmp_path):
+def test_display_read_still_stretches_a_genuinely_multiband_geotiff(
+    tmp_path: Path,
+) -> None:
     """A six-band GeoTIFF's display read is three uint8 bands spanning 0 to 255."""
     from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.tools.vision_tools import _display_of
@@ -285,7 +301,9 @@ def test_display_read_still_stretches_a_genuinely_multiband_geotiff(tmp_path):
     )  # each band stretched across the range
 
 
-def test_visualize_annotations_on_a_grouped_capture(tmp_path, grouped_dataset):
+def test_visualize_annotations_on_a_grouped_capture(
+    tmp_path: Path, grouped_dataset: Path
+) -> None:
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.vision_tools import visualize
 
@@ -299,8 +317,8 @@ def test_visualize_annotations_on_a_grouped_capture(tmp_path, grouped_dataset):
 
 
 def test_visualize_annotations_on_a_band_member_answers_the_resolvers_refusal(
-    tmp_path, grouped_dataset
-):
+    tmp_path: Path, grouped_dataset: Path
+) -> None:
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.vision_tools import visualize
 
@@ -318,8 +336,8 @@ def test_visualize_annotations_on_a_band_member_answers_the_resolvers_refusal(
 
 
 def test_viz_dataset_sample_folds_a_grouped_capture_into_one_entry(
-    tmp_path, grouped_dataset
-):
+    tmp_path: Path, grouped_dataset: Path
+) -> None:
     from tcip_mcp.tools.vision_tools import visualize
 
     result = visualize(
@@ -335,8 +353,8 @@ def test_viz_dataset_sample_folds_a_grouped_capture_into_one_entry(
 
 
 def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(
-    tmp_path, grouped_dataset
-):
+    tmp_path: Path, grouped_dataset: Path
+) -> None:
     """A drawn selection records a grouped capture by its own manifest path.
 
     The recorded source is the ``.bandgroup`` manifest in the capture's image directory, and it
@@ -394,8 +412,8 @@ def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(
 
 
 def test_scan_dataset_counts_a_grouped_capture_once_not_once_per_band_file(
-    grouped_dataset,
-):
+    grouped_dataset: Path,
+) -> None:
     """``_scan_dataset`` counts a grouped capture once, never once per band file.
 
     Its image census is built through ``list_logical_images``: a grouped capture is one logical

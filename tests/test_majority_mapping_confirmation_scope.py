@@ -44,7 +44,7 @@ SERIES = [
 ]
 
 
-def test_each_trait_carries_its_own_majority_crossing_column():
+def test_each_trait_carries_its_own_majority_crossing_column() -> None:
     """Each trait's delivery carries its own majority-crossing column and none of the other's.
 
     Bud's majority date is its 95% crossing, pistillate's its 50%: each delivery carries its own

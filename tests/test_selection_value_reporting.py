@@ -7,7 +7,12 @@ selection objective.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 torch = pytest.importorskip("torch")
 
@@ -27,7 +32,10 @@ from tests.tiny_trainer_fixtures import (
 
 
 def _config(
-    tmp_path, evaluation: dict | None = None, *, validated: bool = True
+    tmp_path: Path,
+    evaluation: dict | None = None,
+    *,
+    validated: bool = True,
 ) -> dict:
     """Return a regression config over frames under ``tmp_path``.
 
@@ -59,8 +67,8 @@ def _config(
 
 
 def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An epoch's recorded ``selection`` is the value the best checkpoint was chosen by.
 
     The chosen epoch's recorded ``selection``, the copy embedded in ``model_best.pt``, the
@@ -114,8 +122,8 @@ def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(
 
 
 def test_the_plateau_schedule_reduces_the_rate_where_torch_does_over_the_selection_values(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The plateau schedule reduces the rate where torch's ``ReduceLROnPlateau`` does.
 
     A run selecting on a higher-is-better metric reduces its rate at the epochs
@@ -151,7 +159,9 @@ def test_the_plateau_schedule_reduces_the_rate_where_torch_does_over_the_selecti
     assert rates == pytest.approx(expected)
 
 
-def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
+def test_epoch_record_follows_a_configured_selection_metric(
+    tmp_path: Path,
+) -> None:
     """An epoch's recorded ``selection`` follows a configured selection metric.
 
     An explicit ``evaluation.selection_metric`` drives both the checkpoint objective and the
@@ -182,7 +192,9 @@ def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
     )
 
 
-def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
+def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(
+    tmp_path: Path,
+) -> None:
     """A run selecting on ``f1`` keeps its highest-f1 epoch as ``model_best.pt``.
 
     Over a run whose val f1 varies, ``model_best.pt`` holds the epoch with the highest val f1,
@@ -219,8 +231,8 @@ def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
 
 
 def test_a_run_selecting_on_a_metric_its_task_does_not_produce_fails_naming_both(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A run selecting on a metric its task does not produce fails naming both.
 
     A regression run selecting on ``f1`` fails naming ``f1``, ``val_f1`` and the keys its
@@ -236,8 +248,8 @@ def test_a_run_selecting_on_a_metric_its_task_does_not_produce_fails_naming_both
 
 
 def test_a_loss_selected_run_with_no_validation_loader_still_completes_and_selects_its_lowest_loss(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A loss-selected run with no validation loader completes and keeps its lowest loss.
 
     With no validation loader, every epoch selects on ``loss`` and records no ``val_loss``, and

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,12 +25,22 @@ from tests._producer_fixtures import (
 )
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
 
+if TYPE_CHECKING:
+    import threading
+    from types import ModuleType
+
+    from httpx import Response
+
+    from tcip_mcp.buckets import Bucket
+    from tcip_web.routes.inference import InferenceJob
+    from tcip_web.state import OpenProject
+
 # ── per-image JSON label fixtures (canonical on-disk format) ─────────────────
 
 
 def _write_gt(
-    image,
-    boxes,
+    image: Path,
+    boxes: list[tuple[float, float, float, float]],
     *,
     w: int = 100,
     h: int = 80,
@@ -44,17 +55,12 @@ def _write_gt(
     label_image(image, anns, w, h, keep_empty=keep_empty)
 
 
-def _stored(image) -> list[Annotation]:
+def _stored(image: Path) -> list[Annotation]:
     """Return the annotations of ``image``'s label document as stored."""
     return read_label_document(image_label_key(image)).annotations
 
 
-def _raw(image) -> list[dict]:
-    """Return the annotation records of ``image``'s label document as the store holds them."""
-    return tcip_store.read(image_label_key(image))["annotations"]
-
-
-def _unreadable(image) -> None:
+def _unreadable(image: Path) -> None:
     """Write a label document for ``image`` whose stored bytes no longer decode."""
     from tests._record_damage_fixtures import damage_record
 
@@ -70,7 +76,7 @@ def _write_pred(
     h: int = 80,
     subject: str = "bud",
     name: str = "baseline",
-):
+) -> Bucket:
     """Publish and return the bucket ``<name>/2-11-26`` of the project holding ``dataset_root``.
 
     It holds one document per image name of ``preds`` under ``images/2-11-26``, each entry
@@ -163,7 +169,9 @@ def dataset_root(tmp_path: Path) -> Path:
     (root / "images" / "2-11-26").mkdir(parents=True)
     (root / "images" / "3-2-26").mkdir(parents=True)
     # The dataset's subjects come from its nested registry, not from its label documents.
-    registry_over(root, SubjectRegistry((Subject("bud"), Subject("bush"))))
+    registry_over(
+        root, SubjectRegistry((Subject("bud", ""), Subject("bush", "")))
+    )
     # Add some images
     for i in range(3):
         img = Image.new("RGB", (100, 80), color=(128, 128, 128))
@@ -448,7 +456,7 @@ def test_a_selection_states_its_capture(
 def test_dataset_select_rejects_a_dataset_root_outside_the_allowed_roots(
     opened_client: TestClient,
     opened_project: Path,
-    tmp_path_factory,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     outside = tmp_path_factory.mktemp("outside")
     resp = opened_client.post(
@@ -873,7 +881,9 @@ def test_annotate_save_of_an_image_outside_allowed_root_403(
     assert not tcip_store.exists(image_label_key(outside))
 
 
-def _save_box(opened_client: TestClient, img_path, **extra) -> dict:
+def _save_box(
+    opened_client: TestClient, img_path: Path, **extra: object
+) -> Response:
     resp = opened_client.post(
         "/api/annotate/labels",
         json={
@@ -972,7 +982,7 @@ def test_annotate_save_without_a_token_still_writes(
 
 
 def test_annotate_save_persists_polygon_as_polygon(
-    opened_client, dataset_root, tmp_path
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     # A polygon annotation round-trips as a polygon (its points are the source of truth), never
     # collapsed to a box on disk. Image is 100x80.
@@ -1001,8 +1011,8 @@ def test_annotate_save_persists_polygon_as_polygon(
 
 
 def test_annotate_multi_ring_polygon_round_trips_through_the_route(
-    opened_client, dataset_root, tmp_path
-):
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
     """An occlusion-split shape re-saved through the route keeps both its rings.
 
     The save stores one instance with both rings, and the load reports those ``rings`` back.
@@ -1036,8 +1046,8 @@ def test_annotate_multi_ring_polygon_round_trips_through_the_route(
 
 
 def test_annotate_save_prefers_rings_over_points_when_both_are_sent(
-    opened_client, dataset_root, tmp_path
-):
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
     """A save that sends both `rings` and `points` stores the `rings`.
 
     A two-ring shape sent with its first ring as `points` is stored with both rings.
@@ -1060,7 +1070,7 @@ def test_annotate_save_prefers_rings_over_points_when_both_are_sent(
 
 
 def test_annotate_save_persists_box_as_box(
-    opened_client, dataset_root, tmp_path
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     resp = opened_client.post(
@@ -1084,7 +1094,10 @@ def test_annotate_save_persists_box_as_box(
 
 
 def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
-    opened_client: TestClient, opened, dataset_root: Path, tmp_path: Path
+    opened_client: TestClient,
+    opened: OpenProject,
+    dataset_root: Path,
+    tmp_path: Path,
 ) -> None:
     """A label save audits into the log of the dataset it wrote.
 
@@ -1142,7 +1155,9 @@ def test_a_document_the_bucket_record_does_not_name_is_no_prediction_of_it(
     assert bucket.document_key("IMG_0001") is None
 
 
-def _launch_setup(tmp_path, monkeypatch):
+def _launch_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[str, str, str, ModuleType]:
     from tcip_mcp.dataset_layout import image_dir
     from tcip_web.routes import inference as inference_routes
 
@@ -1158,7 +1173,9 @@ def _launch_setup(tmp_path, monkeypatch):
     return str(ckpt), str(dataset_root), date, inference_routes
 
 
-def _held_worker(monkeypatch, inference_routes):
+def _held_worker(
+    monkeypatch: pytest.MonkeyPatch, inference_routes: ModuleType
+) -> threading.Event:
     """Replace the inference worker with one that holds its job running; return the release.
 
     The job's status reads ``running`` until the returned event is set or five seconds pass,
@@ -1168,7 +1185,7 @@ def _held_worker(monkeypatch, inference_routes):
 
     event = threading.Event()
 
-    def held(job) -> None:
+    def held(job: InferenceJob) -> None:
         job.status = "running"
         event.wait(timeout=5)
         job.status = "completed"
@@ -1184,7 +1201,7 @@ BUCKET = "baseline/2026-02-11"
 def test_a_launch_into_a_bucket_that_exists_fails_its_job_and_writes_nothing(
     opened_client: TestClient,
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A launch into a bucket that exists fails its job and leaves the bucket's version.
 
@@ -1241,7 +1258,7 @@ def test_a_launch_into_a_bucket_that_exists_fails_its_job_and_writes_nothing(
 def test_inference_launch_leaves_the_bucket_for_its_publication_to_create(
     opened_client: TestClient,
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import tcip_store
     from tcip_mcp.dataset_layout import bucket_key
@@ -1270,7 +1287,7 @@ def test_inference_launch_leaves_the_bucket_for_its_publication_to_create(
 def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
     opened_client: TestClient,
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A second launch while the first job still writes is refused naming that job.
 
@@ -1344,7 +1361,7 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
 def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset_root(
     opened_client: TestClient,
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The in-flight launch check finds the live job by resolved directory identity.
 
@@ -1400,7 +1417,7 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
 def test_inference_launch_resolves_explicit_conf_source_from_the_payload(
     opened_client: TestClient,
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A caller-stated conf travels on the launched job as stated."""
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
@@ -1431,7 +1448,7 @@ def test_inference_launch_resolves_explicit_conf_source_from_the_payload(
 def test_inference_launch_carries_an_omitted_conf_as_unstated(
     opened_client: TestClient,
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An omitted conf travels on the launched job as unstated."""
     ckpt, dataset_root, date, inference_routes = _launch_setup(
@@ -1575,7 +1592,7 @@ def test_fs_list_is_unconfined_from_a_local_connection(
 
 
 def test_annotate_save_stamps_created_by(
-    opened_client, dataset_root, tmp_path
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     """A human-drawn box is stamped created_by=user:<gui-user> + created_at."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
@@ -1588,13 +1605,13 @@ def test_annotate_save_stamps_created_by(
         },
     )
     assert resp.status_code == 200
-    obj = _raw(img_path)[0]
-    assert obj["created_by"] == "user:breeder"
-    assert obj["created_at"]
+    obj = _stored(img_path)[0]
+    assert obj.created_by == "user:breeder"
+    assert obj.created_at
 
 
 def test_annotate_save_polygon_stamps_author(
-    opened_client, dataset_root, tmp_path
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     """A human-drawn polygon is stamped created_by=user:<gui-user> (not None)."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
@@ -1609,11 +1626,11 @@ def test_annotate_save_polygon_stamps_author(
         },
     )
     assert resp.status_code == 200
-    assert _raw(img_path)[0]["created_by"] == "user:emily"
+    assert _stored(img_path)[0].created_by == "user:emily"
 
 
 def test_annotate_save_naming_no_one_writes_nothing(
-    opened_client, dataset_root
+    opened_client: TestClient, dataset_root: Path
 ) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     for name in REFUSED_NAMES:
@@ -1633,7 +1650,7 @@ def test_annotate_save_naming_no_one_writes_nothing(
 
 
 def test_annotate_load_returns_provenance(
-    opened_client, dataset_root, tmp_path
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_image(
@@ -1662,7 +1679,7 @@ def test_annotate_load_returns_provenance(
 
 
 def test_annotate_resave_preserves_original_creator(
-    opened_client, dataset_root, tmp_path
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     """A re-save keeps each loaded shape's original creator and stamps only new shapes.
 
@@ -1699,21 +1716,19 @@ def test_annotate_resave_preserves_original_creator(
         },
     )
     assert resp.status_code == 200
-    objs = _raw(img_path)
+    objs = _stored(img_path)
     assert (
-        objs[0]["created_by"] == "derived:user:breeder"
+        objs[0].created_by == "derived:user:breeder"
     )  # original creator kept
     assert (
-        objs[0]["created_at"] == "2026-02-11T00:00:00+00:00"
+        objs[0].created_at == "2026-02-11T00:00:00+00:00"
     )  # original timestamp kept
-    assert objs[0]["accepted_by"] == "user:breeder"  # acceptance carried
-    assert (
-        objs[1]["created_by"] == "user:emily"
-    )  # only the new shape is Emily's
+    assert objs[0].accepted_by == "user:breeder"  # acceptance carried
+    assert objs[1].created_by == "user:emily"  # only the new shape is Emily's
 
 
 def test_annotate_resave_keeps_the_crowd_flag(
-    opened_client, dataset_root, tmp_path
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     """A crowd region the load route hands the canvas comes back on save as a crowd region.
 
@@ -1765,7 +1780,12 @@ def test_annotate_resave_keeps_the_crowd_flag(
     ids=["yes", "false_string", "zero_string", "two", "null", "true", "one"],
 )
 def test_annotate_save_reads_the_crowd_flag_through_the_decoders_check(
-    opened_client, dataset_root, tmp_path, flag, status, crowd
+    opened_client: TestClient,
+    dataset_root: Path,
+    tmp_path: Path,
+    flag: str | int | bool | None,
+    status: int,
+    crowd: bool | None,
 ) -> None:
     """The save route refuses a crowd flag that is a string or 2, and stores the others.
 
@@ -1792,7 +1812,7 @@ def test_annotate_save_reads_the_crowd_flag_through_the_decoders_check(
 
 
 def test_the_mcp_read_and_the_web_load_project_an_annotation_alike(
-    opened_client, dataset_root, tmp_path
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     """The MCP read and the web load project a writer-produced annotation alike.
 
@@ -1838,7 +1858,7 @@ def test_the_mcp_read_and_the_web_load_project_an_annotation_alike(
 
 
 def test_annotate_polygons_keep_and_stamp_provenance(
-    opened_client, dataset_root, tmp_path
+    opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_image(
@@ -1869,9 +1889,9 @@ def test_annotate_polygons_keep_and_stamp_provenance(
         },
     )
     assert resp.status_code == 200
-    objs = _raw(img_path)
+    objs = _stored(img_path)
     assert (
-        objs[0]["created_by"] == "user:emily"
+        objs[0].created_by == "user:emily"
     )  # round-tripped shape keeps its author
     # new polygon -> stamped to the current annotator
-    assert objs[1]["created_by"] == "user:breeder"
+    assert objs[1].created_by == "user:breeder"

@@ -21,7 +21,7 @@ SCOPE = {"subject": fx.COUNT_SUBJECT}
 
 
 @pytest.fixture(autouse=True)
-def _recorded_meaning(tmp_path):
+def _recorded_meaning(tmp_path: Path) -> None:
     fx.seed_confirmed_count(tmp_path, measured_subject=fx.COUNT_SUBJECT)
 
 
@@ -72,8 +72,8 @@ def _acknowledged(project: Path, bucket: str) -> dict:
     ],
 )
 def test_an_acknowledgment_names_who_and_why_both_non_empty(
-    tmp_path, who, why
-):
+    tmp_path: Path, who: str, why: str
+) -> None:
     field = "acknowledged_by" if not who.strip() else "reason"
     with pytest.raises(ValueError, match=field):
         record_acknowledgment(
@@ -82,8 +82,8 @@ def test_an_acknowledgment_names_who_and_why_both_non_empty(
 
 
 def test_an_unassessed_bucket_refuses_with_no_acknowledgment_and_writes_nothing(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tests._chain_fixtures import predicted
 
     bucket = _bucket(
@@ -100,8 +100,8 @@ def test_an_unassessed_bucket_refuses_with_no_acknowledgment_and_writes_nothing(
 
 
 def test_an_acknowledged_delivery_ships_stamped_unvalidated_with_the_act_on_its_record(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.delivery import read_delivery_events
     from tests._chain_fixtures import acknowledged, predicted
 
@@ -128,7 +128,9 @@ def test_an_acknowledged_delivery_ships_stamped_unvalidated_with_the_act_on_its_
     assert "no assessment answers" in str(event.buckets[0].reason)
 
 
-def test_an_acknowledgment_given_for_another_result_refuses(tmp_path):
+def test_an_acknowledgment_given_for_another_result_refuses(
+    tmp_path: Path,
+) -> None:
     """An acknowledgment given for another result refuses the delivery.
 
     An acknowledgment binds the one result it was given for: an act recorded against another
@@ -161,8 +163,8 @@ def test_an_acknowledgment_given_for_another_result_refuses(tmp_path):
 
 
 def test_an_acknowledgment_binds_the_rows_and_refuses_once_a_document_changes(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An acknowledgment binds the rows and refuses after a published document changes.
 
     An act recorded for six detections does not ship twelve: the delivery refuses as another
@@ -197,16 +199,18 @@ def test_an_acknowledgment_binds_the_rows_and_refuses_once_a_document_changes(
         _deliver(tmp_path, bucket, act.acknowledgment_id)
 
     assert not (tmp_path / "out" / "counts.csv").exists()
-    assert [
-        (e["tool"], e["arguments"]["acknowledgment_id"])
+    (line,) = [
+        e["arguments"]
         for e in tcip_store.read_log(audit_log_key(tmp_path)).records
         if e["tool"] == "delivery_acknowledged"
-    ] == [("delivery_acknowledged", act.acknowledgment_id)]
+    ]
+    assert isinstance(line, dict)
+    assert line["acknowledgment_id"] == act.acknowledgment_id
 
 
 def test_an_mcp_door_executes_a_recorded_acknowledgment_and_never_originates_one(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An MCP door executes a recorded acknowledgment by its id and does not originate one.
 
     The agent's door takes a recorded act by its id and nothing a caller could compose an act
@@ -256,7 +260,9 @@ def test_an_mcp_door_executes_a_recorded_acknowledgment_and_never_originates_one
     )
 
 
-def test_a_validated_delivery_carries_no_acknowledgment(tmp_path):
+def test_a_validated_delivery_carries_no_acknowledgment(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.delivery import read_delivery_events
     from tests._chain_fixtures import run_the_chain
 
@@ -271,8 +277,8 @@ def test_a_validated_delivery_carries_no_acknowledgment(tmp_path):
 
 
 def test_the_delivery_skill_documents_the_per_image_csv_the_door_writes(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The delivery skill's Per-Image CSV Schema table is the schema the door actually writes."""
     from tcip_mcp.knowledge import document_path
     from tests._chain_fixtures import predicted
@@ -305,8 +311,8 @@ def test_the_delivery_skill_documents_the_per_image_csv_the_door_writes(
 
 
 def test_a_zero_extent_box_is_counted_by_neither_the_document_nor_the_delivery(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A zero-extent box is counted by neither the published document nor the delivery.
 
     A box that collapses to zero width is not a detection: the published document drops it,
@@ -336,8 +342,8 @@ def test_a_zero_extent_box_is_counted_by_neither_the_document_nor_the_delivery(
 
 
 def test_a_non_finite_score_refuses_the_publication_so_no_average_ever_reads_it(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A non-finite score refuses the publication naming it, and no bucket is recorded."""
     import tcip_store
     from tcip_mcp.dataset_layout import bucket_key
@@ -362,8 +368,8 @@ def test_a_non_finite_score_refuses_the_publication_so_no_average_ever_reads_it(
 
 
 def test_a_delivery_over_no_bucket_refuses_and_carries_no_result_to_acknowledge(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A delivery over no bucket refuses and carries no result to acknowledge."""
     from tcip_mcp.delivery import Result, gate
     from tcip_mcp.traits import PER_IMAGE_COUNT
@@ -382,8 +388,8 @@ def test_a_delivery_over_no_bucket_refuses_and_carries_no_result_to_acknowledge(
 
 
 def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A per-plant count over a bucket counting another subject refuses.
 
     A bucket of another subject refuses and writes no CSV, and one of the measured subject

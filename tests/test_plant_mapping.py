@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -12,6 +13,7 @@ import tcip_store
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     MappingBuild,
     PlantRecord,
+    PlantRegistryReference,
     StatedRadius,
     _segment_runs,
     assign_plants,
@@ -28,12 +30,22 @@ from tests._image_fixtures import write_geo_image
 from tests._mapping_fixtures import PLOTS, map_captures
 from tests._web_fixtures import named_project
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        Assignment,
+        ImageStamp,
+    )
+
 DATE = "2026-02-11"
 WIDE = StatedRadius(value=10.0, rationale="reaches every plant a test places")
 """A stated radius past every plant the assignment tests place near their photographs."""
 
 
-def _assign(stamps, plants):
+def _assign(
+    stamps: list[ImageStamp], plants: list[PlantRecord]
+) -> list[Assignment]:
     """Run ``assign_plants`` over ``stamps`` within their date's radius stated as :data:`WIDE`."""
     return assign_plants(
         stamps, plants, radius=date_match_radius(stamps, WIDE)
@@ -41,14 +53,16 @@ def _assign(stamps, plants):
 
 
 @pytest.fixture
-def stamp(tmp_path: Path):
+def stamp(
+    tmp_path: Path,
+) -> Callable[[str, float, float, int], ImageStamp]:
     """Return a maker of stamps read off geotagged photographs written under ``tmp_path``.
 
     The platform's own reader reads each stamp, each photograph captured ``seconds`` after one
     start time.
     """
 
-    def make(stem: str, lat: float, lon: float, seconds: int):
+    def make(stem: str, lat: float, lon: float, seconds: int) -> ImageStamp:
         path = tmp_path / DATE / f"{stem}.JPG"
         write_geo_image(
             path,
@@ -100,7 +114,9 @@ def test_a_plants_distance_is_the_wgs84_geodesic() -> None:
     assert distance == pytest.approx(6_378_137.0 * math.pi / 180, abs=1e-3)
 
 
-def test_segment_runs_splits_on_large_jumps(stamp) -> None:
+def test_segment_runs_splits_on_large_jumps(
+    stamp: Callable[[str, float, float, int], ImageStamp],
+) -> None:
     stamps = [
         stamp("a", 43.1960, -90.0580, 0),
         stamp("b", 43.1961, -90.0580, 2),
@@ -113,7 +129,9 @@ def test_segment_runs_splits_on_large_jumps(stamp) -> None:
     assert [s.stem for s in runs[1]] == ["c", "d"]
 
 
-def test_segment_runs_splits_on_multiple_jumps(stamp) -> None:
+def test_segment_runs_splits_on_multiple_jumps(
+    stamp: Callable[[str, float, float, int], ImageStamp],
+) -> None:
     # Three row runs of ~2 m in-row steps separated by two ~15 m row-transition jumps.
     # 15 m is well under a fixed 25 m threshold, so this only splits under a derivation
     # that reads the break relative to this date's own ~2 m walking pace.
@@ -134,7 +152,9 @@ def test_segment_runs_splits_on_multiple_jumps(stamp) -> None:
     ]
 
 
-def test_segment_runs_curved_row_not_fragile_to_uneven_steps(stamp) -> None:
+def test_segment_runs_curved_row_not_fragile_to_uneven_steps(
+    stamp: Callable[[str, float, float, int], ImageStamp],
+) -> None:
     # In-row steps vary (20-28 m, simulating a curved row's uneven pace) and one includes a step
     # larger than a fixed 25 m threshold, followed by one unambiguous ~300 m row-transition
     # jump. A fixed-distance rule would split on every step over 25 m; the derivation should not.
@@ -152,7 +172,9 @@ def test_segment_runs_curved_row_not_fragile_to_uneven_steps(stamp) -> None:
     assert [s.stem for s in runs[1]] == ["f"]
 
 
-def test_segment_runs_uniform_gaps_stay_one_run(stamp) -> None:
+def test_segment_runs_uniform_gaps_stay_one_run(
+    stamp: Callable[[str, float, float, int], ImageStamp],
+) -> None:
     # Roughly uniform ~27-32 m gaps throughout, all above a fixed 25 m threshold (which
     # would split every consecutive pair) but with no real bimodal break in the sequence.
     stamps = [
@@ -170,7 +192,7 @@ def test_segment_runs_uniform_gaps_stay_one_run(stamp) -> None:
 
 
 def test_segment_runs_duplicate_gps_gap_does_not_hijack_the_split(
-    stamp,
+    stamp: Callable[[str, float, float, int], ImageStamp],
 ) -> None:
     # A duplicate/cached EXIF GPS reading between two rapid captures (an exact 0 m gap) carries
     # no walking-pace information; it must not be read as an "infinitely large" jump that wins
@@ -190,7 +212,9 @@ def test_segment_runs_duplicate_gps_gap_does_not_hijack_the_split(
     assert [s.stem for s in runs[1]] == ["f", "g"]
 
 
-def test_assign_plants_one_to_one(stamp) -> None:
+def test_assign_plants_one_to_one(
+    stamp: Callable[[str, float, float, int], ImageStamp],
+) -> None:
     plants = [
         _plant("P1", "A", 43.1960, -90.0580),
         _plant("P2", "B", 43.1961, -90.0580),
@@ -218,13 +242,17 @@ def test_assign_plants_handles_missing_gps(tmp_path: Path) -> None:
     assert assignments[0].plant_id is None
 
 
-def test_assign_plants_no_plants_returns_unmapped(stamp) -> None:
+def test_assign_plants_no_plants_returns_unmapped(
+    stamp: Callable[[str, float, float, int], ImageStamp],
+) -> None:
     stamps = [stamp("img1", 43.1960, -90.0580, 0)]
     assignments = _assign(stamps, [])
     assert all(a.source == "unmapped" for a in assignments)
 
 
-def test_assign_plants_far_image_falls_back_or_unmapped(stamp) -> None:
+def test_assign_plants_far_image_falls_back_or_unmapped(
+    stamp: Callable[[str, float, float, int], ImageStamp],
+) -> None:
     plants = [_plant("P1", "A", 43.1960, -90.0580)]
     # ~111 km away
     stamps = [stamp("img1", 44.1960, -90.0580, 0)]
@@ -289,7 +317,9 @@ def test_build_mapping_empty_dir_refuses_naming_no_capture(
             dataset_root=tmp_path / "ds",
             dataset_id="ds-1",
             project=tmp_path,
-            plant_registry={"name": "unregistered", "digest": "0" * 64},
+            plant_registry=PlantRegistryReference(
+                name="unregistered", digest="0" * 64
+            ),
         )
     assert type(exc.value).__name__ == "UngeoreferencedCaptureError"
 

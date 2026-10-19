@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pydantic import JsonValue
+
     from tcip_mcp.workspace import BoundProject
 
 
 def called_through_the_server(
     tool: str, arguments: dict, *, bound: BoundProject | None = None
-) -> Any:
+) -> JsonValue:
     """Call ``tool`` with ``arguments`` through ``build_server(bound)``.
 
     The server is started for ``bound`` or, by default, for no project. Returns the tool error's

@@ -11,6 +11,7 @@ sampling whose window paths do not resolve to one of the run's own admitted sour
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -25,12 +26,22 @@ from tests._chain_fixtures import (
 )
 from tests._training_values import RATIONALE, drawn_split, evaluation_block
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+
 SUBJECT = "leaf"
 TIMM_WEIGHTS = {"library": "timm", "name": "resnet18.a1_in1k"}
 """A sample pretrained weights record a normalization source names."""
 
 
-def _cfg(project, images_dir, *, normalization: dict | str = FRAME_STATISTICS):
+def _cfg(
+    project: Path,
+    images_dir: Path,
+    *,
+    normalization: dict | str = FRAME_STATISTICS,
+) -> dict:
     """Return ``training_config`` of ``project`` for ``BESPOKE_DETECTION`` over ``images_dir``.
 
     The model source normalizes by ``normalization``; the data section scopes to the subject under
@@ -54,7 +65,9 @@ def _cfg(project, images_dir, *, normalization: dict | str = FRAME_STATISTICS):
     )
 
 
-def _label(images_dir, *stems, width=16, height=16):
+def _label(
+    images_dir: Path, *stems: str, width: int = 16, height: int = 16
+) -> None:
     """Write one label document, one box of the subject, per stem's image in ``images_dir``."""
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
@@ -68,7 +81,7 @@ def _label(images_dir, *stems, width=16, height=16):
         )
 
 
-def _frame(path) -> None:
+def _frame(path: Path) -> None:
     """Write a 16 px RGB frame of seeded uniform uint8 noise at ``path``."""
     import numpy as np
     from PIL import Image
@@ -78,7 +91,9 @@ def _frame(path) -> None:
     ).save(path)
 
 
-def _derived(paths, num_channels: int = 3) -> dict:
+def _derived(
+    paths: Sequence[str | Path | BandGroupRef], num_channels: int = 3
+) -> dict:
     """Return ``band_normalization_stats`` over ``paths`` as a dumped record.
 
     It is called at ``num_channels`` with ``max_images=len(paths)`` and ``seed=0``.
@@ -93,7 +108,7 @@ def _derived(paths, num_channels: int = 3) -> dict:
     return result.model_dump()
 
 
-def test_preflight_refuses_statistics_with_no_source(tmp_path):
+def test_preflight_refuses_statistics_with_no_source(tmp_path: Path) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -110,7 +125,9 @@ def test_preflight_refuses_statistics_with_no_source(tmp_path):
     assert any("model_source.normalization.source" in i for i in r["issues"])
 
 
-def test_the_weights_own_statistics_are_admitted_naming_the_weights(tmp_path):
+def test_the_weights_own_statistics_are_admitted_naming_the_weights(
+    tmp_path: Path,
+) -> None:
     """The weights' producer's record, its source the weights themselves, validates cleanly."""
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.derivations import pretrained_normalization
@@ -131,8 +148,8 @@ def test_the_weights_own_statistics_are_admitted_naming_the_weights(tmp_path):
 
 
 def test_a_model_reading_more_bands_than_its_weights_states_every_band_with_its_reason(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A five-band model under three-band weights builds from a stated record with its reason.
 
     The weights' own three statistics refuse at the build's band count, a stated record lacking
@@ -193,7 +210,9 @@ def test_a_model_reading_more_bands_than_its_weights_states_every_band_with_its_
     assert model.detector.transform.image_mean == stated["image_mean"]
 
 
-def test_preflight_refuses_a_window_path_outside_images_dir(tmp_path):
+def test_preflight_refuses_a_window_path_outside_images_dir(
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -212,7 +231,9 @@ def test_preflight_refuses_a_window_path_outside_images_dir(tmp_path):
     assert r["image_stats_containment"] == "checked"
 
 
-def test_preflight_records_not_checked_when_no_membership_resolved(tmp_path):
+def test_preflight_records_not_checked_when_no_membership_resolved(
+    tmp_path: Path,
+) -> None:
     """Preflight records the windows as not checked when no membership resolved.
 
     A config naming no locations resolves no membership, so there are no sources to check the
@@ -244,7 +265,9 @@ def test_preflight_records_not_checked_when_no_membership_resolved(tmp_path):
     assert not any("outside" in i for i in r["issues"])
 
 
-def test_preflight_admits_the_exact_derivations_own_record(tmp_path):
+def test_preflight_admits_the_exact_derivations_own_record(
+    tmp_path: Path,
+) -> None:
     """Preflight admits the exact derivation's sampling over an admitted image as contained."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -264,7 +287,9 @@ def test_preflight_admits_the_exact_derivations_own_record(tmp_path):
     assert r["image_stats_containment"] == "checked"
 
 
-def test_preflight_admits_the_sampled_derivations_own_record(tmp_path):
+def test_preflight_admits_the_sampled_derivations_own_record(
+    tmp_path: Path,
+) -> None:
     """Preflight admits the windowed derivation's own sampling record.
 
     The sampling, its window size and windows per raster beside the seed and cap, is the same
@@ -298,8 +323,8 @@ def test_preflight_admits_the_sampled_derivations_own_record(tmp_path):
 
 
 def test_preflight_admits_the_exact_derivations_record_over_a_band_group_dataset(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Preflight admits the exact derivation's record over a band-group dataset.
 
     The derivation labels a band-group raster by its manifest path, the label preflight's
@@ -339,7 +364,9 @@ def test_preflight_admits_the_exact_derivations_record_over_a_band_group_dataset
     assert r["image_stats_containment"] == "checked"
 
 
-def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
+def test_preflight_keeps_every_sample_of_a_two_date_selection(
+    tmp_path: Path,
+) -> None:
     """Preflight finds a window over a two-date selection's sources contained.
 
     Such a selection holds two samples of one name; preflight over a window of the bound run's
@@ -392,8 +419,8 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
 
 
 def test_preflight_refuses_a_hand_written_source_naming_the_record_keys(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Preflight refuses a source shaped by neither derivation, naming both record keys.
 
     The source carries neither 'windows' nor 'pixel_fraction', and the refusal names both keys.
@@ -421,7 +448,7 @@ def test_preflight_refuses_a_hand_written_source_naming_the_record_keys(
         assert any(key in i for i in r["issues"]), r["issues"]
 
 
-def test_preflight_refuses_a_sampling_naming_no_window(tmp_path):
+def test_preflight_refuses_a_sampling_naming_no_window(tmp_path: Path) -> None:
     """A sampling naming no window is refused by its type.
 
     Such a sampling says no image produced the statistics.
@@ -452,8 +479,8 @@ def test_preflight_refuses_a_sampling_naming_no_window(tmp_path):
 
 
 def test_preflight_reads_the_band_count_over_every_source_the_run_admits(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Preflight refuses a run whose two admitted sources differ in band count, saying so."""
     pytest.importorskip("torch")
     import numpy as np
@@ -480,14 +507,14 @@ def test_preflight_reads_the_band_count_over_every_source_the_run_admits(
 
 
 def test_a_copied_projects_run_reads_its_statistics_windows_from_the_copy(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A copied project's run resolves its recorded statistics-window paths under the copy."""
     pytest.importorskip("torch")
     import shutil
 
     import tcip_store as ts
-    from tcip_mcp.experiments import observe
+    from tcip_mcp.experiments import read_run
     from tests._verified_checkpoint_fixtures import opened_run
 
     project = tmp_path / "project"
@@ -501,16 +528,18 @@ def test_a_copied_projects_run_reads_its_statistics_windows_from_the_copy(
     copy = tmp_path / "copy"
     ts.release_root(project)
     shutil.copytree(project, copy)
-    sampling = observe(copy / run.relative_to(project)).record["config"][
-        "model_source"
-    ]["normalization"]["source"]
+    sampling = read_run(
+        copy / run.relative_to(project)
+    ).spec.model_source.normalization.source
 
-    assert [window[0] for window in sampling["windows"]] == [
+    assert [window[0] for window in sampling.windows] == [
         str((copy / a.relative_to(project)).resolve())
     ]
 
 
-def test_preflight_refuses_a_model_source_stating_no_statistics(tmp_path):
+def test_preflight_refuses_a_model_source_stating_no_statistics(
+    tmp_path: Path,
+) -> None:
     """Preflight refuses a model source stating no normalization record, naming the field.
 
     The refusal is the field's type, where preflight validates the config.
@@ -529,8 +558,8 @@ def test_preflight_refuses_a_model_source_stating_no_statistics(tmp_path):
 
 
 def test_a_selection_bound_runs_checkpoint_records_statistics_preflight_admits(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A selection-bound run's checkpoint records statistics that preflight admits.
 
     A run trained over a drawn selection (``_chain_fixtures.train_on``) registers a checkpoint
@@ -540,7 +569,6 @@ def test_a_selection_bound_runs_checkpoint_records_statistics_preflight_admits(
     pytest.importorskip("torch")
     from tcip_mcp.experiments import CONFIG_PATHS
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.model_build import CONFIG_KEY
     from tcip_mcp.registry_paths import runtime_paths
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._chain_fixtures import (
@@ -562,9 +590,8 @@ def test_a_selection_bound_runs_checkpoint_records_statistics_preflight_admits(
     assert {label for label, _ in windows} == _train_side(
         tmp_path, checkpoint.experiment_id
     )
-    recorded = runtime_paths(
-        checkpoint.stamped(CONFIG_KEY), CONFIG_PATHS, tmp_path
-    )
+    recorded = runtime_paths(checkpoint.stamp.config, CONFIG_PATHS, tmp_path)
+    assert isinstance(recorded, dict)
     relaunch = {
         **run_config(tmp_path, selection_dir),
         "model_source": recorded["model_source"],
@@ -574,25 +601,22 @@ def test_a_selection_bound_runs_checkpoint_records_statistics_preflight_admits(
     assert r["image_stats_containment"] == "checked"
 
 
-def _train_side(project, experiment_id: str) -> set:
+def _train_side(project: Path, experiment_id: str) -> set:
     """Return the train-side sources of the partition run ``experiment_id`` recorded.
 
     The partition is the one ``experiment_id`` of ``project`` resolved and recorded, read off the
-    record by the platform's own partition reader. It asserts the validation side holds a source.
+    record by the platform's own reader. It asserts the validation side holds a source.
     """
     from tcip_mcp.experiments import run_resolution
-    from tcip_mcp.pipelines.data.split_construction import partition_samples
 
-    samples = partition_samples(
-        run_resolution(experiment_id, project=project).partition
-    )
+    samples = run_resolution(experiment_id, project=project).partition.samples
     assert any(s.side == "val" for s in samples), experiment_id
     return {str(s.source) for s in samples if s.side == "train"}
 
 
 def test_a_configs_statistics_are_its_resolved_train_side_whatever_its_route(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A config's statistics name exactly its resolved partition's train-side sources.
 
     Both configs are ``_chain_fixtures.training_config``'s: one over a selection redrawn at a
@@ -635,7 +659,9 @@ def test_a_configs_statistics_are_its_resolved_train_side_whatever_its_route(
         ), experiment_id
 
 
-def test_own_statistics_refuses_a_config_whose_frames_carry_none(tmp_path):
+def test_own_statistics_refuses_a_config_whose_frames_carry_none(
+    tmp_path: Path,
+) -> None:
     """The config fixture's own statistics refuse a config whose frames carry none.
 
     The fixture's statistics have no fallback: a config whose data section names no frames

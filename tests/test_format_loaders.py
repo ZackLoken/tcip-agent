@@ -8,7 +8,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 
-def test_parse_coco_annotations_decodes_names():
+def test_parse_coco_annotations_decodes_names() -> None:
     """A dataset-level COCO parses to name-based Annotations, subjects from its categories."""
     from tcip_annotation.format_io import parse_coco_annotations
     from tcip_annotation.state import Polygon

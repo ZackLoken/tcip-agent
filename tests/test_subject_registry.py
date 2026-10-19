@@ -7,6 +7,7 @@ survives a file round-trip.
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -22,8 +23,14 @@ from tcip_mcp.subject_registry import (
 )
 from tests._producer_fixtures import registry_over
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def _version(dataset_root):
+    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_store import Version
+
+
+def _version(dataset_root: Path) -> Version:
     """Return the version ``dataset_root``'s stored registry reads at."""
     return read_versioned_registry(dataset_root)[1]
 
@@ -47,7 +54,9 @@ def _bud_bush() -> SubjectRegistry:
     )
 
 
-def test_a_stored_subject_stating_no_description_refuses_and_a_request_s_states_an_empty_one():
+def test_a_stored_subject_stating_no_description_refuses_and_a_request_s_states_an_empty_one() -> (
+    None
+):
     """A stored subject with no description refuses; an authoring request states an empty one.
 
     A stored subject missing ``description`` refuses naming the field; an authoring request may
@@ -63,7 +72,7 @@ def test_a_stored_subject_stating_no_description_refuses_and_a_request_s_states_
     )
 
 
-def test_dict_and_file_roundtrip_preserve_the_registry(tmp_path):
+def test_dict_and_file_roundtrip_preserve_the_registry(tmp_path: Path) -> None:
     reg = _bud_bush()
     assert registry_from_dict(registry_to_dict(reg)) == reg
 
@@ -79,7 +88,9 @@ def test_dict_and_file_roundtrip_preserve_the_registry(tmp_path):
     ]
 
 
-def _scope(tmp_path, registry, subject):
+def _scope(
+    tmp_path: Path, registry: SubjectRegistry, subject: str
+) -> ClassScope:
     """Return the class space the admission reads for ``subject`` over ``registry``.
 
     The dataset under ``tmp_path`` declares ``registry``.
@@ -90,7 +101,9 @@ def _scope(tmp_path, registry, subject):
     return registry_scope(tmp_path / "images", subject)
 
 
-def test_a_value_id_is_its_declared_position_never_a_sorted_one(tmp_path):
+def test_a_value_id_is_its_declared_position_never_a_sorted_one(
+    tmp_path: Path,
+) -> None:
     # Values declared reverse-alphabetically: a sorted/set-based id would flip these and silently
     # remap every prediction. Declared order must win, every attribute of the subject carried.
     from tcip_annotation.json_io import UNASSESSED, attribute_ids
@@ -100,6 +113,7 @@ def test_a_value_id_is_its_declared_position_never_a_sorted_one(tmp_path):
         subjects=(
             Subject(
                 name="bud",
+                description="",
                 attributes=(
                     Attribute(
                         name="opening",
@@ -133,8 +147,8 @@ def test_a_value_id_is_its_declared_position_never_a_sorted_one(tmp_path):
 
 
 def test_a_subject_with_no_attributes_reads_none_and_an_absent_subject_refuses(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     # rail admits valid work: bush (detection-only) loads and reads an empty attribute tuple
     reg = registry_from_dict({"bush": {"description": "a bush"}})
     assert _scope(tmp_path, reg, "bush").attributes == ()
@@ -171,18 +185,21 @@ def test_a_subject_with_no_attributes_reads_none_and_an_absent_subject_refuses(
         },  # missing type
     ],
 )
-def test_malformed_registry_refuses(bad):
+def test_malformed_registry_refuses(bad: dict) -> None:
     with pytest.raises(RegistryError):
         registry_from_dict(bad)
 
 
-def test_ordinal_file_roundtrip_preserves_type_and_rank(tmp_path):
+def test_ordinal_file_roundtrip_preserves_type_and_rank(
+    tmp_path: Path,
+) -> None:
     # The apex on-disk risk: a writer that sorted or flattened ordinal metadata would reorder the
     # ranks. Declared order here is deliberately not alphabetical, so a sorting writer is caught.
     reg = SubjectRegistry(
         subjects=(
             Subject(
                 name="leaf",
+                description="",
                 attributes=(
                     Attribute(
                         name="efb_severity",
@@ -210,7 +227,7 @@ def test_ordinal_file_roundtrip_preserves_type_and_rank(tmp_path):
     )
 
 
-def test_attribute_refuses_bad_values_at_construction():
+def test_attribute_refuses_bad_values_at_construction() -> None:
     # The invariant travels with the type, so a positional id can never silently collapse a value,
     # however the Attribute was built, not only via the JSON parser.
     with pytest.raises(ValueError):
@@ -225,26 +242,21 @@ def test_attribute_refuses_bad_values_at_construction():
         )  # numeric not an attr type
 
 
-def test_absent_or_null_attributes_valid_but_falsy_malformed_refused():
-    for ok in (
-        {"bush": {"description": ""}},
-        {"bush": {"description": "", "attributes": None}},
-    ):  # detection-only subject
-        bush = registry_from_dict(ok).subject("bush")
-        assert bush is not None and bush.attributes == ()
-    for bad in (
-        False,
-        0,
-        "",
-        [],
-    ):  # a falsy but wrong-typed attributes is malformed, not "none"
-        with pytest.raises(RegistryError):
-            registry_from_dict({"bush": {"attributes": bad}})
+def test_absent_attributes_are_valid_and_any_other_spelling_of_none_refuses() -> (
+    None
+):
+    bush = registry_from_dict({"bush": {"description": ""}}).subject("bush")
+    assert bush is not None and bush.attributes == ()
+    for bad in (None, False, 0, "", []):
+        with pytest.raises(RegistryError, match="attributes"):
+            registry_from_dict(
+                {"bush": {"description": "", "attributes": bad}}
+            )
 
 
 def test_a_present_but_undecodable_registry_refuses_and_an_absent_one_says_so(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An undecodable registry refuses, and an absent one says it is absent.
 
     An undecodable registry raises ``RegistryError`` and an absent one ``FileNotFoundError``.
@@ -260,13 +272,16 @@ def test_a_present_but_undecodable_registry_refuses_and_an_absent_one_says_so(
         read_registry(tmp_path / "absent")
 
     # a registry that does decode still reads, so the refusal has not swallowed valid work.
-    registry_over(tmp_path, SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(
+        tmp_path,
+        SubjectRegistry(subjects=(Subject(name="bud", description=""),)),
+    )
     assert read_registry(tmp_path).subject("bud") is not None
 
 
 def test_a_copied_registry_declares_the_same_document_in_the_same_order(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A copied registry declares the same document in the same order.
 
     A registry copied beside another dataset's data holds its source's bytes and reads back its
@@ -284,7 +299,7 @@ def test_a_copied_registry_declares_the_same_document_in_the_same_order(
                 Subject(
                     name="bud", description="a description with an ümlaut"
                 ),
-                Subject(name="bush"),
+                Subject(name="bush", description=""),
             )
         ),
     )
@@ -301,8 +316,8 @@ def test_a_copied_registry_declares_the_same_document_in_the_same_order(
 
 
 def test_copy_registry_refuses_when_the_destination_already_holds_one(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """``copy_registry`` refuses when the destination already holds a registry.
 
     A copy over a destination holding its own registry raises ``RegistryError``, and the
@@ -313,9 +328,13 @@ def test_copy_registry_refuses_when_the_destination_already_holds_one(
     source, destination = tmp_path / "source", tmp_path / "destination"
     source.mkdir()
     destination.mkdir()
-    registry_over(source, SubjectRegistry(subjects=(Subject(name="bud"),)))
     registry_over(
-        destination, SubjectRegistry(subjects=(Subject(name="bush"),))
+        source,
+        SubjectRegistry(subjects=(Subject(name="bud", description=""),)),
+    )
+    registry_over(
+        destination,
+        SubjectRegistry(subjects=(Subject(name="bush", description=""),)),
     )
 
     with pytest.raises(RegistryError):
@@ -348,7 +367,7 @@ def _leaf_bush() -> SubjectRegistry:
     )
 
 
-def test_replace_registry_refuses_an_empty_registry(tmp_path):
+def test_replace_registry_refuses_an_empty_registry(tmp_path: Path) -> None:
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
@@ -361,7 +380,9 @@ def test_replace_registry_refuses_an_empty_registry(tmp_path):
         )
 
 
-def test_replace_registry_first_write_succeeds_and_reports_the_save(tmp_path):
+def test_replace_registry_first_write_succeeds_and_reports_the_save(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
@@ -377,22 +398,23 @@ def test_replace_registry_first_write_succeeds_and_reports_the_save(tmp_path):
     }
 
 
-def test_replace_registry_admits_growing_the_registry(tmp_path):
+def test_replace_registry_admits_growing_the_registry(tmp_path: Path) -> None:
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
     # admits valid work: adding a subject/attribute/value never drops a declared name.
     replace_registry(
         tmp_path,
-        SubjectRegistry(subjects=(Subject(name="bush"),)),
+        SubjectRegistry(subjects=(Subject(name="bush", description=""),)),
         expect=Version.ABSENT,
         actor=None,
     )
     grown = SubjectRegistry(
         subjects=(
-            Subject(name="bush"),
+            Subject(name="bush", description=""),
             Subject(
                 name="leaf",
+                description="",
                 attributes=(
                     Attribute(
                         name="stage",
@@ -408,13 +430,15 @@ def test_replace_registry_admits_growing_the_registry(tmp_path):
 
 
 def test_replace_registry_refuses_dropping_a_declared_name_without_allow_removals(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
     replace_registry(tmp_path, _leaf_bush(), expect=Version.ABSENT, actor=None)
-    shrunk = SubjectRegistry(subjects=(Subject(name="bush"),))  # drops leaf
+    shrunk = SubjectRegistry(
+        subjects=(Subject(name="bush", description=""),)
+    )  # drops leaf
     with pytest.raises(RegistryError, match="leaf"):
         replace_registry(
             tmp_path, shrunk, expect=_version(tmp_path), actor=None
@@ -424,12 +448,12 @@ def test_replace_registry_refuses_dropping_a_declared_name_without_allow_removal
     )  # refusal leaves the stored registry untouched
 
 
-def test_replace_registry_allows_removals_when_stated(tmp_path):
+def test_replace_registry_allows_removals_when_stated(tmp_path: Path) -> None:
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
     replace_registry(tmp_path, _leaf_bush(), expect=Version.ABSENT, actor=None)
-    shrunk = SubjectRegistry(subjects=(Subject(name="bush"),))
+    shrunk = SubjectRegistry(subjects=(Subject(name="bush", description=""),))
     replace_registry(
         tmp_path,
         shrunk,
@@ -440,20 +464,27 @@ def test_replace_registry_allows_removals_when_stated(tmp_path):
     assert read_registry(tmp_path) == shrunk
 
 
-def test_replace_registry_refuses_a_stale_expect_version(tmp_path):
+def test_replace_registry_refuses_a_stale_expect_version(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version, VersionConflictError
 
     replace_registry(
         tmp_path,
-        SubjectRegistry(subjects=(Subject(name="bush"),)),
+        SubjectRegistry(subjects=(Subject(name="bush", description=""),)),
         expect=Version.ABSENT,
         actor=None,
     )
     stale = _version(tmp_path)
     replace_registry(
         tmp_path,
-        SubjectRegistry(subjects=(Subject(name="bush"), Subject(name="leaf"))),
+        SubjectRegistry(
+            subjects=(
+                Subject(name="bush", description=""),
+                Subject(name="leaf", description=""),
+            )
+        ),
         expect=stale,
         actor=None,
     )
@@ -461,7 +492,10 @@ def test_replace_registry_refuses_a_stale_expect_version(tmp_path):
         replace_registry(
             tmp_path,
             SubjectRegistry(
-                subjects=(Subject(name="bush"), Subject(name="tip"))
+                subjects=(
+                    Subject(name="bush", description=""),
+                    Subject(name="tip", description=""),
+                )
             ),
             expect=stale,
             allow_removals=True,
@@ -470,8 +504,8 @@ def test_replace_registry_refuses_a_stale_expect_version(tmp_path):
 
 
 def test_replace_registry_refuses_undecodable_bytes_without_allow_removals(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.subject_registry import replace_registry
 
     path = tmp_path / "subjects.json"
@@ -481,7 +515,7 @@ def test_replace_registry_refuses_undecodable_bytes_without_allow_removals(
     with pytest.raises(RegistryError):
         replace_registry(
             tmp_path,
-            SubjectRegistry(subjects=(Subject(name="bush"),)),
+            SubjectRegistry(subjects=(Subject(name="bush", description=""),)),
             expect=None,
             actor=None,
         )
@@ -489,27 +523,27 @@ def test_replace_registry_refuses_undecodable_bytes_without_allow_removals(
 
 
 def test_replace_registry_repairs_undecodable_bytes_when_allow_removals(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.subject_registry import replace_registry
 
     path = tmp_path / "subjects.json"
     path.write_bytes(b'{"leaf": {"description": "one leaf"')
     replace_registry(
         tmp_path,
-        SubjectRegistry(subjects=(Subject(name="bush"),)),
+        SubjectRegistry(subjects=(Subject(name="bush", description=""),)),
         expect=None,
         allow_removals=True,
         actor=None,
     )
     assert read_registry(tmp_path) == SubjectRegistry(
-        subjects=(Subject(name="bush"),)
+        subjects=(Subject(name="bush", description=""),)
     )
 
 
 def test_replace_registry_refuses_a_same_values_type_flip_without_allow_type_changes(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
@@ -517,6 +551,7 @@ def test_replace_registry_refuses_a_same_values_type_flip_without_allow_type_cha
         subjects=(
             Subject(
                 name="bud",
+                description="",
                 attributes=(
                     Attribute(
                         name="opening",
@@ -532,6 +567,7 @@ def test_replace_registry_refuses_a_same_values_type_flip_without_allow_type_cha
         subjects=(
             Subject(
                 name="bud",
+                description="",
                 attributes=(
                     Attribute(
                         name="opening",
@@ -550,7 +586,9 @@ def test_replace_registry_refuses_a_same_values_type_flip_without_allow_type_cha
     assert read_registry(tmp_path) == categorical
 
 
-def test_replace_registry_refuses_the_reverse_type_flip_too(tmp_path):
+def test_replace_registry_refuses_the_reverse_type_flip_too(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
@@ -558,6 +596,7 @@ def test_replace_registry_refuses_the_reverse_type_flip_too(tmp_path):
         subjects=(
             Subject(
                 name="bud",
+                description="",
                 attributes=(
                     Attribute(
                         name="opening",
@@ -573,6 +612,7 @@ def test_replace_registry_refuses_the_reverse_type_flip_too(tmp_path):
         subjects=(
             Subject(
                 name="bud",
+                description="",
                 attributes=(
                     Attribute(
                         name="opening",
@@ -592,8 +632,8 @@ def test_replace_registry_refuses_the_reverse_type_flip_too(tmp_path):
 
 
 def test_replace_registry_allow_removals_alone_does_not_admit_a_type_flip(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
@@ -601,6 +641,7 @@ def test_replace_registry_allow_removals_alone_does_not_admit_a_type_flip(
         subjects=(
             Subject(
                 name="bud",
+                description="",
                 attributes=(
                     Attribute(
                         name="opening",
@@ -616,6 +657,7 @@ def test_replace_registry_allow_removals_alone_does_not_admit_a_type_flip(
         subjects=(
             Subject(
                 name="bud",
+                description="",
                 attributes=(
                     Attribute(
                         name="opening",
@@ -637,7 +679,9 @@ def test_replace_registry_allow_removals_alone_does_not_admit_a_type_flip(
         )
 
 
-def test_replace_registry_admits_a_type_flip_with_allow_type_changes(tmp_path):
+def test_replace_registry_admits_a_type_flip_with_allow_type_changes(
+    tmp_path: Path,
+) -> None:
     """``replace_registry`` with ``allow_type_changes`` lands a categorical-to-ordinal flip."""
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
@@ -646,6 +690,7 @@ def test_replace_registry_admits_a_type_flip_with_allow_type_changes(tmp_path):
         subjects=(
             Subject(
                 name="bud",
+                description="",
                 attributes=(
                     Attribute(
                         name="opening",
@@ -662,6 +707,7 @@ def test_replace_registry_admits_a_type_flip_with_allow_type_changes(tmp_path):
         subjects=(
             Subject(
                 name="bud",
+                description="",
                 attributes=(
                     Attribute(
                         name="opening",
@@ -684,8 +730,8 @@ def test_replace_registry_admits_a_type_flip_with_allow_type_changes(tmp_path):
 
 
 def test_replace_registry_admits_a_values_only_growth_and_a_same_type_resave(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """``replace_registry`` admits a values-only growth and a same-type re-save.
 
     The type-flip refusal does not fire over a growth or a re-save that restates the same type.
@@ -697,6 +743,7 @@ def test_replace_registry_admits_a_values_only_growth_and_a_same_type_resave(
         subjects=(
             Subject(
                 name="bud",
+                description="",
                 attributes=(
                     Attribute(
                         name="opening",
@@ -712,6 +759,7 @@ def test_replace_registry_admits_a_values_only_growth_and_a_same_type_resave(
         subjects=(
             Subject(
                 name="bud",
+                description="",
                 attributes=(
                     Attribute(
                         name="opening",
@@ -728,7 +776,9 @@ def test_replace_registry_admits_a_values_only_growth_and_a_same_type_resave(
     assert read_registry(tmp_path) == grown
 
 
-def test_write_subject_registry_refuses_a_type_flip_without_the_flag(tmp_path):
+def test_write_subject_registry_refuses_a_type_flip_without_the_flag(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     write_subject_registry(
@@ -768,8 +818,8 @@ def test_write_subject_registry_refuses_a_type_flip_without_the_flag(tmp_path):
 
 
 def test_write_subject_registry_allow_removals_alone_still_refuses_a_type_flip(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     write_subject_registry(
@@ -806,8 +856,8 @@ def test_write_subject_registry_allow_removals_alone_still_refuses_a_type_flip(
 
 
 def test_write_subject_registry_admits_a_type_flip_with_allow_type_changes(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     write_subject_registry(
@@ -848,8 +898,8 @@ def test_write_subject_registry_admits_a_type_flip_with_allow_type_changes(
 
 
 def test_write_subject_registry_refuses_dropping_a_declared_subject_without_allow_removals(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     write_subject_registry(
@@ -866,8 +916,8 @@ def test_write_subject_registry_refuses_dropping_a_declared_subject_without_allo
 
 
 def test_write_subject_registry_admits_a_removal_stated_as_deliberate(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     write_subject_registry(
@@ -884,8 +934,8 @@ def test_write_subject_registry_admits_a_removal_stated_as_deliberate(
 
 
 def test_write_subject_registry_refuses_undecodable_existing_bytes_without_allow_removals(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     path = tmp_path / "subjects.json"
@@ -903,5 +953,5 @@ def test_write_subject_registry_refuses_undecodable_existing_bytes_without_allow
     )
     assert "error" not in repaired
     assert read_registry(tmp_path) == SubjectRegistry(
-        subjects=(Subject(name="bush"),)
+        subjects=(Subject(name="bush", description=""),)
     )

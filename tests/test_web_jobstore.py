@@ -1,11 +1,18 @@
 """Web job lifecycle: the in-memory registry, its memory cap, and inference cancellation."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
 
 from tcip_mcp.pipelines.active_learning import ScorerSpec
 from tcip_mcp.pipelines.execution import Stated
 from tests._producer_fixtures import write_image
 from tests._training_values import RATIONALE
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 STATED = Stated(
     tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2, rationale=RATIONALE
@@ -24,7 +31,7 @@ class J:
         self.job_id = job_id
 
 
-def test_evict_terminal_caps_and_keeps_running():
+def test_evict_terminal_caps_and_keeps_running() -> None:
     from tcip_web.jobstore import evict_terminal
 
     jobs = {f"done{i}": J("completed") for i in range(5)}
@@ -36,7 +43,9 @@ def test_evict_terminal_caps_and_keeps_running():
     assert "done0" not in jobs  # oldest terminal evicted first
 
 
-def test_evict_terminal_drops_the_oldest_terminal_jobs_whichever_root_they_belong_to():
+def test_evict_terminal_drops_the_oldest_terminal_jobs_whichever_root_they_belong_to() -> (
+    None
+):
     """Trimming to max_jobs keeps a lone recent job of another root beside the first root's.
 
     Six terminal jobs across two roots trimmed to three keep the second root's one job and two
@@ -52,7 +61,7 @@ def test_evict_terminal_drops_the_oldest_terminal_jobs_whichever_root_they_belon
     assert sum(1 for j in jobs.values() if j.project == "root-a") == 2
 
 
-def test_evict_terminal_bounds_the_whole_dict_across_roots():
+def test_evict_terminal_bounds_the_whole_dict_across_roots() -> None:
     """Eviction bounds the whole job dict across roots.
 
     The whole dict stays at max_jobs or fewer as a second root registers its jobs, and the
@@ -72,7 +81,9 @@ def test_evict_terminal_bounds_the_whole_dict_across_roots():
     assert not any(j.project == "root-a" for j in jobs.values())
 
 
-def test_job_registry_registers_gets_lists_by_root_and_finds_or_registers():
+def test_job_registry_registers_gets_lists_by_root_and_finds_or_registers() -> (
+    None
+):
     """The job registry registers, gets, lists by root, and finds or registers.
 
     A job registered under a root is got by id and listed under its own root and not another;
@@ -83,7 +94,7 @@ def test_job_registry_registers_gets_lists_by_root_and_finds_or_registers():
 
     registry = JobRegistry()
     job = J("pending", "root-a", "j1")
-    registry.register(job.job_id, job)
+    registry.register(job)
 
     assert registry.get("j1") is job
     assert registry.list("root-a") == [job]
@@ -99,7 +110,7 @@ def test_job_registry_registers_gets_lists_by_root_and_finds_or_registers():
     assert created is True and registry.get("j3") is made
 
 
-def _fake_predictor(monkeypatch) -> None:
+def _fake_predictor(monkeypatch: pytest.MonkeyPatch) -> None:
     from tests._predictor_fixtures import StubPredictor, install
 
     install(
@@ -108,8 +119,8 @@ def _fake_predictor(monkeypatch) -> None:
 
 
 def test_inference_cancel_endpoint_and_worker(
-    tmp_path, opened_project, monkeypatch
-):
+    tmp_path: Path, opened_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     pytest.importorskip("fastapi")
     monkeypatch.chdir(tmp_path)
     from fastapi import HTTPException
@@ -158,9 +169,9 @@ def test_inference_cancel_endpoint_and_worker(
 
 
 def test_inference_cancel_reaches_a_job_launched_for_a_previously_open_project(
-    tmp_path,
-    opened_project,
-):
+    tmp_path: Path,
+    opened_project: Path,
+) -> None:
     """An inference cancel reaches a job launched for a previously open project.
 
     After another project is opened the job is found by id and canceled, the list route lists
@@ -209,9 +220,9 @@ def test_inference_cancel_reaches_a_job_launched_for_a_previously_open_project(
 
 
 def test_priority_queue_by_id_reaches_a_job_launched_for_a_previously_open_project(
-    tmp_path,
-    opened_project,
-):
+    tmp_path: Path,
+    opened_project: Path,
+) -> None:
     """A priority queue reached by id answers a job launched for a previously open project.
 
     After another project is opened the job is found by id, and an unknown id answers 404.
@@ -240,7 +251,7 @@ def test_priority_queue_by_id_reaches_a_job_launched_for_a_previously_open_proje
         total_candidates=1,
         reviewed_skipped=0,
     )
-    _pq_registry.register(job.job_id, job)
+    _pq_registry.register(job)
 
     try:
         open_new_project(tmp_path / "other")

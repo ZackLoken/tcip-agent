@@ -8,6 +8,7 @@ hands it. The fixture spans several internal tiles on both axes.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -15,6 +16,9 @@ import tifffile
 
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.raster_source import open_raster
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 # Wider than it is tall, and a multiple of neither the tile size nor the traversal step, so edge
 # windows are short and interior windows straddle tile boundaries on both axes.
@@ -40,7 +44,7 @@ def _mosaic_array(height: int, width: int) -> np.ndarray:
 
 
 @pytest.fixture
-def restored_gdal_cache():
+def restored_gdal_cache() -> Iterator[None]:
     """Restore the process-global GDAL block cache budget to the value it held at setup."""
     from rasterio.env import get_gdal_config, set_gdal_config
 
@@ -51,7 +55,9 @@ def restored_gdal_cache():
 
 
 @pytest.fixture(scope="module")
-def multi_tile_raster(tmp_path_factory) -> tuple[Path, np.ndarray]:
+def multi_tile_raster(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, np.ndarray]:
     arr = _mosaic_array(_HEIGHT, _WIDTH)
     path = tmp_path_factory.mktemp("mosaic") / "mosaic.tif"
     tifffile.imwrite(str(path), arr, photometric="rgb", tile=(_TILE, _TILE))
@@ -59,7 +65,7 @@ def multi_tile_raster(tmp_path_factory) -> tuple[Path, np.ndarray]:
 
 
 def test_the_fixture_spans_many_internal_tiles_on_both_axes(
-    multi_tile_raster,
+    multi_tile_raster: tuple[Path, np.ndarray],
 ) -> None:
     """The fixture raster spans many internal tiles on both axes.
 
@@ -76,7 +82,7 @@ def test_the_fixture_spans_many_internal_tiles_on_both_axes(
 
 
 def test_a_traversal_whose_windows_straddle_tile_boundaries_reassembles_the_raster(
-    multi_tile_raster,
+    multi_tile_raster: tuple[Path, np.ndarray],
 ) -> None:
     """A traversal whose windows straddle tile boundaries reassembles the raster.
 
@@ -111,7 +117,7 @@ def test_a_traversal_whose_windows_straddle_tile_boundaries_reassembles_the_rast
 
 
 def test_an_interior_window_of_a_multi_tile_raster_is_its_own_pixels(
-    multi_tile_raster,
+    multi_tile_raster: tuple[Path, np.ndarray],
 ) -> None:
     """An interior window of a multi-tile raster is exactly the slice it names.
 
@@ -130,8 +136,8 @@ def test_an_interior_window_of_a_multi_tile_raster_is_its_own_pixels(
 
 
 def test_a_worker_share_scales_the_block_cache_budget_it_commits(
-    monkeypatch,
-    restored_gdal_cache,
+    monkeypatch: pytest.MonkeyPatch,
+    restored_gdal_cache: None,
 ) -> None:
     """A worker share scales the block cache budget it commits.
 
@@ -151,8 +157,8 @@ def test_a_worker_share_scales_the_block_cache_budget_it_commits(
 
 
 def test_a_host_too_small_to_budget_still_commits_an_unambiguous_byte_count(
-    monkeypatch,
-    restored_gdal_cache,
+    monkeypatch: pytest.MonkeyPatch,
+    restored_gdal_cache: None,
 ) -> None:
     """A host too small to budget still commits an unambiguous byte count.
 

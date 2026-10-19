@@ -7,6 +7,7 @@ and the positive state a bucket's scope classifies.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
@@ -23,6 +24,9 @@ from tests._trait_fixtures import (
     propose_and_confirm,
 )
 
+if TYPE_CHECKING:
+    from tcip_mcp.buckets import Bucket
+
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
@@ -31,7 +35,7 @@ pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 def test_an_entry_delivering_a_vocabulary_phenotype_is_admitted_and_reads_back(
     tmp_path: Path,
-):
+) -> None:
     propose(
         tmp_path,
         entry(
@@ -56,7 +60,9 @@ def test_an_entry_delivering_a_vocabulary_phenotype_is_admitted_and_reads_back(
         ({"localization": "box"}, "localization"),
     ],
 )
-def test_an_entry_the_schema_refuses_names_why(fields: dict, refusal: str):
+def test_an_entry_the_schema_refuses_names_why(
+    fields: dict, refusal: str
+) -> None:
     """The closed field set and the stated localization vocabulary refuse by name."""
     base = entry("leaf", ("leaf_length",)).model_dump()
     with pytest.raises(ValidationError, match=refusal):
@@ -74,7 +80,7 @@ def test_a_proposal_off_the_vocabulary_refuses_and_appends_nothing(
     tmp_path: Path,
     delivers: tuple,
     refusal: str,
-):
+) -> None:
     """A proposal whose ``delivers`` is empty or leaves crops.yml refuses by name.
 
     No revision is appended.
@@ -84,7 +90,9 @@ def test_a_proposal_off_the_vocabulary_refuses_and_appends_nothing(
     assert "leaf" not in trait_names(tmp_path)
 
 
-def test_every_picker_names_an_admitted_count_objective_and_unset_stays_empty():
+def test_every_picker_names_an_admitted_count_objective_and_unset_stays_empty() -> (
+    None
+):
     """Admission accepts each count objective a picker implements.
 
     An unset count objective stays empty.
@@ -106,7 +114,7 @@ def test_every_picker_names_an_admitted_count_objective_and_unset_stays_empty():
 
 def test_an_unset_count_objective_refuses_the_proposal_asking_the_breeder(
     tmp_path: Path,
-):
+) -> None:
     """A count operationalization proposed with no count objective refuses, asking the breeder.
 
     No platform default stands in for the objective a count is fitted under; a stated one is
@@ -151,7 +159,7 @@ def test_an_unset_count_objective_refuses_the_proposal_asking_the_breeder(
 )
 def test_an_entry_naming_what_no_table_implements_refuses_naming_the_field(
     field: str,
-):
+) -> None:
     """An entry naming a value outside a field's vocabulary refuses, naming the field.
 
     The refusal comes where the entry a proposal takes is built.
@@ -184,7 +192,7 @@ def test_an_entry_naming_what_no_table_implements_refuses_naming_the_field(
 )
 def test_every_authorable_name_has_an_implementation_and_no_other(
     vocabulary: str, table: str
-):
+) -> None:
     """A field's vocabulary and the table its reader subscripts name the same set.
 
     The empty unauthored member is set aside.
@@ -203,7 +211,7 @@ def test_every_authorable_name_has_an_implementation_and_no_other(
 
 def test_every_trait_record_is_read_and_the_latest_revision_answers(
     tmp_path: Path,
-):
+) -> None:
     propose(
         tmp_path,
         entry("leaf", ("leaf_length",), count_bias_tolerance_frac=1.0),
@@ -217,14 +225,14 @@ def test_every_trait_record_is_read_and_the_latest_revision_answers(
     assert latest("leaf", tmp_path).count_bias_tolerance_frac == 99.0
 
 
-def test_an_unknown_trait_hard_fails(tmp_path: Path):
+def test_an_unknown_trait_hard_fails(tmp_path: Path) -> None:
     with pytest.raises(TraitUnknownError):
         traits.read_trait("banana", tmp_path)
 
 
 def test_a_measurement_reader_refuses_a_trait_with_no_confirmed_revision_by_name(
     tmp_path: Path,
-):
+) -> None:
     """A measurement reader refuses a trait with no confirmed revision by name.
 
     A measurement reads the latest confirmed revision: an entry proposed but not confirmed
@@ -256,7 +264,7 @@ def test_a_measurement_reader_refuses_a_trait_with_no_confirmed_revision_by_name
 def test_a_proposal_made_while_another_holds_the_record_lands_as_the_next_revision(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     """Two concurrent proposals both land as successive revisions.
 
     One started while the other holds the record lands after it, as revision 2.
@@ -267,7 +275,7 @@ def test_a_proposal_made_while_another_holds_the_record_lands_as_the_next_revisi
     other_landed = threading.Event()
     other: list = []
 
-    def propose_other():
+    def propose_other() -> None:
         other.append(
             propose(
                 tmp_path,
@@ -276,7 +284,7 @@ def test_a_proposal_made_while_another_holds_the_record_lands_as_the_next_revisi
         )
         other_landed.set()
 
-    def clock_while_holding_the_record():
+    def clock_while_holding_the_record() -> str:
         monkeypatch.setattr(traits, "now_iso", real_clock)
         threading.Thread(target=propose_other).start()
         other_landed.wait(timeout=2)
@@ -296,7 +304,9 @@ def test_a_proposal_made_while_another_holds_the_record_lands_as_the_next_revisi
     assert (mine.number, other[0].number) == (1, 2)
 
 
-def test_bud_opening_reads_back_as_the_reference_fixture(tmp_path: Path):
+def test_bud_opening_reads_back_as_the_reference_fixture(
+    tmp_path: Path,
+) -> None:
     t = latest_confirmed("bud_opening", tmp_path).entry
     assert t == BUD_OPENING
     assert t.positive_state == traits.PositiveState(
@@ -310,7 +320,9 @@ def test_bud_opening_reads_back_as_the_reference_fixture(tmp_path: Path):
     assert set(t.delivers) == {"leaf_out_05per_date", "leaf_out_50per_date"}
 
 
-def test_a_trait_record_lands_in_the_project_state_database(tmp_path: Path):
+def test_a_trait_record_lands_in_the_project_state_database(
+    tmp_path: Path,
+) -> None:
     project_root = tmp_path / "fresh"
     propose(project_root, entry("leaf", ("leaf_length",)))
 
@@ -349,7 +361,7 @@ def _crossing(**state: str) -> TraitEntry:
 
 def test_a_positive_state_its_registry_does_not_declare_refuses_at_proposal(
     tmp_path: Path,
-):
+) -> None:
     """A positive state its registry does not declare refuses at proposal.
 
     The positive state names its attribute and its value as one fact, each held to the
@@ -361,7 +373,11 @@ def test_a_positive_state_its_registry_does_not_declare_refuses_at_proposal(
     registry_over(
         tmp_path,
         cr.SubjectRegistry(
-            subjects=(cr.Subject(name="bud", attributes=(OPENING, GRADE)),)
+            subjects=(
+                cr.Subject(
+                    name="bud", description="", attributes=(OPENING, GRADE)
+                ),
+            )
         ),
     )
 
@@ -392,7 +408,7 @@ def test_a_positive_state_its_registry_does_not_declare_refuses_at_proposal(
 )
 def test_an_operationalization_leaving_its_breeder_definition_unauthored_refuses_asking_for_it(
     tmp_path: Path, kind: str, field: str
-):
+) -> None:
     """An operationalization leaving its breeder definition unauthored refuses, asking for it.
 
     The rule a milestone's day is read under and the statistic a plant's images combine into
@@ -435,7 +451,7 @@ def _bucket(
     *,
     attributes: tuple,
     images: list[Path] | None = None,
-):
+) -> Bucket:
     """Publish and return the bucket ``run/<date>`` of one ``bud`` detection per image.
 
     Each of ``images`` (by default one frame ``P1.png`` of capture ``date`` of the dataset
@@ -446,7 +462,9 @@ def _bucket(
     from tests._chain_fixtures import published
 
     registry = cr.SubjectRegistry(
-        subjects=(cr.Subject(name="bud", attributes=attributes),)
+        subjects=(
+            cr.Subject(name="bud", description="", attributes=attributes),
+        )
     )
     return published(
         project,
@@ -476,7 +494,7 @@ def _bucket(
 
 def test_the_positive_state_resolves_by_name_from_the_buckets_own_scope(
     tmp_path: Path,
-):
+) -> None:
     named = _bucket(tmp_path, "2026-02-11", attributes=(OPENING,))
     absent = _bucket(
         tmp_path,
@@ -547,7 +565,9 @@ def _deliver_series(tmp_path: Path, *, attributed: bool) -> dict:
 
 
 @pytest.mark.usefixtures("seed_bud_operationalization")
-def test_a_series_classifying_the_states_attribute_delivers(tmp_path: Path):
+def test_a_series_classifying_the_states_attribute_delivers(
+    tmp_path: Path,
+) -> None:
     """A series classifying the positive state's attribute delivers.
 
     The delivered milestones are read under the crossing rule the shipped revision states, and
@@ -577,7 +597,7 @@ def test_a_series_classifying_the_states_attribute_delivers(tmp_path: Path):
 @pytest.mark.usefixtures("seed_bud_operationalization")
 def test_a_series_that_never_classified_the_positive_state_refuses(
     tmp_path: Path,
-):
+) -> None:
     res = _deliver_series(tmp_path, attributed=False)
 
     assert "classify no opening='open'" in res["error"]

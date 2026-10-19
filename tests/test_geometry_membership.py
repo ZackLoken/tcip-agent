@@ -9,19 +9,22 @@ holds the training side its partition records.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
+if TYPE_CHECKING:
+    from torch.utils.data import Dataset
+
+    from tcip_mcp.pipelines.data.datasets import BaseImageDataset
+    from tcip_mcp.pipelines.data.split_construction import Partition
+
 pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
-from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
-    partition_samples,
-    partition_spatial,
-)
 from tcip_mcp.pipelines.model_contract import (  # noqa: E402
     DETECTOR_TASKS,
     TILING_TASKS,
@@ -42,7 +45,7 @@ IMG = 64
 SUBJECT = "bud"
 
 
-def _target_geometry(task: str):
+def _target_geometry(task: str) -> Polygon | BBox:
     """Return a four-point square ``Polygon`` for instance_seg and a ``BBox`` for any other task."""
     if task == "instance_seg":
         return Polygon(
@@ -51,7 +54,7 @@ def _target_geometry(task: str):
     return BBox(10.0, 10.0, 30.0, 30.0)
 
 
-def _labeled(root: Path, stems, *, task: str = "detection") -> Path:
+def _labeled(root: Path, stems: list[str], *, task: str = "detection") -> Path:
     """Write one labeled directory and return it.
 
     Each stem gets a ``labeled_frame`` under ``root``'s undated bucket, labeled with one
@@ -69,7 +72,7 @@ def _labeled(root: Path, stems, *, task: str = "detection") -> Path:
     return images_dir
 
 
-def _one_target(ds, task: str) -> None:
+def _one_target(ds: Dataset, task: str) -> None:
     """Read one example off a loader and assert the task's own target shape came back."""
     _image_tensor, target = ds[0]
     assert target["boxes"].tolist() == [[10.0, 10.0, 30.0, 30.0]]
@@ -78,7 +81,7 @@ def _one_target(ds, task: str) -> None:
         assert int(target["masks"].sum()) > 0
 
 
-def _membership(ds) -> set[str]:
+def _membership(ds: BaseImageDataset) -> set[str]:
     """Return what one loader says its own members are, read off the samples it was built from.
 
     Assert each key the loader indexes names a sample whose source is on disk.
@@ -89,7 +92,9 @@ def _membership(ds) -> set[str]:
     return {ds.sample_of(key).member for key in keys}
 
 
-def _recorded(project: Path, task: str, data_cfg: dict, **config) -> dict:
+def _recorded(
+    project: Path, task: str, data_cfg: dict, **config: object
+) -> Partition:
     """Return the partition the launcher's own producer resolves for a ``task`` run.
 
     The run is of ``project`` over ``data_cfg``, with ``config``'s keys laid beside it, and the
@@ -113,7 +118,7 @@ def _recorded(project: Path, task: str, data_cfg: dict, **config) -> dict:
 @pytest.mark.parametrize("task", sorted(DETECTOR_TASKS))
 def test_the_drawn_route_loaders_name_their_own_samples(
     tmp_path: Path, task: str
-):
+) -> None:
     stems = [f"src{i}_0_0" for i in range(4)]
     images_dir = _labeled(tmp_path / "ds", stems, task=task)
     data_cfg = {
@@ -134,7 +139,7 @@ def test_the_drawn_route_loaders_name_their_own_samples(
 @pytest.mark.parametrize("task", sorted(DETECTOR_TASKS))
 def test_a_zero_validation_share_trains_on_every_admitted_sample_and_records_them(
     tmp_path: Path, task: str
-):
+) -> None:
     """A zero validation share loads and records the three admitted samples on the training side.
 
     With all shares at zero and selection on the training loss, the training loader holds the
@@ -182,7 +187,7 @@ def test_a_zero_validation_share_trains_on_every_admitted_sample_and_records_the
 @pytest.mark.parametrize("task", sorted(DETECTOR_TASKS))
 def test_a_starved_draw_refuses_by_the_draws_own_floor(
     tmp_path: Path, task: str
-):
+) -> None:
     """A draw starved to one group refuses naming its own floor.
 
     A grouping map putting both samples in one group refuses, naming the two groups the
@@ -209,7 +214,7 @@ def test_a_starved_draw_refuses_by_the_draws_own_floor(
 @pytest.mark.parametrize("task", sorted(TILING_TASKS))
 def test_one_tiled_source_still_splits_spatially_over_its_own_samples(
     tmp_path: Path, task: str
-):
+) -> None:
     """One tiled source splits spatially over its own sample.
 
     For each task in ``TILING_TASKS``, the within-image route records the one sample as its
@@ -233,10 +238,10 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(
     )
 
     assert val_ds is not None
-    assert [s.member for s in partition_samples(partition)] == [stem]
+    assert [s.member for s in partition.samples] == [stem]
     assert _membership(train_ds) == _membership(val_ds) == {stem}
     assert set(train_ds.tile_entries).isdisjoint(set(val_ds.tile_entries))
-    manifest = partition_spatial(partition)
+    manifest = partition.spatial
     assert manifest is not None
     assert manifest.stem == stem
     assert all(
@@ -247,7 +252,7 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(
 
 def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(
     tmp_path: Path,
-):
+) -> None:
     """A run holding nothing out and a drawn run record one directory's members alike.
 
     One training directory of four samples is admitted by a run holding nothing out and by a
@@ -276,10 +281,10 @@ def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(
     }
     drawn = _recorded(tmp_path, "detection", drawn_cfg)
 
-    def _held(record: dict) -> list[tuple]:
+    def _held(record: Partition) -> list[tuple]:
         return sorted(
             (s.member, s.source, s.ground_truth, s.ground_truth_digest)
-            for s in partition_samples(record)
+            for s in record.samples
         )
 
     assert _held(whole) == _held(drawn)

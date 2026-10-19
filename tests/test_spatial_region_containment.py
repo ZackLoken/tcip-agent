@@ -7,9 +7,16 @@ such region reads as a leak even when it touches no recorded train region.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 pytest.importorskip("torch")
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from tcip_mcp.pipelines.schemas import Rect
 
 from tcip_mcp.pipelines.operating_point import spatial_disjointness  # noqa: E402
 from tcip_mcp.pipelines.schemas import SpatialManifest  # noqa: E402
@@ -27,7 +34,7 @@ GAPPED = SpatialManifest.model_construct(
 1000, with no holdout or calibration region: the strip from x 400 to 600 lies in no region."""
 
 
-def test_a_rect_in_an_unattested_gap_between_regions_is_a_leak():
+def test_a_rect_in_an_unattested_gap_between_regions_is_a_leak() -> None:
     """A rect in an unattested gap between regions reads as a leak.
 
     A rect drawn from the silent strip touches no train pixel and lies inside no recorded
@@ -49,14 +56,14 @@ def test_a_rect_in_an_unattested_gap_between_regions_is_a_leak():
     assert spatial_disjointness(GAPPED, [gap_rect]) == ["[440, 100, 560, 300]"]
 
 
-def test_a_rect_inside_an_attested_region_is_admitted():
+def test_a_rect_inside_an_attested_region_is_admitted() -> None:
     """A rect fully inside a recorded non-train region reads clean."""
     assert spatial_disjointness(GAPPED, [(650, 100, 750, 300)]) == []
 
 
 def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_the_unattested(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A persisted four-way split admits its calibration region and refuses an unattested rect.
 
     The manifest is the run's resolved record, written by the real writer. A four-way split
@@ -76,12 +83,14 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
         ),
     }
     resolved_run(tmp_path, data_cfg, experiment_id="exp_four_way")
-    spatial = run_resolution("exp_four_way", project=tmp_path).spatial
+    spatial = run_resolution(
+        "exp_four_way", project=tmp_path
+    ).partition.spatial
     assert spatial is not None
     cal_region = spatial.calibration_region
     assert cal_region, "the writer produced no calibration region to read back"
 
-    def _shrunk(rect):
+    def _shrunk(rect: Rect) -> Rect:
         x0, y0, x1, y1 = rect
         return (x0 + 1, y0 + 1, x1 - 1, y1 - 1)
 
@@ -99,7 +108,9 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
     ]
 
 
-def test_a_spatial_runs_resolved_record_carries_no_drawn_seed(tmp_path):
+def test_a_spatial_runs_resolved_record_carries_no_drawn_seed(
+    tmp_path: Path,
+) -> None:
     """A spatial run's resolved record carries no drawn seed.
 
     The run's resolved partition carries no drawn seed and its spatial manifest no ``seed`` key,
@@ -118,6 +129,6 @@ def test_a_spatial_runs_resolved_record_carries_no_drawn_seed(tmp_path):
     resolved_run(tmp_path, data_cfg, experiment_id="exp_spatial_no_seed")
     resolved = run_resolution("exp_spatial_no_seed", project=tmp_path)
 
-    assert resolved.partition["seed"] is None
-    manifest = resolved.partition["spatial"]
-    assert manifest is not None and "seed" not in manifest
+    assert resolved.partition.seed is None
+    manifest = resolved.partition.spatial
+    assert manifest is not None and "seed" not in manifest.model_dump()

@@ -7,6 +7,7 @@ over real images and the canonical per-image label documents.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from PIL import Image
@@ -14,6 +15,9 @@ from PIL import Image
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._training_values import augmentation
 from tests.conftest import DATA_DIR_BUCKET
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.augmentations import Compose
 
 DATE = "2-11-26"
 """The capture date conftest's ``data_dir`` lays its images and its published bucket under."""
@@ -51,15 +55,15 @@ def _empty_bucket(project: Path, *images: Path) -> str:
 
 
 class TestReadAnnotations:
-    def test_load_missing_image(self):
+    def test_load_missing_image(self) -> None:
         from tcip_mcp.tools.annotation_tools import read_annotations
 
         result = read_annotations("/nonexistent/image.jpg")
         assert "error" in result
 
     def test_polygon_is_reported_as_rings_including_every_contour(
-        self, tmp_path
-    ):
+        self, tmp_path: Path
+    ) -> None:
         """The tool response represents a two-contour polygon as ``rings``, both of them."""
         from tcip_annotation.state import Annotation, Polygon
         from tcip_mcp.tools.annotation_tools import read_annotations
@@ -100,7 +104,7 @@ class TestReadAnnotations:
 class TestEvaluatePredictions:
     """Tests of score_predictions over files on disk."""
 
-    def test_evaluate_single_image(self, data_dir: Path):
+    def test_evaluate_single_image(self, data_dir: Path) -> None:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
         img = str(data_dir / "images" / DATE / "img_001.jpg")
@@ -114,7 +118,7 @@ class TestEvaluatePredictions:
         assert 0.0 <= result["precision"] <= 1.0
         assert 0.0 <= result["recall"] <= 1.0
 
-    def test_evaluate_folder(self, data_dir: Path):
+    def test_evaluate_folder(self, data_dir: Path) -> None:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
         result = score_predictions(
@@ -134,7 +138,7 @@ class TestEvaluatePredictions:
 class TestEvaluatePredictionsDetail:
     """Tests of score_predictions(detail=True)'s per-detection breakdown over files on disk."""
 
-    def test_detail_breakdown(self, data_dir: Path):
+    def test_detail_breakdown(self, data_dir: Path) -> None:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
         img = str(data_dir / "images" / DATE / "img_001.jpg")
@@ -161,7 +165,7 @@ def _write_empty_label(image: Path, w: int, h: int) -> None:
 class TestEvaluateFolderEnumeration:
     def test_a_band_grouped_capture_scores_as_one_logical_image(
         self, tmp_path: Path
-    ):
+    ) -> None:
         import numpy as np
         import tifffile
 
@@ -193,7 +197,7 @@ class TestEvaluateFolderEnumeration:
             "cap.bandgroup"
         ]
 
-    def test_an_npz_capture_scores(self, tmp_path: Path):
+    def test_an_npz_capture_scores(self, tmp_path: Path) -> None:
         import numpy as np
 
         from tcip_mcp.tools.annotation_tools import score_predictions
@@ -215,7 +219,7 @@ class TestEvaluateFolderEnumeration:
 
     def test_a_folder_nested_inside_the_images_directory_is_not_scored(
         self, tmp_path: Path
-    ):
+    ) -> None:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
         images_dir = tmp_path / "images" / "2024-01-01"
@@ -238,7 +242,7 @@ class TestEvaluateFolderEnumeration:
 # ── Augmentation tests ──────────────────────────────────────────────────────
 
 
-def _chain(**transforms):
+def _chain(**transforms: object) -> Compose:
     """Validate an ``augmentation`` block of ``transforms`` and return the chain it builds."""
     from tcip_mcp.pipelines.data.augmentations import build_augmentation
     from tcip_mcp.pipelines.schemas import AugmentationSpec
@@ -251,12 +255,11 @@ def _chain(**transforms):
 class TestAugmentations:
     """Tests of the data augmentation pipeline."""
 
-    def test_build_empty_augmentation(self):
+    def test_build_empty_augmentation(self) -> None:
         transforms = _chain()
-        # Should just have ToTensor
-        assert len(transforms.transforms) == 1
+        assert len(transforms.transforms) == 0
 
-    def test_build_full_augmentation(self):
+    def test_build_full_augmentation(self) -> None:
         transforms = _chain(
             horizontal_flip={"p": 0.5},
             vertical_flip={"p": 0.3},
@@ -267,10 +270,9 @@ class TestAugmentations:
             },
             gaussian_blur={"p": 0.1, "radius": 2.0},
         )
-        # 4 augmentations + ToTensor
-        assert len(transforms.transforms) == 5
+        assert len(transforms.transforms) == 4
 
-    def test_augmentation_preserves_detection_target(self):
+    def test_augmentation_preserves_detection_target(self) -> None:
         import torch
 
         transforms = _chain(horizontal_flip={"p": 1.0})  # always flip
@@ -287,7 +289,7 @@ class TestAugmentations:
         assert out_target["boxes"][0, 0].item() == pytest.approx(70.0)
         assert out_target["boxes"][0, 2].item() == pytest.approx(90.0)
 
-    def test_augmentation_classification(self):
+    def test_augmentation_classification(self) -> None:
         import torch
 
         transforms = _chain(
@@ -306,7 +308,9 @@ class TestAugmentations:
 
 
 class TestReadAnnotationsUnknownFormat:
-    def test_unrecognized_store_returns_error_not_raise(self, tmp_path):
+    def test_unrecognized_store_returns_error_not_raise(
+        self, tmp_path: Path
+    ) -> None:
         """``read_annotations`` answers an unreadable record's refusal as an error dict.
 
         The per-image reader refuses a record of a shape it does not read; read_annotations

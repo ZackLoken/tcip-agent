@@ -74,7 +74,7 @@ def _dumped(out: Path) -> dict[tuple, object]:
 
 def test_the_records_a_database_holds_and_the_records_its_dump_writes_agree(
     tmp_path: Path,
-):
+) -> None:
     """The records a database holds and the records its dump writes agree.
 
     Store by store, the dump's files read back to exactly the keys and values each database
@@ -93,7 +93,7 @@ def test_the_records_a_database_holds_and_the_records_its_dump_writes_agree(
 
 def test_every_key_the_store_admits_dumps_to_its_own_file_inside_the_destination(
     tmp_path: Path,
-):
+) -> None:
     """Keys of edge-case shapes each dump to their own file inside the destination.
 
     A key with no parts, parts naming a parent directory, two parts that differ only by case
@@ -140,7 +140,7 @@ def test_every_key_the_store_admits_dumps_to_its_own_file_inside_the_destination
 
 def test_the_dump_refuses_a_directory_inside_the_project_and_admits_one_outside(
     tmp_path: Path,
-):
+) -> None:
     project = _project_with_records(tmp_path)
 
     with pytest.raises(ValueError, match="inside the project"):
@@ -152,7 +152,7 @@ def test_the_dump_refuses_a_directory_inside_the_project_and_admits_one_outside(
 
 def test_the_command_writes_the_dump_and_answers_how_many_files(
     tmp_path: Path,
-):
+) -> None:
     project = _project_with_records(tmp_path)
     out = tmp_path.parent / "dump"
     ts.release_root(project)

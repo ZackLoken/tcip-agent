@@ -72,7 +72,9 @@ ONE_PLANT = {"P1": (43.19670, -90.058000)}
 TWO_PLANTS = {**ONE_PLANT, "P2": (43.19680, -90.057000)}
 
 
-def _mapped(tmp_path: Path, plants=ONE_PLANT) -> tuple[Path, str]:
+def _mapped(
+    tmp_path: Path, plants: dict[str, tuple[float, float]] = ONE_PLANT
+) -> tuple[Path, str]:
     """Build :func:`_scene` with the mapping ``valley`` over it; return ``(dataset root, date)``."""
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
     from tests._mapping_fixtures import register_plant_registry_for
@@ -135,7 +137,7 @@ def _deliver(
     plants: list[str],
     dataset_root: Path,
     buckets: list[str],
-    **kwargs,
+    **kwargs: str | None,
 ) -> dict:
     from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
 
@@ -154,8 +156,8 @@ def _deliver(
 
 
 def test_a_verified_mapping_over_an_unassessed_bucket_reaches_the_gate_and_refuses_there(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A verified mapping over an unassessed bucket reaches the gate and refuses there.
 
     Over a mapping built on a registered registry, a published bucket and per-image records, the
@@ -181,7 +183,7 @@ def test_a_verified_mapping_over_an_unassessed_bucket_reaches_the_gate_and_refus
     assert not (tmp_path / "o.csv").exists()
 
 
-def test_an_unknown_plant_mapping_refuses_by_name(tmp_path):
+def test_an_unknown_plant_mapping_refuses_by_name(tmp_path: Path) -> None:
     """A ``plant_mapping`` with no stored record is refused by name, and no CSV is written.
 
     The refusal names the mapping and ``build_plant_mapping``.
@@ -203,7 +205,9 @@ def test_an_unknown_plant_mapping_refuses_by_name(tmp_path):
     assert not (tmp_path / "o.csv").exists()
 
 
-def test_a_delivered_date_the_mapping_does_not_cover_refuses(tmp_path):
+def test_a_delivered_date_the_mapping_does_not_cover_refuses(
+    tmp_path: Path,
+) -> None:
     from tests._image_fixtures import write_geo_image
 
     dataset_root, date = _mapped(tmp_path)
@@ -230,7 +234,9 @@ def test_a_delivered_date_the_mapping_does_not_cover_refuses(tmp_path):
     assert not (tmp_path / "o.csv").exists()
 
 
-def test_predictions_under_another_dataset_than_the_mappings_refuse(tmp_path):
+def test_predictions_under_another_dataset_than_the_mappings_refuse(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
     from tests._image_fixtures import write_geo_image
@@ -260,8 +266,8 @@ def test_predictions_under_another_dataset_than_the_mappings_refuse(tmp_path):
 
 
 def test_a_mapping_with_no_capture_at_all_for_a_delivered_date_refuses(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A mapping with no capture for a delivered date refuses on the record's own evidence.
 
     The mapping is recorded with no capture at all for that date.
@@ -303,8 +309,8 @@ def test_a_mapping_with_no_capture_at_all_for_a_delivered_date_refuses(
 
 
 def test_a_delivered_plant_the_mapping_never_assigned_refuses_by_name(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A delivered plant the mapping never assigned on a delivered date is refused by name.
 
     The refusal names the unassigned plant and not the assigned one, and no output CSV is
@@ -326,7 +332,9 @@ def test_a_delivered_plant_the_mapping_never_assigned_refuses_by_name(
     assert not (tmp_path / "o.csv").exists()
 
 
-def test_a_capture_added_since_the_mapping_was_built_refuses(tmp_path):
+def test_a_capture_added_since_the_mapping_was_built_refuses(
+    tmp_path: Path,
+) -> None:
     """A capture added since the mapping was built refuses the delivery.
 
     The refusal says the mapping does not cover what is on disk now, and no CSV is written.

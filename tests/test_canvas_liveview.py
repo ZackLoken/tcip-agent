@@ -2,9 +2,9 @@
 
 Covers the two-file scheme (meta heartbeats never touch the geometry blob; geometry is valid
 only when its (image_path, tab) identity matches the meta), the display-resolved shape renderer
-(crop-to-viewport math, two-pass draw, malformed-shape tolerance), the push route answering a push
-built for any project but the backend's open one as a mismatch, and the MCP tool end (no state
-pushed, identity-stale shapes, ages, tag/creator counts).
+(crop-to-viewport math, two-pass draw), the push route answering a push built for any project
+but the backend's open one as a mismatch, and the MCP tool end (no state pushed, identity-stale
+shapes, ages, tag counts).
 """
 
 from __future__ import annotations
@@ -16,18 +16,38 @@ from typing import TYPE_CHECKING
 
 import pytest
 from PIL import Image
+from pydantic import TypeAdapter, ValidationError
 
 pytest.importorskip("fastapi")
 
 import tcip_store  # noqa: E402
-from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key  # noqa: E402
+from tcip_annotation.viz import CanvasShape  # noqa: E402
+from tcip_mcp.web_client import (  # noqa: E402
+    canvas_geometry_key,
+    canvas_meta_key,
+    read_canvas_geometry,
+    read_canvas_meta,
+)
 from tests import REFUSED_NAMES  # noqa: E402
 
+_SHAPES = TypeAdapter(list[CanvasShape])
+"""The pushed shapes as the canvas records validate them."""
+
 if TYPE_CHECKING:
+    import numpy as np
+    from fastapi.testclient import TestClient
+
+    from tcip_mcp.web_client import CanvasGeometry, CanvasMeta
+    from tcip_mcp.workspace import BoundProject
     from tcip_web.state import OpenProject
 
 
-def _payload(project_id: str, image_path: str, shapes=None, **over) -> dict:
+def _payload(
+    project_id: str,
+    image_path: str,
+    shapes: list[dict] | None = None,
+    **over: bool | dict,
+) -> dict:
     body = {
         "project_id": project_id,
         "tab": "annotate",
@@ -37,6 +57,9 @@ def _payload(project_id: str, image_path: str, shapes=None, **over) -> dict:
         "img_height": 100,
         "viewport": {"x": 0, "y": 0, "w": 200, "h": 100, "scale": 1.0},
         "mode": "polygon",
+        "active_subject": None,
+        "cut_armed": False,
+        "dirty": False,
         "user": "breeder",
         "classes": [{"id": 0, "name": "bud", "color": "#FF0000"}],
         "counts": {"boxes": 0, "polygons": 1, "drawing_points": 0},
@@ -46,12 +69,12 @@ def _payload(project_id: str, image_path: str, shapes=None, **over) -> dict:
     return body
 
 
-def _meta(root: Path) -> dict | None:
-    return tcip_store.read(canvas_meta_key(str(root)), default=None)
+def _meta(root: Path) -> CanvasMeta | None:
+    return read_canvas_meta(str(root))
 
 
-def _shapes_doc(root: Path) -> dict | None:
-    return tcip_store.read(canvas_geometry_key(str(root)), default=None)
+def _shapes_doc(root: Path) -> CanvasGeometry | None:
+    return read_canvas_geometry(str(root))
 
 
 _OUTSIDE = Path(tempfile.gettempdir()).resolve() / "tcip-canvas-liveview"
@@ -67,14 +90,12 @@ SHAPES = [
         "color": "#00FF00",
         "fill": True,
         "tag": "gt",
-        "created_by": "user:breeder",
     },
     {
         "kind": "box",
         "xyxy": [80, 20, 140, 70],
         "color": "#FF0000",
         "tag": "gt",
-        "created_by": "derived:user:breeder",
     },
     {
         "kind": "polyline",
@@ -97,23 +118,25 @@ def _other_project(tmp_path: Path) -> OpenProject:
 # ── route: a push lands only under the project it was built for, while that one is open ─────
 
 
-def test_full_push_writes_geometry_and_meta(client, opened, opened_project):
+def test_full_push_writes_geometry_and_meta(
+    client: TestClient, opened: OpenProject, opened_project: Path
+) -> None:
     image = str(opened_project / "images" / "a.jpg")
     r = client.post(
         "/api/canvas/state", json=_payload(opened.id, image, shapes=SHAPES)
     )
     assert r.status_code == 200 and r.json()["shapes_written"] is True
-    assert len(_shapes_doc(opened_project)["shapes"]) == 3
-    assert _shapes_doc(opened_project)["image_path"] == "images/a.jpg"
-    assert _meta(opened_project)["image_path"] == "images/a.jpg"
+    assert len(_shapes_doc(opened_project).shapes) == 3
+    assert _shapes_doc(opened_project).image_path == "images/a.jpg"
+    assert _meta(opened_project).image_path == "images/a.jpg"
 
 
 def test_a_push_naming_another_project_is_answered_as_a_mismatch_and_writes_nothing(
-    client,
-    opened,
-    opened_project,
-    tmp_path,
-):
+    client: TestClient,
+    opened: OpenProject,
+    opened_project: Path,
+    tmp_path: Path,
+) -> None:
     """A push built for another project answers 409 naming the open one.
 
     The canvas meta record stays absent under both projects.
@@ -131,8 +154,11 @@ def test_a_push_naming_another_project_is_answered_as_a_mismatch_and_writes_noth
 
 
 def test_a_push_naming_the_open_project_is_admitted(
-    client, opened, opened_project, tmp_path
-):
+    client: TestClient,
+    opened: OpenProject,
+    opened_project: Path,
+    tmp_path: Path,
+) -> None:
     """A push built for the project the backend has open lands."""
     _other_project(tmp_path)
 
@@ -141,12 +167,12 @@ def test_a_push_naming_the_open_project_is_admitted(
     )
 
     assert r.status_code == 200, r.text
-    assert _meta(opened_project)["image_path"] == A_STORED
+    assert _meta(opened_project).image_path == A_STORED
 
 
 def test_a_push_while_no_project_is_open_is_answered_as_a_mismatch(
-    client, made
-):
+    client: TestClient, made: OpenProject
+) -> None:
     r = client.post(
         "/api/canvas/state", json=_payload(made.id, A_IMG, shapes=SHAPES)
     )
@@ -157,8 +183,8 @@ def test_a_push_while_no_project_is_open_is_answered_as_a_mismatch(
 
 
 def test_a_push_naming_no_one_is_refused_before_anything_is_written(
-    client, opened, opened_project
-):
+    client: TestClient, opened: OpenProject, opened_project: Path
+) -> None:
     """A push whose name names no one is refused, and no canvas document is written.
 
     A push must name its person; neither the geometry nor the meta document is written for one
@@ -176,10 +202,10 @@ def test_a_push_naming_no_one_is_refused_before_anything_is_written(
 
 
 def test_a_push_stating_no_person_is_refused_before_anything_is_written(
-    client,
-    opened,
-    opened_project,
-):
+    client: TestClient,
+    opened: OpenProject,
+    opened_project: Path,
+) -> None:
     body = _payload(opened.id, A_IMG, shapes=SHAPES)
     del body["user"]
 
@@ -192,19 +218,19 @@ def test_a_push_stating_no_person_is_refused_before_anything_is_written(
 
 
 def test_a_push_naming_a_person_is_stored_under_that_person(
-    client, opened, opened_project
-):
+    client: TestClient, opened: OpenProject, opened_project: Path
+) -> None:
     r = client.post(
         "/api/canvas/state", json=_payload(opened.id, A_IMG, shapes=SHAPES)
     )
 
     assert r.status_code == 200
-    assert _meta(opened_project)["user"] == "user:breeder"
+    assert _meta(opened_project).user == "user:breeder"
 
 
 def test_a_push_naming_a_project_root_refuses_as_an_unknown_field(
-    client, opened, opened_project
-):
+    client: TestClient, opened: OpenProject, opened_project: Path
+) -> None:
     """A push body that names a project root is refused as an unknown field, answering 422."""
     body = _payload(opened.id, A_IMG, shapes=SHAPES)
     r = client.post(
@@ -213,19 +239,21 @@ def test_a_push_naming_a_project_root_refuses_as_an_unknown_field(
     assert r.status_code == 422
 
 
-def test_cut_armed_flag_rides_the_meta_push(client, opened, opened_project):
+def test_cut_armed_flag_rides_the_meta_push(
+    client: TestClient, opened: OpenProject, opened_project: Path
+) -> None:
     """The cut-armed flag a push carries lands in the meta document."""
     r = client.post(
         "/api/canvas/state",
         json=_payload(opened.id, A_IMG, shapes=SHAPES, cut_armed=True),
     )
     assert r.status_code == 200
-    assert _meta(opened_project)["cut_armed"] is True
+    assert _meta(opened_project).cut_armed is True
 
 
 def test_heartbeat_updates_meta_without_touching_geometry(
-    client, opened, opened_project
-):
+    client: TestClient, opened: OpenProject, opened_project: Path
+) -> None:
     client.post(
         "/api/canvas/state", json=_payload(opened.id, A_IMG, shapes=SHAPES)
     )
@@ -240,7 +268,9 @@ def test_heartbeat_updates_meta_without_touching_geometry(
     )
     r = client.post("/api/canvas/state", json=hb)
     assert r.json()["shapes_written"] is False
-    assert _meta(opened_project)["viewport"]["x"] == 40  # meta moved
+    meta = _meta(opened_project)
+    assert meta is not None and meta.viewport is not None
+    assert meta.viewport.x == 40  # meta moved
     after = tcip_store.read_versioned(
         canvas_geometry_key(str(opened_project))
     ).version
@@ -248,8 +278,8 @@ def test_heartbeat_updates_meta_without_touching_geometry(
 
 
 def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(
-    opened, opened_project
-):
+    opened: OpenProject, opened_project: Path
+) -> None:
     """A push takes the meta record's lock, so it cannot overwrite what a holder is editing.
 
     The push runs on its own thread while another thread holds the key, and is observed still
@@ -258,7 +288,6 @@ def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(
     """
     import threading
 
-    import tcip_store as ts
     from tcip_web.routes.canvas import CanvasStatePayload, push_canvas_state
     from tests._audit_fixtures import held_by_another_writer
 
@@ -274,12 +303,12 @@ def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(
         "the push wrote while another writer held the record's lock"
     )
     assert not pushing.is_alive()
-    assert ts.read(key)["image_path"] == A_STORED
+    assert _meta(opened_project).image_path == A_STORED
 
 
 def test_heartbeat_for_new_image_invalidates_geometry_by_identity(
-    client, opened, opened_project
-):
+    client: TestClient, opened: OpenProject, opened_project: Path
+) -> None:
     client.post(
         "/api/canvas/state", json=_payload(opened.id, A_IMG, shapes=SHAPES)
     )
@@ -288,8 +317,8 @@ def test_heartbeat_for_new_image_invalidates_geometry_by_identity(
     )
     # The geometry file still holds a.jpg's shapes, but its identity no longer matches the meta:
     # the reader must treat it as stale (a.jpg's polygons never render under b.jpg).
-    assert _shapes_doc(opened_project)["image_path"] == A_STORED
-    assert _meta(opened_project)["image_path"] == B_STORED
+    assert _shapes_doc(opened_project).image_path == A_STORED
+    assert _meta(opened_project).image_path == B_STORED
 
 
 # ── renderer: region placement + two-pass draw + tolerance ────────────
@@ -304,7 +333,11 @@ def _make_image(tmp_path: Path) -> str:
     return str(write_image(tmp_path / "img.jpg", (200, 100), (90, 110, 90)))
 
 
-def _pixels(image_path: str, region=None, scale: float = 1.0):
+def _pixels(
+    image_path: str,
+    region: tuple[int, int, int, int] | None = None,
+    scale: float = 1.0,
+) -> np.ndarray:
     """Return the image's RGB pixels, cropped to ``region`` when given and resized by ``scale``."""
     import numpy as np
 
@@ -329,7 +362,9 @@ def _red_over_green(rendered: Image.Image, xy: tuple[int, int]) -> int:
     return red - green
 
 
-def test_render_places_a_shape_at_its_offset_inside_a_cropped_region(tmp_path):
+def test_render_places_a_shape_at_its_offset_inside_a_cropped_region(
+    tmp_path: Path,
+) -> None:
     """A shape's native coordinate lands where the crop origin puts it inside a cropped region.
 
     It does not land where it sat in the full frame.
@@ -337,7 +372,16 @@ def test_render_places_a_shape_at_its_offset_inside_a_cropped_region(tmp_path):
     from tcip_annotation.viz import render_canvas_state
 
     img = _make_image(tmp_path)
-    shapes = [{"kind": "point", "points": [[100, 50]], "color": "#FF0000"}]
+    shapes = _SHAPES.validate_python(
+        [
+            {
+                "kind": "point",
+                "points": [[100, 50]],
+                "color": "#FF0000",
+                "tag": "gt",
+            }
+        ]
+    )
     out = render_canvas_state(
         _pixels(img, region=(50, 0, 150, 100)),
         shapes,
@@ -352,11 +396,22 @@ def test_render_places_a_shape_at_its_offset_inside_a_cropped_region(tmp_path):
     )  # nothing where the unshifted one would hit
 
 
-def test_render_scales_a_shape_with_the_pixels_it_is_drawn_on(tmp_path):
+def test_render_scales_a_shape_with_the_pixels_it_is_drawn_on(
+    tmp_path: Path,
+) -> None:
     from tcip_annotation.viz import render_canvas_state
 
     img = _make_image(tmp_path)
-    shapes = [{"kind": "point", "points": [[100, 50]], "color": "#FF0000"}]
+    shapes = _SHAPES.validate_python(
+        [
+            {
+                "kind": "point",
+                "points": [[100, 50]],
+                "color": "#FF0000",
+                "tag": "gt",
+            }
+        ]
+    )
     out = render_canvas_state(
         _pixels(img, scale=0.5),
         shapes,
@@ -371,24 +426,28 @@ def test_render_scales_a_shape_with_the_pixels_it_is_drawn_on(tmp_path):
     assert _red_over_green(px, (90, 25)) < 10
 
 
-def test_render_two_pass_fill_does_not_erase_outlines(tmp_path):
+def test_render_two_pass_fill_does_not_erase_outlines(tmp_path: Path) -> None:
     from tcip_annotation.viz import render_canvas_state
 
     img = _make_image(tmp_path)
-    shapes = [
-        {
-            "kind": "box",
-            "xyxy": [20, 20, 80, 80],
-            "color": "#00FF00",
-        },  # green outline
-        # later red fill over it
-        {
-            "kind": "box",
-            "xyxy": [10, 10, 90, 90],
-            "color": "#FF0000",
-            "fill": True,
-        },
-    ]
+    shapes = _SHAPES.validate_python(
+        [
+            {
+                "kind": "box",
+                "xyxy": [20, 20, 80, 80],
+                "color": "#00FF00",
+                "tag": "gt",
+            },  # green outline
+            # later red fill over it
+            {
+                "kind": "box",
+                "xyxy": [10, 10, 90, 90],
+                "color": "#FF0000",
+                "fill": True,
+                "tag": "gt",
+            },
+        ]
+    )
     out = render_canvas_state(
         _pixels(img),
         shapes,
@@ -403,7 +462,9 @@ def test_render_two_pass_fill_does_not_erase_outlines(tmp_path):
     )  # outline survives the later overlapping fill (green-dominant)
 
 
-def test_render_draws_a_point_shape_and_never_widens_it_to_a_box(tmp_path):
+def test_render_draws_a_point_shape_and_never_widens_it_to_a_box(
+    tmp_path: Path,
+) -> None:
     """A pushed point reaches the agent's view as a mark with a tick, and no box around it.
 
     The core sits on the coordinate and a radial tick lies above it; nothing is drawn 40 px
@@ -412,14 +473,17 @@ def test_render_draws_a_point_shape_and_never_widens_it_to_a_box(tmp_path):
     from tcip_annotation.viz import render_canvas_state
 
     img = _make_image(tmp_path)
-    shapes = [
-        {
-            "kind": "point",
-            "points": [[100, 50]],
-            "color": "#FF0000",
-            "label": "tip",
-        }
-    ]
+    shapes = _SHAPES.validate_python(
+        [
+            {
+                "kind": "point",
+                "points": [[100, 50]],
+                "color": "#FF0000",
+                "label": "tip",
+                "tag": "gt",
+            }
+        ]
+    )
     out = render_canvas_state(
         _pixels(img),
         shapes,
@@ -439,8 +503,8 @@ def test_render_draws_a_point_shape_and_never_widens_it_to_a_box(tmp_path):
 
 
 def test_render_draws_the_focused_shape_with_a_halo_under_its_own_stroke(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A focused shape renders with a halo beneath its stroke, which keeps the shape's own color.
 
     A focused shape reaches the agent's view with a wider white stroke beneath its own color, and
@@ -452,14 +516,17 @@ def test_render_draws_the_focused_shape_with_a_halo_under_its_own_stroke(
 
     def rendered(focused: bool) -> Image.Image:
         halo = {"color": "#FFFFFF", "opacity": 0.55, "width_factor": 3}
-        shapes = [
-            {
-                "kind": "box",
-                "xyxy": [40, 20, 160, 80],
-                "color": "#FF0000",
-                **({"halo": halo} if focused else {}),
-            }
-        ]
+        shapes = _SHAPES.validate_python(
+            [
+                {
+                    "kind": "box",
+                    "xyxy": [40, 20, 160, 80],
+                    "color": "#FF0000",
+                    "tag": "gt",
+                    **({"halo": halo} if focused else {}),
+                }
+            ]
+        )
         out = render_canvas_state(
             _pixels(img),
             shapes,
@@ -497,7 +564,7 @@ def _wide_render(tmp_path: Path, shape: dict, *, dashed: bool) -> Image.Image:
     shape = {k: v for k, v in shape.items() if dashed or k != "dash"}
     out = render_canvas_state(
         _pixels(img),
-        [shape],
+        _SHAPES.validate_python([shape]),
         region=(0, 0, 1400, 200),
         output_path=str(tmp_path / f"wide-{dashed}.png"),
     )
@@ -512,14 +579,14 @@ def _ink(rendered: Image.Image, xy: tuple[int, int]) -> int:
     )
 
 
-def _red_in_rows(rendered: Image.Image, x: int, rows) -> int:
+def _red_in_rows(rendered: Image.Image, x: int, rows: range) -> int:
     """Return the largest :func:`_ink` over the pixels of column ``x`` in ``rows``."""
     return max(_ink(rendered, (x, y)) for y in rows)
 
 
 def test_render_lays_a_dash_down_in_stroke_widths_at_the_renders_own_stroke(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A dash pattern is laid down in stroke widths at the render's own stroke.
 
     The two-pixel stroke of a 1400-pixel frame makes [1, 3] two pixels on, six off: the gap
@@ -536,7 +603,9 @@ def test_render_lays_a_dash_down_in_stroke_widths_at_the_renders_own_stroke(
     )  # the gap's pixel on a solid outline
 
 
-def test_render_dashes_a_points_ticks_as_it_does_any_outline(tmp_path):
+def test_render_dashes_a_points_ticks_as_it_does_any_outline(
+    tmp_path: Path,
+) -> None:
     """A tool's point renders dotted.
 
     The tick above the core has its one dash near the core and a gap beyond, which the solid
@@ -550,14 +619,14 @@ def test_render_dashes_a_points_ticks_as_it_does_any_outline(tmp_path):
 
 
 def test_render_admits_the_one_vertex_polyline_a_drawing_in_progress_pushes(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_annotation.viz import render_canvas_state
 
     img = _make_image(tmp_path)
     out = render_canvas_state(
         _pixels(img),
-        [FIRST_VERTEX],
+        _SHAPES.validate_python([FIRST_VERTEX]),
         region=_WHOLE,
         output_path=str(tmp_path / "one-vertex.png"),
     )
@@ -572,11 +641,11 @@ def test_render_admits_the_one_vertex_polyline_a_drawing_in_progress_pushes(
 
 
 def test_render_dots_a_polylines_vertices_unless_it_says_it_is_a_tail(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A draft's laid stroke inks beside its second vertex; with ``vertices=False`` it does not."""
 
-    def stroke(**over) -> dict:
+    def stroke(**over: bool) -> dict:
         return {
             "kind": "polyline",
             "points": [[300, 100], [500, 100]],
@@ -626,68 +695,73 @@ def test_render_dots_a_polylines_vertices_unless_it_says_it_is_a_tail(
         "infinite_off",
     ],
 )
-def test_render_refuses_a_dash_that_is_not_a_pattern_naming_the_shape(
-    tmp_path, dash
-):
-    from tcip_annotation.viz import render_canvas_state
-
-    img = _make_image(tmp_path)
+def test_a_shape_whose_dash_is_not_a_pattern_is_refused_naming_it(
+    dash: list[int] | list[float] | list[str] | list[bool] | str | int,
+) -> None:
     shape = {
         "kind": "box",
         "xyxy": [10, 10, 40, 40],
         "color": "#FF0000",
+        "tag": "gt",
         "dash": dash,
     }
-    with pytest.raises(ValueError, match="canvas shape 0 carries a dash"):
-        render_canvas_state(
-            _pixels(img),
-            [shape],
-            region=_WHOLE,
-            output_path=str(tmp_path / "bad-dash.jpg"),
-        )
+    with pytest.raises(ValidationError) as refused:
+        _SHAPES.validate_python([shape])
+
+    assert {e["loc"][:3] for e in refused.value.errors()} == {
+        (0, "box", "dash")
+    }
 
 
 @pytest.mark.parametrize(
-    "bad",
+    ("bad", "field"),
     [
-        {"kind": "box", "color": "#FF0000"},
-        {"kind": "polygon", "points": [[1, 1]], "color": "#FF0000"},
-        "junk",
-        {"kind": "box", "xyxy": [10, 10, 40, 40], "color": "not-a-color"},
-        {"kind": "box", "xyxy": [10, 10, 40, 40]},
+        ({"kind": "box", "color": "#FF0000", "tag": "gt"}, "xyxy"),
+        (
+            {
+                "kind": "polygon",
+                "points": [[1, 1]],
+                "color": "#FF0000",
+                "tag": "gt",
+            },
+            "points",
+        ),
+        (
+            {
+                "kind": "box",
+                "xyxy": [10, 10, 40, 40],
+                "color": "not-a-color",
+                "tag": "gt",
+            },
+            "color",
+        ),
+        ({"kind": "box", "xyxy": [10, 10, 40, 40], "tag": "gt"}, "color"),
     ],
     ids=[
         "box_without_corners",
         "one_point_polygon",
-        "not_a_shape",
         "unparsable_color",
         "no_color",
     ],
 )
-def test_render_refuses_a_malformed_shape_naming_it(tmp_path, bad):
-    """A malformed canvas shape is refused naming its index.
+def test_a_malformed_shape_is_refused_naming_its_field(
+    bad: dict, field: str
+) -> None:
+    """A malformed canvas shape is refused naming its index and field; a well-formed one reads."""
+    good = {
+        "kind": "box",
+        "xyxy": [10, 10, 40, 40],
+        "color": "#0f0",
+        "tag": "gt",
+    }
+    assert len(_SHAPES.validate_python([good])) == 1
 
-    The well-formed shape renders on its own.
-    """
-    from tcip_annotation.viz import render_canvas_state
+    with pytest.raises(ValidationError) as refused:
+        _SHAPES.validate_python([good, bad])
 
-    img = _make_image(tmp_path)
-    good = {"kind": "box", "xyxy": [10, 10, 40, 40], "color": "#0f0"}
-    assert Path(
-        render_canvas_state(
-            _pixels(img),
-            [good],
-            region=_WHOLE,
-            output_path=str(tmp_path / "good.jpg"),
-        )
-    ).is_file()
-    with pytest.raises(ValueError, match="canvas shape 1 "):
-        render_canvas_state(
-            _pixels(img),
-            [good, bad],
-            region=_WHOLE,
-            output_path=str(tmp_path / "bad.jpg"),
-        )
+    assert {(e["loc"][0], e["loc"][2]) for e in refused.value.errors()} == {
+        (1, field)
+    }
 
 
 # ── MCP tool ────────────────────────────────────────────────────────────────
@@ -696,12 +770,12 @@ def test_render_refuses_a_malformed_shape_naming_it(tmp_path, bad):
 def _write_state(
     project: Path,
     img: str,
-    shapes=SHAPES,
+    shapes: list[dict] | None = SHAPES,
     *,
     shapes_image: str | None = None,
     tab: str = "annotate",
     shapes_tab: str | None = None,
-    cut_armed: bool | None = None,
+    cut_armed: bool = False,
 ) -> None:
     """Write the canvas geometry document, unless ``shapes`` is ``None``, and the meta document.
 
@@ -710,41 +784,45 @@ def _write_state(
     """
     from tcip_mcp.audit import now_iso
     from tcip_mcp.registry_paths import stored_path
+    from tcip_mcp.web_client import CanvasGeometry, CanvasMeta, Viewport
 
     root = str(project)
     stored = stored_path(img, project)
     now = now_iso()
     if shapes is not None:
-        tcip_store.replace(
-            canvas_geometry_key(root),
-            {
-                "image_path": stored_path(shapes_image, project)
-                if shapes_image
-                else stored,
-                "tab": shapes_tab or tab,
-                "shapes": shapes,
-                "received_at": now,
-            },
+        geometry = CanvasGeometry(
+            image_path=stored_path(shapes_image, project)
+            if shapes_image
+            else stored,
+            tab=shapes_tab or tab,
+            shapes=_SHAPES.validate_python(shapes),
+            received_at=now,
         )
-    tcip_store.replace(
-        canvas_meta_key(root),
-        {
-            "received_at": now,
-            "tab": tab,
-            "image": Path(img).name,
-            "image_path": stored,
-            "viewport": {"x": 0, "y": 0, "w": 200, "h": 100},
-            "user": "breeder",
-            "mode": "polygon",
-            "cut_armed": cut_armed,
-            "classes": [{"id": 0, "name": "bud", "color": "#FF0000"}],
-        },
+        tcip_store.replace(
+            canvas_geometry_key(root), geometry.model_dump(mode="json")
+        )
+    meta = CanvasMeta(
+        received_at=now,
+        tab=tab,
+        image=Path(img).name,
+        image_path=stored,
+        img_width=200,
+        img_height=100,
+        viewport=Viewport(x=0, y=0, w=200, h=100, scale=1.0),
+        user="breeder",
+        mode="polygon",
+        active_subject=None,
+        cut_armed=cut_armed,
+        dirty=False,
+        classes=[{"id": 0, "name": "bud", "color": "#FF0000"}],
+        counts={},
     )
+    tcip_store.replace(canvas_meta_key(root), meta.model_dump(mode="json"))
 
 
 def test_capture_live_canvas_with_no_state_pushed_names_what_pushes_one(
-    project, bound
-):
+    project: Path, bound: BoundProject
+) -> None:
     from tcip_mcp.tools.vision_tools import capture_live_canvas
 
     res = capture_live_canvas(bound, refresh=False)
@@ -752,7 +830,9 @@ def test_capture_live_canvas_with_no_state_pushed_names_what_pushes_one(
     assert "no canvas state has been pushed" in res["error"].lower()
 
 
-def test_capture_live_canvas_renders_pushed_state(project, bound):
+def test_capture_live_canvas_renders_pushed_state(
+    project: Path, bound: BoundProject
+) -> None:
     img = _make_image(project)
     _write_state(project, img)
 
@@ -764,15 +844,13 @@ def test_capture_live_canvas_renders_pushed_state(project, bound):
     assert res["source_image"] == img
     assert res["classes"][0]["name"] == "bud"
     assert res["shape_counts_by_tag"] == {"gt": 2, "in_progress": 1}
-    assert res["shape_counts_by_creator"] == {
-        "user:breeder": 1,
-        "derived:user:breeder": 1,
-    }
     assert res["state_age_seconds"] >= 0
     assert res["shapes_missing"] is False
 
 
-def test_capture_live_canvas_names_the_armed_cut(project, bound):
+def test_capture_live_canvas_names_the_armed_cut(
+    project: Path, bound: BoundProject
+) -> None:
     """The live canvas capture reports the armed cut its meta document records."""
     img = _make_image(project)
     _write_state(project, img, cut_armed=True)
@@ -784,17 +862,24 @@ def test_capture_live_canvas_names_the_armed_cut(project, bound):
 
 
 def test_capture_live_canvas_renders_exactly_the_viewport_region(
-    project, bound
-):
+    project: Path, bound: BoundProject
+) -> None:
     """The live canvas capture reports itself cropped to the viewport, at the viewport's size.
 
     The artifact of a 100 px viewport is 100 by 100.
     """
     img = _make_image(project)
     _write_state(project, img)
-    live = tcip_store.read(canvas_meta_key(str(project)))
-    live["viewport"] = {"x": 50, "y": 0, "w": 100, "h": 100}
-    tcip_store.replace(canvas_meta_key(str(project)), live)
+    from tcip_mcp.web_client import Viewport
+
+    live = read_canvas_meta(str(project))
+    assert live is not None
+    moved = live.model_copy(
+        update={"viewport": Viewport(x=50, y=0, w=100, h=100, scale=1.0)}
+    )
+    tcip_store.replace(
+        canvas_meta_key(str(project)), moved.model_dump(mode="json")
+    )
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
 
@@ -803,7 +888,9 @@ def test_capture_live_canvas_renders_exactly_the_viewport_region(
     assert Image.open(res["image_path"]).size == (100, 100)
 
 
-def test_capture_live_canvas_full_frame_downscales_to_max_edge(project, bound):
+def test_capture_live_canvas_full_frame_downscales_to_max_edge(
+    project: Path, bound: BoundProject
+) -> None:
     img = _make_image(project)
     _write_state(project, img)
 
@@ -817,8 +904,8 @@ def test_capture_live_canvas_full_frame_downscales_to_max_edge(project, bound):
 
 
 def test_capture_live_canvas_reads_a_multiband_raster_without_writing_a_preview(
-    project, bound
-):
+    project: Path, bound: BoundProject
+) -> None:
     """A six-band raster captures as an RGB artifact, with no band-preview directory written."""
     import numpy as np
     import tifffile
@@ -843,8 +930,8 @@ def test_capture_live_canvas_reads_a_multiband_raster_without_writing_a_preview(
 
 
 def test_capture_live_canvas_identity_stale_shapes_do_not_render(
-    project, bound
-):
+    project: Path, bound: BoundProject
+) -> None:
     """Geometry left over from a previous image is reported missing under the current one.
 
     The capture renders the image, with no shape counted.

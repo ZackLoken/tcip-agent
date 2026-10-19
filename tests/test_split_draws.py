@@ -7,6 +7,8 @@ point and picks the best by mean over each point's draws.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from tests._chain_fixtures import (
@@ -27,6 +29,14 @@ from tests._training_values import (
 )
 from tests._verified_checkpoint_fixtures import opened_sweep
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from tcip_mcp.experiments import RunRow
+    from tcip_mcp.pipelines.data.selection import Selection
+    from tcip_mcp.workspace import BoundProject
+
 THREE_CHOICE_SPACE = {
     **sweep_space(),
     "batch_size": {"type": "categorical", "choices": [2, 4, 8]},
@@ -34,23 +44,23 @@ THREE_CHOICE_SPACE = {
 """A sample space whose one discrete axis holds three choices, so a grid count triples."""
 
 
-def _never_search(ran: list):
+def _never_search(ran: list) -> Callable[..., None]:
     """Return a ``tune_search`` stand-in that records into ``ran`` that it ran."""
 
-    def fake_search(**kw):
+    def fake_search(**kw: object) -> None:
         ran.append(1)
 
     return fake_search
 
 
-def _search(monkeypatch) -> dict:
+def _search(monkeypatch: pytest.MonkeyPatch) -> dict:
     """Replace ``tune_search`` with a search that records its keywords and runs no trial.
 
     The keywords it ran with are recorded into the returned dict.
     """
     captured: dict = {}
 
-    def fake_search(**kw):
+    def fake_search(**kw: object) -> None:
         captured.update(kw)
 
     monkeypatch.setattr(
@@ -60,8 +70,8 @@ def _search(monkeypatch) -> dict:
 
 
 def test_real_hpo_base_config_is_admitted_by_preflight(
-    tmp_path, real_hpo_base_config
-):
+    tmp_path: Path, real_hpo_base_config: dict
+) -> None:
     """The ``real_hpo_base_config`` fixture is admitted by preflight with no issues.
 
     preflight_config, the sweep door's own admissibility check, reports the fixture valid with
@@ -79,8 +89,11 @@ def test_real_hpo_base_config_is_admitted_by_preflight(
 
 @pytest.mark.parametrize("name", ["split_draws", "n_trials", "trial_budget"])
 def test_run_hyperparameter_search_takes_each_count_as_a_whole_number_of_at_least_one(
-    name, bound, real_hpo_base_config, monkeypatch
-):
+    name: str,
+    bound: BoundProject,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The sweep door takes each count only as a whole number of at least one.
 
     The MCP call refuses a count that is not a whole number of at least one by the
@@ -119,10 +132,10 @@ def test_run_hyperparameter_search_takes_each_count_as_a_whole_number_of_at_leas
 
 
 def test_run_hyperparameter_search_refuses_split_draws_above_one_with_no_trial_budget(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A launch above one draw stating no trial_budget is refused, naming the budget.
 
     A launch at two draws that states no trial_budget refuses naming ``trial_budget=2`` and the
@@ -154,9 +167,9 @@ def test_run_hyperparameter_search_refuses_split_draws_above_one_with_no_trial_b
 
 
 def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_would_starve_a_side(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A split-draws sweep over a selection holding one foreground group is refused.
 
     The refusal names the shortfall, the search is not reached, and no sweep directory is
@@ -195,8 +208,10 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
 
 
 def test_run_hyperparameter_search_refuses_split_draws_over_a_zero_validation_share(
-    tmp_path, real_hpo_base_config, monkeypatch
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -221,7 +236,9 @@ def test_run_hyperparameter_search_refuses_split_draws_over_a_zero_validation_sh
     assert not ran
 
 
-def _unheld(project, model_source: dict, data: dict, **keys) -> dict:
+def _unheld(
+    project: Path, model_source: dict, data: dict, **keys: object
+) -> dict:
     """Return ``training_config`` of ``project`` and ``model_source`` over a merged data section.
 
     The data section is ``data`` with its ``split`` given ``val_ratio`` 0.0, then ``keys``
@@ -235,10 +252,10 @@ def _unheld(project, model_source: dict, data: dict, **keys) -> dict:
 
 
 def test_run_hyperparameter_search_refuses_split_draws_with_a_non_native_search_alg(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -262,10 +279,10 @@ def test_run_hyperparameter_search_refuses_split_draws_with_a_non_native_search_
 
 
 def test_run_hyperparameter_search_refuses_split_draws_with_a_pruning_scheduler(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -289,10 +306,10 @@ def test_run_hyperparameter_search_refuses_split_draws_with_a_pruning_scheduler(
 
 
 def test_run_hyperparameter_search_refuses_split_draw_seeds_of_the_wrong_length(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -316,10 +333,10 @@ def test_run_hyperparameter_search_refuses_split_draw_seeds_of_the_wrong_length(
 
 
 def test_run_hyperparameter_search_refuses_split_draws_when_param_space_already_sweeps_the_seed(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -344,10 +361,10 @@ def test_run_hyperparameter_search_refuses_split_draws_when_param_space_already_
 
 
 def test_run_hyperparameter_search_refuses_split_draws_when_the_baseline_names_the_seed(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -371,10 +388,10 @@ def test_run_hyperparameter_search_refuses_split_draws_when_the_baseline_names_t
 
 
 def test_run_hyperparameter_search_refuses_split_draws_when_param_space_sweeps_another_data_axis(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -403,8 +420,8 @@ def test_run_hyperparameter_search_refuses_split_draws_when_param_space_sweeps_a
 
 
 def test_tune_search_refuses_split_draws_without_the_axis_in_param_space(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """tune_search called directly refuses split_draws without the seed axis in its space.
 
     tune_search called directly with split_draws=2 and a space holding no data.split.seed axis
@@ -469,11 +486,11 @@ def test_tune_search_refuses_split_draws_without_the_axis_in_param_space(
     ],
 )
 def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_one_draw(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-    case,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+    case: dict,
+) -> None:
     """A caller-supplied split seed axis at one draw is refused, naming the remedy.
 
     A caller-supplied data.split.seed axis with split_draws at 1 (unset) refuses under the random
@@ -504,7 +521,9 @@ def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_one_draw(
     assert not ran
 
 
-def test_caller_split_seed_refusal_tolerates_an_infinite_split_draws_value():
+def test_caller_split_seed_refusal_tolerates_an_infinite_split_draws_value() -> (
+    None
+):
     """``caller_split_seed_refusal`` reads an infinite split_draws as no draw count.
 
     A seed axis at a split_draws of float("inf"), the value a JSON Infinity literal decodes
@@ -522,10 +541,10 @@ def test_caller_split_seed_refusal_tolerates_an_infinite_split_draws_value():
 
 
 def test_run_hyperparameter_search_refuses_repeated_split_draw_seeds(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A repeated seed in split_draw_seeds is refused by the repeated value's own name.
 
     split_draw_seeds naming the same seed twice is not a spread over distinct partitions; the
@@ -554,10 +573,10 @@ def test_run_hyperparameter_search_refuses_repeated_split_draw_seeds(
 
 
 def test_run_hyperparameter_search_admits_distinct_split_draw_seeds_beside_the_repeated_case(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A sweep at split_draws=2 stating distinct seeds [7, 8] and trial_budget 2 is admitted."""
     import tcip_mcp.tools.training_tools as tt
 
@@ -579,10 +598,10 @@ def test_run_hyperparameter_search_admits_distinct_split_draw_seeds_beside_the_r
 
 
 def test_run_hyperparameter_search_admits_the_paired_path_with_a_param_space_beside_distinct_seeds(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Distinct split_draw_seeds are added as the seed axis beside a param_space.
 
     split_draws=2 with distinct split_draw_seeds admits a param_space naming no data.* axis,
@@ -609,10 +628,10 @@ def test_run_hyperparameter_search_admits_the_paired_path_with_a_param_space_bes
 
 
 def test_run_hyperparameter_search_admits_a_space_naming_no_seed_axis_at_one_draw(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A space naming no seed axis at one draw reaches the search unaltered.
 
     A space naming no data.split.seed axis is admitted at split_draws=1 (unset),
@@ -637,10 +656,10 @@ def test_run_hyperparameter_search_admits_a_space_naming_no_seed_axis_at_one_dra
 
 
 def test_run_hyperparameter_search_reports_the_seed_axis_refusal_over_a_preflight_failure(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A call tripping the seed-axis refusal and preflight answers the seed-axis refusal.
 
     A seed axis over a base config with an unimportable builder answers the seed-axis refusal,
@@ -679,10 +698,10 @@ def test_run_hyperparameter_search_reports_the_seed_axis_refusal_over_a_prefligh
 
 
 def test_the_seed_axis_refusal_answers_before_a_later_points_schema_error(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A sweep with a seed axis and a schema-refused point answers the seed-axis refusal.
 
     A space carrying a caller-supplied seed axis and a batch size of 0 answers the seed-axis
@@ -717,7 +736,7 @@ def test_the_seed_axis_refusal_answers_before_a_later_points_schema_error(
 # -- admits valid work -------------------------------------------------------------
 
 
-def _bound_hpo_config(project, selection_dir) -> dict:
+def _bound_hpo_config(project: Path, selection_dir: Path) -> dict:
     """Return a detection config bound to the selection at ``selection_dir``, redrawn at seed 42."""
     return training_config(
         project,
@@ -727,9 +746,9 @@ def _bound_hpo_config(project, selection_dir) -> dict:
 
 
 def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A split-draws sweep over a base_config bound to a selection is admitted.
 
     The seed axis holds the bound split's seed and the next (42, 43); the caller's split keeps
@@ -791,8 +810,8 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection(
 
 
 def test_a_bound_sweep_reads_and_redraws_its_selection_once_on_opening(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Opening a bound sweep reads its selection once and redraws it once."""
     import tcip_mcp.pipelines.data.selection as selection_mod
     import tcip_mcp.pipelines.data.split_construction as split_mod
@@ -825,11 +844,13 @@ def test_a_bound_sweep_reads_and_redraws_its_selection_once_on_opening(
         split_mod.redrawn_selection,
     )
 
-    def read(*args, **kwargs):
+    def read(*args: str | Path, **kwargs: str | Path) -> Selection:
         calls["read"] += 1
         return real_read(*args, **kwargs)
 
-    def redraw(*args, **kwargs):
+    def redraw(
+        *args: Selection | str | int, **kwargs: Selection | str | int
+    ) -> Selection:
         calls["redraw"] += 1
         return real_redraw(*args, **kwargs)
 
@@ -857,16 +878,17 @@ def test_a_bound_sweep_reads_and_redraws_its_selection_once_on_opening(
 
 
 def test_run_hyperparameter_search_admits_split_draws_and_derives_seeds_from_the_base_config(
-    tmp_path,
-    hpo_base_config_at,
-    monkeypatch,
-):
+    tmp_path: Path,
+    hpo_base_config_at: Callable[[int], dict],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Default draw seeds are the base config's split seed plus the draw index.
 
     The default draw seeds are the base config's own data.split.seed plus the draw index, and
     the space handed to the search carries the paired grid axis.
     """
     import tcip_mcp.tools.training_tools as tt
+    from tcip_mcp.experiments import SweepInput
 
     captured = _search(monkeypatch)
 
@@ -888,17 +910,19 @@ def test_run_hyperparameter_search_admits_split_draws_and_derives_seeds_from_the
         "choices": [42, 43, 44],
     }
 
-    manifest = result["sweep"]["input"]
-    assert manifest["split_draws"] == 3
-    assert manifest["split_draw_seeds"] == [42, 43, 44]
+    manifest = SweepInput.model_validate(result["sweep"]["input"])
+    assert manifest.split_draws == 3
+    assert manifest.split_draw_seeds == [42, 43, 44]
     assert (
-        "data.split.seed" not in manifest["param_space"]
+        "data.split.seed" not in manifest.param_space
     )  # the caller's own axes, unaugmented
 
 
 def test_run_hyperparameter_search_admits_split_draws_with_explicit_seeds(
-    tmp_path, real_hpo_base_config, monkeypatch
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import tcip_mcp.tools.training_tools as tt
 
     captured = _search(monkeypatch)
@@ -921,12 +945,12 @@ def test_run_hyperparameter_search_admits_split_draws_with_explicit_seeds(
 
 @pytest.mark.parametrize("search_alg, budget", [("grid", 6), ("random", 2)])
 def test_run_hyperparameter_search_admits_split_draws_with_a_native_search_alg(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-    search_alg,
-    budget,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+    search_alg: str,
+    budget: int,
+) -> None:
     """A split-draws sweep is admitted under the grid and random search algorithms.
 
     Over the sample space at one trial and two draws, grid at a trial budget of 6 and random at
@@ -953,8 +977,10 @@ def test_run_hyperparameter_search_admits_split_draws_with_a_native_search_alg(
 
 
 def test_run_hyperparameter_search_admits_split_draws_for_instance_seg(
-    tmp_path, real_hpo_base_config, monkeypatch
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A split-draws sweep over an instance_seg config on polygon ground truth is admitted."""
     import tcip_mcp.tools.training_tools as tt
     from tests._chain_fixtures import training_config
@@ -991,10 +1017,10 @@ def test_run_hyperparameter_search_admits_split_draws_for_instance_seg(
 
 
 def test_run_hyperparameter_search_admits_split_draws_with_a_baseline_not_naming_the_seed(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A split-draws sweep admits a baseline that does not name the split seed.
 
     A baseline over the ordinary space is admitted and handed to the search as stated.
@@ -1020,10 +1046,10 @@ def test_run_hyperparameter_search_admits_split_draws_with_a_baseline_not_naming
 
 
 def test_run_hyperparameter_search_admits_a_bare_seed_axis_beside_split_draws(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A bare run-seed axis stays admitted beside split draws.
 
     The bare 'seed' axis (the run seed) is a different key from data.split.seed and stays
@@ -1053,10 +1079,10 @@ def test_run_hyperparameter_search_admits_a_bare_seed_axis_beside_split_draws(
 
 
 def test_run_hyperparameter_search_refuses_a_budget_that_admits_fewer_than_every_draw(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A trial_budget admitting fewer draws than requested is refused, naming the draws it admits.
 
     A stated trial_budget the count exceeds, but not at one draw, refuses
@@ -1089,10 +1115,10 @@ def test_run_hyperparameter_search_refuses_a_budget_that_admits_fewer_than_every
 
 
 def test_run_hyperparameter_search_refuses_a_budget_at_the_quotient_boundary(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A trial_budget at the per-draw count is refused, naming the one draw it admits.
 
     Ray's own count over a three-choice space at n_trials=2, split_draws=3, grid is 18 (6 per
@@ -1126,10 +1152,10 @@ def test_run_hyperparameter_search_refuses_a_budget_at_the_quotient_boundary(
 
 
 def test_run_hyperparameter_search_refuses_a_budget_a_single_draw_already_exceeds(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A trial_budget a single draw already exceeds is refused as exceeding at one draw.
 
     Ray's own count over a three-choice space at n_trials=2, split_draws=2, grid is 12 (6 per
@@ -1165,10 +1191,10 @@ def test_run_hyperparameter_search_refuses_a_budget_a_single_draw_already_exceed
 
 
 def test_run_hyperparameter_search_admits_a_budget_the_count_fits_and_records_it(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A trial_budget the count fits is admitted and recorded verbatim.
 
     n_trials=2, split_draws=3, random over the sample space counts 6, which trial_budget=6
@@ -1196,10 +1222,10 @@ def test_run_hyperparameter_search_admits_a_budget_the_count_fits_and_records_it
 
 
 def test_run_hyperparameter_search_refuses_a_one_draw_launch_a_stated_budget_exceeds(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A one-draw launch a stated trial_budget does not fit is refused.
 
     At one draw a stated trial_budget is checked: n_trials=5 over the sample space (random
@@ -1229,10 +1255,10 @@ def test_run_hyperparameter_search_refuses_a_one_draw_launch_a_stated_budget_exc
 
 
 def test_run_hyperparameter_search_admits_a_one_draw_launch_with_no_stated_budget(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A one-draw launch with no stated budget is admitted and records a null budget."""
     import tcip_mcp.tools.training_tools as tt
 
@@ -1254,10 +1280,10 @@ def test_run_hyperparameter_search_admits_a_one_draw_launch_with_no_stated_budge
 
 
 def test_run_hyperparameter_search_relaunch_with_no_budget_replays_as_recorded(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A relaunch (``relaunched_from`` given) at two draws stating no trial_budget is admitted."""
     import tcip_mcp.tools.training_tools as tt
 
@@ -1280,10 +1306,10 @@ def test_run_hyperparameter_search_relaunch_with_no_budget_replays_as_recorded(
 
 
 def test_run_hyperparameter_search_relaunch_with_a_budget_is_still_checked(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A relaunch that names a trial_budget its count exceeds is refused.
 
     The count (2, one draw's worth times two draws under random) exceeds trial_budget=1.
@@ -1315,12 +1341,12 @@ def test_run_hyperparameter_search_relaunch_with_a_budget_is_still_checked(
 
 @pytest.mark.parametrize("split_draws, trial_budget", [(2, 5), (1, None)])
 def test_run_hyperparameter_search_refuses_a_categorical_with_no_choices_before_minting(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-    split_draws,
-    trial_budget,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+    split_draws: int,
+    trial_budget: int | None,
+) -> None:
     """A categorical axis with no choices is refused, and the search is not reached.
 
     A param_space naming a categorical axis with no choices key is refused as not a search
@@ -1350,11 +1376,11 @@ def test_run_hyperparameter_search_refuses_a_categorical_with_no_choices_before_
 
 @pytest.mark.parametrize("search_alg", ["grid", "random"])
 def test_run_hyperparameter_search_refuses_an_inverted_int_bound_before_minting(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-    search_alg,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+    search_alg: str,
+) -> None:
     """An int axis whose low exceeds its high is refused by name, and the search is not reached.
 
     Grid and random search alike refuse it as not a search space whose low exceeds high.
@@ -1383,7 +1409,9 @@ def test_run_hyperparameter_search_refuses_an_inverted_int_bound_before_minting(
     assert not ran
 
 
-def test_a_sampled_int_axis_over_a_large_range_is_drawn_from_its_bounds():
+def test_a_sampled_int_axis_over_a_large_range_is_drawn_from_its_bounds() -> (
+    None
+):
     """A sampled int axis over a million-wide range draws a value within its bounds."""
     from tcip_mcp.pipelines.training.hpo import _to_tune_space
 
@@ -1395,7 +1423,9 @@ def test_a_sampled_int_axis_over_a_large_range_is_drawn_from_its_bounds():
 
 
 @pytest.mark.parametrize("end", [-(2**63), 2**63 - 1])
-def test_a_sampled_int_axis_reaches_each_end_of_the_int64_values(end):
+def test_a_sampled_int_axis_reaches_each_end_of_the_int64_values(
+    end: int,
+) -> None:
     """A sampled int axis reaches each end of the int64 values and refuses past it.
 
     An axis holding a single end of the int64 values draws that end, and an axis one past it
@@ -1419,10 +1449,10 @@ def test_a_sampled_int_axis_reaches_each_end_of_the_int64_values(end):
 
 
 def test_run_hyperparameter_search_refuses_a_sampled_int_axis_the_sampler_cannot_draw(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """An int axis past the int64 range refuses by name, and the search is not reached."""
     import tcip_mcp.tools.training_tools as tt
 
@@ -1450,12 +1480,12 @@ def test_run_hyperparameter_search_refuses_a_sampled_int_axis_the_sampler_cannot
 
 @pytest.mark.parametrize("split_draws, trial_budget", [(2, 5), (1, None)])
 def test_run_hyperparameter_search_refuses_a_grid_axis_past_its_bound_by_name(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-    split_draws,
-    trial_budget,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+    split_draws: int,
+    trial_budget: int | None,
+) -> None:
     """A grid axis past its enumeration bound is refused by name, and the search is not reached.
 
     A gridded int axis of a million values refuses naming the axis, its bounds and its span,
@@ -1489,10 +1519,10 @@ def test_run_hyperparameter_search_refuses_a_grid_axis_past_its_bound_by_name(
 
 
 def test_run_hyperparameter_search_counts_an_empty_param_space_at_one_draw_as_itself(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """An empty param_space at one draw is counted as itself, no space substituted.
 
     n_trials=2 under grid counts 2, which trial_budget=1 does not admit.
@@ -1521,10 +1551,10 @@ def test_run_hyperparameter_search_counts_an_empty_param_space_at_one_draw_as_it
 
 
 def test_run_hyperparameter_search_an_empty_param_space_above_one_draw_counts_the_seed_axis_alone(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """An empty param_space above one draw counts the seed axis alone.
 
     At n_trials=1, split_draws=2, grid, the count is 2 (one per draw), so trial_budget=1 refuses
@@ -1577,8 +1607,8 @@ def test_run_hyperparameter_search_an_empty_param_space_above_one_draw_counts_th
 
 
 def _trial_rows(
-    sweep, trials: list[tuple[float, int | None, float | None]]
-) -> list[dict]:
+    sweep: Path, trials: list[tuple[float, int | None, float | None]]
+) -> list[RunRow]:
     """Open each ``(lr, seed, value)`` trial under ``sweep`` and return its listing rows.
 
     Each trial is opened by its own producer (``training_tools.open_trial``), ``value`` logged as
@@ -1615,7 +1645,7 @@ def _trial_rows(
     return [by_name[name] for name in names]
 
 
-def _two_draw_sweep(project, real_hpo_base_config):
+def _two_draw_sweep(project: Path, real_hpo_base_config: dict) -> Path:
     """Open a two-draw sweep over ``real_hpo_base_config`` and return its directory.
 
     The sweep is opened by its own writer (``open_sweep``) over ``optimizer.head_lr`` choices
@@ -1636,19 +1666,23 @@ def _two_draw_sweep(project, real_hpo_base_config):
     )
 
 
-def _outcome(project, real_hpo_base_config, trials) -> dict:
+def _outcome(
+    project: Path,
+    real_hpo_base_config: dict,
+    trials: list[tuple[float, int | None, float | None]],
+) -> dict:
     """Return what ``trials`` (:func:`_trial_rows`) of a :func:`_two_draw_sweep` amount to."""
-    from tcip_mcp.experiments import observe, sweep_outcome
+    from tcip_mcp.experiments import observe_sweep, sweep_outcome
 
     sweep = _two_draw_sweep(project, real_hpo_base_config)
-    observed = observe(sweep)
-    return sweep_outcome(_trial_rows(sweep, trials), observed.record["input"])
+    observed = observe_sweep(sweep)
+    return sweep_outcome(_trial_rows(sweep, trials), observed.record.input)
 
 
 def test_a_sweeps_outcome_groups_trials_by_point_and_picks_the_best_by_mean(
-    tmp_path,
-    real_hpo_base_config,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+) -> None:
     """A sweep's outcome groups trials by point and picks the best by mean.
 
     Two points, two draws each; real_hpo_base_config's own metric is lower=better, so the
@@ -1683,9 +1717,9 @@ def test_a_sweeps_outcome_groups_trials_by_point_and_picks_the_best_by_mean(
 
 
 def test_a_sweeps_outcome_marks_a_group_with_a_failed_draw_ineligible(
-    tmp_path,
-    real_hpo_base_config,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+) -> None:
     outcome = _outcome(
         tmp_path,
         real_hpo_base_config,
@@ -1703,9 +1737,9 @@ def test_a_sweeps_outcome_marks_a_group_with_a_failed_draw_ineligible(
 
 
 def test_a_sweeps_outcome_never_picks_a_repeated_point_that_never_completed_every_planned_seed(
-    tmp_path,
-    real_hpo_base_config,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+) -> None:
     """A sweep's outcome does not pick a repeated point missing a planned seed.
 
     A point with two complete trials under seed 42 and a failed one under its other planned seed
@@ -1728,9 +1762,9 @@ def test_a_sweeps_outcome_never_picks_a_repeated_point_that_never_completed_ever
 
 
 def test_a_sweeps_outcome_is_a_null_best_when_no_point_is_eligible(
-    tmp_path,
-    real_hpo_base_config,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+) -> None:
     outcome = _outcome(
         tmp_path, real_hpo_base_config, [(0.1, 42, 0.9), (0.1, 43, None)]
     )
@@ -1744,9 +1778,9 @@ def test_a_sweeps_outcome_is_a_null_best_when_no_point_is_eligible(
 
 
 def test_group_split_draws_with_no_planned_seeds_groups_a_sweep_without_the_axis(
-    tmp_path,
-    real_hpo_base_config,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+) -> None:
     """``group_split_draws`` with no planned seeds groups a sweep without the seed axis.
 
     Trials with no data.split.seed axis group with planned_seeds=[] into one complete block per
@@ -1775,9 +1809,9 @@ def test_group_split_draws_with_no_planned_seeds_groups_a_sweep_without_the_axis
 
 
 def test_group_split_draws_ineligible_when_a_repeated_point_never_completes_every_planned_seed(
-    tmp_path,
-    real_hpo_base_config,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+) -> None:
     """``group_split_draws`` marks a repeated point missing a planned seed ineligible.
 
     A point with two complete trials under seed 42 and a failed one under its other planned
@@ -1806,8 +1840,8 @@ def test_group_split_draws_ineligible_when_a_repeated_point_never_completes_ever
 
 @pytest.mark.ray_cluster
 def test_tune_search_split_draws_end_to_end_pairs_every_point_with_every_seed(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A real Ray sweep at split_draws=2 pairs every sampled point with every seed.
 
     A real Ray sweep over a trivial objective: split_draws=2 pairs the seed grid with every
@@ -1821,7 +1855,7 @@ def test_tune_search_split_draws_end_to_end_pairs_every_point_with_every_seed(
     marks = tmp_path / "marks"
     marks.mkdir()
 
-    def objective_fn(config, report):
+    def objective_fn(config: dict, report: Callable[[float], None]) -> None:
         (marks / f"{config['lr']!r}__{config['data.split.seed']}").touch()
         report(1.0)
 
@@ -1851,7 +1885,9 @@ def test_tune_search_split_draws_end_to_end_pairs_every_point_with_every_seed(
 # -- the single-source spatial-strip leg -----------------------------------------
 
 
-def _tiled_cfg(project, images_dir, task: str, **split) -> dict:
+def _tiled_cfg(
+    project: Path, images_dir: Path, task: str, **split: object
+) -> dict:
     """Return a tiled ``task`` config of ``project`` over the ``bud`` images of ``images_dir``.
 
     The config uses the bespoke detector's builder, tiled at 128 px with 0.2 overlap and a
@@ -1878,10 +1914,10 @@ def _tiled_cfg(project, images_dir, task: str, **split) -> dict:
 
 @pytest.mark.parametrize("task", ["detection", "instance_seg"])
 def test_run_hyperparameter_search_refuses_split_draws_over_a_single_source_spatial_split(
-    tmp_path,
-    monkeypatch,
-    task,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    task: str,
+) -> None:
     """Split draws over a single-source spatial split are refused, naming the source.
 
     One admitted source under a built-in config of a task that tiles, with tiling on, at two
@@ -1920,9 +1956,9 @@ def test_run_hyperparameter_search_refuses_split_draws_over_a_single_source_spat
 
 
 def test_run_hyperparameter_search_admits_a_single_source_spatial_config_at_one_draw(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A single-source tiled config is admitted at one draw."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
@@ -1949,9 +1985,9 @@ def test_run_hyperparameter_search_admits_a_single_source_spatial_config_at_one_
 
 
 def test_run_hyperparameter_search_admits_split_draws_over_a_two_source_tiled_config(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Split draws over a two-source tiled config are admitted.
 
     An unbound, built-in detection config with tiling on that admits two sources answers no
@@ -1982,9 +2018,9 @@ def test_run_hyperparameter_search_admits_split_draws_over_a_two_source_tiled_co
 
 
 def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_draw(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Split draws over one bespoke source are refused for the validation they cannot draw.
 
     One admitted source behind a bespoke dataset_source leaves nothing to hold a validation side
@@ -2035,10 +2071,10 @@ def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_d
 
 
 def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A config an earlier check refuses answers that check's reason, not the spatial split's.
 
     A tiled config with a zero ``data.split.val_ratio`` answers the zero-ratio reason, the error

@@ -21,7 +21,7 @@ from tcip_mcp.knowledge import (
 )
 
 
-def test_list_documents_returns_one_entry_per_markdown_file():
+def test_list_documents_returns_one_entry_per_markdown_file() -> None:
     """``list_documents`` lists one entry per .md file under KNOWLEDGE_DIR, each named and read."""
     documents = list_documents()
     on_disk = list(KNOWLEDGE_DIR.rglob("*.md"))
@@ -41,26 +41,26 @@ def test_list_documents_returns_one_entry_per_markdown_file():
         )
 
 
-def test_read_document_strips_the_frontmatter():
+def test_read_document_strips_the_frontmatter() -> None:
     body = read_document("delivery")
     assert not body.startswith("---")
     assert "name: delivery" not in body
 
 
-def test_document_path_resolves_a_real_file():
+def test_document_path_resolves_a_real_file() -> None:
     path = document_path("delivery")
     assert path.is_file()
     assert path.read_text(encoding="utf-8").startswith("---")
 
 
-def test_document_path_raises_for_an_unknown_name():
+def test_document_path_raises_for_an_unknown_name() -> None:
     with pytest.raises(KeyError):
         document_path("not-a-real-document")
 
 
 def test_malformed_frontmatter_raises_value_error_naming_the_file(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tcip_mcp import knowledge
 
     monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
@@ -71,7 +71,9 @@ def test_malformed_frontmatter_raises_value_error_naming_the_file(
     assert str(bad) in str(excinfo.value)
 
 
-def test_duplicate_document_name_raises_value_error(tmp_path, monkeypatch):
+def test_duplicate_document_name_raises_value_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tcip_mcp import knowledge
 
     monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
@@ -86,8 +88,8 @@ def test_duplicate_document_name_raises_value_error(tmp_path, monkeypatch):
 
 
 def test_non_utf8_document_raises_value_error_naming_the_file(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tcip_mcp import knowledge
 
     monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
@@ -103,8 +105,8 @@ def test_non_utf8_document_raises_value_error_naming_the_file(
 
 
 def test_a_utf8_bom_does_not_defeat_the_frontmatter_check(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tcip_mcp import knowledge
 
     monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
@@ -119,7 +121,9 @@ def test_a_utf8_bom_does_not_defeat_the_frontmatter_check(
     assert knowledge.read_document("bommed").strip() == "body"
 
 
-def test_a_name_carrying_a_slash_raises_value_error(tmp_path, monkeypatch):
+def test_a_name_carrying_a_slash_raises_value_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tcip_mcp import knowledge
 
     monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
@@ -137,8 +141,8 @@ def test_a_name_carrying_a_slash_raises_value_error(tmp_path, monkeypatch):
 
 
 def test_a_description_carrying_a_newline_raises_value_error(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tcip_mcp import knowledge
 
     monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
@@ -152,13 +156,13 @@ def test_a_description_carrying_a_newline_raises_value_error(
     assert str(bad) in str(excinfo.value)
 
 
-def test_crops_yml_path_resolves_under_knowledge_dir():
+def test_crops_yml_path_resolves_under_knowledge_dir() -> None:
     path = crops_yml_path()
     assert path == KNOWLEDGE_DIR / "crops" / "crops.yml"
     assert path.is_file()
 
 
-def test_the_vocabulary_still_loads_through_the_relocated_path():
+def test_the_vocabulary_still_loads_through_the_relocated_path() -> None:
     from tcip_mcp import traits
 
     records = traits._crops_traits()
@@ -167,13 +171,15 @@ def test_the_vocabulary_still_loads_through_the_relocated_path():
     )
 
 
-def test_import_tcip_mcp_server_succeeds_and_registers_serve_domain_knowledge():
+def test_import_tcip_mcp_server_succeeds_and_registers_serve_domain_knowledge() -> (
+    None
+):
     import tcip_mcp.server as server
 
     assert "serve_domain_knowledge" in server.list_registered_tools()
 
 
-def test_the_registered_tool_description_names_every_document():
+def test_the_registered_tool_description_names_every_document() -> None:
     from tcip_mcp.server import build_server
 
     tools = {t.name: t for t in build_server(None)._tool_manager.list_tools()}
@@ -187,7 +193,7 @@ def test_the_registered_tool_description_names_every_document():
         assert document.description in tool.description
 
 
-def test_serve_domain_knowledge_with_no_name_returns_the_index():
+def test_serve_domain_knowledge_with_no_name_returns_the_index() -> None:
     from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
 
     result = serve_domain_knowledge()
@@ -200,7 +206,9 @@ def test_serve_domain_knowledge_with_no_name_returns_the_index():
         )
 
 
-def test_serve_domain_knowledge_with_a_name_returns_that_documents_body():
+def test_serve_domain_knowledge_with_a_name_returns_that_documents_body() -> (
+    None
+):
     from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
 
     result = serve_domain_knowledge("delivery")
@@ -208,7 +216,9 @@ def test_serve_domain_knowledge_with_a_name_returns_that_documents_body():
     assert result["content"] == read_document("delivery")
 
 
-def test_serve_domain_knowledge_with_an_unknown_name_names_the_available_names():
+def test_serve_domain_knowledge_with_an_unknown_name_names_the_available_names() -> (
+    None
+):
     from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
 
     result = serve_domain_knowledge("not-a-real-document")

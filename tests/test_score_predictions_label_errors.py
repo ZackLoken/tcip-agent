@@ -7,6 +7,7 @@ through the MCP tool boundary, on both the single-image and folder paths.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -16,6 +17,10 @@ from tcip_mcp.tools.annotation_tools import score_predictions
 from tests._producer_fixtures import image_label_key, label_image, write_image
 from tests._training_values import TRIAGE_WEIGHTS
 
+if TYPE_CHECKING:
+    from tcip_mcp.buckets import Bucket
+    from tcip_mcp.subject_registry import SubjectRegistry
+
 pytest.importorskip("torch")
 
 ONE_BUD = [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))]
@@ -24,7 +29,12 @@ SCORED_AT = (0.5, 0.25)
 """A sample IoU and confidence each scoring here states."""
 
 
-def _published(project: Path, name: str, image: Path, registry=None):
+def _published(
+    project: Path,
+    name: str,
+    image: Path,
+    registry: SubjectRegistry | None = None,
+) -> Bucket:
     """Publish one ``bud`` box at 0.9 on ``image`` as the bucket ``name`` and return the bucket.
 
     The box carries the last value of each attribute ``registry`` declares on it (none for no
@@ -106,6 +116,7 @@ def test_score_predictions_over_attributed_documents_scores_the_object_class(
             subjects=(
                 cr.Subject(
                     name="bud",
+                    description="",
                     attributes=(
                         cr.Attribute(
                             "opening", "categorical", ("closed", "open")
@@ -124,7 +135,7 @@ def test_score_predictions_over_attributed_documents_scores_the_object_class(
 
 def test_a_predicted_image_with_no_label_document_is_refused_as_a_reference(
     tmp_path: Path,
-):
+) -> None:
     """A predicted image with no label document is refused as a reference, naming it.
 
     An image the bucket predicted and nobody labeled has no reference: scoring and the count
@@ -148,7 +159,7 @@ def test_a_predicted_image_with_no_label_document_is_refused_as_a_reference(
 
 def test_an_image_the_bucket_names_no_document_for_is_unknown_never_a_miss(
     tmp_path: Path,
-):
+) -> None:
     """A labeled image the bucket did not predict is left out and named, not scored a miss.
 
     A labeled image the bucket's record did not predict is no false negative and no triage

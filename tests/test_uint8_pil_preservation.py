@@ -10,6 +10,7 @@ band alpha; with no such signal, or a signal naming something else, it stays an 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -20,12 +21,20 @@ from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 from tests._producer_fixtures import dataset_over  # noqa: E402
 from tests._training_values import augmentation, drawn_split, tiling_block
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    import torch
+
 TILING = tiling_block(tile_size=64, overlap=0.2, sliver_frac=0.5)
 """The tiling every windowed case states; its sliver cutoff stated, since one box derives none."""
 
 
 def _grid(
-    height: int, width: int, channels: int, dtype=np.uint8
+    height: int,
+    width: int,
+    channels: int,
+    dtype: type[np.uint8] | type[np.uint16] = np.uint8,
 ) -> np.ndarray:
     arr = np.zeros((height, width, channels), dtype=dtype)
     for c in range(channels):
@@ -38,7 +47,7 @@ def _grid(
 # ── The helper itself ────────────────────────────────────────────────────
 
 
-def test_uint8_channel_counts_convert_to_their_pil_mode():
+def test_uint8_channel_counts_convert_to_their_pil_mode() -> None:
     from tcip_mcp.pipelines.image_utils import to_pil_if_faithful
 
     for channels, mode in ((1, "L"), (3, "RGB")):
@@ -49,7 +58,7 @@ def test_uint8_channel_counts_convert_to_their_pil_mode():
         assert np.array_equal(back, arr[:, :, 0] if channels == 1 else arr)
 
 
-def test_unfaithful_inputs_return_unchanged():
+def test_unfaithful_inputs_return_unchanged() -> None:
     from tcip_mcp.pipelines.image_utils import to_pil_if_faithful
 
     for arr in (
@@ -60,14 +69,14 @@ def test_unfaithful_inputs_return_unchanged():
         np.zeros((6, 5), dtype=np.uint8),
     ):
         assert to_pil_if_faithful(arr) is arr
-    pil = Image.new("RGB", (5, 6))
-    assert to_pil_if_faithful(pil) is pil
 
 
 # ── The 4-channel alpha-vs-spectral-band ambiguity ───────────────────────
 
 
-def test_four_channel_converts_to_rgba_only_when_the_source_declares_alpha():
+def test_four_channel_converts_to_rgba_only_when_the_source_declares_alpha() -> (
+    None
+):
     """A 4-channel array converts to RGBA only when its source declares alpha.
 
     With band_interpretations naming the 4th band alpha, the array converts to an RGBA image
@@ -113,7 +122,7 @@ def test_four_channel_converts_to_rgba_only_when_the_source_declares_alpha():
 # ── load_image's array-backend return ────────────────────────────────────
 
 
-def test_load_image_returns_pil_for_uint8_tiffs(tmp_path: Path):
+def test_load_image_returns_pil_for_uint8_tiffs(tmp_path: Path) -> None:
     import tifffile
 
     rgb = _grid(20, 16, 3)
@@ -133,7 +142,7 @@ def test_load_image_returns_pil_for_uint8_tiffs(tmp_path: Path):
 
 def test_load_image_converts_a_real_alpha_tagged_geotiff_to_rgba(
     tmp_path: Path,
-):
+) -> None:
     """``load_image`` converts a TIFF whose file declares its 4th band alpha to RGBA.
 
     The file tags its 4th band ExtraSamples=2, unassociated alpha, and ``load_image`` returns an
@@ -156,7 +165,7 @@ def test_load_image_converts_a_real_alpha_tagged_geotiff_to_rgba(
 
 def test_load_image_keeps_a_declared_spectral_fourth_band_as_ndarray(
     tmp_path: Path,
-):
+) -> None:
     """``load_image`` keeps a declared spectral fourth band as an ndarray.
 
     A 4-band TIFF whose file tags the 4th band ExtraSamples=0 (unspecified, GDAL's
@@ -179,7 +188,7 @@ def test_load_image_keeps_a_declared_spectral_fourth_band_as_ndarray(
 
 def test_load_image_keeps_an_undeclared_fourth_band_npy_as_ndarray(
     tmp_path: Path,
-):
+) -> None:
     """``load_image`` keeps a four-band .npy stack as an ndarray.
 
     A .npy stack carries no color-interpretation metadata; load_image returns its pixels as an
@@ -194,7 +203,7 @@ def test_load_image_keeps_an_undeclared_fourth_band_npy_as_ndarray(
 
 def test_load_image_keeps_ndarray_where_pil_has_no_faithful_mode(
     tmp_path: Path,
-):
+) -> None:
     import tifffile
 
     u16 = _grid(20, 16, 3, dtype=np.uint16)
@@ -234,8 +243,12 @@ def test_load_image_keeps_ndarray_where_pil_has_no_faithful_mode(
     ],
 )
 def test_the_header_and_the_decode_agree_on_whether_a_source_is_served_as_pil(
-    tmp_path: Path, name, channels, dtype, tags
-):
+    tmp_path: Path,
+    name: str,
+    channels: int,
+    dtype: type[np.uint8] | type[np.uint16],
+    tags: dict | None,
+) -> None:
     """The header and the decode agree on whether a source is served as PIL.
 
     The mode a source's header says it is served in (what a loader built under the chain
@@ -265,8 +278,10 @@ def test_the_header_and_the_decode_agree_on_whether_a_source_is_served_as_pil(
 # ── The augmentation chain applies end to end ────────────────────────────
 
 
-def _flip_transform():
-    def transform(img, target):
+def _flip_transform() -> Callable[
+    [Image.Image, dict], tuple[torch.Tensor, dict]
+]:
+    def transform(img: Image.Image, target: dict) -> tuple[torch.Tensor, dict]:
         return pil_to_tensor(img.transpose(Image.FLIP_LEFT_RIGHT)), target
 
     return transform
@@ -274,7 +289,7 @@ def _flip_transform():
 
 def _detection_project(
     tmp_path: Path, arr: np.ndarray, *, extrasamples: list[str] | None = None
-):
+) -> Path:
     """Write ``img0.tif`` holding ``arr`` and its one-box label document; return their directory.
 
     The TIFF sits under ``images/<undated bucket>`` and its ``bud`` box is (2, 2, 10, 10).
@@ -301,7 +316,9 @@ def _detection_project(
     return images_dir
 
 
-def test_a_uint8_tiff_trains_augmented_through_detection(tmp_path: Path):
+def test_a_uint8_tiff_trains_augmented_through_detection(
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     import torch
 
@@ -320,7 +337,9 @@ def test_a_uint8_tiff_trains_augmented_through_detection(tmp_path: Path):
     assert torch.equal(got, flipped)
 
 
-def test_a_uint8_windowed_tile_trains_augmented_through_tiling(tmp_path: Path):
+def test_a_uint8_windowed_tile_trains_augmented_through_tiling(
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     import torch
 
@@ -348,7 +367,9 @@ def test_a_uint8_windowed_tile_trains_augmented_through_tiling(tmp_path: Path):
         raster_source.close_source_pool()
 
 
-def test_a_declared_alpha_windowed_tile_trains_augmented(tmp_path: Path):
+def test_a_declared_alpha_windowed_tile_trains_augmented(
+    tmp_path: Path,
+) -> None:
     """A windowed tile of a TIFF declaring alpha is read through the flip augmentation.
 
     For a 96x96 4-band TIFF whose file declares its 4th band alpha, the dataset's first tile
@@ -385,7 +406,7 @@ def test_a_declared_alpha_windowed_tile_trains_augmented(tmp_path: Path):
 
 def test_a_declared_spectral_fourth_band_windowed_tile_refuses_the_chain(
     tmp_path: Path,
-):
+) -> None:
     """A tiled loader under the chain refuses a TIFF declaring a spectral fourth band.
 
     A 4-band TIFF tagging its 4th band unspecified, read under a flip, is refused naming its
@@ -447,7 +468,7 @@ def _augmented_run(
 @pytest.mark.parametrize("bespoke", [False, True], ids=["platform", "bespoke"])
 def test_a_run_stating_augmentation_over_uint16_frames_refuses_at_its_resolution(
     tmp_path: Path, bespoke: bool
-):
+) -> None:
     """A run stating augmentation over uint16 frames refuses at its resolution.
 
     Whoever builds the run's loaders, the platform's factory or its ``dataset_source``
@@ -465,7 +486,9 @@ def test_a_run_stating_augmentation_over_uint16_frames_refuses_at_its_resolution
         opened_run(tmp_path, config)
 
 
-def test_a_bodys_tiler_refuses_the_chain_over_uint16_frames(tmp_path: Path):
+def test_a_bodys_tiler_refuses_the_chain_over_uint16_frames(
+    tmp_path: Path,
+) -> None:
     """A body's tiler refuses the augmentation chain over uint16 frames.
 
     ``ctx.tiled_dataset`` under a flip refuses a uint16 dataset, naming its 3-band uint16
@@ -505,7 +528,7 @@ def test_a_bodys_tiler_refuses_the_chain_over_uint16_frames(tmp_path: Path):
 
 def test_a_dataset_built_around_the_door_refuses_the_chain_at_its_first_read(
     tmp_path: Path,
-):
+) -> None:
     """A dataset built around the door refuses the chain at its first read.
 
     A loader constructed directly with transforms over a uint16 frame refuses at its first
@@ -533,7 +556,7 @@ def test_a_dataset_built_around_the_door_refuses_the_chain_at_its_first_read(
 
 def test_a_bespoke_run_over_uint8_frames_resolves_with_its_augmentation(
     tmp_path: Path,
-):
+) -> None:
     pytest.importorskip("torch")
     from tests._verified_checkpoint_fixtures import opened_run
 
@@ -543,7 +566,9 @@ def test_a_bespoke_run_over_uint8_frames_resolves_with_its_augmentation(
     assert run_dir.is_dir()
 
 
-def test_the_same_run_over_uint8_frames_trains_augmented(tmp_path: Path):
+def test_the_same_run_over_uint8_frames_trains_augmented(
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     import torch
 

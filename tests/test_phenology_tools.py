@@ -76,9 +76,14 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
         }
     }
     persisted = ts.read(plant_mapping_key(tmp_path, name))
-    assert list(persisted["assignments"].keys()) == ["2026-02-11"]
-    assert persisted["assignments"]["2026-02-11"][0]["stem"] == "img1"
-    assert "confidence" not in persisted["assignments"]["2026-02-11"][0]
+    assert isinstance(persisted, dict)
+    assignments = persisted["assignments"]
+    assert isinstance(assignments, dict)
+    assert list(assignments.keys()) == ["2026-02-11"]
+    dated = assignments["2026-02-11"]
+    assert isinstance(dated, list) and isinstance(dated[0], dict)
+    assert dated[0]["stem"] == "img1"
+    assert "confidence" not in dated[0]
 
 
 def test_build_plant_mapping_missing_images_root(tmp_path: Path) -> None:
@@ -122,7 +127,7 @@ def test_build_plant_mapping_missing_registry(tmp_path: Path) -> None:
 
 def test_an_assessed_series_delivers_validated_milestones_under_its_revision(
     tmp_path: Path,
-):
+) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.delivery import read_delivery_events
     from tcip_mcp.operationalization import latest_confirmed
@@ -158,7 +163,7 @@ def test_an_assessed_series_delivers_validated_milestones_under_its_revision(
 
 def test_the_delivery_line_lands_in_the_log_of_the_dataset_its_buckets_sit_in(
     tmp_path: Path,
-):
+) -> None:
     """The delivery's one audit line, in the log that travels with the data, names the event."""
     pytest.importorskip("torch")
     from tcip_mcp.audit import audit_log_key
@@ -187,7 +192,7 @@ def test_the_delivery_line_lands_in_the_log_of_the_dataset_its_buckets_sit_in(
 
 def test_an_unassessed_series_refuses_at_the_door_that_takes_no_acknowledgment(
     tmp_path: Path,
-):
+) -> None:
     pytest.importorskip("torch")
     from tests._chain_fixtures import attributed_series
 
@@ -202,7 +207,9 @@ def test_an_unassessed_series_refuses_at_the_door_that_takes_no_acknowledgment(
     assert not out_csv.exists()
 
 
-def test_an_unreadable_prediction_document_is_reported_by_name(tmp_path: Path):
+def test_an_unreadable_prediction_document_is_reported_by_name(
+    tmp_path: Path,
+) -> None:
     """A present, unreadable prediction document is returned as an error naming its stem."""
     pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import prediction_key
@@ -226,7 +233,7 @@ def test_an_unreadable_prediction_document_is_reported_by_name(tmp_path: Path):
 
 def test_predictions_that_never_classified_the_positive_state_refuse(
     tmp_path: Path,
-):
+) -> None:
     """Predictions that classify no positive state refuse.
 
     Detector buckets over the same captures carry no opening axis at all, so the delivery refuses
@@ -255,7 +262,7 @@ def test_predictions_that_never_classified_the_positive_state_refuse(
 
 def test_each_bucket_stands_for_the_date_its_record_states_and_two_on_one_date_refuse(
     tmp_path: Path,
-):
+) -> None:
     """Each bucket stands for the date its record states, and two on one date refuse.
 
     A bucket published under a name naming another date delivers as the date its record states,
@@ -297,7 +304,9 @@ def test_each_bucket_stands_for_the_date_its_record_states_and_two_on_one_date_r
     assert not (tmp_path / "out" / "b.csv").exists()
 
 
-def test_a_missing_mapping_and_an_unknown_trait_each_refuse(tmp_path: Path):
+def test_a_missing_mapping_and_an_unknown_trait_each_refuse(
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     from tests._chain_fixtures import attributed_series
 

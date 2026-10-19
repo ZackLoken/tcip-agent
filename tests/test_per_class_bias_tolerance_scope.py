@@ -71,7 +71,7 @@ def _records(prefix: str, offset: float, *, spurious: bool) -> list[dict]:
     return recs
 
 
-def _criterion(*, spurious: bool):
+def _criterion(*, spurious: bool) -> tuple[float, dict, list[str]]:
     return count_criterion(
         _records("c", 0.0, spurious=spurious),
         _records("h", 100000.0, spurious=spurious),
@@ -82,7 +82,9 @@ def _criterion(*, spurious: bool):
     )
 
 
-def test_a_rare_class_is_not_granted_the_dense_class_density_as_its_tolerance():
+def test_a_rare_class_is_not_granted_the_dense_class_density_as_its_tolerance() -> (
+    None
+):
     """A rare class is judged against its own density, not the dense class's, as its tolerance.
 
     Class 2 carries 10 objects an image and is over-counted by 2 on every one of them, a 20%
@@ -110,7 +112,9 @@ def test_a_rare_class_is_not_granted_the_dense_class_density_as_its_tolerance():
     assert "count_bias_exceeds_tolerance_per_class" in failures
 
 
-def test_the_same_dense_and_rare_class_pairing_passes_when_every_class_is_honest():
+def test_the_same_dense_and_rare_class_pairing_passes_when_every_class_is_honest() -> (
+    None
+):
     """A dense and rare class pairing counted correctly passes, both classes in the evidence."""
     _conf, evidence, failures = _criterion(spurious=False)
 

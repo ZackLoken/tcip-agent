@@ -7,7 +7,12 @@ builds it, drained to exhaustion, yields as many trials as planned_trial_count a
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, NoReturn
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from tcip_mcp.pipelines.schemas import DrawnSplit
 from tcip_mcp.pipelines.training.hpo import (
@@ -50,7 +55,9 @@ def _paired_space(draws: int, param_space: dict = SPACE) -> dict:
 
 
 @pytest.mark.parametrize("draws, expected", [(1, 5), (2, 10), (3, 15)])
-def test_planned_trial_count_random_over_the_sample_space(draws, expected):
+def test_planned_trial_count_random_over_the_sample_space(
+    draws: int, expected: int
+) -> None:
     """Random over the sample space counts n_trials per point times the paired seed draws.
 
     With no baseline, five draws per point at one, two and three paired seed draws count 5, 10
@@ -61,14 +68,18 @@ def test_planned_trial_count_random_over_the_sample_space(draws, expected):
 
 
 @pytest.mark.parametrize("draws, expected", [(1, 15), (2, 30), (3, 45)])
-def test_planned_trial_count_grid_over_the_sample_space(draws, expected):
+def test_planned_trial_count_grid_over_the_sample_space(
+    draws: int, expected: int
+) -> None:
     """Grid with no baseline counts n_trials times the three batch_size choices, times the draws."""
     space = SPACE if draws == 1 else _paired_space(draws)
     assert planned_trial_count(space, 5, "grid", draws, None) == expected
 
 
 @pytest.mark.parametrize("draws, expected", [(1, 13), (2, 26), (3, 39)])
-def test_planned_trial_count_grid_with_a_baseline(draws, expected):
+def test_planned_trial_count_grid_with_a_baseline(
+    draws: int, expected: int
+) -> None:
     """A baseline under grid pins batch_size to one sample per draw.
 
     A baseline pins batch_size to one sample per draw and leaves the other n_trials-1 samples
@@ -78,13 +89,15 @@ def test_planned_trial_count_grid_with_a_baseline(draws, expected):
     assert planned_trial_count(space, 5, "grid", draws, BASELINE) == expected
 
 
-def test_planned_trial_count_random_at_two_draws_with_a_baseline():
+def test_planned_trial_count_random_at_two_draws_with_a_baseline() -> None:
     """A baseline leaves random's count at two draws unmoved."""
     space = _paired_space(2)
     assert planned_trial_count(space, 5, "random", 2, BASELINE) == 10
 
 
-def test_planned_trial_count_a_uniform_axis_under_grid_contributes_one():
+def test_planned_trial_count_a_uniform_axis_under_grid_contributes_one() -> (
+    None
+):
     """A continuous axis under grid contributes a factor of one.
 
     With one uniform axis, three samples under grid count three trials.
@@ -93,17 +106,19 @@ def test_planned_trial_count_a_uniform_axis_under_grid_contributes_one():
     assert planned_trial_count(space, 3, "grid", 1, None) == 3
 
 
-def test_planned_trial_count_normalizes_the_search_alg_name():
+def test_planned_trial_count_normalizes_the_search_alg_name() -> None:
     """planned_trial_count counts ``search_alg='Grid'`` as a grid search."""
     assert planned_trial_count(SPACE, 5, "Grid", 1, None) == 15
 
 
-def test_planned_trial_count_over_an_empty_param_space_at_one_draw():
+def test_planned_trial_count_over_an_empty_param_space_at_one_draw() -> None:
     """An empty param_space at one draw counts num_samples trials of the one point it holds."""
     assert planned_trial_count({}, 2, "grid", 1, None) == 2
 
 
-def test_planned_trial_count_over_an_empty_param_space_run_through_split_draw_search_space():
+def test_planned_trial_count_over_an_empty_param_space_run_through_split_draw_search_space() -> (
+    None
+):
     """Above one draw, an empty param_space holds the paired seed axis alone, one trial a seed."""
     space = _paired_space(2, {})
     assert space == {
@@ -112,7 +127,7 @@ def test_planned_trial_count_over_an_empty_param_space_run_through_split_draw_se
     assert planned_trial_count(space, 1, "grid", 2, None) == 2
 
 
-def test_planned_trial_count_over_a_backend_search_alg_name():
+def test_planned_trial_count_over_a_backend_search_alg_name() -> None:
     """A backend search algorithm (bayesopt) at one draw over a sampled space counts n_trials."""
     space = {
         "optimizer.head_lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}
@@ -123,7 +138,7 @@ def test_planned_trial_count_over_a_backend_search_alg_name():
 # -- uncountable shapes --------------------------------------------------------------
 
 
-def test_planned_trial_count_raises_on_a_categorical_with_no_choices():
+def test_planned_trial_count_raises_on_a_categorical_with_no_choices() -> None:
     """A categorical axis with no choices key raises ``KeyError``."""
     with pytest.raises(KeyError):
         planned_trial_count({"x": {"type": "categorical"}}, 2, "grid", 1, None)
@@ -131,26 +146,32 @@ def test_planned_trial_count_raises_on_a_categorical_with_no_choices():
 
 @pytest.mark.parametrize("search_alg", ["grid", "random"])
 def test_planned_trial_count_raises_on_an_int_axis_whose_low_exceeds_high(
-    search_alg,
-):
+    search_alg: str,
+) -> None:
     """An int axis whose low exceeds high refuses naming the axis, gridded or sampled."""
     space = {"batch_size": {"type": "int", "low": 8, "high": 2}}
     with pytest.raises(ValueError, match="'batch_size'.*exceeds high"):
         planned_trial_count(space, 2, search_alg, 1, None)
 
 
-def test_planned_trial_count_raises_on_an_unknown_type_naming_the_axis():
+def test_planned_trial_count_raises_on_an_unknown_type_naming_the_axis() -> (
+    None
+):
     with pytest.raises(ValueError, match="'x'.*'beta'"):
         planned_trial_count({"x": {"type": "beta"}}, 2, "random", 1, None)
 
 
-def test_planned_trial_count_raises_on_a_categorical_with_an_empty_choice_list():
+def test_planned_trial_count_raises_on_a_categorical_with_an_empty_choice_list() -> (
+    None
+):
     space = {"x": {"type": "categorical", "choices": []}}
     with pytest.raises(ValueError, match="'x'.*no choices"):
         planned_trial_count(space, 2, "grid", 1, None)
 
 
-def test_planned_trial_count_counts_a_large_sampled_int_span_and_refuses_it_gridded():
+def test_planned_trial_count_counts_a_large_sampled_int_span_and_refuses_it_gridded() -> (
+    None
+):
     """A large sampled int span counts its samples, and gridded it refuses by name.
 
     Sampled, the count is the samples drawn; gridded, an axis past the bound a grid axis may
@@ -162,7 +183,9 @@ def test_planned_trial_count_counts_a_large_sampled_int_span_and_refuses_it_grid
         planned_trial_count(space, 2, "grid", 1, None)
 
 
-def test_planned_trial_count_refuses_an_int_axis_past_the_samplers_int64_range():
+def test_planned_trial_count_refuses_an_int_axis_past_the_samplers_int64_range() -> (
+    None
+):
     with pytest.raises(ValueError, match="'x'.*int64"):
         planned_trial_count(
             {"x": {"type": "int", "low": 0, "high": 10**30}},
@@ -177,8 +200,8 @@ def test_planned_trial_count_refuses_an_int_axis_past_the_samplers_int64_range()
 
 
 def test_tune_search_and_planned_trial_count_share_one_search_space_derivation(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """tune_search and planned_trial_count share one search-space derivation.
 
     With _search_space_and_points patched to record its arguments and raise, tune_search and
@@ -188,7 +211,9 @@ def test_tune_search_and_planned_trial_count_share_one_search_space_derivation(
 
     calls: list[tuple] = []
 
-    def recorder(*args, **kwargs):
+    def recorder(
+        *args: dict | str | int | None, **kwargs: dict | str | int | None
+    ) -> NoReturn:
         calls.append((args, kwargs))
         raise RuntimeError("stop before Ray")
 
@@ -211,7 +236,9 @@ def test_tune_search_and_planned_trial_count_share_one_search_space_derivation(
     assert calls[0] == calls[1] == ((space, "random", 1, None), {})
 
 
-def test_split_draw_search_space_at_one_draw_returns_param_space_itself():
+def test_split_draw_search_space_at_one_draw_returns_param_space_itself() -> (
+    None
+):
     """At one draw split_draw_search_space returns param_space itself.
 
     At split_draws of one or below no seeds resolve, and split_draw_search_space is then a
@@ -228,8 +255,8 @@ def test_split_draw_search_space_at_one_draw_returns_param_space_itself():
 
 
 def test_planned_trial_count_leaves_nothing_under_home_or_the_project_root(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """planned_trial_count writes nothing under home or the project root.
 
     A monkeypatched home directory and project root both stay empty after a real count.
@@ -258,7 +285,7 @@ def _trials_ray_yields(
     search_alg: str,
     draws: int,
     baseline_params: dict | None,
-    storage_path,
+    storage_path: Path,
 ) -> tuple[int, int]:
     """Build and drain a searcher over this sweep's space and starting points.
 
@@ -306,8 +333,11 @@ def _trials_ray_yields(
     ],
 )
 def test_planned_trial_count_equals_the_trials_the_generator_yields(
-    search_alg, draws, baseline_params, tmp_path
-):
+    search_alg: str,
+    draws: int,
+    baseline_params: dict[str, float] | None,
+    tmp_path: Path,
+) -> None:
     """planned_trial_count equals the trials a drained generator yields.
 
     A separately built generator is drained to exhaustion, and the trials it yielded, its own
@@ -327,7 +357,9 @@ def test_planned_trial_count_equals_the_trials_the_generator_yields(
 
 
 @pytest.mark.parametrize("draws", [2, 3, 4])
-def test_the_counted_total_divides_evenly_into_the_per_draw_count(draws):
+def test_the_counted_total_divides_evenly_into_the_per_draw_count(
+    draws: int,
+) -> None:
     """The counted total divides evenly into the per-draw count.
 
     Under random and grid search alike, the counted total is an exact multiple of split_draws

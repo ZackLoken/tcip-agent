@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
+from typing import IO, TYPE_CHECKING
 
 import pytest
 
@@ -17,6 +18,18 @@ from tests._training_values import (
     TRIAGE_WEIGHTS,
     drawn_split,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Sequence
+
+    from _typeshed import FileDescriptorOrPath, StrOrBytesPath
+    from PIL.ImageFile import ImageFile
+    from torch.utils.data import Dataset
+
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.data.selection import ClassScope, Sample
+    from tcip_store import Key, ReadDefault, Versioned
+    from tcip_store.sqlite_backend import SqliteBackend
 
 torch = pytest.importorskip("torch")
 
@@ -29,7 +42,9 @@ _READ_STORES = (
 """The stores whose records hold ground truth, predictions and the buckets naming them."""
 
 
-def _counting_reads(monkeypatch, files: tuple[str, ...] = ()) -> Counter:
+def _counting_reads(
+    monkeypatch: pytest.MonkeyPatch, files: tuple[str, ...] = ()
+) -> Counter:
     """Count reads at the store boundary and file opens, keyed by what was read.
 
     Counted are each ``SqliteBackend.read_versioned`` of a record of :data:`_READ_STORES` and each
@@ -43,7 +58,9 @@ def _counting_reads(monkeypatch, files: tuple[str, ...] = ()) -> Counter:
     counts: Counter = Counter()
     real_record = SqliteBackend.read_versioned
 
-    def counted_record(self, key, **default):
+    def counted_record(
+        self: SqliteBackend, key: Key, **default: ReadDefault
+    ) -> Versioned:
         if key.store in _READ_STORES:
             counts[str(key)] += 1
         return real_record(self, key, **default)
@@ -51,7 +68,12 @@ def _counting_reads(monkeypatch, files: tuple[str, ...] = ()) -> Counter:
     monkeypatch.setattr(SqliteBackend, "read_versioned", counted_record)
     real_open = builtins.open
 
-    def counted_open(file, mode="r", *args, **kwargs):
+    def counted_open(
+        file: FileDescriptorOrPath,
+        mode: str = "r",
+        *args: int | str | bool | Callable[[str, int], int] | None,
+        **kwargs: int | str | bool | Callable[[str, int], int] | None,
+    ) -> IO[str] | IO[bytes]:
         if (
             isinstance(file, (str, Path))
             and mode.startswith("r")
@@ -65,7 +87,7 @@ def _counting_reads(monkeypatch, files: tuple[str, ...] = ()) -> Counter:
     return counts
 
 
-def _consume(*datasets) -> None:
+def _consume(*datasets: Dataset | None) -> None:
     """Read the class distribution and each item of each loader."""
     for ds in datasets:
         ds.class_distribution
@@ -74,8 +96,8 @@ def _consume(*datasets) -> None:
 
 
 def test_a_drawn_detection_run_reads_each_document_once(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tests._producer_fixtures import train_val
     from tests.test_training_autoval import _detection_dataset
 
@@ -99,7 +121,9 @@ def test_a_drawn_detection_run_reads_each_document_once(
     assert set(counts.values()) == {1}, counts
 
 
-def test_a_drawn_table_run_reads_its_table_once(tmp_path: Path, monkeypatch):
+def test_a_drawn_table_run_reads_its_table_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tests._producer_fixtures import train_val
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
@@ -123,8 +147,8 @@ def test_a_drawn_table_run_reads_its_table_once(tmp_path: Path, monkeypatch):
 
 
 def test_a_written_draw_reads_each_document_once_with_its_fingerprint(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tcip_mcp.tools.data_tools import draw_splits
     from tests.test_training_autoval import _detection_dataset
 
@@ -152,7 +176,7 @@ def test_a_written_draw_reads_each_document_once_with_its_fingerprint(
 
 def test_a_recorded_table_changed_under_its_digest_refuses_by_name(
     tmp_path: Path,
-):
+) -> None:
     from dataclasses import replace
 
     from tcip_mcp.pipelines.data.label_queries import acquired, admit
@@ -172,8 +196,8 @@ def test_a_recorded_table_changed_under_its_digest_refuses_by_name(
 
 
 def test_an_assessment_reads_each_reference_document_once(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An assessment reads each reference document once and retains what that read answered.
 
     A document emptied after the assessment's re-admission read is measured as read: the
@@ -200,7 +224,9 @@ def test_an_assessment_reads_each_reference_document_once(
     readmitted: dict = {}
     real_readmit = label_queries.readmitted_samples
 
-    def emptied_after_its_read(samples, scope):
+    def emptied_after_its_read(
+        samples: Sequence[Sample], scope: ClassScope
+    ) -> list[Sample]:
         out = real_readmit(samples, scope)
         readmitted.update((s.ground_truth, s.ground_truth_digest) for s in out)
         json_io.write_label_document(
@@ -229,7 +255,7 @@ def test_an_assessment_reads_each_reference_document_once(
 
 def test_a_reference_document_emptied_before_the_assessment_reads_it_refuses(
     tmp_path: Path,
-):
+) -> None:
     from tcip_annotation import json_io
     from tests._chain_fixtures import IMG, assess, confirm_count_trait
     from tests.test_assessment_guards import _trained
@@ -248,7 +274,9 @@ def test_a_reference_document_emptied_before_the_assessment_reads_it_refuses(
     assert "no longer admissible" in record["error"], record
 
 
-def test_a_semantic_run_reads_each_mask_once(tmp_path: Path, monkeypatch):
+def test_a_semantic_run_reads_each_mask_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from PIL import Image
 
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
@@ -285,8 +313,8 @@ def test_a_semantic_run_reads_each_mask_once(tmp_path: Path, monkeypatch):
 
 
 def test_a_freeze_reads_each_document_once_with_its_fingerprint(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tcip_mcp.tools.data_tools import freeze_selection
     from tests.test_freeze_selection import _real_drawn_experiment
     from tests.test_selection_binding import _two_subject_two_date_dataset
@@ -302,8 +330,8 @@ def test_a_freeze_reads_each_document_once_with_its_fingerprint(
 
 
 def test_a_physical_scale_assessment_reads_its_references_and_table_once(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tests import _trait_fixtures as fx
     from tests.test_physical_scale_assessment import (
         _author_tolerance,
@@ -324,8 +352,8 @@ def test_a_physical_scale_assessment_reads_its_references_and_table_once(
 
 
 def test_a_reserved_regions_assessment_reads_its_mosaic_document_once(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tests import _trait_fixtures as fx
     from tests.test_block_calibration import _assess, _attested
 
@@ -385,14 +413,16 @@ def _published_frames(root: Path) -> list[Path]:
     return frames
 
 
-def _counting_scans(monkeypatch) -> Counter:
+def _counting_scans(monkeypatch: pytest.MonkeyPatch) -> Counter:
     """Count every scan of an image directory for its logical images, keyed by directory."""
     from tcip_mcp.pipelines import image_utils
 
     scans: Counter = Counter()
     real_scan = image_utils._scan_identities
 
-    def counted_scan(directory):
+    def counted_scan(
+        directory: Path,
+    ) -> dict[str, list[tuple[Path, BandGroupRef | None]]]:
         scans[str(directory)] += 1
         return real_scan(directory)
 
@@ -400,14 +430,16 @@ def _counting_scans(monkeypatch) -> Counter:
     return scans
 
 
-def _counting_resolutions(monkeypatch) -> Counter:
+def _counting_resolutions(monkeypatch: pytest.MonkeyPatch) -> Counter:
     """Count every path resolved to its logical image, keyed by path."""
     from tcip_mcp.pipelines import image_utils
 
     resolutions: Counter = Counter()
     real_resolve = image_utils.resolve_image_paths
 
-    def counted_resolve(paths):
+    def counted_resolve(
+        paths: Iterable[str | Path],
+    ) -> list[Path | BandGroupRef]:
         paths = list(paths)
         resolutions.update(str(Path(p)) for p in paths)
         return real_resolve(paths)
@@ -416,7 +448,9 @@ def _counting_resolutions(monkeypatch) -> Counter:
     return resolutions
 
 
-def test_an_assessment_resolves_each_image_once(tmp_path: Path, monkeypatch):
+def test_an_assessment_resolves_each_image_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tests._chain_fixtures import assess, confirm_count_trait
     from tests.test_assessment_guards import _trained
 
@@ -439,8 +473,8 @@ def test_an_assessment_resolves_each_image_once(tmp_path: Path, monkeypatch):
 
 
 def test_a_selection_bound_run_resolves_each_image_once(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tests._producer_fixtures import train_val
     from tests.test_selection_binding import (
         _draw,
@@ -465,8 +499,8 @@ def test_a_selection_bound_run_resolves_each_image_once(
 
 
 def test_a_comparison_render_reads_its_documents_and_bucket_once(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from PIL import Image
 
     from tcip_mcp.tools.vision_tools import visualize
@@ -477,7 +511,11 @@ def test_a_comparison_render_reads_its_documents_and_bucket_once(
     opened: list = []
     real_open = Image.open
 
-    def counted_open(fp, *args, **kwargs):
+    def counted_open(
+        fp: StrOrBytesPath | IO[bytes],
+        *args: str | list[str] | tuple[str, ...] | None,
+        **kwargs: str | list[str] | tuple[str, ...] | None,
+    ) -> ImageFile:
         if Path(str(fp)) == frame:
             opened.append(fp)
         return real_open(fp, *args, **kwargs)
@@ -502,8 +540,8 @@ def test_a_comparison_render_reads_its_documents_and_bucket_once(
 
 
 def test_a_folder_scoring_resolves_its_images_once(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tcip_mcp.tools.annotation_tools import score_predictions
 
     frames = _published_frames(tmp_path)
@@ -519,8 +557,8 @@ def test_a_folder_scoring_resolves_its_images_once(
 
 
 def test_a_failure_render_reads_each_document_and_its_bucket_once(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tcip_mcp.tools.vision_tools import render_failure_cases
 
     frames = _published_frames(tmp_path)

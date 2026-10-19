@@ -15,6 +15,7 @@ import pytest
 import tcip_store as ts
 from tcip_mcp.model_registry import (
     ModelRegistry,
+    RegistryIndex,
     read_registry_index,
     registry_index_key,
 )
@@ -29,13 +30,15 @@ def _checkpoint(path: Path, content: str) -> None:
     produced_checkpoint(path, content)
 
 
-def test_absent_registry_answers_empty_for_a_fresh_project(tmp_path: Path):
+def test_absent_registry_answers_empty_for_a_fresh_project(
+    tmp_path: Path,
+) -> None:
     assert read_registry_index(tmp_path) == []
 
 
 def test_archive_project_carries_a_registered_checkpoint_outside_models(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.tools.project_tools import ZipBundle, archive_project
     from tests._web_fixtures import new_project
 
@@ -77,12 +80,16 @@ def test_archive_project_carries_a_registered_checkpoint_outside_models(
         "//fileserver/share/model.pt",
     ],
 )
-def test_is_external_form_recognizes_every_absolute_spelling(spelling: str):
+def test_is_external_form_recognizes_every_absolute_spelling(
+    spelling: str,
+) -> None:
     assert is_external_form(spelling) is True
 
 
 @pytest.mark.parametrize("spelling", [".", "models/m.pt", "a/b/c.pt"])
-def test_is_external_form_rejects_every_relative_spelling(spelling: str):
+def test_is_external_form_rejects_every_relative_spelling(
+    spelling: str,
+) -> None:
     assert is_external_form(spelling) is False
 
 
@@ -91,7 +98,7 @@ def test_is_external_form_rejects_every_relative_spelling(spelling: str):
 
 def test_dataset_and_checkpoint_spellers_agree_on_the_same_geometry(
     tmp_path: Path,
-):
+) -> None:
     """The dataset and checkpoint registries spell the same geometry the same way.
 
     A checkpoint and a dataset both under the project root are recorded relative by their own
@@ -105,28 +112,30 @@ def test_dataset_and_checkpoint_spellers_agree_on_the_same_geometry(
     _checkpoint(project / ".tcip" / "models" / "m.pt", "weights")
 
     reg = ModelRegistry(str(project))
-    entry = reg.register_model("m", str(project / ".tcip" / "models" / "m.pt"))
+    entry = reg.register_model(
+        "m", str(project / ".tcip" / "models" / "m.pt")
+    ).entry
     assert "error" not in register_dataset(
         project, str(nested_dataset), "chestnut"
     )
-    stored_ckpt = read_registry_index(project)[0]["checkpoint_path"]
+    stored_ckpt = read_registry_index(project)[0].checkpoint_path
     (dataset_entry,) = read_datasets(project)
 
     assert not is_external_form(stored_ckpt)
-    assert not is_external_form(dataset_entry["path"])
-    assert Path(entry["checkpoint_path"]).is_absolute()
+    assert not is_external_form(dataset_entry.path)
+    assert Path(entry.checkpoint_path).is_absolute()
 
     outside = tmp_path / "elsewhere"
     _checkpoint(outside / "m2.pt", "other weights")
     reg.register_model("m2", str(outside / "m2.pt"))
     assert "error" not in register_dataset(project, str(outside), "chestnut")
-    stored_outside = read_registry_index(project)[1]["checkpoint_path"]
+    stored_outside = read_registry_index(project)[1].checkpoint_path
     outside_entry = next(
-        e for e in read_datasets(project) if e["id"] != dataset_entry["id"]
+        e for e in read_datasets(project) if e.id != dataset_entry.id
     )
 
     assert is_external_form(stored_outside)
-    assert is_external_form(outside_entry["path"])
+    assert is_external_form(outside_entry.path)
 
 
 # ── response surfaces: resolved absolute, including a relative-root process case ───────────
@@ -140,18 +149,20 @@ def _register_internal_checkpoint(project: Path) -> tuple[ModelRegistry, str]:
     return reg, str(ckpt)
 
 
-def test_model_registry_listing_answers_resolved_absolute(tmp_path: Path):
+def test_model_registry_listing_answers_resolved_absolute(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "proj"
     _, ckpt = _register_internal_checkpoint(project)
 
-    listed = ModelRegistry(str(project)).list_models()[0]["checkpoint_path"]
+    listed = ModelRegistry(str(project)).list_models()[0].entry.checkpoint_path
 
     assert Path(listed) == Path(ckpt).resolve()
 
 
 def test_rank_registered_models_listing_view_answers_resolved_absolute(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.tools.model_tools import rank_registered_models
 
     project = tmp_path / "proj"
@@ -162,7 +173,9 @@ def test_rank_registered_models_listing_view_answers_resolved_absolute(
     assert Path(result["models"][0]["checkpoint_path"]) == Path(ckpt).resolve()
 
 
-def test_rank_registered_models_tool_answers_resolved_absolute(tmp_path: Path):
+def test_rank_registered_models_tool_answers_resolved_absolute(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.model_tools import rank_registered_models
 
     project = tmp_path / "proj"
@@ -183,19 +196,21 @@ def test_rank_registered_models_tool_answers_resolved_absolute(tmp_path: Path):
     assert Path(result["checkpoint_path"]) == ckpt.resolve()
 
 
-def test_explicit_register_model_return_is_resolved_absolute(tmp_path: Path):
+def test_explicit_register_model_return_is_resolved_absolute(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "proj"
     ckpt = project / ".tcip" / "models" / "m.pt"
     _checkpoint(ckpt, "weights")
 
-    entry = ModelRegistry(str(project)).register_model("m", str(ckpt))
+    entry = ModelRegistry(str(project)).register_model("m", str(ckpt)).entry
 
-    assert Path(entry["checkpoint_path"]) == ckpt.resolve()
+    assert Path(entry.checkpoint_path) == ckpt.resolve()
 
 
 def test_a_completed_runs_registry_entry_answers_its_checkpoint_resolved_absolute(
     tmp_path: Path,
-):
+) -> None:
     """A completed run's registry entry answers its checkpoint resolved absolute.
 
     A run's final status stores its checkpoint relative to the project; the registry's
@@ -210,14 +225,14 @@ def test_a_completed_runs_registry_entry_answers_its_checkpoint_resolved_absolut
     finished_run(project, experiment_id="exp1")
 
     (entry,) = [
-        m
+        m.entry
         for m in ModelRegistry(str(project)).list_models()
-        if m["name"] == "exp1"
+        if m.entry.name == "exp1"
     ]
 
-    assert Path(entry["checkpoint_path"]).is_absolute()
+    assert Path(entry.checkpoint_path).is_absolute()
     assert (
-        Path(entry["checkpoint_path"]).resolve()
+        Path(entry.checkpoint_path).resolve()
         == (
             experiment_dir("exp1", project=project) / "model_final.pt"
         ).resolve()
@@ -232,7 +247,7 @@ def test_a_completed_runs_registry_entry_answers_its_checkpoint_resolved_absolut
 )
 def test_resolved_registry_path_refuses_a_traversal_in_either_grammar(
     tmp_path: Path, stored: str
-):
+) -> None:
     from tcip_mcp.registry_paths import (
         RegistryPathTraversalError,
         resolved_registry_path,
@@ -244,7 +259,7 @@ def test_resolved_registry_path_refuses_a_traversal_in_either_grammar(
 
 def test_resolved_registry_path_admits_a_legitimate_relative_value(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.registry_paths import resolved_registry_path, stored_path
 
     target = (tmp_path / ".tcip" / "models" / "m.pt").resolve()
@@ -256,7 +271,7 @@ def test_resolved_registry_path_admits_a_legitimate_relative_value(
 # ── resolved_registry_path's empty-value refusal, and its admits-valid-work partner ────────
 
 
-def test_resolved_registry_path_refuses_an_empty_value(tmp_path: Path):
+def test_resolved_registry_path_refuses_an_empty_value(tmp_path: Path) -> None:
     from tcip_mcp.registry_paths import (
         RegistryPathEmptyError,
         resolved_registry_path,
@@ -266,7 +281,9 @@ def test_resolved_registry_path_refuses_an_empty_value(tmp_path: Path):
         resolved_registry_path(tmp_path, "")
 
 
-def test_resolved_registry_path_admits_a_non_empty_value(tmp_path: Path):
+def test_resolved_registry_path_admits_a_non_empty_value(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.registry_paths import resolved_registry_path, stored_path
 
     target = (tmp_path / "m.pt").resolve()
@@ -279,7 +296,9 @@ def test_resolved_registry_path_admits_a_non_empty_value(tmp_path: Path):
 # ── checkpoint_registry_path_for's root gate, and its admits-valid-work partner ────────────
 
 
-def test_checkpoint_registry_path_for_refuses_a_missing_root(tmp_path: Path):
+def test_checkpoint_registry_path_for_refuses_a_missing_root(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.registry_paths import (
         CheckpointRegistryRootUnusableError,
         checkpoint_registry_path_for,
@@ -295,7 +314,7 @@ def test_checkpoint_registry_path_for_refuses_a_missing_root(tmp_path: Path):
 
 def test_checkpoint_registry_path_for_refuses_a_file_shaped_root(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.registry_paths import (
         CheckpointRegistryRootUnusableError,
         checkpoint_registry_path_for,
@@ -312,7 +331,7 @@ def test_checkpoint_registry_path_for_refuses_a_file_shaped_root(
 
 def test_checkpoint_registry_path_for_admits_an_existing_directory_root(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.registry_paths import checkpoint_registry_path_for
 
     ckpt_dir = tmp_path / ".tcip" / "models"
@@ -323,40 +342,56 @@ def test_checkpoint_registry_path_for_admits_an_existing_directory_root(
     assert checkpoint_registry_path_for(ckpt, tmp_path) == ".tcip/models/m.pt"
 
 
-# ── the malformed-entry response row: checkpoint_path_error, never hidden behind a raise ───
-
-
-def test_list_models_carries_a_malformed_entrys_error_rather_than_dropping_it(
+def test_list_models_refuses_a_stored_entry_whose_path_climbs_out_of_the_project(
     tmp_path: Path,
-):
+) -> None:
+    """A stored entry whose checkpoint path carries ``..`` refuses the listing that reads it."""
+    from tcip_mcp.registry_paths import RegistryPathTraversalError
+
     project = tmp_path / "proj"
-    project.mkdir()
+    reg, _ckpt = _register_internal_checkpoint(project)
+    (entry,) = read_registry_index(project)
     ts.replace(
         registry_index_key(project),
-        {
-            "entries": [
-                {
-                    "name": "malformed",
-                    "checkpoint_path": "../outside/evil.pt",
-                    "sha256": "a" * 64,
-                    "file_size_bytes": None,
-                    "registered_at": "2026-01-01T00:00:00+00:00",
-                    "config": {},
-                    "metrics": {},
-                    "metrics_source": None,
-                    "tags": [],
-                    "experiment_id": None,
-                },
+        RegistryIndex(
+            entries=[
+                entry.model_copy(
+                    update={"checkpoint_path": "../outside/evil.pt"}
+                )
             ]
-        },
-        expect=ts.Version.ABSENT,
+        ).model_dump(mode="json"),
     )
 
-    listed = ModelRegistry(str(project)).list_models()
+    with pytest.raises(RegistryPathTraversalError):
+        reg.list_models()
 
-    assert len(listed) == 1
-    assert listed[0]["checkpoint_path"] == "../outside/evil.pt"
-    assert "checkpoint_path_error" in listed[0]
+
+@pytest.mark.parametrize(
+    "reader", ["checkpoint_files", "registry_checkpoint_disclosures"]
+)
+def test_the_archive_readers_refuse_a_stored_entry_whose_path_climbs_out_of_the_project(
+    tmp_path: Path, reader: str
+) -> None:
+    """A stored entry whose checkpoint path carries ``..`` refuses each archive reader of it."""
+    import tcip_mcp.model_registry as model_registry
+    from tcip_mcp.registry_paths import RegistryPathTraversalError
+
+    project = tmp_path / "proj"
+    _register_internal_checkpoint(project)
+    (entry,) = read_registry_index(project)
+    ts.replace(
+        registry_index_key(project),
+        RegistryIndex(
+            entries=[
+                entry.model_copy(
+                    update={"checkpoint_path": "../outside/evil.pt"}
+                )
+            ]
+        ).model_dump(mode="json"),
+    )
+
+    with pytest.raises(RegistryPathTraversalError):
+        getattr(model_registry, reader)(project)
 
 
 # ── the symlinked-checkpoint spelling rule: stores the resolved location, not the symlink ──
@@ -364,7 +399,7 @@ def test_list_models_carries_a_malformed_entrys_error_rather_than_dropping_it(
 
 def test_a_symlink_to_a_checkpoint_outside_root_stores_the_resolved_external_location(
     tmp_path: Path,
-):
+) -> None:
     """A symlink to a checkpoint outside the root stores the resolved external location.
 
     A symlink under the project root pointing at a file outside it stores that file's resolved
@@ -386,14 +421,14 @@ def test_a_symlink_to_a_checkpoint_outside_root_stores_the_resolved_external_loc
     reg = ModelRegistry(str(project))
     reg.register_model("m", str(link))
 
-    stored = read_registry_index(project)[0]["checkpoint_path"]
+    stored = read_registry_index(project)[0].checkpoint_path
     assert stored == str(real.resolve())
     assert is_external_form(stored)
 
 
 def test_a_symlink_to_a_checkpoint_under_root_stores_the_resolved_internal_location(
     tmp_path: Path,
-):
+) -> None:
     """A symlink to a checkpoint under the root stores the target's relative spelling.
 
     A symlink whose resolved target sits under the project root stores that target's own
@@ -415,14 +450,14 @@ def test_a_symlink_to_a_checkpoint_under_root_stores_the_resolved_internal_locat
     reg = ModelRegistry(str(project))
     reg.register_model("m", str(link))
 
-    stored = read_registry_index(project)[0]["checkpoint_path"]
+    stored = read_registry_index(project)[0].checkpoint_path
     assert stored == "weights_home/m.pt"
     assert not is_external_form(stored)
 
 
 def test_a_relative_root_still_answers_an_absolute_response(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``resolved_registry_path`` over a relative root answers the absolute path under the cwd."""
     from tcip_mcp.registry_paths import resolved_registry_path
 

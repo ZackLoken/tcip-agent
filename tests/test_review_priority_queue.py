@@ -8,8 +8,14 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+
+    from tcip_mcp.pipelines.active_learning import ScorerSpec
 
 QUEUE = {
     "scorer": {"name": "uncertainty"},
@@ -20,14 +26,16 @@ QUEUE = {
 
 
 @pytest.fixture(autouse=True)
-def _no_queue_jobs():
+def _no_queue_jobs() -> None:
     """Clear the queue jobs the backend's annotate routes hold."""
     import tcip_web.routes.annotate as annotate_mod
 
     annotate_mod._pq_registry.jobs.clear()
 
 
-def _wait_for_terminal(client, job_id: str, timeout: float = 5.0) -> dict:
+def _wait_for_terminal(
+    client: TestClient, job_id: str, timeout: float = 5.0
+) -> dict:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         body = client.get(f"/api/annotate/queue/{job_id}").json()
@@ -37,7 +45,9 @@ def _wait_for_terminal(client, job_id: str, timeout: float = 5.0) -> dict:
     raise AssertionError(f"job {job_id} never reached a terminal status")
 
 
-def test_launch_404s_on_missing_checkpoint(opened_client, tmp_path: Path):
+def test_launch_404s_on_missing_checkpoint(
+    opened_client: TestClient, tmp_path: Path
+) -> None:
     images = tmp_path / "images"
     images.mkdir()
     resp = opened_client.post(
@@ -53,8 +63,8 @@ def test_launch_404s_on_missing_checkpoint(opened_client, tmp_path: Path):
 
 
 def test_launch_refuses_a_queue_stating_no_scorer_budget_or_reason(
-    opened_client, tmp_path: Path
-):
+    opened_client: TestClient, tmp_path: Path
+) -> None:
     images = tmp_path / "images"
     images.mkdir()
     for missing in QUEUE:
@@ -70,7 +80,9 @@ def test_launch_refuses_a_queue_stating_no_scorer_budget_or_reason(
         assert missing in resp.text
 
 
-def test_launch_404s_on_missing_images_dir(opened_client, tmp_path: Path):
+def test_launch_404s_on_missing_images_dir(
+    opened_client: TestClient, tmp_path: Path
+) -> None:
     ckpt = tmp_path / "model.pt"
     ckpt.write_bytes(b"not a real checkpoint")
     resp = opened_client.post(
@@ -85,17 +97,17 @@ def test_launch_404s_on_missing_images_dir(opened_client, tmp_path: Path):
     assert "images_dir not found" in resp.json()["detail"]
 
 
-def test_unknown_job_id_404s(opened_client):
+def test_unknown_job_id_404s(opened_client: TestClient) -> None:
     resp = opened_client.get("/api/annotate/queue/does-not-exist")
     assert resp.status_code == 404
 
 
 def test_job_completes_and_carries_the_tool_s_own_queue(
-    opened_client,
+    opened_client: TestClient,
     tmp_path: Path,
     opened_project: Path,
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     ckpt = tmp_path / "model.pt"
     ckpt.write_bytes(b"not a real checkpoint")
     images = tmp_path / "images"
@@ -104,8 +116,11 @@ def test_job_completes_and_carries_the_tool_s_own_queue(
     calls: list[dict] = []
 
     def fake_ranked_review_queue(
-        project, checkpoint_path, images_dir, **kwargs
-    ):
+        project: Path,
+        checkpoint_path: Path,
+        images_dir: Path,
+        **kwargs: ScorerSpec | int | str | None,
+    ) -> dict:
         calls.append(
             {
                 "project": project,
@@ -137,7 +152,7 @@ def test_job_completes_and_carries_the_tool_s_own_queue(
     real_located = registry_paths.located
     located_paths: list = []
 
-    def located(path, project):
+    def located(path: str | Path, project: str | Path | None) -> Path:
         located_paths.append(path)
         return real_located(path, project)
 
@@ -192,8 +207,10 @@ def test_job_completes_and_carries_the_tool_s_own_queue(
 
 
 def test_job_fails_honestly_on_the_tool_s_own_refusal(
-    opened_client, tmp_path: Path, monkeypatch
-):
+    opened_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A queue job reports the operation's own refusal as its ``failed`` status.
 
     The operation's soft ``{"error": ...}`` (an unresolvable scorer name, say) surfaces as the
@@ -205,8 +222,11 @@ def test_job_fails_honestly_on_the_tool_s_own_refusal(
     images.mkdir()
 
     def fake_ranked_review_queue(
-        project, checkpoint_path, images_dir, **kwargs
-    ):
+        project: Path,
+        checkpoint_path: Path,
+        images_dir: Path,
+        **kwargs: ScorerSpec | int | str | None,
+    ) -> dict:
         return {"error": "no scorer registered as 'nonsense'"}
 
     import tcip_mcp.tools.feedback_tools as feedback_tools_mod

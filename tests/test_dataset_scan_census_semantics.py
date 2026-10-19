@@ -47,7 +47,7 @@ def _lopsided_dataset(root: Path) -> Path:
 
 def test_scan_reports_four_distinct_counts_over_a_lopsided_dataset(
     tmp_path: Path,
-):
+) -> None:
     """The scan reports four distinct counts over a lopsided dataset.
 
     image_count, labels_count, paired_images and unlabeled_images each measure their own
@@ -74,7 +74,9 @@ def test_scan_reports_four_distinct_counts_over_a_lopsided_dataset(
     ]
 
 
-def test_a_buckets_record_is_not_counted_as_a_prediction(tmp_path: Path):
+def test_a_buckets_record_is_not_counted_as_a_prediction(
+    tmp_path: Path,
+) -> None:
     """A bucket's record is not counted as a prediction.
 
     A bucket published over two images, beside a document no bucket names, counts two
@@ -115,7 +117,7 @@ def test_a_buckets_record_is_not_counted_as_a_prediction(tmp_path: Path):
     assert result["predictions_count"] == 2
 
 
-def test_scan_writes_nothing_into_the_dataset(tmp_path: Path):
+def test_scan_writes_nothing_into_the_dataset(tmp_path: Path) -> None:
     """The scan leaves the dataset's file names, sizes and label versions unchanged.
 
     The files outside the store keep their names and sizes, and each label record keeps its

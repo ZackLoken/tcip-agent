@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, NoReturn
 from unittest import mock
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from ray.tune.search import SearchAlgorithm
+
+    from tcip_mcp.pipelines.data.augmentations import Compose
 
 pytest.importorskip("torch")
 import torch  # noqa: E402
@@ -18,7 +27,6 @@ from tcip_mcp.pipelines.components.losses import (  # noqa: E402
 )
 from tcip_mcp.pipelines.data.augmentations import (  # noqa: E402
     RandomRotation,
-    ToTensor,
     build_augmentation,
 )
 from tests._training_values import (  # noqa: E402
@@ -32,7 +40,7 @@ from tests._training_values import (  # noqa: E402
 # --------------------------------------------------------------------------
 
 
-def test_compute_class_weights_balanced():
+def test_compute_class_weights_balanced() -> None:
     w = compute_class_weights({0: 90, 1: 10})
     assert len(w) == 2
     assert w[1] > w[0]  # rarer class up-weighted
@@ -42,8 +50,8 @@ def test_compute_class_weights_balanced():
 
 
 def test_class_weights_are_sized_by_the_one_class_count_derivation(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``compute_class_weights`` is sized by ``num_classes_from_distribution``.
 
     Weights over ids 0 and 4 ask the derivation once with that distribution and hold five
@@ -54,7 +62,7 @@ def test_class_weights_are_sized_by_the_one_class_count_derivation(
 
     asked: list[dict] = []
 
-    def _record(distribution):
+    def _record(distribution: dict[int, int]) -> int:
         asked.append(dict(distribution))
         return derivations.num_classes_from_distribution(distribution)
 
@@ -71,7 +79,7 @@ def test_class_weights_are_sized_by_the_one_class_count_derivation(
     )  # an unseen class is weighted, not dropped
 
 
-def test_focal_loss_scalar_alpha_unchanged():
+def test_focal_loss_scalar_alpha_unchanged() -> None:
     fl = FocalLoss(alpha=0.25, gamma=2.0)
     preds = torch.randn(8, 5, requires_grad=True)
     targets = torch.randint(0, 5, (8,))
@@ -80,7 +88,7 @@ def test_focal_loss_scalar_alpha_unchanged():
     loss.backward()
 
 
-def test_focal_loss_class_weights():
+def test_focal_loss_class_weights() -> None:
     torch.manual_seed(0)
     w = compute_class_weights({0: 90, 1: 10, 2: 50})
     fl = FocalLoss(weight=w)
@@ -93,20 +101,20 @@ def test_focal_loss_class_weights():
     assert not torch.allclose(fl(preds, targets), FocalLoss()(preds, targets))
 
 
-def test_weighted_ce_built():
+def test_weighted_ce_built() -> None:
     loss = build_loss(
         "weighted_ce", class_distribution={0: 90, 1: 10}, num_classes=2
     )
     assert loss.ce.weight is not None  # class weight injected
 
 
-def test_class_distribution_on_an_unweightable_loss_refuses():
+def test_class_distribution_on_an_unweightable_loss_refuses() -> None:
     """A class distribution handed to a loss that cannot weight refuses by name."""
     with pytest.raises(ValueError, match="not weightable"):
         build_loss("dice", class_distribution={0: 90, 1: 10}, num_classes=2)
 
 
-def test_combined_loss_routes_each_kwarg_to_the_terms_that_accept_it():
+def test_combined_loss_routes_each_kwarg_to_the_terms_that_accept_it() -> None:
     """A combined loss hands ``label_smoothing`` to cross entropy and ``smooth`` to dice."""
     loss = build_loss("cross_entropy+dice", label_smoothing=0.1, smooth=2.0)
     ce, dice = loss.losses
@@ -114,7 +122,7 @@ def test_combined_loss_routes_each_kwarg_to_the_terms_that_accept_it():
     assert dice.smooth == 2.0
 
 
-def test_combined_loss_weights_only_the_weightable_term():
+def test_combined_loss_weights_only_the_weightable_term() -> None:
     loss = build_loss(
         "cross_entropy+dice", class_distribution={0: 90, 1: 10}, num_classes=2
     )
@@ -124,12 +132,12 @@ def test_combined_loss_weights_only_the_weightable_term():
     )  # dice never sees class_distribution, so it builds fine
 
 
-def test_combined_loss_refuses_a_kwarg_no_term_accepts():
+def test_combined_loss_refuses_a_kwarg_no_term_accepts() -> None:
     with pytest.raises(ValueError, match="not accepted by any term"):
         build_loss("cross_entropy+dice", nonexistent_param=1)
 
 
-def test_classification_head_loss_optional():
+def test_classification_head_loss_optional() -> None:
     from tcip_mcp.pipelines.components.heads import ClassificationHead
 
     feats = torch.randn(4, 512)
@@ -147,7 +155,7 @@ def test_classification_head_loss_optional():
     )
 
 
-def test_regression_head_loss_optional():
+def test_regression_head_loss_optional() -> None:
     from tcip_mcp.pipelines.components.heads import RegressionHead
 
     feats = torch.randn(4, 256)
@@ -165,7 +173,7 @@ def test_regression_head_loss_optional():
     )
 
 
-def test_semantic_seg_head_weighted_ce():
+def test_semantic_seg_head_weighted_ce() -> None:
     from tcip_mcp.pipelines.components.heads import SemanticSegHead
 
     h = SemanticSegHead(
@@ -179,7 +187,7 @@ def test_semantic_seg_head_weighted_ce():
     )
 
 
-def test_semantic_seg_head_advertises_no_loss_choice():
+def test_semantic_seg_head_advertises_no_loss_choice() -> None:
     """``SemanticSegHead`` takes no ``loss`` argument and refuses one by name."""
     import pytest as _pytest
 
@@ -206,28 +214,31 @@ EVERY_TRANSFORM: dict[str, dict] = {
 value its transform takes."""
 
 
-def _built(config):
+def _built(config: dict | str) -> Compose:
     """Validate ``config`` as an ``augmentation`` block and return the chain it builds."""
     from tcip_mcp.pipelines.schemas import AugmentationSpec
 
     return build_augmentation(AugmentationSpec.model_validate(config))
 
 
-def test_build_augmentation_builds_each_transform_at_the_values_its_entry_states():
+def test_build_augmentation_builds_each_transform_at_the_values_its_entry_states() -> (
+    None
+):
     """``build_augmentation`` builds each transform at the values its entry states.
 
     Each entry of ``EVERY_TRANSFORM`` builds its transform, in the config's order, holding the
-    values the entry states, and the chain ends in ToTensor.
+    values the entry states.
     """
     chain = _built(augmentation(**EVERY_TRANSFORM)).transforms
 
-    assert [t.model_dump(mode="json") for t in chain[:-1]] == list(
+    assert [t.model_dump(mode="json") for t in chain] == list(
         EVERY_TRANSFORM.values()
     )
-    assert isinstance(chain[-1], ToTensor)
 
 
-def test_every_invariance_a_registered_transform_relies_on_is_a_field_of_the_record():
+def test_every_invariance_a_registered_transform_relies_on_is_a_field_of_the_record() -> (
+    None
+):
     """A record holding no capture invariance draws as many issues as it has fields, naming each.
 
     Under a record stating each invariance false and the rotation at 0 degrees,
@@ -284,8 +295,8 @@ def test_every_invariance_a_registered_transform_relies_on_is_a_field_of_the_rec
     ],
 )
 def test_build_augmentation_refuses_an_entry_not_stating_its_values_by_name(
-    config, named
-):
+    config: dict | str, named: str
+) -> None:
     """An augmentation entry not stating its values refuses by name.
 
     A shorthand (True, a number, a list), a preset name, a value the transform does not take
@@ -296,7 +307,7 @@ def test_build_augmentation_refuses_an_entry_not_stating_its_values_by_name(
         _built(config)
 
 
-def test_random_rotation_detection_keeps_boxes_valid():
+def test_random_rotation_detection_keeps_boxes_valid() -> None:
     torch.manual_seed(0)
     img = Image.new("RGB", (64, 64), (120, 120, 120))
     target = {
@@ -314,7 +325,7 @@ def test_random_rotation_detection_keeps_boxes_valid():
     assert len(t["labels"]) == len(boxes)
 
 
-def test_random_rotation_classification_passthrough():
+def test_random_rotation_classification_passthrough() -> None:
     img = Image.new("RGB", (64, 64), (100, 100, 100))
     out, t = RandomRotation(degrees=90, p=1.0)(img, {"labels": 3})
     assert out.size == (64, 64)
@@ -350,7 +361,7 @@ def _mask_bbox(mask: torch.Tensor) -> list[float]:
     ]
 
 
-def test_horizontal_flip_flips_instance_masks_with_boxes():
+def test_horizontal_flip_flips_instance_masks_with_boxes() -> None:
     from tcip_mcp.pipelines.data.augmentations import RandomHorizontalFlip
 
     img = Image.new("RGB", (64, 64))
@@ -363,7 +374,7 @@ def test_horizontal_flip_flips_instance_masks_with_boxes():
     )
 
 
-def test_vertical_flip_flips_semantic_mask():
+def test_vertical_flip_flips_semantic_mask() -> None:
     from tcip_mcp.pipelines.data.augmentations import RandomVerticalFlip
     from tests._producer_fixtures import painted_array
 
@@ -376,7 +387,7 @@ def test_vertical_flip_flips_semantic_mask():
     assert (t["masks"][-10:, :] == 2).all()
 
 
-def test_resize_scales_masks_with_image_and_boxes():
+def test_resize_scales_masks_with_image_and_boxes() -> None:
     from tcip_mcp.pipelines.data.augmentations import Resize
 
     img = Image.new("RGB", (64, 64))
@@ -396,7 +407,7 @@ def test_resize_scales_masks_with_image_and_boxes():
     assert set(t2["masks"].unique().tolist()) == {3}
 
 
-def test_random_resized_crop_keeps_masks_aligned():
+def test_random_resized_crop_keeps_masks_aligned() -> None:
     from tcip_mcp.pipelines.data.augmentations import RandomResizedCrop
 
     # Full-scale crop is deterministic: pure 2x upscale
@@ -412,7 +423,7 @@ def test_random_resized_crop_keeps_masks_aligned():
     )
 
 
-def test_random_resized_crop_random_scale_masks_track_boxes():
+def test_random_resized_crop_random_scale_masks_track_boxes() -> None:
     import random as _random
 
     from tcip_mcp.pipelines.data.augmentations import RandomResizedCrop
@@ -432,7 +443,7 @@ def test_random_resized_crop_random_scale_masks_track_boxes():
                 assert abs(a - b) <= 3  # nearest-vs-continuous rounding
 
 
-def test_random_resized_crop_semantic_mask_follows_image():
+def test_random_resized_crop_semantic_mask_follows_image() -> None:
     from tcip_mcp.pipelines.data.augmentations import RandomResizedCrop
 
     sem = torch.full((64, 64), 5, dtype=torch.long)
@@ -442,7 +453,7 @@ def test_random_resized_crop_semantic_mask_follows_image():
     assert set(t["masks"].unique().tolist()) == {5}
 
 
-def test_random_rotation_rotates_semantic_mask():
+def test_random_rotation_rotates_semantic_mask() -> None:
     import random as _random
 
     from tests._producer_fixtures import painted_array
@@ -468,7 +479,7 @@ def test_random_rotation_rotates_semantic_mask():
 # --------------------------------------------------------------------------
 
 
-def test_to_tune_space_maps_every_param_type():
+def test_to_tune_space_maps_every_param_type() -> None:
     pytest.importorskip("ray")
     from ray import tune
 
@@ -487,7 +498,7 @@ def test_to_tune_space_maps_every_param_type():
     assert isinstance(space["k"], tune.search.sample.Integer)
 
 
-def test_grid_mode_enumerates_discrete_axes():
+def test_grid_mode_enumerates_discrete_axes() -> None:
     pytest.importorskip("ray")
     from tcip_mcp.pipelines.training.hpo import _to_tune_space
 
@@ -499,8 +510,8 @@ def test_grid_mode_enumerates_discrete_axes():
 
 
 def test_tune_search_normalizes_search_alg_case_before_deciding_grid(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """tune_search builds a grid space for ``search_alg='Grid'``.
 
     With ``_to_tune_space`` stubbed to record its grid keyword and stop the sweep,
@@ -514,7 +525,11 @@ def test_tune_search_normalizes_search_alg_case_before_deciding_grid(
 
     captured: dict = {}
 
-    def fake_to_tune_space(param_space, grid=False, grid_keys=frozenset()):
+    def fake_to_tune_space(
+        param_space: dict,
+        grid: bool = False,
+        grid_keys: frozenset[str] = frozenset(),
+    ) -> NoReturn:
         captured["grid"] = grid
         raise _StoppedAfterSpaceError
 
@@ -562,7 +577,9 @@ HYPERBAND_SCHEDULER = {
 """Sample trial scheduler blocks, each stating every setting its Ray class takes."""
 
 
-def test_build_scheduler_builds_each_scheduler_at_the_settings_its_block_states():
+def test_build_scheduler_builds_each_scheduler_at_the_settings_its_block_states() -> (
+    None
+):
     """``build_scheduler`` builds Ray's own scheduler class for each named block.
 
     ASHA and HyperBand carry their blocks' ``max_t`` of 7 and 9, median builds a
@@ -635,8 +652,8 @@ def test_build_scheduler_builds_each_scheduler_at_the_settings_its_block_states(
     ],
 )
 def test_scheduler_settings_refuses_a_setting_unstated_or_not_taken_by_name(
-    scheduler, named
-):
+    scheduler: dict, named: str
+) -> None:
     """A scheduler setting left unstated or not taken by its Ray class refuses by name.
 
     A setting its scheduler's Ray class takes and the block leaves unstated, and one the class
@@ -651,7 +668,7 @@ def test_scheduler_settings_refuses_a_setting_unstated_or_not_taken_by_name(
         scheduler_settings(scheduler)
 
 
-def _first_sampled_lr(searcher, storage_path) -> float:
+def _first_sampled_lr(searcher: SearchAlgorithm, storage_path: Path) -> float:
     """Return the ``lr`` of the first trial ``searcher`` samples from a one-axis space."""
     from ray import tune
     from ray.tune.experiment import Experiment
@@ -668,7 +685,9 @@ def _first_sampled_lr(searcher, storage_path) -> float:
     return searcher.next_trial().config["lr"]
 
 
-def test_the_native_sampler_draws_the_sweep_seed_s_points(tmp_path):
+def test_the_native_sampler_draws_the_sweep_seed_s_points(
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("ray")
     from tcip_mcp.pipelines.training.hpo import build_search_alg
 
@@ -683,7 +702,7 @@ def test_the_native_sampler_draws_the_sweep_seed_s_points(tmp_path):
     assert first != other
 
 
-def test_every_backend_searcher_retains_the_sweep_seed():
+def test_every_backend_searcher_retains_the_sweep_seed() -> None:
     """The optuna, hyperopt and bayesopt searchers each retain the sweep seed.
 
     Each real backend searcher holds the stated seed: optuna's ``_seed``, hyperopt's ``rstate``
@@ -711,7 +730,9 @@ def test_every_backend_searcher_retains_the_sweep_seed():
 
 
 @pytest.mark.parametrize("name", ["nevergrad", "ax"])
-def test_a_searcher_this_platform_cannot_seed_or_run_is_refused_by_name(name):
+def test_a_searcher_this_platform_cannot_seed_or_run_is_refused_by_name(
+    name: str,
+) -> None:
     pytest.importorskip("ray")
     from tcip_mcp.pipelines.training.hpo import build_search_alg
 
@@ -719,7 +740,7 @@ def test_a_searcher_this_platform_cannot_seed_or_run_is_refused_by_name(name):
         build_search_alg(name, seed=0)
 
 
-def test_a_blank_search_alg_refuses_naming_the_vocabulary():
+def test_a_blank_search_alg_refuses_naming_the_vocabulary() -> None:
     pytest.importorskip("ray")
     from tcip_mcp.pipelines.training.hpo import build_search_alg
 
@@ -727,7 +748,7 @@ def test_a_blank_search_alg_refuses_naming_the_vocabulary():
         build_search_alg("", seed=0)
 
 
-def test_build_search_alg_native_and_backend():
+def test_build_search_alg_native_and_backend() -> None:
     pytest.importorskip("ray")
     from ray.tune.search.basic_variant import BasicVariantGenerator
 
@@ -747,7 +768,7 @@ def test_build_search_alg_native_and_backend():
             build_search_alg("optuna", seed=0)
 
 
-def test_available_search_algs_lists_natives_and_installed_backends():
+def test_available_search_algs_lists_natives_and_installed_backends() -> None:
     """``available_search_algs`` lists the native names and the installed optuna backend."""
     pytest.importorskip("ray")
     from tcip_mcp.pipelines.training.hpo import (
@@ -762,7 +783,9 @@ def test_available_search_algs_lists_natives_and_installed_backends():
 
 
 @pytest.mark.ray_cluster
-def test_tune_search_evaluates_its_baseline_and_optimizes(tmp_path):
+def test_tune_search_evaluates_its_baseline_and_optimizes(
+    tmp_path: Path,
+) -> None:
     """A real Ray Tune sweep of six samples runs six trials, the baseline point among them.
 
     It uses a pure-math objective, each trial writing the point it was handed.
@@ -774,7 +797,7 @@ def test_tune_search_evaluates_its_baseline_and_optimizes(tmp_path):
     seen = tmp_path / "seen"
     seen.mkdir()
 
-    def obj(config, report):
+    def obj(config: dict, report: Callable[[float], None]) -> None:
         (seen / f"{uuid.uuid4().hex}.json").write_text(
             json.dumps(config["x"]), encoding="utf-8"
         )
@@ -783,7 +806,7 @@ def test_tune_search_evaluates_its_baseline_and_optimizes(tmp_path):
     from tcip_mcp.pipelines.training.hpo import tune_search
 
     tune_search(
-        obj,
+        objective_fn=obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
         sweep_dir=tmp_path / "hpo" / "sweep",
         **tune_arguments(num_samples=6, baseline_params={"x": 2.0}),
@@ -795,7 +818,9 @@ def test_tune_search_evaluates_its_baseline_and_optimizes(tmp_path):
     assert 2.0 in points  # the baseline point, the exact minimum, was trained
 
 
-def test_run_hyperparameter_search_exposes_agent_search_choices_not_pinned():
+def test_run_hyperparameter_search_exposes_agent_search_choices_not_pinned() -> (
+    None
+):
     """``run_hyperparameter_search`` requires its search settings and pins no space or pruner.
 
     run_hyperparameter_search takes the trial count, the search algorithm and the

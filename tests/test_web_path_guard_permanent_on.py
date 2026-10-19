@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 
 import tcip_store
 from tcip_mcp.audit import audit_log_key
-from tcip_mcp.tools.project_tools import upsert_dataset
+from tcip_mcp.tools.project_tools import DatasetEntry, upsert_dataset
 from tcip_web.paths import assert_path_allowed
 from tcip_web.state import store
 from tests._producer_fixtures import write_image
@@ -30,6 +30,8 @@ from tests.test_results_mapping_summary_and_audit_anchoring import (
 )
 
 if TYPE_CHECKING:
+    from typing import NoReturn
+
     from tests._chain_fixtures import Series
 
 
@@ -87,15 +89,7 @@ def test_a_dataset_registered_to_a_workspace_project_is_admitted_wherever_it_liv
     (external / "images").mkdir(parents=True)
     with pytest.raises(ValueError):
         assert_path_allowed(str(external / "images"))
-    upsert_dataset(
-        project,
-        {
-            "id": "ds-1",
-            "path": str(external),
-            "crop": "currant",
-            "fingerprint": "v1:f",
-        },
-    )
+    upsert_dataset(project, DatasetEntry(id="ds-1", path=str(external)))
     assert (
         assert_path_allowed(str(external / "images"))
         == (external / "images").resolve()
@@ -206,7 +200,7 @@ def test_a_registry_that_will_not_decode_raises_rather_than_admitting_nothing(
 
     new_project(tmp_path)
 
-    def broken(_root):
+    def broken(_root: str | Path) -> NoReturn:
         raise tcip_store.DecodeError("registry bytes are not a document")
 
     monkeypatch.setattr(project_tools, "read_datasets", broken)
@@ -392,7 +386,7 @@ def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
     assert refused.status_code == 403
     assert "does not belong to project" in refused.json()["detail"]
 
-    upsert_dataset(tmp_path, {"id": "ds-1", "path": str(copied)})
+    upsert_dataset(tmp_path, DatasetEntry(id="ds-1", path=str(copied)))
     resp = client.post("/api/results/phenology_measurement", json=relocated)
     assert resp.status_code not in (403, 409), resp.text
 
@@ -446,7 +440,9 @@ def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
         if r["tool"] == "plant_mapping_built"
     ]
     assert len(built) == 2
-    assert built[-1]["arguments"]["name"] == payload["name"]
+    arguments = built[-1]["arguments"]
+    assert isinstance(arguments, dict)
+    assert arguments["name"] == payload["name"]
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
     build = plant_mapping.load_mapping(tmp_path, payload["name"])

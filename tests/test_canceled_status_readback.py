@@ -8,11 +8,17 @@ cancellation.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.training.envelope import TrainContext
 
-def test_a_canceled_inference_job_reads_as_canceled(tmp_path, monkeypatch):
+
+def test_a_canceled_inference_job_reads_as_canceled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     pytest.importorskip("fastapi")
     monkeypatch.chdir(tmp_path)
     from PIL import Image
@@ -52,7 +58,7 @@ def test_a_canceled_inference_job_reads_as_canceled(tmp_path, monkeypatch):
         inference._registry.jobs.clear()
 
 
-def _train_stops_on_cancel(ctx):
+def _train_stops_on_cancel(ctx: TrainContext) -> None:
     """Request the run's cancellation and train nothing."""
     from tcip_mcp.experiments import request_cancel
 
@@ -60,8 +66,8 @@ def _train_stops_on_cancel(ctx):
 
 
 def test_a_canceled_training_run_derives_as_canceled_from_its_directory(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.experiments import observe
     from tests._verified_checkpoint_fixtures import (

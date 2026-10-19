@@ -6,10 +6,19 @@ lower-is-better ranking, the metrics source a registration derives, and a comple
 checkpoint metrics sourced from the checkpoint's own epoch.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def _checkpoint(tmp_path, name: str) -> str:
+    from tcip_mcp.model_registry import Listed, ModelRegistry
+
+
+def _checkpoint(tmp_path: Path, name: str) -> str:
     """Write a checkpoint file of its own under ``tmp_path`` for ``name`` and return its path."""
     pytest.importorskip("torch")
     from tests._verified_checkpoint_fixtures import produced_checkpoint
@@ -17,7 +26,9 @@ def _checkpoint(tmp_path, name: str) -> str:
     return str(produced_checkpoint(tmp_path / f"{name}.pt", name))
 
 
-def _registered(tmp_path, *entries: tuple[str, dict | None]):
+def _registered(
+    tmp_path: Path, *entries: tuple[str, dict | None]
+) -> ModelRegistry:
     """Return a registry holding one foreign entry per ``(name, metrics)``.
 
     Each entry is over a checkpoint file of its own.
@@ -32,15 +43,52 @@ def _registered(tmp_path, *entries: tuple[str, dict | None]):
     return reg
 
 
-def _named(reg, name: str) -> dict:
+def _named(reg: ModelRegistry, name: str) -> Listed:
     """Return the one entry ``reg`` lists under ``name``."""
-    (entry,) = [m for m in reg.list_models() if m["name"] == name]
-    return entry
+    (listed,) = [m for m in reg.list_models() if m.entry.name == name]
+    return listed
+
+
+def test_a_listing_answers_each_entry_flat_with_its_checkpoints_metrics_and_source(
+    tmp_path: Path,
+) -> None:
+    """A listing answers each entry's fields flat, its checkpoint's metrics and source over them.
+
+    The listing's model and the ranked answer the training route projects are each the entry's
+    fields with the facts' ``metrics`` and ``metrics_source``, one flat mapping.
+    """
+    from tcip_mcp.tools.model_tools import (
+        ranked_registered_model,
+        registered_listing,
+    )
+
+    reg = _registered(tmp_path, ("a", {"val_map50": 0.5}))
+    (listed,) = reg.list_models()
+    flat = {
+        **listed.entry.model_dump(),
+        "metrics": listed.facts.metrics,
+        "metrics_source": listed.facts.metrics_source,
+    }
+
+    assert registered_listing(tmp_path)["models"] == [flat]
+    ranked = ranked_registered_model(
+        tmp_path,
+        "val_map50",
+        higher_is_better=True,
+        include_unverified=True,
+        experiment_ids=None,
+        tag=None,
+    )
+    assert {key: ranked[key] for key in flat} == flat
+    assert (ranked["metrics_source"], ranked["metrics"]) == (
+        "caller",
+        {"val_map50": 0.5},
+    )
 
 
 def test_rank_registered_models_lists_rather_than_ranking_on_an_empty_metric(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.model_tools import rank_registered_models
 
     project = tmp_path
@@ -94,8 +142,8 @@ def test_rank_registered_models_lists_rather_than_ranking_on_an_empty_metric(
 
 
 def test_rank_registered_models_excludes_unverified_entries_by_default(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Ranking excludes unverified entries by default and ranks them with ``include_unverified``."""
     from tcip_mcp.tools.model_tools import rank_registered_models
 
@@ -116,8 +164,8 @@ def test_rank_registered_models_excludes_unverified_entries_by_default(
 
 
 def test_rank_registered_models_refusals_name_no_argument_a_breeder_would_not_pass(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The undeclared-direction and all-unverified ranking refusals name no tool parameter."""
     from tcip_mcp.tools.model_tools import rank_registered_models
 
@@ -149,7 +197,9 @@ def test_rank_registered_models_refusals_name_no_argument_a_breeder_would_not_pa
             assert parameter not in text
 
 
-def test_register_model_refuses_a_nonexistent_checkpoint(tmp_path):
+def test_register_model_refuses_a_nonexistent_checkpoint(
+    tmp_path: Path,
+) -> None:
     """``register_model`` refuses a nonexistent checkpoint and stores no entry."""
     from tcip_mcp.model_registry import ModelRegistry
 
@@ -159,7 +209,9 @@ def test_register_model_refuses_a_nonexistent_checkpoint(tmp_path):
     assert reg.list_models() == []
 
 
-def test_register_model_refuses_bytes_the_verified_reader_refuses(tmp_path):
+def test_register_model_refuses_bytes_the_verified_reader_refuses(
+    tmp_path: Path,
+) -> None:
     """``register_model`` refuses bytes the verified reader refuses.
 
     Bytes that are no checkpoint refuse with nothing stored, and a readable checkpoint
@@ -179,12 +231,12 @@ def test_register_model_refuses_bytes_the_verified_reader_refuses(tmp_path):
     assert reg.list_models() == []
 
     reg.register_model("real", _checkpoint(tmp_path, "real"))
-    assert [m["name"] for m in reg.list_models()] == ["real"]
+    assert [m.entry.name for m in reg.list_models()] == ["real"]
 
 
 def test_a_foreign_registrations_source_is_read_off_whether_it_carries_metrics(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A foreign registration's source reads ``caller`` with metrics and ``None`` without."""
     from tcip_mcp.model_registry import ModelRegistry
     from tcip_mcp.tools.model_tools import register_model
@@ -200,23 +252,21 @@ def test_a_foreign_registrations_source_is_read_off_whether_it_carries_metrics(
     )
 
     reg = ModelRegistry(str(tmp_path))
-    assert _named(reg, "a")["metrics_source"] == "caller"
-    assert _named(reg, "b")["metrics_source"] is None
+    assert _named(reg, "a").facts.metrics_source == "caller"
+    assert _named(reg, "b").facts.metrics_source is None
 
 
-def test_best_model_lower_is_better_for_loss(tmp_path):
+def test_best_model_lower_is_better_for_loss(tmp_path: Path) -> None:
     from tcip_mcp.model_registry import best_model
 
     models = _registered(
         tmp_path, ("hi", {"val_loss": 0.9}), ("lo", {"val_loss": 0.2})
     ).list_models()
 
-    assert (
-        best_model(
-            models, "val_loss", higher_is_better=False, include_unverified=True
-        )["name"]
-        == "lo"
+    best = best_model(
+        models, "val_loss", higher_is_better=False, include_unverified=True
     )
+    assert best is not None and best.entry.name == "lo"
     # A metric no model has: None, cleanly distinguishable from "no models".
     assert (
         best_model(
@@ -229,7 +279,9 @@ def test_best_model_lower_is_better_for_loss(tmp_path):
     )
 
 
-def test_best_model_excludes_an_entry_with_no_metrics_from_ranking(tmp_path):
+def test_best_model_excludes_an_entry_with_no_metrics_from_ranking(
+    tmp_path: Path,
+) -> None:
     """``best_model`` excludes an entry with no metrics from ranking.
 
     Beside an entry carrying ``val_loss``, an entry registered with no metrics raises nothing
@@ -241,18 +293,16 @@ def test_best_model_excludes_an_entry_with_no_metrics_from_ranking(tmp_path):
         tmp_path, ("empty", None), ("real", {"val_loss": 0.5})
     ).list_models()
 
-    assert (
-        best_model(
-            models, "val_loss", higher_is_better=False, include_unverified=True
-        )["name"]
-        == "real"
+    best = best_model(
+        models, "val_loss", higher_is_better=False, include_unverified=True
     )
+    assert best is not None and best.entry.name == "real"
 
 
 def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epoch(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A completed run's metrics come from its best checkpoint, not its last epoch.
 
     A run the default trainer completes names its best checkpoint, whose metrics are that
@@ -285,20 +335,20 @@ def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epo
         experiment_id="exp-best",
     )
 
-    entry = _named(ModelRegistry(str(tmp_path)), "exp-best")
-    assert entry["metrics_source"] == "trainer"
+    facts = _named(ModelRegistry(str(tmp_path)), "exp-best").facts
+    assert facts.metrics_source == "trainer"
     best = torch.load(run_dir / "model_best.pt", weights_only=False)
     (row,) = [
         r
         for r in partition_rows(read_rows(run_dir / METRICS_FILE)[0])[0]
         if r["epoch"] == best["epoch"]
     ]
-    assert entry["metrics"]["selection"] == row["selection"]
+    assert facts.metrics["selection"] == row["selection"]
 
 
 def test_a_registry_payload_that_json_cannot_hold_is_refused_at_register_model(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A registry payload JSON cannot hold is refused at ``register_model``.
 
     An infinite metric refuses naming ``metrics.val_map50``, and the registry lists nothing.
@@ -311,28 +361,28 @@ def test_a_registry_payload_that_json_cannot_hold_is_refused_at_register_model(
 
     with pytest.raises(ts.StoreError) as metrics_refused:
         reg.register_model("a", str(ckpt), metrics={"val_map50": float("inf")})
-    assert "metrics.val_map50" in str(metrics_refused.value)
+    assert "metrics.dict.val_map50" in str(metrics_refused.value)
 
     assert reg.list_models() == []
 
 
-def test_an_ordinary_registry_payload_is_still_registered(tmp_path):
+def test_an_ordinary_registry_payload_is_still_registered(
+    tmp_path: Path,
+) -> None:
     """An ordinary metrics payload registers, lists and ranks."""
     from tcip_mcp.model_registry import ModelRegistry, best_model
 
     reg = ModelRegistry(str(tmp_path))
-    entry = reg.register_model(
+    listed = reg.register_model(
         "a", _checkpoint(tmp_path, "a"), metrics={"val_map50": 0.70}
     )
 
-    assert entry["name"] == "a"
-    assert [m["name"] for m in reg.list_models()] == ["a"]
-    assert (
-        best_model(
-            reg.list_models(),
-            "val_map50",
-            higher_is_better=True,
-            include_unverified=True,
-        )["metrics"]["val_map50"]
-        == 0.70
+    assert listed.entry.name == "a"
+    assert [m.entry.name for m in reg.list_models()] == ["a"]
+    best = best_model(
+        reg.list_models(),
+        "val_map50",
+        higher_is_better=True,
+        include_unverified=True,
     )
+    assert best is not None and best.facts.metrics["val_map50"] == 0.70

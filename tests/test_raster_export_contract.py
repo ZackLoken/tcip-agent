@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -12,8 +17,8 @@ TILE = 32
 
 
 def test_the_raster_door_records_the_execution_its_prepared_pass_states(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The raster door records the execution its prepared pass states.
 
     The execution record the raster door returns and its bucket keeps each equal the one
@@ -21,7 +26,7 @@ def test_the_raster_door_records_the_execution_its_prepared_pass_states(
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.execution import Stated, prepare
+    from tcip_mcp.pipelines.execution import EXECUTION_RECORD, Stated, prepare
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS
     from tests.test_block_calibration import _build_experiment
@@ -45,12 +50,16 @@ def test_the_raster_door_records_the_execution_its_prepared_pass_states(
         load_registered_checkpoint(exp["checkpoint_path"], project=tmp_path),
         Stated(tile=True, tile_size=TILE, overlap=0.2, conf=0.0, **stated),
     ).runnable()
-    assert result["execution"] == prepared.execution.record()
+    assert result["execution"] == EXECUTION_RECORD.dump_python(
+        prepared.execution, mode="json"
+    )
     bucket = read_bucket(result["dataset_root"], result["bucket"])
-    assert bucket.execution.record() == prepared.execution.record()
+    assert bucket.execution == prepared.execution
 
 
-def test_a_raster_pass_records_the_frame_its_predictions_are_in(tmp_path):
+def test_a_raster_pass_records_the_frame_its_predictions_are_in(
+    tmp_path: Path,
+) -> None:
     """A raster pass records the frame its predictions are in.
 
     For a TIFF whose stored axes read as one frame at its own band count and another at the
@@ -94,7 +103,7 @@ def test_a_raster_pass_records_the_frame_its_predictions_are_in(tmp_path):
     )
     identity = bucket.raster_identity
     assert identity is not None
-    assert (identity["width"], identity["height"]) == (
+    assert (identity.width, identity.height) == (
         document.width,
         document.height,
     )

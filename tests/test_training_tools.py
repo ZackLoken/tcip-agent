@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -36,6 +37,39 @@ from tests._training_values import (
     tiling_block,
 )
 from tests._web_fixtures import INVARIANCES, new_project
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing import NoReturn, Required, TypedDict, Unpack
+
+    from torch.utils.data import DataLoader
+
+    from tcip_mcp.pipelines.data.label_queries import Admission
+    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.data.split_construction import (
+        Partition,
+        ResolvedRun,
+    )
+    from tcip_mcp.pipelines.model_build import SourceLayout, StagedSources
+    from tcip_mcp.pipelines.schemas import DataSpec, TrainConfigSchema
+    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tests.bespoke_models import BespokeDetection
+
+    class _DetectionBuilderKeywords(TypedDict, total=False):
+        """The keywords ``build_bespoke_detection`` takes."""
+
+        image_mean: Required[list[float]]
+        image_std: Required[list[float]]
+        num_classes: int
+        in_chans: int
+        detector: str
+
+    class _AdmitKeywords(TypedDict, total=False):
+        """The keywords ``label_queries.admit`` takes beside its directories."""
+
+        scope: ClassScope | None
+        members: list[str] | None
+
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
@@ -87,7 +121,9 @@ def _damaged(image: Path, stored: bytes) -> None:
 # --------------------------------------------------------------------------
 
 
-def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
+def test_preflight_config_accepts_trainer_canonical_stages(
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -117,7 +153,9 @@ def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
     assert any("['stages'] unstated" in i for i in r3["issues"]), r3["issues"]
 
 
-def test_preflight_config_refuses_a_nested_training_section_by_name(tmp_path):
+def test_preflight_config_refuses_a_nested_training_section_by_name(
+    tmp_path: Path,
+) -> None:
     """A preflight refuses a nested ``training`` section by name and admits its keys flat."""
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -136,7 +174,9 @@ def test_preflight_config_refuses_a_nested_training_section_by_name(tmp_path):
     assert preflight_config(tmp_path, flat)["valid"] is True
 
 
-def test_a_smoke_preflight_validates_its_config_once(tmp_path, monkeypatch):
+def test_a_smoke_preflight_validates_its_config_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A smoke preflight validates its config once.
 
     A smoke preflight that admits a config records one validation, of ``TrainConfigSchema``.
@@ -175,8 +215,8 @@ def test_a_smoke_preflight_validates_its_config_once(tmp_path, monkeypatch):
 
 
 def test_preflight_config_types_a_non_dict_data_section_instead_of_raising(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.training_tools import preflight_config
 
     r = preflight_config(tmp_path, {"data": "x"})
@@ -189,7 +229,9 @@ def test_preflight_config_types_a_non_dict_data_section_instead_of_raising(
 # preflight_config's overfit branch: reseed-run-restore, never gating
 
 
-def _frozen_detection_builder(**kwargs):
+def _frozen_detection_builder(
+    **kwargs: Unpack[_DetectionBuilderKeywords],
+) -> BespokeDetection:
     """Build a detector through ``build_bespoke_detection`` with its parameters frozen.
 
     The kwargs pass through to ``build_bespoke_detection``.
@@ -221,7 +263,9 @@ def _detection_smoke_cfg(builder: str, tmp_path: Path) -> dict:
     )
 
 
-def test_preflight_config_overfit_restores_rng_state(tmp_path, monkeypatch):
+def test_preflight_config_overfit_restores_rng_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A preflight's overfit check restores the random streams it reseeded.
 
     A smoke build with overfit=False and the same build with overfit=True, each run from seed
@@ -266,8 +310,8 @@ def test_preflight_config_overfit_restores_rng_state(tmp_path, monkeypatch):
 
 
 def test_preflight_config_overfit_on_all_frozen_model_reports_without_raising(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An overfit preflight on an all-frozen model reports its empty parameters without raising.
 
     check_model_contract's own gradient-presence check requires a real learnable path, so the
@@ -290,7 +334,9 @@ def test_preflight_config_overfit_on_all_frozen_model_reports_without_raising(
     assert "empty parameter list" in r["overfit_check"]["issue"]
 
 
-def test_preflight_config_refuses_a_per_stage_lr_by_name(tmp_path):
+def test_preflight_config_refuses_a_per_stage_lr_by_name(
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -308,7 +354,9 @@ def test_preflight_config_refuses_a_per_stage_lr_by_name(tmp_path):
     assert preflight_config(tmp_path, cfg)["valid"] is True
 
 
-def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
+def test_preflight_config_warns_when_most_candidates_wont_train(
+    tmp_path: Path,
+) -> None:
     """A preflight warns when most candidate images will not train.
 
     A run whose label store admits one of its four candidate images stays valid and warns that
@@ -342,7 +390,9 @@ def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
     assert any("{'absent': 3}" in w for w in r["warnings"])
 
 
-def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
+def test_preflight_config_no_coverage_warning_when_everything_trains(
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -367,8 +417,8 @@ def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
 
 
 def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A preflight over an unreadable label is invalid.
 
     Its issues carry the refusal the admission raises naming the document.
@@ -408,7 +458,7 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(
     assert any(str(raised.value) in i for i in r["issues"]), r["issues"]
 
 
-def test_preflight_admits_the_run_once(tmp_path):
+def test_preflight_admits_the_run_once(tmp_path: Path) -> None:
     """A preflight admits the run once.
 
     A valid preflight of a single tiled source with reserved shares calls the admission once.
@@ -437,7 +487,10 @@ def test_preflight_admits_the_run_once(tmp_path):
     calls = []
     real_admit = label_queries.admit
 
-    def counting_admit(*args, **kwargs):
+    def counting_admit(
+        *args: Unpack[tuple[str | Path, str | Path | None]],
+        **kwargs: Unpack[_AdmitKeywords],
+    ) -> Admission:
         calls.append(args)
         return real_admit(*args, **kwargs)
 
@@ -463,8 +516,8 @@ def test_preflight_admits_the_run_once(tmp_path):
     ],
 )
 def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(
-    tmp_path, bad_document, refusal
-):
+    tmp_path: Path, bad_document: str, refusal: str
+) -> None:
     """A preflight is invalid over a document whose annotations the admission refuses.
 
     A document whose annotations field is not a list, or holds a non-object, makes preflight
@@ -493,7 +546,9 @@ def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(
     assert any(refusal in i for i in r["issues"]), r["issues"]
 
 
-def test_preflight_config_training_source_shape_and_importability(tmp_path):
+def test_preflight_config_training_source_shape_and_importability(
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -528,7 +583,9 @@ def test_preflight_config_training_source_shape_and_importability(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
+def test_preflight_config_rejects_incoherent_selection_metric(
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -559,8 +616,8 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
 
 
 def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A non-mapping ``evaluation`` block is a named preflight issue."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -585,7 +642,9 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(
 # this module's own validation surface, never review_calibration._FAILURE_MESSAGES.
 
 
-def test_preflight_calibration_ratio_wrong_task_flags_issue(tmp_path):
+def test_preflight_calibration_ratio_wrong_task_flags_issue(
+    tmp_path: Path,
+) -> None:
     """A preflight flags a calibration_ratio on a classification run by name.
 
     The issue names calibration_ratio and the reserved strips it needs.
@@ -614,7 +673,9 @@ def test_preflight_calibration_ratio_wrong_task_flags_issue(tmp_path):
     ), r["issues"]
 
 
-def test_preflight_calibration_ratio_multi_member_flags_issue(tmp_path):
+def test_preflight_calibration_ratio_multi_member_flags_issue(
+    tmp_path: Path,
+) -> None:
     """A preflight flags a calibration_ratio over two admitted members by name.
 
     The issue names calibration_ratio and the reserved strips it needs.
@@ -645,8 +706,8 @@ def test_preflight_calibration_ratio_multi_member_flags_issue(tmp_path):
 
 
 def test_preflight_reserved_regions_infeasible_layout_refuses_under_smoke(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -677,8 +738,8 @@ def test_preflight_reserved_regions_infeasible_layout_refuses_under_smoke(
 
 
 def test_preflight_reserved_regions_report_an_unreadable_label_by_name(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The reserved-region preflight probe reports an unreadable label by name.
 
     An issue names the document and its decode failure.
@@ -709,7 +770,9 @@ def test_preflight_reserved_regions_report_an_unreadable_label_by_name(
     ]
 
 
-def test_preflight_reserved_regions_admit_a_feasible_layout(tmp_path):
+def test_preflight_reserved_regions_admit_a_feasible_layout(
+    tmp_path: Path,
+) -> None:
     """A real, feasible reserved-region config produces no spatial-split issue.
 
     The preflight runs under smoke=True.
@@ -783,8 +846,8 @@ def _built_groups(config: dict) -> list[tuple[float, float]]:
     ],
 )
 def test_the_launch_door_refuses_what_a_trainer_reads_unstated_and_the_schema_admits_it(
-    tmp_path, training_source, unstated, named
-):
+    tmp_path: Path, training_source: str | None, unstated: str, named: str
+) -> None:
     """The launch door refuses a key a trainer reads unstated, and the schema admits it.
 
     What a trainer reads is asked at the launch door, not by the schema: a detector config
@@ -834,7 +897,7 @@ def _applied(base: dict, params: dict) -> dict:
     return _apply_hpo_params(base, params)
 
 
-def _base(builder: str = BESPOKE_DETECTION, **overrides) -> dict:
+def _base(builder: str = BESPOKE_DETECTION, **overrides: object) -> dict:
     """Return a detection base config of this repository of ``builder`` over no data.
 
     It normalizes by its named weights' statistics (``_chain_fixtures.weights_statistics``),
@@ -856,7 +919,9 @@ def _base(builder: str = BESPOKE_DETECTION, **overrides) -> dict:
     )
 
 
-def test_apply_hpo_params_optimizer_axes_reach_optimizer_param_groups():
+def test_apply_hpo_params_optimizer_axes_reach_optimizer_param_groups() -> (
+    None
+):
     """Swept optimizer values reach the optimizer's param groups.
 
     They reach each group's rate and both groups' weight decay through the trainer's own
@@ -875,7 +940,7 @@ def test_apply_hpo_params_optimizer_axes_reach_optimizer_param_groups():
     assert backbone_decay == head_decay == pytest.approx(2e-4)
 
 
-def test_apply_hpo_params_preserves_base_config_stages():
+def test_apply_hpo_params_preserves_base_config_stages() -> None:
     """Sweeping a rate leaves base_config's stages unchanged."""
     custom_stages = [stage(-1), stage(2), stage(0)]
     out = _applied(
@@ -884,7 +949,7 @@ def test_apply_hpo_params_preserves_base_config_stages():
     assert out["stages"] == custom_stages
 
 
-def test_apply_hpo_params_undotted_key_reaches_top_level():
+def test_apply_hpo_params_undotted_key_reaches_top_level() -> None:
     """An undotted swept key lands at the top level of the resolved config.
 
     The resolved config holds no ``training`` section.
@@ -894,7 +959,7 @@ def test_apply_hpo_params_undotted_key_reaches_top_level():
     assert "training" not in out
 
 
-def test_apply_hpo_params_dotted_key_reaches_nested_field():
+def test_apply_hpo_params_dotted_key_reaches_nested_field() -> None:
     """A dotted param (e.g. a swept builder) reaches the nested field it names."""
     out = _applied(
         _base("old:builder"), {"model_source.builder": "new:builder"}
@@ -905,7 +970,7 @@ def test_apply_hpo_params_dotted_key_reaches_nested_field():
     )  # the rest of the mapping survives
 
 
-def test_apply_hpo_params_dotted_seed_key_reaches_the_split_config():
+def test_apply_hpo_params_dotted_seed_key_reaches_the_split_config() -> None:
     """A swept ``data.split.seed`` reaches the nested split field.
 
     split_draws's own paired grid axis reaches the nested field run_hyperparameter_search's
@@ -915,13 +980,17 @@ def test_apply_hpo_params_dotted_seed_key_reaches_the_split_config():
     assert out["data"]["split"]["seed"] == 7
 
 
-def test_apply_hpo_params_refuses_a_dotted_key_through_a_non_mapping_intermediate():
+def test_apply_hpo_params_refuses_a_dotted_key_through_a_non_mapping_intermediate() -> (
+    None
+):
     """A dotted key whose path walks through a non-mapping value is refused by name."""
     with pytest.raises(ValueError, match="model_source.builder.x"):
         _applied(_base("x:y"), {"model_source.builder.x": "y"})
 
 
-def test_preflight_points_covers_every_categorical_choice_and_both_numeric_bounds():
+def test_preflight_points_covers_every_categorical_choice_and_both_numeric_bounds() -> (
+    None
+):
     """The preflight points cover every categorical choice and both numeric bounds.
 
     Every categorical choice and both numeric bounds (low and high) are held by some point, no
@@ -957,14 +1026,14 @@ def test_preflight_points_covers_every_categorical_choice_and_both_numeric_bound
 
 
 def test_a_trials_combined_point_is_admitted_as_the_launch_door_admits_it(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A trial's combined point is admitted as the launch door admits it.
 
     A trial whose combined point is a default-trainer config with no ``stages`` ends failed
     naming why, with nothing resolved; a combination the door admits opens its trial resolved.
     """
-    from tcip_mcp.experiments import RUN_FILE, observe, read_record
+    from tcip_mcp.experiments import observe, read_run
     from tcip_mcp.tools.training_tools import open_trial
     from tests._verified_checkpoint_fixtures import opened_sweep
 
@@ -988,14 +1057,15 @@ def test_a_trials_combined_point_is_admitted_as_the_launch_door_admits_it(
         sweep, "refused", {"training_source": None, "stages": None}
     )
     final = observe(refused).final
-    assert final is not None and final["state"] == "failed"
-    assert "['stages'] unstated" in final["status_error"]
-    assert read_record(refused / RUN_FILE)["resolved"] is None
+    assert final is not None and final.state == "failed"
+    assert final.status_error is not None
+    assert "['stages'] unstated" in final.status_error
+    assert read_run(refused).resolved is None
     admitted = open_trial(
         sweep, "admitted", {"training_source": TRAIN_BESPOKE, "stages": None}
     )
     assert observe(admitted).final is None
-    assert read_record(admitted / RUN_FILE)["resolved"] is not None
+    assert read_run(admitted).resolved is not None
 
 
 # --------------------------------------------------------------------------
@@ -1005,10 +1075,10 @@ def test_a_trials_combined_point_is_admitted_as_the_launch_door_admits_it(
 
 
 class _FakeDataset:
-    def __len__(self):
+    def __len__(self) -> int:
         return 4
 
-    def __getitem__(self, i):
+    def __getitem__(self, i: int) -> int:
         return i
 
 
@@ -1029,7 +1099,7 @@ def _detection_base(project: Path) -> dict:
     )
 
 
-def _classifier_base(project: Path, **overrides) -> dict:
+def _classifier_base(project: Path, **overrides: object) -> dict:
     """Return a classification base config over :func:`_labeled`'s frames, selecting on accuracy.
 
     The model normalizes by its weights' statistics (``_chain_fixtures.weights_statistics``),
@@ -1057,7 +1127,11 @@ def _the_sweep(project: Path) -> Path:
 
 
 def _trial(
-    point: dict, report, base: dict, project: Path, name: str = "t0"
+    point: dict,
+    report: Callable[[float], None],
+    base: dict,
+    project: Path,
+    name: str = "t0",
 ) -> Path:
     """Run one HPO trial ``name`` through ``_run_hpo_trial``.
 
@@ -1082,7 +1156,7 @@ def _row(value: float, metric: str = "loss") -> dict:
     return {"selection_metric": metric, "selection": value}
 
 
-def _complete(run):
+def _complete(run: TrainRun) -> TrainRun:
     """Save a one-zero weight under ``model_final`` and mark ``run`` completed.
 
     The save goes through the run's own writer, ``TrainContext.save_checkpoint``.
@@ -1107,7 +1181,21 @@ def _sweep_outcome(project: Path) -> dict:
     return sweep.outcome
 
 
-def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
+def _patch_hpo_trial_machinery(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_train: Callable[
+        [
+            TrainRun,
+            DataLoader,
+            DataLoader | None,
+            Callable[[int, dict], None] | None,
+            Callable[[int, int, dict], None] | None,
+            str,
+        ],
+        TrainRun,
+    ],
+    captured: dict | None = None,
+) -> None:
     """Stub a trial's dataset building, and its training with ``fake_train``.
 
     ``auto_train_val`` answers one stand-in dataset on both sides with an empty partition
@@ -1121,15 +1209,26 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
 
     ds = _FakeDataset()
 
-    def fake_auto_train_val(project, task, data, transforms, plan, **_):
+    def fake_auto_train_val(
+        project: Path,
+        task: str,
+        data: DataSpec,
+        transforms: object,
+        plan: SourceLayout,
+        **_: object,
+    ) -> tuple[_FakeDataset, _FakeDataset, Partition, DataSpec]:
         if captured is not None:
             captured["transforms"] = transforms
             captured["data"] = data
         return (
             ds,
             ds,
-            sc._partition_record(
-                [], seed=None, group_by="stem", selection=None, spatial=None
+            sc.Partition(
+                seed=None,
+                group_by="stem",
+                samples=[],
+                selection=None,
+                spatial=None,
             ),
             data,
         )
@@ -1147,7 +1246,7 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
     monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
 
 
-def _spaces_searched(monkeypatch) -> list:
+def _spaces_searched(monkeypatch: pytest.MonkeyPatch) -> list:
     """Replace ``tune_search`` with a stub that records the param space of each call.
 
     The stub returns nothing; the return is the list it records into.
@@ -1156,7 +1255,7 @@ def _spaces_searched(monkeypatch) -> list:
 
     seen: list = []
 
-    def fake_search(*args, **kwargs):
+    def fake_search(*args: object, **kwargs: object) -> None:
         seen.append(
             kwargs.get("param_space", args[1] if len(args) > 1 else None)
         )
@@ -1166,21 +1265,21 @@ def _spaces_searched(monkeypatch) -> list:
 
 
 def _completed_train(
-    run,
-    train_loader,
-    val_loader,
-    epoch_callback=None,
-    batch_callback=None,
-    resume_from="",
-):
+    run: TrainRun,
+    train_loader: DataLoader,
+    val_loader: DataLoader | None,
+    epoch_callback: Callable[[int, dict], None] | None = None,
+    batch_callback: Callable[[int, int, dict], None] | None = None,
+    resume_from: str = "",
+) -> TrainRun:
     """Mark the run completed, reporting no epoch."""
     run.status = "completed"
     return run
 
 
 def test_run_hpo_trial_reports_each_epoch_and_its_result_is_the_best_of_them(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """An HPO trial reports each epoch, and its result is the best of them.
 
     Every epoch's selection value is reported as the trial logs it, and the trial's result is
@@ -1189,13 +1288,13 @@ def test_run_hpo_trial_reports_each_epoch_and_its_result_is_the_best_of_them(
     pytest.importorskip("torch")
 
     def fake_train(
-        run,
-        train_loader,
-        val_loader,
-        epoch_callback=None,
-        batch_callback=None,
-        resume_from="",
-    ):
+        run: TrainRun,
+        train_loader: DataLoader,
+        val_loader: DataLoader | None,
+        epoch_callback: Callable[[int, dict], None] | None = None,
+        batch_callback: Callable[[int, int, dict], None] | None = None,
+        resume_from: str = "",
+    ) -> TrainRun:
         for epoch, value in enumerate([50.0, 40.0, 30.0]):
             if epoch_callback:
                 epoch_callback(epoch, _row(value))
@@ -1218,8 +1317,11 @@ def test_run_hpo_trial_reports_each_epoch_and_its_result_is_the_best_of_them(
     [(1e-2, {"optimizer.head_lr": "high"}), (3e-4, {})],
 )
 def test_a_sweeps_best_at_an_end_of_its_stated_range_is_reported(
-    monkeypatch, tmp_path, head_lr, at_end
-):
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    head_lr: float,
+    at_end: dict,
+) -> None:
     """A sweep's best at an end of its stated range is reported with that end.
 
     A best whose value sits at the stated ``low`` or ``high`` of its axis is named with that
@@ -1228,13 +1330,13 @@ def test_a_sweeps_best_at_an_end_of_its_stated_range_is_reported(
     pytest.importorskip("torch")
 
     def fake_train(
-        run,
-        train_loader,
-        val_loader,
-        epoch_callback=None,
-        batch_callback=None,
-        resume_from="",
-    ):
+        run: TrainRun,
+        train_loader: DataLoader,
+        val_loader: DataLoader | None,
+        epoch_callback: Callable[[int, dict], None] | None = None,
+        batch_callback: Callable[[int, int, dict], None] | None = None,
+        resume_from: str = "",
+    ) -> TrainRun:
         if epoch_callback:
             epoch_callback(0, _row(30.0))
         return _complete(run)
@@ -1250,7 +1352,9 @@ def test_a_sweeps_best_at_an_end_of_its_stated_range_is_reported(
     assert _sweep_outcome(tmp_path)["best_at_range_end"] == at_end
 
 
-def test_run_hpo_trial_that_fails_has_no_result(monkeypatch, tmp_path):
+def test_run_hpo_trial_that_fails_has_no_result(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A crashed HPO trial ends failed and carries no result.
 
     It reports nothing, and the sweep has no best value.
@@ -1259,13 +1363,13 @@ def test_run_hpo_trial_that_fails_has_no_result(monkeypatch, tmp_path):
     from tcip_mcp.experiments import observe
 
     def fake_train(
-        run,
-        train_loader,
-        val_loader,
-        epoch_callback=None,
-        batch_callback=None,
-        resume_from="",
-    ):
+        run: TrainRun,
+        train_loader: DataLoader,
+        val_loader: DataLoader | None,
+        epoch_callback: Callable[[int, dict], None] | None = None,
+        batch_callback: Callable[[int, int, dict], None] | None = None,
+        resume_from: str = "",
+    ) -> NoReturn:
         raise RuntimeError("CUDA out of memory")
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
@@ -1282,8 +1386,8 @@ def test_run_hpo_trial_that_fails_has_no_result(monkeypatch, tmp_path):
 
 
 def test_run_hpo_trial_result_is_the_highest_value_for_a_higher_is_better_metric(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """An HPO trial's result is its highest value under a higher-is-better metric.
 
     Under accuracy, a trial reporting 0.5, 0.9 and 0.6 has 0.9 as its result.
@@ -1291,13 +1395,13 @@ def test_run_hpo_trial_result_is_the_highest_value_for_a_higher_is_better_metric
     pytest.importorskip("torch")
 
     def fake_train(
-        run,
-        train_loader,
-        val_loader,
-        epoch_callback=None,
-        batch_callback=None,
-        resume_from="",
-    ):
+        run: TrainRun,
+        train_loader: DataLoader,
+        val_loader: DataLoader | None,
+        epoch_callback: Callable[[int, dict], None] | None = None,
+        batch_callback: Callable[[int, int, dict], None] | None = None,
+        resume_from: str = "",
+    ) -> TrainRun:
         for epoch, value in enumerate([0.5, 0.9, 0.6]):
             if epoch_callback:
                 epoch_callback(epoch, _row(value, metric="accuracy"))
@@ -1316,22 +1420,22 @@ def test_run_hpo_trial_result_is_the_highest_value_for_a_higher_is_better_metric
 
 
 def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
-    monkeypatch,
-    tmp_path,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     """Beside a failed trial, a maximize sweep's best is the completed trial's params and value."""
     pytest.importorskip("torch")
 
     base = _classifier_base(tmp_path)
 
     def fake_train_ok(
-        run,
-        train_loader,
-        val_loader,
-        epoch_callback=None,
-        batch_callback=None,
-        resume_from="",
-    ):
+        run: TrainRun,
+        train_loader: DataLoader,
+        val_loader: DataLoader | None,
+        epoch_callback: Callable[[int, dict], None] | None = None,
+        batch_callback: Callable[[int, int, dict], None] | None = None,
+        resume_from: str = "",
+    ) -> TrainRun:
         if epoch_callback:
             epoch_callback(0, _row(0.7, metric="accuracy"))
         return _complete(run)
@@ -1341,13 +1445,13 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
     _trial({"optimizer.head_lr": 3e-4}, real.append, base, tmp_path, "real")
 
     def fake_train_fails(
-        run,
-        train_loader,
-        val_loader,
-        epoch_callback=None,
-        batch_callback=None,
-        resume_from="",
-    ):
+        run: TrainRun,
+        train_loader: DataLoader,
+        val_loader: DataLoader | None,
+        epoch_callback: Callable[[int, dict], None] | None = None,
+        batch_callback: Callable[[int, int, dict], None] | None = None,
+        resume_from: str = "",
+    ) -> NoReturn:
         raise RuntimeError("boom")
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train_fails)
@@ -1363,7 +1467,9 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
     )
 
 
-def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
+def test_run_hpo_trial_uses_base_augmentation_and_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """An HPO trial hands base_config's augmentation and bespoke model_source to its training.
 
     The dataset build receives built transforms, and the body receives the bespoke builder.
@@ -1373,13 +1479,13 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
     captured: dict = {}
 
     def fake_train(
-        run,
-        train_loader,
-        val_loader,
-        epoch_callback=None,
-        batch_callback=None,
-        resume_from="",
-    ):
+        run: TrainRun,
+        train_loader: DataLoader,
+        val_loader: DataLoader | None,
+        epoch_callback: Callable[[int, dict], None] | None = None,
+        batch_callback: Callable[[int, int, dict], None] | None = None,
+        resume_from: str = "",
+    ) -> TrainRun:
         captured["model_source"] = run.spec.model_source.model_dump(
             exclude_unset=True
         )
@@ -1399,9 +1505,9 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
 
 
 def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_train_val(
-    monkeypatch,
-    tmp_path,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     """A trial's swept ``data.split.seed`` reaches the data section auto_train_val is handed.
 
     The data section auto_train_val is handed carries the swept seed 7.
@@ -1419,15 +1525,15 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_trai
 
 
 def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A trial's swept ``data.split.seed`` reaches the trial's own records.
 
     The split_draws grid axis lands in the trial's launch record and in the data section it
     resolved, at the nested field auto_train_val reads it from, beside the sampled point itself.
     """
     pytest.importorskip("torch")
-    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.experiments import read_run
 
     _patch_hpo_trial_machinery(monkeypatch, _completed_train)
 
@@ -1435,16 +1541,16 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(
         {"data.split.seed": 7}, [].append, _detection_base(tmp_path), tmp_path
     )
 
-    run = read_record(trial_dir / RUN_FILE)
-    assert run["config"]["data"]["split"]["seed"] == 7
-    assert run["trial_params"] == {"data.split.seed": 7}
-    assert run["resolved"]["data"]["split"]["seed"] == 7
+    run = read_run(trial_dir)
+    assert run.spec.data.split.seed == 7
+    assert run.trial_params == {"data.split.seed": 7}
+    assert run.resolution.data.split.seed == 7
 
 
 def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spatial_path(
-    monkeypatch,
-    tmp_path,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     """A trial over a single-source spatial split records the split and tiling it resolved.
 
     The producer path: a real one-source tiled dataset through the real, unstubbed
@@ -1453,7 +1559,7 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
     """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
-    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.experiments import read_run
 
     images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
     base = training_config(
@@ -1477,30 +1583,31 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
 
     trial_dir = _trial({"data.split.seed": 3}, [].append, base, tmp_path)
 
-    resolved = read_record(trial_dir / RUN_FILE)["resolved"]
-    assert resolved["partition"]["seed"] is None
-    assert resolved["partition"]["spatial"]
-    assert "seed" not in resolved["partition"]["spatial"]
-    assert resolved["data"]["tiling"]["tile_size"] == 128
+    resolved = read_run(trial_dir).resolution
+    assert resolved.partition.seed is None
+    assert resolved.partition.spatial is not None
+    assert "seed" not in resolved.partition.spatial.model_dump()
+    assert resolved.data.tiling is not None
+    assert resolved.data.tiling.tile_size == 128
 
 
 def test_a_trials_launch_record_carries_the_seed_it_trained_under(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A trial's launch record and its body's received spec both carry the base config's seed."""
     pytest.importorskip("torch")
-    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.experiments import read_run
 
     captured: dict = {}
 
     def fake_train(
-        run,
-        train_loader,
-        val_loader,
-        epoch_callback=None,
-        batch_callback=None,
-        resume_from="",
-    ):
+        run: TrainRun,
+        train_loader: DataLoader,
+        val_loader: DataLoader | None,
+        epoch_callback: Callable[[int, dict], None] | None = None,
+        batch_callback: Callable[[int, int, dict], None] | None = None,
+        resume_from: str = "",
+    ) -> TrainRun:
         captured["seed"] = run.spec.seed
         run.status = "completed"
         return run
@@ -1509,13 +1616,13 @@ def test_a_trials_launch_record_carries_the_seed_it_trained_under(
     base = {**_detection_base(tmp_path), "seed": 11}
     trial_dir = _trial({"optimizer.head_lr": 3e-4}, [].append, base, tmp_path)
 
-    recorded = read_record(trial_dir / RUN_FILE)["config"]["seed"]
+    recorded = read_run(trial_dir).spec.seed
     assert recorded == captured["seed"] == 11
 
 
 def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A trial over a model diverging after one good call reports a finite first score.
 
     The sweep is left no best value. The model is ``build_diverges_after_model`` with one good
@@ -1559,7 +1666,9 @@ def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(
 # --------------------------------------------------------------------------
 
 
-def test_get_worst_predictions_reads_canonical_confidence(tmp_path):
+def test_get_worst_predictions_reads_canonical_confidence(
+    tmp_path: Path,
+) -> None:
     """The worst-predictions ranking reads confidence from a document's native ``score``.
 
     Prediction documents carry a native ``score``; confidence reads from that field, not from
@@ -1613,42 +1722,24 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path):
     )  # low confidence ranks worst
 
 
-def test_a_launch_config_that_json_cannot_hold_is_refused_before_the_run_starts(
-    tmp_path, monkeypatch
-):
-    """A launch config JSON cannot hold raises a TypeError naming the field.
-
-    The field is ``config.model_source.builder``, holding a path object.
-    """
-    from tcip_mcp.tools import training_tools
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        training_tools,
-        "_preflight",
-        lambda project, spec, issues, *, smoke, overfit: (
-            {"valid": False, "issues": ["stub"]},
-            None,
-        ),
-    )
-
-    with pytest.raises(TypeError) as refused:
-        training_tools.launch_training(
-            tmp_path, {"model_source": {"builder": Path("m.py")}}, actor=None
-        )
-    assert "config.model_source.builder" in str(refused.value)
-
-
-def test_an_ordinary_launch_config_passes_the_boundary_to_preflight(
-    tmp_path, monkeypatch
-):
-    """An ordinary launch config passes the JSON boundary to preflight with no issue."""
+def test_an_ordinary_launch_config_reaches_preflight_admitted_with_no_issue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ordinary launch config reaches preflight admitted, with no issue."""
     from tcip_mcp.tools import training_tools
 
     monkeypatch.chdir(tmp_path)
     seen = []
 
-    def stub_preflight(project, spec, plan, issues, *, smoke, overfit):
+    def stub_preflight(
+        project: Path,
+        spec: TrainConfigSchema | None,
+        plan: StagedSources | None,
+        issues: list[str],
+        *,
+        smoke: bool,
+        overfit: bool,
+    ) -> tuple[dict, ResolvedRun | None]:
         seen.append((spec, issues))
         return {"valid": False, "issues": ["stub"]}, None
 
@@ -1662,51 +1753,6 @@ def test_an_ordinary_launch_config_passes_the_boundary_to_preflight(
     assert spec is not None and issues == []
 
 
-def test_a_sweep_payload_that_json_cannot_hold_is_refused_before_any_trial_runs(
-    tmp_path, monkeypatch
-):
-    """A sweep space or base config JSON cannot hold raises a TypeError naming its field.
-
-    The space's field is ``param_space.lr`` and the base config's is
-    ``base_config.model_source.builder``.
-    """
-    from tcip_mcp.pipelines.training import hpo
-    from tcip_mcp.tools import training_tools
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        hpo,
-        "tune_search",
-        lambda *args, **kwargs: {
-            "best_params": {},
-            "best_value": 0.1,
-            "n_trials": 1,
-        },
-    )
-
-    with pytest.raises(TypeError) as space_refused:
-        training_tools.run_hyperparameter_search(
-            tmp_path,
-            {"model_source": {"builder": "m:f"}},
-            param_space={"lr": Path("lr.txt")},
-            n_trials=1,
-            **fifo_search(),
-            search_seed=0,
-        )
-    assert "param_space.lr" in str(space_refused.value)
-
-    with pytest.raises(TypeError) as config_refused:
-        training_tools.run_hyperparameter_search(
-            tmp_path,
-            {"model_source": {"builder": Path("m.py")}},
-            param_space=_CHOICE_SPACE,
-            n_trials=1,
-            **fifo_search(),
-            search_seed=0,
-        )
-    assert "base_config.model_source.builder" in str(config_refused.value)
-
-
 _CHOICE_SPACE = {
     "optimizer.head_lr": {"type": "categorical", "choices": [0.1, 0.01]}
 }
@@ -1714,8 +1760,8 @@ _CHOICE_SPACE = {
 
 
 def test_a_space_not_in_the_search_space_shape_is_refused_before_any_trial(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A space not in the search-space shape is refused, and no search runs.
 
     A list where an axis spec belongs is refused with an error saying param_space is not a
@@ -1740,8 +1786,8 @@ def test_a_space_not_in_the_search_space_shape_is_refused_before_any_trial(
 
 
 def test_an_ordinary_sweep_payload_still_runs_its_search(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An ordinary sweep payload reaches its search and completes.
 
     The sweep passes the sweep door's structural preflight (an importable builder, a real data
@@ -1777,11 +1823,11 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(
     ids=["the-first-corner", "a-later-corner"],
 )
 def test_a_sweep_opens_over_a_base_omitting_what_its_space_sweeps_and_refuses_an_invalid_point(
-    tmp_path,
-    monkeypatch,
-    choices,
-    label,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    choices: list[float],
+    label: str,
+) -> None:
     """A sweep opens over a base omitting what its space sweeps and refuses an invalid point.
 
     A base config may leave unstated what its search space names: the sweep validates each
@@ -1854,7 +1900,9 @@ def _project_answering(project: Path, **answers: bool | float) -> None:
     assert "error" not in result, result
 
 
-def _door_issues(door: str, project: Path, config: dict, monkeypatch) -> list:
+def _door_issues(
+    door: str, project: Path, config: dict, monkeypatch: pytest.MonkeyPatch
+) -> list:
     """Return the issues ``door`` answers ``config`` with over ``project``.
 
     The issues are ``preflight_config``'s report, or the issues ``launch_training`` hands its
@@ -1866,7 +1914,15 @@ def _door_issues(door: str, project: Path, config: dict, monkeypatch) -> list:
         return training_tools.preflight_config(project, config)["issues"]
     seen: list = []
 
-    def stub_preflight(project, spec, sources, issues, *, smoke, overfit):
+    def stub_preflight(
+        project: Path,
+        spec: TrainConfigSchema | None,
+        sources: StagedSources | None,
+        issues: list[str],
+        *,
+        smoke: bool,
+        overfit: bool,
+    ) -> tuple[dict, ResolvedRun | None]:
         seen.append(issues)
         return {"valid": False, "issues": ["stub"]}, None
 
@@ -1954,8 +2010,13 @@ _BRIGHTNESS_ALONE = {
     ],
 )
 def test_the_launch_doors_judge_each_augmentation_by_the_invariance_the_project_records(
-    tmp_path, monkeypatch, door, answers, transforms, refused
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    door: str,
+    answers: dict,
+    transforms: dict,
+    refused: list[str],
+) -> None:
     """The launch doors judge each augmentation by the invariance the project records.
 
     A transform relying on an invariance the record states false, or a rotation past the
@@ -2035,8 +2096,8 @@ def test_the_launch_doors_judge_each_augmentation_by_the_invariance_the_project_
     ],
 )
 def test_preflight_refuses_an_augmentation_value_outside_its_range_naming_the_field(
-    tmp_path, transforms, field, refusal
-):
+    tmp_path: Path, transforms: dict, field: str, refusal: str
+) -> None:
     """An augmentation value outside its range is refused by preflight, naming the field.
 
     The transform's type refuses the stated value, naming the entry and the field, under the
@@ -2064,8 +2125,8 @@ def test_preflight_refuses_an_augmentation_value_outside_its_range_naming_the_fi
 
 
 def test_a_sweep_refuses_the_point_its_augmentation_axis_samples_against_the_record(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A sweep refuses the point its augmentation axis samples against the project record.
 
     An axis over an augmentation value is judged at each point it samples: a saturation of
@@ -2123,8 +2184,8 @@ def test_a_sweep_refuses_the_point_its_augmentation_axis_samples_against_the_rec
 
 
 def test_preflight_names_a_missing_task_where_the_config_is_validated(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Preflight names a missing ``model_source.task`` where it validates the config.
 
     The config stating its task is admitted.
@@ -2154,10 +2215,10 @@ def test_preflight_names_a_missing_task_where_the_config_is_validated(
 
 
 def test_run_hyperparameter_search_admits_an_lr_sweep_beside_a_base_config_selection_metric(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A base config stating its own selection metric still completes an lr sweep.
 
     The sweep's search is called with the stated space.
@@ -2185,10 +2246,10 @@ def test_run_hyperparameter_search_admits_an_lr_sweep_beside_a_base_config_selec
 
 
 def test_hpo_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_every_choice(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A categorical evaluation axis naming the base config's metric at every choice is admitted.
 
     The sweep's search is called with that space.
@@ -2243,8 +2304,8 @@ def test_hpo_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_ever
     ids=["a-block-axis", "a-metric-axis"],
 )
 def test_a_sweep_whose_space_samples_another_selection_metric_is_refused_naming_the_base_configs(
-    tmp_path, real_hpo_base_config, param_space
-):
+    tmp_path: Path, real_hpo_base_config: dict, param_space: dict
+) -> None:
     """A sweep whose space samples another selection metric is refused, naming the base's.
 
     A space axis sampling another metric, whether the whole evaluation block or the metric
@@ -2273,7 +2334,9 @@ def test_a_sweep_whose_space_samples_another_selection_metric_is_refused_naming_
     assert sweep_dirs(tmp_path) == []
 
 
-def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(tmp_path):
+def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(
+    tmp_path: Path,
+) -> None:
     """A dataset with no identity document reads as no dataset id, not a refusal."""
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
     from tcip_mcp.pipelines.schemas import DataSpec
@@ -2290,7 +2353,7 @@ def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(tmp_path):
 
 
 def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_and_no_result(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     """A trial canceled through the real trainer ends canceled with records and no result.
 
@@ -2300,12 +2363,7 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_a
     pytest.importorskip("torch")
     import math
 
-    from tcip_mcp.experiments import (
-        RUN_FILE,
-        observe,
-        read_record,
-        request_cancel,
-    )
+    from tcip_mcp.experiments import observe, read_run, request_cancel
     from tests.tiny_trainer_fixtures import (
         regressor_config,
         write_regression_dataset,
@@ -2339,4 +2397,4 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_a
     )  # epoch 1's real score, reported before the cancel
     assert observe(trial_dir).state == "canceled"
     assert _sweep_outcome(tmp_path)["best_value"] is None
-    assert read_record(trial_dir / RUN_FILE)["trial_params"] == {}
+    assert read_run(trial_dir).trial_params == {}

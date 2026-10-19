@@ -11,10 +11,16 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests._chain_fixtures import CLASSIFIER_SOURCE
+
+if TYPE_CHECKING:
+    from torch import Tensor
+
+    from tcip_mcp.pipelines.training.run_registry import TrainRun
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -50,13 +56,13 @@ BASE_BB_LR = 1e-3
 # --------------------------------------------------------------------------
 
 
-def test_compute_lr_scale():
+def test_compute_lr_scale() -> None:
     assert compute_lr_scale(128, 64, 0.5) == pytest.approx(2**0.5)
     assert compute_lr_scale(1024, 64, 0.5) == pytest.approx(4.0)
     assert compute_lr_scale(64, 64, 0.5) == 1.0
 
 
-def test_capture_restore_roundtrip():
+def test_capture_restore_roundtrip() -> None:
     model = nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 2))
     for p in model[0].parameters():  # freeze first Linear
         p.requires_grad = False
@@ -111,7 +117,7 @@ def test_capture_restore_roundtrip():
         _warmup_starts(model, mixed, state[GROUPS_KEY], [2e-3])
 
 
-def test_warmup_reads_only_the_rates_of_the_groups_it_merges():
+def test_warmup_reads_only_the_rates_of_the_groups_it_merges() -> None:
     """A merged group warms up from its captured groups' shared rate, not the new optimizer's.
 
     Two captured groups at one rate that differ in an unrelated setting merge into one new group,
@@ -133,7 +139,9 @@ def test_warmup_reads_only_the_rates_of_the_groups_it_merges():
     assert _warmup_starts(model, merged, state[GROUPS_KEY], [2e-2]) == [1e-2]
 
 
-def test_a_resume_refuses_a_group_merging_two_captured_groups_even_at_equal_settings():
+def test_a_resume_refuses_a_group_merging_two_captured_groups_even_at_equal_settings() -> (
+    None
+):
     """A resume refuses a group merging two captured groups, even at equal settings.
 
     A resumed group whose members came from two captured groups has no one setting on record, even
@@ -168,10 +176,12 @@ def test_a_resume_refuses_a_group_merging_two_captured_groups_even_at_equal_sett
 class _CustomGroupRegressor(nn.Linear):
     """A bespoke model whose ``get_param_groups`` puts a tensor-valued setting on its group."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(2, 1)
 
-    def get_param_groups(self, backbone_lr, head_lr):
+    def get_param_groups(
+        self, backbone_lr: float, head_lr: float
+    ) -> list[dict]:
         return [
             {
                 "params": self.parameters(),
@@ -181,7 +191,7 @@ class _CustomGroupRegressor(nn.Linear):
         ]
 
 
-def test_a_tensor_valued_bespoke_group_setting_survives_a_resume():
+def test_a_tensor_valued_bespoke_group_setting_survives_a_resume() -> None:
     """A tensor-valued bespoke group setting survives a resume.
 
     A setting a bespoke ``get_param_groups`` puts on its group, changed while training, comes back
@@ -219,8 +229,8 @@ def test_a_tensor_valued_bespoke_group_setting_survives_a_resume():
     ids=["plain", "with-attribute-heads"],
 )
 def test_an_optimizer_trains_a_built_detectors_backbone_at_backbone_lr_and_the_rest_at_head_lr(
-    attributes,
-):
+    attributes: tuple[str, ...],
+) -> None:
     """The optimizer gives a built detector's backbone ``backbone_lr`` and the rest ``head_lr``.
 
     For a detector the platform's ``build_detector`` builds, its subject's attribute heads beside
@@ -265,7 +275,7 @@ def test_an_optimizer_trains_a_built_detectors_backbone_at_backbone_lr_and_the_r
 class _NoStageCount(nn.Module):
     """A model freezing through ``freeze_backbone`` over a backbone declaring no stage count."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.backbone = nn.Linear(2, 2)
 
@@ -274,7 +284,7 @@ class _NoStageCount(nn.Module):
             p.requires_grad = False
 
 
-def test_a_stage_freeze_a_model_cannot_apply_refuses_by_name():
+def test_a_stage_freeze_a_model_cannot_apply_refuses_by_name() -> None:
     """A stage freeze a model cannot apply refuses, naming what is missing.
 
     A nonzero ``freeze_to`` over a model with no ``freeze_backbone``, and a negative one over a
@@ -298,7 +308,9 @@ def test_a_stage_freeze_a_model_cannot_apply_refuses_by_name():
     assert all(p.requires_grad for p in model.heads.parameters())
 
 
-def test_a_restore_puts_every_tensor_on_its_parameter_dtype_and_the_next_step_runs():
+def test_a_restore_puts_every_tensor_on_its_parameter_dtype_and_the_next_step_runs() -> (
+    None
+):
     """A restore puts a one-element parameter's momentum on its dtype, and the next step runs.
 
     The momentum restored into a float64 model is float64, and the restored optimizer steps.
@@ -322,7 +334,7 @@ def test_a_restore_puts_every_tensor_on_its_parameter_dtype_and_the_next_step_ru
     new_opt.step()
 
 
-def test_a_resume_restore_puts_back_every_scheduled_group_setting():
+def test_a_resume_restore_puts_back_every_scheduled_group_setting() -> None:
     """A resume restore puts back every scheduled group setting.
 
     The settings a scheduler writes into a group (OneCycle's betas beside its rate) come back on a
@@ -354,7 +366,9 @@ def test_a_resume_restore_puts_back_every_scheduled_group_setting():
     ] == (0.9, 0.999)
 
 
-def test_a_restore_into_an_optimizer_missing_a_trained_parameter_is_refused():
+def test_a_restore_into_an_optimizer_missing_a_trained_parameter_is_refused() -> (
+    None
+):
     model = nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 2))
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
     model(torch.randn(3, 4)).sum().backward()
@@ -376,7 +390,9 @@ def test_a_restore_into_an_optimizer_missing_a_trained_parameter_is_refused():
     )
 
 
-def test_a_restore_dropping_a_parameter_a_stateless_optimizer_held_is_refused():
+def test_a_restore_dropping_a_parameter_a_stateless_optimizer_held_is_refused() -> (
+    None
+):
     """A restore dropping a parameter a stateless optimizer held is refused.
 
     A momentum-free SGD keeps no per-parameter state, and a restore that drops one of its
@@ -405,7 +421,7 @@ def test_a_restore_dropping_a_parameter_a_stateless_optimizer_held_is_refused():
     )
 
 
-def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone():
+def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone() -> None:
     """``freeze_to`` freezes a wrapped bespoke backbone per stage, not all-or-nothing.
 
     The agent-written backbone keeps its stages one level down inside a ModuleList.
@@ -427,7 +443,7 @@ def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone():
                 ]
             )
 
-        def forward(self, x):
+        def forward(self, x: Tensor) -> dict[str, Tensor]:
             out = {}
             for i, layer in enumerate(self.stages):
                 x = layer(x)
@@ -452,7 +468,9 @@ def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone():
 # --------------------------------------------------------------------------
 
 
-def _trained(tmp_path: Path, stages, n: int = 6, **extra):
+def _trained(
+    tmp_path: Path, stages: list[dict], n: int = 6, **extra: object
+) -> tuple[TrainRun, Path]:
     """Train a resnet18 classification run over ``stages``; return the run and its directory.
 
     ``extra`` are the run's other config keys; it trains on ``n`` frames under ``tmp_path``,
@@ -498,14 +516,14 @@ def _trained(tmp_path: Path, stages, n: int = 6, **extra):
 # --------------------------------------------------------------------------
 
 
-def test_monotonic_unfreeze_guard_fails(tmp_path: Path):
+def test_monotonic_unfreeze_guard_fails(tmp_path: Path) -> None:
     # Stage 0 fully unfreezes; stage 1 re-freezes the backbone -> guard must fire.
     run, _ = _trained(tmp_path, [stage(0), stage(-1)])
     assert run.status == "failed"
     assert "Non-decreasing unfreeze" in run.status_error
 
 
-def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path):
+def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path) -> None:
     """The learning rate ramps up over warmup at a stage boundary.
 
     The second stage's three epochs start below the base backbone rate, rise, and reach it at the
@@ -524,7 +542,7 @@ def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path):
 
 def test_lr_scaling_is_relative_to_the_first_stage_effective_batch(
     tmp_path: Path,
-):
+) -> None:
     """Learning-rate scaling is relative to the first stage's effective batch.
 
     Batch size 2 targets an effective batch of 2 in the first stage and 8 in the second, so the
@@ -545,7 +563,7 @@ def test_lr_scaling_is_relative_to_the_first_stage_effective_batch(
     assert run.metrics_history[1]["lr"] == pytest.approx(BASE_BB_LR * 2.0)
 
 
-def test_two_stage_handoff_smoke(tmp_path: Path):
+def test_two_stage_handoff_smoke(tmp_path: Path) -> None:
     run, run_dir = _trained(tmp_path, [stage(-1), stage(0)])
     assert run.status == "completed", run.status_error
     assert all(math.isfinite(m["train_loss"]) for m in run.metrics_history)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -22,6 +23,11 @@ from tests._mapping_fixtures import (
     write_plant_csv,
 )
 from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS
+
+if TYPE_CHECKING:
+    from tcip_mcp.buckets import Bucket
+    from tcip_mcp.subject_registry import SubjectRegistry
+    from tcip_mcp.traits import TraitRevision
 
 torch = pytest.importorskip("torch")
 
@@ -197,7 +203,7 @@ def _raster_bucket(
     boxes: list[tuple[float, float, float, float]],
     *,
     name: str = "preds",
-):
+) -> Bucket:
     """Publish a whole-raster bucket ``<name>/2026-01-01`` over ``raster_path`` and return it.
 
     The bucket holds one detection per box and is published through the platform's own
@@ -225,7 +231,11 @@ def _raster_bucket(
 
 
 def _deliver(
-    project: Path, bucket, registry: str, plants: list[str], **kwargs
+    project: Path,
+    bucket: Bucket,
+    registry: str,
+    plants: list[str],
+    **kwargs: str | float | None,
 ) -> dict:
     """Ship ``orthomosaic_plant_counts`` under a breeder's acknowledgment and return its answer.
 
@@ -274,8 +284,8 @@ def _rows(project: Path) -> dict[str, dict]:
 
 
 def test_run_inference_over_a_raster_publishes_one_document_and_the_raster_it_ran_on(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A raster pass publishes one document and a record naming the raster it ran on.
 
     An explicit tile_size runs the pass; the bucket holds one document for the whole raster and a
@@ -306,7 +316,7 @@ def test_run_inference_over_a_raster_publishes_one_document_and_the_raster_it_ra
     assert bucket.raster(tmp_path) == str(raster_path)
     assert (
         bucket.raster_identity is not None
-        and bucket.raster_identity["width"] == 64
+        and bucket.raster_identity.width == 64
     )
     assert bucket.execution.tile_size == TILE
     assert bucket.execution.sources["tile_size"] == "explicit"
@@ -321,8 +331,8 @@ def _published(project: Path, bucket: str) -> bool:
 
 
 def test_a_second_raster_export_into_a_published_bucket_refuses_and_leaves_it_whole(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     import tcip_store
     from tcip_mcp.dataset_layout import prediction_key
     from tcip_mcp.tools.inference_tools import run_inference
@@ -354,8 +364,8 @@ def test_a_second_raster_export_into_a_published_bucket_refuses_and_leaves_it_wh
 
 
 def test_a_missing_checkpoint_or_raster_refuses_cleanly_with_nothing_written(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.inference_tools import run_inference
 
     raster_path = _raster(tmp_path)
@@ -382,8 +392,8 @@ def test_a_missing_checkpoint_or_raster_refuses_cleanly_with_nothing_written(
 
 
 def test_a_raster_pass_with_no_basis_for_its_tile_edge_refuses_before_writing(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A raster pass with no basis for its tile edge refuses and publishes nothing.
 
     With no persisted training geometry and no explicit tile_size, the pass refuses naming the
@@ -410,8 +420,8 @@ def test_a_raster_pass_with_no_basis_for_its_tile_edge_refuses_before_writing(
 
 
 def test_an_unassessed_raster_bucket_refuses_at_the_door_that_takes_no_acknowledgment(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.orthomosaic_tools import (
         deliver_orthomosaic_plant_counts,
     )
@@ -438,8 +448,8 @@ def test_an_unassessed_raster_bucket_refuses_at_the_door_that_takes_no_acknowled
 
 
 def test_detections_are_counted_to_their_nearest_plant_at_detection_granularity(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Detections are counted to their nearest plant, one detection at a time.
 
     Two detections near plot0, one near plot2, none near plot1 or plot3: every population plant
@@ -484,8 +494,8 @@ def test_detections_are_counted_to_their_nearest_plant_at_detection_granularity(
 
 
 def test_a_delivery_reads_the_rasters_georeferencing_once(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An acknowledged delivery constructs the raster's ``tifffile.TiffFile`` twice in all.
 
     The two constructions span the attempt refused for its acknowledgment and the acknowledged one.
@@ -499,7 +509,9 @@ def test_a_delivery_reads_the_rasters_georeferencing_once(
     reads: list = []
     real = tifffile.TiffFile
 
-    def counting(*args, **kwargs):
+    def counting(
+        *args: str, **kwargs: str | int | bool | None
+    ) -> tifffile.TiffFile:
         if Path(str(args[0])) == raster_path:
             reads.append(args[0])
         return real(*args, **kwargs)
@@ -513,8 +525,8 @@ def test_a_delivery_reads_the_rasters_georeferencing_once(
 
 
 def test_a_delivery_reads_the_confirmed_revision_once_per_act(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An acknowledged delivery calls ``confirmed_revision`` twice in all.
 
     The two calls span the attempt refused for its acknowledgment and the acknowledged one.
@@ -530,7 +542,9 @@ def test_a_delivery_reads_the_confirmed_revision_once_per_act(
     reads: list = []
     real = operationalization.confirmed_revision
 
-    def counting(*args, **kwargs):
+    def counting(
+        *args: str, **kwargs: str | Path | SubjectRegistry | None
+    ) -> TraitRevision:
         reads.append(args)
         return real(*args, **kwargs)
 
@@ -542,7 +556,7 @@ def test_a_delivery_reads_the_confirmed_revision_once_per_act(
     assert len(reads) == 2
 
 
-def test_a_far_detection_is_counted_to_no_plant(tmp_path):
+def test_a_far_detection_is_counted_to_no_plant(tmp_path: Path) -> None:
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
     bucket = _raster_bucket(
@@ -566,8 +580,8 @@ def test_a_far_detection_is_counted_to_no_plant(tmp_path):
 
 
 def test_a_raster_whose_georeferencing_cannot_be_read_refuses_cleanly(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A ModelTransformationTag raster refuses as a returned error naming the tag."""
     raster_path = _raster(tmp_path)
     rng = np.random.default_rng(0)
@@ -620,8 +634,8 @@ def test_a_raster_whose_georeferencing_cannot_be_read_refuses_cleanly(
 
 
 def test_the_delivery_event_discloses_the_registry_raster_and_tolerance_it_matched_under(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The delivery event discloses the registry, raster and tolerance it matched under.
 
     A whole-raster frame carries no walked mapping, so the event names the registry it read, the
@@ -630,7 +644,11 @@ def test_the_delivery_event_discloses_the_registry_raster_and_tolerance_it_match
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.delivery import read_delivery_events
+    from tcip_mcp.pipelines.delivery_events_schema import (
+        PlantRegistryDisclosure,
+    )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        MatchTolerance,
         grid_pitch_m,
         read_plant_csvs,
     )
@@ -647,40 +665,43 @@ def test_the_delivery_event_discloses_the_registry_raster_and_tolerance_it_match
 
     assert "error" not in _deliver(tmp_path, bucket, registry, _GRID)
     (event,) = read_delivery_events(tmp_path)
-    pm = event.model_dump(mode="json")["plant_mapping"]
+    pm = event.plant_mapping
+    assert isinstance(pm, PlantRegistryDisclosure)
     plants = read_plant_csvs([plant_csv])
-    assert pm["plant_registry"]["name"] == registry
-    assert pm["detections_unattributed"] == 1
-    assert pm["detections_unattributed_scope"] == "delivered_raster"
-    assert pm["plant_attribution"] == "detection"
-    assert pm["nn_tolerance_m"] == {
-        "value": grid_pitch_m(plants) / 2,
-        "source": "grid_pitch",
-    }
+    assert pm.plant_registry.name == registry
+    assert pm.detections_unattributed == 1
+    assert pm.detections_unattributed_scope == "delivered_raster"
+    assert pm.plant_attribution == "detection"
+    assert pm.nn_tolerance_m == MatchTolerance(
+        value=grid_pitch_m(plants) / 2, source="grid_pitch"
+    )
     assert (
-        pm["raster_identity"]
+        pm.raster_identity
         == read_bucket(bucket.root, bucket.name).raster_identity
     )
-    assert "dates_delivered" not in pm and "record_sha256" not in pm
+    disclosed = pm.model_dump()
+    assert "dates_delivered" not in disclosed
+    assert "record_sha256" not in disclosed
 
     stated = grid_pitch_m(plants) / 4
     assert "error" not in _deliver(
         tmp_path, bucket, registry, _GRID, nn_tolerance_m=stated
     )
     latest = [
-        e
+        e.plant_mapping
         for e in read_delivery_events(tmp_path)
         if e.event_id != event.event_id
-    ]
-    assert latest[0].model_dump(mode="json")["plant_mapping"][
-        "nn_tolerance_m"
-    ] == {"value": stated, "source": "stated"}
+    ][0]
+    assert isinstance(latest, PlantRegistryDisclosure)
+    assert latest.nn_tolerance_m == MatchTolerance(
+        value=stated, source="stated"
+    )
 
 
 @pytest.mark.parametrize("change", ["rewritten", "deleted"])
 def test_a_registered_plant_csv_that_changed_since_registration_refuses_by_name(
-    tmp_path, change
-):
+    tmp_path: Path, change: str
+) -> None:
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
     bucket = _raster_bucket(tmp_path, raster_path, [(8.0, 8.0, 12.0, 12.0)])
@@ -707,7 +728,7 @@ def test_a_registered_plant_csv_that_changed_since_registration_refuses_by_name(
     assert not (tmp_path / "counts.csv").exists()
 
 
-def test_an_unchanged_registry_csv_delivers(tmp_path):
+def test_an_unchanged_registry_csv_delivers(tmp_path: Path) -> None:
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
     bucket = _raster_bucket(tmp_path, raster_path, [(8.0, 8.0, 12.0, 12.0)])
@@ -720,8 +741,8 @@ def test_an_unchanged_registry_csv_delivers(tmp_path):
 
 
 def test_a_plant_outside_the_raster_is_named_and_an_edge_detection_is_not_given_to_it(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A plant outside the raster is named, and an edge detection is not given to it.
 
     A registry plant outside the raster's own frame is named on the delivery and not counted, and
@@ -775,8 +796,8 @@ def test_a_plant_outside_the_raster_is_named_and_an_edge_detection_is_not_given_
     ids=["duplicate", "blank"],
 )
 def test_a_registry_naming_a_plant_twice_or_not_at_all_refuses(
-    tmp_path, rows, message
-):
+    tmp_path: Path, rows: list[tuple[str, float, float]], message: str
+) -> None:
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
     bucket = _raster_bucket(tmp_path, raster_path, [(8.0, 8.0, 12.0, 12.0)])
@@ -793,7 +814,9 @@ def test_a_registry_naming_a_plant_twice_or_not_at_all_refuses(
 # ── canopy_subject: attribution by segment containment ────────────────────
 
 
-def _canopy_setup(tmp_path, boxes) -> tuple:
+def _canopy_setup(
+    tmp_path: Path, boxes: list[tuple[float, float, float, float]]
+) -> tuple:
     """Return a dataset root, a 64 by 64 raster registered in it, and the raster's bucket."""
     from tests._geotiff_fixtures import write_canonical_dataset_raster
 
@@ -833,7 +856,9 @@ def _write_canopy_document(
     label_image(raster_path, anns, 64, 64, keep_empty=True)
 
 
-def test_canopy_segments_attribute_by_containment_and_name_every_gap(tmp_path):
+def test_canopy_segments_attribute_by_containment_and_name_every_gap(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.delivery import read_delivery_events
 
     _root, raster_path, bucket = _canopy_setup(
@@ -917,8 +942,8 @@ def test_canopy_segments_attribute_by_containment_and_name_every_gap(tmp_path):
 
 
 def test_a_plant_within_the_position_error_is_disclosed_as_such_and_its_segment_holds_a_plant(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A plant within the position error is disclosed as such, and its segment holds a plant.
 
     A plant half a meter inside its segment's boundary, under a 1 m position error, leaves its
@@ -977,8 +1002,8 @@ def test_a_plant_within_the_position_error_is_disclosed_as_such_and_its_segment_
 
 
 def test_an_ambiguous_overlap_drops_both_implicated_plants_and_keeps_the_third(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     _root, raster_path, bucket = _canopy_setup(
         tmp_path,
         [
@@ -1040,7 +1065,9 @@ def test_an_ambiguous_overlap_drops_both_implicated_plants_and_keeps_the_third(
     assert "plot0" in refused["error"] and "ambiguous" in refused["error"]
 
 
-def test_a_stated_tolerance_beside_canopy_subject_refuses(tmp_path):
+def test_a_stated_tolerance_beside_canopy_subject_refuses(
+    tmp_path: Path,
+) -> None:
     _root, raster_path, bucket = _canopy_setup(
         tmp_path, [(8.0, 8.0, 12.0, 12.0)]
     )
@@ -1063,7 +1090,9 @@ def test_a_stated_tolerance_beside_canopy_subject_refuses(tmp_path):
     assert not (tmp_path / "counts.csv").exists()
 
 
-def test_canopy_subject_refuses_a_missing_canopy_document(tmp_path):
+def test_canopy_subject_refuses_a_missing_canopy_document(
+    tmp_path: Path,
+) -> None:
     _root, raster_path, bucket = _canopy_setup(
         tmp_path, [(8.0, 8.0, 12.0, 12.0)]
     )

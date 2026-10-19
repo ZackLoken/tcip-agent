@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
@@ -14,6 +15,9 @@ from tests._verified_checkpoint_fixtures import (
     opened_run,
 )
 
+if TYPE_CHECKING:
+    from tcip_mcp.model_registry import RegistryEntry
+
 # ── Audit logging ──
 
 
@@ -23,7 +27,7 @@ def _rows(project: Path) -> list[dict]:
     return list(ts.read_log(audit_mod.audit_log_key(project)).records)
 
 
-def test_audited_logs_success(tmp_path):
+def test_audited_logs_success(tmp_path: Path) -> None:
     from tcip_mcp.audit import audited
 
     @audited
@@ -40,7 +44,7 @@ def test_audited_logs_success(tmp_path):
     assert "timestamp" in entry
 
 
-def test_audited_logs_exception(tmp_path):
+def test_audited_logs_exception(tmp_path: Path) -> None:
     from tcip_mcp.audit import audited
 
     @audited
@@ -55,7 +59,7 @@ def test_audited_logs_exception(tmp_path):
     assert "test error" in entry["error"]
 
 
-def test_redaction():
+def test_redaction() -> None:
     from tcip_mcp.audit import _redact
 
     args = {"name": "test", "api_key": "secret123", "token": "tok123"}
@@ -68,7 +72,7 @@ def test_redaction():
 # -- positional args are bound to their parameter names --------------
 
 
-def test_audited_binds_positional_args_to_names(tmp_path):
+def test_audited_binds_positional_args_to_names(tmp_path: Path) -> None:
     from tcip_mcp.audit import audited
 
     @audited
@@ -82,7 +86,9 @@ def test_audited_binds_positional_args_to_names(tmp_path):
     assert _rows(tmp_path)[0]["arguments"] == {"x": 5, "y": "explicit"}
 
 
-def test_audited_positional_binding_fills_unstated_defaults(tmp_path):
+def test_audited_positional_binding_fills_unstated_defaults(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.audit import audited
 
     @audited
@@ -94,7 +100,9 @@ def test_audited_positional_binding_fills_unstated_defaults(tmp_path):
     assert _rows(tmp_path)[0]["arguments"] == {"x": 5, "y": "default"}
 
 
-def test_audited_call_that_does_not_bind_raises_before_the_body_runs(tmp_path):
+def test_audited_call_that_does_not_bind_raises_before_the_body_runs(
+    tmp_path: Path,
+) -> None:
     """An audited call that does not bind raises, runs no body and records nothing.
 
     A call with the wrong arity raises ``TypeError``; the body does not run and the project's log
@@ -119,7 +127,7 @@ def test_audited_call_that_does_not_bind_raises_before_the_body_runs(tmp_path):
 # ── Experiment tracking ──
 
 
-def test_get_experiment_reads_the_run_directory(tmp_path):
+def test_get_experiment_reads_the_run_directory(tmp_path: Path) -> None:
     import tcip_mcp.experiments as exp
 
     run_dir = opened_run(
@@ -139,13 +147,13 @@ def test_get_experiment_reads_the_run_directory(tmp_path):
     assert len(result["metrics"]) == 1
 
 
-def test_get_experiment_not_found(tmp_path):
+def test_get_experiment_not_found(tmp_path: Path) -> None:
     import tcip_mcp.experiments as exp
 
     assert "error" in exp.get_experiment("nonexistent", project=tmp_path)
 
 
-def test_list_experiments(tmp_path):
+def test_list_experiments(tmp_path: Path) -> None:
     import tcip_mcp.experiments as exp
 
     opened_run(
@@ -164,7 +172,7 @@ def test_list_experiments(tmp_path):
     assert {e.state for e in listing} == {"running"}
 
 
-def test_compare_experiments(tmp_path):
+def test_compare_experiments(tmp_path: Path) -> None:
     import tcip_mcp.experiments as exp
 
     x = opened_run(
@@ -187,7 +195,7 @@ def test_compare_experiments(tmp_path):
     assert exps["exp-y"]["last_logged_metrics"]["mAP50"] == 0.7
 
 
-def test_get_experiment_lineage(tmp_path):
+def test_get_experiment_lineage(tmp_path: Path) -> None:
     import tcip_mcp.experiments as exp
 
     config = detection_config(tmp_path / "ds", project=tmp_path)
@@ -208,11 +216,11 @@ def test_get_experiment_lineage(tmp_path):
 # ── a foreign registration is keyed by its bytes and audited ──
 
 
-def _entry(project: Path, sha256: str) -> dict:
+def _entry(project: Path, sha256: str) -> RegistryEntry:
     """Return the one foreign entry ``project``'s registry holds for ``sha256``."""
     from tcip_mcp.model_registry import registered_entries
 
-    [entry] = [e for e in registered_entries(project) if e["sha256"] == sha256]
+    [entry] = [e for e in registered_entries(project) if e.sha256 == sha256]
     return entry
 
 
@@ -222,7 +230,9 @@ def _ckpt(project: Path, name: str, content: bytes) -> str:
     return str(produced_checkpoint(project / name, content.decode()))
 
 
-def test_a_first_registration_and_a_replacement_each_leave_one_row(tmp_path):
+def test_a_first_registration_and_a_replacement_each_leave_one_row(
+    tmp_path: Path,
+) -> None:
     """A first registration and a replacement each leave one audit row.
 
     The same bytes registered again under another name replace their one entry, the row naming
@@ -231,9 +241,9 @@ def test_a_first_registration_and_a_replacement_each_leave_one_row(tmp_path):
     from tcip_mcp.model_registry import ModelRegistry
 
     reg = ModelRegistry(str(tmp_path))
-    first_sha = reg.register_model("exp1", _ckpt(tmp_path, "a.pt", b"first"))[
-        "sha256"
-    ]
+    first_sha = reg.register_model(
+        "exp1", _ckpt(tmp_path, "a.pt", b"first")
+    ).entry.sha256
     (first,) = _rows(tmp_path)
     assert first["tool"] == "model_registered"
     assert first["arguments"] == {"name": "exp1", "new_sha256": first_sha}
@@ -246,17 +256,19 @@ def test_a_first_registration_and_a_replacement_each_leave_one_row(tmp_path):
         "superseded_name": "exp1",
         "superseded_tags": [],
     }
-    assert _entry(tmp_path, first_sha)["name"] == "exp2"
+    assert _entry(tmp_path, first_sha).name == "exp2"
 
     second_sha = reg.register_model(
         "exp1", _ckpt(tmp_path, "b.pt", b"second, different")
-    )["sha256"]
+    ).entry.sha256
     assert second_sha != first_sha
     assert "superseded_name" not in _rows(tmp_path)[-1]["arguments"]
-    assert _entry(tmp_path, first_sha)["name"] == "exp2"
+    assert _entry(tmp_path, first_sha).name == "exp2"
 
 
-def test_the_register_model_door_leaves_only_the_registrys_own_rows(tmp_path):
+def test_the_register_model_door_leaves_only_the_registrys_own_rows(
+    tmp_path: Path,
+) -> None:
     """The ``register_model`` door leaves only the registry's own audit rows.
 
     Through the door: one row per registry write that changed content, the registry's, and none
@@ -294,8 +306,8 @@ def test_the_register_model_door_leaves_only_the_registrys_own_rows(tmp_path):
 
 
 def test_reregistering_an_identical_entry_changes_nothing_and_leaves_no_row(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.model_registry import ModelRegistry, registry_index_key
 
     reg = ModelRegistry(str(tmp_path))
@@ -310,8 +322,8 @@ def test_reregistering_an_identical_entry_changes_nothing_and_leaves_no_row(
 
 
 def test_the_same_weights_under_new_tags_change_the_entry_and_leave_one_row(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The same weights registered under new tags change the entry and leave one row.
 
     The checkpoint re-registered with identical weights and new tags gets the new tags on its
@@ -321,10 +333,10 @@ def test_the_same_weights_under_new_tags_change_the_entry_and_leave_one_row(
 
     reg = ModelRegistry(str(tmp_path))
     ckpt = _ckpt(tmp_path, "a.pt", b"same bytes")
-    sha = reg.register_model("exp1", ckpt)["sha256"]
+    sha = reg.register_model("exp1", ckpt).entry.sha256
     reg.register_model("exp1", ckpt, tags=["chestnut"])
 
-    assert _entry(tmp_path, sha)["tags"] == ["chestnut"]
+    assert _entry(tmp_path, sha).tags == ["chestnut"]
     assert [e["tool"] for e in _rows(tmp_path)] == [
         "model_registered",
         "model_registered",
@@ -332,8 +344,8 @@ def test_the_same_weights_under_new_tags_change_the_entry_and_leave_one_row(
 
 
 def test_replace_raises_and_stays_committed_when_its_audit_line_fails(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A replacement whose audit line fails raises and stays committed.
 
     The caller is told through ``AuditEntryNotWrittenError`` naming ``model_registered``, and
@@ -343,11 +355,11 @@ def test_replace_raises_and_stays_committed_when_its_audit_line_fails(
     from tcip_mcp.model_registry import ModelRegistry
 
     reg = ModelRegistry(str(tmp_path))
-    sha = reg.register_model("exp1", _ckpt(tmp_path, "a.pt", b"first"))[
-        "sha256"
-    ]
+    sha = reg.register_model(
+        "exp1", _ckpt(tmp_path, "a.pt", b"first")
+    ).entry.sha256
 
-    def _refuse(*args, **kwargs):
+    def _refuse(*args: object, **kwargs: object) -> NoReturn:
         raise RuntimeError("the audit log could not be appended to")
 
     monkeypatch.setattr(audit_mod, "append", _refuse)
@@ -356,4 +368,4 @@ def test_replace_raises_and_stays_committed_when_its_audit_line_fails(
         reg.register_model("exp2", _ckpt(tmp_path, "a.pt", b"first"))
 
     assert caught.value.tool == "model_registered"
-    assert _entry(tmp_path, sha)["name"] == "exp2"
+    assert _entry(tmp_path, sha).name == "exp2"

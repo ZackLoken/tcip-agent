@@ -86,9 +86,9 @@ def _registry(root: Path) -> None:
         root,
         SubjectRegistry(
             subjects=(
-                Subject(name="leaf"),
-                Subject(name="bush"),
-                Subject(name="bud"),
+                Subject(name="leaf", description=""),
+                Subject(name="bush", description=""),
+                Subject(name="bud", description=""),
             )
         ),
     )

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 from PIL import Image
+from pydantic import ValidationError
 
 from tcip_mcp.workspace import BoundProject
 from tests._producer_fixtures import write_image
@@ -74,33 +75,50 @@ def _push_state(
     They are the meta heartbeat and the geometry blob, the image named relative to the project
     as the push route stores it.
     """
+    from pydantic import TypeAdapter
+
     import tcip_store
+    from tcip_annotation.viz import CanvasShape
     from tcip_mcp.registry_paths import stored_path
-    from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key
+    from tcip_mcp.web_client import (
+        CanvasGeometry,
+        CanvasMeta,
+        Viewport,
+        canvas_geometry_key,
+        canvas_meta_key,
+    )
 
     root = str(tmp_path)
     image_path = stored_path(image, tmp_path)
     tcip_store.replace(
         canvas_geometry_key(root),
-        {
-            "image_path": image_path,
-            "tab": "annotate",
-            "received_at": received_at,
-            "shapes": SHAPES if shapes is None else shapes,
-        },
+        CanvasGeometry(
+            image_path=image_path,
+            tab="annotate",
+            received_at=received_at,
+            shapes=TypeAdapter(list[CanvasShape]).validate_python(
+                SHAPES if shapes is None else shapes
+            ),
+        ).model_dump(mode="json"),
     )
     tcip_store.replace(
         canvas_meta_key(root),
-        {
-            "received_at": received_at,
-            "tab": "annotate",
-            "image": Path(image).name,
-            "image_path": image_path,
-            "viewport": {"x": 0, "y": 0, "w": FRAME_W, "h": FRAME_H},
-            "user": "breeder",
-            "mode": "polygon",
-            "classes": [{"id": 0, "name": "bud", "color": "#FF0000"}],
-        },
+        CanvasMeta(
+            received_at=received_at,
+            tab="annotate",
+            image=Path(image).name,
+            image_path=image_path,
+            img_width=FRAME_W,
+            img_height=FRAME_H,
+            viewport=Viewport(x=0, y=0, w=FRAME_W, h=FRAME_H, scale=1.0),
+            user="breeder",
+            mode="polygon",
+            active_subject=None,
+            cut_armed=False,
+            dirty=False,
+            classes=[{"id": 0, "name": "bud", "color": "#FF0000"}],
+            counts={},
+        ).model_dump(mode="json"),
     )
 
 
@@ -113,7 +131,7 @@ def _dominance(px: Image.Image, xy: tuple[int, int], channel: int) -> int:
 
 def test_canvas_shapes_are_drawn_at_the_resolution_the_pixels_were_served_at(
     tmp_path: Path,
-    bound,
+    bound: BoundProject,
 ) -> None:
     """A frame read down to ``max_edge`` carries its shapes down with it.
 
@@ -142,7 +160,7 @@ def test_canvas_shapes_are_drawn_at_the_resolution_the_pixels_were_served_at(
 
 def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
     tmp_path: Path,
-    bound,
+    bound: BoundProject,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A ping that reaches the hub but produces no new push leaves the capture unrefreshed.
@@ -181,7 +199,7 @@ def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
 
 def test_a_capture_the_gui_answered_reports_the_state_as_live(
     tmp_path: Path,
-    bound,
+    bound: BoundProject,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A capture the GUI answered with fresh state reports the state as live.
@@ -216,7 +234,7 @@ def test_a_capture_the_gui_answered_reports_the_state_as_live(
 
 def test_a_canvas_record_without_its_arrival_instant_is_refused_by_name(
     tmp_path: Path,
-    bound,
+    bound: BoundProject,
 ) -> None:
     """A canvas record without its arrival instant is refused by name.
 
@@ -228,9 +246,10 @@ def test_a_canvas_record_without_its_arrival_instant_is_refused_by_name(
 
     image = _canvas_image(tmp_path)
     _push_state(tmp_path, image, received_at=_ago(0))
-    meta = dict(tcip_store.read(canvas_meta_key(str(tmp_path))))
+    meta = tcip_store.read(canvas_meta_key(str(tmp_path)))
+    assert isinstance(meta, dict)
     del meta["received_at"]
     tcip_store.replace(canvas_meta_key(str(tmp_path)), meta)
 
-    with pytest.raises(ValueError, match="canvas_live carries no received_at"):
+    with pytest.raises(ValidationError, match="received_at"):
         capture_live_canvas(bound, refresh=False)

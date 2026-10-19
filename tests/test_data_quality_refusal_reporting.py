@@ -7,6 +7,7 @@ check goes on to the remaining documents. A warning and an error are distinct le
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import tcip_store as ts
 from tcip_annotation import json_io
@@ -14,6 +15,12 @@ from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.cli import doctor
 from tcip_mcp.dataset_layout import label_key
 from tests._producer_fixtures import write_image
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
+    from tcip_annotation.json_io import CompletionMark
+    from tcip_store import Version
 
 DATE = "2-11-26"
 
@@ -33,17 +40,19 @@ def _errors(findings: list[tuple[str, str]]) -> list[str]:
 def _label(
     root: Path,
     stem: str,
-    annotations,
+    annotations: Iterable[Annotation],
     width: int = 96,
     height: int = 64,
-    **kwargs,
+    **kwargs: bool | Version | Mapping[str, list[CompletionMark]] | None,
 ) -> None:
     json_io.write_label_document(
         label_key(root, DATE, stem), annotations, width, height, **kwargs
     )
 
 
-def test_an_unreadable_label_record_is_an_error_per_document(tmp_path: Path):
+def test_an_unreadable_label_record_is_an_error_per_document(
+    tmp_path: Path,
+) -> None:
     """An unreadable label record is an error per document, naming the refusal.
 
     Two label records of a shape the reader refuses are two errors; a dataset with no label
@@ -73,7 +82,7 @@ def test_an_unreadable_label_record_is_an_error_per_document(tmp_path: Path):
     assert [level for level, _ in findings] == ["info"]
 
 
-def test_a_label_with_no_matching_image_is_an_error(tmp_path: Path):
+def test_a_label_with_no_matching_image_is_an_error(tmp_path: Path) -> None:
     """An orphan label is an error-level finding."""
     root = tmp_path / "ds"
     for stem in ("plotA_0_0", "plotB_0_0"):
@@ -91,7 +100,9 @@ def test_a_label_with_no_matching_image_is_an_error(tmp_path: Path):
     assert "plotZ_9_9" in errors[0] and "no matching image" in errors[0]
 
 
-def test_an_unreadable_first_label_hides_no_later_finding(tmp_path: Path):
+def test_an_unreadable_first_label_hides_no_later_finding(
+    tmp_path: Path,
+) -> None:
     """An unreadable first label hides no later finding.
 
     An unreadable label sorting first and the orphan after it are each reported.
@@ -111,7 +122,9 @@ def test_an_unreadable_first_label_hides_no_later_finding(tmp_path: Path):
     assert any("zzz_orphan" in e and "no matching image" in e for e in errors)
 
 
-def test_an_empty_label_not_marked_complete_is_an_error(tmp_path: Path):
+def test_an_empty_label_not_marked_complete_is_an_error(
+    tmp_path: Path,
+) -> None:
     """An empty label no person marked complete is the one error, naming it not marked complete."""
     root = tmp_path / "ds"
     write_image(root / "images" / DATE / "plotA_0_0.jpg", (96, 64))
@@ -123,7 +136,7 @@ def test_an_empty_label_not_marked_complete_is_an_error(tmp_path: Path):
     assert "plotA_0_0" in errors[0] and "not marked complete" in errors[0]
 
 
-def test_a_confirmed_negative_empty_label_stays_clean(tmp_path: Path):
+def test_a_confirmed_negative_empty_label_stays_clean(tmp_path: Path) -> None:
     """An empty label a person marked complete stays clean, a confirmed negative.
 
     A human's Complete-with-nothing yields no finding at all.
@@ -141,7 +154,7 @@ def test_a_confirmed_negative_empty_label_stays_clean(tmp_path: Path):
 
 def test_an_unreadable_label_is_a_finding_beside_a_readable_one(
     tmp_path: Path,
-):
+) -> None:
     """An unreadable label is one finding beside a readable label of the same capture.
 
     The refusal surfaces as one error-level finding and no warning.

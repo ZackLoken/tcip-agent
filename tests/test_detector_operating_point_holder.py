@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -21,6 +22,9 @@ from tests._chain_fixtures import (
 )
 from tests._training_values import drawn_split
 
+if TYPE_CHECKING:
+    from torch import nn
+
 torch = pytest.importorskip("torch")
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
@@ -30,7 +34,7 @@ IMG = 32
 _DIMS = {"in_chans": 3, "num_classes": 1}
 
 
-def _built(model_source: dict):
+def _built(model_source: dict) -> nn.Module:
     """Return the model ``model_source`` builds at :data:`_DIMS` and a 32 px frame's geometry.
 
     The builder is imported from the staged sources of a run config over one noise frame of its
@@ -76,7 +80,7 @@ def _built(model_source: dict):
     )
 
 
-def test_holder_resolves_to_the_module_itself_with_no_detector():
+def test_holder_resolves_to_the_module_itself_with_no_detector() -> None:
     from tcip_mcp.pipelines.operating_point import (
         detector_operating_point_holder,
     )
@@ -86,7 +90,9 @@ def test_holder_resolves_to_the_module_itself_with_no_detector():
     assert holder is model and path == "self"
 
 
-def test_holder_resolves_to_detector_roi_heads_for_a_two_stage_wrapper():
+def test_holder_resolves_to_detector_roi_heads_for_a_two_stage_wrapper() -> (
+    None
+):
     from tcip_mcp.pipelines.operating_point import (
         detector_operating_point_holder,
     )
@@ -97,7 +103,7 @@ def test_holder_resolves_to_detector_roi_heads_for_a_two_stage_wrapper():
     assert holder is roi_heads and path == "detector.roi_heads"
 
 
-def test_holder_resolves_to_detector_itself_for_a_one_stage_wrapper():
+def test_holder_resolves_to_detector_itself_for_a_one_stage_wrapper() -> None:
     from tcip_mcp.pipelines.operating_point import (
         detector_operating_point_holder,
     )
@@ -108,7 +114,7 @@ def test_holder_resolves_to_detector_itself_for_a_one_stage_wrapper():
     assert holder is detector and path == "detector"
 
 
-def test_holder_is_none_when_nothing_exposes_a_knob():
+def test_holder_is_none_when_nothing_exposes_a_knob() -> None:
     from tcip_mcp.pipelines.operating_point import (
         detector_operating_point_holder,
     )
@@ -118,7 +124,9 @@ def test_holder_is_none_when_nothing_exposes_a_knob():
     assert holder is None and path is None
 
 
-def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_a_knob():
+def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_a_knob() -> (
+    None
+):
     """The holder refuses a module whose knob sits both on itself and on its detector's heads.
 
     The module is a torchvision two-stage detector under ``.detector`` (whose ``roi_heads``
@@ -140,7 +148,7 @@ def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_
         detector_operating_point_holder(model)
 
 
-def test_set_detector_operating_point_sets_each_knob_on_the_holder():
+def test_set_detector_operating_point_sets_each_knob_on_the_holder() -> None:
     """Each knob lands on its own attribute of a built detector's holder."""
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     from tests._verified_checkpoint_fixtures import built_detector
@@ -161,8 +169,8 @@ def test_set_detector_operating_point_sets_each_knob_on_the_holder():
     ids=["no knob", "no cap knob", "no score knob"],
 )
 def test_set_detector_operating_point_refuses_a_knob_the_model_does_not_expose(
-    model, missing
-):
+    model: SimpleNamespace, missing: str
+) -> None:
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
 
     with pytest.raises(ValueError, match=f"exposes no {missing} "):
@@ -171,7 +179,7 @@ def test_set_detector_operating_point_refuses_a_knob_the_model_does_not_expose(
         )
 
 
-def _checkpoint(tmp_path, builder: str) -> str:
+def _checkpoint(tmp_path: Path, builder: str) -> str:
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     return registered_checkpoint(
@@ -241,8 +249,8 @@ def _assessed(tmp_path: Path, builder: str) -> dict:
 
 
 def test_a_bespoke_module_exposing_its_own_knobs_is_assessed_at_its_stated_floor(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A bespoke module exposing its own knobs is assessed, its floor path recorded as ``self``.
 
     A hand-rolled, non-torchvision module exposing both knobs on itself is assessed without
@@ -259,7 +267,9 @@ def test_a_bespoke_module_exposing_its_own_knobs_is_assessed_at_its_stated_floor
     assert "conf_censored" not in record["failures"]
 
 
-def test_a_module_exposing_no_knob_refuses_naming_the_knob_it_lacks(tmp_path):
+def test_a_module_exposing_no_knob_refuses_naming_the_knob_it_lacks(
+    tmp_path: Path,
+) -> None:
     refused = _assessed(tmp_path, BARE_NO_KNOB_DETECTOR)
 
     assert "score_thresh" in refused.get("error", ""), refused

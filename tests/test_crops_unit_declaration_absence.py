@@ -21,7 +21,7 @@ from tests import _trait_fixtures as fx, csv_rows
 
 
 @pytest.fixture(autouse=True)
-def _recorded_meaning(tmp_path: Path):
+def _recorded_meaning(tmp_path: Path) -> None:
     """Confirm ``stem_count`` and ``plant_surface_area`` delivered meanings in the project."""
     fx.seed_delivery_traits(tmp_path)
     fx.seed_confirmed_aggregate(
@@ -54,8 +54,8 @@ def _deliver(
     *,
     value_key: str,
     delivery_kind: str,
-    buckets=None,
-):
+    buckets: list | None = None,
+) -> dict:
     """Run the acknowledged per-plant delivery (``_chain_fixtures.deliver_acknowledged``)."""
     if buckets is None:
         pytest.importorskip("torch")
@@ -93,7 +93,7 @@ UNDECLARED = [
 ]
 
 
-def test_declared_units_are_read_verbatim_from_crops_yml():
+def test_declared_units_are_read_verbatim_from_crops_yml() -> None:
     """The declared units are read verbatim from crops.yml.
 
     The mapping is not empty and carries each declaring trait's own unit, several distinct ones.
@@ -107,7 +107,7 @@ def test_declared_units_are_read_verbatim_from_crops_yml():
 @pytest.mark.parametrize("trait_name", UNDECLARED)
 def test_a_trait_declaring_no_unit_is_absent_rather_than_given_one(
     trait_name: str,
-):
+) -> None:
     """A crops.yml trait declaring no unit is absent from the unit mapping."""
     from tcip_mcp import traits
 
@@ -120,7 +120,7 @@ def test_a_trait_declaring_no_unit_is_absent_rather_than_given_one(
 @pytest.mark.parametrize(
     "value_key", ["detections_count", "burrs_count", "seeds_count"]
 )
-def test_a_count_suffixed_value_key_implies_no_unit(value_key: str):
+def test_a_count_suffixed_value_key_implies_no_unit(value_key: str) -> None:
     """A value_key ending in a count implies no unit, since a count is not a physical unit.
 
     A key ending in a declared unit, ``detections_mm``, resolves to that unit.
@@ -133,7 +133,7 @@ def test_a_count_suffixed_value_key_implies_no_unit(value_key: str):
 
 def test_a_count_valued_delivery_ships_with_a_blank_units_column(
     tmp_path: Path,
-):
+) -> None:
     """A per-plant count delivered for a trait declaring no unit ships with a blank units column.
 
     The delivery runs end to end and keeps the counted values.
@@ -154,7 +154,7 @@ def test_a_count_valued_delivery_ships_with_a_blank_units_column(
 
 def test_a_dimensional_value_ships_for_a_trait_crops_yml_declares_no_unit_for(
     tmp_path: Path,
-):
+) -> None:
     """A dimensional value ships for a trait crops.yml declares no unit for.
 
     With no unit declared for the trait, an mm-keyed area resolves to its own squared label,
@@ -180,7 +180,7 @@ def test_a_dimensional_value_ships_for_a_trait_crops_yml_declares_no_unit_for(
 
 def test_a_declared_unit_still_cross_checks_the_value_keys_own_unit(
     tmp_path: Path,
-):
+) -> None:
     """A trait declaring ``mm`` refuses a value whose own key implies ``cm``."""
     assert crops_units()["bark_thickness"] == "mm"
     with pytest.raises(ValueError, match="declared units"):

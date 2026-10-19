@@ -23,7 +23,7 @@ from tests._trait_fixtures import BUD_OPENING
 # An attribute whose positive value sits at id 2 with no record ever carrying id 1.
 SPARSE = cr.Attribute("opening", "categorical", ("closed", "partial", "open"))
 REGISTRY = cr.SubjectRegistry(
-    subjects=(cr.Subject(name="bud", attributes=(SPARSE,)),)
+    subjects=(cr.Subject(name="bud", description="", attributes=(SPARSE,)),)
 )
 
 
@@ -41,7 +41,7 @@ def _states(n_positive: int, n_negative: int) -> list[str]:
 # -- crossings on a curve that rises and falls ----------------------------
 
 
-def test_crossing_uses_the_bracket_that_exists_in_time():
+def test_crossing_uses_the_bracket_that_exists_in_time() -> None:
     """A crossing is read off the bracket of captures that straddles the target in calendar order.
 
     The crossing is read off the two neighboring captures that straddle the target in calendar
@@ -63,7 +63,9 @@ def test_crossing_uses_the_bracket_that_exists_in_time():
     assert c.gap_days == 4
 
 
-def test_crossing_above_target_at_the_first_capture_stays_left_censored_when_the_curve_dips():
+def test_crossing_above_target_at_the_first_capture_stays_left_censored_when_the_curve_dips() -> (
+    None
+):
     """A curve past the target at its first capture stays left-censored when it later dips.
 
     A curve whose first capture is already past the target, and which later falls back below it
@@ -77,7 +79,9 @@ def test_crossing_above_target_at_the_first_capture_stays_left_censored_when_the
     assert c.date == "2026-03-01"
 
 
-def test_positive_onset_is_the_earliest_capture_with_any_positive_observation():
+def test_positive_onset_is_the_earliest_capture_with_any_positive_observation() -> (
+    None
+):
     """Onset is the first date in calendar order carrying a positive observation.
 
     It is not the date carrying the smallest positive fraction.
@@ -87,7 +91,7 @@ def test_positive_onset_is_the_earliest_capture_with_any_positive_observation():
     assert phenology.positive_onset_date(series) == "2026-03-05"
 
 
-def test_first_capture_exactly_on_the_target_is_an_upper_bound():
+def test_first_capture_exactly_on_the_target_is_an_upper_bound() -> None:
     """A first capture exactly on the target is an upper bound with no gap.
 
     The date is the first capture's, left-censored, with no gap.
@@ -101,7 +105,9 @@ def test_first_capture_exactly_on_the_target_is_an_upper_bound():
     assert c.gap_days is None
 
 
-def test_first_capture_exactly_on_the_target_keeps_its_date_when_the_curve_falls_back():
+def test_first_capture_exactly_on_the_target_keeps_its_date_when_the_curve_falls_back() -> (
+    None
+):
     """A first capture exactly on the target keeps its date when the curve falls back.
 
     The crossing is still bounded by the first observation, not moved forward to a later
@@ -116,8 +122,8 @@ def test_first_capture_exactly_on_the_target_keeps_its_date_when_the_curve_falls
 
 
 def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture_order(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A noisy plant's and a steady plant's milestones are each read in capture order.
 
     Two plants observed on the same four dates, one whose fraction dips mid-season and one that
@@ -182,8 +188,8 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
 
 
 def test_positive_detections_are_the_named_value_not_a_fixed_position(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Positive detections are the value the trait names, wherever it sits in declared order.
 
     An attribute whose positive value sits at id 2 with no record at id 1 counts two positive
@@ -230,8 +236,8 @@ def test_positive_detections_are_the_named_value_not_a_fixed_position(
 
 
 def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A bucket the real publication produced reads back with the values the run decoded.
 
     The bucket is published through the real publication and read back through the readers here:
@@ -264,7 +270,7 @@ def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes
 
 def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(
     tmp_path: Path,
-):
+) -> None:
     """The delivered CSV marks a milestone met on the first capture as left-censored.
 
     A plant already at half its buds on the first capture ships that date with its left-censored

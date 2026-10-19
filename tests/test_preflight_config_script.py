@@ -37,7 +37,7 @@ def _fixture_config(root: Path) -> Path:
     return config_path
 
 
-def test_refuses_a_run_naming_no_project(tmp_path):
+def test_refuses_a_run_naming_no_project(tmp_path: Path) -> None:
     config_path = _fixture_config(tmp_path)
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
@@ -51,7 +51,9 @@ def test_refuses_a_run_naming_no_project(tmp_path):
     assert not (cwd / ".tcip").exists()
 
 
-def test_validates_a_fixture_config_for_the_named_project(project, tmp_path):
+def test_validates_a_fixture_config_for_the_named_project(
+    project: Path, tmp_path: Path
+) -> None:
     config_path = _fixture_config(project)
     cwd = tmp_path.parent / "operator_cwd"
     cwd.mkdir()

@@ -12,7 +12,11 @@ from PIL import Image
 
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.subject_registry import Subject, SubjectRegistry
-from tcip_mcp.tools.project_tools import read_datasets, register_dataset
+from tcip_mcp.tools.project_tools import (
+    DatasetEntry,
+    read_datasets,
+    register_dataset,
+)
 from tests._cli_fixtures import run_tcip
 from tests._producer_fixtures import label_image, registry_over
 
@@ -29,7 +33,9 @@ def _make_dataset(root: Path) -> None:
         32,
         32,
     )
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(
+        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
+    )
 
 
 # ── the writer: stores "." for the project's own tree ──────────────────────────
@@ -37,7 +43,7 @@ def _make_dataset(root: Path) -> None:
 
 def test_register_dataset_stores_a_relative_path_for_the_projects_own_tree(
     tmp_path: Path,
-):
+) -> None:
     """A dataset that is the project's own tree registers as ``"."``, not as an absolute path."""
     src = tmp_path / "proj"
     _make_dataset(src)
@@ -45,7 +51,7 @@ def test_register_dataset_stores_a_relative_path_for_the_projects_own_tree(
     registered = register_dataset(src, str(src), crop="currant")
 
     assert "error" not in registered
-    assert read_datasets(src) == [{"id": registered["id"], "path": "."}]
+    assert read_datasets(src) == [DatasetEntry(id=registered["id"], path=".")]
 
 
 # ── the accessor: resolves a relative entry, leaves an absolute one alone ──────
@@ -53,7 +59,7 @@ def test_register_dataset_stores_a_relative_path_for_the_projects_own_tree(
 
 def test_dataset_entry_path_resolves_a_relative_entry_against_the_project_root(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.tools.project_tools import dataset_entry_path
 
     src = tmp_path / "proj"
@@ -67,7 +73,7 @@ def test_dataset_entry_path_resolves_a_relative_entry_against_the_project_root(
 
 def test_dataset_entry_path_leaves_an_external_absolute_entry_unchanged(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.tools.project_tools import dataset_entry_path
 
     project = tmp_path / "proj"
@@ -79,13 +85,13 @@ def test_dataset_entry_path_leaves_an_external_absolute_entry_unchanged(
     )
 
     (entry,) = read_datasets(project)
-    assert entry["path"] == str(external.resolve())
+    assert entry.path == str(external.resolve())
     assert dataset_entry_path(project, entry) == external.resolve()
 
 
 def test_register_dataset_stores_a_nested_relative_path_with_posix_separators(
     tmp_path: Path,
-):
+) -> None:
     """A dataset nested under the project registers a relative path with posix separators.
 
     A dataset under a subdirectory of the project (not the project's own tree) stores a deeper
@@ -102,8 +108,8 @@ def test_register_dataset_stores_a_nested_relative_path_with_posix_separators(
 
     assert "error" not in registered
     entries = read_datasets(project)
-    assert entries[0]["path"] == "datasets/main"
-    assert "\\" not in entries[0]["path"]
+    assert entries[0].path == "datasets/main"
+    assert "\\" not in entries[0].path
     assert (
         dataset_entry_path(project, entries[0]).resolve() == nested.resolve()
     )
@@ -111,7 +117,7 @@ def test_register_dataset_stores_a_nested_relative_path_with_posix_separators(
 
 def test_stored_path_returns_the_resolved_absolute_path_when_not_contained(
     tmp_path: Path,
-):
+) -> None:
     """A dataset genuinely outside the project is stored as its resolved absolute path.
 
     A spelling through '..' is stored resolved, with no '..' left in it.
@@ -132,7 +138,7 @@ def test_stored_path_returns_the_resolved_absolute_path_when_not_contained(
 
 def test_stored_path_recognizes_containment_through_a_symlinked_project_root(
     tmp_path: Path,
-):
+) -> None:
     """A symlinked project root recognizes a dataset under the directory it points at.
 
     Through a symlink aliasing the project root, a dataset under the real directory stores as a
@@ -159,7 +165,7 @@ def test_stored_path_recognizes_containment_through_a_symlinked_project_root(
 
 def test_check_dataset_identity_stays_quiet_for_a_self_registered_project(
     tmp_path: Path,
-):
+) -> None:
     from tests._web_fixtures import new_project
 
     src = new_project(tmp_path / "proj").root
@@ -176,7 +182,7 @@ def test_check_dataset_identity_stays_quiet_for_a_self_registered_project(
 
 def test_check_dataset_identity_still_fires_for_a_genuinely_moved_dataset(
     tmp_path: Path,
-):
+) -> None:
     import shutil
 
     import tcip_store
@@ -203,7 +209,7 @@ def test_check_dataset_identity_still_fires_for_a_genuinely_moved_dataset(
 
 def test_resolve_statement_registry_names_the_resolved_root_not_the_stored_dot(
     tmp_path: Path,
-):
+) -> None:
     """The statement-registry refusal names each dataset's resolved root, not the stored dot.
 
     A project registering two datasets under its subdirectories refuses, and the refusal names
@@ -238,7 +244,7 @@ def test_resolve_statement_registry_names_the_resolved_root_not_the_stored_dot(
 
 def test_evidence_roots_resolves_a_relatively_registered_dataset(
     tmp_path: Path,
-):
+) -> None:
     """The evidence roots include a relatively registered dataset, resolved.
 
     A dataset registered under a subdirectory of the project is among the roots.

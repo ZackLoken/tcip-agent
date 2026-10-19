@@ -7,20 +7,28 @@ removal that resolves it, and what the editor reads back.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tcip_annotation.flags import (
     FlagRequest,
-    decode_flag,
-    encode_flag,
     flag_key,
+    flags_of,
+    flags_record,
     read_flags,
 )
 from tcip_annotation.json_io import read_label_document
 from tcip_mcp.dataset_layout import Gestures, image_dir, save_label_document
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import image_label_key, write_image
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+
+    from tcip_annotation.flags import Flag
+    from tcip_annotation.json_io import LabelDocument
+    from tcip_store import Version
 
 DATE = "2026-02-11"
 WIDTH, HEIGHT = 100, 80
@@ -41,7 +49,7 @@ def _save(
     *,
     author: str = "user:breeder",
     gestures: Gestures = Gestures(),
-):
+) -> tuple[Version, LabelDocument, dict[int, int]]:
     return save_label_document(
         root,
         image_label_key(image),
@@ -54,7 +62,7 @@ def _save(
     )
 
 
-def _flags(image: Path):
+def _flags(image: Path) -> list[Flag]:
     return read_flags(flag_key(image_label_key(image)))
 
 
@@ -106,7 +114,7 @@ def test_a_flag_on_an_annotation_is_recorded_with_who_and_when(
         "bud",
     )
     assert flag.open and flag.at
-    assert decode_flag(encode_flag(flag)) == flag
+    assert flags_of(flags_record([flag])) == [flag]
 
 
 def test_a_flag_on_the_image_and_one_on_a_proposal_are_each_their_own_target(
@@ -134,7 +142,7 @@ def test_a_flag_on_the_image_and_one_on_a_proposal_are_each_their_own_target(
 @pytest.mark.parametrize(
     "request_, message",
     [
-        (FlagRequest(text="   "), "does not read|is not a comment"),
+        (FlagRequest(text="   "), "for Flag\ntext\n"),
         (FlagRequest(text="where?", point=INSIDE), "is not a comment"),
         (FlagRequest(text="which?", subject="bud"), "is not a comment"),
     ],
@@ -169,7 +177,9 @@ def test_a_flag_or_a_resolution_by_no_person_refuses_before_any_write(
     """
     image = _image(tmp_path)
     box = [{"subject": "bud", "bbox": BOX}]
-    with pytest.raises(ValueError, match="by a person"):
+    with pytest.raises(
+        ValueError, match="is not a person's recorded identity"
+    ):
         _save(
             tmp_path,
             image,
@@ -191,7 +201,9 @@ def test_a_flag_or_a_resolution_by_no_person_refuses_before_any_write(
         read_label_document(image_label_key(image)),
         audit_rows(tmp_path),
     )
-    with pytest.raises(ValueError, match="by a person"):
+    with pytest.raises(
+        ValueError, match="is not a person's recorded identity"
+    ):
         _save(tmp_path, image, [], author="save_annotations")
     assert _flags(image)[0].open
     assert read_label_document(image_label_key(image)) == held
@@ -325,7 +337,7 @@ def test_moving_a_flagged_annotation_off_its_flag_resolves_it_as_removed(
 
 
 def test_the_editor_reads_the_flags_at_load_and_after_a_save(
-    tmp_path: Path, client
+    tmp_path: Path, client: TestClient
 ) -> None:
     from tests._web_fixtures import open_new_project
 

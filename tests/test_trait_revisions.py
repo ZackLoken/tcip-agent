@@ -12,6 +12,7 @@ confirmed revision until it is confirmed itself; the delivery event names the re
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,12 +24,19 @@ from tcip_mcp.delivery import read_delivery_events
 from tcip_mcp.operationalization import OperationalizationRefusedError
 from tests import REFUSED_NAMES, _trait_fixtures as fx
 
+if TYPE_CHECKING:
+    from httpx import Response
+    from pydantic import JsonValue
+
+    from tcip_mcp.buckets import Bucket
+    from tcip_store import Key
+
 TRAITS_ROUTE = "/api/results/traits"
 CONFIRM_ROUTE = "/api/results/traits/confirm"
 _SCOPE = {"subject": fx.COUNT_SUBJECT}
 
 
-def _count_entry(**fields) -> traits.TraitEntry:
+def _count_entry(**fields: str | tuple[str, ...]) -> traits.TraitEntry:
     return fx.with_operationalization(
         fx.COUNT_SPEC,
         traits.PER_IMAGE_COUNT,
@@ -37,7 +45,7 @@ def _count_entry(**fields) -> traits.TraitEntry:
     )
 
 
-def _bucket(root: Path):
+def _bucket(root: Path) -> Bucket:
     """Return ``root``'s one unassessed bucket ``counts/2026-02-11``, publishing it on first use.
 
     The bucket holds three detections on one frame of the dataset ``ds``, published through
@@ -95,7 +103,9 @@ def _deliver_counts(root: Path, name: str) -> dict:
     return event.model_dump(mode="json")
 
 
-def _confirm(client: TestClient, revision: traits.TraitRevision, **extra):
+def _confirm(
+    client: TestClient, revision: traits.TraitRevision, **extra: str
+) -> Response:
     body = {
         "trait": revision.entry.name,
         "revision": revision.number,
@@ -562,9 +572,11 @@ def test_confirming_and_withdrawing_land_in_the_project_log_with_the_actor(
         if e["tool"] == "confirm_trait_revision"
     ]
 
-    assert [e["arguments"]["confirmed"] for e in entries] == [True, False]
+    arguments = [a for e in entries if isinstance(a := e["arguments"], dict)]
+    assert len(arguments) == len(entries)
+    assert [a["confirmed"] for a in arguments] == [True, False]
     assert all(e["actor"] == "user:rosalind" for e in entries)
-    assert all(e["arguments"]["revision"] == 1 for e in entries)
+    assert all(a["revision"] == 1 for a in arguments)
 
 
 def test_the_confirmation_writes_its_own_audit_line_after_its_record(
@@ -582,7 +594,7 @@ def test_the_confirmation_writes_its_own_audit_line_after_its_record(
     real_append = audit_module.append
     seen: list[bool] = []
 
-    def append(key, entry):
+    def append(key: Key, entry: dict[str, JsonValue]) -> None:
         if entry["tool"] == "confirm_trait_revision":
             seen.append(
                 traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest.confirmed

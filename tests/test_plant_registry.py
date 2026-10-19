@@ -77,7 +77,7 @@ def test_a_registered_csvs_hash_is_of_the_bytes_its_rows_were_parsed_from(
     parsed_bytes = csv_path.read_bytes()
     real = plant_mapping.read_plant_csv_bytes
 
-    def parse_then_rewrite(data: bytes):
+    def parse_then_rewrite(data: bytes) -> list[plant_mapping.PlantRecord]:
         rows = real(data)
         write_plant_csv(csv_path, PLANTS)
         return rows
@@ -104,8 +104,11 @@ def test_refuses_a_name_outside_name_segment(tmp_path: Path) -> None:
         site="orchard",
     )
 
-    assert "error" in res
-    assert "lowercase" in res["error"]
+    match res:
+        case {"error": str() as error}:
+            assert "lowercase" in error
+        case _:
+            raise AssertionError(res)
 
 
 def test_refuses_a_missing_file(tmp_path: Path) -> None:
@@ -117,8 +120,11 @@ def test_refuses_a_missing_file(tmp_path: Path) -> None:
         site="orchard",
     )
 
-    assert "error" in res
-    assert "plant CSV" in res["error"]
+    match res:
+        case {"error": str() as error}:
+            assert "plant CSV" in error
+        case _:
+            raise AssertionError(res)
 
 
 def test_refuses_naming_a_file_that_parses_no_georeferenced_plant(
@@ -136,9 +142,12 @@ def test_refuses_naming_a_file_that_parses_no_georeferenced_plant(
         site="orchard",
     )
 
-    assert "error" in res
-    assert bad.name in res["error"]
-    assert good.name not in res["error"]
+    match res:
+        case {"error": str() as error}:
+            assert bad.name in error
+            assert good.name not in error
+        case _:
+            raise AssertionError(res)
     assert not ts.exists(plant_mapping.plant_registry_key(tmp_path, "valley"))
 
 
@@ -194,8 +203,11 @@ def test_a_second_registration_under_the_same_name_and_different_plants_refuses(
         site="orchard",
     )
 
-    assert "error" in conflict
-    assert first["digest"] in conflict["error"]
+    match conflict:
+        case {"error": str() as error}:
+            assert first["digest"] in error
+        case _:
+            raise AssertionError(conflict)
     stored = plant_mapping.load_registry(tmp_path, "valley")
     assert stored["digest"] == first["digest"], (
         "the taken name's record must not have moved"
@@ -232,10 +244,9 @@ def test_build_plant_mapping_reads_a_registered_registry(
     assert "error" not in res, res
     build = plant_mapping.load_mapping(tmp_path, "valley")
     assert build is not None
-    assert build.plant_registry == {
-        "name": "valley-plants",
-        "digest": reg["digest"],
-    }
+    assert build.plant_registry == plant_mapping.PlantRegistryReference(
+        name="valley-plants", digest=reg["digest"]
+    )
 
 
 def test_build_plant_mapping_refuses_naming_register_plant_registry_when_registry_is_missing(

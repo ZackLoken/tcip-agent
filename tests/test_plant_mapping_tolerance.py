@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -17,8 +18,10 @@ from pyproj import Geod
 
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     MatchRadius,
+    MatchTolerance,
     NoMatchRadiusError,
     NoMatchToleranceError,
+    PlantRegistryReference,
     StatedRadius,
     build_mapping,
     grid_pitch_m,
@@ -27,6 +30,14 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
 )
 from tests._image_fixtures import write_geo_image
 from tests._mapping_fixtures import write_plant_csv
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        MappingBuild,
+        PlantRecord,
+    )
 
 DATE = "2026-02-11"
 ROW_ORIGIN = (43.19670, -90.058000)
@@ -53,7 +64,11 @@ STRAY_NORTH_M = 4.0
 """How far north of the last plant the one stray photograph was taken."""
 
 
-def _build(tmp_path: Path, errors, match_radius: StatedRadius | None = None):
+def _build(
+    tmp_path: Path,
+    errors: Sequence[float | None],
+    match_radius: StatedRadius | None = None,
+) -> MappingBuild:
     """Map a date of up to four photographs through ``build_mapping`` and return the build.
 
     One photograph sits at each of the first three plants and one :data:`STRAY_NORTH_M` north of
@@ -79,7 +94,9 @@ def _build(tmp_path: Path, errors, match_radius: StatedRadius | None = None):
         dataset_root=tmp_path / "ds",
         dataset_id="ds-1",
         project=tmp_path,
-        plant_registry={"name": "unregistered", "digest": "0" * 64},
+        plant_registry=PlantRegistryReference(
+            name="unregistered", digest="0" * 64
+        ),
         match_radius=match_radius,
     )
 
@@ -168,7 +185,7 @@ def test_a_stated_radius_is_recorded_on_a_date_with_no_positioned_capture(
     assert build.match_radius["2026-02-12"] == build.match_radius[DATE]
 
 
-def _plants(tmp_path: Path, plants: list[dict]):
+def _plants(tmp_path: Path, plants: list[dict]) -> list[PlantRecord]:
     return read_plant_csvs([write_plant_csv(tmp_path / "p.csv", plants)])
 
 
@@ -179,8 +196,8 @@ def test_the_nn_tolerance_derives_as_half_the_grid_pitch(
 
     tolerance = resolve_nn_tolerance_m(plants)
 
-    assert tolerance["source"] == "grid_pitch"
-    assert tolerance["value"] == pytest.approx(PLANT_SPACING_M / 2, rel=1e-3)
+    assert tolerance.source == "grid_pitch"
+    assert tolerance.value == pytest.approx(PLANT_SPACING_M / 2, rel=1e-3)
 
 
 def test_the_grid_pitch_is_numpys_median_of_unequal_neighbor_distances(
@@ -213,7 +230,7 @@ def test_the_grid_pitch_is_numpys_median_of_unequal_neighbor_distances(
 
     assert pitch == pytest.approx(float(np.median(nearest)), rel=1e-9)
     assert pitch == pytest.approx(5.0, rel=1e-3)
-    assert resolve_nn_tolerance_m(plants)["value"] == pytest.approx(pitch / 2)
+    assert resolve_nn_tolerance_m(plants).value == pytest.approx(pitch / 2)
 
 
 def test_the_nn_tolerance_refuses_naming_the_parameter_without_a_pitch(
@@ -229,15 +246,12 @@ def test_a_stated_nn_tolerance_is_honored_up_to_half_the_pitch(
     plants = _plants(tmp_path, PLANTS)
     half = grid_pitch_m(plants) / 2
 
-    assert resolve_nn_tolerance_m(plants, 1.0) == {
-        "value": 1.0,
-        "source": "stated",
-    }
-    assert resolve_nn_tolerance_m(plants, 5.0) == {
-        "value": half,
-        "source": "stated_capped",
-    }
-    assert resolve_nn_tolerance_m(plants[:1], 2.0) == {
-        "value": 2.0,
-        "source": "stated",
-    }
+    assert resolve_nn_tolerance_m(plants, 1.0) == MatchTolerance(
+        value=1.0, source="stated"
+    )
+    assert resolve_nn_tolerance_m(plants, 5.0) == MatchTolerance(
+        value=half, source="stated_capped"
+    )
+    assert resolve_nn_tolerance_m(plants[:1], 2.0) == MatchTolerance(
+        value=2.0, source="stated"
+    )

@@ -32,8 +32,8 @@ def _scalar_steps(log_dir: Path, tag: str) -> list[int]:
 
 
 def test_classification_training_writes_train_and_val_scalars_every_epoch(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     ctx = run_context(
         tmp_path,
         classifier_config(
@@ -50,7 +50,9 @@ def test_classification_training_writes_train_and_val_scalars_every_epoch(
     assert _scalar_steps(tb_dir, "val_accuracy") == [1, 2, 3]
 
 
-def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
+def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(
+    tmp_path: Path,
+) -> None:
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.experiments import board_of, run_dirs
     from tcip_mcp.tools.training_tools import _run_hpo_trial
@@ -95,8 +97,8 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
 
 
 def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(
-    tmp_path, caplog
-):
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """Each of a two-epoch run's console lines names validation accuracy and F1."""
     import logging
 

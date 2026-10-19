@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
@@ -14,6 +14,19 @@ from tcip_annotation.matching import REVIEW_CONF_FLOOR
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.raster_source import SourceHeader
 from tests._training_values import IOU_THRESHOLD, TRIAGE_WEIGHTS
+
+if TYPE_CHECKING:
+    from typing import Required, TypedDict, Unpack
+
+    from tcip_store import Key
+
+    class _RenderGridKeywords(TypedDict, total=False):
+        """The keywords ``render_grid`` takes beside its image paths."""
+
+        titles: list[str] | None
+        cols: int
+        cell_size: int
+        output_path: Required[str]
 
 
 def _display(image_path: str) -> tuple[np.ndarray, tuple[int, int]]:
@@ -88,7 +101,7 @@ def viz_bucket(viz_dataset: Path) -> Path:
     return viz_dataset
 
 
-def _damage(key, stored: bytes = b"{not json") -> None:
+def _damage(key: Key, stored: bytes = b"{not json") -> None:
     """Replace the record ``key`` names in the store by ``stored``."""
     from tests._record_damage_fixtures import damage_record
 
@@ -102,13 +115,13 @@ def _damage_record(project: Path) -> None:
     _damage(bucket_key(project, PUBLISHED))
 
 
-def _label_key(image: Path):
+def _label_key(image: Path) -> Key:
     from tests._producer_fixtures import image_label_key
 
     return image_label_key(image)
 
 
-def _prediction_key(project: Path, image: Path):
+def _prediction_key(project: Path, image: Path) -> Key:
     from tcip_mcp.dataset_layout import prediction_key
 
     return prediction_key(project, PUBLISHED, image.stem)
@@ -118,7 +131,7 @@ def _prediction_key(project: Path, image: Path):
 
 
 class TestRenderDetections:
-    def test_basic_render(self, viz_dataset: Path):
+    def test_basic_render(self, viz_dataset: Path) -> None:
         from tcip_annotation.viz import render_detections
 
         pixels, native = _display(
@@ -136,7 +149,7 @@ class TestRenderDetections:
         rendered = Image.open(result)
         assert rendered.size[0] > 0
 
-    def test_with_class_names(self, viz_dataset: Path):
+    def test_with_class_names(self, viz_dataset: Path) -> None:
         from tcip_annotation.viz import render_detections
 
         pixels, native = _display(
@@ -153,7 +166,7 @@ class TestRenderDetections:
         )
         assert Path(result).is_file()
 
-    def test_with_score(self, viz_dataset: Path):
+    def test_with_score(self, viz_dataset: Path) -> None:
         from tcip_annotation.viz import render_detections
 
         pixels, native = _display(
@@ -177,7 +190,7 @@ class TestRenderDetections:
 
     def test_a_shape_without_its_class_and_a_candidate_without_its_score_refuse_by_name(
         self, tmp_path: Path
-    ):
+    ) -> None:
         """A shape without its class and a candidate without its score refuse by name.
 
         A box stating no ``class_id`` and a candidate stating no ``score`` raise a KeyError
@@ -217,7 +230,7 @@ class TestRenderDetections:
 
     def test_a_pil_frame_renders_the_same_as_its_own_pixels(
         self, viz_dataset: Path
-    ):
+    ) -> None:
         """A PIL frame renders byte-identically to its own pixels and is left untouched."""
         from tcip_annotation.viz import render_detections
 
@@ -242,7 +255,7 @@ class TestRenderDetections:
 
     def test_pixels_that_are_not_uint8_rgb_are_refused(
         self, viz_dataset: Path
-    ):
+    ) -> None:
         from tcip_annotation.viz import render_detections
 
         with pytest.raises(ValueError, match="uint8"):
@@ -255,7 +268,7 @@ class TestRenderDetections:
 
     def test_a_native_coordinate_lands_at_its_scaled_position(
         self, tmp_path: Path
-    ):
+    ) -> None:
         """A native coordinate lands at its scaled position on reduced pixels.
 
         A box edge at native x 100 of a 400x200 frame draws at x 50 on 200x100 pixels, and
@@ -274,7 +287,7 @@ class TestRenderDetections:
         )
         px = Image.open(out).convert("RGB")
 
-        def red_at(xy):
+        def red_at(xy: tuple[int, int]) -> int:
             r, g, _b = px.getpixel(xy)
             return r - g
 
@@ -285,7 +298,7 @@ class TestRenderDetections:
 
 
 class TestRenderSegmentations:
-    def test_basic_render(self, viz_dataset: Path):
+    def test_basic_render(self, viz_dataset: Path) -> None:
         from tcip_annotation.viz import render_segmentations
 
         pixels, native = _display(
@@ -305,7 +318,7 @@ class TestRenderSegmentations:
 
     def test_renders_every_ring_of_an_occlusion_split_instance(
         self, viz_dataset: Path
-    ):
+    ) -> None:
         """An instance's second ring is drawn: its render differs from its first ring's alone."""
         from tcip_annotation.viz import render_segmentations
 
@@ -337,7 +350,7 @@ class TestRenderSegmentations:
 
     def test_a_polygon_stating_no_rings_refuses_and_one_with_none_drawn_admits(
         self, viz_dataset: Path
-    ):
+    ) -> None:
         """An entry naming no ``rings`` refuses by name; one whose ring list is empty renders."""
         from tcip_annotation.viz import render_segmentations
 
@@ -360,7 +373,7 @@ class TestRenderSegmentations:
 
 
 class TestRenderComparison:
-    def test_basic_comparison(self, viz_dataset: Path):
+    def test_basic_comparison(self, viz_dataset: Path) -> None:
         from tcip_annotation.viz import render_comparison
 
         pixels, native = _display(
@@ -385,7 +398,7 @@ class TestRenderComparison:
 
     def test_a_tp_entry_draws_a_line_between_the_boxes_it_indexes(
         self, viz_dataset: Path
-    ):
+    ) -> None:
         """A true-positive entry draws a line between the boxes it indexes.
 
         ``matches`` carries the one matcher's ``(gt index, prediction index)`` pairs; the line
@@ -436,7 +449,7 @@ class TestRenderComparison:
 
 
 class TestRenderGrid:
-    def test_grid(self, viz_dataset: Path):
+    def test_grid(self, viz_dataset: Path) -> None:
         from tcip_annotation.viz import render_grid
 
         paths = [
@@ -451,7 +464,7 @@ class TestRenderGrid:
         grid = Image.open(result)
         assert grid.size[0] == 4 * 256  # 4 cols * 256 cell_size
 
-    def test_empty_grid(self, viz_dataset: Path):
+    def test_empty_grid(self, viz_dataset: Path) -> None:
         from tcip_annotation.viz import render_grid
 
         out = str(viz_dataset / "test_empty.png")
@@ -463,7 +476,7 @@ class TestRenderGrid:
 
 
 class TestVisualizeAnnotations:
-    def test_detect(self, viz_dataset: Path):
+    def test_detect(self, viz_dataset: Path) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         img = str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg")
@@ -472,7 +485,7 @@ class TestVisualizeAnnotations:
         assert Path(result["image_path"]).is_file()
         assert result["count"] == 2
 
-    def test_with_class_names(self, viz_dataset: Path):
+    def test_with_class_names(self, viz_dataset: Path) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         img = str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg")
@@ -486,13 +499,13 @@ class TestVisualizeAnnotations:
         assert "error" not in result
         assert "bud" in result["summary"] or "nut" in result["summary"]
 
-    def test_missing_image(self, tmp_path: Path):
+    def test_missing_image(self, tmp_path: Path) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         result = visualize(tmp_path, "annotations", "/nonexistent/image.jpg")
         assert "error" in result
 
-    def test_no_labels(self, viz_dataset: Path):
+    def test_no_labels(self, viz_dataset: Path) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         # Create an image with no labels
@@ -502,7 +515,7 @@ class TestVisualizeAnnotations:
         result = visualize(viz_dataset, "annotations", str(no_label))
         assert "error" in result
 
-    def test_unknown_source(self, viz_dataset: Path):
+    def test_unknown_source(self, viz_dataset: Path) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         img = str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg")
@@ -511,7 +524,7 @@ class TestVisualizeAnnotations:
 
     def test_an_unreadable_label_returns_an_error_naming_the_document(
         self, viz_dataset: Path
-    ):
+    ) -> None:
         """An annotations render over an unreadable label returns an error naming the document."""
         from tcip_mcp.tools.vision_tools import visualize
 
@@ -524,7 +537,7 @@ class TestVisualizeAnnotations:
 
 
 class TestVisualizePredictions:
-    def test_detect(self, viz_bucket: Path):
+    def test_detect(self, viz_bucket: Path) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         img = str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg")
@@ -535,7 +548,7 @@ class TestVisualizePredictions:
         assert Path(result["image_path"]).is_file()
         assert result["count"] == 2
 
-    def test_missing_predictions(self, viz_bucket: Path):
+    def test_missing_predictions(self, viz_bucket: Path) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         img = Image.new("RGB", (100, 100))
@@ -548,7 +561,7 @@ class TestVisualizePredictions:
 
     def test_no_bucket_named_refuses_naming_the_parameter(
         self, viz_dataset: Path
-    ):
+    ) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         result = visualize(
@@ -560,7 +573,7 @@ class TestVisualizePredictions:
 
     def test_an_unreadable_prediction_returns_an_error_naming_the_document(
         self, viz_bucket: Path
-    ):
+    ) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         img = viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg"
@@ -571,7 +584,9 @@ class TestVisualizePredictions:
         )
         assert "img_001" in result["error"]
 
-    def test_an_undecodable_bucket_record_refuses(self, viz_bucket: Path):
+    def test_an_undecodable_bucket_record_refuses(
+        self, viz_bucket: Path
+    ) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         _damage_record(viz_bucket)
@@ -587,7 +602,7 @@ class TestVisualizePredictions:
 
 def test_scoring_and_the_comparison_render_state_one_count_for_one_image(
     tmp_path: Path,
-):
+) -> None:
     """The scoring and the comparison render state one count for one image.
 
     With no trait, the single-image scoring's TP/FP/FN, its per-detection tags and the
@@ -662,7 +677,7 @@ def test_scoring_and_the_comparison_render_state_one_count_for_one_image(
 
 
 class TestVisualizeComparison:
-    def test_basic(self, viz_bucket: Path):
+    def test_basic(self, viz_bucket: Path) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         img = str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg")
@@ -680,7 +695,7 @@ class TestVisualizeComparison:
 
     def test_the_scoring_doors_refuse_an_unstated_iou_threshold_by_name(
         self, viz_bucket: Path
-    ):
+    ) -> None:
         """The scoring doors refuse an unstated IoU threshold by name.
 
         A comparison render and ``score_predictions`` refuse naming ``iou_threshold`` when none
@@ -702,7 +717,7 @@ class TestVisualizeComparison:
 
     def test_an_image_the_bucket_did_not_predict_draws_its_ground_truth_all_missed(
         self, viz_bucket: Path
-    ):
+    ) -> None:
         from tcip_annotation.state import Annotation, BBox
         from tcip_mcp.tools.vision_tools import visualize
         from tests._producer_fixtures import label_image
@@ -733,7 +748,7 @@ class TestVisualizeComparison:
 
     def test_an_unreadable_gt_returns_an_error_naming_the_document(
         self, viz_bucket: Path
-    ):
+    ) -> None:
         """A comparison render over an unreadable GT label returns an error naming the document."""
         from tcip_mcp.tools.vision_tools import visualize
 
@@ -751,7 +766,7 @@ class TestVisualizeComparison:
 
     def test_an_unreadable_prediction_returns_an_error_naming_the_document(
         self, viz_bucket: Path
-    ):
+    ) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         img = viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg"
@@ -766,7 +781,9 @@ class TestVisualizeComparison:
         )
         assert "img_001" in result["error"]
 
-    def test_an_undecodable_bucket_record_refuses(self, viz_bucket: Path):
+    def test_an_undecodable_bucket_record_refuses(
+        self, viz_bucket: Path
+    ) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         _damage_record(viz_bucket)
@@ -786,7 +803,7 @@ class TestDisplayRead:
 
     def test_a_large_source_is_read_down_to_the_artifact_bound(
         self, tmp_path: Path
-    ):
+    ) -> None:
         """A large source is read down to the artifact bound.
 
         A source twice the bound wide is served with its long edge at the bound, and the native
@@ -815,7 +832,7 @@ class TestDisplayRead:
 
     def test_a_source_within_the_bound_is_read_at_native_resolution(
         self, viz_dataset: Path
-    ):
+    ) -> None:
         from tcip_mcp.tools.vision_tools import _display_of
 
         read = _display_of(
@@ -835,8 +852,12 @@ class TestDisplayRead:
         ids=["tall", "wide"],
     )
     def test_a_skinny_raster_places_annotations_by_each_axis_own_scale(
-        self, tmp_path: Path, shape, native_point, served_point
-    ):
+        self,
+        tmp_path: Path,
+        shape: tuple[int, int],
+        native_point: tuple[int, int],
+        served_point: tuple[int, int],
+    ) -> None:
         """A skinny raster places annotations by each axis's own scale.
 
         A one-pixel-wide raster read down to the artifact edge is reduced along its long axis
@@ -845,7 +866,7 @@ class TestDisplayRead:
         import numpy as np
         import tifffile
 
-        from tcip_annotation.viz import render_canvas_state
+        from tcip_annotation.viz import CanvasPoint, render_canvas_state
         from tcip_mcp.tools.vision_tools import _display_of
 
         path = tmp_path / "skinny.tif"
@@ -859,11 +880,14 @@ class TestDisplayRead:
         out = render_canvas_state(
             read.pixels,
             [
-                {
-                    "kind": "point",
-                    "points": [list(native_point)],
-                    "color": "#FF0000",
-                }
+                CanvasPoint.model_validate(
+                    {
+                        "kind": "point",
+                        "points": [list(native_point)],
+                        "color": "#FF0000",
+                        "tag": "gt",
+                    }
+                )
             ],
             region=(read.rect.x0, read.rect.y0, read.rect.x1, read.rect.y1),
             output_path=str(tmp_path / "skinny.png"),
@@ -874,7 +898,7 @@ class TestDisplayRead:
 
     def test_a_three_band_raster_that_is_not_8_bit_is_stretched_to_be_visible(
         self, tmp_path: Path
-    ):
+    ) -> None:
         """A three-band raster that is not 8-bit is stretched to be visible.
 
         A 16-bit capture with values from 100 to 490 is served as uint8 pixels reaching 255.
@@ -895,7 +919,9 @@ class TestDisplayRead:
         assert pixels.dtype == np.uint8
         assert pixels.max() == 255
 
-    def test_a_region_read_reports_the_rect_it_served(self, viz_dataset: Path):
+    def test_a_region_read_reports_the_rect_it_served(
+        self, viz_dataset: Path
+    ) -> None:
         from tcip_mcp.tools.vision_tools import _display_of
 
         read = _display_of(
@@ -914,7 +940,7 @@ class TestDisplayRead:
 
     def test_a_region_hanging_off_the_edge_is_clamped_into_the_raster(
         self, viz_dataset: Path
-    ):
+    ) -> None:
         """A viewport hanging off the raster's edge is clamped to the raster.
 
         A 400x400 region at (500, 400) on the 640x480 frame reads the 140x80 part inside it.
@@ -932,7 +958,7 @@ class TestDisplayRead:
 
 
 class TestVisualizeDatasetSample:
-    def test_sample(self, viz_dataset: Path):
+    def test_sample(self, viz_dataset: Path) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         result = visualize(viz_dataset, "dataset", str(viz_dataset), n=4)
@@ -941,7 +967,9 @@ class TestVisualizeDatasetSample:
         assert result["count"] == 4
         assert result["total_images"] == 4
 
-    def test_only_the_images_of_a_capture_are_sampled(self, viz_dataset: Path):
+    def test_only_the_images_of_a_capture_are_sampled(
+        self, viz_dataset: Path
+    ) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         Image.new("RGB", (64, 48)).save(viz_dataset / "images" / "loose.jpg")
@@ -955,7 +983,7 @@ class TestVisualizeDatasetSample:
         assert "error" not in result, result
         assert result["total_images"] == 4
 
-    def test_no_images(self, tmp_path: Path):
+    def test_no_images(self, tmp_path: Path) -> None:
         from tcip_mcp.tools.vision_tools import visualize
 
         (tmp_path / "images" / UNDATED_BUCKET).mkdir(parents=True)
@@ -964,7 +992,7 @@ class TestVisualizeDatasetSample:
 
     def test_a_corrupt_label_returns_an_error_not_an_unlabeled_render(
         self, viz_dataset: Path
-    ):
+    ) -> None:
         """A dataset render over a corrupt label returns an error naming the image."""
         from tcip_annotation.state import Annotation, BBox
         from tcip_mcp.tools.vision_tools import visualize
@@ -987,8 +1015,8 @@ class TestVisualizeDatasetSample:
         assert "img_bad" in result["error"]
 
     def test_an_unlabeled_multiband_sample_is_a_rendered_cell(
-        self, tmp_path: Path, monkeypatch
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """An unlabeled multiband sample is a rendered grid cell.
 
         Each cell the grid tiles is a rendered file in the project's viz directory, labels or
@@ -1009,7 +1037,9 @@ class TestVisualizeDatasetSample:
         tiled: list[list[str]] = []
         real_grid = vision_tools.render_grid
 
-        def spy(image_paths, **kwargs):
+        def spy(
+            image_paths: list[str], **kwargs: Unpack[_RenderGridKeywords]
+        ) -> str:
             tiled.append(list(image_paths))
             return real_grid(image_paths, **kwargs)
 
@@ -1029,7 +1059,7 @@ class TestVisualizeDatasetSample:
 
 
 class TestVisualizeWorstPredictions:
-    def test_basic(self, viz_bucket: Path):
+    def test_basic(self, viz_bucket: Path) -> None:
         from tcip_mcp.tools.vision_tools import render_failure_cases
 
         result = render_failure_cases(
@@ -1039,7 +1069,9 @@ class TestVisualizeWorstPredictions:
         # Should have rendered some cases
         assert len(result.get("case_images", [])) > 0
 
-    def test_the_ranking_takes_its_size_and_weights_with_no_default(self):
+    def test_the_ranking_takes_its_size_and_weights_with_no_default(
+        self,
+    ) -> None:
         import inspect
 
         from tcip_mcp.tools.vision_tools import (
@@ -1060,7 +1092,7 @@ class TestVisualizeWorstPredictions:
 
 
 class TestRenderCandidates:
-    def test_basic_render(self, viz_dataset: Path):
+    def test_basic_render(self, viz_dataset: Path) -> None:
         from tcip_annotation.viz import render_candidates
 
         pixels, native = _display(
@@ -1090,7 +1122,7 @@ class TestRenderCandidates:
         )
         assert Path(out).is_file()
 
-    def test_empty_candidates(self, viz_dataset: Path):
+    def test_empty_candidates(self, viz_dataset: Path) -> None:
         from tcip_annotation.viz import render_candidates
 
         pixels, native = _display(
@@ -1113,7 +1145,7 @@ def _uniform_cells(width: int, height: int, tile: int) -> list:
 
 
 class TestRenderGridOverlay:
-    def test_basic(self, viz_dataset: Path):
+    def test_basic(self, viz_dataset: Path) -> None:
         from tcip_annotation.viz import render_grid_overlay
 
         pixels, native = _display(
@@ -1127,26 +1159,7 @@ class TestRenderGridOverlay:
         )
         assert Path(out).is_file()
 
-    def test_cell_dicts_accepted(self, viz_dataset: Path):
-        """The grid renderer takes cells as the plain dicts a JSON route serves."""
-        from tcip_annotation.viz import render_grid_overlay
-
-        pixels, native = _display(
-            str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg")
-        )
-        cells = [
-            {"name": c.name, "x0": c.x0, "y0": c.y0, "x1": c.x1, "y1": c.y1}
-            for c in _uniform_cells(*native, 160)
-        ]
-        out = render_grid_overlay(
-            pixels,
-            cells,
-            native_size=native,
-            output_path=str(viz_dataset / "grid_cells.png"),
-        )
-        assert Path(out).is_file()
-
-    def test_grid_wider_than_alphabet(self, viz_dataset: Path):
+    def test_grid_wider_than_alphabet(self, viz_dataset: Path) -> None:
         from tcip_annotation.viz import render_grid_overlay
 
         pixels, _native = _display(
@@ -1160,7 +1173,7 @@ class TestRenderGridOverlay:
         )
         assert Path(out).is_file()
 
-    def test_empty_cells_refused(self, viz_dataset: Path):
+    def test_empty_cells_refused(self, viz_dataset: Path) -> None:
         from tcip_annotation.viz import render_grid_overlay
 
         pixels, native = _display(
@@ -1174,7 +1187,9 @@ class TestRenderGridOverlay:
                 output_path=str(viz_dataset / "grid_empty.png"),
             )
 
-    def test_lines_land_on_supplied_cell_boundaries(self, tmp_path: Path):
+    def test_lines_land_on_supplied_cell_boundaries(
+        self, tmp_path: Path
+    ) -> None:
         """The grid overlay draws its lines on the supplied cell boundaries.
 
         The renderer draws the supplied cell rects: on a clamped 100x80 grid at tile 64 the
@@ -1217,7 +1232,7 @@ class TestRenderGridOverlay:
 
 
 class TestGridToRect:
-    def test_a_name_resolves_to_its_cells_rect(self):
+    def test_a_name_resolves_to_its_cells_rect(self) -> None:
         from tcip_annotation.grid import grid_to_rect
 
         assert grid_to_rect("A1", _uniform_cells(640, 480, 80)) == (
@@ -1233,13 +1248,13 @@ class TestGridToRect:
             480.0,
         )
 
-    def test_case_insensitive(self):
+    def test_case_insensitive(self) -> None:
         from tcip_annotation.grid import grid_to_rect
 
         cells = _uniform_cells(640, 480, 80)
         assert grid_to_rect(" b3 ", cells) == grid_to_rect("B3", cells)
 
-    def test_a_clamped_edge_cell_is_its_own_clipped_rect(self):
+    def test_a_clamped_edge_cell_is_its_own_clipped_rect(self) -> None:
         from tcip_annotation.grid import grid_to_rect
 
         assert grid_to_rect("B2", _uniform_cells(100, 80, 64)) == (
@@ -1249,29 +1264,19 @@ class TestGridToRect:
             80.0,
         )
 
-    def test_cell_dicts_accepted(self):
-        """The cell lookup takes cells as plain dicts and answers the named cell's rect."""
-        from tcip_annotation.grid import grid_to_rect
-
-        cells = [
-            {"name": c.name, "x0": c.x0, "y0": c.y0, "x1": c.x1, "y1": c.y1}
-            for c in _uniform_cells(640, 480, 80)
-        ]
-        assert grid_to_rect("C2", cells) == (160.0, 80.0, 240.0, 160.0)
-
-    def test_unknown_column_names_the_valid_range(self):
+    def test_unknown_column_names_the_valid_range(self) -> None:
         from tcip_annotation.grid import grid_to_rect
 
         with pytest.raises(ValueError, match="Use A1 through H6"):
             grid_to_rect("Z1", _uniform_cells(640, 480, 80))
 
-    def test_unknown_row_names_the_valid_range(self):
+    def test_unknown_row_names_the_valid_range(self) -> None:
         from tcip_annotation.grid import grid_to_rect
 
         with pytest.raises(ValueError, match="Use A1 through H6"):
             grid_to_rect("A9", _uniform_cells(640, 480, 80))
 
-    def test_malformed_reference_is_invalid(self):
+    def test_malformed_reference_is_invalid(self) -> None:
         from tcip_annotation.grid import grid_to_rect
 
         with pytest.raises(ValueError, match="Invalid cell reference"):
@@ -1281,7 +1286,7 @@ class TestGridToRect:
 class TestColumnLabels:
     """Spreadsheet-style column labels shared by the grid geometry and cell lookup."""
 
-    def test_round_trip_boundaries(self):
+    def test_round_trip_boundaries(self) -> None:
         from tcip_annotation.grid import column_index, column_label
 
         expected = {
@@ -1298,7 +1303,7 @@ class TestColumnLabels:
             assert column_label(idx) == label
             assert column_index(label) == idx
 
-    def test_multi_letter_cell_parses(self):
+    def test_multi_letter_cell_parses(self) -> None:
         from tcip_annotation.grid import grid_to_rect
 
         assert grid_to_rect("AA1", _uniform_cells(2700, 480, 100))[:2] == (
@@ -1306,7 +1311,7 @@ class TestColumnLabels:
             0.0,
         )
 
-    def test_high_columns_do_not_alias(self):
+    def test_high_columns_do_not_alias(self) -> None:
         # chr() past 'Z' labeled column 32 'a', which case folding silently parsed as column 0
         from tcip_annotation.grid import column_label, grid_to_rect
 
@@ -1317,7 +1322,7 @@ class TestColumnLabels:
         for c, label in enumerate(labels):
             assert grid_to_rect(f"{label}1", cells)[0] == c * 100
 
-    def test_out_of_range_hint_uses_column_labels(self):
+    def test_out_of_range_hint_uses_column_labels(self) -> None:
         from tcip_annotation.grid import grid_to_rect
 
         with pytest.raises(ValueError, match="Use A1 through AD6"):
@@ -1325,7 +1330,7 @@ class TestColumnLabels:
 
 
 class TestVisualizeGridOverlayTool:
-    def test_derived_default_echoes_geometry(self, viz_dataset: Path):
+    def test_derived_default_echoes_geometry(self, viz_dataset: Path) -> None:
         """With no tile_size the grid overlay derives the pointing grain and echoes the geometry.
 
         The answer carries the width, height, derived tile size, overlap, columns and rows.
@@ -1348,7 +1353,7 @@ class TestVisualizeGridOverlayTool:
         assert result["overlap"] == 0.0
         assert result["cols"] >= 1 and result["rows"] >= 1
 
-    def test_explicit_tile_size_echoes_back(self, viz_dataset: Path):
+    def test_explicit_tile_size_echoes_back(self, viz_dataset: Path) -> None:
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
         result = overlay_reference_grid(
@@ -1364,7 +1369,7 @@ class TestVisualizeGridOverlayTool:
         assert result["cols"] == 8
         assert result["rows"] == 6
 
-    def test_missing_image(self, tmp_path: Path):
+    def test_missing_image(self, tmp_path: Path) -> None:
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
         result = overlay_reference_grid(
@@ -1372,7 +1377,7 @@ class TestVisualizeGridOverlayTool:
         )
         assert "error" in result
 
-    def test_invalid_tile_size_is_an_error(self, viz_dataset: Path):
+    def test_invalid_tile_size_is_an_error(self, viz_dataset: Path) -> None:
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
         result = overlay_reference_grid(
@@ -1386,7 +1391,7 @@ class TestVisualizeGridOverlayTool:
         assert "error" in result
         assert "tile_size" in result["error"]
 
-    def test_wide_grid_summary_labels(self, viz_dataset: Path):
+    def test_wide_grid_summary_labels(self, viz_dataset: Path) -> None:
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
         result = overlay_reference_grid(
@@ -1405,7 +1410,7 @@ class TestVisualizeGridOverlayTool:
 class TestProposeAnnotationsTool:
     """Tests of the propose_annotations tool over a mocked engine."""
 
-    def test_missing_image(self, tmp_path: Path):
+    def test_missing_image(self, tmp_path: Path) -> None:
         from tcip_mcp.tools.proposal_tools import propose_annotations
 
         result = propose_annotations(
@@ -1413,7 +1418,7 @@ class TestProposeAnnotationsTool:
         )
         assert "error" in result
 
-    def test_unknown_engine(self, viz_dataset: Path):
+    def test_unknown_engine(self, viz_dataset: Path) -> None:
         from tcip_mcp.tools.proposal_tools import propose_annotations
 
         result = propose_annotations(
@@ -1428,7 +1433,7 @@ class TestProposeAnnotationsTool:
 
 
 class TestAcceptProposalsTool:
-    def test_no_prior_proposals(self, viz_dataset: Path):
+    def test_no_prior_proposals(self, viz_dataset: Path) -> None:
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
         result = stage_proposals(
@@ -1443,7 +1448,7 @@ class TestAcceptProposalsTool:
 
     def test_with_cached_proposals(
         self, viz_dataset: Path, monkeypatch: pytest.MonkeyPatch
-    ):
+    ) -> None:
         from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools.proposal_tools import (
             propose_annotations,
@@ -1588,21 +1593,25 @@ def _staged(
     The pair is its annotations as the reader decodes them and its records as the store holds
     them.
     """
+    from pydantic import JsonValue, TypeAdapter
+
     import tcip_store
     from tcip_annotation.json_io import read_label_document
     from tcip_mcp.buckets import read_bucket
 
     key = read_bucket(project, staged["bucket"]).document_key(image.stem)
     assert key is not None, staged
-    return read_label_document(key).annotations, tcip_store.read(key)[
-        "annotations"
-    ]
+    document = tcip_store.read(key)
+    assert isinstance(document, dict)
+    return read_label_document(key).annotations, TypeAdapter(
+        list[dict[str, JsonValue]]
+    ).validate_python(document["annotations"])
 
 
 class TestCandidateCacheRoundTrip:
     """Tests that candidates survive a JSON serialize and deserialize round trip."""
 
-    def test_polygon_geometry_preserved(self, tmp_path: Path):
+    def test_polygon_geometry_preserved(self, tmp_path: Path) -> None:
         state_file = tmp_path / "candidates_test.json"
         state_file.write_text(
             json.dumps(MOCK_CANDIDATES, default=str), encoding="utf-8"
@@ -1637,7 +1646,7 @@ class TestCandidateCacheRoundTrip:
                     assert abs(ox - rx) < 1e-6
                     assert abs(oy - ry) < 1e-6
 
-    def test_empty_candidates_roundtrip(self, tmp_path: Path):
+    def test_empty_candidates_roundtrip(self, tmp_path: Path) -> None:
         state_file = tmp_path / "candidates_empty.json"
         state_file.write_text(json.dumps([]), encoding="utf-8")
         loaded = json.loads(state_file.read_text(encoding="utf-8"))
@@ -1686,7 +1695,7 @@ class TestFullPipelineIntegration:
         self,
         pipeline_dataset: Path,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Engine proposals are staged as predictions.
 
         The two staged objects carry the assigned subjects, boxes inside the 640x480 frame,
@@ -1726,7 +1735,7 @@ class TestFullPipelineIntegration:
         self,
         pipeline_dataset: Path,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Engine proposals are staged as prediction polygons: pixel vertices, subject, score."""
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
@@ -1758,7 +1767,7 @@ class TestFullPipelineIntegration:
         self,
         pipeline_dataset: Path,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Box and mask views of the staged predictions cover the same objects (one document)."""
         from tcip_annotation import bbox_of
         from tcip_mcp.tools.proposal_tools import stage_proposals
@@ -1793,7 +1802,7 @@ class TestFullPipelineIntegration:
         self,
         pipeline_dataset: Path,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Staging one assignment out of three candidates stages one proposal."""
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
@@ -1814,7 +1823,7 @@ class TestFullPipelineIntegration:
         self,
         pipeline_dataset: Path,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Assignments with non-existent candidate_id are ignored."""
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
@@ -1837,7 +1846,7 @@ class TestFullPipelineIntegration:
         self,
         pipeline_dataset: Path,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Candidate and grid renders are written, and three assignments stage with a QA render."""
         from tcip_annotation.viz import render_candidates, render_grid_overlay
         from tcip_mcp.tools.proposal_tools import stage_proposals
@@ -1922,7 +1931,7 @@ class TestEnginePredictionStaging:
         self,
         format_dataset: Path,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         from tcip_annotation import bbox_of
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
@@ -1949,7 +1958,7 @@ class TestEnginePredictionStaging:
         self,
         format_dataset: Path,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Staged engine output carries ``created_by="stub"`` and a float ``score``."""
         from tcip_mcp.tools.proposal_tools import stage_proposals
 

@@ -68,7 +68,7 @@ def _seg_pred(image: str) -> dict:
 
 
 class TestReviewQueue:
-    def test_detection_partitioning(self):
+    def test_detection_partitioning(self) -> None:
         predictions = [
             {"image": "a.png", "scores": [0.95]},
             {"image": "b.png", "scores": [0.5]},
@@ -77,7 +77,7 @@ class TestReviewQueue:
         queue = review_queue(predictions, low=0.3, high=0.8)
         assert [p["image"] for p in queue] == ["b.png"]
 
-    def test_classification_partitioning_and_ordering(self):
+    def test_classification_partitioning_and_ordering(self) -> None:
         predictions = [
             _cls_pred("confident.png", 0.93),  # above high -> auto territory
             _cls_pred("mid.png", 0.6),
@@ -88,7 +88,7 @@ class TestReviewQueue:
         # Most uncertain first.
         assert [p["image"] for p in queue] == ["shaky.png", "mid.png"]
 
-    def test_ordinal_partitioning_and_ordering(self):
+    def test_ordinal_partitioning_and_ordering(self) -> None:
         predictions = [
             _ordinal_pred(
                 "confident.png", 2, 0.93
@@ -100,16 +100,16 @@ class TestReviewQueue:
         queue = review_queue(predictions, low=0.3, high=0.8)
         assert [p["image"] for p in queue] == ["shaky.png", "mid.png"]
 
-    def test_multi_head_gates_on_least_confident_head(self):
+    def test_multi_head_gates_on_least_confident_head(self) -> None:
         pred = _cls_pred("multi.png", 0.95)
         pred["head1_confidences"] = [0.5]
         queue = review_queue([pred], low=0.3, high=0.8)
         assert queue == [pred]
 
-    def test_seg_probabilities_are_ignored(self):
+    def test_seg_probabilities_are_ignored(self) -> None:
         assert review_queue([_seg_pred("mask.png")], low=0.0, high=1.0) == []
 
-    def test_mixed_detection_and_classification_sorted_together(self):
+    def test_mixed_detection_and_classification_sorted_together(self) -> None:
         det = {"image": "det.png", "scores": [0.7, 0.4]}
         cls = _cls_pred("cls.png", 0.6)
         queue = review_queue([det, cls], low=0.3, high=0.8)
@@ -122,18 +122,18 @@ class TestReviewQueue:
 
 
 class TestUnscoreable:
-    def test_regression_prediction_has_no_confidence_signal(self):
+    def test_regression_prediction_has_no_confidence_signal(self) -> None:
         """A regression prediction is left out of review_queue and returned by unscoreable."""
         pred = _reg_pred("val.png", 0.42)
         assert review_queue([pred], low=0.0, high=1.0) == []
         assert unscoreable([pred]) == [pred]
 
-    def test_seg_prediction_with_no_confidences_is_unscoreable(self):
+    def test_seg_prediction_with_no_confidences_is_unscoreable(self) -> None:
         # 4-D head0_probabilities alone carries no usable per-instance confidence either.
         pred = _seg_pred("mask.png")
         assert unscoreable([pred]) == [pred]
 
-    def test_detection_negative_is_not_unscoreable(self):
+    def test_detection_negative_is_not_unscoreable(self) -> None:
         """A detection with no boxes is not unscoreable.
 
         scores=[] (zero boxes found) is a complete signal, and unscoreable leaves it out.
@@ -142,7 +142,7 @@ class TestUnscoreable:
 
     def test_detection_and_classification_and_ordinal_are_not_unscoreable(
         self,
-    ):
+    ) -> None:
         det = {"image": "det.png", "scores": [0.9]}
         cls = _cls_pred("cls.png", 0.9)
         ordinal = _ordinal_pred("ord.png", 1, 0.9)

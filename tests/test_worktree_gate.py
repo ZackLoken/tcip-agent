@@ -10,15 +10,19 @@ import importlib.util
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import REPO_ROOT
 
+if TYPE_CHECKING:
+    from types import ModuleType
+
 SCRIPT = REPO_ROOT / "tools" / "worktree_gate.py"
 
 
-def _load():
+def _load() -> ModuleType:
     spec = importlib.util.spec_from_file_location("worktree_gate", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     sys.modules["worktree_gate"] = mod
@@ -27,7 +31,7 @@ def _load():
 
 
 @pytest.fixture
-def tool():
+def tool() -> ModuleType:
     return _load()
 
 
@@ -36,8 +40,8 @@ def _sep() -> str:
 
 
 def test_build_environ_sets_pythonpath_to_the_four_package_src_dirs_under_the_worktree(
-    tool, tmp_path
-):
+    tool: ModuleType, tmp_path: Path
+) -> None:
     worktree = tmp_path / "worktree"
 
     env = tool.build_environ(worktree)
@@ -51,15 +55,17 @@ def test_build_environ_sets_pythonpath_to_the_four_package_src_dirs_under_the_wo
 
 
 def test_the_proof_succeeds_when_tcip_mcp_resolves_under_the_worktree(
-    tool, tmp_path, monkeypatch
-):
+    tool: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     worktree = tmp_path / "worktree"
     worktree.mkdir()
     inside = (
         worktree / "packages" / "tcip-mcp" / "src" / "tcip_mcp" / "__init__.py"
     )
 
-    def _fake_run(cmd, **kwargs):
+    def _fake_run(
+        cmd: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             cmd, 0, stdout=str(inside) + "\n", stderr=""
         )
@@ -73,13 +79,15 @@ def test_the_proof_succeeds_when_tcip_mcp_resolves_under_the_worktree(
 
 
 def test_the_proof_refuses_when_tcip_mcp_resolves_outside_the_worktree(
-    tool, tmp_path, monkeypatch
-):
+    tool: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     worktree = tmp_path / "worktree"
     worktree.mkdir()
     calls = []
 
-    def _fake_run(cmd, **kwargs):
+    def _fake_run(
+        cmd: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         calls.append(cmd)
         elsewhere = tmp_path / "elsewhere" / "tcip_mcp" / "__init__.py"
         return subprocess.CompletedProcess(
@@ -97,13 +105,15 @@ def test_the_proof_refuses_when_tcip_mcp_resolves_outside_the_worktree(
 
 
 def test_main_refuses_before_running_any_gate_when_resolution_is_outside(
-    tool, tmp_path, monkeypatch
-):
+    tool: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     worktree = tmp_path / "worktree"
     worktree.mkdir()
     calls = []
 
-    def _fake_run(cmd, **kwargs):
+    def _fake_run(
+        cmd: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         calls.append(cmd)
         elsewhere = tmp_path / "elsewhere" / "tcip_mcp.py"
         return subprocess.CompletedProcess(
@@ -132,10 +142,14 @@ def test_main_refuses_before_running_any_gate_when_resolution_is_outside(
     )
 
 
-def test_run_mypy_removes_its_cache_directory_afterward(tool, monkeypatch):
+def test_run_mypy_removes_its_cache_directory_afterward(
+    tool: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
     created: list[str] = []
 
-    def _fake_run(cmd, **kwargs):
+    def _fake_run(
+        cmd: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
         cache_dir = cmd[cmd.index("--cache-dir") + 1]
         assert Path(cache_dir).is_dir()
         created.append(cache_dir)
@@ -150,11 +164,11 @@ def test_run_mypy_removes_its_cache_directory_afterward(tool, monkeypatch):
 
 
 def test_a_worktree_that_is_not_a_directory_is_refused_before_any_proof_or_gate(
-    tool, tmp_path, monkeypatch
-):
+    tool: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     calls: list[object] = []
 
-    def _fake_run(*args, **kwargs):
+    def _fake_run(*args: object, **kwargs: object) -> None:
         calls.append(args)
 
     monkeypatch.setattr(tool.subprocess, "run", _fake_run)

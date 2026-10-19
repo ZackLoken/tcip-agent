@@ -7,6 +7,7 @@ like a ZIP.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tcip_mcp.tools.project_tools import (
     TreeBundle,
@@ -16,8 +17,13 @@ from tcip_mcp.tools.project_tools import (
 )
 from tests._producer_fixtures import one_labeled_capture
 
+if TYPE_CHECKING:
+    import pytest
 
-def test_archive_project_refuses_a_destination_inside_the_project(tmp_path):
+
+def test_archive_project_refuses_a_destination_inside_the_project(
+    tmp_path: Path,
+) -> None:
     root = one_labeled_capture(tmp_path / "project")
 
     result = archive_project(root, TreeBundle(output_dir=str(root / "bundle")))
@@ -27,7 +33,9 @@ def test_archive_project_refuses_a_destination_inside_the_project(tmp_path):
     assert not (root / "bundle").exists()
 
 
-def test_archive_project_refuses_a_non_empty_destination(tmp_path):
+def test_archive_project_refuses_a_non_empty_destination(
+    tmp_path: Path,
+) -> None:
     root = one_labeled_capture(tmp_path / "project")
     dest = tmp_path / "bundle"
     dest.mkdir()
@@ -41,9 +49,9 @@ def test_archive_project_refuses_a_non_empty_destination(tmp_path):
 
 
 def test_archive_project_refuses_a_zip_destination_inside_the_project_or_already_written(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``archive_project`` refuses a ZIP destination inside the project or over a written archive.
 
     The ZIP form takes the directory form's refusals: a destination inside the project is
@@ -81,7 +89,9 @@ def test_archive_project_refuses_a_zip_destination_inside_the_project_or_already
     assert list(elsewhere.iterdir()) == []
 
 
-def test_archive_project_directory_mode_admits_valid_work(tmp_path):
+def test_archive_project_directory_mode_admits_valid_work(
+    tmp_path: Path,
+) -> None:
     root = one_labeled_capture(tmp_path / "project")
     dest = tmp_path / "bundle"
 
@@ -96,8 +106,8 @@ def test_archive_project_directory_mode_admits_valid_work(tmp_path):
 
 
 def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_trip(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A bundle written as a tree and imported recovers the project's records and files.
 
     The recovered project includes its band-group manifest and its multi-band-file capture.
@@ -192,7 +202,9 @@ def _populate_project(src: Path) -> tuple[Path, Path]:
         32,
         32,
     )
-    registry_over(src, SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(
+        src, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
+    )
 
     # A multispectral capture written one file per band: the manifest beside the bands is what
     # makes those files one logical image, so a directory bundle has to carry all of them too.
@@ -219,7 +231,9 @@ def _populate_project(src: Path) -> tuple[Path, Path]:
     return manifest, npz_image
 
 
-def test_import_project_refuses_a_bundle_path_that_does_not_exist(tmp_path):
+def test_import_project_refuses_a_bundle_path_that_does_not_exist(
+    tmp_path: Path,
+) -> None:
     result = import_project(str(tmp_path / "nope"), str(tmp_path / "dest"))
 
     assert "error" in result

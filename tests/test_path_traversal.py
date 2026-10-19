@@ -3,12 +3,21 @@
 Covered: the allowed-root image guard and the route-level run id and path guards.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
 
 
 def test_assert_path_allowed_admits_the_workspace_and_refuses_a_sibling(
-    tmp_path, tmp_path_factory: pytest.TempPathFactory
-):
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
     from tcip_web.paths import assert_path_allowed
 
     target = tmp_path / "data" / "img.jpg"
@@ -25,7 +34,9 @@ def test_assert_path_allowed_admits_the_workspace_and_refuses_a_sibling(
         assert_path_allowed(str(outside))  # a sibling workspace -> refused
 
 
-def test_training_stream_closes_on_run_id_traversal(opened_project, client):
+def test_training_stream_closes_on_run_id_traversal(
+    opened_project: Path, client: TestClient
+) -> None:
     """A run_id carrying a path separator closes the training stream.
 
     For a run_id holding a backslash, the stream closes with code 1008 naming the run_id as not a
@@ -43,8 +54,8 @@ def test_training_stream_closes_on_run_id_traversal(opened_project, client):
 
 
 def test_annotate_labels_route_blocks_outside_allowed_root(
-    tmp_path, tmp_path_factory: pytest.TempPathFactory
-):
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
     pytest.importorskip("fastapi")
     from fastapi import HTTPException
     from PIL import Image
@@ -66,8 +77,8 @@ def test_annotate_labels_route_blocks_outside_allowed_root(
 
 
 def test_images_route_blocks_outside_allowed_root(
-    tmp_path, tmp_path_factory: pytest.TempPathFactory
-):
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
     """The images route serves a path inside the workspace and refuses one outside with 403.
 
     The guard exercised is images.py's own ``_checked``, through ``get_bands``.

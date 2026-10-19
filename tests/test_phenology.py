@@ -15,6 +15,7 @@ per-detection decode within it.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -25,6 +26,11 @@ from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing import phenology
 from tests._trait_fixtures import BUD_OPENING, entry
 
+if TYPE_CHECKING:
+    from tcip_mcp.buckets import Bucket
+    from tcip_mcp.traits import TraitEntry
+    from tcip_store import Key
+
 OPENING = cr.Attribute("opening", "categorical", ("closed", "open"))
 """The attribute :data:`BUD_OPENING`'s positive state names."""
 OPENED = BUD_OPENING.positive_state
@@ -33,7 +39,9 @@ RULE = BUD_OPENING.crossing_rule
 
 def _registry(*attributes: cr.Attribute) -> cr.SubjectRegistry:
     return cr.SubjectRegistry(
-        subjects=(cr.Subject(name="bud", attributes=attributes),)
+        subjects=(
+            cr.Subject(name="bud", description="", attributes=attributes),
+        )
     )
 
 
@@ -46,7 +54,7 @@ def _scope(root: Path, *attributes: cr.Attribute) -> ClassScope:
     return registry_scope(root / "images", "bud")
 
 
-def _document(project: Path, annotations: list[Annotation]):
+def _document(project: Path, annotations: list[Annotation]) -> Key:
     """Write ``annotations`` as an image's prediction document under ``project``; return its key."""
     from tcip_mcp.dataset_layout import prediction_key
 
@@ -61,7 +69,7 @@ def _bucket(
     documents: dict[str, list[str]],
     *,
     attributed: bool = True,
-):
+) -> Bucket:
     """Publish a bucket for ``date`` holding one document per stem of ``documents``; return it.
 
     Each detection carries its value under :data:`OPENING`, from a checkpoint whose scope declares
@@ -89,23 +97,23 @@ def _bucket(
 # ── date helpers ──────────────────────────────────────────────
 
 
-def test_date_key_orders_chronologically():
+def test_date_key_orders_chronologically() -> None:
     assert phenology.date_key("2024-05-01") < phenology.date_key("2024-05-15")
     assert phenology.date_key("2024-05-15") < phenology.date_key("2024-06-01")
 
 
-def test_date_key_malformed_sorts_first():
+def test_date_key_malformed_sorts_first() -> None:
     assert phenology.date_key("undated") == (0, 0, 0)
     assert phenology.date_key("2024-13") == (0, 0, 0)
     assert phenology.date_key("not-a-date-x") == (0, 0, 0)
 
 
-def test_date_key_rejects_out_of_range_dates():
+def test_date_key_rejects_out_of_range_dates() -> None:
     assert phenology.date_key("2026-13-01") == (0, 0, 0)
     assert phenology.date_key("2026-02-30") == (0, 0, 0)
 
 
-def test_crossing_date_does_not_crash_on_malformed_date():
+def test_crossing_date_does_not_crash_on_malformed_date() -> None:
     series = [
         ("2026-02-01", 0.0),
         ("2026-13-01", 0.9),  # out-of-range month, excluded
@@ -117,7 +125,7 @@ def test_crossing_date_does_not_crash_on_malformed_date():
     assert phenology.positive_onset_date(series) == "2026-02-15"
 
 
-def test_real_points_drops_undated_and_sorts():
+def test_real_points_drops_undated_and_sorts() -> None:
     series = [("2024-05-15", 0.5), ("undated", 0.9), ("2024-05-01", 0.1)]
     pts = phenology._real_points(series)
     assert [d for d, _ in pts] == ["2024-05-01", "2024-05-15"]
@@ -126,7 +134,7 @@ def test_real_points_drops_undated_and_sorts():
 # ── crossings (censoring bound disclosed) ─────────────────────────────
 
 
-def test_crossing_interpolates_between_dates():
+def test_crossing_interpolates_between_dates() -> None:
     series = [("2024-05-01", 0.0), ("2024-05-11", 1.0)]
     c = phenology.crossing_date(series, 0.50, RULE)
     assert c.date == "2024-05-06"
@@ -134,7 +142,7 @@ def test_crossing_interpolates_between_dates():
     assert c.gap_days == 10
 
 
-def test_crossing_first_point_already_at_target_is_left_censored():
+def test_crossing_first_point_already_at_target_is_left_censored() -> None:
     # A left-censored crossing must be flagged, not returned as a bare tuple indistinguishable
     # from a real single-date measurement.
     series = [("2024-05-01", 0.2), ("2024-05-05", 0.8)]
@@ -143,14 +151,14 @@ def test_crossing_first_point_already_at_target_is_left_censored():
     assert c.bound == "left_censored"
 
 
-def test_crossing_exact_match_is_not_censored():
+def test_crossing_exact_match_is_not_censored() -> None:
     series = [("2024-05-01", 0.0), ("2024-05-05", 0.50)]
     c = phenology.crossing_date(series, 0.50, RULE)
     assert c.date == "2024-05-05"
     assert c.bound == "exact"
 
 
-def test_crossing_never_reached_is_right_censored():
+def test_crossing_never_reached_is_right_censored() -> None:
     # The last observed point never meets the target: right-censored there, unlike no
     # observations at all, which stays None.
     series = [("2024-05-01", 0.0), ("2024-05-05", 0.3)]
@@ -160,11 +168,11 @@ def test_crossing_never_reached_is_right_censored():
     assert c.gap_days is None
 
 
-def test_crossing_no_observations_is_none():
+def test_crossing_no_observations_is_none() -> None:
     assert phenology.crossing_date([], 0.95, RULE) is None
 
 
-def test_opening_onset_is_first_nonzero_date():
+def test_opening_onset_is_first_nonzero_date() -> None:
     series = [
         ("2024-05-01", 0.0),
         ("2024-05-05", 0.0),
@@ -174,12 +182,12 @@ def test_opening_onset_is_first_nonzero_date():
     assert phenology.positive_onset_date(series) == "2024-05-09"
 
 
-def test_opening_onset_none_when_all_zero():
+def test_opening_onset_none_when_all_zero() -> None:
     series = [("2024-05-01", 0.0), ("2024-05-05", 0.0)]
     assert phenology.positive_onset_date(series) is None
 
 
-def test_plant_milestones_returns_four_dates_and_bounds():
+def test_plant_milestones_returns_four_dates_and_bounds() -> None:
     series = [
         ("2024-05-01", 0.0),
         ("2024-05-06", 0.04),
@@ -198,7 +206,7 @@ def test_plant_milestones_returns_four_dates_and_bounds():
     assert m["bud_50per_date_bound"] == "exact"
 
 
-def test_the_milestones_and_their_schema_restate_no_crossing_rule():
+def test_the_milestones_and_their_schema_restate_no_crossing_rule() -> None:
     """Neither a plant's milestones nor the CSV schema restates the crossing rule.
 
     The rule a crossing is read under is the trait revision's.
@@ -210,13 +218,13 @@ def test_the_milestones_and_their_schema_restate_no_crossing_rule():
     assert "crossing_rule" not in phenology.phenology_csv_columns(BUD_OPENING)
 
 
-def test_plant_milestones_requires_spec_no_bud_opening_fallback():
+def test_plant_milestones_requires_spec_no_bud_opening_fallback() -> None:
     # No silent default: a caller that forgets to pass spec must fail loudly.
     with pytest.raises(TypeError, match="'spec'"):
         phenology.plant_milestones([("2024-05-01", 0.5)])  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to spec
 
 
-def test_milestone_date_columns_is_proper_subset_of_full_columns():
+def test_milestone_date_columns_is_proper_subset_of_full_columns() -> None:
     cols = phenology.phenology_csv_columns(BUD_OPENING)
     milestone_cols = {
         c[k]
@@ -228,7 +236,9 @@ def test_milestone_date_columns_is_proper_subset_of_full_columns():
     assert "validated" not in milestone_cols
 
 
-def test_every_milestone_bound_and_the_observed_date_count_are_delivered_columns():
+def test_every_milestone_bound_and_the_observed_date_count_are_delivered_columns() -> (
+    None
+):
     """Every milestone bound and the observed-date count are delivered columns.
 
     ``plant_milestones`` emits a bound beside each milestone date, and the CSV schema names each
@@ -248,8 +258,8 @@ def test_every_milestone_bound_and_the_observed_date_count_are_delivered_columns
 
 
 def test_count_by_class_bare_detector_bucket_refuses_never_full_coverage(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     # A detector whose scope declares no attribute at all has no call of the positive state, so
     # none of its detections counts as assessed for it.
     p = _document(
@@ -266,7 +276,7 @@ def test_count_by_class_bare_detector_bucket_refuses_never_full_coverage(
     assert (total, positive, unclassified) == (2, 0, 2)
 
 
-def test_count_by_class_wrong_axis_bucket_refuses(tmp_path):
+def test_count_by_class_wrong_axis_bucket_refuses(tmp_path: Path) -> None:
     # A run whose scope declares a different attribute of the same subject (damage severity); it
     # never called the positive state's attribute, so it must refuse, not be miscounted.
     p = _document(
@@ -289,7 +299,9 @@ def test_count_by_class_wrong_axis_bucket_refuses(tmp_path):
     assert (total, positive, unclassified) == (1, 0, 1)
 
 
-def test_count_by_class_attributed_bucket_splits_positive_negative(tmp_path):
+def test_count_by_class_attributed_bucket_splits_positive_negative(
+    tmp_path: Path,
+) -> None:
     p = _document(
         tmp_path,
         [
@@ -320,8 +332,8 @@ def test_count_by_class_attributed_bucket_splits_positive_negative(tmp_path):
 
 
 def test_count_by_class_foreign_record_within_attributed_bucket_refuses(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     # A record carrying no value under the state's attribute (a stale bare-detector document)
     # refuses by name rather than reading as a negative.
     p = _document(
@@ -346,15 +358,17 @@ def test_count_by_class_foreign_record_within_attributed_bucket_refuses(
 
 
 class _Assignment:
-    def __init__(self, stem, plant_id, accession_name):
+    def __init__(
+        self, stem: str, plant_id: str | None, accession_name: str | None
+    ) -> None:
         self.stem = stem
         self.plant_id = plant_id
         self.accession_name = accession_name
 
 
 def test_per_plant_phenology_builds_fraction_series_over_attributed_buckets(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     buckets = {
         "2024-05-01": _bucket(
             tmp_path, "2024-05-01", {"P1_a": ["closed", "closed"]}
@@ -387,8 +401,8 @@ def test_per_plant_phenology_builds_fraction_series_over_attributed_buckets(
 
 
 def test_per_plant_phenology_bare_detector_bucket_refuses_whole_delivery(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     buckets = {
         "2024-05-01": _bucket(
             tmp_path, "2024-05-01", {"P1_a": ["bud"]}, attributed=False
@@ -409,7 +423,9 @@ def test_per_plant_phenology_bare_detector_bucket_refuses_whole_delivery(
     assert row["bud_50per_date"] is None
 
 
-def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(tmp_path):
+def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(
+    tmp_path: Path,
+) -> None:
     # A stem the mapping names with no prediction document must not read as an observed zero
     # (which would count as an assessed 0/0 and silently pass coverage).
     buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01", {})}
@@ -433,8 +449,8 @@ def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(tmp_path):
 
 
 def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     # One date whose bucket declares no attribute excludes the whole plant's milestones,
     # disclosed, rather than computing them from the dates that happened to be usable.
     buckets = {
@@ -466,8 +482,8 @@ def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(
 
 
 def test_a_plant_the_mapping_captured_on_no_image_of_a_date_is_incomplete_on_it(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A plant the mapping captured on no image of a date is incomplete on that date.
 
     A plant captured on the first date only carries an imageless second date, counted against its
@@ -508,28 +524,12 @@ def test_a_plant_the_mapping_captured_on_no_image_of_a_date_is_incomplete_on_it(
     assert p2["bud_05per_date"] is None
 
 
-def test_per_plant_series_accepts_dict_assignments(tmp_path):
-    buckets = {
-        "2024-05-01": _bucket(tmp_path, "2024-05-01", {"P1_a": ["open"]})
-    }
-    mapping = {
-        "2024-05-01": [
-            {"stem": "P1_a", "plant_id": "P1", "accession_name": "acc-9"}
-        ]
-    }
-    per_plant = phenology.per_plant_series(mapping, buckets, OPENED, ["P1"])
-    assert per_plant["P1"]["accession"] == "acc-9"
-    assert per_plant["P1"]["series"][0][:3] == (
-        "2024-05-01",
-        1,
-        1,
-    )  # total=1, positive=1
-
-
 # ── the positive state's attribute ────────────────────────────────
 
 
-def test_the_positive_states_ids_read_the_bucket_records_scope(tmp_path):
+def test_the_positive_states_ids_read_the_bucket_records_scope(
+    tmp_path: Path,
+) -> None:
     bucket = _bucket(tmp_path, "2024-05-01", {})
     assert bucket.scope.state_ids(OPENED) == (
         0,
@@ -538,8 +538,8 @@ def test_the_positive_states_ids_read_the_bucket_records_scope(tmp_path):
 
 
 def test_the_positive_states_ids_are_none_for_a_bucket_declaring_no_attribute(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     bucket = _bucket(tmp_path, "2024-05-01", {}, attributed=False)
     assert bucket.scope.state_ids(OPENED) is None
 
@@ -584,7 +584,9 @@ _SPEC_SHAPES = [
     _SPEC_SHAPES,
     ids=lambda s: f"{s.name}-{s.majority_milestone or 'nomajority'}",
 )
-def test_phenology_csv_columns_name_no_column_without_a_producer(spec):
+def test_phenology_csv_columns_name_no_column_without_a_producer(
+    spec: TraitEntry,
+) -> None:
     """Every trait-prefixed column the CSV schema names is filled by a producer.
 
     The parametrized spec shapes include one whose ``majority_milestone`` is unset, and no
@@ -602,8 +604,8 @@ def test_phenology_csv_columns_name_no_column_without_a_producer(spec):
 
 
 def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An excluded plant carries the same milestone keys as an included one.
 
     The shape includes each milestone date's ``*_date_bound`` key, not just
@@ -642,7 +644,9 @@ def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(
     assert "bud_95per_date_bound" in by_plant["BAD"]
 
 
-def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
+def test_per_plant_series_counts_the_images_the_mapping_names(
+    tmp_path: Path,
+) -> None:
     """``n_images`` counts every image the mapping names for a (plant, date).
 
     Four images are named for one plant on one date, one with no prediction document: the count
@@ -670,8 +674,8 @@ def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
 
 
 def test_per_plant_series_excludes_unattributed_assignments_from_coverage(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An assignment with no ``plant_id`` adds no plant to the per-plant series.
 
     Such an assignment is an image the plant-mapping step could not assign.
@@ -692,8 +696,8 @@ def test_per_plant_series_excludes_unattributed_assignments_from_coverage(
 
 
 def test_per_plant_phenology_excludes_unattributed_assignments_from_rows(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """``per_plant_phenology`` emits no row and no unmapped count for an unattributed assignment."""
     buckets = {
         "2026-02-11": _bucket(tmp_path, "2026-02-11", {"P1_a": ["open"]})

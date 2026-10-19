@@ -11,10 +11,14 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn
 
 import numpy as np
 import pytest
 import tifffile
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 REAL_DJI_DIR = Path(
     r"C:\Users\breeder\tcip-projects\currant_multispectral_valley-farm-2023\images\2023-05-23"
@@ -57,7 +61,9 @@ def grouped_dir(tmp_path: Path) -> Path:
 # ── list_logical_images / resolve_image_path ───────────────────────────────────────────
 
 
-def test_list_logical_images_folds_a_group_and_keeps_the_rest(grouped_dir):
+def test_list_logical_images_folds_a_group_and_keeps_the_rest(
+    grouped_dir: Path,
+) -> None:
     from tcip_mcp.pipelines.image_utils import (
         BandGroupRef,
         list_logical_images,
@@ -72,7 +78,9 @@ def test_list_logical_images_folds_a_group_and_keeps_the_rest(grouped_dir):
     assert "cap_G" not in logical and "cap_R" not in logical
 
 
-def test_resolve_image_path_answers_what_the_listing_names(grouped_dir):
+def test_resolve_image_path_answers_what_the_listing_names(
+    grouped_dir: Path,
+) -> None:
     from tcip_mcp.pipelines.image_utils import (
         list_logical_images,
         resolve_image_paths,
@@ -86,8 +94,8 @@ def test_resolve_image_path_answers_what_the_listing_names(grouped_dir):
 
 
 def test_resolve_image_path_refuses_a_band_member_naming_its_manifest(
-    grouped_dir,
-):
+    grouped_dir: Path,
+) -> None:
     """``resolve_image_path`` refuses a band member naming its manifest, and admits the manifest.
 
     A band of a grouped capture is no logical image of its own: its path refuses naming the
@@ -102,7 +110,9 @@ def test_resolve_image_path_refuses_a_band_member_naming_its_manifest(
     )
 
 
-def test_resolve_image_path_unknown_path_raises_file_not_found(grouped_dir):
+def test_resolve_image_path_unknown_path_raises_file_not_found(
+    grouped_dir: Path,
+) -> None:
     from tcip_mcp.pipelines.image_utils import resolve_image_path
 
     with pytest.raises(FileNotFoundError):
@@ -110,8 +120,8 @@ def test_resolve_image_path_unknown_path_raises_file_not_found(grouped_dir):
 
 
 def test_resolve_image_path_stale_group_raises_band_group_incomplete(
-    grouped_dir,
-):
+    grouped_dir: Path,
+) -> None:
     from tcip_mcp.pipelines.image_utils import (
         BandGroupIncompleteError,
         resolve_image_path,
@@ -123,8 +133,8 @@ def test_resolve_image_path_stale_group_raises_band_group_incomplete(
 
 
 def test_list_logical_images_skips_a_corrupt_manifest_without_raising(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
     d = tmp_path / "images"
@@ -133,15 +143,17 @@ def test_list_logical_images_skips_a_corrupt_manifest_without_raising(
     assert list_logical_images(d) == {}
 
 
-def test_list_logical_images_on_missing_dir_returns_empty(tmp_path):
+def test_list_logical_images_on_missing_dir_returns_empty(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
     assert list_logical_images(tmp_path / "nope") == {}
 
 
 def test_list_logical_images_refuses_a_stem_collision_between_a_group_and_a_standalone_file(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """``list_logical_images`` refuses a standalone file sharing a group manifest's stem.
 
     A raw standalone file whose own stem collides with a manifest's canonical stem is refused
@@ -174,7 +186,9 @@ def test_list_logical_images_refuses_a_stem_collision_between_a_group_and_a_stan
         list_logical_images(d)
 
 
-def test_bucket_logical_identities_over_the_grouped_fixture(grouped_dir):
+def test_bucket_logical_identities_over_the_grouped_fixture(
+    grouped_dir: Path,
+) -> None:
     from tcip_mcp.pipelines.image_utils import bucket_logical_identities
 
     identities = bucket_logical_identities(grouped_dir)
@@ -184,13 +198,17 @@ def test_bucket_logical_identities_over_the_grouped_fixture(grouped_dir):
     assert identities["loose"] == [grouped_dir / "loose.tif"]
 
 
-def test_bucket_logical_identities_on_missing_dir_returns_empty(tmp_path):
+def test_bucket_logical_identities_on_missing_dir_returns_empty(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.image_utils import bucket_logical_identities
 
     assert bucket_logical_identities(tmp_path / "nope") == {}
 
 
-def test_list_logical_images_refuses_two_raw_files_sharing_one_stem(tmp_path):
+def test_list_logical_images_refuses_two_raw_files_sharing_one_stem(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.image_utils import (
         AmbiguousImageStemError,
         list_logical_images,
@@ -207,7 +225,9 @@ def test_list_logical_images_refuses_two_raw_files_sharing_one_stem(tmp_path):
     assert "foo.jpg" in message and "foo.png" in message
 
 
-def test_list_logical_images_refuses_a_case_variant_stem_pair(tmp_path):
+def test_list_logical_images_refuses_a_case_variant_stem_pair(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.image_utils import (
         AmbiguousImageStemError,
         list_logical_images,
@@ -225,8 +245,8 @@ def test_list_logical_images_refuses_a_case_variant_stem_pair(tmp_path):
 
 
 def test_list_logical_images_with_a_corrupt_manifest_beside_a_same_stem_raw_file_lists_it(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A raw file beside a corrupt manifest of the same stem is listed.
 
     Beside ``broken.bandgroup`` holding no JSON, the stem ``broken`` lists once, as
@@ -247,8 +267,8 @@ def test_list_logical_images_with_a_corrupt_manifest_beside_a_same_stem_raw_file
 
 
 def test_list_logical_images_does_not_raise_when_stems_are_all_distinct(
-    grouped_dir,
-):
+    grouped_dir: Path,
+) -> None:
     """``list_logical_images`` lists every stem when the stems are all distinct.
 
     A directory holding a band group, a plain image and a loose raster lists the three stems.
@@ -259,14 +279,14 @@ def test_list_logical_images_does_not_raise_when_stems_are_all_distinct(
     assert set(logical) == {"cap", "plain", "loose"}
 
 
-def test_image_exts_recognizes_npy_npz_and_bandgroup():
+def test_image_exts_recognizes_npy_npz_and_bandgroup() -> None:
     from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
 
     for ext in (".npy", ".npz", ".bandgroup", ".jpg", ".png", ".tif", ".tiff"):
         assert ext in IMAGE_EXTS
 
 
-def test_stem_of_a_plain_path_and_a_band_group(grouped_dir):
+def test_stem_of_a_plain_path_and_a_band_group(grouped_dir: Path) -> None:
     from tcip_mcp.pipelines.image_utils import resolve_image_path, stem_of
 
     assert stem_of(str(grouped_dir / "plain.jpg")) == "plain"
@@ -274,7 +294,9 @@ def test_stem_of_a_plain_path_and_a_band_group(grouped_dir):
     assert stem_of(resolve_image_path(grouped_dir / "cap.bandgroup")) == "cap"
 
 
-def test_logical_image_name_agrees_with_source_paths_basename(grouped_dir):
+def test_logical_image_name_agrees_with_source_paths_basename(
+    grouped_dir: Path,
+) -> None:
     """``logical_image_name`` is the basename of the path an image is recorded under.
 
     It agrees with ``source_path_of`` for a plain path and a band group alike.
@@ -297,8 +319,8 @@ def test_logical_image_name_agrees_with_source_paths_basename(grouped_dir):
 
 
 def test_probe_channels_of_a_plain_tif_does_not_decode_pixels(
-    grouped_dir, monkeypatch
-):
+    grouped_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``probe_channels`` reads a TIFF's band count off its header without decoding a pixel.
 
     Neither ``TiffFile.asarray`` nor ``TiffPage.asarray`` runs.
@@ -307,7 +329,7 @@ def test_probe_channels_of_a_plain_tif_does_not_decode_pixels(
 
     from tcip_mcp.pipelines.derivations import probe_channels
 
-    def no_decode(*a, **kw):
+    def no_decode(*a: object, **kw: object) -> NoReturn:
         raise AssertionError("a TIFF was decoded to answer its band count")
 
     monkeypatch.setattr(_tifffile.TiffFile, "asarray", no_decode)
@@ -318,7 +340,7 @@ def test_probe_channels_of_a_plain_tif_does_not_decode_pixels(
 # ── BandGroupRef-accepting decode overloads (synthetic) ────────────────────────────────
 
 
-def test_the_frame_of_a_band_group_at_its_own_count(grouped_dir):
+def test_the_frame_of_a_band_group_at_its_own_count(grouped_dir: Path) -> None:
     from tcip_mcp.pipelines.image_utils import (
         image_dimensions,
         resolve_image_path,
@@ -328,7 +350,9 @@ def test_the_frame_of_a_band_group_at_its_own_count(grouped_dir):
     assert image_dimensions(ref, 2) == (8, 8)
 
 
-def test_load_image_stacks_siblings_in_declared_order(grouped_dir):
+def test_load_image_stacks_siblings_in_declared_order(
+    grouped_dir: Path,
+) -> None:
     from tcip_mcp.pipelines.image_utils import load_image, resolve_image_path
 
     ref = resolve_image_path(grouped_dir / "cap.bandgroup")
@@ -339,7 +363,7 @@ def test_load_image_stacks_siblings_in_declared_order(grouped_dir):
     assert int(arr[0, 0, 1]) == 222
 
 
-def test_load_image_of_a_band_group_is_an_array(grouped_dir):
+def test_load_image_of_a_band_group_is_an_array(grouped_dir: Path) -> None:
     from tcip_mcp.pipelines.image_utils import load_image, resolve_image_path
 
     ref = resolve_image_path(grouped_dir / "cap.bandgroup")
@@ -349,8 +373,8 @@ def test_load_image_of_a_band_group_is_an_array(grouped_dir):
 
 
 def test_a_band_groups_header_and_reader_state_one_band_per_member(
-    grouped_dir,
-):
+    grouped_dir: Path,
+) -> None:
     """A band group's header and reader state one band per member.
 
     A group of single-band members is as many bands as it has members, and the reader its header
@@ -370,8 +394,8 @@ def test_a_band_groups_header_and_reader_state_one_band_per_member(
 
 
 def test_a_band_group_of_channel_first_single_band_arrays_is_admitted_as_it_is_read(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A band group of channel-first single-band arrays is admitted as it is read.
 
     A member stored as a ``(1, H, W)`` array is one band read the way it is opened, at one band:
@@ -404,8 +428,8 @@ def test_a_band_group_of_channel_first_single_band_arrays_is_admitted_as_it_is_r
 
 @pytest.mark.parametrize("save", [np.save, np.savez], ids=["npy", "npz"])
 def test_a_band_group_naming_a_four_dimensional_array_is_refused_at_its_header(
-    tmp_path, save
-):
+    tmp_path: Path, save: Callable[[str, np.ndarray], None]
+) -> None:
     """A band group naming a four-dimensional array is refused at its header.
 
     An array of four dimensions is no image of one band: the header refuses it when asked for its
@@ -439,8 +463,8 @@ def test_a_band_group_naming_a_four_dimensional_array_is_refused_at_its_header(
 
 
 def test_a_band_group_naming_a_multi_band_member_is_refused_at_its_header(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A band group naming a three-band member is refused by name at its header."""
     from PIL import Image
 
@@ -471,7 +495,7 @@ def test_a_band_group_naming_a_multi_band_member_is_refused_at_its_header(
 
 
 @requires_real_dji_data
-def test_real_dji_capture_decodes_as_a_4_band_stack(tmp_path):
+def test_real_dji_capture_decodes_as_a_4_band_stack(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.band_groups import (
         detect_and_write_band_groups,
     )

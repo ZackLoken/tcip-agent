@@ -9,10 +9,14 @@ from __future__ import annotations
 
 import textwrap
 import time
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import child_pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 HANG_HOLDING_THE_GIL = textwrap.dedent(
     """
@@ -36,8 +40,8 @@ BOUND_S = 10 * TIMEOUT_S
 
 @pytest.mark.parametrize("workers", ["0", "2"])
 def test_a_test_blocked_in_c_with_the_gil_is_ended_and_named(
-    tmp_path, workers
-):
+    tmp_path: Path, workers: str
+) -> None:
     test_file = tmp_path / "test_gil_hang.py"
     test_file.write_text(HANG_HOLDING_THE_GIL, encoding="utf-8")
     started = time.monotonic()

@@ -41,7 +41,9 @@ def _persist_a_selection(project: OpenProject) -> None:
     )
 
 
-def test_view_gui_state_reads_what_the_backend_persisted_and_reopens(made):
+def test_view_gui_state_reads_what_the_backend_persisted_and_reopens(
+    made: OpenProject,
+) -> None:
     from tcip_mcp.tools.project_tools import view_gui_state
     from tcip_web.state import StateStore
 
@@ -60,13 +62,15 @@ def test_view_gui_state_reads_what_the_backend_persisted_and_reopens(made):
     assert "2026-02-11" in ctx["current_image"]
 
 
-def test_view_gui_state_with_no_snapshot_carries_a_note(project):
+def test_view_gui_state_with_no_snapshot_carries_a_note(project: Path) -> None:
     from tcip_mcp.tools.project_tools import view_gui_state
 
     assert set(view_gui_state(project)) == {"note"}
 
 
-def test_view_gui_state_refuses_a_snapshot_that_does_not_decode(project):
+def test_view_gui_state_refuses_a_snapshot_that_does_not_decode(
+    project: Path,
+) -> None:
     from pydantic import ValidationError
 
     import tcip_store
@@ -79,7 +83,9 @@ def test_view_gui_state_refuses_a_snapshot_that_does_not_decode(project):
         view_gui_state(project)
 
 
-def test_inspect_project_reports_the_project_it_is_given(project):
+def test_inspect_project_reports_the_project_it_is_given(
+    project: Path,
+) -> None:
     from tcip_mcp.tools.project_tools import inspect_project
 
     st = inspect_project(project)

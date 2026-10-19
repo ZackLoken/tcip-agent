@@ -8,6 +8,7 @@ spawn failure leaves one that reads interrupted.
 from __future__ import annotations
 
 import subprocess
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -18,12 +19,16 @@ from tests._producer_fixtures import (
     small_detection_config,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
+
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 
 @pytest.fixture(autouse=True)
-def _forget_agent_identity_between_tests():
+def _forget_agent_identity_between_tests() -> Iterator[None]:
     from tcip_mcp import agent_identity
 
     agent_identity.end()
@@ -34,11 +39,11 @@ def _forget_agent_identity_between_tests():
 class NoExecutableChild:
     """A ``Popen`` stand-in whose construction raises ``OSError``, as a missing executable does."""
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: object, **kwargs: object) -> None:
         raise OSError("no such executable")
 
 
-def _launch_record(project, experiment_id: str) -> dict:
+def _launch_record(project: Path, experiment_id: str) -> dict:
     from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
 
     return read_record(
@@ -46,7 +51,7 @@ def _launch_record(project, experiment_id: str) -> dict:
     )
 
 
-def _row(project, experiment_id: str) -> dict:
+def _row(project: Path, experiment_id: str) -> dict:
     from tcip_mcp.experiments import run_rows
 
     return next(
@@ -55,8 +60,8 @@ def _row(project, experiment_id: str) -> dict:
 
 
 def test_a_launch_no_agent_declared_itself_to_shows_an_empty_declaration(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A launch outside an MCP handshake shows an empty identity on the run's row.
 
     The run's row shows an empty launch identity, and the launch record carries no
@@ -81,9 +86,9 @@ def test_a_launch_no_agent_declared_itself_to_shows_an_empty_declaration(
 
 
 def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_event(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A launch inside an MCP handshake shows the connected agent's identity from its event.
 
     The run's row shows the agent's name, version and session, and the run's own record carries
@@ -116,8 +121,8 @@ def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_
 
 
 def test_launch_refuses_when_the_launch_record_cannot_be_written(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A launch whose launch record cannot be written is refused, spawning no worker.
 
     The refusal names the failure and leaves no directory that reads as a run.
@@ -132,7 +137,7 @@ def test_launch_refuses_when_the_launch_record_cannot_be_written(
     captured: list[list[str]] = []
     _fake_popen(monkeypatch, captured)
 
-    def _raise(*args, **kwargs):
+    def _raise(*args: object, **kwargs: object) -> None:
         raise StoreError("disk full")
 
     monkeypatch.setattr(experiments_mod, "write_once", _raise)
@@ -151,7 +156,9 @@ def test_launch_refuses_when_the_launch_record_cannot_be_written(
     assert run_dirs(tmp_path) == []
 
 
-def test_a_launch_records_the_seed_its_config_states(tmp_path, monkeypatch):
+def test_a_launch_records_the_seed_its_config_states(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A launch records the seed its config states in ``run.json``."""
     from tcip_mcp.tools import training_tools
 
@@ -170,8 +177,8 @@ def test_a_launch_records_the_seed_its_config_states(tmp_path, monkeypatch):
 
 
 def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A spawn failure propagates and leaves a directory that reads interrupted.
 
     A Popen failure after the launch record propagates out of launch_training, and the one

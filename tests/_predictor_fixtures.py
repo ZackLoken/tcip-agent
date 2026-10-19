@@ -3,7 +3,26 @@
 from __future__ import annotations
 
 import copy
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from tcip_mcp.pipelines.execution import (
+    DEFAULT_IMAGE_BATCH_SIZE,
+    DEFAULT_TILE_BATCH_SIZE,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+    from pathlib import Path
+
+    import pytest
+
+    from tcip_mcp.model_registry import VerifiedCheckpoint
+    from tcip_mcp.pipelines.execution import Execution
+    from tcip_mcp.pipelines.image_utils import BandGroupRef
+    from tcip_mcp.pipelines.inference.generic_predictor import (
+        WindowedRasterReader,
+    )
+    from tcip_mcp.pipelines.schemas import AugmentationSpec
 
 BOX = (10.0, 10.0, 30.0, 30.0)
 """The one box the stub answers unless told otherwise, xyxy in pixels."""
@@ -24,15 +43,15 @@ class StubPredictor:
         *,
         width: int = 100,
         height: int = 100,
-        boxes=(BOX,),
-        scores=(0.9,),
-        attributes=None,
+        boxes: Sequence[Sequence[float]] = (BOX,),
+        scores: Sequence[float] = (0.9,),
+        attributes: list[list[int]] | None = None,
         cap: int | None = None,
-        train_tile_size=None,
-        train_overlap=None,
-        train_native_size=None,
-        train_augmentation=None,
-        **traits: Any,
+        train_tile_size: int | None = None,
+        train_overlap: float | None = None,
+        train_native_size: tuple[int, int] | None = None,
+        train_augmentation: AugmentationSpec | None = None,
+        **traits: str | int,
     ) -> None:
         self.train_tile_size = train_tile_size
         self.train_overlap = train_overlap
@@ -55,23 +74,45 @@ class StubPredictor:
         self.executions: list = []
         self.checkpoint = None
 
-    def built(self, checkpoint_path=None, **kwargs: Any) -> StubPredictor:
-        """Return this predictor, keeping ``checkpoint_path``'s path as its checkpoint."""
-        self.checkpoint = getattr(checkpoint_path, "path", checkpoint_path)
+    def built(
+        self, checkpoint: VerifiedCheckpoint, device: str | None = None
+    ) -> StubPredictor:
+        """Return this predictor, keeping ``checkpoint``'s path as its checkpoint."""
+        self.checkpoint = getattr(checkpoint, "path", checkpoint)
         return self
 
-    def predict_batch(self, paths, execution=None, **kw: Any) -> list[dict]:
+    def predict_batch(
+        self,
+        image_paths: list[str | Path | BandGroupRef],
+        execution: Execution,
+        *,
+        tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
+        batch_size: int = DEFAULT_IMAGE_BATCH_SIZE,
+    ) -> list[dict]:
         self.calls += 1
         self.executions.append(execution)
-        return [{"image": p, **copy.deepcopy(self.record)} for p in paths]
+        return [
+            {"image": p, **copy.deepcopy(self.record)} for p in image_paths
+        ]
 
-    def predict_sliced(self, path, execution=None, **kw: Any) -> dict:
+    def predict_sliced(
+        self,
+        source: str | Path | BandGroupRef | WindowedRasterReader,
+        *,
+        execution: Execution,
+        tile_batch_size: int,
+        source_label: str = "",
+        prior: dict | None = None,
+        progress: Callable[[int, int, dict], None] | None = None,
+    ) -> dict:
         self.calls += 1
         self.executions.append(execution)
-        return {"image": path, **copy.deepcopy(self.record)}
+        return {"image": source, **copy.deepcopy(self.record)}
 
 
-def install(monkeypatch, predictor: StubPredictor) -> StubPredictor:
+def install(
+    monkeypatch: pytest.MonkeyPatch, predictor: StubPredictor
+) -> StubPredictor:
     """Make ``GenericPredictor`` build ``predictor``; returns it."""
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor",

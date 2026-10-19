@@ -11,7 +11,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 
-def test_the_ordinal_head_and_the_registered_corn_loss_agree():
+def test_the_ordinal_head_and_the_registered_corn_loss_agree() -> None:
     from tcip_mcp.pipelines.components.heads import OrdinalHead
     from tcip_mcp.pipelines.components.losses import build_loss
 
@@ -29,7 +29,7 @@ def test_the_ordinal_head_and_the_registered_corn_loss_agree():
     assert from_registry.dtype == outputs["logits"].dtype
 
 
-def test_the_corn_loss_accumulates_in_the_logits_dtype():
+def test_the_corn_loss_accumulates_in_the_logits_dtype() -> None:
     from tcip_mcp.pipelines.components.losses import build_loss
 
     logits = torch.randn(4, 2, dtype=torch.float64)

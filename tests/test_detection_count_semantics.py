@@ -69,7 +69,7 @@ def _asymmetric_iou_records() -> list[dict]:
     return [frame_one, frame_two]
 
 
-def test_precision_and_recall_are_not_interchangeable():
+def test_precision_and_recall_are_not_interchangeable() -> None:
     """Precision and recall differ on an asymmetric reference, each over its own denominator.
 
     On a reference with three false positives and two misses the two ratios differ, and each is
@@ -93,7 +93,7 @@ def test_precision_and_recall_are_not_interchangeable():
     assert m["f1"] == pytest.approx(2 * 0.5 * 0.6 / 1.1)
 
 
-def test_extra_false_positives_move_precision_and_leave_recall_alone():
+def test_extra_false_positives_move_precision_and_leave_recall_alone() -> None:
     """Extra false positives move precision and leave recall alone.
 
     Two more spurious detections add two false positives, lower precision, and leave the true
@@ -165,7 +165,7 @@ def _clustered_center_match_records() -> list[dict]:
     return [frame_one, frame_two]
 
 
-def test_second_detection_of_one_object_is_a_false_positive():
+def test_second_detection_of_one_object_is_a_false_positive() -> None:
     """A second detection of one ground-truth object is a false positive.
 
     A ground-truth object is claimed by one detection. The runner-up detection on a matched
@@ -185,7 +185,9 @@ def test_second_detection_of_one_object_is_a_false_positive():
     assert counts["recall"] == pytest.approx(0.6)
 
 
-def test_sweep_records_a_doubly_detected_object_as_one_hit_and_one_false_alarm():
+def test_sweep_records_a_doubly_detected_object_as_one_hit_and_one_false_alarm() -> (
+    None
+):
     """The conf sweep records a doubly detected object as one hit and one false alarm.
 
     A cluster on one object reads as one hit plus a false alarm at the confs that keep the
@@ -209,7 +211,7 @@ def test_sweep_records_a_doubly_detected_object_as_one_hit_and_one_false_alarm()
     assert at[0.85]["recall"] == pytest.approx(0.2)
 
 
-def test_uncontested_detections_all_match():
+def test_uncontested_detections_all_match() -> None:
     """Uncontested detections within tolerance all match.
 
     One detection per object, each within tolerance, counts as all true positives with nothing

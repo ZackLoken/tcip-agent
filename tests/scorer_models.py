@@ -7,9 +7,14 @@ through a registered checkpoint.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 import torch
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.inference.generic_predictor import (
+        GenericPredictor,
+    )
 
 
 class EmptyThenLowDetector(torch.nn.Module):
@@ -19,7 +24,9 @@ class EmptyThenLowDetector(torch.nn.Module):
         super().__init__()
         self._n = 0
 
-    def forward(self, imgs):
+    def forward(
+        self, imgs: list[torch.Tensor]
+    ) -> list[dict[str, torch.Tensor]]:
         self._n += 1
         scores = torch.tensor([]) if self._n == 1 else torch.tensor([0.3, 0.4])
         return [
@@ -34,7 +41,7 @@ class EmptyThenLowDetector(torch.nn.Module):
 class TwoHeadClassifier(torch.nn.Module):
     """Two classification heads with fixed logits."""
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         return {
             "head0_logits": torch.tensor([[2.0, 0.0]]),
             "head1_logits": torch.tensor([[0.0, 0.0]]),
@@ -52,7 +59,9 @@ class ConvBackbone(torch.nn.Module):
 class ScorelessDetector(torch.nn.Module):
     """A detector answering one box and its label and no ``scores``."""
 
-    def forward(self, imgs):
+    def forward(
+        self, imgs: list[torch.Tensor]
+    ) -> list[dict[str, torch.Tensor]]:
         return [
             {
                 "boxes": torch.zeros((1, 4)),
@@ -61,27 +70,27 @@ class ScorelessDetector(torch.nn.Module):
         ]
 
 
-def build_empty_then_low(**_: Any) -> torch.nn.Module:
+def build_empty_then_low(**_: object) -> torch.nn.Module:
     return EmptyThenLowDetector()
 
 
-def build_scoreless(**_: Any) -> torch.nn.Module:
+def build_scoreless(**_: object) -> torch.nn.Module:
     return ScorelessDetector()
 
 
-def build_two_head(**_: Any) -> torch.nn.Module:
+def build_two_head(**_: object) -> torch.nn.Module:
     return TwoHeadClassifier()
 
 
-def build_conv_backbone(**_: Any) -> torch.nn.Module:
+def build_conv_backbone(**_: object) -> torch.nn.Module:
     return ConvBackbone()
 
 
-def build_linear(**_: Any) -> torch.nn.Module:
+def build_linear(**_: object) -> torch.nn.Module:
     return torch.nn.Linear(3, 3)
 
 
-def predictor_for(tmp_path: Path, builder: str, task: str) -> Any:
+def predictor_for(tmp_path: Path, builder: str, task: str) -> GenericPredictor:
     """Return a ``GenericPredictor`` over a registered checkpoint of ``scorer_models:<builder>``.
 
     A ``task`` run over the builder completes and registers the checkpoint, which is loaded

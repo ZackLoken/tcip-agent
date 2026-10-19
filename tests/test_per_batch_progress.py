@@ -6,7 +6,20 @@ log takes one for an epoch row.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+    from pathlib import Path
+
+    from torch import device, nn
+    from torch.utils.data import DataLoader
+
+    from tcip_mcp.pipelines.execution import MaskCut
+    from tcip_mcp.pipelines.schemas import ScoreWeights, TrainerReads
+    from tcip_mcp.traits import TraitEntry, TraitRecord
 
 torch = pytest.importorskip("torch")
 
@@ -38,18 +51,18 @@ TRAIT_SCOPED = evaluation_block(
 """A regression run's evaluation block scoring under the confirmed bud-opening trait."""
 
 
-def batch_rows(rows):
+def batch_rows(rows: list[dict]) -> list[dict]:
     """Return the per-batch rows among ``rows`` (``experiments.partition_rows``)."""
     return partition_rows(rows)[1]
 
 
 def _context(
-    tmp_path,
+    tmp_path: Path,
     hook_calls: list,
-    intensities=TRAIN_INTENSITIES,
+    intensities: list[float] = TRAIN_INTENSITIES,
     *,
     validated: bool = True,
-    **extra,
+    **extra: object,
 ) -> TrainContext:
     """Return the context of a regression run opened by the launcher's own producer.
 
@@ -71,14 +84,16 @@ def _context(
     )
 
 
-def test_a_run_admits_what_its_training_reads_once(tmp_path, monkeypatch):
+def test_a_run_admits_what_its_training_reads_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Building, training and twice evaluating a run read one admission of its training reads."""
     from tcip_mcp.pipelines.schemas import TrainConfigSchema
 
     calls: list[int] = []
     real = TrainConfigSchema.trainer_reads
 
-    def counted(self):
+    def counted(self: TrainConfigSchema) -> TrainerReads:
         calls.append(1)
         return real(self)
 
@@ -92,7 +107,9 @@ def test_a_run_admits_what_its_training_reads_once(tmp_path, monkeypatch):
 
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")
-def test_a_run_resolves_what_its_evaluation_reads_once(tmp_path, monkeypatch):
+def test_a_run_resolves_what_its_evaluation_reads_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Training and twice evaluating a trait-stating run read the trait's entry once.
 
     The run states a confirmed trait, and the registry's ``read_trait`` answers one call.
@@ -102,7 +119,7 @@ def test_a_run_resolves_what_its_evaluation_reads_once(tmp_path, monkeypatch):
     calls: list[int] = []
     real = traits.read_trait
 
-    def counted(trait, project):
+    def counted(trait: str, project: str | Path) -> TraitRecord:
         calls.append(1)
         return real(trait, project)
 
@@ -117,8 +134,8 @@ def test_a_run_resolves_what_its_evaluation_reads_once(tmp_path, monkeypatch):
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_a_run_scores_under_the_trait_revision_its_launch_resolved(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A run's evaluations score under the trait revision its launch resolved.
 
     The run is launched against a trait's confirmed revision, then trained after the breeder
@@ -130,7 +147,15 @@ def test_a_run_scores_under_the_trait_revision_its_launch_resolved(
     handed: list = []
     real = generic_trainer.evaluate
 
-    def recorded(*args, **kwargs):
+    def recorded(
+        *args: nn.Module | DataLoader | device | str,
+        **kwargs: Mapping[str, object]
+        | float
+        | ScoreWeights
+        | TraitEntry
+        | MaskCut
+        | None,
+    ) -> dict:
         handed.append(kwargs["trait"])
         return real(*args, **kwargs)
 
@@ -150,8 +175,8 @@ def test_a_run_scores_under_the_trait_revision_its_launch_resolved(
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_a_run_whose_recorded_revision_holds_another_entry_refuses_by_name(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A run whose recorded revision holds another entry refuses by name.
 
     The body reads the trait entry at the revision its launch recorded, the entry's hash included:
@@ -175,8 +200,8 @@ def test_a_run_whose_recorded_revision_holds_another_entry_refuses_by_name(
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_the_trainers_validation_and_a_bodys_evaluation_hand_evaluate_one_keyword_set(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The trainer's validation and ``ctx.evaluate`` hand ``evaluate`` the same keywords.
 
     The run states its own IoU threshold and a confirmed trait, and the trait's entry is among the
@@ -188,8 +213,16 @@ def test_the_trainers_validation_and_a_bodys_evaluation_hand_evaluate_one_keywor
     handed: dict[str, dict] = {}
     real = evaluation.evaluate
 
-    def recorded(route: str):
-        def evaluate(*args, **kwargs):
+    def recorded(route: str) -> Callable[..., dict]:
+        def evaluate(
+            *args: nn.Module | DataLoader | device | str,
+            **kwargs: Mapping[str, object]
+            | float
+            | ScoreWeights
+            | TraitEntry
+            | MaskCut
+            | None,
+        ) -> dict:
             handed[route] = kwargs
             return real(*args, **kwargs)
 
@@ -207,8 +240,8 @@ def test_the_trainers_validation_and_a_bodys_evaluation_hand_evaluate_one_keywor
 
 
 def test_the_trainer_logs_a_batch_row_at_the_stated_cadence_and_no_reader_takes_it_for_an_epoch(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     hook_calls: list = []
     ctx = _context(tmp_path, hook_calls, log_every_n_batches=2)
     run = ctx.default_train()
@@ -233,8 +266,8 @@ def test_the_trainer_logs_a_batch_row_at_the_stated_cadence_and_no_reader_takes_
 
 @pytest.mark.parametrize("n_batches", [3, 19, 29, 30, 31])
 def test_a_config_stating_no_cadence_logs_ten_batch_rows_every_epoch(
-    tmp_path, n_batches
-):
+    tmp_path: Path, n_batches: int
+) -> None:
     """A config stating no cadence logs up to ten batch rows each epoch.
 
     Each of two epochs logs ``min(10, n_batches)`` distinct rows inside the epoch, the gaps between
@@ -259,8 +292,8 @@ def test_a_config_stating_no_cadence_logs_ten_batch_rows_every_epoch(
 
 
 def test_the_best_selection_reads_epoch_rows_and_never_a_batch_row_s_selection(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A batch row's ``selection``, better than every epoch's, does not become the best selection.
 
     The batch row is a bespoke loop's.
@@ -276,8 +309,8 @@ def test_the_best_selection_reads_epoch_rows_and_never_a_batch_row_s_selection(
 
 
 def test_a_bespoke_loop_logs_a_batch_row_and_neither_sink_takes_the_other_s_stamp(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     hook_calls: list = []
     ctx = _context(tmp_path, hook_calls)
 

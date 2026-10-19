@@ -26,7 +26,9 @@ COLLECTION_CONF = 0.01
 """A sample conf a detector assessment states its predictions are collected at."""
 
 
-def collection_pass(**stated: Any) -> Stated:
+def collection_pass(
+    **stated: object,
+) -> Stated:
     """Return a ``Stated`` of :data:`COLLECTION_CONF` and :data:`RATIONALE`, ``stated`` over."""
     return Stated(
         **{"conf": COLLECTION_CONF, "rationale": RATIONALE, **stated}
@@ -72,7 +74,7 @@ SCHEDULE_SETTINGS: dict[str, dict[str, Any]] = {
 """A sample of each scheduler type's own settings."""
 
 
-def schedule(kind: str, **stated) -> dict:
+def schedule(kind: str, **stated: object) -> dict:
     """Return a ``scheduler`` block for ``kind``.
 
     It merges ``type`` ``kind``, ``SCHEDULE_SETTINGS[kind]``, :data:`RATIONALE` and then
@@ -98,12 +100,12 @@ def stop_rule(
     }
 
 
-def stage(freeze_to: int = 0, **stated) -> dict:
+def stage(freeze_to: int = 0, **stated: object) -> dict:
     """Return a ``stages`` entry at ``freeze_to`` stating :data:`RATIONALE`, ``stated`` over it."""
     return {"freeze_to": freeze_to, "rationale": RATIONALE, **stated}
 
 
-def adamw_optimizer(**stated) -> dict:
+def adamw_optimizer(**stated: object) -> dict:
     """Return a sample AdamW ``optimizer`` block, with ``stated`` over it."""
     return {
         "name": "adamw",
@@ -115,7 +117,7 @@ def adamw_optimizer(**stated) -> dict:
     }
 
 
-def sgd_optimizer(**stated) -> dict:
+def sgd_optimizer(**stated: object) -> dict:
     """Return a sample SGD ``optimizer`` block, its momentum stated, with ``stated`` over it."""
     return {
         "name": "sgd",
@@ -128,7 +130,7 @@ def sgd_optimizer(**stated) -> dict:
     }
 
 
-def drawn_split(**stated) -> dict:
+def drawn_split(**stated: object) -> dict:
     """Return a drawn ``data.split`` block, and ``draw_splits``'s statement of a draw.
 
     It states seed 0, validation ratio 0.5, calibration and holdout ratios 0, stem grouping,
@@ -146,12 +148,12 @@ def drawn_split(**stated) -> dict:
     }
 
 
-def tiling_block(**stated) -> dict:
+def tiling_block(**stated: object) -> dict:
     """Return a ``data.tiling`` block: ``skip_empty`` False, :data:`RATIONALE`, ``stated`` over."""
     return {"skip_empty": False, "rationale": RATIONALE, **stated}
 
 
-def augmentation(**transforms) -> dict:
+def augmentation(**transforms: object) -> dict:
     """Return an ``augmentation`` block of :data:`RATIONALE` with ``transforms`` merged over it.
 
     Each of ``transforms`` maps a transform's name to its values.
@@ -159,7 +161,7 @@ def augmentation(**transforms) -> dict:
     return {"rationale": RATIONALE, **transforms}
 
 
-def sampler(name: str, **values) -> dict:
+def sampler(name: str, **values: object) -> dict:
     """Return a ``sampler`` block of ``name`` and :data:`RATIONALE`, ``values`` merged over them."""
     return {"name": name, "rationale": RATIONALE, **values}
 
@@ -186,7 +188,7 @@ SCORE_WEIGHTS = {"loss": 0.5, "f1": 0.3, "map50": 0.2}
 """Sample weights a run selecting on the composite objective states for its three terms."""
 
 
-def evaluation_block(**stated) -> dict:
+def evaluation_block(**stated: object) -> dict:
     """Return an ``evaluation`` block, ``stated`` merged over its sample settings.
 
     The settings are ``selection_metric`` ``objective``, :data:`VALIDATION_CONF`, a copy of
@@ -224,7 +226,7 @@ def fifo_search() -> dict:
     return {"search_alg": "random", "scheduler": fifo_scheduler()}
 
 
-def asha_scheduler(**stated) -> dict:
+def asha_scheduler(**stated: object) -> dict:
     """Return a sample ``asha`` trial ``scheduler`` block, ``stated`` merged over its settings.
 
     The settings are ``time_attr``, ``max_t``, ``grace_period``, ``reduction_factor``,
@@ -242,7 +244,7 @@ def asha_scheduler(**stated) -> dict:
     }
 
 
-def tune_arguments(**stated) -> dict:
+def tune_arguments(**stated: object) -> dict:
     """Return sample keyword arguments for ``hpo.tune_search``, ``stated`` merged over them.
 
     They state metric ``objective`` at mode ``min``, one sample, random search, the ``fifo``

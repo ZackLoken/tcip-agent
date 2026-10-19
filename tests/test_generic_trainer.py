@@ -4,9 +4,17 @@ Minted-id uniqueness, the run's stated seeding, terminal status on setup failure
 checkpoint writes.
 """
 
+from __future__ import annotations
+
 import threading
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from tcip_mcp.pipelines.training.envelope import TrainContext
 
 torch = pytest.importorskip("torch")
 
@@ -16,7 +24,7 @@ from tcip_mcp.pipelines.training.generic_trainer import train
 # mint_experiment_id: id uniqueness (same-second and cross-thread)
 
 
-def test_mint_experiment_id_unique_within_one_second():
+def test_mint_experiment_id_unique_within_one_second() -> None:
     from tcip_mcp.experiments import mint_experiment_id
 
     ids = {mint_experiment_id() for _ in range(50)}
@@ -25,7 +33,7 @@ def test_mint_experiment_id_unique_within_one_second():
     )  # the uuid suffix, not a counter, keeps same-second calls from colliding
 
 
-def test_mint_experiment_id_unique_across_threads():
+def test_mint_experiment_id_unique_across_threads() -> None:
     from tcip_mcp.experiments import mint_experiment_id
 
     n = 16
@@ -33,7 +41,7 @@ def test_mint_experiment_id_unique_across_threads():
     results: list[str] = []
     lock = threading.Lock()
 
-    def make():
+    def make() -> None:
         barrier.wait()  # maximize same-instant contention
         minted = mint_experiment_id()
         with lock:
@@ -51,7 +59,7 @@ def test_mint_experiment_id_unique_across_threads():
 # the run's own seeding: the seed and determinism its config states
 
 
-def _context(tmp_path, **stated):
+def _context(tmp_path: Path, **stated: object) -> TrainContext:
     """Return ``run_context`` of a ``regressor_config`` run with ``stated`` passed through.
 
     The data block is ``frames_data`` of two frames, intensities 0.1 and 0.5 valued 0.2 and 1.0,
@@ -69,11 +77,13 @@ def _context(tmp_path, **stated):
     )
 
 
-def test_train_applies_the_runs_seed(tmp_path, monkeypatch):
+def test_train_applies_the_runs_seed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The trainer calls ``set_seed`` with the seed and determinism the run's config states."""
     captured = {}
 
-    def fake_set_seed(seed, *, deterministic):
+    def fake_set_seed(seed: int, *, deterministic: bool) -> None:
         captured["seed"] = seed
         captured["deterministic"] = deterministic
 
@@ -90,7 +100,9 @@ def test_train_applies_the_runs_seed(tmp_path, monkeypatch):
 # ====================================================================
 
 
-def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
+def test_train_with_unwritable_output_dir_marks_run_failed(
+    tmp_path: Path,
+) -> None:
     import shutil
 
     ctx = _context(tmp_path)
@@ -107,14 +119,16 @@ def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
 # ── checkpoints: durable, torn-read-free writes ──────────────────────
 
 
-def _run_artifacts(directory):
+def _run_artifacts(directory: Path) -> list[str]:
     """Return what a run left behind, without the storage layer's own lock bookkeeping."""
     return sorted(
         p.name for p in directory.iterdir() if not p.name.endswith(".lock")
     )
 
 
-def test_a_checkpoint_loads_back_exactly_what_was_saved(tmp_path):
+def test_a_checkpoint_loads_back_exactly_what_was_saved(
+    tmp_path: Path,
+) -> None:
     """``write_checkpoint`` lands ``model_best.pt`` alone, and it loads back the saved payload."""
     path = gt.checkpoint_path(tmp_path, "model_best")
 
@@ -130,12 +144,12 @@ def test_a_checkpoint_loads_back_exactly_what_was_saved(tmp_path):
 
 
 def test_a_failed_checkpoint_write_preserves_the_previous_one(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     path = gt.checkpoint_path(tmp_path, "model_best")
     gt.write_checkpoint({"epoch": 1}, path)
 
-    def broken_save(*args, **kwargs):
+    def broken_save(*args: object, **kwargs: object) -> NoReturn:
         raise RuntimeError("simulated crash mid-serialization")
 
     monkeypatch.setattr(gt.torch, "save", broken_save)
@@ -154,7 +168,7 @@ def test_a_failed_checkpoint_write_preserves_the_previous_one(
 # capture_rng_state / restore_rng_state: put the four streams back where they were
 
 
-def test_capture_and_restore_rng_state_roundtrip():
+def test_capture_and_restore_rng_state_roundtrip() -> None:
     import random
 
     import numpy as np

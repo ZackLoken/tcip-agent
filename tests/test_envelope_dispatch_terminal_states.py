@@ -29,13 +29,13 @@ from tests._verified_checkpoint_fixtures import (
 )  # noqa: E402
 
 
-def _audit_statuses(root, tool="training_run"):
+def _audit_statuses(root: Path, tool: str = "training_run") -> list[str]:
     events = ts.read_log(audit_log_key(root)).records
     return [e["status"] for e in events if e.get("tool") == tool]
 
 
 def _start(
-    tmp_path, body_name, *, deadline: float | None = None
+    tmp_path: Path, body_name: str, *, deadline: float | None = None
 ) -> tuple[TrainContext, Path]:
     """Run this module's body ``body_name`` through the envelope and return its context.
 
@@ -66,7 +66,7 @@ def _start(
     return ctx, run_dir
 
 
-def _train_saves_best_then_final(ctx):
+def _train_saves_best_then_final(ctx: TrainContext) -> None:
     """Save ``model_best`` at epoch 4, val_loss 0.2, then ``model_final`` at epoch 9, 0.8."""
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.2, "epoch": 4}},
@@ -78,7 +78,9 @@ def _train_saves_best_then_final(ctx):
     )
 
 
-def test_best_checkpoint_outranks_the_last_one_as_the_deliverable(tmp_path):
+def test_best_checkpoint_outranks_the_last_one_as_the_deliverable(
+    tmp_path: Path,
+) -> None:
     ctx, run_dir = _start(tmp_path, "_train_saves_best_then_final")
 
     assert ctx.run.status == "completed"
@@ -90,7 +92,7 @@ def test_best_checkpoint_outranks_the_last_one_as_the_deliverable(tmp_path):
     assert checkpoint["metrics"]["epoch"] == 4
 
 
-def _train_declares_its_own_deliverable(ctx):
+def _train_declares_its_own_deliverable(ctx: TrainContext) -> None:
     """Declare shippable weights saved under a tag outside the model_best/model_final pair."""
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.8, "epoch": 9}},
@@ -103,7 +105,9 @@ def _train_declares_its_own_deliverable(ctx):
     ctx.set_final_weights("ema_weights")
 
 
-def test_an_explicit_deliverable_outranks_the_filename_convention(tmp_path):
+def test_an_explicit_deliverable_outranks_the_filename_convention(
+    tmp_path: Path,
+) -> None:
     ctx, run_dir = _start(tmp_path, "_train_declares_its_own_deliverable")
 
     assert ctx.run.status == "completed"
@@ -115,8 +119,8 @@ def test_an_explicit_deliverable_outranks_the_filename_convention(tmp_path):
 
 
 def test_completed_metrics_source_is_training_source_for_a_bespoke_loop(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A bespoke loop's completed metrics carry ``metrics_source='training_source'``.
 
     A ``metrics`` key in the state ``save_checkpoint`` saved becomes the completed checkpoint's
@@ -134,7 +138,7 @@ class _OutsideTheContract:
     """A value ``torch.load(weights_only=True)`` refuses to unpickle."""
 
 
-def _train_leaves_an_undecodable_deliverable(ctx):
+def _train_leaves_an_undecodable_deliverable(ctx: TrainContext) -> None:
     """Save ``model_best`` with an ``_OutsideTheContract`` under ``extra``; declare it final."""
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, "extra": _OutsideTheContract()}, "model_best"
@@ -143,20 +147,20 @@ def _train_leaves_an_undecodable_deliverable(ctx):
 
 
 def test_a_deliverable_the_verified_reader_refuses_ends_the_run_failed(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A deliverable the verified reader refuses ends the run failed with no checkpoint."""
     ctx, run_dir = _start(tmp_path, "_train_leaves_an_undecodable_deliverable")
 
     final = observe(run_dir).final
     assert ctx.run.status == "failed"
-    assert final["state"] == "failed" and final["status_error"]
-    assert final["checkpoint"] is None
+    assert final.state == "failed" and final.status_error
+    assert final.checkpoint is None
     assert _completed(run_dir) is None
     assert _audit_statuses(tmp_path) == ["running", "failed"]
 
 
-def _train_stops_on_cancel(ctx):
+def _train_stops_on_cancel(ctx: TrainContext) -> None:
     """Save a checkpoint, then request the run's cancellation and return."""
     from tcip_mcp.experiments import request_cancel
 
@@ -166,17 +170,19 @@ def _train_stops_on_cancel(ctx):
     request_cancel(ctx.run_dir)
 
 
-def test_a_canceled_run_completes_no_checkpoint_despite_its_weights(tmp_path):
+def test_a_canceled_run_completes_no_checkpoint_despite_its_weights(
+    tmp_path: Path,
+) -> None:
     ctx, run_dir = _start(tmp_path, "_train_stops_on_cancel")
 
     assert ctx.run.status == "canceled"
     assert (run_dir / "model_final.pt").is_file()
-    assert observe(run_dir).final["state"] == "canceled"
+    assert observe(run_dir).final.state == "canceled"
     assert _completed(run_dir) is None
     assert _audit_statuses(tmp_path) == ["running", "canceled"]
 
 
-def _train_records_its_own_failure(ctx):
+def _train_records_its_own_failure(ctx: TrainContext) -> None:
     """Save a checkpoint, then set the run's status to failed with a reason and return."""
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}}, "model_best"
@@ -186,13 +192,13 @@ def _train_records_its_own_failure(ctx):
 
 
 def test_a_body_that_marks_itself_failed_is_not_promoted_to_completed(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     ctx, run_dir = _start(tmp_path, "_train_records_its_own_failure")
 
     assert ctx.run.status == "failed"
     final = observe(run_dir).final
-    assert (final["state"], final["status_error"]) == (
+    assert (final.state, final.status_error) == (
         "failed",
         "loss diverged at stage 2",
     )
@@ -201,7 +207,7 @@ def test_a_body_that_marks_itself_failed_is_not_promoted_to_completed(
     assert _audit_statuses(tmp_path) == ["running", "failed"]
 
 
-def _train_raises_after_checkpointing(ctx):
+def _train_raises_after_checkpointing(ctx: TrainContext) -> None:
     """Declare a best checkpoint, then raise partway through."""
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}}, "model_best"
@@ -211,18 +217,18 @@ def _train_raises_after_checkpointing(ctx):
 
 
 def test_a_raised_failure_closes_the_run_failed_and_completes_nothing(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     ctx, run_dir = _start(tmp_path, "_train_raises_after_checkpointing")
 
     assert ctx.run.status == "failed"
-    assert "out of memory" in observe(run_dir).final["status_error"]
+    assert "out of memory" in observe(run_dir).final.status_error
     assert (run_dir / "model_best.pt").is_file()
     assert _completed(run_dir) is None
     assert _audit_statuses(tmp_path) == ["running", "failed"]
 
 
-def _train_finishes_past_the_wall_clock(ctx):
+def _train_finishes_past_the_wall_clock(ctx: TrainContext) -> None:
     """Save and declare weights, then return normally."""
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.3}}, "model_best"
@@ -231,8 +237,8 @@ def _train_finishes_past_the_wall_clock(ctx):
 
 
 def test_a_run_past_its_wall_clock_ends_failed_naming_it_with_no_checkpoint(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A run returning past its wall clock ends failed naming the limit, with no checkpoint."""
     ctx, run_dir = _start(
         tmp_path,
@@ -242,7 +248,7 @@ def test_a_run_past_its_wall_clock_ends_failed_naming_it_with_no_checkpoint(
 
     assert ctx.run.status == "failed"
     assert (
-        observe(run_dir).final["status_error"]
+        observe(run_dir).final.status_error
         == "exceeded max_wall_clock_seconds"
     )
     assert (run_dir / "model_best.pt").is_file()

@@ -89,7 +89,7 @@ GOLDEN_DATASET = {
 }
 
 
-def test_evaluate_single_image_golden(data_dir: Path):
+def test_evaluate_single_image_golden(data_dir: Path) -> None:
     from tcip_mcp.tools.annotation_tools import score_predictions
     from tests.conftest import DATA_DIR_BUCKET
 
@@ -114,7 +114,7 @@ def test_evaluate_single_image_golden(data_dir: Path):
     assert result == GOLDEN_DETECTIONS
 
 
-def test_evaluate_folder_golden(data_dir: Path):
+def test_evaluate_folder_golden(data_dir: Path) -> None:
     from tcip_mcp.tools.annotation_tools import score_predictions
     from tests.conftest import DATA_DIR_BUCKET
 

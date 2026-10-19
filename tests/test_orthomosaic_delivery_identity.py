@@ -66,7 +66,9 @@ def _delivered(tmp_path: Path, bucket: str, raster_path: Path) -> dict:
     )
 
 
-def test_a_raster_whose_tiepoint_moved_since_publication_refuses(tmp_path):
+def test_a_raster_whose_tiepoint_moved_since_publication_refuses(
+    tmp_path: Path,
+) -> None:
     """A raster whose tiepoint moved since publication refuses.
 
     Identical pixels at a moved tiepoint refuse as a georeferencing mismatch naming the tiepoint,
@@ -84,7 +86,9 @@ def test_a_raster_whose_tiepoint_moved_since_publication_refuses(tmp_path):
     assert not (tmp_path / "counts.csv").exists()
 
 
-def test_a_raster_whose_content_changed_since_publication_refuses(tmp_path):
+def test_a_raster_whose_content_changed_since_publication_refuses(
+    tmp_path: Path,
+) -> None:
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
     bucket = _produced_bucket(tmp_path, raster_path)
@@ -96,7 +100,9 @@ def test_a_raster_whose_content_changed_since_publication_refuses(tmp_path):
     assert not (tmp_path / "counts.csv").exists()
 
 
-def test_a_bucket_of_per_image_predictions_refuses_naming_what_it_is(tmp_path):
+def test_a_bucket_of_per_image_predictions_refuses_naming_what_it_is(
+    tmp_path: Path,
+) -> None:
     from tests._chain_fixtures import published
 
     raster_path = _raster(tmp_path)
@@ -125,8 +131,8 @@ def test_a_bucket_of_per_image_predictions_refuses_naming_what_it_is(tmp_path):
 
 
 def test_the_raster_it_was_produced_on_passes_the_identity_check_and_meets_the_gate(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The raster a bucket was produced on passes the identity check and meets the gate.
 
     The producer's own recorded identity admits the unchanged raster; with no assessment behind
@@ -138,8 +144,9 @@ def test_the_raster_it_was_produced_on_passes_the_identity_check_and_meets_the_g
     _write_geo_raster(raster_path)
     bucket = _produced_bucket(tmp_path, raster_path)
     recorded = read_bucket(tmp_path / "ds", bucket).raster_identity
-    assert recorded is not None and recorded["pixel_checksum"]
-    assert recorded["geotransform"]["tiepoint_native_x"] == TIEPOINT_NATIVE_X
+    assert recorded is not None and recorded.pixel_checksum
+    assert recorded.geotransform is not None
+    assert recorded.geotransform["tiepoint_native_x"] == TIEPOINT_NATIVE_X
 
     refused = _delivered(tmp_path, bucket, raster_path)
 

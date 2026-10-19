@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,11 +25,22 @@ from tcip_mcp.tools.data_tools import draw_splits, scan_dataset
 from tests._producer_fixtures import label_image, registry_over
 from tests._training_values import RATIONALE, drawn_split
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
+
+    from pydantic import JsonValue
+
+    from tcip_mcp.pipelines.data.split_construction import Membership
+
 SHARES = {"val_ratio": 0.15, "calibration_ratio": 0.1, "holdout_ratio": 0.05}
 """The sample shares a draw here states unless it states its own."""
 
 
-def _draw(project, folder_path, **stated) -> dict:
+def _draw(
+    project: Path,
+    folder_path: str,
+    **stated: str | float | bool | dict[str, str] | None,
+) -> dict:
     """Run ``draw_splits`` over ``folder_path`` at :data:`SHARES` and return its result.
 
     The draw is grouped by tile prefix and stratified, with ``stated`` over those.
@@ -40,7 +52,7 @@ def _draw(project, folder_path, **stated) -> dict:
     )
 
 
-def _quality_findings(root) -> list[tuple[str, str]]:
+def _quality_findings(root: Path) -> list[tuple[str, str]]:
     findings: list[tuple[str, str]] = []
     doctor.check_data_quality(
         Path(root), findings, census=doctor._census(Path(root), findings)
@@ -48,7 +60,7 @@ def _quality_findings(root) -> list[tuple[str, str]]:
     return findings
 
 
-def test_scan_dataset(data_dir: Path):
+def test_scan_dataset(data_dir: Path) -> None:
     result = scan_dataset(str(data_dir))
     assert result["image_count"] == 3
     assert result["labels_count"] == 3
@@ -56,17 +68,17 @@ def test_scan_dataset(data_dir: Path):
     assert result["unlabeled_images"] == 0
 
 
-def test_scan_dataset_not_found():
+def test_scan_dataset_not_found() -> None:
     result = scan_dataset("/nonexistent/path")
     assert "error" in result
 
 
-def test_doctor_check_data_quality(data_dir: Path):
+def test_doctor_check_data_quality(data_dir: Path) -> None:
     findings = _quality_findings(data_dir)
     assert not [f for f in findings if f[0] == "error"]
 
 
-def test_doctor_check_data_quality_missing_dir(tmp_path: Path):
+def test_doctor_check_data_quality_missing_dir(tmp_path: Path) -> None:
     # _scan_dataset's own rglob over a nonexistent path yields nothing rather than raising; a
     # missing project root is doctor.main()'s own upfront refusal, not this check's job.
     missing = tmp_path / "nonexistent" / "xyz123"
@@ -76,7 +88,7 @@ def test_doctor_check_data_quality_missing_dir(tmp_path: Path):
 
 def test_scan_dataset_counts_only_the_documents_a_published_bucket_names(
     tmp_path: Path,
-):
+) -> None:
     """``scan_dataset`` counts only the prediction documents a published bucket names.
 
     Beside one published document, a prediction document no bucket record names leaves the count
@@ -126,7 +138,7 @@ def _add_extra_bud_groups(data_dir: Path, count: int) -> None:
         )
 
 
-def test_draw_splits_basic(data_dir: Path, tmp_path: Path):
+def test_draw_splits_basic(data_dir: Path, tmp_path: Path) -> None:
     _add_extra_bud_groups(data_dir, 1)
     out = tmp_path / "manifests"
     # The fixture's 4 stems (img_001..003 plus one grown group) are 4 distinct foreground
@@ -195,7 +207,7 @@ def _leaf_scene(root: Path, n: int = 6) -> Path:
 
 def test_a_draw_without_stratification_reports_the_counted_annotations(
     tmp_path: Path,
-):
+) -> None:
     """A draw without stratification reports the subject's annotations it counted.
 
     With balancing off the draw reports the subject's own annotation total, and the per-side
@@ -214,7 +226,9 @@ def test_a_draw_without_stratification_reports_the_counted_annotations(
     )
 
 
-def test_draw_splits_and_a_runs_own_draw_side_the_same_members(tmp_path: Path):
+def test_draw_splits_and_a_runs_own_draw_side_the_same_members(
+    tmp_path: Path,
+) -> None:
     """``draw_splits`` and a run's own draw hold the same per-side sizes and foreground.
 
     The draws share ground truth, seed, policy and val share, and the run's foreground is
@@ -243,10 +257,8 @@ def test_draw_splits_and_a_runs_own_draw_side_the_same_members(tmp_path: Path):
     _train, _val, partition, _data = train_val(tmp_path, "detection", data_cfg)
 
     by_side: dict[str, list[int]] = {"train": [], "val": []}
-    for sample in partition["samples"]:
-        by_side[sample["side"]].append(
-            int(sample["member"].removeprefix("s")) + 1
-        )
+    for sample in partition.samples:
+        by_side[sample.side].append(int(sample.member.removeprefix("s")) + 1)
     assert {side: len(v) for side, v in by_side.items()} == {
         side: drawn["splits"][side] for side in by_side
     }
@@ -257,7 +269,7 @@ def test_draw_splits_and_a_runs_own_draw_side_the_same_members(tmp_path: Path):
 
 def test_every_draw_refuses_a_tree_short_of_its_floor_the_same_way(
     tmp_path: Path,
-):
+) -> None:
     """``draw_splits`` and a run's own draw both refuse a tree short of the floor in its words.
 
     Two captures mapped into one group are one foreground group, short of a train and a val
@@ -294,7 +306,7 @@ def test_every_draw_refuses_a_tree_short_of_its_floor_the_same_way(
 
 def test_draw_splits_stats_only_admits_a_nonzero_calibration_ratio(
     data_dir: Path,
-):
+) -> None:
     """A stats-only draw admits a nonzero calibration ratio beside a zero holdout.
 
     A stats-only call (no output_path) draws a calibration side beside a holdout stated at zero,
@@ -324,7 +336,7 @@ def _spoil(data_dir: Path, stem: str) -> None:
 
 def test_draw_splits_reports_an_unreadable_label_by_name(
     data_dir: Path, tmp_path: Path
-):
+) -> None:
     """``draw_splits`` reports an unreadable label among its candidates by name.
 
     A present, unreadable label among the candidates is an error naming the document.
@@ -349,7 +361,7 @@ def test_draw_splits_reports_an_unreadable_label_by_name(
 def test_draw_splits_reports_an_unreadable_label_sorted_last(
     data_dir: Path,
     tmp_path: Path,
-):
+) -> None:
     """``draw_splits`` reports an unreadable label sorted last by name.
 
     A corrupt label last in sort order answers an error dict naming it.
@@ -374,7 +386,7 @@ def test_draw_splits_reports_an_unreadable_label_sorted_last(
 def test_draw_splits_writes_nothing_when_a_marked_document_will_not_read(
     data_dir: Path,
     tmp_path: Path,
-):
+) -> None:
     """``draw_splits`` writes no selection when a document marked complete will not read.
 
     An unreadable label on an image a human marked complete refuses the draw naming it, and no
@@ -407,7 +419,7 @@ def test_draw_splits_writes_nothing_when_a_marked_document_will_not_read(
 
 def test_draw_splits_stats_only_reports_an_unreadable_first_sorted_label(
     data_dir: Path,
-):
+) -> None:
     """A stats-only draw reports an unreadable first-sorted label by name.
 
     In a stats-only call (no output_path), an unreadable first-sorted candidate is an error
@@ -423,7 +435,7 @@ def test_draw_splits_stats_only_reports_an_unreadable_first_sorted_label(
 
 def test_draw_splits_stats_only_reports_an_unreadable_label_during_stratification(
     data_dir: Path,
-):
+) -> None:
     """A stats-only draw reports a corrupt label reached after a readable one by name.
 
     In a stats-only call, a corrupt label sorted after a readable first candidate is an error
@@ -439,7 +451,7 @@ def test_draw_splits_stats_only_reports_an_unreadable_label_during_stratificatio
 
 def test_draw_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(
     tmp_path: Path,
-):
+) -> None:
     """A selection-writing draw answers an ambiguous image stem as an error naming the stem.
 
     The ambiguity is a raw file colliding with a band group's own canonical stem.
@@ -487,7 +499,7 @@ def test_draw_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(
 
 def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(
     tmp_path: Path,
-):
+) -> None:
     """A stats-only draw answers an ambiguous image stem as an error naming the stem."""
     import numpy as np
 
@@ -523,7 +535,7 @@ def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(
 
 def test_scan_dataset_answers_an_ambiguous_image_stem_as_an_error(
     tmp_path: Path,
-):
+) -> None:
     """``scan_dataset`` answers an ambiguous image stem as an error naming the stem."""
     import numpy as np
 
@@ -571,7 +583,7 @@ def _add_extra_leaf_groups(images_dir: Path, count: int) -> None:
 
 def test_draw_splits_refuses_an_incomplete_band_group_before_writing(
     tmp_path: Path,
-):
+) -> None:
     """A band group whose manifest names a missing sibling refuses the draw, writing no selection.
 
     The refusal names the group and its missing band.
@@ -618,7 +630,7 @@ def test_draw_splits_refuses_an_incomplete_band_group_before_writing(
     assert not ts.exists(selection_key(out))
 
 
-def test_draw_splits_bad_ratios(data_dir: Path):
+def test_draw_splits_bad_ratios(data_dir: Path) -> None:
     result = _draw(
         data_dir,
         str(data_dir),
@@ -632,7 +644,7 @@ def test_draw_splits_bad_ratios(data_dir: Path):
 
 def test_shares_leaving_train_nothing_refuse_naming_every_share(
     tmp_path: Path,
-):
+) -> None:
     """Shares that leave ``train`` no remainder refuse naming every share they were given."""
     root = _multi_source_dataset(tmp_path / "ds")
     result = _draw(
@@ -653,7 +665,7 @@ def test_shares_leaving_train_nothing_refuse_naming_every_share(
 
 def test_a_dry_draw_leaves_no_audit_line_and_a_written_selection_leaves_one(
     tmp_path: Path,
-):
+) -> None:
     import tcip_mcp.audit as audit
 
     root = _multi_source_dataset(tmp_path / "ds")
@@ -674,7 +686,7 @@ def test_a_dry_draw_leaves_no_audit_line_and_a_written_selection_leaves_one(
     assert [row["arguments"]["output_path"] for row in lines()] == [str(out)]
 
 
-def test_draw_splits_selection_carries_all_four_sides(tmp_path: Path):
+def test_draw_splits_selection_carries_all_four_sides(tmp_path: Path) -> None:
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
@@ -708,7 +720,7 @@ def test_draw_splits_selection_carries_all_four_sides(tmp_path: Path):
 )
 def test_a_draw_stating_no_share_grouping_stratification_or_reason_refuses_naming_it(
     tmp_path: Path, unstated: str
-):
+) -> None:
     """A draw stating no share, grouping, stratification or reason is refused naming it.
 
     A draw leaving a share, the grouping, the stratification or its reason unstated refuses
@@ -761,6 +773,7 @@ def test_a_draw_stating_no_share_grouping_stratification_or_reason_refuses_namin
         for row in ts.read_log(audit.audit_log_key(tmp_path)).records
         if row["tool"] == "draw_splits"
     ]
+    assert isinstance(line, dict)
     assert (
         line["ratios"],
         line["stratify_foreground"],
@@ -770,7 +783,7 @@ def test_a_draw_stating_no_share_grouping_stratification_or_reason_refuses_namin
 
 def test_draw_splits_floor_refuses_before_any_write_regardless_of_stratify_foreground(
     tmp_path: Path,
-):
+) -> None:
     """The foreground floor refuses a draw with ``stratify_foreground`` off, writing no selection.
 
     A tree with three foreground groups refuses naming the floor.
@@ -797,7 +810,9 @@ def test_draw_splits_floor_refuses_before_any_write_regardless_of_stratify_foreg
     assert not ts.exists(selection_key(out))
 
 
-def test_draw_splits_answers_one_draw_whether_or_not_it_writes(tmp_path: Path):
+def test_draw_splits_answers_one_draw_whether_or_not_it_writes(
+    tmp_path: Path,
+) -> None:
     """``draw_splits`` answers one draw whether or not it writes.
 
     A zero ratio draws no side of that name and a negative one refuses, with or without
@@ -843,7 +858,7 @@ def test_draw_splits_answers_one_draw_whether_or_not_it_writes(tmp_path: Path):
 
 def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
     tmp_path: Path,
-):
+) -> None:
     """The draw's floor ignores a group whose only annotations are of another subject.
 
     Three ``leaf`` groups plus one group holding only a ``bud`` annotation, marked complete for
@@ -862,8 +877,8 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
         root,
         SubjectRegistry(
             subjects=(
-                Subject(name="leaf"),
-                Subject(name="bud"),
+                Subject(name="leaf", description=""),
+                Subject(name="bud", description=""),
             )
         ),
     )
@@ -939,7 +954,7 @@ def _leaf_dataset_with_negatives(
 
 def test_draw_splits_calibration_side_holds_real_foreground_regardless_of_stratify_foreground(
     tmp_path: Path,
-):
+) -> None:
     """The calibration side holds real foreground with ``stratify_foreground`` off.
 
     Over four foreground groups and six confirmed negatives, for each of seeds 1 to 20 the
@@ -967,7 +982,9 @@ def test_draw_splits_calibration_side_holds_real_foreground_regardless_of_strati
 
 
 def _multi_source_dataset(
-    root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"), tiles=3
+    root: Path,
+    prefixes: tuple[str, ...] = ("srcA", "srcB", "srcC", "srcD"),
+    tiles: int = 3,
 ) -> Path:
     from PIL import Image
 
@@ -989,7 +1006,7 @@ def _multi_source_dataset(
     return root
 
 
-def _bud_membership(root: Path):
+def _bud_membership(root: Path) -> Membership:
     from tcip_mcp.pipelines.data.split_construction import admitted_membership
 
     date = "2-11-26"
@@ -1000,14 +1017,17 @@ def _bud_membership(root: Path):
     )
 
 
-def _spied_draws(monkeypatch) -> list[bool]:
+def _spied_draws(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
     """Spy on the split algorithm and return each ``weighted`` the draw hands it, in call order."""
     import tcip_mcp.pipelines.data.splits as splits
 
     calls: list[bool] = []
     real = splits.group_balanced_split
 
-    def spy(stems, **kwargs):
+    def spy(
+        stems: Sequence[str],
+        **kwargs: Mapping[str, float] | bool | int | Callable[[str], str],
+    ) -> dict[str, list[str]]:
         calls.append(kwargs["weighted"])
         return real(stems, **kwargs)
 
@@ -1026,14 +1046,18 @@ def _spied_draws(monkeypatch) -> list[bool]:
     ],
     ids=["train_stated", "one", "negative", "no_remainder", "unknown_side"],
 )
-def test_check_shares_refuses_shares_that_are_not_a_draw(sides):
+def test_check_shares_refuses_shares_that_are_not_a_draw(
+    sides: dict[str, float],
+) -> None:
     from tcip_mcp.pipelines.data.split_construction import check_shares
 
     with pytest.raises(ValueError, match=r"share in \[0, 1\)"):
         check_shares(sides)
 
 
-def test_check_shares_gives_train_the_remainder_and_draws_no_zero_side():
+def test_check_shares_gives_train_the_remainder_and_draws_no_zero_side() -> (
+    None
+):
     from tcip_mcp.pipelines.data.split_construction import check_shares
 
     assert check_shares(
@@ -1044,9 +1068,9 @@ def test_check_shares_gives_train_the_remainder_and_draws_no_zero_side():
 @pytest.mark.parametrize("stratify", [True, False])
 def test_draw_sides_cuts_the_reference_under_the_balancing_it_was_given(
     tmp_path: Path,
-    monkeypatch,
-    stratify,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    stratify: bool,
+) -> None:
     from tcip_mcp.pipelines.data.split_construction import draw_sides
 
     membership = _bud_membership(_multi_source_dataset(tmp_path / "ds"))
@@ -1072,7 +1096,7 @@ def test_draw_sides_cuts_the_reference_under_the_balancing_it_was_given(
     }
 
 
-def test_draw_splits_groups_tiles_together(tmp_path: Path):
+def test_draw_splits_groups_tiles_together(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.splits import default_group_key
 
     root = _multi_source_dataset(tmp_path / "ds")
@@ -1099,7 +1123,7 @@ def test_draw_splits_groups_tiles_together(tmp_path: Path):
         seen[g] = sample.side
 
 
-def test_draw_splits_grouping_map_never_straddles(tmp_path: Path):
+def test_draw_splits_grouping_map_never_straddles(tmp_path: Path) -> None:
     """A draw's grouping map is honored, its two same-group samples landing on one side.
 
     In an agent-derived grouping map of 5 samples and 4 groups, the two samples of group ``gA``
@@ -1139,7 +1163,7 @@ def test_draw_splits_grouping_map_never_straddles(tmp_path: Path):
 
 def test_draw_splits_unrecognized_grouping_policy_refuses_without_writing(
     tmp_path: Path,
-):
+) -> None:
     """An unrecognized grouping policy refuses the draw and writes no selection."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -1160,7 +1184,7 @@ def test_draw_splits_unrecognized_grouping_policy_refuses_without_writing(
 
 def test_draw_splits_refuses_to_write_a_selection_with_no_subject(
     tmp_path: Path,
-):
+) -> None:
     """``draw_splits`` given no subject refuses naming ``subject`` and writes no selection."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -1213,7 +1237,9 @@ def _two_date_collision_dataset(root: Path, subject: str) -> Path:
     return root
 
 
-def test_two_dates_sharing_a_filename_stay_distinct_samples(tmp_path: Path):
+def test_two_dates_sharing_a_filename_stay_distinct_samples(
+    tmp_path: Path,
+) -> None:
     """Two dates sharing a filename stay two distinct samples.
 
     The two ``shared`` images are two samples, each naming its own source and label under its
@@ -1267,8 +1293,8 @@ def _two_subject_dataset(root: Path) -> Path:
         root,
         SubjectRegistry(
             subjects=(
-                Subject(name="leaf"),
-                Subject(name="bud"),
+                Subject(name="leaf", description=""),
+                Subject(name="bud", description=""),
             )
         ),
     )
@@ -1294,7 +1320,7 @@ def _two_subject_dataset(root: Path) -> Path:
 
 def test_draw_splits_holds_only_the_named_subjects_admitted_samples(
     tmp_path: Path,
-):
+) -> None:
     root = _two_subject_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = _draw(
@@ -1337,6 +1363,7 @@ def _attribute_scoped_dataset(root: Path) -> Path:
             subjects=(
                 Subject(
                     name="leaf",
+                    description="",
                     attributes=(
                         Attribute(
                             name="condition",
@@ -1383,7 +1410,7 @@ def _attribute_scoped_dataset(root: Path) -> Path:
 
 def test_draw_splits_records_every_declared_attribute_and_keeps_an_unassessed_sample(
     tmp_path: Path,
-):
+) -> None:
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = _draw(
@@ -1411,7 +1438,7 @@ def test_draw_splits_records_every_declared_attribute_and_keeps_an_unassessed_sa
 
 def test_draw_splits_nothing_admitted_names_the_searched_images(
     tmp_path: Path,
-):
+) -> None:
     """A draw that admits nothing names the images directory it searched and writes no selection.
 
     A capture whose only label document names an image that is gone admits nothing.
@@ -1444,7 +1471,7 @@ def test_draw_splits_nothing_admitted_names_the_searched_images(
 
 def test_draw_splits_draws_an_undated_capture_beside_a_dated_one(
     tmp_path: Path,
-):
+) -> None:
     """Both captures' label documents enter one draw, each sample naming its own."""
     from PIL import Image
 
@@ -1497,7 +1524,7 @@ def test_draw_splits_draws_an_undated_capture_beside_a_dated_one(
 
 def test_draw_splits_holds_no_sample_for_a_date_that_admits_nothing(
     tmp_path: Path,
-):
+) -> None:
     """A capture date that admits nothing contributes no sample to the draw.
 
     A capture whose only label document names no image anywhere contributes no sample: every
@@ -1571,7 +1598,20 @@ def _write_one_sample_selection(root: Path, out: Path) -> None:
     )
 
 
-def test_read_selection_admits_the_writers_own_record(tmp_path: Path):
+def _stored_selection(
+    out: Path,
+) -> tuple[dict[str, JsonValue], list[dict[str, JsonValue]]]:
+    """Return the selection document stored under ``out`` and its sample documents, as stored."""
+    document = ts.read(selection_key(out))
+    assert isinstance(document, dict)
+    samples = document["samples"]
+    assert isinstance(samples, list)
+    stored = [s for s in samples if isinstance(s, dict)]
+    assert len(stored) == len(samples)
+    return document, stored
+
+
+def test_read_selection_admits_the_writers_own_record(tmp_path: Path) -> None:
     """``read_selection`` admits the record the selection writer wrote.
 
     The stored source is project-relative, and the reader answers the scope, the seed and each
@@ -1580,10 +1620,8 @@ def test_read_selection_admits_the_writers_own_record(tmp_path: Path):
     out = tmp_path / "m"
     _write_one_sample_selection(tmp_path, out)
 
-    assert (
-        ts.read(selection_key(out))["samples"][0]["source"]
-        == f"images/{UNDATED_BUCKET}/a.jpg"
-    )
+    _document, samples = _stored_selection(out)
+    assert samples[0]["source"] == f"images/{UNDATED_BUCKET}/a.jpg"
     drawn = read_selection(out, project=tmp_path)
 
     assert drawn.scope == registry_scope(tmp_path / "images", "leaf")
@@ -1596,40 +1634,43 @@ def test_read_selection_admits_the_writers_own_record(tmp_path: Path):
     ]
 
 
-def test_read_selection_refuses_an_absent_record_by_name(tmp_path: Path):
+def test_read_selection_refuses_an_absent_record_by_name(
+    tmp_path: Path,
+) -> None:
     with pytest.raises(ValueError, match="no selection recorded"):
         read_selection(tmp_path / "nothing", project=tmp_path)
 
 
 def test_read_selection_refuses_a_sample_missing_its_own_ground_truth(
     tmp_path: Path,
-):
+) -> None:
     """``read_selection`` refuses a sample naming no ground truth of its own.
 
     A sample whose ``ground_truth`` is removed is refused naming that key.
     """
     out = tmp_path / "m"
     _write_one_sample_selection(tmp_path, out)
-    document = ts.read(selection_key(out))
-    document["samples"][0].pop("ground_truth")
+    document, samples = _stored_selection(out)
+    samples[0].pop("ground_truth")
     ts.replace(selection_key(out), document)
 
-    with pytest.raises(ValueError, match=r"carries no \['ground_truth'\]"):
+    with pytest.raises(ValueError, match=r"ground_truth\s+Field required"):
         read_selection(out, project=tmp_path)
 
 
-def test_read_selection_refuses_an_empty_sample_list(tmp_path: Path):
+def test_read_selection_refuses_an_empty_sample_list(tmp_path: Path) -> None:
     out = tmp_path / "m"
     _write_one_sample_selection(tmp_path, out)
-    document = ts.read(selection_key(out))
-    document["samples"] = []
-    ts.replace(selection_key(out), document)
+    document, _samples = _stored_selection(out)
+    ts.replace(selection_key(out), {**document, "samples": []})
 
     with pytest.raises(ValueError, match="lists no samples"):
         read_selection(out, project=tmp_path)
 
 
-def test_read_selection_refuses_one_source_on_two_sides(tmp_path: Path):
+def test_read_selection_refuses_one_source_on_two_sides(
+    tmp_path: Path,
+) -> None:
     """``read_selection`` refuses one source on two sides.
 
     A sample copied onto the calibration side under another group is refused as on more than
@@ -1637,37 +1678,48 @@ def test_read_selection_refuses_one_source_on_two_sides(tmp_path: Path):
     """
     out = tmp_path / "m"
     _write_one_sample_selection(tmp_path, out)
-    document = ts.read(selection_key(out))
-    document["samples"].append(
-        {**document["samples"][0], "group": "b", "side": "calibration"}
+    document, samples = _stored_selection(out)
+    ts.replace(
+        selection_key(out),
+        {
+            **document,
+            "samples": [
+                *samples,
+                {**samples[0], "group": "b", "side": "calibration"},
+            ],
+        },
     )
-    ts.replace(selection_key(out), document)
 
     with pytest.raises(ValueError, match="on more than one side"):
         read_selection(out, project=tmp_path)
 
 
-def test_read_selection_refuses_one_group_on_two_sides(tmp_path: Path):
+def test_read_selection_refuses_one_group_on_two_sides(tmp_path: Path) -> None:
     """``read_selection`` refuses a selection placing one group on two sides.
 
     Two samples of group ``a``, one on each of two sides, are refused naming the group.
     """
     out = tmp_path / "m"
     _write_one_sample_selection(tmp_path, out)
-    document = ts.read(selection_key(out))
-    document["samples"].append(
+    document, samples = _stored_selection(out)
+    ground_truth = samples[0]["ground_truth"]
+    assert isinstance(ground_truth, dict)
+    ts.replace(
+        selection_key(out),
         {
-            "member": "a_0_1",
-            "source": "images/a_0_1.jpg",
-            "ground_truth": {
-                **document["samples"][0]["ground_truth"],
-                "stem": "a_0_1",
-            },
-            "group": "a",
-            "side": "val",
-        }
+            **document,
+            "samples": [
+                *samples,
+                {
+                    "member": "a_0_1",
+                    "source": "images/a_0_1.jpg",
+                    "ground_truth": {**ground_truth, "stem": "a_0_1"},
+                    "group": "a",
+                    "side": "val",
+                },
+            ],
+        },
     )
-    ts.replace(selection_key(out), document)
 
     with pytest.raises(ValueError, match="group"):
         read_selection(out, project=tmp_path)

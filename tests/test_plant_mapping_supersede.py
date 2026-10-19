@@ -26,6 +26,9 @@ from tests.test_plant_mapping_binding import (
 from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
 if TYPE_CHECKING:
+    import pytest
+    from fastapi.testclient import TestClient
+
     from tcip_web.state import OpenProject
 
 
@@ -94,7 +97,7 @@ def test_a_cited_rebuild_refuses_naming_the_citing_events(
         tmp_path,
         name="valley",
         images_root=images_root,
-        plant_registry=(before.plant_registry["name"]),
+        plant_registry=(before.plant_registry.name),
     )
 
     assert "error" in res
@@ -139,7 +142,7 @@ def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_rea
         tmp_path,
         name="valley",
         images_root=images_root,
-        plant_registry=before.plant_registry["name"],
+        plant_registry=before.plant_registry.name,
         supersede=True,
     )
 
@@ -190,7 +193,7 @@ def test_resolved_mapping_key_for_citation_names_the_archive_once_superseded(
         tmp_path,
         name="valley",
         images_root=images_root,
-        plant_registry=before.plant_registry["name"],
+        plant_registry=before.plant_registry.name,
         supersede=True,
     )
     assert "error" not in res, res
@@ -206,7 +209,7 @@ def test_resolved_mapping_key_for_citation_names_the_archive_once_superseded(
 
 def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive(
     tmp_path: Path,
-    client,
+    client: TestClient,
 ) -> None:
     """The delivery-events route resolves a superseded citation to the archive.
 
@@ -231,7 +234,7 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
         tmp_path,
         name="valley",
         images_root=images_root,
-        plant_registry=before.plant_registry["name"],
+        plant_registry=before.plant_registry.name,
         supersede=True,
     )
     assert "error" not in res, res
@@ -281,7 +284,7 @@ def test_a_mapping_record_without_assignments_refuses_to_decode_by_name(
 
 def test_a_rebuild_over_a_record_that_will_not_decode_proceeds_on_its_raw_digest(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A rebuild over a record that will not decode proceeds on its raw digest.
 
@@ -294,7 +297,7 @@ def test_a_rebuild_over_a_record_that_will_not_decode_proceeds_on_its_raw_digest
     asked: list[str] = []
     real = plant_mapping._citing_delivery_event_ids
 
-    def citing(project, name, digest):
+    def citing(project: Path | str, name: str, digest: str) -> list[str]:
         asked.append(digest)
         return real(project, name, digest)
 

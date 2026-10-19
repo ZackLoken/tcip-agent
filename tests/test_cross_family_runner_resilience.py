@@ -10,15 +10,21 @@ import importlib.util
 import json
 import subprocess
 import sys
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
 from tests import REPO_ROOT
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+    from types import ModuleType
+
 SCRIPT = REPO_ROOT / "tools" / "cross_family_ask.py"
 
 
-def _load():
+def _load() -> ModuleType:
     """Import the runner by path: it is a script, not an installed module."""
     spec = importlib.util.spec_from_file_location("cross_family_ask", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
@@ -28,13 +34,13 @@ def _load():
 
 
 @pytest.fixture
-def runner():
+def runner() -> ModuleType:
     return _load()
 
 
 def test_a_model_id_that_states_its_effort_is_the_effort_whatever_the_flag_said(
-    runner,
-):
+    runner: ModuleType,
+) -> None:
     """A model id that states its effort takes it, with the --effort flag medium or unset."""
     assert (
         runner.effective_effort("antigravity", "gemini-3.1-pro-high", "medium")
@@ -46,17 +52,23 @@ def test_a_model_id_that_states_its_effort_is_the_effort_whatever_the_flag_said(
     )
 
 
-def test_an_effort_claude_would_ignore_is_refused_by_name(runner):
+def test_an_effort_claude_would_ignore_is_refused_by_name(
+    runner: ModuleType,
+) -> None:
     with pytest.raises(SystemExit, match="claude effort 'turbo'"):
         runner.effective_effort("claude", "opus", "turbo")
     assert runner.effective_effort("claude", "opus", "high") == "high"
     assert runner.effective_effort("codex", "gpt-5.6-sol", "high") == "high"
 
 
-def _stub_run(stdout, stderr=""):
+def _stub_run(
+    stdout: str | bytes | None, stderr: str = ""
+) -> Callable[..., subprocess.CompletedProcess[str | bytes | None]]:
     """Return a subprocess.run replacement returning the given streams verbatim."""
 
-    def _run(*_args, **_kwargs):
+    def _run(
+        *_args: object, **_kwargs: object
+    ) -> subprocess.CompletedProcess[str | bytes | None]:
         return subprocess.CompletedProcess(
             args=["stub"], returncode=0, stdout=stdout, stderr=stderr
         )
@@ -66,8 +78,11 @@ def _stub_run(stdout, stderr=""):
 
 @pytest.mark.parametrize("stdout", [None, b"bytes not str"])
 def test_a_harness_returning_no_usable_stdout_still_records_its_run(
-    runner, tmp_path, monkeypatch, stdout
-):
+    runner: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stdout: bytes | None,
+) -> None:
     """A harness returning None or bytes stdout gets its stdout and meta files written."""
     monkeypatch.setattr(runner.subprocess, "run", _stub_run(stdout))
     monkeypatch.setattr(
@@ -97,20 +112,24 @@ def test_a_harness_returning_no_usable_stdout_still_records_its_run(
 
 
 def test_one_familys_failure_leaves_the_others_results_intact(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A raising harness is recorded as a runner error while the surviving family's answer is kept.
 
     The run exits non-zero, the surviving family's response holds its answer, and the summary
     rows carry the survivor's clean exit and the raising family's error text.
     """
 
-    def _explode(*_args, **_kwargs):
+    def _explode(*_args: object, **_kwargs: object) -> NoReturn:
         raise RuntimeError("harness blew up")
 
     real_run_one = runner.run_one
 
-    def _dispatch(family, *args, **kwargs):
+    def _dispatch(
+        family: str,
+        *args: Path | int | str | None,
+        **kwargs: list[Path] | str | None,
+    ) -> dict:
         if family == "codex":
             _explode()
         return real_run_one(family, *args, **kwargs)
@@ -179,14 +198,21 @@ def test_one_familys_failure_leaves_the_others_results_intact(
 
 
 def test_a_prompt_file_with_a_byte_order_mark_reaches_the_harness_without_it(
-    runner, tmp_path, monkeypatch
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A prompt file's byte order mark is absent from the question ``run_one`` receives."""
     seen: list[str] = []
 
     real_run_one = runner.run_one
 
-    def _capture(family, qid, condition, prompt, *args, **kwargs):
+    def _capture(
+        family: str,
+        qid: str,
+        condition: str,
+        prompt: str,
+        *args: Path | int | str | None,
+        **kwargs: list[Path] | str | None,
+    ) -> dict:
         seen.append(prompt)
         return real_run_one(family, qid, condition, prompt, *args, **kwargs)
 
@@ -230,7 +256,9 @@ def test_a_prompt_file_with_a_byte_order_mark_reaches_the_harness_without_it(
     assert seen[0] == "question"
 
 
-def test_a_codex_agent_message_stream_yields_the_last_message(runner):
+def test_a_codex_agent_message_stream_yields_the_last_message(
+    runner: ModuleType,
+) -> None:
     """A codex agent-message stream yields its last agent message as the answer.
 
     The stream carries its answers inside item.completed/agent_message events.
@@ -275,7 +303,9 @@ def test_a_codex_agent_message_stream_yields_the_last_message(runner):
     assert source == "stream_agent_message"
 
 
-def test_an_oversized_raw_stream_is_a_failed_extraction_not_an_answer(runner):
+def test_an_oversized_raw_stream_is_a_failed_extraction_not_an_answer(
+    runner: ModuleType,
+) -> None:
     """An oversized raw stream reads as a failed extraction, not an answer.
 
     A stream past the size bound yields no text and the ``extraction_failed`` source.
@@ -287,8 +317,8 @@ def test_an_oversized_raw_stream_is_a_failed_extraction_not_an_answer(runner):
 
 
 def test_an_oversized_raw_stream_through_main_fails_the_run(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A run whose oversized stream could not be extracted fails through main.
 
     Its meta records the ``extraction_failed`` response source.
@@ -339,8 +369,8 @@ def test_an_oversized_raw_stream_through_main_fails_the_run(
 
 
 def test_a_payload_with_only_empty_recognized_keys_reads_as_an_empty_response(
-    runner,
-):
+    runner: ModuleType,
+) -> None:
     """A payload whose only recognized keys are empty reads as an empty response.
 
     An antigravity SUCCESS payload whose ``response`` is blank yields no text and the
@@ -367,8 +397,8 @@ def test_a_payload_with_only_empty_recognized_keys_reads_as_an_empty_response(
 
 
 def test_an_empty_response_through_main_fails_the_run(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A run whose recognized answer is empty fails through main."""
     stdout = json.dumps({"status": "SUCCESS", "response": "  "})
     monkeypatch.setattr(runner.subprocess, "run", _stub_run(stdout))
@@ -411,8 +441,8 @@ def test_an_empty_response_through_main_fails_the_run(
 
 
 def test_completely_empty_stdout_does_not_read_as_a_clean_run(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Completely empty stdout does not read as a clean run.
 
     A harness whose stdout is the empty string fails the run, and its meta records a fault under
@@ -471,8 +501,8 @@ def test_completely_empty_stdout_does_not_read_as_a_clean_run(
 
 
 def test_a_whitespace_only_agent_message_stream_is_a_failed_run_not_a_clean_one(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A codex stream whose only agent message is whitespace fails the run.
 
     The run's meta records zero response characters and a fault.
@@ -537,8 +567,8 @@ def test_a_whitespace_only_agent_message_stream_is_a_failed_run_not_a_clean_one(
 
 
 def test_a_runs_own_fault_verdict_is_recorded_in_its_meta_json(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A run's own fault verdict is recorded in its meta.json.
 
     A clean run's ``fault`` verdict, empty, is in the meta it returns and in its meta.json on
@@ -577,8 +607,8 @@ def test_a_runs_own_fault_verdict_is_recorded_in_its_meta_json(
 
 
 def test_a_small_plain_text_stdout_still_returns_as_a_raw_stdout_answer_through_main(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A short plain-text stdout returns as a full-length ``raw_stdout`` answer through main."""
     monkeypatch.setattr(
         runner.subprocess, "run", _stub_run("a short plain-text answer")
@@ -628,8 +658,8 @@ def test_a_small_plain_text_stdout_still_returns_as_a_raw_stdout_answer_through_
 
 
 def test_a_dict_payload_with_no_recognized_keys_still_returns_whole_payload(
-    runner,
-):
+    runner: ModuleType,
+) -> None:
     """A dict with unrecognized keys yields the ``whole_payload`` source.
 
     Its text names ``unexpected_field``.
@@ -642,7 +672,9 @@ def test_a_dict_payload_with_no_recognized_keys_still_returns_whole_payload(
     assert "unexpected_field" in text
 
 
-def test_a_non_string_answer_value_still_dumps_the_whole_payload(runner):
+def test_a_non_string_answer_value_still_dumps_the_whole_payload(
+    runner: ModuleType,
+) -> None:
     """A non-string value under a recognized key yields the ``whole_payload`` source.
 
     A content-block list and a null under a recognized key each yield that source.
@@ -661,7 +693,7 @@ def test_a_non_string_answer_value_still_dumps_the_whole_payload(runner):
 
 
 def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_child(
-    runner, tmp_path, monkeypatch
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A box-drawing character reaches a stdin child as utf-8 and its stdout decodes intact."""
     echo_child = [
@@ -702,8 +734,8 @@ def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_c
 
 
 def test_an_unnamed_codex_model_with_no_config_is_refused_before_launch(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An unnamed codex model with no config is refused by name."""
     monkeypatch.setattr(
         runner, "CODEX_CONFIG", tmp_path / "absent" / "config.toml"
@@ -714,8 +746,8 @@ def test_an_unnamed_codex_model_with_no_config_is_refused_before_launch(
 
 
 def test_the_codex_model_is_read_from_the_config_and_its_source_recorded(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config = tmp_path / "config.toml"
     config.write_text('model = "gpt-from-config"' + chr(10), encoding="utf-8")
     monkeypatch.setattr(runner, "CODEX_CONFIG", config)
@@ -728,8 +760,11 @@ def test_the_codex_model_is_read_from_the_config_and_its_source_recorded(
 
 
 def test_a_run_with_no_usable_answer_says_so_in_words_at_the_end_of_its_output(
-    runner, tmp_path, monkeypatch, capsys
-):
+    runner: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """A run with no usable answer prints a RUN FAILED verdict naming the family, in words.
 
     The verdict appears on stdout and stderr beside the non-zero exit, and the output's last line
@@ -793,8 +828,8 @@ def test_a_run_with_no_usable_answer_says_so_in_words_at_the_end_of_its_output(
 
 
 def test_load_tcip_mcp_config_refuses_when_mcp_json_is_missing(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
     with pytest.raises(
         SystemExit, match="cannot read the tcip MCP server block"
@@ -803,8 +838,8 @@ def test_load_tcip_mcp_config_refuses_when_mcp_json_is_missing(
 
 
 def test_load_tcip_mcp_config_refuses_when_the_tcip_block_is_missing(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     (tmp_path / ".mcp.json").write_text(
         json.dumps({"mcpServers": {"claude-context": {}}}), encoding="utf-8"
     )
@@ -814,8 +849,11 @@ def test_load_tcip_mcp_config_refuses_when_the_tcip_block_is_missing(
 
 
 def test_a_run_whose_families_all_answered_says_so_rather_than_staying_silent(
-    runner, tmp_path, monkeypatch, capsys
-):
+    runner: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """A run whose families all answered prints a RUN OK verdict and no RUN FAILED."""
     monkeypatch.setattr(
         runner.subprocess, "run", _stub_run("a real answer from the harness")
@@ -862,8 +900,8 @@ def test_a_run_whose_families_all_answered_says_so_rather_than_staying_silent(
 
 
 def test_an_attached_image_reaches_codex_as_a_flag_and_the_other_families_in_the_prompt(
-    runner, tmp_path
-):
+    runner: ModuleType, tmp_path: Path
+) -> None:
     """An attached image reaches codex as a flag and antigravity and Claude Code in the prompt.
 
     Codex takes the image through ``-i``, the flag followed by the next option and the trailing
@@ -901,8 +939,8 @@ def test_an_attached_image_reaches_codex_as_a_flag_and_the_other_families_in_the
 
 
 def test_an_attached_image_prefaces_the_prompt_and_is_recorded_in_the_runs_meta(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An attached image prefaces the prompt and is recorded in the run's meta.json.
 
     The preface sits ahead of the question, the builder receives the resolved paths, and
@@ -915,8 +953,15 @@ def test_an_attached_image_prefaces_the_prompt_and_is_recorded_in_the_runs_meta(
     seen = {}
 
     def builder(
-        prompt_file, run_dir, cwd, condition, model, effort, timeout, images=()
-    ):
+        prompt_file: Path,
+        run_dir: Path,
+        cwd: Path,
+        condition: dict,
+        model: str | None,
+        effort: str | None,
+        timeout: int,
+        images: tuple[Path, ...] = (),
+    ) -> tuple[list[str], Path | None]:
         seen["images"] = images
         return ["stub", "argv"], None
 
@@ -950,8 +995,8 @@ def test_an_attached_image_prefaces_the_prompt_and_is_recorded_in_the_runs_meta(
 
 
 def test_a_family_prompt_override_replaces_the_shared_prompt_for_that_family_alone(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A family prompt override replaces the shared prompt for that family alone.
 
     --family-prompt swaps the prompt text for one family and records which file it came from; a
@@ -1031,8 +1076,11 @@ def test_a_family_prompt_override_replaces_the_shared_prompt_for_that_family_alo
     "bad_flag", ["codex-no-separator", "nobody=missing.txt"]
 )
 def test_a_malformed_family_prompt_flag_is_refused_before_any_family_launches(
-    runner, tmp_path, monkeypatch, bad_flag
-):
+    runner: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    bad_flag: str,
+) -> None:
     """A flag with no '=' and a flag naming an unknown family refuse, and no family launches."""
     launched = []
     monkeypatch.setattr(runner, "run_one", lambda *a, **k: launched.append(a))
@@ -1067,8 +1115,8 @@ def test_a_malformed_family_prompt_flag_is_refused_before_any_family_launches(
 
 
 def test_a_family_prompt_flag_naming_a_missing_file_is_refused(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     launched = []
     monkeypatch.setattr(runner, "run_one", lambda *a, **k: launched.append(a))
     monkeypatch.setattr(
@@ -1102,8 +1150,8 @@ def test_a_family_prompt_flag_naming_a_missing_file_is_refused(
 
 
 def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_intact(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A single-family rerun marks itself a rerun and keeps both families' summary rows.
 
     Re-running codex under a question id that holds both families' results leaves antigravity's
@@ -1199,8 +1247,8 @@ def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_in
 
 
 def test_a_malformed_prior_summary_loses_only_itself_not_the_current_run(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A malformed prior summary loses itself, not the current run's rows.
 
     Over a summary.json that is not valid JSON, the run exits zero and the summary holds the
@@ -1250,8 +1298,8 @@ def test_a_malformed_prior_summary_loses_only_itself_not_the_current_run(
 
 
 def test_a_missing_image_is_refused_before_any_family_launches(
-    runner, tmp_path, monkeypatch
-):
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A missing image is refused, and no family launches."""
     launched = []
     monkeypatch.setattr(runner, "run_one", lambda *a, **k: launched.append(a))

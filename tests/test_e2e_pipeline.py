@@ -108,7 +108,7 @@ BUCKET = "live/2-11-26"
 class TestE2EPipeline:
     """The full pipeline walked through MCP tools, its state asserted at each step."""
 
-    def test_full_pipeline(self, project_dir: Path, tmp_path: Path):
+    def test_full_pipeline(self, project_dir: Path, tmp_path: Path) -> None:
         root = str(project_dir)
 
         # ── Step 1: Init project ─────────────────────────────────────
@@ -250,12 +250,12 @@ class TestE2EPipeline:
 class TestE2EPipelineEdgeCases:
     """Edge-case scenarios for the pipeline."""
 
-    def test_empty_project(self, tmp_path: Path):
+    def test_empty_project(self, tmp_path: Path) -> None:
         """An uninitialized project inspects as no id, its record problem named."""
         status = inspect_project(tmp_path)
         assert status["id"] is None and status["record_problem"]
 
-    def test_dataset_with_missing_labels(self, tmp_path: Path):
+    def test_dataset_with_missing_labels(self, tmp_path: Path) -> None:
         """scan_dataset counts three images, one label and two unlabeled images."""
         images = tmp_path / "images" / UNDATED_BUCKET
         images.mkdir(parents=True)
@@ -279,7 +279,7 @@ class TestE2EPipelineEdgeCases:
         assert ds["labels_count"] == 1
         assert ds["unlabeled_images"] == 2
 
-    def test_evaluate_no_predictions(self, tmp_path: Path):
+    def test_evaluate_no_predictions(self, tmp_path: Path) -> None:
         """score_predictions answers a dict for an image under an unpublished bucket name."""
         images = tmp_path / "images" / UNDATED_BUCKET
         images.mkdir(parents=True)
@@ -308,8 +308,8 @@ class TestE2EPipelineEdgeCases:
         assert isinstance(result, dict)
 
     def test_save_annotations_writes_a_first_label_document(
-        self, tmp_path: Path, bound
-    ):
+        self, tmp_path: Path, bound: BoundProject
+    ) -> None:
         """save_annotations writes an image's first label document."""
         import tcip_store
         from tests._producer_fixtures import image_label_key

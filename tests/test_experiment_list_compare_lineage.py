@@ -3,13 +3,22 @@
 Each run is a directory the launcher's own writer opened under a scratch project.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
+
 
 def _opened(
-    project,
+    project: Path,
     experiment_id: str,
     builder: str = "my_models:tree_detector",
-    **facts,
-):
+    **facts: str | float | dict | None,
+) -> Path:
     """Open a run of a detector built by ``builder`` through the launcher's own writer.
 
     The run belongs to ``project``, its builder declared in a ``my_models.py`` of its own, over
@@ -38,11 +47,12 @@ def _opened(
     return opened_run(project, config, experiment_id=experiment_id, **facts)
 
 
-def test_experiment_list_compare_lineage(tmp_path):
+def test_experiment_list_compare_lineage(tmp_path: Path) -> None:
     from tcip_mcp.experiments import (
+        RUN_FILE,
         compare_experiments,
         get_experiment_lineage,
-        observe,
+        read_run_record,
         run_rows,
     )
     from tests._verified_checkpoint_fixtures import log_epoch
@@ -65,7 +75,11 @@ def test_experiment_list_compare_lineage(tmp_path):
     )  # the missing run is reported
 
     lineage = get_experiment_lineage("e1", project=tmp_path)["lineage"]
-    assert lineage["data"] == observe(e1).record["resolved"]["data"]
+    record = read_run_record(e1 / RUN_FILE)
+    assert isinstance(record, dict)
+    resolved = record["resolved"]
+    assert isinstance(resolved, dict)
+    assert lineage["data"] == resolved["data"]
     assert lineage["relaunched_from"] == "e0"
     assert (
         lineage["checkpoint"] is None
@@ -74,9 +88,13 @@ def test_experiment_list_compare_lineage(tmp_path):
 
 
 def test_a_completed_runs_lineage_names_the_checkpoint_its_final_status_names(
-    tmp_path,
-):
-    from tcip_mcp.experiments import get_experiment_lineage, observe
+    tmp_path: Path,
+) -> None:
+    from tcip_mcp.experiments import (
+        RunCheckpoint,
+        get_experiment_lineage,
+        observe,
+    )
     from tests._verified_checkpoint_fixtures import finished_run
 
     checkpoint = observe(
@@ -85,10 +103,12 @@ def test_a_completed_runs_lineage_names_the_checkpoint_its_final_status_names(
     assert checkpoint is not None
 
     lineage = get_experiment_lineage("exp-done", project=tmp_path)["lineage"]
-    assert lineage["checkpoint"] == checkpoint
+    assert RunCheckpoint.model_validate(lineage["checkpoint"]) == checkpoint
 
 
-def test_get_experiment_tool_pages_epoch_rows_bounded_by_n_epochs(tmp_path):
+def test_get_experiment_tool_pages_epoch_rows_bounded_by_n_epochs(
+    tmp_path: Path,
+) -> None:
     """``get_experiment`` pages the epoch rows ``n_epochs`` counts under the full view.
 
     The MCP tool accepts metrics_limit/metrics_offset under view='full', paging the epoch
@@ -112,8 +132,8 @@ def test_get_experiment_tool_pages_epoch_rows_bounded_by_n_epochs(tmp_path):
 
 
 def test_get_experiment_tool_lineage_view_admits_defaults_refuses_pagination(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """``get_experiment``'s lineage view admits its defaults and refuses pagination.
 
     The ordinary view='lineage' call (no pagination args) still succeeds; a non-default
@@ -135,8 +155,8 @@ def test_get_experiment_tool_lineage_view_admits_defaults_refuses_pagination(
 
 
 def test_compare_experiments_reports_the_last_row_and_rows_logged_after_the_end(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """``compare_experiments`` reports the last row and counts rows logged after the end.
 
     Of two rows appended to a completed run, the one stamped now is counted after the end and
@@ -168,8 +188,8 @@ def test_compare_experiments_reports_the_last_row_and_rows_logged_after_the_end(
 
 
 def test_compare_experiments_stale_heartbeat_compares_interrupted(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A run with no final status compares running, then interrupted when its heartbeat is stale.
 
     While its heartbeat is fresh it reads running with no rows-after-end count.
@@ -192,8 +212,8 @@ def test_compare_experiments_stale_heartbeat_compares_interrupted(
 
 
 def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """``rows_after_end`` compares row timestamps as instants across UTC offsets.
 
     Of five rows stamped in three UTC offsets and a bare "Z", the two whose instants fall
@@ -213,7 +233,7 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
     run_dir = finished_run(tmp_path, experiment_id="exp-instants")
     final = observe(run_dir).final
     assert final is not None
-    ended = datetime.fromisoformat(final["ended"])
+    ended = datetime.fromisoformat(final.ended)
 
     def at(offset_s: float, zone: timezone) -> str:
         return (

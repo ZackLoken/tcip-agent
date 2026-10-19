@@ -12,6 +12,7 @@ document of another shape refuses.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -20,6 +21,7 @@ from tcip_annotation.json_io import (
     UNASSESSED,
     UndeclaredValueError,
     UnreadableLabelDocumentError,
+    annotation_object,
     attribute_ids,
     attribute_values,
     read_label_document,
@@ -34,6 +36,9 @@ from tcip_annotation.state import (
     bbox_of,
 )
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
 
 # Coordinates use binary-exact values (.0/.25/.5/.75) so the writer's 2-decimal rounding
 # is an identity and geometry assertions can be exact.
@@ -54,11 +59,27 @@ def _read(key: tcip_store.Key) -> list[Annotation]:
     return read_label_document(key).annotations
 
 
-def _stored(tmp_path: Path, payload, stem: str = "a") -> tcip_store.Key:
+def _stored(
+    tmp_path: Path, payload: JsonValue, stem: str = "a"
+) -> tcip_store.Key:
     """Store ``payload`` as-is under ``stem``'s label key, past the writer; return the key."""
     key = _key(tmp_path, stem)
     tcip_store.replace(key, payload)
     return key
+
+
+def _document(key: tcip_store.Key) -> dict[str, JsonValue]:
+    """Return the label document stored under ``key``, as stored."""
+    document = tcip_store.read(key)
+    assert isinstance(document, dict)
+    return document
+
+
+def _records(key: tcip_store.Key) -> list[dict]:
+    """Return the annotation records the label document under ``key`` holds, as stored."""
+    records = _document(key)["annotations"]
+    assert isinstance(records, list)
+    return [annotation_object(r) for r in records]
 
 
 # -- GT box round-trip --------------------------------------------------------
@@ -101,7 +122,7 @@ def test_the_crowd_flag_round_trips_through_the_writer_and_the_reader(
         100,
     )
 
-    crowd, single = tcip_store.read(key)["annotations"]
+    crowd, single = _records(key)
     assert (
         crowd["iscrowd"] is True and "iscrowd" not in single
     )  # written only when set
@@ -150,15 +171,16 @@ def test_the_payload_route_keeps_the_crowd_flag_and_shares_the_decoders_checks()
     "subject", [None, "", 7], ids=["absent", "empty", "not_a_string"]
 )
 def test_a_record_naming_no_subject_is_refused_where_an_annotation_is_made(
-    tmp_path: Path, subject
+    tmp_path: Path, subject: str | int | None
 ) -> None:
     """A record naming no subject is refused where the annotation is made.
 
     A direct constructor refuses it, and a stored document holding such a record refuses
     naming the record.
     """
-    with pytest.raises(ValueError, match="non-empty string subject"):
-        Annotation(subject=subject)  # type: ignore[arg-type]
+    if not isinstance(subject, int):
+        with pytest.raises(ValueError, match="non-empty string subject"):
+            Annotation(subject=subject)  # type: ignore[arg-type]
     key = _key(tmp_path)
     write_label_document(
         key,
@@ -166,17 +188,23 @@ def test_a_record_naming_no_subject_is_refused_where_an_annotation_is_made(
         10,
         10,
     )
-    raw = tcip_store.read(key)
-    raw["annotations"].append(
+    raw = _document(key)
+    tcip_store.replace(
+        key,
         {
-            "bbox": [1, 1, 4, 4],
-            **({} if subject is None else {"subject": subject}),
-        }
+            **raw,
+            "annotations": [
+                *_records(key),
+                {
+                    "bbox": [1, 1, 4, 4],
+                    **({} if subject is None else {"subject": subject}),
+                },
+            ],
+        },
     )
-    tcip_store.replace(key, raw)
     with pytest.raises(
         UnreadableLabelDocumentError,
-        match=r"record 1 .*non-empty string subject",
+        match=r"record 1 subject .* is not a non-empty string",
     ):
         _read(key)
 
@@ -252,7 +280,7 @@ def test_provenance_is_the_stored_records_or_the_actors_never_the_payloads() -> 
     ],
 )
 def test_a_payload_polygon_that_is_no_shape_refuses_rather_than_reading_as_absent(
-    geometry,
+    geometry: dict[str, list],
 ) -> None:
     """A payload polygon that is empty, too short or malformed refuses."""
     from tcip_annotation.json_io import annotation_from_payload
@@ -351,15 +379,16 @@ def test_gt_record_schema_is_coco_xywh_without_score(tmp_path: Path) -> None:
         480,
     )
 
-    data = tcip_store.read(key)
+    data = _document(key)
     assert set(data) == {"width", "height", "annotations"}
     assert data["width"] == 640 and data["height"] == 480
-    rec = data["annotations"][0]
+    records = _records(key)
+    rec = records[0]
     # In-memory is xyxy; the record is COCO xywh, keyed by subject name (no numeric class id).
     assert rec["bbox"] == [10.0, 20.0, 100.0, 200.0]
     assert rec["subject"] == "bud"
     # A GT record never carries a score.
-    assert all("score" not in o for o in data["annotations"])
+    assert all("score" not in o for o in records)
 
 
 # -- prediction box round-trip ------------------------------------------------
@@ -377,8 +406,7 @@ def test_pred_round_trip_confidence_via_score(tmp_path: Path) -> None:
     ]
     write_label_document(key, preds, 640, 480)
 
-    data = tcip_store.read(key)
-    assert [o["score"] for o in data["annotations"]] == [0.875, 0.5]
+    assert [o["score"] for o in _records(key)] == [0.875, 0.5]
 
     got = _read(key)
     assert [
@@ -412,17 +440,17 @@ def test_polygon_gt_round_trip(tmp_path: Path) -> None:
         480,
     )
 
-    data = tcip_store.read(key)
+    records = _records(key)
     # segmentation is [[flat pixel coords]].
-    assert data["annotations"][0]["segmentation"] == [
+    assert records[0]["segmentation"] == [
         [10.0, 20.0, 110.0, 20.0, 110.0, 220.0, 10.0, 220.0]
     ]
-    assert data["annotations"][1]["segmentation"] == [
+    assert records[1]["segmentation"] == [
         [0.5, 0.25, 30.0, 0.25, 15.25, 40.75]
     ]
-    assert all("score" not in o for o in data["annotations"])
+    assert all("score" not in o for o in records)
     # A polygon record stores its rings only; its box is derived on read, never a second spelling.
-    assert all("bbox" not in o for o in data["annotations"])
+    assert all("bbox" not in o for o in records)
 
     got = _read(key)
     assert len(got) == 2
@@ -455,7 +483,7 @@ def test_multi_ring_polygon_round_trip_keeps_every_ring_in_order(
         480,
     )
 
-    (rec,) = tcip_store.read(key)["annotations"]
+    (rec,) = _records(key)
     assert rec["segmentation"] == [
         [10.0, 10.0, 30.0, 10.0, 30.0, 50.0, 10.0, 50.0],
         [70.0, 12.0, 90.0, 12.0, 90.0, 48.0, 70.0, 48.0],
@@ -479,7 +507,9 @@ def test_multi_ring_polygon_round_trip_keeps_every_ring_in_order(
     ],
     ids=["two_point_beside_a_ring", "one_vertex", "no_ring"],
 )
-def test_a_polygon_with_a_ring_that_is_no_shape_cannot_be_made(rings) -> None:
+def test_a_polygon_with_a_ring_that_is_no_shape_cannot_be_made(
+    rings: list[list[tuple[float, float]]],
+) -> None:
     """A polygon with a ring that is no shape cannot be made.
 
     A ring of fewer than the minimum points, or no ring at all, refuses at construction, and
@@ -503,7 +533,8 @@ def test_a_polygon_with_a_ring_that_is_no_shape_cannot_be_made(rings) -> None:
     ids=["short", "odd", "run_length"],
 )
 def test_a_bad_ring_beside_good_ones_refuses_the_document_by_record(
-    tmp_path: Path, bad_ring
+    tmp_path: Path,
+    bad_ring: JsonValue,
 ) -> None:
     """A bad ring beside good ones refuses the document by record.
 
@@ -551,7 +582,7 @@ def test_box_only_record_reads_as_single_bbox_annotation(
         480,
     )
 
-    obj = tcip_store.read(key)["annotations"][0]
+    obj = _records(key)[0]
     assert "bbox" in obj and "segmentation" not in obj
 
     got = _read(key)
@@ -569,7 +600,7 @@ def test_polygon_pred_round_trip_confidence_via_score(tmp_path: Path) -> None:
         480,
     )
 
-    assert tcip_store.read(key)["annotations"][0]["score"] == 0.75
+    assert _records(key)[0]["score"] == 0.75
 
     got = _read(key)
     assert got[0].geometry.rings == [TRIANGLE]
@@ -587,7 +618,7 @@ PROV = {
 }
 
 
-def _assert_prov(shape) -> None:
+def _assert_prov(shape: Annotation) -> None:
     for k, v in PROV.items():
         assert getattr(shape, k) == v
 
@@ -670,7 +701,7 @@ def test_unset_provenance_omitted_from_the_record_not_null(
         100,
     )
     for key in (box, polygon):
-        obj = tcip_store.read(key)["annotations"][0]
+        obj = _records(key)[0]
         for k in ("created_by", "created_at", "accepted_by", "accepted_at"):
             assert k not in obj  # omitted entirely, never written as null
 
@@ -689,7 +720,7 @@ def test_partial_provenance_writes_only_set_fields(tmp_path: Path) -> None:
         100,
         100,
     )
-    obj = tcip_store.read(key)["annotations"][0]
+    obj = _records(key)[0]
     assert obj["created_by"] == "claude"
     for k in ("created_at", "accepted_by", "accepted_at"):
         assert k not in obj
@@ -734,7 +765,7 @@ def test_keep_empty_writes_a_present_empty_document(tmp_path: Path) -> None:
     assert tcip_store.exists(
         key
     )  # present, and still unannotated until a person confirms it
-    assert tcip_store.read(key)["annotations"] == []
+    assert _records(key) == []
     assert _read(key) == []
 
 
@@ -800,7 +831,7 @@ def test_a_record_that_does_not_decode_raises_the_one_unreadable_refusal(
     "payload", [[1, 2, 3], "a string", 42], ids=["list", "string", "number"]
 )
 def test_a_record_that_is_not_an_object_raises(
-    tmp_path: Path, payload
+    tmp_path: Path, payload: JsonValue
 ) -> None:
     key = _stored(tmp_path, payload)
 
@@ -866,7 +897,9 @@ def test_entry_without_subject_raises(tmp_path: Path) -> None:
     ],
 )
 def test_a_supplied_malformed_value_refuses_the_document_by_record(
-    tmp_path: Path, key_name, value
+    tmp_path: Path,
+    key_name: str,
+    value: JsonValue,
 ) -> None:
     """A supplied malformed value refuses the document, naming the record and the key."""
     key = _stored(
@@ -920,7 +953,8 @@ def test_stored_box_with_no_positive_extent_raises(tmp_path: Path) -> None:
     ids=["short", "odd", "run_length", "empty", "non_numeric"],
 )
 def test_a_bad_segmentation_refuses_rather_than_falling_back_to_the_box(
-    tmp_path: Path, segmentation
+    tmp_path: Path,
+    segmentation: JsonValue,
 ) -> None:
     """A bad segmentation beside a box refuses the document.
 
@@ -954,7 +988,7 @@ def test_a_bad_segmentation_refuses_rather_than_falling_back_to_the_box(
     ids=["negative_width", "zero_extent"],
 )
 def test_a_box_with_no_extent_refuses_beside_valid_rings(
-    tmp_path: Path, bbox
+    tmp_path: Path, bbox: JsonValue
 ) -> None:
     """A box with no extent refuses beside valid rings.
 
@@ -1020,7 +1054,9 @@ def test_an_absent_key_still_reads_as_absent(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "payload", [{"annotations": None}, {"width": 100}], ids=["null", "absent"]
 )
-def test_annotations_null_or_absent_raises(tmp_path: Path, payload) -> None:
+def test_annotations_null_or_absent_raises(
+    tmp_path: Path, payload: JsonValue
+) -> None:
     key = _stored(tmp_path, payload)
 
     with pytest.raises(UnreadableLabelDocumentError):
@@ -1058,7 +1094,9 @@ def test_readers_accept_a_document_of_only_valid_records(
 
 
 @pytest.mark.parametrize("junk", [1, "x", None, [1, 2]])
-def test_a_non_dict_annotation_record_raises(tmp_path: Path, junk) -> None:
+def test_a_non_dict_annotation_record_raises(
+    tmp_path: Path, junk: JsonValue
+) -> None:
     """An annotation record that is not an object raises."""
     key = _stored(tmp_path, {"annotations": [junk]})
 
@@ -1123,7 +1161,9 @@ def test_a_non_finite_score_is_refused_rather_than_written(
 
 
 @pytest.mark.parametrize("flag", [True, False])
-def test_boolean_score_field_is_not_a_confidence(tmp_path: Path, flag) -> None:
+def test_boolean_score_field_is_not_a_confidence(
+    tmp_path: Path, flag: bool
+) -> None:
     """A boolean in a ``score`` field refuses the document, naming the record and its score."""
     key = _stored(
         tmp_path,
@@ -1244,7 +1284,7 @@ def test_attribute_ids_distinguish_unassessed_from_undeclared() -> None:
     assert attribute_values([UNASSESSED, 1], attributes) == {"grade": "high"}
 
 
-def test_whole_image_rating_never_becomes_a_target(tmp_path) -> None:
+def test_whole_image_rating_never_becomes_a_target(tmp_path: Path) -> None:
     """A whole-image rating yields no detection target.
 
     A geometry-less annotation under a scope declaring an attribute takes no box row and no
@@ -1267,6 +1307,7 @@ def test_whole_image_rating_never_becomes_a_target(tmp_path) -> None:
             subjects=(
                 cr.Subject(
                     name="bud",
+                    description="",
                     attributes=(
                         cr.Attribute(
                             "opening", "categorical", ("closed", "open")

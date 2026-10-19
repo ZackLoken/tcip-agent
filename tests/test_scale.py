@@ -1,9 +1,18 @@
 """GPU-batched detection inference + paginated experiment metrics."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def test_predict_batch_detection_uses_one_forward_per_batch(tmp_path):
+
+def test_predict_batch_detection_uses_one_forward_per_batch(
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     import torch
     from PIL import Image
@@ -31,7 +40,9 @@ def test_predict_batch_detection_uses_one_forward_per_batch(tmp_path):
             100,
         )  # no box, so within either knob
 
-        def forward(self, images):
+        def forward(
+            self, images: list[torch.Tensor]
+        ) -> list[dict[str, torch.Tensor]]:
             calls["n"] += 1
             calls["sizes"].append(len(images))
             return [
@@ -73,7 +84,7 @@ def test_predict_batch_detection_uses_one_forward_per_batch(tmp_path):
     assert calls["sizes"] == [2, 2, 1]
 
 
-def test_get_experiment_metrics_pagination(tmp_path):
+def test_get_experiment_metrics_pagination(tmp_path: Path) -> None:
     from tcip_mcp.experiments import get_experiment
     from tests._verified_checkpoint_fixtures import (
         detection_config,
@@ -101,7 +112,9 @@ def test_get_experiment_metrics_pagination(tmp_path):
     assert page["metrics_offset"] == 3
 
 
-def test_get_experiment_reads_the_rows_of_one_epoch_as_one(tmp_path):
+def test_get_experiment_reads_the_rows_of_one_epoch_as_one(
+    tmp_path: Path,
+) -> None:
     """``get_experiment`` reads the rows a run logged under one epoch as one epoch.
 
     A bespoke loop logging train and val as separate rows under one epoch reads as one epoch

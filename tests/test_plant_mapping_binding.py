@@ -38,6 +38,8 @@ from tests.test_second_trait_acceptance import (
 )
 
 if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+
     from tcip_web.state import OpenProject
 
 PLANTS = [
@@ -959,7 +961,9 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
         dataset_root=dataset_root,
         dataset_id="whatever-id",
         project=tmp_path,
-        plant_registry={"name": "unregistered", "digest": "0" * 64},
+        plant_registry=plant_mapping.PlantRegistryReference(
+            name="unregistered", digest="0" * 64
+        ),
     )
 
     with (
@@ -974,7 +978,7 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
 
 def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
     tmp_path: Path,
-    client,
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tcip_mcp.audit import audit_log_key
@@ -1032,7 +1036,7 @@ def _cite_mapping(
 
 def test_a_supersede_whose_receipt_fails_answers_409_and_the_archive_still_loads(
     tmp_path: Path,
-    client,
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A supersede whose receipt fails answers 409, and the archived record still loads.
@@ -1808,10 +1812,11 @@ def test_build_mapping_persists_and_reads_back_capture_digests(
     recomputed = record_digest(raw)
     page = ts.read_log(audit_log_key(tmp_path))
     receipts = [
-        entry["arguments"]["record_sha256"]
+        arguments["record_sha256"]
         for entry in page.records
         if entry.get("tool") == "plant_mapping_built"
-        and (entry.get("arguments") or {}).get("name") == "valley"
+        and isinstance(arguments := entry.get("arguments"), dict)
+        and arguments.get("name") == "valley"
     ]
     assert receipts, "no plant_mapping_built receipt found for 'valley'"
     assert receipts[-1] == recomputed
@@ -2013,7 +2018,7 @@ def test_second_receipt_scan_in_one_process_reads_only_what_was_appended(
     calls: list[str | None] = []
     real_read_log = ts.read_log
 
-    def spy(key, after=None):
+    def spy(key: ts.Key, after: str | None = None) -> ts.LogPage:
         calls.append(after)
         return real_read_log(key, after=after)
 
@@ -2066,7 +2071,7 @@ def test_two_spellings_of_one_project_share_one_receipt_scan(
     calls: list[str | None] = []
     real_read_log = ts.read_log
 
-    def spy(key, after=None):
+    def spy(key: ts.Key, after: str | None = None) -> ts.LogPage:
         calls.append(after)
         return real_read_log(key, after=after)
 
@@ -2108,4 +2113,5 @@ def test_a_build_leaves_one_row_its_receipt(
     assert "error" not in res, res
     rows = ts.read_log(audit_log_key(tmp_path)).records[before:]
     assert [row["tool"] for row in rows] == ["plant_mapping_built"], rows
-    assert rows[0]["arguments"]["name"] == "valley"
+    arguments = rows[0]["arguments"]
+    assert isinstance(arguments, dict) and arguments["name"] == "valley"

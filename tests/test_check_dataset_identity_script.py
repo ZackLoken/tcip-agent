@@ -39,7 +39,7 @@ def _registered(
     return project, root, result
 
 
-def test_a_matching_fingerprint_reports_ok(tmp_path):
+def test_a_matching_fingerprint_reports_ok(tmp_path: Path) -> None:
     project, root, _ = _registered(tmp_path)
 
     completed = run_tcip(
@@ -51,7 +51,7 @@ def test_a_matching_fingerprint_reports_ok(tmp_path):
     assert "MOVED" not in completed.stdout and "GONE" not in completed.stdout
 
 
-def test_a_real_content_change_still_reports_changed(tmp_path):
+def test_a_real_content_change_still_reports_changed(tmp_path: Path) -> None:
     project, root, _ = _registered(tmp_path)
     Image.new("RGB", (10, 10), (4, 5, 6)).save(
         root / "images" / "2024-01-01" / "b.png"
@@ -68,7 +68,9 @@ def test_a_real_content_change_still_reports_changed(tmp_path):
     assert "CHANGED" in completed.stdout
 
 
-def test_a_never_recorded_fingerprint_is_its_own_outcome(tmp_path):
+def test_a_never_recorded_fingerprint_is_its_own_outcome(
+    tmp_path: Path,
+) -> None:
     project, root, result = _registered(tmp_path, content=False)
     assert result["fingerprint"] is None
     # Real content shows up after the fingerprint-less registration.
@@ -82,7 +84,9 @@ def test_a_never_recorded_fingerprint_is_its_own_outcome(tmp_path):
     assert "NEVER-RECORDED" in completed.stdout
 
 
-def test_the_same_identity_at_another_path_is_reported_moved(tmp_path):
+def test_the_same_identity_at_another_path_is_reported_moved(
+    tmp_path: Path,
+) -> None:
     """A copy carrying the identity read at the registered path is reported MOVED.
 
     The report names the id and the path it is registered at.
@@ -101,7 +105,9 @@ def test_the_same_identity_at_another_path_is_reported_moved(tmp_path):
     ), completed.stdout + completed.stderr
 
 
-def test_a_registered_path_holding_no_identity_is_reported_gone(tmp_path):
+def test_a_registered_path_holding_no_identity_is_reported_gone(
+    tmp_path: Path,
+) -> None:
     """A registered path holding no identity is reported GONE.
 
     A dataset moved away from its registered path is reported GONE, naming the id and that

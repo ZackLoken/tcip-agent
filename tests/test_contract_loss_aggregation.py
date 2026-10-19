@@ -27,7 +27,9 @@ class _ThreeTermLoss(torch.nn.Module):
         super().__init__()
         self.scale = torch.nn.Parameter(torch.tensor(1.0))
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: torch.Tensor, targets: dict | None = None
+    ) -> dict:
         if self.training and targets is not None:
             return {
                 "first": self.scale * 1.0,
@@ -44,7 +46,9 @@ class _NonFiniteSecondTerm(torch.nn.Module):
         super().__init__()
         self.scale = torch.nn.Parameter(torch.tensor(1.0))
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: torch.Tensor, targets: dict | None = None
+    ) -> dict:
         if self.training and targets is not None:
             return {
                 "first": self.scale * 1.0,
@@ -64,7 +68,9 @@ class _UnoptimizedCompanionTerm(torch.nn.Module):
         super().__init__()
         self.weight = torch.nn.Parameter(torch.tensor(2.0))
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: torch.Tensor, targets: dict | None = None
+    ) -> dict:
         if self.training and targets is not None:
             primary = self.weight**2
             return {
@@ -82,7 +88,9 @@ class _TwoOptimizableTerms(torch.nn.Module):
         self.a = torch.nn.Parameter(torch.tensor(3.0))
         self.b = torch.nn.Parameter(torch.tensor(-4.0))
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: torch.Tensor, targets: dict | None = None
+    ) -> dict:
         if self.training and targets is not None:
             return {
                 "a_term": (self.a - 1.0) ** 2,
@@ -91,7 +99,7 @@ class _TwoOptimizableTerms(torch.nn.Module):
         return {"logits": torch.zeros(2, 1)}
 
 
-def test_train_loss_is_the_sum_of_every_returned_loss_term():
+def test_train_loss_is_the_sum_of_every_returned_loss_term() -> None:
     """The contract's reported train loss is the sum of every loss term the model returns.
 
     The three terms, 1, 10 and 100 at scale 1, report a train loss of 111.
@@ -103,7 +111,7 @@ def test_train_loss_is_the_sum_of_every_returned_loss_term():
     assert report["train_loss"] == pytest.approx(111.0)
 
 
-def test_a_non_finite_later_loss_term_fails_the_smoke():
+def test_a_non_finite_later_loss_term_fails_the_smoke() -> None:
     """A non-finite second loss term fails the smoke despite a finite first term."""
     report = check_model_contract(
         _NonFiniteSecondTerm(), "classification", dims=CLS_DIMS
@@ -114,7 +122,7 @@ def test_a_non_finite_later_loss_term_fails_the_smoke():
     ]
 
 
-def test_overfit_check_judges_the_whole_objective_not_the_first_term():
+def test_overfit_check_judges_the_whole_objective_not_the_first_term() -> None:
     """A run where the first term improves while the objective as a whole worsens is refused."""
     model = _UnoptimizedCompanionTerm()
     report = overfit_check(
@@ -131,7 +139,7 @@ def test_overfit_check_judges_the_whole_objective_not_the_first_term():
     assert abs(float(model.weight.detach())) < 2.0
 
 
-def test_a_multi_term_model_that_optimizes_every_term_passes():
+def test_a_multi_term_model_that_optimizes_every_term_passes() -> None:
     """A two-term model whose summed loss falls over 25 steps passes the overfit check."""
     report = overfit_check(
         _TwoOptimizableTerms(),

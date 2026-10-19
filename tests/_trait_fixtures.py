@@ -16,7 +16,7 @@ from tcip_mcp import subject_registry as cr, traits
 from tcip_mcp.traits import TraitEntry, TraitRevision
 
 
-def entry(name: str, delivers: Sequence[str], **fields: Any) -> TraitEntry:
+def entry(name: str, delivers: Sequence[str], **fields: object) -> TraitEntry:
     """Return a ``TraitEntry`` validated from ``name``, ``delivers`` and ``fields``.
 
     Every other field is empty, except a ``half_class_avg_size`` localization tolerance at 0.5;
@@ -55,7 +55,7 @@ def entry(name: str, delivers: Sequence[str], **fields: Any) -> TraitEntry:
     )
 
 
-def with_fields(base: TraitEntry, **fields: Any) -> TraitEntry:
+def with_fields(base: TraitEntry, **fields: object) -> TraitEntry:
     """Return ``base`` with ``fields`` replaced, validated as a new entry."""
     return TraitEntry.model_validate({**base.model_dump(), **fields})
 
@@ -196,7 +196,7 @@ def propose_and_confirm(
 
 
 def confirm_bare(
-    project_root: Path, name: str, **fields: Any
+    project_root: Path, name: str, **fields: object
 ) -> TraitRevision:
     """Propose and confirm ``entry(name, ("leaf_length",), **fields)`` at ``project_root``."""
     return propose_and_confirm(
@@ -216,7 +216,9 @@ def count_revision(project_root: Path) -> TraitRevision:
     return latest_confirmed(COUNT_TRAIT, project_root)
 
 
-def operationalization(**fields: Any) -> dict[str, Any]:
+def operationalization(
+    **fields: object,
+) -> dict[str, Any]:
     """Return an operationalization of fixture texts and :data:`COUNT_SUBJECT`, ``fields`` over."""
     return {
         "statement": "the number the breeder records for one plant",
@@ -229,7 +231,7 @@ def operationalization(**fields: Any) -> dict[str, Any]:
 
 
 def with_operationalization(
-    base: TraitEntry, kind: str, **fields: Any
+    base: TraitEntry, kind: str, **fields: object
 ) -> TraitEntry:
     """Return ``base`` with an operationalization for ``kind`` added or replaced."""
     stated = {k: v.model_dump() for k, v in base.operationalizations.items()}
@@ -248,9 +250,9 @@ def seed_positive_class(
     """
     from tests._producer_fixtures import registry_over
 
-    registry = (
-        cr.registry_for_dataset_root(project_root) or cr.SubjectRegistry()
-    )
+    registry = cr.registry_for_dataset_root(
+        project_root
+    ) or cr.SubjectRegistry(subjects=())
     subjects = {s.name: s for s in registry.subjects}
     existing = subjects.get(subject_name)
     attrs = {a.name: a for a in (existing.attributes if existing else ())}
@@ -267,7 +269,9 @@ def seed_positive_class(
                 values=(*attr.values, state.value),
             )
     subjects[subject_name] = cr.Subject(
-        name=subject_name, attributes=tuple(attrs.values())
+        name=subject_name,
+        description=existing.description if existing else "",
+        attributes=tuple(attrs.values()),
     )
     updated = cr.SubjectRegistry(subjects=tuple(subjects.values()))
     registry_over(project_root, updated)
@@ -275,7 +279,7 @@ def seed_positive_class(
 
 
 def seed_confirmed_crossing(
-    project_root: Path, trait: str, **fields: Any
+    project_root: Path, trait: str, **fields: object
 ) -> TraitRevision:
     """Confirm a revision of ``trait`` stating a crossing operationalization.
 
@@ -302,7 +306,10 @@ def seed_confirmed_crossing(
 
 
 def seed_confirmed_count(
-    project_root: Path, *, measured_subject: str = COUNT_SUBJECT, **fields: Any
+    project_root: Path,
+    *,
+    measured_subject: str = COUNT_SUBJECT,
+    **fields: object,
 ) -> TraitRevision:
     """Confirm the count trait at this root with a per-image-count operationalization.
 
@@ -333,7 +340,7 @@ def seed_confirmed_aggregate(
     *,
     value_keys: Sequence[str],
     delivery_kind: str = traits.PER_PLANT_COUNT_AGGREGATE,
-    **fields: Any,
+    **fields: object,
 ) -> TraitRevision:
     """Confirm a revision of the trait delivering ``delivered_phenotype``.
 

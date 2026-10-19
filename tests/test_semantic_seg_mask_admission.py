@@ -7,11 +7,15 @@ the dataset and tallied absent.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.selection import Sample
 
 pytest.importorskip("torch")
 
@@ -20,7 +24,7 @@ from PIL import Image  # noqa: E402
 from tests._producer_fixtures import dataset_over, painted_frame, run_over  # noqa: E402
 
 
-def _dataset(tmp_path: Path):
+def _dataset(tmp_path: Path) -> tuple[Path, Path]:
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     masks_dir = tmp_path / "masks"
     images_dir.mkdir(parents=True)
@@ -91,8 +95,8 @@ def test_the_class_count_is_derived_from_the_masks_the_run_was_handed(
 
 
 def test_the_class_count_and_a_served_sample_read_one_mask_the_same_way(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The class count and a served sample read their masks through ``read_mask``.
 
     Building the dataset reads each mask through ``BaseImageDataset.read_mask``, and serving
@@ -108,7 +112,7 @@ def test_the_class_count_and_a_served_sample_read_one_mask_the_same_way(
     read_mask = BaseImageDataset.read_mask
     read: list[str] = []
 
-    def _spy(sample):
+    def _spy(sample: Sample) -> np.ndarray:
         read.append(Path(sample.ground_truth).name)
         return read_mask(sample)
 

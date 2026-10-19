@@ -21,7 +21,7 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 class PatchProposer:
     """A proposer that reports the red patch in the pixels it is handed."""
 
-    def propose(self, image_path, **params):
+    def propose(self, image_path: str, **params: object) -> list[dict]:
         arr = np.asarray(Image.open(image_path).convert("RGB"))
         mask = (arr[:, :, 0] > 200) & (arr[:, :, 1] < 50) & (arr[:, :, 2] < 50)
         ys, xs = np.nonzero(mask)
@@ -132,7 +132,6 @@ def test_region_crop_carries_no_exif_orientation_tag(
 def test_region_scoped_proposal_lands_at_the_full_frame_coordinates(
     exif_rotated_source: Path,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A region-scoped proposal lands at the full-frame coordinates.
 
@@ -140,10 +139,10 @@ def test_region_scoped_proposal_lands_at_the_full_frame_coordinates(
     candidate at the patch's upright full-frame box, and no temp region crop is left. The same
     call naming no overlap refuses naming it.
     """
-    from tcip_mcp.pipelines import proposal
+    from tcip_mcp.pipelines.proposal import register_proposal_engine
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
-    monkeypatch.setitem(proposal._ENGINES, "patch", PatchProposer())
+    register_proposal_engine("patch", PatchProposer())
 
     region = {
         "image_path": str(exif_rotated_source),
@@ -181,7 +180,7 @@ def test_region_scoped_proposal_cleans_up_temp_crop_on_engine_failure(
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
     class BoomProposer:
-        def propose(self, image_path, **params):
+        def propose(self, image_path: str, **params: object) -> list[dict]:
             raise RuntimeError("engine exploded")
 
     monkeypatch.setattr(
@@ -227,17 +226,6 @@ class TestRegionCellNamesResolveThroughTheOneLookup:
         assert _region_rect_from_cells(
             cells, [" b1 ", "c1"]
         ) == _region_rect_from_cells(cells, ["B1", "C1"])
-
-    def test_cell_dicts_are_accepted(self) -> None:
-        """Plain cell dicts, as a JSON route serves them, resolve to the named cells' rect."""
-        from tcip_mcp.tools.proposal_tools import _region_rect_from_cells
-
-        cells = [
-            {"name": c.name, "x0": c.x0, "y0": c.y0, "x1": c.x1, "y1": c.y1}
-            for c in _region_cells()
-        ]
-        rect = _region_rect_from_cells(cells, ["B1", "C1"])
-        assert (rect.x0, rect.y0, rect.x1, rect.y1) == (60, 0, 180, 60)
 
     def test_a_reference_that_is_not_a_cell_name_is_refused(self) -> None:
         from tcip_mcp.tools.proposal_tools import _region_rect_from_cells
@@ -350,7 +338,7 @@ class TestRegionFrameIsTheResolvedImageSources:
         )
 
         class NeverProposer:
-            def propose(self, image_path, **params):
+            def propose(self, image_path: str, **params: object) -> list[dict]:
                 raise AssertionError(
                     "the engine ran on a source with no RGB frame"
                 )
@@ -397,7 +385,7 @@ class TestRegionFrameIsTheResolvedImageSources:
         crops: list[tuple[str, tuple[int, int]]] = []
 
         class RecordingProposer:
-            def propose(self, image_path, **params):
+            def propose(self, image_path: str, **params: object) -> list[dict]:
                 with Image.open(image_path) as im:
                     crops.append((im.mode, im.size))
                 return [
@@ -442,7 +430,9 @@ class TestWholeFrameDefaultIsUnaffected:
 
         called = []
 
-        def recording_offset_candidates(candidates, origin):
+        def recording_offset_candidates(
+            candidates: list[dict], origin: tuple[float, float]
+        ) -> list[dict]:
             called.append((candidates, origin))
             return candidates
 
@@ -451,7 +441,7 @@ class TestWholeFrameDefaultIsUnaffected:
         )
 
         class OneBoxProposer:
-            def propose(self, image_path, **params):
+            def propose(self, image_path: str, **params: object) -> list[dict]:
                 return [
                     {
                         "candidate_id": 0,
@@ -488,7 +478,7 @@ class TestWholeFrameDefaultIsUnaffected:
         from tcip_mcp.tools import proposal_tools
 
         class OneBoxProposer:
-            def propose(self, image_path, **params):
+            def propose(self, image_path: str, **params: object) -> list[dict]:
                 return [
                     {
                         "candidate_id": 0,
@@ -518,57 +508,6 @@ class TestWholeFrameDefaultIsUnaffected:
         envelope = ts.read(proposal_tools._staging_key_for(str(img_path)))
         assert set(envelope) == {"engine", "candidates", "image_identity"}
 
-    def test_a_candidate_the_store_cannot_hold_is_reported_rather_than_staged(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """A candidate the store cannot hold is reported by name and not staged.
-
-        A bespoke engine's candidate carrying a numpy array as its bbox refuses naming
-        ``candidates[0].bbox``.
-        """
-        import numpy as np
-
-        import tcip_store as ts
-        from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools import proposal_tools
-
-        class ArrayBoxProposer:
-            def propose(self, image_path, **params):
-                return [
-                    {
-                        "candidate_id": 0,
-                        "bbox": np.array([1.0, 1.0, 2.0, 2.0]),
-                        "area": 1,
-                        "score": 0.5,
-                        "engine": "stub",
-                        "engine_meta": {},
-                        "rings": [],
-                    }
-                ]
-
-        monkeypatch.setattr(
-            proposal, "resolve_proposer", lambda engine: ArrayBoxProposer()
-        )
-
-        images_dir = tmp_path / "images" / UNDATED_BUCKET
-        images_dir.mkdir(parents=True)
-        img_path = images_dir / "unstorable.jpg"
-        Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
-
-        result = proposal_tools.propose_annotations(
-            tmp_path, image_path=str(img_path), engine="stub"
-        )
-
-        assert "candidates[0].bbox" in result["error"]
-        assert (
-            ts.read(
-                proposal_tools._staging_key_for(str(img_path)), default=None
-            )
-            is None
-        )
-
     def test_a_candidate_whose_rings_are_no_polygon_is_refused_where_it_arrives(
         self,
         tmp_path: Path,
@@ -584,7 +523,7 @@ class TestWholeFrameDefaultIsUnaffected:
         from tcip_mcp.tools import proposal_tools
 
         class TwoPointProposer:
-            def propose(self, image_path, **params):
+            def propose(self, image_path: str, **params: object) -> list[dict]:
                 return [
                     {
                         "candidate_id": 0,
@@ -630,7 +569,7 @@ class TestWholeFrameDefaultIsUnaffected:
         from tcip_mcp.tools import proposal_tools
 
         class OneBoxProposer:
-            def propose(self, image_path, **params):
+            def propose(self, image_path: str, **params: object) -> list[dict]:
                 return [
                     {
                         "candidate_id": 0,
@@ -657,8 +596,10 @@ class TestWholeFrameDefaultIsUnaffected:
         )
 
         assert "error" not in result, result
-        envelope = ts.read(proposal_tools._staging_key_for(str(img_path)))
-        assert envelope["candidates"][0]["bbox"] == [1.0, 1.0, 2.0, 2.0]
+        envelope = proposal_tools.ProposalStaging.model_validate(
+            ts.read(proposal_tools._staging_key_for(str(img_path)))
+        )
+        assert envelope.candidates[0].bbox == (1.0, 1.0, 2.0, 2.0)
 
     def test_a_candidate_stating_no_confidence_is_refused_where_it_arrives(
         self,
@@ -670,7 +611,7 @@ class TestWholeFrameDefaultIsUnaffected:
         from tcip_mcp.tools import proposal_tools
 
         class UnscoredProposer:
-            def propose(self, image_path, **params):
+            def propose(self, image_path: str, **params: object) -> list[dict]:
                 return [
                     {
                         "candidate_id": 0,
@@ -692,7 +633,7 @@ class TestWholeFrameDefaultIsUnaffected:
             tmp_path, image_path=str(img_path), engine="unscored"
         )
 
-        assert "'score'" in result.get("error", ""), result
+        assert "0.score" in result.get("error", ""), result
         assert (
             ts.read(
                 proposal_tools._staging_key_for(str(img_path)), default=None

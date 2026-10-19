@@ -47,14 +47,14 @@ def test_registered_models_are_recorded_in_the_index_not_copied_into_the_registr
     assert ts.exists(registry_index_key(root))
     assert list(models_dir.glob("*.pt")) == []
 
-    reread = ModelRegistry(str(root)).list_models()
-    assert {m["name"] for m in reread} == set(_RUNS)
+    reread = [m.entry for m in ModelRegistry(str(root)).list_models()]
+    assert {m.name for m in reread} == set(_RUNS)
     for entry in reread:
-        ckpt = Path(entry["checkpoint_path"])
+        ckpt = Path(entry.checkpoint_path)
         assert ckpt.is_file()
         assert ckpt.parent.parent.parent.name == "experiments"
-        assert ckpt.parent.parent.name == entry["name"]
-        assert entry["sha256"] == hashlib.sha256(ckpt.read_bytes()).hexdigest()
+        assert ckpt.parent.parent.name == entry.name
+        assert entry.sha256 == hashlib.sha256(ckpt.read_bytes()).hexdigest()
 
 
 def test_registering_a_checkpoint_again_supersedes_its_earlier_entry(
@@ -98,11 +98,12 @@ def test_registering_a_checkpoint_again_supersedes_its_earlier_entry(
 
     inventory = ModelRegistry(str(root)).list_models()
     assert len(inventory) == 3
-    by_sha = {m["sha256"]: m for m in inventory}
+    by_sha = {m.entry.sha256: m for m in inventory}
     superseding = by_sha[hashlib.sha256(ckpt_v1.read_bytes()).hexdigest()]
-    assert superseding["name"] == "currant_bud_detector_v1_final"
-    assert superseding["metrics"]["val_map50"] == 0.74
-    assert superseding["checkpoint_path"] == str(ckpt_v1)
-    assert by_sha[hashlib.sha256(ckpt_v2.read_bytes()).hexdigest()][
-        "name"
-    ] == ("currant_bud_detector_v1")
+    assert superseding.entry.name == "currant_bud_detector_v1_final"
+    assert superseding.facts.metrics["val_map50"] == 0.74
+    assert superseding.entry.checkpoint_path == str(ckpt_v1)
+    assert (
+        by_sha[hashlib.sha256(ckpt_v2.read_bytes()).hexdigest()].entry.name
+        == "currant_bud_detector_v1"
+    )

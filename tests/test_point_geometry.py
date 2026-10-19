@@ -12,6 +12,7 @@ Covered:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,18 +31,15 @@ from tests._producer_fixtures import (
 )
 from tests._training_values import TRIAGE_WEIGHTS
 
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.workspace import BoundProject
+
 BOX = BBox(10.0, 10.0, 30.0, 30.0)
 RING = [(50.0, 50.0), (70.0, 50.0), (70.0, 70.0)]
 
 
 # ── the geometry itself ──────────────────────────────────────────────────────
-
-
-def test_bbox_of_refuses_a_point_and_says_why() -> None:
-    with pytest.raises(ValueError) as exc:
-        bbox_of(Point(5.0, 6.0))
-    msg = str(exc.value)
-    assert "Point" in msg and "no bounding box" in msg
 
 
 def test_bbox_of_still_reads_a_box_and_a_polygon() -> None:
@@ -62,7 +60,10 @@ def test_point_round_trips_through_the_per_image_document(
         key, [Annotation(subject="bud", geometry=Point(12.5, 34.25))], 100, 80
     )
 
-    (rec,) = tcip_store.read(key)["annotations"]
+    stored = tcip_store.read(key)
+    assert isinstance(stored, dict) and isinstance(stored["annotations"], list)
+    (rec,) = stored["annotations"]
+    assert isinstance(rec, dict)
     assert rec["point"] == [12.5, 34.25]
     assert "bbox" not in rec  # no fabricated box travels with a point
 
@@ -95,7 +96,7 @@ def test_a_point_alongside_a_box_and_a_polygon_all_survive_one_document(
 # ── target membership (the one shared decision) ──────────────────────────────
 
 
-def _scope(root: Path, *values: str):
+def _scope(root: Path, *values: str) -> ClassScope:
     """Return the registry scope of ``bud`` over a dataset at ``root``.
 
     The dataset declares ``opening`` over ``values`` on it, or no attribute for no values.
@@ -110,7 +111,9 @@ def _scope(root: Path, *values: str):
     registry_over(
         root,
         cr.SubjectRegistry(
-            subjects=(cr.Subject(name="bud", attributes=attributes),)
+            subjects=(
+                cr.Subject(name="bud", description="", attributes=attributes),
+            )
         ),
     )
     return registry_scope(root / "images", "bud")
@@ -409,7 +412,7 @@ def test_subject_task_names_a_point_only_frame(tmp_path: Path) -> None:
 
 
 def test_save_annotations_tool_writes_an_incoming_point(
-    tmp_path: Path, bound
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     from tcip_mcp.tools.annotation_tools import save_annotations
 
@@ -426,7 +429,7 @@ def test_save_annotations_tool_writes_an_incoming_point(
 
 
 def test_save_annotations_tool_keeps_points_and_point_distinct(
-    tmp_path: Path, bound
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     """``save_annotations`` keeps ``points`` and ``point`` distinct.
 

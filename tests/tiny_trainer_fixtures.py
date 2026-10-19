@@ -8,6 +8,7 @@ constants, and each builder accepts ``in_chans`` and, for the classifier, ``num_
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -21,6 +22,17 @@ from tests._training_values import (
     schedule,
     stage,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Mapping, Sequence
+
+    import pytest
+    from pydantic import BaseModel
+
+    from tcip_mcp.pipelines.model_build import SourceLayout
+    from tcip_mcp.pipelines.schemas import ModelSourceSchema, TrainGeometry
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+    from tcip_mcp.pipelines.training.generic_trainer import EpochCallback
 
 
 def _phantom_nan() -> torch.Tensor:
@@ -65,17 +77,19 @@ class MeanIntensityRegressor(nn.Module):
             path.mkdir(parents=True, exist_ok=True)
             request_cancel(path)
 
-    def predict(self, images):
+    def predict(self, images: torch.Tensor) -> torch.Tensor:
         return self.weight * images.mean(dim=(1, 2, 3))
 
-    def fit_loss(self, images, targets) -> dict:
+    def fit_loss(self, images: torch.Tensor, targets: dict) -> dict:
         return {
             "mse": (
                 (self.predict(images) - targets["values"].float()) ** 2
             ).mean()
         }
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: torch.Tensor, targets: dict | None = None
+    ) -> dict:
         if self.training and targets is not None:
             self._count_training_forward()
             return self.fit_loss(images, targets)
@@ -88,7 +102,7 @@ def build_mean_intensity_regressor(
     init_weight: float = 0.0,
     cancel_at_call: int | None = None,
     cancel_output_dir: str | None = None,
-    **_statistics,
+    **_statistics: object,
 ) -> MeanIntensityRegressor:
     """Build a :class:`MeanIntensityRegressor` as a ``model_source`` builder.
 
@@ -113,11 +127,13 @@ class CountingRegressor(MeanIntensityRegressor):
         super().__init__(init_weight)
         self.register_buffer("forwards", torch.zeros(()))
 
-    def fit_loss(self, images, targets) -> dict:
+    def fit_loss(self, images: torch.Tensor, targets: dict) -> dict:
         self.forwards += 1
         return super().fit_loss(images, targets)
 
-    def get_param_groups(self, backbone_lr, head_lr):
+    def get_param_groups(
+        self, backbone_lr: float, head_lr: float
+    ) -> list[dict]:
         return [
             {
                 "params": [self.weight],
@@ -128,7 +144,7 @@ class CountingRegressor(MeanIntensityRegressor):
 
 
 def build_counting_regressor(
-    *, in_chans: int = 1, init_weight: float = 0.0, **_statistics
+    *, in_chans: int = 1, init_weight: float = 0.0, **_statistics: object
 ) -> CountingRegressor:
     """Build a :class:`CountingRegressor` as a ``model_source`` builder."""
     return CountingRegressor(init_weight=init_weight)
@@ -146,10 +162,12 @@ class TwoRateRegressor(MeanIntensityRegressor):
         self.bias = nn.Parameter(torch.zeros(1))
         self.reverse_groups = reverse_groups
 
-    def predict(self, images):
+    def predict(self, images: torch.Tensor) -> torch.Tensor:
         return self.weight * images.mean(dim=(1, 2, 3)) + self.bias
 
-    def get_param_groups(self, backbone_lr, head_lr):
+    def get_param_groups(
+        self, backbone_lr: float, head_lr: float
+    ) -> list[dict]:
         groups = [
             {"params": [self.weight], "lr": backbone_lr},
             {"params": [self.bias], "lr": head_lr},
@@ -158,7 +176,7 @@ class TwoRateRegressor(MeanIntensityRegressor):
 
 
 def build_two_rate_regressor(
-    *, in_chans: int = 1, reverse_groups: bool = False, **_statistics
+    *, in_chans: int = 1, reverse_groups: bool = False, **_statistics: object
 ) -> TwoRateRegressor:
     """Build a :class:`TwoRateRegressor` as a ``model_source`` builder."""
     return TwoRateRegressor(reverse_groups=reverse_groups)
@@ -167,14 +185,16 @@ def build_two_rate_regressor(
 class NanEvalRegressor(MeanIntensityRegressor):
     """A regressor answering its parent's loss in train mode and ``predict + nan`` in eval."""
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: torch.Tensor, targets: dict | None = None
+    ) -> dict:
         if self.training and targets is not None:
             return self.fit_loss(images, targets)
         return {"head0_values": self.predict(images) + float("nan")}
 
 
 def build_nan_eval_regressor(
-    *, in_chans: int = 1, init_weight: float = 0.0, **_statistics
+    *, in_chans: int = 1, init_weight: float = 0.0, **_statistics: object
 ) -> NanEvalRegressor:
     """Build a :class:`NanEvalRegressor` as a ``model_source`` builder."""
     return NanEvalRegressor(init_weight=init_weight)
@@ -194,7 +214,9 @@ class MeanIntensityClassifier(nn.Module):
         self.weight = nn.Parameter(torch.tensor([float(init_weight)]))
         self.heads = [self]  # evaluate() reads num_classes off model.heads[0]
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: torch.Tensor, targets: dict | None = None
+    ) -> dict:
         logit1 = self.weight * (images.mean(dim=(1, 2, 3)) - 0.5)
         logits = torch.stack([torch.zeros_like(logit1), logit1], dim=1)
         if self.training and targets is not None:
@@ -207,7 +229,7 @@ def build_mean_intensity_classifier(
     in_chans: int = 1,
     num_classes: int = 2,
     init_weight: float = 0.0,
-    **_statistics,
+    **_statistics: object,
 ) -> MeanIntensityClassifier:
     """Build a :class:`MeanIntensityClassifier` as a ``model_source`` builder.
 
@@ -219,14 +241,14 @@ def build_mean_intensity_classifier(
 class DataScaledGradientModel(MeanIntensityRegressor):
     """A model whose loss is ``weight * sum(batch values)``."""
 
-    def fit_loss(self, images, targets) -> dict:
+    def fit_loss(self, images: torch.Tensor, targets: dict) -> dict:
         return {
             "linear": (self.weight * targets["values"].float().sum()).squeeze()
         }
 
 
 def build_data_scaled_gradient_model(
-    *, in_chans: int = 1, **_statistics
+    *, in_chans: int = 1, **_statistics: object
 ) -> DataScaledGradientModel:
     """Build a :class:`DataScaledGradientModel` as a ``model_source`` builder."""
     return DataScaledGradientModel()
@@ -235,7 +257,7 @@ def build_data_scaled_gradient_model(
 class AlwaysDivergedModel(MeanIntensityRegressor):
     """A :class:`MeanIntensityRegressor` whose ``fit_loss`` answers ``weight * nan``."""
 
-    def fit_loss(self, images, targets) -> dict:
+    def fit_loss(self, images: torch.Tensor, targets: dict) -> dict:
         return {"nan_loss": self.weight * float("nan")}
 
 
@@ -244,7 +266,7 @@ def build_always_diverged_model(
     in_chans: int = 1,
     cancel_at_call: int | None = None,
     cancel_output_dir: str | None = None,
-    **_statistics,
+    **_statistics: object,
 ) -> AlwaysDivergedModel:
     """Build an :class:`AlwaysDivergedModel` as a ``model_source`` builder."""
     return AlwaysDivergedModel(
@@ -253,8 +275,12 @@ def build_always_diverged_model(
 
 
 def run_context(
-    root, config: dict, *, epoch_hook=None, experiment_id: str | None = None
-):
+    root: str | Path,
+    config: dict,
+    *,
+    epoch_hook: EpochCallback | None = None,
+    experiment_id: str | None = None,
+) -> TrainContext:
     """Return the context the child's own entry builds for a run opened over ``config``.
 
     The context is built by ``subprocess_worker.prepare_run_context`` for the run
@@ -274,7 +300,9 @@ def run_context(
     )
 
 
-def frames_data(root, intensities, values) -> dict:
+def frames_data(
+    root: str | Path, intensities: Sequence[float], values: Sequence[float]
+) -> dict:
     """Return a run's data block over every frame written under ``root``.
 
     :func:`write_regression_dataset` writes the frames at ``intensities`` and valued
@@ -288,7 +316,9 @@ def frames_data(root, intensities, values) -> dict:
     }
 
 
-def drawn_data(root, train: tuple[list, list], val: tuple[list, list]) -> dict:
+def drawn_data(
+    root: str | Path, train: tuple[list, list], val: tuple[list, list]
+) -> dict:
     """Return the data block of a run drawing its own split over frames written under ``root``.
 
     :func:`write_regression_dataset` writes ``train``'s and then ``val``'s frames, each
@@ -328,7 +358,11 @@ FIT, HOLDOUT_FIT = 2.0, -5.0
 at ``FIT`` times their intensity, validation frames at ``HOLDOUT_FIT``."""
 
 
-def opposed_regression_data(root, train_intensities, val_intensities) -> dict:
+def opposed_regression_data(
+    root: str | Path,
+    train_intensities: list[float],
+    val_intensities: list[float],
+) -> dict:
     """Return :func:`drawn_data` over training and validation frames written under ``root``.
 
     The training frames sit at ``train_intensities``, each valued :data:`FIT` times its
@@ -358,12 +392,12 @@ SEPARABLE_VAL = ([0.15, 0.40, 0.60, 0.85], [0, 0, 1, 1])
 six training and four validation frames, which :class:`MeanIntensityClassifier` separates."""
 
 
-def separable_classifier_data(root) -> dict:
+def separable_classifier_data(root: str | Path) -> dict:
     """Return :func:`drawn_data` of :data:`SEPARABLE_TRAIN` and :data:`SEPARABLE_VAL`."""
     return drawn_data(root, SEPARABLE_TRAIN, SEPARABLE_VAL)
 
 
-def count_validations(monkeypatch) -> list[str]:
+def count_validations(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Return a list each explicit config or model-source validation appends its class name to.
 
     From here on, each ``model_validate`` of a whole training config
@@ -376,7 +410,13 @@ def count_validations(monkeypatch) -> list[str]:
     for schema in (TrainConfigSchema, ModelSourceSchema):
         real = schema.model_validate.__func__
 
-        def counted(cls, obj, *args, _real=real, **kwargs):
+        def counted(
+            cls: type[BaseModel],
+            obj: object,
+            *args: object,
+            _real: Callable[..., BaseModel] = real,
+            **kwargs: object,
+        ) -> BaseModel:
             seen.append(cls.__name__)
             return _real(cls, obj, *args, **kwargs)
 
@@ -411,7 +451,7 @@ def regressor_config(
     builder: str = MEAN_INTENSITY_REGRESSOR,
     builder_kwargs: dict | None = None,
     normalization: dict | None = None,
-    **overrides,
+    **overrides: object,
 ) -> dict:
     """Return a training config of ``project`` for the regression ``builder`` over ``data``.
 
@@ -454,7 +494,7 @@ def classifier_config(
     project: Path,
     task: str = "classification",
     normalization: dict | None = None,
-    **overrides,
+    **overrides: object,
 ) -> dict:
     """Return a training config of ``project`` for the mean-intensity classifier over ``data``.
 
@@ -488,7 +528,7 @@ def classifier_config(
     )
 
 
-def capture_model(monkeypatch, sink: list) -> None:
+def capture_model(monkeypatch: pytest.MonkeyPatch, sink: list) -> None:
     """Append every model ``generic_trainer.build_from_model_source`` builds to ``sink``.
 
     Each model is appended as it is built.
@@ -497,7 +537,12 @@ def capture_model(monkeypatch, sink: list) -> None:
 
     real_build = gt.build_from_model_source
 
-    def build(source, plan, dims, geometry):
+    def build(
+        source: ModelSourceSchema,
+        plan: SourceLayout,
+        dims: Mapping[str, object],
+        geometry: TrainGeometry,
+    ) -> object:
         model = real_build(source, plan, dims, geometry)
         sink.append(model)
         return model
@@ -515,7 +560,7 @@ class _CallScheduledModel(MeanIntensityRegressor):
     def finite(self, call: int) -> bool:
         raise NotImplementedError
 
-    def fit_loss(self, images, targets) -> dict:
+    def fit_loss(self, images: torch.Tensor, targets: dict) -> dict:
         if self.finite(self._forwards):
             return super().fit_loss(images, targets)
         return {"nan_loss": _phantom_nan()}
@@ -537,7 +582,7 @@ def build_transiently_diverged_model(
     in_chans: int = 1,
     bad_batches: int = 2,
     init_weight: float = 0.0,
-    **_statistics,
+    **_statistics: object,
 ) -> TransientlyDivergedModel:
     """Build a :class:`TransientlyDivergedModel` as a ``model_source`` builder."""
     return TransientlyDivergedModel(
@@ -548,7 +593,9 @@ def build_transiently_diverged_model(
 class StepCountedDivergenceModel(_CallScheduledModel):
     """A :class:`_CallScheduledModel` whose ``finite(call)`` is ``call in set(finite_at)``."""
 
-    def __init__(self, finite_at=(), init_weight: float = 0.0) -> None:
+    def __init__(
+        self, finite_at: Iterable[int] = (), init_weight: float = 0.0
+    ) -> None:
         super().__init__(init_weight)
         self.finite_at = set(finite_at)
 
@@ -559,9 +606,9 @@ class StepCountedDivergenceModel(_CallScheduledModel):
 def build_step_counted_divergence_model(
     *,
     in_chans: int = 1,
-    finite_at=(),
+    finite_at: Iterable[int] = (),
     init_weight: float = 0.0,
-    **_statistics,
+    **_statistics: object,
 ) -> StepCountedDivergenceModel:
     """Build a :class:`StepCountedDivergenceModel` as a ``model_source`` builder."""
     return StepCountedDivergenceModel(
@@ -585,7 +632,7 @@ def build_diverges_after_model(
     good_calls: int,
     in_chans: int = 1,
     init_weight: float = 0.0,
-    **_statistics,
+    **_statistics: object,
 ) -> DivergesAfterModel:
     """Build a :class:`DivergesAfterModel` as a ``model_source`` builder."""
     return DivergesAfterModel(good_calls=good_calls, init_weight=init_weight)
@@ -597,22 +644,27 @@ class PixelSpreadDivideModel(MeanIntensityRegressor):
     The spread is the bands' standard deviation at each pixel, averaged over the pixels.
     """
 
-    def predict(self, images):
+    def predict(self, images: torch.Tensor) -> torch.Tensor:
         return (self.weight + images.mean(dim=(1, 2, 3))) / images.std(
             dim=1
         ).mean(dim=(1, 2))
 
 
 def build_pixel_spread_divide_model(
-    *, in_chans: int = 1, **_statistics
+    *, in_chans: int = 1, **_statistics: object
 ) -> PixelSpreadDivideModel:
     """Build a :class:`PixelSpreadDivideModel` as a ``model_source`` builder."""
     return PixelSpreadDivideModel()
 
 
 def write_regression_dataset(
-    root, intensities, values, *, height: int = 6, width: int = 10
-):
+    root: str | Path,
+    intensities: Sequence[float],
+    values: Sequence[float],
+    *,
+    height: int = 6,
+    width: int = 10,
+) -> tuple[Path, Path]:
     """Write a small on-disk table-labeled dataset of PNG frames and a CSV of values.
 
     The frames are uint8 RGB PNGs ``img<i>.png`` under ``root/images/<undated bucket>``, and

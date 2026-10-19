@@ -8,6 +8,7 @@ a prediction bucket, never ground truth.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,9 +25,12 @@ from tcip_mcp.tools.gui_tools import focus_human_attention
 from tcip_mcp.tools.proposal_tools import stage_proposals
 from tests._producer_fixtures import write_image
 
+if TYPE_CHECKING:
+    from tcip_mcp.workspace import BoundProject
+
 
 @pytest.fixture(autouse=True)
-def _stub_gui(monkeypatch):
+def _stub_gui(monkeypatch: pytest.MonkeyPatch) -> None:
     # No GUI backend in tests: make delivery a deterministic soft miss (else a 2s socket timeout).
     import tcip_mcp.web_client as web_client
 
@@ -49,7 +53,7 @@ def _staged_name(producer: str, date: str, stem: str) -> str:
     return f"{producer}/{date}/{stem}"
 
 
-def _staged(root: Path, producer: str, date: str, stem: str):
+def _staged(root: Path, producer: str, date: str, stem: str) -> tcip_store.Key:
     """Return the key of the document staged for ``stem`` under ``producer``."""
     return prediction_key(root, _staged_name(producer, date, stem), stem)
 
@@ -108,7 +112,7 @@ def _damage(root: Path, bucket: str, stem: str) -> None:
 
 
 def test_focus_over_a_bucket_lands_on_first_frame_with_proposals(
-    tmp_path: Path, bound
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
@@ -130,7 +134,7 @@ def test_focus_over_a_bucket_lands_on_first_frame_with_proposals(
 
 
 def test_focus_over_a_bucket_skips_an_empty_prediction_document(
-    tmp_path: Path, bound
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
@@ -144,7 +148,7 @@ def test_focus_over_a_bucket_skips_an_empty_prediction_document(
 
 
 def test_focus_over_a_bucket_navigates_past_an_unreadable_prediction_on_another_frame(
-    tmp_path: Path, bound
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     """A focus over a bucket navigates past a corrupt prediction document on another frame.
 
@@ -167,7 +171,7 @@ def test_focus_over_a_bucket_navigates_past_an_unreadable_prediction_on_another_
 
 
 def test_focus_over_a_bucket_refuses_an_explicitly_named_unreadable_frame(
-    tmp_path: Path, bound
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
@@ -184,7 +188,7 @@ def test_focus_over_a_bucket_refuses_an_explicitly_named_unreadable_frame(
 
 
 def test_focus_over_a_bucket_carries_the_explicit_index_and_proposal(
-    tmp_path: Path, bound
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
@@ -198,7 +202,9 @@ def test_focus_over_a_bucket_carries_the_explicit_index_and_proposal(
     assert res["proposal"] == 2
 
 
-def test_focus_refuses_a_name_that_is_no_bucket(tmp_path: Path, bound) -> None:
+def test_focus_refuses_a_name_that_is_no_bucket(
+    tmp_path: Path, bound: BoundProject
+) -> None:
     root = tmp_path / "proj"
     _images(root, "2026-02-11", ["IMG_0000.JPG"])
     res = focus_human_attention(
@@ -256,11 +262,9 @@ def test_stage_proposals_writes_prediction_format_not_gt(
         b0.geometry.y2,
     ) == pytest.approx((288.0, 216.0, 352.0, 264.0))
     # Every staged object stamps the producer (model_name) as created_by + a created_at.
-    data = tcip_store.read(out)
-    assert len(data["annotations"]) == 2
-    for obj in data["annotations"]:
-        assert obj["created_by"] == "claude"
-        assert obj["created_at"]
+    for obj in preds:
+        assert obj.created_by == "claude"
+        assert obj.created_at
     # It must not have written any ground truth.
     assert _no_ground_truth(root)
 
@@ -329,7 +333,9 @@ def test_stage_proposals_rejects_a_model_name_that_is_no_single_segment(
     assert _no_ground_truth(root)  # nothing leaked into ground truth
 
 
-def test_focus_rejects_path_traversal(tmp_path: Path, bound) -> None:
+def test_focus_rejects_path_traversal(
+    tmp_path: Path, bound: BoundProject
+) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, ["IMG_0000.JPG"])
@@ -360,7 +366,7 @@ def test_stage_proposals_rejects_box_missing_subject(tmp_path: Path) -> None:
 )
 @pytest.mark.parametrize("shape", ["boxes", "polygons"])
 def test_stage_proposals_refuses_a_shape_naming_no_subject_by_index(
-    tmp_path: Path, shape: str, subject
+    tmp_path: Path, shape: str, subject: str | int | None
 ) -> None:
     """A staged shape naming no subject is refused by its index, and nothing is staged.
 
@@ -440,16 +446,15 @@ def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
     assert len(p0.geometry.rings[0]) == 4
     assert p0.geometry.rings[0][0] == pytest.approx((64.0, 48.0))
     # Each staged polygon stamps the producer (model_name) as created_by + a created_at.
-    data = tcip_store.read(out)
-    assert len(data["annotations"]) == 1
-    assert data["annotations"][0]["created_by"] == "sam"
-    assert data["annotations"][0]["created_at"]
+    assert p0.created_by == "sam"
+    assert p0.created_at
     # It must not touch GT; the polygon is stored as its rings alone, its box derived by readers.
     assert _no_ground_truth(root)
-    assert (
-        "segmentation" in data["annotations"][0]
-        and "bbox" not in data["annotations"][0]
-    )
+    data = tcip_store.read(out)
+    assert isinstance(data, dict) and isinstance(data["annotations"], list)
+    (stored,) = data["annotations"]
+    assert isinstance(stored, dict)
+    assert "segmentation" in stored and "bbox" not in stored
 
 
 def test_stage_proposals_stages_boxes_and_polygons_together(
@@ -487,17 +492,18 @@ def test_stage_proposals_stages_boxes_and_polygons_together(
     )
     # Boxes and polygons alike land in the one per-image prediction document.
     assert res["bucket"] == _staged_name("claude", date, "IMG_0001")
-    objs = tcip_store.read(_staged(root, "claude", date, "IMG_0001"))[
-        "annotations"
-    ]
+    objs = json_io.read_label_document(
+        _staged(root, "claude", date, "IMG_0001")
+    ).annotations
     assert len(objs) == 2
     # Both the box and the polygon stamp the producer (model_name) as created_by + a created_at.
     for obj in objs:
-        assert obj["created_by"] == "claude"
-        assert obj["created_at"]
+        assert obj.created_by == "claude"
+        assert obj.created_at
     # One box and one polygon in the single document: no detect/segment split.
     kinds = sorted(
-        "segmentation" if "segmentation" in o else "bbox" for o in objs
+        "segmentation" if isinstance(o.geometry, Polygon) else "bbox"
+        for o in objs
     )
     assert kinds == ["bbox", "segmentation"]
     assert _no_ground_truth(root)
@@ -554,7 +560,7 @@ def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
 class _FakeSingleBoxEngine:
     """A proposal engine whose ``propose`` answers one fixed candidate with one ring."""
 
-    def propose(self, image_path, **params):
+    def propose(self, image_path: str, **params: object) -> list[dict]:
         return [
             {
                 "candidate_id": 1,
@@ -568,16 +574,12 @@ class _FakeSingleBoxEngine:
         ]
 
 
-def _staged_assignments_image(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> str:
+def _staged_assignments_image(tmp_path: Path) -> str:
     """Return a real image with one candidate already staged by ``propose_annotations``."""
-    from tcip_mcp.pipelines import proposal
+    from tcip_mcp.pipelines.proposal import register_proposal_engine
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
-    monkeypatch.setitem(
-        proposal._ENGINES, "fake_single_box", _FakeSingleBoxEngine()
-    )
+    register_proposal_engine("fake_single_box", _FakeSingleBoxEngine())
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0205", size=(640, 480))
@@ -591,9 +593,8 @@ def _staged_assignments_image(
 
 def test_stage_proposals_refuses_assignments_combined_with_boxes_or_polygons(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    image_path = _staged_assignments_image(tmp_path, monkeypatch)
+    image_path = _staged_assignments_image(tmp_path)
     assignments = [{"candidate_id": 1, "subject": "leaf"}]
     a_box = [
         {
@@ -636,13 +637,12 @@ def test_stage_proposals_refuses_assignments_combined_with_boxes_or_polygons(
 
 def test_stage_proposals_treats_an_empty_boxes_list_beside_assignments_as_no_shapes_given(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An empty ``boxes`` list beside assignments counts as no shapes given.
 
     Beside an empty ``boxes`` list, the assignments regime stages its one proposal.
     """
-    image_path = _staged_assignments_image(tmp_path, monkeypatch)
+    image_path = _staged_assignments_image(tmp_path)
     assignments = [{"candidate_id": 1, "subject": "leaf"}]
 
     admitted = stage_proposals(
@@ -653,9 +653,8 @@ def test_stage_proposals_treats_an_empty_boxes_list_beside_assignments_as_no_sha
 
 def test_stage_proposals_refuses_model_name_beside_assignments(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    image_path = _staged_assignments_image(tmp_path, monkeypatch)
+    image_path = _staged_assignments_image(tmp_path)
     assignments = [{"candidate_id": 1, "subject": "leaf"}]
 
     res = stage_proposals(
@@ -728,7 +727,7 @@ class _FakeMultiRingEngine:
         [(100.0, 100.0), (140.0, 100.0), (120.0, 140.0)],
     ]
 
-    def propose(self, image_path, **params):
+    def propose(self, image_path: str, **params: object) -> list[dict]:
         xs = [x for ring in self._RINGS for x, _ in ring]
         ys = [y for ring in self._RINGS for _, y in ring]
         return [
@@ -777,23 +776,20 @@ def test_stage_proposals_admits_a_two_ring_pixel_proposal_with_pair_vertices(
 
 def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A two-ring proposal reads back with both rings after propose and accept.
 
     The proposer seam's return is staged as one candidate, accepted with a class, and read back
     with its two rings of three and four vertices.
     """
-    from tcip_mcp.pipelines import proposal
+    from tcip_mcp.pipelines.proposal import register_proposal_engine
     from tcip_mcp.tools.annotation_tools import read_annotations
     from tcip_mcp.tools.proposal_tools import (
         propose_annotations,
         stage_proposals,
     )
 
-    monkeypatch.setitem(
-        proposal._ENGINES, "fake_multi_ring", _FakeMultiRingEngine()
-    )
+    register_proposal_engine("fake_multi_ring", _FakeMultiRingEngine())
 
     root = tmp_path / "proj"
     date = "2026-02-11"

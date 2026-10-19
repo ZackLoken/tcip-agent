@@ -9,8 +9,13 @@ attributes, and its bucket's scope carries none.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from tcip_annotation.state import Annotation
+    from tcip_mcp.buckets import Bucket
 
 torch = pytest.importorskip("torch")
 
@@ -36,7 +41,11 @@ def _checkpoint(tmp_path: Path, *attributes: cr.Attribute) -> str:
         tmp_path,
         data={"num_channels": 3, "scope": {"subject": SUBJECT}},
         registry=cr.SubjectRegistry(
-            subjects=(cr.Subject(name=SUBJECT, attributes=attributes),)
+            subjects=(
+                cr.Subject(
+                    name=SUBJECT, description="", attributes=attributes
+                ),
+            )
         ),
     )
 
@@ -50,12 +59,14 @@ def _attributed_predictor() -> StubPredictor:
     )
 
 
-def _published(tmp_path: Path, checkpoint: str, images_dir: Path):
+def _published(
+    tmp_path: Path, checkpoint: str, images_dir: Path
+) -> tuple[Bucket, list[Annotation]]:
     """Run inference over ``images_dir`` into the bucket ``out/2026-01-01``.
 
     Return the bucket and the annotations read from its ``img`` document.
     """
-    import tcip_store
+    from tcip_annotation.json_io import read_predictions
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -70,12 +81,12 @@ def _published(tmp_path: Path, checkpoint: str, images_dir: Path):
     bucket = read_bucket(result["dataset_root"], result["bucket"])
     key = bucket.document_key("img")
     assert key is not None
-    return bucket, tcip_store.read(key)["annotations"]
+    return bucket, read_predictions(key).annotations
 
 
 def test_an_attributed_run_writes_every_attribute_value_and_stamps_its_scope(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     images_dir = tmp_path / "images" / "2026-01-01"
     write_image(images_dir / "img.png", (100, 100))
@@ -84,18 +95,18 @@ def test_an_attributed_run_writes_every_attribute_value_and_stamps_its_scope(
 
     bucket, anns = _published(tmp_path, checkpoint, images_dir)
 
-    assert [a["attributes"] for a in anns] == [
+    assert [a.attributes for a in anns] == [
         {"color": "red", "grade": "high"},
         {"color": "blue", "grade": "low"},
     ]
-    assert all(a["subject"] == SUBJECT for a in anns)
+    assert all(a.subject == SUBJECT for a in anns)
 
     assert bucket.scope.attributes == (COLOR, GRADE)
 
 
 def test_a_detector_run_declaring_no_attribute_writes_the_ordinary_shape_and_stamps_its_scope(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     images_dir = tmp_path / "images" / "2026-01-01"
     write_image(images_dir / "img.png", (100, 100))
@@ -105,7 +116,7 @@ def test_a_detector_run_declaring_no_attribute_writes_the_ordinary_shape_and_sta
     bucket, anns = _published(tmp_path, checkpoint, images_dir)
 
     assert len(anns) == 1
-    assert anns[0]["subject"] == SUBJECT
-    assert not anns[0].get("attributes")
+    assert anns[0].subject == SUBJECT
+    assert not anns[0].attributes
 
     assert bucket.scope.attributes == ()

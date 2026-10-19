@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests._audit_fixtures import audit_rows
+
+if TYPE_CHECKING:
+    from tcip_mcp.workspace import BoundProject
 
 
 def test_a_dataset_render_leaves_no_audit_line(project: Path) -> None:
@@ -25,7 +29,9 @@ def test_a_dataset_render_leaves_no_audit_line(project: Path) -> None:
     assert audit_rows(project) == before
 
 
-def test_a_panel_push_leaves_no_audit_line(project: Path, bound) -> None:
+def test_a_panel_push_leaves_no_audit_line(
+    project: Path, bound: BoundProject
+) -> None:
     from tcip_mcp.tools.gui_tools import push_panel_event
 
     before = audit_rows(project)

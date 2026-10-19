@@ -12,8 +12,15 @@ import re
 import subprocess
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, BinaryIO
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from tcip_mcp.experiments import FinalStatus
+    from tcip_mcp.pipelines.training.envelope import TrainContext
 
 pytest.importorskip("torch")
 
@@ -29,7 +36,7 @@ ONE_RATE = {"optimizer.backbone_lr": 0.01, "optimizer.head_lr": 0.01}
 
 
 @pytest.fixture
-def children(monkeypatch) -> list:
+def children(monkeypatch: pytest.MonkeyPatch) -> list:
     """Return the training children the launches spawned, each a real process.
 
     A training child is a process handed ``--run-dir``.
@@ -38,7 +45,7 @@ def children(monkeypatch) -> list:
     real_popen = subprocess.Popen
 
     class _Recorded(real_popen):  # type: ignore[misc, valid-type]
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *args: object, **kwargs: object) -> None:
             super().__init__(*args, **kwargs)
             if "--run-dir" in (args[0] if args else kwargs.get("args", ())):
                 spawned.append(self)
@@ -48,7 +55,9 @@ def children(monkeypatch) -> list:
 
 
 @pytest.fixture
-def launch(tmp_path, monkeypatch, children):
+def launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, children: list
+) -> Callable[..., dict]:
     """Return a ``launch_training`` caller in the project ``tmp_path`` over a tiny dataset.
 
     Each launch is over the regression dataset written under ``tmp_path / "ds"``, drawing 0.15
@@ -71,7 +80,9 @@ def launch(tmp_path, monkeypatch, children):
         values=[0.1, 0.3, 0.5, 0.9],
     )
 
-    def _launch(horizon: int = 1, *, resume_from: str = "", **extra) -> dict:
+    def _launch(
+        horizon: int = 1, *, resume_from: str = "", **extra: object
+    ) -> dict:
         config = regressor_config(
             horizon,
             data={
@@ -89,7 +100,9 @@ def launch(tmp_path, monkeypatch, children):
     return _launch
 
 
-def _until(what: str, answer, deadline_s: float = 120):
+def _until[T](
+    what: str, answer: Callable[[], T | None], deadline_s: float = 120
+) -> T:
     """Poll ``answer()`` every 0.1 s and return its first truthy value, raising past ``deadline_s``.
 
     The ``AssertionError`` raised names ``what``.
@@ -103,7 +116,7 @@ def _until(what: str, answer, deadline_s: float = 120):
     raise AssertionError(f"{what} did not happen within {deadline_s}s")
 
 
-def _wait_final(run_dir: Path) -> dict:
+def _wait_final(run_dir: Path) -> FinalStatus:
     """Wait for the final status the run's child writes and return it."""
     from tcip_mcp.experiments import observe
 
@@ -121,8 +134,8 @@ def _contents(directory: Path) -> dict[str, bytes]:
 
 
 def test_a_launched_run_completes_and_its_completion_is_its_registration(
-    launch, tmp_path
-):
+    launch: Callable[..., dict], tmp_path: Path
+) -> None:
     from tcip_mcp.experiments import METRICS_FILE, RUN_FILE, observe, read_rows
     from tcip_mcp.model_registry import (
         ModelRegistry,
@@ -134,25 +147,28 @@ def test_a_launched_run_completes_and_its_completion_is_its_registration(
     run_dir = Path(res["output_dir"])
 
     final = _wait_final(run_dir)
-    assert final["state"] == "completed", final
+    assert final.state == "completed", final
     observation = observe(run_dir)
     assert observation.state == "completed"
     assert (run_dir / RUN_FILE).is_file()
     assert read_rows(run_dir / METRICS_FILE)[0]
     checkpoint = observation.checkpoint
-    assert checkpoint is not None and Path(checkpoint["path"]).is_file()
-    assert final["checkpoint"]["sha256"] == checkpoint["sha256"]
-    (entry,) = [
+    assert checkpoint is not None and Path(checkpoint.path).is_file()
+    assert final.checkpoint is not None
+    assert final.checkpoint.sha256 == checkpoint.sha256
+    (listed,) = [
         m
         for m in ModelRegistry(str(tmp_path)).list_models()
-        if m["name"] == run_dir.name
+        if m.entry.name == run_dir.name
     ]
-    assert entry["sha256"] == checkpoint["sha256"]
-    loaded = load_registered_checkpoint(checkpoint["path"], project=tmp_path)
-    assert loaded.producer["experiment_id"] == run_dir.name
+    assert listed.entry.sha256 == checkpoint.sha256
+    loaded = load_registered_checkpoint(checkpoint.path, project=tmp_path)
+    assert loaded.producer.experiment_id == run_dir.name
 
 
-def test_a_cancel_requested_by_id_ends_the_child_canceled(launch, tmp_path):
+def test_a_cancel_requested_by_id_ends_the_child_canceled(
+    launch: Callable[..., dict], tmp_path: Path
+) -> None:
     """A cancel requested by id ends a training child canceled, completing no checkpoint.
 
     The cancel is requested after the child logs its first epoch row.
@@ -176,19 +192,19 @@ def test_a_cancel_requested_by_id_ends_the_child_canceled(launch, tmp_path):
     )
     final = _wait_final(run_dir)
 
-    assert final["state"] == "canceled", final
+    assert final.state == "canceled", final
     assert observe(run_dir).checkpoint is None
 
 
 def test_a_resume_is_a_new_directory_that_leaves_its_source_untouched(
-    launch, tmp_path
-):
+    launch: Callable[..., dict], tmp_path: Path
+) -> None:
     from tcip_mcp.experiments import RUN_FILE, read_record
     from tcip_mcp.registry_paths import stored_path
 
     first = launch(horizon=2, checkpoint_every_n_epochs=1)
     source = Path(first["output_dir"])
-    assert _wait_final(source)["state"] == "completed"
+    assert _wait_final(source).state == "completed"
     epoch_checkpoints = sorted(source.glob("checkpoint_epoch_*.pt"))
     assert epoch_checkpoints, sorted(p.name for p in source.iterdir())
     before = _contents(source)
@@ -197,9 +213,11 @@ def test_a_resume_is_a_new_directory_that_leaves_its_source_untouched(
     assert "error" not in resumed, resumed
     run_dir = Path(resumed["output_dir"])
     assert run_dir != source
-    assert _wait_final(run_dir)["state"] == "completed"
+    assert _wait_final(run_dir).state == "completed"
 
-    assert read_record(run_dir / RUN_FILE)["resume_from"] == stored_path(
+    stored = read_record(run_dir / RUN_FILE)
+    assert isinstance(stored, dict)
+    assert stored["resume_from"] == stored_path(
         epoch_checkpoints[-1], tmp_path
     )
     assert (run_dir / "model_final.pt").is_file()
@@ -207,8 +225,10 @@ def test_a_resume_is_a_new_directory_that_leaves_its_source_untouched(
 
 
 def test_a_child_killed_before_its_final_status_reads_running_then_interrupted(
-    launch, children, monkeypatch
-):
+    launch: Callable[..., dict],
+    children: list,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A child killed while it runs reads running, then interrupted.
 
     Killed while it runs, the child writes no final status: after the process has exited the
@@ -231,8 +251,8 @@ def test_a_child_killed_before_its_final_status_reads_running_then_interrupted(
 
 
 def test_progress_logged_after_the_final_status_never_reopens_the_run(
-    launch, tmp_path
-):
+    launch: Callable[..., dict], tmp_path: Path
+) -> None:
     """A metrics row logged after the final status is refused and the run stays completed.
 
     After the child wrote its final status the run's metrics writer refuses a row, leaving the
@@ -253,7 +273,7 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(
 
     res = launch(horizon=2)
     run_dir = Path(res["output_dir"])
-    assert _wait_final(run_dir)["state"] == "completed"
+    assert _wait_final(run_dir).state == "completed"
     before = {
         name: (run_dir / name).read_bytes()
         for name in (FINAL_STATUS_FILE, METRICS_FILE)
@@ -271,13 +291,13 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(
     summary = monitor_training(tmp_path, res["experiment_id"])["run"]
     assert summary["state"] == "completed"
     assert summary["best_metric"] is not None
-    assert observation.spec.evaluation.selection_metric == "loss"
+    assert observation.record.spec.evaluation.selection_metric == "loss"
     assert summary["best_metric"] == best_selection(rows, False)
 
 
 def test_a_reader_never_sees_a_final_status_before_its_bytes_are_whole(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A reader never sees a final status before its bytes are whole.
 
     Read by a spy inside the write of the final status, the run has no final status and reads
@@ -295,8 +315,10 @@ def test_a_reader_never_sees_a_final_status_before_its_bytes_are_whole(
     seen: list = []
     real_publish = experiments.publish_once
 
-    def observed_mid_write(path, write):
-        def write_after_reading(handle):
+    def observed_mid_write(
+        path: Path, write: Callable[[BinaryIO], object]
+    ) -> None:
+        def write_after_reading(handle: BinaryIO) -> None:
             seen.append(experiments.observe(run_dir))
             write(handle)
 
@@ -311,7 +333,7 @@ def test_a_reader_never_sees_a_final_status_before_its_bytes_are_whole(
 
 
 def _refusing_final_status(
-    monkeypatch, times: float, winerror: int | None = None
+    monkeypatch: pytest.MonkeyPatch, times: float, winerror: int | None = None
 ) -> list[Path]:
     """Make the next ``times`` final-status reads fail, and return the paths refused, in order.
 
@@ -341,9 +363,9 @@ def _refusing_final_status(
 
 
 def test_a_final_status_a_sharing_violation_refuses_once_is_read_on_the_retry(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A final status refused once by a sharing violation is read on the retry.
 
     The run observes as completed after one refused read.
@@ -359,8 +381,8 @@ def test_a_final_status_a_sharing_violation_refuses_once_is_read_on_the_retry(
 
 
 def test_a_final_status_a_sharing_violation_keeps_refusing_raises(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A sharing violation that outlasts the retry budget is raised after more than one read."""
     import math
 
@@ -376,8 +398,8 @@ def test_a_final_status_a_sharing_violation_keeps_refusing_raises(
 
 
 def test_a_final_status_denied_for_another_reason_raises_without_a_retry(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A final-status read denied for a reason other than sharing raises without a retry.
 
     A read denied with Windows' access-denied code (5) raises on its first refusal.
@@ -395,7 +417,9 @@ def test_a_final_status_denied_for_another_reason_raises_without_a_retry(
     assert len(refused) == 1
 
 
-def test_no_retry_starts_after_the_budget_is_spent(monkeypatch):
+def test_no_retry_starts_after_the_budget_is_spent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """No retry of a denied action starts after the retry budget is spent.
 
     An action denied until past the 0.12 s budget starts at 0, 0.051 and 0.102 s only: the wait
@@ -424,7 +448,9 @@ def test_no_retry_starts_after_the_budget_is_spent(monkeypatch):
     assert started == pytest.approx([0.0, 0.051, 0.102])
 
 
-def test_a_completed_run_missing_its_checkpoint_refuses_naming_it(tmp_path):
+def test_a_completed_run_missing_its_checkpoint_refuses_naming_it(
+    tmp_path: Path,
+) -> None:
     """Loading a completed run's checkpoint whose file is gone refuses naming the file.
 
     With the checkpoint file the run recorded deleted, ``checkpoint_payload`` raises
@@ -438,15 +464,16 @@ def test_a_completed_run_missing_its_checkpoint_refuses_naming_it(tmp_path):
         registered_checkpoint(tmp_path, experiment_id="exp-lost-weights")
     )
     named = observe(checkpoint.parent).checkpoint
+    assert named is not None
     checkpoint.unlink()
 
     with pytest.raises(FileNotFoundError, match=checkpoint.name):
-        checkpoint_payload(named["path"], named["sha256"])
+        checkpoint_payload(named.path, named.sha256)
 
 
 def test_a_config_naming_its_run_refuses_naming_the_key_and_writes_nothing(
-    launch, tmp_path
-):
+    launch: Callable[..., dict], tmp_path: Path
+) -> None:
     """A config stating ``experiment_id`` is refused naming the key and makes no directory.
 
     A launch with no ``experiment_id`` names its directory by the id it answers; a config stating
@@ -468,9 +495,9 @@ def test_a_config_naming_its_run_refuses_naming_the_key_and_writes_nothing(
 
 
 def test_a_name_is_reserved_by_the_directory_that_takes_it_first(
-    tmp_path,
-    real_hpo_base_config,
-):
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+) -> None:
     """A name is reserved by the directory that takes it first.
 
     A directory created with no record written already holds its name: a second creation under
@@ -518,8 +545,8 @@ def test_a_name_is_reserved_by_the_directory_that_takes_it_first(
 
 
 def test_the_live_run_conflict_reads_the_projects_one_listing(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The live-run conflict reads the project's one training listing.
 
     A running run is the conflict the listing shows it as, and a listing showing nothing
@@ -547,7 +574,7 @@ def test_the_live_run_conflict_reads_the_projects_one_listing(
 
 
 def _trial(
-    tmp_path, point: dict | None = None, **extra
+    tmp_path: Path, point: dict | None = None, **extra: object
 ) -> tuple[Path, list[float]]:
     """Run one HPO trial and return its run directory and the values it reported, in order.
 
@@ -598,45 +625,46 @@ def _trial_row(project: Path, trial_dir: Path) -> dict:
 
 
 def test_an_hpo_trial_is_a_run_directory_reporting_the_sweeps_one_selection(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An HPO trial is a run directory reporting its config's one selection metric.
 
     A trial is a run directory like any launched run's, its sampled point and what it resolved
     on its launch record, and it reports its config's selection each epoch; its result is the
     best of what it reported, in that metric's direction (``loss``, lower better).
     """
-    from tcip_mcp.experiments import RUN_FILE, observe, read_record
+    from tcip_mcp.experiments import observe, read_run
 
     trial_dir, reported = _trial(tmp_path)
 
-    record = read_record(trial_dir / RUN_FILE)
-    assert record["trial_params"] == ONE_RATE
-    assert record["resolved"]["partition"]["samples"]
-    assert record["resolved"]["trait_revision"] is None
-    assert record["config"]["evaluation"]["selection_metric"] == "loss"
+    record = read_run(trial_dir)
+    assert record.trial_params == ONE_RATE
+    assert record.resolution.partition.samples
+    assert record.resolution.trait_revision is None
+    assert record.spec.evaluation.selection_metric == "loss"
     assert observe(trial_dir).state == "completed"
     assert len(reported) == 2
     assert _trial_row(tmp_path, trial_dir)["best_metric"] == min(reported)
 
 
 def test_a_trial_whose_resolution_fails_is_a_directory_whose_final_status_names_it(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A trial whose resolution fails is a directory whose final status names why.
 
     A trial whose sampled point cannot resolve still opens its run directory, and its final
     status is ``failed`` naming why; the sweep's listing reads it as a row with no best value
     and no metric name.
     """
-    from tcip_mcp.experiments import observe
+    from tcip_mcp.experiments import observe_run
 
     trial_dir, reported = _trial(
         tmp_path, {"data.labels_dir": str(tmp_path / "gone")}
     )
 
-    final = observe(trial_dir).final
-    assert final["state"] == "failed" and final["status_error"]
+    final = observe_run(trial_dir).final
+    assert final is not None
+    assert final.state == "failed" and final.status_error
     assert reported == []
     row = _trial_row(tmp_path, trial_dir)
     assert (
@@ -644,12 +672,12 @@ def test_a_trial_whose_resolution_fails_is_a_directory_whose_final_status_names_
         row["status_error"],
         row["best_metric"],
         row["best_metric_name"],
-    ) == ("failed", final["status_error"], None, None)
+    ) == ("failed", final.status_error, None, None)
     with pytest.raises(ValueError, match="resolved to nothing"):
-        observe(trial_dir).trait_revision
+        observe_run(trial_dir).record.resolution.trait_revision
 
 
-def _reports_only(ctx):
+def _reports_only(ctx: TrainContext) -> None:
     """Report 0.25 through ``ctx.report_objective`` and save ``model_final``.
 
     Pass ``{STATE_DICT_KEY: ctx.build_model().state_dict()}`` to ``ctx.save_checkpoint`` under
@@ -661,7 +689,9 @@ def _reports_only(ctx):
     )
 
 
-def test_a_report_only_trial_projects_the_value_it_reported(tmp_path):
+def test_a_report_only_trial_projects_the_value_it_reported(
+    tmp_path: Path,
+) -> None:
     """A trial reporting through ``report_objective`` alone projects that value as its result.
 
     The trial completes, reports 0.25, and its listing row's best metric is 0.25.
@@ -683,8 +713,10 @@ RESOLVED_KEYS = {"data", "geometry", "partition", "trait_revision"}
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_the_configs(
-    tmp_path, monkeypatch, real_hpo_base_config
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    real_hpo_base_config: dict,
+) -> None:
     """Run and sweep records carry no selection metric, and their readers answer the config's.
 
     A run opened through the launcher's own producer (``run_context``) and a sweep
@@ -700,6 +732,8 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
         METRICS_FILE,
         find_sweep,
         observe,
+        observe_run,
+        observe_sweep,
         read_rows,
         read_sweep,
         run_dirs,
@@ -729,7 +763,10 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
             evaluation=evaluation_block(selection_metric="mae"),
         ),
     )
-    assert set(observe(ctx.run_dir).record["resolved"]) == RESOLVED_KEYS
+    assert (
+        set(observe_run(ctx.run_dir).record.resolution.model_dump())
+        == RESOLVED_KEYS
+    )
     ctx.report_objective(0.25)
     rows = read_rows(ctx.run_dir / METRICS_FILE)[0]
     assert rows[-1]["selection_metric"] == "mae"
@@ -742,7 +779,14 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
     )
     modes: list[str] = []
 
-    def one_trial(**kw):
+    def one_trial(
+        **kw: Callable[[dict, Callable[[float], None]], object]
+        | dict
+        | str
+        | int
+        | Path
+        | None,
+    ) -> None:
         modes.append(kw["mode"])
         # A newer revision confirmed once the sweep opened: the trial still records the sweep's.
         fx.propose_and_confirm(
@@ -775,20 +819,21 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
     )
     sweep_dir = find_sweep(result["sweep"]["sweep_id"], project=tmp_path)
     (trial_dir,) = run_dirs(tmp_path)
-    trial = observe(trial_dir)
+    trial = observe_run(trial_dir)
     metric, higher = selection_of(
         real_hpo_base_config["evaluation"]["selection_metric"]
     )
 
-    assert set(observe(sweep_dir).record) == {
+    sweep = observe_sweep(sweep_dir).record
+    assert set(sweep.model_dump()) == {
         "created",
         "trait_revision",
         "input",
     }
-    assert set(trial.record["resolved"]) == RESOLVED_KEYS
-    swept = observe(sweep_dir).trait_revision
+    assert set(trial.record.resolution.model_dump()) == RESOLVED_KEYS
+    swept = sweep.trait_revision
     assert swept is not None
-    assert trial.trait_revision == swept
+    assert trial.record.resolution.trait_revision == swept
     assert run_summary(trial, [], None).best_metric_name == metric
     assert modes == ["max" if higher else "min"]
     assert (
@@ -798,8 +843,8 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
 
 
 def test_a_context_for_an_ended_run_is_refused_and_writes_nothing(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A context for an ended run is refused and writes nothing.
 
     For a run whose final status is written, running it again refuses and a context built from

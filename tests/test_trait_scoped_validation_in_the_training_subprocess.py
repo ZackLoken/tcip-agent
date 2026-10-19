@@ -15,7 +15,7 @@ import pytest
 def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_entry_alone(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     """The training child resolves the trait's authored criterion and leaves the entry alone.
 
     The child runs in its own process under an evaluation naming the trait and completes, and

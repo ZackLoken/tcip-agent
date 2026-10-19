@@ -26,11 +26,11 @@ from tcip_mcp.pipelines.raster_source import Rect, _check_target_size
     ],
 )
 def test_every_fitted_size_is_within_its_bounds_and_admitted_by_the_reader(
-    width,
-    height,
-    max_pixels,
-    max_edge,
-):
+    width: int,
+    height: int,
+    max_pixels: int,
+    max_edge: int | None,
+) -> None:
     out_w, out_h = fit_within(width, height, max_pixels, max_edge)
     assert out_w * out_h <= max_pixels
     assert max_edge is None or max(out_w, out_h) <= max_edge
@@ -40,7 +40,7 @@ def test_every_fitted_size_is_within_its_bounds_and_admitted_by_the_reader(
     )
 
 
-def test_the_plan_reads_the_finest_level_that_fits_and_names_it():
+def test_the_plan_reads_the_finest_level_that_fits_and_names_it() -> None:
     plan = plan_read(
         Rect(0, 0, 1000, 1000), 1000, 1000, [(500, 500), (250, 250)], 300_000
     )
@@ -52,7 +52,9 @@ def test_the_plan_reads_the_finest_level_that_fits_and_names_it():
     )
 
 
-def test_with_no_level_fitting_the_plan_reads_the_coarsest_within_the_cap():
+def test_with_no_level_fitting_the_plan_reads_the_coarsest_within_the_cap() -> (
+    None
+):
     plan = plan_read(
         Rect(0, 0, 1000, 1000), 1000, 1000, [(500, 500), (250, 250)], 10_000
     )
@@ -64,7 +66,7 @@ def test_with_no_level_fitting_the_plan_reads_the_coarsest_within_the_cap():
     )
 
 
-def test_an_edge_limited_plan_names_the_coarser_level_it_comes_off():
+def test_an_edge_limited_plan_names_the_coarser_level_it_comes_off() -> None:
     """An edge-limited plan names the coarser level it comes off.
 
     A 1024 by 13 output of a 5000 by 64 window over overviews of 32, 16 and 8 rows is planned
@@ -95,8 +97,8 @@ LEVELS = [(1024, 1024), (512, 512)]
     ],
 )
 def test_a_crop_is_planned_on_the_window_the_reader_opens(
-    rect, max_pixels, owed
-):
+    rect: Rect, max_pixels: int, owed: tuple[int, int, int, bool]
+) -> None:
     """A crop is planned on the window ``level_window`` gives at the planned level.
 
     For a one-pixel-wide crop and an offset crop alike, that window holds the planned size, and

@@ -11,11 +11,15 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tcip_store.file_backend import is_bookkeeping
 from tests import _trait_fixtures as fx, csv_rows
+
+if TYPE_CHECKING:
+    from tcip_mcp.subject_registry import SubjectRegistry
 
 pytest.importorskip("torch")
 
@@ -30,12 +34,12 @@ def _images(images_dir: Path) -> list[Path]:
 
 
 @pytest.fixture(autouse=True)
-def _recorded_meaning(tmp_path):
+def _recorded_meaning(tmp_path: Path) -> None:
     """Confirm the count trait's per-image count of :data:`SCOPE`'s subject in the project."""
     fx.seed_confirmed_count(tmp_path, measured_subject=fx.COUNT_SUBJECT)
 
 
-def _deliver(project: Path, root: Path, bucket: str, **overrides) -> dict:
+def _deliver(project: Path, root: Path, bucket: str, **overrides: str) -> dict:
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
     return deliver_per_image_counts(
@@ -47,7 +51,11 @@ def _deliver(project: Path, root: Path, bucket: str, **overrides) -> dict:
     )
 
 
-def _bucket(project: Path, scope: dict = SCOPE, **published_kw) -> str:
+def _bucket(
+    project: Path,
+    scope: dict = SCOPE,
+    **published_kw: SubjectRegistry | Path | None,
+) -> str:
     from tests._chain_fixtures import predicted, published
 
     name = f"{scope['subject'] or 'raster'}/2026-01-01"
@@ -58,7 +66,7 @@ def _bucket(project: Path, scope: dict = SCOPE, **published_kw) -> str:
     ).name
 
 
-def test_a_name_no_bucket_record_answers_for_refuses(tmp_path):
+def test_a_name_no_bucket_record_answers_for_refuses(tmp_path: Path) -> None:
     """A name no bucket is published under is refused, and no CSV is written."""
     res = _deliver(tmp_path, tmp_path / "ds", "nothing/2026-01-01")
 
@@ -66,7 +74,9 @@ def test_a_name_no_bucket_record_answers_for_refuses(tmp_path):
     assert not (tmp_path / "out" / "counts.csv").exists()
 
 
-def test_a_mosaic_bucket_refuses_naming_the_per_plant_door(tmp_path):
+def test_a_mosaic_bucket_refuses_naming_the_per_plant_door(
+    tmp_path: Path,
+) -> None:
     import numpy as np
     import tifffile
 
@@ -89,8 +99,8 @@ def test_a_mosaic_bucket_refuses_naming_the_per_plant_door(tmp_path):
 
 
 def test_a_bucket_counting_another_subject_refuses_and_its_own_subject_is_admitted_to_the_gate(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A bucket counting another subject refuses, and the confirmed subject's reaches the gate.
 
     A bucket recording another subject is refused naming both subjects, and the confirmed
@@ -106,7 +116,7 @@ def test_a_bucket_counting_another_subject_refuses_and_its_own_subject_is_admitt
     assert "no assessment answers" in reached["error"]
 
 
-def test_an_unknown_trait_answers_an_error_dict(tmp_path):
+def test_an_unknown_trait_answers_an_error_dict(tmp_path: Path) -> None:
     res = _deliver(
         tmp_path, tmp_path / "ds", _bucket(tmp_path), trait="no-such-trait"
     )
@@ -115,8 +125,8 @@ def test_an_unknown_trait_answers_an_error_dict(tmp_path):
 
 
 def test_an_assessed_bucket_delivers_validated_counts_naming_the_producer(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.delivery import read_delivery_events
     from tests._chain_fixtures import run_the_chain
 
@@ -136,8 +146,8 @@ def test_an_assessed_bucket_delivers_validated_counts_naming_the_producer(
 
 
 def test_reading_a_published_bucket_to_a_delivered_csv_imports_no_torch(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Delivering a published bucket to a CSV imports no torch.
 
     The delivery runs in a subprocess with torch and torchvision blocked from importing, returns

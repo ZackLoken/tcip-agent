@@ -7,13 +7,17 @@ trait nor an allow-listed platform token fails.
 from __future__ import annotations
 
 import importlib.util
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import REPO_ROOT
 
+if TYPE_CHECKING:
+    from types import ModuleType
 
-def _load_guardrail():
+
+def _load_guardrail() -> ModuleType:
     spec = importlib.util.spec_from_file_location(
         "verify_skill_traits", REPO_ROOT / "tools" / "verify_skill_traits.py"
     )
@@ -99,7 +103,7 @@ def test_mentioned_trait_names_finds_single_word_traits() -> None:
 
 
 def test_the_guardrail_checks_the_vocabulary_the_registry_itself_loads(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The guardrail checks against the vocabulary the trait registry loads.
 

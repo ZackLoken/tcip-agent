@@ -6,9 +6,13 @@ A file's bytes are those its producer writes, and a record's those the store dum
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import tcip_store as ts
 from tcip_mcp.cli.dump_store import dump_store
+
+if TYPE_CHECKING:
+    import pytest
 
 SUBJECT = "subject_under_test"
 REGISTRY_VALUE = {
@@ -96,8 +100,8 @@ def _dumped(project: Path, store: str) -> bytes:
 
 
 def test_the_subject_registry_lands_as_the_ordered_json_document_labels_are_decoded_by(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The subject registry lands as its ordered JSON document, byte for byte.
 
     Written through ``replace_registry``, the subject and attribute sequences keep their
@@ -118,9 +122,9 @@ def test_the_subject_registry_lands_as_the_ordered_json_document_labels_are_deco
 
 
 def test_the_dataset_identity_document_lands_as_the_json_every_citing_record_reads(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The dataset identity document lands as the exact JSON bytes the fixture pins.
 
     It is written through ``register_dataset``, its minted id and computed fingerprint held
@@ -148,8 +152,8 @@ def test_the_dataset_identity_document_lands_as_the_json_every_citing_record_rea
 
 
 def test_a_band_group_manifest_lands_as_the_json_the_image_enumerators_parse(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A band-group manifest lands as its expected JSON document, byte for byte.
 
     The manifest is written through ``write_band_group_manifest``.
@@ -176,9 +180,9 @@ def test_a_band_group_manifest_lands_as_the_json_the_image_enumerators_parse(
 
 
 def test_a_friction_report_dumps_as_the_json_document_every_reader_of_the_corpus_parses(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A friction report dumps as the exact JSON bytes the fixture pins.
 
     It is written through ``report_friction``, its clock and id suffix held still.
@@ -199,9 +203,9 @@ def test_a_friction_report_dumps_as_the_json_document_every_reader_of_the_corpus
 
 
 def test_a_retrospective_dumps_as_its_markdown_text_spelled_as_one_json_string(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A retrospective dumps as its markdown text spelled as one JSON string.
 
     It is written through ``write_retrospective``, its clock held still.

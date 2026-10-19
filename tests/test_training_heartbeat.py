@@ -3,14 +3,22 @@
 It reads 'interrupted' when the heartbeat is past the stale window.
 """
 
+from __future__ import annotations
+
 import os
 import time
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def _beat(run_dir, seconds_ago: float) -> float:
+    import pytest
+
+
+def _beat(run_dir: Path, seconds_ago: float) -> float:
     """Touch ``run_dir``'s heartbeat through its own writer, then age it ``seconds_ago``.
 
     Returns the instant the heartbeat now reads.
@@ -23,14 +31,16 @@ def _beat(run_dir, seconds_ago: float) -> float:
     return instant
 
 
-def _listed(project) -> dict:
+def _listed(project: Path) -> dict:
     """Return the project's runs as ``list_experiments`` lists them, by id."""
     from tcip_mcp.tools.experiment_tools import list_experiments
 
     return {r["experiment_id"]: r for r in list_experiments(project)["runs"]}
 
 
-def test_the_heartbeat_window_decides_running_against_interrupted(tmp_path):
+def test_the_heartbeat_window_decides_running_against_interrupted(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.experiments import HEARTBEAT_STALE_SECONDS, observe
 
     run_dir = opened_run(
@@ -44,7 +54,7 @@ def test_the_heartbeat_window_decides_running_against_interrupted(tmp_path):
     assert observe(run_dir).state == "interrupted"
 
 
-def test_listed_runs_read_running_against_interrupted(tmp_path):
+def test_listed_runs_read_running_against_interrupted(tmp_path: Path) -> None:
     _beat(
         opened_run(
             tmp_path,
@@ -67,7 +77,7 @@ def test_listed_runs_read_running_against_interrupted(tmp_path):
     assert by_id["dead"]["state"] == "interrupted"
 
 
-def test_a_listed_row_carries_the_heartbeat_instant(tmp_path):
+def test_a_listed_row_carries_the_heartbeat_instant(tmp_path: Path) -> None:
     """A listed row carries the heartbeat instant itself.
 
     A 'running' row carries the heartbeat's instant itself beside the derived state.
@@ -90,8 +100,8 @@ def test_a_listed_row_carries_the_heartbeat_instant(tmp_path):
 
 
 def test_configured_stale_window_agrees_across_run_list_compare_and_status(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A configured stale window reads alike in the run list, the compare and the status.
 
     list_experiments, compare_experiments and monitor_training each read a 300s-old heartbeat

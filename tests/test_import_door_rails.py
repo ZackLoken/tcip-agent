@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import zipfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -22,6 +23,9 @@ from tests._chain_fixtures import BESPOKE_DETECTION, FRAME_STATISTICS
 from tests._producer_fixtures import one_labeled_capture
 from tests._training_values import drawn_split
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 
 def _hand_zip(path: Path, members: dict[str, bytes]) -> Path:
     """Write a hand-built zip carrying exactly ``members`` and return its path."""
@@ -35,8 +39,8 @@ def _hand_zip(path: Path, members: dict[str, bytes]) -> Path:
 
 
 def test_import_refuses_a_non_empty_destination_and_changes_nothing(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
     assert "error" not in archive_project(
@@ -60,7 +64,9 @@ def test_import_refuses_a_non_empty_destination_and_changes_nothing(
     assert ts.read(gui_snapshot_key(dest)) == {"active_subject": "x"}
 
 
-def test_import_admits_a_pre_existing_empty_destination(tmp_path):
+def test_import_admits_a_pre_existing_empty_destination(
+    tmp_path: Path,
+) -> None:
     root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
     assert "error" not in archive_project(
@@ -79,7 +85,9 @@ def test_import_admits_a_pre_existing_empty_destination(tmp_path):
 # ── rail 5: a database's sidecar, or its lock, refuses ──────────────────────────────────────
 
 
-def test_import_refuses_a_member_named_as_a_database_sidecar(tmp_path):
+def test_import_refuses_a_member_named_as_a_database_sidecar(
+    tmp_path: Path,
+) -> None:
     zip_path = _hand_zip(
         tmp_path / "bundle.zip", {".tcip/store.db-wal": b"not a log"}
     )
@@ -92,7 +100,7 @@ def test_import_refuses_a_member_named_as_a_database_sidecar(tmp_path):
     assert not dest.exists()
 
 
-def test_import_refuses_a_member_named_store_db_lock(tmp_path):
+def test_import_refuses_a_member_named_store_db_lock(tmp_path: Path) -> None:
     zip_path = _hand_zip(tmp_path / "bundle.zip", {".tcip/store.db.lock": b""})
     dest = tmp_path / "dest"
 
@@ -105,7 +113,7 @@ def test_import_refuses_a_member_named_store_db_lock(tmp_path):
 # ── rail 8: zip-slip refusal ─────────────────────────────────────────────────────────────────
 
 
-def test_import_refuses_a_zip_slip_path(tmp_path):
+def test_import_refuses_a_zip_slip_path(tmp_path: Path) -> None:
     zip_path = tmp_path / "evil.zip"
     with zipfile.ZipFile(str(zip_path), "w") as zf:
         zf.writestr("../../evil.txt", "escaped")
@@ -119,8 +127,8 @@ def test_import_refuses_a_zip_slip_path(tmp_path):
 
 
 def test_extract_zip_refuses_a_sibling_directory_that_shares_stagings_name_as_a_prefix(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Zip extraction refuses a sibling directory sharing staging's name as a prefix.
 
     A member resolving to ``<staging.name>extra/`` lies outside staging and refuses as an unsafe
@@ -139,8 +147,8 @@ def test_extract_zip_refuses_a_sibling_directory_that_shares_stagings_name_as_a_
 
 
 def test_import_refuses_a_corrupt_zip_without_stranding_a_staging_tree(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
     assert "error" not in archive_project(
@@ -163,7 +171,9 @@ def test_import_refuses_a_corrupt_zip_without_stranding_a_staging_tree(
 # ── rail 10: a record the database holds travels in its database ────────────────────────────
 
 
-def test_a_record_travels_inside_the_database_the_archive_copies(tmp_path):
+def test_a_record_travels_inside_the_database_the_archive_copies(
+    tmp_path: Path,
+) -> None:
     record = {"active_subject": "x"}
     root = one_labeled_capture(tmp_path / "source")
     ts.replace(gui_snapshot_key(root), record, expect=ts.Version.ABSENT)
@@ -183,8 +193,8 @@ def test_a_record_travels_inside_the_database_the_archive_copies(tmp_path):
 
 
 def test_a_locked_staging_sibling_is_left_alone_while_another_import_completes(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     import filelock
 
     root = one_labeled_capture(tmp_path / "source")
@@ -213,8 +223,8 @@ def test_a_locked_staging_sibling_is_left_alone_while_another_import_completes(
 
 
 def test_a_free_locked_leftover_staging_sibling_is_swept_with_its_lock_file(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
     assert "error" not in archive_project(
@@ -238,7 +248,9 @@ def test_a_free_locked_leftover_staging_sibling_is_swept_with_its_lock_file(
 # ── rail 7: the dataset registry travels ────────────────────────────────────────────────────
 
 
-def test_dataset_registry_stores_the_relative_dot_after_import(tmp_path):
+def test_dataset_registry_stores_the_relative_dot_after_import(
+    tmp_path: Path,
+) -> None:
     """The project's own dataset entry stores the relative ``"."`` after import.
 
     The project registered as its own dataset reads back after the archive/import round trip
@@ -259,11 +271,13 @@ def test_dataset_registry_stores_the_relative_dot_after_import(tmp_path):
 
     assert "error" not in imported
     entries = read_datasets(dest)
-    assert entries[0]["path"] == "."
+    assert entries[0].path == "."
     assert imported["dataset_paths_unresolved"] == []
 
 
-def test_dataset_registry_travels_with_nothing_rewritten(tmp_path):
+def test_dataset_registry_travels_with_nothing_rewritten(
+    tmp_path: Path,
+) -> None:
     """The project's own dataset entry resolves to the import destination after an import."""
     from tcip_mcp.tools.project_tools import (
         dataset_entry_path,
@@ -287,7 +301,9 @@ def test_dataset_registry_travels_with_nothing_rewritten(tmp_path):
     assert dataset_entry_path(dest, entries[0]).resolve() == dest.resolve()
 
 
-def test_an_external_dataset_entry_stays_absolute_and_is_disclosed(tmp_path):
+def test_an_external_dataset_entry_stays_absolute_and_is_disclosed(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.project_tools import register_dataset
 
     root = one_labeled_capture(tmp_path / "source")
@@ -336,18 +352,20 @@ def _annotated_dataset(root: Path, n: int) -> None:
             640,
             480,
         )
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(
+        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
+    )
 
 
 def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_trips(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A splits root nested under a nested dataset root archives and round-trips.
 
     A dataset under a project, partitioned in place by draw_splits with selection.json under the
     dataset root, archives, imports, and reads its selection back.
     """
-    from tcip_mcp.pipelines.data.selection import selection_key
+    from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
 
     project = tmp_path / "project"
@@ -377,14 +395,14 @@ def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_tri
     imported = import_project(str(zip_path), str(dest))
     assert "error" not in imported, imported
     assert (
-        ts.read(selection_key(dest / "curated" / "splits"))["scope"]["subject"]
+        read_selection(dest / "curated" / "splits", project=dest).scope.subject
         == "bud"
     )
 
 
 def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A full round trip through real producers reads back with no hand adoption.
 
     A project record, a registered dataset, a confirmed trait revision, a completed run's
@@ -395,7 +413,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
     """
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp import experiments
-    from tcip_mcp.pipelines.data.selection import selection_key
+    from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.project_tools import (
         dataset_entry_path,
@@ -423,11 +441,23 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
 
     finished_run(root, experiment_id="exp1", rows=[{"epoch": 1, "loss": 0.5}])
 
-    def fake_trial(point, report, sweep, trial_id):
+    def fake_trial(
+        point: dict,
+        report: Callable[[float], None],
+        sweep: Path,
+        trial_id: str,
+    ) -> None:
         tt.open_trial(sweep, trial_id, point)
         report(0.2)
 
-    def fake_search(**kw):
+    def fake_search(
+        **kw: Callable[[dict, Callable[[float], None]], object]
+        | dict
+        | str
+        | int
+        | Path
+        | None,
+    ) -> None:
         kw["objective_fn"]({"optimizer.head_lr": 0.1}, lambda value: None)
 
     from tests._chain_fixtures import BESPOKE_MODELS, training_config
@@ -489,15 +519,15 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
     assert read_record(str(dest)).site == "north orchard"
 
     entries = read_datasets(dest)
-    assert entries[0]["path"] == "."
+    assert entries[0].path == "."
     assert dataset_entry_path(dest, entries[0]).resolve() == dest.resolve()
 
     assert read_trait(COUNT_TRAIT, dest).latest_confirmed == confirmed
 
     run_dir = experiments.find_run("exp1", project=dest)
     assert run_dir is not None
-    observation = experiments.observe(run_dir)
-    assert observation.record["config"]["model_source"]["task"] == "detection"
+    observation = experiments.observe_run(run_dir)
+    assert observation.record.spec.model_source.task == "detection"
     rows = experiments.read_rows(run_dir / experiments.METRICS_FILE)[0]
     assert rows[0]["loss"] == 0.5
     assert observation.checkpoint is not None
@@ -508,5 +538,5 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
         {"optimizer.head_lr": 0.1}
     ]
 
-    selection = ts.read(selection_key(dest / "splits_out"))
-    assert selection["scope"]["subject"] == "bud"
+    selection = read_selection(dest / "splits_out", project=dest)
+    assert selection.scope.subject == "bud"

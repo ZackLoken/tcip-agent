@@ -31,12 +31,11 @@ def test_a_checkpoint_without_kind_predicts_and_ranks(tmp_path: Path) -> None:
     assert "kind" not in checkpoint.payload
 
     predictor = GenericPredictor(checkpoint, device="cpu")
-    images = [
-        str(p)
-        for p in list_logical_images(
+    images = list(
+        list_logical_images(
             table_images(tmp_path / "unlabeled")["images_dir"]
         ).values()
-    ]
+    )
     result = predictor.predict(
         images[0],
         execution_record(
@@ -53,4 +52,6 @@ def test_a_checkpoint_without_kind_predicts_and_ranks(tmp_path: Path) -> None:
     ranked = resolve_scorer(
         ScorerSpec(name="uncertainty"), checkpoint.task
     ).score(images, predictor)
-    assert sorted(path for path, _score in ranked) == sorted(images)
+    assert sorted(str(path) for path, _score in ranked) == sorted(
+        str(path) for path in images
+    )

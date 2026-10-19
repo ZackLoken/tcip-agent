@@ -1,7 +1,14 @@
 """Tests of channel-aware image loading, readers, and ``BaseImageDataset``."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
@@ -11,7 +18,7 @@ from tests._producer_fixtures import dataset_over  # noqa: E402
 from tests.tiny_trainer_fixtures import write_regression_dataset  # noqa: E402
 
 
-def test_pil_to_tensor_grayscale_and_multiband():
+def test_pil_to_tensor_grayscale_and_multiband() -> None:
     from tcip_mcp.pipelines.image_utils import pil_to_tensor
 
     assert pil_to_tensor(np.zeros((8, 8), dtype=np.uint8)).shape == (
@@ -27,7 +34,7 @@ def test_pil_to_tensor_grayscale_and_multiband():
     assert pil_to_tensor(Image.new("RGB", (8, 8))).shape == (3, 8, 8)
 
 
-def test_load_image_grayscale_pil_and_npy_multiband(tmp_path):
+def test_load_image_grayscale_pil_and_npy_multiband(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.image_utils import load_image
 
     png = tmp_path / "x.png"
@@ -43,7 +50,7 @@ def test_load_image_grayscale_pil_and_npy_multiband(tmp_path):
     assert isinstance(arr, np.ndarray) and arr.shape == (16, 16, 6)
 
 
-def test_build_dataset_grayscale_yields_one_channel(tmp_path):
+def test_build_dataset_grayscale_yields_one_channel(tmp_path: Path) -> None:
     images_dir, labels = write_regression_dataset(
         tmp_path, [0.0], [0], height=16, width=16
     )
@@ -57,7 +64,7 @@ def test_build_dataset_grayscale_yields_one_channel(tmp_path):
     assert img.shape[0] == 1
 
 
-def test_grayscale_classification_end_to_end(tmp_path):
+def test_grayscale_classification_end_to_end(tmp_path: Path) -> None:
     pytest.importorskip("torchvision")
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tests._chain_fixtures import training_config

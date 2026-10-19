@@ -7,7 +7,22 @@ of the batches it covers.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from pathlib import Path
+
+    from tcip_mcp.pipelines.model_build import SourceLayout
+    from tcip_mcp.pipelines.schemas import (
+        ModelSourceSchema,
+        OptimizerSpec,
+        TrainGeometry,
+    )
+    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tcip_mcp.subject_registry import Attribute
 
 pytest.importorskip("torch")
 import torch  # noqa: E402
@@ -32,12 +47,12 @@ SKEWED_INTENSITIES = [0.2, 0.5, 0.9]
 
 
 def _trained(
-    tmp_path,
-    values=SKEWED_VALUES,
-    intensities=SKEWED_INTENSITIES,
+    tmp_path: Path,
+    values: list[float] = SKEWED_VALUES,
+    intensities: list[float] = SKEWED_INTENSITIES,
     *,
     accumulation: int = 1,
-):
+) -> TrainRun:
     """Train a run over frames at ``intensities`` valued ``values`` and return it.
 
     The run has no validation side, one frame a batch at ``accumulation`` batches a step,
@@ -57,7 +72,9 @@ def _trained(
     return train(ctx.run, ctx.train_loader)
 
 
-def _batch_gradient(images, targets) -> torch.Tensor:
+def _batch_gradient(
+    images: torch.Tensor, targets: dict[str, torch.Tensor]
+) -> torch.Tensor:
     """Return one batch's own gradient from a fresh instance of the model the run builds."""
     model = build_data_scaled_gradient_model()
     model.train()
@@ -68,7 +85,7 @@ def _batch_gradient(images, targets) -> torch.Tensor:
     return torch.cat([p.grad.detach().reshape(-1) for p in model.parameters()])
 
 
-def _record_steps(monkeypatch, steps: list) -> None:
+def _record_steps(monkeypatch: pytest.MonkeyPatch, steps: list) -> None:
     """Record each optimizer step's gradient and the batches fed since the previous step.
 
     A step pre-hook appends to ``steps`` the gradient the parameters carry and the training
@@ -80,10 +97,18 @@ def _record_steps(monkeypatch, steps: list) -> None:
         gt.build_optimizer,
     )
 
-    def build_model(source, plan, dims, geometry):
+    def build_model(
+        source: ModelSourceSchema,
+        plan: SourceLayout,
+        dims: Mapping[str, int | tuple[Attribute, ...]],
+        geometry: TrainGeometry,
+    ) -> torch.nn.Module:
         model = real_build_model(source, plan, dims, geometry)
 
-        def record(module, args):
+        def record(
+            module: torch.nn.Module,
+            args: tuple[torch.Tensor, dict[str, torch.Tensor]],
+        ) -> None:
             if module.training:
                 images, targets = args
                 fed.append(
@@ -96,10 +121,12 @@ def _record_steps(monkeypatch, steps: list) -> None:
         model.register_forward_pre_hook(record)
         return model
 
-    def build_optimizer(*args, **kwargs):
+    def build_optimizer(
+        *args: OptimizerSpec | torch.nn.Module, **kwargs: float
+    ) -> torch.optim.Optimizer:
         optimizer = real_build_optimizer(*args, **kwargs)
 
-        def hook(opt, *_):
+        def hook(opt: torch.optim.Optimizer, *_: object) -> None:
             steps.append(
                 (
                     torch.cat(
@@ -142,8 +169,8 @@ def _window_sizes(steps: list) -> list[int]:
 
 
 def test_each_optimizer_step_sees_only_its_own_batch_gradient(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """At accumulation 1, each batch makes one step carrying that batch's gradient alone."""
     steps: list = []
     _record_steps(monkeypatch, steps)
@@ -153,7 +180,9 @@ def test_each_optimizer_step_sees_only_its_own_batch_gradient(
     assert _window_sizes(steps) == [1, 1, 1]
 
 
-def test_no_accumulated_gradient_survives_the_run(tmp_path, monkeypatch):
+def test_no_accumulated_gradient_survives_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """No accumulated gradient survives the end of the run.
 
     After the run ends, each trainable parameter's gradient is absent or zero.
@@ -172,8 +201,8 @@ def test_no_accumulated_gradient_survives_the_run(tmp_path, monkeypatch):
 
 
 def test_gradient_accumulation_combines_only_its_own_window(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Gradient accumulation combines its own window's batches and no others.
 
     With two batches per step, each of the two steps carries the mean of its own two batches'
@@ -193,8 +222,8 @@ def test_gradient_accumulation_combines_only_its_own_window(
 
 
 def test_an_epoch_last_shorter_window_averages_over_the_batches_it_holds(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An epoch's shorter last window averages over the batches it holds.
 
     Three batches at accumulation two: the second window holds one batch, and its step carries

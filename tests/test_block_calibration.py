@@ -10,8 +10,24 @@ records, the geometric disjointness check, and the band geometry helpers.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from fastapi.testclient import TestClient
+
+    from tcip_mcp.assessment import RetainedFile
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.data.selection import Sample, Side
+    from tcip_mcp.pipelines.execution import Execution, MaskCut, Pass
+    from tcip_mcp.pipelines.inference.generic_predictor import (
+        GenericPredictor,
+        WindowedRasterReader,
+    )
+    from tcip_mcp.pipelines.raster_source import RasterSource
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -45,7 +61,7 @@ BOX_STEP = 40
 
 
 @pytest.fixture(autouse=True)
-def _count_trait(tmp_path):
+def _count_trait(tmp_path: Path) -> None:
     """Confirm the count trait in this test's project, measuring the mosaic's subject."""
     fx.seed_confirmed_count(tmp_path, measured_subject="bud")
 
@@ -98,7 +114,7 @@ def _completed_over(project: Path, data_cfg: dict, experiment_id: str) -> dict:
     The run's body saves the model as built. Returns its checkpoint path and the spatial
     manifest its resolved record carries.
     """
-    from tcip_mcp.experiments import observe
+    from tcip_mcp.experiments import observe_run
     from tests._verified_checkpoint_fixtures import worker_run
 
     run_dir = worker_run(
@@ -111,14 +127,12 @@ def _completed_over(project: Path, data_cfg: dict, experiment_id: str) -> dict:
         ),
         experiment_id=experiment_id,
     )
-    observation = observe(run_dir)
+    observation = observe_run(run_dir)
     checkpoint = observation.checkpoint
     assert checkpoint is not None, observation.final
     return {
-        "checkpoint_path": checkpoint["path"],
-        "spatial_manifest": observation.record["resolved"]["partition"][
-            "spatial"
-        ],
+        "checkpoint_path": checkpoint.path,
+        "spatial_manifest": observation.record.resolution.partition.spatial,
     }
 
 
@@ -197,19 +211,27 @@ def _attest_regions_complete(
         )
 
 
-def _attested(tmp_path: Path, **kwargs) -> dict:
+def _attested(
+    tmp_path: Path, **kwargs: float | str | list[str] | None
+) -> dict:
     """Run :func:`_build_experiment` and attest both reserved regions complete; return it."""
     exp = _build_experiment(tmp_path, **kwargs)
     manifest = exp["spatial_manifest"]
     _attest_regions_complete(
         exp["root"],
         exp["stem"],
-        [manifest["calibration_region"], manifest["holdout_region"]],
+        [manifest.calibration_region, manifest.holdout_region],
     )
     return exp
 
 
-def _assess(exp: dict, *, k_cal: int = 3, k_test: int = 3, **stated) -> dict:
+def _assess(
+    exp: dict,
+    *,
+    k_cal: int = 3,
+    k_test: int = 3,
+    **stated: bool | int | float | str | MaskCut | None,
+) -> dict:
     """Assess the count trait's per-image count over ``exp``'s reserved regions.
 
     ``assess_reserved_regions`` runs for ``exp``'s checkpoint in ``k_cal`` and ``k_test`` bands
@@ -258,7 +280,7 @@ def _band_total(record: dict) -> int:
 
 def test_an_assessment_refuses_while_the_reserved_regions_are_unattested(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.assessment import AssessmentRefusedError
 
     exp = _build_experiment(tmp_path)
@@ -267,7 +289,9 @@ def test_an_assessment_refuses_while_the_reserved_regions_are_unattested(
         _assess(exp)
 
 
-def test_a_mark_over_one_region_leaves_the_other_unattested(tmp_path: Path):
+def test_a_mark_over_one_region_leaves_the_other_unattested(
+    tmp_path: Path,
+) -> None:
     """A mark over the calibration region leaves the holdout region unattested and named.
 
     With the calibration region alone marked, the assessment refuses naming only the holdout
@@ -279,7 +303,7 @@ def test_a_mark_over_one_region_leaves_the_other_unattested(tmp_path: Path):
     _attest_regions_complete(
         exp["root"],
         exp["stem"],
-        [exp["spatial_manifest"]["calibration_region"]],
+        [exp["spatial_manifest"].calibration_region],
     )
 
     with pytest.raises(
@@ -289,7 +313,7 @@ def test_a_mark_over_one_region_leaves_the_other_unattested(tmp_path: Path):
         _assess(exp)
 
 
-def test_completeness_is_checked_before_feasibility(tmp_path: Path):
+def test_completeness_is_checked_before_feasibility(tmp_path: Path) -> None:
     """An incomplete and infeasible case reports the completeness gap, not feasibility.
 
     At this band count the regions are both unmarked and infeasible; the refusal names them as
@@ -307,7 +331,7 @@ def test_completeness_is_checked_before_feasibility(tmp_path: Path):
 
 def test_a_stated_tile_edge_other_than_the_splits_refuses_naming_both(
     tmp_path: Path,
-):
+) -> None:
     """A stated tile edge other than the split's refuses, naming both.
 
     Stating twice the run's tile edge raises ``ValueError`` naming the stated and the resolved
@@ -324,8 +348,8 @@ def test_a_stated_tile_edge_other_than_the_splits_refuses_naming_both(
 
 def test_every_band_runs_under_the_execution_record_the_assessment_records(
     tmp_path: Path,
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The bands' passes agree with the assessment's recorded execution on five fields.
 
     Across the six recorded passes, overlap, postprocessor and merge threshold equal the stated
@@ -337,7 +361,16 @@ def test_every_band_runs_under_the_execution_record_the_assessment_records(
     real = GenericPredictor.predict_sliced
     passes: list[dict] = []
 
-    def recorded(self, view, **kwargs):
+    def recorded(
+        self: GenericPredictor,
+        view: str | Path | BandGroupRef | WindowedRasterReader,
+        **kwargs: Execution
+        | int
+        | str
+        | dict
+        | Callable[[int, int, dict], None]
+        | None,
+    ) -> dict:
         passes.append({"execution": kwargs["execution"]})
         return real(self, view, **kwargs)
 
@@ -369,8 +402,8 @@ def test_every_band_runs_under_the_execution_record_the_assessment_records(
 
 
 def test_the_document_retained_is_the_document_measured(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A source document emptied just before retention leaves both measurement and copy nonempty.
 
     The label document is emptied when the assessment reaches its retention step; the bands still
@@ -383,7 +416,9 @@ def test_the_document_retained_is_the_document_measured(
     exp = _attested(tmp_path)
     real_retained = assessment._retained
 
-    def emptied_first(run_dir, samples, *args):
+    def emptied_first(
+        run_dir: Path, samples: list[Sample], *args: dict
+    ) -> tuple[list[RetainedFile], list[Sample]]:
         label_image(exp["raster_path"], [], WIDTH, HEIGHT, keep_empty=True)
         return real_retained(run_dir, samples, *args)
 
@@ -401,7 +436,7 @@ def test_the_document_retained_is_the_document_measured(
     assert len(retained.annotations) > 0
 
 
-def test_an_attested_mosaic_is_assessed_and_recorded(tmp_path: Path):
+def test_an_attested_mosaic_is_assessed_and_recorded(tmp_path: Path) -> None:
     """An attested mosaic is assessed and recorded.
 
     With both reserved regions attested complete, the record holds three reference samples on
@@ -414,9 +449,12 @@ def test_an_attested_mosaic_is_assessed_and_recorded(tmp_path: Path):
 
     record = _assess(exp)
 
-    samples = read_assessment(
-        tmp_path, record["assessment_id"]
-    ).reference.samples
+    samples = [
+        s.sample
+        for s in read_assessment(
+            tmp_path, record["assessment_id"]
+        ).reference.samples
+    ]
     assert record["reference"]["n_samples"] == len(samples)
     assert (
         sorted(s.side for s in samples)
@@ -439,7 +477,7 @@ def test_an_attested_mosaic_is_assessed_and_recorded(tmp_path: Path):
 
 def test_a_run_with_no_reserved_region_refuses_naming_the_remedy(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.assessment import AssessmentRefusedError
 
     exp = _build_experiment(
@@ -455,7 +493,7 @@ def test_a_run_with_no_reserved_region_refuses_naming_the_remedy(
 )
 def test_a_recorded_mosaic_size_other_than_the_file_refuses_by_name(
     tmp_path: Path, width: int
-):
+) -> None:
     """A recorded mosaic size other than the file's refuses by name.
 
     The run's recorded mosaic dimensions are checked against the raster as read at assessment: a
@@ -468,7 +506,14 @@ def test_a_recorded_mosaic_size_other_than_the_file_refuses_by_name(
     exp = _attested(tmp_path)
     run_dir = experiment_dir(exp["experiment_id"], project=tmp_path)
     run = read_record(run_dir / RUN_FILE)
-    run["resolved"]["partition"]["spatial"]["width"] = width
+    assert isinstance(run, dict)
+    resolved = run["resolved"]
+    assert isinstance(resolved, dict)
+    partition = resolved["partition"]
+    assert isinstance(partition, dict)
+    spatial = partition["spatial"]
+    assert isinstance(spatial, dict)
+    spatial["width"] = width
     (run_dir / RUN_FILE).write_bytes(encode_record(run))
 
     with pytest.raises(AssessmentRefusedError, match="now reads"):
@@ -480,7 +525,7 @@ def test_a_recorded_mosaic_size_other_than_the_file_refuses_by_name(
 
 def test_band_counts_and_spacing_count_objects_not_crowd_regions(
     tmp_path: Path,
-):
+) -> None:
     """Band counts and object spacing count objects, never crowd regions.
 
     The same mosaic is assessed twice, its boxes plain and then every other one marked a crowd
@@ -513,7 +558,7 @@ def test_band_counts_and_spacing_count_objects_not_crowd_regions(
         _attest_regions_complete(
             exp["root"],
             exp["stem"],
-            [manifest["calibration_region"], manifest["holdout_region"]],
+            [manifest.calibration_region, manifest.holdout_region],
         )
         records.append(_assess(exp))
 
@@ -527,7 +572,7 @@ def test_band_counts_and_spacing_count_objects_not_crowd_regions(
 
 def test_the_band_scale_prefers_plant_pitch_when_the_run_names_plant_files(
     tmp_path: Path,
-):
+) -> None:
     # Two plants ~10m apart, independent of the mosaic's own pixel geometry: the plant path only
     # needs the raster's real geotransform to convert this real-world spacing to pixels.
     plant_csv = write_plant_csv(
@@ -546,7 +591,7 @@ def test_the_band_scale_prefers_plant_pitch_when_the_run_names_plant_files(
 
 def test_the_band_scale_falls_back_to_object_spacing_with_no_plant_files(
     tmp_path: Path,
-):
+) -> None:
     source = _assess(_attested(tmp_path))["criterion"]["count"][
         "block_scale_source"
     ]
@@ -555,8 +600,8 @@ def test_the_band_scale_falls_back_to_object_spacing_with_no_plant_files(
 
 
 def test_a_saturated_band_cap_surfaces_as_cap_saturated_provenance(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A band whose raw detection count reaches the applied cap is recorded as saturated.
 
     The derived density is forced low enough that the applied cap is reached, and the
@@ -577,7 +622,7 @@ def test_a_saturated_band_cap_surfaces_as_cap_saturated_provenance(
 
 def test_the_recorded_density_is_derived_from_the_calibration_bands_alone(
     tmp_path: Path,
-):
+) -> None:
     """The recorded density is derived from the calibration bands alone.
 
     Ground truth is made dense inside the test region alone, so a derivation pooled over both
@@ -588,7 +633,7 @@ def test_the_recorded_density_is_derived_from_the_calibration_bands_alone(
     exp = _build_experiment(tmp_path)
     manifest = exp["spatial_manifest"]
     existing = json_io.read_label_document(exp["label"]).annotations
-    tx0, _ty0, tx1, _ty1 = manifest["holdout_region"][0]
+    tx0, _ty0, tx1, _ty1 = manifest.holdout_region[0]
     dense = [
         Annotation(subject="bud", geometry=BBox(x, y, x + 15, y + 30))
         for x in range(int(tx0) + 5, int(tx1) - 20, 2)
@@ -600,7 +645,7 @@ def test_the_recorded_density_is_derived_from_the_calibration_bands_alone(
     _attest_regions_complete(
         exp["root"],
         exp["stem"],
-        [manifest["calibration_region"], manifest["holdout_region"]],
+        [manifest.calibration_region, manifest.holdout_region],
     )
 
     record = _assess(exp)
@@ -609,7 +654,7 @@ def test_the_recorded_density_is_derived_from_the_calibration_bands_alone(
 
     counts = record["criterion"]["count"]["band_gt_counts"]
     rects = {
-        s.member: s.rect
+        s.sample.member: s.sample.rect
         for s in read_assessment(
             exp["project"], record["assessment_id"]
         ).reference.samples
@@ -638,7 +683,7 @@ def test_the_recorded_density_is_derived_from_the_calibration_bands_alone(
 
 def test_the_recorded_density_caps_the_whole_mosaic_at_its_own_pixels(
     tmp_path: Path,
-):
+) -> None:
     """The cap the recorded density gives the whole mosaic covers the mosaic's objects.
 
     The mosaic holds more objects than its densest calibration band, and the detection cap of the
@@ -662,7 +707,7 @@ def test_the_recorded_density_caps_the_whole_mosaic_at_its_own_pixels(
 
 def test_an_unstated_merge_threshold_derives_from_the_calibration_bands(
     tmp_path: Path,
-):
+) -> None:
     """An unstated merge threshold is recorded with the cross-tile NMS derivation as its source.
 
     Each object in the ground truth has an overlapping neighbor.
@@ -688,7 +733,7 @@ def test_an_unstated_merge_threshold_derives_from_the_calibration_bands(
     _attest_regions_complete(
         exp["root"],
         exp["stem"],
-        [manifest["calibration_region"], manifest["holdout_region"]],
+        [manifest.calibration_region, manifest.holdout_region],
     )
 
     record = _assess(exp, cross_tile_nms=None)
@@ -701,7 +746,7 @@ def test_an_unstated_merge_threshold_derives_from_the_calibration_bands(
 
 def test_the_assessment_records_the_band_counts_and_test_settings_it_ran_under(
     tmp_path: Path,
-):
+) -> None:
     """The assessment records the band counts and test settings it ran under, none defaulted.
 
     The band counts, the equivalence multiplier and the dispersion quantile an assessment states
@@ -718,12 +763,12 @@ def test_the_assessment_records_the_band_counts_and_test_settings_it_ran_under(
     record = read_assessment(exp["project"], answered["assessment_id"])
 
     count = record.criterion["count"]
+    assert isinstance(count, dict)
     assert (count["k_cal"], count["k_test"]) == (2, 3)
     assert count["equivalence_z"] == EQUIVALENCE_Z
-    assert (
-        count["calibration_curve"]["dispersion_quantile"]
-        == DISPERSION_QUANTILE
-    )
+    curve = count["calibration_curve"]
+    assert isinstance(curve, dict)
+    assert curve["dispersion_quantile"] == DISPERSION_QUANTILE
     assert record.rationale == RATIONALE
     for door in (
         assess_reserved_regions,
@@ -748,7 +793,7 @@ def test_the_assessment_records_the_band_counts_and_test_settings_it_ran_under(
 
 def test_a_raster_pass_stamps_its_stated_conf_and_refuses_an_omitted_one(
     tmp_path: Path,
-):
+) -> None:
     """A raster pass records the conf it states, and one stating none is refused naming it.
 
     A raster pass without an assessment records the conf it states with an explicit source, and
@@ -793,7 +838,9 @@ def test_a_raster_pass_stamps_its_stated_conf_and_refuses_an_omitted_one(
 # ── the band geometry ─────────────────────────────────────────────────────
 
 
-def test_band_ground_truth_keeps_what_is_centered_in_the_band_at_full_extent():
+def test_band_ground_truth_keeps_what_is_centered_in_the_band_at_full_extent() -> (
+    None
+):
     """Band ground truth keeps each box centered in the band, at full extent.
 
     A box centered inside the band is kept at full extent, translated to local coordinates; a box
@@ -850,7 +897,9 @@ def test_band_ground_truth_keeps_what_is_centered_in_the_band_at_full_extent():
     )
 
 
-def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
+def test_band_records_carry_each_ground_truth_rows_crowd_flag(
+    tmp_path: Path,
+) -> None:
     """Band records carry each ground-truth row's crowd flag.
 
     Of a plain box and a crowd region, the band's ground truth flags the second as a crowd
@@ -868,7 +917,16 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
     from tcip_mcp.pipelines.data.selection import Sample
 
     class _OneDetection:
-        def predict_sliced(self, view, **kwargs):
+        def predict_sliced(
+            self,
+            view: str | Path | BandGroupRef | WindowedRasterReader,
+            **kwargs: Execution
+            | int
+            | str
+            | dict
+            | Callable[[int, int, dict], None]
+            | None,
+        ) -> dict:
             return {
                 "width": 200,
                 "height": 200,
@@ -910,12 +968,13 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
         source="mosaic.tif",
         ground_truth=label,
         group="a",
-        side="",
+        side="holdout",
         rect=(0, 0, 200, 200),
     )
 
     records = _band_records(
         SimpleNamespace(height=200, width=200, num_channels=3),
+        "holdout",
         {"a": (0, 0, 200, 200)},
         stub,
         SimpleNamespace(tile_size=64, overlap=0.2),
@@ -931,8 +990,8 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
 
 
 def test_a_band_record_states_the_frame_its_forward_ran_on_and_the_band_it_scores(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A band record states the frame its forward ran on and the band it scores.
 
     Through a real assessment, each band's record is the halo its tiled pass ran on: that
@@ -946,8 +1005,15 @@ def test_a_band_record_states_the_frame_its_forward_ran_on_and_the_band_it_score
     seen: list = []
     real = assessment._band_records
 
-    def recording(reader, bands, p, execution, **kwargs):
-        records = real(reader, bands, p, execution, **kwargs)
+    def recording(
+        reader: RasterSource,
+        side: Side,
+        bands: dict[str, tuple[int, int, int, int]],
+        p: Pass,
+        execution: Execution,
+        **kwargs: dict | str,
+    ) -> list[dict]:
+        records = real(reader, side, bands, p, execution, **kwargs)
         seen.append(((reader.width, reader.height), bands, execution, records))
         return records
 
@@ -983,7 +1049,7 @@ def test_a_band_record_states_the_frame_its_forward_ran_on_and_the_band_it_score
                 )
 
 
-def test_band_rects_are_reported_in_full_mosaic_coordinates():
+def test_band_rects_are_reported_in_full_mosaic_coordinates() -> None:
     """Band rects are reported in full-mosaic coordinates.
 
     Over a region whose origin is (500, 60), the three bands lie inside the region and do not
@@ -1006,7 +1072,9 @@ def test_band_rects_are_reported_in_full_mosaic_coordinates():
         assert x1 <= nx0
 
 
-def test_density_outlier_bands_are_flagged_against_their_own_siblings():
+def test_density_outlier_bands_are_flagged_against_their_own_siblings() -> (
+    None
+):
     """Density-outlier bands are flagged against their own siblings, empty bands never.
 
     Among counts 10, 11, 1, 60 and 0, the bands at 1 and 60 are named and the band at 0 is not;
@@ -1021,7 +1089,7 @@ def test_density_outlier_bands_are_flagged_against_their_own_siblings():
     )
 
 
-def test_feasibility_counts_only_bands_that_carry_ground_truth():
+def test_feasibility_counts_only_bands_that_carry_ground_truth() -> None:
     from tcip_mcp.assessment import AssessmentRefusedError
     from tcip_mcp.pipelines.block_calibration import check_feasibility
 
@@ -1057,6 +1125,7 @@ def _build_attribute_scoped_experiment(
                 subjects=(
                     Subject(
                         name="bud",
+                        description="",
                         attributes=(
                             Attribute(
                                 name="stage", type="categorical", values=values
@@ -1109,7 +1178,7 @@ def _build_attribute_scoped_experiment(
     _attest_regions_complete(
         root,
         stem,
-        [manifest["calibration_region"], manifest["holdout_region"]],
+        [manifest.calibration_region, manifest.holdout_region],
     )
     return {
         "project": tmp_path,
@@ -1123,7 +1192,7 @@ def _build_attribute_scoped_experiment(
 
 def test_ground_truth_decodes_through_the_checkpoints_own_recorded_attributes(
     tmp_path: Path,
-):
+) -> None:
     """An assessment still counts ground truth after the registry reorders the run's values.
 
     The run records its attribute values in one order and the live registry is reordered after
@@ -1148,7 +1217,7 @@ def test_ground_truth_decodes_through_the_checkpoints_own_recorded_attributes(
     assert _band_total(_assess(exp)) > 0
 
 
-def test_a_recorded_scope_needs_no_registry_on_disk(tmp_path: Path):
+def test_a_recorded_scope_needs_no_registry_on_disk(tmp_path: Path) -> None:
     exp = _build_attribute_scoped_experiment(
         tmp_path,
         trained_values=("closed", "open", "shed"),
@@ -1162,8 +1231,8 @@ def test_a_recorded_scope_needs_no_registry_on_disk(tmp_path: Path):
 
 
 def test_regions_marked_through_the_editors_save_admit_the_assessment(
-    tmp_path: Path, client
-):
+    tmp_path: Path, client: TestClient
+) -> None:
     """Regions marked complete through the editor's save admit the assessment.
 
     Both reserved regions are marked complete through posts to ``/api/annotate/labels``.
@@ -1173,7 +1242,7 @@ def test_regions_marked_through_the_editors_save_admit_the_assessment(
     exp = _build_experiment(tmp_path)
     open_new_project(tmp_path)
     manifest = exp["spatial_manifest"]
-    for region in (manifest["calibration_region"], manifest["holdout_region"]):
+    for region in (manifest.calibration_region, manifest.holdout_region):
         x0, y0, x1, y1 = region[0]
         current = client.get(
             "/api/annotate/labels",

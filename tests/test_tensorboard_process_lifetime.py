@@ -114,7 +114,9 @@ def _read_pids(
     return returned, standin
 
 
-def test_child_is_gone_within_ten_seconds_of_a_hard_kill(tmp_path):
+def test_child_is_gone_within_ten_seconds_of_a_hard_kill(
+    tmp_path: Path,
+) -> None:
     parent = _spawn_parent(tmp_path, "sleep")
     returned = standin = None
     try:
@@ -135,8 +137,8 @@ def test_child_is_gone_within_ten_seconds_of_a_hard_kill(tmp_path):
 
 
 def test_child_survives_its_launching_thread_and_dies_within_ten_seconds_of_a_hard_kill(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     parent = _spawn_parent(tmp_path, "sleep", "--thread")
     returned = standin = None
     try:
@@ -159,7 +161,9 @@ def test_child_survives_its_launching_thread_and_dies_within_ten_seconds_of_a_ha
         parent.stderr.close()
 
 
-def test_child_is_gone_within_ten_seconds_of_a_normal_exit(tmp_path):
+def test_child_is_gone_within_ten_seconds_of_a_normal_exit(
+    tmp_path: Path,
+) -> None:
     parent = _spawn_parent(tmp_path, "exit", "--no-tie")
     returned = standin = None
     try:
@@ -180,8 +184,8 @@ def test_child_is_gone_within_ten_seconds_of_a_normal_exit(tmp_path):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="no guardian there")
 def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A stand-in that ignores SIGTERM is ended before ``stop_tensorboard`` returns."""
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
@@ -262,7 +266,7 @@ def _run_guardian(*args: str) -> subprocess.CompletedProcess:
     )
 
 
-def test_guardian_usage_error_for_a_missing_term_grace():
+def test_guardian_usage_error_for_a_missing_term_grace() -> None:
     """The guardian refuses a missing --term-grace with its usage message.
 
     Run through its real subprocess entry point, it exits 1 with the usage message on stderr.
@@ -276,7 +280,7 @@ def test_guardian_usage_error_for_a_missing_term_grace():
     assert guardian._USAGE in result.stderr
 
 
-def test_guardian_usage_error_for_a_non_integer_parent():
+def test_guardian_usage_error_for_a_non_integer_parent() -> None:
     """A --parent that does not parse as an integer exits 1 with the usage message."""
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
@@ -294,7 +298,7 @@ def test_guardian_usage_error_for_a_non_integer_parent():
     assert guardian._USAGE in result.stderr
 
 
-def test_guardian_usage_error_for_a_non_numeric_term_grace():
+def test_guardian_usage_error_for_a_non_numeric_term_grace() -> None:
     """A --term-grace that does not parse as a float exits 1 with the usage message."""
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
@@ -312,7 +316,7 @@ def test_guardian_usage_error_for_a_non_numeric_term_grace():
     assert guardian._USAGE in result.stderr
 
 
-def test_guardian_usage_error_for_a_negative_term_grace():
+def test_guardian_usage_error_for_a_negative_term_grace() -> None:
     """A negative --term-grace is a usage error, since the guardian has no wait to use it for."""
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
@@ -331,7 +335,9 @@ def test_guardian_usage_error_for_a_negative_term_grace():
 
 
 @pytest.mark.parametrize("term_grace", ["nan", "inf"])
-def test_guardian_usage_error_for_a_non_finite_term_grace(term_grace):
+def test_guardian_usage_error_for_a_non_finite_term_grace(
+    term_grace: str,
+) -> None:
     """The guardian refuses a non-finite --term-grace with its usage message.
 
     Nan and inf both parse as floats; each exits 1 with the usage message.
@@ -353,7 +359,9 @@ def test_guardian_usage_error_for_a_non_finite_term_grace(term_grace):
 
 
 @pytest.mark.parametrize("parent_pid", ["0", "-1"])
-def test_guardian_usage_error_for_a_non_positive_parent(parent_pid):
+def test_guardian_usage_error_for_a_non_positive_parent(
+    parent_pid: str,
+) -> None:
     """The guardian refuses a --parent of zero or less with its usage message.
 
     Such a value parses as an integer; it exits 1 with the usage message.

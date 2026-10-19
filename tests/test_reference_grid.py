@@ -30,8 +30,8 @@ class TestReferenceCells:
         ],
     )
     def test_clamped_zero_overlap_is_an_exact_partition(
-        self, width, height, tile
-    ):
+        self, width: int, height: int, tile: int
+    ) -> None:
         """Union of the clamped cells is the extent and no two cells share a pixel."""
         cells = reference_cells(width, height, tile, 0.0, clamp=True)
         covered = 0
@@ -50,7 +50,9 @@ class TestReferenceCells:
                     or b[3] <= a[1]
                 ), f"cells overlap: {a} and {b}"
 
-    def test_unclamped_overlap_steps_origins_and_keeps_full_size_rects(self):
+    def test_unclamped_overlap_steps_origins_and_keeps_full_size_rects(
+        self,
+    ) -> None:
         """Unclamped overlapping cells step by the overlapped stride and keep the full edge.
 
         Overlap > 0 under clamp=False steps origins by the overlapped stride while they lie
@@ -69,7 +71,7 @@ class TestReferenceCells:
         assert all(c.x1 - c.x0 == tile and c.y1 - c.y0 == tile for c in cells)
         assert any(c.x1 > width or c.y1 > height for c in cells)
 
-    def test_clamped_overlapping_cells_cover_the_whole_frame(self):
+    def test_clamped_overlapping_cells_cover_the_whole_frame(self) -> None:
         """Clamped overlapping cells reach the far edge on both axes.
 
         Origins step while they lie inside the frame, so a stride that does not divide the
@@ -85,7 +87,7 @@ class TestReferenceCells:
         )
         assert max(c.x1 for c in cells) == max(c.y1 for c in cells) == 200
 
-    def test_names_are_column_letter_plus_row(self):
+    def test_names_are_column_letter_plus_row(self) -> None:
         from tcip_annotation.grid import column_index, column_label
 
         cells = reference_cells(2800, 200, 100, 0.0, clamp=True)
@@ -95,7 +97,7 @@ class TestReferenceCells:
             assert column_index(c.name.rstrip("0123456789")) == c.col
         assert cells[-1].name == "AB2"
 
-    def test_refusals_name_the_bad_input(self):
+    def test_refusals_name_the_bad_input(self) -> None:
         with pytest.raises(ValueError, match="tile_size"):
             reference_cells(100, 100, 0, 0.0)
         with pytest.raises(ValueError, match="overlap"):
@@ -121,20 +123,22 @@ class TestDerivations:
             (100_000, 1),
         ],
     )
-    def test_every_serving_cell_fits_the_cap(self, width, height):
+    def test_every_serving_cell_fits_the_cap(
+        self, width: int, height: int
+    ) -> None:
         tile = derive_serving_tile_size(width, height, CAP)
         cells = reference_cells(width, height, tile, 0.0, clamp=True)
         assert all((c.x1 - c.x0) * (c.y1 - c.y0) <= CAP for c in cells)
         assert len(cells) == 1 or width * height > CAP
 
-    def test_image_inside_the_cap_is_one_cell(self):
+    def test_image_inside_the_cap_is_one_cell(self) -> None:
         for width, height in [(1920, 1000), (5000, 64)]:
             tile = derive_serving_tile_size(width, height, CAP)
             assert (
                 len(reference_cells(width, height, tile, 0.0, clamp=True)) == 1
             )
 
-    def test_mosaic_scale_geometry(self):
+    def test_mosaic_scale_geometry(self) -> None:
         """An orthomosaic-sized extent derives tile 1920 and a 74 x 125 serving grid.
 
         The numeric case is 141130 x 239921 under the fixture display's cap.
@@ -145,7 +149,7 @@ class TestDerivations:
         assert geometry["cols"] == 74
         assert geometry["rows"] == 125
 
-    def test_derivations_are_deterministic(self):
+    def test_derivations_are_deterministic(self) -> None:
         assert derive_serving_tile_size(
             7000, 5000, CAP
         ) == derive_serving_tile_size(7000, 5000, CAP)
@@ -153,7 +157,7 @@ class TestDerivations:
             7000, 5000
         ) == derive_pointing_tile_size(7000, 5000)
 
-    def test_pointing_grain_is_fixed_in_render_space(self):
+    def test_pointing_grain_is_fixed_in_render_space(self) -> None:
         """Images at or past the artifact bound share one pointing grain.
 
         Images of different native sizes at or past the bound split their long edge into the
@@ -169,14 +173,16 @@ class TestDerivations:
             tile = derive_pointing_tile_size(*dims)
             assert math.ceil(long_native / tile) == expected
 
-    def test_pointing_tile_numeric_case_inside_the_artifact_bound(self):
+    def test_pointing_tile_numeric_case_inside_the_artifact_bound(
+        self,
+    ) -> None:
         """An image inside the artifact bound takes its pointing grain from its own long edge.
 
         A 640 by 480 image takes a pointing tile of edge 46.
         """
         assert derive_pointing_tile_size(640, 480) == 46
 
-    def test_serving_tile_is_a_fixed_derivation_of_the_extent(self):
+    def test_serving_tile_is_a_fixed_derivation_of_the_extent(self) -> None:
         """Five extents derive their known serving tile edges under the fixture cap."""
         assert derive_serving_tile_size(141130, 239921, CAP) == 1920
         assert derive_serving_tile_size(4000, 3000, CAP) == 1334
@@ -184,7 +190,7 @@ class TestDerivations:
         assert derive_serving_tile_size(640, 480, CAP) == 640
         assert derive_serving_tile_size(1920, 1000, CAP) == 1920
 
-    def test_an_encodings_edge_limit_bounds_the_tile_edge(self):
+    def test_an_encodings_edge_limit_bounds_the_tile_edge(self) -> None:
         """An encoding's edge limit splits a one-pixel level that fits the cap into cells.
 
         A one-pixel level within the cap but longer than the encoding's edge limit splits
@@ -196,7 +202,7 @@ class TestDerivations:
 
 
 class TestGridGeometry:
-    def test_round_trips_through_reference_cells(self):
+    def test_round_trips_through_reference_cells(self) -> None:
         geometry = grid_geometry(100, 80, 64, 0.0)
         cells = reference_cells(
             geometry["width"],
@@ -215,7 +221,7 @@ class TestGridGeometry:
         }
         assert len(cells) == geometry["cols"] * geometry["rows"]
 
-    def test_tile_size_and_overlap_are_required(self):
+    def test_tile_size_and_overlap_are_required(self) -> None:
         with pytest.raises(TypeError, match="'tile_size' and 'overlap'"):
             grid_geometry(100, 80)  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to both
         for grid in (grid_geometry, reference_cells):

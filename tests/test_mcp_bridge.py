@@ -12,20 +12,24 @@ import sys
 import threading
 import time
 from queue import Empty, Queue
+from typing import IO, TYPE_CHECKING
 
 import pytest
 
 from tests import REPO_ROOT
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
-def _send_jsonrpc(proc, obj: dict) -> None:
+
+def _send_jsonrpc(proc: subprocess.Popen[bytes], obj: dict) -> None:
     """Send a JSON-RPC message as newline-delimited JSON."""
     line = json.dumps(obj) + "\n"
     proc.stdin.write(line.encode("utf-8"))
     proc.stdin.flush()
 
 
-def _reader_thread(stdout, queue: Queue) -> None:
+def _reader_thread(stdout: IO[bytes], queue: Queue) -> None:
     """Read newline-delimited JSON-RPC messages into ``queue``, then ``None`` at EOF."""
     while True:
         line = stdout.readline()
@@ -63,7 +67,7 @@ class TestMcpBridge:
     """Tests of the JSON-RPC protocol against a spawned real MCP server."""
 
     @pytest.fixture(autouse=True)
-    def mcp_server(self):
+    def mcp_server(self) -> Iterator[None]:
         env = os.environ.copy()
 
         self.proc = subprocess.Popen(
@@ -101,7 +105,7 @@ class TestMcpBridge:
         _send_jsonrpc(self.proc, msg)
         return _recv(self.queue)
 
-    def test_initialize_and_list_tools(self):
+    def test_initialize_and_list_tools(self) -> None:
         """The server answers initialize and lists its tools, ``inspect_project`` among them."""
         # Initialize
         resp = self._call(

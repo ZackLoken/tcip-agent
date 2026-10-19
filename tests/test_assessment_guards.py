@@ -9,10 +9,20 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
+if TYPE_CHECKING:
+    from PIL import ImageDraw
+
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.data.selection import Selection
+    from tcip_mcp.pipelines.execution import Execution, MaskCut, Pass
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.traits import TraitEntry
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
@@ -45,7 +55,9 @@ from tests._training_values import (  # noqa: E402
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS  # noqa: E402
 
 
-def _trained(project: Path, experiment_id: str):
+def _trained(
+    project: Path, experiment_id: str
+) -> tuple[Path, Selection, Path, str]:
     """Ingest a capture, draw its selection and train a checkpoint on the selection's train side.
 
     Returns ``(images_dir, selection, selection_dir, checkpoint_path)``.
@@ -97,7 +109,11 @@ def _add_frame(
 
 
 def _resided(
-    project: Path, images_dir: Path, drawn, extra: dict[str, str], out: Path
+    project: Path,
+    images_dir: Path,
+    drawn: Selection,
+    extra: dict[str, str],
+    out: Path,
 ) -> Path:
     """Write a reference selection of its own at ``out`` and return ``out``.
 
@@ -137,7 +153,7 @@ def _resided(
     return out
 
 
-def _a_train_member(selection) -> str:
+def _a_train_member(selection: Selection) -> str:
     return next(s.member for s in selection.samples if s.side == "train")
 
 
@@ -145,8 +161,8 @@ def _a_train_member(selection) -> str:
 
 
 def test_a_distinct_image_holding_a_training_frames_boxes_is_a_legitimate_reference(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A distinct image holding a training frame's boxes is a disjoint reference.
 
     Two different images can carry identical boxes: the second is not the first, so a reference
@@ -176,8 +192,8 @@ def test_a_distinct_image_holding_a_training_frames_boxes_is_a_legitimate_refere
 
 
 def test_a_training_image_copied_under_a_new_name_into_the_reference_fails_disjointness(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A training image copied under a new name into the reference fails disjointness.
 
     A reference holding a byte copy of a training frame under another name fails with
@@ -207,8 +223,8 @@ def test_a_training_image_copied_under_a_new_name_into_the_reference_fails_disjo
 
 
 def test_a_reference_frame_in_a_training_group_fails_even_when_its_pixels_are_its_own(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A reference frame in a training group fails disjointness on the group alone.
 
     A holdout frame ``<member>_5_5`` of its own pixels, grouped by tile prefix with a training
@@ -242,7 +258,9 @@ def test_a_reference_frame_in_a_training_group_fails_even_when_its_pixels_are_it
     ]
 
 
-def test_a_mosaic_reference_band_is_held_out_only_inside_a_non_training_region():
+def test_a_mosaic_reference_band_is_held_out_only_inside_a_non_training_region() -> (
+    None
+):
     """A mosaic reference rect is held out only inside a non-training region.
 
     Against a within-image split's recorded regions, a reference rect is held out when it lies
@@ -279,11 +297,11 @@ def test_a_mosaic_reference_band_is_held_out_only_inside_a_non_training_region()
 # -- the count and classifier criteria ------------------------------------------------
 
 
-def _count_entry(**fields):
+def _count_entry(**fields: object) -> TraitEntry:
     return fx.with_fields(fx.COUNT_SPEC, **fields)
 
 
-def test_an_accurate_reference_passes_the_count_criterion():
+def test_an_accurate_reference_passes_the_count_criterion() -> None:
     from tcip_mcp.pipelines.operating_point import count_criterion
 
     cal, hold = good_cal_holdout()
@@ -299,7 +317,9 @@ def test_an_accurate_reference_passes_the_count_criterion():
     assert failures == [], failures
 
 
-def test_a_known_count_bias_fails_the_outcome_tolerance_with_no_dispersion_at_all():
+def test_a_known_count_bias_fails_the_outcome_tolerance_with_no_dispersion_at_all() -> (
+    None
+):
     """A known count bias with no dispersion fails the outcome tolerance.
 
     Every held-out image over-counts by the same ten objects: the bias is certain, its spread
@@ -331,7 +351,7 @@ def _items(image: str, calls: list[tuple[bool, bool]]) -> list[dict]:
     ]
 
 
-def test_an_agreeing_classifier_passes_the_classifier_criterion():
+def test_an_agreeing_classifier_passes_the_classifier_criterion() -> None:
     from tcip_mcp.pipelines.operating_point import classifier_criterion
 
     calls = [(True, True), (True, True), (False, False), (False, False)]
@@ -343,7 +363,9 @@ def test_an_agreeing_classifier_passes_the_classifier_criterion():
     assert failures == [], (failures, evidence)
 
 
-def test_compensating_classification_errors_cannot_validate_through_pooled_counts():
+def test_compensating_classification_errors_cannot_validate_through_pooled_counts() -> (
+    None
+):
     """Compensating classification errors fail the classifier agreement floor.
 
     Each image's two positives called negative and two negatives called positive: its positive
@@ -365,8 +387,8 @@ def test_compensating_classification_errors_cannot_validate_through_pooled_count
 
 
 def test_an_unauthored_tolerance_refuses_the_revision_with_the_breeders_question(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A count revision leaving a tolerance unauthored is refused with the breeder's question.
 
     With ``count_bias_tolerance_frac`` unset, the proposal raises ``UnauthoredFieldError`` naming
@@ -383,8 +405,8 @@ def test_an_unauthored_tolerance_refuses_the_revision_with_the_breeders_question
 
 
 def test_an_iou_match_operationalization_is_proposed_only_with_its_jitter_and_margin(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An ``iou_match`` proposal is refused without its jitter and margin and recorded with them.
 
     The fields an IoU match compares by are part of the criterion a count operationalization
@@ -424,8 +446,8 @@ def test_an_iou_match_operationalization_is_proposed_only_with_its_jitter_and_ma
     ],
 )
 def test_an_iou_field_that_is_no_finite_nonnegative_value_refuses(
-    field, value
-):
+    field: str, value: float | str
+) -> None:
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError, match=field):
@@ -433,8 +455,8 @@ def test_an_iou_field_that_is_no_finite_nonnegative_value_refuses(
 
 
 def test_a_delivery_under_another_revision_than_the_assessments_refuses_naming_both(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
     chain = run_the_chain(tmp_path, experiment_id="exp-revision")
@@ -460,7 +482,9 @@ def test_a_delivery_under_another_revision_than_the_assessments_refuses_naming_b
 # -- the one gate over the producers ------------------------------------------------------
 
 
-def test_one_producer_clears_the_gate_and_a_series_of_two_refuses(tmp_path):
+def test_one_producer_clears_the_gate_and_a_series_of_two_refuses(
+    tmp_path: Path,
+) -> None:
     """The gate clears one producer's bucket and refuses a series of two, naming each.
 
     Two checkpoints publish over one capture: the assessed one's bucket alone validates, and the
@@ -507,8 +531,8 @@ def test_one_producer_clears_the_gate_and_a_series_of_two_refuses(tmp_path):
 
 
 def test_an_assessment_whose_retained_reference_is_gone_answers_for_nothing(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The gate refuses a bucket whose assessment's retained reference is gone.
 
     An assessment whose retained reference copies are removed reads as a changed reference, so
@@ -535,8 +559,8 @@ def test_an_assessment_whose_retained_reference_is_gone_answers_for_nothing(
 
 
 def test_a_reference_source_edited_after_the_assessment_answers_for_nothing(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The gate refuses a bucket whose reference source was edited after its assessment.
 
     The pixels an assessment measured are part of its reference: a source image edited after it
@@ -560,7 +584,7 @@ def test_a_reference_source_edited_after_the_assessment_answers_for_nothing(
         result=nothing,
     ).validated
     assessment = read_assessment(tmp_path, chain.assessment["assessment_id"])
-    source = assessment.reference.samples[0].source
+    source = assessment.reference.samples[0].sample.source
     with Image.open(source) as frame:
         edited = frame.copy()
     edited.putpixel((0, 0), (255, 0, 0))
@@ -580,7 +604,9 @@ def test_a_reference_source_edited_after_the_assessment_answers_for_nothing(
 # -- a missing fact refuses by name -----------------------------------------------------
 
 
-def test_an_evaluation_record_missing_its_ground_truth_field_refuses_by_name():
+def test_an_evaluation_record_missing_its_ground_truth_field_refuses_by_name() -> (
+    None
+):
     from tcip_mcp.pipelines.training.evaluation import gt_objects
 
     with pytest.raises(KeyError, match="gt"):
@@ -588,8 +614,8 @@ def test_an_evaluation_record_missing_its_ground_truth_field_refuses_by_name():
 
 
 def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from types import SimpleNamespace
 
     from PIL import Image
@@ -599,7 +625,13 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(
     from tcip_mcp.pipelines.execution import Pass, execution_record
 
     class Silent:
-        def predict_batch(self, sources, execution, *, tile_batch_size):
+        def predict_batch(
+            self,
+            sources: list[str | Path | BandGroupRef],
+            execution: Execution,
+            *,
+            tile_batch_size: int,
+        ) -> list[dict]:
             return [{"image": s, "regression_values": []} for s in sources]
 
     checkpoint = SimpleNamespace(
@@ -630,7 +662,13 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(
         _scalar(p, [sample], entry, {sample.location: "digest"})
 
     class Short:
-        def predict_batch(self, sources, execution, *, tile_batch_size):
+        def predict_batch(
+            self,
+            sources: list[str | Path | BandGroupRef],
+            execution: Execution,
+            *,
+            tile_batch_size: int,
+        ) -> list[dict]:
             return []
 
     p.predictor = Short()
@@ -641,8 +679,8 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(
 
 
 def test_a_polygon_that_fails_to_rasterize_refuses_rather_than_training_an_empty_mask(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from PIL import ImageDraw
 
     from tests._producer_fixtures import dataset_over, label_image, write_image
@@ -662,7 +700,9 @@ def test_a_polygon_that_fails_to_rasterize_refuses_rather_than_training_an_empty
     )
     dataset = dataset_over("instance_seg", images_dir, subject=SUBJECT)
 
-    def refuse(self, *args, **kwargs):
+    def refuse(
+        self: ImageDraw.ImageDraw, *args: object, **kwargs: object
+    ) -> NoReturn:
         raise ValueError("the ring would not draw")
 
     monkeypatch.setattr(ImageDraw.ImageDraw, "polygon", refuse)
@@ -671,8 +711,8 @@ def test_a_polygon_that_fails_to_rasterize_refuses_rather_than_training_an_empty
 
 
 def test_an_instance_segmentation_assessment_reads_its_reference_through_polygons(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An instance segmentation count fit reads polygons and refuses a box-only reference.
 
     An instance-segmentation checkpoint's count fit reads its reference through its own task's
@@ -707,7 +747,7 @@ def test_an_instance_segmentation_assessment_reads_its_reference_through_polygon
         project=tmp_path,
     )
 
-    def fit(polygons: bool):
+    def fit(polygons: bool) -> tuple[Pass, dict, list[str]]:
         reference = detection_images(
             tmp_path.parent / f"reference-{polygons}",
             {"subject": SUBJECT},
@@ -728,7 +768,7 @@ def test_an_instance_segmentation_assessment_reads_its_reference_through_polygon
             samples[:2],
             samples[2:],
             fx.COUNT_SPEC,
-            "per_image_count",
+            None,
             source_digests(samples),
             **COUNT_TEST,
         )
@@ -740,8 +780,8 @@ def test_an_instance_segmentation_assessment_reads_its_reference_through_polygon
 
 
 def test_an_assessment_records_the_test_settings_and_the_reason_it_states(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An assessment records the test settings and the reason it states, no door defaulting them.
 
     The equivalence multiplier and the dispersion quantile a count assessment states are the
@@ -758,11 +798,11 @@ def test_an_assessment_records_the_test_settings_and_the_reason_it_states(
     )
 
     count = recorded.criterion["count"]
+    assert isinstance(count, dict)
     assert count["equivalence_z"] == EQUIVALENCE_Z
-    assert (
-        count["calibration_curve"]["dispersion_quantile"]
-        == DISPERSION_QUANTILE
-    )
+    curve = count["calibration_curve"]
+    assert isinstance(curve, dict)
+    assert curve["dispersion_quantile"] == DISPERSION_QUANTILE
     assert recorded.rationale == RATIONALE
     for door in (assessment.assess, calibration_tools.assess_checkpoint):
         parameters = inspect.signature(door).parameters
@@ -774,8 +814,8 @@ def test_an_assessment_records_the_test_settings_and_the_reason_it_states(
 
 
 def test_a_detector_assessment_collects_at_the_conf_it_states_and_records_it_as_the_floor(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A detector assessment collects at the conf it states and records it as the floor.
 
     Every prediction a detector assessment collects runs at the conf its statement carries, that
@@ -793,7 +833,12 @@ def test_a_detector_assessment_collects_at_the_conf_it_states_and_records_it_as_
     collected: set[float] = set()
     real = GenericPredictor.predict_batch
 
-    def recording(self, sources, execution, **kwargs):
+    def recording(
+        self: GenericPredictor,
+        sources: list[str | Path | BandGroupRef],
+        execution: Execution,
+        **kwargs: int,
+    ) -> list[dict]:
         collected.add(execution.conf)
         return real(self, sources, execution, **kwargs)
 
@@ -827,8 +872,8 @@ def test_a_detector_assessment_collects_at_the_conf_it_states_and_records_it_as_
     ],
 )
 def test_the_assess_tools_take_a_dispersion_quantile_within_zero_and_one(
-    tool, bands
-):
+    tool: str, bands: dict[str, str] | dict[str, int]
+) -> None:
     """The assess tools refuse a dispersion quantile of -0.1 or 1.5 by name, and not 0.0 or 1.0.
 
     Called through the MCP server, the answer at -0.1 and 1.5 names ``dispersion_quantile``, and
@@ -861,15 +906,15 @@ def test_the_assess_tools_take_a_dispersion_quantile_within_zero_and_one(
 
 
 def test_a_restored_record_runs_as_recorded_and_a_changed_overlap_or_merge_refuses_by_name(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import ExecutionRefusedError, prepare
 
     _images, _drawn, _sel, checkpoint_path = _trained(tmp_path, "exp-restore")
     checkpoint = load_registered_checkpoint(checkpoint_path, project=tmp_path)
 
-    def tiled(**merge) -> Stated:
+    def tiled(**merge: bool | int | float | str | MaskCut | None) -> Stated:
         return Stated(
             tile=True, overlap=0.2, **{**SAMPLE_DETECTOR_PASS, **merge}
         )

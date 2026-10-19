@@ -8,21 +8,33 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 from pydantic import ValidationError
 
 import tcip_store
-from tcip_mcp.web_client import DatasetSelection, GuiState, gui_snapshot_key
+from tcip_mcp.web_client import (
+    GUI_STATE_DEFAULTS,
+    gui_snapshot_key,
+    read_gui_snapshot,
+    selection_for,
+)
 from tcip_web.state import (
     GuiMutationInvalidError,
     Held,
     NoProjectOpenError,
     OpenProject,
+    PanelEnvelope,
     ProjectNotOpenError,
     StateStore,
 )
 from tests._web_fixtures import named_project
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+    from tcip_store import Key, Txn
 
 
 def test_version_increments_on_mutate() -> None:
@@ -45,10 +57,8 @@ def test_a_change_persists_to_the_project_open_when_it_is_made(
     asyncio.run(store.open_project(proj_b))
     asyncio.run(store.mutate({"active_tab": "results"}, project=store.held()))
 
-    assert (
-        tcip_store.read(gui_snapshot_key(proj_b.root))["active_tab"]
-        == "results"
-    )
+    snapshot = read_gui_snapshot(proj_b.root)
+    assert snapshot is not None and snapshot.active_tab == "results"
     assert not tcip_store.exists(gui_snapshot_key(proj_a.root))
 
 
@@ -100,14 +110,14 @@ def test_a_mutation_made_for_no_project_persists_nowhere(
 
 
 def test_a_state_that_cannot_be_persisted_raises_and_is_not_held(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import tcip_mcp.web_client as web_client
 
     store = StateStore()
     asyncio.run(store.open_project(named_project(tmp_path / "A", "A")))
 
-    def _refuse(*args, **kwargs):
+    def _refuse(*args: object, **kwargs: object) -> NoReturn:
         raise tcip_store.StoreError("the store refused the write")
 
     monkeypatch.setattr(web_client.tcip_store, "replace", _refuse)
@@ -129,8 +139,8 @@ def test_a_reopened_project_holds_the_state_it_persisted(
         store.mutate(
             {
                 "active_tab": "results",
-                "dataset": DatasetSelection(
-                    dataset_root=str(project.root / "ds"), date="undated"
+                "dataset": selection_for(
+                    project.root / "ds", None, "undated", None, 0
                 ),
             },
             project=store.held(),
@@ -149,7 +159,7 @@ def test_opening_a_project_with_no_snapshot_holds_a_fresh_state(
 ) -> None:
     store = StateStore()
     asyncio.run(store.open_project(named_project(tmp_path / "A", "A")))
-    assert store.state == GuiState()
+    assert store.state == GUI_STATE_DEFAULTS
 
 
 def test_opening_a_project_whose_snapshot_does_not_decode_refuses_and_leaves_the_open_one(
@@ -188,6 +198,7 @@ def test_a_persisted_snapshot_stating_a_nested_field_partly_is_reported_not_defa
     asyncio.run(store.open_project(project))
     asyncio.run(store.mutate({"active_tab": "results"}, project=store.held()))
     written = tcip_store.read(gui_snapshot_key(project.root))
+    assert isinstance(written, dict)
 
     reopened = StateStore()
     asyncio.run(reopened.open_project(project))
@@ -222,8 +233,8 @@ def test_mutate_refuses_a_built_model_with_a_wrongly_typed_field_and_holds_nothi
     The store's version and state are unchanged.
     """
     store = StateStore()
-    bad_dataset = DatasetSelection.model_construct(
-        current_image_index="banana"
+    bad_dataset = GUI_STATE_DEFAULTS.dataset.model_copy(
+        update={"current_image_index": "banana"}
     )
     with pytest.raises(GuiMutationInvalidError):
         asyncio.run(store.mutate({"dataset": bad_dataset}, project=None))
@@ -250,10 +261,12 @@ def test_retained_events_are_the_open_projects_and_go_when_another_opens(
     proj_a = named_project(tmp_path / "A", "A")
     proj_b = named_project(tmp_path / "B", "B")
     asyncio.run(store.open_project(proj_a))
-    store.retain_event("meta", {"event_type": "for_a"})
-    assert [e["event_type"] for e in store.retained_events("meta")] == [
-        "for_a"
-    ]
+    store.retain_event(
+        PanelEnvelope(
+            panel="meta", event_type="for_a", data={}, event_id="for_a#1"
+        )
+    )
+    assert [e.event_type for e in store.retained_events("meta")] == ["for_a"]
 
     asyncio.run(store.open_project(proj_b))
     assert store.retained_events("meta") == []
@@ -281,14 +294,17 @@ class _SwitchingStore(StateStore):
 
     def __init__(self, first: OpenProject, second: OpenProject) -> None:
         super().__init__()
-        self._reads = [Held(first, GuiState()), Held(second, GuiState())]
+        self._reads = [
+            Held(first, GUI_STATE_DEFAULTS),
+            Held(second, GUI_STATE_DEFAULTS),
+        ]
 
     @property
     def _now(self) -> Held:
         return self._reads.pop(0) if len(self._reads) > 1 else self._reads[0]
 
     @_now.setter
-    def _now(self, value) -> None:
+    def _now(self, value: Held) -> None:
         """Ignore the assignment, so the switching reads stand."""
 
 
@@ -309,8 +325,8 @@ def test_admission_reads_the_open_project_once(tmp_path: Path) -> None:
 
 
 def test_a_switch_publishes_nothing_until_its_departure_commits(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A switch publishes nothing until its departure commits.
 
     Opening B departs from A in A's stats transaction; while that transaction is open, and when
@@ -330,7 +346,7 @@ def test_a_switch_publishes_nothing_until_its_departure_commits(
     failing = [True]
 
     @contextlib.contextmanager
-    def observed(*keys, **kwargs):
+    def observed(*keys: Key, **kwargs: float | None) -> Generator[Txn]:
         with real(*keys, **kwargs) as txn:
             yield txn
             seen.append((store.opened, store.state))
@@ -346,7 +362,7 @@ def test_a_switch_publishes_nothing_until_its_departure_commits(
     failing[0] = False
     asyncio.run(store.open_project(proj_b))
     assert seen[-1] == held_a
-    assert (store.opened, store.state) == (proj_b, GuiState())
+    assert (store.opened, store.state) == (proj_b, GUI_STATE_DEFAULTS)
 
 
 def test_a_close_naming_another_project_closes_nothing(tmp_path: Path) -> None:

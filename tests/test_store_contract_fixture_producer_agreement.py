@@ -5,7 +5,10 @@ Each record is checked against a golden of its shape or against the shape its re
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 TRAIT_UNDER_TEST = "trait_under_test"
 DELIVERY_KIND_UNDER_TEST = "state_crossing_dates"
@@ -115,8 +118,8 @@ it shipped and its plant mapping's disclosure."""
 
 
 def test_a_selection_record_carries_each_sample_s_own_source_label_group_and_side(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A selection record's first sample carries member, source, ground truth, group and side keys.
 
     In the record ``draw_splits`` writes over real images and their label documents, the first
@@ -139,13 +142,16 @@ def test_a_selection_record_carries_each_sample_s_own_source_label_group_and_sid
     )
     assert "error" not in drawn, drawn
     fresh = ts.read(selection.selection_key(tmp_path / "splits"))
+    assert isinstance(fresh, dict)
 
     assert (
         "members" not in fresh
         and "splits" not in fresh
         and "date" not in fresh
     )
-    assert set(fresh["samples"][0]) >= {
+    samples = fresh["samples"]
+    assert isinstance(samples, list) and isinstance(samples[0], dict)
+    assert set(samples[0]) >= {
         "member",
         "source",
         "ground_truth",
@@ -155,8 +161,8 @@ def test_a_selection_record_carries_each_sample_s_own_source_label_group_and_sid
 
 
 def test_the_delivery_events_golden_carries_every_key_a_delivery_records(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The delivery-event golden carries every key a real phenology delivery records.
 
     A real phenology delivery through a plant mapping, every record of it made by the
@@ -206,8 +212,8 @@ def test_the_delivery_events_golden_carries_every_key_a_delivery_records(
 
 
 def test_the_traits_golden_carries_every_field_the_proposing_and_confirming_producers_write(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The traits golden carries every field the proposing and confirming producers write.
 
     The record ``propose_trait`` and ``confirm_revision`` leave on the store carries exactly
@@ -219,16 +225,25 @@ def test_the_traits_golden_carries_every_field_the_proposing_and_confirming_prod
 
     fx.seed_confirmed_count(tmp_path)
     fresh = ts.read(traits.trait_key(tmp_path, fx.COUNT_TRAIT))
+    assert isinstance(fresh, dict)
+    revisions = fresh["revisions"]
+    assert isinstance(revisions, list)
 
     (golden_revision,), fresh_revision = (
         TRAIT_GOLDEN["revisions"],
-        fresh["revisions"][-1],
+        revisions[-1],
     )
+    assert isinstance(fresh_revision, dict)
+    fresh_entry = fresh_revision["entry"]
+    assert isinstance(fresh_entry, dict)
+    fresh_operationalizations = fresh_entry["operationalizations"]
+    assert isinstance(fresh_operationalizations, dict)
     assert set(TRAIT_GOLDEN) == set(fresh)
     assert set(golden_revision) == set(fresh_revision)
-    assert set(golden_revision["entry"]) == set(fresh_revision["entry"])
+    assert set(golden_revision["entry"]) == set(fresh_entry)
     (golden_op,), (fresh_op,) = (
         golden_revision["entry"]["operationalizations"].values(),
-        fresh_revision["entry"]["operationalizations"].values(),
+        fresh_operationalizations.values(),
     )
+    assert isinstance(fresh_op, dict)
     assert set(golden_op) == set(fresh_op)

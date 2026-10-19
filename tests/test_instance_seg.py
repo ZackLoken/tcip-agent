@@ -9,7 +9,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 
-def test_mask_rcnn_uses_masks_in_loss_and_predicts_masks():
+def test_mask_rcnn_uses_masks_in_loss_and_predicts_masks() -> None:
     from tests import bespoke_models
     from tests._chain_fixtures import detector_values
 
@@ -41,7 +41,7 @@ def test_mask_rcnn_uses_masks_in_loss_and_predicts_masks():
     assert "masks" in out[0]  # predictions carry instance masks
 
 
-def test_segm_metrics_score_mask_overlap():
+def test_segm_metrics_score_mask_overlap() -> None:
     from tcip_mcp.pipelines.training.evaluation import (
         detection_metrics,
         records_from_detector,

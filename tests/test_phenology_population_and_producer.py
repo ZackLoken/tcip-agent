@@ -7,10 +7,14 @@ cover included; dates whose buckets were produced by different checkpoints refus
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import csv_rows
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 pytest.importorskip("torch")
 
@@ -107,7 +111,7 @@ def test_an_empty_population_refuses_naming_the_argument(
 
 
 def test_the_web_route_delivers_the_population_it_was_given(
-    tmp_path: Path, client
+    tmp_path: Path, client: TestClient
 ) -> None:
     from tests._chain_fixtures import attributed_series
 
@@ -163,7 +167,7 @@ def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
     other_bucket = f"other/{second}"
     published = run_inference(
         tmp_path,
-        checkpoint_path=other["path"],
+        checkpoint_path=other.path,
         images_dir=str(series.root / "images" / second),
         bucket=other_bucket,
         stated=chain_pass(),

@@ -7,6 +7,7 @@ and the crash propagates.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -17,6 +18,13 @@ from tcip_mcp.pipelines.data import split_construction as sc
 from tcip_mcp.pipelines.training import subprocess_worker as worker
 from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
+if TYPE_CHECKING:
+    from typing import NoReturn
+
+    from pydantic import JsonValue
+
+    from tcip_store import Key
+
 
 def _training_run_events(root: Path) -> list[dict]:
     events = ts.read_log(audit_log_key(root)).records
@@ -24,15 +32,15 @@ def _training_run_events(root: Path) -> list[dict]:
 
 
 def test_a_pre_envelope_crash_marks_the_run_failed_and_opens_a_training_run_event(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     run_dir = opened_run(
         tmp_path,
         detection_config(tmp_path / "data", project=tmp_path, batch_size=1),
         experiment_id="exp-worker-crash",
     )
 
-    def _boom(*args, **kwargs):
+    def _boom(*args: object, **kwargs: object) -> NoReturn:
         raise RuntimeError("dataset build exploded")
 
     # recorded_datasets is imported inside prepare_run_context at call time, so patching the
@@ -41,11 +49,12 @@ def test_a_pre_envelope_crash_marks_the_run_failed_and_opens_a_training_run_even
     with pytest.raises(RuntimeError, match="dataset build exploded"):
         worker.run_directory(run_dir)
 
-    observation = exp.observe(run_dir)
+    observation = exp.observe_run(run_dir)
     final = observation.final
-    assert final["state"] == "failed"
-    assert final["status_error"] == "dataset build exploded"
-    assert final["checkpoint"] is None
+    assert final is not None
+    assert final.state == "failed"
+    assert final.status_error == "dataset build exploded"
+    assert final.checkpoint is None
     assert observation.state == "failed"
 
     events = _training_run_events(tmp_path)
@@ -55,8 +64,8 @@ def test_a_pre_envelope_crash_marks_the_run_failed_and_opens_a_training_run_even
 
 
 def test_a_pre_envelope_crash_whose_audit_line_is_refused_names_both_causes(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A pre-envelope crash whose audit line is refused names both causes.
 
     The setup error propagates, and the final status names it and the unwritten line.
@@ -69,10 +78,10 @@ def test_a_pre_envelope_crash_whose_audit_line_is_refused_names_both_causes(
         experiment_id="exp-worker-crash-unaudited",
     )
 
-    def _boom(*args, **kwargs):
+    def _boom(*args: object, **kwargs: object) -> NoReturn:
         raise RuntimeError("dataset build exploded")
 
-    def _refuse(key, entry):
+    def _refuse(key: Key, entry: dict[str, JsonValue]) -> NoReturn:
         raise OSError("the log's disk is full")
 
     monkeypatch.setattr(sc, "recorded_datasets", _boom)
@@ -80,7 +89,8 @@ def test_a_pre_envelope_crash_whose_audit_line_is_refused_names_both_causes(
     with pytest.raises(RuntimeError, match="dataset build exploded"):
         worker.run_directory(run_dir)
 
-    final = exp.observe(run_dir).final
-    assert final["state"] == "failed"
-    assert "dataset build exploded" in final["status_error"]
-    assert "audit entry could not be written" in final["status_error"]
+    final = exp.observe_run(run_dir).final
+    assert final is not None and final.status_error is not None
+    assert final.state == "failed"
+    assert "dataset build exploded" in final.status_error
+    assert "audit entry could not be written" in final.status_error

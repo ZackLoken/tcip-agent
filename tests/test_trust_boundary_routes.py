@@ -9,6 +9,7 @@ WebSocket URL, which is how a connection through a routable address is simulated
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,6 +17,9 @@ from starlette.websockets import WebSocketDisconnect
 
 from tcip_web.app import app
 from tcip_web.trust_boundary import TrustBoundaryMiddleware
+
+if TYPE_CHECKING:
+    from starlette.types import Receive, Scope, Send
 
 LAN = "http://192.168.1.23:8765"
 TERMINAL_WORDS = "interactive agent terminal"
@@ -131,7 +135,9 @@ def test_the_lifespan_runs_with_no_arrival_to_classify() -> None:
         assert running.get("/health").status_code == 200
 
 
-async def _accepting_ws_app(scope, receive, send) -> None:
+async def _accepting_ws_app(
+    scope: Scope, receive: Receive, send: Send
+) -> None:
     """Accept a WebSocket and send the one message ``hello``, with no origin check of its own."""
     await send({"type": "websocket.accept"})
     await send({"type": "websocket.send", "text": "hello"})
