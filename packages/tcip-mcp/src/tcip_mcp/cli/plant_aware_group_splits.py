@@ -67,7 +67,7 @@ def derive_plant_group_key_map(
             "no plant records to match against (the plant CSV(s) parsed to zero rows)"
         )
 
-    tolerance_m = resolve_nn_tolerance_m(plants, nn_tolerance_m)["value"]
+    tolerance_m = resolve_nn_tolerance_m(plants, nn_tolerance_m).value
 
     group_key_map: dict[str, str] = {}
     failures: list[str] = []

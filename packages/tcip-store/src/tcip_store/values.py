@@ -2,20 +2,22 @@
 
 The module also states how a producer says a number is not finite. A record is spelled by
 :func:`encode_record` and a log line by :func:`encode_log_line`; both are read back by
-:func:`decode_value`. :func:`check_json_value` refuses, naming the field, an object JSON has no
-type for or a non-finite number. :func:`stored_number` keeps a non-finite number as a JSON null
-beside a sibling field naming the state.
+:func:`decode_value`. :func:`check_json_value` refuses, naming the field, a value pydantic's
+``JsonValue`` does not admit or a non-finite number. :func:`stored_number` keeps a non-finite
+number as a JSON null beside a sibling field naming the state.
 """
 
 from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, TypeGuard
+
+from pydantic import ConfigDict, JsonValue, TypeAdapter, ValidationError
 
 
-def encode_record(value: Any) -> bytes:
+def encode_record(value: JsonValue) -> bytes:
     """Return a record's bytes: UTF-8 JSON indented by two, keys in their authored order.
 
     The bytes end in a trailing newline. Refuses what :func:`check_json_value` refuses, before
@@ -28,7 +30,7 @@ def encode_record(value: Any) -> bytes:
     return f"{text}\n".encode()
 
 
-def encode_log_line(value: Any) -> bytes:
+def encode_log_line(value: JsonValue) -> bytes:
     """Return a log entry's bytes: UTF-8 JSON on one line, keys in their authored order.
 
     Refuses what :func:`check_json_value` refuses, before anything is spelled.
@@ -39,7 +41,7 @@ def encode_log_line(value: Any) -> bytes:
     ).encode("utf-8")
 
 
-def decode_value(data: bytes) -> Any:
+def decode_value(data: bytes) -> JsonValue:
     """Return the value a record's or a log entry's bytes spell.
 
     Raises ``ValueError`` when they do not decode.
@@ -47,18 +49,16 @@ def decode_value(data: bytes) -> Any:
     return json.loads(data.decode("utf-8"))
 
 
-_SCALARS = (str, bool, int, float, type(None))
-
 NOT_FINITE_SUFFIX = "_state"
 """Appended to a numeric field's name for the sibling that says why it is null."""
 
 
-def scalar_number(value: Any) -> bool:
+def scalar_number(value: object) -> TypeGuard[int | float]:
     """Return whether ``value`` is a number other than a boolean."""
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def finite_number(value: Any) -> bool:
+def finite_number(value: object) -> TypeGuard[int | float]:
     """Return whether ``value`` is a finite :func:`scalar_number`."""
     return scalar_number(value) and math.isfinite(value)
 
@@ -74,7 +74,7 @@ def non_finite_state(value: float) -> str | None:
     return None
 
 
-def stored_number(field: str, value: Any) -> dict[str, Any]:
+def stored_number[T](field: str, value: T) -> dict[str, T | str | None]:
     """Return one numeric field as a record carries it, with a state field when it is not a number.
 
     A finite number, or None, is carried as itself. A non-finite one becomes null plus
@@ -99,45 +99,31 @@ def stored_numbers(values: Mapping[str, Any]) -> dict[str, Any]:
     return row
 
 
-def finite_or_none(value: Any) -> Any:
+def finite_or_none[T](value: T) -> T | None:
     """Return ``None`` for a non-finite float, else ``value``; no state companion is written."""
     if isinstance(value, float) and non_finite_state(value) is not None:
         return None
     return value
 
 
-def check_json_value(value: Any, *, path: str = "value") -> None:
-    """Refuse a payload the canonical codec cannot encode, naming the field and the type.
+_FINITE_JSON: TypeAdapter[JsonValue] = TypeAdapter(
+    JsonValue, config=ConfigDict(allow_inf_nan=False)
+)
 
-    Raises ``TypeError`` for an object JSON has no type for and ``ValueError`` for a non-finite
-    number. ``path`` names the position inside the payload.
+
+def check_json_value(value: object, *, path: str = "value") -> None:
+    """Refuse a payload that is not a finite JSON value, naming each position and its type.
+
+    A JSON value is pydantic's ``JsonValue``: a ``dict`` keyed by strings, a list, a string,
+    number, boolean or None, every number finite. Anything else refuses (``ValueError``) under
+    ``path``, naming the position and the type it holds, and naming :func:`stored_number` as how
+    a non-finite number is stored.
     """
-    if isinstance(value, Mapping):
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise TypeError(
-                    f"{path} is keyed by {type(key).__name__} {key!r}: a JSON object's keys "
-                    "are strings, so convert the key before storing it"
-                )
-            check_json_value(item, path=f"{path}.{key}")
-        return
-    if isinstance(value, float):
-        state = non_finite_state(value)
-        if state is not None:
-            raise ValueError(
-                f"{path} is {state}, which JSON cannot spell and no strict parser will read. "
-                "Represent it as null beside a field naming the state, at the writer that "
-                "produced it."
-            )
-        return
-    if isinstance(value, _SCALARS):
-        return
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        for index, item in enumerate(value):
-            check_json_value(item, path=f"{path}[{index}]")
-        return
-    raise TypeError(
-        f"{path} is a {type(value).__name__}, which JSON has no type for. Convert it to a "
-        "string, number, boolean, list or object at the writer, so the record states what it "
-        "holds rather than a repr of it."
-    )
+    try:
+        _FINITE_JSON.validate_python(value)
+    except ValidationError as exc:
+        raise ValueError(
+            f"{path} is not a finite JSON value: {exc}\nConvert what it holds to a JSON type at "
+            "the writer, a non-finite number to null beside a field naming its state "
+            "(stored_number)."
+        ) from exc

@@ -180,7 +180,7 @@ describe("buildAnnotateShapes", () => {
     });
     const [start, tail] = buildAnnotateShapes({ ...base, draft }).slice(-2);
     expect(start).toMatchObject({ label: "cut", points: [[3, 4]], color: "#123456" });
-    expect(start.vertices).toBeUndefined();
+    expect(start).not.toHaveProperty("vertices");
     expect(tail).toMatchObject({
       points: [
         [3, 4],
@@ -237,7 +237,7 @@ describe("buildAnnotateShapes", () => {
       ],
     });
     expect(shapes).toHaveLength(1);
-    expect(shapes[0].xyxy).toEqual([33, 6.1, 90.1, 58]);
+    expect(shapes[0]).toMatchObject({ xyxy: [33, 6.1, 90.1, 58] });
   });
 
   it("box mode adds one read-only derived box per active-subject polygon, === ringsBbox, unlabeled", () => {
@@ -246,7 +246,7 @@ describe("buildAnnotateShapes", () => {
     const shapes = buildAnnotateShapes({ ...base, mode: "box", boxes: [] });
     const derived = shapes.filter((s) => s.kind === "box");
     expect(derived).toHaveLength(1); // only the active "subject_a" polygon; "other" is filtered out
-    expect(derived[0].xyxy).toEqual(ringsBbox(base.polygons[0].rings));
+    expect(derived[0]).toMatchObject({ xyxy: ringsBbox(base.polygons[0].rings) });
     expect(derived[0].label).toBeUndefined();
     expect(derived[0].dash).toBeUndefined();
   });
@@ -276,7 +276,7 @@ describe("buildAnnotateShapes", () => {
       focused: focusOn("polygon", 0),
     });
     expect(shapes).toHaveLength(2);
-    expect(shapes.map((s) => s.points)).toEqual(multi.rings);
+    expect(shapes.map((s) => ("points" in s ? s.points : null))).toEqual(multi.rings);
     expect(shapes.every((s) => s.color === RED && s.tag === "gt" && s.halo)).toBe(true);
     // Labeled once: a two-part subject_a is one subject_a, not two.
     expect(shapes.filter((s) => s.label === "subject_a")).toHaveLength(1);
@@ -302,7 +302,7 @@ describe("buildAnnotateShapes", () => {
     const shapes = buildAnnotateShapes({ ...base, mode: "box", boxes: [], polygons: [multi] });
     const derived = shapes.filter((s) => s.kind === "box");
     expect(derived).toHaveLength(1);
-    expect(derived[0].xyxy).toEqual([0, 0, 60, 60]);
+    expect(derived[0]).toMatchObject({ xyxy: [0, 0, 60, 60] });
   });
 
   it("point mode pushes each active-subject point as its own point shape (no box, no path)", () => {
@@ -324,7 +324,7 @@ describe("buildAnnotateShapes", () => {
       color: RED,
       tag: "gt",
     });
-    expect(shapes[0].xyxy).toBeUndefined();
+    expect(shapes[0]).not.toHaveProperty("xyxy");
   });
 
   it("the focused point is pushed haloed in its own color, and no point draws outside point mode", () => {
@@ -692,9 +692,14 @@ describe("createCanvasPusher", () => {
     img_width: 100,
     img_height: 80,
     viewport: null,
+    mode: "box",
+    active_subject: null,
+    cut_armed: false,
+    dirty: false,
     user: "grower",
     classes: [],
-    shapes: [{ kind: "box", xyxy: [0, 0, 1, 1], color: "#fff" }],
+    counts: {},
+    shapes: [{ kind: "box", xyxy: [0, 0, 1, 1], color: "#fff", tag: "gt" }],
   });
 
   it("carries cut_armed through to the post untouched (the pusher never special-cases it)", () => {

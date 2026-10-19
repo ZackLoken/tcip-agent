@@ -23,41 +23,27 @@ An attribute is an axis a subject's instances carry, ``categorical`` (unordered)
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar
+
+from pydantic import (
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    Strict,
+    TypeAdapter,
+    WrapSerializer,
+)
+from pydantic.dataclasses import dataclass as pydantic_dataclass
+
+from tcip_annotation.state import Attribute
 
 if TYPE_CHECKING:
+    from pydantic import JsonValue
+
     from tcip_mcp.traits import PositiveState
     from tcip_store import Version
-
-#: The attribute kinds a subject may carry. Numeric is deliberately absent, see the module
-#: docstring.
-ATTR_TYPES = ("categorical", "ordinal")
-
-
-@dataclass(frozen=True)
-class Attribute:
-    """One classification axis of a subject's instances.
-
-    ``values`` are ordered; for an ``ordinal`` attribute that order is the rank (severity 0 < 1 <
-    2). A known ``type`` and a non-empty list of distinct names are enforced here.
-    """
-
-    name: str
-    type: str
-    values: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        """Refuse (``ValueError``) an unknown ``type`` and empty, unnamed or duplicate values."""
-        if self.type not in ATTR_TYPES:
-            raise ValueError(f"type {self.type!r} not in {ATTR_TYPES}")
-        if not self.values or not all(
-            isinstance(v, str) and v for v in self.values
-        ):
-            raise ValueError("values must be a non-empty list of names")
-        if len(set(self.values)) != len(self.values):
-            raise ValueError(f"duplicate values: {list(self.values)}")
 
 
 class _Named(Protocol):
@@ -73,31 +59,66 @@ def named(records: Iterable[_N], name: str) -> _N | None:
     return next((r for r in records if r.name == name), None)
 
 
-@dataclass(frozen=True)
+def _entries(document: object) -> object:
+    """Return a name-keyed mapping as its entries in order, each stating its key as ``name``.
+
+    Anything else is returned as given: a tuple of entries is read as itself, and any other value
+    is refused by the tuple it is validated as.
+    """
+    if not isinstance(document, dict):
+        return document
+    return tuple(
+        {**body, "name": name} if isinstance(body, dict) else body
+        for name, body in document.items()
+    )
+
+
+def _keyed(
+    entries: tuple[Any, ...], handler: SerializerFunctionWrapHandler
+) -> dict[str, Any]:
+    """Return ``entries`` serialized as a mapping from each entry's ``name`` to its other fields."""
+    return {
+        serialized.pop("name"): serialized for serialized in handler(entries)
+    }
+
+
+type ByName[T] = Annotated[
+    tuple[T, ...], Strict(), BeforeValidator(_entries), WrapSerializer(_keyed)
+]
+"""Entries stored as one mapping from each entry's name to its other fields, in declared order;
+held as a tuple, and read from that mapping or a tuple of entries, never a list."""
+
+
+@pydantic_dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class Subject:
     """The object a label set is about.
 
-    ``attributes`` may be empty, such a subject is only detected.
+    ``attributes`` may be empty, such a subject is only detected, and is then not written.
     """
 
     name: str
-    description: str = ""
-    attributes: tuple[Attribute, ...] = ()
+    description: str
+    attributes: ByName[Attribute] = Field(
+        default=(), exclude_if=lambda attributes: not attributes
+    )
 
     def attribute(self, name: str) -> Attribute | None:
         """Return the named attribute of this subject (:func:`named`), or ``None``."""
         return named(self.attributes, name)
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class SubjectRegistry:
     """The whole ``subjects.json``, the dataset's subjects, in declared order."""
 
-    subjects: tuple[Subject, ...] = ()
+    subjects: ByName[Subject]
 
     def subject(self, name: str) -> Subject | None:
         """Return the named subject of this registry (:func:`named`), or ``None``."""
         return named(self.subjects, name)
+
+
+_REGISTRY = TypeAdapter(SubjectRegistry)
 
 
 class RegistryError(ValueError):
@@ -107,67 +128,14 @@ class RegistryError(ValueError):
 def registry_from_dict(data: object) -> SubjectRegistry:
     """Parse the nested registry mapping into a :class:`SubjectRegistry`, in declared order.
 
-    Refuses (:class:`RegistryError`) a malformed shape: a non-object registry, subject or
-    attribute, a subject with no description string, or an attribute whose ``type`` is unknown or
-    whose ``values`` are absent/empty/non-string/duplicated.
+    Refuses (:class:`RegistryError`) what does not validate as the registry, naming each field.
     """
-    if not isinstance(data, dict):
+    try:
+        return _REGISTRY.validate_python({"subjects": data})
+    except ValueError as exc:
         raise RegistryError(
-            f"registry must be a JSON object of subjects, got {type(data).__name__}"
-        )
-    subjects: list[Subject] = []
-    for sname, sbody in data.items():
-        if not isinstance(sbody, dict):
-            raise RegistryError(
-                f"subject {sname!r} must be an object, got {type(sbody).__name__}"
-            )
-        attrs: list[Attribute] = []
-        raw_attrs = sbody.get("attributes")
-        if (
-            raw_attrs is None
-        ):  # absent/null attributes -> a detection-only subject (valid)
-            raw_attrs = {}
-        # a falsy non-object (false/0/""/[]) is malformed, not "none"
-        if not isinstance(raw_attrs, dict):
-            raise RegistryError(
-                f"subject {sname!r} 'attributes' must be an object, got {type(raw_attrs).__name__}"
-            )
-        for aname, abody in raw_attrs.items():
-            if not isinstance(abody, dict):
-                raise RegistryError(
-                    f"attribute {sname}.{aname} must be an object"
-                )
-            values = abody.get("values")
-            if not isinstance(values, list):
-                raise RegistryError(
-                    f"attribute {sname}.{aname} 'values' must be a list"
-                )
-            # The value invariant (known type, non-empty, distinct) lives on Attribute, one guard,
-            # shared by the parser and any code that constructs an Attribute directly.
-            try:
-                # Attribute.__post_init__ is the type gate, so the type is cast here, not checked.
-                attrs.append(
-                    Attribute(
-                        name=aname,
-                        type=cast(str, abody.get("type")),
-                        values=tuple(values),
-                    )
-                )
-            except ValueError as exc:
-                raise RegistryError(
-                    f"attribute {sname}.{aname}: {exc}"
-                ) from exc
-        description = sbody.get("description")
-        if not isinstance(description, str):
-            raise RegistryError(
-                f"subject {sname!r} states no description string"
-            )
-        subjects.append(
-            Subject(
-                name=sname, description=description, attributes=tuple(attrs)
-            )
-        )
-    return SubjectRegistry(subjects=tuple(subjects))
+            f"the subject registry does not read: {exc}"
+        ) from exc
 
 
 def registry_from_request(subjects: object) -> SubjectRegistry:
@@ -188,21 +156,12 @@ def registry_from_request(subjects: object) -> SubjectRegistry:
 def registry_to_dict(registry: SubjectRegistry) -> dict:
     """Serialize a :class:`SubjectRegistry` back to the nested mapping.
 
-    The inverse of :func:`registry_from_dict`; an empty description is still written.
+    The inverse of :func:`registry_from_dict`.
     """
-    out: dict[str, dict] = {}
-    for s in registry.subjects:
-        body: dict = {"description": s.description}
-        if s.attributes:
-            body["attributes"] = {
-                a.name: {"type": a.type, "values": list(a.values)}
-                for a in s.attributes
-            }
-        out[s.name] = body
-    return out
+    return _REGISTRY.dump_python(registry, mode="json")["subjects"]
 
 
-def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
+def _checked_registry_document(data: bytes, *, path: str | Path) -> JsonValue:
     """Return the stored registry's decoded document.
 
     Raises :class:`RegistryError` for bytes that do not decode as JSON.

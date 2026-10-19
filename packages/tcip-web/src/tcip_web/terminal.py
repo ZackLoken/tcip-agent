@@ -560,18 +560,18 @@ def render_argv(
 
 def prepare_launch(
     executable: str, provider: Provider, launch: ProjectLaunch | None
-) -> tuple[list[str], str | None]:
+) -> list[str] | str:
     """Run ``provider.prepare`` with the resolved ``executable`` and ``launch``.
 
-    Returns the steps it took (empty for a row with no preparation) and the reason it failed,
-    ``None`` when it succeeded, prefixed with the row's name.
+    Returns the steps it took (empty for a row with no preparation), or the reason it failed,
+    prefixed with the row's name.
     """
     if provider.prepare is None:
-        return [], None
+        return []
     try:
-        return provider.prepare(executable, launch), None
+        return provider.prepare(executable, launch)
     except PreparationFailedError as exc:
-        return [], f"{provider.name}'s launch preparation failed: {exc}"
+        return f"{provider.name}'s launch preparation failed: {exc}"
 
 
 _PRIVATE_MODE = re.compile(r"\x1b\[\?([0-9;]*)([hl])")
@@ -729,7 +729,7 @@ class _WinPty:
         rows: int,
         cols: int,
         env: dict[str, str],
-    ):
+    ) -> None:
         from winpty import PtyProcess
 
         self._p = PtyProcess.spawn(
@@ -789,6 +789,7 @@ class _PosixPty:
     _master: int
     _proc: subprocess.Popen
     _decoder: codecs.IncrementalDecoder
+    pid: int
 
     def __init__(
         self,
@@ -797,7 +798,7 @@ class _PosixPty:
         rows: int,
         cols: int,
         env: dict[str, str],
-    ):
+    ) -> None:
         # _open_pty dispatches this class off os.name == "nt", so it never runs on Windows;
         # the guard also tells mypy the POSIX-only stdlib members below are never checked there.
         if sys.platform == "win32":
@@ -873,9 +874,13 @@ class _PosixPty:
             pass
 
 
+type Pty = _WinPty | _PosixPty
+"""A platform PTY: ConPTY through pywinpty on Windows, the stdlib ``pty`` elsewhere."""
+
+
 def spawn_pty(
     argv: list[str], cwd: str, rows: int, cols: int, env: dict[str, str]
-):
+) -> Pty:
     """Spawn ``argv`` attached to a platform PTY under ``env``.
 
     Raises ``OSError`` on failure.
@@ -889,7 +894,7 @@ def spawn_pty(
 
 
 def start_reader(
-    pty,
+    pty: Pty,
     on_output: Callable[[str], None],
     on_exit: Callable[[], None],
     name: str,

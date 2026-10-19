@@ -8,14 +8,14 @@ import uuid
 import zipfile
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
 
 import tcip_store
+from tcip_annotation.text import Text
 from tcip_mcp.audit import audited
 from tcip_mcp.project_record import CaptureInvariances
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
-from tcip_mcp.traits import Text
 from tcip_store import Key, VersionConflictError, encode_record
 
 
@@ -40,25 +40,41 @@ def dataset_registry_key(project: str | Path) -> Key:
     )
 
 
-def read_datasets(project: str | Path) -> list[dict]:
-    """Read the project's dataset registry (``[{id, path}]``), or [] when absent.
+class DatasetEntry(BaseModel):
+    """One dataset the project's registry names: its identity's ``id`` and its stored ``path``."""
 
-    A registry present but undecodable raises rather than reading as empty.
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str
+    path: str
+
+
+_DATASET_REGISTRY = TypeAdapter(list[DatasetEntry])
+"""The project's dataset registry, its entries sorted by ``id``."""
+
+
+def read_datasets(project: str | Path) -> list[DatasetEntry]:
+    """Read the project's dataset registry, or [] when absent.
+
+    A registry present but undecodable raises, as does one that is not a list of
+    :class:`DatasetEntry` (``ValidationError``).
     """
-    return tcip_store.read(dataset_registry_key(project), default=[])
+    return _DATASET_REGISTRY.validate_python(
+        tcip_store.read(dataset_registry_key(project), default=[])
+    )
 
 
-def dataset_entry_path(project: str | Path, entry: dict) -> Path:
+def dataset_entry_path(project: str | Path, entry: DatasetEntry) -> Path:
     """Return the absolute path a dataset registry ``entry`` names.
 
     The path is resolved through :func:`~tcip_mcp.registry_paths.resolved_registry_path`.
     """
     from tcip_mcp.registry_paths import resolved_registry_path
 
-    return resolved_registry_path(project, entry["path"])
+    return resolved_registry_path(project, entry.path)
 
 
-def upsert_dataset(project: str | Path, entry: dict) -> None:
+def upsert_dataset(project: str | Path, entry: DatasetEntry) -> None:
     """Add or refresh a dataset in the project's registry, matched by ``id``.
 
     A moved dataset updates the ``path`` of its existing id rather than duplicating, so identity
@@ -69,9 +85,14 @@ def upsert_dataset(project: str | Path, entry: dict) -> None:
     """
     key = dataset_registry_key(project)
     with tcip_store.transaction(key) as txn:
-        regs = [r for r in txn.read(key, default=[]) if r["id"] != entry["id"]]
-        regs.append(entry)
-        txn.write(key, sorted(regs, key=lambda r: r["id"]))
+        stored = _DATASET_REGISTRY.validate_python(txn.read(key, default=[]))
+        regs = [r for r in stored if r.id != entry.id] + [entry]
+        txn.write(
+            key,
+            _DATASET_REGISTRY.dump_python(
+                sorted(regs, key=lambda r: r.id), mode="json"
+            ),
+        )
 
 
 @tool()
@@ -123,23 +144,23 @@ def register_dataset(project: Path, dataset_root: str, crop: Text) -> dict:
                     "error": f"{exc}; minting a fresh id over it would sever every record "
                     "that cites the old one"
                 }
-        candidate = {
+        entry = DatasetEntry(
+            id=existing.get("id") or mint_id(), path=stored_path(root, project)
+        )
+        identity: dict[str, JsonValue] = {
             "crop": crop,
-            "id": existing.get("id") or mint_id(),
+            "id": entry.id,
             "fingerprint": fingerprint,
         }
         try:
             tcip_store.put_blob(
-                ident_path, encode_record(candidate), expect=stored.version
+                ident_path, encode_record(identity), expect=stored.version
             )
         except VersionConflictError:
             continue
-        identity = candidate
         break
 
-    upsert_dataset(
-        project, {"id": identity["id"], "path": stored_path(root, project)}
-    )
+    upsert_dataset(project, entry)
     return {"dataset_root": str(root), **identity}
 
 
@@ -685,7 +706,5 @@ def _external_dataset_paths(project: Path) -> list[str]:
     from tcip_mcp.registry_paths import is_external_form
 
     return sorted(
-        str(e["path"])
-        for e in read_datasets(project)
-        if is_external_form(str(e["path"]))
+        e.path for e in read_datasets(project) if is_external_form(e.path)
     )

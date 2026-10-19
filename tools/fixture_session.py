@@ -9,15 +9,16 @@ from __future__ import annotations
 
 import json
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from tests._web_fixtures import backend_session
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
+    from pydantic import JsonValue
 
     from tcip_web.state import OpenProject
 
@@ -44,22 +45,31 @@ def opened(client: TestClient, project: OpenProject) -> None:
     response.raise_for_status()
 
 
+type Leaf = Callable[[str | None, JsonValue], JsonValue]
+"""A replacement of one leaf of a served value, given the dict key it sits under."""
+
+
 def replaced(
-    value: Any, leaf: Callable[[str | None, Any], Any], key: str | None = None
-) -> Any:
-    """Return ``value`` with each leaf (anything not a dict or a list) replaced through ``leaf``.
+    served: Mapping[str, JsonValue], leaf: Leaf
+) -> dict[str, JsonValue]:
+    """Return the served mapping with each leaf (anything not a dict or a list) through ``leaf``.
 
     A leaf becomes ``leaf(key, leaf value)``, ``key`` being the dict key the leaf sits under,
-    ``None`` for a list item or the root.
+    ``None`` for a list item.
     """
+    return {k: _replaced(v, leaf, k) for k, v in served.items()}
+
+
+def _replaced(value: JsonValue, leaf: Leaf, key: str | None) -> JsonValue:
+    """Return ``value``, under ``key``, with each of its leaves replaced through ``leaf``."""
     if isinstance(value, dict):
-        return {k: replaced(v, leaf, k) for k, v in value.items()}
+        return replaced(value, leaf)
     if isinstance(value, list):
-        return [replaced(v, leaf) for v in value]
+        return [_replaced(v, leaf, None) for v in value]
     return leaf(key, value)
 
 
-def write_fixture(path: Path, content: Any) -> int:
+def write_fixture(path: Path, content: JsonValue) -> int:
     """Write ``content`` to ``path`` as indented JSON with LF line endings and say so.
 
     Returns the exit code 0.

@@ -30,10 +30,16 @@ if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
     from tcip_mcp.delivery import Result
     from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.traits import CrossingRule, PositiveState, TraitRevision
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import Assignment
+    from tcip_mcp.traits import (
+        CrossingRule,
+        PositiveState,
+        TraitEntry,
+        TraitRevision,
+    )
 
 
-def _milestone_targets(spec) -> dict[str, float]:
+def _milestone_targets(spec: TraitEntry) -> dict[str, float]:
     """Return milestone crossing fractions from the trait's confirmed semantics, per call.
 
     Keyed "NNper" to match the CSV column names.
@@ -43,7 +49,7 @@ def _milestone_targets(spec) -> dict[str, float]:
     }
 
 
-def _milestone_columns(spec) -> list[tuple[str, str]]:
+def _milestone_columns(spec: TraitEntry) -> list[tuple[str, str]]:
     """Return ``(column_suffix, crossing_key)`` for every milestone this trait delivers.
 
     The majority alias enters, first, only when the spec names a crossing for it.
@@ -54,7 +60,7 @@ def _milestone_columns(spec) -> list[tuple[str, str]]:
     return cols
 
 
-def milestone_date_columns(spec) -> list[dict[str, str]]:
+def milestone_date_columns(spec: TraitEntry) -> list[dict[str, str]]:
     """Return the milestone columns a trait's phenology delivery carries.
 
     Each is ``{"date", "bound"}``: the milestone's date column and the column holding that date's
@@ -69,7 +75,7 @@ def milestone_date_columns(spec) -> list[dict[str, str]]:
     ]
 
 
-def phenology_csv_columns(spec) -> list[str]:
+def phenology_csv_columns(spec: TraitEntry) -> list[str]:
     """Return the delivered per-plant phenology CSV schema for one trait's ``TraitEntry``.
 
     The columns are the plant, its coverage, each milestone date and its evidentiary bound, then
@@ -233,7 +239,9 @@ def positive_onset_date(series: list[tuple[str, float]]) -> str | None:
     return None
 
 
-def plant_milestones(series: list[tuple[str, float]], spec) -> dict:
+def plant_milestones(
+    series: list[tuple[str, float]], spec: TraitEntry
+) -> dict:
     """Return the phenology dates for one plant's positive-fraction series, keyed by column.
 
     The keys are the trait's own date and bound columns. The column names (``phenology_prefix`` +
@@ -285,11 +293,10 @@ def count_by_class(
     if found is None:
         return total, 0, total
     column, wanted = found
+    read = scope.document_attributes("this bucket's scope")
     positive = 0
     for i, a in enumerate(annotations):
-        ids = json_io.attribute_ids(
-            a, cast(str, scope.subject), cast(tuple, scope.attributes)
-        )
+        ids = json_io.attribute_ids(a, read.subject, read.attributes)
         if ids is None or ids[column] == json_io.UNASSESSED:
             raise json_io.UndeclaredValueError(
                 f"{'/'.join(document.parts)}#{i}: a record of {a.subject!r} with attributes "
@@ -339,7 +346,7 @@ def population(plants: Sequence[str]) -> list[str]:
 
 
 def per_plant_series(
-    mapping: dict[str, list],
+    mapping: dict[str, list[Assignment]],
     buckets: dict[str, Bucket],
     state: PositiveState | None,
     plants: list[str],
@@ -349,15 +356,15 @@ def per_plant_series(
     Only buckets whose scope declares ``state``'s attribute classify; the series covers exactly
     the plants in ``plants`` (:func:`population`'s list).
 
-    ``mapping`` is ``{date: [assignment, ...]}`` where each assignment has ``.stem`` /
-    ``.plant_id`` / ``.accession_name`` (attributes or dict keys); ``buckets`` is each delivered
-    date's published bucket, by its recorded date. ``plants`` is the delivery's population: every
-    plant in it gets an entry, in the order given, and a plant the mapping names that is not in it
-    is never read. Every population plant has a series point on every date the mapping names, one
-    the mapping assigns it no capture on carrying no image. Returns ``{plant_id: {accession,
-    series: [(date, total, positive, unclassified, missing, n_images), ...]}}``. An entry naming no
-    plant (``plant_mapping.assignment_is_attributed`` false) is excluded from every plant's
-    coverage.
+    ``mapping`` is ``{date: [assignment, ...]}``, a mapping build's own per-date
+    :class:`~tcip_mcp.pipelines.postprocessing.plant_mapping.Assignment` rows; ``buckets`` is
+    each delivered date's published bucket, by its recorded date. ``plants`` is the delivery's
+    population: every plant in it gets an entry, in the order given, and a plant the mapping names
+    that is not in it is never read. Every population plant has a series point on every date the
+    mapping names, one the mapping assigns it no capture on carrying no image. Returns
+    ``{plant_id: {accession, series: [(date, total, positive, unclassified, missing, n_images),
+    ...]}}``. An entry naming no plant (``plant_mapping.assignment_is_attributed`` false) is
+    excluded from every plant's coverage.
 
     Coverage is measured against the stems the plant mapping names for each (plant, date): a named
     stem with no corresponding prediction document is a missing observation, and a date the
@@ -365,7 +372,6 @@ def per_plant_series(
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         assignment_is_attributed,
-        attr,
         stems_delivery_reads,
     )
 
@@ -384,19 +390,17 @@ def per_plant_series(
             plant_id: [0, 0, 0, 0, 0] for plant_id in plants
         }
         for a in mapping[date_str]:
-            plant_id = attr(a, "plant_id")
-            if not assignment_is_attributed(a) or plant_id not in per_plant:
+            if not assignment_is_attributed(a) or a.plant_id not in per_plant:
                 continue
-            acc = by_plant[plant_id]
+            acc = by_plant[a.plant_id]
             acc[4] += 1
-            if per_plant[plant_id]["accession"] is None:
-                per_plant[plant_id]["accession"] = attr(a, "accession_name")
-            stem = attr(a, "stem")
-            if bucket is None or stem not in read_stems:
+            if per_plant[a.plant_id]["accession"] is None:
+                per_plant[a.plant_id]["accession"] = a.accession_name
+            if bucket is None or a.stem not in read_stems:
                 acc[3] += 1
                 continue
             total, positive, unclassified = count_by_class(
-                prediction_key(bucket.root, bucket.name, str(stem)),
+                prediction_key(bucket.root, bucket.name, a.stem),
                 state,
                 scope=bucket.scope,
             )
@@ -409,9 +413,9 @@ def per_plant_series(
 
 
 def per_plant_phenology(
-    mapping: dict[str, list],
+    mapping: dict[str, list[Assignment]],
     buckets: dict[str, Bucket],
-    spec,
+    spec: TraitEntry,
     plants: list[str],
 ) -> dict:
     """Measure per-plant milestones from predictions and a plant mapping against ``spec``.
@@ -587,7 +591,7 @@ def measure_phenology(
         project, mapping_name, dated
     )
     measured = per_plant_phenology(
-        mapping_build.rows(), dated, revision.entry, wanted
+        mapping_build.assignments, dated, revision.entry, wanted
     )
     return PhenologyMeasurement(
         revision=revision,

@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import os
 import threading
-from collections.abc import Generator, Mapping
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from tcip_store.errors import BadKeyError, TransactionMisuseError
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
 
 _open_transaction = threading.local()
 
@@ -108,7 +111,7 @@ class LogPage:
     ``records`` leaves out.
     """
 
-    records: list[Mapping[str, Any]]
+    records: list[dict[str, JsonValue]]
     cursor: str
     corrupt: tuple[int, ...] = ()
 
@@ -122,6 +125,9 @@ class _Required:
 
 REQUIRED: Any = _Required()
 """Passed as ``default`` to mean the entry is required: absence raises ``NotFoundError``."""
+
+type ReadDefault = JsonValue | _Required
+"""What a record read takes as ``default``: a stored value, or the required sentinel."""
 
 
 def canonical_path(path: str | Path) -> str:

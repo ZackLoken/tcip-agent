@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tcip_annotation.state import BBox, Polygon
@@ -61,7 +61,7 @@ def encode_predictions(
     detection; a result missing one of the first seven, or whose boxes, scores and labels differ
     in length, refuses (``ValueError``) naming it, and so does a ``scope`` naming no subject or
     attributes
-    (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.admitted_for`). Every prediction's
+    (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.document_attributes`). Every prediction's
     ``subject`` is ``scope``'s, and its ``attributes`` each attribute's value its row names
     (:func:`~tcip_annotation.json_io.attribute_values`), none for a scope declaring none. An
     image with no detection encodes ``{"annotations": []}``. ``created_by`` stamps every
@@ -77,11 +77,9 @@ def encode_predictions(
     from tcip_annotation.state import Annotation
     from tcip_mcp.audit import now_iso
     from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
-    from tcip_mcp.pipelines.data.selection import DOCUMENT
 
-    attributes = cast(
-        tuple, scope.admitted_for(DOCUMENT, "this bucket's scope").attributes
-    )
+    read = scope.document_attributes("this bucket's scope")
+    attributes = read.attributes
     missing = [
         k
         for k in (
@@ -123,7 +121,7 @@ def encode_predictions(
             continue
         preds.append(
             Annotation(
-                subject=cast(str, scope.subject),
+                subject=read.subject,
                 geometry=geometry,
                 score=float(score),
                 attributes=json_io.attribute_values(ids, attributes),

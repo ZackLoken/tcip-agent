@@ -15,13 +15,27 @@ import logging
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    model_serializer,
+)
 
 import tcip_store
 from tcip_mcp.audit import now_iso
+from tcip_mcp.pipelines.model_build import (
+    CONFIG_KEY,
+    GEOMETRY_KEY,
+    SNAPSHOT_KEY,
+)
+from tcip_mcp.pipelines.schemas import TrainGeometry
 from tcip_mcp.registry_paths import (
-    RegistryPathEmptyError,
-    RegistryPathTraversalError,
     checkpoint_registry_path_for,
     is_external_form,
     located,
@@ -31,9 +45,9 @@ from tcip_mcp.registry_paths import (
 from tcip_store import Key, finite_number
 
 if TYPE_CHECKING:
-    from tcip_mcp.experiments import RunObservation
+    from tcip_mcp.experiments import RunObservation, RunRecord
     from tcip_mcp.pipelines.model_build import SourceLayout
-    from tcip_mcp.pipelines.schemas import TrainConfigSchema, TrainGeometry
+    from tcip_mcp.pipelines.schemas import TrainConfigSchema
 
 logger = logging.getLogger(__name__)
 
@@ -42,31 +56,67 @@ _INDEX_PARTS = ("registry",)
 
 
 def registry_index_key(project_path: str | Path) -> Key:
-    """Return the key of the project's registered-model index, ``{entries: [...]}``."""
+    """Return the key of the project's registered-model index, a :class:`RegistryIndex`."""
     return Key(MODEL_REGISTRY_STORE, str(project_path), _INDEX_PARTS)
 
 
-def read_registry_index(project_path: str | Path) -> list[dict]:
+class RegistryEntry(BaseModel):
+    """One checkpoint a project can load, under the name and tags it was registered with.
+
+    ``checkpoint_path`` is as stored (:func:`~tcip_mcp.registry_paths.checkpoint_registry_path_for`)
+    and ``sha256`` the digest of its bytes. ``metrics`` are the ones its registration asserted: a
+    caller's for a foreign checkpoint, none for a run's own entry, whose metrics its checkpoint
+    carries (:func:`entry_facts`). ``experiment_id`` is the run whose final status names it,
+    ``None`` for a foreign checkpoint.
+    """
+
+    model_config = ConfigDict(
+        frozen=True, extra="forbid", ser_json_inf_nan="constants"
+    )
+
+    name: str
+    checkpoint_path: str
+    sha256: str
+    registered_at: str
+    metrics: dict[str, JsonValue]
+    tags: list[str]
+    experiment_id: str | None
+
+
+class RegistryIndex(BaseModel):
+    """The project's registered-model index: its foreign checkpoints, one entry per sha256."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    entries: list[RegistryEntry]
+
+
+def _index_entries(stored: JsonValue) -> list[RegistryEntry]:
+    """Return the entries of a stored index, validated as a :class:`RegistryIndex`."""
+    return RegistryIndex.model_validate(stored).entries
+
+
+def read_registry_index(project_path: str | Path) -> list[RegistryEntry]:
     """Return every foreign checkpoint the project has registered, in registration order.
 
     A project that has registered nothing reads as an empty list; an index that does not decode
-    raises ``DecodeError``.
+    raises ``DecodeError``, and one that does not validate ``pydantic.ValidationError``.
     """
-    return tcip_store.read(
-        registry_index_key(project_path), default={"entries": []}
-    )["entries"]
+    return _index_entries(
+        tcip_store.read(
+            registry_index_key(project_path), default={"entries": []}
+        )
+    )
 
 
 def _checkpoint_entry_file(project_path: Path, raw: str) -> Path | None:
     """Return the existing file under ``project_path`` a stored registry ``checkpoint_path`` names.
 
-    ``raw`` is the path as stored. Returns ``None`` for an entry naming another tree, a relative
-    one with nothing at it, or one that does not resolve at all.
+    ``raw`` is the path as stored. Returns ``None`` for an entry naming another tree or a relative
+    one with nothing at it; a stored path the resolver refuses (empty, or a relative form carrying
+    ``..``) raises its refusal (:func:`~tcip_mcp.registry_paths.resolved_registry_path`).
     """
-    try:
-        resolved = resolved_registry_path(project_path, raw).resolve()
-    except (RegistryPathEmptyError, RegistryPathTraversalError):
-        return None
+    resolved = resolved_registry_path(project_path, raw).resolve()
     return (
         resolved
         if resolved.is_file() and resolved.is_relative_to(project_path)
@@ -79,7 +129,7 @@ def checkpoint_files(root: Path) -> frozenset[Path]:
 
     These are each file in ``.tcip/models``, each file a registry entry names under the project,
     and each ``.pt`` file a run directory (``experiments.run_dirs``, a sweep's trials included)
-    holds beside its run record.
+    holds beside its run record. A stored entry path the resolver refuses raises its refusal.
     """
     from tcip_mcp.experiments import run_dirs
 
@@ -87,7 +137,7 @@ def checkpoint_files(root: Path) -> frozenset[Path]:
     found |= {
         path
         for path in (
-            _checkpoint_entry_file(root, e["checkpoint_path"])
+            _checkpoint_entry_file(root, e.checkpoint_path)
             for e in read_registry_index(root)
         )
         if path is not None
@@ -102,9 +152,10 @@ def registry_checkpoint_disclosures(root: Path) -> dict[str, list]:
     ``root`` is the established project root. ``checkpoint_paths_unresolved`` is every stored
     path that is not a designed-external claim (:func:`~tcip_mcp.registry_paths.is_external_form`)
     and names no file under the project, as stored; ``external_checkpoints`` is every
-    designed-external path with whether it exists.
+    designed-external path with whether it exists. A stored path the resolver refuses raises its
+    refusal.
     """
-    stored = sorted(e["checkpoint_path"] for e in read_registry_index(root))
+    stored = sorted(e.checkpoint_path for e in read_registry_index(root))
     return {
         "checkpoint_paths_unresolved": [
             raw
@@ -120,7 +171,9 @@ def registry_checkpoint_disclosures(root: Path) -> dict[str, list]:
     }
 
 
-def run_entry(observation: RunObservation) -> dict | None:
+def run_entry(
+    observation: RunObservation[RunRecord],
+) -> RegistryEntry | None:
     """Return the registry entry a completed training run's final status stands for.
 
     The entry is named by the run's id and carries it as ``experiment_id``; ``None`` for a run
@@ -132,22 +185,23 @@ def run_entry(observation: RunObservation) -> dict | None:
     assert observation.final is not None, (
         "a completed checkpoint is named by a final status"
     )
-    return {
-        "name": observation.directory.name,
-        "checkpoint_path": checkpoint["path"],
-        "sha256": checkpoint["sha256"],
-        "registered_at": observation.final["ended"],
-        "tags": [],
-        "experiment_id": observation.directory.name,
-    }
+    return RegistryEntry(
+        name=observation.directory.name,
+        checkpoint_path=checkpoint.path,
+        sha256=checkpoint.sha256,
+        registered_at=observation.final.ended,
+        metrics={},
+        tags=[],
+        experiment_id=observation.directory.name,
+    )
 
 
-def registered_entries(project_path: str | Path) -> list[dict]:
+def registered_entries(project_path: str | Path) -> list[RegistryEntry]:
     """Return every checkpoint the project can load, one entry per sha256, from its one owner.
 
     The owner is the completed training run whose final status names those bytes
-    (:func:`run_entry`), else the foreign entry of the index registering them, with
-    ``experiment_id`` ``None``. Runs' entries come first, in completion order.
+    (:func:`run_entry`), else the foreign entry of the index registering them. Runs' entries come
+    first, in completion order.
     """
     from tcip_mcp.experiments import run_observations
 
@@ -157,44 +211,63 @@ def registered_entries(project_path: str | Path) -> list[dict]:
             for entry in map(run_entry, run_observations(project_path))
             if entry is not None
         ),
-        key=lambda entry: entry["registered_at"],
+        key=lambda entry: entry.registered_at,
     )
-    owned = {entry["sha256"] for entry in runs}
+    owned = {entry.sha256 for entry in runs}
     return [
         *runs,
         *(
-            {**e, "experiment_id": None}
+            e
             for e in read_registry_index(project_path)
-            if e["sha256"] not in owned
+            if e.sha256 not in owned
         ),
     ]
 
 
-def entry_facts(entry: dict, project: Path) -> dict:
+type MetricsSource = Literal["trainer", "training_source", "caller"]
+"""Who measured a registered checkpoint's metrics: its trainer, a bespoke loop, or the caller."""
+
+
+class CheckpointFacts(BaseModel):
+    """What a registered checkpoint says of itself: its ``metrics`` and their ``metrics_source``."""
+
+    model_config = ConfigDict(
+        frozen=True, extra="forbid", ser_json_inf_nan="constants"
+    )
+
+    metrics: dict[str, JsonValue]
+    metrics_source: MetricsSource | None
+
+
+def entry_facts(entry: RegistryEntry, project: Path) -> CheckpointFacts:
     """Return what ``entry``'s checkpoint, a checkpoint of ``project``, says of itself.
 
-    It is read from its payload (:func:`checkpoint_payload`): the ``metrics`` with their
-    ``metrics_source``. A run's metrics are the ones its payload carries, sourced
-    ``"trainer"``, or ``"training_source"`` when the payload's config
-    (:attr:`VerifiedCheckpoint.spec`) names a bespoke loop; a foreign entry's are the ones its
-    registration stated, sourced ``"caller"``. No metrics carry no source.
+    ``entry``'s ``checkpoint_path`` is the location the checkpoint is read at. It is read from
+    its payload (:func:`checkpoint_payload`): the ``metrics`` with their ``metrics_source``. A
+    run's metrics are the ones its payload carries, sourced ``"trainer"``, or
+    ``"training_source"`` when the payload's config (:attr:`VerifiedCheckpoint.spec`) names a
+    bespoke loop; a foreign entry's are the ones its registration stated, sourced ``"caller"``.
+    No metrics carry no source.
     """
     from tcip_mcp.pipelines.model_build import METRICS_KEY
 
     checkpoint = VerifiedCheckpoint(
-        path=entry["checkpoint_path"],
+        path=entry.checkpoint_path,
         entry=entry,
         project=project,
-        payload=checkpoint_payload(entry["checkpoint_path"], entry["sha256"]),
+        payload=checkpoint_payload(entry.checkpoint_path, entry.sha256),
     )
-    if entry["experiment_id"] is None:
-        metrics, source = entry["metrics"], "caller"
+    source: MetricsSource
+    if entry.experiment_id is None:
+        metrics, source = entry.metrics, "caller"
     else:
         metrics = checkpoint.payload.get(METRICS_KEY) or {}
         source = (
             "training_source" if checkpoint.spec.training_source else "trainer"
         )
-    return {"metrics": metrics, "metrics_source": source if metrics else None}
+    return CheckpointFacts(
+        metrics=metrics, metrics_source=source if metrics else None
+    )
 
 
 def _sha256_of_bytes(data: bytes) -> str:
@@ -213,6 +286,39 @@ def _unregistered_checkpoint_error(
     )
 
 
+class CheckpointStamp(BaseModel):
+    """The stamp a checkpoint carries beside its weights, as ``checkpoint_stamp`` writes it.
+
+    That is ``generic_trainer.checkpoint_stamp``: its run's ``config`` as it records itself, its
+    paths stored against the run's project, the digest of the source ``snapshot`` its run took
+    (``SourceLayout.snapshot``), and the ``geometry`` its run read off its training frames.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    config: dict[str, JsonValue] = Field(
+        validation_alias=CONFIG_KEY, serialization_alias=CONFIG_KEY
+    )
+    snapshot: str = Field(
+        validation_alias=SNAPSHOT_KEY, serialization_alias=SNAPSHOT_KEY
+    )
+    geometry: TrainGeometry = Field(
+        validation_alias=GEOMETRY_KEY, serialization_alias=GEOMETRY_KEY
+    )
+
+
+class Producer(BaseModel):
+    """The checkpoint and the run behind a model's predictions.
+
+    It is what :attr:`VerifiedCheckpoint.producer` states.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    checkpoint_sha256: str
+    experiment_id: str | None
+
+
 @dataclass(frozen=True)
 class VerifiedCheckpoint:
     """A checkpoint read, hashed and matched against the registry before anything was unpickled."""
@@ -221,7 +327,7 @@ class VerifiedCheckpoint:
     """The established location the checkpoint was read from."""
     payload: dict
     """The loaded checkpoint, read with ``weights_only=True``."""
-    entry: dict
+    entry: RegistryEntry
     """The one registered entry of the digest of the bytes ``payload`` was unpickled from
     (:func:`registered_entries`)."""
     project: Path
@@ -231,42 +337,41 @@ class VerifiedCheckpoint:
     @property
     def sha256(self) -> str:
         """The digest of the exact bytes ``payload`` was unpickled from, its entry's."""
-        return self.entry["sha256"]
+        return self.entry.sha256
 
     @property
     def experiment_id(self) -> str | None:
         """The run whose final status names this checkpoint, ``None`` for a foreign one."""
-        return self.entry["experiment_id"]
+        return self.entry.experiment_id
 
     @property
-    def producer(self) -> dict[str, str | None]:
-        """The checkpoint's producer identity.
+    def producer(self) -> Producer:
+        """The checkpoint's producer identity: its sha256 and the run behind it."""
+        return Producer(
+            checkpoint_sha256=self.sha256, experiment_id=self.experiment_id
+        )
 
-        It is the checkpoint's sha256 and the run behind it.
+    @cached_property
+    def stamp(self) -> CheckpointStamp:
+        """The payload's :class:`CheckpointStamp`, validated once.
+
+        Refuses (``ValueError``) a payload that does not carry it, naming each key it lacks or
+        holds invalid and the stamp's writer.
         """
-        return {
-            "checkpoint_sha256": self.sha256,
-            "experiment_id": self.experiment_id,
-        }
-
-    def stamped(self, key: str) -> Any:
-        """Return the payload's ``key``, a key ``generic_trainer.checkpoint_stamp`` writes.
-
-        Refuses (``ValueError``) a payload carrying none, naming the key and the stamp.
-        """
-        if key not in self.payload:
+        try:
+            return CheckpointStamp.model_validate(self.payload)
+        except ValidationError as exc:
+            keys = ", ".join(sorted({repr(e["loc"][0]) for e in exc.errors()}))
             raise ValueError(
-                f"{self.path} carries no {key!r}: a checkpoint carries what "
-                "generic_trainer.checkpoint_stamp writes, as the default trainer and "
-                "ctx.save_checkpoint save it, and this one was written past that stamp. Save "
-                "it through a run (launch_training, or ctx.save_checkpoint in its training "
-                "body)."
-            )
-        return self.payload[key]
+                f"{self.path} carries no {keys} as generic_trainer.checkpoint_stamp writes "
+                "it, as the default trainer and ctx.save_checkpoint save it, so it was written "
+                "past that stamp. Save it through a run (launch_training, or "
+                f"ctx.save_checkpoint in its training body). {exc}"
+            ) from exc
 
     @cached_property
     def spec(self) -> TrainConfigSchema:
-        """The run config the checkpoint's payload carries (:meth:`stamped`), validated once.
+        """The run config the checkpoint's :attr:`stamp` carries, validated once.
 
         Its stored paths (``experiments.CONFIG_PATHS``) are read against :attr:`project`, and it
         is validated by ``schemas.train_config``, which refuses (``ValueError``) one that is
@@ -276,11 +381,11 @@ class VerifiedCheckpoint:
         imported.
         """
         from tcip_mcp.experiments import CONFIG_PATHS
-        from tcip_mcp.pipelines.model_build import CONFIG_KEY, source_seams
+        from tcip_mcp.pipelines.model_build import source_seams
         from tcip_mcp.pipelines.schemas import train_config
 
         spec = train_config(
-            runtime_paths(self.stamped(CONFIG_KEY), CONFIG_PATHS, self.project)
+            runtime_paths(self.stamp.config, CONFIG_PATHS, self.project)
         )
         absent = [
             file
@@ -297,35 +402,22 @@ class VerifiedCheckpoint:
             )
         return spec
 
-    @cached_property
+    @property
     def geometry(self) -> TrainGeometry:
-        """The geometry its run's resolution read off its training frames, validated once.
-
-        It is as the payload's ``GEOMETRY_KEY`` records it (:meth:`stamped`), refusing
-        (``ValueError``) one that is invalid.
-        """
-        from tcip_mcp.pipelines.model_build import GEOMETRY_KEY
-        from tcip_mcp.pipelines.schemas import TrainGeometry
-
-        return TrainGeometry.model_validate(self.stamped(GEOMETRY_KEY))
+        """The geometry its run read off its training frames, as its :attr:`stamp` records it."""
+        return self.stamp.geometry
 
     @cached_property
     def layout(self) -> SourceLayout:
         """The run snapshot the checkpoint's model imports from.
 
-        It is the one its payload's ``SNAPSHOT_KEY`` digest names (:meth:`stamped`), as the record
-        of the run of :attr:`project` that took it states it (``model_build.owning_run_layout``,
-        which refuses a config declaring no file, or a snapshot and files no run of
-        :attr:`project` took).
+        It is the one its :attr:`stamp`'s snapshot digest names, as the record of the run of
+        :attr:`project` that took it states it (``model_build.owning_run_layout``, which refuses
+        a config declaring no file, or a snapshot and files no run of :attr:`project` took).
         """
-        from tcip_mcp.pipelines.model_build import (
-            SNAPSHOT_KEY,
-            owning_run_layout,
-        )
+        from tcip_mcp.pipelines.model_build import owning_run_layout
 
-        return owning_run_layout(
-            self.spec, self.stamped(SNAPSHOT_KEY), self.project
-        )
+        return owning_run_layout(self.spec, self.stamp.snapshot, self.project)
 
     @property
     def task(self) -> str:
@@ -437,7 +529,7 @@ def load_registered_checkpoint(
         raise CheckpointNotFoundError(f"Checkpoint not found: {ckpt}") from exc
     digest = _sha256_of_bytes(data)
     entry = next(
-        (e for e in registered_entries(root) if e["sha256"] == digest), None
+        (e for e in registered_entries(root) if e.sha256 == digest), None
     )
     if entry is None:
         raise _unregistered_checkpoint_error(ckpt, digest, root)
@@ -448,8 +540,8 @@ def load_registered_checkpoint(
 
 
 def _write_registry_entry(
-    txn: tcip_store.Txn, key: Key, entry: dict
-) -> tuple[dict | None, dict]:
+    txn: tcip_store.Txn, key: Key, entry: RegistryEntry
+) -> tuple[RegistryEntry | None, RegistryEntry]:
     """Write ``entry`` as the one foreign entry of its sha256 inside ``txn``.
 
     ``txn`` is an already-open transaction over the index key.
@@ -459,23 +551,19 @@ def _write_registry_entry(
     written and the superseded entry when that already holds every field but ``registered_at``,
     which is no change and so no write.
     """
-    index = txn.read(key, default={"entries": []})["entries"]
-    superseded = next(
-        (e for e in index if e["sha256"] == entry["sha256"]), None
-    )
-    if superseded is not None:
-        if {k: v for k, v in superseded.items() if k != "registered_at"} == {
-            k: v for k, v in entry.items() if k != "registered_at"
-        }:
-            return superseded, superseded
-    index = [e for e in index if e["sha256"] != entry["sha256"]]
-    index.append(entry)
-    txn.write(key, {"entries": index})
+    index = _index_entries(txn.read(key, default={"entries": []}))
+    superseded = next((e for e in index if e.sha256 == entry.sha256), None)
+    if superseded is not None and entry == superseded.model_copy(
+        update={"registered_at": entry.registered_at}
+    ):
+        return superseded, superseded
+    index = [*(e for e in index if e.sha256 != entry.sha256), entry]
+    txn.write(key, RegistryIndex(entries=index).model_dump(mode="json"))
     return superseded, entry
 
 
 def _audit_entry_write(
-    project_path: str, superseded: dict | None, entry: dict
+    project_path: str, superseded: RegistryEntry | None, entry: RegistryEntry
 ) -> None:
     """Emit ``model_registered`` in the project's log for a written ``entry``.
 
@@ -484,37 +572,57 @@ def _audit_entry_write(
     """
     from tcip_mcp.audit import record_event_or_raise
 
-    replaced = (
+    replaced: dict[str, JsonValue] = (
         {}
         if superseded is None
         else {
-            "superseded_name": superseded["name"],
-            "superseded_tags": superseded["tags"],
+            "superseded_name": superseded.name,
+            "superseded_tags": list(superseded.tags),
         }
     )
     record_event_or_raise(
         "model_registered",
-        {"name": entry["name"], "new_sha256": entry["sha256"], **replaced},
+        {"name": entry.name, "new_sha256": entry.sha256, **replaced},
         actor=None,
         scope=project_path,
     )
 
 
-def _resolve_entry_checkpoint(project_path: str, entry: dict) -> dict:
-    """Return a shallow copy of ``entry`` with ``checkpoint_path`` resolved to an absolute path.
+class Listed(BaseModel):
+    """A registered ``entry`` as listed, its ``checkpoint_path`` resolved, beside its ``facts``.
 
-    A stored value this reader cannot resolve (empty, or a relative form carrying ``..``) keeps its
-    stored spelling and carries the reason in ``checkpoint_path_error``.
+    ``facts`` are what its checkpoint says of it (:func:`entry_facts`). It serializes flat: the
+    entry's fields with the facts' ``metrics`` and ``metrics_source`` laid over them.
     """
-    copy = dict(entry)
-    stored = entry["checkpoint_path"]
-    try:
-        copy["checkpoint_path"] = str(
-            resolved_registry_path(project_path, stored)
-        )
-    except (RegistryPathEmptyError, RegistryPathTraversalError) as exc:
-        copy["checkpoint_path_error"] = str(exc)
-    return copy
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    entry: RegistryEntry
+    facts: CheckpointFacts
+
+    @model_serializer(mode="wrap")
+    def _flat(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Return the entry's serialized fields with the facts' laid over them."""
+        dumped = handler(self)
+        return dumped["entry"] | dumped["facts"]
+
+
+def _listed(project_path: str, entry: RegistryEntry) -> Listed:
+    """Return ``entry`` as listed, its ``checkpoint_path`` resolved to an absolute path.
+
+    A stored path the resolver refuses (empty, or a relative form carrying ``..``) raises its
+    refusal (:func:`~tcip_mcp.registry_paths.resolved_registry_path`).
+    """
+    resolved = entry.model_copy(
+        update={
+            "checkpoint_path": str(
+                resolved_registry_path(project_path, entry.checkpoint_path)
+            )
+        }
+    )
+    return Listed(
+        entry=resolved, facts=entry_facts(resolved, Path(project_path))
+    )
 
 
 class ModelRegistry:
@@ -534,7 +642,7 @@ class ModelRegistry:
         *,
         metrics: dict | None = None,
         tags: list[str] | None = None,
-    ) -> dict:
+    ) -> Listed:
         """Register a checkpoint by its sha256 under ``name``, and return the owner of its bytes.
 
         The digest is :func:`admitted_digest`'s and ``name`` is the entry's presentation; the
@@ -555,7 +663,8 @@ class ModelRegistry:
         Raises:
             FileNotFoundError: ``checkpoint_path`` does not exist.
             StoreError: ``metrics`` holds something JSON cannot carry, named
-                before anything is stored.
+                before anything is stored (``pydantic.ValidationError`` for a value that is no
+                JSON type at all).
             ValueError: the checkpoint's payload is one the verified reader refuses.
             AuditEntryNotWrittenError: the write committed but its own audit line could not be
                 appended.
@@ -567,16 +676,17 @@ class ModelRegistry:
                 f"register_model: checkpoint_path {checkpoint_path!r} does not exist, refusing to "
                 "register a phantom registry entry."
             )
-        entry = {
-            "name": name,
-            "checkpoint_path": checkpoint_registry_path_for(
+        entry = RegistryEntry(
+            name=name,
+            checkpoint_path=checkpoint_registry_path_for(
                 ckpt, self._project_path
             ),
-            "sha256": admitted_digest(ckpt),
-            "registered_at": now_iso(),
-            "metrics": metrics or {},
-            "tags": tags or [],
-        }
+            sha256=admitted_digest(ckpt),
+            registered_at=now_iso(),
+            metrics=metrics or {},
+            tags=tags or [],
+            experiment_id=None,
+        )
         key = registry_index_key(self._project_path)
         with tcip_store.transaction(key) as txn:
             superseded, stored = _write_registry_entry(txn, key, entry)
@@ -585,43 +695,34 @@ class ModelRegistry:
         owner = next(
             e
             for e in registered_entries(self._project_path)
-            if e["sha256"] == entry["sha256"]
+            if e.sha256 == entry.sha256
         )
-        return _resolve_entry_checkpoint(self._project_path, owner)
+        return _listed(self._project_path, owner)
 
-    def list_models(self, tag: str | None = None) -> list[dict]:
+    def list_models(self, tag: str | None = None) -> list[Listed]:
         """Return every registered checkpoint carrying ``tag``, every one when ``tag`` is ``None``.
 
-        Each is a copy carrying the resolved absolute ``checkpoint_path``
-        (:func:`_resolve_entry_checkpoint`) and what its payload says of it (:func:`entry_facts`),
-        except one whose path did not resolve, which carries its ``checkpoint_path_error``.
+        Each is listed (:func:`_listed`).
         """
-        resolved = [
-            _resolve_entry_checkpoint(self._project_path, m)
-            for m in registered_entries(self._project_path)
-            if tag is None or tag in m["tags"]
-        ]
-        # A path the resolution above refused names no file to read facts from; its error says so.
         return [
-            m
-            if "checkpoint_path_error" in m
-            else {**m, **entry_facts(m, Path(self._project_path))}
-            for m in resolved
+            _listed(self._project_path, m)
+            for m in registered_entries(self._project_path)
+            if tag is None or tag in m.tags
         ]
 
 
-def verified(entry: dict) -> bool:
+def verified(entry: Listed) -> bool:
     """Return whether a registry entry's metrics were measured by the trainer, not asserted."""
-    return entry["metrics_source"] == "trainer"
+    return entry.facts.metrics_source == "trainer"
 
 
 def best_model(
-    models: list[dict],
+    models: list[Listed],
     metric_key: str,
     *,
     higher_is_better: bool,
     include_unverified: bool = False,
-) -> dict | None:
+) -> Listed | None:
     """Return the one of ``models`` with the best finite ``metric_key`` value, or ``None``.
 
     ``models`` are :meth:`ModelRegistry.list_models`'s entries; best is in the stated direction,
@@ -633,7 +734,7 @@ def best_model(
     for m in models:
         if not (include_unverified or verified(m)):
             continue
-        val = m["metrics"].get(metric_key)
+        val = m.facts.metrics.get(metric_key)
         if not finite_number(val):
             continue
         if best_val is None or (

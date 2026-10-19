@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any, cast
 from tcip_store import non_finite_state, stored_number
 
 if TYPE_CHECKING:
+    import torch
+
     from tcip_mcp.pipelines.schemas import SpatialManifest
 
 from tcip_mcp.pipelines.training.evaluation import (
@@ -93,7 +95,9 @@ OPERATING_POINT_ATTRS = (SCORE_THRESH, DETECTIONS_PER_IMG)
 """The two knobs the detection operating point governs, wherever a module holds them."""
 
 
-def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
+def detector_operating_point_holder(
+    model: torch.nn.Module,
+) -> tuple[Any, str | None]:
     """Return the holder of a model's operating-point knobs and its attribute path.
 
     Checked in this order, the first that exposes any of :data:`OPERATING_POINT_ATTRS`: the module
@@ -124,7 +128,7 @@ def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
 
 
 def set_detector_operating_point(
-    model: Any, *, score_thresh: float, detections_per_img: int
+    model: torch.nn.Module, *, score_thresh: float, detections_per_img: int
 ) -> None:
     """Set both knobs on the holder :func:`detector_operating_point_holder` resolves.
 
@@ -136,7 +140,9 @@ def set_detector_operating_point(
     _set_knob(target, path, DETECTIONS_PER_IMG, detections_per_img)
 
 
-def _set_knob(target: Any, path: str | None, attr: str, value: float) -> None:
+def _set_knob(
+    target: torch.nn.Module | None, path: str | None, attr: str, value: float
+) -> None:
     """Set the operating-point knob ``attr`` to ``value`` on ``target``, the holder at ``path``.
 
     Refuses (``ValueError``) naming the knob and the holder when ``target`` does not expose it.
@@ -152,7 +158,7 @@ def _set_knob(target: Any, path: str | None, attr: str, value: float) -> None:
 
 
 def governed_forward(
-    model: Any, inputs: list, caps: list[int], *, conf: float
+    model: torch.nn.Module, inputs: list, caps: list[int], *, conf: float
 ) -> list:
     """Return ``model``'s output for each of ``inputs``, in input order, under its own cap.
 

@@ -14,16 +14,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from tcip_annotation.state import Annotation, BBox, Polygon, box_derivable
+from tcip_annotation.state import Annotation, GeometryReader, box_derivable
 from tcip_mcp.pipelines.image_utils import list_logical_images
 from tcip_store import Key
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.data.selection import ClassScope, Sample
+    from tcip_mcp.pipelines.data.selection import ClassScope, Sample, Side
 
 
-def registry_scope(images_dir, subject: str | None) -> ClassScope:
+def registry_scope(images_dir: str | Path, subject: str | None) -> ClassScope:
     """Return the class space ``subject`` is read under over the images ``images_dir`` holds.
 
     That is the subject with every attribute their dataset's ``subjects.json`` declares for it,
@@ -50,7 +50,7 @@ def registry_scope(images_dir, subject: str | None) -> ClassScope:
 def json_det_targets(
     annotations: Sequence[Annotation],
     scope: ClassScope,
-    reads: Callable[[Any], bool] = box_derivable,
+    reads: GeometryReader = box_derivable,
 ) -> dict[str, Any]:
     """Return one image's detection target from its label document's ``annotations``.
 
@@ -68,7 +68,8 @@ def json_det_targets(
     from tcip_annotation import json_io
     from tcip_annotation.state import bbox_of
 
-    attributes = cast(tuple, scope.attributes)
+    read = scope.document_attributes("this label document's class space")
+    attributes = read.attributes
     target: dict[str, Any] = {
         "boxes": [],
         "labels": [],
@@ -79,11 +80,10 @@ def json_det_targets(
     for a in annotations:
         if not reads(a.geometry):
             continue
-        ids = json_io.attribute_ids(a, cast(str, scope.subject), attributes)
+        ids = json_io.attribute_ids(a, read.subject, attributes)
         if ids is None:
             continue
-        # Every reads predicate admits a box or a region only (box_derivable or narrower).
-        geometry = cast(BBox | Polygon, a.geometry)
+        geometry = a.geometry
         box = bbox_of(geometry)
         target["boxes"].append([box.x1, box.y1, box.x2, box.y2])
         target["labels"].append(1)
@@ -97,7 +97,7 @@ def json_det_targets(
     return target
 
 
-def ground_truth_shape(ground_truth) -> str:
+def ground_truth_shape(ground_truth: str | Path | None) -> str:
     """Return which ground-truth shape a run's ``ground_truth`` names.
 
     The shape is one of :data:`~tcip_mcp.pipelines.data.selection.GROUND_TRUTH_SHAPES`: none
@@ -105,12 +105,17 @@ def ground_truth_shape(ground_truth) -> str:
     sample, and a directory holding ``<stem>.png`` rasters masks. Anything else refuses
     (``ValueError``) naming it.
     """
-    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK, TABLE
+    from tcip_mcp.pipelines.data.selection import (
+        DOCUMENT,
+        MASK,
+        TABLE,
+        shape_of,
+    )
 
     if ground_truth is None:
         return DOCUMENT
     path = Path(ground_truth)
-    if path.suffix.lower() == ".csv":
+    if shape_of(str(path), None) == TABLE:
         if not path.is_file():
             raise ValueError(
                 f"{path} names a ground-truth table that does not exist; name where this run's "
@@ -178,21 +183,24 @@ def _table(tables: _Tables, path: str) -> tuple[dict[str, str], Any]:
 
 
 def _candidates(
-    shape: str, ground_truth, images_dir, members, tables: _Tables
+    ground_truth: str | Path | None,
+    images_dir: str | Path,
+    members: list[str] | None,
+    tables: _Tables,
 ) -> list[Candidate]:
-    """Return every candidate one place holding ground truth of ``shape`` offers.
+    """Return every candidate one place holding ``ground_truth`` offers.
 
-    The candidates are ``members`` when named, else every image (documents or a mask directory)
-    or every row (a table), an image's label document being its own key
-    (:func:`~tcip_mcp.dataset_layout.label_key`). A mask directory holding another format beside
-    an image of the same stem, and no ``<stem>.png``, refuses.
+    The candidates are ``members`` when named, else every image (documents, ``ground_truth``
+    ``None``, or a mask directory) or every row (a table), an image's label document being its
+    own key (:func:`~tcip_mcp.dataset_layout.label_key`). A mask directory holding another format
+    beside an image of the same stem, and no ``<stem>.png``, refuses.
     """
     from tcip_mcp.dataset_layout import label_key_of
-    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
+    from tcip_mcp.pipelines.data.selection import MASK, shape_of
     from tcip_mcp.pipelines.image_utils import source_path_of
 
     sources = list_logical_images(images_dir)
-    if shape == DOCUMENT:
+    if ground_truth is None:
         names = list(members) if members is not None else sorted(sources)
         return [
             Candidate(
@@ -204,7 +212,7 @@ def _candidates(
             )
             for m in names
         ]
-    if shape == MASK:
+    if shape_of(str(ground_truth), None) == MASK:
         labels_p = Path(ground_truth)
         entries = list(labels_p.iterdir()) if labels_p.is_dir() else []
         masks = {p.stem: str(p) for p in entries if is_mask(p)}
@@ -233,14 +241,13 @@ def _candidates(
 
 
 def _acquire(
-    shape: str,
     ground_truth: Key | str,
     row_key: str | None,
     tables: _Tables,
     *,
     version: str | None,
 ) -> tuple[Any, Any]:
-    """Read one member's ground truth of ``shape`` once.
+    """Read one member's ground truth once, by the shape its own value names.
 
     The answer is what the store answered (``tcip_store.Versioned``) and what that decodes to,
     the label document, the row's value, or nothing for a mask; ``(None, None)`` for ground
@@ -255,23 +262,21 @@ def _acquire(
         document_at,
         read_stored,
     )
-    from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
+    from tcip_mcp.pipelines.data.selection import MASK, shape_of
 
     stored: Any = None
     decoded: Any = None
-    if shape == DOCUMENT:
-        stored = read_stored(cast(Key, ground_truth), default=None)
+    if isinstance(ground_truth, Key):
+        stored = read_stored(ground_truth, default=None)
         if stored.version == tcip_store.Version.ABSENT:
             stored = None
         else:
-            decoded = document_at(cast(Key, ground_truth), stored)
-    elif shape == MASK:
-        if is_mask(Path(cast(str, ground_truth))):
-            stored = tcip_store.read_blob_versioned(
-                Path(cast(str, ground_truth))
-            )
+            decoded = document_at(ground_truth, stored)
+    elif shape_of(ground_truth, row_key) == MASK:
+        if is_mask(Path(ground_truth)):
+            stored = tcip_store.read_blob_versioned(Path(ground_truth))
     else:
-        rows, table = _table(tables, cast(str, ground_truth))
+        rows, table = _table(tables, ground_truth)
         if holds_row(rows, row_key):
             stored, decoded = table, rows[cast(str, row_key)]
     if version is not None and (
@@ -283,7 +288,9 @@ def _acquire(
             else f"is at version {stored.version.token}"
         )
         refusal = (
-            UnreadableLabelDocumentError if shape == DOCUMENT else ValueError
+            UnreadableLabelDocumentError
+            if isinstance(ground_truth, Key)
+            else ValueError
         )
         raise refusal(
             f"{ground_truth}{f' row {row_key!r}' if row_key else ''} {at}, not "
@@ -293,25 +300,23 @@ def _acquire(
 
 
 def _tally(
-    shape: str, candidate: Candidate, scope: ClassScope, tables: _Tables
+    candidate: Candidate, scope: ClassScope, tables: _Tables
 ) -> tuple[str, Any, Any]:
     """Return what one candidate's ground truth reads as, with its one read (:func:`_acquire`).
 
     The tally is its label document's state for ``scope``'s subject, ``complete`` for a mask or
     a row that is there, :data:`ABSENT` (no read) for anything missing.
     """
-    from tcip_mcp.pipelines.data.selection import DOCUMENT
-
     if candidate.source is None or candidate.ground_truth is None:
         return ABSENT, None, None
     stored, decoded = _acquire(
-        shape, candidate.ground_truth, candidate.row_key, tables, version=None
+        candidate.ground_truth, candidate.row_key, tables, version=None
     )
     if stored is None:
         return ABSENT, None, None
     return (
-        decoded.state(cast(str, scope.subject))
-        if shape == DOCUMENT
+        decoded.state(scope.document_attributes("a label document").subject)
+        if isinstance(candidate.ground_truth, Key)
         else "complete",
         stored,
         decoded,
@@ -319,7 +324,6 @@ def _tally(
 
 
 def _admission(
-    shape: str,
     candidates: Sequence[Candidate],
     scope: ClassScope,
     tables: _Tables,
@@ -334,7 +338,7 @@ def _admission(
     records: list[Admitted] = []
     tallies: dict[str, int] = {}
     for candidate in candidates:
-        tally, stored, read = _tally(shape, candidate, scope, tables)
+        tally, stored, read = _tally(candidate, scope, tables)
         if admits(tally):
             image = refuse_incomplete_band_group(
                 cast("Path | BandGroupRef", candidate.source)
@@ -389,7 +393,7 @@ class Admitted:
 
 def samples_over(
     records: Sequence[Admitted],
-    assignment: dict[str, str],
+    assignment: dict[str, Side],
     group_of: Callable[[str], str],
 ) -> list[Sample]:
     """Return the admitted records ``assignment`` names as explicit samples, sorted by member.
@@ -447,7 +451,7 @@ def is_mask(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() == ".png"
 
 
-def parse_ground_truth_table(data: bytes, csv_path) -> dict[str, str]:
+def parse_ground_truth_table(data: bytes, csv_path: str) -> dict[str, str]:
     """Parse one ground-truth table's bytes as ``{row key: value}``.
 
     The row key is the image stem its first column names and the value its second, both as
@@ -505,7 +509,6 @@ def acquired(samples: Sequence[Sample]) -> list[Sample]:
         if s.stored is not None:
             return s
         stored, decoded = _acquire(
-            s.shape,
             s.ground_truth,
             s.row_key,
             tables,
@@ -542,7 +545,6 @@ def readmitted_samples(
     for shape in sorted({s.shape for s in samples}):
         held = [s for s in samples if s.shape == shape]
         records, counts = _admission(
-            shape,
             [
                 Candidate(
                     s.location,
@@ -655,7 +657,7 @@ class Admission:
     date: str
 
     def samples(
-        self, assignment: dict[str, str], group_of: Callable[[str], str]
+        self, assignment: dict[str, Side], group_of: Callable[[str], str]
     ) -> list[Sample]:
         """Return the admitted records this assignment names, as samples on its sides."""
         return samples_over(self.records, assignment, group_of)
@@ -675,8 +677,8 @@ class Admission:
 
 
 def admit(
-    images_dir,
-    ground_truth=None,
+    images_dir: str | Path,
+    ground_truth: str | Path | None = None,
     *,
     scope: ClassScope | None = None,
     members: list[str] | None = None,
@@ -707,8 +709,7 @@ def admit(
     )
     tables: _Tables = {}
     records, counts = _admission(
-        shape,
-        _candidates(shape, ground_truth, images_dir, members, tables),
+        _candidates(ground_truth, images_dir, members, tables),
         admitted,
         tables,
     )

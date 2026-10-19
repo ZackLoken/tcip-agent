@@ -22,23 +22,23 @@ logger = logging.getLogger(__name__)
 
 _Tool = TypeVar("_Tool", bound=Callable[..., Any])
 
-_TOOLS: list[tuple[Callable[..., Any], dict[str, Any]]] = []
-"""Every function a tool module declared with :func:`tool`, with its registration options."""
+_TOOLS: list[tuple[Callable[..., Any], str | None]] = []
+"""Every function a tool module declared with :func:`tool`, with its stated description."""
 
 
 class NoProjectError(ToolError):
     """A tool that acts on a project was called on a server started for none."""
 
 
-def tool(**options: Any) -> Callable[[_Tool], _Tool]:
+def tool(*, description: str | None = None) -> Callable[[_Tool], _Tool]:
     """Declare the decorated function an MCP tool and return it unchanged.
 
-    ``options`` are passed to the server's own registration when :func:`build_server` builds a
-    server.
+    ``description`` is passed to the server's own registration when :func:`build_server` builds
+    a server; omitted, the registration reads the function's docstring.
     """
 
     def decorate(fn: _Tool) -> _Tool:
-        _TOOLS.append((fn, options))
+        _TOOLS.append((fn, description))
         return fn
 
     return decorate
@@ -87,7 +87,7 @@ def _bound(
         return fn
 
     @functools.wraps(fn)
-    def entry(*args: Any, **kwargs: Any) -> Any:
+    def entry(*args: object, **kwargs: object) -> object:
         if binding is None:
             raise NoProjectError(
                 "this MCP server was started for no project, so no tool that acts on "
@@ -115,17 +115,14 @@ def build_server(binding: BoundProject | None) -> MCPServer:
     )
     # Records which harness connected, from the handshake, before any tool call is served.
     server.middleware.append(agent_identity.record_connecting_client)
-    for fn, options in _TOOLS:
-        server.add_tool(_bound(fn, binding), **options)
+    for fn, description in _TOOLS:
+        server.add_tool(_bound(fn, binding), description=description)
     return server
 
 
 def list_registered_tools() -> list[str]:
     """Return the sorted names of all tools a server registers."""
-    return sorted(
-        fn.__name__ if "name" not in options else options["name"]
-        for fn, options in _TOOLS
-    )
+    return sorted(fn.__name__ for fn, _description in _TOOLS)
 
 
 def main(argv: list[str] | None = None) -> None:

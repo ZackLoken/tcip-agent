@@ -8,9 +8,8 @@ Cells are recomputed from the serializable geometry dict (:func:`grid_geometry`)
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 
-from tcip_annotation.grid import column_label
+from tcip_annotation.grid import Cell, column_label
 from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE, within_cap
 
 POINTING_LEGIBLE_EDGE = 46
@@ -18,23 +17,6 @@ POINTING_LEGIBLE_EDGE = 46
 clearly with most of the cell visible, measured by rendering ``render_grid_overlay`` at the
 artifact bound over cell edges 32 to 128: at 32 two-letter, two-digit labels collide, at 40 they
 cover most of the cell."""
-
-
-@dataclass(frozen=True)
-class Cell:
-    """One grid cell: its name plus its half-open native-pixel rect.
-
-    The rect is ``x0 <= x < x1``, ``y0 <= y < y1``.
-    ``col``/``row`` are 0-based grid coordinates; ``name`` is ``column_label(col)`` + 1-based row.
-    """
-
-    name: str
-    col: int
-    row: int
-    x0: int
-    y0: int
-    x1: int
-    y1: int
 
 
 def reference_cells(
@@ -137,10 +119,10 @@ def grid_geometry(
     """
     cells = reference_cells(width, height, tile_size, overlap)
     return {
-        "width": int(width),
-        "height": int(height),
-        "tile_size": int(tile_size),
-        "overlap": float(overlap),
+        "width": width,
+        "height": height,
+        "tile_size": tile_size,
+        "overlap": overlap,
         "cols": max(c.col for c in cells) + 1,
         "rows": max(c.row for c in cells) + 1,
     }

@@ -9,7 +9,10 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
 
 
 def is_external_form(stored: str) -> bool:
@@ -158,9 +161,9 @@ def resolved_registry_path(root: str | Path, stored: str) -> Path:
 PathFields = tuple[tuple[str, ...], ...]
 """The fields of one record shape that name a path, each a sequence of steps from the record's
 top: a key, ``"[]"`` for every item of a list, ``"*"`` for every value of a mapping, ``"{}"``
-for every key of a mapping, or ``"0"`` for the first item of a pair. A field whose value is a
-mapping where a path ends, or a path where a key step continues, names no path in that record
-and is left as it is."""
+for every key of a mapping, or ``"0"`` for the first item of a pair. A field whose value does
+not have the shape its steps walk (a mapping where a path ends, a path where a step continues)
+names no path in that record and is left as it is."""
 
 
 def within(prefix: tuple[str, ...], fields: PathFields) -> PathFields:
@@ -169,29 +172,33 @@ def within(prefix: tuple[str, ...], fields: PathFields) -> PathFields:
 
 
 def _each_path(
-    value: Any, steps: tuple[str, ...], convert: Callable[[str], str]
-) -> Any:
+    value: JsonValue, steps: tuple[str, ...], convert: Callable[[str], str]
+) -> JsonValue:
     if value is None:
         return None
     if not steps:
         return value if isinstance(value, dict) else convert(str(value))
     step, rest = steps[0], steps[1:]
-    if step == "[]":
-        return [_each_path(item, rest, convert) for item in value]
-    if step == "*":
-        return {
-            key: _each_path(item, rest, convert) for key, item in value.items()
-        }
-    if step == "{}":
-        return {convert(key): item for key, item in value.items()}
-    if step == "0":
-        return [_each_path(value[0], rest, convert), *value[1:]]
-    if not isinstance(value, dict) or step not in value:
-        return value
-    return {**value, step: _each_path(value[step], rest, convert)}
+    match step, value:
+        case "[]", list():
+            return [_each_path(item, rest, convert) for item in value]
+        case "0", [first, *others]:
+            return [_each_path(first, rest, convert), *others]
+        case "*", dict():
+            return {
+                key: _each_path(item, rest, convert)
+                for key, item in value.items()
+            }
+        case "{}", dict():
+            return {convert(key): item for key, item in value.items()}
+        case _, dict() if step in value:
+            return {**value, step: _each_path(value[step], rest, convert)}
+    return value
 
 
-def recorded_paths(record: Any, fields: PathFields, root: str | Path) -> Any:
+def recorded_paths(
+    record: JsonValue, fields: PathFields, root: str | Path
+) -> JsonValue:
     """Return a copy of ``record`` with each path ``fields`` names in its stored form.
 
     The stored form is :func:`stored_path`'s against ``root``. An absent or ``None`` field stays
@@ -204,7 +211,9 @@ def recorded_paths(record: Any, fields: PathFields, root: str | Path) -> Any:
     return record
 
 
-def runtime_paths(record: Any, fields: PathFields, root: str | Path) -> Any:
+def runtime_paths(
+    record: JsonValue, fields: PathFields, root: str | Path
+) -> JsonValue:
     """Return a copy of ``record`` with each path ``fields`` names resolved against ``root``.
 
     ``record`` is as :func:`recorded_paths` writes it; each path resolves through

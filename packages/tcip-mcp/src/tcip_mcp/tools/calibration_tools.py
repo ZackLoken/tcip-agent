@@ -6,7 +6,6 @@ and a physical scale against a breeder's reference measurements.
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -42,19 +41,13 @@ def _refusals() -> tuple[type[Exception], ...]:
 
 
 def _answer(assessment: Assessment) -> dict[str, Any]:
-    """Return an assessment as a dict, its reference's sample list replaced by its count.
+    """Return an assessment as its record, its reference's sample list replaced by its count."""
+    from tcip_mcp.assessment import ASSESSMENT_RECORD
 
-    The dict carries every field of the assessment, its revision dumped and its execution as its
-    record, with the reference's ``samples`` replaced by ``n_samples``.
-    """
-    answer = asdict(assessment)
+    answer = ASSESSMENT_RECORD.dump_python(assessment, mode="json")
     samples = answer["reference"].pop("samples")
     return {
         **answer,
-        "revision": assessment.revision.model_dump(),
-        "execution": assessment.execution.record()
-        if assessment.execution
-        else None,
         "reference": {**answer["reference"], "n_samples": len(samples)},
     }
 

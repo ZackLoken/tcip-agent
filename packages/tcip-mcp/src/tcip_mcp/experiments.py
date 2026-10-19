@@ -34,16 +34,24 @@ from typing import (
     Any,
     BinaryIO,
     Literal,
-    NamedTuple,
     cast,
     get_args,
 )
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
 
 from tcip_mcp.audit import now_iso
 from tcip_mcp.pipelines.data.selection import SAMPLE_PATHS
-from tcip_mcp.pipelines.schemas import TraitRevisionRef, selection_of
+from tcip_mcp.pipelines.data.split_construction import Partition
+from tcip_mcp.pipelines.model_build import Environment, SourceSnapshot
+from tcip_mcp.pipelines.model_contract import LaunchContract
+from tcip_mcp.pipelines.schemas import (
+    DataSpec,
+    EvaluationSpec,
+    TrainGeometry,
+    TraitRevisionRef,
+    selection_of,
+)
 from tcip_mcp.registry_paths import (
     PathFields,
     recorded_paths,
@@ -63,12 +71,7 @@ from tcip_store.file_backend import is_sharing_violation, retry_while_denied
 from tcip_store.values import NOT_FINITE_SUFFIX
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.schemas import (
-        DataSpec,
-        SpatialManifest,
-        TrainConfigSchema,
-        TrainGeometry,
-    )
+    from tcip_mcp.pipelines.schemas import TrainConfigSchema
 
 logger = logging.getLogger(__name__)
 
@@ -268,8 +271,128 @@ def create_run_directory(directory: Path) -> Path:
     return directory
 
 
+class DatasetIdentity(BaseModel):
+    """The dataset a run's data block names: its id and its fingerprint, each ``None`` unset."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str | None
+    fingerprint: str | None
+
+
+class ResolvedInput(BaseModel):
+    """What a run's input resolved to at launch, as ``split_construction``'s resolution records it.
+
+    That is its data block, the geometry read off its training frames, its ``partition`` (the
+    resolution's own record of its samples and how they were drawn,
+    ``split_construction.Partition``) and the confirmed trait revision it trains for, ``None``
+    for none.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    data: DataSpec
+    geometry: TrainGeometry
+    partition: Partition
+    trait_revision: TraitRevisionRef | None
+
+
+class RunRecord(BaseModel):
+    """A run's ``run.json``: its input and what that input resolved to, written once at launch.
+
+    It holds the instant it was created, its launch ``config`` as the config records itself,
+    ``resolved`` (``None`` for a sweep trial whose sampled point was refused at its admission or
+    failed to resolve), the ``environment`` it ran in, the ``dataset`` its data block names, the
+    ``source`` snapshot record its admission took, the run it was relaunched from and the
+    checkpoint it resumes from, its wall clock, the model contract preflight proved, and a
+    sweep trial's sampled point.
+    """
+
+    model_config = ConfigDict(
+        frozen=True, extra="forbid", ser_json_inf_nan="constants"
+    )
+
+    created: str
+    config: dict[str, JsonValue]
+    resolved: ResolvedInput | None
+    environment: Environment
+    dataset: DatasetIdentity
+    source: SourceSnapshot
+    relaunched_from: str | None
+    resume_from: str | None
+    max_wall_clock_seconds: float | None
+    model_contract: LaunchContract | None
+    trial_params: dict[str, JsonValue] | None
+
+    @cached_property
+    def spec(self) -> TrainConfigSchema:
+        """The launch ``config`` validated once; ``schemas.train_config`` refuses an invalid one."""
+        from tcip_mcp.pipelines.schemas import train_config
+
+        return train_config(self.config)
+
+    @property
+    def resolution(self) -> ResolvedInput:
+        """What its launch resolved to.
+
+        Refuses (``ValueError``) a run that resolved to nothing, a sweep trial refused at its
+        admission or whose resolution failed, which never ran.
+        """
+        if self.resolved is None:
+            raise ValueError(
+                "this run resolved to nothing: its input was refused at admission or failed "
+                "to resolve, so it never ran"
+            )
+        return self.resolved
+
+
+class SweepInput(BaseModel):
+    """What a sweep was asked for: its search, its trial budget and the config its trials vary.
+
+    ``base_config`` is the base training config each trial modifies and ``param_space`` the
+    space its points are drawn from (``hpo.space_axes``); ``split_draw_seeds`` names the seeds
+    each point is drawn under, one draw per seed, ``None`` for a single draw.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    n_trials: int
+    search_alg: str
+    scheduler: dict[str, JsonValue]
+    max_concurrent: int
+    baseline_params: dict[str, JsonValue] | None
+    resources_per_trial: dict[str, JsonValue] | None
+    param_space: dict[str, JsonValue]
+    base_config: dict[str, JsonValue]
+    relaunched_from: str | None
+    split_draw_seeds: list[int] | None
+    search_seed: int
+    trial_budget: int | None
+
+    @property
+    def split_draws(self) -> int:
+        """How many partitions the sweep draws: one per recorded seed, one for none."""
+        return (
+            1 if self.split_draw_seeds is None else len(self.split_draw_seeds)
+        )
+
+
+class SweepRecord(BaseModel):
+    """A sweep's ``sweep.json``, written once before its first trial.
+
+    It holds the instant it was created, the confirmed trait revision its trials train for
+    (``None`` for none) and its :class:`SweepInput`.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    created: str
+    trait_revision: TraitRevisionRef | None
+    input: SweepInput
+
+
 def open_run_directory(
-    run_dir: Path, record: dict, copies: Mapping[str, bytes]
+    run_dir: Path, record: RunRecord, copies: Mapping[str, bytes]
 ) -> None:
     """Create the run directory ``run_dir`` with its snapshot and metrics log, then its record.
 
@@ -285,18 +408,24 @@ def open_run_directory(
     write_record(run_dir / RUN_FILE, record)
 
 
-def write_record(path: Path, value: Any) -> None:
-    """Publish the run or sweep record ``value`` at ``path`` once (:func:`write_once`).
+def write_record(
+    path: Path, record: RunRecord | SweepRecord | FinalStatus
+) -> None:
+    """Publish ``record`` at ``path`` once (:func:`write_once`), as its model dumps it.
 
     Each path :data:`RECORD_PATHS` names for its file is stored against the directory's project.
     """
     write_once(
         path,
-        recorded_paths(value, RECORD_PATHS[path.name], project_of_run(path)),
+        recorded_paths(
+            record.model_dump(mode="json", exclude_unset=True),
+            RECORD_PATHS[path.name],
+            project_of_run(path),
+        ),
     )
 
 
-def read_run_record(path: Path) -> Any:
+def read_run_record(path: Path) -> JsonValue:
     """Return the run or sweep record at ``path`` (:func:`read_record`).
 
     Each path :data:`RECORD_PATHS` names for its file is resolved against the directory's
@@ -329,7 +458,7 @@ def publish_once(path: Path, write: Callable[[BinaryIO], object]) -> None:
         staging.unlink(missing_ok=True)
 
 
-def write_once(path: Path, value: Any) -> None:
+def write_once(path: Path, value: JsonValue) -> None:
     """Publish ``value`` as the JSON record at ``path`` (:func:`publish_once`).
 
     Refuses a value JSON cannot hold before anything is created, and a path already written with
@@ -339,29 +468,51 @@ def write_once(path: Path, value: Any) -> None:
     publish_once(path, lambda handle: handle.write(data))
 
 
-def write_final_status(
-    directory: Path, state: str, status_error: str | None, **outcome: Any
-) -> None:
-    """Write the final status of the run or sweep at ``directory`` once.
+class RunCheckpoint(BaseModel):
+    """The checkpoint a completed run selected: its path and the sha256 of its bytes."""
 
-    The status holds ``state``, the instant, ``status_error``, the error behind it, and
-    ``outcome``, what it produced (a run's ``checkpoint``). Refuses (``ValueError``) a state
-    outside :data:`FINAL_STATES`, and a status already written with ``FileExistsError``.
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    path: str
+    sha256: str
+
+
+class FinalStatus(BaseModel):
+    """How a run or sweep ended: its state, the instant, the error behind it, and its checkpoint.
+
+    ``checkpoint`` is ``None`` for a sweep and for a run that selected none.
     """
-    if state not in FINAL_STATES:
-        raise ValueError(
-            f"{state!r} is not a final state; a final status names one of "
-            f"{list(FINAL_STATES)}."
-        )
-    write_record(
-        directory / FINAL_STATUS_FILE,
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    state: FinalState
+    ended: str
+    status_error: str | None
+    checkpoint: RunCheckpoint | None
+
+
+def write_final_status(
+    directory: Path,
+    state: str,
+    status_error: str | None,
+    checkpoint: JsonValue = None,
+) -> None:
+    """Write the final status of the run or sweep at ``directory`` once, a :class:`FinalStatus`.
+
+    The status holds ``state``, the instant, ``status_error``, the error behind it, and the
+    ``checkpoint`` a run produced. Refuses (``pydantic.ValidationError``) a state outside
+    :data:`FINAL_STATES` or a checkpoint that is not a :class:`RunCheckpoint`, and a status
+    already written with ``FileExistsError``.
+    """
+    status = FinalStatus.model_validate(
         {
             "state": state,
             "ended": now_iso(),
             "status_error": status_error,
-            **outcome,
-        },
+            "checkpoint": checkpoint,
+        }
     )
+    write_record(directory / FINAL_STATUS_FILE, status)
 
 
 def append_row(path: Path, row: dict) -> None:
@@ -381,7 +532,7 @@ SHARING_RETRY_BUDGET_S = 0.35
 violation (``tcip_store.file_backend.retry_while_denied``) before raising it."""
 
 
-def read_record(path: Path) -> Any:
+def read_record(path: Path) -> JsonValue:
     """Return the JSON record at ``path``.
 
     A Windows sharing violation is retried while :data:`SHARING_RETRY_BUDGET_S` is unspent and
@@ -398,21 +549,27 @@ def read_record(path: Path) -> Any:
         raise DecodeError(f"{path} does not decode as JSON: {exc}") from exc
 
 
-def read_rows(path: Path, *, after: int = 0) -> tuple[list[dict], int]:
+_ROW = TypeAdapter(dict[str, JsonValue])
+"""One row of a metrics log, a JSON object as :func:`append_row` writes it."""
+
+
+def read_rows(
+    path: Path, *, after: int = 0
+) -> tuple[list[dict[str, JsonValue]], int]:
     """Return every complete row of the JSON log at ``path`` past byte offset ``after``.
 
     Beside them is the offset past the last complete one. A line still being appended is left for
     the next read. A log that does not exist raises ``FileNotFoundError``; a complete line that
-    does not decode raises ``DecodeError`` naming the file.
+    does not decode as a JSON object raises ``DecodeError`` naming the file.
     """
     with open(path, "rb") as handle:
         handle.seek(after)
         data = handle.read()
     end = data.rfind(b"\n") + 1
-    rows: list[dict] = []
+    rows: list[dict[str, JsonValue]] = []
     for line in data[:end].splitlines():
         try:
-            rows.append(decode_value(line))
+            rows.append(_ROW.validate_python(decode_value(line)))
         except ValueError as exc:
             raise DecodeError(
                 f"{path} holds a row that does not decode: {exc}"
@@ -489,10 +646,31 @@ def request_cancel(directory: Path) -> str:
     """
     require_open(directory)
     try:
-        write_once(directory / CANCEL_FILE, {"requested": now_iso()})
+        write_once(
+            directory / CANCEL_FILE,
+            CancelRequest(requested=now_iso()).model_dump(),
+        )
     except FileExistsError:
         pass
-    return read_record(directory / CANCEL_FILE)["requested"]
+    return cancel_requested_at(directory)
+
+
+class CancelRequest(BaseModel):
+    """The first cancellation request of a run or sweep: the instant it was made."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    requested: str
+
+
+def cancel_requested_at(directory: Path) -> str:
+    """Return when the cancellation of the run or sweep at ``directory`` was first requested.
+
+    The record is a :class:`CancelRequest`; none written raises ``FileNotFoundError``.
+    """
+    return CancelRequest.model_validate(
+        read_record(directory / CANCEL_FILE)
+    ).requested
 
 
 def cancel_requested(directory: Path) -> bool:
@@ -504,20 +682,19 @@ def cancel_requested(directory: Path) -> bool:
 
 
 @dataclass(frozen=True)
-class RunObservation:
+class RunObservation[R: RunRecord | SweepRecord]:
     """One run or sweep directory read once.
 
-    It holds its launch record, its final status (``None`` while it has not ended), its latest
-    sign of life as a POSIX time (:func:`last_alive`), the state those derive, and the record file
-    it holds (``RUN_FILE`` or ``SWEEP_FILE``).
+    It holds its launch record (a :class:`RunRecord` or a :class:`SweepRecord`), its final status
+    (``None`` while it has not ended), its latest sign of life as a POSIX time
+    (:func:`last_alive`) and the state those derive.
     """
 
     directory: Path
-    record: dict
-    final: dict | None
+    record: R
+    final: FinalStatus | None
     alive: float
     state: str
-    record_file: str
 
     @property
     def metrics_log(self) -> Path:
@@ -525,14 +702,14 @@ class RunObservation:
         return self.directory / METRICS_FILE
 
     @property
-    def checkpoint(self) -> dict | None:
+    def checkpoint(self) -> RunCheckpoint | None:
         """The checkpoint a completed training run's final status selects, or ``None``.
 
         ``None`` is a run that has not completed.
         """
         if self.final is None or self.state != "completed":
             return None
-        return self.final["checkpoint"]
+        return self.final.checkpoint
 
     @property
     def heartbeat(self) -> str:
@@ -542,74 +719,7 @@ class RunObservation:
     @property
     def status_error(self) -> str | None:
         """The error the final status names, ``None`` while it has not ended."""
-        return self.final["status_error"] if self.final is not None else None
-
-    @property
-    def resolution(self) -> dict | None:
-        """What a run's input resolved to at launch, or ``None``.
-
-        It holds the run's ``data``, ``geometry``, ``partition`` and ``trait_revision``; ``None``
-        is a sweep trial whose sampled point was refused at its admission or failed to resolve.
-        """
-        return self.record["resolved"]
-
-    @cached_property
-    def spec(self) -> TrainConfigSchema:
-        """A run's launch ``config`` validated once.
-
-        The validation is ``schemas.train_config``, which refuses an invalid one.
-        """
-        from tcip_mcp.pipelines.schemas import train_config
-
-        return train_config(self.record["config"])
-
-    @cached_property
-    def resolved_data(self) -> DataSpec | None:
-        """The data block a run's launch resolved (:attr:`resolution`'s), validated once.
-
-        ``None`` for a run that resolved to nothing.
-        """
-        from tcip_mcp.pipelines.schemas import DataSpec
-
-        resolved = self.resolution
-        return (
-            None
-            if resolved is None
-            else DataSpec.model_validate(resolved["data"])
-        )
-
-    @cached_property
-    def resolved_geometry(self) -> TrainGeometry | None:
-        """The geometry a run's launch read off its training frames, validated once.
-
-        It is :attr:`resolution`'s; ``None`` for a run that resolved to nothing.
-        """
-        from tcip_mcp.pipelines.schemas import TrainGeometry
-
-        resolved = self.resolution
-        return (
-            None
-            if resolved is None
-            else TrainGeometry.model_validate(resolved["geometry"])
-        )
-
-    @cached_property
-    def trait_revision(self) -> TraitRevisionRef | None:
-        """The confirmed trait revision the record carries, validated once.
-
-        It is a sweep's own, else what a run's launch resolved (:attr:`resolution`'s); ``None``
-        for one naming no trait. Refuses (``ValueError``) naming the run when it resolved to
-        nothing.
-        """
-        held = (
-            self.record if self.record_file == SWEEP_FILE else self.resolution
-        )
-        if held is None:
-            raise ValueError(
-                f"run {self.directory.name} resolved to nothing and carries no trait revision"
-            )
-        ref = held["trait_revision"]
-        return None if ref is None else TraitRevisionRef.model_validate(ref)
+        return self.final.status_error if self.final is not None else None
 
     @property
     def sweep(self) -> str | None:
@@ -618,38 +728,73 @@ class RunObservation:
         return parent.name if (parent / SWEEP_FILE).is_file() else None
 
 
-def observe(directory: Path) -> RunObservation:
-    """Read the sweep (holding its ``sweep.json``) or run at ``directory`` once.
+def _observed[R: RunRecord | SweepRecord](
+    directory: Path, record: R, record_file: str
+) -> RunObservation[R]:
+    """Return the observation of ``directory`` holding ``record`` in its ``record_file``.
 
     Its state is the one its final status names once one is written; before that ``running``
     while its latest sign of life is within :data:`HEARTBEAT_STALE_SECONDS`, else
-    ``interrupted``. A run holds its metrics log from the moment it opened; one missing it
-    refuses with :class:`IncompleteRunError` naming it. A completed run's checkpoint is not read.
+    ``interrupted``.
     """
-    record_file = (
-        SWEEP_FILE if (directory / SWEEP_FILE).is_file() else RUN_FILE
-    )
-    record = read_run_record(directory / record_file)
     final_path = directory / FINAL_STATUS_FILE
-    final = read_run_record(final_path) if final_path.exists() else None
+    final = (
+        FinalStatus.model_validate(read_run_record(final_path))
+        if final_path.exists()
+        else None
+    )
     alive = last_alive(directory, record_file)
+    state: str
     if final is not None:
-        state = final["state"]
+        state = final.state
     else:
         state = (
             "running"
             if time.time() - alive <= HEARTBEAT_STALE_SECONDS
             else "interrupted"
         )
-    observation = RunObservation(
-        directory, record, final, alive, state, record_file
-    )
-    if record_file == RUN_FILE and not observation.metrics_log.is_file():
+    return RunObservation(directory, record, final, alive, state)
+
+
+def read_run(run_dir: Path) -> RunRecord:
+    """Return the :class:`RunRecord` the run at ``run_dir`` holds, its paths read as resolved."""
+    return RunRecord.model_validate(read_run_record(run_dir / RUN_FILE))
+
+
+def observe_run(directory: Path) -> RunObservation[RunRecord]:
+    """Read the run at ``directory`` once (:func:`read_run`).
+
+    A run holds its metrics log from the moment it opened; one missing it refuses with
+    :class:`IncompleteRunError` naming it. A completed run's checkpoint is not read.
+    """
+    observation = _observed(directory, read_run(directory), RUN_FILE)
+    if not observation.metrics_log.is_file():
         raise IncompleteRunError(
-            f"run {directory.name} ({state}) is missing "
+            f"run {directory.name} ({observation.state}) is missing "
             f"{observation.metrics_log}."
         )
     return observation
+
+
+def observe_sweep(directory: Path) -> RunObservation[SweepRecord]:
+    """Read the sweep at ``directory`` once, its :class:`SweepRecord` validated."""
+    return _observed(
+        directory,
+        SweepRecord.model_validate(read_run_record(directory / SWEEP_FILE)),
+        SWEEP_FILE,
+    )
+
+
+def observe(
+    directory: Path,
+) -> RunObservation[RunRecord] | RunObservation[SweepRecord]:
+    """Read the sweep (holding its ``sweep.json``) or run at ``directory`` once.
+
+    It is :func:`observe_sweep`'s or :func:`observe_run`'s.
+    """
+    if (directory / SWEEP_FILE).is_file():
+        return observe_sweep(directory)
+    return observe_run(directory)
 
 
 class IncompleteRunError(ValueError):
@@ -688,9 +833,9 @@ def run_dirs(project: Path | str) -> list[Path]:
     )
 
 
-def run_observations(project: Path | str) -> list[RunObservation]:
+def run_observations(project: Path | str) -> list[RunObservation[RunRecord]]:
     """Return every run of ``project`` (:func:`run_dirs`), each observed once."""
-    return [observe(d) for d in run_dirs(project)]
+    return [observe_run(d) for d in run_dirs(project)]
 
 
 def live_run_conflict(project: Path) -> str | None:
@@ -718,42 +863,27 @@ def live_run_conflict(project: Path) -> str | None:
 
 def find_observation(
     experiment_id: str, *, project: Path | str
-) -> RunObservation | None:
+) -> RunObservation[RunRecord] | None:
     """Return the run ``experiment_id`` names (:func:`find_run`), observed, or ``None``."""
     run_dir = find_run(experiment_id, project=project)
-    return observe(run_dir) if run_dir is not None else None
-
-
-class RunResolution(NamedTuple):
-    """What a run resolved at launch.
-
-    It holds its data block (``RunObservation.resolved_data``), its ``partition`` and the
-    within-image split that partition records (``split_construction.partition_spatial``).
-    """
-
-    data: DataSpec
-    partition: dict
-    spatial: SpatialManifest | None
+    return observe_run(run_dir) if run_dir is not None else None
 
 
 def run_resolution(
     experiment_id: str, *, project: Path | str
-) -> RunResolution:
+) -> ResolvedInput:
     """Return what the run ``experiment_id`` names resolved at launch (:func:`find_observation`).
 
     Refuses (``ValueError``) an id naming no run directory or one whose input resolved to
     nothing.
     """
     observation = find_observation(experiment_id, project=project)
-    data = observation.resolved_data if observation is not None else None
-    if observation is None or observation.resolution is None or data is None:
+    resolved = observation.record.resolved if observation is not None else None
+    if resolved is None:
         raise ValueError(
             f"no run directory records what {experiment_id!r} resolved to."
         )
-    from tcip_mcp.pipelines.data.split_construction import partition_spatial
-
-    partition = observation.resolution["partition"]
-    return RunResolution(data, partition, partition_spatial(partition))
+    return resolved
 
 
 def partition_rows(
@@ -827,7 +957,7 @@ class RunRow(BaseModel):
 
 
 def run_summary(
-    observation: RunObservation,
+    observation: RunObservation[RunRecord],
     rows: list[dict[str, Any]],
     launch: dict[str, str | None] | None,
 ) -> RunRow:
@@ -840,20 +970,21 @@ def run_summary(
     direction (``schemas.selection_of``) with that metric's name, both ``None`` for a run that
     resolved to nothing.
     """
-    record, spec = observation.record, observation.spec
+    record = observation.record
+    spec = record.spec
     selection = (
         selection_of(spec.evaluation.selection_metric)
-        if observation.resolution is not None
+        if record.resolved is not None
         else None
     )
     rows = epoch_rows(rows)
     return RunRow(
         experiment_id=observation.directory.name,
         state=observation.state,
-        created=record["created"],
-        relaunched_from=record["relaunched_from"],
+        created=record.created,
+        relaunched_from=record.relaunched_from,
         sweep=observation.sweep,
-        trial_params=record["trial_params"],
+        trial_params=record.trial_params,
         builder=spec.model_source.builder,
         task=spec.model_source.task,
         images_dir=spec.data.images_dir,
@@ -950,18 +1081,20 @@ def group_split_draws(
     return out
 
 
-def sweep_selection(given: dict[str, Any]) -> tuple[str, bool]:
+def sweep_selection(given: SweepInput) -> tuple[str, bool]:
     """Return the metric and direction a sweep whose recorded input is ``given`` ranks trials by.
 
     They are ``schemas.selection_of`` its base config's ``evaluation.selection_metric``, which no
-    trial's point sweeps.
+    trial's point sweeps; the ``evaluation`` block is validated as an ``EvaluationSpec``.
     """
-    return selection_of(given["base_config"]["evaluation"]["selection_metric"])
+    return selection_of(
+        EvaluationSpec.model_validate(
+            given.base_config["evaluation"]
+        ).selection_metric
+    )
 
 
-def sweep_outcome(
-    trials: list[RunRow], given: dict[str, Any]
-) -> dict[str, Any]:
+def sweep_outcome(trials: list[RunRow], given: SweepInput) -> dict[str, Any]:
     """Return what a sweep's trial rows amount to under its recorded input ``given``.
 
     That is ``best_params`` and ``best_value`` over its completed trials in its selection's
@@ -975,16 +1108,17 @@ def sweep_outcome(
     from tcip_mcp.pipelines.training.hpo import space_axes
 
     choose = max if sweep_selection(given)[1] else min
-    if given["split_draws"] > 1:
-        groups = group_split_draws(trials, given["split_draw_seeds"])
+    if given.split_draw_seeds is not None:
+        groups = group_split_draws(trials, given.split_draw_seeds)
         eligible = [g for g in groups if g["eligible"]]
         best_group = (
             choose(eligible, key=lambda g: g["block"]["mean"])
             if eligible
             else None
         )
+        best_params = best_group["point"] if best_group else None
         best = {
-            "best_params": best_group["point"] if best_group else None,
+            "best_params": best_params,
             **stored_number(
                 "best_value",
                 best_group["block"]["mean"] if best_group else None,
@@ -999,19 +1133,20 @@ def sweep_outcome(
             if done
             else None
         )
+        best_params = best_trial.trial_params if best_trial else None
         best = {
-            "best_params": best_trial.trial_params if best_trial else None,
+            "best_params": best_params,
             **stored_number(
                 "best_value", best_trial.best_metric if best_trial else None
             ),
         }
-    params = best["best_params"] or {}
+    params = best_params or {}
     return {
         **best,
         "best_at_range_end": {
             name: end
             for name, (ptype, ends) in space_axes(
-                given["param_space"], grid=False
+                given.param_space, grid=False
             ).items()
             if ptype != "categorical" and name in params
             for end, bound in zip(("low", "high"), ends)
@@ -1026,7 +1161,7 @@ class SweepGroup(BaseModel):
     sweep_id: str
     state: str
     status_error: str | None
-    input: dict[str, Any]
+    input: SweepInput
     cancel_requested: bool
     heartbeat: str
     trials: list[RunRow]
@@ -1039,17 +1174,17 @@ def read_sweep(directory: Path, rows: list[RunRow]) -> SweepGroup:
     Its trials are the ``rows`` of the project's runs (:func:`run_rows`) it holds, with their
     outcome (:func:`sweep_outcome`).
     """
-    sweep = observe(directory)
+    sweep = observe_sweep(directory)
     trials = [row for row in rows if row.sweep == directory.name]
     return SweepGroup(
         sweep_id=directory.name,
         state=sweep.state,
         status_error=sweep.status_error,
-        input=sweep.record["input"],
+        input=sweep.record.input,
         cancel_requested=cancel_requested(directory),
         heartbeat=sweep.heartbeat,
         trials=trials,
-        outcome=sweep_outcome(trials, sweep.record["input"]),
+        outcome=sweep_outcome(trials, sweep.record.input),
     )
 
 
@@ -1128,8 +1263,9 @@ def get_experiment(
     )
     return {
         "experiment_id": experiment_id,
-        "run": observation.record,
-        "final_status": observation.final,
+        "run": observation.record.model_dump(mode="json", exclude_unset=True),
+        "final_status": observation.final
+        and observation.final.model_dump(mode="json"),
         "state": observation.state,
         "n_epochs": len(rows),
         "metrics": rows[metrics_offset:end],
@@ -1137,30 +1273,26 @@ def get_experiment(
     }
 
 
-def _split_summary(observation: RunObservation) -> dict[str, Any]:
-    """Return the partition column of a comparison of the observed run.
+def _split_summary(record: RunRecord) -> dict[str, Any]:
+    """Return the partition column of a comparison of the run whose record is ``record``.
 
     It is ``{"case": "bound", "selection_dir", "seed", "redraw"}`` for a run bound to a
     selection, ``{"case": "spatial"}`` for a within-image split, ``{"case": "drawn", "seed"}`` for
     a drawn one, and ``{"case": "none"}`` for a run that resolved to nothing.
     """
-    resolved, data = observation.resolution, observation.resolved_data
-    if resolved is None or data is None:
+    if record.resolved is None:
         return {"case": "none"}
-    partition = resolved["partition"]
-    binding = partition["selection"]
-    if binding is not None:
+    partition = record.resolved.partition
+    if (bound := partition.selection) is not None:
         return {
             "case": "bound",
-            "selection_dir": binding["selection_dir"],
-            "seed": partition["seed"],
-            "redraw": binding["redraw"],
+            "selection_dir": bound.selection_dir,
+            "seed": partition.seed,
+            "redraw": bound.redraw,
         }
-    from tcip_mcp.pipelines.data.split_construction import partition_spatial
-
-    if partition_spatial(partition) is not None:
+    if partition.spatial is not None:
         return {"case": "spatial"}
-    return {"case": "drawn", "seed": partition["seed"]}
+    return {"case": "drawn", "seed": partition.seed}
 
 
 def _row_instant(row: dict, experiment_id: str) -> datetime:
@@ -1204,11 +1336,8 @@ def compare_experiments(
                 {"experiment_id": eid, "error": f"Experiment not found: {eid}"}
             )
             continue
-        run, final, spec = (
-            observation.record,
-            observation.final,
-            observation.spec,
-        )
+        run, final = observation.record, observation.final
+        spec = run.spec
         metrics = read_rows(observation.metrics_log)[0]
         epochs = epoch_rows(metrics)
         summary: dict[str, Any] = {
@@ -1229,34 +1358,33 @@ def compare_experiments(
             else sum(
                 1
                 for at in instants
-                if at > datetime.fromisoformat(final["ended"])
+                if at > datetime.fromisoformat(final.ended)
             )
         )
         summary["rows_after_end"] = rows_after_end
         summary["status_error"] = observation.status_error
         entry = run_entry(observation)
-        summary["registry"] = (
-            []
-            if entry is None
-            else [
+        summary["registry"] = []
+        if entry is not None:
+            facts = entry_facts(entry, project_of_run(observation.directory))
+            summary["registry"] = [
                 {
-                    "name": entry["name"],
-                    "registered_at": entry["registered_at"],
-                    **entry_facts(
-                        entry, project_of_run(observation.directory)
-                    ),
+                    "name": entry.name,
+                    "registered_at": entry.registered_at,
+                    "metrics": facts.metrics,
+                    "metrics_source": facts.metrics_source,
                 }
             ]
-        )
-        data = observation.resolved_data
-        summary["split"] = _split_summary(observation)
+        summary["split"] = _split_summary(run)
         summary["model"] = spec.model_source.builder
         summary["task"] = spec.model_source.task
         summary["subject"] = (
-            data.recorded_scope.subject if data is not None else None
+            run.resolved.data.recorded_scope.subject
+            if run.resolved is not None
+            else None
         )
-        summary["dataset_id"] = run["dataset"]["id"]
-        summary["dataset_fingerprint"] = run["dataset"]["fingerprint"]
+        summary["dataset_id"] = run.dataset.id
+        summary["dataset_fingerprint"] = run.dataset.fingerprint
         comparisons.append(summary)
 
     any_error = any("error" in c for c in comparisons)
@@ -1285,15 +1413,18 @@ def get_experiment_lineage(
     observation = find_observation(experiment_id, project=project)
     if observation is None:
         return {"error": f"Experiment not found: {experiment_id}"}
-    run, data = observation.record, observation.resolved_data
+    run = observation.record
     return {
         "experiment_id": experiment_id,
         "lineage": {
-            "data": data.record() if data is not None else None,
-            "dataset_id": run["dataset"]["id"],
-            "dataset_fingerprint": run["dataset"]["fingerprint"],
-            "relaunched_from": run["relaunched_from"],
-            "resume_from": run["resume_from"],
-            "checkpoint": observation.checkpoint,
+            "data": run.resolved.data.record()
+            if run.resolved is not None
+            else None,
+            "dataset_id": run.dataset.id,
+            "dataset_fingerprint": run.dataset.fingerprint,
+            "relaunched_from": run.relaunched_from,
+            "resume_from": run.resume_from,
+            "checkpoint": observation.checkpoint
+            and observation.checkpoint.model_dump(mode="json"),
         },
     }

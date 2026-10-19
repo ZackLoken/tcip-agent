@@ -8,20 +8,51 @@ coordinates are in. ``render_grid`` tiles already-rendered artifacts and so take
 
 from __future__ import annotations
 
-import math
+from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Annotated, Literal, NamedTuple
 
 from PIL import Image, ImageDraw, ImageFont
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveFloat,
+    Strict,
+    StringConstraints,
+)
 
 from tcip_annotation.utils import auto_orient_image
 
 if TYPE_CHECKING:
     import numpy as np
 
+    from tcip_annotation.grid import Cell
+
+type Pixels = Image.Image | np.ndarray
+"""Display pixels: a PIL image or a ``uint8 [H, W, 3]`` array."""
+
+type FrameSize = tuple[int, int]
+"""A frame's ``(width, height)`` in pixels."""
+
+type Coord = tuple[float, float]
+"""One ``(x, y)`` pixel position."""
+
+type Dash = tuple[float, float]
+"""A stroke's ``(on, off)`` dash lengths in pixels."""
+
+type Color = tuple[int, int, int]
+"""An RGB color."""
+
+type ColorAlpha = tuple[int, int, int, int]
+"""An RGBA color."""
+
+type Font = ImageFont.FreeTypeFont | ImageFont.ImageFont
+"""A loaded font, TrueType or PIL's bitmap default."""
+
 # 20-class color palette (RGB), indexed by class id modulo its length; the same palette across
 # every renderer in this module, not the GUI annotation canvas's own colors
-COLOR_PALETTE: list[tuple[int, int, int]] = [
+COLOR_PALETTE: list[Color] = [
     (255, 0, 0),  # red
     (0, 255, 0),  # green
     (0, 0, 255),  # blue
@@ -45,7 +76,7 @@ COLOR_PALETTE: list[tuple[int, int, int]] = [
 ]
 
 
-def _rgb_frame(image: Image.Image | np.ndarray) -> Image.Image:
+def _rgb_frame(image: Pixels) -> Image.Image:
     """Return the caller's display pixels as an RGB frame this module can draw on.
 
     A ``uint8 [H, W, 3]`` array or any PIL image; the returned frame is always a new one. An array
@@ -56,13 +87,12 @@ def _rgb_frame(image: Image.Image | np.ndarray) -> Image.Image:
 
     import numpy as np
 
-    arr = np.asarray(image)
-    if arr.dtype != np.uint8 or arr.ndim != 3 or arr.shape[2] != 3:
+    if image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3:
         raise ValueError(
             f"a renderer takes uint8 [H, W, 3] display pixels or a PIL image, got "
-            f"{arr.shape} {arr.dtype}"
+            f"{image.shape} {image.dtype}"
         )
-    return Image.fromarray(arr, mode="RGB")
+    return Image.fromarray(image, mode="RGB")
 
 
 def _get_scale(
@@ -72,25 +102,33 @@ def _get_scale(
     return render_w / orig_w, render_h / orig_h
 
 
-def _color_for_class(class_id: int) -> tuple[int, int, int]:
+def _color_for_class(class_id: int) -> Color:
     """Return the palette color of ``class_id``, cycling through :data:`COLOR_PALETTE`."""
     return COLOR_PALETTE[class_id % len(COLOR_PALETTE)]
 
 
-def _saved(img: Image.Image, output_path: str, **options) -> str:
-    """Write ``img`` to ``output_path``, making its directory first, and return the path."""
+def _saved(
+    img: Image.Image, output_path: str, *, quality: int | None = None
+) -> str:
+    """Write ``img`` to ``output_path``, making its directory first, and return the path.
+
+    ``quality`` is the JPEG quality ``Image.save`` takes; omitted, the writer's own default holds.
+    """
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    img.save(output_path, **options)
+    if quality is None:
+        img.save(output_path)
+    else:
+        img.save(output_path, quality=quality)
     return output_path
 
 
 def _label(
     draw: ImageDraw.ImageDraw,
-    xy: tuple[float, float],
+    xy: Coord,
     text: str,
-    font,
-    background,
-    fill=(255, 255, 255),
+    font: Font,
+    background: Color,
+    fill: Color = (255, 255, 255),
 ) -> None:
     """Draw ``text`` at ``xy`` over a ``background`` box padded two pixels each side."""
     x, y = xy
@@ -101,7 +139,7 @@ def _label(
     draw.text((x + 2, y + 2), text, fill=fill, font=font)
 
 
-def _try_font(size: int = 12) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+def _try_font(size: int = 12) -> Font:
     """Try to load a TTF font, fall back to default bitmap font."""
     try:
         return ImageFont.truetype("arial.ttf", size)
@@ -113,10 +151,10 @@ def _try_font(size: int = 12) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 
 def render_detections(
-    image: Image.Image | np.ndarray,
+    image: Pixels,
     boxes: list[dict],
     *,
-    native_size: tuple[int, int],
+    native_size: FrameSize,
     class_names: dict[int, str] | None = None,
     output_path: str,
     line_width: int = 2,
@@ -160,10 +198,10 @@ def render_detections(
 
 
 def render_segmentations(
-    image: Image.Image | np.ndarray,
+    image: Pixels,
     polygons: list[dict],
     *,
-    native_size: tuple[int, int],
+    native_size: FrameSize,
     class_names: dict[int, str] | None = None,
     output_path: str,
     alpha: float = 0.3,
@@ -193,7 +231,7 @@ def render_segmentations(
     for poly in polygons:
         cid = poly["class_id"]
         color = _color_for_class(cid)
-        all_pts: list[tuple[float, float]] = []
+        all_pts: list[Coord] = []
         for ring in poly["rings"]:
             pts = [(x * sx, y * sy) for x, y in ring]
             draw.polygon(pts, fill=color + (int(255 * alpha),), outline=color)
@@ -209,11 +247,11 @@ def render_segmentations(
 
 
 def render_comparison(
-    image: Image.Image | np.ndarray,
+    image: Pixels,
     gt_boxes: list[dict],
     pred_boxes: list[dict],
     *,
-    native_size: tuple[int, int],
+    native_size: FrameSize,
     matches: list[tuple[int, int]] | None = None,
     class_names: dict[int, str] | None = None,
     output_path: str,
@@ -349,10 +387,10 @@ def render_grid(
 
 
 def render_candidates(
-    image: Image.Image | np.ndarray,
+    image: Pixels,
     candidates: list[dict],
     *,
-    native_size: tuple[int, int],
+    native_size: FrameSize,
     output_path: str,
     alpha: float = 0.35,
 ) -> str:
@@ -428,16 +466,16 @@ def render_candidates(
 
 
 def render_grid_overlay(
-    image: Image.Image | np.ndarray,
-    cells: list,
+    image: Pixels,
+    cells: list[Cell],
     *,
-    native_size: tuple[int, int],
+    native_size: FrameSize,
     output_path: str,
 ) -> str:
     """Render display pixels with the caller's labeled reference-grid cells overlaid.
 
-    ``cells`` is the caller's own cell list, each entry a mapping or an object carrying ``name``
-    plus the half-open native-pixel rect ``x0, y0, x1, y1`` (see ``grid.cell_fields``).
+    ``cells`` is the caller's own cell list, each a :class:`~tcip_annotation.grid.Cell`: its
+    ``name`` plus the half-open native-pixel rect ``x0, y0, x1, y1``.
     Rects scale by the rendered/native ratio, so the lines land on the true cell boundaries, which
     under a clamped grid are non-uniform at the edges.
 
@@ -503,24 +541,21 @@ def render_grid_overlay(
     return _saved(img, output_path)
 
 
-def _hex_rgb(color: str) -> tuple[int, int, int]:
-    """Return ``#RRGGBB`` (or ``#RGB``) as an RGB tuple.
-
-    Anything else refuses (``ValueError``) naming it.
-    """
+def _hex_rgb(color: HexColor) -> Color:
+    """Return a :data:`HexColor` as an RGB tuple."""
     from PIL import ImageColor
 
-    if not (
-        isinstance(color, str)
-        and color.startswith("#")
-        and len(color) in (4, 7)
-    ):
-        raise ValueError(f"shape color {color!r} is not #RGB or #RRGGBB")
     return ImageColor.getrgb(color)[:3]  # type: ignore[return-value]
 
 
 def _dashed_segment(
-    draw, p1, p2, fill, width: int, dash: float, gap: float
+    draw: ImageDraw.ImageDraw,
+    p1: Coord,
+    p2: Coord,
+    fill: ColorAlpha,
+    width: int,
+    dash: float,
+    gap: float,
 ) -> None:
     """Draw p1→p2 as dashes."""
     x1, y1 = p1
@@ -540,64 +575,112 @@ def _dashed_segment(
         pos = end + gap
 
 
-def _dash_pixels(dash, stroke: int) -> tuple[float, float] | None:
-    """Return a shape's ``[on, off]`` dash, given in stroke widths, as pixel lengths.
+HexColor = Annotated[
+    str, StringConstraints(pattern=r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+]
+"""A color as ``#RGB`` or ``#RRGGBB``."""
 
-    The lengths are at ``stroke`` pixels; None for a solid stroke (no pattern given). A pattern
-    that is not two numbers with a positive ``on`` and a non-negative ``off`` refuses
-    (``ValueError``), an empty one included.
+_FINITE = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+
+class CanvasHalo(BaseModel):
+    """The wider translucent stroke the GUI draws under its focused shape."""
+
+    model_config = _FINITE
+
+    color: HexColor
+    opacity: Annotated[float, Field(ge=0, le=1)]
+    width_factor: PositiveFloat
+
+
+class _CanvasStroke(BaseModel):
+    """What every pushed canvas shape carries beside its geometry.
+
+    ``color`` is its stroke, ``tag`` what it stands for, ``dash`` its ``(on, off)`` pattern in
+    stroke widths (``None`` for a solid stroke), ``halo`` its focus halo and ``label`` its text,
+    each ``None`` when the GUI draws none.
     """
-    if dash is None:
-        return None
-    if (
-        not isinstance(dash, (list, tuple))
-        or len(dash) != 2
-        or not all(
-            isinstance(u, (int, float))
-            and not isinstance(u, bool)
-            and math.isfinite(u)
-            for u in dash
-        )
-    ):
-        raise ValueError(
-            f"dash {dash!r} is not an [on, off] pair of finite numbers"
-        )
-    on, off = (float(u) * stroke for u in dash)
-    if on <= 0 or off < 0:
-        raise ValueError(
-            f"dash {list(dash)!r} needs a positive on length and a non-negative off"
-        )
-    return on, off
+
+    model_config = _FINITE
+
+    color: HexColor
+    tag: str
+    dash: (
+        tuple[
+            Annotated[float, Strict(), Field(gt=0)],
+            Annotated[float, Strict(), Field(ge=0)],
+        ]
+        | None
+    ) = None
+    halo: CanvasHalo | None = None
+    label: str | None = None
 
 
-# A polyline is a drawing in progress, which shows its first laid vertex alone.
-_MIN_VERTICES = {"polygon": 2, "polyline": 1}
+class CanvasBox(_CanvasStroke):
+    """A box, its pixel ``xyxy``, filled when ``fill``."""
+
+    kind: Literal["box"]
+    xyxy: tuple[float, float, float, float]
+    fill: bool = False
+
+
+class CanvasPoint(_CanvasStroke):
+    """A point mark at the one pixel coordinate ``points`` holds."""
+
+    kind: Literal["point"]
+    points: tuple[tuple[float, float]]
+
+
+class CanvasPolygon(_CanvasStroke):
+    """One closed ring of two or more pixel coordinates, filled when ``fill``."""
+
+    kind: Literal["polygon"]
+    points: Annotated[list[tuple[float, float]], Field(min_length=2)]
+    fill: bool = False
+
+
+class CanvasPolyline(_CanvasStroke):
+    """A drawing in progress, its first laid vertex alone included.
+
+    Each vertex is dotted unless ``vertices`` is false.
+    """
+
+    kind: Literal["polyline"]
+    points: Annotated[list[tuple[float, float]], Field(min_length=1)]
+    vertices: bool = True
+
+
+CanvasShape = Annotated[
+    CanvasBox | CanvasPoint | CanvasPolygon | CanvasPolyline,
+    Field(discriminator="kind"),
+]
+"""One display-resolved shape the GUI's canvas pushes, as it draws it."""
 
 
 class _CanvasShape(NamedTuple):
-    """One pushed canvas shape as decoded.
+    """One pushed canvas shape as placed.
 
     It holds its record, its points in output pixels, its color, whether its outline closes and
     its dash as pixel lengths (None for a solid stroke).
     """
 
-    spec: dict
-    pts: list[tuple[float, float]]
-    color: tuple[int, int, int]
+    spec: CanvasShape
+    pts: list[Coord]
+    color: Color
     closed: bool
-    dash: tuple[float, float] | None
+    dash: Dash | None
 
 
 def _draw_path(
-    draw,
-    pts,
-    color,
+    draw: ImageDraw.ImageDraw,
+    pts: list[Coord],
+    color: ColorAlpha,
     width: int,
-    dash: tuple[float, float] | None,
+    dash: Dash | None,
     closed: bool,
 ) -> None:
     """Draw ``pts`` as one path, solid or as ``dash`` (on, off) lengths in pixels."""
-    seg_pts = list(pts) + ([pts[0]] if closed and len(pts) > 2 else [])
+    seg_pts = pts + ([pts[0]] if closed and len(pts) > 2 else [])
     if dash is not None:
         for a, b in zip(seg_pts, seg_pts[1:]):
             _dashed_segment(
@@ -608,8 +691,8 @@ def _draw_path(
 
 
 def render_canvas_state(
-    image: Image.Image | np.ndarray,
-    shapes: list[dict],
+    image: Pixels,
+    shapes: Sequence[CanvasShape],
     *,
     region: tuple[int, int, int, int],
     output_path: str,
@@ -617,20 +700,15 @@ def render_canvas_state(
     """Render the live GUI canvas: display-resolved shapes over the pixels the human is viewing.
 
     ``shapes`` come from the canvas-state push, each already carrying the exact symbology the GUI
-    rendered: ``{kind: box|polygon|polyline|point, xyxy|points (pixel), color '#hex', fill?,
-    dash?, halo?, label?}``. A ``point`` carries one coordinate in ``points`` and draws as
-    the GUI's mark (a core with radial ticks), never widened into a box; a shape carrying ``halo``
-    (``{color, opacity, width_factor}``, the GUI's focus) draws that wider translucent stroke
-    under its own, and one carrying ``dash`` (``[on, off]`` in stroke widths) draws its outline
-    dashed to that pattern. A polyline dots each vertex unless it carries ``vertices: false``.
+    rendered. A point draws as the GUI's mark (a core with radial ticks); a shape carrying a halo
+    draws that wider translucent stroke under its own, and one carrying a dash draws its outline
+    dashed to that pattern.
 
     ``image`` is whatever region of the raster the caller read (the human's viewport, or the whole
     frame), and ``region`` is that region's half-open ``(x0, y0, x1, y1)`` in the raster's own
     full-resolution grid. Shape coordinates arrive in the native grid and are placed by the
     region's origin and the image's size against the region's, one scale per axis. The render is
-    written to ``output_path`` as JPEG. A
-    shape that is none of those kinds, lacks its coordinates, or names a color that is not
-    ``#RGB`` or ``#RRGGBB`` refuses (``ValueError``) naming its index.
+    written to ``output_path`` as JPEG.
     """
     img = _rgb_frame(image)
     ox, oy = region[0], region[1]
@@ -645,66 +723,41 @@ def render_canvas_state(
     font = _try_font(max(11, out_w // 90))
     dot_r = max(2.0, out_w / 450)
 
-    def tx(p) -> tuple[float, float]:
+    def tx(p: Sequence[float]) -> Coord:
         return ((float(p[0]) - ox) * sx, (float(p[1]) - oy) * sy)
 
     # Two passes over one overlay: all fills first, then all outlines/vertices. ImageDraw
     # replaces pixels (it does not composite), so a later shape's translucent fill would
     # otherwise punch its silhouette out of earlier shapes' opaque outlines.
     parsed: list[_CanvasShape] = []
-    labels: list[tuple[tuple[float, float], str, tuple[int, int, int]]] = []
-    for i, s in enumerate(shapes):
-        try:
-            color = _hex_rgb(s["color"])
-            kind = s["kind"]
-            if kind == "box":
-                (x1, y1), (x2, y2) = tx(s["xyxy"][:2]), tx(s["xyxy"][2:4])
-                pts = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
-            elif kind == "point":
-                pts = [tx(s["points"][0])]
-            elif (
-                kind in ("polygon", "polyline")
-                and len(s["points"]) >= _MIN_VERTICES[kind]
-            ):
-                pts = [tx(p) for p in s["points"]]
-            else:
-                raise ValueError(f"kind {kind!r} with {s.get('points')!r}")
-        except (KeyError, TypeError, ValueError, IndexError) as exc:
-            raise ValueError(
-                f"canvas shape {i} is not a box, point, polygon or polyline the "
-                f"canvas draws: {exc!r}"
-            ) from exc
-        try:
-            dash = _dash_pixels(s.get("dash"), lw)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"canvas shape {i} carries a dash the canvas does not draw: "
-                f"{exc!r}"
-            ) from exc
-        closed = kind in ("box", "polygon")
+    labels: list[tuple[Coord, str, Color]] = []
+    for s in shapes:
+        color = _hex_rgb(s.color)
+        if isinstance(s, CanvasBox):
+            (x1, y1), (x2, y2) = tx(s.xyxy[:2]), tx(s.xyxy[2:])
+            pts = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+        else:
+            pts = [tx(p) for p in s.points]
+        dash = None if s.dash is None else (s.dash[0] * lw, s.dash[1] * lw)
+        closed = isinstance(s, (CanvasBox, CanvasPolygon))
         parsed.append(_CanvasShape(s, pts, color, closed, dash))
-        label = s.get("label")
-        if label:
-            labels.append((pts[0], str(label), color))
+        if s.label:
+            labels.append((pts[0], s.label, color))
 
     for shape in parsed:  # pass 1: fills
-        if shape.spec.get("fill") and shape.closed and len(shape.pts) >= 3:
+        if (
+            isinstance(shape.spec, (CanvasBox, CanvasPolygon))
+            and shape.spec.fill
+            and len(shape.pts) >= 3
+        ):
             draw.polygon(shape.pts, fill=shape.color + (38,))
-    for i, shape in enumerate(parsed):  # pass 2: halos, under every outline
+    for shape in parsed:  # pass 2: halos, under every outline
         s, pts, closed = shape.spec, shape.pts, shape.closed
-        if not s.get("halo"):
+        if s.halo is None:
             continue
-        try:
-            halo = _hex_rgb(s["halo"]["color"]) + (
-                round(255 * float(s["halo"]["opacity"])),
-            )
-            halo_w = max(1, round(lw * float(s["halo"]["width_factor"])))
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(
-                f"canvas shape {i} carries a halo the canvas does not draw: "
-                f"{exc!r}"
-            ) from exc
-        if s["kind"] == "point":
+        halo = _hex_rgb(s.halo.color) + (round(255 * s.halo.opacity),)
+        halo_w = max(1, round(lw * s.halo.width_factor))
+        if isinstance(s, CanvasPoint):
             px, py = pts[0]
             reach = dot_r * 1.6 * 3.2
             draw.ellipse(
@@ -716,7 +769,7 @@ def render_canvas_state(
             _draw_path(draw, pts, halo, halo_w, None, closed=closed)
     for shape in parsed:  # pass 3: outlines + vertices
         s, pts, color, closed, dash = shape
-        if s["kind"] == "point":
+        if isinstance(s, CanvasPoint):
             # The GUI's reticle: a core plus four radial ticks converging on the coordinate, the
             # mark that distinguishes a location from a very small box on the same canvas.
             px, py = pts[0]
@@ -740,8 +793,8 @@ def render_canvas_state(
                 )
             continue
         _draw_path(draw, pts, color + (255,), lw, dash, closed=closed)
-        if s["kind"] == "polyline" and s.get(
-            "vertices", True
+        if (
+            isinstance(s, CanvasPolyline) and s.vertices
         ):  # a drawing's laid vertices
             for px, py in pts:
                 draw.ellipse(

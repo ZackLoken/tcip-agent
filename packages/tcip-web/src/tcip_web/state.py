@@ -10,16 +10,16 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict, deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, NamedTuple, TypeVar
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
 from tcip_mcp.web_client import (
+    GUI_STATE_DEFAULTS,
     GuiState,
     read_gui_snapshot,
-    require_whole,
     write_gui_snapshot,
 )
 
@@ -30,6 +30,32 @@ T = TypeVar("T")
 RETAINED_EVENTS_PER_PANEL = 64
 """How many of the open project's latest panel events each panel retains and replays on connect;
 chosen here."""
+
+
+class StateNotification(BaseModel):
+    """A held GUI state as its subscribers are told of it: the state and its version."""
+
+    state: GuiState
+    version: int
+
+
+type Subscriber = Callable[[StateNotification], Awaitable[None]]
+"""A coroutine called with each held state's notification."""
+
+
+class PanelEnvelope(BaseModel):
+    """A panel event as retained and broadcast: its panel, type, data and id.
+
+    The agent identity its sender declared
+    (:func:`tcip_mcp.agent_identity.fields_from_headers`) rides beside them as further fields.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    panel: str
+    event_type: str
+    data: dict[str, JsonValue]
+    event_id: str
 
 
 class GuiMutationInvalidError(ValueError):
@@ -73,13 +99,13 @@ class StateStore:
 
     def __init__(self) -> None:
         """Start with no workspace, no open project and a fresh state at version 0."""
-        self._now = Held(None, GuiState())
+        self._now = Held(None, GUI_STATE_DEFAULTS)
         self._version = 0
         self._lock = asyncio.Lock()
-        self._subscribers: list = []  # list[Callable[[dict], Awaitable[None]]]
+        self._subscribers: list[Subscriber] = []
         self._workspace: Path | None = None
         self._image_roots: tuple[Path, ...] = ()
-        self._retained: dict[str, deque[dict[str, Any]]] = defaultdict(
+        self._retained: dict[str, deque[PanelEnvelope]] = defaultdict(
             lambda: deque(maxlen=RETAINED_EVENTS_PER_PANEL)
         )
 
@@ -147,7 +173,7 @@ class StateStore:
         """
         state = (
             await asyncio.to_thread(read_gui_snapshot, project.root)
-            or GuiState()
+            or GUI_STATE_DEFAULTS
         )
         await self._switch(project, state)
 
@@ -157,7 +183,7 @@ class StateStore:
         The name is compared through :meth:`admit`, the comparison and the close one step under
         the lock; a no-op when it does not name it, or none is open.
         """
-        await self._switch(None, GuiState(), closing=project_id)
+        await self._switch(None, GUI_STATE_DEFAULTS, closing=project_id)
 
     async def _switch(
         self,
@@ -184,13 +210,12 @@ class StateStore:
                 except NoProjectOpenError:
                     return
             departed = self._now.project
-            ended: list[dict] = []
-            if departed is not None and (
-                following is None or following.id != departed.id
-            ):
-                ended = await asyncio.to_thread(
-                    end_sessions, departed.root, None
-                )
+            ended = (
+                await asyncio.to_thread(end_sessions, departed.root, None)
+                if departed is not None
+                and (following is None or following.id != departed.id)
+                else []
+            )
             await self._hold(following, state)
         if departed is not None and ended:
             await asyncio.to_thread(record_ended, departed.root, ended)
@@ -205,11 +230,11 @@ class StateStore:
             root = self.admit(project_id).root
             return await asyncio.to_thread(act, root)
 
-    def retain_event(self, panel: str, event: dict[str, Any]) -> None:
-        """Append ``event`` to ``panel``'s retained events."""
-        self._retained[panel].append(event)
+    def retain_event(self, event: PanelEnvelope) -> None:
+        """Append ``event`` to its panel's retained events."""
+        self._retained[event.panel].append(event)
 
-    def retained_events(self, panel: str) -> list[dict[str, Any]]:
+    def retained_events(self, panel: str) -> list[PanelEnvelope]:
         """Return the open project's latest events on ``panel``, oldest first."""
         return list(self._retained.get(panel, ()))
 
@@ -224,18 +249,18 @@ class StateStore:
             self._retained.clear()
         self._now = Held(project, state)
         self._version += 1
-        payload = {"state": self.snapshot(), "version": self._version}
+        notification = self.notification()
         for cb in list(self._subscribers):
             try:
-                await cb(payload)
+                await cb(notification)
             except Exception:
                 logger.exception("state subscriber failed")
 
-    def subscribe(self, callback) -> None:
-        """Register a coroutine called with each mutation payload ``{state, version}``."""
+    def subscribe(self, callback: Subscriber) -> None:
+        """Register a coroutine called with each held state's notification."""
         self._subscribers.append(callback)
 
-    def unsubscribe(self, callback) -> None:
+    def unsubscribe(self, callback: Subscriber) -> None:
         """Remove a registered ``callback``; a no-op when it is not registered."""
         try:
             self._subscribers.remove(callback)
@@ -256,6 +281,10 @@ class StateStore:
         """Return a JSON-safe snapshot of the current state."""
         return self._now.state.model_dump(mode="json")
 
+    def notification(self) -> StateNotification:
+        """Return the held state with its version."""
+        return StateNotification(state=self._now.state, version=self._version)
+
     async def mutate(
         self, mutation: dict[str, Any], *, project: OpenProject | None
     ) -> None:
@@ -267,10 +296,10 @@ class StateStore:
         mutation made while no project was open, which is held and persisted nowhere.
         ``mutation`` is a shallow dict of top-level field names; a nested field is set by
         passing a fully built model instance or a complete dict for it.
-        After the admission the merged result is validated through :class:`GuiState` and
-        :func:`~tcip_mcp.web_client.require_whole`: a mutation that does not validate, or states
-        a nested field partly, raises :class:`GuiMutationInvalidError` naming the field. A state
-        that cannot be persisted raises the store's own error, and nothing is held.
+        After the admission the merged result is validated through :class:`GuiState`: a mutation
+        that does not validate, or states a nested field partly, raises
+        :class:`GuiMutationInvalidError` naming the field. A state that cannot be persisted raises
+        the store's own error, and nothing is held.
         """
         async with self._lock:
             opened = None if project is None else self.admit(project.id)
@@ -281,8 +310,7 @@ class StateStore:
             merged = {**self._now.state.model_dump(mode="json"), **dumped}
             try:
                 new_state = GuiState.model_validate(merged)
-                require_whole(new_state, "the mutated state")
-            except (ValidationError, ValueError) as exc:
+            except ValidationError as exc:
                 raise GuiMutationInvalidError(str(exc)) from exc
             if opened is not None:
                 await asyncio.to_thread(

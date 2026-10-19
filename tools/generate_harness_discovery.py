@@ -13,6 +13,12 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from tcip_mcp.knowledge import DocumentInfo
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CLAUDE_SKILLS = Path(".claude") / "skills"
@@ -77,7 +83,7 @@ def render_agents_skill(
     )
 
 
-def render_agents_block(documents) -> str:
+def render_agents_block(documents: list[DocumentInfo]) -> str:
     """Return the generated block for `AGENTS.md`'s root.
 
     The block states what TCIP is, the document index, and how a harness with no skill mechanism
@@ -110,7 +116,11 @@ def render_agents_block(documents) -> str:
     return "\n".join(lines) + "\n"
 
 
-def stale_skills(skills_dir: Path, render, documents) -> list[str]:
+def stale_skills(
+    skills_dir: Path,
+    render: Callable[[str, str, Path], str],
+    documents: list[DocumentInfo],
+) -> list[str]:
     """Return the document names whose `SKILL.md` under `skills_dir` is missing or stale.
 
     Stale is not equal to `render(name, description, path)`.
@@ -127,14 +137,20 @@ def stale_skills(skills_dir: Path, render, documents) -> list[str]:
     return stale
 
 
-def stray_skill_directories(skills_dir: Path, documents) -> set[str]:
+def stray_skill_directories(
+    skills_dir: Path, documents: list[DocumentInfo]
+) -> set[str]:
     """Return the directory names directly under `skills_dir` naming no document in `documents`."""
     documented_names = {document.name for document in documents}
     on_disk = {entry.name for entry in skills_dir.iterdir() if entry.is_dir()}
     return on_disk - documented_names
 
 
-def _write_skill_tree(skills_dir: Path, render, documents) -> list[Path]:
+def _write_skill_tree(
+    skills_dir: Path,
+    render: Callable[[str, str, Path], str],
+    documents: list[DocumentInfo],
+) -> list[Path]:
     """Render every document into a `SKILL.md` under `skills_dir`; return the paths written.
 
     Each document's file sits in its own subdirectory.
@@ -153,7 +169,9 @@ def _write_skill_tree(skills_dir: Path, render, documents) -> list[Path]:
     return written
 
 
-def write_agents_block(documents=None, path: Path = AGENTS_MD_PATH) -> Path:
+def write_agents_block(
+    documents: list[DocumentInfo] | None = None, path: Path = AGENTS_MD_PATH
+) -> Path:
     """Rewrite `AGENTS.md`'s generated block in place and return the path.
 
     The file is created if it is absent, and any text outside the markers is left untouched.

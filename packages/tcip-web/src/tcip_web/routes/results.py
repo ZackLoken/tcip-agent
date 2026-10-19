@@ -20,6 +20,7 @@ its positive/measured state, from a validated classifier. The milestone math liv
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -62,7 +63,9 @@ def _is_root(resolved: Path, root: Path) -> bool:
     return resolved == root
 
 
-def _belonging(root: Path, path: str, admits=within) -> Path:
+def _belonging(
+    root: Path, path: str, admits: Callable[[Path, Path], bool] = within
+) -> Path:
     """Resolve ``path`` when ``admits`` it against the open project or a dataset registered to it.
 
     By default ``admits`` means at or under one; any other path refuses (403), naming the roots
@@ -305,7 +308,10 @@ class AcknowledgmentPayload(BaseModel):
 
 
 def _recorded_acknowledgment(
-    root: Path, payload, person: str, request: Request
+    root: Path,
+    payload: ExportCsvPayload | ExportCountCsvPayload,
+    person: str,
+    request: Request,
 ) -> str | None:
     """Record the acknowledgment ``payload`` carries and return its id; ``None`` when none.
 

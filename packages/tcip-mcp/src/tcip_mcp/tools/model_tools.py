@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tcip_mcp.model_registry import ModelRegistry, best_model, verified
+from tcip_mcp.model_registry import Listed, ModelRegistry, best_model, verified
 from tcip_mcp.server import tool
 
 
@@ -34,10 +34,10 @@ def register_model(
     registry = ModelRegistry(str(project))
     return registry.register_model(
         name, checkpoint_path, metrics=metrics, tags=tags
-    )
+    ).model_dump()
 
 
-def _labeled_available_metrics(models: list[dict]) -> list[dict]:
+def _labeled_available_metrics(models: list[Listed]) -> list[dict]:
     """List the metric keys carried by ``models``, with their roles, directions and sources.
 
     ``direction`` is ``"higher"``/``"lower"`` when :mod:`schemas`'s declaration names the bare
@@ -51,16 +51,16 @@ def _labeled_available_metrics(models: list[dict]) -> list[dict]:
     )
     from tcip_mcp.pipelines.training.evaluation import VAL_METRIC_PREFIX
 
-    keys = sorted({k for m in models for k in m["metrics"]})
+    keys = sorted({k for m in models for k in m.facts.metrics})
     result = []
     for k in keys:
         bare = k.removeprefix(VAL_METRIC_PREFIX)
         higher = HIGHER_IS_BETTER_BY_METRIC.get(bare)
         sources = sorted(
             {
-                m["metrics_source"]
+                m.facts.metrics_source
                 for m in models
-                if k in m["metrics"] and m["metrics_source"] is not None
+                if k in m.facts.metrics and m.facts.metrics_source is not None
             }
         )
         result.append(
@@ -135,12 +135,12 @@ def rank_registered_models(
 
 
 def _narrowed(
-    models: list[dict], experiment_ids: list[str] | None
-) -> list[dict]:
+    models: list[Listed], experiment_ids: list[str] | None
+) -> list[Listed]:
     """Return ``models`` narrowed to ``experiment_ids`` when given."""
     if experiment_ids is None:
         return models
-    return [m for m in models if m["experiment_id"] in set(experiment_ids)]
+    return [m for m in models if m.entry.experiment_id in set(experiment_ids)]
 
 
 def registered_listing(
@@ -158,7 +158,7 @@ def registered_listing(
         ModelRegistry(str(project)).list_models(tag), experiment_ids
     )
     return {
-        "models": models,
+        "models": [m.model_dump() for m in models],
         "count": len(models),
         "available_metrics": _labeled_available_metrics(models),
     }
@@ -227,7 +227,7 @@ def ranked_registered_model(
         []
         if include_unverified
         else [
-            {"name": m["name"], "metrics_source": m["metrics_source"]}
+            {"name": m.entry.name, "metrics_source": m.facts.metrics_source}
             for m in unverified
         ]
     )
@@ -238,7 +238,7 @@ def ranked_registered_model(
         include_unverified=include_unverified,
     )
     if best is None:
-        carriers = [m for m in models if metric in m["metrics"]]
+        carriers = [m for m in models if metric in m.facts.metrics]
         if (
             carriers
             and not include_unverified
@@ -258,7 +258,7 @@ def ranked_registered_model(
             "n_models": len(models),
         }
     return {
-        **best,
+        **best.model_dump(),
         "ranking_basis": metric,
         "higher_is_better": resolved_direction,
         "direction_source": direction_source,

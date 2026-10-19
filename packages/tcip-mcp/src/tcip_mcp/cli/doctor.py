@@ -15,9 +15,13 @@ import argparse
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tcip_store import Key
 
 
-def _named(key) -> str:
+def _named(key: Key) -> str:
     """Return a label document's key as a finding names it, ``<capture>/<stem>``."""
     return "/".join(key.parts)
 
@@ -122,12 +126,15 @@ def check_registry(root: Path, findings: list) -> None:
     when the root itself sits under one; only a checkpoint the root does not contain is scanned.
 
     Every way the registry can refuse to be read (a store that will not decode, a database file
-    that will not open) comes out as a finding, not as a traceback.
+    that will not open, an index that does not validate) comes out as a finding, not as a
+    traceback.
     """
+    from pydantic import ValidationError
+
     import tcip_store
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import PREDICTION_BUCKETS
-    from tcip_mcp.model_registry import registered_entries
+    from tcip_mcp.model_registry import Producer, registered_entries
     from tcip_mcp.registry_paths import (
         RegistryPathEmptyError,
         RegistryPathTraversalError,
@@ -137,7 +144,7 @@ def check_registry(root: Path, findings: list) -> None:
 
     try:
         entries = registered_entries(root)
-    except StoreError as exc:
+    except (StoreError, ValidationError) as exc:
         findings.append(
             (
                 "error",
@@ -149,12 +156,12 @@ def check_registry(root: Path, findings: list) -> None:
     for m in entries:
         # Existence resolves first; the temp-tree marker scan runs over the resolved string.
         try:
-            resolved = resolved_registry_path(root, m["checkpoint_path"])
+            resolved = resolved_registry_path(root, m.checkpoint_path)
         except (RegistryPathEmptyError, RegistryPathTraversalError) as exc:
             findings.append(
                 (
                     "error",
-                    f"registry entry {m['name']!r} checkpoint_path "
+                    f"registry entry {m.name!r} checkpoint_path "
                     f"could not be resolved: {exc}",
                 )
             )
@@ -167,7 +174,7 @@ def check_registry(root: Path, findings: list) -> None:
             findings.append(
                 (
                     "error",
-                    f"registry entry {m['name']!r} points at a test/temp "
+                    f"registry entry {m.name!r} points at a test/temp "
                     f"checkpoint: {ckpt}",
                 )
             )
@@ -175,15 +182,15 @@ def check_registry(root: Path, findings: list) -> None:
             findings.append(
                 (
                     "error",
-                    f"registry entry {m['name']!r} checkpoint missing: {ckpt}",
+                    f"registry entry {m.name!r} checkpoint missing: {ckpt}",
                 )
             )
 
-    registered_shas = {m["sha256"] for m in entries}
+    registered_shas = {m.sha256 for m in entries}
     for key in tcip_store.keys(PREDICTION_BUCKETS, str(root)):
         name = key.parts[0]
         try:
-            sha = read_bucket(root, name).producer.get("checkpoint_sha256")
+            producer = read_bucket(root, name).producer
         except ValueError as exc:
             findings.append(
                 (
@@ -192,12 +199,15 @@ def check_registry(root: Path, findings: list) -> None:
                 )
             )
             continue
-        if sha is not None and sha not in registered_shas:
+        if (
+            isinstance(producer, Producer)
+            and producer.checkpoint_sha256 not in registered_shas
+        ):
             findings.append(
                 (
                     "warn",
-                    f"bucket {name!r}: prediction bucket's record names "
-                    f"checkpoint {sha}, which no registry entry names; register the "
+                    f"bucket {name!r}: prediction bucket's record names checkpoint "
+                    f"{producer.checkpoint_sha256}, which no registry entry names; register the "
                     "checkpoint to make this bucket's provenance verifiable going "
                     "forward.",
                 )

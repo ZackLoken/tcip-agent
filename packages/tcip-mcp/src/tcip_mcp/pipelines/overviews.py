@@ -11,9 +11,12 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 from tcip_mcp.pipelines.raster_source import SourceHeader
+
+if TYPE_CHECKING:
+    from rasterio.io import DatasetWriter
 
 PYRAMID_FLOOR_EDGE = 1024
 """Longest edge of a pyramid's deepest level: an engineering bound, a level small enough to read
@@ -59,7 +62,7 @@ def overview_dims(path: str | Path) -> list[tuple[int, int]]:
         return source.level_dims()
 
 
-def plan_overview_build(ds) -> dict:
+def plan_overview_build(ds: DatasetWriter) -> dict:
     """Plan the pyramid build of the raster the open GDAL dataset ``ds`` is (``ds.name``).
 
     The plan is read off ``ds`` and the raster's TIFF header: ``{"refusal": why}`` when the raster

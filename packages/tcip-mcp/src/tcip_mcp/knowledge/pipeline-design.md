@@ -128,7 +128,10 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   platform's own producer named for the side being built and the class space they were
   admitted under (`samples` / `scope` / `transforms` / `task`), each sample carrying the logical
   image its pixels are read from as `image` (a `BandGroupRef` for a grouped capture), sizing the
-  dataset it builds itself, plus your own `builder_kwargs`, and must return a torch `Dataset`.
+  dataset it builds itself, plus your own `builder_kwargs`, and must return a
+  `pipelines.data.datasets.BaseDataset`: a built-in loader, or your own subclass stating
+  `num_samples` and `__getitem__`, its interface `num_samples`, `expected_channels` and
+  `sample_classes`; anything else refuses naming your builder.
   Never a directory, a document path or a format flag: the platform names the samples and your
   builder builds over them, so a strip split over your own samples composes the tiled wrapper
   inside `train(ctx)` at the lattice it states (`ctx.tiled_dataset(base, tile_size=,
@@ -275,19 +278,22 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
 build = load_mapping(
     project_root, mapping_name
 )  # from a prior build_plant_mapping call
-by_stem = {row["stem"]: row for rows in build.rows().values() for row in rows}
+by_stem = {a.stem: a for rows in build.assignments.values() for a in rows}
 
-# Each record carries its assignment's plant, source, distance_m and plant_attribution.
+# Each record carries its assignment's plant, source and distance_m, and the build's
+# plant_attribution.
 records = [
     {
         **r,
-        "plant_id": row["plant_id"],
-        **{k: row[k] for k in ("source", "distance_m", "plant_attribution")},
+        "plant_id": a.plant_id,
+        "source": a.source,
+        "distance_m": a.distance_m,
+        "plant_attribution": build.plant_attribution,
     }
     for r in read_stage_b_preds_as_image_results(
         "stage-b/<date>"
     )  # your own per-image count reader
-    if (row := by_stem.get(Path(r["image"]).stem))
+    if (a := by_stem.get(Path(r["image"]).stem))
 ]
 
 # The delivery door aggregates each plant's records under the trait's confirmed plant_aggregation

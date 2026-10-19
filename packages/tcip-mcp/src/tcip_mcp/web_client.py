@@ -11,9 +11,10 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, JsonValue, PositiveFloat
 
 import tcip_store
+from tcip_annotation.viz import CanvasShape
 from tcip_store import Key
 
 if TYPE_CHECKING:
@@ -94,11 +95,79 @@ AnnotateMode = Literal["box", "polygon", "point"]
 
 ANNOTATE_MODES = get_args(AnnotateMode)
 
-_TRANSPORT = ConfigDict(
-    extra="forbid", json_schema_serialization_defaults_required=True
-)
-"""The GUI state models' config: no field beyond the declared ones, and every field present in
-what they serialize to."""
+
+class Viewport(BaseModel):
+    """The image region the GUI's canvas shows, in image coordinates, and its zoom ``scale``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    x: float
+    y: float
+    w: PositiveFloat
+    h: PositiveFloat
+    scale: float
+
+
+class CanvasView(BaseModel):
+    """What the GUI's canvas showed: tab, image, size, viewport, mode, person, classes, counts.
+
+    ``viewport`` is ``None`` while the canvas shows no region, ``active_subject`` while no subject
+    is active, and ``cut_armed`` is whether the Annotate cut tool is armed.
+    """
+
+    tab: ActiveTab
+    image_path: str
+    image: str
+    img_width: int
+    img_height: int
+    viewport: Viewport | None
+    mode: AnnotateMode
+    active_subject: str | None
+    cut_armed: bool
+    dirty: bool
+    user: str
+    classes: list[dict[str, JsonValue]]  # [{name, color}]
+    counts: dict[str, int]
+
+
+class CanvasMeta(CanvasView):
+    """The canvas meta record: the latest push's view, stamped with the instant it arrived."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    received_at: str
+
+
+class CanvasGeometry(BaseModel):
+    """The canvas geometry record: a full push's display-resolved shapes and their identity.
+
+    The identity is the ``image_path`` and ``tab`` the shapes were drawn on.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    image_path: str
+    tab: ActiveTab
+    shapes: list[CanvasShape]
+    received_at: str
+
+
+def read_canvas_meta(project: str) -> CanvasMeta | None:
+    """Return ``project``'s canvas meta record, or ``None`` when no push has landed.
+
+    A record that does not decode as its shape raises ``ValidationError``.
+    """
+    raw = tcip_store.read(canvas_meta_key(project), default=None)
+    return None if raw is None else CanvasMeta.model_validate(raw)
+
+
+def read_canvas_geometry(project: str) -> CanvasGeometry | None:
+    """Return ``project``'s canvas geometry record, or ``None`` when no full push has landed.
+
+    A record that does not decode as its shape raises ``ValidationError``.
+    """
+    raw = tcip_store.read(canvas_geometry_key(project), default=None)
+    return None if raw is None else CanvasGeometry.model_validate(raw)
 
 
 class DatasetSelection(BaseModel):
@@ -107,34 +176,36 @@ class DatasetSelection(BaseModel):
     It holds the capture, its image list, and the name of a bucket under the dataset root.
     """
 
-    model_config = _TRANSPORT
+    model_config = ConfigDict(extra="forbid")
 
-    dataset_root: str | None = None
-    subject: str | None = None
-    date: str | None = None
-    image_list: list[str] = Field(default_factory=list)
-    current_image_index: int = 0
-    images_dir: str | None = None
-    bucket: str | None = None
+    dataset_root: str | None
+    subject: str | None
+    date: str | None
+    image_list: list[str]
+    current_image_index: int
+    images_dir: str | None
+    bucket: str | None
 
 
 class ViewState(BaseModel):
     """The Annotate canvas's pan/zoom state."""
 
-    model_config = _TRANSPORT
+    model_config = ConfigDict(extra="forbid")
 
-    scale: float = 1.0
-    offset_x: float = 0.0
-    offset_y: float = 0.0
+    scale: float
+    offset_x: float
+    offset_y: float
 
 
 class _GuiFields(BaseModel):
     """The GUI state's fields other than its dataset."""
 
-    active_tab: ActiveTab = "annotate"
-    view: ViewState = Field(default_factory=ViewState)
-    mode: AnnotateMode = "box"
-    active_subject: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    active_tab: ActiveTab
+    view: ViewState
+    mode: AnnotateMode
+    active_subject: str | None
 
 
 class GuiState(_GuiFields):
@@ -143,9 +214,26 @@ class GuiState(_GuiFields):
     Only ``dataset`` is the backend's own, the rest advisory.
     """
 
-    model_config = _TRANSPORT
+    dataset: DatasetSelection
 
-    dataset: DatasetSelection = Field(default_factory=DatasetSelection)
+
+GUI_STATE_DEFAULTS = GuiState(
+    active_tab="annotate",
+    view=ViewState(scale=1.0, offset_x=0.0, offset_y=0.0),
+    mode="box",
+    active_subject=None,
+    dataset=DatasetSelection(
+        dataset_root=None,
+        subject=None,
+        date=None,
+        image_list=[],
+        current_image_index=0,
+        images_dir=None,
+        bucket=None,
+    ),
+)
+"""The GUI state a project holds before it has any of its own: the Annotate tab in box mode at
+unit zoom, no subject active and no dataset chosen."""
 
 
 class _DatasetChoice(BaseModel):
@@ -167,24 +255,7 @@ class _DatasetChoice(BaseModel):
 class _PersistedGuiState(_GuiFields):
     """The GUI snapshot's whole shape: :class:`GuiState` with its dataset held as the choice."""
 
-    model_config = ConfigDict(extra="forbid")
-
     dataset: _DatasetChoice | None
-
-
-def require_whole(model: BaseModel, where: str) -> None:
-    """Refuse a field of ``model``, or of a model nested in it, its input did not state.
-
-    The refusal is ``ValueError``, naming the field under ``where``: a GUI record decodes as its
-    producer's whole shape, never with a default standing in for a missing field.
-    """
-    missing = sorted(set(type(model).model_fields) - model.model_fields_set)
-    if missing:
-        raise ValueError(f"{where} states no {missing}")
-    for name in type(model).model_fields:
-        value = getattr(model, name)
-        if isinstance(value, BaseModel):
-            require_whole(value, f"{where}.{name}")
 
 
 def selection_for(
@@ -263,8 +334,8 @@ def read_gui_snapshot(project: Path) -> GuiState | None:
     """Return ``project``'s persisted GUI state, or ``None`` when it has none.
 
     Its selection is rebuilt through :func:`selection_for`. A snapshot that does not decode as its
-    whole shape raises (``ValidationError``, ``ValueError`` from :func:`require_whole`, or the
-    store's own error), as does a selection that will not build.
+    shape raises (``ValidationError``, or the store's own error), as does a selection that will
+    not build.
     """
     from tcip_mcp.registry_paths import resolved_registry_path
 
@@ -272,10 +343,9 @@ def read_gui_snapshot(project: Path) -> GuiState | None:
     if raw is None:
         return None
     persisted = _PersistedGuiState.model_validate(raw)
-    require_whole(persisted, "the GUI snapshot")
     choice = persisted.dataset
     dataset = (
-        DatasetSelection()
+        GUI_STATE_DEFAULTS.dataset
         if choice is None
         else selection_for(
             resolved_registry_path(project, choice.dataset_root),
@@ -314,22 +384,18 @@ class NoBackendPortError(LookupError):
 def resolve_web_port(workspace: Path) -> int:
     """Return the port the backend serving ``workspace`` recorded under it.
 
-    Refuses (:class:`NoBackendPortError`) when none is recorded, and (``ValueError``) a recorded
-    port that is not an integer.
+    Refuses (:class:`NoBackendPortError`) when none is recorded, and
+    (``pydantic.ValidationError``) a recorded port that does not validate as an integer.
     """
+    from pydantic import TypeAdapter
+
     recorded = tcip_store.read(backend_port_key(workspace), default=None)
     if recorded is None:
         raise NoBackendPortError(
             f"no backend has recorded a port under {workspace}; "
             "`python -m tcip_web` serving it records one"
         )
-    try:
-        return int(recorded)
-    except ValueError as exc:
-        raise ValueError(
-            f"the backend's port under {workspace} does not read as a port: "
-            f"{exc}"
-        ) from exc
+    return TypeAdapter(int).validate_python(recorded)
 
 
 def backend_url(workspace: Path, path: str) -> str:

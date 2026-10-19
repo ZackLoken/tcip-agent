@@ -22,10 +22,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
-    Any,
     ClassVar,
     Literal,
     NamedTuple,
+    SupportsFloat,
+    TypedDict,
     cast,
     get_args,
 )
@@ -37,6 +38,7 @@ from pydantic import (
     Field,
     PositiveFloat,
     TypeAdapter,
+    with_config,
 )
 from pyproj import Geod
 
@@ -48,8 +50,13 @@ from tcip_store import Key, encode_record
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from pydantic import JsonValue
+
     from tcip_mcp.buckets import Bucket
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        DetectionAssignment,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +166,15 @@ class MatchRadius(BaseModel):
     rationale: str | None
 
 
+class PlantRegistryReference(BaseModel):
+    """A registered plant registry (:class:`PlantRegistry`) by name and content digest."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    digest: str
+
+
 @dataclass
 class Assignment:
     """One image's plant assignment, the image named by its file name in its date folder.
@@ -198,15 +214,15 @@ class Assignment:
         )
 
 
-def assignment_is_attributed(assignment: object) -> bool:
+def assignment_is_attributed(
+    assignment: PlantRecord | Assignment | DetectionAssignment,
+) -> bool:
     """Return whether ``assignment`` names a real plant: a non-empty ``plant_id``.
 
-    ``assignment`` is a :class:`PlantRecord`, any assignment record, or the plain dict row
-    ``MappingBuild.rows`` produces; a plant CSV's own blank column and an unmapped capture
-    (``plant_id=None``) both fail the rule.
+    ``assignment`` is a :class:`PlantRecord` or an assignment record; a plant CSV's own blank
+    column and an unmapped capture (``plant_id=None``) both fail the rule.
     """
-    plant_id = attr(assignment, "plant_id")
-    return isinstance(plant_id, str) and plant_id != ""
+    return bool(assignment.plant_id)
 
 
 def require_named_plants(plants: list[PlantRecord]) -> None:
@@ -251,9 +267,8 @@ class MappingBuild:
     dates_requested: list[str] | None
     dates: list[str]
     match_radius: dict[str, MatchRadius]
-    plant_registry: dict
-    """The named :data:`PLANT_REGISTRY_STORE` record this build's plants were read from:
-    ``{"name": ..., "digest": ...}``."""
+    plant_registry: PlantRegistryReference
+    """The named :data:`PLANT_REGISTRY_STORE` record this build's plants were read from."""
     capture_digests: dict[str, dict[str, str]]
     unreadable: dict[str, list[str]]
     assignments: dict[str, list[Assignment]]
@@ -275,7 +290,7 @@ class MappingBuild:
 
     @classmethod
     def from_record(
-        cls, raw: object, project: Path | str, name: str
+        cls, raw: JsonValue, project: Path | str, name: str
     ) -> MappingBuild:
         """Return the build the stored record ``raw`` under ``name`` holds, with its digest.
 
@@ -292,19 +307,6 @@ class MappingBuild:
                 f"reader decodes: {exc}"
             ) from exc
         return replace(build, record_sha256=record_digest(raw))
-
-    def rows(self) -> dict[str, list[dict]]:
-        """Return the assignments as plain per-date dict rows.
-
-        Each is a fresh dict carrying this build's own ``plant_attribution``.
-        """
-        return {
-            date: [
-                {**a.__dict__, "plant_attribution": self.plant_attribution}
-                for a in assignments
-            ]
-            for date, assignments in self.assignments.items()
-        }
 
     def unattributed(self, dates: Iterable[str] | None = None) -> int:
         """Return the number of assignments over ``dates`` naming no plant.
@@ -369,8 +371,12 @@ class MappingBuild:
             "name": self.name,
             "summary": self.summary(),
             "unreadable": self.unreadable,
-            "match_radius": self.to_record()["match_radius"],
+            "match_radius": self.recorded_match_radius(),
         }
+
+    def recorded_match_radius(self) -> dict[str, dict]:
+        """Return each date's match radius as the record stores it."""
+        return {d: r.model_dump() for d, r in self.match_radius.items()}
 
     def delivery_disclosure(
         self, verified: dict, dates: Iterable[str]
@@ -388,7 +394,7 @@ class MappingBuild:
             "dataset_root": self.dataset_root,
             "built_at": self.built_at,
             "record_sha256": self.record_sha256,
-            "match_radius": self.to_record()["match_radius"],
+            "match_radius": self.recorded_match_radius(),
             "capture_digests": self.capture_digests,
             "captures_unverified": verified["captures_unverified"],
             "plant_csvs_unverified": verified["plant_csvs_unverified"],
@@ -408,7 +414,13 @@ _GPS_IFD_TAG = 0x8825
 
 
 def _exif_dms_to_decimal(
-    dms, ref, *, axis: str, negative: str, positive: str, path: Path
+    dms: Iterable[SupportsFloat] | None,
+    ref: object,
+    *,
+    axis: str,
+    negative: str,
+    positive: str,
+    path: Path,
 ) -> float | None:
     """Return degrees, minutes and seconds with their hemisphere reference as decimal degrees.
 
@@ -419,7 +431,7 @@ def _exif_dms_to_decimal(
         return None
     try:
         d, m, s = (float(x) for x in dms)
-    except (TypeError, ValueError) as exc:
+    except ValueError as exc:
         raise ValueError(
             f"{path}'s GPS {axis} {dms!r} is not degrees, minutes and seconds"
         ) from exc
@@ -906,11 +918,41 @@ class PlantRegistryNotFoundError(ValueError):
     """A plant registry name nothing is registered under in the project."""
 
 
-def load_registry(project: Path | str, name: str) -> dict:
+@with_config(ConfigDict(extra="forbid"))
+class RegistryCsv(TypedDict):
+    """One plant-locations CSV a registry names: its path, content digest and plant count."""
+
+    path: str
+    sha256: str
+    n_plants: int
+
+
+@with_config(ConfigDict(extra="forbid"))
+class PlantRegistry(TypedDict):
+    """A plant registry record, the one :func:`plant_registry_key` stores.
+
+    It names its plant-locations CSVs, their ``crop`` and ``site``, the plant count, the content
+    digest over every parsed row and when it was registered.
+    """
+
+    name: str
+    crop: str
+    site: str
+    csvs: list[RegistryCsv]
+    n_plants: int
+    digest: str
+    registered_at: str
+
+
+_PLANT_REGISTRY = TypeAdapter(PlantRegistry)
+
+
+def load_registry(project: Path | str, name: str) -> PlantRegistry:
     """Return the named registry record.
 
     A name nothing is stored under (never registered, or deleted since a mapping recorded it)
-    refuses (:class:`PlantRegistryNotFoundError`) naming it.
+    refuses (:class:`PlantRegistryNotFoundError`) naming it; a record that does not validate as
+    :class:`PlantRegistry` refuses with ``pydantic.ValidationError`` naming each field.
     """
     record = tcip_store.read(plant_registry_key(project, name), default=None)
     if record is None:
@@ -918,11 +960,13 @@ def load_registry(project: Path | str, name: str) -> dict:
             f"plant registry not found: {name!r} under {project}; register it with "
             "register_plant_registry before naming it."
         )
-    return record
+    return _PLANT_REGISTRY.validate_python(record)
 
 
-def registry_csv_entries(record: dict, project: Path | str) -> list[dict]:
-    """Return the ``{path, sha256, n_plants}`` entries a loaded registry record carries.
+def registry_csv_entries(
+    record: PlantRegistry, project: Path | str
+) -> list[RegistryCsv]:
+    """Return the CSV entries a loaded registry record carries, each path resolved.
 
     The record is ``project``'s; each ``path`` is resolved through
     :func:`~tcip_mcp.registry_paths.resolved_registry_path`.
@@ -930,7 +974,11 @@ def registry_csv_entries(record: dict, project: Path | str) -> list[dict]:
     from tcip_mcp.registry_paths import resolved_registry_path
 
     return [
-        {**e, "path": str(resolved_registry_path(project, e["path"]))}
+        RegistryCsv(
+            path=str(resolved_registry_path(project, e["path"])),
+            sha256=e["sha256"],
+            n_plants=e["n_plants"],
+        )
         for e in record["csvs"]
     ]
 
@@ -938,40 +986,35 @@ def registry_csv_entries(record: dict, project: Path | str) -> list[dict]:
 def registry_entries_or_refusal(
     build: MappingBuild,
     project: Path | str,
-) -> tuple[list[dict], str | None]:
+) -> tuple[list[RegistryCsv], str | None]:
     """Return the CSV entries ``build.plant_registry`` names, or the refusal when untrusted.
 
     The refusal names the registry, the mapping and ``project``: the named registry no longer
-    loads, or its own ``digest`` no longer matches ``build.plant_registry["digest"]``. A build
-    naming no registry answers no entries and no refusal.
+    loads, or its own ``digest`` no longer matches ``build.plant_registry.digest``.
     """
-    registry_name = (build.plant_registry or {}).get("name")
-    if not registry_name:
-        return [], None
+    reference = build.plant_registry
     try:
-        record = load_registry(project, registry_name)
+        record = load_registry(project, reference.name)
     except PlantRegistryNotFoundError as exc:
         return [], f"mapping {build.name!r} names it: {exc}"
-    stored_digest = (build.plant_registry or {}).get("digest")
-    if stored_digest is not None and record.get("digest") != stored_digest:
+    if record["digest"] != reference.digest:
         return [], (
-            f"plant registry {registry_name!r} under {project} named by mapping "
-            f"{build.name!r} has moved (built against digest {stored_digest!r}, now "
-            f"{record.get('digest')!r}); rebuild the mapping against the current registry"
+            f"plant registry {reference.name!r} under {project} named by mapping "
+            f"{build.name!r} has moved (built against digest {reference.digest!r}, now "
+            f"{record['digest']!r}); rebuild the mapping against the current registry"
         )
     return registry_csv_entries(record, project), None
 
 
 def verify_registry_csv_bytes(
-    registry_entries: list[dict],
+    registry_entries: list[RegistryCsv],
 ) -> tuple[list[str], str | None, dict[str, bytes]]:
     """Check each of ``registry_entries``'s recorded bytes against what is on disk now.
 
-    The entries are in :func:`registry_csv_entries`'s own ``{path, sha256, n_plants}`` shape;
-    each present file's bytes are read exactly once. Returns every missing path, the first
-    rewritten file (or ``None`` when every present path's bytes still match what was registered),
-    and the verified bytes this call read for every present path, keyed by the entry's own
-    ``path``.
+    The entries are :func:`registry_csv_entries`'; each present file's bytes are read exactly
+    once. Returns every missing path, the first rewritten file (or ``None`` when every present
+    path's bytes still match what was registered), and the verified bytes this call read for every
+    present path, keyed by the entry's own ``path``.
     """
     missing: list[str] = []
     rewritten: str | None = None
@@ -992,12 +1035,12 @@ def verify_registry_csv_bytes(
 def parse_plant_registry_csvs(
     csv_paths: list[Path],
     project: Path | str,
-) -> tuple[list[dict], str, int]:
+) -> tuple[list[RegistryCsv], str, int]:
     """Parse the absolute ``csv_paths`` into registry entries, their digest and plant count.
 
-    Returns the registry's own ``{path, sha256, n_plants}`` entries, each ``path`` spelled against
-    ``project`` by :func:`~tcip_mcp.registry_paths.stored_path`, the content digest over every
-    parsed row and the total plant count, committing nothing.
+    Returns the registry's own entries, each ``path`` spelled against ``project`` by
+    :func:`~tcip_mcp.registry_paths.stored_path`, the content digest over every parsed row and the
+    total plant count, committing nothing.
 
     Raises :class:`NoGeoreferencedPlantsError`, naming every file that parsed no georeferenced,
     named plant or is not UTF-8 text (a binary file, a shapefile's own ``.shp``/``.shx``/``.dbf``
@@ -1006,7 +1049,7 @@ def parse_plant_registry_csvs(
     from tcip_mcp.registry_paths import stored_path
 
     failed: list[str] = []
-    csvs_meta: list[dict] = []
+    csvs_meta: list[RegistryCsv] = []
     all_plants: list[PlantRecord] = []
     for p in csv_paths:
         data = p.read_bytes() if p.is_file() else b""
@@ -1019,11 +1062,11 @@ def parse_plant_registry_csvs(
             continue
         all_plants.extend(records)
         csvs_meta.append(
-            {
-                "path": stored_path(p, project),
-                "sha256": hashlib.sha256(data).hexdigest(),
-                "n_plants": len(records),
-            }
+            RegistryCsv(
+                path=stored_path(p, project),
+                sha256=hashlib.sha256(data).hexdigest(),
+                n_plants=len(records),
+            )
         )
     if failed:
         raise NoGeoreferencedPlantsError(
@@ -1042,12 +1085,12 @@ def register_plant_registry_record(
     *,
     crop: str,
     site: str,
-) -> dict:
+) -> PlantRegistry:
     """Register ``csv_paths`` under ``name`` in this project's plant registry; return the record.
 
     Parses every path through :func:`parse_plant_registry_csvs`
     (:class:`NoGeoreferencedPlantsError` names the file that parsed no georeferenced, named
-    plant); the record holds the ``{path, sha256, n_plants}`` entries plus ``crop``, ``site``,
+    plant); the record (:class:`PlantRegistry`) holds those entries plus ``crop``, ``site``,
     ``registered_at`` and the parsed content's digest. The read-then-write is one transaction
     (:func:`tcip_store.transaction`, this store's own ``concurrency="cas"``): a second
     registration under a taken name returns the existing record unchanged when the digest
@@ -1056,38 +1099,31 @@ def register_plant_registry_record(
     csvs_meta, digest, n_plants = parse_plant_registry_csvs(csv_paths, project)
     key = plant_registry_key(project, name)
     with tcip_store.transaction(key) as txn:
-        existing = txn.read(key, default=None)
-        if existing is not None:
-            if existing.get("digest") == digest:
+        stored = txn.read(key, default=None)
+        if stored is not None:
+            existing = _PLANT_REGISTRY.validate_python(stored)
+            if existing["digest"] == digest:
                 return existing
             raise PlantRegistryNameConflictError(
                 f"plant registry {name!r} under {project} already names different plants "
-                f"(digest {existing.get('digest')!r}, this registration would write "
+                f"(digest {existing['digest']!r}, this registration would write "
                 f"{digest!r}); register under a new name"
             )
-        record = {
-            "name": name,
-            "crop": crop,
-            "site": site,
-            "csvs": csvs_meta,
-            "n_plants": n_plants,
-            "digest": digest,
-            "registered_at": now_iso(),
-        }
-        txn.write(key, record)
+        record = PlantRegistry(
+            name=name,
+            crop=crop,
+            site=site,
+            csvs=csvs_meta,
+            n_plants=n_plants,
+            digest=digest,
+            registered_at=now_iso(),
+        )
+        txn.write(key, _PLANT_REGISTRY.dump_python(record))
     return record
 
 
-def attr(row: object, name: str) -> Any:
-    """Return one field of an assignment row, or ``None`` when it carries none.
-
-    The row is an :class:`Assignment` or the plain dict row :meth:`MappingBuild.rows` produces.
-    """
-    return row.get(name) if isinstance(row, dict) else getattr(row, name, None)
-
-
 def stems_delivery_reads(
-    rows: Iterable[Assignment | dict], bucket: Bucket
+    rows: Iterable[Assignment], bucket: Bucket
 ) -> set[str]:
     """Return the attributed stems of ``rows`` that carry a prediction document in ``bucket``.
 
@@ -1097,9 +1133,9 @@ def stems_delivery_reads(
     """
     pred_stems = set(bucket.documents)
     return {
-        attr(row, "stem")
+        row.stem
         for row in rows
-        if assignment_is_attributed(row) and attr(row, "stem") in pred_stems
+        if assignment_is_attributed(row) and row.stem in pred_stems
     }
 
 
@@ -1318,12 +1354,22 @@ class NoMatchToleranceError(ValueError):
     """No match tolerance is stated and the plant layout derives none."""
 
 
+class MatchTolerance(BaseModel):
+    """A nearest-neighbor match tolerance (meters) and the branch of its resolution behind it.
+
+    The branch is :func:`resolve_nn_tolerance_m`'s.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    value: float
+    source: ToleranceSource
+
+
 def resolve_nn_tolerance_m(
     plants: list[PlantRecord], stated: float | None = None
-) -> dict:
+) -> MatchTolerance:
     """Return the tolerance (meters) a capture or detection is matched to a plant within.
-
-    The answer is ``{"value": float, "source": str}``, the source where the value came from.
 
     Derived as half the grid pitch (:func:`grid_pitch_m`), ``"grid_pitch"``: the farthest a
     position can lie from a plant and still be nearer it than any neighbor on the grid. A stated
@@ -1338,10 +1384,10 @@ def resolve_nn_tolerance_m(
                 "the plant layout carries fewer than two georeferenced plants, so no grid pitch "
                 "derives a match tolerance: state nn_tolerance_m (meters)"
             )
-        return {"value": ceiling, "source": "grid_pitch"}
+        return MatchTolerance(value=ceiling, source="grid_pitch")
     if 0 < ceiling < stated:
-        return {"value": ceiling, "source": "stated_capped"}
-    return {"value": stated, "source": "stated"}
+        return MatchTolerance(value=ceiling, source="stated_capped")
+    return MatchTolerance(value=stated, source="stated")
 
 
 def build_mapping(
@@ -1352,7 +1398,7 @@ def build_mapping(
     dataset_root: Path | str,
     dataset_id: str,
     project: Path | str,
-    plant_registry: dict,
+    plant_registry: PlantRegistryReference,
     dates: list[str] | None = None,
     match_radius: StatedRadius | None = None,
 ) -> MappingBuild:
@@ -1361,8 +1407,8 @@ def build_mapping(
     The provenance binds the record to the inputs it was built from.
     ``name``/``dataset_root``/``dataset_id`` are taken as already resolved, and ``project`` is the
     project the mapping belongs to. ``plant_csv_paths`` are the files this build reads the plants
-    from, those of the registry ``plant_registry`` names; ``plant_registry`` is the
-    ``{"name": ..., "digest": ...}`` reference stored on the record in their place.
+    from, those of the registry ``plant_registry`` names; ``plant_registry`` is the reference
+    stored on the record in their place.
 
     Each date's captures are matched within its :func:`date_match_radius`, ``match_radius`` when
     stated and derived from the date's own positioning errors when not, which the record carries
@@ -1480,7 +1526,7 @@ def archived_mapping_name(name: str, record_sha256: str) -> str:
     return f"{name}@{record_sha256[:12]}"
 
 
-def record_digest(record: object) -> str:
+def record_digest(record: JsonValue) -> str:
     """Return the digest a stored mapping record earns, whatever its shape.
 
     The digest is sha256 over ``encode_record(record)``, what its receipt names.
@@ -1637,21 +1683,14 @@ def build_plant_mapping(
         dataset_root=dataset,
         dataset_id=identity["id"],
         project=project,
-        plant_registry={"name": plant_registry, "digest": registry["digest"]},
+        plant_registry=PlantRegistryReference(
+            name=registry["name"], digest=registry["digest"]
+        ),
         dates=dates,
         match_radius=match_radius,
     )
     persist_mapping(build, project, supersede=supersede, actor=actor)
     return build
-
-
-def load_mapping_rows(project: Path | str, name: str) -> dict[str, list[dict]]:
-    """Return the persisted mapping as plain per-date rows, read through :func:`load_mapping`.
-
-    ``{}`` when no mapping is stored under ``name``.
-    """
-    build = load_mapping(project, name)
-    return build.rows() if build is not None else {}
 
 
 # Process-local memo for load_mapping's receipt check: a project's log cursor plus every

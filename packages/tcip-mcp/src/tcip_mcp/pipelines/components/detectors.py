@@ -8,12 +8,25 @@ mode and ``list[dict]`` predictions in eval mode.
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 import torch.nn as nn
 
 from tcip_mcp.pipelines.operating_point import DETECTIONS_PER_IMG, SCORE_THRESH
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torchvision.models.detection import (
+        FCOS,
+        FasterRCNN,
+        MaskRCNN,
+        RetinaNet,
+    )
+    from torchvision.models.detection.image_list import ImageList
+
+    from tcip_mcp.subject_registry import Attribute
 
 ROI_OUTPUT_SIZE = 7
 """The edge, in feature cells, every box's pooled features are resampled to: torchvision's own
@@ -54,7 +67,7 @@ def _anchor_sizes(num_levels: int, base: int) -> tuple[tuple[int, ...], ...]:
     return tuple((base * 2**i,) for i in range(num_levels))
 
 
-def _probe_in_chans(adapter: Any) -> int | None:
+def _probe_in_chans(adapter: nn.Module) -> int | None:
     """Return the ``in_channels`` of ``adapter``'s first ``Conv2d`` in registration order.
 
     ``None`` when it holds no conv.
@@ -66,7 +79,11 @@ def _probe_in_chans(adapter: Any) -> int | None:
 
 
 def _normalization(
-    adapter: Any, in_chans: int | None, image_mean, image_std, detector: str
+    adapter: nn.Module,
+    in_chans: int | None,
+    image_mean: list[float],
+    image_std: list[float],
+    detector: str,
 ) -> dict:
     """Validate ``image_mean``/``image_std`` kwargs for a torchvision detector at ``in_chans``.
 
@@ -117,7 +134,7 @@ def _rcnn_anchors_and_box_pool(
 
 
 def _build_faster_rcnn(
-    adapter: Any,
+    adapter: nn.Module,
     num_classes: int,
     *,
     featmap_names: list[str],
@@ -127,10 +144,10 @@ def _build_faster_rcnn(
     max_size: int,
     aspect_ratios: tuple[float, ...],
     in_chans: int | None = None,
-    image_mean: Any,
-    image_std: Any,
-    **kwargs: Any,
-) -> Any:
+    image_mean: list[float],
+    image_std: list[float],
+    **kwargs: object,
+) -> FasterRCNN:
     from torchvision.models.detection import FasterRCNN
 
     anchor_generator, roi_pool = _rcnn_anchors_and_box_pool(
@@ -151,7 +168,7 @@ def _build_faster_rcnn(
 
 
 def _build_fcos(
-    adapter: Any,
+    adapter: nn.Module,
     num_classes: int,
     *,
     featmap_names: list[str],
@@ -160,10 +177,10 @@ def _build_fcos(
     min_size: int,
     max_size: int,
     in_chans: int | None = None,
-    image_mean: Any,
-    image_std: Any,
-    **kwargs: Any,
-) -> Any:
+    image_mean: list[float],
+    image_std: list[float],
+    **kwargs: object,
+) -> FCOS:
     from torchvision.models.detection import FCOS
     from torchvision.models.detection.rpn import AnchorGenerator
 
@@ -184,7 +201,7 @@ def _build_fcos(
 
 
 def _build_retinanet(
-    adapter: Any,
+    adapter: nn.Module,
     num_classes: int,
     *,
     featmap_names: list[str],
@@ -194,10 +211,10 @@ def _build_retinanet(
     max_size: int,
     aspect_ratios: tuple[float, ...],
     in_chans: int | None = None,
-    image_mean: Any,
-    image_std: Any,
-    **kwargs: Any,
-) -> Any:
+    image_mean: list[float],
+    image_std: list[float],
+    **kwargs: object,
+) -> RetinaNet:
     from torchvision.models.detection import RetinaNet
     from torchvision.models.detection.rpn import AnchorGenerator
 
@@ -224,7 +241,7 @@ def _build_retinanet(
 
 
 def _build_mask_rcnn(
-    adapter: Any,
+    adapter: nn.Module,
     num_classes: int,
     *,
     featmap_names: list[str],
@@ -234,10 +251,10 @@ def _build_mask_rcnn(
     max_size: int,
     aspect_ratios: tuple[float, ...],
     in_chans: int | None = None,
-    image_mean: Any,
-    image_std: Any,
-    **kwargs: Any,
-) -> Any:
+    image_mean: list[float],
+    image_std: list[float],
+    **kwargs: object,
+) -> MaskRCNN:
     from torchvision.models.detection import MaskRCNN
     from torchvision.ops import MultiScaleRoIAlign
 
@@ -262,7 +279,7 @@ def _build_mask_rcnn(
     )
 
 
-_DETECTORS = {
+_DETECTORS: dict[str, tuple[Callable[..., nn.Module], str]] = {
     "faster_rcnn": (_build_faster_rcnn, "FasterRCNN"),
     "fcos": (_build_fcos, "FCOS"),
     "retinanet": (_build_retinanet, "RetinaNet"),
@@ -313,6 +330,10 @@ def _held(name: str) -> property:
     )
 
 
+DetectorOutput = dict[str, torch.Tensor] | list[dict[str, torch.Tensor]]
+"""A torchvision detector's forward: its losses in train mode, one prediction per image in eval."""
+
+
 class AttributeDetector(nn.Module):
     """A torchvision detector with one per-instance head per attribute of its subject.
 
@@ -334,11 +355,15 @@ class AttributeDetector(nn.Module):
     roi_heads = _held("roi_heads")
     score_thresh = _held(SCORE_THRESH)
     detections_per_img = _held(DETECTIONS_PER_IMG)
+    _features: dict[str, torch.Tensor]
+    """The held backbone's feature maps of the one forward, by name."""
+    _transformed: tuple[ImageList, list[dict[str, torch.Tensor]] | None]
+    """The held transform's resized images and resized targets of the one forward."""
 
     def __init__(
         self,
         detector: nn.Module,
-        attributes: Any,
+        attributes: tuple[Attribute, ...],
         *,
         featmap_names: list[str],
         in_channels: int,
@@ -350,11 +375,11 @@ class AttributeDetector(nn.Module):
         """
         from torchvision.ops import MultiScaleRoIAlign
 
+        from tcip_annotation.state import ATTR_TYPES
         from tcip_mcp.pipelines.components.heads import (
             ClassificationHead,
             OrdinalHead,
         )
-        from tcip_mcp.subject_registry import ATTR_TYPES
 
         super().__init__()
         self.detector = detector
@@ -371,29 +396,35 @@ class AttributeDetector(nn.Module):
             head_of[a.type](in_channels, len(a.values))
             for a in self.attributes
         )
-        self._seen: dict[str, Any] = {}
-        cast(Any, detector).backbone.register_forward_hook(
-            self._hold("features")
-        )
+        cast(Any, detector).backbone.register_forward_hook(self._hold_features)
         cast(Any, detector).transform.register_forward_hook(
-            self._hold("transformed")
+            self._hold_transformed
         )
 
-    def _hold(self, key: str) -> Any:
-        def hook(_module: nn.Module, _inputs: Any, output: Any) -> None:
-            self._seen[key] = output
+    def _hold_features(
+        self,
+        _module: nn.Module,
+        _inputs: object,
+        output: dict[str, torch.Tensor],
+    ) -> None:
+        self._features = output
 
-        return hook
+    def _hold_transformed(
+        self,
+        _module: nn.Module,
+        _inputs: object,
+        output: tuple[ImageList, list[dict[str, torch.Tensor]] | None],
+    ) -> None:
+        self._transformed = output
 
     def _pooled(self, boxes: list[torch.Tensor]) -> torch.Tensor:
-        image_list = self._seen["transformed"][0]
         return self.pool(
-            self._seen["features"], boxes, image_list.image_sizes
+            self._features, boxes, self._transformed[0].image_sizes
         ).mean(dim=(2, 3))
 
     def forward(
         self, images: list[torch.Tensor], targets: list[dict] | None = None
-    ) -> Any:
+    ) -> DetectorOutput:
         """Run the detector and its attribute heads over ``images``.
 
         In train mode, return the detector's losses joined by each head's loss over its assessed
@@ -403,7 +434,8 @@ class AttributeDetector(nn.Module):
 
         out = self.detector(images, targets)
         if self.training:
-            resized = self._seen["transformed"][1]
+            resized = self._transformed[1]
+            assert resized is not None, "a detector trains on resized targets"
             pooled = self._pooled([t["boxes"] for t in resized])
             truth = torch.cat([t["attributes"] for t in resized]).reshape(
                 -1, len(self.attributes)
@@ -425,7 +457,7 @@ class AttributeDetector(nn.Module):
                     else logits.sum() * 0.0
                 )
             return {**out, **losses}
-        sizes = self._seen["transformed"][0].image_sizes
+        sizes = self._transformed[0].image_sizes
         boxes = []
         for image, (h, w), result in zip(images, sizes, out):
             scale = result["boxes"].new_tensor(
@@ -447,12 +479,13 @@ class AttributeDetector(nn.Module):
 
 def build_detector(
     name: str,
-    adapter: Any,
+    adapter: BackboneNeckAdapter,
     num_classes: int,
     *,
-    attributes: Any = (),
-    **kwargs: Any,
-) -> Any:
+    featmap_names: list[str],
+    attributes: tuple[Attribute, ...] = (),
+    **kwargs: object,
+) -> nn.Module:
     """Instantiate a detector builder by name, held by an :class:`AttributeDetector` if need be.
 
     The :class:`AttributeDetector` carries one head per record of ``attributes`` when it names
@@ -501,12 +534,12 @@ def build_detector(
             f"build_detector('{name}', ...) got unexpected keyword argument(s) {unknown}. "
             f"Accepted by '{name}': {sorted(accepted)}. {detail}."
         )
-    detector = fn(adapter, num_classes, **kwargs)
+    detector = fn(adapter, num_classes, featmap_names=featmap_names, **kwargs)
     if not attributes:
         return detector
     return AttributeDetector(
         detector,
         attributes,
-        featmap_names=kwargs["featmap_names"],
+        featmap_names=featmap_names,
         in_channels=adapter.out_channels,
     )

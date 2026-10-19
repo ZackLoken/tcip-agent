@@ -22,12 +22,12 @@ from pydantic import TypeAdapter
 
 import tcip_store
 from tcip_mcp.audit import now_iso, record_event_or_raise
+from tcip_mcp.model_registry import Producer
 from tcip_mcp.pipelines.delivery_events_schema import (
     Acknowledgment,
     BucketFinding,
     DeliveryEventRecord,
     PlantMapping,
-    Producer,
 )
 from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths
@@ -333,22 +333,22 @@ def gate(
             "numbers were measured from; name the published buckets it ships."
         )
     shared_root(buckets)
-    proposed = [
-        b.name for b in buckets if "checkpoint_sha256" not in b.producer
-    ]
+    by_model = {
+        b.name: b.producer for b in buckets if isinstance(b.producer, Producer)
+    }
+    proposed = [b.name for b in buckets if b.name not in by_model]
     if proposed:
         raise DeliveryRefusedError(
             f"{proposed} hold staged proposals, which no model predicted and "
             "no assessment measures: a delivery ships a model's predictions."
         )
-    producers = {Producer.model_validate(b.producer) for b in buckets}
+    producers = set(by_model.values())
     if len(producers) > 1:
         raise DeliveryRefusedError(
             "the delivered buckets were produced by more than one checkpoint or run ("
             + "; ".join(
-                f"{b.name}: {b.producer['checkpoint_sha256']} / "
-                f"{b.producer['experiment_id']}"
-                for b in buckets
+                f"{name}: {p.checkpoint_sha256} / {p.experiment_id}"
+                for name, p in by_model.items()
             )
             + "): one delivered series names one producer, so deliver the buckets one producer "
             "made."

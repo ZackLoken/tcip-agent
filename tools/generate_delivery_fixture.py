@@ -16,7 +16,7 @@ superseding rebuild archives the mapping it cites. The served records are writte
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from tools.fixture_session import (
     opened,
@@ -27,6 +27,9 @@ from tools.fixture_session import (
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
+    from pydantic import JsonValue
+
+    from tcip_web.state import OpenProject
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 GENERATED_PATH = (
@@ -43,13 +46,15 @@ SCRATCH_ROOT = "/scratch"
 """What the scratch directory the deliveries were made under reads as in every served path."""
 
 
-def rebased(value: Any, scratch: Path) -> Any:
+def rebased(
+    value: dict[str, JsonValue], scratch: Path
+) -> dict[str, JsonValue]:
     """Return ``value`` with every spelling of ``scratch`` in its strings made :data:`SCRATCH_ROOT`.
 
     The scratch directory differs with where a run was made.
     """
 
-    def leaf(_key: str | None, text: Any) -> Any:
+    def leaf(_key: str | None, text: JsonValue) -> JsonValue:
         if not isinstance(text, str):
             return text
         for spelling in (str(scratch), scratch.as_posix()):
@@ -59,7 +64,7 @@ def rebased(value: Any, scratch: Path) -> Any:
     return replaced(value, leaf)
 
 
-def deliveries(workspace: Path, client: TestClient) -> dict[str, dict]:
+def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
     """Return the served delivery events of the scenes this module names, by fixture name.
 
     The scenes are made in projects created under ``workspace`` and served through ``client``.
@@ -79,7 +84,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, dict]:
     from tests._web_fixtures import named_project
     from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
-    def served(project) -> dict:
+    def served(project: OpenProject) -> JsonValue:
         opened(client, project)
         response = client.get("/api/results/delivery-events")
         response.raise_for_status()
@@ -92,7 +97,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, dict]:
                 f"generate_delivery_fixture.py: a scene's delivery refused: {result}"
             )
 
-    out: dict[str, dict] = {}
+    out: dict[str, JsonValue] = {}
 
     root = workspace / "counts"
     project = named_project(root, "Counts")
@@ -221,7 +226,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, dict]:
     return out
 
 
-def produce() -> dict[str, dict]:
+def produce() -> dict[str, JsonValue]:
     """Return the fixture's content, made in a scratch session.
 
     The content is :func:`rebased` against the scratch directory holding its workspace.

@@ -10,11 +10,12 @@ import argparse
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from tcip_mcp.experiments import RunObservation
+    from tcip_mcp.experiments import RunObservation, RunRecord
     from tcip_mcp.pipelines.training.envelope import TrainContext
+    from tcip_mcp.pipelines.training.generic_trainer import EpochCallback
     from tcip_mcp.pipelines.training.run_registry import TrainRun
 
 logger = logging.getLogger(__name__)
@@ -27,10 +28,10 @@ def _parse_args() -> argparse.Namespace:
 
 
 def prepare_run_context(
-    observation: RunObservation,
+    observation: RunObservation[RunRecord],
     *,
     origin: str = "training",
-    epoch_hook: Any = None,
+    epoch_hook: EpochCallback | None = None,
 ) -> TrainContext:
     """Build the ``TrainContext`` of the observed run from what its launch record resolved.
 
@@ -39,11 +40,7 @@ def prepare_run_context(
     loaders (:func:`~tcip_mcp.pipelines.data.split_construction.recorded_datasets`).
     ``origin`` and ``epoch_hook`` are the context's own.
     """
-    from tcip_mcp.pipelines.data.split_construction import (
-        partition_samples,
-        partition_spatial,
-        recorded_datasets,
-    )
+    from tcip_mcp.pipelines.data.split_construction import recorded_datasets
     from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.generic_trainer import (
@@ -55,17 +52,17 @@ def prepare_run_context(
     run_dir = observation.directory
     run_record = observation.record
     run_obj = observed_run(observation, origin=origin)
-    if run_record["max_wall_clock_seconds"] is not None:
-        run_obj.deadline = time.time() + run_record["max_wall_clock_seconds"]
+    if run_record.max_wall_clock_seconds is not None:
+        run_obj.deadline = time.time() + run_record.max_wall_clock_seconds
 
     spec = run_obj.spec
     task = spec.model_source.task
-    partition = cast(dict, observation.resolution)["partition"]
-    spatial = partition_spatial(partition)
+    partition = run_record.resolution.partition
+    spatial = partition.spatial
     train_ds, val_ds = recorded_datasets(
         task,
         spec.data,
-        partition_samples(partition),
+        partition.samples,
         spatial,
         run_transforms(spec),
         run_obj.layout,
@@ -84,7 +81,7 @@ def prepare_run_context(
         train_loader=train_loader,
         val_loader=val_loader,
         spatial=spatial,
-        resume_from=run_record["resume_from"] or "",
+        resume_from=run_record.resume_from or "",
         epoch_hook=epoch_hook,
     )
 
@@ -93,7 +90,7 @@ def run_directory(
     run_dir: Path,
     *,
     origin: str = "training",
-    epoch_hook: Any = None,
+    epoch_hook: EpochCallback | None = None,
 ) -> TrainRun:
     """Run the run whose directory is ``run_dir`` to its final status and return it.
 
@@ -103,14 +100,14 @@ def run_directory(
     envelope. A failure before the envelope opens closes the run ``failed`` naming it
     (``envelope.close_run``) and propagates.
     """
-    from tcip_mcp.experiments import keep_heartbeat, observe, require_open
+    from tcip_mcp.experiments import keep_heartbeat, observe_run, require_open
     from tcip_mcp.pipelines.training.envelope import (
         close_run,
         run_training_envelope,
     )
 
     require_open(run_dir)
-    observation = observe(run_dir)
+    observation = observe_run(run_dir)
     stop = keep_heartbeat(run_dir)
     try:
         try:

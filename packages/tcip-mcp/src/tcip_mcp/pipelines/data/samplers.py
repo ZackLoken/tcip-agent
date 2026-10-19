@@ -22,6 +22,8 @@ from torch.utils.data import (
 from tcip_mcp.pipelines.data.datasets import BaseDataset
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from tcip_mcp.pipelines.schemas import SamplerSpec
 
 logger = logging.getLogger(__name__)
@@ -70,7 +72,7 @@ class ClassBalancedSampler(Sampler):
         self._weights = _class_weights(self, dataset)
         self._length = len(dataset)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         """Draw one epoch's indices, as many as the dataset holds, with replacement."""
         idx = torch.multinomial(self._weights, self._length, replacement=True)
         return iter(idx.tolist())
@@ -106,7 +108,7 @@ class OverSampler(Sampler):
                 extras.extend(indices * reps)
         self._indices.extend(extras)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         """Yield every held index once, in an order drawn per epoch."""
         # The global RNG: the order varies per epoch and set_seed() governs it.
         perm = torch.randperm(len(self._indices))
@@ -129,7 +131,7 @@ class WeightedRandomSampler(Sampler):
             replacement=True,
         )
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         """Iterate the wrapped torch sampler's indices."""
         return iter(self._sampler)
 
@@ -176,7 +178,7 @@ class TileLocalitySampler(Sampler):
 
     def __init__(
         self,
-        dataset,
+        dataset: BaseDataset,
         num_workers: int | None = None,
         batch_size: int | None = None,
     ) -> None:
@@ -298,7 +300,7 @@ class TileLocalitySampler(Sampler):
                 )
         return out
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         """Yield one epoch's tile indices, band by band or interleaved across worker lanes."""
         bands = self._draw_bands()
         if self._lane_count <= 1:

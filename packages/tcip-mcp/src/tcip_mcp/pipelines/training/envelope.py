@@ -18,16 +18,42 @@ import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Unpack
 
+from tcip_mcp.pipelines import measurement
+from tcip_mcp.pipelines.components import losses
+from tcip_mcp.pipelines.data import samplers
+from tcip_mcp.pipelines.training import generic_trainer, optimizer_factory
 from tcip_store import stored_number
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import torch
+    from pydantic import JsonValue
+    from torch.utils.data import DataLoader
+    from torch.utils.tensorboard import SummaryWriter
+
+    from tcip_mcp.pipelines.data.augmentations import Transforms
+    from tcip_mcp.pipelines.data.datasets import (
+        BaseDataset,
+        DocumentDataset,
+        TiledDetectionDataset,
+    )
+    from tcip_mcp.pipelines.data.selection import Sample
+    from tcip_mcp.pipelines.model_contract import (
+        ContractKeywords,
+        ContractReport,
+        OverfitKeywords,
+        OverfitReport,
+    )
     from tcip_mcp.pipelines.schemas import (
-        SamplerSpec,
         SpatialManifest,
         TrainConfigSchema,
     )
+    from tcip_mcp.pipelines.training.collation import Collate
+    from tcip_mcp.pipelines.training.generic_trainer import EpochCallback
+    from tcip_mcp.pipelines.training.run_registry import TrainRun
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +69,14 @@ class TrainContext:
     and owns the sinks a training body records metrics, checkpoints and artifacts through.
     """
 
-    run: Any  # TrainRun
+    run: TrainRun
     train_loader: Any
     val_loader: Any | None = None
     spatial: SpatialManifest | None = (
         None  # the within-image split the run's partition records
     )
     resume_from: str = ""
-    epoch_hook: Any = (
-        None  # (epoch, metrics) -> None, fired for every epoch row
-    )
+    epoch_hook: EpochCallback | None = None
     _epoch: int = 0
     _tb: Any = None
 
@@ -80,23 +104,21 @@ class TrainContext:
         return self.spec.seed
 
     @property
-    def device(self) -> Any:
+    def device(self) -> torch.device:
         """The device the validated config trains on (``generic_trainer.run_device``)."""
-        from tcip_mcp.pipelines.training.generic_trainer import run_device
-
-        return run_device(self.spec)
+        return generic_trainer.run_device(self.spec)
 
     def set_seed(self) -> None:
         """Seed every random stream at the validated config's ``seed`` and ``deterministic``.
 
         The seeding is ``generic_trainer.set_seed``'s.
         """
-        from tcip_mcp.pipelines.training.generic_trainer import set_seed
-
-        set_seed(self.spec.seed, deterministic=self.spec.deterministic)
+        generic_trainer.set_seed(
+            self.spec.seed, deterministic=self.spec.deterministic
+        )
 
     # ---- model ----
-    def build_model(self) -> Any:
+    def build_model(self) -> torch.nn.Module:
         """Build this run's model from its validated ``model_source``.
 
         The build (:func:`~tcip_mcp.pipelines.model_build.build_from_model_source`) runs at the
@@ -116,8 +138,8 @@ class TrainContext:
             self.run.geometry,
         )
 
-    def _contract_args(self, **overrides: Any) -> dict:
-        """Return the arguments the contract smoke runs against, ``overrides`` laid over them.
+    def _contract_args(self) -> ContractKeywords:
+        """Return the arguments the contract smoke runs against.
 
         They are the dims this run resolved, or one batch off its own train loader when those dims
         cannot shape a batch (``no_batch_reason``).
@@ -134,50 +156,55 @@ class TrainContext:
         if no_batch_reason(self.task, dims, None) is not None:
             batch = next(iter(self.train_loader or []), None)
             if batch is not None:
-                return {"sample_batch": batch, **overrides}
-        return {"dims": dims, **overrides}
+                return {"sample_batch": batch}
+        return {"dims": dims}
 
-    def check_contract(self, model: Any = None, **overrides: Any) -> dict:
+    def check_contract(
+        self,
+        model: torch.nn.Module | None = None,
+        **overrides: Unpack[ContractKeywords],
+    ) -> ContractReport:
         """Run the measurement-boundary contract on ``model``, built if omitted.
 
-        The contract runs at the arguments :meth:`_contract_args` gives.
+        The contract runs at the arguments :meth:`_contract_args` gives, ``overrides`` laid over
+        them.
         """
         from tcip_mcp.pipelines.model_contract import check_model_contract
 
         return check_model_contract(
             model or self.build_model(),
             self.task,
-            **self._contract_args(**overrides),
+            **(self._contract_args() | overrides),
         )
 
-    def overfit_check(self, model: Any = None, **overrides: Any) -> dict:
+    def overfit_check(
+        self,
+        model: torch.nn.Module | None = None,
+        **overrides: Unpack[OverfitKeywords],
+    ) -> OverfitReport:
         """Drive a few steps on one tiny batch of ``model`` and report whether the loss falls.
 
         The steps (``model_contract.overfit_check``) run at the arguments :meth:`_contract_args`
-        gives, with the run's ``seed`` and ``deterministic``.
+        gives, ``overrides`` laid over them, with the run's ``seed`` and ``deterministic``.
         """
         from tcip_mcp.pipelines.model_contract import overfit_check
 
         return overfit_check(
             model or self.build_model(),
             self.task,
-            **self._contract_args(
-                seed=self.spec.seed,
-                deterministic=self.spec.deterministic,
-                **overrides,
-            ),
+            seed=self.spec.seed,
+            deterministic=self.spec.deterministic,
+            **(self._contract_args() | overrides),
         )
 
     # ---- the default trainer: one optional convenience ----
-    def default_train(self) -> Any:
+    def default_train(self) -> TrainRun:
         """Run the default trainer over this run's loaders.
 
         Its policy is progressive unfreeze / differential-LR / AMP+accum / selection+early-stop /
         checkpoint cadence.
         """
-        from tcip_mcp.pipelines.training.generic_trainer import train
-
-        return train(
+        return generic_trainer.train(
             self.run,
             self.train_loader,
             self.val_loader,
@@ -187,7 +214,12 @@ class TrainContext:
         )
 
     # ---- craft library passthroughs (compose, don't reinvent) ----
-    def build_dataset(self, *, samples: Any, transforms: Any = None) -> Any:
+    def build_dataset(
+        self,
+        *,
+        samples: Sequence[Sample],
+        transforms: Transforms | None = None,
+    ) -> BaseDataset:
         """Build this run's dataset over ``samples`` at ``transforms``.
 
         The dataset (``split_construction.run_loader``) is built by the builder its data block's
@@ -204,19 +236,21 @@ class TrainContext:
 
     def tiled_dataset(
         self,
-        base: Any,
+        base: DocumentDataset,
         *,
         tile_size: int,
         overlap: float,
         skip_empty: bool,
-        **kwargs: Any,
-    ) -> Any:
+        sliver_frac: float | None = None,
+        transforms: Transforms | None = None,
+        keep_regions: Sequence[tuple[int, int, int, int]] | None = None,
+    ) -> TiledDetectionDataset:
         """Wrap a detection or instance-segmentation dataset in the native-resolution tiler.
 
         The tiler (``datasets.TiledDetectionDataset``) runs at the lattice you compose it at,
         ``tile_size`` and ``overlap``, and ``skip_empty``, whether a tile holding no object is
-        dropped, each required. ``kwargs``: sliver_frac / keep_regions / transforms, the
-        transforms admitted over ``base``'s samples first (``datasets.refuse_unchained``).
+        dropped, each required; ``sliver_frac`` and ``keep_regions`` are the tiler's own, and
+        ``transforms`` are admitted over ``base``'s samples first (``datasets.refuse_unchained``).
         """
         from tcip_mcp.pipelines.data.datasets import (
             TiledDetectionDataset,
@@ -226,172 +260,115 @@ class TrainContext:
         refuse_unchained(
             [base.sample_of(k) for k in base.stems],
             base.expected_channels,
-            kwargs.get("transforms"),
+            transforms,
         )
         return TiledDetectionDataset(
             base,
             tile_size=tile_size,
             overlap=overlap,
             skip_empty=skip_empty,
-            **kwargs,
+            sliver_frac=sliver_frac,
+            transforms=transforms,
+            keep_regions=keep_regions,
         )
 
-    def task_collate(self) -> Any:
+    def task_collate(self) -> Collate:
         """Return the collate function for this run's task (``collation.task_collate``)."""
         from tcip_mcp.pipelines.training.collation import task_collate
 
         return task_collate(self.task)
 
-    def build_sampler(
-        self,
-        block: SamplerSpec,
-        dataset: Any,
-        *,
-        num_workers: int | None = None,
-        batch_size: int | None = None,
-    ) -> Any:
-        """Build the sampler ``block`` states over ``dataset`` (``samplers.build_sampler``)."""
-        from tcip_mcp.pipelines.data.samplers import build_sampler
+    build_sampler = staticmethod(samplers.build_sampler)
 
-        return build_sampler(
-            block, dataset, num_workers=num_workers, batch_size=batch_size
-        )
-
-    def build_augmentation(self) -> Any:
+    def build_augmentation(self) -> Transforms:
         """Build the augmentation chain the run's validated ``augmentation`` block states.
 
-        A config stating no block refuses (:meth:`_stated`).
+        A config stating no block refuses (:meth:`_unstated`).
         """
         from tcip_mcp.pipelines.data.augmentations import build_augmentation
 
-        return build_augmentation(self._stated("augmentation"))
+        if (augmentation := self.spec.augmentation) is None:
+            raise self._unstated("augmentation")
+        return build_augmentation(augmentation)
 
-    def compute_class_weights(self, *args: Any, **kwargs: Any) -> Any:
-        """Return ``losses.compute_class_weights`` of the given arguments."""
-        from tcip_mcp.pipelines.components.losses import compute_class_weights
+    compute_class_weights = staticmethod(losses.compute_class_weights)
 
-        return compute_class_weights(*args, **kwargs)
+    @staticmethod
+    def _unstated(block: str) -> ValueError:
+        """Return the refusal of a loop building from ``block``, which the run's config omits."""
+        return ValueError(
+            f"this run's config states no {block!r} block for the loop to build "
+            "from; state one beside training_source"
+        )
 
-    def _stated(self, block: str) -> Any:
-        """Return the run's validated ``block``.
-
-        Refuses (``ValueError``) naming the block when the run's config states none.
-        """
-        value = getattr(self.spec, block)
-        if value is None:
-            raise ValueError(
-                f"this run's config states no {block!r} block for the loop to build "
-                "from; state one beside training_source"
-            )
-        return value
-
-    def build_optimizer(self, model: Any) -> Any:
+    def build_optimizer(self, model: torch.nn.Module) -> torch.optim.Optimizer:
         """Build the optimizer the run's validated ``optimizer`` block names over ``model``.
 
         Its param groups take the block's own rates.
         """
-        from tcip_mcp.pipelines.training.optimizer_factory import (
-            build_optimizer,
-        )
-
-        spec = self._stated("optimizer")
-        return build_optimizer(
+        if (spec := self.spec.optimizer) is None:
+            raise self._unstated("optimizer")
+        return optimizer_factory.build_optimizer(
             spec, model, backbone_lr=spec.backbone_lr, head_lr=spec.head_lr
         )
 
-    def build_scheduler(self, optimizer: Any) -> Any:
+    def build_scheduler(
+        self, optimizer: torch.optim.Optimizer
+    ) -> torch.optim.lr_scheduler.LRScheduler:
         """Build the scheduler the run's validated ``scheduler`` block names over ``optimizer``.
 
         It runs at the block's own settings and horizon, in the direction of the run's selection
         metric.
         """
         from tcip_mcp.pipelines.schemas import selection_of
-        from tcip_mcp.pipelines.training.generic_trainer import (
-            _build_scheduler,
-        )
 
-        return _build_scheduler(
+        if (scheduler := self.spec.scheduler) is None:
+            raise self._unstated("scheduler")
+        return generic_trainer._build_scheduler(
             optimizer,
-            self._stated("scheduler"),
+            scheduler,
             higher_is_better=selection_of(
                 self.spec.evaluation.selection_metric
             )[1],
         )
 
-    def apply_stage_freeze(
-        self,
-        model: Any,
-        freeze_to: int,
-        *,
-        prev_trainable: int | None = None,
-    ) -> int:
-        """Apply a stage's progressive-unfreeze policy and return the new trainable-param count.
+    apply_stage_freeze = staticmethod(generic_trainer.apply_stage_freeze)
+    compute_lr_scale = staticmethod(optimizer_factory.compute_lr_scale)
+    capture_training_state = staticmethod(
+        optimizer_factory.capture_training_state
+    )
+    restore_training_state = staticmethod(
+        optimizer_factory.restore_training_state
+    )
 
-        The monotonic guard applies too (``generic_trainer.apply_stage_freeze``, whose refusals
-        propagate).
-        """
-        from tcip_mcp.pipelines.training.generic_trainer import (
-            apply_stage_freeze,
-        )
-
-        return apply_stage_freeze(
-            model, freeze_to, prev_trainable=prev_trainable
-        )
-
-    def compute_lr_scale(self, *args: Any, **kwargs: Any) -> Any:
-        """Return ``optimizer_factory.compute_lr_scale`` of the given arguments."""
-        from tcip_mcp.pipelines.training.optimizer_factory import (
-            compute_lr_scale,
-        )
-
-        return compute_lr_scale(*args, **kwargs)
-
-    def capture_training_state(self, *args: Any, **kwargs: Any) -> Any:
-        """Return ``optimizer_factory.capture_training_state`` of the given arguments."""
-        from tcip_mcp.pipelines.training.optimizer_factory import (
-            capture_training_state,
-        )
-
-        return capture_training_state(*args, **kwargs)
-
-    def restore_training_state(self, *args: Any, **kwargs: Any) -> Any:
-        """Run ``optimizer_factory.restore_training_state`` on the given arguments."""
-        from tcip_mcp.pipelines.training.optimizer_factory import (
-            restore_training_state,
-        )
-
-        return restore_training_state(*args, **kwargs)
-
-    def evaluate(self, model: Any, loader: Any = None, **kwargs: Any) -> Any:
+    def evaluate(
+        self, model: torch.nn.Module, loader: DataLoader | None = None
+    ) -> dict:
         """Return ``evaluation.evaluate`` of ``model`` over ``loader`` at the run's keywords.
 
         ``loader`` is the run's validation loader when omitted, and the keywords are the ones the
-        run resolved once (``TrainRun.evaluation_arguments``); ``kwargs`` are ``evaluate``'s other
-        keywords, and one naming a keyword the run supplies is refused by the call (``TypeError``).
+        run resolved once (``TrainRun.evaluation_arguments``). Refuses (``ValueError``) naming
+        ``val_loader`` when no loader is given and the run has none.
         """
         from tcip_mcp.pipelines.training.evaluation import evaluate
 
+        loader = self.val_loader if loader is None else loader
+        if loader is None:
+            raise ValueError(
+                "ctx.evaluate was given no loader and this run has no val_loader to score "
+                "instead; pass loader=, or state a validation side in the run's split."
+            )
         return evaluate(
             model,
-            self.val_loader if loader is None else loader,
+            loader,
             self.device,
             self.task,
             **self.run.evaluation_arguments,
-            **kwargs,
         )
 
     # ---- measurement primitives (compose for dimensional traits) ----
-    def mask_geometry(self, *args: Any, **kwargs: Any) -> Any:
-        """Return ``measurement.mask_geometry`` of the given arguments."""
-        from tcip_mcp.pipelines.measurement import mask_geometry
-
-        return mask_geometry(*args, **kwargs)
-
-    def instance_geometries(self, *args: Any, **kwargs: Any) -> Any:
-        """Return ``measurement.instance_geometries`` of the given arguments."""
-        from tcip_mcp.pipelines.measurement import instance_geometries
-
-        return instance_geometries(*args, **kwargs)
+    mask_geometry = staticmethod(measurement.mask_geometry)
+    instance_geometries = staticmethod(measurement.instance_geometries)
 
     # ---- envelope-owned sinks ----
     def _metrics_row(self, metrics: dict, stamps: dict) -> dict:
@@ -408,9 +385,6 @@ class TrainContext:
             TIMESTAMP_KEY,
             require_open,
         )
-        from tcip_mcp.pipelines.training.generic_trainer import (
-            _checkpoint_metrics,
-        )
 
         stamped = sorted({EPOCH_KEY, STEP_KEY, TIMESTAMP_KEY} & metrics.keys())
         if stamped:
@@ -420,7 +394,7 @@ class TrainContext:
             )
         require_open(self.run_dir)
         return {
-            **_checkpoint_metrics(metrics),
+            **generic_trainer._checkpoint_metrics(metrics),
             **stamps,
             TIMESTAMP_KEY: now_iso(),
         }
@@ -519,14 +493,9 @@ class TrainContext:
         config, snapshot and geometry are always this run's own.
         """
         from tcip_mcp.experiments import require_open
-        from tcip_mcp.pipelines.training.generic_trainer import (
-            checkpoint_path,
-            checkpoint_stamp,
-            write_checkpoint,
-        )
 
         require_open(self.run_dir)
-        stamp = checkpoint_stamp(self.run)
+        stamp = generic_trainer.checkpoint_stamp(self.run)
         if reserved := sorted(set(state) & set(stamp)):
             raise ValueError(
                 f"ctx.save_checkpoint: state carries {reserved}, reserved for this run's own "
@@ -534,8 +503,9 @@ class TrainContext:
                 "source snapshot and the geometry its launch resolved; name a bespoke loop's own "
                 "field something else."
             )
-        self.run.saved[tag] = write_checkpoint(
-            {**state, **stamp}, checkpoint_path(self.run_dir, tag)
+        self.run.saved[tag] = generic_trainer.write_checkpoint(
+            {**state, **stamp},
+            generic_trainer.checkpoint_path(self.run_dir, tag),
         )
         return str(self.run.saved[tag])
 
@@ -562,7 +532,7 @@ class TrainContext:
         return self.run.should_cancel()
 
     @property
-    def tb(self) -> Any:
+    def tb(self) -> SummaryWriter:
         """The run's one TensorBoard writer, over its ``tensorboard`` directory.
 
         It is opened on first use.
@@ -666,7 +636,7 @@ def close_run(
     *,
     checkpoint: dict | None,
     arguments: dict[str, Any],
-    **extra: Any,
+    **extra: JsonValue,
 ) -> tuple[str, str | None]:
     """Append the run's closing ``training_run`` line, then write its final status once.
 
@@ -711,18 +681,19 @@ def _settle_run(ctx: TrainContext) -> dict | None:
             "exceeded max_wall_clock_seconds",
         )
     checkpoint = None
-    if run.status == "completed" and run.deliverable is None:
-        run.status = "failed"
-        run.status_error = "training completed but saved no final weights"
-    elif run.status == "completed":
-        try:
-            checkpoint = {
-                "path": str(run.deliverable),
-                "sha256": admitted_digest(run.deliverable),
-            }
-        except (OSError, ValueError) as exc:
-            run.status, run.status_error = (
-                "failed",
-                f"final weights could not be admitted: {exc}",
-            )
+    if run.status == "completed":
+        if run.deliverable is None:
+            run.status = "failed"
+            run.status_error = "training completed but saved no final weights"
+        else:
+            try:
+                checkpoint = {
+                    "path": str(run.deliverable),
+                    "sha256": admitted_digest(run.deliverable),
+                }
+            except (OSError, ValueError) as exc:
+                run.status, run.status_error = (
+                    "failed",
+                    f"final weights could not be admitted: {exc}",
+                )
     return checkpoint

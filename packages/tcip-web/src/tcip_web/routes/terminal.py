@@ -158,8 +158,9 @@ class TerminalSession:
 
     launch: TerminalLaunch
     """What the last start launched; set by :meth:`start`."""
+    _pty: pty_host.Pty | None
 
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str) -> None:
         """Take the session's id; no process runs until :meth:`start`."""
         self.id = session_id
         self._pty = None
@@ -198,13 +199,13 @@ class TerminalSession:
             command = pty_host.resolve_terminal_command(provider)
             if command is None:
                 return provider.unavailable_reason
-            prepared: list[str] = []
-            if not command[1]:
-                prepared, problem = pty_host.prepare_launch(
-                    command[0][0], provider, launch
-                )
-                if problem is not None:
-                    return problem
+            prepared = (
+                []
+                if command[1]
+                else pty_host.prepare_launch(command[0][0], provider, launch)
+            )
+            if isinstance(prepared, str):
+                return prepared
             env = pty_host.spawn_env(self.id)
             argv = pty_host.render_argv(command[0], launch, env)
             program = pty_host.launched_program(argv, command[1])

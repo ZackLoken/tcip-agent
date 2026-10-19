@@ -6,14 +6,22 @@ delivered.
 
 from __future__ import annotations
 
-import dataclasses
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from tcip_mcp.pipelines.execution import DEFAULT_TILE_BATCH_SIZE, Stated
+from pydantic import BaseModel, ConfigDict
+
+from tcip_mcp.model_registry import Producer
+from tcip_mcp.pipelines.execution import (
+    DEFAULT_TILE_BATCH_SIZE,
+    EXECUTION_RECORD,
+    Execution,
+    Stated,
+)
+from tcip_mcp.pipelines.raster_source import RasterIdentity
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_store import (
@@ -21,10 +29,12 @@ from tcip_store import (
     Version,
     VersionConflictError,
     canonical_path,
-    decode_value,
-    encode_record,
     store,
 )
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.execution import Pass
+    from tcip_mcp.pipelines.raster_source import RasterSource
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +42,28 @@ RASTER_PASS_PROGRESS_STORE = "raster_pass_progress"
 """One tiled raster pass's resume state under the project: an ``identity`` record naming the
 pass, plus one ``batch-<index>`` record per tile batch already predicted, both keyed under the
 bucket's dataset root and name."""
+
+type Progress = Callable[[int, int], None]
+"""Called with ``(done, total)`` images as a pass over images advances."""
+
+type Canceled = Callable[[], bool]
+"""Asked before each image whether the pass is to stop there."""
+
+
+class RasterPassIdentity(BaseModel):
+    """The ``identity`` record of one raster pass: what a resumed pass states identically.
+
+    It names the raster's content identity, the checkpoint's ``producer``, the assessment and the
+    tile batch size, and carries the pass's ``execution``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    raster_identity: RasterIdentity
+    producer: Producer
+    assessment_id: str | None
+    tile_batch_size: int
+    execution: Execution
 
 
 def infer(
@@ -47,8 +79,8 @@ def infer(
     tile_batch_size: int,
     dry_run: bool,
     resume: bool,
-    progress: Callable[[int, int], None] | None = None,
-    canceled: Callable[[], bool] | None = None,
+    progress: Progress | None = None,
+    canceled: Canceled | None = None,
     actor: str | None,
 ) -> dict:
     """Run the registered checkpoint's pass and publish its predictions as the bucket ``bucket``.
@@ -70,11 +102,7 @@ def infer(
         UnregisteredCheckpointError,
         load_registered_checkpoint,
     )
-    from tcip_mcp.pipelines.execution import (
-        Execution,
-        ExecutionRefusedError,
-        prepare,
-    )
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError, prepare
 
     if not bucket:
         return {
@@ -101,14 +129,14 @@ def infer(
     except (UnregisteredCheckpointError, FileNotFoundError, ValueError) as exc:
         return {"error": str(exc)}
 
-    recorded = (
+    stored = (
         store.read(
             _progress_key(project, root, bucket, "identity"), default=None
         )
         if resume
         else None
     )
-    if resume and recorded is None:
+    if resume and stored is None:
         return {
             "error": f"resume=True but no raster-pass progress toward bucket {bucket!r} "
             f"under {root} is recorded."
@@ -116,8 +144,13 @@ def infer(
     if raster_path is not None:
         stated = stated.model_copy(update={"tile": True})
     try:
+        recorded = (
+            None
+            if stored is None
+            else RasterPassIdentity.model_validate(stored)
+        )
         restored = (
-            Execution.of(recorded.pop("execution"))
+            recorded.execution
             if recorded is not None
             else read_assessment(project, assessment_id).execution
             if assessment_id is not None
@@ -137,7 +170,7 @@ def infer(
     # A raster pass reads its raster through one reader, opened at the model's count: the
     # identity it records and the predictions it publishes are of the one frame that reader serves.
     with ExitStack() as held:
-        reader, raster_identity = None, None
+        raster: tuple[RasterSource, RasterPassIdentity] | None = None
         if raster_path is not None:
             from tcip_mcp.pipelines.image_utils import resolve_image_path
             from tcip_mcp.pipelines.raster_source import (
@@ -151,44 +184,45 @@ def infer(
                         resolve_image_path(raster_path), p.predictor.in_chans
                     )
                 )
-                raster_identity = decode_value(
-                    encode_record(dataclasses.asdict(content_identity(reader)))
+                identity = RasterPassIdentity(
+                    raster_identity=content_identity(reader),
+                    producer=checkpoint.producer,
+                    assessment_id=assessment_id,
+                    tile_batch_size=tile_batch_size,
+                    execution=p.execution,
                 )
             except (FileNotFoundError, ValueError) as exc:
                 return {
                     "error": f"raster content identity could not be computed for "
                     f"{raster_path}: {exc}"
                 }
-        pass_identity = {
-            "raster_identity": raster_identity,
-            **checkpoint.producer,
-            "assessment_id": assessment_id,
-            "tile_batch_size": tile_batch_size,
-        }
-        if recorded is not None:
-            differing = sorted(
-                k
-                for k in recorded.keys() | pass_identity.keys()
-                if recorded.get(k) != pass_identity.get(k)
-            )
-            if differing:
-                return {
-                    "error": f"resume=True but the recorded pass toward bucket {bucket!r} "
-                    f"differs from this call in {differing}: a resumed pass is the "
-                    "identical pass."
-                }
+            if recorded is not None:
+                was, now = (
+                    stated_pass.model_dump(mode="json", exclude={"execution"})
+                    for stated_pass in (recorded, identity)
+                )
+                differing = sorted(k for k in was if was[k] != now[k])
+                if differing:
+                    return {
+                        "error": f"resume=True but the recorded pass toward bucket "
+                        f"{bucket!r} differs from this call in {differing}: a resumed "
+                        "pass is the identical pass."
+                    }
+            raster = reader, identity
         if dry_run:
             return {
                 "dry_run": True,
                 "dataset_root": str(root),
                 "bucket": bucket,
                 "bucket_exists": store.exists(bucket_key(root, bucket)),
-                "execution": p.execution.record(),
+                "execution": EXECUTION_RECORD.dump_python(
+                    p.execution, mode="json"
+                ),
                 "assessment_id": assessment_id,
             }
 
         results: Any
-        if reader is not None:
+        if raster is not None:
             try:
                 results = [
                     _raster_pass(
@@ -196,9 +230,8 @@ def infer(
                         root,
                         bucket,
                         p,
-                        reader,
+                        *raster,
                         str(raster_path),
-                        {**pass_identity, "execution": p.execution.record()},
                         resumed=recorded is not None,
                     )
                 ]
@@ -226,7 +259,9 @@ def infer(
             scope=p.scope,
             execution=p.execution,
             raster_path=raster_path,
-            raster_identity=raster_identity,
+            raster_identity=None
+            if raster is None
+            else raster[1].raster_identity,
             assessment_id=assessment_id,
             actor=actor,
         )
@@ -244,19 +279,19 @@ def infer(
         "total_detections": sum(r["count"] for r in rows)
         if rows is not None
         else None,
-        "execution": p.execution.record(),
+        "execution": EXECUTION_RECORD.dump_python(p.execution, mode="json"),
         "assessment_id": published.assessment_id,
-        **published.producer,
+        **published.producer.model_dump(),
         "date": published.date,
         "dropped_boxes": published.dropped_boxes,
     }
 
 
 def _image_results(
-    p: Any,
-    progress: Callable[[int, int], None] | None,
-    canceled: Callable[[], bool] | None,
-):
+    p: Pass,
+    progress: Progress | None,
+    canceled: Canceled | None,
+) -> Iterator[dict]:
     """Yield the pass's prediction per image, one image at a time.
 
     Reports each image's progress and stops at the image boundary a cancel is first seen at.
@@ -384,41 +419,46 @@ def _raster_pass(
     project: Path,
     root: Path,
     bucket: str,
-    p: Any,
-    reader: Any,
+    p: Pass,
+    reader: RasterSource,
+    identity: RasterPassIdentity,
     label: str,
-    pass_identity: dict,
     *,
     resumed: bool,
 ) -> dict:
     """Run the tiled pass over the open raster ``reader``, ``label`` naming it.
 
-    The pass's identity is recorded first on a fresh pass, each flushed tile batch recorded as it
-    lands, the batches already recorded fed back in on a resumed one.
+    The pass's ``identity`` is recorded first on a fresh pass, each flushed tile batch recorded as
+    it lands, the batches already recorded fed back in on a resumed one as one
+    :class:`~tcip_mcp.pipelines.inference.generic_predictor.SliceBatch`.
     """
-    prior: dict[str, list] | None = None
+    from tcip_mcp.pipelines.inference.generic_predictor import SliceBatch
+
+    prior: SliceBatch | None = None
     if resumed:
-        indexed = sorted(
-            (int(key.parts[-1][len("batch-") :]), key)
-            for key in _progress_keys(project, root, bucket)
-            if key.parts[-1].startswith("batch-")
+        batches = [
+            SliceBatch.model_validate(store.read(key))
+            for _index, key in sorted(
+                (int(key.parts[-1][len("batch-") :]), key)
+                for key in _progress_keys(project, root, bucket)
+                if key.parts[-1].startswith("batch-")
+            )
+        ]
+        prior = SliceBatch(
+            slices=[s for b in batches for s in b.slices],
+            predictions=[row for b in batches for row in b.predictions],
         )
-        prior = {"slices": [], "predictions": []}
-        for _index, key in indexed:
-            batch = store.read(key)
-            prior["slices"].extend(batch["slices"])
-            prior["predictions"].extend(batch["predictions"])
     else:
         store.replace(
             _progress_key(project, root, bucket, "identity"),
-            pass_identity,
+            identity.model_dump(mode="json"),
             expect=Version.ABSENT,
         )
 
-    def record(start: int, _end: int, batch: dict) -> None:
+    def record(start: int, _end: int, batch: SliceBatch) -> None:
         store.replace(
             _progress_key(project, root, bucket, f"batch-{start:06d}"),
-            batch,
+            batch.model_dump(mode="json"),
             expect=Version.ABSENT,
         )
 

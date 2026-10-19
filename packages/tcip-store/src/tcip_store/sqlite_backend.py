@@ -16,10 +16,10 @@ import threading
 import time
 import uuid
 from collections import Counter
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Sequence
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tcip_store.errors import (
     BackendUnavailableError,
@@ -49,6 +49,11 @@ from tcip_store.model import (
     canonical_path,
 )
 from tcip_store.values import decode_value, encode_log_line, encode_record
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
+
+    from tcip_store.model import ReadDefault
 
 SCHEMA_DDL = """
 create table if not exists records (
@@ -232,7 +237,9 @@ def copy_database(source: Path, destination: Path) -> None:
         src.close()
 
 
-def _encoded(key: Key, encode: Callable[[Any], bytes], value: Any) -> bytes:
+def _encoded(
+    key: Key, encode: Callable[[Any], bytes], value: JsonValue
+) -> bytes:
     """Return ``value`` through ``encode``.
 
     Raises a ``StoreError`` naming the entry and what would not encode.
@@ -247,7 +254,7 @@ def _encoded(key: Key, encode: Callable[[Any], bytes], value: Any) -> bytes:
         ) from exc
 
 
-def _decoded(key: Key, data: bytes) -> Any:
+def _decoded(key: Key, data: bytes) -> JsonValue:
     """Return a stored entry's value; ``DecodeError`` naming the entry when it will not decode."""
     try:
         return decode_value(data)
@@ -257,7 +264,9 @@ def _decoded(key: Key, data: bytes) -> Any:
         ) from exc
 
 
-def _versioned(key: Key, data: bytes | None, default: Any) -> Versioned:
+def _versioned(
+    key: Key, data: bytes | None, default: ReadDefault
+) -> Versioned:
     """Return a stored record as :func:`~tcip_store.file_backend.versioned` answers it.
 
     Its bytes are decoded through :func:`_decoded`.
@@ -499,7 +508,7 @@ class SqliteBackend:
     # ── records ─────────────────────────────────────────────────────────────────
 
     def read_versioned(
-        self, key: Key, *, default: Any = REQUIRED
+        self, key: Key, *, default: ReadDefault = REQUIRED
     ) -> Versioned:
         """Return a record and its version read together, without creating a database.
 
@@ -523,7 +532,7 @@ class SqliteBackend:
             return conn is not None and self._stored(conn, key) is not None
 
     def replace(
-        self, key: Key, value: Any, *, expect: Version | None = None
+        self, key: Key, value: JsonValue, *, expect: Version | None = None
     ) -> Version:
         """Replace one record whole in one write transaction and return its new version.
 
@@ -594,7 +603,7 @@ class SqliteBackend:
 
     # ── logs ────────────────────────────────────────────────────────────────────
 
-    def append(self, key: Key, record: Mapping[str, Any]) -> None:
+    def append(self, key: Key, record: dict[str, JsonValue]) -> None:
         """Append one entry to a log in its own write transaction."""
         data = _encoded(key, encode_log_line, record)
         with self._write((key,)) as conn:
@@ -604,7 +613,7 @@ class SqliteBackend:
         """Return the entries committed after the cursor, in commit order.
 
         The cursor is the last returned row's id, which autoincrement never reuses; an entry that
-        will not decode is reported through ``corrupt``.
+        will not decode as the JSON object :meth:`append` writes is reported through ``corrupt``.
         """
         start = int(after) if after else 0
         with (
@@ -618,13 +627,17 @@ class SqliteBackend:
                 "order by id",
                 (key.store, encode_parts(key.parts), start),
             ).fetchall()
-        records: list[Mapping[str, Any]] = []
+        records: list[dict[str, JsonValue]] = []
         corrupt: list[int] = []
         cursor = start
         for position, (row_id, entry) in enumerate(rows):
             try:
-                records.append(_decoded(key, entry))
+                value = _decoded(key, entry)
             except DecodeError:
+                value = None
+            if isinstance(value, dict):
+                records.append(value)
+            else:
                 corrupt.append(position)
             cursor = row_id
         return LogPage(
@@ -666,7 +679,7 @@ class Txn:
             )
 
     def read_versioned(
-        self, key: Key, *, default: Any = REQUIRED
+        self, key: Key, *, default: ReadDefault = REQUIRED
     ) -> Versioned:
         """Return one of the transaction's records and its version.
 
@@ -675,11 +688,11 @@ class Txn:
         self._held(key)
         return _versioned(key, self._backend._stored(self._conn, key), default)
 
-    def read(self, key: Key, *, default: Any = REQUIRED) -> Any:
+    def read(self, key: Key, *, default: ReadDefault = REQUIRED) -> JsonValue:
         """Return one of the transaction's records (:meth:`read_versioned`'s value)."""
         return self.read_versioned(key, default=default).value
 
-    def write(self, key: Key, value: Any) -> Version:
+    def write(self, key: Key, value: JsonValue) -> Version:
         """Replace one of the transaction's records whole, returning its new version."""
         self._held(key)
         data = _encoded(key, encode_record, value)
@@ -691,7 +704,7 @@ class Txn:
         self._held(key)
         self._backend._drop(self._conn, key)
 
-    def append(self, key: Key, record: Mapping[str, Any]) -> None:
+    def append(self, key: Key, record: dict[str, JsonValue]) -> None:
         """Append one entry to one of the transaction's logs."""
         self._held(key)
         self._backend._append(

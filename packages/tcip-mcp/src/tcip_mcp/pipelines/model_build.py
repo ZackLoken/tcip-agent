@@ -32,13 +32,26 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    NamedTuple,
+    Required,
+    TypedDict,
+    overload,
+)
 
+from tcip_annotation.state import Attribute
 from tcip_store import canonical_path
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    import torch
+
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.schemas import (
+        ModelDims,
         ModelSourceSchema,
         TrainConfigSchema,
         TrainGeometry,
@@ -67,10 +80,11 @@ def _split_dotted(target: str) -> tuple[str, str]:
     return mod_name, attr
 
 
-def _import_dotted(target: object) -> Any:
+def _import_dotted(target: object) -> Callable[..., object]:
     """Resolve a ``'module.path:function'`` (or ``'module.path.function'``) string to the callable.
 
-    A non-string or empty ``target`` refuses (``ValueError``).
+    A non-string or empty ``target``, and a name whose object is not callable, refuse
+    (``ValueError``).
     """
     if not isinstance(target, str) or not target:
         raise ValueError(
@@ -86,26 +100,52 @@ def _import_dotted(target: object) -> Any:
 
     module = importlib.import_module(mod_name)
     try:
-        return getattr(module, attr)
+        found: object = getattr(module, attr)
     except AttributeError as exc:
         raise ValueError(
             f"Builder {attr!r} not found in module {mod_name!r}."
         ) from exc
+    if not callable(found):
+        raise ValueError(
+            f"{target!r} names a {type(found).__name__}, which is not callable: name the "
+            "function or class in that module that builds it."
+        )
+    return found
 
 
-def resolve_named(
+@overload
+def resolve_named[T](
     name: str,
-    registry: Mapping[str, Any],
+    registry: Mapping[str, T],
+    *,
+    kind: str,
+    register: None = None,
+) -> T: ...
+
+
+@overload
+def resolve_named[T](
+    name: str,
+    registry: Mapping[str, T],
+    *,
+    kind: str,
+    register: str,
+) -> T | Callable[..., object]: ...
+
+
+def resolve_named[T](
+    name: str,
+    registry: Mapping[str, T],
     *,
     kind: str,
     register: str | None = None,
-) -> Any:
+) -> T | Callable[..., object]:
     """Return the entry ``registry`` holds under ``name``.
 
     Where ``register`` names the call that adds an entry to ``registry``, a dotted
-    ``module:factory`` ``name`` imports its target instead. Refuses (``ValueError``) a name that is
-    neither, naming the ``kind``, the registered names and ``register``, and a dotted name that
-    will not import.
+    ``module:factory`` ``name`` imports its callable target instead. Refuses (``ValueError``) a
+    name that is neither, naming the ``kind``, the registered names and ``register``, and a dotted
+    name that will not import or names nothing callable.
     """
     if name in registry:
         return registry[name]
@@ -126,7 +166,7 @@ def resolve_named(
     )
 
 
-def keyword_parameters(fn: Any) -> tuple[set[str], bool]:
+def keyword_parameters(fn: Callable[..., object]) -> tuple[set[str], bool]:
     """Return the keyword names ``fn``'s signature names and whether it takes any keyword.
 
     ``self`` and variadics are excluded from the names; any keyword is a ``**kwargs``.
@@ -205,6 +245,28 @@ def lay_out(directory: Path, copies: Mapping[str, bytes]) -> None:
         (directory / name).write_bytes(data)
 
 
+class SnapshotCopy(TypedDict):
+    """One declared file's copy in a run's source snapshot.
+
+    ``file`` is its path in the run directory (under :data:`SNAPSHOT_DIR`), ``sha256`` its content
+    digest and ``bytes`` its size.
+    """
+
+    file: str
+    sha256: str
+    bytes: int
+
+
+class SourceSnapshot(TypedDict):
+    """A run's source snapshot record (:func:`snapshot_model_source`).
+
+    ``files`` holds each declared file's copy, keyed by the file's stored path
+    (``registry_paths.stored_path`` against the run's project).
+    """
+
+    files: dict[str, SnapshotCopy]
+
+
 class StagedSources(NamedTuple):
     """A run's source snapshot taken once at its admission, and those copies laid out.
 
@@ -212,7 +274,7 @@ class StagedSources(NamedTuple):
     out (:func:`lay_out`) in a temporary directory the ``layout`` holds.
     """
 
-    record: dict
+    record: SourceSnapshot
     copies: dict[str, bytes]
     layout: SourceLayout
 
@@ -237,7 +299,7 @@ def staged_sources(spec: TrainConfigSchema, project: Path) -> StagedSources:
     )
 
 
-def run_layout(run_dir: Path, source: dict) -> SourceLayout:
+def run_layout(run_dir: Path, source: SourceSnapshot) -> SourceLayout:
     """Return the layout a snapshot's copies make under ``run_dir`` (:func:`lay_out`).
 
     It is ``run_dir``'s :data:`SNAPSHOT_DIR`, each copy at the place the snapshot's record
@@ -271,7 +333,7 @@ def owning_run_layout(
     or a snapshot and files no run of ``project`` took, naming how a checkpoint comes to have a
     run.
     """
-    from tcip_mcp.experiments import RUN_FILE, read_run_record, run_dirs
+    from tcip_mcp.experiments import read_run, run_dirs
 
     declared = {
         Path(file)
@@ -279,9 +341,7 @@ def owning_run_layout(
         for file in files or []
     }
     for run_dir in run_dirs(project):
-        layout = run_layout(
-            run_dir, read_run_record(run_dir / RUN_FILE)["source"]
-        )
+        layout = run_layout(run_dir, read_run(run_dir).source)
         if (
             declared
             and layout.snapshot == snapshot
@@ -301,7 +361,9 @@ _LAYOUT_ROOTS: set[str] = set()
 (``tcip_store.canonical_path``)."""
 
 
-def import_source_builder(dotted: str, layout: SourceLayout) -> Any:
+def import_source_builder(
+    dotted: str, layout: SourceLayout
+) -> Callable[..., object]:
     """Import the callable ``dotted`` (``'module:function'``) names from ``layout``.
 
     Every module loaded from another layout root still on ``sys.path`` (its file, or for a
@@ -375,21 +437,21 @@ def child_pythonpath() -> str:
     )
 
 
-def model_dims(scope: ClassScope, sizes: Mapping[str, int]) -> dict[str, Any]:
-    """Return the dimensions a run's model is built at, each under the name its builder takes.
+def model_dims(scope: ClassScope, sizes: Mapping[str, int]) -> ModelDims:
+    """Return the dimensions a run's model is built at (``schemas.ModelDims``).
 
     ``in_chans`` is the band count the run's sources are read at, ``sizes["num_channels"]``
     (:func:`~tcip_mcp.pipelines.data.datasets.resolve_sizes`). For a run over label documents
     (``scope`` naming a subject), ``num_classes`` is 1 and ``attributes``, present when the scope
-    declares any, is its tuple of :class:`~tcip_mcp.subject_registry.Attribute` records; a
+    declares any, is its tuple of :class:`~tcip_annotation.state.Attribute` records; a
     ``sizes`` stating a count beside it refuses by name.
     Otherwise the ``num_classes`` or ``num_ranks`` ``sizes`` carries, and none for a run whose
     ground truth carries no count.
     Refuses by name a ``sizes`` recording no band count, and a document scope the admission did
-    not read attributes for (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.admitted_for`).
+    not read attributes for
+    (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.document_attributes`).
     """
     from tcip_mcp.pipelines.data.datasets import GROUND_TRUTH_COUNTS
-    from tcip_mcp.pipelines.data.selection import DOCUMENT
     from tcip_mcp.pipelines.schemas import ModelDims
 
     if sizes.get("num_channels") is None:
@@ -398,29 +460,29 @@ def model_dims(scope: ClassScope, sizes: Mapping[str, int]) -> dict[str, Any]:
             "is unknown, and building at a guess would feed it something other than what it "
             "trained on. Build from a run this platform trained, or state data.num_channels."
         )
-    in_chans = int(sizes["num_channels"])
-    counts: dict[str, Any] = {
-        name: int(sizes[name])
-        for name in GROUND_TRUTH_COUNTS
-        if sizes.get(name) is not None
-    }
+    dims = ModelDims(in_chans=int(sizes["num_channels"]))
+    counts = [
+        name for name in GROUND_TRUTH_COUNTS if sizes.get(name) is not None
+    ]
     if scope.subject is None:
-        return ModelDims(in_chans=in_chans, **counts).handed()
+        for name in counts:
+            dims[name] = int(sizes[name])
+        return dims
     if counts:
         raise ValueError(
             f"this run over label documents records {sorted(counts)}: its head sizes are the "
             "subject its scope isolates and the attributes the registry declares for it, so a "
             f"stated count would be a second one. Drop {sorted(counts)} from data."
         )
-    attributes = scope.admitted_for(
-        DOCUMENT, "this run's data.scope"
-    ).attributes
-    return ModelDims(
-        in_chans=in_chans, num_classes=1, attributes=attributes or None
-    ).handed()
+    dims["num_classes"] = 1
+    if attributes := scope.document_attributes(
+        "this run's data.scope"
+    ).attributes:
+        dims["attributes"] = attributes
+    return dims
 
 
-def recorded_model_dims(spec: TrainConfigSchema) -> dict[str, Any]:
+def recorded_model_dims(spec: TrainConfigSchema) -> ModelDims:
     """Return :func:`model_dims` over what a validated run config records on its data block.
 
     That is its ``scope`` and its sizes. Refuses by name a run of a built-in loader's task that
@@ -444,51 +506,77 @@ def recorded_model_dims(spec: TrainConfigSchema) -> dict[str, Any]:
 def build_from_model_source(
     source: ModelSourceSchema,
     layout: SourceLayout,
-    dims: Mapping[str, Any],
+    dims: ModelDims,
     geometry: TrainGeometry,
-) -> Any:
+) -> torch.nn.Module:
     """Import the builder a validated ``model_source`` names from ``layout`` and call it.
 
     The ``model_source`` is a ``schemas.TrainConfigSchema``'s; the import is
     :func:`import_source_builder`'s. The builder is called with its ``builder_kwargs``, its
     normalization's values and weights (``schemas.Normalization.handed``), ``dims``
     (:func:`model_dims`) and, for a detector, the geometry its run's resolution recorded
-    (``geometry.detector``).
+    (``geometry.detector``). Refuses (``TypeError``) a builder that returns anything but a
+    ``torch.nn.Module``, naming ``model_source.builder``.
     """
+    import torch
+
     fn = import_source_builder(source.builder, layout)
     detector = {} if geometry.detector is None else geometry.detector.handed()
-    return fn(
+    model = fn(
         **(source.builder_kwargs or {}),
         **source.normalization.handed(),
         **detector,
         **dims,
     )
+    if not isinstance(model, torch.nn.Module):
+        raise TypeError(
+            f"model_source.builder {source.builder!r} returned a {type(model).__name__}, "
+            "not a torch.nn.Module: the builder returns the module it builds."
+        )
+    return model
+
+
+class ContractDims(TypedDict, total=False):
+    """The dimensions a synthetic smoke batch of a run is shaped at.
+
+    They are :func:`resolve_contract_dims`': ``in_chans``, the band count; ``img_size``, the
+    ``(width, height)`` of the frame it trains on; ``num_classes``, its class or rank count;
+    ``attributes``, the attribute records its detector heads read. A run has no key for a
+    dimension it has none of.
+    """
+
+    in_chans: Required[int]
+    img_size: tuple[int, int]
+    num_classes: int
+    attributes: tuple[Attribute, ...]
 
 
 def resolve_contract_dims(
     spec: TrainConfigSchema,
-    dims: Mapping[str, Any],
+    dims: ModelDims,
     geometry: TrainGeometry,
-) -> dict:
+) -> ContractDims:
     """Return the dimensions a smoke batch of a run resolved to ``spec`` and ``geometry`` takes.
 
     The batch is synthetic, shaped at the width, count and attributes the model is built at
-    (``dims``, :func:`model_dims`, a rank count carried as ``num_classes``) and the ``img_size``,
-    ``(width, height)``, of the frame it trains on (``schemas.run_frame``). A run that resolved
-    none carries no ``img_size``.
+    (``dims``, :func:`model_dims`, a rank count carried as ``num_classes``) and the ``img_size``
+    of the frame it trains on (``schemas.run_frame``). A run that resolved none carries no
+    ``img_size``.
     """
     from tcip_mcp.pipelines.schemas import run_frame
 
-    count = dims.get("num_classes", dims.get("num_ranks"))
+    resolved = ContractDims(in_chans=dims["in_chans"])
     frame = run_frame(
         spec.model_source.task, spec.data.tiling, geometry.native_size
     )
-    return {
-        "in_chans": dims["in_chans"],
-        **({} if frame is None else {"img_size": tuple(frame)}),
-        **({} if count is None else {"num_classes": count}),
-        **({"attributes": dims["attributes"]} if "attributes" in dims else {}),
-    }
+    if frame is not None:
+        resolved["img_size"] = frame
+    count = dims.get("num_classes", dims.get("num_ranks"))
+    if count is not None:
+        resolved["num_classes"] = count
+    if "attributes" in dims:
+        resolved["attributes"] = dims["attributes"]
+    return resolved
 
 
 # The checkout's commit can't change within a process, resolve it once (a subprocess per training
@@ -520,30 +608,50 @@ def _tcip_git_commit() -> str | None:
     return _GIT_COMMIT
 
 
-def capture_env() -> dict:
-    """Return the platform git commit and the Python, ML library and CUDA versions this runs.
+class Environment(TypedDict):
+    """The platform git commit and the Python, ML library and CUDA versions a run ran under.
 
-    Each is ``None`` when it cannot be resolved.
+    Each but ``python`` is ``None`` when it cannot be resolved; ``cuda`` is ``None`` on a CPU-only
+    or torch-less environment.
     """
+
+    python: str
+    tcip_git_commit: str | None
+    torch: str | None
+    torchvision: str | None
+    timm: str | None
+    numpy: str | None
+    cuda: str | None
+
+
+def _version(module: str) -> str | None:
+    """Return ``module``'s ``__version__``, ``"unknown"`` if it states none, ``None`` unimported."""
+    try:
+        return getattr(__import__(module), "__version__", "unknown")
+    except Exception:
+        return None
+
+
+def capture_env() -> Environment:
+    """Return the :class:`Environment` this process runs."""
     import sys
 
-    env: dict[str, Any] = {
-        "python": sys.version.split()[0],
-        "tcip_git_commit": _tcip_git_commit(),
-    }
-    for name in ("torch", "torchvision", "timm", "numpy"):
-        try:
-            env[name] = getattr(__import__(name), "__version__", "unknown")
-        except Exception:
-            env[name] = None
-    # CUDA/driver fingerprint, a run's numerics depend on it; null on a CPU-only or torch-less env.
+    # CUDA/driver fingerprint, a run's numerics depend on it.
     try:
         import torch
 
-        env["cuda"] = torch.version.cuda if torch.cuda.is_available() else None
+        cuda = torch.version.cuda if torch.cuda.is_available() else None
     except Exception:
-        env["cuda"] = None
-    return env
+        cuda = None
+    return Environment(
+        python=sys.version.split()[0],
+        tcip_git_commit=_tcip_git_commit(),
+        torch=_version("torch"),
+        torchvision=_version("torchvision"),
+        timm=_version("timm"),
+        numpy=_version("numpy"),
+        cuda=cuda,
+    )
 
 
 SNAPSHOT_DIR = "model_src"
@@ -643,7 +751,7 @@ def module_plan(
 
 def snapshot_model_source(
     spec: TrainConfigSchema, project: Path
-) -> tuple[dict, dict[str, bytes]]:
+) -> tuple[SourceSnapshot, dict[str, bytes]]:
     """Snapshot the files a run of ``project`` declares, placed by its :func:`module_plan`.
 
     The plan refuses as it does. Returns the snapshot's record, ``{"files": {...}}``, one entry
@@ -656,21 +764,21 @@ def snapshot_model_source(
 
     from tcip_mcp.registry_paths import stored_path
 
-    entries: dict[str, dict] = {}
+    entries: dict[str, SnapshotCopy] = {}
     copies: dict[str, bytes] = {}
     for p, place in module_plan(spec, project).items():
         copy = f"{SNAPSHOT_DIR}/{place}"
         copies[copy] = data = p.read_bytes()
-        entries[stored_path(p, project)] = {
-            "file": copy,
-            "sha256": hashlib.sha256(data).hexdigest(),
-            "bytes": len(data),
-        }
-    return {"files": entries}, copies
+        entries[stored_path(p, project)] = SnapshotCopy(
+            file=copy,
+            sha256=hashlib.sha256(data).hexdigest(),
+            bytes=len(data),
+        )
+    return SourceSnapshot(files=entries), copies
 
 
 def snapshot_bound(
-    spec: TrainConfigSchema, source: dict, run_dir: Path
+    spec: TrainConfigSchema, source: SourceSnapshot, run_dir: Path
 ) -> TrainConfigSchema:
     """Return ``spec``, a run's config, with each declared file replaced by its snapshot copy.
 

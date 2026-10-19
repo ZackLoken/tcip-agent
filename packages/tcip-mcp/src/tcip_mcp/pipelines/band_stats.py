@@ -11,6 +11,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, get_args
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import numpy as np
+    from numpy.typing import NDArray
+
     from tcip_mcp.pipelines.raster_source import RasterSource
 
 # The bounds a ``percent_clip`` render stretches between, as percentiles of the band's own values:
@@ -51,7 +56,7 @@ class SampledBandRanges:
     pixel_fraction: float
 
 
-def band_ranges(pixels) -> list[BandRange]:
+def band_ranges(pixels: np.ndarray) -> list[BandRange]:
     """Return exact per-band min/max of an ``[H, W, C]`` array (or one 2-D band), in dtype units."""
     from tcip_mcp.pipelines.raster_source import hwc_array
 
@@ -63,7 +68,8 @@ def band_ranges(pixels) -> list[BandRange]:
 
 
 def clip_bounds(
-    band, percentiles: tuple[float, float] = DISPLAY_CLIP_PERCENTILES
+    band: np.ndarray,
+    percentiles: tuple[float, float] = DISPLAY_CLIP_PERCENTILES,
 ) -> tuple[float, float]:
     """Return the values ``percentiles`` cuts a band at, in the band's own dtype units."""
     import numpy as np
@@ -75,8 +81,8 @@ def clip_bounds(
 
 
 def full_scale_denominator(
-    band,
-    source_dtype,
+    band: np.ndarray,
+    source_dtype: np.dtype,
     *,
     sampled_maximum: float | None = None,
     sampled_minimum: float | None = None,
@@ -106,7 +112,9 @@ def full_scale_denominator(
     return 1.0
 
 
-def _stretch_between(raw, low: float, high: float):
+def _stretch_between(
+    raw: NDArray[np.float64], low: float, high: float
+) -> NDArray[np.float64]:
     """Rescale ``raw`` (float64) so ``low``..``high`` spans the 8-bit display range.
 
     A band with no spread (``high <= low``) maps to zeros.
@@ -119,8 +127,11 @@ def _stretch_between(raw, low: float, high: float):
 
 
 def stretch_band(
-    band, mode: str, source_dtype, bounds: tuple[float, float] | None = None
-):
+    band: np.ndarray,
+    mode: str,
+    source_dtype: np.dtype,
+    bounds: tuple[float, float] | None = None,
+) -> NDArray[np.uint8]:
     """Return one band as ``uint8`` display pixels, stretched by ``mode``.
 
     ``minmax`` spans the band's own data range, ``percent_clip`` spans
@@ -167,11 +178,11 @@ def stretch_band(
 
 
 def composite_display_rgb(
-    pixels,
-    band_indices,
+    pixels: np.ndarray,
+    band_indices: Sequence[int],
     stretch: str,
     bounds: list[tuple[float, float]] | None = None,
-):
+) -> NDArray[np.uint8]:
     """Stretch three of ``pixels``' bands independently and stack them into ``uint8 [H, W, 3]``.
 
     ``pixels`` is ``[H, W, C]`` (a 2-D array reads as one band) and ``band_indices`` names exactly
@@ -208,7 +219,13 @@ def composite_display_rgb(
     )
 
 
-def _reservoir_take(reservoir, seen: int, values, size: int, rng):
+def _reservoir_take(
+    reservoir: np.ndarray | None,
+    seen: int,
+    values: np.ndarray,
+    size: int,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, int]:
     """Fold ``values`` (``[N, C]`` pixels, in stream order) into a reservoir of at most ``size``.
 
     Returns the reservoir and how many pixels the stream has offered. Classic reservoir sampling

@@ -14,38 +14,50 @@ of the proposed mask.
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from pydantic import JsonValue
 
 
 @runtime_checkable
 class Proposer(Protocol):
     """A source of annotation proposals for a human to review (see module docstring)."""
 
-    def propose(self, image_path: str, **params: Any) -> list[dict]:
+    def propose(self, image_path: str, **params: JsonValue) -> list[dict]:
         """Return candidate shapes over the image in the neutral schema."""
         ...
 
 
-_ENGINES: dict[str, Proposer] = {}
+_ENGINES: dict[str, Callable[[], Proposer]] = {}
+"""Each registered engine, as the factory that answers it."""
 
 
 def register_proposal_engine(name: str, engine: Proposer) -> None:
     """Register an auto-labeling engine under ``name`` so ``engine=<name>`` resolves to it."""
-    _ENGINES[name] = engine
+    _ENGINES[name] = lambda: engine
 
 
 def resolve_proposer(engine: str) -> Proposer:
-    """Return the engine registered under ``engine``, else the one a dotted name imports.
+    """Return the engine registered under ``engine``, else the one a dotted factory builds.
 
-    A dotted ``module:factory`` target is instantiated when it is callable
-    (:func:`~tcip_mcp.pipelines.model_build.resolve_named`, whose refusals propagate).
+    The engine is resolved by :func:`~tcip_mcp.pipelines.model_build.resolve_named`, whose
+    refusals propagate, and a dotted ``module:factory`` target is called with no argument; one
+    that builds anything without ``propose`` refuses (``TypeError``) naming ``engine``.
     """
     from tcip_mcp.pipelines.model_build import resolve_named
 
-    target = resolve_named(
+    built = resolve_named(
         engine,
         _ENGINES,
         kind="proposal engine",
         register="register_proposal_engine",
-    )
-    return target() if engine not in _ENGINES and callable(target) else target
+    )()
+    if not isinstance(built, Proposer):
+        raise TypeError(
+            f"proposal engine {engine!r} built a {type(built).__name__}, which has no "
+            "propose: a dotted factory returns the Proposer it builds."
+        )
+    return built

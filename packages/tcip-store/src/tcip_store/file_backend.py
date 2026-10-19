@@ -18,7 +18,7 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from itertools import takewhile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tcip_store.errors import (
     BackendUnavailableError,
@@ -35,6 +35,9 @@ from tcip_store.model import (
     canonical_path,
     refuse_inside_transaction,
 )
+
+if TYPE_CHECKING:
+    from tcip_store.model import _Required
 
 _TEMP_SUFFIX = ".tmp"
 _LOCK_SUFFIX = ".lock"
@@ -283,10 +286,10 @@ def require_version(
         raise VersionConflictError(entry, expect, current)
 
 
-def versioned(
+def versioned[T](
     data: bytes | None,
-    default: Any,
-    decode: Callable[[bytes], Any],
+    default: T | _Required,
+    decode: Callable[[bytes], T],
     absent: str,
 ) -> Versioned:
     """Return stored bytes ``data`` as their decoded value (``decode``) and their version.
@@ -303,7 +306,9 @@ def versioned(
     return Versioned(default, Version.ABSENT)
 
 
-def read_blob_versioned(path: Path, *, default: Any = REQUIRED) -> Versioned:
+def read_blob_versioned(
+    path: Path, *, default: bytes | None | _Required = REQUIRED
+) -> Versioned:
     """Read a file's bytes and their version together (:func:`versioned`)."""
     return versioned(
         _read_bytes(path), default, bytes, f"{path} does not exist"
@@ -371,12 +376,12 @@ def is_sharing_violation(exc: PermissionError) -> bool:
     return getattr(exc, "winerror", None) == SHARING_VIOLATION
 
 
-def retry_while_denied(
-    action: Callable[[], Any],
+def retry_while_denied[T](
+    action: Callable[[], T],
     budget_s: float,
     *,
     denied: Callable[[PermissionError], bool] = lambda exc: True,
-) -> Any:
+) -> T:
     """Run a filesystem action a conflicting handle may deny for a while, retrying denials.
 
     A ``PermissionError`` that ``denied`` accepts (by default every one) is retried after a

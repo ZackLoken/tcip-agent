@@ -14,9 +14,12 @@ and that route's refusal of a block whose rotation is out of range are written,
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from tools.fixture_session import replaced, scratch_session, write_fixture
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 GENERATED_PATH = (
@@ -30,31 +33,38 @@ GENERATED_PATH = (
 )
 
 
-def normalized(served: dict, workspace: Path, ids: dict[str, str]) -> dict:
+def normalized(
+    served: dict, workspace: Path, ids: dict[str, str]
+) -> dict[str, JsonValue]:
     """Return ``served`` with the values a run fills differently replaced by what they stand for.
 
     Each minted project id in ``ids`` becomes its project's name, each listed path the workspace
     placeholder and its folder name, the workspace the placeholder, and each listed time zero;
-    the listed projects are ordered by display name.
+    the listed projects are ordered by display name. ``served`` itself is left as it is; a
+    listed path that is not a string raises ``TypeError``.
     """
 
-    def leaf(key: str | None, value: Any) -> Any:
+    def leaf(key: str | None, value: JsonValue) -> JsonValue:
         if key in ("created", "modified"):
             return 0.0
         if key == "workspace":
             return "<workspace>"
         if key == "path":
+            if not isinstance(value, str):
+                raise TypeError(f"a listed path is a string, not {value!r}")
             return f"<workspace>/{Path(value).relative_to(workspace)}"
         if isinstance(value, str) and value in ids:
             return f"<{ids[value]} id>"
         return value
 
-    out = replaced(served, leaf)
-    out["listing"]["projects"].sort(key=lambda p: p["display_name"])
-    return out
+    listing = served["listing"]
+    projects = sorted(listing["projects"], key=lambda p: p["display_name"])
+    return replaced(
+        {**served, "listing": {**listing, "projects": projects}}, leaf
+    )
 
 
-def produce() -> dict:
+def produce() -> dict[str, JsonValue]:
     """Create, list and correct the fixture projects in a scratch session; return the answers.
 
     The second project's invariances are corrected and the route refuses an out-of-range block;

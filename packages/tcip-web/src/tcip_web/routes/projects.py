@@ -194,10 +194,10 @@ def _job_conflict(target: Path) -> str | None:
                 f"inference job {job.job_id!r} is not finished; ask the agent to cancel it "
                 "or wait for it to finish"
             )
-    for job in annotate._pq_registry.list(str(target)):
-        if live(job):
+    for queue_job in annotate._pq_registry.list(str(target)):
+        if live(queue_job):
             return (
-                f"a review priority-queue scoring pass ({job.job_id!r}) is not finished; "
+                f"a review priority-queue scoring pass ({queue_job.job_id!r}) is not finished; "
                 "wait for it to finish"
             )
     return None

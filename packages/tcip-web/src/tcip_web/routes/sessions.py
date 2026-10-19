@@ -11,10 +11,10 @@ import asyncio
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, get_args
+from typing import Literal, get_args
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, JsonValue
 
 import tcip_store
 from tcip_mcp import audit
@@ -28,22 +28,6 @@ Activity = Literal["new_annotation", "review", "negative_confirmation"]
 """What one contribution to an image was: annotations added, a negative confirmed, or review."""
 
 
-def _session_start(sessions: list[dict[str, Any]]) -> str:
-    """Return the start stamp of a session opening now among ``sessions``, latest first.
-
-    The stamp is this instant, or one microsecond past the latest's stamp when this instant does
-    not exceed it, so no two sessions of a project share a stamp and the stamp identifies the
-    session.
-    """
-    now = datetime.fromisoformat(now_iso())
-    latest = (
-        datetime.fromisoformat(sessions[0]["started"]) if sessions else None
-    )
-    if latest is not None and now <= latest:
-        now = latest + timedelta(microseconds=1)
-    return now.isoformat()
-
-
 class ImageEntry(BaseModel):
     """One contribution to an image: its identity, seconds, annotations added and activity."""
 
@@ -52,6 +36,45 @@ class ImageEntry(BaseModel):
     seconds: float = Field(ge=0)
     annotations_added: int = Field(ge=0)
     activity: Activity
+
+
+class Session(BaseModel):
+    """One session as recorded: its person, its start and end stamps, and its contributions."""
+
+    user: str
+    started: str
+    ended: str | None
+    entries: list[ImageEntry]
+
+
+class AnnotationStats(BaseModel):
+    """A project's annotation-stats record: its sessions, latest first."""
+
+    sessions: list[Session]
+
+
+def read_stats(raw: JsonValue) -> AnnotationStats:
+    """Return the annotation-stats record ``raw`` decodes to, holding no session for ``None``.
+
+    A document that is not the record's whole shape raises ``ValidationError``.
+    """
+    if raw is None:
+        return AnnotationStats(sessions=[])
+    return AnnotationStats.model_validate(raw)
+
+
+def _session_start(sessions: list[Session]) -> str:
+    """Return the start stamp of a session opening now among ``sessions``, latest first.
+
+    The stamp is this instant, or one microsecond past the latest's stamp when this instant does
+    not exceed it, so no two sessions of a project share a stamp and the stamp identifies the
+    session.
+    """
+    now = datetime.fromisoformat(now_iso())
+    latest = datetime.fromisoformat(sessions[0].started) if sessions else None
+    if latest is not None and now <= latest:
+        now = latest + timedelta(microseconds=1)
+    return now.isoformat()
 
 
 class ImageEventPayload(ImageEntry):
@@ -100,17 +123,13 @@ class SessionWrite(BaseModel):
     session: SessionPlace | None
 
 
-class SessionSummary(BaseModel):
+class SessionSummary(Session):
     """One session as recorded, with the throughput its entries amount to.
 
     The throughput is the images given annotations, the annotations added, the seconds spent in
     all and by activity, and the seconds per added annotation (``None`` when none was added).
     """
 
-    user: str
-    started: str
-    ended: str | None
-    entries: list[ImageEntry]
     images_annotated: int
     total_annotations: int
     total_time_seconds: float
@@ -141,7 +160,9 @@ async def image_event(payload: ImageEventPayload) -> SessionWrite:
     from tcip_web.state import store
 
     person = actor(payload.user)
-    entry = payload.model_dump(exclude={"user", "project_id", "started"})
+    entry = ImageEntry.model_validate(
+        payload.model_dump(exclude={"user", "project_id", "started"})
+    )
     if not (
         payload.seconds
         or payload.annotations_added
@@ -163,14 +184,14 @@ async def image_event(payload: ImageEventPayload) -> SessionWrite:
             _answering,
             written,
             lambda: audit.record_event_or_raise(
-                "image_event", entry, actor=person, scope=root
+                "image_event", entry.model_dump(), actor=person, scope=root
             ),
         )
     return written
 
 
 def _land(
-    root: Path, started: str | None, entry: dict[str, Any], person: str
+    root: Path, started: str | None, entry: ImageEntry, person: str
 ) -> SessionWrite:
     """Append ``entry`` to a session in one transaction on ``root``'s stats record.
 
@@ -181,50 +202,47 @@ def _land(
     """
     key = annotation_stats_key(str(root))
     with tcip_store.transaction(key) as txn:
-        data = txn.read(key, default={"sessions": []})
-        sessions: list[dict[str, Any]] = data["sessions"]
+        stats = read_stats(txn.read(key, default=None))
+        sessions = stats.sessions
         for held in sessions:
             if any(
-                e["contribution_id"] == entry["contribution_id"]
-                for e in held["entries"]
+                e.contribution_id == entry.contribution_id
+                for e in held.entries
             ):
                 return SessionWrite(
                     status="noop",
                     session=SessionPlace(
-                        started=held["started"],
-                        ended=held["ended"] is not None,
+                        started=held.started, ended=held.ended is not None
                     ),
                 )
         if started is None:
             if (
                 not sessions
-                or sessions[0]["ended"] is not None
-                or sessions[0]["user"] != person
+                or sessions[0].ended is not None
+                or sessions[0].user != person
             ):
                 sessions.insert(
                     0,
-                    {
-                        "user": person,
-                        "started": _session_start(sessions),
-                        "ended": None,
-                        "entries": [],
-                    },
+                    Session(
+                        user=person,
+                        started=_session_start(sessions),
+                        ended=None,
+                        entries=[],
+                    ),
                 )
             session = sessions[0]
         else:
-            named = next(
-                (s for s in sessions if s["started"] == started), None
-            )
+            named = next((s for s in sessions if s.started == started), None)
             if (
                 named is None
-                or named["ended"] is not None
-                or named["user"] != person
+                or named.ended is not None
+                or named.user != person
             ):
                 why = (
                     "carries no session started then"
                     if named is None
                     else "ended that session"
-                    if named["ended"] is not None
+                    if named.ended is not None
                     else "holds that session for another person"
                 )
                 raise HTTPException(
@@ -232,11 +250,11 @@ def _land(
                     detail=f"the project {why}: {started}; contribution refused",
                 )
             session = named
-        session["entries"].append(entry)
-        txn.write(key, data)
+        session.entries.append(entry)
+        txn.write(key, stats.model_dump(mode="json"))
     return SessionWrite(
         status="ok",
-        session=SessionPlace(started=session["started"], ended=False),
+        session=SessionPlace(started=session.started, ended=False),
     )
 
 
@@ -260,7 +278,7 @@ def end_session(payload: SessionRef) -> SessionWrite:
     return written
 
 
-def end_sessions(root: Path, started: str | None) -> list[dict[str, Any]]:
+def end_sessions(root: Path, started: str | None) -> list[Session]:
     """Mark sessions ended in one transaction on ``root``'s stats record and return them.
 
     The session ended is the one ``started`` names, or every unended session (each person's)
@@ -269,34 +287,31 @@ def end_sessions(root: Path, started: str | None) -> list[dict[str, Any]]:
     """
     key = annotation_stats_key(str(root))
     with tcip_store.transaction(key) as txn:
-        data = txn.read(key, default={"sessions": []})
-        named = [
-            s for s in data["sessions"] if started in (None, s["started"])
-        ]
+        stats = read_stats(txn.read(key, default=None))
+        named = [s for s in stats.sessions if started in (None, s.started)]
         if started is not None and not named:
             raise LookupError(
                 f"no session of the open project started at {started}"
             )
-        ended = [s for s in named if s["ended"] is None]
+        ended = [s for s in named if s.ended is None]
         stamp = now_iso()
         for session in ended:
-            session["ended"] = stamp
+            session.ended = stamp
         if ended:
-            txn.write(key, data)
+            txn.write(key, stats.model_dump(mode="json"))
     return ended
 
 
-def record_ended(root: Path, ended: list[dict[str, Any]]) -> None:
+def record_ended(root: Path, ended: list[Session]) -> None:
     """Write one ``session_ended`` line in ``root``'s log per session of ``ended``, by its person.
 
-    Each session record in ``ended`` carries its ``started`` stamp and its ``user``; raises
-    ``AuditEntryNotWrittenError`` when one cannot follow.
+    Raises ``AuditEntryNotWrittenError`` when one cannot follow.
     """
     for session in ended:
         audit.record_event_or_raise(
             "session_ended",
-            {"started": session["started"]},
-            actor=session["user"],
+            {"started": session.started},
+            actor=session.user,
             scope=root,
         )
 
@@ -320,23 +335,25 @@ def load_sessions() -> dict[str, list[SessionSummary]]:
     """Return every recorded session, latest first, with its derived throughput."""
     from tcip_web.state import store
 
-    data = tcip_store.read(
-        annotation_stats_key(str(store.held().root)), default={"sessions": []}
+    stats = read_stats(
+        tcip_store.read(
+            annotation_stats_key(str(store.held().root)), default=None
+        )
     )
-    return {"sessions": [_summary(s) for s in data["sessions"]]}
+    return {"sessions": [_summary(s) for s in stats.sessions]}
 
 
-def _summary(session: dict[str, Any]) -> SessionSummary:
+def _summary(session: Session) -> SessionSummary:
     """Return ``session`` with the figures derived from its entries."""
-    entries = [ImageEntry.model_validate(e) for e in session["entries"]]
+    entries = session.entries
     by_activity: dict[Activity, float] = dict.fromkeys(get_args(Activity), 0.0)
     for e in entries:
         by_activity[e.activity] += e.seconds
     added = sum(e.annotations_added for e in entries)
     return SessionSummary(
-        user=session["user"],
-        started=session["started"],
-        ended=session["ended"],
+        user=session.user,
+        started=session.started,
+        ended=session.ended,
         entries=entries,
         images_annotated=len(
             {e.image_name for e in entries if e.annotations_added}

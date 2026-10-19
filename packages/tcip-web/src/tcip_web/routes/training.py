@@ -75,7 +75,7 @@ def relaunch_route(payload: RelaunchPayload) -> dict:
     ``selection_dir`` 422, a refusal 422, and a launch whose audit line could not be written 409.
     """
     from tcip_mcp.audit import AuditEntryNotWrittenError
-    from tcip_mcp.experiments import SWEEP_FILE, named_directory, observe
+    from tcip_mcp.experiments import SWEEP_FILE, named_directory, observe_run
     from tcip_mcp.tools.training_tools import (
         data_with_selection,
         launch_sweep,
@@ -98,8 +98,7 @@ def relaunch_route(payload: RelaunchPayload) -> dict:
                 )
             result = launch_sweep(project, source, actor=person)
         else:
-            observation = observe(source)
-            spec = observation.spec
+            spec = observe_run(source).record.spec
             if payload.selection_dir:
                 data = data_with_selection(
                     spec.data, payload.selection_dir, project
@@ -301,9 +300,9 @@ async def _stream_metrics(
     every row read), then the latest per-batch row the read found, if any
     (``experiments.partition_rows``).
 
-    Each tick observes the run once (``experiments.observe``) and reads its log from a byte-offset
-    cursor (``experiments.read_rows``), so it reads only what was appended since the last tick and
-    a row still being written is replayed once it is complete. Rows are read after the
+    Each tick observes the run once (``experiments.observe_run``) and reads its log from a
+    byte-offset cursor (``experiments.read_rows``), so it reads only what was appended since the
+    last tick and a row still being written is replayed once it is complete. Rows are read after the
     observation, so a run the observation found in a terminal state has every row sent before its
     one status frame (``experiments.run_summary`` over the rows sent), which ends the stream.
     An id naming no run directory under ``project`` ends the stream with one status frame
@@ -316,7 +315,7 @@ async def _stream_metrics(
         epoch_rows,
         find_observation,
         launch_declarations,
-        observe,
+        observe_run,
         partition_rows,
         read_rows,
         run_name,
@@ -373,7 +372,9 @@ async def _stream_metrics(
             )
             break
         await asyncio.sleep(poll_seconds)
-        observation = await asyncio.to_thread(observe, observation.directory)
+        observation = await asyncio.to_thread(
+            observe_run, observation.directory
+        )
 
 
 @router.websocket("/runs/{experiment_id}/stream")

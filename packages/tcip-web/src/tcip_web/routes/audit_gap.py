@@ -5,8 +5,6 @@ The mutation committed, but its line could not be recorded to the audit log.
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 
@@ -17,7 +15,7 @@ AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written"
 
 def audit_gap_409(
     exc: AuditEntryNotWrittenError,
-    committed: Any,
+    committed: object,
     *,
     message: str | None = None,
 ) -> HTTPException:

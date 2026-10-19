@@ -17,7 +17,14 @@
  * vertex dots are its own, scaled to the frame it draws on.
  */
 
-import type { CanvasStatePayload } from "@/api/types.generated";
+import type {
+  CanvasBox,
+  CanvasPoint,
+  CanvasPolygon,
+  CanvasPolyline,
+  CanvasStatePayload,
+  Viewport,
+} from "@/api/types.generated";
 import { boxDraft, type DraftStroke } from "@/lib/draftStrokes";
 import { annotationsToCanvas } from "@/lib/labelSerde";
 import { ringsBbox } from "@/lib/polygonGeometry";
@@ -31,7 +38,6 @@ import {
 } from "@/lib/reviewItems";
 import {
   authorshipLabel,
-  type DashUnits,
   dashUnitsFor,
   DRAFT_DASH,
   FLAG_MARK,
@@ -42,46 +48,18 @@ import {
 } from "@/lib/symbology";
 import type { DrawingBox, Flag, Proposal, TabName, ToolContent } from "@/store/types";
 
-export interface CanvasViewport {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  scale: number;
-}
-
 /** One drawn path. A multi-ring polygon annotation contributes one shape per ring (the render
  *  contract `render_canvas_state` reads is one path per entry), all sharing the instance's color /
  *  dash / tag, with the label on the first so the instance is still named once. A `point` carries a
  *  single coordinate in `points` and is rendered as a mark, never as a path or a derived box. */
-export interface CanvasShape {
-  kind: "box" | "polygon" | "polyline" | "point";
-  xyxy?: [number, number, number, number];
-  points?: [number, number][];
-  color: string;
-  fill?: boolean;
-  // The stroke's (on, off) dash in stroke widths: symbology's DOTTED_DASH or DRAFT_DASH.
-  dash?: DashUnits;
-  // On the focused item: the halo the render draws under its stroke (symbology's FOCUS_HALO).
-  halo?: { color: string; opacity: number; width_factor: number };
-  label?: string;
-  // False on a draft's tail, which draws no dot at its ends; a polyline dots its vertices otherwise.
-  vertices?: boolean;
-  tag?: string; // gt | proposal | in_progress | flag
-}
+export type CanvasShape = CanvasBox | CanvasPoint | CanvasPolygon | CanvasPolyline;
 
-/** The push body: the backend's own model, with the display geometry it stores uninterpreted typed
- *  here. ``classes`` carries the subjects with their GUI-local colors (the registry stores none);
- *  ``shapes`` is null for a heartbeat, where the backend keeps the last pushed geometry. */
-export type CanvasStateBody = Omit<
-  CanvasStatePayload,
-  "tab" | "viewport" | "classes" | "counts" | "shapes"
-> & {
+/** The push body: the backend's own model. ``classes`` carries the subjects with their GUI-local
+ *  colors (the registry stores none); ``shapes`` is null for a heartbeat, where the backend keeps
+ *  the last pushed geometry. */
+export type CanvasStateBody = Omit<CanvasStatePayload, "tab" | "classes"> & {
   tab: Extract<TabName, "annotate">;
-  viewport: CanvasViewport | null;
   classes: { name: string; color: string }[];
-  counts?: Record<string, number>;
-  shapes: CanvasShape[] | null;
 };
 
 /** 0.1-px precision is beyond what any render needs; rounding cuts dense payloads ~2-3×. */
@@ -94,7 +72,7 @@ export function computeViewport(
   host: { w: number; h: number },
   imgW: number,
   imgH: number,
-): CanvasViewport | null {
+): Viewport | null {
   const s = view.scale || 1;
   if (host.w <= 1 || host.h <= 1 || !imgW || !imgH) return null;
   const x = -view.offset_x / s;

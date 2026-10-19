@@ -25,10 +25,17 @@ Conventions:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    import numpy as np
+    import torch
+    from numpy.typing import NDArray
 
 
-def _to_numpy(mask: Any):
+def _to_numpy(mask: np.ndarray | torch.Tensor) -> np.ndarray:
     """Accept a numpy array or a torch tensor; return a numpy array (heavy imports lazy)."""
     if hasattr(mask, "detach"):  # torch tensor
         mask = mask.detach().cpu().numpy()
@@ -37,7 +44,7 @@ def _to_numpy(mask: Any):
     return np.asarray(mask)
 
 
-def _perimeter_px(binary) -> float:
+def _perimeter_px(binary: NDArray[np.bool_]) -> float:
     """Return the 4-connected boundary length of a binary mask.
 
     The length is the sum over foreground pixels of edges facing background or outside.
@@ -50,7 +57,9 @@ def _perimeter_px(binary) -> float:
     return float(((4 - neighbors) * b).sum())
 
 
-def _axes_from_points(pts):
+def _axes_from_points(
+    pts: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], float, float, NDArray[np.float64]]:
     """Return the PCA centroid, axis extents and major axis of a raw ``(x, y)`` point cloud.
 
     The result is ``(centroid_xy, principal, secondary, major_unit_vector)``, the two extents
@@ -79,7 +88,9 @@ def _axes_from_points(pts):
     return centroid, principal, secondary, major_vec
 
 
-def _axes(binary):
+def _axes(
+    binary: NDArray[np.bool_],
+) -> tuple[NDArray[np.float64], float, float, NDArray[np.float64]]:
     """Compute PCA geometry from foreground pixel coordinates.
 
     Returns ``(centroid_xy, principal, secondary, major_unit_vector)``; ``principal`` /
@@ -98,7 +109,9 @@ def _axes(binary):
     return centroid, principal + 1.0, secondary + 1.0, major_vec
 
 
-def principal_axis_extent_of_points(points: Any) -> float:
+def principal_axis_extent_of_points(
+    points: Iterable[tuple[float, float]],
+) -> float:
     """Return the principal-axis extent of a set of ``(x, y)`` points.
 
     The extent is the same orientation-independent PCA primitive :func:`_axes` computes for
@@ -202,7 +215,7 @@ def unit_from_value_key(key: str) -> tuple[str, str] | None:
 
 
 def mask_geometry(
-    mask: Any,
+    mask: np.ndarray | torch.Tensor,
     *,
     scale: float | None = None,
     unit: str,
@@ -278,7 +291,7 @@ def mask_geometry(
 
 
 def instance_geometries(
-    masks: Any,
+    masks: np.ndarray | torch.Tensor,
     *,
     scale: float | None = None,
     unit: str,

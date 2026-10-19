@@ -3,7 +3,24 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Cell:
+    """One grid cell: its name plus its half-open native-pixel rect.
+
+    The rect is ``x0 <= x < x1``, ``y0 <= y < y1``.
+    ``col``/``row`` are 0-based grid coordinates; ``name`` is ``column_label(col)`` + 1-based row.
+    """
+
+    name: str
+    col: int
+    row: int
+    x0: int
+    y0: int
+    x1: int
+    y1: int
 
 
 def column_label(index: int) -> str:
@@ -36,22 +53,10 @@ def column_index(label: str) -> int:
     return n - 1
 
 
-def cell_fields(cell: Any) -> tuple[str, float, float, float, float]:
-    """Return ``(name, x0, y0, x1, y1)`` from one grid cell.
-
-    The cell is a mapping or an object with attributes, carrying ``name`` plus the half-open
-    native-pixel rect ``x0, y0, x1, y1``.
-    """
-    if isinstance(cell, dict):
-        return (
-            str(cell["name"]),
-            float(cell["x0"]),
-            float(cell["y0"]),
-            float(cell["x1"]),
-            float(cell["y1"]),
-        )
+def cell_fields(cell: Cell) -> tuple[str, float, float, float, float]:
+    """Return ``(name, x0, y0, x1, y1)`` from one grid cell, its rect as floats."""
     return (
-        str(cell.name),
+        cell.name,
         float(cell.x0),
         float(cell.y0),
         float(cell.x1),
@@ -60,15 +65,14 @@ def cell_fields(cell: Any) -> tuple[str, float, float, float, float]:
 
 
 def grid_to_rect(
-    cell: str, cells: list[Any]
+    cell: str, cells: list[Cell]
 ) -> tuple[float, float, float, float]:
     """Resolve a grid cell reference (e.g. 'B3') to the named cell's half-open native-pixel rect.
 
-    The rect is ``(x0, y0, x1, y1)``. ``cells`` is the caller's own cell list (see
-    :func:`cell_fields` for the accepted shapes). Matching is case-insensitive and
-    whitespace-stripped. A reference that is not a cell name at all raises ValueError naming the
-    expected format; one that names no cell in this grid raises ValueError naming the grid's valid
-    range.
+    The rect is ``(x0, y0, x1, y1)``. ``cells`` is the caller's own cell list. Matching is
+    case-insensitive and whitespace-stripped. A reference that is not a cell name at all raises
+    ValueError naming the expected format; one that names no cell in this grid raises ValueError
+    naming the grid's valid range.
     """
     wanted = cell.strip().upper()
     if re.fullmatch(r"[A-Z]+[0-9]+", wanted) is None:

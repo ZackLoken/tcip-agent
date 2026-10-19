@@ -14,13 +14,17 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterable, Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from pydantic import BaseModel, ConfigDict, TypeAdapter
+
 import tcip_store
+from tcip_mcp.model_registry import Producer
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.execution import Execution
+from tcip_mcp.pipelines.raster_source import RasterIdentity
 
 if TYPE_CHECKING:
     from tcip_mcp.model_registry import VerifiedCheckpoint
@@ -49,14 +53,22 @@ class NotABucketError(ValueError):
     """A bucket name names no published bucket under a dataset root, or one that does not decode."""
 
 
+class Proposed(BaseModel):
+    """The engine or agent that proposed a bucket's documents, by the name it stages under."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    proposed_by: str
+
+
 @dataclass(frozen=True)
 class Bucket:
     """One published bucket, as its record states it.
 
     ``root`` is the dataset root its source images belong to and ``name`` the name it was
     published under. ``producer`` is a checkpoint's sha256 and run
-    (:attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`), or ``{"proposed_by"}``, the
-    engine or agent that proposed the documents, which no execution record governs
+    (:attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`), or the engine or agent that
+    proposed the documents (:class:`Proposed`), which no execution record governs
     (``execution`` ``None``) and no class scope decodes (``scope`` empty). ``documents`` maps each
     document's stem to the source file name it was predicted from, and ``raster_path`` is the
     raster as stored against the project (:meth:`raster`).
@@ -64,16 +76,17 @@ class Bucket:
 
     root: Path
     name: str
-    producer: dict[str, str | None]
+    producer: Producer | Proposed
     scope: ClassScope
     execution: Execution | None
     dataset_id: str | None
     date: str | None
     raster_path: str | None
-    raster_identity: dict | None
+    raster_identity: RasterIdentity | None
     documents: dict[str, str]
     dropped_boxes: int
     assessment_id: str | None
+    __pydantic_config__ = ConfigDict(ser_json_inf_nan="constants")
 
     def document_key(self, stem: str) -> tcip_store.Key | None:
         """Return the key of the document this bucket holds for the source image of stem ``stem``.
@@ -103,18 +116,26 @@ class Bucket:
 
         Returns ``None`` for a bucket of per-image predictions.
         """
-        from tcip_mcp.registry_paths import runtime_paths
+        from tcip_mcp.registry_paths import resolved_registry_path
 
-        return runtime_paths(
-            {"raster_path": self.raster_path}, _PATHS, project
-        )["raster_path"]
+        if self.raster_path is None:
+            return None
+        return str(resolved_registry_path(project, self.raster_path))
+
+
+_BUCKET = TypeAdapter(Bucket)
+"""The bucket record: every field of :class:`Bucket` but its ``root`` and ``name``, which its key
+states."""
+_KEYED = {"root", "name"}
 
 
 def read_bucket(dataset_root: str | Path, name: str) -> Bucket:
     """Read the bucket named ``name`` under ``dataset_root``, as its record states it.
 
-    ``dataset_root`` is taken as given, not located, and carried as the bucket's root. No record,
-    or one that does not decode, refuses (:class:`NotABucketError`) naming it.
+    ``dataset_root`` is taken as given, not located, and carried as the bucket's root. No record
+    object, or one that does not decode, refuses (:class:`NotABucketError`) naming it; a record
+    that does not validate as the bucket's refuses (``pydantic.ValidationError``) naming each
+    field.
     """
     from tcip_mcp.dataset_layout import bucket_key
 
@@ -123,21 +144,14 @@ def read_bucket(dataset_root: str | Path, name: str) -> Bucket:
         record = tcip_store.read(bucket_key(dataset_root, name), default=None)
     except tcip_store.DecodeError as exc:
         raise NotABucketError(str(exc)) from exc
-    if record is None:
+    if not isinstance(record, dict):
         raise NotABucketError(
             f"no bucket {name!r} is published under {dataset_root}, so nothing states who "
             "produced its documents or how. Publish predictions through run_inference, or stage "
             "proposals through stage_proposals."
         )
-    execution = record.pop("execution")
-    scope = ClassScope.of(record)
-    del record["scope"]
-    return Bucket(
-        root=dataset_root,
-        name=name,
-        scope=scope,
-        execution=Execution.of(execution) if execution is not None else None,
-        **record,
+    return _BUCKET.validate_python(
+        {**record, "root": dataset_root, "name": name}
     )
 
 
@@ -262,11 +276,11 @@ def publish(
     name: str,
     documents: Iterable[Document],
     *,
-    producer: dict[str, str | None],
+    producer: Producer | Proposed,
     scope: ClassScope,
     execution: Execution | None,
     raster_path: str | None,
-    raster_identity: dict | None,
+    raster_identity: RasterIdentity | None,
     assessment_id: str | None,
     actor: str | None,
 ) -> Bucket:
@@ -297,23 +311,25 @@ def publish(
             f"two documents of one publication name the stems {repeated}, and a "
             "document is written once."
         )
-    capture = capture_of(
+    dataset_id, date = capture_of(
         raster_path if raster_path is not None else documents[0].source
     )
-    record = {
-        "producer": producer,
-        "scope": asdict(scope),
-        "execution": execution.record() if execution is not None else None,
-        "dataset_id": capture[0],
-        "date": capture[1],
-        "raster_path": raster_path,
-        "raster_identity": raster_identity,
-        "documents": {
+    bucket = Bucket(
+        root=root,
+        name=name,
+        producer=producer,
+        scope=scope,
+        execution=execution,
+        dataset_id=dataset_id,
+        date=date,
+        raster_path=raster_path,
+        raster_identity=raster_identity,
+        documents={
             Path(d.source).stem: Path(d.source).name for d in documents
         },
-        "dropped_boxes": sum(d.dropped for d in documents),
-        "assessment_id": assessment_id,
-    }
+        dropped_boxes=sum(d.dropped for d in documents),
+        assessment_id=assessment_id,
+    )
     keys = {stem: prediction_key(root, name, stem) for stem in stems}
     held, audit = bucket_key(root, name), audit_log_key(root)
     with tcip_store.transaction(held, audit, *keys.values()) as txn:
@@ -328,7 +344,14 @@ def publish(
             )
         for document, stem in zip(documents, stems, strict=True):
             txn.write(keys[stem], document.data)
-        txn.write(held, recorded_paths(record, _PATHS, project))
+        txn.write(
+            held,
+            recorded_paths(
+                _BUCKET.dump_python(bucket, mode="json", exclude=_KEYED),
+                _PATHS,
+                project,
+            ),
+        )
         txn.append(
             audit,
             audit_entry(
@@ -336,7 +359,7 @@ def publish(
                 {
                     "dataset_root": str(root),
                     "bucket": name,
-                    "dropped_boxes": record["dropped_boxes"],
+                    "dropped_boxes": bucket.dropped_boxes,
                 },
                 actor,
                 "ok",

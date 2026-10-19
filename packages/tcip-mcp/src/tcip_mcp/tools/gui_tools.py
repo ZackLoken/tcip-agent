@@ -21,7 +21,7 @@ from tcip_mcp.server import tool
 from tcip_mcp.workspace import BoundProject
 
 
-def _logical_image_names(images_dir) -> list[str]:
+def _logical_image_names(images_dir: Path) -> list[str]:
     """Return every logical image's on-disk display name under ``images_dir``.
 
     The name is a plain file's own name, or (for a ``.bandgroup``-grouped capture) its manifest's

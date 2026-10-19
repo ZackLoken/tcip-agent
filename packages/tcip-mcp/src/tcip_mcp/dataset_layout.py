@@ -324,10 +324,17 @@ def proposal_pairs(
                 f"bucket {bucket.name!r} was published under assessment "
                 f"{bucket.assessment_id}, which only its project holds; open it"
             )
-        count = read_assessment(project, bucket.assessment_id).criterion.get(
-            "count"
-        )
-        criterion = count["localization"] if count else None
+        assessed = read_assessment(project, bucket.assessment_id)
+        match assessed.criterion.get("count"):
+            case None:
+                pass
+            case {"localization": dict() as localization}:
+                criterion = localization
+            case count:
+                raise ValueError(
+                    f"assessment {bucket.assessment_id} records a count criterion "
+                    f"{count!r} that states no localization"
+                )
     m = pair_proposals(
         annotations,
         proposals,

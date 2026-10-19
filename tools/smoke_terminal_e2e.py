@@ -20,8 +20,11 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 sys.path.insert(
     0, str(Path(__file__).parent.parent / "packages" / "tcip-web" / "src")
@@ -33,7 +36,7 @@ sys.path.insert(
 ANSWER_TIMEOUT_S = 240
 
 
-def terminal_ws_url(client: Any, session_id: str) -> str:
+def terminal_ws_url(client: TestClient, session_id: str) -> str:
     """Return the absolute ``ws://`` URL of ``session_id``'s socket on ``client``'s host."""
     parts = urlsplit(str(client.base_url))
     scheme = "wss" if parts.scheme == "https" else "ws"
@@ -54,7 +57,7 @@ def request_for(token: str) -> str:
     )
 
 
-def reported(client: Any, token: str) -> bool:
+def reported(client: TestClient, token: str) -> bool:
     """Return whether exactly one friction report of the open project carries ``token``.
 
     The token is looked for in its detail, and that report must have the requested category.

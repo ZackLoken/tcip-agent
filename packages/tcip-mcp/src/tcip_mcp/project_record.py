@@ -19,7 +19,7 @@ from pydantic import (
 )
 
 import tcip_store
-from tcip_mcp.traits import Text
+from tcip_annotation.text import Text
 from tcip_store import Key, StoreError, Version, VersionConflictError
 
 PROJECT_RECORD_STORE = "project_record"

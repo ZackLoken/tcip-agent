@@ -9,12 +9,20 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from tcip_mcp.server import tool
 
 if TYPE_CHECKING:
     from tcip_annotation.state import BBox, Polygon
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        OrthomosaicGeoreference,
+    )
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        PlantRegistry,
+        PlantRegistryReference,
+    )
+    from tcip_mcp.pipelines.raster_source import RasterIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +34,7 @@ def orthomosaic_plant_counts(
     project: Path,
     dataset_root: Path,
     bucket: str,
-    registry_record: dict,
+    registry_record: PlantRegistry,
     output_csv_path: Path,
     delivered_phenotype: str,
     plants: list[str],
@@ -85,6 +93,7 @@ def orthomosaic_plant_counts(
     )
     from tcip_mcp.pipelines.postprocessing.phenology import population
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        PlantRegistryReference,
         assignment_is_attributed,
         read_plant_csv_bytes,
         registry_csv_entries,
@@ -158,14 +167,10 @@ def orthomosaic_plant_counts(
         )
     ]
     georef = OrthomosaicGeoreference.of(georeference)
-    width, height = (
-        int(recorded_identity["width"]),
-        int(recorded_identity["height"]),
+    width, height = recorded_identity.width, recorded_identity.height
+    registry_ref = PlantRegistryReference(
+        name=registry_record["name"], digest=registry_record["digest"]
     )
-    registry_ref = {
-        "name": registry_record["name"],
-        "digest": registry_record["digest"],
-    }
 
     uncountable: dict[str, str] = {}
     if canopy_subject:
@@ -192,7 +197,7 @@ def orthomosaic_plant_counts(
         }
         tolerance = resolve_nn_tolerance_m(in_frame, nn_tolerance_m)
         assignments = assign_detections_to_plants(
-            boxes, georef, in_frame, nn_tolerance_m=tolerance["value"]
+            boxes, georef, in_frame, nn_tolerance_m=tolerance.value
         )
         attributed = [a for a in assignments if assignment_is_attributed(a)]
         counts = {p.plant_id: 0 for p in in_frame}
@@ -255,14 +260,14 @@ def orthomosaic_plant_counts(
 
 def _segment_counts(
     raster_path: str,
-    recorded_identity: dict,
+    recorded_identity: RasterIdentity,
     canopy_subject: str,
     registered: list,
-    georef: Any,
+    georef: OrthomosaicGeoreference,
     width: int,
     height: int,
     boxes: list,
-    registry_ref: dict,
+    registry_ref: PlantRegistryReference,
     position_error_m: float,
 ) -> tuple[dict[str, int], dict, dict[str, str]]:
     """Count detections per plant under the segment regime.

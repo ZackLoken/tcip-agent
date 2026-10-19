@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, Self
 
 import numpy as np
 
@@ -34,6 +34,7 @@ from tcip_mcp.pipelines.data.band_groups import (
 
 if TYPE_CHECKING:
     from PIL.Image import Image as PILImage
+    from rasterio.io import DatasetReader
     from tifffile import TiffFile
 
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
@@ -54,7 +55,9 @@ interpretations."""
 
 
 def faithful_pil_mode(
-    dtype: Any, channels: int, band_interpretations: tuple[str, ...] | None
+    dtype: np.dtype,
+    channels: int,
+    band_interpretations: tuple[str, ...] | None,
 ) -> str | None:
     """Return the PIL mode pixels of ``dtype`` and ``channels`` bands take without loss.
 
@@ -120,7 +123,9 @@ def gdal_cache_bytes() -> int:
     return int(configured)
 
 
-def open_gdal_dataset(path: str | Path, overview: int | None = None):
+def open_gdal_dataset(
+    path: str | Path, overview: int | None = None
+) -> DatasetReader:
     """Open a read-only GDAL dataset for ``path``, or for one reduced-resolution level of it.
 
     The level is the ``overview``-th (0 the finest) when one is named. GDAL's own failure is wrapped
@@ -316,7 +321,7 @@ class _ClosableSource:
         region, _spec = self.read_region(Rect(x0, y0, x1, y1))
         return region
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
@@ -469,7 +474,7 @@ def channel_first_reinterpreted(
     )
 
 
-def hwc_array(img: Any) -> np.ndarray:
+def hwc_array(img: PILImage | np.ndarray) -> np.ndarray:
     """Return a decoded PIL image or array as ``[H, W, C]``.
 
     A 2-D one gains a trailing axis of 1.
@@ -668,7 +673,7 @@ class _ArraySource(_ClosableSource):
 
     _backend = "array"
 
-    def __init__(self, decoded: np.ndarray, layout: _Layout):
+    def __init__(self, decoded: np.ndarray, layout: _Layout) -> None:
         """Hold ``decoded`` reshaped to ``layout``'s decoded shape, laid out by its axis order."""
         array = np.transpose(np.reshape(decoded, layout.decoded), layout.order)
         self._array: np.ndarray | None = array
@@ -708,7 +713,7 @@ class PhotographicSource(_ClosableSource):
     The frame is EXIF-oriented before the mode conversion.
     """
 
-    def __init__(self, opened: PILImage, num_channels: int):
+    def __init__(self, opened: PILImage, num_channels: int) -> None:
         """Decode the photograph ``opened`` and close it.
 
         ``opened`` is the photograph as ``PIL.Image.open`` answered it, its pixels not yet decoded.
@@ -766,7 +771,7 @@ class TiffWholeSource(_ArraySource):
 
     _backend = "tiff_whole"
 
-    def __init__(self, source: SourceHeader, layout: _Layout):
+    def __init__(self, source: SourceHeader, layout: _Layout) -> None:
         """Decode the TIFF ``source`` already holds open, laid out in the frame ``layout`` names.
 
         A palette image is expanded through its table.
@@ -805,7 +810,7 @@ class BandGroupSource(_ClosableSource):
     band's; a member covering a different extent is refused at open.
     """
 
-    def __init__(self, group: SourceHeader):
+    def __init__(self, group: SourceHeader) -> None:
         """Open each member of the band group ``group`` at one band.
 
         Raises ``ValueError`` naming a band whose frame differs from the first band's, every member
@@ -878,7 +883,7 @@ class GdalSource(_ClosableSource):
 
     _backend = "gdal"
 
-    def __init__(self, header: _TiffHeader):
+    def __init__(self, header: _TiffHeader) -> None:
         """Open the TIFF ``header`` was read from (its ``path``)."""
         self.path = header.path
         self._ds = open_gdal_dataset(self.path)
@@ -949,7 +954,7 @@ class GdalSource(_ClosableSource):
         return pixels, ReadSpec(self._backend)
 
     def _read_window(
-        self, ds, window: Rect, out: tuple[int, int] | None
+        self, ds: DatasetReader, window: Rect, out: tuple[int, int] | None
     ) -> tuple[np.ndarray, str | None]:
         """Read ``window`` of dataset ``ds`` as ``[H, W, C]`` with the resampling used.
 
@@ -1000,7 +1005,7 @@ class GdalSource(_ClosableSource):
         levels = map(self._level_dataset, range(len(self._ds.overviews(1))))
         return [(int(level.width), int(level.height)) for level in levels]
 
-    def _level_dataset(self, overview: int):
+    def _level_dataset(self, overview: int) -> DatasetReader:
         """Return the ``overview``-th reduced-resolution level, opened once, held until close."""
         if overview not in self._levels:
             self._levels[overview] = open_gdal_dataset(self.path, overview)
@@ -1048,7 +1053,7 @@ class SourceHeader:
     PIL), or an array container's extension cut to ``"tif"``, ``"npy"`` or ``"npz"``.
     """
 
-    def __init__(self, source: str | Path | BandGroupRef):
+    def __init__(self, source: str | Path | BandGroupRef) -> None:
         """Take ``source`` and its :attr:`kind` from its extension; nothing is opened yet."""
         self.source = (
             source if isinstance(source, BandGroupRef) else Path(source)
@@ -1528,33 +1533,33 @@ def raster_content_identity(
 
 
 def open_as_recorded(
-    recorded: dict,
+    recorded: RasterIdentity,
     source: str | Path | BandGroupRef,
 ) -> tuple[RasterSource, RasterIdentity | None]:
     """Open ``source`` at the count a recorded :func:`raster_content_identity` was taken at.
 
-    The recorded result is in its ``dataclasses.asdict`` form. The reader, for the caller to
-    close, is returned beside its identity recomputed under that result's own sampling parameters
-    when it is content-identical to it, ``None`` when it is not. Raises what :func:`open_raster`
-    and :func:`raster_content_identity` raise, the reader closed.
+    The reader, for the caller to close, is returned beside its identity recomputed under the
+    recorded result's own sampling parameters when it is content-identical to it, ``None`` when it
+    is not. Raises what :func:`open_raster` and :func:`raster_content_identity` raise, the reader
+    closed.
     """
-    src = open_raster(source, int(recorded["num_channels"]))
+    src = open_raster(source, recorded.num_channels)
     try:
         fresh = raster_content_identity(
             src,
-            seed=int(recorded["seed"]),
-            window_size=int(recorded["window_size"]),
-            max_windows=int(recorded["max_windows"]),
+            seed=recorded.seed,
+            window_size=recorded.window_size,
+            max_windows=recorded.max_windows,
         )
     except Exception:
         src.close()
         raise
     matches = (
-        fresh.width == int(recorded["width"])
-        and fresh.height == int(recorded["height"])
-        and fresh.num_channels == int(recorded["num_channels"])
-        and fresh.dtype == recorded["dtype"]
-        and fresh.pixel_checksum == recorded["pixel_checksum"]
+        fresh.width == recorded.width
+        and fresh.height == recorded.height
+        and fresh.num_channels == recorded.num_channels
+        and fresh.dtype == recorded.dtype
+        and fresh.pixel_checksum == recorded.pixel_checksum
     )
     return src, fresh if matches else None
 
@@ -1573,7 +1578,7 @@ def content_identity(src: RasterSource) -> RasterIdentity:
 
 
 def georeferenced_raster_identity_mismatch(
-    recorded: dict,
+    recorded: RasterIdentity,
     fresh: RasterIdentity | None,
 ) -> str | None:
     """Name how ``fresh`` mismatches a recorded identity, or return ``None`` when it does not.
@@ -1586,10 +1591,10 @@ def georeferenced_raster_identity_mismatch(
     if fresh is None:
         return (
             "content mismatch: this is not the raster the identity was recorded on "
-            f"(recorded {recorded['width']}x{recorded['height']}x{recorded['num_channels']} "
-            f"{recorded['dtype']}, pixel checksum {str(recorded['pixel_checksum'])[:12]})"
+            f"(recorded {recorded.width}x{recorded.height}x{recorded.num_channels} "
+            f"{recorded.dtype}, pixel checksum {recorded.pixel_checksum[:12]})"
         )
-    recorded_gt = recorded["geotransform"]
+    recorded_gt = recorded.geotransform
     supplied_gt = fresh.geotransform
     if recorded_gt == supplied_gt:
         return None

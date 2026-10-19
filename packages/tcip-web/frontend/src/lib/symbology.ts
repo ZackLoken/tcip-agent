@@ -24,7 +24,7 @@ export function lineStyleOf(authorship: string | null | undefined): LineStyle {
 
 /** A dash pattern as (on, off) lengths in stroke widths, so it scales with the stroke on the
  *  canvas and in the agent's render alike; set by eye, provisional. */
-export type DashUnits = readonly [number, number];
+export type DashUnits = [number, number];
 
 /** The pattern of a dotted stroke. */
 export const DOTTED_DASH: DashUnits = [1, 3];

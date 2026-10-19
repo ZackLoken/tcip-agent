@@ -21,11 +21,17 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from importlib.util import find_spec
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, TypedDict, Unpack
 
 from pydantic import PositiveInt, Strict
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
+    from ray.tune.experiment import Trial
+    from ray.tune.schedulers import TrialScheduler
+    from ray.tune.search import SearchAlgorithm, Searcher
+
     from tcip_mcp.pipelines.schemas import SplitSpec
 
 logger = logging.getLogger(__name__)
@@ -216,7 +222,7 @@ def build_search_alg(
     seed: int,
     points_to_evaluate: list[dict] | None = None,
     constant_grid_search: bool = False,
-):
+) -> Searcher | SearchAlgorithm:
     """Build the Ray Tune searcher ``name`` names, constructed with ``seed``.
 
     A native name (:data:`_NATIVE_SEARCH`) builds Ray's ``BasicVariantGenerator`` with
@@ -294,7 +300,9 @@ def scheduler_settings(scheduler: dict) -> tuple[type, dict]:
     return cls, settings
 
 
-def build_scheduler(scheduler: dict, *, hyperparam_mutations: dict):
+def build_scheduler(
+    scheduler: dict, *, hyperparam_mutations: dict
+) -> TrialScheduler:
     """Build the Ray Tune trial scheduler the block ``scheduler`` states.
 
     The class and settings are :func:`scheduler_settings`'s, a class taking
@@ -338,7 +346,7 @@ def _has_attached_console() -> bool:
     return ctypes.windll.kernel32.GetConsoleCP() != 0
 
 
-def _kill_ray_daemons_before_shutdown(ray: Any) -> None:
+def _kill_ray_daemons_before_shutdown(ray: ModuleType) -> None:
     """Kill every daemon this process's Ray cluster started, ahead of ``ray.shutdown()``.
 
     The reaper goes last, each daemon's descendants before it, waiting one second on them
@@ -404,7 +412,7 @@ def _kill_ray_daemons_before_shutdown(ray: Any) -> None:
 
 
 @contextmanager
-def _ray_session(ray: Any, num_cpus: int) -> Generator[None]:
+def _ray_session(ray: ModuleType, num_cpus: int) -> Generator[None]:
     """Keep Ray up for the duration of one sweep.
 
     Ray is shut down only when the last concurrent sweep leaves and only if this module is what
@@ -489,12 +497,12 @@ def _build_sweep_stopper(sweep_root: Path) -> tuple[Any, Any]:
             self.live_trial_ids: set[str] = set()
 
         def on_trial_start(
-            self, iteration: int, trials: list, trial: Any, **info: Any
+            self, iteration: int, trials: list, trial: Trial, **info: object
         ) -> None:
             self.live_trial_ids.add(trial.trial_id)
 
         def on_trial_complete(
-            self, iteration: int, trials: list, trial: Any, **info: Any
+            self, iteration: int, trials: list, trial: Trial, **info: object
         ) -> None:
             self.live_trial_ids.discard(trial.trial_id)
 
@@ -512,14 +520,11 @@ def _build_sweep_stopper(sweep_root: Path) -> tuple[Any, Any]:
             from datetime import datetime, timezone
 
             from tcip_mcp.experiments import (
-                CANCEL_FILE,
                 HEARTBEAT_STALE_SECONDS,
-                read_record,
+                cancel_requested_at,
             )
 
-            requested = datetime.fromisoformat(
-                read_record(sweep_root / CANCEL_FILE)["requested"]
-            )
+            requested = datetime.fromisoformat(cancel_requested_at(sweep_root))
             waited = (datetime.now(timezone.utc) - requested).total_seconds()
             return (
                 waited > HEARTBEAT_STALE_SECONDS
@@ -619,26 +624,32 @@ def planned_trial_count(
     )
 
 
-def tune_search(
-    objective_fn: Callable[[dict, Callable[[float], None]], Any],
-    param_space: dict,
-    *,
-    metric: str,
-    mode: str,
-    num_samples: int,
-    search_alg: str,
-    scheduler: dict,
-    seed: int,
-    max_concurrent: int,
-    baseline_params: dict | None,
-    sweep_dir: Path,
-    resources_per_trial: dict | None,
-    split_draws: int,
-) -> None:
+type Report = Callable[[float], None]
+
+
+class TuneSearchKeywords(TypedDict):
+    """The keywords :func:`tune_search` takes, each as its docstring describes it."""
+
+    objective_fn: Callable[[dict, Report], object]
+    param_space: dict
+    metric: str
+    mode: str
+    num_samples: int
+    search_alg: str
+    scheduler: dict
+    seed: int
+    max_concurrent: int
+    baseline_params: dict | None
+    sweep_dir: Path
+    resources_per_trial: dict | None
+    split_draws: int
+
+
+def tune_search(**keywords: Unpack[TuneSearchKeywords]) -> None:
     """Run an HPO sweep on Ray Tune, its results in Ray's experiment store at ``sweep_dir``.
 
     A cancel requested of that directory (``experiments.request_cancel``) stops it
-    (:func:`_build_sweep_stopper`).
+    (:func:`_build_sweep_stopper`). The keywords are :class:`TuneSearchKeywords`:
 
     Args:
         objective_fn: ``fn(config, report)``, trains one trial for the trial's ``config`` and calls
@@ -666,6 +677,12 @@ def tune_search(
             native ``search_alg``; a backend ``search_alg`` refuses.
 
     """
+    param_space, split_draws = keywords["param_space"], keywords["split_draws"]
+    max_concurrent, sweep_dir = (
+        keywords["max_concurrent"],
+        keywords["sweep_dir"],
+    )
+    metric = keywords["metric"]
     if split_draws > 1 and SPLIT_DRAW_SEED_KEY not in param_space:
         raise ValueError(
             f"tune_search: split_draws={split_draws} pairs {SPLIT_DRAW_SEED_KEY!r} as a grid "
@@ -677,17 +694,22 @@ def tune_search(
     from ray import tune
 
     space, points, normalized_search_alg = _search_space_and_points(
-        param_space, search_alg, split_draws, baseline_params
+        param_space,
+        keywords["search_alg"],
+        split_draws,
+        keywords["baseline_params"],
     )
-    resources = resources_per_trial or _default_trial_resources(max_concurrent)
+    resources = keywords["resources_per_trial"] or _default_trial_resources(
+        max_concurrent
+    )
 
     searcher = build_search_alg(
         normalized_search_alg,
-        seed=seed,
+        seed=keywords["seed"],
         points_to_evaluate=points,
         constant_grid_search=split_draws > 1,
     )
-    sched = build_scheduler(scheduler, hyperparam_mutations=space)
+    sched = build_scheduler(keywords["scheduler"], hyperparam_mutations=space)
 
     # Ray ignores max_concurrent_trials for a backend searcher unless it is wrapped.
     from ray.tune.search import Searcher
@@ -710,7 +732,9 @@ def tune_search(
         from tcip_store import bind
 
         bind()
-        objective_fn(config, lambda value: tune.report({metric: float(value)}))
+        keywords["objective_fn"](
+            config, lambda value: tune.report({metric: float(value)})
+        )
 
     trainable = tune.with_resources(trainable, resources=resources)
     # A trainable with no CPU request gets one CPU from Ray, so the cluster is sized the same way.
@@ -719,13 +743,13 @@ def tune_search(
     )
 
     stopper, live_trials_callback = _build_sweep_stopper(sweep_dir)
-    run_kwargs: dict[str, Any] = {
-        "verbose": 0,
-        "storage_path": sweep_dir.parent.resolve().as_posix(),
-        "name": sweep_dir.name,
-        "stop": stopper,
-        "callbacks": [live_trials_callback],
-    }
+    run_config = tune.RunConfig(
+        verbose=0,
+        storage_path=sweep_dir.parent.resolve().as_posix(),
+        name=sweep_dir.name,
+        stop=stopper,
+        callbacks=[live_trials_callback],
+    )
 
     removed_env: dict[str, str] = {}
     for var in _ENV_VARS_RAY_TUNE_REFUSES:
@@ -737,7 +761,7 @@ def tune_search(
                 "run while it is set; trial results go to storage_path (%s).",
                 var,
                 value,
-                run_kwargs["storage_path"],
+                run_config.storage_path,
             )
     try:
         with _ray_session(ray, cluster_cpus):
@@ -745,15 +769,15 @@ def tune_search(
                 trainable,
                 param_space=space,
                 tune_config=tune.TuneConfig(
-                    num_samples=num_samples,
+                    num_samples=keywords["num_samples"],
                     search_alg=searcher,
                     scheduler=sched,
                     max_concurrent_trials=tune_max,
                     metric=metric,
-                    mode=mode,
+                    mode=keywords["mode"],
                     reuse_actors=False,
                 ),
-                run_config=tune.RunConfig(**run_kwargs),
+                run_config=run_config,
             )
             tuner.fit()
     finally:

@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
 
 
-def _rle_mask(segmentation: dict) -> Any:
+def _rle_mask(segmentation: dict) -> NDArray[np.uint8]:
     """Decode a COCO run-length ``segmentation``, compressed or uncompressed, as a mask.
 
     A segmentation that does not decode refuses (``ValueError``).

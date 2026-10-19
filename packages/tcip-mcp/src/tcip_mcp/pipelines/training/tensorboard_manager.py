@@ -232,7 +232,7 @@ def _guardian_argv(argv: list[str]) -> list[str]:
     ]
 
 
-def _collect_output(handle) -> str:
+def _collect_output(handle: IO[bytes]) -> str:
     """Read back (and close) what a finished child wrote to its capture file."""
     try:
         handle.seek(0)

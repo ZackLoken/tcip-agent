@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 import secrets
 from collections.abc import Callable, Mapping
@@ -10,6 +9,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    JsonValue,
+    TypeAdapter,
+    ValidationError,
+)
 
 import tcip_store
 from tcip_mcp.audit import audited, now_iso
@@ -41,30 +48,47 @@ def retrospective_key(project_path: str, project_id: str) -> Key:
     return Key(RETROSPECTIVE_STORE, str(project_path), (project_id,))
 
 
-def read_report(project_path: str, report_id: str) -> dict:
-    """Read one friction report's decoded document.
+class FrictionReport(BaseModel):
+    """One friction report as :func:`report_friction` records it."""
 
-    Raises ``NotFoundError`` when nothing is recorded under that id and ``DecodeError`` for a
-    report that will not read as a JSON object.
+    model_config = ConfigDict(extra="forbid")
+
+    timestamp: str
+    category: str
+    detail: str
+    context: dict[str, JsonValue]
+    user_disagreement: bool
+
+
+def read_report(project_path: str, report_id: str) -> FrictionReport:
+    """Read one friction report.
+
+    Raises ``NotFoundError`` when nothing is recorded under that id, ``DecodeError`` for a record
+    that will not decode, and ``ValidationError`` for one that is not a :class:`FrictionReport`.
     """
-    key = friction_report_key(project_path, report_id)
-    entry = tcip_store.read(key)
-    if not isinstance(entry, dict):
-        raise DecodeError(
-            f"{key.store}{list(key.parts)} under {key.root} is not a JSON object"
-        )
-    return entry
-
-
-def read_retrospective(project_path: str, project_id: str) -> str:
-    """Read one project's retrospective text, or return ``""`` when it has none."""
-    return tcip_store.read(
-        retrospective_key(project_path, project_id), default=""
+    return FrictionReport.model_validate(
+        tcip_store.read(friction_report_key(project_path, report_id))
     )
 
 
+def _retrospective(project_path: str, project_id: str) -> tuple[str, Version]:
+    """Read one project's retrospective text and its version, ``""`` when it has none.
+
+    A record that is not text refuses (``ValidationError``).
+    """
+    stored = tcip_store.read_versioned(
+        retrospective_key(project_path, project_id), default=""
+    )
+    return TypeAdapter(str).validate_python(stored.value), stored.version
+
+
+def read_retrospective(project_path: str, project_id: str) -> str:
+    """Read one project's retrospective text (:func:`_retrospective`)."""
+    return _retrospective(project_path, project_id)[0]
+
+
 @dataclass(frozen=True)
-class MemoryDocument:
+class MemoryDocument[T]:
     """One project-memory document: the key part naming it, its value, and the time it states.
 
     ``timestamp`` is the document's own, read out of what it holds, and empty for a document that
@@ -72,11 +96,13 @@ class MemoryDocument:
     """
 
     name: str
-    value: Any
+    value: T
     timestamp: str
 
 
-def _newest_first(documents: list[MemoryDocument]) -> list[MemoryDocument]:
+def _newest_first[T](
+    documents: list[MemoryDocument[T]],
+) -> list[MemoryDocument[T]]:
     """Sort ``documents`` in place by the timestamp each states, newest first, and return them.
 
     Undated ones come last by name, in one deterministic order.
@@ -86,42 +112,40 @@ def _newest_first(documents: list[MemoryDocument]) -> list[MemoryDocument]:
     return documents
 
 
-def report_documents(project_path: str) -> list[MemoryDocument]:
+Unread = DecodeError | ValidationError
+"""Why a stored friction report did not read as a :class:`FrictionReport`."""
+
+
+def report_documents(
+    project_path: str,
+) -> list[MemoryDocument[FrictionReport | Unread]]:
     """Return every friction report under a project, newest stated timestamp first.
 
-    A report that will not decode is carried with the ``DecodeError`` its reader raised as its
-    value, stating no time.
+    A report that will not read (:func:`read_report`) is carried with the error its reader raised
+    as its value, stating no time.
     """
-    documents: list[MemoryDocument] = []
+    documents: list[MemoryDocument[FrictionReport | Unread]] = []
     for key in tcip_store.keys(FRICTION_REPORT_STORE, str(project_path)):
         name = key.parts[0]
         try:
             entry = read_report(project_path, name)
-        except DecodeError as exc:
+        except (DecodeError, ValidationError) as exc:
             documents.append(MemoryDocument(name, exc, ""))
         else:
-            documents.append(MemoryDocument(name, entry, entry["timestamp"]))
+            documents.append(MemoryDocument(name, entry, entry.timestamp))
     return _newest_first(documents)
 
 
-def report_row(document: MemoryDocument) -> dict:
+def report_row(document: MemoryDocument[FrictionReport | Unread]) -> dict:
     """Return one friction report as a row of its id and its recorded fields.
 
-    The row is its id, its time and every field its writer records, or its id and the reason it
-    will not decode (``malformed``) for a report that will not. A decoded report lacking a field
-    its writer records raises ``KeyError``.
+    The row is its id and every field of its :class:`FrictionReport`, or its id and the reason it
+    will not read (``malformed``) for a report that will not.
     """
     entry = document.value
-    if isinstance(entry, DecodeError):
+    if not isinstance(entry, FrictionReport):
         return {"report_id": document.name, "malformed": str(entry)}
-    return {
-        "report_id": document.name,
-        "timestamp": entry["timestamp"],
-        "category": entry["category"],
-        "detail": entry["detail"],
-        "context": entry["context"],
-        "user_disagreement": entry["user_disagreement"],
-    }
+    return {"report_id": document.name, **entry.model_dump()}
 
 
 _RETROSPECTIVE_SECTION = re.compile(r"^## Retrospective: (.+)$", re.MULTILINE)
@@ -143,9 +167,9 @@ def _latest_section(content: str) -> str:
     return max(stated) if stated else ""
 
 
-def retrospective_documents(project_path: str) -> list[MemoryDocument]:
+def retrospective_documents(project_path: str) -> list[MemoryDocument[str]]:
     """Return every retrospective under a project, latest stated section first."""
-    documents: list[MemoryDocument] = []
+    documents: list[MemoryDocument[str]] = []
     for key in tcip_store.keys(RETROSPECTIVE_STORE, str(project_path)):
         name = key.parts[0]
         content = read_retrospective(project_path, name)
@@ -186,24 +210,22 @@ def report_friction(
     now = now_iso()
     report_id = f"{datetime.fromisoformat(now):%Y%m%dT%H%M%SZ}_{category}_{secrets.token_hex(2)}"
 
-    entry = {
-        "timestamp": now,
-        "category": category,
-        "detail": detail,
-        "context": context or {},
-        "user_disagreement": user_disagreement,
-    }
-
     tcip_store.replace(
         friction_report_key(str(project), report_id),
-        entry,
+        FrictionReport(
+            timestamp=now,
+            category=category,
+            detail=detail,
+            context=context or {},
+            user_disagreement=user_disagreement,
+        ).model_dump(mode="json"),
         expect=Version.ABSENT,
     )
 
     return {
         "report_id": report_id,
         "category": category,
-        "timestamp": entry["timestamp"],
+        "timestamp": now,
         "user_disagreement": user_disagreement,
     }
 
@@ -228,7 +250,7 @@ def load_project_memory(
         category: Reports only, optional exact category filter (e.g. 'missing_tool'), one of the
             ``report_friction`` categories; empty means all. Ignored for retrospectives.
         filter_substring: Optional case-insensitive substring matched against each entry's filename
-            or its text.
+            or its text (a report's detail, a retrospective's content).
 
     """
     if kind == "reports":
@@ -368,12 +390,12 @@ def read_audit_log(
     }
 
 
-def _memory_page(
+def _memory_page[T](
     corpus: str,
     noun: str,
-    documents: list[MemoryDocument],
+    documents: list[MemoryDocument[T]],
     limit: int,
-    row: Callable[[MemoryDocument], dict | None],
+    row: Callable[[MemoryDocument[T]], dict | None],
 ) -> dict:
     """Page the rows ``row`` makes of ``documents`` under ``corpus``.
 
@@ -408,13 +430,18 @@ def _load_reports(
     cat = category.strip()
     needle = filter_substring.lower().strip()
 
-    def row(document: MemoryDocument) -> dict | None:
-        made = report_row(document)
-        if cat and ("malformed" in made or made["category"] != cat):
+    def row(document: MemoryDocument[FrictionReport | Unread]) -> dict | None:
+        report = document.value
+        texts = [document.name]
+        if isinstance(report, FrictionReport):
+            if cat and report.category != cat:
+                return None
+            texts.append(report.detail)
+        elif cat:
             return None
-        if needle and needle not in json.dumps(made).lower():
+        if needle and not any(needle in text.lower() for text in texts):
             return None
-        return made
+        return report_row(document)
 
     return _memory_page(
         "reports",
@@ -496,17 +523,20 @@ def write_retrospective(
 
     # Two sessions finishing at once would each append to the text they read and drop a section,
     # so a conflict re-reads and re-appends; the loop ends when this section is the one that lands.
-    key = retrospective_key(project_path, project_id)
     while True:
-        stored = tcip_store.read_versioned(key, default=None)
-        if stored.value is None:
-            content = f"# {project_id}\n\n{body}"
-            appended = False
-        else:
-            content = stored.value.rstrip() + "\n\n" + body
-            appended = True
+        content, version = _retrospective(project_path, project_id)
+        appended = bool(content)
+        content = (
+            content.rstrip() + "\n\n" + body
+            if appended
+            else f"# {project_id}\n\n{body}"
+        )
         try:
-            tcip_store.replace(key, content, expect=stored.version)
+            tcip_store.replace(
+                retrospective_key(project_path, project_id),
+                content,
+                expect=version,
+            )
         except VersionConflictError:
             continue
         break
@@ -533,7 +563,7 @@ def _load_retrospectives(
 ) -> dict:
     needle = filter_substring.lower().strip()
 
-    def row(document: MemoryDocument) -> dict | None:
+    def row(document: MemoryDocument[str]) -> dict | None:
         content = document.value
         if (
             needle

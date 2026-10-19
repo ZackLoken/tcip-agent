@@ -23,7 +23,10 @@ from torch.nn import functional
 from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from tcip_mcp.pipelines.active_learning import ScorerSpec
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
 logger = logging.getLogger(__name__)
@@ -40,8 +43,10 @@ class BaseScorer(ABC):
 
     @abstractmethod
     def score(
-        self, image_paths: list[str], predictor: GenericPredictor
-    ) -> list[tuple[str, float]]:
+        self,
+        image_paths: list[Path | BandGroupRef],
+        predictor: GenericPredictor,
+    ) -> list[tuple[Path | BandGroupRef, float]]:
         """Return (path, score) pairs sorted descending (highest = most valuable).
 
         Each candidate is read through the loaded checkpoint ``predictor``: its model, its device
@@ -63,8 +68,10 @@ class UncertaintyScorer(BaseScorer):
 
     @torch.no_grad()
     def score(
-        self, image_paths: list[str], predictor: GenericPredictor
-    ) -> list[tuple[str, float]]:
+        self,
+        image_paths: list[Path | BandGroupRef],
+        predictor: GenericPredictor,
+    ) -> list[tuple[Path | BandGroupRef, float]]:
         """Return (path, uncertainty) pairs sorted descending.
 
         A detector's uncertainty is one minus its mean detection score, 0.0 for no detection;
@@ -73,7 +80,7 @@ class UncertaintyScorer(BaseScorer):
         """
         model = predictor.model
         model.eval()
-        scored: list[tuple[str, float]] = []
+        scored: list[tuple[Path | BandGroupRef, float]] = []
 
         for path in image_paths:
             tensor = predictor.model_input(path)[0].unsqueeze(0)
@@ -130,8 +137,10 @@ class DiversityScorer(BaseScorer):
 
     @torch.no_grad()
     def score(
-        self, image_paths: list[str], predictor: GenericPredictor
-    ) -> list[tuple[str, float]]:
+        self,
+        image_paths: list[Path | BandGroupRef],
+        predictor: GenericPredictor,
+    ) -> list[tuple[Path | BandGroupRef, float]]:
         """Return (path, cosine distance to the nearest labeled embedding) pairs, descending.
 
         With no labeled embeddings every path scores 1.0, with a warning. Raises
@@ -208,25 +217,32 @@ class CombinedScorer(BaseScorer):
         self.dw = diversity_weight
 
     def score(
-        self, image_paths: list[str], predictor: GenericPredictor
-    ) -> list[tuple[str, float]]:
-        """Return (path, weighted sum of the normalized scores) pairs sorted descending."""
-        unc_scores = dict(self.unc.score(image_paths, predictor))
-        div_scores = dict(self.div.score(image_paths, predictor))
+        self,
+        image_paths: list[Path | BandGroupRef],
+        predictor: GenericPredictor,
+    ) -> list[tuple[Path | BandGroupRef, float]]:
+        """Return (path, weighted sum of the normalized scores) pairs sorted descending.
 
-        # Normalize each to [0, 1]
-        def _normalize(d: dict[str, float]) -> dict[str, float]:
+        The two rankings are joined by each candidate's file (:func:`source_path_of`).
+        """
+        from tcip_mcp.pipelines.image_utils import source_path_of
+
+        def _normalize(
+            scored: list[tuple[Path | BandGroupRef, float]],
+        ) -> dict[str, float]:
+            d = {source_path_of(p): s for p, s in scored}
             vals = list(d.values())
             lo, hi = min(vals), max(vals)
             rng = hi - lo if hi > lo else 1.0
             return {k: (v - lo) / rng for k, v in d.items()}
 
-        unc_norm = _normalize(unc_scores)
-        div_norm = _normalize(div_scores)
+        unc_norm = _normalize(self.unc.score(image_paths, predictor))
+        div_norm = _normalize(self.div.score(image_paths, predictor))
 
         combined = []
         for p in image_paths:
-            s = self.uw * unc_norm.get(p, 0) + self.dw * div_norm.get(p, 0)
+            key = source_path_of(p)
+            s = self.uw * unc_norm.get(key, 0) + self.dw * div_norm.get(key, 0)
             combined.append((p, s))
 
         combined.sort(key=lambda x: x[1], reverse=True)
@@ -255,11 +271,18 @@ def resolve_scorer(block: ScorerSpec, task: str) -> BaseScorer:
     The factory is the one registered under ``block.name``, or the dotted ``module:factory`` it
     names (:func:`~tcip_mcp.pipelines.model_build.resolve_named`, whose refusals propagate). The
     factory's own signature refuses (``TypeError``) a value it requires that the block leaves
-    unstated, and one the block states that it does not take, naming each.
+    unstated, and one the block states that it does not take, naming each; a factory that builds
+    anything but a :class:`BaseScorer` refuses (``TypeError``) naming ``block.name``.
     """
     from tcip_mcp.pipelines.model_build import resolve_named
 
     target = resolve_named(
         block.name, SCORER_REGISTRY, kind="scorer", register="register_scorer"
     )
-    return target(task, **(block.model_extra or {}))
+    scorer = target(task, **(block.model_extra or {}))
+    if not isinstance(scorer, BaseScorer):
+        raise TypeError(
+            f"scorer {block.name!r} built a {type(scorer).__name__}, not a BaseScorer: a "
+            "scorer factory returns the BaseScorer it builds."
+        )
+    return scorer

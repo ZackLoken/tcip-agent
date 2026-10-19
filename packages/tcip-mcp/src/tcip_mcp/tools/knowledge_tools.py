@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from tcip_mcp.knowledge import list_documents, read_document
+from tcip_mcp.knowledge import DocumentInfo, list_documents, read_document
 from tcip_mcp.project_paths import repo_root_from_here
 from tcip_mcp.server import tool
 
 
-def _repo_relative_path(document) -> str:
+def _repo_relative_path(document: DocumentInfo) -> str:
     """Return a document's path relative to the repository root, as a POSIX string."""
     return (
         document.path.resolve().relative_to(repo_root_from_here()).as_posix()
