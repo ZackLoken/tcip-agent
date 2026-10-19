@@ -15,12 +15,13 @@ the phenology and count export request shapes, the revision confirmation and the
 models;
 ``tcip_mcp.traits`` declares the trait record and its revisions; and
 ``tcip_mcp.web_client.GuiState`` declares the GUI state the backend broadcasts, rendered as the
-shape it serializes to, with its default instance as ``GUI_STATE_DEFAULTS``. This script projects
-them into ``frontend/src/api/types.generated.ts`` through each model's own JSON schema. The
-mapper covers only the schema shapes these models use (string/number/integer/boolean, a nullable
-union, a nested model by ``$ref``, an array, a fixed-length tuple, a string-enum union, a
-single-member ``Literal`` discriminator rendered as its literal type, and a free-form object
-(``additionalProperties`` true, no ``properties``) rendered as ``Record<string, unknown>``);
+shape it serializes to, with ``tcip_mcp.web_client.GUI_STATE_DEFAULTS`` as
+``GUI_STATE_DEFAULTS``. This script projects them into ``frontend/src/api/types.generated.ts``
+through each model's own JSON schema. The mapper covers only the schema shapes these models use
+(string/number/integer/boolean, a nullable union, a nested model by ``$ref``, pydantic's
+``JsonValue`` by ``$ref`` rendered as ``unknown``, an array, a fixed-length tuple, a string-enum
+union, a single-member ``Literal`` discriminator rendered as its literal type, and a free-form
+object (``additionalProperties`` true, no ``properties``) rendered as ``Record<string, unknown>``);
 annotation keywords such as ``title`` and ``default`` are ignored rather than mapped, a typed
 mapping (``dict[str, T]``, ``additionalProperties`` a schema rather than a bare ``true``) renders
 ``Record<string, T>``, a model keeping undeclared keys (``extra="allow"``) gains a string index
@@ -77,13 +78,17 @@ _PRIMITIVE = {
 
 
 def declared_models() -> list[type[BaseModel]]:
-    """Return the models this script renders, in the order their interfaces are emitted."""
+    """Return the models this script renders first, in the order their interfaces are emitted.
+
+    A model one of them nests by ``$ref`` is rendered after them whether or not it is listed.
+    """
     from tcip_mcp.experiments import (
         RunRow,
         SweepGroup,
         TrainingDetail,
         TrainingListing,
     )
+    from tcip_mcp.model_registry import Producer
     from tcip_mcp.pipelines.active_learning import ScorerSpec
     from tcip_mcp.pipelines.delivery_events_schema import (
         Acknowledgment,
@@ -95,7 +100,6 @@ def declared_models() -> list[type[BaseModel]]:
         PlantMappingDisclosure,
         PlantRegistryDisclosure,
         PlantRegistryReference,
-        Producer,
         SegmentTieDisclosure,
     )
     from tcip_mcp.pipelines.execution import MaskCut, Stated
@@ -256,10 +260,10 @@ def string_constants() -> dict[str, str]:
 def tuple_constants() -> dict[str, tuple[str, ...]]:
     """Return the backend tuple vocabularies this module emits, by each constant's name."""
     from tcip_annotation.json_io import FINISHED_STATES
+    from tcip_annotation.state import ATTR_TYPES
     from tcip_mcp.agent_identity import RECORD_FIELDS
     from tcip_mcp.experiments import TERMINAL_STATES
     from tcip_mcp.pipelines.execution import CROSS_TILE_MERGES
-    from tcip_mcp.subject_registry import ATTR_TYPES
     from tcip_mcp.web_client import PLATFORM_PANEL_EVENTS, TAB_NAMES
 
     return {
@@ -307,7 +311,9 @@ def literal_aliases() -> dict[str, tuple[str, ...]]:
 def _ts_type(schema: dict, where: str) -> str:
     """Return one schema fragment as a TypeScript type expression; refuse naming ``where``."""
     if "$ref" in schema:
-        return schema["$ref"].rsplit("/", 1)[-1]
+        name = schema["$ref"].rsplit("/", 1)[-1]
+        # pydantic's JsonValue declares the empty schema: a value carried uninterpreted.
+        return "unknown" if name == "JsonValue" else name
     if "anyOf" in schema or "oneOf" in schema:
         parts: list[str] = []
         for part in schema.get("anyOf") or schema["oneOf"]:
@@ -356,7 +362,11 @@ def _ts_type(schema: dict, where: str) -> str:
             item_type = _ts_type(item_schema, where)
             # A top-level union (anyOf, or an enum of more than one member) renders bare, with no
             # brackets of its own; parenthesize it so an array of it reads as ``(A | B)[]``.
-            if "anyOf" in item_schema or len(item_schema.get("enum", [])) > 1:
+            if (
+                "anyOf" in item_schema
+                or "oneOf" in item_schema
+                or len(item_schema.get("enum", [])) > 1
+            ):
                 item_type = f"({item_type})"
             return f"{item_type}[]"
     raise SystemExit(
@@ -382,18 +392,21 @@ def _interface(name: str, schema: dict) -> str:
 
 def render() -> str:
     """Return the full text of the generated module."""
-    from tcip_mcp.web_client import GuiState
+    from tcip_mcp.web_client import GUI_STATE_DEFAULTS, GuiState
 
     models = declared_models()
     _, combined = models_json_schema(
         [(m, "validation") for m in models] + [(GuiState, "serialization")]
     )
     defs = combined["$defs"]
+    listed = [m.__name__ for m in models] + list(TRANSPORT_MODELS)
+    nested = [n for n in defs if n not in listed and n != "JsonValue"]
     body = "\n".join(_interface(m.__name__, defs[m.__name__]) for m in models)
+    body += "\n" + "\n".join(_interface(name, defs[name]) for name in nested)
     body += "\n" + "\n".join(
         _interface(name, defs[name]) for name in TRANSPORT_MODELS
     )
-    defaults = json.dumps(GuiState().model_dump(mode="json"), indent=2)
+    defaults = json.dumps(GUI_STATE_DEFAULTS.model_dump(mode="json"), indent=2)
     body += f"\nexport const GUI_STATE_DEFAULTS: GuiState = {defaults};\n"
     constant = (
         f"export const RENDER_CACHE_VERSION = {render_cache_version()};\n\n"

@@ -19,6 +19,8 @@ from tcip_mcp.pipelines.data.band_groups import (
 from tcip_mcp.pipelines.raster_source import Rect
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     import torch
 
 __all__ = [
@@ -327,7 +329,7 @@ _EXIF_IFD_TAG = 0x8769
 _DT_ORIGINAL_TAG = 0x9003
 
 
-def exif_capture_time(exif) -> object | None:
+def exif_capture_time(exif: Image.Exif) -> object | None:
     """Return the raw DateTimeOriginal an image's ``exif`` (``Image.getexif()``) carries.
 
     It is read from the Exif sub-IFD, else from the top level; ``None`` when it carries none.
@@ -336,7 +338,7 @@ def exif_capture_time(exif) -> object | None:
     return exif.get(_DT_ORIGINAL_TAG) if raw is None else raw
 
 
-def parse_capture_time(raw: object):
+def parse_capture_time(raw: object) -> datetime | None:
     """Parse a capture-time value in any of :data:`CAPTURE_TIME_FORMATS` as a ``datetime``.
 
     ``None`` when none fits.
@@ -359,14 +361,16 @@ def image_dimensions(
     return raster_source.SourceHeader(path).frame_at(num_channels)
 
 
-def frame_size(img) -> tuple[int, int]:
+def frame_size(img: Image.Image | np.ndarray) -> tuple[int, int]:
     """Return ``(width, height)`` of a decoded image: a PIL image, or an ``[H, W, ...]`` array."""
     if isinstance(img, Image.Image):
         return img.size
     return int(img.shape[1]), int(img.shape[0])
 
 
-def pixel_array(img) -> tuple[np.ndarray, tuple[str, ...] | None]:
+def pixel_array(
+    img: Image.Image | np.ndarray,
+) -> tuple[np.ndarray, tuple[str, ...] | None]:
     """Return a decoded image as an ``[H, W, C]`` array.
 
     The image is :func:`load_image`'s return. The array comes with its band interpretations: a PIL
@@ -381,15 +385,15 @@ def pixel_array(img) -> tuple[np.ndarray, tuple[str, ...] | None]:
 
 
 def to_pil_if_faithful(
-    arr, *, band_interpretations: tuple[str, ...] | None = None
-):
+    arr: np.ndarray, *, band_interpretations: tuple[str, ...] | None = None
+) -> Image.Image | np.ndarray:
     """Return an ``[H, W, C]`` ndarray as a PIL image when a faithful mode exists.
 
     The mode is the one :func:`~tcip_mcp.pipelines.raster_source.faithful_pil_mode` gives its
     dtype, channel count and ``band_interpretations`` (a single channel squeezed); anything else
     is returned unchanged.
     """
-    if not isinstance(arr, np.ndarray) or arr.ndim != 3:
+    if arr.ndim != 3:
         return arr
     mode = raster_source.faithful_pil_mode(
         arr.dtype, arr.shape[2], band_interpretations
@@ -399,7 +403,7 @@ def to_pil_if_faithful(
     return Image.fromarray(arr[:, :, 0] if mode == "L" else arr, mode=mode)
 
 
-def pil_to_tensor(img) -> torch.Tensor:
+def pil_to_tensor(img: Image.Image | np.ndarray) -> torch.Tensor:
     """Convert a PIL Image or H×W[×C] array to a float32 ``[C, H, W]`` tensor in ``[0, 1]``.
 
     Channel-aware: a 2-D grayscale array becomes ``[1, H, W]``; any channel count is
@@ -416,7 +420,9 @@ def pil_to_tensor(img) -> torch.Tensor:
     return torch.from_numpy(arr).permute(2, 0, 1).contiguous()
 
 
-def load_image(path: str | Path | BandGroupRef, num_channels: int):
+def load_image(
+    path: str | Path | BandGroupRef, num_channels: int
+) -> Image.Image | np.ndarray:
     """Open an image at ``num_channels``.
 
     Returns a photograph as the ``PIL.Image`` of its count's mode, and an array container's

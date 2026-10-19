@@ -2,51 +2,57 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
+
+from tcip_mcp.model_registry import Producer
+from tcip_mcp.pipelines.execution import Execution
 
 if TYPE_CHECKING:
+    import torch
+    from torch.utils.data import DataLoader
+
+    from tcip_mcp.model_registry import VerifiedCheckpoint
     from tcip_mcp.pipelines.data.label_queries import Admission
     from tcip_mcp.pipelines.execution import Pass, Stated
     from tcip_mcp.pipelines.schemas import TilingSpec
     from tcip_mcp.traits import TraitEntry
 
 
-# Pinned by name and presence only; a regime's own fields travel in the writer's `extra` instead.
-_COMMON_EVAL_FIELDS = (
-    "model_path",
-    "task",
-    "checkpoint_sha256",
-    "experiment_id",
-    "iou_threshold",
-    "execution",
-    "eval_regime",
-)
+class EvaluationIdentity(Producer):
+    """What one evaluation's metrics are of, in either regime.
 
-
-def evaluation_result(common: dict, extra: dict) -> dict:
-    """Return one evaluation's result, ``common``'s identity fields followed by ``extra``.
-
-    ``common`` is the identity tuple both regimes share (``_COMMON_EVAL_FIELDS``,
-    ``experiment_id`` possibly ``None`` but every key present, or this refuses); ``extra`` is this
-    regime's own fields (metrics included), unmodified. A key present in both refuses.
+    The checkpoint at ``model_path`` (its sha256 and run), its ``task``, the ``iou_threshold`` its
+    matches were made at, the pass's ``execution`` and the ``eval_regime`` it ran under.
     """
-    missing = [field for field in _COMMON_EVAL_FIELDS if field not in common]
-    if missing:
-        raise ValueError(
-            f"evaluation_result: common is missing required field(s): {missing}"
-        )
+
+    model_path: str
+    task: str
+    iou_threshold: float
+    execution: Execution
+    eval_regime: Literal[
+        "tile-level", "full-frame-single-pass", "full-frame-tiled-inference"
+    ]
+
+
+def evaluation_result(identity: EvaluationIdentity, extra: dict) -> dict:
+    """Return one evaluation's result, ``identity``'s fields followed by ``extra``.
+
+    ``extra`` is this regime's own fields (metrics included), unmodified, laid beside the
+    identity's in one mapping; a key it shares with the identity refuses.
+    """
+    common = identity.model_dump(mode="json")
     collisions = sorted(set(common) & set(extra))
     if collisions:
         raise ValueError(
-            f"evaluation_result: extra collides with common on field(s): {collisions}"
+            f"evaluation_result: extra collides with the identity on field(s): {collisions}"
         )
-    return {**{field: common[field] for field in _COMMON_EVAL_FIELDS}, **extra}
+    return {**common, **extra}
 
 
 def run_test_evaluation(
     pass_: Pass,
-    loader,
-    device,
+    loader: DataLoader,
+    device: torch.device,
     *,
     iou_threshold: float,
     tiling: TilingSpec | None = None,
@@ -87,19 +93,19 @@ def run_test_evaluation(
         mask_cut=execution.mask_cut,
     )
     tiled = run_tiling(task, tiling) is not None
-    common = {
-        "model_path": checkpoint.path,
-        "task": task,
-        **checkpoint.producer,
-        "iou_threshold": iou_threshold,
-        "execution": execution.record(),
-        "eval_regime": "tile-level" if tiled else "full-frame-single-pass",
-    }
-    return evaluation_result(common, metrics)
+    identity = EvaluationIdentity(
+        **dict(checkpoint.producer),
+        model_path=checkpoint.path,
+        task=task,
+        iou_threshold=iou_threshold,
+        execution=execution,
+        eval_regime="tile-level" if tiled else "full-frame-single-pass",
+    )
+    return evaluation_result(identity, metrics)
 
 
 def run_full_frame_evaluation(
-    checkpoint,
+    checkpoint: VerifiedCheckpoint,
     admitted: Admission,
     *,
     stated: Stated,
@@ -172,14 +178,14 @@ def run_full_frame_evaluation(
         for key, gt in gt_by_key.items()
     ]
 
-    common = {
-        "model_path": checkpoint.path,
-        "task": predictor.task,
-        **checkpoint.producer,
-        "iou_threshold": iou_threshold,
-        "execution": execution.record(),
-        "eval_regime": "full-frame-tiled-inference",
-    }
+    identity = EvaluationIdentity(
+        **dict(checkpoint.producer),
+        model_path=checkpoint.path,
+        task=predictor.task,
+        iou_threshold=iou_threshold,
+        execution=execution,
+        eval_regime="full-frame-tiled-inference",
+    )
     # scored_images/tallies: which images this number was computed over and which the
     # admission held out, so a reviewer can reconstruct the denominator.
     metrics = detection_metrics(
@@ -191,7 +197,7 @@ def run_full_frame_evaluation(
     )
     del metrics["matchings"]
     return evaluation_result(
-        common,
+        identity,
         {
             **metrics,
             "n_gt": sum(len(gt_objects(r)) for r in per_image),

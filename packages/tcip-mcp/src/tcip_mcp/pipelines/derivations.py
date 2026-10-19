@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeAlias, get_args
 
 if TYPE_CHECKING:
     import numpy as np
+    from numpy.typing import NDArray
 
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.raster_source import Rect
@@ -59,74 +60,8 @@ def gt_aspect_ratios(
     return [r for r in out if r > 0]
 
 
-def _validate_gt_boxes_per_image(
-    gt_boxes_per_image: Sequence[Sequence[Sequence[float]]],
-    *,
-    fn_name: str,
-) -> list[list[tuple[float, float, float, float]]]:
-    """Validate and normalize ``gt_boxes_per_image`` into ``(x, y, w, h)`` float tuples.
-
-    Raises ``ValueError`` naming exactly what was wrong.
-    """
-    if not isinstance(gt_boxes_per_image, Sequence) or isinstance(
-        gt_boxes_per_image, (str, bytes)
-    ):
-        raise ValueError(
-            f"{fn_name}: gt_boxes_per_image must be a sequence of per-image box lists, got "
-            f"{type(gt_boxes_per_image).__name__}"
-        )
-    validated: list[list[tuple[float, float, float, float]]] = []
-    for i, boxes in enumerate(gt_boxes_per_image):
-        if not isinstance(boxes, Sequence) or isinstance(boxes, (str, bytes)):
-            raise ValueError(
-                f"{fn_name}: gt_boxes_per_image[{i}] must be a sequence of boxes, got "
-                f"{type(boxes).__name__}"
-            )
-        image_boxes: list[tuple[float, float, float, float]] = []
-        for j, box in enumerate(boxes):
-            if (
-                not isinstance(box, Sequence)
-                or isinstance(box, (str, bytes))
-                or len(box) != 4
-            ):
-                raise ValueError(
-                    f"{fn_name}: gt_boxes_per_image[{i}][{j}] must be a 4-element (x, y, w, h) "
-                    f"box, got {box!r}"
-                )
-            try:
-                x, y, w, h = (float(v) for v in box)
-            except (TypeError, ValueError) as e:
-                raise ValueError(
-                    f"{fn_name}: gt_boxes_per_image[{i}][{j}] has a non-numeric coordinate "
-                    f"({box!r}): {e}"
-                ) from e
-            image_boxes.append((x, y, w, h))
-        validated.append(image_boxes)
-    return validated
-
-
-def _validate_char_sizes(
-    char_sizes: Sequence[float], *, fn_name: str
-) -> list[float]:
-    """Validate and normalize ``char_sizes`` into concrete floats.
-
-    Raises ``ValueError`` naming exactly what was wrong.
-    """
-    if not isinstance(char_sizes, Sequence) or isinstance(
-        char_sizes, (str, bytes)
-    ):
-        raise ValueError(
-            f"{fn_name}: char_sizes must be a sequence of numbers, got {type(char_sizes).__name__}"
-        )
-    validated: list[float] = []
-    for i, s in enumerate(char_sizes):
-        try:
-            validated.append(float(s))
-        except (TypeError, ValueError) as e:
-            raise ValueError(
-                f"{fn_name}: char_sizes[{i}] is not numeric ({s!r}): {e}"
-            ) from e
-    return validated
+type XywhBoxes = Sequence[Sequence[tuple[float, float, float, float]]]
+"""One list of ``(x, y, w, h)`` boxes (COCO xywh, px) per image."""
 
 
 def _neighbor_max_ious(boxes: np.ndarray) -> list[float]:
@@ -171,7 +106,7 @@ by."""
 
 
 def derive_localization_tolerance_frac(
-    gt_boxes_per_image: Sequence[Sequence[Sequence[float]]],
+    gt_boxes_per_image: XywhBoxes,
 ) -> float | None:
     """Derive the center-match tolerance from the GT's own nearest-neighbor spacing.
 
@@ -192,9 +127,6 @@ def derive_localization_tolerance_frac(
 
     from tcip_annotation.matching import box_sizes, xywh_corners
 
-    gt_boxes_per_image = _validate_gt_boxes_per_image(
-        gt_boxes_per_image, fn_name="derive_localization_tolerance_frac"
-    )
     dists: list[float] = []
     sizes: list[float] = []
     for boxes in gt_boxes_per_image:
@@ -391,7 +323,7 @@ IOU_MATCH_DERIVATION = (
 
 
 def derive_iou_match_threshold(
-    gt_boxes_per_image: Sequence[Sequence[Sequence[float]]],
+    gt_boxes_per_image: XywhBoxes,
     *,
     jitter_px: float,
     margin: float,
@@ -412,9 +344,6 @@ def derive_iou_match_threshold(
     ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image, already
     filtered to the trait's own class.
     """
-    gt_boxes_per_image = _validate_gt_boxes_per_image(
-        gt_boxes_per_image, fn_name="derive_iou_match_threshold"
-    )
     from tcip_annotation.matching import xywh_corners
 
     sizes = char_sizes(xywh_corners(boxes) for boxes in gt_boxes_per_image)
@@ -452,7 +381,6 @@ def derive_sliver_frac(char_sizes: Sequence[float]) -> float | None:
     """
     import numpy as np
 
-    char_sizes = _validate_char_sizes(char_sizes, fn_name="derive_sliver_frac")
     sizes = [s for s in char_sizes if s > 0]
     if len(sizes) < 5:
         return None
@@ -639,7 +567,7 @@ def band_normalization_stats(
 class _BandMoments:
     """Pixel-weighted per-band first and second moments over [0, 1] tensor pixels."""
 
-    def __init__(self, num_channels: int):
+    def __init__(self, num_channels: int) -> None:
         import numpy as np
 
         self.num_channels = int(num_channels)
@@ -647,7 +575,7 @@ class _BandMoments:
         self.sqs = np.zeros(self.num_channels, dtype=np.float64)
         self.pixels = 0
 
-    def add(self, tensor_pixels) -> bool:
+    def add(self, tensor_pixels: NDArray[np.float64]) -> bool:
         """Accumulate one ``[C, H, W]`` float64 block and return whether it was accepted.
 
         A band count disagreeing with this accumulator's means the pixels are not the same bands,

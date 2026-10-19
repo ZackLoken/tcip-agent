@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
 
+from pydantic import TypeAdapter
+
 import tcip_store
 from tcip_store import Key
 
@@ -84,13 +86,19 @@ def last_opened_key(workspace: Path) -> Key:
     return Key(LAST_OPENED_STORE, str(workspace), _POINTER_PARTS)
 
 
+_POINTER: TypeAdapter[str | None] = TypeAdapter(str | None)
+
+
 def read_last_opened(workspace: Path) -> str | None:
     """Return the id the last-opened pointer holds, as stored, or ``None`` when it is unset.
 
     ``None`` means the backend has opened nothing in this workspace yet. A pointer the store
-    cannot read raises the store's own error.
+    cannot read raises the store's own error, and one that is not a string
+    ``pydantic.ValidationError``.
     """
-    return tcip_store.read(last_opened_key(workspace), default=None)
+    return _POINTER.validate_python(
+        tcip_store.read(last_opened_key(workspace), default=None)
+    )
 
 
 def write_last_opened(workspace: Path, project_id: str) -> None:

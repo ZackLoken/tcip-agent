@@ -54,7 +54,9 @@ import math
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Annotated, Literal, cast
+
+from pydantic import AfterValidator
 
 import tcip_store
 from tcip_annotation.state import (
@@ -69,6 +71,10 @@ from tcip_annotation.state import (
 )
 from tcip_store import Key, Version, scalar_number
 
+if TYPE_CHECKING:
+    from tcip_annotation.state import Attribute, Rings
+    from tcip_store import ReadDefault
+
 ANNOTATIONS_KEY = "annotations"  # the one top-level list key
 _PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at")
 
@@ -80,7 +86,7 @@ class UnreadableLabelDocumentError(Exception):
     """
 
 
-def safe_score(x) -> float:
+def safe_score(x: float) -> float:
     """Return a confidence as it is stored: rounded to four places.
 
     A non-finite one (NaN or infinity) refuses (``ValueError``) naming it: no stored number stands
@@ -94,7 +100,7 @@ def safe_score(x) -> float:
     return round(v, 4)
 
 
-def _numbers(value, key: str, count: int | None = None) -> list[float]:
+def _numbers(value: object, key: str, count: int | None = None) -> list[float]:
     """Return ``value`` as floats: a list of JSON numbers, exactly ``count`` of them when given.
 
     Raises ``ValueError`` naming ``key`` for anything else, a numeric string included.
@@ -110,7 +116,7 @@ def _numbers(value, key: str, count: int | None = None) -> list[float]:
     return [float(v) for v in value]
 
 
-def _polygon_of(segmentation) -> Polygon:
+def _polygon_of(segmentation: object) -> Polygon:
     """Return a ``segmentation``'s flat ``x, y`` rings as a :class:`Polygon`.
 
     The :class:`Polygon` refuses a ring too short to be a shape; any other shape raises
@@ -120,7 +126,7 @@ def _polygon_of(segmentation) -> Polygon:
         raise ValueError(
             f"segmentation {segmentation!r} is not a list of rings"
         )
-    rings: list[list[tuple[float, float]]] = []
+    rings: Rings = []
     for ring in segmentation:
         flat = _numbers(ring, "segmentation ring")
         if len(flat) % 2:
@@ -129,7 +135,7 @@ def _polygon_of(segmentation) -> Polygon:
     return Polygon(rings)
 
 
-def attributes_of(raw) -> dict[str, str]:
+def attributes_of(raw: object) -> dict[str, str]:
     """Return supplied attribute values, name to value name.
 
     Anything but a mapping of names to non-empty value names raises ``ValueError``.
@@ -143,7 +149,7 @@ def attributes_of(raw) -> dict[str, str]:
     return dict(raw)
 
 
-def iscrowd_of(raw) -> bool:
+def iscrowd_of(raw: object) -> bool:
     """Read a supplied crowd flag: COCO's ``0``/``1`` or ``true``/``false``, else ``ValueError``."""
     if not isinstance(raw, int) or raw not in (0, 1):
         raise ValueError(f"iscrowd {raw!r} is not 0, 1, true or false")
@@ -177,7 +183,7 @@ def check_box_extent(bbox: BBox, *, where: str) -> None:
         )
 
 
-def ring_vertex(vertex) -> tuple:
+def ring_vertex(vertex: object) -> tuple:
     """Return a polygon ring vertex's ``(x, y)`` as given.
 
     The vertex is an ``[x, y]`` pair or an ``{"x":, "y":}`` mapping; any other shape raises
@@ -265,7 +271,7 @@ def _content_key(a: Annotation) -> str:
     return json.dumps(stored_content(a), sort_keys=True)
 
 
-def annotation_object(o) -> dict:
+def annotation_object(o: object) -> dict:
     """Return ``o`` when it is an annotation object (a JSON object), else raise ``ValueError``.
 
     The ``ValueError`` names ``o``.
@@ -275,7 +281,7 @@ def annotation_object(o) -> dict:
     return o
 
 
-def annotation_of_record(o) -> Annotation:
+def annotation_of_record(o: object) -> Annotation:
     """Return one record of a per-image document as an :class:`Annotation`.
 
     A key that is absent or ``null`` reads as absent, for every optional field: a ground-truth
@@ -287,12 +293,12 @@ def annotation_of_record(o) -> Annotation:
     :func:`~tcip_annotation.state.is_ring` admits (:func:`_polygon_of`), a ``point`` that is not
     two numbers, a ``score`` that is not a number, attributes that are not value names
     (:func:`attributes_of`), a crowd flag that is not one (:func:`iscrowd_of`). So does a record
-    that is not an object (:func:`annotation_object`) or that :class:`Annotation` refuses to
-    construct (no non-empty string ``subject``). Geometry precedence is rings, then box, then
+    that is not an object (:func:`annotation_object`) or whose ``subject`` is not a non-empty
+    string (:func:`_text`). Geometry precedence is rings, then box, then
     point, over the keys present: a polygon is the source of truth and its box is derived from it.
     """
     o = annotation_object(o)
-    subject = o.get("subject")
+    subject = _text(o.get("subject"), "subject")
     present = {
         k: o[k]
         for k in (
@@ -336,7 +342,7 @@ def annotation_of_record(o) -> Annotation:
     )
 
 
-def _annotations_of(data: Any) -> list[Annotation]:
+def _annotations_of(data: object) -> list[Annotation]:
     """Parse a stored per-image document into :class:`Annotation` records.
 
     Raises :class:`UnreadableLabelDocumentError` for a document that is not an object (``null``
@@ -404,7 +410,7 @@ class CompletionMark:
     proposals_hidden: bool
 
 
-def canonical_digest(value) -> str:
+def canonical_digest(value: object) -> str:
     """Return the platform's content digest of a JSON value.
 
     The digest is sha256 over its compact serialization, in the value's own key order, first
@@ -482,14 +488,14 @@ def completion_marks(
     return _live(marks, annotations)
 
 
-def _text(value, key: str) -> str:
+def _text(value: object, key: str) -> str:
     """Return ``value`` when it is a non-empty string, else ``ValueError`` naming ``key``."""
     if not isinstance(value, str) or not value:
         raise ValueError(f"{key} {value!r} is not a non-empty string")
     return value
 
 
-def _flag(value) -> bool:
+def _flag(value: object) -> bool:
     """Return ``value`` when it is a boolean, else ``ValueError``."""
     if not isinstance(value, bool):
         raise ValueError(f"proposals_hidden {value!r} is not true or false")
@@ -608,14 +614,16 @@ def document_at(key: Key, stored: tcip_store.Versioned) -> LabelDocument:
         ) from exc
 
 
-def read_stored(key: Key, **default: Any) -> tcip_store.Versioned:
+def read_stored(
+    key: Key, *, default: ReadDefault = tcip_store.REQUIRED
+) -> tcip_store.Versioned:
     """Return the store's read of ``key`` (:func:`tcip_store.read_versioned`, ``default`` passed).
 
     A record that does not decode, and an absent one read with no default (``NotFoundError``),
     raise :class:`UnreadableLabelDocumentError` with the store's own message.
     """
     try:
-        return tcip_store.read_versioned(key, **default)
+        return tcip_store.read_versioned(key, default=default)
     except (tcip_store.DecodeError, tcip_store.NotFoundError) as exc:
         raise UnreadableLabelDocumentError(str(exc)) from exc
 
@@ -711,6 +719,20 @@ def is_person(identity: object) -> bool:
         return False
     name = person_name(identity)
     return name is not None and identity == PERSON_IDENTITY_PREFIX + name
+
+
+def _person(identity: str) -> str:
+    """Return ``identity``, refused (``ValueError``) when :func:`is_person` refuses it."""
+    if not is_person(identity):
+        raise ValueError(
+            f"{identity!r} is not a person's recorded identity "
+            f"({PERSON_IDENTITY_PREFIX}<name>)"
+        )
+    return identity
+
+
+Person = Annotated[str, AfterValidator(_person)]
+"""A person's recorded identity, as a record field validates it."""
 
 
 def is_person_signoff(a: Annotation) -> bool:
@@ -843,9 +865,7 @@ def _stored_bbox_or_raise(bbox: BBox, *, where: str) -> list[float]:
     return xywh(bbox.x1, bbox.y1, bbox.x2, bbox.y2)
 
 
-def _rounded_rings(
-    rings: list[list[tuple[float, float]]],
-) -> list[list[tuple[float, float]]]:
+def _rounded_rings(rings: Rings) -> Rings:
     """Return a polygon's rings with each vertex rounded to the document's stored 2-decimal grid."""
     return [
         [(round(float(x), 2), round(float(y), 2)) for x, y in ring]
@@ -932,7 +952,7 @@ def client_annotation(a: Annotation) -> dict:
 
 
 def document_payload(
-    annotations,
+    annotations: Iterable[Annotation],
     width: int,
     height: int,
     *,
@@ -955,12 +975,12 @@ def document_payload(
     if not records and not live and not keep_empty:
         return None
     payload: dict = {
-        "width": int(width),
-        "height": int(height),
+        "width": width,
+        "height": height,
         ANNOTATIONS_KEY: records,
     }
     if cap is not None:
-        payload[CAP_KEY] = int(cap)
+        payload[CAP_KEY] = cap
     if live:
         payload[COMPLETION_KEY] = {
             subject: [
@@ -980,7 +1000,7 @@ def document_payload(
 
 def write_label_document(
     key: Key,
-    annotations,
+    annotations: Iterable[Annotation],
     width: int,
     height: int,
     *,
@@ -1012,27 +1032,12 @@ UNASSESSED = -1
 """The id an attribute column carries for an instance nobody assessed for that attribute."""
 
 
-class AttributeRecord(Protocol):
-    """An attribute as a scope declares it: its ``name`` and its ``values`` in declared order.
-
-    A value's id is its position there.
-    """
-
-    @property
-    def name(self) -> str:
-        """The attribute's name."""
-
-    @property
-    def values(self) -> tuple[str, ...]:
-        """The attribute's value names in declared order."""
-
-
 class UndeclaredValueError(ValueError):
     """A record carries a value its attribute does not declare."""
 
 
 def attribute_ids(
-    a: Annotation, subject: str, attributes: Iterable[AttributeRecord]
+    a: Annotation, subject: str, attributes: Iterable[Attribute]
 ) -> list[int] | None:
     """Return the id of ``a``'s value under each of ``attributes``, in their order.
 
@@ -1057,14 +1062,14 @@ def attribute_ids(
 
 
 def attribute_values(
-    ids: Iterable[int], attributes: Iterable[AttributeRecord]
+    ids: Iterable[int], attributes: Iterable[Attribute]
 ) -> dict[str, str]:
     """Return ``{name: value}`` for each of ``attributes`` the id row ``ids`` assesses.
 
     ``ids`` and ``attributes`` of unequal length raise ``ValueError``.
     """
     return {
-        attribute.name: attribute.values[int(i)]
+        attribute.name: attribute.values[i]
         for attribute, i in zip(attributes, ids, strict=True)
-        if int(i) != UNASSESSED
+        if i != UNASSESSED
     }

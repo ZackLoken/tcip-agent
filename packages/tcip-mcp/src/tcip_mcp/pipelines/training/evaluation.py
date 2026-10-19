@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, TypedDict, Unpack, cast
 
 import numpy as np
 import torch
@@ -22,8 +22,14 @@ from tcip_mcp.pipelines.schemas import AP_IOU_THRESHOLDS, COMPARABILITY_IOU
 from tcip_store import stored_number, stored_numbers
 
 if TYPE_CHECKING:
+    from pydantic import JsonValue
+    from torch.utils.data import DataLoader
+
+    from tcip_annotation.state import Annotation
+    from tcip_mcp.buckets import Bucket
+    from tcip_mcp.pipelines.derivations import XywhBoxes
     from tcip_mcp.pipelines.execution import MaskCut
-    from tcip_mcp.pipelines.schemas import ScoreWeights
+    from tcip_mcp.pipelines.schemas import ModelDims, ScoreWeights
     from tcip_mcp.traits import TraitEntry
 
 logger = logging.getLogger(__name__)
@@ -35,7 +41,7 @@ VAL_LOSS_KEY = VAL_METRIC_PREFIX + "loss"
 """The validation loss's key in a run's metrics log."""
 
 
-def _rounded(value):
+def _rounded(value: JsonValue) -> JsonValue:
     """Round a finite numeric metric, leaving other values unchanged."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return value
@@ -67,18 +73,17 @@ def compute_composite_objective(
     ``evaluation.score_weights``. A non-positive or non-finite loss, or both quality terms below
     0.01, answers ``None``.
     """
-    vl = (
-        float(val_loss)
-        if (val_loss is not None and math.isfinite(val_loss))
-        else float("inf")
-    )
-    f1v = float(f1) if (f1 is not None and math.isfinite(f1)) else 0.0
-    m50 = float(map50) if (map50 is not None and math.isfinite(map50)) else 0.0
-    if vl <= 0 or not math.isfinite(vl):
+    if val_loss <= 0 or not math.isfinite(val_loss):
         return None
+    f1v = f1 if math.isfinite(f1) else 0.0
+    m50 = map50 if math.isfinite(map50) else 0.0
     if f1v < 0.01 and m50 < 0.01:
         return None
-    return w.loss * vl + w.f1 * (1.0 - f1v) * 10 + w.map50 * (1.0 - m50) * 10
+    return (
+        w.loss * val_loss
+        + w.f1 * (1.0 - f1v) * 10
+        + w.map50 * (1.0 - m50) * 10
+    )
 
 
 def precision_recall_f1(tp: int, fp: int, fn: int) -> dict[str, float]:
@@ -247,7 +252,7 @@ def gt_class_typical_count(
 
 
 def localization_frac(
-    trait: TraitEntry, boxes_per_image: list[list[list[float]]]
+    trait: TraitEntry, boxes_per_image: XywhBoxes
 ) -> tuple[float, str]:
     """Return the center-match tolerance, as a fraction of average object size, and its source.
 
@@ -308,7 +313,12 @@ def resolve_match_criterion(
 
     authored(trait, ("localization",))
     boxes_per_image = [
-        [a["bbox"] for a in gt_objects(rec, class_id=class_id)]
+        [
+            (x, y, w, h)
+            for x, y, w, h in (
+                a["bbox"] for a in gt_objects(rec, class_id=class_id)
+            )
+        ]
         for rec in per_image
     ]
     if trait.localization == "center_match":
@@ -649,7 +659,9 @@ def pick_f1_max(sweep: dict) -> float:
     return max(sweep["curve"], key=lambda c: c["f1"])["conf"]
 
 
-def _mask_rings(mask: Any, cut: MaskCut, *, soft: bool) -> list:
+def _mask_rings(
+    mask: torch.Tensor | np.ndarray, cut: MaskCut, *, soft: bool
+) -> list:
     """Return a mask's regions as rings, for a mask match.
 
     The mask is binary or, with ``soft``, a soft mask cut at ``cut.mask_binarize``; its rings are
@@ -670,7 +682,7 @@ def _mask_rings(mask: Any, cut: MaskCut, *, soft: bool) -> list:
     )
 
 
-def gt_record(bbox: list[float], category_id: int, crowd: Any) -> dict:
+def gt_record(bbox: list[float], category_id: int, crowd: int) -> dict:
     """Return one ground-truth evaluation record of a class, a box and a crowd flag.
 
     The box is ``[x, y, w, h]``.
@@ -682,7 +694,7 @@ def gt_record(bbox: list[float], category_id: int, crowd: Any) -> dict:
     }
 
 
-def dt_record(bbox: list[float], category_id: Any, score: Any) -> dict:
+def dt_record(bbox: list[float], category_id: int, score: float) -> dict:
     """Return one detection's evaluation record of a box, a class and a score.
 
     The ``[x, y, w, h]`` box is kept as given, whatever coordinates it is on.
@@ -694,7 +706,7 @@ def dt_record(bbox: list[float], category_id: Any, score: Any) -> dict:
     }
 
 
-def detection_record(box: Sequence[float], label: Any, score: Any) -> dict:
+def detection_record(box: Sequence[float], label: int, score: float) -> dict:
     """Return one detection's evaluation record from a predictor's corner ``box``.
 
     The box goes onto the stored grid (:func:`~tcip_annotation.json_io.xywh`).
@@ -702,12 +714,17 @@ def detection_record(box: Sequence[float], label: Any, score: Any) -> dict:
     return dt_record(xywh(*box), label, score)
 
 
-def _rows(values: Any) -> list:
+type RowValues = torch.Tensor | np.ndarray | list
+
+
+def _rows(values: RowValues) -> list:
     """Return a tensor's, array's or list's rows as a list."""
     return values.tolist() if hasattr(values, "tolist") else list(values)
 
 
-def _with_attributes(records: list[dict], values: Any) -> list[dict]:
+def _with_attributes(
+    records: list[dict], values: RowValues | None
+) -> list[dict]:
     """Return ``records``, each carrying its row of ``values`` under ``attributes``.
 
     A row holds one id per attribute; ``records`` come back unchanged when ``values`` is
@@ -723,7 +740,7 @@ def result_record(
     result: Mapping[str, Any],
     gt: list[dict],
     *,
-    image_id: Any = None,
+    image_id: ImageId | None = None,
     region: tuple[int, int, int, int] | None = None,
 ) -> dict:
     """Return a detection result and its ground-truth records ``gt`` as one per-image record.
@@ -768,6 +785,11 @@ def result_record(
     )
 
 
+ImageId = int | str
+"""What names the image a per-image record (:func:`prediction_record`) is of: a loader's sample
+index or a sample's member name."""
+
+
 def prediction_record(
     dt: list[dict],
     gt: list[dict],
@@ -776,7 +798,7 @@ def prediction_record(
     height: int,
     cap: int | None,
     count: int,
-    image_id: Any = None,
+    image_id: ImageId | None = None,
     region: tuple[int, int, int, int] | None = None,
 ) -> dict:
     """Return a per-image evaluation record.
@@ -876,7 +898,7 @@ def records_from_detector(
     return record
 
 
-def subject_category_ids(annotations) -> dict[str, int]:
+def subject_category_ids(annotations: Iterable[Annotation]) -> dict[str, int]:
     """Map each box-derivable annotation's subject to a 1-indexed COCO category id.
 
     Background is 0, like detector labels, and ids follow first-seen order; a geometry-less label
@@ -892,8 +914,8 @@ def subject_category_ids(annotations) -> dict[str, int]:
 
 
 def records_from_annotation(
-    gt,
-    preds,
+    gt: Sequence[Annotation],
+    preds: Sequence[Annotation],
     *,
     width: int,
     height: int,
@@ -953,7 +975,7 @@ def records_from_annotation(
 
 
 def bucket_reads(
-    images: Sequence[Any], bucket: Any
+    images: Sequence[Any], bucket: Bucket
 ) -> list[tuple[Any, list, Any]]:
     """Read once what a scoring of ``bucket``'s documents for the logical ``images`` needs.
 
@@ -1002,7 +1024,7 @@ class ScoredImage(NamedTuple):
 
 def score_bucket(
     images: Sequence[Any],
-    bucket: Any,
+    bucket: Bucket,
     *,
     iou_threshold: float,
     conf_threshold: float,
@@ -1371,26 +1393,31 @@ def detection_metrics(
     return out
 
 
+class EvaluationKeywords(TypedDict):
+    """The keywords :func:`evaluate` scores at, each as its docstring describes it."""
+
+    dims: ModelDims
+    conf_threshold: float | None
+    iou_threshold: float
+    score_weights: ScoreWeights | None
+    trait: TraitEntry | None
+    density: float | None
+    mask_cut: MaskCut | None
+
+
 @torch.no_grad()
 def evaluate(
-    model,
-    loader,
-    device,
+    model: torch.nn.Module,
+    loader: DataLoader,
+    device: torch.device,
     task: str,
-    *,
-    dims: Mapping[str, Any],
-    conf_threshold: float | None,
-    iou_threshold: float,
-    score_weights: ScoreWeights | None,
-    trait: TraitEntry | None,
-    density: float | None,
-    mask_cut: MaskCut | None,
+    **keywords: Unpack[EvaluationKeywords],
 ) -> dict:
     """Compute per-task validation/test metrics, returned under bare metric keys.
 
-    ``conf_threshold`` is the confidence a detector's boxes are counted at, read from the run's
-    validated ``evaluation.conf_threshold`` or the pass's execution record; ``None`` for any
-    other head.
+    The keywords are an :class:`EvaluationKeywords`. ``conf_threshold`` is the confidence a
+    detector's boxes are counted at, read from the run's validated ``evaluation.conf_threshold``
+    or the pass's execution record; ``None`` for any other head.
     A detector predicts each image at no score floor, every box the cap ``density`` gives its
     frame admits (``derivations.detection_cap``, through ``operating_point.governed_forward``);
     ``density`` is ``None`` for any other head. ``mask_cut`` is how an instance segmentation
@@ -1414,7 +1441,10 @@ def evaluate(
     from tcip_mcp.pipelines.operating_point import governed_forward
 
     is_detection = task in DETECTOR_TASKS
-    conf, cap_density = cast(float, conf_threshold), cast(float, density)
+    dims, mask_cut = keywords["dims"], keywords["mask_cut"]
+    score_weights = keywords["score_weights"]
+    conf = cast(float, keywords["conf_threshold"])
+    cap_density = cast(float, keywords["density"])
 
     model.eval()
     total_loss = 0.0
@@ -1538,9 +1568,9 @@ def evaluate(
     if is_detection:
         m = detection_metrics(
             per_image,
-            trait=trait,
+            trait=keywords["trait"],
             conf_threshold=conf,
-            iou_threshold=iou_threshold,
+            iou_threshold=keywords["iou_threshold"],
             by_mask=mask_cut is not None,
         )
         result.update(

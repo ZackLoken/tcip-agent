@@ -6,11 +6,15 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING
 
 from tcip_mcp.registry_paths import located, nearest_containing_ancestor
 from tcip_store import canonical_path
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 
 __all__ = [
     "allowed_optional",
@@ -198,7 +202,7 @@ def allowed_file(path: str) -> Path:
     return p
 
 
-def _resolving(read: Any, path: str) -> tuple[Path, Any]:
+def _resolving[T](read: Callable[[Path], T], path: str) -> tuple[Path, T]:
     """Return the client-supplied image ``path`` (:func:`allowed_file`) and ``read``'s answer.
 
     ``read`` is a reader of the logical image a path names; its resolver's refusals are
@@ -221,7 +225,7 @@ def _resolving(read: Any, path: str) -> tuple[Path, Any]:
         raise HTTPException(404, str(exc)) from exc
 
 
-def resolved_image(path: str) -> tuple[Path, Any]:
+def resolved_image(path: str) -> tuple[Path, Path | BandGroupRef]:
     """Return the client-supplied image ``path`` and the logical image it names.
 
     Resolved through :func:`~tcip_mcp.pipelines.image_utils.resolve_image_path` and

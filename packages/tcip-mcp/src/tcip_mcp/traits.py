@@ -10,16 +10,19 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field
 
 import tcip_store as ts
+from tcip_annotation.text import Text
 from tcip_mcp.audit import now_iso
 from tcip_mcp.pipelines.schemas import TraitRevisionRef
 from tcip_store import Key
 
 if TYPE_CHECKING:
+    from pydantic import JsonValue
+
     from tcip_mcp.subject_registry import SubjectRegistry
 
 CountObjective = Literal["", "count_unbiased", "detection_f1", "presence"]
@@ -140,9 +143,6 @@ VALUE_KEY_KINDS = frozenset(
     }
 )
 """Kinds whose rows carry a value key, hence whose operationalization bounds the set."""
-
-Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-"""Text that must say something: surrounding whitespace is stripped and an empty value refuses."""
 
 
 class TraitUnknownError(KeyError):
@@ -562,9 +562,7 @@ def trait_names(project: str | Path) -> list[str]:
     )
 
 
-def _record(
-    trait: str, project: str | Path, value: dict | None
-) -> TraitRecord:
+def _record(trait: str, project: str | Path, value: JsonValue) -> TraitRecord:
     """Return ``trait``'s stored ``value`` read through its schema.
 
     An absent value raises :class:`TraitUnknownError` naming the project's traits; a value the

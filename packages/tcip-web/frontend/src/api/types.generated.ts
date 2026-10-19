@@ -86,21 +86,21 @@ export interface ScorerSpec {
 }
 
 export interface CanvasStatePayload {
-  project_id: string;
   tab: "setup" | "annotate" | "training" | "inference" | "results" | "meta";
   image_path: string;
   image: string;
-  img_width?: number;
-  img_height?: number;
-  viewport?: Record<string, unknown> | null;
-  mode?: string | null;
-  active_subject?: string | null;
-  cut_armed?: boolean | null;
-  dirty?: boolean | null;
+  img_width: number;
+  img_height: number;
+  viewport: Viewport | null;
+  mode: "box" | "polygon" | "point";
+  active_subject: string | null;
+  cut_armed: boolean;
+  dirty: boolean;
   user: string;
-  classes?: Record<string, unknown>[];
-  counts?: Record<string, unknown> | null;
-  shapes?: Record<string, unknown>[] | null;
+  classes: Record<string, unknown>[];
+  counts: Record<string, number>;
+  project_id: string;
+  shapes: (CanvasBox | CanvasPoint | CanvasPolygon | CanvasPolyline)[] | null;
 }
 
 export interface ImageEntry {
@@ -189,7 +189,7 @@ export interface SweepGroup {
   sweep_id: string;
   state: string;
   status_error: string | null;
-  input: Record<string, unknown>;
+  input: SweepInput;
   cancel_requested: boolean;
   heartbeat: string;
   trials: RunRow[];
@@ -426,7 +426,7 @@ export interface PlantMappingDisclosure {
 
 export interface PlantRegistryDisclosure {
   plant_registry: PlantRegistryReference;
-  raster_identity: Record<string, unknown>;
+  raster_identity: RasterIdentity;
   nn_tolerance_m: MatchTolerance;
   detections_unattributed: number;
   detections_unattributed_scope: "delivered_raster";
@@ -450,7 +450,7 @@ export interface SegmentTieDisclosure {
 
 export interface CanopySegmentDisclosure {
   plant_registry: PlantRegistryReference;
-  raster_identity: Record<string, unknown>;
+  raster_identity: RasterIdentity;
   canopy_segments: CanopySegmentsDocument;
   segment_ties: SegmentTieDisclosure[];
   position_error_m: number;
@@ -584,6 +584,92 @@ export interface Stated {
   masks?: boolean | null;
   mask_cut?: MaskCut | null;
   rationale?: string | null;
+}
+
+export interface CanvasBox {
+  color: string;
+  tag: string;
+  dash?: [number, number] | null;
+  halo?: CanvasHalo | null;
+  label?: string | null;
+  kind: "box";
+  xyxy: [number, number, number, number];
+  fill?: boolean;
+}
+
+export interface CanvasHalo {
+  color: string;
+  opacity: number;
+  width_factor: number;
+}
+
+export interface CanvasPoint {
+  color: string;
+  tag: string;
+  dash?: [number, number] | null;
+  halo?: CanvasHalo | null;
+  label?: string | null;
+  kind: "point";
+  points: [[number, number]];
+}
+
+export interface CanvasPolygon {
+  color: string;
+  tag: string;
+  dash?: [number, number] | null;
+  halo?: CanvasHalo | null;
+  label?: string | null;
+  kind: "polygon";
+  points: [number, number][];
+  fill?: boolean;
+}
+
+export interface CanvasPolyline {
+  color: string;
+  tag: string;
+  dash?: [number, number] | null;
+  halo?: CanvasHalo | null;
+  label?: string | null;
+  kind: "polyline";
+  points: [number, number][];
+  vertices?: boolean;
+}
+
+export interface RasterIdentity {
+  width: number;
+  height: number;
+  num_channels: number;
+  dtype: string;
+  pixel_checksum: string;
+  seed: number;
+  window_size: number;
+  max_windows: number;
+  pixel_fraction: number;
+  band_interpretations: string[] | null;
+  geotransform: Record<string, unknown> | null;
+}
+
+export interface SweepInput {
+  n_trials: number;
+  search_alg: string;
+  scheduler: Record<string, unknown>;
+  max_concurrent: number;
+  baseline_params: Record<string, unknown> | null;
+  resources_per_trial: Record<string, unknown> | null;
+  param_space: Record<string, unknown>;
+  base_config: Record<string, unknown>;
+  relaunched_from: string | null;
+  split_draw_seeds: number[] | null;
+  search_seed: number;
+  trial_budget: number | null;
+}
+
+export interface Viewport {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  scale: number;
 }
 
 export interface GuiState {

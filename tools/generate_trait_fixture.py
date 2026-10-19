@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tools.fixture_session import (
     opened,
@@ -20,6 +21,9 @@ from tools.fixture_session import (
     scratch_session,
     write_fixture,
 )
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 GENERATED_PATH = (
@@ -85,7 +89,7 @@ _SET_TIMES = ("proposed_at", "confirmed_at", "withdrawn_at")
 """The revision timestamps a run sets, each read as :data:`_FIXED_TIME` once set."""
 
 
-def normalized(served: dict[str, dict]) -> dict[str, dict]:
+def normalized(served: dict[str, dict]) -> dict[str, JsonValue]:
     """Return ``served`` with each set revision timestamp replaced by ``_FIXED_TIME``.
 
     Those timestamps are the facts that differ between two otherwise identical runs.
@@ -98,7 +102,7 @@ def normalized(served: dict[str, dict]) -> dict[str, dict]:
     )
 
 
-def produce() -> dict[str, dict]:
+def produce() -> dict[str, JsonValue]:
     """Propose and confirm the fixture traits in a scratch session; return the served listings.
 
     The projects are created and opened in the session, the listing served at each stage, and

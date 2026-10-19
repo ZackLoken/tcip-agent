@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
+
+from pydantic import TypeAdapter
 
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.schemas import DrawnSplit
@@ -52,17 +53,14 @@ def freeze_selection(
         read_selection_checked,
         write_selection,
     )
-    from tcip_mcp.pipelines.data.split_construction import (
-        partition_samples,
-        stated_shares,
-    )
+    from tcip_mcp.pipelines.data.split_construction import stated_shares
 
     try:
         resolved = run_resolution(experiment_id, project=project)
     except ValueError as exc:
         return {"error": str(exc)}
     partition = resolved.partition
-    if resolved.spatial is not None:
+    if partition.spatial is not None:
         return {
             "error": f"{experiment_id!r}'s split is spatial (region identities, not stems): "
             "freeze_selection binds a stem-keyed partition, which a spatial split "
@@ -70,12 +68,10 @@ def freeze_selection(
         }
     # The run's own class space, so what this selection records is what the checkpoint records.
     scope = resolved.data.recorded_scope
-    samples = [
-        s for s in partition_samples(partition) if s.side in ("train", "val")
-    ]
+    samples = [s for s in partition.samples if s.side in ("train", "val")]
     n_train = sum(1 for s in samples if s.side == "train")
     n_val = len(samples) - n_train
-    if not n_val:
+    if not n_val or partition.seed is None:
         return {
             "error": f"{experiment_id!r} trained without validation (an empty val side): "
             "a partition no bind can use."
@@ -123,8 +119,8 @@ def freeze_selection(
             Selection(
                 samples=tuple(samples),
                 scope=scope,
-                seed=partition["seed"],
-                group_by=partition["group_by"],
+                seed=partition.seed,
+                group_by=partition.group_by,
                 ratios=stated_shares(drawn_as)
                 if isinstance(drawn_as, DrawnSplit)
                 else drawn_as.ratios,
@@ -435,7 +431,9 @@ def draw_splits_at(
         "stratify_foreground": stratified,
         "seed": seed,
         "group_by": membership.group_by,
-        "scope": asdict(membership.scope),
+        "scope": TypeAdapter(ClassScope).dump_python(
+            membership.scope, mode="json"
+        ),
         "tallies": membership.tallies,
         "selection_dir": str(output_path) if output_path else None,
         "calibration_foreground_groups": foreground_group_count(

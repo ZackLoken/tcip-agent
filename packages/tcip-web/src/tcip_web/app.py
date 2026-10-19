@@ -11,15 +11,16 @@ import itertools
 import logging
 import uuid
 from collections import defaultdict
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 
 from tcip_mcp.audit import now_iso
 from tcip_mcp.buckets import NotABucketError
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def _lifespan(_app: FastAPI):
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Open the last-opened project, size GDAL's block cache and warm the agent terminal.
 
     All three run before the app serves; the project opened is the one the last-opened pointer
@@ -91,7 +92,9 @@ _register_routes(app)
 from tcip_web.state import (  # noqa: E402  (needs `app`)
     GuiMutationInvalidError,
     NoProjectOpenError,
+    PanelEnvelope,
     ProjectNotOpenError,
+    StateNotification,
     store as _gui_store,
 )
 
@@ -143,29 +146,42 @@ async def _project_not_open_handler(
 SERVER_EPOCH = uuid.uuid4().hex
 
 
-def state_snapshot_message(
-    state: dict[str, Any], version: int
-) -> dict[str, Any]:
-    """Return the state-snapshot envelope.
+class SnapshotProject(BaseModel):
+    """The open project as a state snapshot names it: its id and its directory."""
 
-    It carries the state, the version, the open project (``{id, path}``, or null when none is
-    open) and this process's epoch.
+    id: str
+    path: str
+
+
+class StateSnapshotMessage(StateNotification):
+    """The state-snapshot envelope: a notification with the open project and this epoch.
+
+    ``project`` is ``None`` when no project is open.
     """
+
+    type: Literal["state_snapshot"] = "state_snapshot"
+    project: SnapshotProject | None
+    epoch: str
+
+
+def state_snapshot_message(
+    notification: StateNotification,
+) -> StateSnapshotMessage:
+    """Return ``notification``'s state-snapshot envelope."""
     opened = _gui_store.opened
-    return {
-        "type": "state_snapshot",
-        "state": state,
-        "version": version,
-        "project": None
+    return StateSnapshotMessage(
+        state=notification.state,
+        version=notification.version,
+        project=None
         if opened is None
-        else {"id": opened.id, "path": str(opened.root)},
-        "epoch": SERVER_EPOCH,
-    }
+        else SnapshotProject(id=opened.id, path=str(opened.root)),
+        epoch=SERVER_EPOCH,
+    )
 
 
-async def _broadcast_state_snapshot(payload: dict[str, Any]) -> None:
+async def _broadcast_state_snapshot(notification: StateNotification) -> None:
     """Push the new state, version and open project to every state socket, dropping dead ones."""
-    msg = state_snapshot_message(payload["state"], payload["version"])
+    msg = state_snapshot_message(notification).model_dump(mode="json")
     dead: list[WebSocket] = []
     for ws in list(_state_watchers):
         try:
@@ -210,7 +226,9 @@ async def state_ws(websocket: WebSocket) -> None:
     _state_watchers.add(websocket)
     try:
         await websocket.send_json(
-            state_snapshot_message(_gui_store.snapshot(), _gui_store.version)
+            state_snapshot_message(_gui_store.notification()).model_dump(
+                mode="json"
+            )
         )
         while True:
             await websocket.receive_text()
@@ -234,21 +252,22 @@ class PanelEvent(BaseModel):
 
     panel: str | None = None
     event_type: str
-    data: dict[str, Any] = {}
+    data: dict[str, JsonValue] = {}
     # The id of the project the sender acts on.
     project_id: str
 
 
-async def _broadcast_to_panel(panel: str, event: dict[str, Any]) -> None:
-    """Fan out an event to every WebSocket currently subscribed to a panel."""
+async def _broadcast_to_panel(event: PanelEnvelope) -> None:
+    """Fan out ``event`` to every WebSocket currently subscribed to its panel."""
+    message = event.model_dump(mode="json")
     dead: list[WebSocket] = []
-    for ws in list(_panel_subscribers.get(panel, ())):
+    for ws in list(_panel_subscribers.get(event.panel, ())):
         try:
-            await ws.send_json(event)
+            await ws.send_json(message)
         except Exception:
             dead.append(ws)
     for ws in dead:
-        _panel_subscribers[panel].discard(ws)
+        _panel_subscribers[event.panel].discard(ws)
 
 
 def _static_dir_candidates() -> list[Path]:
@@ -307,7 +326,7 @@ def health() -> dict:
 
 
 @app.get("/")
-def index():
+def index() -> Response:
     """Serve the built frontend's ``index.html``, or a 503 naming how to build it when absent."""
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
@@ -331,7 +350,9 @@ def index():
 
 
 @app.post("/api/events/{panel}")
-async def post_panel_event(panel: str, event: PanelEvent, request: Request):
+async def post_panel_event(
+    panel: str, event: PanelEvent, request: Request
+) -> dict:
     """Accept a pushed event and broadcast it to subscribers.
 
     Payload shape: ``{panel, event_type, data, project_id}``. An event naming any project but the
@@ -350,14 +371,14 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
             "valid": sorted(VALID_PANELS),
         }
     project = _gui_store.admit(event.project_id)
-    payload = {
-        "panel": panel,
-        "event_type": event.event_type,
-        "data": event.data,
-        "event_id": f"{now_iso()}#{next(_event_counter)}",
+    envelope = PanelEnvelope(
+        panel=panel,
+        event_type=event.event_type,
+        data=event.data,
+        event_id=f"{now_iso()}#{next(_event_counter)}",
         **agent_identity.fields_from_headers(request.headers),
-    }
-    _gui_store.retain_event(panel, payload)
+    )
+    _gui_store.retain_event(envelope)
     # Agent focus events also update the advisory GuiState slice, so the snapshot shows where the
     # agent pointed the human: the browser applies the event locally and never syncs these back.
     if event.event_type == PANEL_EVENT_ANNOTATE_FOCUS:
@@ -367,12 +388,12 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
         if "active_subject" in event.data:
             mutation["active_subject"] = event.data["active_subject"]
         await _gui_store.mutate(mutation, project=project)
-    await _broadcast_to_panel(panel, payload)
+    await _broadcast_to_panel(envelope)
     return {"status": "ok", "panel": panel, "event_type": event.event_type}
 
 
 @app.websocket("/ws/panel/{panel}")
-async def panel_ws(websocket: WebSocket, panel: str):
+async def panel_ws(websocket: WebSocket, panel: str) -> None:
     """Stream ``panel``'s events over the socket, the open project's retained events first.
 
     An unknown panel closes the socket with 1008.
@@ -385,7 +406,7 @@ async def panel_ws(websocket: WebSocket, panel: str):
     # Replay the open project's retained events so a late-joining browser sees the current state.
     for event in _gui_store.retained_events(panel):
         try:
-            await websocket.send_json(event)
+            await websocket.send_json(event.model_dump(mode="json"))
         except Exception:
             break
     try:

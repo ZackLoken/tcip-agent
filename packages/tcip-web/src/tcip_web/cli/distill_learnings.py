@@ -14,6 +14,8 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from tcip_mcp.tools.meta_tools import FrictionReport, MemoryDocument, Unread
+
 # Generic English function words, filtered out so recurrence-counting surfaces whatever
 # actually recurs in a project's own reports/retrospectives, not a fixed, maintained,
 # domain-specific vocabulary that goes stale the moment this project's vocabulary shifts.
@@ -128,41 +130,52 @@ def build_workspace_worksheet(workspace: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _gather(project: Path) -> tuple[list[dict], list, str]:
+def _gather(
+    project: Path,
+) -> tuple[
+    list[MemoryDocument[FrictionReport | Unread]],
+    list[MemoryDocument[str]],
+    str,
+]:
     """Gather ``project``'s friction reports, its retrospectives and their joined free text.
 
-    The reports are listed as :func:`~tcip_mcp.tools.meta_tools.report_row` lists them, the
-    retrospectives latest stated section first, and the text joins the decoded reports' and the
-    retrospectives'.
+    The reports and the retrospectives are their newest stated first, and the text joins the
+    decoded reports' details and the retrospectives'.
     """
     from tcip_mcp.tools.meta_tools import (
         report_documents,
-        report_row,
         retrospective_documents,
     )
 
-    reports = [
-        report_row(document) for document in report_documents(str(project))
-    ]
+    reports = report_documents(str(project))
     retros = retrospective_documents(str(project))
     text = " ".join(
         [
-            *(r["detail"] for r in reports if "malformed" not in r),
+            *(
+                document.value.detail
+                for document in reports
+                if isinstance(document.value, FrictionReport)
+            ),
             *(document.value for document in retros),
         ]
     )
     return reports, retros, text
 
 
-def _report_line(report: dict, width: int) -> str:
+def _report_line(
+    document: MemoryDocument[FrictionReport | Unread], width: int
+) -> str:
     """Render one report as a bullet on one line cut to ``width``.
 
     The bullet carries its category and its detail, or ``malformed`` and the reason it will not
     decode.
     """
-    if "malformed" in report:
-        return f"- [malformed] {report['malformed'].replace(chr(10), ' ')[:width]}"
-    return f"- [{report['category']}] {report['detail'].replace(chr(10), ' ')[:width]}"
+    report = document.value
+    if isinstance(report, FrictionReport):
+        label, text = report.category, report.detail
+    else:
+        label, text = "malformed", str(report)
+    return f"- [{label}] {text.replace(chr(10), ' ')[:width]}"
 
 
 def build_worksheet(project: Path) -> str:
@@ -180,7 +193,10 @@ def build_worksheet(project: Path) -> str:
             lines.append(f"- {word} ×{n}")
 
     disagreements = [
-        r for r in reports if "malformed" not in r and r["user_disagreement"]
+        document
+        for document in reports
+        if isinstance(document.value, FrictionReport)
+        and document.value.user_disagreement
     ]
     if disagreements:
         lines.append(

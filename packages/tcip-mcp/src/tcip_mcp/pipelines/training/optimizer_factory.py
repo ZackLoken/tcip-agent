@@ -17,21 +17,29 @@ from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
 from tcip_mcp.pipelines.schemas import OptimizerSpec
 
 
-def _build_sgd(params, *, lr: float, weight_decay: float, momentum: float):
+def _build_sgd(
+    params: list[dict], *, lr: float, weight_decay: float, momentum: float
+) -> torch.optim.SGD:
     return torch.optim.SGD(
         params, lr=lr, momentum=momentum, weight_decay=weight_decay
     )
 
 
-def _build_adam(params, *, lr: float, weight_decay: float):
+def _build_adam(
+    params: list[dict], *, lr: float, weight_decay: float
+) -> torch.optim.Adam:
     return torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
 
 
-def _build_adamw(params, *, lr: float, weight_decay: float):
+def _build_adamw(
+    params: list[dict], *, lr: float, weight_decay: float
+) -> torch.optim.AdamW:
     return torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
 
 
-def _build_lamb(params, *, lr: float, weight_decay: float):
+def _build_lamb(
+    params: list[dict], *, lr: float, weight_decay: float
+) -> torch.optim.Optimizer:
     """Build a LAMB optimizer, refusing when the optional ``torch_optimizer`` is absent."""
     try:
         from torch_optimizer import Lamb
@@ -127,7 +135,7 @@ TRAINING_STATE_KEYS = (STATE_DICT_KEY, OPTIMIZER_STATE_KEY, GROUPS_KEY)
 """The keys of a :func:`capture_training_state` result."""
 
 
-def _copied(value: Any) -> Any:
+def _copied(value: object) -> object:
     """Return an independent copy of one optimizer-state value.
 
     A tensor is cloned, anything else deep copied.

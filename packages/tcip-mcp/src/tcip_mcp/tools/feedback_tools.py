@@ -6,20 +6,27 @@ Each skips the images whose label document marks the named subject finished.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tcip_mcp.pipelines.active_learning import ScorerSpec
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 
+if TYPE_CHECKING:
+    from tcip_mcp.model_registry import VerifiedCheckpoint
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.execution import Preparation, Stated
 
-def _load_or_refuse(checkpoint_path: Path, project: Path):
+
+def _load_or_refuse(
+    checkpoint_path: Path, project: Path
+) -> VerifiedCheckpoint | dict[str, str]:
     """Load the registered checkpoint at ``checkpoint_path``, or answer the load's refusal.
 
-    Returns ``(checkpoint, refusal)``: the verified checkpoint at the established location
-    ``checkpoint_path`` (``model_registry.load_registered_checkpoint``) and ``None``, or ``None``
-    and the ``{"error": ...}`` of each refusal that load raises: no file at the location, a
-    checkpoint ``project``'s registry names no entry for, or a project record that will not read.
+    Returns the verified checkpoint at the established location ``checkpoint_path``
+    (``model_registry.load_registered_checkpoint``), or the ``{"error": ...}`` of each refusal
+    that load raises: no file at the location, a checkpoint ``project``'s registry names no entry
+    for, or a project record that will not read.
     """
     from tcip_mcp.model_registry import (
         CheckpointNotFoundError,
@@ -27,15 +34,13 @@ def _load_or_refuse(checkpoint_path: Path, project: Path):
     )
 
     try:
-        return load_registered_checkpoint(
-            checkpoint_path, project=project
-        ), None
+        return load_registered_checkpoint(checkpoint_path, project=project)
     except (CheckpointNotFoundError, ValueError) as exc:
-        return None, {"error": str(exc)}
+        return {"error": str(exc)}
 
 
 def _reference_stems(
-    checkpoint, images_dir: Path, project: Path
+    checkpoint: VerifiedCheckpoint, images_dir: Path, project: Path
 ) -> set[str] | None:
     """Return the reference-side member stems of ``checkpoint``'s run that sit in ``images_dir``.
 
@@ -49,38 +54,38 @@ def _reference_stems(
         return None
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
-    from tcip_mcp.pipelines.data.split_construction import partition_samples
     from tcip_mcp.pipelines.data.splits import same_directory
     from tcip_mcp.pipelines.image_utils import stem_of
 
     partition = run_resolution(
         checkpoint.experiment_id, project=project
     ).partition
-    if partition["selection"] is None:
+    if partition.selection is None:
         return None
     return {
         stem_of(s.source)
-        for s in partition_samples(partition)
+        for s in partition.samples
         if s.side in REFERENCE_SIDES
         and same_directory(Path(s.source).parent, images_dir)
     }
 
 
-def _prepare_queue_sources(images_dir: str, subject: str | None):
+def _prepare_queue_sources(
+    images_dir: str, subject: str | None
+) -> tuple[list[Path | BandGroupRef], int] | dict[str, str]:
     """List the candidate images of the absolute ``images_dir``.
 
     The steps, in order: images directory, logical image enumeration, then, with a ``subject``
     named, dropping each image whose label document marks it finished
     (:meth:`~tcip_annotation.json_io.LabelDocument.finished`).
 
-    Returns ``(sources, reviewed_skipped, error)``; ``error`` is a ready ``{"error": ...}`` dict
-    and the other two are ``None``/``0`` when it is set. With a ``subject`` named, an image
-    outside a dataset's image tree, which cannot name its label document, and a label document
-    that will not read are that error.
+    Returns ``(sources, reviewed_skipped)``, or the ready ``{"error": ...}`` dict of a step that
+    refused. With a ``subject`` named, an image outside a dataset's image tree, which cannot name
+    its label document, and a label document that will not read are that error.
     """
     images_path = Path(images_dir)
     if not images_path.is_dir():
-        return None, 0, {"error": f"Images dir not found: {images_dir}"}
+        return {"error": f"Images dir not found: {images_dir}"}
     from tcip_mcp.pipelines.image_utils import (
         list_logical_images,
         source_path_of,
@@ -88,12 +93,12 @@ def _prepare_queue_sources(images_dir: str, subject: str | None):
 
     logical = list_logical_images(images_path)
     if not logical:
-        return None, 0, {"error": "No images found in images_dir"}
+        return {"error": "No images found in images_dir"}
     # Real sources, one per logical image: a band-grouped capture's sibling bands fold into one
     # entry.
     sources = [logical[stem] for stem in sorted(logical)]
     if subject is None:
-        return sources, 0, None
+        return sources, 0
 
     from tcip_annotation.json_io import (
         UnreadableLabelDocumentError,
@@ -110,24 +115,24 @@ def _prepare_queue_sources(images_dir: str, subject: str | None):
             ].finished(subject)
         ]
     except (ValueError, UnreadableLabelDocumentError) as exc:
-        return None, 0, {"error": str(exc)}
-    return kept, len(sources) - len(kept), None
+        return {"error": str(exc)}
+    return kept, len(sources) - len(kept)
 
 
-def _untiled(checkpoint, stated: Any) -> tuple[Any, dict | None]:
+def _untiled(
+    checkpoint: VerifiedCheckpoint, stated: Stated
+) -> Preparation | dict[str, str]:
     """Ready ``checkpoint`` untiled under ``stated``.
 
-    Returns ``(preparation, refusal)``: the preparation
-    (:func:`~tcip_mcp.pipelines.execution.prepare`), or the refusal when torch is not installed.
+    Returns the preparation (:func:`~tcip_mcp.pipelines.execution.prepare`), or the
+    ``{"error": ...}`` refusal when torch is not installed.
     """
     try:
         from tcip_mcp.pipelines.execution import prepare
 
-        return prepare(
-            checkpoint, stated.model_copy(update={"tile": False})
-        ), None
+        return prepare(checkpoint, stated.model_copy(update={"tile": False}))
     except (ImportError, OSError) as e:
-        return None, {"error": f"torch/torchvision unavailable: {e}"}
+        return {"error": f"torch/torchvision unavailable: {e}"}
 
 
 @tool()
@@ -196,14 +201,13 @@ def ranked_review_queue(
     scorer block, the budget and ``rationale``, or the refusal ``{"error": ...}``; ``subject``'s
     finished images are skipped.
     """
-    checkpoint, refusal = _load_or_refuse(checkpoint_path, project)
-    if refusal is not None:
-        return refusal
-    sources, reviewed_skipped, error = _prepare_queue_sources(
-        str(images_dir), subject
-    )
-    if error is not None:
-        return error
+    checkpoint = _load_or_refuse(checkpoint_path, project)
+    if isinstance(checkpoint, dict):
+        return checkpoint
+    queued = _prepare_queue_sources(str(images_dir), subject)
+    if isinstance(queued, dict):
+        return queued
+    sources, reviewed_skipped = queued
     try:
         task = checkpoint.task
     except ValueError as exc:
@@ -226,9 +230,9 @@ def ranked_review_queue(
 
     from tcip_mcp.pipelines.execution import Stated
 
-    prep, refusal = _untiled(checkpoint, Stated())
-    if refusal is not None:
-        return refusal
+    prep = _untiled(checkpoint, Stated())
+    if isinstance(prep, dict):
+        return prep
     from tcip_mcp.pipelines.active_learning.scorer import resolve_scorer
 
     predictor = prep.predictor
@@ -294,16 +298,13 @@ def triage_predictions(
             are skipped; omitted triages every candidate image.
 
     """
-    checkpoint, refusal = _load_or_refuse(
-        located(checkpoint_path, project), project
-    )
-    if refusal is not None:
-        return refusal
-    sources, reviewed_skipped, error = _prepare_queue_sources(
-        str(located(images_dir, project)), subject
-    )
-    if error is not None:
-        return error
+    checkpoint = _load_or_refuse(located(checkpoint_path, project), project)
+    if isinstance(checkpoint, dict):
+        return checkpoint
+    queued = _prepare_queue_sources(str(located(images_dir, project)), subject)
+    if isinstance(queued, dict):
+        return queued
+    sources, reviewed_skipped = queued
 
     from tcip_mcp.pipelines.active_learning.selector import (
         review_queue,
@@ -323,7 +324,7 @@ def triage_predictions(
     from tcip_mcp.pipelines.execution import ExecutionRefusedError, Stated
     from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 
-    prep, refusal = _untiled(
+    prep = _untiled(
         checkpoint,
         Stated(
             conf=low,
@@ -333,8 +334,8 @@ def triage_predictions(
         if checkpoint.task in DETECTOR_TASKS
         else Stated(),
     )
-    if refusal is not None:
-        return refusal
+    if isinstance(prep, dict):
+        return prep
     try:
         predictions = prep.runnable().predict(sources)
     except ExecutionRefusedError as exc:

@@ -1,7 +1,5 @@
 """The model-side contract: the measurement boundary, as a behavioral check.
 
-* ``TCIPModel``: a ``runtime_checkable`` Protocol naming the minimal surface (any ``nn.Module``
-satisfies it). It is a duck-type marker.
 * ``check_model_contract(model, task)``: a behavioral smoke: a train-mode forward yields a finite
 loss with a gradient, and an eval-mode forward yields the documented shape for the task
 (``list[dict]`` per image for detection/instance_seg, a ``dict`` of tensors otherwise).
@@ -12,10 +10,17 @@ CPU) must drive the loss down.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
+from pydantic import JsonValue
+
+from tcip_mcp.pipelines.model_build import ContractDims
 from tcip_store.values import finite_or_none, stored_number
+
+if TYPE_CHECKING:
+    import torch
+
+    from tcip_mcp.pipelines.training.collation import Batch
 
 DETECTOR_TASKS = frozenset({"detection", "instance_seg"})
 """The tasks whose model answers scored boxes and labels per image: the heads a detection cap,
@@ -37,38 +42,81 @@ shaped without the run's own count. A detector labels its one box foreground and
 target is a value, so neither reads one."""
 
 
-@runtime_checkable
-class TCIPModel(Protocol):
-    """Minimal surface a trainable, measurable model exposes (an ``nn.Module`` already does).
+class ContractKeywords(TypedDict, total=False):
+    """The keywords :func:`check_model_contract` takes beside its model and task.
 
-    Train-mode ``forward(images, targets)`` returns a loss dict (or scalar loss); eval-mode
-    ``forward(images)`` returns predictions. This is a marker, not an architecture contract.
+    ``dims`` is the run's resolved dimensions, ``device`` the device it runs on (``"cpu"``
+    unstated) and ``sample_batch`` an ``(images, targets)`` pair from the run's own dataset.
     """
 
-    def forward(self, *args: Any, **kwargs: Any) -> Any:
-        """Return a loss in train mode, predictions in eval mode."""
+    dims: ContractDims | None
+    device: str
+    sample_batch: Batch | None
 
-    def parameters(self, recurse: bool = True) -> Any:
-        """Return the model's parameters."""
 
-    def named_parameters(self, recurse: bool = True) -> Any:
-        """Return ``(name, parameter)`` pairs."""
+class OverfitKeywords(ContractKeywords, total=False):
+    """The keywords :func:`overfit_check` takes beside its model, task, seed and determinism.
 
-    def train(self, mode: bool = True) -> Any:
-        """Set train mode (eval mode for ``mode`` false)."""
+    Those of :class:`ContractKeywords`, and the optimizer ``steps`` (20 unstated) and learning
+    rate ``lr`` (0.01 unstated).
+    """
 
-    def eval(self) -> Any:
-        """Set eval mode."""
+    steps: int
+    lr: float
 
-    def to(self, *args: Any, **kwargs: Any) -> Any:
-        """Move the model to a device or dtype."""
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        """Run :meth:`forward`."""
+class ContractReport(TypedDict):
+    """What :func:`check_model_contract` found.
+
+    ``ok`` is whether no issue was found and ``issues`` each one found; ``train_loss`` the
+    train-mode loss, ``eval_output_type`` the output shape the eval pass was held to,
+    ``not_smokeable`` why nothing could be smoked, and ``gradient_magnitudes`` each parameter's
+    gradient norm; each is ``None`` when its pass did not produce it.
+    """
+
+    ok: bool
+    issues: list[str]
+    train_loss: float | None
+    eval_output_type: str | None
+    not_smokeable: str | None
+    gradient_magnitudes: dict[str, float] | None
+
+
+class OverfitReport(TypedDict):
+    """What :func:`overfit_check` found.
+
+    ``passed`` is whether the loss fell with no ``issue``; ``losses`` each step's loss, and
+    ``initial`` and ``final`` the first and last, ``None`` with no step taken.
+    """
+
+    passed: bool
+    losses: list[float]
+    initial: float | None
+    final: float | None
+    issue: str | None
+
+
+class LaunchContract(TypedDict):
+    """The model contract a launch records on its run.
+
+    ``subject`` names what was checked and ``gating`` whether it gates the launch;
+    ``batch_source`` is the batch that drove it (``"dataset"`` or ``"synthetic"``), ``dims`` a
+    synthetic batch's dimensions (``None`` for a dataset batch), ``issues`` and
+    ``gradient_magnitudes`` the :class:`ContractReport`'s, and ``overfit_check`` the rendered
+    :func:`overfit_check` report (:func:`render_overfit_report`), ``None`` when none ran.
+    """
+
+    subject: str
+    gating: bool
+    batch_source: str | None
+    dims: ContractDims | None
+    issues: list[str]
+    gradient_magnitudes: dict[str, float] | None
+    overfit_check: dict[str, JsonValue] | None
 
 
 def no_batch_reason(
-    task: str, dims: Mapping[str, Any] | None, sample_batch: Any
+    task: str, dims: ContractDims | None, sample_batch: object
 ) -> str | None:
     """Return why this call can smoke nothing, or ``None`` when it can."""
     if sample_batch is not None:
@@ -95,22 +143,14 @@ def no_batch_reason(
     return None
 
 
-def _synth_batch(
-    task: str,
-    *,
-    in_chans: int,
-    img_size: tuple[int, int],
-    device: Any,
-    num_classes: int | None = None,
-    attributes: Any = (),
-):
-    """Synthesize a minimal batch for ``task``.
+def _synth_batch(task: str, dims: ContractDims, device: torch.device) -> Batch:
+    """Synthesize a minimal batch for ``task`` at ``dims``.
 
     The batch is per-sample ``(image, target)`` items shaped like a dataset's ``__getitem__``,
-    collated with ``task_collate``, each image ``img_size``,
-    ``(width, height)``. ``num_classes`` is the run's own count, which only a ``_COUNTED_TASKS``
-    target reads; a detection target carries an ``attributes`` row, each attribute's first value,
-    when the run's ``attributes`` name any, so every head is driven.
+    collated with ``task_collate``, each image ``in_chans`` bands at ``img_size``, ``(width,
+    height)``. ``num_classes`` is the run's own count, which only a ``_COUNTED_TASKS`` target
+    reads; a detection target carries an ``attributes`` row, each attribute's first value, when
+    the run's ``attributes`` name any, so every head is driven.
     """
     import torch
 
@@ -118,7 +158,9 @@ def _synth_batch(
     from tcip_mcp.pipelines.training.collation import task_collate
 
     collate = task_collate(task)
-    width, height = img_size
+    in_chans, (width, height) = dims["in_chans"], dims["img_size"]
+    attributes = dims.get("attributes", ())
+    num_classes = dims.get("num_classes")
 
     if task in DETECTOR_TASKS:
         img = torch.rand(in_chans, height, width, device=device)
@@ -136,7 +178,9 @@ def _synth_batch(
                 ),
             }
         )
-        target: dict[str, Any] = {k: v.to(device) for k, v in tensors.items()}
+        target: dict[str, torch.Tensor | int] = {
+            k: v.to(device) for k, v in tensors.items()
+        }
         target["image_id"] = 0
         if task == "instance_seg":
             mask = torch.zeros(
@@ -188,26 +232,33 @@ def _synth_batch(
 
 
 def _driving_batch(
-    task: str, dims: Mapping[str, Any] | None, sample_batch: Any, device: Any
-) -> tuple[Any, Any]:
+    task: str,
+    dims: ContractDims | None,
+    sample_batch: Batch | None,
+    device: torch.device,
+) -> Batch:
     """Return the ``(images, targets)`` a model is driven with.
 
-    That is ``sample_batch`` when given, else synthesized; a detection task's targets through
-    ``instance_targets``.
+    That is ``sample_batch`` when given, else synthesized at ``dims``, which
+    :func:`no_batch_reason` then admitted; per-image targets through ``instance_targets``.
     """
     from tcip_mcp.pipelines.data.datasets import instance_targets
 
-    images, targets = (
-        sample_batch
-        if sample_batch is not None
-        else _synth_batch(task, device=device, **(dims or {}))
-    )
-    return images, instance_targets(
-        targets
-    ) if task in DETECTOR_TASKS else targets
+    batch = sample_batch
+    if batch is None:
+        assert dims is not None, (
+            "no_batch_reason admits no synthesis without dims"
+        )
+        batch = _synth_batch(task, dims, device)
+    match batch:
+        case (images, list() as targets):
+            return images, instance_targets(targets)
+    return batch
 
 
-def _contains_tensor(value: Any, _depth: int = 0, _max_depth: int = 4) -> bool:
+def _contains_tensor(
+    value: object, _depth: int = 0, _max_depth: int = 4
+) -> bool:
     """Return whether ``value`` is a tensor, or a list/tuple/dict that carries one.
 
     Any depth up to ``_max_depth`` is searched.
@@ -227,9 +278,9 @@ def _contains_tensor(value: Any, _depth: int = 0, _max_depth: int = 4) -> bool:
     return False
 
 
-def _forward_loss(model: Any, images: Any, targets: Any):
+def _forward_loss(model: torch.nn.Module, batch: Batch) -> torch.Tensor:
     """Return a single scalar loss tensor from a train-mode forward (a loss dict summed)."""
-    out = model(images, targets)
+    out = model(*batch)
     if isinstance(out, dict):
         terms = [v for v in out.values() if hasattr(v, "requires_grad")]
         if not terms:
@@ -244,54 +295,49 @@ def _forward_loss(model: Any, images: Any, targets: Any):
 
 
 def check_model_contract(
-    model: TCIPModel,
+    model: torch.nn.Module,
     task: str,
-    *,
-    dims: Mapping[str, Any] | None = None,
-    device: str = "cpu",
-    sample_batch: Any = None,
-) -> dict:
+    **keywords: Unpack[ContractKeywords],
+) -> ContractReport:
     """Check the model's behavior at the measurement boundary.
 
-    Returns a report; a failed train or eval pass is recorded in it, not raised.
+    Returns the :class:`ContractReport`; a failed train or eval pass is recorded in it, not
+    raised. The ``keywords`` are :class:`ContractKeywords`.
 
     ``dims`` is :func:`~tcip_mcp.pipelines.model_build.resolve_contract_dims`' output, stated only
     when a batch is synthesized here; a caller handing over ``sample_batch`` states none. A
     detector whose ``dims`` carry ``attributes`` must also return ``attributes`` per image.
-
-    ``{"ok": bool, "issues": [...], "train_loss": float|None, "eval_output_type": str|None}``.
 
     ``sample_batch`` is an ``(images, targets)`` pair from this run's own dataset, required for a
     task outside ``_SYNTHESIZABLE_TASKS``.
     """
     import torch
 
+    dims = keywords.get("dims")
+    sample_batch = keywords.get("sample_batch")
     issues: list[str] = []
-    report: dict[str, Any] = {
-        "ok": False,
-        "issues": issues,
-        "train_loss": None,
-        "eval_output_type": None,
-        "not_smokeable": None,
-        "gradient_magnitudes": None,
-    }
     # Never invent a batch shape: a green report earned against a guessed one proves nothing, so
     # a caller with no schema or no dimensions is told to smoke a real batch instead.
-    report["not_smokeable"] = no_batch_reason(task, dims, sample_batch)
+    report = ContractReport(
+        ok=False,
+        issues=issues,
+        train_loss=None,
+        eval_output_type=None,
+        not_smokeable=no_batch_reason(task, dims, sample_batch),
+        gradient_magnitudes=None,
+    )
     if report["not_smokeable"] is not None:
         return report
-    dev = torch.device(device)
-    try:
-        model.to(dev)
-    except Exception:  # noqa: BLE001, a model without .to still may be usable on cpu
-        pass
+    dev = torch.device(keywords.get("device", "cpu"))
+    model.to(dev)
 
     # Train pass: finite loss with a gradient.
     try:
         model.train()
-        images, targets = _driving_batch(task, dims, sample_batch, dev)
-        loss = _forward_loss(model, images, targets)
-        if not (hasattr(loss, "requires_grad") and loss.requires_grad):
+        loss = _forward_loss(
+            model, _driving_batch(task, dims, sample_batch, dev)
+        )
+        if not loss.requires_grad:
             issues.append(
                 "train-mode loss does not require grad (no learnable path)"
             )
@@ -303,7 +349,7 @@ def check_model_contract(
         named_grads = [
             (name, p.grad)
             for name, p in model.named_parameters()
-            if getattr(p, "grad", None) is not None
+            if p.grad is not None
         ]
         grads = [g for _, g in named_grads]
         # float64: an L2 norm summed in the gradient's own float32 dtype can overflow to inf even
@@ -371,25 +417,20 @@ def check_model_contract(
 
 
 def overfit_check(
-    model: TCIPModel,
+    model: torch.nn.Module,
     task: str,
     *,
     seed: int,
     deterministic: bool,
-    dims: Mapping[str, Any] | None = None,
-    steps: int = 20,
-    lr: float = 1e-2,
-    device: str = "cpu",
-    sample_batch: Any = None,
-) -> dict:
+    **keywords: Unpack[OverfitKeywords],
+) -> OverfitReport:
     """Drive ``steps`` optimizer updates on one fixed tiny batch; the loss must fall.
 
-    ``dims`` is as for :func:`check_model_contract`. Seeded at the run's own ``seed`` and
-    ``deterministic``, on CPU by default. Returns
-    ``{"passed": bool, "losses": [...], "initial": float|None, "final": float|None,
-    "issue": str|None}``.
-    ``passed`` iff every step completes with no recorded ``issue``, every loss is finite and the
-    final loss is strictly below the initial one.
+    The ``keywords`` are :class:`OverfitKeywords`; ``dims`` is as for
+    :func:`check_model_contract`. Seeded at the run's own ``seed`` and
+    ``deterministic``, on CPU by default. Returns the :class:`OverfitReport`, ``passed`` iff
+    every step completes with no recorded ``issue``, every loss is finite and the final loss is
+    strictly below the initial one.
 
     ``sample_batch`` is an ``(images, targets)`` pair from your own dataset, required for a task
     outside ``_SYNTHESIZABLE_TASKS``. Without it such a task returns ``passed: False`` with the
@@ -399,6 +440,8 @@ def overfit_check(
 
     from tcip_mcp.pipelines.training.generic_trainer import set_seed
 
+    dims = keywords.get("dims")
+    sample_batch = keywords.get("sample_batch")
     reason = no_batch_reason(task, dims, sample_batch)
     if reason is not None:
         return {
@@ -409,14 +452,11 @@ def overfit_check(
             "issue": reason,
         }
     set_seed(seed, deterministic=deterministic)
-    dev = torch.device(device)
-    try:
-        model.to(dev)
-    except Exception:  # noqa: BLE001
-        pass
+    dev = torch.device(keywords.get("device", "cpu"))
+    model.to(dev)
 
     try:
-        images, targets = _driving_batch(task, dims, sample_batch, dev)
+        batch = _driving_batch(task, dims, sample_batch, dev)
     except ValueError as exc:  # report, never raise: this returns a dict
         return {
             "passed": False,
@@ -431,12 +471,13 @@ def overfit_check(
         # Built inside the try: a model with no trainable parameter (every parameter frozen, a
         # legitimate stage-0 configuration) makes Adam raise, and that belongs in the report.
         optimizer = torch.optim.Adam(
-            (p for p in model.parameters() if p.requires_grad), lr=lr
+            (p for p in model.parameters() if p.requires_grad),
+            lr=keywords.get("lr", 1e-2),
         )
         model.train()
-        for _ in range(max(1, steps)):
+        for _ in range(max(1, keywords.get("steps", 20))):
             optimizer.zero_grad()
-            loss = _forward_loss(model, images, targets)
+            loss = _forward_loss(model, batch)
             loss.backward()
             optimizer.step()
             losses.append(float(loss.detach()))
@@ -461,7 +502,7 @@ def overfit_check(
     }
 
 
-def render_overfit_report(report: dict) -> dict:
+def render_overfit_report(report: OverfitReport) -> dict[str, JsonValue]:
     """Render an :func:`overfit_check` report in the form a record can carry.
 
     A diverging model's raw report may hold ``nan`` or ``inf``, values the canonical JSON codec
@@ -470,7 +511,7 @@ def render_overfit_report(report: dict) -> dict:
     non-finite state; ``losses`` is a positional list with no sibling slot per entry, so each goes
     through :func:`tcip_store.values.finite_or_none`, which drops the state and keeps the null.
     """
-    rendered: dict[str, Any] = {
+    rendered: dict[str, JsonValue] = {
         "passed": report["passed"],
         "issue": report["issue"],
     }

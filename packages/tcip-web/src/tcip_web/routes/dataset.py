@@ -7,6 +7,8 @@ the position is the current image's within it.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -48,7 +50,7 @@ def _label_problem(capture: str, unreadable: list[str]) -> str | None:
 
 
 def _subjects_by_date(
-    root, dates: list[str]
+    root: Path, dates: list[str]
 ) -> tuple[dict[str, list[str]], str | None]:
     """Return each date's labeled subjects and the first label problem encountered.
 

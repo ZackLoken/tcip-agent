@@ -23,7 +23,7 @@ from tcip_annotation.mask_contours import mask_to_polygon_rings
 from tcip_annotation.state import Annotation
 
 
-def is_coco_id(value: Any) -> bool:
+def is_coco_id(value: object) -> bool:
     """Return whether ``value`` is a COCO identity: an integer, never a float, string or bool."""
     return isinstance(value, int) and not isinstance(value, bool)
 

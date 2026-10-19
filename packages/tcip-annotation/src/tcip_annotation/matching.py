@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from shapely.geometry import (
@@ -31,40 +31,35 @@ from tcip_annotation.state import (
     prediction_score,
 )
 
+if TYPE_CHECKING:
+    from numpy.typing import ArrayLike, NDArray
+    from shapely.geometry.base import BaseGeometry
+
+    from tcip_annotation.state import Ring, Rings
+
 REVIEW_CONF_FLOOR = 0.25
 """The confidence below which a prediction is neither matched nor drawn when a visualization
 states none: a viewing filter a person moves, never an execution record's operating point."""
 
-Rings = list[list[tuple[float, float]]]
 
-
-def _boxes(boxes):
-    """Return ``boxes`` as an ``m x 4`` array.
-
-    An array or tensor is kept as given (so a tensor keeps its autograd), anything else becomes
-    float64.
-    """
-    if getattr(boxes, "ndim", None) == 2:
-        return boxes
+def _boxes(boxes: ArrayLike) -> NDArray[np.float64]:
+    """Return ``boxes`` as an ``m x 4`` float64 array."""
     return np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
 
 
-def xywh_corners(boxes) -> np.ndarray:
+def xywh_corners(boxes: ArrayLike) -> NDArray[np.float64]:
     """Return the ``[x, y, w, h]`` ``boxes`` as an ``m x 4`` float64 array of corner boxes."""
-    b = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
+    b = _boxes(boxes)
     return np.concatenate([b[:, :2], b[:, :2] + b[:, 2:]], axis=1)
 
 
-def box_areas(boxes):
-    """Return the area of each corner box of ``boxes``.
-
-    ``boxes`` is ``m x 4``, an array or a tensor, in which the areas are answered.
-    """
+def box_areas(boxes: ArrayLike) -> NDArray[np.float64]:
+    """Return the area of each corner box of the ``m x 4`` ``boxes``."""
     b = _boxes(boxes)
     return (b[:, 2] - b[:, 0]) * (b[:, 3] - b[:, 1])
 
 
-def box_sizes(boxes) -> np.ndarray:
+def box_sizes(boxes: ArrayLike) -> NDArray[np.float64]:
     """Return the characteristic size ``sqrt(w * h)`` of each corner box of ``boxes``.
 
     A negative extent counts as zero.
@@ -75,21 +70,22 @@ def box_sizes(boxes) -> np.ndarray:
     )
 
 
-def box_centers(boxes) -> np.ndarray:
+def box_centers(boxes: ArrayLike) -> NDArray[np.float64]:
     """Return the center of each corner box of ``boxes`` (``m x 4``), as an ``m x 2`` array."""
     b = _boxes(boxes)
     return (b[:, :2] + b[:, 2:]) / 2.0
 
 
-def iou_matrix(a, b, *, over: str = "union") -> np.ndarray:
+def iou_matrix(
+    a: ArrayLike, b: ArrayLike, *, over: str = "union"
+) -> NDArray[np.float64]:
     """Return the pairwise intersection over union of the corner boxes ``a`` and ``b``.
 
     ``a`` is ``m x 4`` and ``b`` is ``k x 4``; with ``over="smaller"`` the denominator is the
     smaller box. The result is an ``m x k`` float64 array; a pair whose denominator has no area is
     ``0``.
     """
-    a = np.asarray(a, dtype=np.float64).reshape(-1, 4)
-    b = np.asarray(b, dtype=np.float64).reshape(-1, 4)
+    a, b = _boxes(a), _boxes(b)
     iw = np.maximum(
         0.0,
         np.minimum(a[:, 2:3], b[None, :, 2])
@@ -112,7 +108,7 @@ def iou_matrix(a, b, *, over: str = "union") -> np.ndarray:
     return iou
 
 
-def shapely_geometry(rings: Rings):
+def shapely_geometry(rings: Rings) -> BaseGeometry:
     """Return one or more closed rings as one valid Shapely geometry.
 
     A polygon for one ring, a multipolygon for several, every ring contributing, repaired by
@@ -126,7 +122,9 @@ def shapely_geometry(rings: Rings):
     return geom if geom.is_valid else make_valid(geom)
 
 
-def rings_iou_matrix(a: Sequence[Rings], b: Sequence[Rings]) -> np.ndarray:
+def rings_iou_matrix(
+    a: Sequence[Rings], b: Sequence[Rings]
+) -> NDArray[np.float64]:
     """Return the pairwise IoU of the regions ``a`` against ``b``.
 
     Each region is a list of rings (:func:`shapely_geometry`). The result is a
@@ -144,7 +142,7 @@ def rings_iou_matrix(a: Sequence[Rings], b: Sequence[Rings]) -> np.ndarray:
     return out
 
 
-def _corners(records: list[dict]) -> np.ndarray:
+def _corners(records: list[dict]) -> NDArray[np.float64]:
     return xywh_corners([r["bbox"] for r in records])
 
 
@@ -441,7 +439,7 @@ def pair_proposals(
     )
 
 
-def box_ring(bbox: BBox) -> list[tuple[float, float]]:
+def box_ring(bbox: BBox) -> Ring:
     """Return ``bbox``'s four corners as one closed ring, in a fixed order.
 
     The order is x1,y1 -> x2,y1 -> x2,y2 -> x1,y2.

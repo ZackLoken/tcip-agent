@@ -527,7 +527,7 @@ def run_capturing_outcome(
     outcome_json: Path,
     timeout: int,
     per_test_timeout: float | None = None,
-):
+) -> tuple[subprocess.CompletedProcess[str], dict | None]:
     """Run pytest in `tree` and return its process plus what it observed.
 
     The observation is None if it reported none.

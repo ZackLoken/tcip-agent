@@ -13,7 +13,9 @@ from fractions import Fraction
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.raster_source import Rect
+    import numpy as np
+
+    from tcip_mcp.pipelines.raster_source import RasterSource, ReadSpec, Rect
 
 VIZ_ARTIFACT_MAX_EDGE = 1024
 
@@ -116,14 +118,20 @@ def plan_read(
     return ReadPlan(level, width, height, bool(fitting))
 
 
-def planned_read(raster, rect: Rect, plan: ReadPlan):
+def planned_read(
+    raster: RasterSource, rect: Rect, plan: ReadPlan
+) -> tuple[np.ndarray, ReadSpec]:
     """Read ``rect`` of ``raster`` at the output size and off the level ``plan`` names.
 
-    The read is ``raster.read_region``, native when the output is the rect's own size.
+    The read is ``raster.read_region``, native when the output is the rect's own size; a
+    :class:`~tcip_mcp.pipelines.raster_source.GdalSource`, the one reader serving overview
+    levels, reads off the plan's level.
     """
+    from tcip_mcp.pipelines.raster_source import GdalSource
+
     if (plan.width, plan.height) == (rect.width, rect.height):
         return raster.read_region(rect)
-    if plan.level:
+    if isinstance(raster, GdalSource):
         return raster.read_region(
             rect, target_size=(plan.width, plan.height), level=plan.level
         )

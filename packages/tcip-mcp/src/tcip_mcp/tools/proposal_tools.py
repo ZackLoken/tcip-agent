@@ -8,22 +8,31 @@ refusing one already published. It never writes ground truth.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    JsonValue,
+    TypeAdapter,
+    ValidationError,
+)
 
 import tcip_store as ts
 from tcip_annotation import Annotation, BBox, Polygon, bbox_of
 from tcip_annotation.grid import grid_to_rect
 from tcip_annotation.json_io import stored_box_extent_ok
+from tcip_annotation.state import Rings
 from tcip_annotation.viz import render_candidates, render_detections
 from tcip_mcp.audit import now_iso, record_event_or_raise
 from tcip_mcp.pipelines.image_utils import (
     BandGroupIncompleteError,
     resolve_image_path,
 )
-from tcip_mcp.pipelines.raster_source import SourceHeader
+from tcip_mcp.pipelines.raster_source import RasterIdentity, SourceHeader
 from tcip_mcp.project_paths import viz_output_path
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
@@ -43,6 +52,37 @@ class _StatedSubject(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     subject: str
+
+
+class ProposalCandidate(BaseModel):
+    """One engine candidate in the neutral schema, coordinates in the source image's frame.
+
+    ``rings`` is a :class:`~tcip_annotation.Polygon`'s, refused as that polygon refuses it. The
+    engine's other keys (its ``engine_meta`` signals) are kept as given, each a JSON value.
+    """
+
+    model_config = ConfigDict(extra="allow")
+    __pydantic_extra__: dict[str, JsonValue]
+
+    candidate_id: int
+    bbox: tuple[float, float, float, float]
+    area: float
+    rings: Annotated[Rings, AfterValidator(lambda rings: Polygon(rings).rings)]
+    score: float
+
+
+class ProposalStaging(BaseModel):
+    """The candidates the latest proposal run produced for one dataset image.
+
+    It names the ``engine`` and the content identity of the pixels it ran on;
+    :func:`proposal_staging_key` addresses it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    engine: str
+    candidates: list[ProposalCandidate]
+    image_identity: RasterIdentity
 
 
 def proposal_staging_key(
@@ -102,24 +142,30 @@ def _write_region_crop(pixels: np.ndarray) -> Path:
 
 
 def _offset_candidates(
-    candidates: list[dict], origin: tuple[float, float]
-) -> list[dict]:
+    candidates: list[ProposalCandidate], origin: tuple[float, float]
+) -> list[ProposalCandidate]:
     """Translate candidates from a region crop's own pixels into the source image's full frame.
 
     Each candidate's box and rings are shifted into the source image's native coordinates by the
     crop's own origin.
     """
     ox, oy = origin
-    shifted = []
-    for c in candidates:
-        c = dict(c)
-        x1, y1, x2, y2 = c["bbox"]
-        c["bbox"] = [x1 + ox, y1 + oy, x2 + ox, y2 + oy]
-        c["rings"] = [
-            [(x + ox, y + oy) for x, y in ring] for ring in c["rings"]
-        ]
-        shifted.append(c)
-    return shifted
+    return [
+        c.model_copy(
+            update={
+                "bbox": (
+                    c.bbox[0] + ox,
+                    c.bbox[1] + oy,
+                    c.bbox[2] + ox,
+                    c.bbox[3] + oy,
+                ),
+                "rings": [
+                    [(x + ox, y + oy) for x, y in ring] for ring in c.rings
+                ],
+            }
+        )
+        for c in candidates
+    ]
 
 
 @tool()
@@ -202,8 +248,7 @@ def propose_annotations(
         # A region is cropped and offset entirely here, before the engine ever sees an image path.
         propose_path = image_path
         crop_tmp: Path | None = None
-        origin = (0.0, 0.0)
-        region_info: dict | None = None
+        origin: tuple[float, float] | None = None
         if grid_cells is not None:
             if not grid_cells:
                 return {
@@ -236,16 +281,10 @@ def propose_annotations(
             crop_tmp = _write_region_crop(pixels)
             propose_path = str(crop_tmp)
             origin = (float(rect.x0), float(rect.y0))
-            region_info = {
-                "grid_cells": list(grid_cells),
-                "tile_size": tile_size,
-                "overlap": overlap,
-                "rect": [rect.x0, rect.y0, rect.x1, rect.y1],
-            }
 
         try:
             try:
-                candidates = proposer.propose(
+                proposed = proposer.propose(
                     propose_path, **(engine_params or {})
                 )
             except ImportError as e:
@@ -256,7 +295,18 @@ def propose_annotations(
             if crop_tmp is not None:
                 crop_tmp.unlink(missing_ok=True)
 
-        if region_info is not None:
+        # An engine's own candidates are refused here, where they arrive, when unstorable, no
+        # polygon or stating no confidence of their own.
+        try:
+            candidates = TypeAdapter(list[ProposalCandidate]).validate_python(
+                proposed
+            )
+        except ValidationError as exc:
+            return {
+                "error": f"Engine {engine!r} proposed a candidate this platform cannot "
+                f"hold: {exc}"
+            }
+        if origin is not None:
             candidates = _offset_candidates(candidates, origin)
 
         if not candidates:
@@ -281,34 +331,15 @@ def propose_annotations(
                 "candidates": [],
             }
 
-        # An engine's own candidates are refused here, where they arrive, when unstorable, no
-        # polygon or stating no confidence of their own.
-        try:
-            ts.check_json_value(candidates, path="candidates")
-            for candidate in candidates:
-                Polygon(rings=candidate["rings"])
-                candidate["score"] = float(candidate["score"])
-        except (KeyError, TypeError, ValueError) as exc:
-            return {
-                "error": f"Engine {engine!r} proposed a candidate this platform cannot "
-                f"hold: {exc}"
-            }
-
         from tcip_mcp.tools.vision_tools import _read_for_display
 
         read = _read_for_display(raster)
         out = render_candidates(
             read.pixels,
-            candidates,
+            [c.model_dump() for c in candidates],
             native_size=read.native_size,
             output_path=viz_output_path(project, "candidates"),
         )
-
-        # The envelope records the engine so stage_proposals's assignments regime stamps the
-        # right producer.
-        envelope: dict = {"engine": engine, "candidates": candidates}
-        if region_info is not None:
-            envelope["region"] = region_info
 
         try:
             address = _staging_key_for(image_path)
@@ -316,14 +347,18 @@ def propose_annotations(
             staged = False
             stage_note = f" Not staged: {exc}"
         else:
-            import dataclasses
-
             from tcip_mcp.pipelines.raster_source import content_identity
 
-            envelope["image_identity"] = dataclasses.asdict(
-                content_identity(raster)
+            # The record names the engine so stage_proposals's assignments regime stamps the
+            # right producer.
+            ts.replace(
+                address,
+                ProposalStaging(
+                    engine=engine,
+                    candidates=candidates,
+                    image_identity=content_identity(raster),
+                ).model_dump(mode="json"),
             )
-            ts.replace(address, envelope)
             record_event_or_raise(
                 "propose_annotations",
                 {"image_path": image_path, "staged": len(candidates)},
@@ -333,7 +368,7 @@ def propose_annotations(
             staged = True
             stage_note = ""
 
-    region_note = f" (region {grid_cells})" if region_info is not None else ""
+    region_note = f" (region {grid_cells})" if origin is not None else ""
     return {
         "image_path": out,
         "engine": engine,
@@ -344,10 +379,10 @@ def propose_annotations(
         "staged": staged,
         "candidates": [
             {
-                "id": c["candidate_id"],
-                "area": c["area"],
-                "score": round(c["score"], 3),
-                "bbox": [round(v, 1) for v in c["bbox"]],
+                "id": c.candidate_id,
+                "area": c.area,
+                "score": round(c.score, 3),
+                "bbox": [round(v, 1) for v in c.bbox],
             }
             for c in candidates
         ],
@@ -372,11 +407,12 @@ def _stage_assignments_regime(
         return {"error": str(exc)}
 
     # Load cached proposals from the same record propose_annotations staged them in.
-    envelope = ts.read(address, default=None)
-    if envelope is None:
+    stored = ts.read(address, default=None)
+    if stored is None:
         return {
             "error": f"No proposals found for {img.stem}. Run propose_annotations first."
         }
+    staging = ProposalStaging.model_validate(stored)
 
     from tcip_mcp.pipelines.raster_source import open_as_recorded
     from tcip_mcp.tools.vision_tools import (
@@ -387,7 +423,7 @@ def _stage_assignments_regime(
     )
 
     # One reader, opened at the count the identity recorded, verifies the content and renders it.
-    identity = envelope["image_identity"]
+    identity = staging.image_identity
     try:
         raster, fresh = open_as_recorded(identity, source)
         with raster:
@@ -405,10 +441,8 @@ def _stage_assignments_regime(
             f"proposals: {exc}"
         }
 
-    engine = envelope["engine"]
-    candidates = envelope["candidates"]
-    cand_map = {c["candidate_id"]: c for c in candidates}
-    w, h = int(identity["width"]), int(identity["height"])
+    engine = staging.engine
+    cand_map = {c.candidate_id: c for c in staging.candidates}
 
     # Build name-based predictions (created_by=<engine>, score = the proposal score); each keeps
     # every ring, so an occlusion-split object stays split rather than its largest fragment.
@@ -420,15 +454,12 @@ def _stage_assignments_regime(
         cand = cand_map.get(assign["candidate_id"])
         if cand is None:
             continue
-        rings = [
-            [(float(x), float(y)) for x, y in ring] for ring in cand["rings"]
-        ]
         try:
             proposals.append(
                 Annotation(
                     subject=_StatedSubject.model_validate(assign).subject,
-                    geometry=Polygon(rings=rings),
-                    score=cand["score"],
+                    geometry=Polygon(rings=cand.rings),
+                    score=cand.score,
                     created_by=engine,
                     created_at=staged_at,
                 )
@@ -446,8 +477,8 @@ def _stage_assignments_regime(
             engine,
             img,
             annotations=proposals,
-            img_w=w,
-            img_h=h,
+            img_w=identity.width,
+            img_h=identity.height,
         )
     except ValueError as exc:
         return {"error": str(exc)}
@@ -494,7 +525,7 @@ def _stage_document(
     (:class:`~tcip_mcp.buckets.BucketExistsError`).
     """
     from tcip_annotation import json_io
-    from tcip_mcp.buckets import Document, publish
+    from tcip_mcp.buckets import Document, Proposed, publish
     from tcip_mcp.pipelines.data.selection import ClassScope
 
     if not annotations:
@@ -507,7 +538,7 @@ def _stage_document(
         Path(address.root),
         name,
         [Document(str(image), data)],
-        producer={"proposed_by": producer},
+        producer=Proposed(proposed_by=producer),
         scope=ClassScope(),
         execution=None,
         raster_path=None,
@@ -539,7 +570,7 @@ def _stage_explicit_regime(
             f"got {model_name!r}"
         }
 
-    def _unnormalized(vals) -> bool:
+    def _unnormalized(vals: Iterable[float]) -> bool:
         return any(v < -0.01 or v > 1.5 for v in vals)
 
     norm_boxes: list[tuple[Any, float, float, float, float, float]] = []

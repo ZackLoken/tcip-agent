@@ -16,7 +16,10 @@ from pathlib import Path
 
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.postprocessing import phenology
-from tcip_mcp.pipelines.postprocessing.plant_mapping import StatedRadius
+from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+    PlantRegistry,
+    StatedRadius,
+)
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 
@@ -25,7 +28,7 @@ from tcip_mcp.server import tool
 @audited
 def register_plant_registry(
     project: Path, name: str, csv_paths: list[str], *, crop: str, site: str
-) -> dict:
+) -> PlantRegistry | dict[str, str]:
     """Register a plant-locations CSV set under a name in this project.
 
     Reads every path in ``csv_paths`` through ``read_plant_csvs``, one file at a time, and refuses

@@ -9,13 +9,20 @@ one location (the source path, and the rect when a sample is a region of a large
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict, get_args
 
-from pydantic import ConfigDict, TypeAdapter
+from pydantic import (
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    TypeAdapter,
+)
 
 import tcip_store
+from tcip_annotation.text import Text
 from tcip_mcp.registry_paths import (
     PathFields,
     recorded_paths,
@@ -26,9 +33,13 @@ from tcip_mcp.subject_registry import Attribute, named
 from tcip_store import Key, encode_record
 
 if TYPE_CHECKING:
+    from pydantic import JsonValue
+
     from tcip_mcp.traits import PositiveState
 
-SIDES = ("train", "val", "calibration", "holdout")
+Side = Literal["train", "val", "calibration", "holdout"]
+
+SIDES: tuple[Side, ...] = get_args(Side)
 """The sides a draw assigns. ``train`` and ``val`` build the run's two loaders; ``calibration`` and
 ``holdout`` build neither and are the reference an assessment fits its operating point on and
 checks it against, held out from both training and selection."""
@@ -69,6 +80,13 @@ def shape_of(ground_truth: Key | str, row_key: str | None) -> str:
     return MASK
 
 
+_OMITTED_WHEN_NONE = Field(exclude_if=lambda value: value is None)
+"""An optional field of a stored sample, written only when it holds a value."""
+
+_TRANSIENT = Field(exclude=True)
+"""A field of a sample this act holds and no record carries."""
+
+
 @dataclass(frozen=True)
 class Sample:
     """One sample of a selection.
@@ -96,17 +114,25 @@ class Sample:
     or compared.
     """
 
-    member: str
-    source: str
-    ground_truth: Key | str
-    group: str
-    side: str
-    rect: tuple[int, int, int, int] | None = None
-    row_key: str | None = None
-    ground_truth_digest: str | None = None
-    read: Any = field(default=None, compare=False, repr=False)
-    stored: Any = field(default=None, compare=False, repr=False)
-    image: Any = field(default=None, compare=False, repr=False)
+    member: Text
+    source: Text
+    ground_truth: GroundTruth
+    group: Text
+    side: Side
+    rect: Annotated[tuple[int, int, int, int] | None, _OMITTED_WHEN_NONE] = (
+        None
+    )
+    row_key: Annotated[str | None, _OMITTED_WHEN_NONE] = None
+    ground_truth_digest: Annotated[str | None, _OMITTED_WHEN_NONE] = None
+    read: Annotated[Any, _TRANSIENT] = field(
+        default=None, compare=False, repr=False
+    )
+    stored: Annotated[Any, _TRANSIENT] = field(
+        default=None, compare=False, repr=False
+    )
+    image: Annotated[Any, _TRANSIENT] = field(
+        default=None, compare=False, repr=False
+    )
 
     @property
     def location(self) -> str:
@@ -157,9 +183,7 @@ class ClassScope:
         """
         stated = record.get("scope")
         return cls.recorded(
-            None
-            if stated is None
-            else TypeAdapter(cls).validate_python(stated)
+            None if stated is None else _SCOPE.validate_python(stated)
         )
 
     @staticmethod
@@ -182,14 +206,11 @@ class ClassScope:
         That is its attribute's position among the declared attributes and its value's among
         that attribute's values. ``None`` for no state, a space naming no subject, or one whose
         attributes do not list ``state``; a subject's space whose attributes were never read
-        refuses (:meth:`admitted_for`).
+        refuses (:meth:`document_attributes`).
         """
         if state is None or self.subject is None:
             return None
-        attributes = cast(
-            tuple,
-            self.admitted_for(DOCUMENT, f"class space {self}").attributes,
-        )
+        attributes = self.document_attributes(f"class space {self}").attributes
         found = named(attributes, state.attribute)
         if found is None or state.value not in found.values:
             return None
@@ -208,18 +229,44 @@ class ClassScope:
                 "carries its own classes and reads no subject or attributes. State the empty "
                 "scope for it."
             )
-        if shape == DOCUMENT and self.subject is None:
+        if shape == DOCUMENT:
+            self.document_attributes(source)
+        return self
+
+    def document_attributes(self, source: str) -> DocumentScope:
+        """Return the subject and attributes per-image label documents are read under here.
+
+        Refused by ``source`` (``ValueError``) when the space names no subject or records no
+        attributes.
+        """
+        if self.subject is None:
             raise ValueError(
                 f"{source} records no subject (data.scope.subject), so nothing names the class "
                 "whose records of a per-image label document it reads. State the subject the run "
                 "or draw is scoped by."
             )
-        if shape == DOCUMENT and self.attributes is None:
+        if self.attributes is None:
             raise ValueError(
                 f"{source} records no attributes: per-image label documents are read under every "
                 "attribute the registry declares for their subject, which their admission reads."
             )
-        return self
+        return DocumentScope(self.subject, self.attributes)
+
+
+@dataclass(frozen=True)
+class DocumentScope:
+    """A class space per-image label documents are read under.
+
+    It is :meth:`ClassScope.document_attributes`' answer: ``subject`` is the object class their
+    records are read for and ``attributes`` every attribute the registry declares for it, in
+    declared order, empty for a subject that declares none.
+    """
+
+    subject: str
+    attributes: tuple[Attribute, ...]
+
+
+_SCOPE = TypeAdapter(ClassScope)
 
 
 @dataclass(frozen=True)
@@ -366,7 +413,15 @@ SELECTION_PATHS: PathFields = within(("samples", "[]"), SAMPLE_PATHS)
 """The fields of a selection document that name a path."""
 
 
-def ground_truth_record(ground_truth: Key | str) -> str | dict[str, str]:
+class StoredLabelKey(TypedDict):
+    """A label document's key as a record stores it."""
+
+    root: str
+    capture: str
+    stem: str
+
+
+def ground_truth_record(ground_truth: Key | str) -> StoredLabelKey | str:
     """Return how a record stores one sample's ground truth.
 
     A label document's key is stored as its ``root``, ``capture`` and ``stem``, a path as itself.
@@ -377,147 +432,71 @@ def ground_truth_record(ground_truth: Key | str) -> str | dict[str, str]:
     return ground_truth
 
 
-def ground_truth_of(stored: Any) -> Key | str:
+def ground_truth_of(stored: StoredLabelKey | str) -> Key | str:
     """Read back a ground truth :func:`ground_truth_record` stored."""
     from tcip_mcp.dataset_layout import label_key
 
-    if isinstance(stored, dict):
-        return label_key(stored["root"], stored["capture"], stored["stem"])
-    return str(stored)
+    if isinstance(stored, str):
+        return stored
+    return label_key(stored["root"], stored["capture"], stored["stem"])
 
 
-def sample_document(sample: Sample) -> dict[str, Any]:
-    """Return the JSON shape one sample is held in."""
-    doc: dict[str, Any] = {
-        "member": sample.member,
-        "source": sample.source,
-        "ground_truth": ground_truth_record(sample.ground_truth),
-        "group": sample.group,
-        "side": sample.side,
-    }
-    if sample.rect is not None:
-        doc["rect"] = list(sample.rect)
-    if sample.row_key is not None:
-        doc["row_key"] = sample.row_key
-    if sample.ground_truth_digest is not None:
-        doc["ground_truth_digest"] = sample.ground_truth_digest
-    return doc
+_STORED_GROUND_TRUTH: TypeAdapter[StoredLabelKey | str] = TypeAdapter(
+    StoredLabelKey | str
+)
 
 
-def selection_document(selection: Selection) -> dict[str, Any]:
-    """Return the JSON shape a selection is held in."""
-    return {
-        "samples": [sample_document(s) for s in selection.samples],
-        "scope": asdict(selection.scope),
-        "seed": selection.seed,
-        "group_by": selection.group_by,
-        "ratios": selection.ratios,
-        "stratify_foreground": selection.stratify_foreground,
-        "rationale": selection.rationale,
-        "dataset_fingerprint": selection.dataset_fingerprint,
-    }
+def _decoded_ground_truth(stored: object) -> Key | str:
+    """Return the ground truth a record stores, validated as :class:`StoredLabelKey` or a path."""
+    return ground_truth_of(_STORED_GROUND_TRUTH.validate_python(stored))
 
 
-def read_sample(raw: Any, position: int, where: str) -> Sample:
-    """Read one sample document back as a :class:`Sample`.
-
-    Refuses by name (naming ``position`` in the record at ``where``) a non-mapping, a sample
-    missing ``member``/``source``/``ground_truth``/``group``/``side``, a side outside
-    :data:`SIDES`, and a malformed ``rect``.
-    """
-    if not isinstance(raw, dict):
-        raise ValueError(
-            f"sample {position} of the record at {where} is a {type(raw).__name__}, not a mapping."
-        )
-    missing = [
-        k
-        for k in ("member", "source", "ground_truth", "group", "side")
-        if not raw.get(k)
-    ]
-    if missing:
-        raise ValueError(
-            f"sample {position} of the record at {where} carries no {missing}: every sample names "
-            "its own member, source, ground truth, group key and side."
-        )
-    side = str(raw["side"])
-    if side not in SIDES:
-        raise ValueError(
-            f"sample {position} of the record at {where} is on side {side!r}, which is none of "
-            f"{list(SIDES)}."
-        )
-    rect_raw = raw.get("rect")
-    rect: tuple[int, int, int, int] | None = None
-    if rect_raw is not None:
-        if not isinstance(rect_raw, (list, tuple)) or len(rect_raw) != 4:
-            raise ValueError(
-                f"sample {position} of the record at {where} carries rect {rect_raw!r}, not a "
-                "half-open pixel rect (x0, y0, x1, y1)."
-            )
-        x0, y0, x1, y1 = (int(v) for v in rect_raw)
-        rect = (x0, y0, x1, y1)
-    row_key = raw.get("row_key")
-    return Sample(
-        member=str(raw["member"]),
-        source=str(raw["source"]),
-        ground_truth=ground_truth_of(raw["ground_truth"]),
-        group=str(raw["group"]),
-        side=side,
-        rect=rect,
-        row_key=str(row_key) if row_key is not None else None,
-        ground_truth_digest=raw.get("ground_truth_digest"),
-    )
+GroundTruth = Annotated[
+    Key | str,
+    BeforeValidator(_decoded_ground_truth),
+    PlainSerializer(ground_truth_record),
+]
+"""A sample's ground truth, a label document's key or a path: read from the form a record stores
+it in and written back to that form (:func:`ground_truth_record`)."""
 
 
-def as_selection(document: Any, *, where: str) -> Selection:
+_SELECTION = TypeAdapter(Selection)
+
+
+def as_selection(document: JsonValue, *, where: str) -> Selection:
     """Read a held document back as a :class:`Selection`, refusing anything a draw never writes.
 
-    ``where`` names the document in every refusal. Refuses a non-mapping, a missing or empty
-    ``samples`` list, a sample missing ``member``/``source``/``ground_truth``/``group``/``side``,
-    a side outside :data:`SIDES`, a malformed ``rect``, a partition whose sides cross
+    The document is validated as the record (``pydantic.ValidationError`` naming each field that
+    does not decode, a side outside :data:`SIDES` among them). ``where`` names the document in
+    every other refusal: an empty ``samples`` list, a partition whose sides cross
     (:func:`refuse_crossing_sides`), and a scope its samples' shape cannot be read under
     (:meth:`ClassScope.admitted_for`).
     """
-    if not isinstance(document, dict):
-        raise ValueError(
-            f"the selection at {where} decodes to a {type(document).__name__}, not the mapping a "
-            "draw writes."
-        )
-    raw_samples = document.get("samples")
-    if not isinstance(raw_samples, list) or not raw_samples:
+    selection = _SELECTION.validate_python(document)
+    if not selection.samples:
         raise ValueError(
             f"the selection at {where} lists no samples: a selection is its sample list, so an "
             "empty one binds nothing. Draw it again over the current data."
         )
-    samples = [
-        read_sample(raw, position, where)
-        for position, raw in enumerate(raw_samples)
-    ]
-    refuse_crossing_sides(samples)
-    scope = ClassScope.of(document).admitted_for(
-        samples[0].shape, f"the selection at {where}"
+    refuse_crossing_sides(selection.samples)
+    selection.scope.admitted_for(
+        selection.samples[0].shape, f"the selection at {where}"
     )
-    return Selection(
-        samples=tuple(samples),
-        scope=scope,
-        seed=document["seed"],
-        group_by=document["group_by"],
-        ratios=document["ratios"],
-        stratify_foreground=document["stratify_foreground"],
-        rationale=document["rationale"],
-        dataset_fingerprint=document["dataset_fingerprint"],
-    )
+    return selection
 
 
 def stored_selection_document(
     selection: Selection, project: str | Path
-) -> dict[str, Any]:
+) -> JsonValue:
     """Return the document a selection of ``project`` is stored as.
 
-    That is :func:`selection_document` with its paths stored against ``project``
+    That is the selection's record with its paths stored against ``project``
     (:data:`SELECTION_PATHS`).
     """
     return recorded_paths(
-        selection_document(selection), SELECTION_PATHS, project
+        _SELECTION.dump_python(selection, mode="json"),
+        SELECTION_PATHS,
+        project,
     )
 
 
@@ -530,7 +509,10 @@ def write_selection(
 
     Refuses, before anything is written, whatever :func:`as_selection` refuses.
     """
-    as_selection(selection_document(selection), where=str(selection_dir))
+    as_selection(
+        _SELECTION.dump_python(selection, mode="json"),
+        where=str(selection_dir),
+    )
     out_dir = Path(selection_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     tcip_store.replace(
@@ -576,7 +558,7 @@ def read_selection_checked(
 
 def _read_selection_document(
     selection_dir: str | Path, project: str | Path
-) -> Any | None:
+) -> JsonValue:
     from tcip_store import DecodeError
 
     try:

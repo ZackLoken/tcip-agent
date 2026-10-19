@@ -6,12 +6,18 @@ largest component.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tcip_annotation.state import RING_MIN_POINTS, is_ring
 
+if TYPE_CHECKING:
+    import numpy as np
+    from scipy._lib._util import _RichResult
 
-def mask_contours(mask: Any, *, threshold: float | None) -> list[Any]:
+    from tcip_annotation.state import Rings
+
+
+def mask_contours(mask: np.ndarray, *, threshold: float | None) -> list[Any]:
     """Return each connected component's outer contour of ``mask`` (``cv2.findContours``).
 
     The contours are in pixel coords, largest contour area first; ``[]`` when nothing is
@@ -24,13 +30,9 @@ def mask_contours(mask: Any, *, threshold: float | None) -> list[Any]:
     import cv2
     import numpy as np
 
-    arr = np.asarray(mask)
-    if arr.ndim == 3 and arr.shape[0] == 1:
-        arr = arr[0]
+    arr = mask[0] if mask.ndim == 3 and mask.shape[0] == 1 else mask
     binary = (
-        arr != 0
-        if threshold is None
-        else arr.astype(np.float64) >= float(threshold)
+        arr != 0 if threshold is None else arr.astype(np.float64) >= threshold
     )
     contours, _ = cv2.findContours(
         binary.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
@@ -38,7 +40,7 @@ def mask_contours(mask: Any, *, threshold: float | None) -> list[Any]:
     return sorted(contours, key=cv2.contourArea, reverse=True)
 
 
-def _simplified(contour: Any, vertex_spacing: float) -> Any:
+def _simplified(contour: np.ndarray, vertex_spacing: float) -> np.ndarray:
     """Return ``contour`` simplified by ``cv2.approxPolyDP`` to the vertex count its perimeter sets.
 
     The count is what its own perimeter (``cv2.arcLength``, closed) implies at ``vertex_spacing``
@@ -57,10 +59,10 @@ def _simplified(contour: Any, vertex_spacing: float) -> Any:
 
     perimeter = cv2.arcLength(contour, True)
 
-    def kept(frac: float) -> Any:
+    def kept(frac: float) -> np.ndarray:
         return cv2.approxPolyDP(contour, frac * perimeter, True)
 
-    def adjacent(res: Any) -> None:
+    def adjacent(res: _RichResult) -> None:
         low, high = res.bracket
         if np.nextafter(low, high) >= high:
             raise StopIteration
@@ -85,8 +87,8 @@ def _simplified(contour: Any, vertex_spacing: float) -> Any:
 
 
 def mask_to_polygon_rings(
-    mask: Any, *, threshold: float | None, vertex_spacing: float
-) -> list[list[tuple[float, float]]]:
+    mask: np.ndarray, *, threshold: float | None, vertex_spacing: float
+) -> Rings:
     """Return one simplified polygon ring per connected component of ``mask``.
 
     Components are :func:`mask_contours` at ``threshold``, in pixel coords, largest first: each
@@ -95,7 +97,7 @@ def mask_to_polygon_rings(
     left that is no ring (:func:`~tcip_annotation.state.is_ring`) dropped. Returns ``[]`` when
     nothing is foreground.
     """
-    rings: list[list[tuple[float, float]]] = []
+    rings: Rings = []
     for c in mask_contours(mask, threshold=threshold):
         approx = _simplified(c, vertex_spacing)
         pts = [(float(p[0][0]), float(p[0][1])) for p in approx]

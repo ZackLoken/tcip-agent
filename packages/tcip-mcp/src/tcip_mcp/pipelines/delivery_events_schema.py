@@ -11,34 +11,16 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from tcip_annotation.text import Text
+from tcip_mcp.model_registry import Producer
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     MatchRadius,
-    ToleranceSource,
+    MatchTolerance,
+    PlantRegistryReference,
     UnattributedSegmentSource,
 )
+from tcip_mcp.pipelines.raster_source import RasterIdentity
 from tcip_mcp.pipelines.schemas import TraitRevisionRef
-from tcip_mcp.traits import Text
-
-
-class MatchTolerance(BaseModel):
-    """A nearest-neighbor attribution's resolved tolerance (meters) and the branch behind it.
-
-    The branch is the one of ``plant_mapping.resolve_nn_tolerance_m`` that produced it.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    value: float
-    source: ToleranceSource
-
-
-class PlantRegistryReference(BaseModel):
-    """The registered plant registry a delivery read, by name and content digest."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    digest: str
 
 
 class PlantMappingDisclosure(BaseModel):
@@ -78,7 +60,7 @@ class PlantRegistryDisclosure(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     plant_registry: PlantRegistryReference
-    raster_identity: dict
+    raster_identity: RasterIdentity
     nn_tolerance_m: MatchTolerance
     detections_unattributed: int
     detections_unattributed_scope: Literal["delivered_raster"]
@@ -132,7 +114,7 @@ class CanopySegmentDisclosure(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     plant_registry: PlantRegistryReference
-    raster_identity: dict
+    raster_identity: RasterIdentity
     canopy_segments: CanopySegmentsDocument
     segment_ties: list[SegmentTieDisclosure]
     position_error_m: float
@@ -149,18 +131,6 @@ class CanopySegmentDisclosure(BaseModel):
     sum is ``detections_unattributed``."""
     detections_unattributed_scope: Literal["delivered_raster"]
     plant_attribution: str
-
-
-class Producer(BaseModel):
-    """The one checkpoint and run behind every delivered bucket.
-
-    Read off :attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    checkpoint_sha256: str
-    experiment_id: str | None
 
 
 class BucketFinding(BaseModel):

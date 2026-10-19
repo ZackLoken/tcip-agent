@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator, Mapping
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from tcip_store.errors import StoreNotBoundError, TransactionMisuseError
 from tcip_store.model import (
@@ -19,6 +19,11 @@ from tcip_store.model import (
     refuse_inside_transaction,
 )
 from tcip_store.sqlite_backend import SqliteBackend, Txn
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
+
+    from tcip_store.model import ReadDefault
 
 _bound: SqliteBackend | None = None
 
@@ -61,7 +66,7 @@ def release_root(root: str | Path) -> None:
     _backend().release(canonical_path(root))
 
 
-def read(key: Key, *, default: Any = REQUIRED) -> Any:
+def read(key: Key, *, default: ReadDefault = REQUIRED) -> JsonValue:
     """Return the record's decoded value.
 
     Raises ``NotFoundError`` when the record is absent and no ``default`` was given, and
@@ -70,7 +75,7 @@ def read(key: Key, *, default: Any = REQUIRED) -> Any:
     return read_versioned(key, default=default).value
 
 
-def read_versioned(key: Key, *, default: Any = REQUIRED) -> Versioned:
+def read_versioned(key: Key, *, default: ReadDefault = REQUIRED) -> Versioned:
     """Return value plus version token, read together so the pair cannot straddle a write."""
     return _backend().read_versioned(key, default=default)
 
@@ -80,7 +85,9 @@ def exists(key: Key) -> bool:
     return _backend().exists(key)
 
 
-def replace(key: Key, value: Any, *, expect: Version | None = None) -> Version:
+def replace(
+    key: Key, value: JsonValue, *, expect: Version | None = None
+) -> Version:
     """Replace one record whole, atomically, and return its new version.
 
     ``expect`` compares against the stored version inside the write: a mismatch raises
@@ -144,7 +151,7 @@ def stores(root: str) -> list[str]:
     return _backend().stores(root)
 
 
-def append(key: Key, record: Mapping[str, Any]) -> None:
+def append(key: Key, record: dict[str, JsonValue]) -> None:
     """Append one entry to a log, committed before returning.
 
     Concurrent appenders from any process are serialized. Raises ``TransactionMisuseError``

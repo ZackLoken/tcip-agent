@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Literal, Protocol
 
 from tcip_mcp.experiments import FINAL_STATES, FinalState
 
@@ -20,7 +20,20 @@ JobStatus = Literal["pending", "running", FinalState]
 (``experiments.FinalState``)."""
 
 
-def live(job: Any) -> bool:
+class Job(Protocol):
+    """A live job as the registry reads it: its id and the status it holds."""
+
+    job_id: str
+    status: JobStatus
+
+
+class ProjectJob(Job, Protocol):
+    """A job that runs for one project."""
+
+    project: str
+
+
+def live(job: Job) -> bool:
     """Return whether the job has not yet ended.
 
     A job that has not ended has status ``pending`` or ``running``.
@@ -41,33 +54,32 @@ def evict_terminal(jobs: dict, max_jobs: int = MAX_JOBS) -> None:
             del jobs[jid]
 
 
-class JobRegistry:
+class JobRegistry[J: Job]:
     """The dict-plus-lock live-job registry: register, find-or-register, get and list."""
 
-    def __init__(self, *, id_field: str = "job_id") -> None:
-        """Initialize an empty registry keyed by ``id_field``."""
-        self.jobs: dict[str, Any] = {}
+    def __init__(self) -> None:
+        """Initialize an empty registry keyed by each job's ``job_id``."""
+        self.jobs: dict[str, J] = {}
         self.lock = threading.Lock()
-        self._id_field = id_field
 
-    def _insert(self, job_id: str, job: Any) -> None:
-        """Add ``job`` under ``job_id`` and evict overflow (:func:`evict_terminal`).
+    def _insert(self, job: J) -> None:
+        """Add ``job`` under its ``job_id`` and evict overflow (:func:`evict_terminal`).
 
         Called under the lock.
         """
-        self.jobs[job_id] = job
+        self.jobs[job.job_id] = job
         evict_terminal(self.jobs)
 
-    def register(self, job_id: str, job: Any) -> None:
-        """Add ``job`` under ``job_id`` (:meth:`_insert`)."""
+    def register(self, job: J) -> None:
+        """Add ``job`` under its ``job_id`` (:meth:`_insert`)."""
         with self.lock:
-            self._insert(job_id, job)
+            self._insert(job)
 
     def find_or_register(
         self,
-        match: Callable[[Any], bool],
-        make: Callable[[], Any],
-    ) -> tuple[Any, bool]:
+        match: Callable[[J], bool],
+        make: Callable[[], J],
+    ) -> tuple[J, bool]:
         """Return the first job ``match`` accepts, or insert and return ``make()``'s new job.
 
         Both happen under one lock acquisition; the new job is inserted through
@@ -78,15 +90,15 @@ class JobRegistry:
                 if match(job):
                     return job, False
             job = make()
-            self._insert(getattr(job, self._id_field), job)
+            self._insert(job)
         return job, True
 
-    def get(self, job_id: str) -> Any:
+    def get(self, job_id: str) -> J | None:
         """Return a job by id, from any project this process holds."""
         with self.lock:
             return self.jobs.get(job_id)
 
-    def list(self, project: str) -> list[Any]:
+    def list[P: ProjectJob](self: JobRegistry[P], project: str) -> list[P]:
         """Return every held job that runs for ``project``."""
         with self.lock:
             return [j for j in self.jobs.values() if j.project == project]

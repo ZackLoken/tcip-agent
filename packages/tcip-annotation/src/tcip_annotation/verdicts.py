@@ -5,70 +5,55 @@ One shard covers one image, each entry read through :func:`decode_verdict` alone
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal, get_args
+from typing import TYPE_CHECKING, Annotated, Literal, get_args
+
+from pydantic import (
+    ConfigDict,
+    Field,
+    StrictInt,
+    TypeAdapter,
+)
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 
 import tcip_store
-from tcip_annotation.json_io import is_person
+from tcip_annotation.json_io import Person
+from tcip_annotation.text import Text
 from tcip_store import Key
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
 
 VerdictAction = Literal["accepted", "rejected"]
 VERDICT_ACTIONS: tuple[VerdictAction, ...] = get_args(VerdictAction)
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class Verdict:
     """One decision on one proposal: which, what, who and when.
 
     ``proposal`` is the record's index in the bucket's document for the image, ``action`` what
-    the person decided, ``by`` who (the label record's own spelling) and ``at`` when.
+    the person decided, ``by`` who (a person's recorded identity, the label record's own
+    spelling) and ``at`` when. Construction validates every field (``pydantic.ValidationError``).
     """
 
-    proposal: int
+    proposal: Annotated[StrictInt, Field(ge=0)]
     action: VerdictAction
-    by: str
-    at: str
+    by: Person
+    at: Text
 
 
-def encode_verdict(verdict: Verdict) -> dict:
+_VERDICT = TypeAdapter(Verdict)
+
+
+def encode_verdict(verdict: Verdict) -> dict[str, JsonValue]:
     """Return ``verdict`` as the entry its shard stores."""
-    return asdict(verdict)
+    return _VERDICT.dump_python(verdict, mode="json")
 
 
-def decode_verdict(entry: Mapping) -> Verdict:
-    """Return one stored entry as a :class:`Verdict`.
-
-    Raises ``ValueError`` naming the entry when a key is missing, the proposal is not an index,
-    the action is not one of :data:`VERDICT_ACTIONS`, the person is not a person's recorded
-    identity (:func:`~tcip_annotation.json_io.is_person`) or the time is not a string.
-    """
-    try:
-        proposal, action, by, at = (
-            entry["proposal"],
-            entry["action"],
-            entry["by"],
-            entry["at"],
-        )
-    except KeyError as exc:
-        raise ValueError(
-            f"verdict entry {dict(entry)!r} states no {exc.args[0]!r}"
-        ) from exc
-    if (
-        isinstance(proposal, bool)
-        or not isinstance(proposal, int)
-        or proposal < 0
-        or action not in VERDICT_ACTIONS
-        or not is_person(by)
-        or not isinstance(at, str)
-        or not at
-    ):
-        raise ValueError(
-            f"verdict entry {dict(entry)!r} is not a proposal index, one of "
-            f"{VERDICT_ACTIONS}, a person and a time"
-        )
-    return Verdict(proposal=proposal, action=action, by=by, at=at)
+def decode_verdict(entry: JsonValue) -> Verdict:
+    """Return one stored entry as a :class:`Verdict`, refusing as :class:`Verdict` does."""
+    return _VERDICT.validate_python(entry)
 
 
 REVIEW_VERDICTS_STORE = "review_verdicts"

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import abc
-from typing import Any
 
 import torch
 import torch.nn as nn
@@ -19,7 +18,7 @@ class BaseHead(nn.Module, abc.ABC):
 
     @abc.abstractmethod
     def forward(
-        self, features: Any, targets: Any = None
+        self, features: torch.Tensor, targets: object = None
     ) -> dict[str, torch.Tensor]:
         """Return output dict (logits, boxes, masks, etc.)."""
 
@@ -27,12 +26,14 @@ class BaseHead(nn.Module, abc.ABC):
     def compute_loss(
         self,
         outputs: dict[str, torch.Tensor],
-        targets: Any,
+        targets: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
         """Compute loss dict from outputs and targets."""
 
     @abc.abstractmethod
-    def decode(self, outputs: dict[str, torch.Tensor]) -> dict[str, Any]:
+    def decode(
+        self, outputs: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         """Post-process outputs into human-readable predictions."""
 
 
@@ -78,13 +79,17 @@ class ClassificationHead(BaseHead):
             self._loss = build_loss(loss, weight=weight)
 
     def forward(
-        self, features: torch.Tensor, targets: Any = None
+        self, features: torch.Tensor, targets: object = None
     ) -> dict[str, torch.Tensor]:
         """Return ``{"logits"}`` for ``features``; ``targets`` are not read."""
         logits = self.fc(self.drop(features))
         return {"logits": logits}
 
-    def compute_loss(self, outputs, targets):
+    def compute_loss(
+        self,
+        outputs: dict[str, torch.Tensor],
+        targets: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
         """Return ``{"cls_loss"}``, the head's loss of the logits against the target labels."""
         if self._loss is not None:
             return {
@@ -98,7 +103,9 @@ class ClassificationHead(BaseHead):
             )
         }
 
-    def decode(self, outputs):
+    def decode(
+        self, outputs: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         """Return each sample's argmax label, its softmax confidence and every probability."""
         probs = functional.softmax(outputs["logits"], dim=-1)
         preds = probs.argmax(dim=-1)
@@ -139,13 +146,17 @@ class OrdinalHead(BaseHead):
         self.classifiers = nn.Linear(in_channels, num_ranks - 1)
 
     def forward(
-        self, features: torch.Tensor, targets: Any = None
+        self, features: torch.Tensor, targets: object = None
     ) -> dict[str, torch.Tensor]:
         """Return ``{"logits"}``, the conditional logits for ``features``; ``targets`` unread."""
         logits = self.classifiers(self.drop(features))
         return {"logits": logits}
 
-    def compute_loss(self, outputs, targets):
+    def compute_loss(
+        self,
+        outputs: dict[str, torch.Tensor],
+        targets: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
         """Return ``{"ordinal_loss"}``, the CORN loss of the logits against the target ranks."""
         from tcip_mcp.pipelines.components.losses import corn_loss
 
@@ -155,7 +166,9 @@ class OrdinalHead(BaseHead):
             )
         }
 
-    def decode(self, outputs):
+    def decode(
+        self, outputs: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         """Return each sample's predicted rank, cumulative probabilities and confidence.
 
         The rank is the count of cumulative probabilities above 0.5; the confidence is the
@@ -220,12 +233,16 @@ class RegressionHead(BaseHead):
             self._loss = build_loss(loss)
 
     def forward(
-        self, features: torch.Tensor, targets: Any = None
+        self, features: torch.Tensor, targets: object = None
     ) -> dict[str, torch.Tensor]:
         """Return ``{"values"}``, one value per sample of ``features``; ``targets`` unread."""
         return {"values": self.fc(features).squeeze(-1)}
 
-    def compute_loss(self, outputs, targets):
+    def compute_loss(
+        self,
+        outputs: dict[str, torch.Tensor],
+        targets: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
         """Return ``{"reg_loss"}``, the head's loss of the values against the target values."""
         if self._loss is not None:
             return {
@@ -237,7 +254,9 @@ class RegressionHead(BaseHead):
             )
         }
 
-    def decode(self, outputs):
+    def decode(
+        self, outputs: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         """Return the predicted ``values`` as they are."""
         return {"values": outputs["values"]}
 
@@ -281,7 +300,11 @@ class SemanticSegHead(BaseHead):
         self.ce_weight: torch.Tensor | None
         self.register_buffer("ce_weight", weight)
 
-    def forward(self, features, targets=None):
+    def forward(
+        self,
+        features: torch.Tensor | dict[str, torch.Tensor],
+        targets: object = None,
+    ) -> dict[str, torch.Tensor]:
         """Return ``{"logits"}`` over ``features``, a pyramid dict read at its first sorted key."""
         # Use highest-resolution pyramid level
         if isinstance(features, dict):
@@ -291,7 +314,11 @@ class SemanticSegHead(BaseHead):
             x = features
         return {"logits": self.conv(x)}
 
-    def compute_loss(self, outputs, targets):
+    def compute_loss(
+        self,
+        outputs: dict[str, torch.Tensor],
+        targets: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
         """Return ``{"ce_loss", "dice_loss"}`` of the logits against the target masks.
 
         Logits at another size than the masks are bilinearly resized to them first.
@@ -322,7 +349,9 @@ class SemanticSegHead(BaseHead):
             "dice_loss": dice_loss(probs.flatten(2), one_hot.flatten(2)),
         }
 
-    def decode(self, outputs):
+    def decode(
+        self, outputs: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         """Return each pixel's argmax class as ``masks`` beside the softmax probabilities."""
         logits = outputs["logits"]
         return {

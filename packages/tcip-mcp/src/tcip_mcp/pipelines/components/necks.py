@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import torch
 import torch.nn as nn
 from torch.nn import functional
@@ -113,7 +111,7 @@ class PAN(nn.Module):
 class IdentityNeck(nn.Module):
     """Pass-through: returns features unchanged."""
 
-    def __init__(self, in_channels_list: list[int], **_: Any) -> None:
+    def __init__(self, in_channels_list: list[int], **_: object) -> None:
         """Take the last level's channel count, 0 for none; other keywords are not read."""
         super().__init__()
         self.out_channels = in_channels_list[-1] if in_channels_list else 0
@@ -132,7 +130,7 @@ class GlobalAvgPoolNeck(nn.Module):
     [B, C].
     """
 
-    def __init__(self, in_channels_list: list[int], **_: Any) -> None:
+    def __init__(self, in_channels_list: list[int], **_: object) -> None:
         """Take the last level's channel count, 0 for none; other keywords are not read."""
         super().__init__()
         self.out_channels = in_channels_list[-1] if in_channels_list else 0

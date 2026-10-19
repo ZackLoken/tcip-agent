@@ -11,6 +11,8 @@ from __future__ import annotations
 import datetime
 import errno
 import logging
+from collections.abc import Iterator
+from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
 
@@ -50,8 +52,27 @@ def _iso_date(raw: object) -> str | None:
     return parsed.strftime("%Y-%m-%d") if parsed is not None else None
 
 
-def _photographic_capture_date(path: Path) -> tuple[str | None, str | None]:
-    """Read EXIF ``DateTimeOriginal`` from a photographic container, and why it could not be read.
+@dataclass(frozen=True)
+class Dated:
+    """A file's capture date, ISO ``YYYY-MM-DD``, and the metadata item that stated it."""
+
+    date: str
+    source: str
+
+
+@dataclass(frozen=True)
+class Unreadable:
+    """Why a file's container could not be read far enough to find its capture date."""
+
+    reason: str
+
+
+type CaptureDate = Dated | Unreadable | None
+"""What a file states of its capture date; ``None`` for a file that states none."""
+
+
+def _photographic_capture_date(path: Path) -> CaptureDate:
+    """Read EXIF ``DateTimeOriginal`` from a photographic container.
 
     The tag is read through :func:`~tcip_mcp.pipelines.image_utils.exif_capture_time`.
     ``Image.open`` decodes the header only and never the pixels.
@@ -66,26 +87,21 @@ def _photographic_capture_date(path: Path) -> tuple[str | None, str | None]:
             try:
                 raw = exif_capture_time(exif)
             except Exception as exc:
-                return None, f"EXIF block could not be read: {exc}"
+                return Unreadable(f"EXIF block could not be read: {exc}")
     except Exception as exc:
-        return None, f"image header could not be read: {exc}"
+        return Unreadable(f"image header could not be read: {exc}")
     if raw is None:
-        return None, None
+        return None
     iso = _iso_date(raw)
     if iso is None:
-        return (
-            None,
-            f"EXIF DateTimeOriginal {str(raw)!r} is not a date this reads",
+        return Unreadable(
+            f"EXIF DateTimeOriginal {str(raw)!r} is not a date this reads"
         )
-    return iso, None
+    return Dated(iso, _EXIF_DATE)
 
 
-def _gdal_capture_date(
-    path: Path, date_item: str | None
-) -> tuple[str | None, str | None, str | None]:
+def _gdal_capture_date(path: Path, date_item: str | None) -> CaptureDate:
     """Read the capture date a GDAL-readable raster's metadata states.
-
-    Returns the date, why it could not be read, and the metadata item that stated it.
 
     Asks the TIFF ``DateTime`` tag first, then an EXIF IFD if the container exposes one, then the
     stated ``date_item`` in the default metadata domain (matched case-insensitively), where a
@@ -111,46 +127,40 @@ def _gdal_capture_date(
                     None,
                 )
     except Exception as exc:  # noqa: BLE001, rasterio raises driver-specific errors
-        return None, f"raster metadata could not be read: {exc}", None
-    item, raw = next(((k, v) for k, v in stated.items() if v), (None, None))
-    if not raw:
-        return None, None, None
+        return Unreadable(f"raster metadata could not be read: {exc}")
+    found = next(((k, v) for k, v in stated.items() if v), None)
+    if found is None:
+        return None
+    item, raw = found
     iso = _iso_date(raw)
     if iso is None:
-        return (
-            None,
-            f"capture date {str(raw)!r} is not a date this reads",
-            None,
+        return Unreadable(
+            f"capture date {str(raw)!r} is not a date this reads"
         )
-    return iso, None, item
+    return Dated(iso, item)
 
 
-def _capture_iso_date(
-    path: Path, date_item: str | None
-) -> tuple[str | None, str | None, str | None]:
-    """Read one file's capture date, why it could not be read, and the item that stated it.
+def _capture_iso_date(path: Path, date_item: str | None) -> CaptureDate:
+    """Read what one file states of its capture date.
 
-    Returns ``(ISO YYYY-MM-DD or None, why it could not be read or None, the item that stated it
-    or None)``, a raster's ``date_item`` asked after its own tags (:func:`_gdal_capture_date`).
-
-    No date and no reason is the undated fact: a photo with no EXIF date, a raster stating none,
-    or an array file or band group, which has nowhere to put one and is not read. A reason is the
-    different fact that the container itself could not be read this far. The container family is
-    the file's :attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.kind`: EXIF in a
+    A raster's ``date_item`` is asked after its own tags (:func:`_gdal_capture_date`). ``None``
+    is the undated fact: a photo with no EXIF date, a raster stating none, or an array file or
+    band group, which has nowhere to put one and is not read. :class:`Unreadable` is the
+    different fact that the container itself could not be read this far. The container family
+    is the file's :attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.kind`: EXIF in a
     photograph, raster metadata in a TIFF, nothing in any other.
     """
     from tcip_mcp.pipelines.raster_source import SourceHeader
 
     kind = SourceHeader(path).kind
     if kind == "photo":
-        iso, unreadable = _photographic_capture_date(path)
-        return iso, unreadable, _EXIF_DATE if iso else None
+        return _photographic_capture_date(path)
     if kind == "tif":
         return _gdal_capture_date(path, date_item)
-    return None, None, None
+    return None
 
 
-def _iter_source_images(source: str, recursive: bool):
+def _iter_source_images(source: str, recursive: bool) -> Iterator[Path]:
     """Yield image files under ``source``: a directory or a glob pattern."""
     src = Path(source)
     if src.is_dir():
@@ -167,7 +177,7 @@ def _iter_source_images(source: str, recursive: bool):
 
 def _collision_refusal(
     dest_root: Path,
-    resolved_sources: list[tuple[Path, str, str | None, str | None]],
+    resolved_sources: list[tuple[Path, str]],
 ) -> str | None:
     """Return the whole-call refusal naming every source that would collide on a stem key.
 
@@ -179,7 +189,7 @@ def _collision_refusal(
     The carve-out tests the destination filename only, not the source bytes: such a source is left
     out of this refusal and out of ``identities``, whether or not its own bytes match that file.
     """
-    buckets = sorted({bucket for _src, bucket, *_ in resolved_sources})
+    buckets = sorted({bucket for _src, bucket in resolved_sources})
     collisions: dict[str, dict[str, list[Path]]] = {}
     for bucket in buckets:
         # disk_identities is a fixed pre-call snapshot for the re-ingest carve-out below, never
@@ -190,7 +200,7 @@ def _collision_refusal(
         identities = {
             key: list(paths) for key, paths in disk_identities.items()
         }
-        for src_path, src_bucket, *_ in resolved_sources:
+        for src_path, src_bucket in resolved_sources:
             if src_bucket != bucket:
                 continue
             key = stem_collision_key(src_path.stem)
@@ -275,12 +285,19 @@ def ingest_images(
     if not sources:
         return {"error": f"No images found under {source!r}"}
 
-    resolved_sources = []
-    for src_path in sources:
-        iso, unreadable, item = _capture_iso_date(src_path, raster_date_item)
-        resolved_sources.append(
-            (src_path, iso or dataset_layout.UNDATED_BUCKET, unreadable, item)
+    captured = {
+        src_path: _capture_iso_date(src_path, raster_date_item)
+        for src_path in sources
+    }
+    resolved_sources = [
+        (
+            src_path,
+            date.date
+            if isinstance(date, Dated)
+            else dataset_layout.UNDATED_BUCKET,
         )
+        for src_path, date in captured.items()
+    ]
 
     collision_error = _collision_refusal(project, resolved_sources)
     if collision_error is not None:
@@ -293,7 +310,8 @@ def ingest_images(
     errors: list[dict] = []
     touched_buckets: set[str] = set()
 
-    for src_path, bucket, date_unreadable, date_source in resolved_sources:
+    for src_path, bucket in resolved_sources:
+        date = captured[src_path]
         dest = dataset_layout.image_path(
             project, bucket, src_path.stem, src_path.suffix
         )
@@ -338,8 +356,12 @@ def ingest_images(
                 "source": str(src_path),
                 "dest": str(dest),
                 "bucket": bucket,
-                "date_source": date_source,
-                "date_unreadable": date_unreadable,
+                "date_source": date.source
+                if isinstance(date, Dated)
+                else None,
+                "date_unreadable": date.reason
+                if isinstance(date, Unreadable)
+                else None,
             }
         )
 
@@ -460,9 +482,7 @@ def state_capture_date(
     taken = [str(d) for d in dests if d.exists()] + [
         str(new.parts) for _old, new in rekeyed if tcip_store.exists(new)
     ]
-    collision = _collision_refusal(
-        root, [(f, bucket, None, None) for f in files]
-    )
+    collision = _collision_refusal(root, [(f, bucket) for f in files])
     if collision or taken:
         return {
             "error": collision

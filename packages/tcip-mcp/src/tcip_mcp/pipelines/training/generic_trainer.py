@@ -18,7 +18,7 @@ import random
 import time
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Unpack
 
 import numpy as np
 import torch
@@ -36,7 +36,7 @@ from tcip_mcp.pipelines.model_build import (
     STATE_DICT_KEY,
     build_from_model_source,
 )
-from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS, TCIPModel
+from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 from tcip_mcp.pipelines.schemas import (
     CENTER_MATCH_COMPARABILITY_KEYS,
     CosineSchedule,
@@ -58,6 +58,7 @@ from tcip_mcp.pipelines.schemas import (
 from tcip_mcp.pipelines.training.evaluation import (
     VAL_LOSS_KEY,
     VAL_METRIC_PREFIX,
+    EvaluationKeywords,
     evaluate,
 )
 from tcip_mcp.pipelines.training.optimizer_factory import (
@@ -73,6 +74,12 @@ from tcip_mcp.pipelines.training.run_registry import TrainRun
 from tcip_store import scalar_number, stored_numbers
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from pydantic import JsonValue
+
+    from tcip_mcp.pipelines.data.augmentations import Transforms
+    from tcip_mcp.pipelines.data.datasets import BaseDataset
     from tcip_mcp.traits import TraitEntry
 
 logger = logging.getLogger(__name__)
@@ -103,7 +110,10 @@ def run_device(spec: TrainConfigSchema) -> torch.device:
 
 
 def _warmup_starts(
-    model, optimizer, captured: list[dict], target_lrs: list[float]
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    captured: list[dict],
+    target_lrs: list[float],
 ) -> list[float]:
     """Return the learning rate each of ``optimizer``'s param groups warms up from.
 
@@ -151,47 +161,58 @@ def set_seed(seed: int, *, deterministic: bool) -> None:
         torch.backends.cudnn.benchmark = False
 
 
-def capture_rng_state(
-    loader_generator: torch.Generator | None,
-) -> dict[str, Any]:
-    """Snapshot every random stream a run draws from.
+@dataclass(frozen=True)
+class RngState:
+    """Every random stream a run draws from, as :func:`capture_rng_state` captured it.
 
-    The streams are the four set_seed seeds and ``loader_generator``, the generator a loader
-    shuffles with (``None`` for a loader that has none).
+    The streams are python's, numpy's, torch's, each CUDA device's (``None`` without CUDA) and the
+    generator a loader shuffles with (``None`` for a loader that has none).
     """
-    return {
-        "python_rng_state": random.getstate(),
-        "numpy_rng_state": np.random.get_state(),
-        "torch_rng_state": torch.get_rng_state(),
-        "cuda_rng_state": torch.cuda.get_rng_state_all()
+
+    python_rng_state: tuple[object, ...]
+    numpy_rng_state: (
+        dict[str, object] | tuple[str, np.ndarray, int, int, float]
+    )
+    torch_rng_state: torch.Tensor
+    cuda_rng_state: list[torch.Tensor] | None
+    loader_rng_state: torch.Tensor | None
+
+
+def capture_rng_state(loader_generator: torch.Generator | None) -> RngState:
+    """Snapshot every random stream a run draws from, ``loader_generator``'s among them."""
+    return RngState(
+        python_rng_state=random.getstate(),
+        numpy_rng_state=np.random.get_state(),
+        torch_rng_state=torch.get_rng_state(),
+        cuda_rng_state=torch.cuda.get_rng_state_all()
         if torch.cuda.is_available()
         else None,
-        "loader_rng_state": None
+        loader_rng_state=None
         if loader_generator is None
         else loader_generator.get_state(),
-    }
+    )
 
 
 def restore_rng_state(
-    state: dict[str, Any], loader_generator: torch.Generator | None
+    state: RngState, loader_generator: torch.Generator | None
 ) -> None:
     """Restore the streams :func:`capture_rng_state` captured.
 
     The loader's goes into ``loader_generator``. Refuses (``ValueError``) a capture and a loader
     that disagree on whether the loader draws from a generator of its own.
     """
-    if (state["loader_rng_state"] is None) != (loader_generator is None):
+    if (state.loader_rng_state is None) != (loader_generator is None):
         raise ValueError(
             "the captured random state and this loader disagree on whether the loader shuffles "
             "from a generator of its own; resume with a loader built the way the run's was."
         )
-    torch.set_rng_state(state["torch_rng_state"])
-    if state["cuda_rng_state"] is not None:
-        torch.cuda.set_rng_state_all(state["cuda_rng_state"])
-    np.random.set_state(state["numpy_rng_state"])
-    random.setstate(state["python_rng_state"])
-    if loader_generator is not None:
-        loader_generator.set_state(state["loader_rng_state"])
+    torch.set_rng_state(state.torch_rng_state)
+    if state.cuda_rng_state is not None:
+        torch.cuda.set_rng_state_all(state.cuda_rng_state)
+    np.random.set_state(state.numpy_rng_state)
+    random.setstate(state.python_rng_state)
+    if loader_generator is not None and state.loader_rng_state is not None:
+        loader_generator.set_state(state.loader_rng_state)
 
 
 def loader_worker_init(
@@ -228,7 +249,7 @@ def seeded_loader_kwargs(seed: int, num_workers: int | None = None) -> dict:
     }
 
 
-def run_transforms(spec: TrainConfigSchema) -> Any:
+def run_transforms(spec: TrainConfigSchema) -> Transforms | None:
     """Return the training transforms a validated config's ``augmentation`` declares.
 
     The config is a ``schemas.train_config`` one; the answer is ``None`` when it declares none.
@@ -242,7 +263,7 @@ def run_transforms(spec: TrainConfigSchema) -> Any:
 
 
 def run_loaders(
-    run: TrainRun, train_ds: Any, val_ds: Any
+    run: TrainRun, train_ds: BaseDataset, val_ds: BaseDataset | None
 ) -> tuple[DataLoader, DataLoader | None]:
     """Return ``run``'s train loader and, when ``val_ds`` is given, its val loader.
 
@@ -295,7 +316,7 @@ def run_loaders(
 def effective_data_geometry(
     task: str,
     data: DataSpec,
-    train_ds: Any,
+    train_ds: BaseDataset,
     stated: StatedDetectorGeometry | None,
 ) -> TrainGeometry:
     """Return the :class:`~tcip_mcp.pipelines.schemas.TrainGeometry` of a ``task`` run.
@@ -359,7 +380,7 @@ def effective_data_geometry(
     )
 
 
-def _uniform_native_size(train_ds: Any) -> tuple[int, int] | None:
+def _uniform_native_size(train_ds: BaseDataset) -> tuple[int, int] | None:
     """Return the one ``(width, height)`` every training source shares, or ``None``.
 
     The answer is ``None`` when sizes differ, a source cannot be probed, or the dataset exposes
@@ -409,17 +430,19 @@ def write_checkpoint(payload: dict, path: Path) -> Path:
     return path
 
 
-def checkpoint_stamp(run: TrainRun) -> dict:
-    """Return the stamp a checkpoint of ``run`` carries beside its own state.
+def checkpoint_stamp(run: TrainRun) -> dict[str, JsonValue]:
+    """Return the stamp a checkpoint of ``run`` carries beside its own state, as it is stored.
 
-    Under ``CONFIG_KEY`` its spec (``TrainRun.spec``, its source files its own snapshot copies)
-    as it records itself (``TrainConfigSchema.record``) without its data locations
-    (``experiments.DATA_PATHS``), its split whole, and every other path
-    (``experiments.CONFIG_PATHS``, a bound split's selection directory among them) stored
-    against the run's project; under ``SNAPSHOT_KEY`` the digest of the source snapshot its run
-    took (``SourceLayout.snapshot``); under ``GEOMETRY_KEY`` its ``TrainRun.geometry``.
+    The stamp is a ``model_registry.CheckpointStamp``: under ``CONFIG_KEY`` its spec
+    (``TrainRun.spec``, its source files its own snapshot copies) as it records itself
+    (``TrainConfigSchema.record``) without its data locations (``experiments.DATA_PATHS``), its
+    split whole, and every other path (``experiments.CONFIG_PATHS``, a bound split's selection
+    directory among them) stored against the run's project; under ``SNAPSHOT_KEY`` the digest of
+    the source snapshot its run took (``SourceLayout.snapshot``); under ``GEOMETRY_KEY`` its
+    ``TrainRun.geometry``.
     """
     from tcip_mcp.experiments import CONFIG_PATHS, DATA_PATHS
+    from tcip_mcp.model_registry import CheckpointStamp
     from tcip_mcp.registry_paths import recorded_paths
 
     paths: dict = {}
@@ -429,13 +452,17 @@ def checkpoint_stamp(run: TrainRun) -> dict:
         for parent in parents:
             node = node.setdefault(parent, {})
         node[leaf] = True
-    return {
-        CONFIG_KEY: recorded_paths(
-            run.spec.record(exclude={"data": paths}), CONFIG_PATHS, run.project
-        ),
-        SNAPSHOT_KEY: run.layout.snapshot,
-        GEOMETRY_KEY: run.geometry.model_dump(mode="json"),
-    }
+    return CheckpointStamp.model_validate(
+        {
+            CONFIG_KEY: recorded_paths(
+                run.spec.record(exclude={"data": paths}),
+                CONFIG_PATHS,
+                run.project,
+            ),
+            SNAPSHOT_KEY: run.layout.snapshot,
+            GEOMETRY_KEY: run.geometry,
+        }
+    ).model_dump(mode="json", by_alias=True)
 
 
 def _checkpoint_metrics(metrics: dict) -> dict:
@@ -447,12 +474,12 @@ def _checkpoint_metrics(metrics: dict) -> dict:
 
 
 @dataclass(frozen=True)
-class _ResumeState:
+class _ResumeState(RngState):
     """The resume contract a checkpoint carries beside its training state and epoch row.
 
     The training state and the row sit at the checkpoint's top level
-    (:func:`capture_training_state`'s keys and ``METRICS_KEY``); each field here is one more key
-    of the checkpoint.
+    (:func:`capture_training_state`'s keys and ``METRICS_KEY``); each field here, the random
+    streams (:class:`RngState`) among them, is one more key of the checkpoint.
 
     ``best`` is the run's best epoch over the stages before the current one and ``stage_best``
     the current stage's, each an :func:`_epoch_state` or ``None``; ``warmup_groups`` are the
@@ -471,16 +498,11 @@ class _ResumeState:
     es_best: float
     es_counter: int
     global_step: int
-    torch_rng_state: Any
-    numpy_rng_state: Any
-    python_rng_state: Any
-    cuda_rng_state: Any
-    loader_rng_state: Any
 
 
 def _epoch_state(
-    model,
-    optimizer,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
     *,
     selection: float,
     stage: int,
@@ -504,11 +526,11 @@ def _epoch_state(
 def _save_checkpoint(
     path: Path,
     *,
-    model,
-    optimizer,
-    scheduler,
-    scaler,
-    loader_generator,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    scaler: torch.amp.GradScaler | None,
+    loader_generator: torch.Generator | None,
     stamp: dict,
     stage_idx: int,
     stage_epoch: int,
@@ -539,7 +561,7 @@ def _save_checkpoint(
         es_best=es_best,
         es_counter=es_counter,
         global_step=global_step,
-        **capture_rng_state(loader_generator),
+        **vars(capture_rng_state(loader_generator)),
     )
     write_checkpoint(
         {
@@ -558,8 +580,11 @@ def _save_checkpoint(
 
 
 def _build_scheduler(
-    optimizer, spec: SchedulerSpec, *, higher_is_better: bool
-):
+    optimizer: torch.optim.Optimizer,
+    spec: SchedulerSpec,
+    *,
+    higher_is_better: bool,
+) -> torch.optim.lr_scheduler.LRScheduler:
     """Build the scheduler ``spec.type`` names (``schemas.SCHEDULER_TYPES``) over ``optimizer``.
 
     It runs at every setting ``spec`` carries, a horizon-bound one over the block's own
@@ -608,11 +633,11 @@ def _build_scheduler(
 
 @torch.no_grad()
 def _validate(
-    model: TCIPModel,
+    model: torch.nn.Module,
     val_loader: DataLoader,
     device: torch.device,
     task: str,
-    **keywords: Any,
+    **keywords: Unpack[EvaluationKeywords],
 ) -> dict:
     """Return ``evaluation.evaluate`` of ``model`` over ``val_loader`` at ``keywords``.
 
@@ -732,7 +757,7 @@ def _improves(
 
 
 def apply_stage_freeze(
-    model: TCIPModel,
+    model: torch.nn.Module,
     freeze_to: int,
     *,
     prev_trainable: int | None = None,
@@ -746,10 +771,11 @@ def apply_stage_freeze(
     ``prev_trainable`` given, an unfreeze that shrinks the trainable set raises
     (``RuntimeError``).
     """
+    freeze_backbone = getattr(model, "freeze_backbone", None)
     if not freeze_to:
         for p in model.parameters():
             p.requires_grad = True
-    elif not hasattr(model, "freeze_backbone"):
+    elif freeze_backbone is None:
         raise ValueError(
             f"stage freeze_to={freeze_to} freezes through the model's freeze_backbone, which "
             f"this {type(model).__name__} does not expose; state freeze_to 0, or build a model "
@@ -765,9 +791,9 @@ def apply_stage_freeze(
                 f"this {type(model).__name__}'s backbone declares no num_stages; state the "
                 "stage count to freeze to."
             )
-        model.freeze_backbone(num_stages)
+        freeze_backbone(num_stages)
     else:
-        model.freeze_backbone(freeze_to)
+        freeze_backbone(freeze_to)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     if prev_trainable is not None and trainable < prev_trainable:
@@ -804,13 +830,16 @@ def _validate_input_channels(expected: int, loader: DataLoader) -> None:
 # ====================================================================
 
 
+type EpochCallback = Callable[[int, dict], None]
+
+
 def train(
     run: TrainRun,
     train_loader: DataLoader,
     val_loader: DataLoader | None = None,
     *,
-    epoch_callback=None,
-    batch_callback=None,
+    epoch_callback: EpochCallback | None = None,
+    batch_callback: Callable[[int, int, dict], None] | None = None,
     resume_from: str = "",
 ) -> TrainRun:
     """Execute a task-agnostic training run.
@@ -929,7 +958,7 @@ def train(
         first_eff_batch = physical_batch * accumulation(stages[0])
         prev_trainable = None  # trainable param count of the previous stage
         trait = evaluated["trait"]
-        loader_generator = getattr(train_loader, "generator", None)
+        loader_generator = train_loader.generator
 
         global_step = 0
         handoff: dict | None = (
@@ -971,7 +1000,7 @@ def train(
             global_step = ckpt.global_step
             # After the fresh set_seed() above, which also configures cudnn, so the resumed
             # streams overwrite the freshly-seeded ones.
-            restore_rng_state(vars(ckpt), loader_generator)
+            restore_rng_state(ckpt, loader_generator)
             logger.info(
                 "Resuming from %s at stage %d, stage_epoch %d (global epoch %d)",
                 resume_from,
@@ -1052,9 +1081,6 @@ def train(
             warmup_n = stage_warmup_epochs if warmup_starts else 0
             scheduler = _build_scheduler(
                 optimizer, scheduler_spec, higher_is_better=higher_is_better
-            )
-            is_plateau = isinstance(
-                scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
             )
 
             start_epoch = 0
@@ -1218,7 +1244,9 @@ def train(
 
                 # Suppress the scheduler during warmup epochs.
                 if not in_warmup:
-                    if is_plateau:
+                    if isinstance(
+                        scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
+                    ):
                         scheduler.step(sel)
                     else:
                         scheduler.step()

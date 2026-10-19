@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections import Counter
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import numpy as np
 import torch
@@ -21,6 +21,7 @@ from torch.utils.data import Dataset
 
 from tcip_annotation.json_io import LabelDocument
 from tcip_annotation.state import (
+    GeometryReader,
     Polygon,
     box_derivable,
     object_rows,
@@ -62,6 +63,7 @@ from tcip_mcp.pipelines.schemas import (
 )
 
 if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.augmentations import Transforms
     from tcip_mcp.pipelines.model_build import SourceLayout
 
 
@@ -120,10 +122,10 @@ class BaseImageDataset(BaseDataset):
 
     ground_truth_shape: str = DOCUMENT
     ground_truth_count: str | None = None
-    reads_geometry: Callable[[Any], bool] | None = None
+    reads_geometry: ClassVar[GeometryReader | None] = None
     reads_description: str = ""
     scope: ClassScope = ClassScope()
-    transforms: Any = None
+    transforms: Transforms | None = None
     _samples: dict[str, Sample]
     _keys: list[str]
 
@@ -195,9 +197,9 @@ class BaseImageDataset(BaseDataset):
         truth this loader cannot turn into a target. A loader that declares no geometry (a mask
         raster, a table row) refuses nothing here.
         """
-        if self.reads_geometry is None:
+        reads = type(self).reads_geometry
+        if reads is None:
             return
-        reads = self.reads_geometry
         wrong = []
         for sample in samples:
             mine = [
@@ -220,7 +222,7 @@ class BaseImageDataset(BaseDataset):
         """Return the logical image one sample key names, as its sample carries it."""
         return self._samples[stem].image
 
-    def _open_image(self, stem: str):
+    def _open_image(self, stem: str) -> Image.Image | np.ndarray:
         """Open an image honoring ``expected_channels``.
 
         The image is PIL where the pixels have a faithful PIL mode, else an ``[H, W, C]`` ndarray
@@ -229,7 +231,7 @@ class BaseImageDataset(BaseDataset):
         return load_image(self.image_of(stem), self.expected_channels)
 
     def _finalize(
-        self, stem: str, img, target: dict
+        self, stem: str, img: Image.Image | np.ndarray, target: dict
     ) -> tuple[torch.Tensor, dict]:
         """Run ``stem``'s decoded ``img`` through the transforms, or make it a tensor when none.
 
@@ -252,7 +254,7 @@ class BaseImageDataset(BaseDataset):
 # ====================================================================
 
 
-def indexed_sample_keys(dataset: Any) -> set[str]:
+def indexed_sample_keys(dataset: BaseDataset) -> set[str]:
     """Return the sample keys a built dataset indexes, however many examples each one yields.
 
     A per-image dataset indexes one example per sample, so every sample it was handed is here. A
@@ -263,7 +265,7 @@ def indexed_sample_keys(dataset: Any) -> set[str]:
     return set(getattr(dataset, "stems", None) or [])
 
 
-def target_tensors(target: Any) -> dict[str, torch.Tensor]:
+def target_tensors(target: Mapping[str, Any]) -> dict[str, torch.Tensor]:
     """Return a detection target as detection tensors.
 
     The target is ``{"boxes", "labels", "iscrowd"}`` of parallel per-box values, with its
@@ -291,7 +293,9 @@ PER_BOX_KEYS = ("boxes", "scores", "labels", "masks", "iscrowd", "attributes")
 """The keys of a detection target or a detection record holding one row per box."""
 
 
-def crowd_of(target: Mapping[str, Any]) -> Any:
+def crowd_of(
+    target: Mapping[str, Any],
+) -> list[bool] | np.ndarray | torch.Tensor:
     """Return a detection target's per-box crowd flags.
 
     A target stating none refuses (``ValueError``) naming the key.
@@ -356,15 +360,17 @@ def instance_targets(targets: list[dict]) -> list[dict]:
 class DocumentDataset(BaseImageDataset):
     """A loader over samples whose ground truth is a per-image label document.
 
-    It reads under the run's own admitted class space (``scope``).
+    It reads under the run's own admitted class space (``scope``) the geometries its task
+    declares (``reads_geometry``).
     """
 
     ground_truth_shape = DOCUMENT
+    reads_geometry: ClassVar[GeometryReader]
 
     def __init__(
         self,
         samples: Sequence[Sample],
-        transforms: Any = None,
+        transforms: Transforms | None = None,
         *,
         scope: ClassScope,
     ) -> None:
@@ -384,9 +390,7 @@ class DocumentDataset(BaseImageDataset):
         this task's own geometry (``reads_geometry``).
         """
         return json_det_targets(
-            document.annotations,
-            self.scope,
-            reads=cast("Callable[[Any], bool]", self.reads_geometry),
+            document.annotations, self.scope, reads=type(self).reads_geometry
         )
 
     def region(self, stem: str) -> Region:
@@ -441,7 +445,7 @@ class DetectionDataset(DocumentDataset):
     """
 
     task_type = "detection"
-    reads_geometry = staticmethod(box_derivable)
+    reads_geometry = box_derivable
     reads_description = "a box or a polygon of its subject"
 
 
@@ -544,27 +548,20 @@ def clip_rows_to_tile(
 def _validated_keep_regions(
     keep_regions: Sequence[tuple[int, int, int, int]] | None,
 ) -> list[tuple[int, int, int, int]] | None:
-    """Return ``keep_regions`` as integer 4-tuples, or ``None`` when absent.
+    """Return ``keep_regions`` as a list, or ``None`` when absent.
 
-    A malformed rect refuses by name. An empty sequence is a real filter that keeps nothing,
+    A rect with no extent refuses by name. An empty sequence is a real filter that keeps nothing,
     distinct from ``None``.
     """
     if keep_regions is None:
         return None
-    regions: list[tuple[int, int, int, int]] = []
-    for region in keep_regions:
-        vals = tuple(int(v) for v in region)
-        if len(vals) != 4:
-            raise ValueError(
-                f"keep region {region!r} must be a half-open pixel rect (x0, y0, x1, y1)"
-            )
-        x0, y0, x1, y1 = vals
+    for x0, y0, x1, y1 in keep_regions:
         if x1 <= x0 or y1 <= y0:
             raise ValueError(
-                f"keep region {vals!r} has no extent: half-open needs x0 < x1 and y0 < y1"
+                f"keep region {(x0, y0, x1, y1)!r} has no extent: half-open needs x0 < x1 "
+                "and y0 < y1"
             )
-        regions.append(vals)
-    return regions
+    return list(keep_regions)
 
 
 class TiledDetectionDataset(BaseImageDataset):
@@ -611,7 +608,7 @@ class TiledDetectionDataset(BaseImageDataset):
         *,
         skip_empty: bool,
         sliver_frac: float | None = None,
-        transforms: Any = None,
+        transforms: Transforms | None = None,
         keep_regions: Sequence[tuple[int, int, int, int]] | None = None,
     ) -> None:
         """Index ``base``'s sources as the kept slices of the lattice.
@@ -774,7 +771,7 @@ class TiledDetectionDataset(BaseImageDataset):
 
     def _read_windowed_tile(
         self, stem: str, info: dict, s: tuple[int, int, int, int]
-    ):
+    ) -> tuple[np.ndarray, tuple[str, ...] | None]:
         """Read one slice through the pooled windowed source.
 
         Returns its ``[H, W, C]`` array and the source's band interpretations. Refuses when the
@@ -860,7 +857,7 @@ class InstanceSegDataset(DocumentDataset):
     """
 
     task_type = "instance_seg"
-    reads_geometry = staticmethod(polygonal)
+    reads_geometry = polygonal
     reads_description = "a polygon of its subject"
 
     @staticmethod
@@ -913,7 +910,7 @@ class SemanticSegDataset(BaseImageDataset):
     ground_truth_count = "num_classes"
 
     def __init__(
-        self, samples: Sequence[Sample], transforms: Any = None
+        self, samples: Sequence[Sample], transforms: Transforms | None = None
     ) -> None:
         """Index ``samples`` at ``transforms`` (:meth:`_init_from_samples`)."""
         self.transforms = transforms
@@ -955,7 +952,7 @@ class TableDataset(BaseImageDataset):
     convert: staticmethod[[str], Any] = staticmethod(int)
 
     def __init__(
-        self, samples: Sequence[Sample], transforms: Any = None
+        self, samples: Sequence[Sample], transforms: Transforms | None = None
     ) -> None:
         """Index ``samples`` at ``transforms`` and read each row value through ``convert``."""
         self.transforms = transforms
@@ -1047,9 +1044,9 @@ def build_from_dataset_source(
     task: str,
     samples: Sequence[Sample],
     scope: ClassScope,
-    transforms: Any,
-) -> Dataset:
-    """Import the agent's dataset builder a ``dataset_source`` names and call it.
+    transforms: Transforms | None,
+) -> BaseDataset:
+    """Import and call the dataset builder a ``dataset_source`` names, and return its dataset.
 
     The builder is imported from its run's layout (``bespoke``, :data:`BespokeSource`;
     ``model_build.import_source_builder``). It is called with a context of ``samples`` (the
@@ -1061,7 +1058,8 @@ def build_from_dataset_source(
 
     The context is a ``schemas.DatasetContext``, each value under its field's name;
     ``builder_kwargs`` configure the builder (``schemas.DatasetSourceSchema`` refuses one naming
-    a context field).
+    a context field). A builder returning anything but a :class:`BaseDataset` refuses
+    (``ValueError``) naming the builder.
     """
     from tcip_mcp.pipelines.model_build import import_source_builder
 
@@ -1073,7 +1071,16 @@ def build_from_dataset_source(
         scope=scope,
         transforms=transforms,
     )
-    return fn(**context._asdict(), **(dataset_source.builder_kwargs or {}))
+    built = fn(**context._asdict(), **(dataset_source.builder_kwargs or {}))
+    if not isinstance(built, BaseDataset):
+        raise ValueError(
+            f"dataset_source builder {dataset_source.builder!r} returned a "
+            f"{type(built).__name__}, and the loaders and the run's geometry read a dataset's "
+            "num_samples, expected_channels and sample_classes, which a "
+            "tcip_mcp.pipelines.data.datasets.BaseDataset states. Return a BaseDataset: one of "
+            "the built-in loaders, or a subclass of it."
+        )
+    return built
 
 
 def _band_count(samples: Sequence[Sample]) -> int:
@@ -1113,7 +1120,10 @@ def _band_count(samples: Sequence[Sample]) -> int:
     return next(iter(counts))
 
 
-GROUND_TRUTH_COUNTS = ("num_classes", "num_ranks")
+GROUND_TRUTH_COUNTS: tuple[Literal["num_classes", "num_ranks"], ...] = (
+    "num_classes",
+    "num_ranks",
+)
 """The counts ground truth carrying its own classes derives, as a loader declares its own in
 ``ground_truth_count``."""
 
@@ -1189,10 +1199,10 @@ def build_dataset(
     samples: Sequence[Sample],
     sizes: Mapping[str, int],
     scope: ClassScope,
-    transforms: Any = None,
+    transforms: Transforms | None = None,
     tiling: TilingSpec | None = None,
-    **unowned: Any,
-) -> Dataset:
+    **unowned: object,
+) -> BaseDataset:
     """Build the platform's dataset for ``task``.
 
     ``samples`` is the producer's own sample list: each sample reads its own source and the
@@ -1204,10 +1214,8 @@ def build_dataset(
     ``sizes`` is what the caller resolved for this run (:func:`resolve_sizes`); a loader reads its
     sources at its band count. Anything else given refuses (``ValueError``) by name.
 
-    The tiling ``task`` builds at (``schemas.run_tiling``, whose refusal propagates) wraps the
-    task's dataset in a :class:`TiledDetectionDataset` at the options it states
-    (``TilingSpec.tiler_options``), and one missing its ``tile_size`` or ``overlap`` refuses
-    (``ValueError``). An unknown task refuses (``ValueError``) naming the known ones.
+    The tiling ``task`` builds at (``schemas.run_tiling``, whose refusal propagates) builds through
+    :func:`build_tiled_dataset`. An unknown task refuses (``ValueError``) naming the known ones.
     """
     if unowned:
         raise ValueError(
@@ -1218,39 +1226,75 @@ def build_dataset(
             f"Drop {sorted(unowned)}; a dataset_source builds through build_from_dataset_source "
             "(ctx.build_dataset from a training body), configured by its builder_kwargs."
         )
+    tiler = run_tiling(task, tiling)
+    if tiler is not None:
+        return build_tiled_dataset(
+            task,
+            samples=samples,
+            sizes=sizes,
+            scope=scope,
+            transforms=transforms,
+            tiling=tiler,
+        )
+    ds = _builtin_loader(
+        task, samples=samples, scope=scope, transforms=transforms
+    )
+    ds.expected_channels = sizes["num_channels"]
+    return ds
 
+
+def build_tiled_dataset(
+    task: str,
+    *,
+    samples: Sequence[Sample],
+    sizes: Mapping[str, int],
+    scope: ClassScope,
+    transforms: Transforms | None,
+    tiling: TilingSpec,
+) -> TiledDetectionDataset:
+    """Build ``task``'s loader over ``samples`` wrapped in a :class:`TiledDetectionDataset`.
+
+    The tiler runs at the options ``tiling`` states (``TilingSpec.tiler_options``), its base
+    reading its sources at ``sizes``' band count under ``scope``; a tiling missing its
+    ``tile_size`` or ``overlap`` refuses (``ValueError``).
+    """
+    if tiling.tile_size is None or tiling.overlap is None:
+        raise ValueError(
+            f"build_dataset was given a tiling with tile_size {tiling.tile_size!r} "
+            f"and overlap {tiling.overlap!r}: a tiler runs on one whole lattice; state both, "
+            "or resolve them with split_construction.resolved_tiling."
+        )
+    base = _builtin_loader(task, samples=samples, scope=scope, transforms=None)
+    assert isinstance(base, DocumentDataset), (
+        "a task that tiles reads label documents"
+    )
+    # Stamped before the tiler indexes every image at the base's band count.
+    base.expected_channels = sizes["num_channels"]
+    return TiledDetectionDataset(
+        base, transforms=transforms, **tiling.tiler_options()
+    )
+
+
+def _builtin_loader(
+    task: str,
+    *,
+    samples: Sequence[Sample],
+    scope: ClassScope,
+    transforms: Transforms | None,
+) -> BaseDataset:
+    """Construct ``task``'s built-in loader over ``samples``, under ``scope`` where it reads one."""
     from tcip_mcp.pipelines.model_build import resolve_named
 
     cls = resolve_named(task, _DATASET_MAP, kind="task")
     declared = {"scope": scope} if cls.ground_truth_shape == DOCUMENT else {}
     construct: Any = cls
-
-    tiler = run_tiling(task, tiling)
-    if tiler is not None:
-        if tiler.tile_size is None or tiler.overlap is None:
-            raise ValueError(
-                f"build_dataset was given a tiling with tile_size {tiler.tile_size!r} "
-                f"and overlap {tiler.overlap!r}: a tiler runs on one whole lattice; state both, "
-                "or resolve them with split_construction.resolved_tiling."
-            )
-        base = construct(samples=samples, **declared)
-        assert isinstance(base, DocumentDataset), (
-            "a task that tiles reads label documents"
-        )
-        # Stamped before the tiler indexes every image at the base's band count.
-        base.expected_channels = sizes["num_channels"]
-        ds: BaseDataset = TiledDetectionDataset(
-            base, transforms=transforms, **tiler.tiler_options()
-        )
-    else:
-        ds = construct(samples=samples, transforms=transforms, **declared)
-
-    ds.expected_channels = sizes["num_channels"]
-    return ds
+    return construct(samples=samples, transforms=transforms, **declared)
 
 
 def refuse_unchained(
-    samples: Sequence[Sample], num_channels: int, transforms: Any
+    samples: Sequence[Sample],
+    num_channels: int,
+    transforms: Transforms | None,
 ) -> None:
     """Refuse ``transforms`` over ``samples`` when a sample's source is served as an array.
 
@@ -1270,7 +1314,7 @@ def refuse_unchained(
 
 
 def unchained(
-    transforms: Any, frame: str, bands: int, dtype: Any
+    transforms: object, frame: str, bands: int, dtype: np.dtype
 ) -> ValueError:
     """Return the refusal of ``transforms`` over ``frame``.
 

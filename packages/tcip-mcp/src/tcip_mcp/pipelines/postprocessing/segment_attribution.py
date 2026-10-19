@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 
 from shapely.geometry import Point as ShapelyPoint
 
@@ -43,6 +43,9 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     SegmentSource,
     require_named_plants,
 )
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.raster_source import RasterIdentity
 
 
 class CanopySegmentError(ValueError):
@@ -82,7 +85,7 @@ def load_canopy_segments(
     *,
     subject: str,
     raster_stem: str,
-    raster_identity: dict,
+    raster_identity: RasterIdentity,
 ) -> list[CanopySegment]:
     """Return the canopy segments of ``subject`` in the raster's own label ``document``.
 
@@ -100,13 +103,13 @@ def load_canopy_segments(
     unattributed record a reviewer has accepted, all admit.
     """
     if (int(document.width or -1), int(document.height or -1)) != (
-        int(raster_identity["width"]),
-        int(raster_identity["height"]),
+        raster_identity.width,
+        raster_identity.height,
     ):
         raise CanopySegmentError(
             f"the canopy segment document of raster stem {raster_stem!r} is "
             f"{document.width}x{document.height}, the raster is "
-            f"{raster_identity['width']}x{raster_identity['height']}; the document does not "
+            f"{raster_identity.width}x{raster_identity.height}; the document does not "
             "describe this raster"
         )
 

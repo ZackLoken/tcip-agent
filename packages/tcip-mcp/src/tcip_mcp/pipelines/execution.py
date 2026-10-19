@@ -9,10 +9,10 @@ and the threshold it merges at.
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass, field, fields, replace
+from dataclasses import asdict, dataclass, field, fields
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 
 if TYPE_CHECKING:
@@ -99,7 +99,7 @@ class Execution:
     cross_tile_nms: float | None
     sahi_version: str | None
     rationale: str | None
-    sources: dict[str, str] = field(default_factory=dict)
+    sources: dict[str, str]
 
     def __post_init__(self) -> None:
         """Refuse a tile edge without an overlap, a conf without a density, or either reverse."""
@@ -130,41 +130,9 @@ class Execution:
         """Whether the pass collects masks and keeps them uncut."""
         return self.masks and self.mask_cut is None
 
-    def record(self) -> dict[str, Any]:
-        """Return the record as JSON values."""
-        out = asdict(self)
-        out["tile_resize"] = (
-            list(self.tile_resize) if self.tile_resize is not None else None
-        )
-        return out
 
-    @classmethod
-    def of(cls, record: dict[str, Any]) -> Execution:
-        """Restore the execution a :meth:`record` states.
-
-        A record missing a field refuses (``ValueError``) naming the missing fields.
-        """
-        missing = sorted(set(cls.__dataclass_fields__) - set(record))
-        if missing:
-            raise ValueError(
-                f"the execution record carries no {missing}: it states only part of "
-                "a pass, so no pass can be restored from it."
-            )
-        resize, cut = record["tile_resize"], record["mask_cut"]
-        return cls(
-            **{
-                **{k: record[k] for k in cls.__dataclass_fields__},
-                "mask_cut": MaskCut(**cut) if cut is not None else None,
-                "tile_resize": tuple(resize) if resize is not None else None,
-                "sources": dict(record["sources"]),
-            }
-        )
-
-    def with_value(self, name: str, value: Any, source: str) -> Execution:
-        """Return this record with ``name`` set to ``value`` from ``source``."""
-        return replace(
-            self, **{name: value}, sources={**self.sources, name: source}
-        )
+EXECUTION_RECORD = TypeAdapter(Execution)
+"""The execution record's validation and its JSON form."""
 
 
 class Stated(BaseModel):

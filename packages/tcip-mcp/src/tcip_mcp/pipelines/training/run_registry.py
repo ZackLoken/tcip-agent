@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from tcip_mcp.experiments import RunObservation
+    from tcip_mcp.experiments import RunObservation, RunRecord
     from tcip_mcp.pipelines.model_build import SourceLayout
     from tcip_mcp.pipelines.schemas import (
         TrainConfigSchema,
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         TrainGeometry,
         TraitRevisionRef,
     )
+    from tcip_mcp.pipelines.training.evaluation import EvaluationKeywords
 
 
 @dataclass
@@ -44,7 +45,7 @@ class TrainRun:
     start_time: float = 0.0
     end_time: float = 0.0
     # The error the run's final status will name (``experiments.write_final_status``).
-    status_error: str = ""
+    status_error: str | None = None
     output_dir: str = ""
     # "training" (a launched run) vs "hpo_trial" (an HPO sweep's own trial run, which a cancel
     # of its sweep also stops).
@@ -64,7 +65,7 @@ class TrainRun:
         return self.spec.trainer_reads()
 
     @cached_property
-    def evaluation_arguments(self) -> dict:
+    def evaluation_arguments(self) -> EvaluationKeywords:
         """The run's resolved evaluation keywords.
 
         They are the dims its config records (``model_build.recorded_model_dims``), the
@@ -120,36 +121,33 @@ class TrainRun:
 
 
 def observed_run(
-    observation: RunObservation, *, origin: str = "training"
+    observation: RunObservation[RunRecord], *, origin: str = "training"
 ) -> TrainRun:
     """Return the :class:`TrainRun` of an observed run, of ``origin``.
 
     The run is named for its directory and trains under its validated launch config
-    (``RunObservation.spec``) with the data block its launch resolved
-    (``RunObservation.resolved_data``) laid over it and its source files bound to the run's own
-    snapshot (``model_build.snapshot_bound``), which it imports from as the record states it
-    (``model_build.run_layout``), under the trait revision and at the geometry that resolution
-    carries. A run whose input resolved to nothing ended at its opening and has none.
+    (``RunRecord.spec``) with the data block its launch resolved (``RunRecord.resolution``,
+    which refuses a run that resolved to nothing) laid over it and its source files bound to the
+    run's own snapshot (``model_build.snapshot_bound``), which it imports from as the record
+    states it (``model_build.run_layout``), under the trait revision and at the geometry that
+    resolution carries.
     """
     from tcip_mcp.experiments import project_of_run
     from tcip_mcp.pipelines.model_build import run_layout, snapshot_bound
 
-    data, geometry = observation.resolved_data, observation.resolved_geometry
-    assert data is not None and geometry is not None, (
-        "a run whose input resolved to nothing ended at its opening"
-    )
-    spec = snapshot_bound(
-        observation.spec.model_copy(update={"data": data}),
-        observation.record["source"],
-        observation.directory,
-    )
+    record, directory = observation.record, observation.directory
+    resolved = record.resolution
     return TrainRun(
-        id=observation.directory.name,
-        spec=spec,
-        trait_revision=observation.trait_revision,
-        geometry=geometry,
-        project=project_of_run(observation.directory),
-        layout=run_layout(observation.directory, observation.record["source"]),
-        output_dir=str(observation.directory),
+        id=directory.name,
+        spec=snapshot_bound(
+            record.spec.model_copy(update={"data": resolved.data}),
+            record.source,
+            directory,
+        ),
+        trait_revision=resolved.trait_revision,
+        geometry=resolved.geometry,
+        project=project_of_run(directory),
+        layout=run_layout(directory, record.source),
+        output_dir=str(directory),
         origin=origin,
     )

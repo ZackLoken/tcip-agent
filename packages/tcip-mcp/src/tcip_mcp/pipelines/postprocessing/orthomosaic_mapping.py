@@ -211,7 +211,7 @@ class OrthomosaicGeoreference:
     Each instance builds one transformer.
     """
 
-    def __init__(self, transform: GeoTransform):
+    def __init__(self, transform: GeoTransform) -> None:
         """Take the raster's affine; the WGS84 transformer is built on first use."""
         self.transform = transform
         self._to_wgs84: pyproj.Transformer | None = None

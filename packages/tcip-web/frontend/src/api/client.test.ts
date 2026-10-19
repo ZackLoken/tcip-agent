@@ -92,8 +92,13 @@ describe("canvas.pushState 409 recovery", () => {
     img_width: 100,
     img_height: 80,
     viewport: null,
+    mode: "box" as const,
+    active_subject: null,
+    cut_armed: false,
+    dirty: false,
     user: "grower",
     classes: [],
+    counts: {},
     shapes: null,
   });
 

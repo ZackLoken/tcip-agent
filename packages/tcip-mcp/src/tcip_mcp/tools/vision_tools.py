@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     import numpy as np
 
     from tcip_mcp.buckets import Bucket
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.raster_source import RasterSource, Rect
 
 
@@ -171,7 +172,7 @@ def _point_note(n: int) -> str:
     )
 
 
-def _legend_name(a: Annotation, *, scope) -> str:
+def _legend_name(a: Annotation, *, scope: ClassScope | None) -> str:
     """Return the name a render's legend shows for ``a``.
 
     The name is its subject followed by each value it carries under ``scope``'s attributes, in
@@ -180,24 +181,24 @@ def _legend_name(a: Annotation, *, scope) -> str:
     another subject.
     """
     from tcip_annotation.json_io import attribute_ids, attribute_values
-    from tcip_mcp.pipelines.data.selection import DOCUMENT
 
     if scope is None or scope.subject is None:
         return a.subject
-    attributes = scope.admitted_for(
-        DOCUMENT, "the rendered bucket's scope"
-    ).attributes
-    ids = attribute_ids(a, scope.subject, attributes)
+    read = scope.document_attributes("the rendered bucket's scope")
+    ids = attribute_ids(a, read.subject, read.attributes)
     return " ".join(
         [
             a.subject,
-            *(attribute_values(ids, attributes).values() if ids else ()),
+            *(attribute_values(ids, read.attributes).values() if ids else ()),
         ]
     )
 
 
 def _box_dict(
-    a: Annotation, index: Callable[[str], int], *, scope=None
+    a: Annotation,
+    index: Callable[[str], int],
+    *,
+    scope: ClassScope | None = None,
 ) -> dict:
     geometry = a.geometry
     assert box_derivable(geometry), (
@@ -217,7 +218,10 @@ def _box_dict(
 
 
 def _poly_dict(
-    a: Annotation, index: Callable[[str], int], *, scope=None
+    a: Annotation,
+    index: Callable[[str], int],
+    *,
+    scope: ClassScope | None = None,
 ) -> dict:
     geometry = a.geometry
     assert polygonal(geometry), (
@@ -886,16 +890,6 @@ def _viz_dataset_sample(
     }
 
 
-def _received_at(document: dict, name: str) -> datetime:
-    """Return the instant the backend received the canvas document ``name``.
-
-    Refuses (``ValueError``) a document that carries none.
-    """
-    if "received_at" not in document:
-        raise ValueError(f"the canvas document {name} carries no received_at")
-    return datetime.fromisoformat(document["received_at"])
-
-
 @tool()
 def capture_live_canvas(
     bound: BoundProject,
@@ -909,7 +903,7 @@ def capture_live_canvas(
     classes, counts, tab, mode, active_subject, cut_armed, dirty and user) and the geometry record
     (the full display-resolved geometry, including unsaved edits and an in-progress drawing).
     Renders the region being shown at up to ``max_edge`` and returns the artifact path, plus the
-    classes schema, per-tag/per-creator counts, and the state's age. A canvas document that will
+    classes schema, per-tag counts, and the state's age. A canvas document that will
     not read raises the store's own error.
 
     Args:
@@ -925,17 +919,13 @@ def capture_live_canvas(
 
     from tcip_mcp.web_client import (
         PANEL_EVENT_CANVAS_STATE_REQUEST,
-        canvas_geometry_key,
-        canvas_meta_key,
         post_panel_event,
+        read_canvas_geometry,
+        read_canvas_meta,
     )
 
     project = bound.root
-    meta_doc = canvas_meta_key(str(project))
-    shapes_doc = canvas_geometry_key(str(project))
-
-    previous = ts.read(meta_doc, default=None)
-    since = None if previous is None else _received_at(previous, "canvas_live")
+    previous = read_canvas_meta(str(project))
     refreshed = False
     ping: dict = {}
     if refresh:
@@ -945,14 +935,16 @@ def capture_live_canvas(
         if ping.get("delivered"):
             for _ in range(12):  # ~2.4s for the GUI's flush to land
                 _time.sleep(0.2)
-                cur = ts.read(meta_doc, default=None)
-                if cur and (
-                    since is None or _received_at(cur, "canvas_live") > since
+                cur = read_canvas_meta(str(project))
+                if cur is not None and (
+                    previous is None
+                    or datetime.fromisoformat(cur.received_at)
+                    > datetime.fromisoformat(previous.received_at)
                 ):
                     refreshed = True
                     break
 
-    state = ts.read(meta_doc, default=None)
+    state = read_canvas_meta(str(project))
     if state is None:
         return {
             "error": "No canvas state has been pushed for this project; the GUI pushes its "
@@ -963,7 +955,7 @@ def capture_live_canvas(
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.registry_paths import resolved_registry_path
 
-    src_image = str(resolved_registry_path(project, state["image_path"]))
+    src_image = str(resolved_registry_path(project, state.image_path))
     if not Path(src_image).is_file():
         return {
             "error": f"Canvas state references a missing image: {src_image}"
@@ -971,27 +963,20 @@ def capture_live_canvas(
 
     # Geometry is valid only when its identity matches the meta document: a heartbeat for a
     # different image/tab means the stored shapes are stale and must not render.
-    sdoc = ts.read(shapes_doc, default=None) or {}
-    shapes_valid = sdoc.get("image_path") == state.get(
-        "image_path"
-    ) and sdoc.get("tab") == state.get("tab")
-    shapes: list = (sdoc.get("shapes") or []) if shapes_valid else []
-    viewport = state.get("viewport")
+    geometry = read_canvas_geometry(str(project))
+    if geometry is not None and (
+        geometry.image_path != state.image_path or geometry.tab != state.tab
+    ):
+        geometry = None
+    shapes = [] if geometry is None else geometry.shapes
     # Read exactly the region being rendered: the human's viewport is a rectangle in the
     # image's own grid, so a raster far too large to decode whole is still capturable.
-    region = None
-    if (
-        crop_to_viewport
-        and viewport
-        and viewport.get("w")
-        and viewport.get("h")
-    ):
-        region = (
-            float(viewport.get("x", 0)),
-            float(viewport.get("y", 0)),
-            float(viewport["w"]),
-            float(viewport["h"]),
-        )
+    viewport = state.viewport
+    region = (
+        (viewport.x, viewport.y, viewport.w, viewport.h)
+        if crop_to_viewport and viewport is not None
+        else None
+    )
     read = _display_of(
         SourceHeader(resolve_image_path(src_image)),
         max_edge=max_edge,
@@ -1013,20 +998,19 @@ def capture_live_canvas(
     now = datetime.now(timezone.utc)
     from collections import Counter
 
-    tag_counts = dict(Counter(str(s.get("tag") or "untagged") for s in shapes))
-    creator_counts = dict(
-        Counter(str(s["created_by"]) for s in shapes if s.get("created_by"))
-    )
+    tag_counts = dict(Counter(s.tag for s in shapes))
 
-    age = round((now - _received_at(state, "canvas_live")).total_seconds(), 1)
+    age = round(
+        (now - datetime.fromisoformat(state.received_at)).total_seconds(), 1
+    )
     if refreshed or age < 5.0:
         summary = (
-            f"Rendered the live {state.get('tab')} canvas for {state.get('image')} "
+            f"Rendered the live {state.tab} canvas for {state.image} "
             f"({len(shapes)} shapes)."
         )
     else:
         summary = (
-            f"Rendered the last known {state.get('tab')} canvas for {state.get('image')} "
+            f"Rendered the last known {state.tab} canvas for {state.image} "
             f"({len(shapes)} shapes, {age}s old; not live: the GUI did not answer the refresh "
             "ping, see refresh_answer)."
         )
@@ -1036,28 +1020,30 @@ def capture_live_canvas(
     return {
         "image_path": out,
         "source_image": src_image,
-        "image": state.get("image"),
-        "tab": state.get("tab"),
-        "mode": state.get("mode"),
-        "cut_armed": state.get("cut_armed"),
-        "user": state.get("user"),
-        "dirty": state.get("dirty"),
-        "viewport": state.get("viewport"),
+        "image": state.image,
+        "tab": state.tab,
+        "mode": state.mode,
+        "cut_armed": state.cut_armed,
+        "user": state.user,
+        "dirty": state.dirty,
+        "viewport": None if viewport is None else viewport.model_dump(),
         "cropped_to_viewport": region is not None,
-        "classes": state.get("classes") or [],
-        "counts": state.get("counts"),
+        "classes": state.classes,
+        "counts": state.counts,
         "shape_counts_by_tag": tag_counts,
-        "shape_counts_by_creator": creator_counts,
         "state_age_seconds": age,
         "shapes_age_seconds": (
-            round(
-                (now - _received_at(sdoc, "canvas_shapes")).total_seconds(), 1
+            None
+            if geometry is None
+            else round(
+                (
+                    now - datetime.fromisoformat(geometry.received_at)
+                ).total_seconds(),
+                1,
             )
-            if shapes_valid
-            else None
         ),
         # True when no valid geometry exists for this image/tab yet (heartbeat-only or stale).
-        "shapes_missing": not shapes_valid,
+        "shapes_missing": geometry is None,
         # Did a fresh push land after our ping? False + delivered ping = GUI not listening here.
         "refreshed": refreshed,
         "refresh_ping_delivered": ping_delivered,

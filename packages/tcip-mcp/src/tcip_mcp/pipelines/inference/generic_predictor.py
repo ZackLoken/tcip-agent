@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 import torch
+from pydantic import BaseModel, ConfigDict, JsonValue
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -39,6 +40,20 @@ from tcip_mcp.pipelines.model_build import (
     recorded_model_dims,
 )
 from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS, TILING_TASKS
+
+
+class SliceBatch(BaseModel):
+    """Lattice slices a sliced pass predicted, with their shifted predictions.
+
+    ``slices`` are ``(x0, y0, x1, y1)`` (:func:`~tcip_mcp.pipelines.slicing.slice_lattice`) and
+    ``predictions`` their full-frame rows (:func:`~tcip_mcp.pipelines.slicing.prediction_rows`):
+    one tile batch's, or every recorded batch's together as an interrupted pass's prior.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    slices: list[tuple[int, int, int, int]]
+    predictions: list[dict[str, JsonValue]]
 
 
 class WindowedRasterReader(Protocol):
@@ -269,8 +284,8 @@ class GenericPredictor:
         execution: Execution,
         tile_batch_size: int,
         source_label: str = "",
-        prior: dict | None = None,
-        progress: Callable[[int, int, dict], None] | None = None,
+        prior: SliceBatch | None = None,
+        progress: Callable[[int, int, SliceBatch], None] | None = None,
     ) -> dict:
         """Run sliced detection over one source under a tiled ``execution`` record.
 
@@ -294,10 +309,9 @@ class GenericPredictor:
         ``masks``, one ``{"segmentation": [[x0, y0, x1, y1, ...], ...]}`` per detection: the
         merged SAHI polygons in full-frame pixels, empty where the mask binarized to nothing.
 
-        ``prior`` seeds a reader's pass with the ``slices`` and shifted ``predictions``
-        (:func:`~tcip_mcp.pipelines.slicing.prediction_rows`) an interrupted pass recorded, and
-        those slices are skipped; ``progress`` is called once per live batch with its first and
-        last slice index and a mapping of that shape. Both refuse on a decoded source. Returns the
+        ``prior`` seeds a reader's pass with the :class:`SliceBatch` an interrupted pass recorded,
+        and its slices are skipped; ``progress`` is called once per live batch with its first and
+        last slice index and its :class:`SliceBatch`. Both refuse on a decoded source. Returns the
         detection record (:meth:`_detection_record`) with ``tiles``, the lattice's slice count.
         """
         from tcip_mcp.pipelines.slicing import (
@@ -370,10 +384,10 @@ class GenericPredictor:
         slices = slice_lattice(
             height, width, tile_size, cast(float, execution.overlap)
         )
-        prior = prior or {"slices": [], "predictions": []}
-        done = {tuple(s) for s in prior["slices"]}
+        prior = prior or SliceBatch(slices=[], predictions=[])
+        done = set(prior.slices)
         predictions = predictions_from_rows(
-            prior["predictions"], [height, width], self.attribute_sizes
+            prior.predictions, [height, width], self.attribute_sizes
         )
         pending = [(i, s) for i, s in enumerate(slices) if s not in done]
         for start in range(0, len(pending), tile_batch_size):
@@ -393,12 +407,10 @@ class GenericPredictor:
                 progress(
                     batch[0][0],
                     batch[-1][0],
-                    {
-                        "slices": [list(s) for _, s in batch],
-                        "predictions": prediction_rows(
-                            new, self.attribute_sizes
-                        ),
-                    },
+                    SliceBatch(
+                        slices=[s for _, s in batch],
+                        predictions=prediction_rows(new, self.attribute_sizes),
+                    ),
                 )
 
         merged = sorted(

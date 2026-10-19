@@ -31,7 +31,13 @@ from tcip_mcp.pipelines.image_utils import pil_to_tensor
 from tcip_mcp.project_record import CaptureInvariances, RotationDegrees
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from tcip_mcp.pipelines.schemas import AugmentationSpec
+
+    Transforms = Callable[[Image.Image, dict], tuple[torch.Tensor, dict]]
+    """An augmentation chain: an image and its target in, the image as a tensor and the target
+    out."""
 
 Probability = Annotated[float, Field(ge=0, le=1)]
 CropFraction = Annotated[float, Field(gt=0, le=1)]
@@ -57,36 +63,35 @@ class _Transform(BaseModel, ABC):
         ``invariances`` states for it.
         """
 
+    @abstractmethod
+    def __call__(
+        self, img: Image.Image, target: dict
+    ) -> tuple[Image.Image, dict]:
+        """Return ``img`` and its ``target`` transformed together."""
+
 
 class Compose:
-    """Chain multiple (image, target) transforms."""
+    """Chain (image, target) transforms, ending in the image as a tensor."""
 
-    def __init__(self, transforms: list) -> None:
+    def __init__(self, transforms: list[_Transform]) -> None:
         """Hold ``transforms``, applied in their order."""
         self.transforms = transforms
 
     def __call__(
         self, img: Image.Image, target: dict
-    ) -> tuple[torch.Tensor | Image.Image, dict]:
-        """Apply each transform to ``(img, target)`` in order and return the resulting pair."""
+    ) -> tuple[torch.Tensor, dict]:
+        """Apply each transform to ``(img, target)`` in order, then return the image as a tensor.
+
+        The tensor is :func:`pil_to_tensor`'s, beside the transformed target.
+        """
         for t in self.transforms:
             img, target = t(img, target)
-        return img, target
+        return pil_to_tensor(img), target
 
     def __repr__(self) -> str:
         """Return the chain as ``Compose([...])``, one transform per line."""
         lines = [f"  {t!r}" for t in self.transforms]
         return "Compose([\n" + "\n".join(lines) + "\n])"
-
-
-class ToTensor:
-    """Convert a PIL image to a tensor, ``target`` unchanged."""
-
-    def __call__(
-        self, img: Image.Image, target: dict
-    ) -> tuple[torch.Tensor, dict]:
-        """Return ``img`` as a tensor (:func:`pil_to_tensor`) beside ``target`` unchanged."""
-        return pil_to_tensor(img), target
 
 
 def _resize_masks(masks: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
@@ -508,7 +513,7 @@ def recorded_resize(config: AugmentationSpec | None) -> tuple[int, int] | None:
 
 
 def build_augmentation(config: AugmentationSpec) -> Compose:
-    """Build the augmentation chain ``config`` states, in its order, ending in :class:`ToTensor`.
+    """Build the augmentation chain ``config`` states, in its order (:class:`Compose`).
 
     ``config`` maps each transform's name (:data:`_AUGMENTATION_REGISTRY`) to a dict stating
     every value that transform's constructor takes, e.g. ``{"rationale": "...",
@@ -517,5 +522,4 @@ def build_augmentation(config: AugmentationSpec) -> Compose:
     """
     return Compose(
         [transform for _name, transform in _stated_transforms(config)]
-        + [ToTensor()]
     )

@@ -22,7 +22,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
@@ -35,6 +35,17 @@ from tcip_mcp.pipelines.display_bounds import (
 )
 from tcip_web import jobstore
 from tcip_web.paths import allowed_file, resolved_image
+
+if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
+
+    from tcip_mcp.pipelines.band_stats import BandRange
+    from tcip_mcp.pipelines.raster_source import (
+        GdalSource,
+        RasterSource,
+        SourceHeader,
+    )
 
 router = APIRouter(prefix="/api/images", tags=["images"])
 
@@ -438,7 +449,9 @@ def _overviews_required(path: str, reason: str) -> HTTPException:
     )
 
 
-def _overview_stats(raster, dims: list[tuple[int, int]]):
+def _overview_stats(
+    raster: GdalSource, dims: list[tuple[int, int]]
+) -> tuple[list[BandRange], list[tuple[float, float]], tuple[int, int]]:
     """Return per-band ranges, clip cut points and the ``(width, height)`` they were read at.
 
     They come from one reduced read of ``raster``'s whole frame, planned within
@@ -462,7 +475,7 @@ def _overview_stats(raster, dims: list[tuple[int, int]]):
     return band_ranges(pixels), clips, (plan.width, plan.height)
 
 
-def _source_identity(header) -> tuple:
+def _source_identity(header: SourceHeader) -> tuple:
     """Return ``(version, sidecar)``, what identifies ``header``'s raster on disk.
 
     Both are read off the filesystem without opening the raster: its version
@@ -505,7 +518,7 @@ def _memo(
     return value
 
 
-def _stats_of(raster) -> _RasterStats:
+def _stats_of(raster: RasterSource) -> _RasterStats:
     """Read the per-band display bounds of the open ``raster``, in band order.
 
     A raster the :data:`_STATS_MAX_WINDOWS` windows can hold is read from native pixels by the
@@ -571,7 +584,9 @@ def _sampled_bounds(
     return [(stats.ranges[i].minimum, stats.ranges[i].maximum) for i in idxs]
 
 
-def _plain_rgb(pixels, dtype, bounds: tuple[float, float] | None):
+def _plain_rgb(
+    pixels: np.ndarray, dtype: np.dtype, bounds: tuple[float, float] | None
+) -> NDArray[np.uint8]:
     """Render a 1/3/4-band array as the plain ``uint8`` RGB the file's own pixels read as.
 
     A single band is replicated, a fourth band dropped, and no data-range stretch applied.
@@ -1002,7 +1017,7 @@ class OverviewJob:
     error: str | None = None
 
 
-_overview_registry = jobstore.JobRegistry()
+_overview_registry: jobstore.JobRegistry[OverviewJob] = jobstore.JobRegistry()
 """The live registry for overview-build jobs (``jobstore.JobRegistry``), with no root concept."""
 
 

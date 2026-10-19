@@ -7,39 +7,71 @@ it; a resolved flag is kept, never removed.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Annotated, TypedDict
 
-from tcip_annotation.json_io import PERSON_IDENTITY_PREFIX, is_person
+from pydantic import (
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    TypeAdapter,
+)
+from pydantic.dataclasses import dataclass as pydantic_dataclass
+
+from tcip_annotation.json_io import Person
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
+from tcip_annotation.text import Text
 from tcip_store import Key
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
 
 REVIEW_FLAGS_STORE = "review_flags"
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(
+    frozen=True, config=ConfigDict(extra="forbid", allow_inf_nan=False)
+)
 class Flag:
     """One flag: its id, comment, raiser and time, its target, and its resolution.
 
-    ``id`` names it, ``text`` is the comment, ``by`` who raised it (the label record's own
-    spelling) and ``at`` when. Its target is one of: ``point`` (pixel ``(x, y)``) with the
-    ``subject`` of the annotation flagged there; ``proposal`` (``(bucket, index)``, the index in
-    that bucket's document for the image); or neither, the image as a whole. Once
-    resolved it carries ``resolved_by`` and ``resolved_at``, the ``reply`` given, and ``removed``
-    when the save that resolved it did so by removing the annotation it sat on.
+    ``id`` names it, ``text`` is the comment, ``by`` who raised it (a person's recorded identity,
+    the label record's own spelling) and ``at`` when. Its target is one of: ``point`` (pixel
+    ``(x, y)``) with the ``subject`` of the annotation flagged there; ``proposal`` (``(bucket,
+    index)``, the index in that bucket's document for the image); or neither, the image as a
+    whole. Once resolved it carries ``resolved_by`` (a person) and ``resolved_at``, the
+    ``reply`` given, and ``removed`` when the save that resolved it did so by removing the
+    annotation it sat on. Construction validates every field (``pydantic.ValidationError``).
     """
 
-    id: str
-    text: str
-    by: str
-    at: str
-    point: tuple[float, float] | None = None
-    subject: str | None = None
-    proposal: tuple[str, int] | None = None
-    resolved_by: str | None = None
-    resolved_at: str | None = None
-    reply: str = ""
-    removed: bool = False
+    id: Text
+    text: Text
+    by: Person
+    at: Text
+    point: tuple[float, float] | None
+    subject: Text | None
+    proposal: tuple[Text, Annotated[StrictInt, Field(ge=0)]] | None
+    resolved_by: Person | None
+    resolved_at: str | None
+    reply: str
+    removed: StrictBool
+
+    def __post_init__(self) -> None:
+        """Refuse a target or a resolution stated by halves (``ValueError``).
+
+        A point without its subject or a subject without its point, a point beside a proposal,
+        and a resolver without a time or a time without a resolver refuse.
+        """
+        if (
+            (self.point is None) != (self.subject is None)
+            or (self.point is not None and self.proposal is not None)
+            or (self.resolved_by is None) != (self.resolved_at is None)
+        ):
+            raise ValueError(
+                f"flag {self.id!r} is not a comment by a person at a time on a point with its "
+                "subject, a proposal or the image, resolved by a person at a time if at all"
+            )
 
     @property
     def open(self) -> bool:
@@ -49,20 +81,9 @@ class Flag:
     def resolved(
         self, *, by: str, at: str, reply: str = "", removed: bool = False
     ) -> Flag:
-        """Return this flag resolved by ``by`` at ``at``.
-
-        A resolution :func:`decode_flag` would not read back refuses (``ValueError``).
-        """
-        return decode_flag(
-            encode_flag(
-                replace(
-                    self,
-                    resolved_by=by,
-                    resolved_at=at,
-                    reply=reply,
-                    removed=removed,
-                )
-            )
+        """Return this flag resolved by ``by`` at ``at``, validated as a :class:`Flag`."""
+        return replace(
+            self, resolved_by=by, resolved_at=at, reply=reply, removed=removed
         )
 
 
@@ -79,23 +100,23 @@ class FlagRequest:
 def raised(request: FlagRequest, *, by: str, at: str) -> Flag:
     """Return ``request`` as a new open flag by ``by`` at ``at`` under a freshly minted id.
 
-    A blank comment, or a target :func:`decode_flag` would not read back, refuses
-    (``ValueError``).
+    The comment is stripped; a flag that does not validate refuses as :class:`Flag` does.
     """
     import uuid
 
-    flag = Flag(
+    return Flag(
         id=uuid.uuid4().hex,
-        text=request.text.strip()
-        if isinstance(request.text, str)
-        else request.text,
+        text=request.text.strip(),
         by=by,
         at=at,
         point=request.point,
         subject=request.subject,
         proposal=request.proposal,
+        resolved_by=None,
+        resolved_at=None,
+        reply="",
+        removed=False,
     )
-    return decode_flag(encode_flag(flag))
 
 
 def flag_key(label_key: Key) -> Key:
@@ -103,95 +124,37 @@ def flag_key(label_key: Key) -> Key:
     return Key(REVIEW_FLAGS_STORE, label_key.root, label_key.parts)
 
 
-def encode_flag(flag: Flag) -> dict:
+_FLAG = TypeAdapter(Flag)
+
+
+def encode_flag(flag: Flag) -> dict[str, JsonValue]:
     """Return ``flag`` as the entry its record stores."""
-    return {
-        **asdict(flag),
-        "point": list(flag.point) if flag.point else None,
-        "proposal": list(flag.proposal) if flag.proposal else None,
-    }
+    return _FLAG.dump_python(flag, mode="json")
 
 
-def _is_text(value) -> bool:
-    return isinstance(value, str) and bool(value)
+class FlagsRecord(TypedDict):
+    """One image's flags record: every flag raised on it, oldest first."""
+
+    flags: list[Flag]
 
 
-def decode_flag(entry: Mapping) -> Flag:
-    """Return one stored entry as a :class:`Flag`.
-
-    Raises ``ValueError`` naming the entry when a key is missing, the id, comment or time is not a
-    non-empty string, the point is not two numbers, the proposal is not a bucket name and an
-    index, a point comes without a subject or beside a proposal, the raiser or the resolver is
-    not a person's recorded identity (:func:`~tcip_annotation.json_io.is_person`), or the
-    resolution states a person without a time.
-    """
-    try:
-        point, proposal = entry["point"], entry["proposal"]
-        flag = Flag(
-            id=entry["id"],
-            text=entry["text"],
-            by=entry["by"],
-            at=entry["at"],
-            point=None
-            if point is None
-            else (float(point[0]), float(point[1])),
-            subject=entry["subject"],
-            proposal=None if proposal is None else (proposal[0], proposal[1]),
-            resolved_by=entry["resolved_by"],
-            resolved_at=entry["resolved_at"],
-            reply=entry["reply"],
-            removed=entry["removed"],
-        )
-    except (KeyError, TypeError, ValueError, IndexError) as exc:
-        raise ValueError(
-            f"flag entry {dict(entry)!r} does not read: {exc!r}"
-        ) from exc
-    well_formed = (
-        all(_is_text(v) for v in (flag.id, flag.text, flag.at))
-        and is_person(flag.by)
-        and (flag.point is None) == (flag.subject is None)
-        and (flag.subject is None or _is_text(flag.subject))
-        and not (flag.point is not None and flag.proposal is not None)
-        and (
-            flag.proposal is None
-            or (
-                _is_text(flag.proposal[0])
-                and isinstance(flag.proposal[1], int)
-                and not isinstance(flag.proposal[1], bool)
-                and flag.proposal[1] >= 0
-            )
-        )
-        and (flag.resolved_by is None) == (flag.resolved_at is None)
-        and (flag.resolved_by is None or is_person(flag.resolved_by))
-        and isinstance(flag.reply, str)
-        and isinstance(flag.removed, bool)
-    )
-    if not well_formed:
-        raise ValueError(
-            f"flag entry {dict(entry)!r} is not a comment by a person "
-            f"({PERSON_IDENTITY_PREFIX}<name>) at a time on a point with its "
-            "subject, a proposal or the image, resolved by a person if at all"
-        )
-    return flag
+_FLAGS_RECORD = TypeAdapter(FlagsRecord)
 
 
-def flags_of(record: Mapping | None) -> list[Flag]:
+def flags_of(record: JsonValue) -> list[Flag]:
     """Return the flags a stored record holds, oldest first; an absent record holds none.
 
-    A record that is not ``{"flags": [...]}`` or an entry that will not decode refuses
-    (``ValueError``).
+    A record that does not validate as a :class:`FlagsRecord` refuses
+    (``pydantic.ValidationError``) naming each field.
     """
     if record is None:
         return []
-    entries = record.get("flags") if isinstance(record, Mapping) else None
-    if not isinstance(entries, list):
-        raise ValueError("a flags record holds a list under 'flags'")
-    return [decode_flag(entry) for entry in entries]
+    return _FLAGS_RECORD.validate_python(record)["flags"]
 
 
-def flags_record(flags: list[Flag]) -> dict:
-    """Return ``flags`` as a ``{"flags": [...]}`` record, each through :func:`encode_flag`."""
-    return {"flags": [encode_flag(flag) for flag in flags]}
+def flags_record(flags: list[Flag]) -> dict[str, JsonValue]:
+    """Return ``flags`` as the :class:`FlagsRecord` its key stores."""
+    return _FLAGS_RECORD.dump_python({"flags": flags}, mode="json")
 
 
 def read_flags(key: Key) -> list[Flag]:

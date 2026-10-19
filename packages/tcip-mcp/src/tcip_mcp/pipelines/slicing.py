@@ -306,7 +306,7 @@ class TcipDetectionModel(DetectionModel):
         """Take the predictor's own device; ``device`` is not read."""
         self.device = self._predictor.device
 
-    def set_model(self, model: Any, **kwargs: Any) -> None:
+    def set_model(self, model: object, **kwargs: object) -> None:
         """Hold ``model`` as the model the slices run through; ``kwargs`` are not read."""
         self.model = model
 

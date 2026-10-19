@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypeVar, overload
 
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 
 from tcip_mcp import agent_identity
 from tcip_mcp.registry_paths import located
@@ -161,7 +161,7 @@ def record_event_or_raise(
     actor: str | None,
     status: str = "ok",
     scope: str | Path,
-    **extra: Any,
+    **extra: JsonValue,
 ) -> None:
     """Emit one audit line, performed by ``actor``, for a mutation already made.
 
@@ -178,29 +178,26 @@ def record_event_or_raise(
         ) from exc
 
 
-def dataset_scope_of(value: Any) -> Path | None:
+def dataset_scope_of(value: Path) -> Path | None:
     """Return the dataset root ``value`` names, or ``None`` when it does not name one.
 
-    ``value`` is any value; one naming a root is a path inside the dataset's ``images/`` tree (an
-    image, a capture directory), or the dataset root itself. A path under ``images/`` resolves
-    through :func:`dataset_layout.dataset_root_of`. A path that is not under one counts as a root
-    only when it is a directory that actually carries dataset or project state (its own
-    ``.tcip/`` or a subject registry); anything else yields ``None``.
+    ``value`` is an established location; one naming a root is a path inside the dataset's
+    ``images/`` tree (an image, a capture directory), or the dataset root itself. A path under
+    ``images/`` resolves through :func:`dataset_layout.dataset_root_of`. A path that is not under
+    one counts as a root only when it is a directory that actually carries dataset or project
+    state (its own ``.tcip/`` or a subject registry); anything else yields ``None``.
     """
     from tcip_mcp.dataset_layout import SUBJECTS_FILENAME, dataset_root_of
 
-    if not isinstance(value, (str, Path)) or not str(value):
-        return None
     root = dataset_root_of(value)
-    if root is None:
-        candidate = Path(value)
-        if not candidate.is_dir() or not (
-            (candidate / ".tcip").is_dir()
-            or (candidate / SUBJECTS_FILENAME).is_file()
-        ):
-            return None
-        root = candidate
-    return root
+    if root is None and not (
+        value.is_dir()
+        and (
+            (value / ".tcip").is_dir() or (value / SUBJECTS_FILENAME).is_file()
+        )
+    ):
+        return None
+    return value if root is None else root
 
 
 _Door = TypeVar("_Door", bound=Callable[..., Any])
@@ -243,7 +240,7 @@ def audited(
             )
 
         @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
+        def wrapper(*args: object, **kwargs: object) -> object:
             tool_name = func.__name__
             t0 = time.monotonic()
             bound = sig.bind(*args, **kwargs)

@@ -490,7 +490,7 @@ export function AnnotateTab() {
       img_height: canvas.imgHeight,
       viewport: host ? computeViewport(view, host, canvas.imgWidth, canvas.imgHeight) : null,
       mode,
-      active_subject: activeSubject ?? undefined,
+      active_subject: activeSubject ?? null,
       cut_armed: annotateUi.cut,
       dirty: canvas.dirty,
       user: useStore.getState().user,

@@ -363,7 +363,7 @@ class PriorityQueueJob(BaseModel):
         )
 
 
-_pq_registry = jobstore.JobRegistry()
+_pq_registry: jobstore.JobRegistry[PriorityQueueJob] = jobstore.JobRegistry()
 """The review queue's own live jobs (``jobstore.JobRegistry``)."""
 
 
@@ -432,7 +432,7 @@ def launch_priority_queue(
         budget=payload.budget,
         rationale=payload.rationale,
     )
-    _pq_registry.register(job.job_id, job)
+    _pq_registry.register(job)
     launched = job.model_copy(deep=True)
     threading.Thread(target=_pq_worker, args=(job,), daemon=True).start()
     return launched

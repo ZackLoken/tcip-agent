@@ -2,8 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TypeGuard
+from typing import TYPE_CHECKING, Annotated, Literal, TypeGuard, get_args
+
+from pydantic import AfterValidator, ConfigDict, Field
+from pydantic.dataclasses import dataclass as pydantic_dataclass
+
+from tcip_annotation.text import Text
+
+if TYPE_CHECKING:
+    import numpy as np
+    from torch import Tensor
+
+type CrowdFlags = list[bool] | np.ndarray | Tensor
+"""A detection target's per-row crowd flags: a list, an array or a tensor."""
 
 
 @dataclass
@@ -16,9 +29,14 @@ class BBox:
     y2: float
 
     @classmethod
-    def from_normalized_center(cls, box, img_w: float, img_h: float) -> BBox:
+    def from_normalized_center(
+        cls,
+        box: tuple[float, float, float, float],
+        img_w: float,
+        img_h: float,
+    ) -> BBox:
         """Scale a normalized center-form ``[cx, cy, w, h]`` to an ``img_w`` x ``img_h`` image."""
-        cx, cy, w, h = (float(v) for v in box)
+        cx, cy, w, h = box
         return cls(
             (cx - w / 2) * img_w,
             (cy - h / 2) * img_h,
@@ -30,8 +48,14 @@ class BBox:
 RING_MIN_POINTS = 3
 """The fewest points a ring encloses an area with."""
 
+Ring = list[tuple[float, float]]
+"""One closed contour: its ``(x, y)`` pixel points in order."""
 
-def is_ring(ring) -> bool:
+Rings = list[Ring]
+"""One region's contours, an occlusion-split instance holding several."""
+
+
+def is_ring(ring: Ring) -> bool:
     """Return whether ``ring`` can be a shape: :data:`RING_MIN_POINTS` or more points."""
     return len(ring) >= RING_MIN_POINTS
 
@@ -44,7 +68,7 @@ class Polygon:
     admits, or ``ValueError``.
     """
 
-    rings: list[list[tuple[float, float]]]
+    rings: Rings
 
     def __post_init__(self) -> None:
         """Refuse (``ValueError``) no ring, or a ring :func:`is_ring` does not admit."""
@@ -65,6 +89,36 @@ class Point:
 
     x: float
     y: float
+
+
+AttributeType = Literal["categorical", "ordinal"]
+"""The attribute kinds a subject may carry: unordered, or ranked by declared order."""
+
+ATTR_TYPES: tuple[AttributeType, ...] = get_args(AttributeType)
+
+
+def _distinct(values: tuple[str, ...]) -> tuple[str, ...]:
+    """Return ``values``, refused (``ValueError``) when one is repeated."""
+    if len(set(values)) != len(values):
+        raise ValueError(f"duplicate values: {list(values)}")
+    return values
+
+
+@pydantic_dataclass(frozen=True, config=ConfigDict(extra="forbid"))
+class Attribute:
+    """One classification axis of a subject's instances.
+
+    ``values`` are ordered, and a value's id is its position there; for an ``ordinal`` attribute
+    that order is the rank (severity 0 < 1 < 2). Construction validates every field
+    (``pydantic.ValidationError``): a known ``type`` and a non-empty list of distinct non-empty
+    names.
+    """
+
+    name: str
+    type: AttributeType
+    values: Annotated[
+        tuple[Text, ...], Field(min_length=1), AfterValidator(_distinct)
+    ]
 
 
 @dataclass
@@ -91,18 +145,15 @@ class Annotation:
     accepted_at: str | None = None
 
     def __post_init__(self) -> None:
-        """Refuse (``ValueError``) a ``subject`` that is not a non-empty string."""
-        if not isinstance(self.subject, str) or not self.subject:
+        """Refuse (``ValueError``) an empty ``subject``."""
+        if not self.subject:
             raise ValueError(
                 f"an annotation needs a non-empty string subject; got {self.subject!r}"
             )
 
 
-def object_rows(iscrowd) -> list[bool]:
-    """Return, for each crowd flag, whether its row is one object rather than a crowd region.
-
-    ``iscrowd`` is a list, an array or a tensor, one flag per row.
-    """
+def object_rows(iscrowd: CrowdFlags) -> list[bool]:
+    """Return, for each crowd flag, whether its row is one object rather than a crowd region."""
     return [not bool(flag) for flag in iscrowd]
 
 
@@ -127,6 +178,13 @@ def box_derivable(
 ) -> TypeGuard[BBox | Polygon]:
     """Return whether a geometry yields a box: a rect or a polygon, never a point or nothing."""
     return geometry is not None and not isinstance(geometry, Point)
+
+
+type GeometryReader = Callable[
+    [BBox | Polygon | Point | None], TypeGuard[BBox | Polygon]
+]
+"""A predicate admitting the geometries a reader turns into a box: :func:`box_derivable` or
+narrower."""
 
 
 def is_detection(a: Annotation) -> bool:
@@ -155,16 +213,10 @@ def bbox_of(geometry: BBox | Polygon) -> BBox:
     """Return the axis-aligned bounding box of a geometry.
 
     That is the box itself, or a polygon's enclosing box (over every ring, so a multi-ring
-    instance's box covers all of its parts). Raises for a :class:`Point`.
+    instance's box covers all of its parts).
     """
     if isinstance(geometry, BBox):
         return geometry
-    if isinstance(geometry, Point):
-        raise ValueError(
-            "bbox_of: a Point has no bounding box; it is not a detection/segmentation target. "
-            "Filter Point geometries out before calling bbox_of (the same way a geometry-less "
-            "annotation is already filtered), rather than relying on this raise."
-        )
     xs = [pt[0] for ring in geometry.rings for pt in ring]
     ys = [pt[1] for ring in geometry.rings for pt in ring]
     return BBox(min(xs), min(ys), max(xs), max(ys))

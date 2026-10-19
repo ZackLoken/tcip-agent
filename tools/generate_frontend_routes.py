@@ -15,8 +15,12 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi.routing import APIRoute, APIWebSocketRoute
+
+if TYPE_CHECKING:
+    from fastapi import APIRouter, FastAPI
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _API_DIR = _REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src" / "api"
@@ -69,7 +73,9 @@ def route_name(path: str, method: str) -> str:
     return prefix + ("".join(parts) or "Root")
 
 
-def iter_api_routes(app) -> Iterator[APIRoute | APIWebSocketRoute]:
+def iter_api_routes(
+    app: FastAPI | APIRouter,
+) -> Iterator[APIRoute | APIWebSocketRoute]:
     """Yield every ``APIRoute``/``APIWebSocketRoute`` the app has actually registered.
 
     Routers are included through wrapper objects rather than flattened onto the app, so this
@@ -82,7 +88,7 @@ def iter_api_routes(app) -> Iterator[APIRoute | APIWebSocketRoute]:
             yield from iter_api_routes(route.original_router)
 
 
-def collect_routes(app) -> list[tuple[str, str, str]]:
+def collect_routes(app: FastAPI) -> list[tuple[str, str, str]]:
     """Return every (name, path, method) the app has registered, sorted by name."""
     found: list[tuple[str, str, str]] = []
     for route in iter_api_routes(app):
@@ -132,7 +138,7 @@ def _entry(name: str, path: str) -> str:
     return f"  {name}: ({args}) =>\n    `{body}`,\n"
 
 
-def render(app) -> str:
+def render(app: FastAPI) -> str:
     """Return the full text of the generated module."""
     return (
         HEADER
@@ -141,7 +147,7 @@ def render(app) -> str:
     )
 
 
-def collect_proxy_entries(app) -> list[tuple[str, bool]]:
+def collect_proxy_entries(app: FastAPI) -> list[tuple[str, bool]]:
     """Return one dev-proxy prefix per distinct first path segment of a registered route, sorted.
 
     Each is paired with whether a websocket is mounted under it. Excludes the paths
@@ -179,7 +185,7 @@ export const DEV_PROXY: DevProxyEntry[] = [
 PROXY_FOOTER = "];\n"
 
 
-def render_proxy(app) -> str:
+def render_proxy(app: FastAPI) -> str:
     """Return the full text of the generated dev-proxy module.
 
     The module also carries the loopback host the backend binds and answers to

@@ -24,7 +24,7 @@ def reserved_spatial_regions(
 ) -> SpatialManifest | None:
     """Return a run's within-image split ``spatial`` when it reserved both reference regions.
 
-    ``spatial`` is ``experiments.RunResolution.spatial``; the regions are a calibration and a
+    ``spatial`` is ``split_construction.Partition.spatial``; the regions are a calibration and a
     holdout region. ``None`` for a run that drew no within-image split, or one that reserved no
     calibration or no holdout region.
     """

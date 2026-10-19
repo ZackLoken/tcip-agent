@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         status = 2
 
     for r in read_datasets(project):
-        if r["id"] != ds_id:
+        if r.id != ds_id:
             continue
         entry_path = dataset_entry_path(project, r)
         try:

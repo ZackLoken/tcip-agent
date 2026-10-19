@@ -78,12 +78,12 @@ def _summary(job: InferenceJob) -> dict:
     }
 
 
-_registry = jobstore.JobRegistry()
+_registry: jobstore.JobRegistry[InferenceJob] = jobstore.JobRegistry()
 """This route's own live jobs (``jobstore.JobRegistry``)."""
 
 
 def _register(job: InferenceJob) -> None:
-    _registry.register(job.job_id, job)
+    _registry.register(job)
 
 
 def _get(job_id: str) -> InferenceJob | None:

@@ -17,9 +17,15 @@ from operator import methodcaller
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from pydantic import ConfigDict, JsonValue, TypeAdapter
+
+from tcip_mcp.model_registry import Producer
 from tcip_mcp.pipelines.data.selection import (
     GROUND_TRUTH_PATHS,
-    ground_truth_of,
+    SAMPLE_PATHS,
+    GroundTruth,
+    Sample,
+    Side,
     ground_truth_record,
 )
 from tcip_mcp.pipelines.execution import (
@@ -28,6 +34,7 @@ from tcip_mcp.pipelines.execution import (
     MaskCut,
     Stated,
 )
+from tcip_mcp.pipelines.raster_source import RasterIdentity
 from tcip_mcp.pipelines.schemas import TraitRevisionRef
 from tcip_mcp.registry_paths import (
     PathFields,
@@ -46,8 +53,10 @@ from tcip_mcp.traits import (
 from tcip_store import Key
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.data.selection import Sample, Selection
+    from tcip_mcp.pipelines.data.datasets import DocumentDataset
+    from tcip_mcp.pipelines.data.selection import ClassScope, Selection
     from tcip_mcp.pipelines.execution import Pass, Preparation
+    from tcip_mcp.pipelines.raster_source import RasterSource
     from tcip_mcp.pipelines.schemas import TilingSpec
     from tcip_mcp.traits import TraitEntry, TraitRevision
 
@@ -57,10 +66,7 @@ REFERENCE_DIR = "reference"
 
 _PATHS: PathFields = (
     ("reference", "selection_dir"),
-    ("reference", "samples", "[]", "source"),
-    *within(
-        ("reference", "samples", "[]", "ground_truth"), GROUND_TRUTH_PATHS
-    ),
+    *within(("reference", "samples", "[]", "sample"), SAMPLE_PATHS),
     *within(
         ("reference", "ground_truth", "[]", "ground_truth"), GROUND_TRUTH_PATHS
     ),
@@ -84,27 +90,17 @@ class RetainedFile:
     under the assessment's ``reference/``.
     """
 
-    ground_truth: Key | str
+    ground_truth: GroundTruth
     digest: str
     copy: str
 
 
 @dataclass(frozen=True)
 class ReferenceSample:
-    """One reference sample.
+    """One reference sample and the digest its source's pixels had when it was measured."""
 
-    It holds its side, member, source, source digest, group, ground truth, the row its table
-    names it by and the region of its source it is.
-    """
-
-    side: str
-    member: str
-    source: str
+    sample: Sample
     source_digest: str
-    group: str
-    ground_truth: Key | str
-    row_key: str | None
-    rect: tuple[int, int, int, int] | None
 
 
 @dataclass(frozen=True)
@@ -116,7 +112,7 @@ class Reference:
     """
 
     selection_dir: str | None
-    raster_identity: dict | None
+    raster_identity: RasterIdentity | None
     captures: list[tuple[str | None, str | None]]
     ground_truth: list[RetainedFile]
     samples: list[ReferenceSample]
@@ -126,7 +122,7 @@ class Reference:
         *,
         dataset_id: str | None,
         date: str | None,
-        raster_identity: dict | None,
+        raster_identity: RasterIdentity | None,
     ) -> bool:
         """Return whether this reference spans a capture.
 
@@ -146,7 +142,6 @@ class Reference:
         its path.
         """
         from tcip_mcp.pipelines.data.selection import (
-            Sample,
             moved_ground_truth,
             source_digests,
         )
@@ -158,18 +153,7 @@ class Reference:
                 {f.ground_truth: f.digest, str(run_dir / f.copy): f.digest}
             )
         ]
-        samples = {
-            Sample(
-                member=s.member,
-                source=s.source,
-                ground_truth=s.ground_truth,
-                group=s.group,
-                side=s.side,
-                rect=s.rect,
-                row_key=s.row_key,
-            ): s.source_digest
-            for s in self.samples
-        }
+        samples = {s.sample: s.source_digest for s in self.samples}
         try:
             now = source_digests(samples)
         except FileNotFoundError as exc:
@@ -198,15 +182,20 @@ class Assessment:
     assessment_id: str
     delivery_kind: str | None
     revision: TraitRevisionRef
-    producer: dict[str, str | None] | None
+    producer: Producer | None
     execution: Execution | None
     rationale: str | None
     reference: Reference
-    disjointness: dict[str, Any]
-    criterion: dict[str, Any]
-    scale: dict[str, Any] | None
+    disjointness: dict[str, JsonValue]
+    criterion: dict[str, JsonValue]
+    scale: dict[str, JsonValue] | None
     failures: list[str]
     passed: bool
+    __pydantic_config__ = ConfigDict(ser_json_inf_nan="constants")
+
+
+ASSESSMENT_RECORD = TypeAdapter(Assessment)
+"""The assessment record's validation and its JSON form."""
 
 
 def assessment_dir(project: Path | str, assessment_id: str) -> Path:
@@ -219,7 +208,8 @@ def assessment_dir(project: Path | str, assessment_id: str) -> Path:
 def read_assessment(project: Path | str, assessment_id: str) -> Assessment:
     """Return assessment ``assessment_id`` of ``project``, its paths resolved against the project.
 
-    An id naming no finished assessment refuses (``ValueError``) naming it.
+    An id naming no finished assessment refuses (``ValueError``) naming it, and a record that
+    does not validate as an :class:`Assessment` (``pydantic.ValidationError``) naming each field.
     """
     from tcip_mcp.experiments import read_record
 
@@ -229,36 +219,8 @@ def read_assessment(project: Path | str, assessment_id: str) -> Assessment:
             f"no assessment {assessment_id!r} is recorded under {project}: nothing "
             "states what it measured."
         )
-    record = runtime_paths(read_record(path), _PATHS, project)
-    execution = record.pop("execution")
-    raw = record.pop("reference")
-    reference = Reference(
-        selection_dir=raw["selection_dir"],
-        raster_identity=raw["raster_identity"],
-        captures=[(c["dataset_id"], c["date"]) for c in raw["captures"]],
-        ground_truth=[
-            RetainedFile(
-                **{**f, "ground_truth": ground_truth_of(f["ground_truth"])}
-            )
-            for f in raw["ground_truth"]
-        ],
-        samples=[
-            ReferenceSample(
-                **{
-                    **s,
-                    "ground_truth": ground_truth_of(s["ground_truth"]),
-                    "rect": tuple(s["rect"]) if s["rect"] else None,
-                }
-            )
-            for s in raw["samples"]
-        ],
-    )
-    revision = TraitRevisionRef.model_validate(record.pop("revision"))
-    return Assessment(
-        **record,
-        revision=revision,
-        reference=reference,
-        execution=Execution.of(execution) if execution else None,
+    return ASSESSMENT_RECORD.validate_python(
+        runtime_paths(read_record(path), _PATHS, project)
     )
 
 
@@ -280,31 +242,54 @@ def _finish(
     project: Path,
     run_dir: Path,
     revision: TraitRevision,
-    record: dict[str, Any],
+    *,
+    delivery_kind: str | None,
+    producer: Producer | None,
+    execution: Execution | None,
+    rationale: str | None,
+    reference: Reference,
+    disjointness: dict[str, Any],
+    criterion: dict[str, Any],
+    scale: dict[str, Any] | None,
+    failures: list[str],
 ) -> Assessment:
-    """Write ``record``, judged under ``revision``, as the run's ``assessment.json`` once.
+    """Write the assessment judged under ``revision`` as the run's ``assessment.json`` once.
 
-    Then its one audit line, ``assessment_recorded``, is written; returns it as read back.
+    It passes when it names no failure. Then its one audit line, ``assessment_recorded``, is
+    written; returns it as read back.
     """
     from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.experiments import write_once
 
-    record = {
-        "assessment_id": run_dir.name,
-        "revision": revision.ref.model_dump(),
-        **record,
-        "passed": not record["failures"],
-    }
+    assessment = Assessment(
+        assessment_id=run_dir.name,
+        delivery_kind=delivery_kind,
+        revision=revision.ref,
+        producer=producer,
+        execution=execution,
+        rationale=rationale,
+        reference=reference,
+        disjointness=disjointness,
+        criterion=criterion,
+        scale=scale,
+        failures=failures,
+        passed=not failures,
+    )
     write_once(
-        run_dir / ASSESSMENT_FILE, recorded_paths(record, _PATHS, project)
+        run_dir / ASSESSMENT_FILE,
+        recorded_paths(
+            ASSESSMENT_RECORD.dump_python(assessment, mode="json"),
+            _PATHS,
+            project,
+        ),
     )
     record_event_or_raise(
         "assessment_recorded",
         {
             "assessment_id": run_dir.name,
             "trait": revision.entry.name,
-            "delivery_kind": record["delivery_kind"],
-            "passed": record["passed"],
+            "delivery_kind": delivery_kind,
+            "passed": assessment.passed,
         },
         actor=None,
         scope=project,
@@ -377,47 +362,30 @@ def _retained(
     return list(files.values()), measured
 
 
-def _reference_record(
+def _reference(
     selection_dir: str | None,
-    raster_identity: dict | None,
+    raster_identity: RasterIdentity | None,
     samples: list[Sample],
     digest_of: dict[str, str],
     retained: list[RetainedFile],
-) -> dict[str, Any]:
-    """Return the reference record.
+) -> Reference:
+    """Return what an assessment measured.
 
     It holds where the reference came from, the captures its samples span, every retained file,
-    and each sample's side, member, source, source digest (``digest_of``), group, ground truth,
-    row key and region.
+    and each sample beside its source digest (``digest_of``).
     """
     from tcip_mcp.dataset_layout import capture_of
 
-    captures = sorted({capture_of(s.source) for s in samples}, key=str)
-    return {
-        "selection_dir": selection_dir,
-        "raster_identity": raster_identity,
-        "captures": [
-            {"dataset_id": dataset_id, "date": date}
-            for dataset_id, date in captures
-        ],
-        "ground_truth": [
-            {**vars(f), "ground_truth": ground_truth_record(f.ground_truth)}
-            for f in retained
-        ],
-        "samples": [
-            {
-                "side": s.side,
-                "member": s.member,
-                "source": s.source,
-                "source_digest": digest_of[s.location],
-                "group": s.group,
-                "ground_truth": ground_truth_record(s.ground_truth),
-                "row_key": s.row_key,
-                "rect": list(s.rect) if s.rect is not None else None,
-            }
+    return Reference(
+        selection_dir=selection_dir,
+        raster_identity=raster_identity,
+        captures=sorted({capture_of(s.source) for s in samples}, key=str),
+        ground_truth=retained,
+        samples=[
+            ReferenceSample(sample=s, source_digest=digest_of[s.location])
             for s in samples
         ],
-    }
+    )
 
 
 def _reference_sides(
@@ -493,7 +461,7 @@ def _prepared(
     )
 
 
-def _admit_reference(samples: list[Sample], scope: Any) -> list[Sample]:
+def _admit_reference(samples: list[Sample], scope: ClassScope) -> list[Sample]:
     """Return ``samples`` as the platform's own admission re-admits them under ``scope``.
 
     The admission is :func:`~tcip_mcp.pipelines.data.label_queries.readmitted_samples`, each
@@ -527,11 +495,8 @@ def _run_sides(
     if experiment_id is None:
         return None
     from tcip_mcp.experiments import run_resolution
-    from tcip_mcp.pipelines.data.split_construction import partition_samples
 
-    run = partition_samples(
-        run_resolution(experiment_id, project=project).partition
-    )
+    run = run_resolution(experiment_id, project=project).partition.samples
     return {
         side: [s for s in run if s.side == side] for side in ("train", "val")
     }
@@ -634,10 +599,12 @@ def assess(
     )
     _selection, cal, hold = _reference_sides(project, selection_dir)
     state = revision.entry.positive_state
-    if (
-        delivery_kind == STATE_CROSSING_DATES
-        and prep.scope.state_ids(state) is None
-    ):
+    positive = (
+        prep.scope.state_ids(state)
+        if delivery_kind == STATE_CROSSING_DATES
+        else None
+    )
+    if delivery_kind == STATE_CROSSING_DATES and positive is None:
         raise AssessmentRefusedError(
             f"{checkpoint_path} classifies no {state}: a state fraction is measured off a "
             "classifier of the trait's positive state."
@@ -661,7 +628,7 @@ def assess(
             m_cal,
             m_hold,
             revision.entry,
-            delivery_kind,
+            positive,
             digest_of,
             equivalence_z=equivalence_z,
             dispersion_quantile=dispersion_quantile,
@@ -675,19 +642,17 @@ def assess(
         project,
         run_dir,
         revision,
-        {
-            "delivery_kind": delivery_kind,
-            "producer": p.checkpoint.producer,
-            "execution": p.execution.record(),
-            "rationale": rationale,
-            "reference": _reference_record(
-                str(selection_dir), None, cal + hold, digest_of, retained
-            ),
-            "disjointness": disjointness,
-            "criterion": criterion,
-            "scale": None,
-            "failures": [*failures, *criterion_failures],
-        },
+        delivery_kind=delivery_kind,
+        producer=p.checkpoint.producer,
+        execution=p.execution,
+        rationale=rationale,
+        reference=_reference(
+            str(selection_dir), None, cal + hold, digest_of, retained
+        ),
+        disjointness=disjointness,
+        criterion=criterion,
+        scale=None,
+        failures=[*failures, *criterion_failures],
     )
 
 
@@ -727,8 +692,10 @@ def _count_fit(
         dispersion_quantile=dispersion_quantile,
         held=held,
     )
-    p.execution = p.execution.with_value(
-        "conf", conf, evidence["conf_derived_from"]
+    p.execution = replace(
+        p.execution,
+        conf=conf,
+        sources={**p.execution.sources, "conf": evidence["conf_derived_from"]},
     )
     if p.execution.uncut:
         p.execution = _mask_fit(p.execution, cal_records, evidence, held)
@@ -736,7 +703,10 @@ def _count_fit(
 
 
 def _records(
-    p: Pass, ds: Any, digest_of: dict[str, str], execution: Execution
+    p: Pass,
+    ds: DocumentDataset,
+    digest_of: dict[str, str],
+    execution: Execution,
 ) -> list[dict]:
     """Return one evaluation record per sample of the loader ``ds``, predicted under ``execution``.
 
@@ -768,7 +738,7 @@ def _detection(
     cal: list[Sample],
     hold: list[Sample],
     entry: TraitEntry,
-    delivery_kind: str,
+    positive: tuple[int, int] | None,
     digest_of: dict[str, str],
     *,
     equivalence_z: float,
@@ -780,10 +750,12 @@ def _detection(
     density, and its merge threshold and tile geometry where unstated and unrecorded); the count
     criterion is measured over the reference at ``equivalence_z`` and ``dispersion_quantile``
     (:func:`_count_fit`, which derives an uncut pass's mask cut), each side's loader built once,
-    every fitted value from the calibration side, plus the classifier agreement over matched
-    instances for a state-fraction delivery. ``digest_of`` is keyed by each sample's location,
-    which reading the retained copies leaves unchanged.
+    every fitted value from the calibration side, plus, given the positive state's
+    ``(column, value id)`` for a state-fraction delivery, the classifier agreement over matched
+    instances. ``digest_of`` is keyed by each sample's location, which reading the retained copies
+    leaves unchanged.
     """
+    from tcip_mcp.pipelines.data.datasets import DocumentDataset
     from tcip_mcp.pipelines.data.split_construction import predictor_dataset
     from tcip_mcp.pipelines.execution import Reference
 
@@ -793,6 +765,9 @@ def _detection(
         )
         for side in (cal, hold)
     )
+    assert isinstance(cal_ds, DocumentDataset) and isinstance(
+        hold_ds, DocumentDataset
+    ), "a detector's build over samples is one of these"
     p = prep.runnable(Reference(regions=cal_ds.regions))
     evidence, failures, cal_records, hold_records = _count_fit(
         p,
@@ -805,21 +780,19 @@ def _detection(
         dispersion_quantile=dispersion_quantile,
     )
     measured: dict[str, Any] = {"count": evidence}
-    if delivery_kind == STATE_CROSSING_DATES:
+    if positive is not None:
         from tcip_mcp.pipelines.operating_point import classifier_criterion
 
         classifier, classifier_failures = classifier_criterion(
             _classification_items(
                 cal_records,
-                p.scope,
-                entry,
+                positive,
                 evidence["localization"],
                 evidence["conf"],
             ),
             _classification_items(
                 hold_records,
-                p.scope,
-                entry,
+                positive,
                 evidence["localization"],
                 evidence["conf"],
             ),
@@ -885,22 +858,21 @@ def _mask_fit(
 
 def _classification_items(
     records: list[dict],
-    scope: Any,
-    entry: TraitEntry,
+    state: tuple[int, int],
     criterion: dict,
     conf: float,
 ) -> list[dict]:
     """Return one item per reference instance assessed for the state's attribute and matched.
 
-    An instance is matched to one detection at ``conf``
-    (:func:`~tcip_mcp.pipelines.training.evaluation.attribute_pairs` under the trait's
-    localization ``criterion``); its item says whether the reference's and the model's value id
-    of that attribute is the positive state's (:meth:`~tcip_mcp.pipelines.data.selection.
-    ClassScope.state_ids`).
+    ``state`` is the positive state's ``(column, value id)``
+    (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.state_ids`). An instance is matched to
+    one detection at ``conf`` (:func:`~tcip_mcp.pipelines.training.evaluation.attribute_pairs`
+    under the trait's localization ``criterion``); its item says whether the reference's and the
+    model's value id of that attribute is the positive state's.
     """
     from tcip_mcp.pipelines.training.evaluation import attribute_pairs
 
-    column, positive = cast(tuple, scope.state_ids(entry.positive_state))
+    column, positive = state
     return [
         {
             "image_id": image_id,
@@ -1017,12 +989,7 @@ def assess_reserved_regions(
     from tcip_mcp.pipelines import block_calibration as blocks
     from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS, object_region
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
-    from tcip_mcp.pipelines.data.selection import (
-        DOCUMENT,
-        Sample,
-        source_digests,
-    )
-    from tcip_mcp.pipelines.data.split_construction import partition_samples
+    from tcip_mcp.pipelines.data.selection import source_digests
     from tcip_mcp.pipelines.derivations import derive_block_scale_px
     from tcip_mcp.pipelines.execution import Reference
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
@@ -1049,20 +1016,23 @@ def assess_reserved_regions(
             "reserved regions are known to have been held out from it."
         )
     resolved = run_resolution(experiment_id, project=project)
-    spatial = blocks.reserved_spatial_regions(resolved.spatial)
+    spatial = blocks.reserved_spatial_regions(resolved.partition.spatial)
     if spatial is None:
         raise AssessmentRefusedError(
             f"run {experiment_id!r} resolved no within-image spatial split with a reserved "
             "calibration and holdout region (train it with data.split.calibration_ratio set)."
         )
-    (mosaic,) = partition_samples(resolved.partition)
+    (mosaic,) = resolved.partition.samples
     stem = mosaic.member
     lattice = cast("TilingSpec", resolved.data.tiling)
     tile_size, overlap = (
         cast(int, lattice.tile_size),
         cast(float, lattice.overlap),
     )
-    scope = prep.scope.admitted_for(DOCUMENT, f"experiment {experiment_id!r}")
+    scope = prep.scope
+    subject = scope.document_attributes(
+        f"experiment {experiment_id!r}"
+    ).subject
     (mosaic,) = _admit_reference([mosaic], scope)
     document = mosaic.read
     reads = _reference_reads([mosaic])
@@ -1073,7 +1043,7 @@ def assess_reserved_regions(
     blocks.check_completeness(
         document,
         f"{stem}'s label document",
-        cast(str, scope.subject),
+        subject,
         {"calibration_region": cal_rect, "holdout_region": test_rect},
     )
     source = mosaic.image
@@ -1103,7 +1073,7 @@ def assess_reserved_regions(
             ),
             raster_path=None if isinstance(source, BandGroupRef) else source,
         )
-        bands = {
+        bands: dict[Side, dict[str, tuple[int, int, int, int]]] = {
             "calibration": blocks.band_rects(
                 cal_rect, k_cal, tile_size, overlap, buffer_px, "cal"
             ),
@@ -1147,7 +1117,7 @@ def assess_reserved_regions(
             ground_truth=mosaic.ground_truth,
             group=name,
             side=side,
-            rect=cast(Any, tuple(rect)),
+            rect=rect,
             image=source,
         )
         for side, side_bands in bands.items()
@@ -1172,6 +1142,7 @@ def assess_reserved_regions(
             return (
                 _band_records(
                     reader,
+                    "calibration",
                     bands["calibration"],
                     p,
                     execution,
@@ -1181,6 +1152,7 @@ def assess_reserved_regions(
                 ),
                 _band_records(
                     reader,
+                    "holdout",
                     bands["holdout"],
                     p,
                     execution,
@@ -1207,42 +1179,41 @@ def assess_reserved_regions(
         project,
         run_dir,
         revision,
-        {
-            "delivery_kind": delivery_kind,
-            "producer": p.checkpoint.producer,
-            "execution": p.execution.record(),
-            "rationale": rationale,
-            "reference": _reference_record(
-                None,
-                spatial.raster_content_identity,
-                samples,
-                digest_of,
-                retained,
-            ),
-            "disjointness": disjointness,
-            "criterion": {
-                "count": {
-                    **evidence,
-                    "block_scale_px": buffer_px,
-                    "block_scale_source": scale_source,
-                    "k_cal": k_cal,
-                    "k_test": k_test,
-                    "band_gt_counts": band_counts,
-                    "density_uniformity_flags": sorted(
-                        f
-                        for counts in band_counts.values()
-                        for f in blocks.density_uniformity_flags(counts)
-                    ),
-                }
-            },
-            "scale": None,
-            "failures": [*disjoint_failures, *failures],
+        delivery_kind=delivery_kind,
+        producer=p.checkpoint.producer,
+        execution=p.execution,
+        rationale=rationale,
+        reference=_reference(
+            None,
+            spatial.raster_content_identity,
+            samples,
+            digest_of,
+            retained,
+        ),
+        disjointness=disjointness,
+        criterion={
+            "count": {
+                **evidence,
+                "block_scale_px": buffer_px,
+                "block_scale_source": scale_source,
+                "k_cal": k_cal,
+                "k_test": k_test,
+                "band_gt_counts": band_counts,
+                "density_uniformity_flags": sorted(
+                    f
+                    for counts in band_counts.values()
+                    for f in blocks.density_uniformity_flags(counts)
+                ),
+            }
         },
+        scale=None,
+        failures=[*disjoint_failures, *failures],
     )
 
 
 def _band_records(
-    reader: Any,
+    reader: RasterSource,
+    side: Side,
     bands: dict[str, tuple[int, int, int, int]],
     p: Pass,
     execution: Execution,
@@ -1251,7 +1222,7 @@ def _band_records(
     digest_of: dict[str, str],
     source: str,
 ) -> list[dict]:
-    """Return one evaluation record per band, in band-name order.
+    """Return one evaluation record per band of ``side``, in band-name order.
 
     Each is :func:`~tcip_mcp.pipelines.training.evaluation.result_record`'s over the tiled
     prediction under ``execution`` over the band widened on every side (clipped to the mosaic) by
@@ -1263,7 +1234,6 @@ def _band_records(
 
     from tcip_mcp.pipelines import block_calibration as blocks
     from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
-    from tcip_mcp.pipelines.data.selection import Sample
     from tcip_mcp.pipelines.raster_source import Rect, _RegionView
     from tcip_mcp.pipelines.slicing import slice_lattice
     from tcip_mcp.pipelines.training.evaluation import (
@@ -1291,7 +1261,7 @@ def _band_records(
             source=source,
             ground_truth="",
             group=name,
-            side="",
+            side=side,
             rect=inner,
         ).location
         result = p.predictor.predict_sliced(
@@ -1504,21 +1474,19 @@ def assess_physical_scale(
         project,
         run_dir,
         revision,
-        {
-            "delivery_kind": None,
-            "producer": None,
-            "execution": None,
-            "rationale": None,
-            "reference": _reference_record(
-                str(selection_dir), None, cal + hold, digest_of, retained
-            ),
-            "disjointness": disjointness,
-            "criterion": {"scale": evidence},
-            "scale": {
-                "unit": unit,
-                "value": value,
-                "reference_subject": reference_subject,
-            },
-            "failures": failures,
+        delivery_kind=None,
+        producer=None,
+        execution=None,
+        rationale=None,
+        reference=_reference(
+            str(selection_dir), None, cal + hold, digest_of, retained
+        ),
+        disjointness=disjointness,
+        criterion={"scale": evidence},
+        scale={
+            "unit": unit,
+            "value": value,
+            "reference_subject": reference_subject,
         },
+        failures=failures,
     )

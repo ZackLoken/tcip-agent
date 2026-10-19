@@ -1,7 +1,7 @@
 """Live canvas-state bridge: a pushed canvas state stored as the open project's records.
 
-A heartbeat (image, viewport, classes, counts; ``shapes`` omitted) carries no geometry, and a
-full push carries the display-resolved geometry. State is split across two records of the open
+A heartbeat (``shapes`` ``null``) carries no geometry, and a full push carries the
+display-resolved geometry. State is split across two records of the open
 project:
 
   - the meta record (``canvas_meta_key``): replaced by every push.
@@ -15,41 +15,36 @@ but the backend's open one answers 409 and writes nothing.
 from __future__ import annotations
 
 from fastapi import APIRouter
-from pydantic import BaseModel, ConfigDict
+from pydantic import ConfigDict
 
 import tcip_store as ts
+from tcip_annotation.viz import CanvasShape
 from tcip_mcp.audit import now_iso
 from tcip_mcp.identity import actor
 from tcip_mcp.registry_paths import stored_path
-from tcip_mcp.web_client import ActiveTab, canvas_geometry_key, canvas_meta_key
+from tcip_mcp.web_client import (
+    CanvasGeometry,
+    CanvasMeta,
+    CanvasView,
+    canvas_geometry_key,
+    canvas_meta_key,
+)
 from tcip_web.state import store
 
 router = APIRouter(prefix="/api/canvas", tags=["canvas"])
 
 
-class CanvasStatePayload(BaseModel):
-    """A canvas state push: a heartbeat when ``shapes`` is None, else a full push."""
+class CanvasStatePayload(CanvasView):
+    """A canvas state push for the project ``project_id`` names.
+
+    It is a heartbeat when ``shapes`` is ``None``, which leaves the geometry record untouched,
+    else a full push.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    # The id of the project the GUI built this push for.
     project_id: str
-    tab: ActiveTab
-    image_path: str
-    image: str
-    img_width: int = 0
-    img_height: int = 0
-    viewport: dict | None = None  # {x, y, w, h, scale} in image coords
-    mode: str | None = None
-    active_subject: str | None = None
-    # Whether the Annotate cut tool is armed (sticky across a completed cut or a refusal alike).
-    cut_armed: bool | None = None
-    dirty: bool | None = None
-    user: str
-    classes: list[dict] = []  # [{name, color}]
-    counts: dict | None = None
-    # None = heartbeat (geometry file untouched); a list = full geometry push.
-    shapes: list[dict] | None = None
+    shapes: list[CanvasShape] | None
 
 
 @router.post("/state")
@@ -67,33 +62,17 @@ def push_canvas_state(payload: CanvasStatePayload) -> dict:
     if payload.shapes is not None:
         # Geometry first, meta second: a reader pairing the new meta with the old geometry
         # sees an identity mismatch (stale), never a false match.
-        ts.replace(
-            canvas_geometry_key(root),
-            {
-                "image_path": image_path,
-                "tab": payload.tab,
-                "shapes": payload.shapes,
-                "received_at": now,
-            },
+        geometry = CanvasGeometry(
+            image_path=image_path,
+            tab=payload.tab,
+            shapes=payload.shapes,
+            received_at=now,
         )
+        ts.replace(canvas_geometry_key(root), geometry.model_dump(mode="json"))
 
-    ts.replace(
-        canvas_meta_key(root),
-        {
-            "received_at": now,
-            "tab": payload.tab,
-            "image_path": image_path,
-            "image": payload.image,
-            "img_width": payload.img_width,
-            "img_height": payload.img_height,
-            "viewport": payload.viewport,
-            "mode": payload.mode,
-            "active_subject": payload.active_subject,
-            "cut_armed": payload.cut_armed,
-            "dirty": payload.dirty,
-            "user": person,
-            "classes": payload.classes,
-            "counts": payload.counts,
-        },
+    view = payload.model_dump(include=set(CanvasView.model_fields))
+    meta = CanvasMeta.model_validate(
+        {**view, "image_path": image_path, "user": person, "received_at": now}
     )
+    ts.replace(canvas_meta_key(root), meta.model_dump(mode="json"))
     return {"status": "ok", "shapes_written": payload.shapes is not None}

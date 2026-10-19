@@ -68,14 +68,16 @@ class CrossEntropyLoss(BaseLoss):
 
     def __init__(
         self, weight: torch.Tensor | None = None, label_smoothing: float = 0.0
-    ):
+    ) -> None:
         """Take an optional per-class ``weight`` and the ``label_smoothing`` to apply."""
         super().__init__()
         self.ce = nn.CrossEntropyLoss(
             weight=weight, label_smoothing=label_smoothing
         )
 
-    def forward(self, predictions, targets):
+    def forward(
+        self, predictions: torch.Tensor, targets: torch.Tensor
+    ) -> torch.Tensor:
         """Return the cross-entropy of ``predictions`` logits against class ``targets``."""
         return self.ce(predictions, targets)
 
@@ -91,7 +93,7 @@ class FocalLoss(BaseLoss):
         gamma: float = 2.0,
         weight: torch.Tensor | list | None = None,
         reduction: str = "mean",
-    ):
+    ) -> None:
         """Take ``alpha``, ``gamma``, an optional per-class ``weight`` and the ``reduction``.
 
         A ``weight`` given as a list is held as a float32 tensor buffer.
@@ -107,7 +109,9 @@ class FocalLoss(BaseLoss):
         self.weight: torch.Tensor | None
         self.register_buffer("weight", weight)
 
-    def forward(self, predictions, targets):
+    def forward(
+        self, predictions: torch.Tensor, targets: torch.Tensor
+    ) -> torch.Tensor:
         """Return the focal loss of ``predictions`` against ``targets`` under ``reduction``.
 
         A per-class ``weight`` replaces the scalar ``alpha``. ``"mean"`` averages, ``"sum"`` sums,
@@ -138,12 +142,14 @@ class SmoothL1Loss(BaseLoss):
 
     name = "smooth_l1"
 
-    def __init__(self, beta: float = 1.0):
+    def __init__(self, beta: float = 1.0) -> None:
         """Take the ``beta`` at which the loss turns from quadratic to linear."""
         super().__init__()
         self.loss = nn.SmoothL1Loss(beta=beta)
 
-    def forward(self, predictions, targets):
+    def forward(
+        self, predictions: torch.Tensor, targets: torch.Tensor
+    ) -> torch.Tensor:
         """Return the smooth L1 loss of ``predictions`` against ``targets``."""
         return self.loss(predictions, targets)
 
@@ -153,12 +159,14 @@ class HuberLoss(BaseLoss):
 
     name = "huber"
 
-    def __init__(self, delta: float = 1.0):
+    def __init__(self, delta: float = 1.0) -> None:
         """Take the ``delta`` at which the loss turns from quadratic to linear."""
         super().__init__()
         self.loss = nn.HuberLoss(delta=delta)
 
-    def forward(self, predictions, targets):
+    def forward(
+        self, predictions: torch.Tensor, targets: torch.Tensor
+    ) -> torch.Tensor:
         """Return the Huber loss of ``predictions`` against ``targets``."""
         return self.loss(predictions, targets)
 
@@ -168,12 +176,14 @@ class BCEWithLogitsLoss(BaseLoss):
 
     name = "bce"
 
-    def __init__(self, pos_weight: torch.Tensor | None = None):
+    def __init__(self, pos_weight: torch.Tensor | None = None) -> None:
         """Take an optional ``pos_weight`` on the positive class."""
         super().__init__()
         self.loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
-    def forward(self, predictions, targets):
+    def forward(
+        self, predictions: torch.Tensor, targets: torch.Tensor
+    ) -> torch.Tensor:
         """Return the binary cross-entropy of ``predictions`` logits against ``targets``."""
         return self.loss(predictions, targets.float())
 
@@ -183,12 +193,14 @@ class DiceLoss(BaseLoss):
 
     name = "dice"
 
-    def __init__(self, smooth: float = 1e-6):
+    def __init__(self, smooth: float = 1e-6) -> None:
         """Take the ``smooth`` term added to the Dice numerator and denominator."""
         super().__init__()
         self.smooth = smooth
 
-    def forward(self, predictions, targets):
+    def forward(
+        self, predictions: torch.Tensor, targets: torch.Tensor
+    ) -> torch.Tensor:
         """Return :func:`dice_loss` of sigmoid ``predictions``, each sample flattened."""
         return dice_loss(
             torch.sigmoid(predictions).flatten(1),
@@ -202,9 +214,17 @@ class GIoULoss(BaseLoss):
 
     name = "giou"
 
-    def forward(self, predictions, targets):
-        """Return the mean GIoU loss of ``predictions`` boxes against ``targets`` boxes."""
-        return _generalized_box_iou_loss(predictions, targets)
+    def forward(
+        self, predictions: torch.Tensor, targets: torch.Tensor
+    ) -> torch.Tensor:
+        """Return the mean GIoU loss of ``predictions`` boxes against ``targets`` boxes.
+
+        Each predicted box is paired with the target box at its row; the loss is
+        ``torchvision.ops.generalized_box_iou_loss``'s.
+        """
+        from torchvision.ops import generalized_box_iou_loss
+
+        return generalized_box_iou_loss(predictions, targets, reduction="mean")
 
 
 class CORNLoss(BaseLoss):
@@ -212,12 +232,14 @@ class CORNLoss(BaseLoss):
 
     name = "corn"
 
-    def __init__(self, num_ranks: int):
+    def __init__(self, num_ranks: int) -> None:
         """Take the rank count ``num_ranks``."""
         super().__init__()
         self.num_ranks = num_ranks
 
-    def forward(self, predictions, targets):
+    def forward(
+        self, predictions: torch.Tensor, targets: torch.Tensor
+    ) -> torch.Tensor:
         """Return :func:`corn_loss` of ``predictions`` against ``targets`` ranks."""
         return corn_loss(predictions, targets, self.num_ranks)
 
@@ -231,12 +253,14 @@ class CORALLoss(BaseLoss):
 
     name = "coral"
 
-    def __init__(self, num_ranks: int):
+    def __init__(self, num_ranks: int) -> None:
         """Take the rank count ``num_ranks``."""
         super().__init__()
         self.num_ranks = num_ranks
 
-    def forward(self, predictions, targets):
+    def forward(
+        self, predictions: torch.Tensor, targets: torch.Tensor
+    ) -> torch.Tensor:
         """Return the binary cross-entropy of ``predictions`` against each sample's rank levels."""
         levels = torch.zeros_like(predictions)
         for i in range(predictions.size(0)):
@@ -251,52 +275,23 @@ class CombinedLoss(BaseLoss):
 
     def __init__(
         self, losses: list[BaseLoss], weights: list[float] | None = None
-    ):
+    ) -> None:
         """Take the ``losses`` and their ``weights``, each weight 1.0 when none are given."""
         super().__init__()
         self.losses = nn.ModuleList(losses)
         self.weights = weights or [1.0] * len(losses)
 
-    def forward(self, predictions, targets):
+    def forward(
+        self, predictions: torch.Tensor, targets: torch.Tensor
+    ) -> torch.Tensor:
         """Return the weighted sum of the losses of ``predictions`` against ``targets``.
 
         Each loss is paired with the weight at its position; the sum runs over those pairs.
         """
-        total = torch.tensor(
-            0.0,
-            device=predictions.device
-            if torch.is_tensor(predictions)
-            else "cpu",
-        )
+        total = torch.tensor(0.0, device=predictions.device)
         for loss_fn, w in zip(self.losses, self.weights):
             total = total + w * loss_fn(predictions, targets)
         return total
-
-
-def _generalized_box_iou_loss(
-    pred_boxes: torch.Tensor, gt_boxes: torch.Tensor
-) -> torch.Tensor:
-    """Return the GIoU loss for bounding box regression; boxes are in xyxy format."""
-    from tcip_annotation.matching import box_areas
-
-    x1 = torch.max(pred_boxes[:, 0], gt_boxes[:, 0])
-    y1 = torch.max(pred_boxes[:, 1], gt_boxes[:, 1])
-    x2 = torch.min(pred_boxes[:, 2], gt_boxes[:, 2])
-    y2 = torch.min(pred_boxes[:, 3], gt_boxes[:, 3])
-    inter = (x2 - x1).clamp(min=0) * (y2 - y1).clamp(min=0)
-
-    union = box_areas(pred_boxes) + box_areas(gt_boxes) - inter
-
-    iou = inter / (union + 1e-7)
-
-    ex1 = torch.min(pred_boxes[:, 0], gt_boxes[:, 0])
-    ey1 = torch.min(pred_boxes[:, 1], gt_boxes[:, 1])
-    ex2 = torch.max(pred_boxes[:, 2], gt_boxes[:, 2])
-    ey2 = torch.max(pred_boxes[:, 3], gt_boxes[:, 3])
-    enclose = box_areas(torch.stack([ex1, ey1, ex2, ey2], dim=1))
-
-    giou = iou - (enclose - union) / (enclose + 1e-7)
-    return (1.0 - giou).mean()
 
 
 def compute_class_weights(
@@ -363,7 +358,7 @@ def build_loss(
     class_distribution: dict[int, int] | None = None,
     num_classes: int | None = None,
     weight_scheme: str = "balanced",
-    **kwargs,
+    **kwargs: object,
 ) -> BaseLoss:
     """Build a loss by name, or a :class:`CombinedLoss` from terms joined like ``'bce+dice'``.
 

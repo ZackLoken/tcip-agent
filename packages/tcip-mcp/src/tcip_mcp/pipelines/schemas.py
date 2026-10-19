@@ -16,6 +16,8 @@ from typing import (
     Any,
     Literal,
     NamedTuple,
+    Required,
+    TypedDict,
     cast,
     get_args,
 )
@@ -36,8 +38,12 @@ from pydantic import (
 from tcip_mcp.pipelines.data.selection import ClassScope, Sample
 from tcip_mcp.pipelines.derivations import DetectorGeometryDerivation
 from tcip_mcp.pipelines.execution import MaskCut
+from tcip_mcp.pipelines.raster_source import RasterIdentity
 
 if TYPE_CHECKING:
+    from pydantic import JsonValue
+
+    from tcip_mcp.pipelines.data.augmentations import Transforms
     from tcip_mcp.subject_registry import Attribute
 
 
@@ -389,15 +395,6 @@ class StatedBeyondWeights(_Stated):
     pretrained_weights: PretrainedWeights
 
 
-def _present(record: Any, names: Sequence[str]) -> dict[str, Any]:
-    """Return each of ``names`` whose value on ``record`` is not ``None``, under its own name."""
-    return {
-        name: value
-        for name in names
-        if (value := getattr(record, name)) is not None
-    }
-
-
 class _Sourced(BaseModel):
     """Values a model builder is handed, beside the ``source`` that gave them."""
 
@@ -405,22 +402,16 @@ class _Sourced(BaseModel):
 
     @classmethod
     def handed_names(cls) -> tuple[str, ...]:
-        """Return the names of the values a builder is handed.
-
-        They are every field but ``source``, and every property the class reads off its fields.
-        """
-        return (
-            *(name for name in cls.model_fields if name != "source"),
-            *(
-                name
-                for name, v in vars(cls).items()
-                if isinstance(v, property)
-            ),
-        )
+        """Return the names of the values a builder is handed: every field but ``source``."""
+        return tuple(name for name in cls.model_fields if name != "source")
 
     def handed(self) -> dict[str, Any]:
-        """Return each present value a builder is handed (:meth:`handed_names`)."""
-        return _present(self, self.handed_names())
+        """Return each field but ``source`` that is not ``None``, under its own name."""
+        return {
+            name: value
+            for name, value in self
+            if name != "source" and value is not None
+        }
 
 
 class Normalization(_Sourced):
@@ -446,6 +437,18 @@ class Normalization(_Sourced):
             return self.source
         return None
 
+    @classmethod
+    def handed_names(cls) -> tuple[str, ...]:
+        """Return the fields a builder is handed, and ``pretrained_weights``."""
+        return (*super().handed_names(), "pretrained_weights")
+
+    def handed(self) -> dict[str, Any]:
+        """Return the fields a builder is handed, and any :attr:`pretrained_weights` it loads."""
+        weights = self.pretrained_weights
+        return super().handed() | (
+            {} if weights is None else {"pretrained_weights": weights}
+        )
+
 
 class DetectorGeometry(_Sourced):
     """A detector's input scale and anchors, the four keyword values the platform hands a builder.
@@ -469,22 +472,18 @@ class StatedDetectorGeometry(DetectorGeometry):
     source: _Stated
 
 
-class ModelDims(NamedTuple):
-    """The dimensions a run's model is built at.
+class ModelDims(TypedDict, total=False):
+    """The dimensions a run's model is built at, each it has under the name its builder takes.
 
     ``in_chans`` is the band count its sources are read at; ``num_classes`` or ``num_ranks``, the
     count its ground truth derives; ``attributes``, the attribute records a document scope
-    declares. ``None`` for each the run has none of.
+    declares. A run has no key for a dimension it has none of.
     """
 
-    in_chans: int
-    num_classes: int | None = None
-    num_ranks: int | None = None
-    attributes: tuple[Attribute, ...] | None = None
-
-    def handed(self) -> dict[str, Any]:
-        """Return each dimension the run has, under its own name."""
-        return _present(self, self._fields)
+    in_chans: Required[int]
+    num_classes: int
+    num_ranks: int
+    attributes: tuple[Attribute, ...]
 
 
 def _handed_once(
@@ -535,7 +534,7 @@ class ModelSourceSchema(BaseModel):
 
 
 HANDED_TO_BUILDER = (
-    *ModelDims._fields,
+    *ModelDims.__annotations__,
     *Normalization.handed_names(),
     *DetectorGeometry.handed_names(),
 )
@@ -554,7 +553,7 @@ class DatasetContext(NamedTuple):
     task: str
     samples: Sequence[Sample]
     scope: ClassScope
-    transforms: Any
+    transforms: Transforms | None
 
 
 class DatasetSourceSchema(BaseModel):
@@ -612,14 +611,16 @@ class DrawnSplit(_Stated):
     grouping: str | dict[str, str]
 
 
-def _split_kind(value: Any) -> str:
-    """Return ``"bound"`` for a ``data.split`` naming a ``selection_dir``, else ``"drawn"``."""
-    held = (
-        value.get("selection_dir")
-        if isinstance(value, dict)
-        else getattr(value, "selection_dir", None)
+def _split_kind(value: object) -> str:
+    """Return ``"bound"`` for a ``data.split`` naming a ``selection_dir``, else ``"drawn"``.
+
+    ``value`` is a stated block or an already validated :class:`BoundSplit` or
+    :class:`DrawnSplit`.
+    """
+    bound = isinstance(value, BoundSplit) or (
+        isinstance(value, dict) and value.get("selection_dir") is not None
     )
-    return "drawn" if held is None else "bound"
+    return "bound" if bound else "drawn"
 
 
 SplitSpec = Annotated[
@@ -664,7 +665,7 @@ class SpatialManifest(BaseModel):
     realized_discard_fraction: float
     tiles_dropped_past_extent: int
     tiles_dropped_outside_regions: int
-    raster_content_identity: dict
+    raster_content_identity: RasterIdentity
 
 
 class TilingSpec(_Stated):
@@ -952,7 +953,7 @@ class TrainConfigSchema(_Recorded):
 
 
 def checked_train_config(
-    config: dict, project: Path | None = None
+    config: JsonValue, project: Path | None = None
 ) -> tuple[TrainConfigSchema | None, list[str]]:
     """Validate ``config`` once against the schema, its paths located against ``project``.
 
@@ -970,7 +971,7 @@ def checked_train_config(
 
 
 def train_config(
-    config: dict, project: Path | None = None
+    config: JsonValue, project: Path | None = None
 ) -> TrainConfigSchema:
     """Validate ``config`` against the schema (:func:`checked_train_config`).
 
