@@ -65,8 +65,8 @@ _DATA = {"num_channels": 3, "scope": {"subject": "bud", "attributes": []}}
 
 
 def test_snapshot_model_source_copies_each_declared_file_at_its_path_in_its_tree(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """``snapshot_model_source`` copies each declared file at its path in its own tree.
 
     Each declared file is keyed by its stored path and copied at its path under the import root
@@ -104,8 +104,8 @@ def test_snapshot_model_source_copies_each_declared_file_at_its_path_in_its_tree
 
 
 def test_snapshot_model_source_refuses_a_declared_file_it_cannot_read(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     src = _model_source()
     src["source_files"] = [
         *src["source_files"],
@@ -117,8 +117,8 @@ def test_snapshot_model_source_refuses_a_declared_file_it_cannot_read(
 
 
 def test_snapshot_model_source_refuses_a_builder_no_declared_file_holds(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     with pytest.raises(ValueError, match="definitely_not_a_real_module_xyz"):
         _snapshot(
             {
@@ -131,8 +131,8 @@ def test_snapshot_model_source_refuses_a_builder_no_declared_file_holds(
 
 
 def test_a_declared_file_of_the_builders_stem_that_is_not_python_holds_no_module(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A declared non-Python file of the builder's stem holds no module, and the plan refuses.
 
     A declared ``review.txt`` is no module, so the plan of a builder ``review:build`` it is
@@ -173,8 +173,8 @@ def test_a_declared_file_of_the_builders_stem_that_is_not_python_holds_no_module
 
 
 def test_snapshot_model_source_refuses_a_file_outside_every_tree_it_can_place(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """``snapshot_model_source`` refuses a file outside every tree it can place it in.
 
     A declared file outside the project and under no declared module's import root has no path
@@ -199,7 +199,9 @@ def test_snapshot_model_source_refuses_a_file_outside_every_tree_it_can_place(
     )
 
 
-def test_snapshot_model_source_refuses_two_files_landing_on_one_copy(tmp_path):
+def test_snapshot_model_source_refuses_two_files_landing_on_one_copy(
+    tmp_path: Path,
+) -> None:
     """``snapshot_model_source`` refuses two declared files landing on one copy.
 
     The project's own ``bespoke_models.py`` and the builder's module of that path under its
@@ -217,8 +219,8 @@ def test_snapshot_model_source_refuses_two_files_landing_on_one_copy(tmp_path):
 
 
 def test_a_project_file_beside_an_external_builder_named_like_the_standard_library_refuses(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A project file named like a standard-library module beside an external builder refuses.
 
     A project-local ``code.py`` declared beside a builder from another tree is refused by the
@@ -248,8 +250,8 @@ def test_a_project_file_beside_an_external_builder_named_like_the_standard_libra
 
 
 def test_a_preflight_over_a_declared_standard_library_name_imports_nothing(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A preflight reports a declared standard-library name and keeps the loaded module.
 
     The preflight reports the declared ``code.py`` as a standard-library name, and the loaded
@@ -292,7 +294,9 @@ def test_a_preflight_over_a_declared_standard_library_name_imports_nothing(
     assert sys.modules["code"] is code
 
 
-def test_a_run_whose_snapshot_refuses_leaves_no_run_directory(tmp_path):
+def test_a_run_whose_snapshot_refuses_leaves_no_run_directory(
+    tmp_path: Path,
+) -> None:
     """A run whose snapshot refuses leaves no run directory.
 
     A declared file that cannot be read refuses the run, and no run directory exists after.
@@ -323,8 +327,8 @@ def test_a_run_whose_snapshot_refuses_leaves_no_run_directory(tmp_path):
 
 
 def test_a_declared_file_named_like_the_standard_library_refuses_before_a_run_opens(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A declared file named like a standard-library module refuses and leaves no run directory.
 
     A declared ``code.py`` beside the builder names the standard library's ``code`` module, so
@@ -361,7 +365,9 @@ def test_a_declared_file_named_like_the_standard_library_refuses_before_a_run_op
     assert not experiment_dir("shadowing", project=tmp_path).exists()
 
 
-def test_snapshot_model_source_keeps_files_sharing_a_name_apart(tmp_path):
+def test_snapshot_model_source_keeps_files_sharing_a_name_apart(
+    tmp_path: Path,
+) -> None:
     """Two declared files sharing a basename land at their own paths, each with its own content."""
     for name in ("a", "b"):
         (tmp_path / name).mkdir()
@@ -387,7 +393,9 @@ def test_snapshot_model_source_keeps_files_sharing_a_name_apart(tmp_path):
 # A pass rebuilds the bespoke model from its builder (no exec) and predicts.
 
 
-def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(tmp_path):
+def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(
+    tmp_path: Path,
+) -> None:
     from PIL import Image
 
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -423,7 +431,9 @@ def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(tmp_path):
     )  # measurable detection output
 
 
-def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
+def test_predictor_loads_at_the_two_channels_its_run_recorded(
+    tmp_path: Path,
+) -> None:
     """A predictor loads at the two channels its run recorded and predicts at them.
 
     A run over two-band frames records two channels; the predictor its checkpoint prepares has
@@ -490,8 +500,8 @@ def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
 
 
 def test_a_completed_bespoke_runs_entry_carries_its_metrics_and_digest(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.model_registry import ModelRegistry
     from tests._verified_checkpoint_fixtures import finished_run
 
@@ -503,11 +513,10 @@ def test_a_completed_bespoke_runs_entry_carries_its_metrics_and_digest(
         metrics={"val_loss": 0.3, "epoch": 1},
     )
 
-    [entry] = [
+    [listed] = [
         m
         for m in ModelRegistry(str(tmp_path)).list_models()
-        if m["experiment_id"] == "expB"
+        if m.entry.experiment_id == "expB"
     ]
-    assert entry["metrics"]["val_loss"] == pytest.approx(0.3)
-    assert entry["sha256"] and len(entry["sha256"]) == 64
-    assert entry["experiment_id"] == "expB"
+    assert listed.facts.metrics["val_loss"] == pytest.approx(0.3)
+    assert listed.entry.sha256 and len(listed.entry.sha256) == 64

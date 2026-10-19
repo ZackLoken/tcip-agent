@@ -114,14 +114,14 @@ def test_capture_subjects_names_an_unreadable_label_and_lists_the_rest(
     assert capture_subjects(tmp_path, "2026-02-11") == (["bud"], ["IMG_1"])
 
 
-def test_subjects_path_is_the_single_dataset_registry():
+def test_subjects_path_is_the_single_dataset_registry() -> None:
     from tcip_mcp.dataset_layout import subjects_path
 
     # One nested registry at the dataset root: no per-subject classes/<x>.json anymore.
     assert subjects_path("/ds") == Path("/ds/subjects.json")
 
 
-def test_dataset_root_of_recovers_the_root_from_its_image_tree():
+def test_dataset_root_of_recovers_the_root_from_its_image_tree() -> None:
     from tcip_mcp.dataset_layout import dataset_root_of
 
     assert dataset_root_of("/ds/images/2026-03-02") == Path("/ds")

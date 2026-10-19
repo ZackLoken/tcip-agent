@@ -10,8 +10,12 @@ cancel requested on the run directory turns ``should_cancel`` true.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 torch = pytest.importorskip("torch")
 
@@ -23,7 +27,10 @@ from tcip_mcp.pipelines.model_build import (
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
 
 
-def _context(tmp_path, **kwargs) -> tuple[TrainContext, Path]:
+def _context(
+    tmp_path: Path,
+    **kwargs: Callable[[int, dict], None] | _RecordingWriter,
+) -> tuple[TrainContext, Path]:
     """Return a context built with ``kwargs`` and the run directory the launcher's writer opened."""
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
@@ -53,18 +60,18 @@ def _rows(run_dir: Path) -> list[dict]:
 class _RecordingWriter:
     """Stand-in summary writer recording exactly which scalars the sink routes to it."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.scalars: list[tuple] = []
         self.flushes = 0
 
-    def add_scalar(self, tag, value, step):
+    def add_scalar(self, tag: str, value: float, step: int) -> None:
         self.scalars.append((tag, value, step))
 
-    def flush(self):
+    def flush(self) -> None:
         self.flushes += 1
 
 
-def test_epoch_signal_reaches_the_trial_hook(tmp_path):
+def test_epoch_signal_reaches_the_trial_hook(tmp_path: Path) -> None:
     """An HPO trial's hook receives the epoch and metrics the body logs."""
     seen: list[tuple] = []
     ctx, _ = _context(
@@ -77,7 +84,9 @@ def test_epoch_signal_reaches_the_trial_hook(tmp_path):
     assert seen == [(4, {"val_loss": 0.25})]
 
 
-def test_the_sink_is_the_one_stamp_of_a_rows_epoch_and_instant(tmp_path):
+def test_the_sink_is_the_one_stamp_of_a_rows_epoch_and_instant(
+    tmp_path: Path,
+) -> None:
     """The metrics sink refuses an epoch or instant key and stamps the epoch itself.
 
     Metrics carrying the epoch or the instant refuse naming the key and write nothing; the
@@ -96,7 +105,7 @@ def test_the_sink_is_the_one_stamp_of_a_rows_epoch_and_instant(tmp_path):
     assert _rows(run_dir) == [{"val_loss": 0.5, EPOCH_KEY: 2}]
 
 
-def test_metrics_file_accumulates_one_row_per_epoch(tmp_path):
+def test_metrics_file_accumulates_one_row_per_epoch(tmp_path: Path) -> None:
     """Two logged epochs both remain in the metrics file, in the order they were logged."""
     ctx, run_dir = _context(tmp_path)
 
@@ -110,8 +119,8 @@ def test_metrics_file_accumulates_one_row_per_epoch(tmp_path):
 
 
 def test_a_diverged_metric_is_logged_as_null_beside_the_state_that_names_it(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A diverged metric is logged as null beside a state naming why.
 
     A diverged loss is real information the run has to record, and NaN is not JSON: the
@@ -127,8 +136,8 @@ def test_a_diverged_metric_is_logged_as_null_beside_the_state_that_names_it(
 
 
 def test_a_diverged_metric_still_reaches_the_pruning_hook_as_the_number_it_was(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A diverged metric reaches the pruning hook as the number it was.
 
     The hook receives the infinite loss the body logged.
@@ -143,7 +152,7 @@ def test_a_diverged_metric_still_reaches_the_pruning_hook_as_the_number_it_was(
     assert seen[0]["val_loss"] == float("inf")
 
 
-def test_only_real_scalars_reach_the_summary_writer(tmp_path):
+def test_only_real_scalars_reach_the_summary_writer(tmp_path: Path) -> None:
     """The summary writer receives the numeric scalars alone, flushed once."""
     writer = _RecordingWriter()
     ctx, _ = _context(tmp_path, _tb=writer)
@@ -162,7 +171,9 @@ def test_only_real_scalars_reach_the_summary_writer(tmp_path):
     assert writer.flushes == 1
 
 
-def test_checkpoint_lands_under_the_tag_it_was_asked_for(tmp_path):
+def test_checkpoint_lands_under_the_tag_it_was_asked_for(
+    tmp_path: Path,
+) -> None:
     """Distinct tags are distinct files; a periodic save leaves the best one's metrics intact."""
     ctx, run_dir = _context(tmp_path)
 
@@ -185,7 +196,9 @@ def test_checkpoint_lands_under_the_tag_it_was_asked_for(tmp_path):
     assert saved_best[CONFIG_KEY]["data"]["num_channels"] == 3
 
 
-def test_a_checkpoint_name_written_twice_refuses_and_keeps_the_first(tmp_path):
+def test_a_checkpoint_name_written_twice_refuses_and_keeps_the_first(
+    tmp_path: Path,
+) -> None:
     """A second checkpoint save under one tag refuses and keeps the first save's bytes."""
     ctx, run_dir = _context(tmp_path)
     ctx.save_checkpoint(
@@ -204,7 +217,9 @@ def test_a_checkpoint_name_written_twice_refuses_and_keeps_the_first(tmp_path):
     ]
 
 
-def test_a_checkpoint_tag_cannot_walk_out_of_the_run_directory(tmp_path):
+def test_a_checkpoint_tag_cannot_walk_out_of_the_run_directory(
+    tmp_path: Path,
+) -> None:
     """A checkpoint tag spelled as a path refuses and writes nothing outside the run."""
     from tcip_store import BadKeyError
 
@@ -216,7 +231,9 @@ def test_a_checkpoint_tag_cannot_walk_out_of_the_run_directory(tmp_path):
     assert not (run_dir.parent / "escaped.pt").exists()
 
 
-def test_checkpoint_stamping_leaves_the_callers_state_untouched(tmp_path):
+def test_checkpoint_stamping_leaves_the_callers_state_untouched(
+    tmp_path: Path,
+) -> None:
     """The stamp goes onto the saved payload, not back into the loop's own live state dict."""
     ctx, run_dir = _context(tmp_path)
     state = {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.2}}
@@ -229,7 +246,7 @@ def test_checkpoint_stamping_leaves_the_callers_state_untouched(tmp_path):
     )
 
 
-def test_record_artifact_copies_the_file_into_the_run(tmp_path):
+def test_record_artifact_copies_the_file_into_the_run(tmp_path: Path) -> None:
     """``record_artifact`` copies a file into the run and refuses a second under its name.
 
     The artifact lands under the run's ``artifacts`` directory, the run names no deliverable,
@@ -247,7 +264,9 @@ def test_record_artifact_copies_the_file_into_the_run(tmp_path):
         ctx.record_artifact("failure_log", str(source))
 
 
-def test_an_artifact_name_cannot_walk_out_of_the_run_directory(tmp_path):
+def test_an_artifact_name_cannot_walk_out_of_the_run_directory(
+    tmp_path: Path,
+) -> None:
     """An artifact name is a name inside the run, so one spelled as a path copies nothing."""
     from tcip_store import BadKeyError
 
@@ -261,7 +280,9 @@ def test_an_artifact_name_cannot_walk_out_of_the_run_directory(tmp_path):
     assert not (run_dir.parent / "escaped").exists()
 
 
-def test_cancellation_is_seen_through_the_runs_cancellation_record(tmp_path):
+def test_cancellation_is_seen_through_the_runs_cancellation_record(
+    tmp_path: Path,
+) -> None:
     """A cancel requested on the run directory turns ``ctx.should_cancel()`` true."""
     from tcip_mcp.experiments import request_cancel
 

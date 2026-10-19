@@ -8,18 +8,23 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from torch import Tensor
+
+    from tcip_mcp.pipelines.data.selection import Sample, Selection
+    from tcip_mcp.pipelines.data.split_construction import Partition
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from torch.utils.data import Dataset  # noqa: E402
-
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.pipelines.data.datasets import BaseDataset
 from tcip_mcp.pipelines.data.selection import ClassScope, read_selection
-from tcip_mcp.pipelines.data.split_construction import partition_samples
 from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
 from tcip_mcp.tools.data_tools import draw_splits
 from tests._chain_fixtures import (
@@ -44,7 +49,9 @@ OTHER_SUBJECT = "bud"
 DATES = ("2-11-26", "2-12-01")
 
 
-def _write_stem(images_dir: Path, stem: str, annotations) -> None:
+def _write_stem(
+    images_dir: Path, stem: str, annotations: list[Annotation]
+) -> None:
     labeled_frame(
         images_dir / f"{stem}.jpg",
         annotations,
@@ -65,8 +72,8 @@ def _two_subject_two_date_dataset(root: Path) -> Path:
         root,
         SubjectRegistry(
             subjects=(
-                Subject(name=SUBJECT),
-                Subject(name=OTHER_SUBJECT),
+                Subject(name=SUBJECT, description=""),
+                Subject(name=OTHER_SUBJECT, description=""),
             )
         ),
     )
@@ -94,7 +101,7 @@ def _two_subject_two_date_dataset(root: Path) -> Path:
 
 def test_every_sample_groups_each_member_the_way_the_stem_policy_records_it(
     tmp_path: Path,
-):
+) -> None:
     """Every sample groups each member the way the ``stem`` policy records it.
 
     On a dated tree the ``stem`` policy's group key names the capture date, so each member's
@@ -128,6 +135,7 @@ def _attribute_scoped_dataset(root: Path) -> Path:
             subjects=(
                 Subject(
                     name=SUBJECT,
+                    description="",
                     attributes=(
                         Attribute(
                             name="condition",
@@ -171,7 +179,10 @@ def _dataset_with_a_confirmed_negative(root: Path) -> Path:
     The first date holds stems ``a`` to ``d``, each with one box of the subject, and ``n``,
     whose label document is empty.
     """
-    registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(
+        root,
+        SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
+    )
     images_dir = root / "images" / DATES[0]
     for stem in ("a", "b", "c", "d"):
         _write_stem(
@@ -189,7 +200,10 @@ def _tiled_dataset(root: Path) -> Path:
     The crops of parents ``srcA`` to ``srcD`` are named ``<parent>_<x>_0`` for x of 0, 1 and 2,
     each with one box of the subject, in the first date.
     """
-    registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(
+        root,
+        SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
+    )
     images_dir = root / "images" / DATES[0]
     for parent in ("srcA", "srcB", "srcC", "srcD"):
         for x in range(3):
@@ -201,7 +215,7 @@ def _tiled_dataset(root: Path) -> Path:
     return root
 
 
-class _RecordingDataset(Dataset):
+class _RecordingDataset(BaseDataset):
     """A bespoke dataset standing in for an agent's own builder.
 
     It keeps the samples, class space and data locations it is constructed with as
@@ -210,15 +224,21 @@ class _RecordingDataset(Dataset):
     label 1 and ``iscrowd`` 0 for every index.
     """
 
-    def __init__(self, samples, scope, directories) -> None:
+    def __init__(
+        self,
+        samples: list[Sample],
+        scope: ClassScope | None,
+        directories: dict[str, object],
+    ) -> None:
         self.seen_samples = list(samples)
         self.seen_scope = scope
         self.seen_directories = directories
 
-    def __len__(self) -> int:
+    @property
+    def num_samples(self) -> int:
         return len(self.seen_samples)
 
-    def __getitem__(self, idx: int):
+    def __getitem__(self, idx: int) -> tuple[Tensor, dict[str, Tensor]]:
         return torch.zeros(3, 8, 8), {
             "boxes": torch.tensor([[0.0, 0.0, 1.0, 1.0]]),
             "labels": torch.tensor([1]),
@@ -226,7 +246,7 @@ class _RecordingDataset(Dataset):
         }
 
     @property
-    def regions(self):
+    def regions(self) -> list:
         """The regions ``served_regions`` reads off each item this dataset serves."""
         from tests._producer_fixtures import served_regions
 
@@ -234,7 +254,9 @@ class _RecordingDataset(Dataset):
 
 
 def build_recording_dataset(
-    samples=None, scope=None, **kwargs
+    samples: list[Sample] | None = None,
+    scope: ClassScope | None = None,
+    **kwargs: object,
 ) -> _RecordingDataset:
     """Build a recording dataset, the ``dataset_source`` builder registered by dotted name.
 
@@ -260,7 +282,7 @@ def _draw(
     *,
     subject: str = SUBJECT,
     seed: int = 2,
-):
+) -> Selection:
     result = draw_splits(
         project,
         str(root),
@@ -278,7 +300,9 @@ def _draw(
     return read_selection(out, project=project)
 
 
-def _run_data_cfg(root: Path, selection_dir: Path, **overrides) -> dict:
+def _run_data_cfg(
+    root: Path, selection_dir: Path, **overrides: object
+) -> dict:
     data_cfg: dict = {"split": {"selection_dir": str(selection_dir)}}
     data_cfg.update(overrides)
     return data_cfg
@@ -287,7 +311,9 @@ def _run_data_cfg(root: Path, selection_dir: Path, **overrides) -> dict:
 # -- binding a run to a selection ----------------------------------------------
 
 
-def test_auto_train_val_binds_the_selections_own_partition(tmp_path: Path):
+def test_auto_train_val_binds_the_selections_own_partition(
+    tmp_path: Path,
+) -> None:
     """``auto_train_val`` binds the loaders to the selection's own recorded partition.
 
     The loaders hold exactly the samples the selection recorded on each side, both capture
@@ -320,15 +346,16 @@ def test_auto_train_val_binds_the_selections_own_partition(tmp_path: Path):
     }
     assert read_from == set(DATES)
 
-    binding = partition["selection"]
-    assert binding["selection_dir"] == str(out)
-    assert binding["redraw"] is False
-    assert "date" not in binding
+    binding = partition.selection
+    assert binding is not None
+    assert binding.selection_dir == str(out)
+    assert binding.redraw is False
+    assert "date" not in binding.model_dump()
     # The class space is the run's own, recorded once on the data block, never restated here.
     assert resolved.scope == drawn.scope
     assert drawn.scope.subject == SUBJECT
-    assert "scope" not in binding
-    assert {s.ground_truth.parts[0] for s in partition_samples(partition)} == {
+    assert "scope" not in binding.model_dump()
+    assert {s.ground_truth.parts[0] for s in partition.samples} == {
         s.ground_truth.parts[0] for s in drawn.samples
     }
 
@@ -351,7 +378,7 @@ def _pixels_and_ground_truth(under: Path) -> dict[Path, int]:
 
 def test_a_multi_date_selection_trains_without_copying_anything(
     tmp_path: Path,
-):
+) -> None:
     """A selection spanning two capture dates trains with its selected file paths and sizes kept.
 
     One selection spanning two capture dates trains through the worker: the run's resolved
@@ -382,9 +409,7 @@ def test_a_multi_date_selection_trains_without_copying_anything(
     )
 
     # Both dates reach the members the run actually recorded, from two captures.
-    samples = partition_samples(
-        run_resolution(run_dir.name, project=tmp_path).partition
-    )
+    samples = run_resolution(run_dir.name, project=tmp_path).partition.samples
     consumed = {s for s in samples if s.side in ("train", "val")}
     assert {s.ground_truth.parts[0] for s in consumed} == set(DATES)
     assert {s.ground_truth.parts[-1] for s in consumed} == {
@@ -402,7 +427,7 @@ def test_a_multi_date_selection_trains_without_copying_anything(
 
 def test_a_bound_run_keeps_its_selections_attributes_when_the_registry_is_reordered(
     tmp_path: Path,
-):
+) -> None:
     """A bound run keeps its selection's attributes when the registry is reordered.
 
     The registry's declared value order is reversed between the draw and the run, and the
@@ -426,6 +451,7 @@ def test_a_bound_run_keeps_its_selections_attributes_when_the_registry_is_reorde
             subjects=(
                 Subject(
                     name=SUBJECT,
+                    description="",
                     attributes=(
                         Attribute(
                             name="condition",
@@ -461,7 +487,7 @@ def test_a_bound_run_keeps_its_selections_attributes_when_the_registry_is_reorde
 
 def test_a_scope_stated_beside_a_selection_refuses_the_bound_run(
     tmp_path: Path,
-):
+) -> None:
     """A scope stated beside a selection refuses the bound run by name.
 
     The selection records the class space its samples were admitted under; a data section
@@ -487,7 +513,7 @@ def test_a_scope_stated_beside_a_selection_refuses_the_bound_run(
 
 def test_a_ground_truth_place_stated_beside_a_selection_refuses_the_bound_run(
     tmp_path: Path,
-):
+) -> None:
     """A ``labels_dir`` stated beside a selection refuses the bound run by name.
 
     A data section naming ``labels_dir`` beside the selection refuses by name, an existing
@@ -515,7 +541,7 @@ def test_a_ground_truth_place_stated_beside_a_selection_refuses_the_bound_run(
 
 def test_a_selected_label_emptied_since_the_draw_refuses_the_run(
     tmp_path: Path,
-):
+) -> None:
     """A selected label emptied since the draw with no confirmed negative refuses the run.
 
     A label that held the subject at draw time is emptied with nobody confirming that image
@@ -535,7 +561,7 @@ def test_a_selected_label_emptied_since_the_draw_refuses_the_run(
 
 def test_a_selected_label_a_human_confirmed_negative_still_trains(
     tmp_path: Path,
-):
+) -> None:
     """A selected label emptied since the draw binds after a human confirms it negative.
 
     An emptied label whose image a human marked negative for this subject is a real negative,
@@ -563,7 +589,7 @@ def test_a_selected_label_a_human_confirmed_negative_still_trains(
 
 def test_a_bound_run_admits_when_an_unselected_images_stem_turns_ambiguous(
     tmp_path: Path,
-):
+) -> None:
     """A bound run admits when an unselected image's stem turns ambiguous.
 
     An image nobody selected picks up a second file under its stem after the draw, and the bound
@@ -591,7 +617,7 @@ def test_a_bound_run_admits_when_an_unselected_images_stem_turns_ambiguous(
 
 def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
     tmp_path: Path,
-):
+) -> None:
     """A sample naming a row of its ground truth is refused by the geometry loaders.
 
     ``row_key`` names one row inside a ground truth that answers for many samples. A detection
@@ -615,7 +641,10 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
     images_dir = root / "images" / DATES[0]
     images_dir.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (64, 64), (100, 120, 90)).save(images_dir / "a.jpg")
-    registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(
+        root,
+        SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
+    )
     label_image(
         images_dir / "a.jpg",
         [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))],
@@ -670,7 +699,7 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
     assert list(admitted.stems) == [str(images_dir / "a.jpg")]
 
 
-def test_crops_of_one_parent_cannot_cross_sides(tmp_path: Path):
+def test_crops_of_one_parent_cannot_cross_sides(tmp_path: Path) -> None:
     """Crops of one parent image never land on two sides of a bound run.
 
     The draw places every crop of one parent on one side, the bound run's train and val loaders
@@ -678,7 +707,7 @@ def test_crops_of_one_parent_cannot_cross_sides(tmp_path: Path):
     """
     from tcip_mcp.pipelines.data.selection import (
         as_selection,
-        selection_document,
+        stored_selection_document,
     )
 
     root = _tiled_dataset(tmp_path / "ds")
@@ -701,19 +730,19 @@ def test_crops_of_one_parent_cannot_cross_sides(tmp_path: Path):
     assert not parents_on["train"] & parents_on["val"]
 
     # And the record itself refuses a hand-made partition that splits one parent's crops.
-    document = selection_document(drawn)
-    a_train = next(s for s in document["samples"] if s["side"] == "train")
+    document = stored_selection_document(drawn, tmp_path)
+    assert isinstance(document, dict) and isinstance(document["samples"], list)
+    samples = [s for s in document["samples"] if isinstance(s, dict)]
+    a_train = next(s for s in samples if s["side"] == "train")
     moved = dict(a_train, side="val")
-    document["samples"] = [
-        s for s in document["samples"] if s is not a_train
-    ] + [moved]
+    document["samples"] = [s for s in samples if s is not a_train] + [moved]
     with pytest.raises(ValueError, match="group"):
         as_selection(document, where="hand-made")
 
 
 def test_auto_train_val_admits_a_confirmed_negative_the_draw_admitted(
     tmp_path: Path,
-):
+) -> None:
     """A bound run's loader holds a confirmed negative the draw admitted, as a zero-object sample.
 
     A stem whose label document is empty and whose image a human marked negative is admitted
@@ -740,7 +769,9 @@ def test_auto_train_val_admits_a_confirmed_negative_the_draw_admitted(
     assert target["boxes"].shape[0] == 0
 
 
-def test_an_unconfirmed_empty_label_never_reaches_a_bound_run(tmp_path: Path):
+def test_an_unconfirmed_empty_label_never_reaches_a_bound_run(
+    tmp_path: Path,
+) -> None:
     """An empty label document nobody confirmed appears in no selection.
 
     The draw admits no empty label document nobody confirmed, so none is a selection's sample.
@@ -755,7 +786,7 @@ def test_an_unconfirmed_empty_label_never_reaches_a_bound_run(tmp_path: Path):
 
 def test_a_bound_run_reads_attribute_ids_from_the_selections_own_scope(
     tmp_path: Path,
-):
+) -> None:
     """A bound run's loaders read the attributes the selection's own scope records.
 
     The selection records the attributes its admission read, the bound train loader carries that
@@ -778,7 +809,7 @@ def test_a_bound_run_reads_attribute_ids_from_the_selections_own_scope(
     assert drawn.scope.subject == SUBJECT
 
 
-def test_a_bound_run_threads_a_bespoke_dataset_source(tmp_path: Path):
+def test_a_bound_run_threads_a_bespoke_dataset_source(tmp_path: Path) -> None:
     """A selection-bound run threads its samples and scope to a bespoke dataset source.
 
     The bespoke seam stays reachable from a selection-bound run: the agent's own builder
@@ -803,8 +834,8 @@ def test_a_bound_run_threads_a_bespoke_dataset_source(tmp_path: Path):
 
 @pytest.mark.parametrize("task", ["detection", "canopy_extent"])
 def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(
-    tmp_path: Path, task
-):
+    tmp_path: Path, task: str
+) -> None:
     """A bound and an unbound bespoke run agree on the samples of the date they share.
 
     The same tree is resolved twice through a bespoke builder, bound to a selection drawn over it
@@ -840,7 +871,7 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(
         "each route draws both sides over the samples its producer named"
     )
 
-    def handed(*datasets) -> list[tuple]:
+    def handed(*datasets: _RecordingDataset) -> list[tuple]:
         """Return the samples the builders were handed, with multiplicity, sorted.
 
         Each sample is the tuple of its source, ground truth, row key, rect, group and member.
@@ -886,7 +917,7 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(
 
 def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(
     tmp_path: Path,
-):
+) -> None:
     """The batch a preflight smokes comes off the bound run's training loader.
 
     The smoked loader, resolved as the launch resolves it, holds the selection's train side and
@@ -918,9 +949,9 @@ def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(
     smoked = resolve_run(
         spec, staged_sources(spec, tmp_path).layout, project=tmp_path
     ).train_ds
-    batch, why = _one_real_batch("detection", smoked)
+    batch = _one_real_batch("detection", smoked)
 
-    assert why is None and batch is not None
+    assert not isinstance(batch, str), batch
     assert sorted(s.location for s in smoked.seen_samples) == sorted(
         s.location for s in drawn.on("train")
     )
@@ -930,7 +961,9 @@ def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(
     assert config["data"]["split"] == {"selection_dir": str(out)}
 
 
-def test_auto_train_val_refuses_a_selection_with_an_empty_side(tmp_path: Path):
+def test_auto_train_val_refuses_a_selection_with_an_empty_side(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.data.selection import Selection, write_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -960,15 +993,17 @@ def _strip_the_recorded_subject(out: Path) -> None:
     from tcip_mcp.pipelines.data.selection import selection_key
 
     document = ts.read(selection_key(out))
+    assert isinstance(document, dict)
+    scope = document["scope"]
+    assert isinstance(scope, dict)
     ts.replace(
-        selection_key(out),
-        {**document, "scope": {**document["scope"], "subject": None}},
+        selection_key(out), {**document, "scope": {**scope, "subject": None}}
     )
 
 
 def test_the_selection_writer_refuses_a_document_selection_with_no_subject(
     tmp_path: Path,
-):
+) -> None:
     import dataclasses
 
     from tcip_mcp.pipelines.data.selection import write_selection
@@ -984,7 +1019,9 @@ def test_the_selection_writer_refuses_a_document_selection_with_no_subject(
     assert not (tmp_path / "unscoped").exists()
 
 
-def test_auto_train_val_refuses_a_selection_with_no_subject(tmp_path: Path):
+def test_auto_train_val_refuses_a_selection_with_no_subject(
+    tmp_path: Path,
+) -> None:
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
@@ -996,7 +1033,7 @@ def test_auto_train_val_refuses_a_selection_with_no_subject(tmp_path: Path):
 
 def test_a_split_naming_a_selection_refuses_a_drawn_splits_own_parameter_by_name(
     tmp_path: Path,
-):
+) -> None:
     """A split naming a selection refuses a drawn split's own parameter by name.
 
     A split naming a selection is a bound split, which carries no share: the schema refuses
@@ -1014,7 +1051,7 @@ def test_a_split_naming_a_selection_refuses_a_drawn_splits_own_parameter_by_name
 
 def test_auto_train_val_selection_refuses_a_task_reading_another_ground_truth(
     tmp_path: Path,
-):
+) -> None:
     """A selection refuses a task whose loader reads another ground truth.
 
     A selection of per-image label documents refuses a semantic segmentation run, naming them as
@@ -1032,7 +1069,7 @@ def test_auto_train_val_selection_refuses_a_task_reading_another_ground_truth(
 
 def test_auto_train_val_binding_failure_raises_rather_than_degrading(
     tmp_path: Path,
-):
+) -> None:
     """A bind whose sample's image moved since the draw raises, naming it no longer admissible."""
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -1055,7 +1092,7 @@ def _redraw_cfg(root: Path, out: Path, seed: int) -> dict:
 
 def test_a_redraw_repartitions_the_selections_own_members_and_leaves_calibration_alone(
     tmp_path: Path,
-):
+) -> None:
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
@@ -1068,11 +1105,14 @@ def test_a_redraw_repartitions_the_selections_own_members_and_leaves_calibration
 
     assert set(train_ds.stems) | set(val_ds.stems) == pool
     assert not (set(train_ds.stems) | set(val_ds.stems)) & held_out
-    assert partition["selection"]["redraw"] is True
-    assert partition["seed"] == 1
+    assert partition.selection is not None
+    assert partition.selection.redraw is True
+    assert partition.seed == 1
 
 
-def test_two_redraw_seeds_differ_and_the_same_seed_repeats(tmp_path: Path):
+def test_two_redraw_seeds_differ_and_the_same_seed_repeats(
+    tmp_path: Path,
+) -> None:
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
@@ -1090,7 +1130,7 @@ def test_two_redraw_seeds_differ_and_the_same_seed_repeats(tmp_path: Path):
 
 def test_a_bound_split_stating_a_seed_redraws_and_one_stating_none_keeps_the_recorded_sides(
     tmp_path: Path,
-):
+) -> None:
     """A bound split stating a seed redraws; one stating none keeps the recorded sides.
 
     Through the child's own context (``run_context``) over a bound selection: a split stating no
@@ -1098,7 +1138,7 @@ def test_a_bound_split_stating_a_seed_redraws_and_one_stating_none_keeps_the_rec
     recorded seed, and one stating a seed redraws inside the selection at it, recorded as a
     redraw.
     """
-    from tcip_mcp.experiments import observe
+    from tcip_mcp.experiments import read_run
     from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
     from tests.tiny_trainer_fixtures import run_context
@@ -1107,7 +1147,9 @@ def test_a_bound_split_stating_a_seed_redraws_and_one_stating_none_keeps_the_rec
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
 
-    def _opened(experiment_id: str, **split):
+    def _opened(
+        experiment_id: str, **split: int
+    ) -> tuple[set[str], Partition]:
         ctx = run_context(
             tmp_path,
             training_config(
@@ -1117,27 +1159,26 @@ def test_a_bound_split_stating_a_seed_redraws_and_one_stating_none_keeps_the_rec
             ),
             experiment_id=experiment_id,
         )
-        partition = observe(ctx.run_dir).record["resolved"]["partition"]
+        partition = read_run(ctx.run_dir).resolution.partition
         return set(ctx.train_loader.dataset.stems), partition
 
     kept, bound = _opened("exp-bound")
     assert kept == {s.location for s in drawn.on("train")}
-    assert (bound["selection"]["redraw"], bound["seed"]) == (False, drawn.seed)
+    assert bound.selection is not None
+    assert (bound.selection.redraw, bound.seed) == (False, drawn.seed)
 
     redrawn = [
         _opened(f"exp-redrawn-{seed}", seed=seed) for seed in range(3, 8)
     ]
     for seed, (_train, partition) in zip(range(3, 8), redrawn):
-        assert (partition["selection"]["redraw"], partition["seed"]) == (
-            True,
-            seed,
-        )
+        assert partition.selection is not None
+        assert (partition.selection.redraw, partition.seed) == (True, seed)
     assert any(train != kept for train, _ in redrawn)
 
 
 def test_a_redraw_refuses_a_starved_pool_through_the_draws_own_floor(
     tmp_path: Path,
-):
+) -> None:
     """A redraw over a starved pool is refused through the draw's own floor.
 
     A redraw is the one draw over a selection's own train-plus-val members: fewer than two
@@ -1172,7 +1213,7 @@ def test_a_redraw_refuses_a_starved_pool_through_the_draws_own_floor(
 
 def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_member(
     tmp_path: Path,
-):
+) -> None:
     """The explicit draw, a run's own draw and a redraw agree member for member.
 
     One membership and one draw: ``draw_splits`` over a dated tree, a run drawing its own
@@ -1190,7 +1231,10 @@ def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_mem
             stem,
             [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))],
         )
-    registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(
+        root,
+        SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
+    )
     out = tmp_path / "m"
     explicit = draw_splits(
         tmp_path,
@@ -1216,7 +1260,7 @@ def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_mem
     redrawn = redrawn_selection(selection, str(out), 2)
 
     drawn = {s.member: s.side for s in selection.samples}
-    assert {s.member: s.side for s in partition_samples(partition)} == drawn
+    assert {s.member: s.side for s in partition.samples} == drawn
     assert {s.member: s.side for s in redrawn.samples} == drawn
 
 
@@ -1237,7 +1281,10 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
     from tests._producer_fixtures import image_label_key, mark_complete
 
     root = tmp_path / "ds"
-    registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(
+        root,
+        SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
+    )
     images_dir = root / "images" / DATES[0]
     for stem in ("fg", "neg", "held_a", "held_b"):
         _write_stem(
@@ -1282,7 +1329,7 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
 
 def test_preflight_flags_a_redraw_whose_members_hold_one_foreground_group(
     tmp_path: Path,
-):
+) -> None:
     """Preflight flags a redraw whose members hold one foreground group.
 
     The selection's val side holds one group, a confirmed negative carrying no foreground, and
@@ -1309,7 +1356,7 @@ def test_preflight_flags_a_redraw_whose_members_hold_one_foreground_group(
 
 def test_preflight_config_admits_a_bound_selection_with_no_issues(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.tools.training_tools import preflight_config
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -1326,7 +1373,9 @@ def test_preflight_config_admits_a_bound_selection_with_no_issues(
     assert result["issues"] == []
 
 
-def test_preflight_config_flags_a_selection_with_no_subject(tmp_path: Path):
+def test_preflight_config_flags_a_selection_with_no_subject(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.training_tools import preflight_config
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -1344,7 +1393,7 @@ def test_preflight_config_flags_a_selection_with_no_subject(tmp_path: Path):
 
 def test_preflight_config_admits_a_redraw_seed_with_a_warning(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.tools.training_tools import preflight_config
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -1365,8 +1414,10 @@ def test_preflight_config_admits_a_redraw_seed_with_a_warning(
 # -- the run's own resolved record ---------------------------------------------
 
 
-def test_the_resolved_partition_carries_the_selection_it_bound(tmp_path: Path):
-    from tcip_mcp.experiments import observe
+def test_the_resolved_partition_carries_the_selection_it_bound(
+    tmp_path: Path,
+) -> None:
+    from tcip_mcp.experiments import read_run
     from tests._verified_checkpoint_fixtures import resolved_run
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -1376,9 +1427,10 @@ def test_the_resolved_partition_carries_the_selection_it_bound(tmp_path: Path):
     run_dir = resolved_run(
         tmp_path, _run_data_cfg(root, out), experiment_id="exp-bound"
     )
-    partition = observe(run_dir).record["resolved"]["partition"]
+    partition = read_run(run_dir).resolution.partition
 
-    assert partition["selection"]["selection_dir"] == str(out)
+    assert partition.selection is not None
+    assert partition.selection.selection_dir == str(out)
     assert partition_side(partition, "train") == sorted(
         {s.member for s in drawn.on("train")}
     )
@@ -1387,15 +1439,15 @@ def test_the_resolved_partition_carries_the_selection_it_bound(tmp_path: Path):
     )
     # The selection's own named grouping policy, carried rather than collapsed into the finite
     # per-sample groups beside it: a stem the groups do not cover is what the policy answers for.
-    assert partition["group_by"] == drawn.group_by == "tile_prefix"
-    samples = partition_samples(partition)
+    assert partition.group_by == drawn.group_by == "tile_prefix"
+    samples = partition.samples
     assert all(s.group for s in samples)
     assert all(s.ground_truth_digest for s in samples)
 
 
 def test_a_bound_detection_run_stating_the_composite_objective_selects_by_it(
     tmp_path: Path,
-):
+) -> None:
     """A bound detection run stating the composite objective selects by it.
 
     The chain's detector trained over a drawn selection stating the composite objective as
@@ -1404,7 +1456,7 @@ def test_a_bound_detection_run_stating_the_composite_objective_selects_by_it(
     """
     import math
 
-    from tcip_mcp.experiments import epoch_rows, observe, read_rows
+    from tcip_mcp.experiments import epoch_rows, observe_run, read_rows
     from tests import _chain_fixtures as chain
     from tests._verified_checkpoint_fixtures import worker_run
 
@@ -1414,12 +1466,12 @@ def test_a_bound_detection_run_stating_the_composite_objective_selects_by_it(
     config = chain.run_config(tmp_path, tmp_path / "selection")
     assert config["evaluation"]["selection_metric"] == "objective"
 
-    observation = observe(
+    observation = observe_run(
         worker_run(tmp_path, config, experiment_id="exp-default-objective")
     )
 
     assert observation.state == "completed", observation.status_error
-    assert observation.trait_revision is None
+    assert observation.record.resolution.trait_revision is None
     rows = epoch_rows(read_rows(observation.metrics_log)[0])
     assert rows
     for row in rows:
@@ -1428,13 +1480,15 @@ def test_a_bound_detection_run_stating_the_composite_objective_selects_by_it(
         assert math.isfinite(row["selection"]) and row["selection"] > 0
 
 
-def test_a_run_that_draws_its_own_split_records_no_binding(tmp_path: Path):
+def test_a_run_that_draws_its_own_split_records_no_binding(
+    tmp_path: Path,
+) -> None:
     """A run that draws its own split records no selection binding.
 
     A run over the same tree that names no selection draws a partition of its own, and its
     resolved partition names no selection it bound.
     """
-    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.experiments import read_run
     from tests._verified_checkpoint_fixtures import resolved_run
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -1447,8 +1501,8 @@ def test_a_run_that_draws_its_own_split_records_no_binding(tmp_path: Path):
         },
         experiment_id="exp-drawn",
     )
-    resolved = read_record(run_dir / RUN_FILE)["resolved"]
+    partition = read_run(run_dir).resolution.partition
 
-    assert resolved["partition"]["selection"] is None
-    assert partition_side(resolved["partition"], "train")
-    assert partition_side(resolved["partition"], "val")
+    assert partition.selection is None
+    assert partition_side(partition, "train")
+    assert partition_side(partition, "val")

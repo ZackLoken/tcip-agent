@@ -21,7 +21,9 @@ from tests._dense_op_fixtures import dense_records, good_cal_holdout  # noqa: E4
 from tests._training_values import COUNT_TEST  # noqa: E402
 
 
-def _criterion(cal, hold, floor):
+def _criterion(
+    cal: list[dict], hold: list[dict], floor: float
+) -> tuple[float, dict, list[str]]:
     return count_criterion(
         cal,
         hold,
@@ -32,7 +34,7 @@ def _criterion(cal, hold, floor):
     )
 
 
-def test_min_dt_score():
+def test_min_dt_score() -> None:
     recs = dense_records(n_images=2, objects_per_image=3, score=0.9)
     assert _min_dt_score(recs) == pytest.approx(0.9)
     assert _min_dt_score([{"gt": [], "dt": []}]) is None
@@ -42,7 +44,7 @@ def test_min_dt_score():
 # count-unbiased pick lands at 0.9, comfortably above a real 0.01 collection floor.
 
 
-def test_a_reference_collected_at_a_real_floor_passes():
+def test_a_reference_collected_at_a_real_floor_passes() -> None:
     conf, evidence, failures = _criterion(
         *good_cal_holdout(fp_score=0.05), 0.01
     )
@@ -52,7 +54,7 @@ def test_a_reference_collected_at_a_real_floor_passes():
     assert failures == []
 
 
-def test_a_conf_picked_at_or_below_the_collection_floor_is_censored():
+def test_a_conf_picked_at_or_below_the_collection_floor_is_censored() -> None:
     """A conf picked at or below the collection floor is censored.
 
     With the stated floor at the picked conf, the criterion reports ``conf_censored``.
@@ -64,7 +66,9 @@ def test_a_conf_picked_at_or_below_the_collection_floor_is_censored():
     assert "conf_censored" in failures
 
 
-def test_a_floor_far_below_every_observed_score_is_reported_and_never_fails():
+def test_a_floor_far_below_every_observed_score_is_reported_and_never_fails() -> (
+    None
+):
     """A floor far below the observed scores is reported beside the criterion and does not fail it.
 
     With the stated 0.01 floor and detections no lower than 0.5, the evidence records both the

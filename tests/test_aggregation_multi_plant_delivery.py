@@ -8,6 +8,8 @@ assessment.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from tcip_mcp.pipelines.execution import Stated
@@ -21,9 +23,14 @@ from tests._training_values import (
     collection_pass,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from tcip_mcp.buckets import Bucket
+
 
 @pytest.fixture(autouse=True)
-def _recorded_meaning(tmp_path):
+def _recorded_meaning(tmp_path: Path) -> None:
     """Confirm the delivery traits and ``stem_count``'s per-plant count meaning of ``bud``."""
     fx.seed_delivery_traits(tmp_path)
     # The count measures what the chain's unassessed bucket detects.
@@ -45,7 +52,7 @@ def _by_plant(rows: list[dict]) -> dict[str, dict]:
 # -- each plant's summary comes from that plant's own records ----------------
 
 
-def test_each_plants_summary_describes_only_that_plants_records():
+def test_each_plants_summary_describes_only_that_plants_records() -> None:
     """Each plant's median and image count are computed over that plant's own records.
 
     Three plants have deliberately different count distributions, none of which equals the
@@ -73,7 +80,9 @@ def test_each_plants_summary_describes_only_that_plants_records():
     ]
 
 
-def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort():
+def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort() -> (
+    None
+):
     """Each plant's identity provenance is summarized over its own records.
 
     One plant is resolved from a single source, another from two, a third with no provenance at
@@ -122,7 +131,9 @@ def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort():
     assert "plant_id_distance_m_max" not in out["PLANT_C"]
 
 
-def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
+def test_delivery_csv_carries_each_plants_own_value_and_image_count(
+    tmp_path: Path,
+) -> None:
     """Each delivery CSV row carries its own plant's value and image count.
 
     The delivery runs from per-image records to the CSV; each of three rows carries its plant's
@@ -204,7 +215,7 @@ def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
 # -- a plant's mean is its own -------------------------------------------------
 
 
-def test_each_plants_mean_describes_only_that_plants_records():
+def test_each_plants_mean_describes_only_that_plants_records() -> None:
     """Each plant's mean is computed over that plant's own records.
 
     The samples are skewed, each plant's mean and median several units apart.
@@ -225,7 +236,7 @@ def test_each_plants_mean_describes_only_that_plants_records():
     assert out["PLANT_B"]["value"] == pytest.approx(17.0)
 
 
-def test_summed_areas_stay_within_their_own_plant():
+def test_summed_areas_stay_within_their_own_plant() -> None:
     """Each plant's summed area is taken over its own images.
 
     The plants have different numbers of contributing images, and each reports its own image
@@ -249,7 +260,7 @@ def test_summed_areas_stay_within_their_own_plant():
 # -- an assessment answers for the kind it measured, and no other -------
 
 
-def _assessed(project, kind: str, experiment_id: str):
+def _assessed(project: Path, kind: str, experiment_id: str) -> Bucket:
     """Return a bucket published under an assessment of ``kind``, as recorded.
 
     The count trait is confirmed first with both its per-image and its per-plant count
@@ -315,8 +326,8 @@ _RECORDS = [
 
 
 def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         deliver_per_plant_aggregate,
@@ -340,8 +351,8 @@ def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(
 
 
 def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A per-plant delivery under a per-image count assessment is refused, naming both kinds.
 
     The per-image count the assessment measured is not the per-plant number the delivery ships:

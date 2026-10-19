@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests._chain_fixtures import CLASSIFIER_SOURCE
+
+if TYPE_CHECKING:
+    from torch import Generator, nn
+    from torch.optim import Optimizer
+
+    from tcip_mcp.pipelines.training.run_registry import TrainRun
 
 torch = pytest.importorskip("torch")
 import numpy as np  # noqa: E402
@@ -15,7 +22,7 @@ import numpy as np  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import set_seed  # noqa: E402
 
 
-def test_set_seed_reproducible():
+def test_set_seed_reproducible() -> None:
     set_seed(123, deterministic=False)
     a = (random.random(), float(np.random.rand()), float(torch.rand(1)))
     set_seed(123, deterministic=False)
@@ -23,7 +30,7 @@ def test_set_seed_reproducible():
     assert a == b
 
 
-def test_set_seed_sets_cudnn_flags():
+def test_set_seed_sets_cudnn_flags() -> None:
     det0, bench0 = (
         torch.backends.cudnn.deterministic,
         torch.backends.cudnn.benchmark,
@@ -58,7 +65,7 @@ from tests._training_values import (  # noqa: E402
 )
 
 
-def _classification_data(tmp_path: Path, n: int = 6):
+def _classification_data(tmp_path: Path, n: int = 6) -> tuple[str, str]:
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
     images_dir, csv_path = write_regression_dataset(
@@ -71,11 +78,17 @@ def _classification_data(tmp_path: Path, n: int = 6):
     return str(images_dir), str(csv_path)
 
 
-def _model_source():
+def _model_source() -> dict:
     return dict(CLASSIFIER_SOURCE)
 
 
-def _cfg(project, data: tuple[str, str], stages, horizon: int = 1, **extra):
+def _cfg(
+    project: Path,
+    data: tuple[str, str],
+    stages: list[dict],
+    horizon: int = 1,
+    **extra: object,
+) -> dict:
     """Return a classifier config of ``project`` over ``stages`` and ``data``'s frames and table.
 
     Its split draws no validation side, its optimizer is AdamW under a cosine schedule over
@@ -107,7 +120,7 @@ def _run_dir(project: Path, name: str) -> Path:
     return experiment_dir(name, project=project)
 
 
-def _trained(project: Path, cfg: dict, name: str, **kwargs):
+def _trained(project: Path, cfg: dict, name: str, **kwargs: str) -> TrainRun:
     """Open and train the run named ``name`` of ``project`` over ``cfg`` and return it.
 
     The run is opened by the launcher's own producer and trained through the training loader
@@ -125,10 +138,10 @@ def _trained(project: Path, cfg: dict, name: str, **kwargs):
     return train(run, run_loaders(run, ds, None)[0], **kwargs)
 
 
-def test_seeded_train_reproducible(tmp_path):
+def test_seeded_train_reproducible(tmp_path: Path) -> None:
     data = _classification_data(tmp_path)
 
-    def run_once(name):
+    def run_once(name: str) -> float:
         run = _trained(
             tmp_path, _cfg(tmp_path, data, [stage(-1)], seed=7), name
         )
@@ -137,7 +150,7 @@ def test_seeded_train_reproducible(tmp_path):
     assert run_once("a") == pytest.approx(run_once("b"))
 
 
-def test_resume_continues_epochs(tmp_path):
+def test_resume_continues_epochs(tmp_path: Path) -> None:
     data = _classification_data(tmp_path)
     cfg = _cfg(tmp_path, data, [stage(-1)], 2)
 
@@ -152,7 +165,9 @@ def test_resume_continues_epochs(tmp_path):
     assert (_run_dir(tmp_path, "out2") / "model_final.pt").is_file()
 
 
-def test_resume_skips_completed_stage_and_restores_optimizer(tmp_path):
+def test_resume_skips_completed_stage_and_restores_optimizer(
+    tmp_path: Path,
+) -> None:
     data = _classification_data(tmp_path)
     cfg = _cfg(tmp_path, data, [stage(-1), stage(0)])
 
@@ -168,7 +183,7 @@ def test_resume_skips_completed_stage_and_restores_optimizer(tmp_path):
     assert run2.current_epoch == 2  # restored optimizer + ran stage 1's epoch
 
 
-def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
+def test_resume_restores_rng_state_not_just_reseeds(tmp_path: Path) -> None:
     """A resume restores the RNG stream positions its checkpoint captured.
 
     The checkpoint carries ``torch_rng_state``, and with the global streams reseeded between
@@ -200,8 +215,8 @@ def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
 
 
 def test_resume_from_a_checkpoint_missing_a_resume_key_refuses_naming_it(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A resume from a checkpoint lacking a key it reads fails the run naming that key."""
     data = _classification_data(tmp_path)
     cfg = _cfg(tmp_path, data, [stage(-1)], 2)
@@ -218,8 +233,8 @@ def test_resume_from_a_checkpoint_missing_a_resume_key_refuses_naming_it(
 
 
 def test_resume_from_a_checkpoint_missing_its_scheduler_state_refuses_naming_it(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     data = _classification_data(tmp_path)
     cfg = _cfg(tmp_path, data, [stage(-1)], 2)
 
@@ -235,8 +250,8 @@ def test_resume_from_a_checkpoint_missing_its_scheduler_state_refuses_naming_it(
 
 
 def test_a_resume_whose_optimizer_restore_raises_fails_the_run(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     data = _classification_data(tmp_path)
     cfg = _cfg(tmp_path, data, [stage(-1)], 2)
 
@@ -244,7 +259,13 @@ def test_a_resume_whose_optimizer_restore_raises_fails_the_run(
 
     import tcip_mcp.pipelines.training.generic_trainer as trainer
 
-    def _refuse(model, optimizer, state, *, group_settings):
+    def _refuse(
+        model: nn.Module,
+        optimizer: Optimizer,
+        state: dict,
+        *,
+        group_settings: bool,
+    ) -> None:
         raise ValueError("optimizer state does not fit")
 
     monkeypatch.setattr(trainer, "restore_training_state", _refuse)
@@ -275,7 +296,9 @@ def _draws() -> tuple:
 @pytest.mark.skipif(
     not torch.cuda.is_available(), reason="needs a CUDA device"
 )
-def test_a_cuda_resume_restores_the_rng_streams(tmp_path, monkeypatch):
+def test_a_cuda_resume_restores_the_rng_streams(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A CUDA resume continues from the RNG streams the checkpoint captured.
 
     The draws taken just after the trainer's restore equal the draws the captured states yield
@@ -291,7 +314,9 @@ def test_a_cuda_resume_restores_the_rng_streams(tmp_path, monkeypatch):
     real_restore = trainer.restore_rng_state
     after_restore: list = []
 
-    def _observing_restore(state, loader_generator):
+    def _observing_restore(
+        state: dict, loader_generator: Generator | None
+    ) -> None:
         real_restore(state, loader_generator)
         after_restore.append(_draws())
         # The run continues from the restored streams, not the drawn ones.
@@ -314,7 +339,7 @@ def test_a_cuda_resume_restores_the_rng_streams(tmp_path, monkeypatch):
     assert after_restore == [_draws()]
 
 
-def test_seeded_loader_kwargs_reproducible_shuffle():
+def test_seeded_loader_kwargs_reproducible_shuffle() -> None:
     """Two ``seeded_loader_kwargs`` generators built from one seed shuffle identically."""
     from tcip_mcp.pipelines.training.generic_trainer import (
         seeded_loader_kwargs,
@@ -327,7 +352,7 @@ def test_seeded_loader_kwargs_reproducible_shuffle():
     assert torch.equal(perm1, perm2)
 
 
-def test_loader_worker_init_fn_is_picklable():
+def test_loader_worker_init_fn_is_picklable() -> None:
     """The loader's ``worker_init_fn`` survives a pickle round trip."""
     import pickle
 
@@ -339,7 +364,9 @@ def test_loader_worker_init_fn_is_picklable():
     assert pickle.loads(pickle.dumps(fn)) is not None
 
 
-def test_loader_worker_init_configures_gdal_cache_and_seeds(monkeypatch):
+def test_loader_worker_init_configures_gdal_cache_and_seeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The loader's worker init configures GDAL's cache and seeds numpy and random.
 
     The init fn calls ``configure_gdal_cache`` once and seeds numpy and random from the seed
@@ -369,7 +396,9 @@ def test_loader_worker_init_configures_gdal_cache_and_seeds(monkeypatch):
     assert calls == ["cache"]
 
 
-def test_resume_from_non_resumable_checkpoint_fails_loudly(tmp_path):
+def test_resume_from_non_resumable_checkpoint_fails_loudly(
+    tmp_path: Path,
+) -> None:
     # Resuming a checkpoint without optimizer state (e.g. model_best.pt) must fail
     # loudly, not silently restart from scratch.
     data = _classification_data(tmp_path)

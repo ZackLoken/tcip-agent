@@ -8,10 +8,17 @@ being each line's time and the minted record id it carries.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from tcip_mcp.project_record import CaptureInvariances
 from tests._audit_fixtures import audit_rows
 from tests._cli_fixtures import run_tcip
 from tests._web_fixtures import INVARIANCES, named_project
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
 
 
 def _flags(block: CaptureInvariances) -> list[str]:
@@ -39,8 +46,8 @@ def _recorded(line: dict, record_id: str) -> dict:
 
 
 def test_the_console_and_web_doors_record_one_correction_alike(
-    client, tmp_path
-):
+    client: TestClient, tmp_path: Path
+) -> None:
     """The console and web doors record one correction alike.
 
     The same block corrected by the same person through the console door on one project and the

@@ -4,6 +4,10 @@ Covered: sensor->in_chans, backbones accept in_chans, a train-start channel guar
 channel metadata. The plumbing carries channel counts and validates them.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
@@ -16,12 +20,24 @@ from tests._chain_fixtures import (
 from tests._producer_fixtures import dataset_over  # noqa: E402
 from tests._training_values import RATIONALE, drawn_split  # noqa: E402
 
+if TYPE_CHECKING:
+    from collections import OrderedDict
+    from pathlib import Path
+
+    import numpy as np
+    from numpy.typing import NDArray
+    from torch import Tensor
+    from torch.utils.data import Dataset
+
+    from tcip_mcp.pipelines.components.detectors import BackboneNeckAdapter
+    from tcip_mcp.pipelines.schemas import ImageStatsSampling, Normalization
+
 torch = pytest.importorskip("torch")
 
 pytest.importorskip("torchvision")
 
 
-def test_backbone_accepts_in_chans():
+def test_backbone_accepts_in_chans() -> None:
     import timm
 
     from tcip_mcp.pipelines.components.backbones import BackboneWrapper
@@ -39,7 +55,7 @@ def test_backbone_accepts_in_chans():
     assert bb.out_channels == [256, 512, 1024, 2048]
 
 
-def test_compose_and_forward_4_channel_model():
+def test_compose_and_forward_4_channel_model() -> None:
     from tests import bespoke_models
     from tests._chain_fixtures import band_statistics
 
@@ -50,7 +66,7 @@ def test_compose_and_forward_4_channel_model():
     assert isinstance(out, dict) and len(out) > 0  # forward runs on 4 channels
 
 
-def test_train_start_channel_guard():
+def test_train_start_channel_guard() -> None:
     """A first batch at a width other than the run's recorded one refuses; a matching one passes."""
     from tcip_mcp.pipelines.training.generic_trainer import (
         _validate_input_channels,
@@ -62,7 +78,7 @@ def test_train_start_channel_guard():
     _validate_input_channels(3, [(torch.rand(2, 3, 16, 16), {})])
 
 
-def _nchan_adapter(in_chans: int):
+def _nchan_adapter(in_chans: int) -> BackboneNeckAdapter:
     """Return a ``BackboneNeckAdapter`` over a timm resnet18 at ``in_chans`` and a 64-wide FPN.
 
     The backbone is ``timm.create_model("resnet18", features_only=True)`` without pretrained
@@ -85,7 +101,7 @@ def _nchan_adapter(in_chans: int):
     return BackboneNeckAdapter(bb, FPN(bb.out_channels, 64))
 
 
-def test_n_channel_detector_builds_and_trains():
+def test_n_channel_detector_builds_and_trains() -> None:
     """A five-band detector builds, normalizes at five bands and returns finite training losses."""
     from tcip_mcp.pipelines.components.detectors import build_detector
 
@@ -116,7 +132,7 @@ def test_n_channel_detector_builds_and_trains():
     assert losses and all(torch.isfinite(v) for v in losses.values())
 
 
-def test_normalization_length_and_channel_count_are_validated():
+def test_normalization_length_and_channel_count_are_validated() -> None:
     from tcip_mcp.pipelines.components.detectors import build_detector
 
     adapter = _nchan_adapter(5)
@@ -137,7 +153,7 @@ def test_normalization_length_and_channel_count_are_validated():
         )
 
 
-def test_explicit_in_chans_wins_over_the_registration_order_probe():
+def test_explicit_in_chans_wins_over_the_registration_order_probe() -> None:
     """A stated ``in_chans`` builds the detector where the registration-order probe disagrees.
 
     An adapter that registers its neck before its backbone reports a first-conv width that is not
@@ -150,7 +166,7 @@ def test_explicit_in_chans_wins_over_the_registration_order_probe():
     from tcip_mcp.pipelines.components.necks import FPN
 
     class NeckFirstAdapter(nn.Module):
-        def __init__(self, backbone, neck):
+        def __init__(self, backbone: BackboneWrapper, neck: FPN) -> None:
             super().__init__()
             self.neck = neck  # registered first: the probe sees this conv
             self.backbone = backbone
@@ -160,7 +176,7 @@ def test_explicit_in_chans_wins_over_the_registration_order_probe():
                 else neck.out_channels[-1]
             )
 
-        def forward(self, x):
+        def forward(self, x: Tensor) -> OrderedDict[str, Tensor]:
             from collections import OrderedDict
 
             return OrderedDict(sorted(self.neck(self.backbone(x)).items()))
@@ -193,7 +209,7 @@ def test_explicit_in_chans_wins_over_the_registration_order_probe():
     assert det.transform.image_mean == [0.4] * 3
 
 
-def test_torchvision_constructor_kwargs_forward_but_typos_raise():
+def test_torchvision_constructor_kwargs_forward_but_typos_raise() -> None:
     from tcip_mcp.pipelines.components.detectors import build_detector
     from tests._chain_fixtures import detector_values
 
@@ -228,8 +244,8 @@ def test_torchvision_constructor_kwargs_forward_but_typos_raise():
     ],
 )
 def test_band_normalization_stats_matches_the_tensors_the_model_is_fed(
-    tmp_path, dtype, scale
-):
+    tmp_path: Path, dtype: str, scale: int
+) -> None:
     """Band statistics equal the mean and std of the tensors the loader yields.
 
     `pil_to_tensor` decides [0,1] scaling from dtype; the statistics read every raster and match
@@ -271,7 +287,7 @@ def test_band_normalization_stats_matches_the_tensors_the_model_is_fed(
     )
 
 
-def _sampling(stats):
+def _sampling(stats: Normalization) -> ImageStatsSampling:
     """Return the sampling record a band statistics record names as its source."""
     from tcip_mcp.pipelines.schemas import ImageStatsSampling
 
@@ -279,7 +295,7 @@ def _sampling(stats):
     return stats.source
 
 
-def test_band_normalization_stats_admits_underivable(tmp_path):
+def test_band_normalization_stats_admits_underivable(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.derivations import band_normalization_stats
 
     # Underivable is None, never a stand-in constant.
@@ -292,8 +308,8 @@ def test_band_normalization_stats_admits_underivable(tmp_path):
 
 
 def test_band_normalization_stats_draw_their_capped_sample_from_the_stated_seed(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Band statistics read at most the stated number of rasters, drawn from the stated seed.
 
     One seed reads the same rasters twice and another seed others, the record naming the cap and
@@ -336,7 +352,9 @@ def test_band_normalization_stats_draw_their_capped_sample_from_the_stated_seed(
         band_normalization_stats(paths, 5, seed=0)  # type: ignore[call-arg]  # the omission is the subject
 
 
-def _strip_tiff_raster(path, *, height=24, width=20, channels=4):
+def _strip_tiff_raster(
+    path: Path, *, height: int = 24, width: int = 20, channels: int = 4
+) -> NDArray[np.uint8]:
     """Write a seeded ``(height, width, channels)`` uint8 array to ``path``; return the array.
 
     The array is drawn from ``default_rng(5)`` and written by ``tifffile.imwrite`` in six-row
@@ -353,8 +371,8 @@ def _strip_tiff_raster(path, *, height=24, width=20, channels=4):
 
 
 def test_sampled_band_normalization_stats_over_full_coverage_match_the_exact_sibling(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Sampled band statistics over every window match the exact sibling's numbers.
 
     The sampled statistics record a pixel fraction of 1 and equal the exact mean and std.
@@ -389,8 +407,8 @@ def test_sampled_band_normalization_stats_over_full_coverage_match_the_exact_sib
 
 
 def test_sampled_band_normalization_stats_records_the_windows_it_read(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.derivations import band_normalization_stats_sampled
 
     path = tmp_path / "mosaic.tif"
@@ -420,7 +438,9 @@ def test_sampled_band_normalization_stats_records_the_windows_it_read(
     assert repeat == sampled
 
 
-def test_sampled_band_normalization_stats_admit_underivable(tmp_path):
+def test_sampled_band_normalization_stats_admit_underivable(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.derivations import band_normalization_stats_sampled
 
     assert (
@@ -436,7 +456,7 @@ def test_sampled_band_normalization_stats_admit_underivable(tmp_path):
     )
 
 
-def test_build_dataset_sets_expected_channels(tmp_path):
+def test_build_dataset_sets_expected_channels(tmp_path: Path) -> None:
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
@@ -459,7 +479,7 @@ def test_build_dataset_sets_expected_channels(tmp_path):
 
 
 def _classification_data(
-    tmp_path, *, num_channels: int | None
+    tmp_path: Path, *, num_channels: int | None
 ) -> tuple[dict, str]:
     """Return a data section over four sources under ``tmp_path``, and one source's path.
 
@@ -482,7 +502,9 @@ def _classification_data(
     return data_cfg, str(images_dir / "img0.png")
 
 
-def _classification_run(tmp_path, *, num_channels: int | None):
+def _classification_run(
+    tmp_path: Path, *, num_channels: int | None
+) -> tuple[dict, Dataset, str]:
     """Bind a run through the producer over :func:`_classification_data`.
 
     Return the data block it resolved, in the form its record holds it, after its loaders are
@@ -503,7 +525,9 @@ def _classification_run(tmp_path, *, num_channels: int | None):
     return resolved.record(), train_ds, image
 
 
-def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
+def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(
+    tmp_path: Path,
+) -> None:
     """A checkpoint's later readers all read images at the width its run recorded.
 
     A model is built at the width its run resolved: the builder, the contract dims and the
@@ -546,8 +570,8 @@ def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
 
 
 def test_a_run_that_states_no_width_records_the_one_its_sources_carry(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A run stating no width records its sources' three channels in its dataset and model dims."""
     data_cfg, train_ds, _image = _classification_run(
         tmp_path, num_channels=None
@@ -567,8 +591,8 @@ def test_a_run_that_states_no_width_records_the_one_its_sources_carry(
 
 
 def test_a_source_whose_band_count_cannot_be_read_refuses_rather_than_defaulting(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A source whose band count cannot be read refuses, naming the band count.
 
     A run's input channels are derived from its own sources.

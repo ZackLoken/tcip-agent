@@ -9,12 +9,17 @@ The captures are 2-band groups.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 import tifffile
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.raster_source import RasterSource
 
 torch = pytest.importorskip("torch")
 
@@ -26,7 +31,9 @@ pytest.importorskip("torchvision")
 TILE = 32
 
 
-def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
+def _write_group(
+    images_dir: Path, stem: str, fill: tuple[int, int] = (111, 222)
+) -> None:
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
     band_a = images_dir / f"{stem}_G.tif"
@@ -98,8 +105,8 @@ def _grouped_dataset(root: Path) -> Path:
 
 
 def test_the_assessments_records_over_grouped_samples_decode_each_capture(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The assessment's records over grouped samples open each capture as a ``BandGroupRef``.
 
     The raster layer is handed each capture as a ``BandGroupRef``, and the 2-channel predictor
@@ -129,7 +136,9 @@ def test_the_assessments_records_over_grouped_samples_decode_each_capture(
     seen_sources = []
     real_open_raster = raster_source.open_raster
 
-    def _spy_open_raster(source, num_channels):
+    def _spy_open_raster(
+        source: str | Path | BandGroupRef, num_channels: int
+    ) -> RasterSource:
         seen_sources.append(source)
         return real_open_raster(source, num_channels)
 
@@ -145,7 +154,9 @@ def test_the_assessments_records_over_grouped_samples_decode_each_capture(
     assert {g.stem for g in grouped} == {"capture_001", "capture_002"}
 
 
-def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path):
+def test_run_inference_images_dir_folds_a_grouped_capture(
+    tmp_path: Path,
+) -> None:
     """A pass over an images directory folds a grouped capture's band files into one image."""
     from tests._verified_checkpoint_fixtures import predicted_over
 
@@ -162,7 +173,9 @@ def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path):
     assert results[0]["image"].endswith("capture_001.bandgroup")
 
 
-def test_predict_batch_rejects_stringified_band_group_refs(tmp_path):
+def test_predict_batch_rejects_stringified_band_group_refs(
+    tmp_path: Path,
+) -> None:
     """A pass refuses stringified ``BandGroupRef`` sources with a ``ValueError``."""
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare

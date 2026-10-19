@@ -36,7 +36,9 @@ TWO_TESTS = textwrap.dedent(
 )
 
 
-def test_a_passed_tests_workspace_is_emptied_and_a_failed_ones_kept(tmp_path):
+def test_a_passed_tests_workspace_is_emptied_and_a_failed_ones_kept(
+    tmp_path: Path,
+) -> None:
     test_file = tmp_path / "test_two.py"
     test_file.write_text(TWO_TESTS, encoding="utf-8")
     proc = child_pytest(

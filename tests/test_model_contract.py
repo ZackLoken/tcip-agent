@@ -9,15 +9,21 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from torch import Tensor
+
+    from tcip_mcp.pipelines.model_build import SourceLayout
+    from tcip_mcp.pipelines.schemas import ModelSourceSchema
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.model_build import build_from_model_source  # noqa: E402
 from tcip_mcp.pipelines.model_contract import (  # noqa: E402
-    TCIPModel,
     check_model_contract,
     overfit_check,
 )
@@ -33,7 +39,7 @@ CLS_DIMS = {"in_chans": 3, "num_classes": 2, "img_size": (64, 64)}
 DET_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": (64, 64)}
 
 
-def _classifier():
+def _classifier() -> bespoke_models.BespokeComposed:
     """Build a real bespoke two-class classifier at :func:`band_statistics`."""
     from tests._chain_fixtures import band_statistics
 
@@ -42,7 +48,9 @@ def _classifier():
     )
 
 
-def _bespoke_builder(*, image_mean, image_std, **_handed):
+def _bespoke_builder(
+    *, image_mean: list[float], image_std: list[float], **_handed: object
+) -> bespoke_models.BespokeComposed:
     """Build a real bespoke classifier at the handed statistics, as an agent-written builder.
 
     The builder is importable and loads none of the weights it is handed.
@@ -58,7 +66,7 @@ _UNRESOLVED = TrainGeometry(
 """The geometry of a classification run that resolved no frame."""
 
 
-def _source(builder: str):
+def _source(builder: str) -> tuple[ModelSourceSchema, SourceLayout]:
     """Return ``builder``'s classification ``model_source`` and the layout its admission stages.
 
     The model source declares this module, validated in a run config over no data; the layout
@@ -85,33 +93,50 @@ def _source(builder: str):
     return spec.model_source, staged_sources(spec, REPO_ROOT).layout
 
 
-def test_build_from_model_source_imports_builder():
+def _not_a_module_builder(**_handed: object) -> dict:
+    """Return a plain dict where a builder returns a module, as a mistaken agent builder."""
+    return {"in_chans": _handed["in_chans"]}
+
+
+_NOT_CALLABLE = 3
+"""A module attribute a dotted builder name can reach that is not callable."""
+
+
+def test_build_from_model_source_imports_builder() -> None:
     source, layout = _source(f"{Path(__file__).stem}:_bespoke_builder")
     model = build_from_model_source(
         source, layout, {"in_chans": 3, "num_classes": 2}, _UNRESOLVED
     )
-    assert isinstance(model, TCIPModel)
+    assert isinstance(model, torch.nn.Module)
 
 
-def test_a_config_stating_no_model_source_is_refused_at_validation():
+def test_a_builder_returning_no_module_is_refused_naming_the_builder() -> None:
+    """A model_source builder that returns no ``nn.Module`` is refused by its config path."""
+    source, layout = _source(f"{Path(__file__).stem}:_not_a_module_builder")
+    with pytest.raises(TypeError, match="model_source.builder"):
+        build_from_model_source(
+            source, layout, {"in_chans": 3, "num_classes": 2}, _UNRESOLVED
+        )
+
+
+def test_a_dotted_builder_naming_nothing_callable_is_refused() -> None:
+    """A dotted builder name reaching a non-callable attribute is refused at its import."""
+    source, layout = _source(f"{Path(__file__).stem}:_NOT_CALLABLE")
+    with pytest.raises(ValueError, match="not callable"):
+        build_from_model_source(
+            source, layout, {"in_chans": 3, "num_classes": 2}, _UNRESOLVED
+        )
+
+
+def test_a_config_stating_no_model_source_is_refused_at_validation() -> None:
     _spec, issues = checked_train_config({"data": {}})
     assert any(issue.startswith("model_source") for issue in issues), issues
 
 
-def test_build_from_model_source_bad_builder_raises():
+def test_build_from_model_source_bad_builder_raises() -> None:
     with pytest.raises(ValueError, match="not found|Invalid dotted"):
         source, layout = _source(f"{Path(__file__).stem}:does_not_exist")
         build_from_model_source(source, layout, {"in_chans": 3}, _UNRESOLVED)
-
-
-# --------------------------------------------------------------------------
-# TCIPModel Protocol: duck-type marker, not an architecture requirement
-# --------------------------------------------------------------------------
-
-
-def test_tcip_model_protocol_membership():
-    assert isinstance(_classifier(), TCIPModel)
-    assert not isinstance(object(), TCIPModel)
 
 
 # --------------------------------------------------------------------------
@@ -119,7 +144,7 @@ def test_tcip_model_protocol_membership():
 # --------------------------------------------------------------------------
 
 
-def test_check_model_contract_classification_ok():
+def test_check_model_contract_classification_ok() -> None:
     model = _classifier()
     report = check_model_contract(model, "classification", dims=CLS_DIMS)
     assert report["ok"], report["issues"]
@@ -127,7 +152,9 @@ def test_check_model_contract_classification_ok():
     assert report["train_loss"] is not None
 
 
-def test_check_model_contract_records_per_parameter_gradient_magnitudes():
+def test_check_model_contract_records_per_parameter_gradient_magnitudes() -> (
+    None
+):
     """The model contract records gradient magnitudes keyed by the model's parameter names.
 
     Each reported name is a parameter of the model, and each magnitude is a non-negative float.
@@ -144,7 +171,9 @@ def test_check_model_contract_records_per_parameter_gradient_magnitudes():
     assert all(isinstance(v, float) and v >= 0.0 for v in mags.values())
 
 
-def test_check_model_contract_gradient_norm_survives_a_float32_overflow():
+def test_check_model_contract_gradient_norm_survives_a_float32_overflow() -> (
+    None
+):
     """The contract's gradient norm survives a float32 overflow as a finite value.
 
     Each element of the parameter's gradient is 2e38, finite in float32, and the reported norm
@@ -159,7 +188,9 @@ def test_check_model_contract_gradient_norm_survives_a_float32_overflow():
             self.w.register_hook(lambda grad: grad * 2e38)
             self.lin = nn.Linear(4, 4)
 
-        def forward(self, images, targets=None):
+        def forward(
+            self, images: Tensor, targets: dict | None = None
+        ) -> dict[str, Tensor]:
             if self.training:
                 return {
                     "loss": self.w.sum() + self.lin(torch.rand(1, 4)).sum() * 0
@@ -175,7 +206,7 @@ def test_check_model_contract_gradient_norm_survives_a_float32_overflow():
     assert norm == pytest.approx(2e38 * 2**0.5, rel=1e-6)
 
 
-def test_check_model_contract_rejects_prediction_free_eval_output():
+def test_check_model_contract_rejects_prediction_free_eval_output() -> None:
     """The model contract rejects an eval output holding no tensor."""
     import torch.nn as nn
 
@@ -184,7 +215,9 @@ def test_check_model_contract_rejects_prediction_free_eval_output():
             super().__init__()
             self.lin = nn.Linear(4, 4)
 
-        def forward(self, images, targets=None):
+        def forward(
+            self, images: Tensor, targets: dict | None = None
+        ) -> dict[str, Tensor] | dict[str, str]:
             if self.training:
                 return {"loss": self.lin(torch.rand(1, 4)).sum()}
             return {"note": "done"}
@@ -196,7 +229,7 @@ def test_check_model_contract_rejects_prediction_free_eval_output():
     ]
 
 
-def test_check_model_contract_accepts_a_ragged_nested_eval_output():
+def test_check_model_contract_accepts_a_ragged_nested_eval_output() -> None:
     """The model contract accepts a ragged nested eval output.
 
     An eval output holding, under one key, a list of per-image tensors of different lengths
@@ -209,7 +242,9 @@ def test_check_model_contract_accepts_a_ragged_nested_eval_output():
             super().__init__()
             self.lin = nn.Linear(4, 4)
 
-        def forward(self, images, targets=None):
+        def forward(
+            self, images: Tensor, targets: dict | None = None
+        ) -> dict[str, Tensor] | dict[str, list[Tensor]]:
             if self.training:
                 return {"loss": self.lin(torch.rand(1, 4)).sum()}
             # Ragged: a different number of per-instance score tensors per image.
@@ -219,7 +254,7 @@ def test_check_model_contract_accepts_a_ragged_nested_eval_output():
     assert report["ok"], report["issues"]
 
 
-def test_check_model_contract_detection_ok():
+def test_check_model_contract_detection_ok() -> None:
     from tests._chain_fixtures import detector_values
 
     model = bespoke_models.build_bespoke_detection(
@@ -235,7 +270,7 @@ def test_check_model_contract_detection_ok():
 # --------------------------------------------------------------------------
 
 
-def test_overfit_check_classification_passes():
+def test_overfit_check_classification_passes() -> None:
     model = _classifier()
     report = overfit_check(
         model,
@@ -253,7 +288,7 @@ def test_overfit_check_classification_passes():
 # render_overfit_report: the record-safe form of a raw overfit_check report
 
 
-def test_render_overfit_report_passes_through_a_finite_report():
+def test_render_overfit_report_passes_through_a_finite_report() -> None:
     from tcip_mcp.pipelines.model_contract import render_overfit_report
 
     model = _classifier()
@@ -275,7 +310,7 @@ def test_render_overfit_report_passes_through_a_finite_report():
     assert rendered["losses"] == raw["losses"]
 
 
-def test_render_overfit_report_keeps_a_diverging_models_state():
+def test_render_overfit_report_keeps_a_diverging_models_state() -> None:
     """The rendered overfit report keeps a diverging model's state as a named field.
 
     A raw report carrying nan and inf renders to a form check_json_value admits, the

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pickle
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -24,9 +25,23 @@ from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 from tests._producer_fixtures import dataset_over  # noqa: E402
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
+    from typing import NoReturn, TypedDict, Unpack
+
+    from rasterio.io import DatasetReader
+
+    from tcip_mcp.pipelines.raster_source import GdalSource, ReadSpec, Rect
+
+    class _ReadRegionKeywords(TypedDict, total=False):
+        """The keywords ``GdalSource.read_region`` takes beside its rect."""
+
+        target_size: tuple[int, int] | None
+        level: int
+
 
 @pytest.fixture(autouse=True)
-def _empty_source_pool():
+def _empty_source_pool() -> Iterator[None]:
     """Clear the process-global source pool around each test."""
     raster_source.close_source_pool()
     yield
@@ -34,7 +49,10 @@ def _empty_source_pool():
 
 
 def _distinctive(
-    height: int, width: int, channels: int = 3, dtype=np.uint8
+    height: int,
+    width: int,
+    channels: int = 3,
+    dtype: type[np.uint8] | type[np.uint16] = np.uint8,
 ) -> np.ndarray:
     arr = np.zeros((height, width, channels), dtype=dtype)
     for c in range(channels):
@@ -66,8 +84,11 @@ def _jpeg_project(tmp_path: Path, size: int = 200) -> Path:
 
 
 def _tiff_project(
-    tmp_path: Path, height: int = 200, width: int = 200, dtype=np.uint8
-):
+    tmp_path: Path,
+    height: int = 200,
+    width: int = 200,
+    dtype: type[np.uint8] | type[np.uint16] = np.uint8,
+) -> tuple[Path, np.ndarray]:
     import tifffile
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -80,7 +101,9 @@ def _tiff_project(
     return images_dir, arr
 
 
-def _tiled(images_dir, **kwargs) -> TiledDetectionDataset:
+def _tiled(
+    images_dir: Path, **kwargs: Sequence[tuple[int, int, int, int]] | None
+) -> TiledDetectionDataset:
     base = dataset_over("detection", str(images_dir), subject="bud")
     # sliver_frac stated: one labeled box derives no size spread.
     return TiledDetectionDataset(
@@ -93,7 +116,7 @@ def _tiled(images_dir, **kwargs) -> TiledDetectionDataset:
     )
 
 
-def _only_source(ds) -> str:
+def _only_source(ds: TiledDetectionDataset) -> str:
     """Return the dataset's one stem key, asserting it holds exactly one."""
     keys = sorted(set(ds.stems))
     assert len(keys) == 1, keys
@@ -103,7 +126,7 @@ def _only_source(ds) -> str:
 # -- keep_regions ---------------------------------------------------------
 
 
-def test_keep_regions_keeps_only_fully_contained_tiles(tmp_path):
+def test_keep_regions_keeps_only_fully_contained_tiles(tmp_path: Path) -> None:
     images_dir = _jpeg_project(tmp_path)
     full = _tiled(images_dir)
     assert len(full) == 16
@@ -130,7 +153,7 @@ def test_keep_regions_keeps_only_fully_contained_tiles(tmp_path):
         assert np.array_equal(e["labels"], ref["labels"])
 
 
-def test_keep_regions_union_across_disjoint_rects(tmp_path):
+def test_keep_regions_union_across_disjoint_rects(tmp_path: Path) -> None:
     images_dir = _jpeg_project(tmp_path)
     ds = _tiled(
         images_dir, keep_regions=[(0, 0, 64, 64), (104, 104, 168, 168)]
@@ -140,7 +163,7 @@ def test_keep_regions_union_across_disjoint_rects(tmp_path):
     assert ds.tiles_dropped_outside_regions == 14
 
 
-def test_an_empty_keep_regions_sequence_keeps_nothing(tmp_path):
+def test_an_empty_keep_regions_sequence_keeps_nothing(tmp_path: Path) -> None:
     images_dir = _jpeg_project(tmp_path)
     ds = _tiled(images_dir, keep_regions=[])
     assert len(ds) == 0
@@ -149,8 +172,8 @@ def test_an_empty_keep_regions_sequence_keeps_nothing(tmp_path):
 
 
 def test_a_frame_shorter_than_the_tile_counts_its_short_slice_past_the_extent(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     images_dir = _jpeg_project(tmp_path, size=50)
     assert len(_tiled(images_dir)) == 1  # one 50x50 slice, kept unfiltered
     ds = _tiled(images_dir, keep_regions=[(0, 0, 200, 200)])
@@ -159,10 +182,8 @@ def test_a_frame_shorter_than_the_tile_counts_its_short_slice_past_the_extent(
     assert ds.tiles_dropped_outside_regions == 0
 
 
-def test_a_malformed_keep_region_refuses_by_name(tmp_path):
+def test_a_keep_region_with_no_extent_refuses_by_name(tmp_path: Path) -> None:
     images_dir = _jpeg_project(tmp_path)
-    with pytest.raises(ValueError, match="keep region"):
-        _tiled(images_dir, keep_regions=[(0, 0, 115)])
     with pytest.raises(ValueError, match="no extent"):
         _tiled(images_dir, keep_regions=[(115, 0, 0, 115)])
 
@@ -170,7 +191,7 @@ def test_a_malformed_keep_region_refuses_by_name(tmp_path):
 # -- Sampler-facing properties --------------------------------------------
 
 
-def test_tile_entries_matches_index_order_and_getitem(tmp_path):
+def test_tile_entries_matches_index_order_and_getitem(tmp_path: Path) -> None:
     images_dir = _jpeg_project(tmp_path)
     ds = _tiled(images_dir)
     entries = ds.tile_entries
@@ -184,7 +205,7 @@ def test_tile_entries_matches_index_order_and_getitem(tmp_path):
     assert entries == [(e["stem"], e["slice"]) for e in ds._index]
 
 
-def test_source_frames_for_a_photographic_source(tmp_path):
+def test_source_frames_for_a_photographic_source(tmp_path: Path) -> None:
     images_dir = _jpeg_project(tmp_path)
     ds = _tiled(images_dir)
     assert ds.source_frames == {
@@ -198,7 +219,7 @@ def test_source_frames_for_a_photographic_source(tmp_path):
     }
 
 
-def test_source_frames_for_a_windowed_raster(tmp_path):
+def test_source_frames_for_a_windowed_raster(tmp_path: Path) -> None:
     images_dir, _arr = _tiff_project(tmp_path)
     ds = _tiled(images_dir)
     assert ds.source_frames == {
@@ -216,13 +237,13 @@ def test_source_frames_for_a_windowed_raster(tmp_path):
 
 
 def test_photographic_construction_opens_no_raster_backend(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A directory of JPEGs indexes its 16 tiles without opening a raster backend."""
     images_dir = _jpeg_project(tmp_path)
     base = dataset_over("detection", str(images_dir), subject="bud")
 
-    def _refuse(*_a, **_k):
+    def _refuse(*_a: object, **_k: object) -> NoReturn:
         raise AssertionError(
             "construction must not open a raster backend for photographic sources"
         )
@@ -234,7 +255,9 @@ def test_photographic_construction_opens_no_raster_backend(
     assert len(ds) == 16
 
 
-def test_windowed_construction_registers_the_source_in_the_pool(tmp_path):
+def test_windowed_construction_registers_the_source_in_the_pool(
+    tmp_path: Path,
+) -> None:
     images_dir, _arr = _tiff_project(tmp_path)
     ds = _tiled(images_dir)
     tiff = str(images_dir / "img0.tif")
@@ -245,9 +268,9 @@ def test_windowed_construction_registers_the_source_in_the_pool(tmp_path):
 
 
 def test_the_index_opens_a_windowed_source_once_and_reads_through_that_reader(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Building the index opens the raster once, and tiles are read through that reader.
 
     No probe reader is opened beside the pooled reader, and a read opens nothing new.
@@ -256,7 +279,9 @@ def test_the_index_opens_a_windowed_source_once_and_reads_through_that_reader(
     opened: list = []
     real_open = raster_source.open_gdal_dataset
 
-    def counted(path, overview=None):
+    def counted(
+        path: str | Path, overview: int | None = None
+    ) -> DatasetReader:
         opened.append((path, overview))
         return real_open(path, overview)
 
@@ -268,7 +293,9 @@ def test_the_index_opens_a_windowed_source_once_and_reads_through_that_reader(
     readers: list = []
     real_read = raster_source.GdalSource.read_region
 
-    def recording(self, rect, **kwargs):
+    def recording(
+        self: GdalSource, rect: Rect, **kwargs: Unpack[_ReadRegionKeywords]
+    ) -> tuple[np.ndarray, ReadSpec]:
         readers.append(self)
         return real_read(self, rect, **kwargs)
 
@@ -278,7 +305,9 @@ def test_the_index_opens_a_windowed_source_once_and_reads_through_that_reader(
     assert len(opened) == 1
 
 
-def test_an_unopenable_windowed_layout_refuses_at_construction(tmp_path):
+def test_an_unopenable_windowed_layout_refuses_at_construction(
+    tmp_path: Path,
+) -> None:
     """A raster that cannot be opened is refused when the index is built."""
     images_dir, _arr = _tiff_project(tmp_path)
     # Corrupt the file after writing the labels: header parse now fails.
@@ -290,7 +319,7 @@ def test_an_unopenable_windowed_layout_refuses_at_construction(tmp_path):
 # -- Windowed reads -------------------------------------------------------
 
 
-def test_windowed_tiles_match_the_whole_decode_crop(tmp_path):
+def test_windowed_tiles_match_the_whole_decode_crop(tmp_path: Path) -> None:
     """Every windowed slice is identical to the same rect of the whole-decoded source.
 
     This holds for interior slices and the pulled-back right/bottom edge ones.
@@ -308,12 +337,14 @@ def test_windowed_tiles_match_the_whole_decode_crop(tmp_path):
         assert target["boxes"].shape[1] == 4
 
 
-def test_windowed_getitem_never_whole_decodes(tmp_path, monkeypatch):
+def test_windowed_getitem_never_whole_decodes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A windowed stem's tile is served without calling the whole-decode loader."""
     images_dir, _arr = _tiff_project(tmp_path)
     ds = _tiled(images_dir)
 
-    def _refuse(*_a, **_k):
+    def _refuse(*_a: object, **_k: object) -> NoReturn:
         raise AssertionError(
             "windowed __getitem__ must not decode the source whole"
         )
@@ -323,7 +354,7 @@ def test_windowed_getitem_never_whole_decodes(tmp_path, monkeypatch):
     assert tuple(img_tensor.shape) == (3, 64, 64)
 
 
-def test_a_replaced_windowed_source_refuses_at_read(tmp_path):
+def test_a_replaced_windowed_source_refuses_at_read(tmp_path: Path) -> None:
     """A windowed source replaced after the index was built is refused at read.
 
     A file replaced with other dims after the index was built refuses its read, naming the
@@ -343,12 +374,16 @@ def test_a_replaced_windowed_source_refuses_at_read(tmp_path):
         ds[0]
 
 
-def test_a_decoder_disagreeing_with_its_header_refuses(tmp_path, monkeypatch):
+def test_a_decoder_disagreeing_with_its_header_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     images_dir, _arr = _tiff_project(tmp_path)
     ds = _tiled(images_dir)
     real = raster_source.GdalSource.read_region
 
-    def short(self, rect, **kwargs):
+    def short(
+        self: GdalSource, rect: Rect, **kwargs: Unpack[_ReadRegionKeywords]
+    ) -> tuple[np.ndarray, ReadSpec]:
         region, spec = real(self, rect, **kwargs)
         return region[:-1], spec
 
@@ -358,8 +393,8 @@ def test_a_decoder_disagreeing_with_its_header_refuses(tmp_path, monkeypatch):
 
 
 def test_a_uint16_windowed_tile_stays_ndarray_and_scales_by_its_dtype(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     images_dir, arr = _tiff_project(tmp_path, dtype=np.uint16)
     ds = _tiled(images_dir)
     assert ds.source_frames[_only_source(ds)]["dtype_itemsize"] == 2
@@ -373,7 +408,9 @@ def test_a_uint16_windowed_tile_stays_ndarray_and_scales_by_its_dtype(
 # -- Worker pickling ------------------------------------------------------
 
 
-def test_dataset_pickles_after_construction_and_after_a_read(tmp_path):
+def test_dataset_pickles_after_construction_and_after_a_read(
+    tmp_path: Path,
+) -> None:
     """The dataset pickles after construction and after a read.
 
     A clone pickled after construction, and one pickled after a read, each serve the

@@ -21,6 +21,8 @@ from tests._audit_fixtures import audit_rows
 from tests._web_fixtures import named_project
 
 if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+
     from tcip_web.state import OpenProject
 
 
@@ -33,7 +35,9 @@ def _project(ws: Path, directory: str, display_name: str) -> OpenProject:
     return made
 
 
-def test_removal_archives_moves_and_records_one_line(client, tmp_path):
+def test_removal_archives_moves_and_records_one_line(
+    client: TestClient, tmp_path: Path
+) -> None:
     """A removal archives, moves, and leaves one ``project_removed`` line as its whole trace.
 
     The archive the removal writes records nothing of its own.
@@ -71,7 +75,9 @@ def test_removal_archives_moves_and_records_one_line(client, tmp_path):
     }
 
 
-def test_a_removal_naming_no_one_leaves_the_project(client, tmp_path):
+def test_a_removal_naming_no_one_leaves_the_project(
+    client: TestClient, tmp_path: Path
+) -> None:
     made = _project(tmp_path.parent, "valley_block", "Valley block")
 
     for name in REFUSED_NAMES:
@@ -85,10 +91,10 @@ def test_a_removal_naming_no_one_leaves_the_project(client, tmp_path):
 
 
 def test_an_archive_that_refuses_leaves_the_project_where_it_was_and_still_open(
-    client,
-    tmp_path,
-    monkeypatch,
-):
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A refused archive leaves the project where it was and still open.
 
     The removal answers 409 carrying the archive's refusal; the project stays at its directory and
@@ -128,10 +134,10 @@ def test_an_archive_that_refuses_leaves_the_project_where_it_was_and_still_open(
 
 
 def test_a_live_run_refuses_the_removal_and_writes_nothing_then_a_finished_one_admits(
-    client,
-    tmp_path,
-    monkeypatch,
-):
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from tcip_mcp import experiments
     from tests._verified_checkpoint_fixtures import (
         detection_config,
@@ -159,7 +165,9 @@ def test_a_live_run_refuses_the_removal_and_writes_nothing_then_a_finished_one_a
     assert client.post("/api/projects/remove", json=body).status_code == 200
 
 
-def test_an_unfinished_inference_job_refuses_the_removal(client, tmp_path):
+def test_an_unfinished_inference_job_refuses_the_removal(
+    client: TestClient, tmp_path: Path
+) -> None:
     from tcip_mcp.pipelines.execution import Stated
     from tcip_web.routes import inference
 
@@ -175,7 +183,7 @@ def test_an_unfinished_inference_job_refuses_the_removal(client, tmp_path):
         stated=Stated(),
         status="running",
     )
-    inference._registry.register(job.job_id, job)
+    inference._registry.register(job)
     try:
         resp = client.post(
             "/api/projects/remove",
@@ -194,9 +202,9 @@ def test_an_unfinished_inference_job_refuses_the_removal(client, tmp_path):
 
 
 def test_a_confirm_name_other_than_the_display_name_refuses_then_the_display_name_admits(
-    client,
-    tmp_path,
-):
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
     made = _project(tmp_path.parent, "valley_block", "Valley block")
 
     wrong = client.post(
@@ -220,7 +228,9 @@ def test_a_confirm_name_other_than_the_display_name_refuses_then_the_display_nam
     )
 
 
-def test_an_id_no_project_holds_answers_404(client, tmp_path):
+def test_an_id_no_project_holds_answers_404(
+    client: TestClient, tmp_path: Path
+) -> None:
     _project(tmp_path.parent, "valley_block", "Valley block")
 
     resp = client.post(
@@ -235,7 +245,9 @@ def test_an_id_no_project_holds_answers_404(client, tmp_path):
     assert resp.status_code == 404
 
 
-def test_removing_the_open_project_closes_it_first(client, tmp_path):
+def test_removing_the_open_project_closes_it_first(
+    client: TestClient, tmp_path: Path
+) -> None:
     made = _project(tmp_path.parent, "valley_block", "Valley block")
     opened = client.post(
         "/api/projects/open", json={"id": made.id, "user": "grower"}
@@ -252,8 +264,8 @@ def test_removing_the_open_project_closes_it_first(client, tmp_path):
 
 
 def test_the_archive_restores_through_import_project_with_its_identity(
-    client, tmp_path
-):
+    client: TestClient, tmp_path: Path
+) -> None:
     from tcip_mcp.project_record import read_record
     from tcip_mcp.tools.project_tools import import_project
 
@@ -273,16 +285,16 @@ def test_the_archive_restores_through_import_project_with_its_identity(
 
 
 def test_a_move_the_filesystem_denies_removes_the_archive_and_leaves_the_project(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import os
 
     ws = tmp_path.parent
     project = _project(ws, "valley_block", "Valley block").root
     real_rename = os.rename
 
-    def _denied(src, dst):
+    def _denied(src: Path, dst: Path) -> None:
         if Path(src) == project:
             raise PermissionError(13, "held open", str(src))
         return real_rename(src, dst)

@@ -14,6 +14,8 @@ from tests import REFUSED_NAMES
 from tests._web_fixtures import INVARIANCES
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from tcip_web.state import OpenProject
 
 
@@ -29,7 +31,11 @@ def workspace_dir(tmp_path: Path) -> Path:
 
 
 def _make_project(
-    ws: Path, name: str, *, dates=(), subjects=()
+    ws: Path,
+    name: str,
+    *,
+    dates: Sequence[str] = (),
+    subjects: Sequence[str] = (),
 ) -> OpenProject:
     """Make a workspace project through ``tests._web_fixtures.named_project``.
 
@@ -50,7 +56,8 @@ def _make_project(
         from tests._producer_fixtures import registry_over
 
         registry_over(
-            proj, SubjectRegistry(tuple(Subject(s) for s in sorted(subjects)))
+            proj,
+            SubjectRegistry(tuple(Subject(s, "") for s in sorted(subjects))),
         )
     return made
 
@@ -62,7 +69,9 @@ def _listed(client: TestClient) -> dict[str, dict]:
     }
 
 
-def test_list_projects_lists_workspace_projects(client, workspace_dir):
+def test_list_projects_lists_workspace_projects(
+    client: TestClient, workspace_dir: Path
+) -> None:
     _make_project(
         workspace_dir,
         "currant_bud_valley-farm",
@@ -88,8 +97,8 @@ def test_list_projects_lists_workspace_projects(client, workspace_dir):
 
 
 def test_projects_report_per_date_subject_model_availability(
-    client, workspace_dir
-):
+    client: TestClient, workspace_dir: Path
+) -> None:
     # bud labeled on 02-11 (+ a bucket published over it); bush labeled on 03-02;
     # 03-24 has images but nothing labeled. One name-based label document per image.
     pytest.importorskip("torch")
@@ -147,7 +156,9 @@ def test_projects_report_per_date_subject_model_availability(
     assert hz["label_problem"] is None
 
 
-def test_projects_report_a_label_problem_and_still_list(client, workspace_dir):
+def test_projects_report_a_label_problem_and_still_list(
+    client: TestClient, workspace_dir: Path
+) -> None:
     """A corrupt label under one project is reported without failing the whole listing.
 
     The project still lists, its other dates are unaffected, and the document is named.
@@ -177,14 +188,18 @@ def test_projects_report_a_label_problem_and_still_list(client, workspace_dir):
     assert "img" in hz["label_problem"]
 
 
-def test_list_ignores_dirs_without_tcip(client, workspace_dir):
+def test_list_ignores_dirs_without_tcip(
+    client: TestClient, workspace_dir: Path
+) -> None:
     _make_project(workspace_dir, "real_project_site", dates=["2026-02-11"])
     (workspace_dir / "not_a_project").mkdir()  # no .tcip/
 
     assert set(_listed(client)) == {"real_project_site"}
 
 
-def test_list_sorted_by_modified_desc(client, workspace_dir):
+def test_list_sorted_by_modified_desc(
+    client: TestClient, workspace_dir: Path
+) -> None:
     older = _make_project(
         workspace_dir, "old_project_site", dates=["2026-02-11"]
     ).root
@@ -202,8 +217,8 @@ def test_list_sorted_by_modified_desc(client, workspace_dir):
 
 
 def test_opening_a_project_by_id_marks_it_open_in_the_list(
-    client, workspace_dir
-):
+    client: TestClient, workspace_dir: Path
+) -> None:
     made = _make_project(
         workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"]
     )
@@ -224,7 +239,9 @@ def test_opening_a_project_by_id_marks_it_open_in_the_list(
     assert client.get("/api/projects").json()["open_id"] == made.id
 
 
-def test_opening_an_id_no_project_holds_is_404(client, workspace_dir):
+def test_opening_an_id_no_project_holds_is_404(
+    client: TestClient, workspace_dir: Path
+) -> None:
     _make_project(workspace_dir, "currant_bud_valley-farm")
     resp = client.post(
         "/api/projects/open", json={"id": "000000000000", "user": "grower"}
@@ -235,8 +252,8 @@ def test_opening_an_id_no_project_holds_is_404(client, workspace_dir):
 
 
 def test_opening_a_project_naming_no_one_is_refused_and_opens_nothing(
-    client, workspace_dir
-):
+    client: TestClient, workspace_dir: Path
+) -> None:
     made = _make_project(
         workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"]
     )
@@ -250,8 +267,8 @@ def test_opening_a_project_naming_no_one_is_refused_and_opens_nothing(
 
 
 def test_list_reports_record_fields_across_four_project_states(
-    client, workspace_dir
-):
+    client: TestClient, workspace_dir: Path
+) -> None:
     """The listing reports each project's record fields or why they are absent.
 
     A project with a record, one with ``.tcip`` and nothing else, one whose record is
@@ -315,8 +332,8 @@ def test_list_reports_record_fields_across_four_project_states(
 
 
 def test_the_listing_reads_a_stated_rotation_angle_back_as_degrees(
-    client, workspace_dir
-):
+    client: TestClient, workspace_dir: Path
+) -> None:
     """A project created stating its rotation invariance as 5 degrees lists it as 5.0."""
     from tcip_mcp.project_record import CaptureInvariances
     from tcip_mcp.tools.project_tools import initialize_project
@@ -338,8 +355,8 @@ def test_the_listing_reads_a_stated_rotation_angle_back_as_degrees(
 
 
 def test_a_last_opened_pointer_naming_a_missing_project_is_named_and_opens_nothing(
-    client, workspace_dir, monkeypatch
-):
+    client: TestClient, workspace_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tcip_mcp import workspace
 
     _make_project(workspace_dir, "temp_project_site", dates=["2026-02-11"])
@@ -369,8 +386,8 @@ def _correction(project_id: str, user: str = "tester") -> dict:
 
 
 def test_correcting_the_invariances_answers_the_typed_correction_and_the_record_rereads_it(
-    client, workspace_dir
-):
+    client: TestClient, workspace_dir: Path
+) -> None:
     from tcip_mcp.identity import actor
     from tcip_mcp.project_record import read_record
     from tests._audit_fixtures import audit_rows
@@ -394,8 +411,8 @@ def test_correcting_the_invariances_answers_the_typed_correction_and_the_record_
 
 
 def test_an_invariances_correction_for_an_id_no_project_holds_is_404(
-    client, workspace_dir
-):
+    client: TestClient, workspace_dir: Path
+) -> None:
     _make_project(workspace_dir, "valley_block")
 
     resp = client.post("/api/projects/invariances", json=_correction("0" * 12))
@@ -413,8 +430,8 @@ def test_an_invariances_correction_for_an_id_no_project_holds_is_404(
     ids=["naming-no-one", "half-filled", "out-of-range"],
 )
 def test_a_refused_invariances_correction_writes_nothing(
-    client, workspace_dir, change, status
-):
+    client: TestClient, workspace_dir: Path, change: dict, status: int
+) -> None:
     from tcip_mcp.project_record import read_record
     from tests._audit_fixtures import audit_rows
 

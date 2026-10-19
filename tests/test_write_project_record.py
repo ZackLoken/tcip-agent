@@ -28,7 +28,7 @@ them."""
 
 def test_the_site_form_replaces_the_site_and_keeps_every_other_field(
     project: Path,
-):
+) -> None:
     from tcip_mcp.project_record import read_record
 
     before = read_record(project)
@@ -47,7 +47,7 @@ def test_the_site_form_replaces_the_site_and_keeps_every_other_field(
     assert line["actor"] == actor("tester")
 
 
-def test_the_invariances_form_writes_the_answers(project: Path):
+def test_the_invariances_form_writes_the_answers(project: Path) -> None:
     from tcip_mcp.project_record import read_record
 
     before = read_record(project)
@@ -70,7 +70,9 @@ def test_the_invariances_form_writes_the_answers(project: Path):
     assert line["arguments"]["field"] == "invariances"
 
 
-def test_a_correction_naming_no_one_is_refused_by_the_parser(project: Path):
+def test_a_correction_naming_no_one_is_refused_by_the_parser(
+    project: Path,
+) -> None:
     from tcip_mcp.project_record import read_record
 
     before = read_record(project)
@@ -86,7 +88,9 @@ def test_a_correction_naming_no_one_is_refused_by_the_parser(project: Path):
     assert audit_rows(project, "project_record_corrected") == []
 
 
-def test_a_directory_holding_no_project_record_is_refused(tmp_path: Path):
+def test_a_directory_holding_no_project_record_is_refused(
+    tmp_path: Path,
+) -> None:
     bare = tmp_path / "bare"
     bare.mkdir()
 
@@ -99,7 +103,7 @@ def test_a_directory_holding_no_project_record_is_refused(tmp_path: Path):
         assert "refused" in result.stdout
 
 
-def test_a_record_that_does_not_read_is_refused(project: Path):
+def test_a_record_that_does_not_read_is_refused(project: Path) -> None:
     import tcip_store
     from tcip_mcp.project_record import project_record_key
 

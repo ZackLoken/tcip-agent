@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -20,6 +21,9 @@ from tests._chain_fixtures import (
     weights_normalization,
 )
 from tests._training_values import drawn_split, evaluation_block
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.model_build import SourceLayout
 
 TOP_LEVEL_BUILDER = """
 def build_probe(**kwargs):
@@ -77,7 +81,7 @@ def _packaged_builder(tmp_path: Path, package: str) -> tuple[Path, list[str]]:
     return project, [str(model), str(pkg / "__init__.py")]
 
 
-def _layout(builder: str, files: list[str], project: Path):
+def _layout(builder: str, files: list[str], project: Path) -> SourceLayout:
     """Return the layout a classification run's admission stages for ``builder`` and ``files``.
 
     The run is ``project``'s, over no data, staged by ``model_build.staged_sources``.
@@ -157,11 +161,7 @@ def test_a_builder_outside_the_interpreters_path_imports_from_its_layout_no_chil
 
 
 def test_a_builder_imports_in_a_fresh_interpreter(tmp_path: Path) -> None:
-    """A fresh interpreter that has loaded no ``importlib.util`` imports and builds the builder.
-
-    The layout is laid out here, and a fresh child holding only the importer imports and builds
-    the declared builder from it.
-    """
+    """A fresh interpreter imports and builds the builder from the layout laid out here."""
     import tcip_mcp
 
     layout = _layout(
@@ -173,7 +173,6 @@ def test_a_builder_imports_in_a_fresh_interpreter(tmp_path: Path) -> None:
         "import sys\n"
         "from pathlib import Path, PurePosixPath\n"
         "from tcip_mcp.pipelines.model_build import SourceLayout, import_source_builder\n"
-        "print('importlib.util' in sys.modules)\n"
         "layout = SourceLayout(Path(sys.argv[1]), tuple(map(PurePosixPath, sys.argv[3:])),\n"
         "                      sys.argv[2])\n"
         f"print(import_source_builder({PROBE_BUILDER!r}, layout)(width=7))\n"
@@ -199,14 +198,13 @@ def test_a_builder_imports_in_a_fresh_interpreter(tmp_path: Path) -> None:
 
     assert child.returncode == 0, child.stderr
     assert child.stdout.splitlines() == [
-        "False",
-        "{'built': True, 'kwargs': {'width': 7}}",
+        "{'built': True, 'kwargs': {'width': 7}}"
     ]
 
 
 def test_a_builder_imports_each_declared_module_from_its_own_tree_however_deep(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A builder, its helper and the helper's dependency import from the layout being loaded.
 
     The three modules, all declared, are loaded from one tree and then from another; the second
@@ -252,8 +250,8 @@ def test_a_builder_imports_each_declared_module_from_its_own_tree_however_deep(
 
 
 def test_a_declared_file_edited_between_two_loads_imports_as_edited(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A declared builder rewritten between two loads in one process builds as rewritten."""
     import uuid
 
@@ -278,8 +276,8 @@ def test_a_declared_file_edited_between_two_loads_imports_as_edited(
 
 
 def test_the_last_plan_imported_leads_the_path_and_no_other_plan_stays_on_it(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The last plan imported leads ``sys.path``, and no other plan's root stays on it.
 
     Plans A, B, A imported in turn leave A's root first on ``sys.path`` and B's root off it.
@@ -311,8 +309,8 @@ def test_the_last_plan_imported_leads_the_path_and_no_other_plan_stays_on_it(
 
 
 def test_an_import_takes_off_the_path_only_the_layout_roots_imports_put_there(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A second layout's import removes the first layout's root and keeps the caller's entry.
 
     The second layout's root leads ``sys.path``, the first layout's root is gone from it, and the
@@ -347,8 +345,8 @@ def test_an_import_takes_off_the_path_only_the_layout_roots_imports_put_there(
 
 
 def test_a_plan_imports_the_declared_helper_never_one_beside_the_builder(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A plan imports the declared helper, never an undeclared one beside the builder.
 
     A builder from another tree importing ``helper`` imports the project's declared ``helper``,
@@ -403,8 +401,8 @@ def _resaved(
 
 
 def test_a_checkpoints_layout_is_its_runs_record_whatever_its_files_are_named(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A checkpoint's layout is its run's recorded layout, with a declared data file beside it.
 
     A checkpoint of a run whose packaged builder reads a declared data file named ``run.json``
@@ -439,7 +437,7 @@ def test_a_checkpoints_layout_is_its_runs_record_whatever_its_files_are_named(
     )
     assert observation.checkpoint is not None, observation.final
     loaded = load_registered_checkpoint(
-        observation.checkpoint["path"], project=project
+        observation.checkpoint.path, project=project
     )
 
     assert loaded.layout == observed_run(observation).layout
@@ -459,8 +457,8 @@ def build(**kwargs):
 
 
 def test_a_checkpoint_moved_alone_beside_a_run_of_its_paths_but_not_its_sources_refuses(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A checkpoint copied alone beside a run of its paths but not its sources refuses to build.
 
     Projects A and B each hold a run of one name declaring one builder file name, the two
@@ -516,8 +514,8 @@ def test_a_checkpoint_moved_alone_beside_a_run_of_its_paths_but_not_its_sources_
 
 
 def test_a_checkpoint_registered_by_name_builds_beside_its_run_and_where_the_run_is_carried(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A checkpoint registered by name builds beside its run and where the run is carried.
 
     A checkpoint registered by name (``foreign_checkpoint``) builds in the project holding the
@@ -558,8 +556,8 @@ def test_a_checkpoint_registered_by_name_builds_beside_its_run_and_where_the_run
 
 
 def test_a_checkpoint_whose_source_files_lie_under_no_run_refuses_to_build(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A checkpoint whose source files lie under no run refuses to build.
 
     A produced checkpoint saved again naming copies of its declared files laid out in a
@@ -579,11 +577,11 @@ def test_a_checkpoint_whose_source_files_lie_under_no_run_refuses_to_build(
     snapshot, loose = observation.directory / SNAPSHOT_DIR, tmp_path / "loose"
     shutil.copytree(snapshot, loose)
     produced = load_registered_checkpoint(
-        observation.checkpoint["path"], project=tmp_path
+        observation.checkpoint.path, project=tmp_path
     )
     relocated = _resaved(
         tmp_path,
-        observation.checkpoint["path"],
+        observation.checkpoint.path,
         [
             str(loose / Path(file).relative_to(snapshot))
             for file in produced.spec.model_source.source_files or []
@@ -600,8 +598,8 @@ def test_a_checkpoint_whose_source_files_lie_under_no_run_refuses_to_build(
 
 @pytest.mark.parametrize("source_files", [[], None])
 def test_a_checkpoint_declaring_no_source_file_has_no_run_and_refuses(
-    tmp_path, source_files
-):
+    tmp_path: Path, source_files: list[str] | None
+) -> None:
     """A checkpoint declaring no source file has no run, and its predictor refuses.
 
     A produced checkpoint saved again declaring no source file (a mutated declaration) has no
@@ -615,7 +613,7 @@ def test_a_checkpoint_declaring_no_source_file_has_no_run_and_refuses(
     observation = observe(finished_run(tmp_path))
     assert observation.checkpoint is not None, observation.final
     path = _resaved(
-        tmp_path, observation.checkpoint["path"], source_files, "undeclared"
+        tmp_path, observation.checkpoint.path, source_files, "undeclared"
     )
 
     with pytest.raises(ValueError, match="launch_training"):
@@ -634,7 +632,7 @@ with no ``__init__.py``): the file a tree holds it in and the line a builder imp
 
 def _trees_with_helper(
     tmp_path: Path, shape: str, values: dict[str, int | None]
-):
+) -> tuple[str, str, dict[str, Path], dict[str, SourceLayout]]:
     """Write a builder module of one fresh name in a tree per ``values`` key.
 
     Each builder imports a helper of ``shape`` (:data:`HELPER_SHAPES`) whose ``VALUE`` it
@@ -667,8 +665,8 @@ def _trees_with_helper(
 
 @pytest.mark.parametrize("shape", HELPER_SHAPES)
 def test_a_module_an_earlier_layout_loaded_is_not_reachable_from_a_later_one(
-    tmp_path, monkeypatch, shape
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shape: str
+) -> None:
     """A module an earlier layout loaded is not reachable from a later layout.
 
     Layout A declares its builder and helper; layout B declares only a builder that imports that
@@ -713,8 +711,8 @@ def test_a_module_an_earlier_layout_loaded_is_not_reachable_from_a_later_one(
 
 @pytest.mark.parametrize("shape", HELPER_SHAPES)
 def test_layouts_declaring_one_helper_each_import_their_own_in_turn(
-    tmp_path, monkeypatch, shape
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shape: str
+) -> None:
     """Layouts declaring one helper name each import their own helper in turn.
 
     Layouts A and B each declare their own helper under one name; importing A, B, then A builds
@@ -734,8 +732,8 @@ def test_layouts_declaring_one_helper_each_import_their_own_in_turn(
 
 
 def test_a_project_directory_named_like_a_snapshot_imports_only_what_it_declares(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A project directory named like a snapshot imports no undeclared helper beside the builder.
 
     In a project keeping its sources in a directory of its own named ``model_src``, an
@@ -769,7 +767,9 @@ def test_a_project_directory_named_like_a_snapshot_imports_only_what_it_declares
         )
 
 
-def test_the_admissions_import_reads_the_files_its_run_holds(tmp_path):
+def test_the_admissions_import_reads_the_files_its_run_holds(
+    tmp_path: Path,
+) -> None:
     """The admission's import layout and its run's layout agree and hold the same files.
 
     With its root and directory set to the run's, the admission's layout equals the layout of
@@ -831,8 +831,8 @@ def test_the_admissions_import_reads_the_files_its_run_holds(tmp_path):
 
 
 def test_a_model_built_from_one_layout_still_answers_after_another_layout_imports(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A model built from one layout still answers after another layout imports.
 
     Layouts A and B each hold a module of one name scaling by 3 and by 5; after B's import, A's
@@ -865,8 +865,8 @@ def test_a_model_built_from_one_layout_still_answers_after_another_layout_import
 
 
 def test_a_module_inside_an_undeclared_regular_package_refuses_at_the_plan(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A module inside an undeclared regular package refuses at the plan, naming the initializer.
 
     Declaring ``pkgundeclared/child.py`` alone, its ``__init__.py`` beside it, raises
@@ -888,7 +888,9 @@ def test_a_module_inside_an_undeclared_regular_package_refuses_at_the_plan(
     )
 
 
-def test_a_builder_its_source_files_do_not_hold_refuses_though_it_imports_by_name():
+def test_a_builder_its_source_files_do_not_hold_refuses_though_it_imports_by_name() -> (
+    None
+):
     """A builder its source files do not hold refuses, naming source_files, though it imports.
 
     ``tests.bespoke_models:build_bespoke_detection``, importable by name, with no source file

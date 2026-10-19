@@ -8,7 +8,7 @@ stating ``masks`` false answers boxes alone.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,6 +24,11 @@ from tests._producer_fixtures import (
     gray_frame,
 )
 from tests._training_values import MASK_CUT, RATIONALE, tiling_block
+
+if TYPE_CHECKING:
+    from torch import Tensor
+
+    import tcip_store
 
 torch = pytest.importorskip("torch")
 
@@ -52,7 +57,7 @@ LEAF = registry_scope(Path(__file__).parent, "leaf")
 # --------------------------------------------------------------------------
 
 
-def test_contract_rejects_maskless_instance_seg_model():
+def test_contract_rejects_maskless_instance_seg_model() -> None:
     """The instance_seg contract rejects a model emitting no masks.
 
     A model that emits boxes, scores and labels but no masks fails the instance_seg contract
@@ -65,7 +70,9 @@ def test_contract_rejects_maskless_instance_seg_model():
             super().__init__()
             self.lin = nn.Linear(4, 4)
 
-        def forward(self, images, targets=None):
+        def forward(
+            self, images: list[Tensor], targets: list[dict] | None = None
+        ) -> dict[str, Tensor] | list[dict[str, Tensor]]:
             if self.training:
                 return {"loss": self.lin(torch.rand(1, 4)).sum()}
             return [
@@ -83,7 +90,7 @@ def test_contract_rejects_maskless_instance_seg_model():
     assert any("masks" in i for i in report["issues"]), report["issues"]
 
 
-def test_contract_accepts_real_masked_instance_seg_model():
+def test_contract_accepts_real_masked_instance_seg_model() -> None:
     model = bespoke_models.build_bespoke_instance_seg(
         num_classes=1, **detector_values()
     )
@@ -92,7 +99,7 @@ def test_contract_accepts_real_masked_instance_seg_model():
     assert report["eval_output_type"] == "list[dict]"
 
 
-def test_contract_detection_task_unaffected_by_mask_requirement():
+def test_contract_detection_task_unaffected_by_mask_requirement() -> None:
     """A detection model emitting no masks passes the detection contract."""
     model = bespoke_models.build_bespoke_detection(
         num_classes=1, **detector_values()
@@ -125,7 +132,9 @@ def _sliced_kwargs() -> dict:
     )
 
 
-def test_predict_sliced_instance_seg_reaches_real_slicing_path(tmp_path):
+def test_predict_sliced_instance_seg_reaches_real_slicing_path(
+    tmp_path: Path,
+) -> None:
     """An instance_seg slice of a missing image raises ``FileNotFoundError``."""
     p = _bare_predictor("instance_seg")
     missing = tmp_path / "missing.jpg"
@@ -133,7 +142,9 @@ def test_predict_sliced_instance_seg_reaches_real_slicing_path(tmp_path):
         p.predict_sliced(str(missing), **_sliced_kwargs())
 
 
-def test_predict_sliced_detection_reaches_real_slicing_path(tmp_path):
+def test_predict_sliced_detection_reaches_real_slicing_path(
+    tmp_path: Path,
+) -> None:
     """A detection slice of a missing image raises ``FileNotFoundError``."""
     p = _bare_predictor("detection")
     missing = tmp_path / "missing.jpg"
@@ -176,7 +187,7 @@ TRAINED_LATTICE = tiling_block(tile_size=TILE, overlap=0.0, sliver_frac=0.25)
 spread, and a quarter of the triangle's size keeps both of its pieces."""
 
 
-def _stem_run(tmp_path) -> Path:
+def _stem_run(tmp_path: Path) -> Path:
     """Complete a bespoke instance_seg (Mask R-CNN) run in ``tmp_path`` and return its directory.
 
     The run is over two frames of its own, each two :data:`TILE` px tiles wide holding one
@@ -215,7 +226,7 @@ def _stem_run(tmp_path) -> Path:
 
 
 @pytest.fixture
-def instance_seg_ckpt(tmp_path) -> str:
+def instance_seg_ckpt(tmp_path: Path) -> str:
     """Return the checkpoint :func:`_stem_run` registered by completing."""
     from tests._verified_checkpoint_fixtures import completed_checkpoint
 
@@ -225,8 +236,8 @@ def instance_seg_ckpt(tmp_path) -> str:
 
 
 def test_an_instance_seg_run_trains_over_its_instances_clipped_to_each_tile(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An instance_seg run's tiled loaders serve its instances clipped to each tile.
 
     A run stating a lattice serves tiles whose masks are its instances cut at each tile's edge:
@@ -234,30 +245,27 @@ def test_an_instance_seg_run_trains_over_its_instances_clipped_to_each_tile(
     run's own untiled loader's frame mask over that tile's rect and each tile's box the bounds of
     that mask's pixels within one pixel; its checkpoint records the lattice.
     """
-    from tcip_mcp.experiments import observe
+    from tcip_mcp.experiments import observe_run
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.datasets import (
         TiledDetectionDataset,
         build_dataset,
         stated_sizes,
     )
-    from tcip_mcp.pipelines.data.split_construction import partition_samples
     from tcip_mcp.pipelines.training.subprocess_worker import (
         prepare_run_context,
     )
     from tests._verified_checkpoint_fixtures import completed_checkpoint
 
     run_dir = _stem_run(tmp_path)
-    observation = observe(run_dir)
+    observation = observe_run(run_dir)
     ctx = prepare_run_context(observation)
     data = ctx.run.spec.data
     frames = build_dataset(
         "instance_seg",
         scope=data.recorded_scope,
         sizes=stated_sizes(data),
-        samples=partition_samples(
-            cast(dict, observation.resolution)["partition"]
-        ),
+        samples=observation.record.resolution.partition.samples,
     )
     frame_masks = {
         stem: frames[i][1]["masks"] for i, stem in enumerate(frames.stems)
@@ -300,8 +308,8 @@ def test_an_instance_seg_run_trains_over_its_instances_clipped_to_each_tile(
 
 
 def test_a_pass_stating_no_masks_returns_boxes_only(
-    instance_seg_ckpt, tmp_path
-):
+    instance_seg_ckpt: str, tmp_path: Path
+) -> None:
     """A pass stating no masks returns boxes and no masks key.
 
     A tiled pass stating ``masks`` false and no mask threshold slices into four or more tiles
@@ -357,8 +365,8 @@ def test_a_pass_stating_no_masks_returns_boxes_only(
 
 
 def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(
-    instance_seg_ckpt, tmp_path
-):
+    instance_seg_ckpt: str, tmp_path: Path
+) -> None:
     """An explicitly tiled instance_seg inference runs tiled with masks.
 
     An explicit tile=True is admitted for instance_seg, and the tiled result carries masks in
@@ -386,7 +394,7 @@ def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(
         assert set(result["masks"][0]) == {"segmentation"}
 
 
-def _document(published: dict, images_dir: Path):
+def _document(published: dict, images_dir: Path) -> tcip_store.Key | None:
     """Return the key of ``img.png``'s document in the bucket a ``run_inference`` result names."""
     from tcip_mcp.buckets import read_bucket
 
@@ -395,8 +403,8 @@ def _document(published: dict, images_dir: Path):
 
 
 def test_a_masked_bucket_delivers_the_same_counts_on_every_read(
-    instance_seg_ckpt, tmp_path
-):
+    instance_seg_ckpt: str, tmp_path: Path
+) -> None:
     """Two deliveries of one masked bucket write identical count rows.
 
     Two acknowledged deliveries of one published masked, tiled bucket write identical rows, and
@@ -463,14 +471,14 @@ def test_a_masked_bucket_delivers_the_same_counts_on_every_read(
 
 
 def test_run_inference_never_stamps_a_mask_threshold_into_annotation_attributes(
-    instance_seg_ckpt,
-    tmp_path,
-):
+    instance_seg_ckpt: str,
+    tmp_path: Path,
+) -> None:
     """A tiled inference writes no attributes on its masked annotations.
 
     Annotation.attributes is the domain trait namespace, so no pass value lands there.
     """
-    import tcip_store
+    from tcip_annotation.json_io import read_predictions
     from tcip_mcp.tools.inference_tools import run_inference
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -485,13 +493,13 @@ def test_run_inference_never_stamps_a_mask_threshold_into_annotation_attributes(
     )  # a masked detection
     assert "error" not in r
 
-    for ann in tcip_store.read(_document(r, images_dir))["annotations"]:
-        assert ann.get("attributes", {}) == {}  # never per-annotation
+    for ann in read_predictions(_document(r, images_dir)).annotations:
+        assert ann.attributes == {}  # never per-annotation
 
 
 def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(
-    instance_seg_ckpt, tmp_path
-):
+    instance_seg_ckpt: str, tmp_path: Path
+) -> None:
     """An explicitly tiled instance_seg inference writes a tiled bucket.
 
     An explicit tile=True writes a prediction bucket at the stated tile size; a pass stating no
@@ -529,8 +537,8 @@ def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(
 
 
 def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(
-    instance_seg_ckpt, tmp_path
-):
+    instance_seg_ckpt: str, tmp_path: Path
+) -> None:
     """A tiled full-frame evaluation of instance_seg scores its masks.
 
     A Mask R-CNN checkpoint evaluated with a stated tile lattice is scored full frame under a
@@ -656,7 +664,7 @@ def _predicted(
     return p.predict([str(frame)])[0]
 
 
-def test_export_single_component_mask_writes_polygon(tmp_path):
+def test_export_single_component_mask_writes_polygon(tmp_path: Path) -> None:
     from tcip_annotation.state import Polygon
 
     result = _predicted(
@@ -669,8 +677,8 @@ def test_export_single_component_mask_writes_polygon(tmp_path):
 
 
 def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An exported mask annotation carries no attributes under a scope declaring none."""
     result = _predicted(
         tmp_path, 32, [[5, 5, 20, 20]], box=[5, 5, 19, 19], masks=True
@@ -679,7 +687,9 @@ def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(
     assert anns[0].attributes == {}
 
 
-def test_export_multi_component_mask_writes_multi_ring_polygon(tmp_path):
+def test_export_multi_component_mask_writes_multi_ring_polygon(
+    tmp_path: Path,
+) -> None:
     """A multi-component mask exports as one multi-ring polygon.
 
     An occlusion-split mask of two regions exports as one Polygon holding a ring per region.
@@ -699,7 +709,7 @@ def test_export_multi_component_mask_writes_multi_ring_polygon(tmp_path):
     assert len(anns[0].geometry.rings) == 2
 
 
-def test_export_empty_mask_falls_back_to_bbox(tmp_path):
+def test_export_empty_mask_falls_back_to_bbox(tmp_path: Path) -> None:
     from tcip_annotation.state import BBox
 
     # A mask holding nothing binarizes to nothing at any threshold.
@@ -709,7 +719,9 @@ def test_export_empty_mask_falls_back_to_bbox(tmp_path):
     assert isinstance(anns[0].geometry, BBox)
 
 
-def test_export_drops_a_mask_that_binarizes_to_a_sliver(monkeypatch):
+def test_export_drops_a_mask_that_binarizes_to_a_sliver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Export drops a mask whose geometry is a collinear ring and counts it."""
     from tcip_annotation.state import Polygon
     from tcip_mcp.pipelines.postprocessing import export
@@ -738,8 +750,8 @@ def test_export_drops_a_mask_that_binarizes_to_a_sliver(monkeypatch):
 
 
 def test_export_drops_a_polygon_whose_vertices_all_round_to_one_point(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Export drops a polygon whose vertices all round to one point.
 
     A polygon with real raw extent that collapses to one point at the document's stored
@@ -771,7 +783,7 @@ def test_export_drops_a_polygon_whose_vertices_all_round_to_one_point(
     assert anns == []
 
 
-def test_export_no_masks_key_writes_bbox_as_before(tmp_path):
+def test_export_no_masks_key_writes_bbox_as_before(tmp_path: Path) -> None:
     """A result carrying no masks key exports a box.
 
     A pass collecting no masks returns a result with no masks key, and it exports as one BBox.

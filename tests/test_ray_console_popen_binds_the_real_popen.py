@@ -12,8 +12,12 @@ import importlib
 import importlib.util
 import subprocess
 import sys
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from tests._producer_fixtures import fake_popen
 from tests.test_run_launcher_identity import NoExecutableChild
@@ -40,8 +44,9 @@ from tests.test_tensorboard_launch import DyingChild, LivingChild
     ids=["fake_popen", "no_executable", "dying", "living"],
 )
 def test_ray_console_popen_keeps_the_real_popen_through_a_patched_window(
-    monkeypatch, apply
-):
+    monkeypatch: pytest.MonkeyPatch,
+    apply: Callable[[pytest.MonkeyPatch], type | None],
+) -> None:
     """A ``ConsolePopen`` imported inside a patched window keeps the real ``Popen`` base.
 
     Importing Ray's process launcher inside the window leaves ``ConsolePopen`` based on the

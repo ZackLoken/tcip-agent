@@ -8,11 +8,18 @@ anywhere in its text, fails. Tool names outside a Tools table are not checked fo
 from __future__ import annotations
 
 import importlib.util
+from typing import TYPE_CHECKING
 
 from tests import REPO_ROOT
 
+if TYPE_CHECKING:
+    from pathlib import Path
+    from types import ModuleType
 
-def _load_guardrail():
+    import pytest
+
+
+def _load_guardrail() -> ModuleType:
     spec = importlib.util.spec_from_file_location(
         "verify_skill_tools", REPO_ROOT / "tools" / "verify_skill_tools.py"
     )
@@ -25,7 +32,7 @@ def _load_guardrail():
 guardrail = _load_guardrail()
 
 
-def test_landed_prose_carries_no_fabricated_tool_name():
+def test_landed_prose_carries_no_fabricated_tool_name() -> None:
     fabricated = guardrail.fabricated_tool_names()
     assert not fabricated, (
         f"Tools-table cell(s) name a tool the registry does not hold: {fabricated}. Either "
@@ -34,7 +41,7 @@ def test_landed_prose_carries_no_fabricated_tool_name():
     )
 
 
-def test_landed_prose_leaves_no_registered_tool_orphaned():
+def test_landed_prose_leaves_no_registered_tool_orphaned() -> None:
     orphans = guardrail.orphan_tool_names()
     assert not orphans, (
         f"registered tool(s) named nowhere in any agent-facing surface: {orphans}. Name each "
@@ -42,14 +49,14 @@ def test_landed_prose_leaves_no_registered_tool_orphaned():
     )
 
 
-def test_orphan_allow_list_is_empty():
+def test_orphan_allow_list_is_empty() -> None:
     """The orphan allow-list is empty."""
     assert guardrail.ORPHAN_ALLOW == frozenset()
 
 
 def test_fabricated_tool_names_catches_a_retired_name_in_a_fixture_table(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A Tools table naming a retired tool is reported as fabricated."""
     fixture = tmp_path / "SKILL.md"
     fixture.write_text(
@@ -64,7 +71,9 @@ def test_fabricated_tool_names_catches_a_retired_name_in_a_fixture_table(
     assert fabricated == {str(fixture): ["sam_auto_label"]}
 
 
-def test_fabricated_tool_names_skips_a_non_identifier_first_token(tmp_path):
+def test_fabricated_tool_names_skips_a_non_identifier_first_token(
+    tmp_path: Path,
+) -> None:
     """A Tools-table cell whose backticked token is no identifier is skipped, not reported.
 
     A cell backticking the path fragment ``tools/`` reports nothing.
@@ -81,8 +90,8 @@ def test_fabricated_tool_names_skips_a_non_identifier_first_token(tmp_path):
 
 
 def test_fabricated_tool_names_extracts_the_name_from_a_call_signature(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A Tools-table cell showing a registered tool's whole call reports no fabrication.
 
     A first cell of `` `get_experiment(experiment_id, view='lineage')` `` reports nothing.
@@ -99,8 +108,8 @@ def test_fabricated_tool_names_extracts_the_name_from_a_call_signature(
 
 
 def test_fabrication_check_does_not_reach_a_retired_name_in_running_prose(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The fabrication check does not reach a retired name in running prose.
 
     A retired name in a plain sentence outside any Tools table reports nothing.
@@ -114,8 +123,8 @@ def test_fabrication_check_does_not_reach_a_retired_name_in_running_prose(
 
 
 def test_fabrication_check_does_not_reach_a_differently_headed_tool_table(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The fabrication check does not reach a tool table headed other than "Tool".
 
     A table documenting tools under the header "Piece" reports nothing, though it names a
@@ -133,7 +142,9 @@ def test_fabrication_check_does_not_reach_a_differently_headed_tool_table(
     assert guardrail.fabricated_tool_names([fixture]) == {}
 
 
-def test_fabricated_tool_names_catches_an_invented_console_command(tmp_path):
+def test_fabricated_tool_names_catches_an_invented_console_command(
+    tmp_path: Path,
+) -> None:
     """An invented console command in a Tools table is reported as a fabrication.
 
     A `` `tcip <command>` `` cell naming no console command is reported as a fabrication.
@@ -151,7 +162,9 @@ def test_fabricated_tool_names_catches_an_invented_console_command(tmp_path):
     }
 
 
-def test_fabricated_tool_names_admits_a_real_console_command(tmp_path):
+def test_fabricated_tool_names_admits_a_real_console_command(
+    tmp_path: Path,
+) -> None:
     fixture = tmp_path / "SKILL.md"
     fixture.write_text(
         "## Tools\n\n"
@@ -164,8 +177,8 @@ def test_fabricated_tool_names_admits_a_real_console_command(tmp_path):
 
 
 def test_orphan_tool_names_catches_a_registered_name_missing_from_every_surface(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A registered tool named nowhere in any surface is reported as an orphan."""
     from tcip_mcp import server
 
@@ -182,7 +195,9 @@ def test_orphan_tool_names_catches_a_registered_name_missing_from_every_surface(
     assert guardrail.orphan_tool_names([fixture]) == ["orphaned_tool"]
 
 
-def test_orphan_tool_names_accepts_the_call_form_too(monkeypatch, tmp_path):
+def test_orphan_tool_names_accepts_the_call_form_too(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A tool documented in its call form alone counts as named.
 
     A tool whose one mention is `` `name(`` (its call form, arguments shown) is no orphan.

@@ -25,5 +25,5 @@ CORE_DEPS = [
 
 
 @pytest.mark.parametrize("module_name", CORE_DEPS)
-def test_core_dependency_importable(module_name):
+def test_core_dependency_importable(module_name: str) -> None:
     importlib.import_module(module_name)

@@ -6,12 +6,17 @@ empty JSON object reaches the handler.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from tcip_web.app import app
 from tests._route_walk import state_changing_routes
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class _ProbePayload(BaseModel):
@@ -51,7 +56,7 @@ def test_every_state_changing_route_declares_a_json_body_model() -> None:
 
 
 def test_a_declared_body_model_admits_an_empty_json_object(
-    client: TestClient, opened_project
+    client: TestClient, opened_project: Path
 ) -> None:
     """A body model with no fields admits an empty JSON object and reaches the handler.
 

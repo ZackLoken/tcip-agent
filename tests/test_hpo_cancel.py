@@ -7,14 +7,23 @@ cancel is the record ``experiments.request_cancel`` writes in the sweep director
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from tests._training_values import fifo_search, sweep_space
 from tests._verified_checkpoint_fixtures import opened_sweep
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
 
 def _stub_search(
-    monkeypatch, *, before=None, raises: Exception | None = None
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    before: Callable[[Path], str] | None = None,
+    raises: Exception | None = None,
 ) -> list[dict]:
     """Replace Ray Tune's search with a stub and return the calls it receives.
 
@@ -23,7 +32,14 @@ def _stub_search(
     """
     calls: list[dict] = []
 
-    def fake_search(**kw):
+    def fake_search(
+        **kw: Callable[[dict, Callable[[float], None]], object]
+        | dict
+        | str
+        | int
+        | Path
+        | None,
+    ) -> None:
         calls.append(kw)
         sweep_root = kw["sweep_dir"]
         if before is not None:
@@ -37,7 +53,7 @@ def _stub_search(
     return calls
 
 
-def test_a_cancel_naming_no_run_or_sweep_refuses(project) -> None:
+def test_a_cancel_naming_no_run_or_sweep_refuses(project: Path) -> None:
     from tcip_mcp.experiments import experiment_dir
     from tcip_mcp.tools.training_tools import cancel_training
 
@@ -47,9 +63,9 @@ def test_a_cancel_naming_no_run_or_sweep_refuses(project) -> None:
 
 
 def test_a_cancel_written_before_the_run_ends_the_sweep_canceled_before_its_first_trial(
-    project,
-    real_hpo_base_config,
-    monkeypatch,
+    project: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A sweep holding a cancel when its run starts ends canceled with no search call.
 
@@ -86,10 +102,10 @@ def test_a_cancel_written_before_the_run_ends_the_sweep_canceled_before_its_firs
     ids=["search-returns", "search-raises"],
 )
 def test_a_cancel_landing_mid_search_ends_the_sweep_canceled(
-    project,
-    real_hpo_base_config,
-    monkeypatch,
-    raises,
+    project: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+    raises: RuntimeError | None,
 ) -> None:
     """A cancel landing mid-search ends the sweep canceled whether the search returns or raises."""
     from tcip_mcp import experiments
@@ -122,9 +138,9 @@ def test_a_cancel_landing_mid_search_ends_the_sweep_canceled(
 
 
 def test_a_cancel_after_the_sweep_ended_refuses_and_leaves_its_final_status_as_written(
-    project,
-    real_hpo_base_config,
-    monkeypatch,
+    project: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A cancel after the sweep ended refuses and leaves its final status as written.
 
@@ -156,7 +172,7 @@ def test_a_cancel_after_the_sweep_ended_refuses_and_leaves_its_final_status_as_w
 
 
 def test_a_second_cancel_keeps_the_time_of_the_first(
-    project, real_hpo_base_config
+    project: Path, real_hpo_base_config: dict
 ) -> None:
     """A repeated cancel request answers the first request's time."""
     from tcip_mcp.experiments import request_cancel
@@ -169,9 +185,9 @@ def test_a_second_cancel_keeps_the_time_of_the_first(
 
 
 def test_a_sweep_cancel_reaches_only_a_sweep_of_the_project_it_is_handed(
-    project,
-    real_hpo_base_config,
-    tmp_path_factory,
+    project: Path,
+    real_hpo_base_config: dict,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     """A sweep cancel reaches a sweep of the project it is handed and refuses elsewhere.
 
@@ -192,8 +208,8 @@ def test_a_sweep_cancel_reaches_only_a_sweep_of_the_project_it_is_handed(
 
 
 def test_run_hpo_trial_reports_nothing_and_opens_no_run_when_the_sweep_is_canceled(
-    project,
-    real_hpo_base_config,
+    project: Path,
+    real_hpo_base_config: dict,
 ) -> None:
     from tcip_mcp.experiments import request_cancel, run_dirs
     from tcip_mcp.tools.training_tools import _run_hpo_trial
@@ -216,7 +232,7 @@ class _FakeTrial:
 
 
 def test_sweep_stopper_stop_all_true_once_ray_no_longer_holds_any_trial_live(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     from tcip_mcp.experiments import request_cancel
     from tcip_mcp.pipelines.training.hpo import _build_sweep_stopper
@@ -237,7 +253,7 @@ def test_sweep_stopper_stop_all_true_once_ray_no_longer_holds_any_trial_live(
 
 
 def test_sweep_stopper_stop_all_true_at_once_for_a_trial_ray_killed_outright(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     """The sweep stopper stops all when Ray reports its one live trial errored.
 
@@ -258,7 +274,7 @@ def test_sweep_stopper_stop_all_true_at_once_for_a_trial_ray_killed_outright(
 
 
 def test_sweep_stopper_stop_all_true_after_the_stale_window_elapses_regardless_of_a_live_trial(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tcip_mcp import experiments
     from tcip_mcp.pipelines.training.hpo import _build_sweep_stopper
@@ -280,9 +296,9 @@ def test_sweep_stopper_stop_all_true_after_the_stale_window_elapses_regardless_o
 
 
 def test_run_hyperparameter_search_refuses_a_relaunched_from_naming_no_sweep_under_this_root(
-    project,
-    real_hpo_base_config,
-    monkeypatch,
+    project: Path,
+    real_hpo_base_config: dict,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A ``relaunched_from`` naming no sweep under this root refuses, making no sweep directory.
 

@@ -7,7 +7,7 @@ that sources its tiles from a windowed raster read.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
@@ -39,6 +39,15 @@ from tests._geotiff_fixtures import (
     geotransform_of_file as read_geotransform,
     write_geotiff as _write_geotiff,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from tcip_mcp.pipelines.execution import Execution, Pass
+    from tcip_mcp.pipelines.inference.generic_predictor import (
+        GenericPredictor,
+        WindowedRasterReader,
+    )
 
 # ── Pixel -> native affine (including the y-axis flip) ────────────────────
 
@@ -346,7 +355,7 @@ def test_pixel_to_native_returns_plain_floats(tmp_path: Path) -> None:
 TILE = 32
 
 
-def _pass(tmp_path: Path, ckpt: str, **stated: Any):
+def _pass(tmp_path: Path, ckpt: str, **stated: bool) -> Pass:
     """Prepare the pass the registered ``ckpt`` runs at this module's lattice.
 
     The lattice is a ``TILE`` edge, 0.2 overlap, NMS at 0.3 and ``conf`` 0.0, an instance
@@ -377,14 +386,19 @@ def _pass(tmp_path: Path, ckpt: str, **stated: Any):
     ).runnable()
 
 
-def _bare_execution():
+def _bare_execution() -> Execution:
     """Return a tiled record at this module's lattice with no checkpoint behind it."""
     from tests._verified_checkpoint_fixtures import tiled_record
 
     return tiled_record(tile_size=TILE, overlap=0.2, conf=0.0)
 
 
-def _sliced(predictor, execution, source, **kwargs) -> dict:
+def _sliced(
+    predictor: GenericPredictor,
+    execution: Execution,
+    source: str | WindowedRasterReader,
+    **kwargs: str | dict | Callable[[int, int, dict], None] | None,
+) -> dict:
     """Run ``predict_sliced`` under ``execution``, eight tiles a batch."""
     return predictor.predict_sliced(
         source, execution=execution, tile_batch_size=8, **kwargs
@@ -438,7 +452,7 @@ def _bespoke_detection_checkpoint(
 
 
 def _raster_checkpoint(
-    tmp_path: Path, model_source: dict, channels: int, **data
+    tmp_path: Path, model_source: dict, channels: int, **data: object
 ) -> str:
     """Return the checkpoint a run of ``model_source`` completed over two labeled rasters.
 
@@ -657,7 +671,9 @@ def test_predict_sliced_windowed_source_channel_mismatch_refuses() -> None:
     class _FakeReader:
         height, width, num_channels = 64, 64, 5
 
-        def read_window(self, y0, y1, x0, x1):
+        def read_window(
+            self, y0: int, y1: int, x0: int, x1: int
+        ) -> np.ndarray:
             raise AssertionError(
                 "a channel mismatch must refuse before any tile is read"
             )
@@ -687,7 +703,9 @@ def test_windowed_predict_sliced_reaches_real_slicing_for_instance_seg_with_and_
     class _FakeReader:
         height, width, num_channels = 64, 64, 3
 
-        def read_window(self, y0, y1, x0, x1):
+        def read_window(
+            self, y0: int, y1: int, x0: int, x1: int
+        ) -> np.ndarray:
             raise AssertionError("reached the real tile loop")
 
     p = GenericPredictor.__new__(GenericPredictor)
@@ -716,7 +734,9 @@ def test_predict_sliced_windowed_source_refuses_non_detection_task() -> None:
     class _FakeReader:
         height, width, num_channels = 64, 64, 3
 
-        def read_window(self, y0, y1, x0, x1):
+        def read_window(
+            self, y0: int, y1: int, x0: int, x1: int
+        ) -> np.ndarray:
             raise AssertionError(
                 "a non-detection task must refuse before any tile is read"
             )
@@ -789,7 +809,7 @@ def test_assign_detections_to_plants_maps_near_and_leaves_far_unmapped(
         boxes,
         georef,
         plants,
-        nn_tolerance_m=resolve_nn_tolerance_m(plants)["value"],
+        nn_tolerance_m=resolve_nn_tolerance_m(plants).value,
     )
     assert len(assignments) == 2
 

@@ -5,9 +5,20 @@ publishes its documents, the bucket's record and the publication's audit line, a
 canceled while its first image is predicted publishes that image's document alone.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+
+    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.execution import Execution
+    from tcip_mcp.pipelines.image_utils import BandGroupRef
+    from tcip_web.routes.inference import InferenceJob
 
 from tests._audit_fixtures import audit_rows
 from tests._predictor_fixtures import StubPredictor, install
@@ -17,7 +28,7 @@ from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
 DATE = "2025-06-01"
 
 
-def _two_images(images_dir):
+def _two_images(images_dir: Path) -> Path:
     from tests._producer_fixtures import gray_frame
 
     for stem in ("a", "b"):
@@ -25,7 +36,9 @@ def _two_images(images_dir):
     return images_dir
 
 
-def _job(job_id, images_dir, bucket, ckpt, project):
+def _job(
+    job_id: str, images_dir: Path, bucket: str, ckpt: str, project: Path
+) -> InferenceJob:
     from tcip_mcp.dataset_layout import dataset_root_of
     from tcip_mcp.pipelines.execution import Stated
     from tcip_web.routes.inference import InferenceJob
@@ -44,7 +57,9 @@ def _job(job_id, images_dir, bucket, ckpt, project):
     )
 
 
-def _launch_through_the_route(client, dataset, bucket, ckpt, *, tile: bool):
+def _launch_through_the_route(
+    client: TestClient, dataset: Path, bucket: str, ckpt: str, *, tile: bool
+) -> InferenceJob | None:
     """Launch a GUI run publishing ``bucket`` through the route and join its worker.
 
     The run is launched by ``client``, and its worker thread is joined for up to 60 s.
@@ -99,8 +114,8 @@ def _record(root: Path, bucket: str) -> dict:
 
 
 def test_the_gui_worker_and_the_mcp_door_publish_the_same_bucket_record(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The GUI worker and the MCP door publish the same bucket record.
 
     One checkpoint over one image directory with the same stated values: the two doors' own
@@ -130,11 +145,11 @@ def test_the_gui_worker_and_the_mcp_door_publish_the_same_bucket_record(
 
 
 def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_door(
-    tmp_path,
-    opened_project,
-    client,
-    monkeypatch,
-):
+    tmp_path: Path,
+    opened_project: Path,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A pass failing after its first document publishes nothing on either door.
 
     A pass whose second document's encoding raises leaves no document, no record and no audit
@@ -155,7 +170,9 @@ def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_doo
     real_encode = export.encode_predictions
     calls: list[str] = []
 
-    def failing_second_document(result, **kwargs):
+    def failing_second_document(
+        result: dict, **kwargs: str | ClassScope
+    ) -> tuple[dict, int]:
         calls.append(str(result["image"]))
         if len(calls) % 2 == 0:
             raise OSError("disk full")
@@ -184,11 +201,11 @@ def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_doo
 
 
 def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_published(
-    tmp_path,
-    opened_project,
-    client,
-    monkeypatch,
-):
+    tmp_path: Path,
+    opened_project: Path,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A pass the MCP door refuses, the GUI refuses alike, with nothing published.
 
     A tiled pass stating no tile size fails the GUI job with the MCP door's reason and leaves no
@@ -225,8 +242,8 @@ def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_publishe
 
 
 def test_a_canceled_gui_pass_publishes_what_it_predicted(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A canceled GUI pass publishes the image it predicted.
 
     A cancel set while the first of two images is predicted leaves one image done: its document
@@ -234,6 +251,10 @@ def test_a_canceled_gui_pass_publishes_what_it_predicted(
     """
     pytest.importorskip("fastapi")
     from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.pipelines.execution import (
+        DEFAULT_IMAGE_BATCH_SIZE,
+        DEFAULT_TILE_BATCH_SIZE,
+    )
     from tcip_web.routes.inference import _worker
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -243,9 +264,21 @@ def test_a_canceled_gui_pass_publishes_what_it_predicted(
     job = _job("canceled-after-one", images_dir, f"run/{DATE}", ckpt, tmp_path)
 
     class CancelAfterFirstImage(StubPredictor):
-        def predict_batch(self, paths, *args, **kw):
+        def predict_batch(
+            self,
+            image_paths: list[str | Path | BandGroupRef],
+            execution: Execution,
+            *,
+            tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
+            batch_size: int = DEFAULT_IMAGE_BATCH_SIZE,
+        ) -> list[dict]:
             job.cancel_event.set()
-            return super().predict_batch(paths, *args, **kw)
+            return super().predict_batch(
+                image_paths,
+                execution,
+                tile_batch_size=tile_batch_size,
+                batch_size=batch_size,
+            )
 
     install(monkeypatch, CancelAfterFirstImage())
 
@@ -265,8 +298,8 @@ def test_a_canceled_gui_pass_publishes_what_it_predicted(
 
 
 def test_a_full_gui_pass_publishes_every_document_and_the_record(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A full GUI pass over two images publishes both documents and the bucket's record.
 
     Both prediction documents, encoded in image order, and the record naming their producer
@@ -276,6 +309,7 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(
     import tcip_mcp.pipelines.postprocessing.export as export
     from tcip_annotation import json_io
     from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.model_registry import Producer
     from tcip_web.routes.inference import _summary, _worker
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -287,7 +321,9 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(
     real_encode = export.encode_predictions
     written = []
 
-    def recording_encode(result, **kwargs):
+    def recording_encode(
+        result: dict, **kwargs: str | ClassScope
+    ) -> tuple[dict, int]:
         written.append(result["image"])
         return real_encode(result, **kwargs)
 
@@ -309,7 +345,8 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(
     record = _record(tmp_path, job.bucket)
     assert record["execution"]["conf"] == pytest.approx(0.25)
     assert record["execution"]["sources"]["conf"] == "explicit"
-    assert record["producer"]["checkpoint_sha256"]
+    assert isinstance(bucket.producer, Producer)
+    assert bucket.producer.checkpoint_sha256
     assert record["assessment_id"] is None
     assert record["documents"] == {"a": "a.jpg", "b": "b.jpg"}
 
@@ -328,15 +365,17 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(
 
 
 def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A GUI run and an MCP run leave the same publication lines.
 
     Each run leaves the publication's one line and nothing else in its dataset's log, and each
     bucket's record names the run that produced its checkpoint.
     """
     pytest.importorskip("fastapi")
+    from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.model_registry import Producer
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_web.routes.inference import _worker
@@ -362,10 +401,9 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(
             )
             assert "error" not in result, result
         rows[door] = audit_rows(dataset)[before:]
-        assert (
-            _record(dataset, bucket)["producer"]["experiment_id"]
-            == Path(ckpt).parent.name
-        )
+        producer = read_bucket(dataset, bucket).producer
+        assert isinstance(producer, Producer)
+        assert producer.experiment_id == Path(ckpt).parent.name
 
     def shape(records: list[dict]) -> list[tuple]:
         return [(r["tool"], sorted(r["arguments"])) for r in records]

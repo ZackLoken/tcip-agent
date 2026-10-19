@@ -137,20 +137,20 @@ def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answe
     The fixture's first date makes them three different numbers (four images, two plants
     resolved, three GPS distances recorded), and the summary reports each as its own.
     """
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        load_mapping_rows,
-    )
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
 
     payload = _capture_fixture(tmp_path)
     body = client.post("/api/results/plant_mapping/build", json=payload).json()
 
-    rows = load_mapping_rows(tmp_path, payload["name"])["2026-02-11"]
+    build = load_mapping(tmp_path, payload["name"])
+    assert build is not None
+    rows = build.assignments["2026-02-11"]
     assert len(rows) == 4
-    assert {r["plant_id"] for r in rows if r["plant_id"]} == {
+    assert {r.plant_id for r in rows if r.plant_id} == {
         "PLOT1",
         "PLOT2",
     }
-    distances = [r["distance_m"] for r in rows if r["distance_m"] is not None]
+    distances = [r.distance_m for r in rows if r.distance_m is not None]
     assert len(distances) == 3
 
     summary = body["summary"]["per_date"]["2026-02-11"]
@@ -274,15 +274,21 @@ def test_the_route_and_the_tool_build_one_mapping_with_one_audit_line_each(
 
     lines = tcip_store.read_log(audit_log_key(tmp_path)).records[before:]
     assert [line["tool"] for line in lines] == ["plant_mapping_built"] * 2
-    assert [line["arguments"]["name"] for line in lines] == [
+    route_arguments, tool_arguments = (line["arguments"] for line in lines)
+    assert isinstance(route_arguments, dict)
+    assert isinstance(tool_arguments, dict)
+    assert [route_arguments["name"], tool_arguments["name"]] == [
         payload["name"],
         "ridge",
     ]
-    assert [line["arguments"]["record_sha256"] for line in lines] == [
+    assert [
+        route_arguments["record_sha256"],
+        tool_arguments["record_sha256"],
+    ] == [
         plant_mapping.record_digest(route_record),
         plant_mapping.record_digest(tool_record),
     ]
-    assert own(lines[0]["arguments"]) == own(lines[1]["arguments"])
+    assert own(route_arguments) == own(tool_arguments)
     assert lines[0]["actor"] == "user:tester" and "actor" not in lines[1]
     assert (
         set(lines[0]) - {"actor"} <= AUDIT_ENTRY_KEYS
@@ -337,7 +343,11 @@ def test_a_mapping_or_registry_name_outside_the_segment_rule_refuses_at_its_key(
         crop="c",
         site="s",
     )
-    assert "Bad_Name" in registered["error"]
+    match registered:
+        case {"error": str() as error}:
+            assert "Bad_Name" in error
+        case _:
+            raise AssertionError(registered)
     assert plant_mapping.plant_mapping_names(tmp_path) == []
 
 

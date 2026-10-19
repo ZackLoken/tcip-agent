@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -23,6 +24,9 @@ from tcip_mcp.subject_registry import (
 from tcip_mcp.traits import PositiveState
 from tests._producer_fixtures import registry_over
 
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
 
 def _prefixed_attributes() -> SubjectRegistry:
     """Return one subject carrying two attributes whose names share a prefix.
@@ -34,6 +38,7 @@ def _prefixed_attributes() -> SubjectRegistry:
         subjects=(
             Subject(
                 name="bud",
+                description="",
                 attributes=(
                     Attribute(
                         name="opening_stage",
@@ -60,6 +65,7 @@ def _case_variant_subjects() -> SubjectRegistry:
         subjects=(
             Subject(
                 name="bud",
+                description="",
                 attributes=(
                     Attribute(
                         name="opening",
@@ -70,6 +76,7 @@ def _case_variant_subjects() -> SubjectRegistry:
             ),
             Subject(
                 name="Bud",
+                description="",
                 attributes=(
                     Attribute(
                         name="opening",
@@ -82,7 +89,9 @@ def _case_variant_subjects() -> SubjectRegistry:
     )
 
 
-def _scope(tmp_path: Path, registry: SubjectRegistry, subject: str):
+def _scope(
+    tmp_path: Path, registry: SubjectRegistry, subject: str
+) -> ClassScope:
     """Return the class space the admission reads for ``subject`` over ``registry``.
 
     The dataset under ``tmp_path`` declares ``registry``.
@@ -93,7 +102,9 @@ def _scope(tmp_path: Path, registry: SubjectRegistry, subject: str):
     return registry_scope(tmp_path / "images", subject)
 
 
-def test_attribute_lookup_resolves_the_exactly_named_attribute(tmp_path: Path):
+def test_attribute_lookup_resolves_the_exactly_named_attribute(
+    tmp_path: Path,
+) -> None:
     """An attribute lookup resolves the exactly named attribute.
 
     With two attributes sharing a prefix, the scope carries both under their own names and a
@@ -117,7 +128,7 @@ def test_attribute_lookup_resolves_the_exactly_named_attribute(tmp_path: Path):
     )
 
 
-def test_an_attribute_name_that_only_prefixes_a_declared_one_refuses():
+def test_an_attribute_name_that_only_prefixes_a_declared_one_refuses() -> None:
     """An attribute name that is a strict prefix of a declared one is refused.
 
     The subject declares no attribute of the truncated name, and the positive state naming it
@@ -127,6 +138,7 @@ def test_an_attribute_name_that_only_prefixes_a_declared_one_refuses():
         subjects=(
             Subject(
                 name="bud",
+                description="",
                 attributes=(
                     Attribute(
                         name="opening_stage",
@@ -147,7 +159,9 @@ def test_an_attribute_name_that_only_prefixes_a_declared_one_refuses():
     assert problem is not None and "declares no attribute 'opening'" in problem
 
 
-def test_subject_lookup_resolves_the_exactly_named_subject(tmp_path: Path):
+def test_subject_lookup_resolves_the_exactly_named_subject(
+    tmp_path: Path,
+) -> None:
     """A subject lookup resolves the exactly named subject.
 
     Subject names are matched verbatim: two names differing in case alone are two subjects with
@@ -169,7 +183,7 @@ def test_subject_lookup_resolves_the_exactly_named_subject(tmp_path: Path):
 
 def test_case_variant_subjects_survive_a_file_roundtrip_as_distinct_subjects(
     tmp_path: Path,
-):
+) -> None:
     """Case-variant subjects survive a file round trip as distinct subjects.
 
     Both names are stored and read back verbatim, each with its own attribute vocabulary.

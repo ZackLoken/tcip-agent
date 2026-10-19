@@ -10,12 +10,20 @@ from __future__ import annotations
 import importlib
 from dataclasses import asdict
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
+if TYPE_CHECKING:
+    from torch import Tensor, nn
+
+    from tcip_mcp.pipelines.schemas import PretrainedWeights
+
 torch = pytest.importorskip("torch")
+
+from torch import nn
 
 from tcip_mcp import subject_registry  # noqa: E402
 from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
@@ -66,11 +74,11 @@ def build_probe_net(
     *,
     image_mean: list[float],
     image_std: list[float],
-    pretrained_weights=None,
+    pretrained_weights: PretrainedWeights | None = None,
     num_classes: int = 2,
     in_chans: int = 3,
     attributes: tuple = (),
-):
+) -> nn.Module:
     """Build a tiny module whose parameter shapes follow its builder kwargs.
 
     It has one head per attribute sized by its values, takes the statistics and weights it is
@@ -87,13 +95,15 @@ def build_probe_net(
                 nn.Conv2d(6, len(a.values), 1) for a in attributes
             )
 
-        def forward(self, images, targets=None):
+        def forward(
+            self, images: Tensor, targets: dict | None = None
+        ) -> Tensor:
             return self.head(self.stem(images))
 
     return ProbeNet()
 
 
-def _param_shapes(model) -> dict:
+def _param_shapes(model: nn.Module) -> dict:
     return {name: tuple(t.shape) for name, t in model.state_dict().items()}
 
 
@@ -107,6 +117,7 @@ def _write_registry(dataset_root: Path) -> None:
         subjects=(
             subject_registry.Subject(
                 name="leaf",
+                description="",
                 attributes=(
                     subject_registry.Attribute(
                         name="condition",
@@ -117,6 +128,7 @@ def _write_registry(dataset_root: Path) -> None:
             ),
             subject_registry.Subject(
                 name="bush",
+                description="",
                 attributes=(
                     subject_registry.Attribute(
                         name="vigor",
@@ -125,7 +137,7 @@ def _write_registry(dataset_root: Path) -> None:
                     ),
                 ),
             ),
-            subject_registry.Subject(name="bud"),
+            subject_registry.Subject(name="bud", description=""),
         )
     )
     dataset_root.mkdir(parents=True, exist_ok=True)
@@ -144,8 +156,8 @@ def _agent_package(root: Path, name: str, modules: dict) -> Path:
 
 
 def test_contract_dims_take_the_admitted_attributes_without_the_loader_background_offset(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Contract dims take the admitted attributes without the loader's background offset.
 
     A scoped detection config smokes at the one subject and the two-value attribute the run was
@@ -166,6 +178,7 @@ def test_contract_dims_take_the_admitted_attributes_without_the_loader_backgroun
             subjects=(
                 subject_registry.Subject(
                     name="leaf",
+                    description="",
                     attributes=(
                         subject_registry.Attribute(
                             name="condition",
@@ -229,8 +242,8 @@ def test_contract_dims_take_the_admitted_attributes_without_the_loader_backgroun
 
 
 def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attributes(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Contract dims count the subject as their one class for a scope declaring no attributes.
 
     An instance_seg scope whose subject declares no attribute resolves one class and no
@@ -264,7 +277,9 @@ def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attribute
     assert dims == {"in_chans": 3, "num_classes": 1}
 
 
-def test_snapshot_copies_each_dotted_module_at_its_module_path(tmp_path):
+def test_snapshot_copies_each_dotted_module_at_its_module_path(
+    tmp_path: Path,
+) -> None:
     """The snapshot copies each dotted module at its module path.
 
     Each of the three bespoke seams' modules, declared under its source's ``source_files`` and
@@ -317,8 +332,8 @@ def test_snapshot_copies_each_dotted_module_at_its_module_path(tmp_path):
 
 
 def test_snapshot_captures_the_module_of_a_builder_spelled_without_a_colon(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The snapshot captures the module of a builder spelled without a colon.
 
     For ``agent_code_dotted.detectors.build_net`` the snapshot copies
@@ -356,7 +371,9 @@ def test_snapshot_captures_the_module_of_a_builder_spelled_without_a_colon(
     )
 
 
-def test_a_missing_or_empty_builder_refuses_at_the_configs_validation():
+def test_a_missing_or_empty_builder_refuses_at_the_configs_validation() -> (
+    None
+):
     """A missing or empty builder refuses at the config's validation.
 
     ``builder`` of ``None`` and of ``""`` both refuse where the config is validated, naming
@@ -412,7 +429,9 @@ def _probe_config() -> dict:
 
 
 @pytest.mark.parametrize("restated", HANDED_TO_BUILDER)
-def test_builder_kwargs_restating_a_handed_value_refuses_by_name(restated):
+def test_builder_kwargs_restating_a_handed_value_refuses_by_name(
+    restated: str,
+) -> None:
     """Builder kwargs restating a handed value refuse by name.
 
     A builder_kwargs carrying any name the build hands its builder refuses naming it where the
@@ -425,12 +444,15 @@ def test_builder_kwargs_restating_a_handed_value_refuses_by_name(restated):
     assert any(restated in issue for issue in issues), issues
 
 
-def handed_kwargs(**kwargs) -> dict:
-    """Return the keyword values the builder was handed."""
-    return kwargs
+class HandedKwargs(nn.Module):
+    """A builder whose module records the keyword values its build handed it."""
+
+    def __init__(self, **handed: object) -> None:
+        super().__init__()
+        self.handed = handed
 
 
-def test_the_names_a_build_hands_are_the_names_a_restatement_refuses():
+def test_the_names_a_build_hands_are_the_names_a_restatement_refuses() -> None:
     """The names a build hands its builder are the names a restatement refuses.
 
     A build stating weights, their statistics and a detector geometry hands its builder a
@@ -444,7 +466,7 @@ def test_the_names_a_build_hands_are_the_names_a_restatement_refuses():
     config = training_config(
         REPO_ROOT,
         {
-            "builder": f"{Path(__file__).stem}:handed_kwargs",
+            "builder": f"{Path(__file__).stem}:HandedKwargs",
             "source_files": PROBE_FILES,
             "task": "classification",
             "normalization": pretrained_normalization(
@@ -454,13 +476,16 @@ def test_the_names_a_build_hands_are_the_names_a_restatement_refuses():
         {"num_channels": 3, "num_classes": 7, "scope": {}},
     )
 
-    handed = built_model(config, detector_geometry())
+    model = built_model(config, detector_geometry())
 
+    # The builder is imported from the run's snapshot copy, a class object other than this one.
+    assert type(model).__name__ == HandedKwargs.__name__
+    handed = vars(model)["handed"]
     assert set(HANDED_TO_BUILDER) - set(handed) == {"num_ranks", "attributes"}
     assert set(handed) <= set(HANDED_TO_BUILDER)
 
 
-def test_a_model_source_stating_its_own_width_refuses_by_name():
+def test_a_model_source_stating_its_own_width_refuses_by_name() -> None:
     """A width stated on the model source itself refuses by name at validation."""
     config = _probe_config()
     config["model_source"]["in_chans"] = 4
@@ -469,7 +494,7 @@ def test_a_model_source_stating_its_own_width_refuses_by_name():
         built_model(config)
 
 
-def test_an_ordinal_run_recording_no_rank_count_refuses_by_name():
+def test_an_ordinal_run_recording_no_rank_count_refuses_by_name() -> None:
     """An ordinal run recording no rank count refuses at ``recorded_model_dims`` by name."""
     config = training_config(
         REPO_ROOT,
@@ -485,7 +510,7 @@ def test_an_ordinal_run_recording_no_rank_count_refuses_by_name():
         recorded_model_dims(train_config(config))
 
 
-def test_a_run_over_label_documents_recording_a_count_refuses():
+def test_a_run_over_label_documents_recording_a_count_refuses() -> None:
     """A run over label documents recording a class count refuses.
 
     A detection run whose scope names a subject and records ``num_classes`` beside it refuses
@@ -510,8 +535,8 @@ def test_a_run_over_label_documents_recording_a_count_refuses():
 
 
 def test_a_run_builds_at_the_width_and_heads_its_admitted_data_records(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A run builds at the width and heads its admitted data records.
 
     A run whose data section the platform wrote from its own admission builds a model reading
@@ -569,8 +594,8 @@ def test_a_run_builds_at_the_width_and_heads_its_admitted_data_records(
 
 
 def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A saved checkpoint rebuilds the architecture its config builds.
 
     The checkpoint the envelope saves carries no model source of its own, and the config it
@@ -639,8 +664,8 @@ def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(
 
 
 def test_child_pythonpath_carries_sys_path_and_the_existing_env_value(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A child's PYTHONPATH carries a prepended ``sys.path`` entry and ends with the old value.
 
     With a directory prepended to ``sys.path`` and ``PYTHONPATH`` already set, the child's

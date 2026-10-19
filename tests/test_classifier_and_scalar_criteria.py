@@ -8,10 +8,17 @@ statistic above the trait's floor. Each refuses a holdout too thin to judge.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from tests import _trait_fixtures as fx
 from tests._training_values import EQUIVALENCE_Z
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from torch import Tensor
 
 torch = pytest.importorskip("torch")
 
@@ -39,7 +46,13 @@ def _flipped_items(n: int, flips: set[int]) -> list[dict]:
     ]
 
 
-def _classifier_items(prefix, n_images, pos_per_image, *, miscall_images=()):
+def _classifier_items(
+    prefix: str,
+    n_images: int,
+    pos_per_image: int,
+    *,
+    miscall_images: Sequence[int] = (),
+) -> list[dict]:
     """Return classifier items over ``n_images`` images named ``prefix`` and an index.
 
     Each image gets ``pos_per_image`` positive items called positive and one negative item called
@@ -75,7 +88,7 @@ def _classifier_items(prefix, n_images, pos_per_image, *, miscall_images=()):
     return items
 
 
-def test_a_single_image_holdout_cannot_pass_on_its_zero_dispersion():
+def test_a_single_image_holdout_cannot_pass_on_its_zero_dispersion() -> None:
     """A single-image holdout is refused as having too few holdout images.
 
     One holdout image has no images to vary its bias across, and the criterion reports
@@ -98,7 +111,9 @@ def test_a_single_image_holdout_cannot_pass_on_its_zero_dispersion():
     assert "insufficient_holdout_images" in failures
 
 
-def test_the_positive_count_bias_is_scoped_to_images_carrying_a_positive():
+def test_the_positive_count_bias_is_scoped_to_images_carrying_a_positive() -> (
+    None
+):
     """The positive-count bias is taken over the images carrying a positive alone.
 
     Over ten images carrying positives and forty carrying none, the bias is taken over the ten:
@@ -141,7 +156,9 @@ def test_the_positive_count_bias_is_scoped_to_images_carrying_a_positive():
     assert "positive_count_bias_exceeds_tolerance" in failures
 
 
-def test_the_same_miscall_fails_a_sparse_class_and_passes_a_dense_one():
+def test_the_same_miscall_fails_a_sparse_class_and_passes_a_dense_one() -> (
+    None
+):
     """One extra positive call fails the classifier criterion for a sparse class, not a dense one.
 
     The tolerance is a fraction of the typical positive count: one extra positive call on one
@@ -177,7 +194,7 @@ def test_the_same_miscall_fails_a_sparse_class_and_passes_a_dense_one():
     assert "positive_count_bias_exceeds_tolerance" not in dense_failures
 
 
-def test_the_trait_authored_agreement_floor_is_the_floor_applied():
+def test_the_trait_authored_agreement_floor_is_the_floor_applied() -> None:
     """A kappa between 0.75 and 0.85 clears the entry's floor and fails a trait-authored 0.9."""
     from tcip_mcp.pipelines.operating_point import classifier_criterion
 
@@ -194,20 +211,22 @@ def test_the_trait_authored_agreement_floor_is_the_floor_applied():
     assert "classifier_agreement_below_floor" in strict_failures
 
 
-def _qwk(num_ranks: int):
+def _qwk(num_ranks: int) -> Callable[[Tensor, Tensor], float | None]:
     from tcip_mcp.pipelines.training.evaluation import quadratic_weighted_kappa
 
     return lambda pred, gt: quadratic_weighted_kappa(pred, gt, num_ranks)
 
 
-def _items(true, predicted):
+def _items(true: Sequence[float], predicted: Sequence[float]) -> list[dict]:
     return [
         {"image_id": f"h{i}", "true": t, "predicted": p}
         for i, (t, p) in enumerate(zip(true, predicted))
     ]
 
 
-def test_an_agreeing_ordinal_holdout_passes_and_a_cyclic_miscall_fails_below_the_floor():
+def test_an_agreeing_ordinal_holdout_passes_and_a_cyclic_miscall_fails_below_the_floor() -> (
+    None
+):
     from tcip_mcp.pipelines.operating_point import scalar_criterion
 
     ranks = [0, 1, 2, 1, 0, 2, 1, 0, 2, 1] * 2
@@ -231,7 +250,7 @@ def test_an_agreeing_ordinal_holdout_passes_and_a_cyclic_miscall_fails_below_the
     assert failures == ["criterion_below_floor"]
 
 
-def test_an_empty_holdout_refuses_as_too_thin_and_undefined():
+def test_an_empty_holdout_refuses_as_too_thin_and_undefined() -> None:
     from tcip_mcp.pipelines.operating_point import scalar_criterion
 
     _evidence, failures = scalar_criterion(
@@ -244,8 +263,8 @@ def test_an_empty_holdout_refuses_as_too_thin_and_undefined():
     "criterion", ["r_squared", "concordance_correlation_coefficient"]
 )
 def test_each_regression_statistic_is_the_one_recorded_and_a_skill_free_prediction_fails(
-    criterion,
-):
+    criterion: str,
+) -> None:
     from tcip_mcp.pipelines.operating_point import (
         REGRESSION_CRITERIA,
         scalar_criterion,

@@ -47,19 +47,21 @@ def _run_guard_check(test_file: str) -> subprocess.CompletedProcess:
     )
 
 
-def test_a_known_guard_named_by_its_absolute_path_reports_guards():
+def test_a_known_guard_named_by_its_absolute_path_reports_guards() -> None:
     result = _run_guard_check(str(TEST_FILE))
     assert result.returncode == 0, result.stdout + result.stderr
     assert "GUARDS" in result.stdout
 
 
-def test_the_same_guard_named_by_its_repo_relative_path_reports_guards():
+def test_the_same_guard_named_by_its_repo_relative_path_reports_guards() -> (
+    None
+):
     result = _run_guard_check("tests/test_admission_rule_of.py")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "GUARDS" in result.stdout
 
 
-def test_a_path_outside_tests_is_refused_by_name():
+def test_a_path_outside_tests_is_refused_by_name() -> None:
     outside = REPO_ROOT / "tools" / "prove_test_fails_before.py"
     result = subprocess.run(
         [sys.executable, str(SCRIPT), str(outside)],
@@ -74,7 +76,9 @@ def test_a_path_outside_tests_is_refused_by_name():
     assert "outside tests/" in result.stdout
 
 
-def test_a_relative_and_absolute_dotdot_path_outside_tests_are_both_refused():
+def test_a_relative_and_absolute_dotdot_path_outside_tests_are_both_refused() -> (
+    None
+):
     """A relative and an absolute ".." path outside tests/ are both refused.
 
     A relative spelling that reads as inside tests/ before its ".." segments collapse

@@ -4,12 +4,17 @@ The schema validates the flat config with its training keys beside ``model_sourc
 ``data``, and a nested ``training`` section is refused by name.
 """
 
+from __future__ import annotations
+
 import copy
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from pydantic import ValidationError
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
 
 from tcip_mcp.pipelines.schemas import (
     NESTED_TRAINING_SECTION_REFUSAL,
@@ -48,7 +53,7 @@ from tests._training_values import (
 )
 
 
-def _issues_of(config):
+def _issues_of(config: dict) -> list[str]:
     """Return the issues ``schemas.checked_train_config`` reports for ``config``."""
     return checked_train_config(config)[1]
 
@@ -196,7 +201,7 @@ def _door_issues(config: dict) -> list[str]:
     return _structural_issues(train_config(config), REPO_ROOT)[1]
 
 
-def test_a_flat_config_validates_with_no_issue():
+def test_a_flat_config_validates_with_no_issue() -> None:
     assert _issues_of(FLAT_CONFIG) == []
 
 
@@ -220,8 +225,8 @@ def _refused_naming(config: dict, path: str, project: Path) -> None:
     sorted({*_required_paths(), *STATED_PATHS}) + DRAWN_SPLIT_PATHS,
 )
 def test_a_config_stating_no_required_value_is_refused_naming_it(
-    path, tmp_path
-):
+    path: str, tmp_path: Path
+) -> None:
     """A config stating no required value is refused naming it, and one stating it is admitted.
 
     Each required or stated value, a drawn split's shares, stratification and seed among them,
@@ -232,8 +237,8 @@ def test_a_config_stating_no_required_value_is_refused_naming_it(
 
 @pytest.mark.parametrize(("kind", "path"), SCHEDULE_PATHS)
 def test_a_schedule_stating_no_setting_is_refused_naming_it(
-    kind, path, tmp_path
-):
+    kind: str, path: str, tmp_path: Path
+) -> None:
     """Each setting a schedule kind states is refused unstated by name."""
     _refused_naming(
         {**FLAT_CONFIG, "scheduler": schedule(kind)}, path, tmp_path
@@ -241,7 +246,9 @@ def test_a_schedule_stating_no_setting_is_refused_naming_it(
 
 
 @pytest.mark.parametrize("path", DRAWN_SPLIT_PATHS)
-def test_a_drawn_split_omitting_a_draw_key_is_refused_by_that_field(path):
+def test_a_drawn_split_omitting_a_draw_key_is_refused_by_that_field(
+    path: str,
+) -> None:
     """A drawn split omitting a draw key is refused by that field's requiredness, located at it.
 
     One draw key left out is reported as ``data.split.drawn.<key>: Field required``.
@@ -251,7 +258,7 @@ def test_a_drawn_split_omitting_a_draw_key_is_refused_by_that_field(path):
     assert f"data.split.drawn.{key}: Field required" in issues, issues
 
 
-def test_a_drawn_split_groups_by_a_named_policy_or_an_explicit_map():
+def test_a_drawn_split_groups_by_a_named_policy_or_an_explicit_map() -> None:
     """A drawn split's one ``grouping`` admits a named policy or an explicit map."""
     assert isinstance(FLAT_CONFIG["data"]["split"]["grouping"], str)
     assert _issues_of(FLAT_CONFIG) == []
@@ -261,7 +268,7 @@ def test_a_drawn_split_groups_by_a_named_policy_or_an_explicit_map():
 
 
 @pytest.mark.parametrize("path", RATIONALE_PATHS)
-def test_a_block_stating_no_reason_is_refused_naming_it(path):
+def test_a_block_stating_no_reason_is_refused_naming_it(path: str) -> None:
     """A stated block left without its ``rationale`` is refused naming the block.
 
     Each stated block carries its own ``rationale``, and the config stating each is admitted.
@@ -284,7 +291,7 @@ def _least_admitted(config: dict, paths: list[str]) -> dict:
     return least
 
 
-def _at(record: dict, path: str) -> Any:
+def _at(record: dict, path: str) -> JsonValue:
     """Return the value at the dotted ``path`` of ``record``; ``KeyError`` naming it when absent."""
     node: Any = record
     for part in path.split("."):
@@ -322,7 +329,9 @@ RECORDED_PATHS = [
 """Every value training and its loaders read, by its dotted path in a run's recorded config."""
 
 
-def test_a_runs_record_names_every_value_its_training_reads(tmp_path):
+def test_a_runs_record_names_every_value_its_training_reads(
+    tmp_path: Path,
+) -> None:
     """A run's record carries each recorded training value, as a run context reads it.
 
     The least config the platform admits for a tiled, drawn detection run under a one-cycle
@@ -330,7 +339,7 @@ def test_a_runs_record_names_every_value_its_training_reads(tmp_path):
     ``run.json``'s config, non-null, and a run context's spec record over the same config
     carries each at the recorded value.
     """
-    from tcip_mcp.experiments import observe
+    from tcip_mcp.experiments import observe_run
     from tests._verified_checkpoint_fixtures import (
         SCOPED_DATA,
         detection_images,
@@ -359,7 +368,7 @@ def test_a_runs_record_names_every_value_its_training_reads(tmp_path):
     )
     least = _least_admitted(config, RECORDED_PATHS)
 
-    recorded = observe(opened_run(tmp_path, least)).record["config"]
+    recorded = observe_run(opened_run(tmp_path, least)).record.config
     worker = run_context(tmp_path, least).run.spec.record()
     for path in RECORDED_PATHS:
         assert _at(recorded, path) == _at(worker, path) is not None, path
@@ -367,14 +376,16 @@ def test_a_runs_record_names_every_value_its_training_reads(tmp_path):
 
 @pytest.mark.parametrize("path", TRAINER_READ_PATHS)
 def test_a_config_stating_no_tuned_value_is_admitted_and_refused_at_the_door_naming_it(
-    path,
-):
+    path: str,
+) -> None:
     stated = _without(FLAT_CONFIG, path)
     assert _issues_of(stated) == []
     assert _names(_door_issues(stated), path)
 
 
-def test_a_config_naming_its_own_loop_states_only_what_its_loop_reads():
+def test_a_config_naming_its_own_loop_states_only_what_its_loop_reads() -> (
+    None
+):
     """A config naming its own training loop is not asked for the default trainer's regime.
 
     The door refuses a config naming no ``training_source`` that leaves the default regime's
@@ -393,7 +404,7 @@ def test_a_config_naming_its_own_loop_states_only_what_its_loop_reads():
     assert not any("unstated" in issue for issue in looped), looped
 
 
-def test_an_optimizer_naming_no_family_is_refused_naming_it():
+def test_an_optimizer_naming_no_family_is_refused_naming_it() -> None:
     """An optimizer block naming no family is refused naming ``optimizer.name``.
 
     The optimizer's family has no default, and the same block naming it is admitted.
@@ -405,7 +416,9 @@ def test_an_optimizer_naming_no_family_is_refused_naming_it():
 
 
 @pytest.mark.parametrize("kind", SCHEDULER_TYPES)
-def test_each_schedule_states_its_own_settings_and_no_other(kind):
+def test_each_schedule_states_its_own_settings_and_no_other(
+    kind: str,
+) -> None:
     from typing import get_args
 
     from tcip_mcp.pipelines.schemas import SchedulerSpec
@@ -440,7 +453,7 @@ def test_each_schedule_states_its_own_settings_and_no_other(kind):
         assert _names(issues, f"scheduler.{stray}"), issues
 
 
-def test_sgd_states_its_momentum_and_no_other_optimizer_does():
+def test_sgd_states_its_momentum_and_no_other_optimizer_does() -> None:
     sgd = sgd_optimizer()
     adamw: dict = {**FLAT_CONFIG["optimizer"], "momentum": sgd["momentum"]}
     assert _issues_of({**FLAT_CONFIG, "optimizer": sgd}) == []
@@ -453,7 +466,9 @@ def test_sgd_states_its_momentum_and_no_other_optimizer_does():
     )
 
 
-def test_a_sweep_base_config_may_omit_only_what_its_search_space_names():
+def test_a_sweep_base_config_may_omit_only_what_its_search_space_names() -> (
+    None
+):
     """A sweep's base config may omit the rate its search space names.
 
     With the sweep's point applied, a base config leaving the swept rate to the sweep validates,
@@ -472,7 +487,7 @@ def test_a_sweep_base_config_may_omit_only_what_its_search_space_names():
     assert _names(issues, "optimizer.backbone_lr"), issues
 
 
-def test_a_nested_training_section_is_refused_by_name():
+def test_a_nested_training_section_is_refused_by_name() -> None:
     nested = {
         k: v
         for k, v in FLAT_CONFIG.items()
@@ -486,20 +501,22 @@ def test_a_nested_training_section_is_refused_by_name():
     assert "top level" in NESTED_TRAINING_SECTION_REFUSAL
 
 
-def test_an_empty_training_section_is_refused_too():
+def test_an_empty_training_section_is_refused_too() -> None:
     """An empty ``training`` section is refused by its key with the nested-section refusal."""
     assert _issues_of({**FLAT_CONFIG, "training": {}}) == [
         NESTED_TRAINING_SECTION_REFUSAL
     ]
 
 
-def test_top_level_stages_are_typed_by_stage_spec():
+def test_top_level_stages_are_typed_by_stage_spec() -> None:
     """A stage carries no epoch count: one stating ``epochs`` is refused by name."""
     issues = _issues_of({**FLAT_CONFIG, "stages": [stage(0, epochs=5)]})
     assert any("stages.0.epochs" in issue for issue in issues), issues
 
 
-def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
+def test_the_trainer_reads_the_flat_config_as_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An opened run's recorded spec carries the flat config's stages as given.
 
     The record holds the configured stages and no ``training`` key.
@@ -525,20 +542,22 @@ def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
     assert "training" not in run.spec.record()
 
 
-def test_stage_spec_refuses_a_per_stage_lr():
+def test_stage_spec_refuses_a_per_stage_lr() -> None:
     """A stage stating its own learning rate is refused naming ``lr``."""
     StageSpec.model_validate(stage(-1))
     with pytest.raises(ValidationError, match="lr"):
         StageSpec.model_validate(stage(-1, lr=1e-3))
 
 
-def test_a_stage_states_its_own_gradient_accumulation():
+def test_a_stage_states_its_own_gradient_accumulation() -> None:
     """A stage stating its own gradient accumulation is admitted by the schema."""
     stages = [stage(-1), stage(0, gradient_accumulation_steps=4)]
     assert _issues_of({**FLAT_CONFIG, "stages": stages}) == []
 
 
-def test_the_stop_rule_validates_as_stated_and_refuses_a_zero_patience_and_an_on_switch():
+def test_the_stop_rule_validates_as_stated_and_refuses_a_zero_patience_and_an_on_switch() -> (
+    None
+):
     """The stop rule validates as stated and refuses a zero patience and an ``enabled`` key.
 
     The stop rule's values are the config's own, read as stated, and none has a default; a
@@ -578,7 +597,7 @@ def test_the_stop_rule_validates_as_stated_and_refuses_a_zero_patience_and_an_on
     )
 
 
-def test_lr_scaling_requires_its_power_and_names_no_reference_batch():
+def test_lr_scaling_requires_its_power_and_names_no_reference_batch() -> None:
     scaling = {"scale_power": 0.5, "rationale": RATIONALE}
     assert (
         _issues_of({**FLAT_CONFIG, "lr_scaling": {**scaling, "max_lr": 0.01}})
@@ -601,7 +620,9 @@ def test_lr_scaling_requires_its_power_and_names_no_reference_batch():
     )
 
 
-def test_the_loaders_read_the_batch_size_the_schema_validated(tmp_path):
+def test_the_loaders_read_the_batch_size_the_schema_validated(
+    tmp_path: Path,
+) -> None:
     """The loaders are built at the batch size the schema validated, coerced the same way.
 
     The string ``"3"`` the schema admits builds loaders of batch size 3, and a batch size of 0
@@ -627,7 +648,7 @@ def test_the_loaders_read_the_batch_size_the_schema_validated(tmp_path):
         train_config({**FLAT_CONFIG, "batch_size": 0})
 
 
-def test_model_source_refuses_an_undeclared_key_by_name():
+def test_model_source_refuses_an_undeclared_key_by_name() -> None:
     """A misspelled model_source key is refused by name where the config is validated."""
     issues = _issues_of(
         {
@@ -641,7 +662,7 @@ def test_model_source_refuses_an_undeclared_key_by_name():
     assert any("anchor_ratio" in issue for issue in issues)
 
 
-def test_model_source_admits_every_declared_key(tmp_path):
+def test_model_source_admits_every_declared_key(tmp_path: Path) -> None:
     """A model source stating builder, kwargs, task, sources, statistics and geometry validates.
 
     The statistics are stated as their derivation's own producer records them and the geometry
@@ -672,7 +693,7 @@ def test_model_source_admits_every_declared_key(tmp_path):
     assert issues == []
 
 
-def test_a_width_stated_on_the_model_source_is_refused_by_name():
+def test_a_width_stated_on_the_model_source_is_refused_by_name() -> None:
     """A width stated on the model source is refused by name.
 
     The width is the run's own ``data.num_channels``; a model source stating ``in_chans`` is
@@ -728,8 +749,8 @@ def test_a_width_stated_on_the_model_source_is_refused_by_name():
     ],
 )
 def test_a_fact_a_reader_reads_is_refused_where_the_config_is_validated(
-    path, config
-):
+    path: str, config: dict
+) -> None:
     """A fact a reader reads that is missing, mistyped or misspelled is refused at validation.
 
     ``model_source.task`` and the listed ``data`` keys a resolver or a recorded-dimension reader
@@ -740,7 +761,7 @@ def test_a_fact_a_reader_reads_is_refused_where_the_config_is_validated(
     assert any(issue.startswith(path) for issue in issues), issues
 
 
-def test_a_stated_tiling_block_reaches_the_tiler_as_stated():
+def test_a_stated_tiling_block_reaches_the_tiler_as_stated() -> None:
     """A stated ``data.tiling`` block reaches the tiler as stated.
 
     Every tiler option the block states validates and reaches the tiler's keyword arguments by

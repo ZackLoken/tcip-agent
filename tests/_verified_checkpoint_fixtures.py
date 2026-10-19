@@ -8,7 +8,7 @@ registered through ``register_model``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -26,6 +26,13 @@ from tests._training_values import (
     drawn_split,
     sweep_space,
 )
+
+if TYPE_CHECKING:
+    from tcip_mcp.model_registry import VerifiedCheckpoint
+    from tcip_mcp.pipelines.data.split_construction import Partition
+    from tcip_mcp.pipelines.derivations import Region
+    from tcip_mcp.pipelines.execution import Execution, Pass
+    from tcip_mcp.subject_registry import SubjectRegistry
 
 torch = pytest.importorskip("torch")
 
@@ -51,7 +58,7 @@ SAVE_A_SECOND_CHECKPOINT = (
 """A ``training_source`` saving the built weights as the deliverable and again beside it."""
 
 
-def built_detector(**builder_kwargs: Any) -> dict:
+def built_detector(**builder_kwargs: object) -> dict:
     """Return :data:`BUILT_DETECTOR` with ``builder_kwargs`` as its builder keywords."""
     return {**BUILT_DETECTOR, "builder_kwargs": builder_kwargs}
 
@@ -71,7 +78,7 @@ def detection_images(
     n: int = 2,
     polygons: bool = False,
     values: dict[str, str] | None = None,
-    registry: Any = None,
+    registry: SubjectRegistry | None = None,
 ) -> dict:
     """Write ``n`` labeled frames under ``where`` through ``seed_labeled_images``.
 
@@ -133,7 +140,7 @@ def detection_config(
     project: Path,
     model_source: dict = BUILT_DETECTOR,
     split: dict | None = None,
-    **config: Any,
+    **config: object,
 ) -> dict:
     """Return a :func:`~tests._chain_fixtures.training_config` over two detection frames.
 
@@ -166,7 +173,7 @@ def opened_run(
     config: dict,
     *,
     experiment_id: str | None = None,
-    **facts: Any,
+    **facts: str | float | dict | None,
 ) -> Path:
     """Open a run directory under the project ``root`` over ``config`` validated.
 
@@ -209,7 +216,11 @@ SWEEP_ARGUMENTS: dict[str, Any] = {
 arguments."""
 
 
-def opened_sweep(root: str | Path, base_config: dict, **given: Any) -> Path:
+def opened_sweep(
+    root: str | Path,
+    base_config: dict,
+    **given: dict | int | str | list[int] | None,
+) -> Path:
     """Open a sweep directory under the project ``root`` through the sweep door's own producer.
 
     ``training_tools.open_sweep`` opens it over ``base_config``, :data:`SWEEP_ARGUMENTS` with
@@ -229,16 +240,9 @@ def opened_sweep(root: str | Path, base_config: dict, **given: Any) -> Path:
     return opened
 
 
-def partition_side(partition: dict, side: str) -> list[str]:
-    """Return the members a resolved partition records on ``side``, sorted.
-
-    They are read through ``split_construction.partition_samples``.
-    """
-    from tcip_mcp.pipelines.data.split_construction import partition_samples
-
-    return sorted(
-        s.member for s in partition_samples(partition) if s.side == side
-    )
+def partition_side(partition: Partition, side: str) -> list[str]:
+    """Return the members a resolved partition records on ``side``, sorted."""
+    return sorted(s.member for s in partition.samples if s.side == side)
 
 
 def log_epoch(run_dir: Path, epoch: int, metrics: dict) -> None:
@@ -264,8 +268,8 @@ def finished_run(
     wall_clock_passed: bool = False,
     cancel_requested: bool = False,
     seed: int | None = None,
-    registry: Any = None,
-    **config: Any,
+    registry: SubjectRegistry | None = None,
+    **config: object,
 ) -> Path:
     """Open a run under ``root`` and run it by the child's own entry to its final status.
 
@@ -412,7 +416,7 @@ def run_to_end(
     )
 
 
-def registered_checkpoint(project_root: str | Path, **kwargs: Any) -> str:
+def registered_checkpoint(project_root: str | Path, **kwargs: object) -> str:
     """Return the path of the checkpoint a :func:`finished_run` registered by completing.
 
     The run is under ``project_root``; ``kwargs`` are its own.
@@ -422,7 +426,7 @@ def registered_checkpoint(project_root: str | Path, **kwargs: Any) -> str:
     observation = observe(finished_run(project_root, **kwargs))
     checkpoint = observation.checkpoint
     assert checkpoint is not None, observation.final
-    return checkpoint["path"]
+    return checkpoint.path
 
 
 def foreign_checkpoint(
@@ -440,7 +444,7 @@ def foreign_checkpoint(
     return path
 
 
-def secondary_checkpoint(project_root: Path, **config: Any) -> str:
+def secondary_checkpoint(project_root: Path, **config: object) -> str:
     """Return the path of a checkpoint no completion registered.
 
     It is the second one a :func:`finished_run` of ``project_root`` (``config``'s keys taking
@@ -499,7 +503,7 @@ def register_checkpoint(
 _PROJECT_CHECKPOINTS: dict[str, str] = {}
 
 
-def project_checkpoint(project_root: str | Path, **kwargs: Any) -> str:
+def project_checkpoint(project_root: str | Path, **kwargs: object) -> str:
     """Return one :func:`registered_checkpoint` per project root and ``kwargs``.
 
     It is made on first call and answered again after.
@@ -511,7 +515,9 @@ def project_checkpoint(project_root: str | Path, **kwargs: Any) -> str:
     return _PROJECT_CHECKPOINTS[key]
 
 
-def verified_checkpoint(project_root: str | Path, **kwargs: Any):
+def verified_checkpoint(
+    project_root: str | Path, **kwargs: object
+) -> VerifiedCheckpoint:
     """Return the registry's own ``VerifiedCheckpoint`` over :func:`project_checkpoint`'s."""
     from tcip_mcp.model_registry import load_registered_checkpoint
 
@@ -542,7 +548,7 @@ SAMPLE_INSTANCE_SEG_PASS = {
 the sample mask cut."""
 
 
-def objects_over(boxes: list[list[float]], area: float):
+def objects_over(boxes: list[list[float]], area: float) -> Region:
     """Return the region ``datasets.object_region`` makes of one-class objects at ``boxes``.
 
     ``boxes`` are xyxy, none a crowd region, over ``area`` pixels.
@@ -566,7 +572,7 @@ def tiled_record(
     conf: float,
     tile_resize: tuple[int, int] | None = None,
     cross_tile_nms: float = SAMPLE_CROSS_TILE_NMS,
-):
+) -> Execution:
     """Return a detector's tiled execution record at ``tile_size``, ``overlap`` and ``tile_resize``.
 
     Each of those is stated; the record states ``conf`` and a merge by NMS at the stated
@@ -610,8 +616,8 @@ def predicted_over(
     images_dir: str,
     *,
     device: str | None = None,
-    **stated: Any,
-):
+    **stated: object,
+) -> tuple[Pass, list[dict]]:
     """Prepare and run a pass of the detector registered at ``checkpoint_path``, publishing nothing.
 
     The pass reads ``images_dir`` (``execution.prepare`` under the ``stated`` execution values
@@ -636,16 +642,16 @@ def completed_checkpoint(run_dir: Path) -> dict | None:
     The checkpoint's ``path`` stands beside what it says of itself
     (``model_registry.entry_facts``); ``None`` when the run did not complete one.
     """
-    from tcip_mcp.experiments import observe, project_of_run
+    from tcip_mcp.experiments import observe_run, project_of_run
     from tcip_mcp.model_registry import entry_facts, run_entry
 
-    entry = run_entry(observe(run_dir))
+    entry = run_entry(observe_run(run_dir))
     return (
         None
         if entry is None
         else {
-            "path": entry["checkpoint_path"],
-            "sha256": entry["sha256"],
-            **entry_facts(entry, project_of_run(run_dir)),
+            "path": entry.checkpoint_path,
+            "sha256": entry.sha256,
+            **entry_facts(entry, project_of_run(run_dir)).model_dump(),
         }
     )

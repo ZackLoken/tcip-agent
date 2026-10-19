@@ -6,11 +6,22 @@ Each skips what the label documents mark finished.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
 from tcip_mcp.tools.feedback_tools import prioritize_review_queue
 from tests._training_values import COMBINED_SCORER, RATIONALE, drawn_split
+
+if TYPE_CHECKING:
+    import pytest
+
+    from tcip_mcp.pipelines.data.selection import Selection
+    from tcip_mcp.pipelines.execution import Execution
+    from tcip_mcp.pipelines.image_utils import BandGroupRef
+    from tcip_mcp.pipelines.inference.generic_predictor import (
+        GenericPredictor,
+    )
 
 DATE = "2026-03-04"
 QUEUE = {"scorer": COMBINED_SCORER, "budget": 50, "rationale": RATIONALE}
@@ -43,14 +54,16 @@ def _dataset(tmp_path: Path, *, marked: tuple[str, ...]) -> Path:
     return images
 
 
-def test_prioritize_review_queue_checkpoint_missing(tmp_path):
+def test_prioritize_review_queue_checkpoint_missing(tmp_path: Path) -> None:
     r = prioritize_review_queue(
         tmp_path, str(tmp_path / "nope.pt"), str(tmp_path), **QUEUE
     )
     assert "error" in r  # early guard, no torch import needed
 
 
-def test_prioritize_review_queue_skips_the_images_marked_finished(tmp_path):
+def test_prioritize_review_queue_skips_the_images_marked_finished(
+    tmp_path: Path,
+) -> None:
     """``prioritize_review_queue`` skips both marked images and queues no candidate."""
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -70,8 +83,8 @@ def test_prioritize_review_queue_skips_the_images_marked_finished(tmp_path):
 
 
 def test_triage_predictions_skips_only_the_images_marked_finished(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Triage skips the image marked finished for its subject and triages the rest.
 
     The marked image drops out of the queue and the unmarked one is triaged; for a subject
@@ -116,7 +129,9 @@ def test_triage_predictions_skips_only_the_images_marked_finished(
     assert other["review_images"] == ["imgA.png", "imgB.png"]
 
 
-def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
+def test_triage_predictions_surfaces_unscoreable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Triage routes predictions carrying no confidence to review, tagged unscoreable.
 
     A prediction carrying ``head0_values`` and no scores is routed to review and listed in
@@ -153,8 +168,11 @@ def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
 
 
 def _stubbed_triage_predictions(
-    tmp_path, monkeypatch, predictions: list[dict], **kwargs
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    predictions: list[dict],
+    **kwargs: float | str,
+) -> dict:
     """Run triage_predictions over a real registered checkpoint with predict_batch stubbed.
 
     The stubbed ``predict_batch`` answers ``predictions`` as given, and ``kwargs`` override the
@@ -187,7 +205,9 @@ def _stubbed_triage_predictions(
     )
 
 
-def _triage_over_one_image(tmp_path, monkeypatch) -> tuple[str, str, list]:
+def _triage_over_one_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[str, str, list]:
     """Return a registered detector, a one-image capture, and its predictor's executions.
 
     The execution records are those the stubbed predictor is run under, appended as it runs.
@@ -203,7 +223,9 @@ def _triage_over_one_image(tmp_path, monkeypatch) -> tuple[str, str, list]:
     (images / "a.jpg").write_bytes(b"x")
     ran_at: list = []
 
-    def _predict(sources, **kw):
+    def _predict(
+        sources: list[str | Path | BandGroupRef], **kw: Execution | int
+    ) -> list[dict]:
         ran_at.append(kw["execution"])
         return [{"image": "a.jpg", "scores": [0.35]}]
 
@@ -215,7 +237,9 @@ def _triage_over_one_image(tmp_path, monkeypatch) -> tuple[str, str, list]:
     return str(ckpt), str(images), ran_at
 
 
-def test_triage_predicts_a_detector_at_its_low_bound(tmp_path, monkeypatch):
+def test_triage_predicts_a_detector_at_its_low_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Triage predicts a detector at the band's low bound.
 
     The detector predicts at ``low`` itself, each frame capped at the density its checkpoint
@@ -239,8 +263,8 @@ def test_triage_predicts_a_detector_at_its_low_bound(tmp_path, monkeypatch):
 
 
 def test_triage_predictions_routes_the_band_and_the_unscoreable_and_accepts_nothing(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Triage routes the band and the unscoreable to review and answers no acceptance.
 
     A confident prediction leaves the queue without being accepted: the answer names no accepted
@@ -262,7 +286,7 @@ def test_triage_predictions_routes_the_band_and_the_unscoreable_and_accepts_noth
     }
 
 
-def test_unresolvable_scorer_raises_valueerror_not_an_import_error():
+def test_unresolvable_scorer_raises_valueerror_not_an_import_error() -> None:
     """An unknown scorer name and a dotted one that fails to import each raise ``ValueError``."""
     import pytest
 
@@ -277,7 +301,9 @@ def test_unresolvable_scorer_raises_valueerror_not_an_import_error():
         )
 
 
-def test_a_scorer_block_states_every_value_its_factory_requires_and_nothing_else():
+def test_a_scorer_block_states_every_value_its_factory_requires_and_nothing_else() -> (
+    None
+):
     """A scorer block refuses a missing or untaken factory value and builds at its stated ones.
 
     A ``combined`` block without its weights refuses naming each missing one, a value the
@@ -313,7 +339,7 @@ def test_a_scorer_block_states_every_value_its_factory_requires_and_nothing_else
     assert (built.uw, built.dw) == (0.6, 0.4)
 
 
-def test_unresolvable_proposal_engine_raises_valueerror():
+def test_unresolvable_proposal_engine_raises_valueerror() -> None:
     import pytest
 
     from tcip_mcp.pipelines.proposal import resolve_proposer
@@ -351,15 +377,17 @@ def _bound_checkpoint(
     )
     checkpoint = observe(run_dir).checkpoint
     assert checkpoint is not None
-    return run_dir, checkpoint["path"]
+    return run_dir, checkpoint.path
 
 
-def _stub_scorer(monkeypatch) -> None:
+def _stub_scorer(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub the scorer to score each candidate 1.0, in the order handed."""
     import tcip_mcp.pipelines.active_learning.scorer as al_scorer
 
     class _Scorer:
-        def score(self, sources, predictor):
+        def score(
+            self, sources: list[str], predictor: GenericPredictor
+        ) -> list[tuple[str, float]]:
             return [(s, 1.0) for s in sources]
 
     monkeypatch.setattr(
@@ -367,14 +395,14 @@ def _stub_scorer(monkeypatch) -> None:
     )
 
 
-def _reference_samples(drawn) -> list:
+def _reference_samples(drawn: Selection) -> list:
     """Return the samples a drawn selection holds on its calibration and holdout sides."""
     return [s for side in REFERENCE_SIDES for s in drawn.on(side)]
 
 
 def test_prioritize_review_queue_marks_a_bound_runs_reference_sides(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A bound run's review queue marks candidates on its selection's reference sides.
 
     A checkpoint whose run was bound to a selection marks each ranked candidate against that
@@ -418,9 +446,9 @@ def test_prioritize_review_queue_marks_a_bound_runs_reference_sides(
 
 
 def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selection_changed(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The review queue marks the run's frozen reference sides after the selection changed.
 
     With the selection rewritten after the run, its calibration and holdout samples moved to
@@ -428,8 +456,8 @@ def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selec
     """
     import tcip_store as ts
     from tcip_mcp.pipelines.data.selection import (
-        selection_document,
         selection_key,
+        stored_selection_document,
     )
     from tests.test_selection_ground_truth_digests import (
         DATES,
@@ -452,8 +480,10 @@ def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selec
         tmp_path, manifest_dir, "exp-pq-frozen"
     )
 
-    document = selection_document(drawn)
+    document = stored_selection_document(drawn, tmp_path)
+    assert isinstance(document, dict) and isinstance(document["samples"], list)
     for sample in document["samples"]:
+        assert isinstance(sample, dict)
         if sample["side"] in REFERENCE_SIDES:
             sample["side"] = "train"
     ts.replace(selection_key(manifest_dir), document)
@@ -473,8 +503,8 @@ def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selec
 
 
 def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The review queue scores each three-band candidate under a one-channel checkpoint."""
     from PIL import Image
 
@@ -506,8 +536,8 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(
 
 
 def test_prioritize_review_queue_unbound_run_carries_no_marks(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An unbound run's review queue carries no reference marks.
 
     A checkpoint whose registry entry names no producing run has nothing bound to check
@@ -530,8 +560,8 @@ def test_prioritize_review_queue_unbound_run_carries_no_marks(
 
 
 def test_the_queue_operation_reads_the_locations_its_arrival_established(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``ranked_review_queue`` does not locate its checkpoint or images directory again.
 
     The queue the web route launches over the checkpoint and images directory its own arrival
@@ -548,7 +578,7 @@ def test_the_queue_operation_reads_the_locations_its_arrival_established(
     _stub_scorer(monkeypatch)
     located_again: list = []
 
-    def located(path, project):
+    def located(path: str | Path, project: str | Path | None) -> Path:
         located_again.append(path)
         return Path(path)
 
@@ -599,7 +629,9 @@ def _labeled_flat_image(path: Path) -> None:
     )
 
 
-def _flat_images_dataset(root: Path, stems=_FLAT_STEMS) -> Path:
+def _flat_images_dataset(
+    root: Path, stems: tuple[str, ...] = _FLAT_STEMS
+) -> Path:
     """Write labeled images in the undated capture alone and return the dataset root."""
     for stem in stems:
         _labeled_flat_image(root / "images" / UNDATED_BUCKET / f"{stem}.jpg")
@@ -607,7 +639,7 @@ def _flat_images_dataset(root: Path, stems=_FLAT_STEMS) -> Path:
 
 
 def _mixed_dated_and_flat_dataset(
-    root: Path, date: str, stems=_FLAT_STEMS
+    root: Path, date: str, stems: tuple[str, ...] = _FLAT_STEMS
 ) -> Path:
     """Write labeled images under ``images/<date>/`` and the same stems in the undated capture.
 
@@ -619,7 +651,9 @@ def _mixed_dated_and_flat_dataset(
     return root
 
 
-def _draw_flat(project: Path, root: Path, out: Path, *, seed: int = 2):
+def _draw_flat(
+    project: Path, root: Path, out: Path, *, seed: int = 2
+) -> Selection:
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
 
@@ -641,8 +675,8 @@ def _draw_flat(project: Path, root: Path, out: Path, *, seed: int = 2):
 
 
 def test_prioritize_review_queue_marks_an_undated_capture_correctly(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A run bound over an undated capture alone marks its reference sides correctly.
 
     Over a dataset whose images are its undated capture alone, the queue marks exactly the stems
@@ -674,9 +708,9 @@ def test_prioritize_review_queue_marks_an_undated_capture_correctly(
 
 
 def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibration_side(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A bound run does not mark a reference sample from another capture's directory.
 
     A selection spanning a dated and the undated capture marks exactly the calibration samples
@@ -722,7 +756,9 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
     assert not (marked_true & leaked)
 
 
-def test_prioritize_review_queue_signature_drops_the_triage_only_parameters():
+def test_prioritize_review_queue_signature_drops_the_triage_only_parameters() -> (
+    None
+):
     """``prioritize_review_queue`` carries no strategy flag and none of triage's own knobs."""
     import inspect
 
@@ -733,7 +769,9 @@ def test_prioritize_review_queue_signature_drops_the_triage_only_parameters():
     assert "auto_threshold" not in params
 
 
-def test_the_review_queue_takes_its_scorer_budget_and_reason_with_no_default():
+def test_the_review_queue_takes_its_scorer_budget_and_reason_with_no_default() -> (
+    None
+):
     """The review queue takes its scorer, budget and reason with no default.
 
     ``prioritize_review_queue`` and ``ranked_review_queue`` give ``scorer``, ``budget`` and
@@ -758,7 +796,9 @@ def test_the_review_queue_takes_its_scorer_budget_and_reason_with_no_default():
     )
 
 
-def test_triage_predictions_signature_carries_the_triage_only_parameters():
+def test_triage_predictions_signature_carries_the_triage_only_parameters() -> (
+    None
+):
     """``triage_predictions`` takes its band and reason with no default.
 
     ``triage_predictions`` and ``review_queue`` give ``low`` and ``high`` no default, and
@@ -780,7 +820,7 @@ def test_triage_predictions_signature_carries_the_triage_only_parameters():
     assert "auto_threshold" not in params
 
 
-def test_feedback_tools_register_in_manifest():
+def test_feedback_tools_register_in_manifest() -> None:
     from tcip_mcp.server import list_registered_tools
 
     names = list_registered_tools()

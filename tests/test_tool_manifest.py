@@ -39,7 +39,7 @@ else:
 """
 
 
-def test_server_imports_with_torch_absent():
+def test_server_imports_with_torch_absent() -> None:
     """The MCP server imports and registers tools while torch imports are blocked.
 
     The check runs in a subprocess whose meta-path finder blocks torch and torchvision from
@@ -58,7 +58,7 @@ def test_server_imports_with_torch_absent():
     assert int(result.stdout.strip()) > 0
 
 
-def test_block_torch_finder_actually_blocks_torch_import():
+def test_block_torch_finder_actually_blocks_torch_import() -> None:
     """The meta-path finder the subprocess checks install really prevents importing torch."""
     result = subprocess.run(
         [sys.executable, "-c", _BLOCK_TORCH_AND_TRY_IMPORT],

@@ -7,6 +7,7 @@ The clip tests need no torch. The wrapper tests skip if torch is absent (they go
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -18,6 +19,9 @@ from tcip_mcp.pipelines.data.datasets import clip_rows_to_tile
 from tests._producer_fixtures import dataset_over  # noqa: E402
 from tests._training_values import tiling_block
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 SLIVER = 0.5
 """The sliver cutoff the wrapper tests state: their one-box fixtures derive no size spread."""
 TRIANGLE = Polygon(rings=[[(4.0, 4.0), (124.0, 60.0), (4.0, 60.0)]])
@@ -25,7 +29,11 @@ TRIANGLE = Polygon(rings=[[(4.0, 4.0), (124.0, 60.0), (4.0, 60.0)]])
 second tile its diagonal edge starts at y=32, where its bounding box starts at y=4."""
 
 
-def _clipped(geometries, tile, min_box_size):
+def _clipped(
+    geometries: Sequence[BBox | Polygon],
+    tile: tuple[int, int, int, int],
+    min_box_size: float,
+) -> tuple[np.ndarray, np.ndarray, list[Polygon]]:
     """Clip ``geometries`` (each a box or a polygon) to ``tile``; return boxes, rows, regions.
 
     The clip runs through :func:`clip_rows_to_tile`.
@@ -52,7 +60,9 @@ def _clipped(geometries, tile, min_box_size):
     )
 
 
-def test_a_row_is_clipped_once_and_carries_the_bounds_of_what_the_tile_shows():
+def test_a_row_is_clipped_once_and_carries_the_bounds_of_what_the_tile_shows() -> (
+    None
+):
     """A row clipped to a tile carries the bounds of what the tile shows.
 
     With min_box_size 12 on the tile (200, 200, 264, 264): a row inside the tile is kept, remapped
@@ -112,8 +122,8 @@ def _det_dataset(tmp_path: Path, n: int = 1, size: int = 128) -> Path:
 
 
 def test_a_dataset_too_sparse_to_derive_its_sliver_cutoff_refuses_naming_the_field(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A dataset too sparse to derive its sliver cutoff is refused, naming the field.
 
     Over two images of one box each, an unstated cutoff raises naming ``tiling.sliver_frac``,
@@ -143,7 +153,7 @@ def test_a_dataset_too_sparse_to_derive_its_sliver_cutoff_refuses_naming_the_fie
     assert len(stated) > 0
 
 
-def test_tiled_detection_dataset_wrapper(tmp_path):
+def test_tiled_detection_dataset_wrapper(tmp_path: Path) -> None:
     torch = pytest.importorskip("torch")
 
     images_dir = _det_dataset(tmp_path)
@@ -166,7 +176,9 @@ def test_tiled_detection_dataset_wrapper(tmp_path):
     assert target["labels"].dtype == torch.int64
 
 
-def test_detection_and_instance_seg_tiles_of_one_frame_agree(tmp_path):
+def test_detection_and_instance_seg_tiles_of_one_frame_agree(
+    tmp_path: Path,
+) -> None:
     """The detection and instance-segmentation tiles of one frame agree.
 
     One frame of polygons, several crossing a seam and one of them a triangle no box stands in
@@ -263,7 +275,7 @@ def test_detection_and_instance_seg_tiles_of_one_frame_agree(tmp_path):
     assert straddled > 0
 
 
-def test_tiled_dataset_keeps_empty_tiles(tmp_path):
+def test_tiled_dataset_keeps_empty_tiles(tmp_path: Path) -> None:
     pytest.importorskip("torch")
     from PIL import Image
 
@@ -297,7 +309,7 @@ def test_tiled_dataset_keeps_empty_tiles(tmp_path):
     assert empties > 0
 
 
-def test_tiled_dataset_collate_roundtrip(tmp_path):
+def test_tiled_dataset_collate_roundtrip(tmp_path: Path) -> None:
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     from torch.utils.data import DataLoader
@@ -324,7 +336,7 @@ def test_tiled_dataset_collate_roundtrip(tmp_path):
         assert t["boxes"].shape[0] == t["labels"].shape[0]
 
 
-def test_build_dataset_no_tiling_unchanged(tmp_path):
+def test_build_dataset_no_tiling_unchanged(tmp_path: Path) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.data.datasets import DetectionDataset
     from tests.tiny_trainer_fixtures import write_regression_dataset
@@ -356,7 +368,7 @@ def test_build_dataset_no_tiling_unchanged(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_keep_regions_none_indexes_every_slice(tmp_path):
+def test_keep_regions_none_indexes_every_slice(tmp_path: Path) -> None:
     """No keep_regions and keep_regions=None build the same index, every slice of the lattice."""
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
@@ -392,7 +404,7 @@ def test_keep_regions_none_indexes_every_slice(tmp_path):
     )
 
 
-def test_keep_regions_restricts_to_fully_inside_tiles(tmp_path):
+def test_keep_regions_restricts_to_fully_inside_tiles(tmp_path: Path) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
@@ -425,8 +437,8 @@ def test_keep_regions_restricts_to_fully_inside_tiles(tmp_path):
 
 
 def test_keep_regions_two_views_share_one_base_and_partition_disjointly(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Two keep-region views over one shared base partition its tiles disjointly.
 
     Two TiledDetectionDataset instances over one shared base, with complementary keep_regions,

@@ -6,7 +6,16 @@ seam, the detection cap, and the cross-tile merge threshold a tiled pass derives
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from tcip_mcp.pipelines.derivations import Region
+    from tcip_mcp.pipelines.execution import Pass
 
 torch = pytest.importorskip(
     "torch"
@@ -26,11 +35,11 @@ from tests._dense_op_fixtures import (  # noqa: E402
 from tests._training_values import DISPERSION_QUANTILE  # noqa: E402
 
 
-def test_gt_class_avg_size_derived_from_data():
+def test_gt_class_avg_size_derived_from_data() -> None:
     assert gt_class_avg_size(_records()) == pytest.approx(20.0)
 
 
-def test_count_unbiased_differs_from_f1_max():
+def test_count_unbiased_differs_from_f1_max() -> None:
     recs = _records()
     tol = 0.5 * gt_class_avg_size(
         recs
@@ -58,7 +67,7 @@ def test_count_unbiased_differs_from_f1_max():
     assert by_conf[round(f1m, 6)]["count_bias_mean"] == pytest.approx(0.5)
 
 
-def test_center_match_respects_tolerance():
+def test_center_match_respects_tolerance() -> None:
     # a correct detection just outside tolerance must not count as a hit
     from tcip_mcp.pipelines.training.evaluation import prediction_record
 
@@ -87,7 +96,7 @@ def test_center_match_respects_tolerance():
     )  # miss + false positive
 
 
-def test_sweep_curve_carries_dispersion_and_reference_size_fields():
+def test_sweep_curve_carries_dispersion_and_reference_size_fields() -> None:
     # Every curve entry also carries count_error_at_quantile / count_bias_std / n_images, computed
     # from the same per-image biases list, not a second pass over the data.
     recs = dense_records(
@@ -113,7 +122,7 @@ def test_sweep_curve_carries_dispersion_and_reference_size_fields():
     assert sweep["dispersion_quantile"] == DISPERSION_QUANTILE
 
 
-def test_the_curve_evaluates_every_distinct_calibration_score():
+def test_the_curve_evaluates_every_distinct_calibration_score() -> None:
     from tcip_mcp.pipelines.training.evaluation import prediction_record
 
     scores = [round(0.01 + 0.0097 * i, 6) for i in range(101)]
@@ -144,7 +153,7 @@ def test_the_curve_evaluates_every_distinct_calibration_score():
 # --- the in-model seam ---
 
 
-def _two_stage():
+def _two_stage() -> SimpleNamespace:
     from types import SimpleNamespace
 
     return SimpleNamespace(
@@ -156,7 +165,7 @@ def _two_stage():
     )
 
 
-def _one_stage():
+def _one_stage() -> SimpleNamespace:
     from types import SimpleNamespace
 
     return SimpleNamespace(
@@ -166,7 +175,7 @@ def _one_stage():
     )
 
 
-def test_set_detector_operating_point_two_stage():
+def test_set_detector_operating_point_two_stage() -> None:
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
 
     m = _two_stage()
@@ -178,7 +187,7 @@ def test_set_detector_operating_point_two_stage():
     assert m.detector.roi_heads.detections_per_img == 300
 
 
-def test_set_detector_operating_point_one_stage():
+def test_set_detector_operating_point_one_stage() -> None:
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
 
     m = _one_stage()
@@ -187,7 +196,9 @@ def test_set_detector_operating_point_one_stage():
     assert m.detector.detections_per_img == 300
 
 
-def test_the_object_density_is_its_quantile_over_the_object_bearing_regions():
+def test_the_object_density_is_its_quantile_over_the_object_bearing_regions() -> (
+    None
+):
     """The object density of uniformly dense regions is their objects per pixel, empty ones skipped.
 
     Regions of 80 or 2 objects a frame, or 10 over a tenfold frame, derive that density within
@@ -220,7 +231,7 @@ def test_the_object_density_is_its_quantile_over_the_object_bearing_regions():
 # --- the cross-tile merge threshold ---
 
 
-def _overlap_records(idp="d"):
+def _overlap_records(idp: str = "d") -> list[dict]:
     """Return records ``{idp}_0`` and ``{idp}_1``, each of three 20 px GT boxes 8 px apart.
 
     Each GT box is detected at 0.9.
@@ -242,7 +253,7 @@ def _overlap_records(idp="d"):
     ]
 
 
-def _regions(records):
+def _regions(records: list[dict]) -> list[Region]:
     """Return each record's ground truth as the region of its objects over its frame."""
     from tests._verified_checkpoint_fixtures import objects_over
 
@@ -258,7 +269,9 @@ def _regions(records):
     ]
 
 
-def test_the_merge_threshold_derives_from_the_ground_truths_neighbor_overlap_tail():
+def test_the_merge_threshold_derives_from_the_ground_truths_neighbor_overlap_tail() -> (
+    None
+):
     from tcip_mcp.pipelines.derivations import derive_cross_tile_nms
 
     value = derive_cross_tile_nms(_regions(_overlap_records()))
@@ -266,14 +279,14 @@ def test_the_merge_threshold_derives_from_the_ground_truths_neighbor_overlap_tai
     assert value == pytest.approx(0.4286 + 0.05, abs=1e-2)
 
 
-def test_no_overlapping_ground_truth_derives_no_merge_threshold():
+def test_no_overlapping_ground_truth_derives_no_merge_threshold() -> None:
     from tcip_mcp.pipelines.derivations import derive_cross_tile_nms
 
     assert derive_cross_tile_nms([]) is None
     assert derive_cross_tile_nms(_regions(_records("c"))) is None
 
 
-def _tiled_pass(tmp_path, records, **stated):
+def _tiled_pass(tmp_path: Path, records: list[dict], **stated: float) -> Pass:
     """Return a verified checkpoint's tiled pass, made runnable from ``records``' ground truth.
 
     The pass runs at the sample conf and merges by NMS.
@@ -300,8 +313,8 @@ def _tiled_pass(tmp_path, records, **stated):
 
 
 def test_a_tiled_pass_records_its_derived_merge_threshold_by_the_derivations_name(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.derivations import CROSS_TILE_NMS_DERIVATION
 
     p = _tiled_pass(tmp_path, _overlap_records())
@@ -311,8 +324,8 @@ def test_a_tiled_pass_records_its_derived_merge_threshold_by_the_derivations_nam
 
 
 def test_a_tiled_passs_derived_merge_threshold_is_the_method_its_label_names(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A tiled pass's derived merge threshold is the method its label names.
 
     Over a spread of neighbor overlaps, the threshold a tiled pass records is the labeled
@@ -349,7 +362,9 @@ def test_a_tiled_passs_derived_merge_threshold_is_the_method_its_label_names(
     )
 
 
-def test_a_stated_merge_threshold_is_never_relabeled_derived(tmp_path):
+def test_a_stated_merge_threshold_is_never_relabeled_derived(
+    tmp_path: Path,
+) -> None:
     p = _tiled_pass(tmp_path, _overlap_records(), cross_tile_nms=0.55)
 
     assert p.execution.cross_tile_nms == pytest.approx(0.55)
@@ -357,8 +372,8 @@ def test_a_stated_merge_threshold_is_never_relabeled_derived(tmp_path):
 
 
 def test_an_underivable_merge_threshold_refuses_naming_its_missing_basis(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.execution import ExecutionRefusedError
 
     with pytest.raises(
@@ -368,7 +383,7 @@ def test_an_underivable_merge_threshold_refuses_naming_its_missing_basis(
         _tiled_pass(tmp_path, _records("c"))
 
 
-def test_classification_metrics_per_class_and_bias():
+def test_classification_metrics_per_class_and_bias() -> None:
     from tcip_mcp.pipelines.training.evaluation import classification_metrics
 
     gt = torch.tensor([0, 0, 0, 0, 0, 0, 1, 1, 1, 1])  # 6 closed, 4 open

@@ -9,9 +9,18 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch.utils.data import Dataset
+
+    from tcip_mcp.experiments import ResolvedInput
+    from tcip_mcp.pipelines.data.selection import Selection
 
 pytest.importorskip("torch")
 
@@ -20,8 +29,8 @@ from PIL import Image  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope, read_selection  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
+    Partition,
     auto_train_val,
-    partition_samples,
 )
 from tcip_mcp.pipelines.schemas import DataSpec  # noqa: E402
 from tcip_mcp.tools.data_tools import draw_splits  # noqa: E402
@@ -31,7 +40,9 @@ from tests._training_values import IOU_THRESHOLD, drawn_split  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side, unbuilt_source  # noqa: E402
 
 
-def _train_val(project: Path, task: str, data: DataSpec):
+def _train_val(
+    project: Path, task: str, data: DataSpec
+) -> tuple[Dataset, Dataset | None, Partition, DataSpec]:
     """Return ``split_construction.auto_train_val`` of a ``task`` run of ``project`` over ``data``.
 
     The run declares no dataset builder and is untransformed; the answer is
@@ -45,7 +56,9 @@ def _train_val(project: Path, task: str, data: DataSpec):
 STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
 
 
-def _resolved(project: Path, experiment_id: str, task: str, data_cfg: dict):
+def _resolved(
+    project: Path, experiment_id: str, task: str, data_cfg: dict
+) -> tuple[ResolvedInput, Dataset, Dataset | None]:
     """Resolve a run over ``data_cfg`` and return its record and its loaders' datasets.
 
     The run is under ``project``, resolved by the launcher's own producer: what its launch record
@@ -111,7 +124,9 @@ def _table_dataset(root: Path) -> tuple[Path, Path]:
     return images_dir, csv_path
 
 
-def _drawn(root: Path, ground_truth: Path, out: Path, *, seed: int = 4):
+def _drawn(
+    root: Path, ground_truth: Path, out: Path, *, seed: int = 4
+) -> Selection:
     result = draw_splits(
         out.parent,
         str(root),
@@ -133,7 +148,7 @@ def _drawn(root: Path, ground_truth: Path, out: Path, *, seed: int = 4):
 
 def test_a_bound_semantic_seg_run_trains_over_exactly_its_selections_samples(
     tmp_path: Path,
-):
+) -> None:
     """A bound semantic_seg run's loaders hold exactly its selection's samples.
 
     The training and validation loaders hold the samples the selection recorded on each side,
@@ -162,7 +177,7 @@ def test_a_bound_semantic_seg_run_trains_over_exactly_its_selections_samples(
 
 def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(
     tmp_path: Path,
-):
+) -> None:
     """A bound classification run's sides hold the table rows its selection put on them."""
     root = tmp_path / "ds"
     _images_dir, csv_path = _table_dataset(root)
@@ -180,9 +195,7 @@ def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(
     assert sorted(val_ds.stems) == sorted(s.location for s in drawn.on("val"))
     held_out = {s.location for s in drawn.on("calibration")}
     assert held_out and not held_out & set(train_ds.stems + val_ds.stems)
-    assert {s.ground_truth for s in partition_samples(partition)} == {
-        str(csv_path)
-    }
+    assert {s.ground_truth for s in partition.samples} == {str(csv_path)}
 
 
 def _document_dataset(root: Path) -> tuple[Path, None]:
@@ -244,9 +257,9 @@ def _drop_image_of_a(images_dir: Path, ground_truth: Path | None) -> None:
 @pytest.mark.parametrize("drop", ["ground_truth", "image"])
 def test_a_recorded_sample_is_tallied_as_a_fresh_admission_tallies_it(
     tmp_path: Path,
-    dataset,
+    dataset: Callable[[Path], tuple[Path, Path | None]],
     drop: str,
-):
+) -> None:
     """A recorded sample is tallied as a fresh admission tallies it.
 
     With one member's ground truth or image gone, the refusal of the recorded samples names the
@@ -289,7 +302,7 @@ def test_a_recorded_sample_is_tallied_as_a_fresh_admission_tallies_it(
 
 def test_a_directory_named_like_a_mask_is_admitted_by_neither_read_of_it(
     tmp_path: Path,
-):
+) -> None:
     """A directory named like a mask is admitted by neither read of it.
 
     A directory named ``a.1.png`` among the masks is not admitted, and the samples that are
@@ -327,7 +340,7 @@ def test_a_directory_named_like_a_mask_is_admitted_by_neither_read_of_it(
 # -- each sample reaches its own ground truth ----------------------------------
 
 
-def test_a_mask_sample_reaches_its_own_mask(tmp_path: Path):
+def test_a_mask_sample_reaches_its_own_mask(tmp_path: Path) -> None:
     """A mask sample reaches its own mask.
 
     Each training sample's mask holds the distinct foreground area of the file its sample
@@ -353,7 +366,7 @@ def test_a_mask_sample_reaches_its_own_mask(tmp_path: Path):
         assert Path(sample.ground_truth) == masks_dir / f"{sample.member}.png"
 
 
-def test_a_row_key_sample_reaches_the_row_it_names(tmp_path: Path):
+def test_a_row_key_sample_reaches_the_row_it_names(tmp_path: Path) -> None:
     """A row-key sample reaches the row it names.
 
     Each training sample's label is the one its ``row_key`` names in the table it names.
@@ -383,7 +396,7 @@ def test_a_row_key_sample_reaches_the_row_it_names(tmp_path: Path):
 
 def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(
     tmp_path: Path,
-):
+) -> None:
     """An unbound semantic_seg run reads its membership off its own samples.
 
     With no selection, the loaders' members split the eight stems as the recorded partition does,
@@ -430,7 +443,7 @@ def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(
 
 def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(
     tmp_path: Path,
-):
+) -> None:
     """An unbound regression run reads its membership off its own samples.
 
     The two loaders' members split the eight stems as the recorded partition does, and each
@@ -474,7 +487,7 @@ def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(
 # -- a member's name is its row key, dots and all ------------------------------
 
 
-def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path):
+def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path) -> None:
     """A dotted row key names one member end to end.
 
     A row key is the member's own name: ``a.0`` through ``a.7`` are eight members in the
@@ -514,7 +527,7 @@ def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path):
     assert named == set(dotted)
     assert len(train_ds.stems) == train_ds.num_samples
 
-    samples = partition_samples(resolved.partition)
+    samples = resolved.partition.samples
     assert sorted(s.member for s in samples) == sorted(dotted)
     assert len({s.group for s in samples}) == len(dotted)
 
@@ -532,7 +545,9 @@ def _frozen(
     return freeze_selection(project, experiment_id)
 
 
-def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
+def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(
+    tmp_path: Path,
+) -> None:
     """A mask run freezes into a selection its bind accepts.
 
     Each frozen sample names an existing ``.png`` under the run's mask directory, and a later
@@ -574,7 +589,9 @@ def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
     )
 
 
-def test_a_table_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
+def test_a_table_run_freezes_into_a_selection_its_bind_accepts(
+    tmp_path: Path,
+) -> None:
     """A table run freezes into a selection its bind accepts.
 
     Each frozen sample names the run's table and carries a row key, and a later run bound to the
@@ -610,7 +627,7 @@ def test_a_table_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
 
 def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(
     tmp_path: Path,
-):
+) -> None:
     """A mask edited after the run refuses the freeze by name.
 
     A member's mask replaced after the run refuses the freeze, naming the member.
@@ -656,7 +673,7 @@ def _three_class_masks(root: Path) -> tuple[Path, Path]:
 
 def test_a_stated_class_count_refuses_on_the_run_path_whatever_its_value(
     tmp_path: Path,
-):
+) -> None:
     """A stated class count refuses on the run path, below, at or above the derived count.
 
     A config stating a class count of 2, 3 or 9 refuses naming ``num_classes``, and a config
@@ -684,7 +701,7 @@ def test_a_stated_class_count_refuses_on_the_run_path_whatever_its_value(
     assert resolved.num_classes == 3 and resolved.num_ranks is None
 
 
-def test_a_table_run_stating_a_count_refuses(tmp_path: Path):
+def test_a_table_run_stating_a_count_refuses(tmp_path: Path) -> None:
     """A table run stating a class count refuses by name.
 
     Table values ``0`` and ``1`` derive two classes; a count stated beside them refuses by
@@ -711,7 +728,7 @@ def test_a_table_run_stating_a_count_refuses(tmp_path: Path):
 
 def test_a_runs_unstated_class_count_is_read_once_over_every_sample(
     tmp_path: Path,
-):
+) -> None:
     """A run's unstated class count is read over the samples of both sides.
 
     With the one mask reaching class 2 on the validation side, the run records three classes.
@@ -739,7 +756,7 @@ def test_a_runs_unstated_class_count_is_read_once_over_every_sample(
 
 def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(
     tmp_path: Path,
-):
+) -> None:
     """Evaluation reports metrics over the run's resolved class space.
 
     ``evaluate`` over a training half whose masks reach class 1 alone reports per-class IoU for
@@ -802,7 +819,9 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(
     assert sorted(result["per_class_iou"]) == [0, 1, 2]
 
 
-def test_the_place_and_the_record_read_one_ground_truth_shape(tmp_path: Path):
+def test_the_place_and_the_record_read_one_ground_truth_shape(
+    tmp_path: Path,
+) -> None:
     """A configured place and a recorded sample read one ground-truth shape.
 
     A table, a directory of masks, and no place at all for label documents each read as the
@@ -826,7 +845,7 @@ def test_the_place_and_the_record_read_one_ground_truth_shape(tmp_path: Path):
 
 def test_a_mask_run_refuses_a_stated_class_space_and_admits_the_empty_one(
     tmp_path: Path,
-):
+) -> None:
     """A mask run refuses a stated class space and admits the empty one.
 
     A mask raster carries its own classes, so a scope naming a subject over it refuses by name;
@@ -856,7 +875,7 @@ def test_a_mask_run_refuses_a_stated_class_space_and_admits_the_empty_one(
 
 def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(
     tmp_path: Path,
-):
+) -> None:
     """The bound and drawn mask routes record one directory's members the same way.
 
     One mask directory is admitted by a run bound to a selection drawn over it and by a run
@@ -880,7 +899,7 @@ def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(
         )[0].partition
         return {
             s.member: (s.ground_truth, s.ground_truth_digest, s.source)
-            for s in partition_samples(partition)
+            for s in partition.samples
             if s.side in ("train", "val")
         }
 
@@ -910,7 +929,7 @@ def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(
 
 def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(
     tmp_path: Path,
-):
+) -> None:
     """A document run and a mask run record the same images the same way.
 
     One set of images is resolved under a per-image label document each and under a
@@ -927,7 +946,9 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(
 
     root = tmp_path / "ds"
     images_dir, masks_dir = _mask_dataset(root)
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
+    registry_over(
+        root, SubjectRegistry(subjects=(Subject(name="leaf", description=""),))
+    )
     for stem in STEMS:
         label_image(
             images_dir / f"{stem}.png",
@@ -940,7 +961,7 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(
 
     def resolved(
         experiment_id: str, task: str, data_cfg: dict
-    ) -> tuple[dict, dict, dict]:
+    ) -> tuple[Partition, dict, dict]:
         """Return the resolved partition and each member's ground truth and source as served."""
         record, train_ds, val_ds = _resolved(
             tmp_path, experiment_id, task, data_cfg
@@ -971,13 +992,13 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(
         },
     )
 
-    assert set(document_run) == set(mask_run), (
+    assert set(document_run.model_dump()) == set(mask_run.model_dump()), (
         "one record shape, whatever the ground truth is"
     )
-    assert document_run["group_by"] == mask_run["group_by"] == "stem"
+    assert document_run.group_by == mask_run.group_by == "stem"
 
-    def by_member(partition: dict) -> dict:
-        return {s.member: s for s in partition_samples(partition)}
+    def by_member(partition: Partition) -> dict:
+        return {s.member: s for s in partition.samples}
 
     document_samples, mask_samples = (
         by_member(document_run),

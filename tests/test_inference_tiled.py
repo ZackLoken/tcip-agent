@@ -7,8 +7,14 @@ prepares at tile=True.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from tcip_mcp.pipelines.execution import Execution, Pass
 
 from tests._chain_fixtures import (
     BESPOKE_DETECTION,
@@ -41,7 +47,7 @@ def _detection_checkpoint(tmp_path: Path) -> str:
     )
 
 
-def _tiled_pass(tmp_path: Path, ckpt: str):
+def _tiled_pass(tmp_path: Path, ckpt: str) -> Pass:
     """Prepare and return a tiled pass of ``ckpt`` at tile 64 and the checkpoint's own density.
 
     The pass states overlap 0.2, cross-tile NMS at 0.3 and conf 0.
@@ -64,7 +70,12 @@ def _tiled_pass(tmp_path: Path, ckpt: str):
     ).runnable()
 
 
-def _sliced(p, source, execution=None, **kwargs) -> dict:
+def _sliced(
+    p: Pass,
+    source: str,
+    execution: Execution | None = None,
+    **kwargs: str | dict | Callable[[int, int, dict], None] | None,
+) -> dict:
     """Run ``predict_sliced`` under the pass's own record, or ``execution`` where one is given."""
     return p.predictor.predict_sliced(
         source,
@@ -74,7 +85,7 @@ def _sliced(p, source, execution=None, **kwargs) -> dict:
     )
 
 
-def test_predict_sliced_shape_and_bounds(tmp_path):
+def test_predict_sliced_shape_and_bounds(tmp_path: Path) -> None:
     p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
 
     r = _sliced(p, gray_frame(tmp_path))
@@ -96,19 +107,30 @@ def test_predict_sliced_shape_and_bounds(tmp_path):
         assert 0 <= b[1] <= r["height"] and 0 <= b[3] <= r["height"]
 
 
-def test_predict_sliced_keeps_at_most_the_full_frame_cap(tmp_path):
+def test_predict_sliced_keeps_at_most_the_full_frame_cap(
+    tmp_path: Path,
+) -> None:
     """``predict_sliced`` keeps at most the full frame's cap.
 
     The post-merge cap, the density times the frame's pixels, truncates a dense result and is
     written on the record beside the count kept, which reaches it exactly when the frame held at
     least that many detections.
     """
+    from dataclasses import replace
+
     p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
     img = gray_frame(tmp_path)
     pixels = 128 * 128
-    uncapped = _sliced(
-        p, img, p.execution.with_value("density", 1.0, "explicit")
-    )
+
+    def at_density(density: float) -> Execution:
+        """Return the pass's record at ``density``, stated explicitly."""
+        return replace(
+            p.execution,
+            density=density,
+            sources={**p.execution.sources, "density": "explicit"},
+        )
+
+    uncapped = _sliced(p, img, at_density(1.0))
     assert uncapped["count"] > 1, (
         "the bespoke model must produce more than one raw detection "
         "for this test to force a real truncation, not merely assert an untested edge"
@@ -120,13 +142,7 @@ def test_predict_sliced_keeps_at_most_the_full_frame_cap(tmp_path):
         uncapped["count"],
         uncapped["count"] + 1,
     ):
-        r = _sliced(
-            p,
-            img,
-            p.execution.with_value(
-                "density", (cap - 0.5) / pixels, "explicit"
-            ),
-        )
+        r = _sliced(p, img, at_density((cap - 0.5) / pixels))
         outcomes[cap - uncapped["count"]] = (r["cap"], r["count"])
 
     n = uncapped["count"]
@@ -134,8 +150,8 @@ def test_predict_sliced_keeps_at_most_the_full_frame_cap(tmp_path):
 
 
 def test_predict_sliced_whole_decode_refuses_prior_or_progress_by_name(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A whole-decode slice refuses ``prior`` or ``progress``, naming the resume seam."""
     p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
     img = gray_frame(tmp_path)
@@ -147,7 +163,9 @@ def test_predict_sliced_whole_decode_refuses_prior_or_progress_by_name(
         _sliced(p, img, progress=lambda *a: None)
 
 
-def test_the_prepared_pass_tiles_when_asked_and_not_otherwise(tmp_path):
+def test_the_prepared_pass_tiles_when_asked_and_not_otherwise(
+    tmp_path: Path,
+) -> None:
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_OVERLAP,
         predicted_over,
@@ -173,7 +191,9 @@ def test_the_prepared_pass_tiles_when_asked_and_not_otherwise(tmp_path):
     assert whole.execution.tile_size is None and len(whole_results) == 1
 
 
-def test_predict_sliced_whole_decode_channel_mismatch_refuses(tmp_path):
+def test_predict_sliced_whole_decode_channel_mismatch_refuses(
+    tmp_path: Path,
+) -> None:
     """A whole-decode slice refuses a file whose band count mismatches the predictor.
 
     A 5-band ``.npy`` file against a 3-channel predictor refuses, naming the channel count.
@@ -189,8 +209,8 @@ def test_predict_sliced_whole_decode_channel_mismatch_refuses(tmp_path):
 
 
 def test_predict_sliced_whole_decode_admits_a_photographic_rgba_file_at_in_chans_3(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A whole-decode slice admits a photographic RGBA file at three input channels."""
     from PIL import Image
 
@@ -204,8 +224,8 @@ def test_predict_sliced_whole_decode_admits_a_photographic_rgba_file_at_in_chans
 
 
 def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The pass decodes through the checkpoint's own recorded attributes.
 
     A checkpoint whose config records its scope's attributes prepares a pass scoped to them,
@@ -231,7 +251,9 @@ def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(
         },
         data={"num_channels": 3, "scope": {"subject": "bud"}},
         registry=cr.SubjectRegistry(
-            subjects=(cr.Subject(name="bud", attributes=attributes),)
+            subjects=(
+                cr.Subject(name="bud", description="", attributes=attributes),
+            )
         ),
     )
 

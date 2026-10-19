@@ -50,7 +50,7 @@ def test_local_browser_and_non_browser_clients_are_still_admitted() -> None:
 
 
 def test_sibling_sharing_a_root_name_prefix_is_outside_the_root(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A sibling whose name extends the allowed root's name is outside the root.
 
@@ -73,7 +73,9 @@ def test_sibling_sharing_a_root_name_prefix_is_outside_the_root(
 
 
 def test_every_configured_root_is_honored_not_only_the_first(
-    tmp_path, tmp_path_factory: pytest.TempPathFactory, monkeypatch
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A multi-entry ``TCIP_IMAGE_ROOTS`` admits work under each entry it names.
 
@@ -106,7 +108,7 @@ def test_every_configured_root_is_honored_not_only_the_first(
 
 
 def test_a_relative_image_root_refuses_at_start_and_an_absolute_one_is_read(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A relative ``TCIP_IMAGE_ROOTS`` entry is refused at start, and an absolute one is read.
 
@@ -128,7 +130,7 @@ def test_a_relative_image_root_refuses_at_start_and_an_absolute_one_is_read(
 
 
 def test_derived_default_canonicalises_the_path_it_admits(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A path under the derived allow-set (here, the workspace) resolves to an absolute path.
 
@@ -159,7 +161,9 @@ def test_derived_default_canonicalises_the_path_it_admits(
 # -- safe_join ------------------------------------------------------------
 
 
-def test_symlink_inside_the_root_pointing_out_is_refused(tmp_path) -> None:
+def test_symlink_inside_the_root_pointing_out_is_refused(
+    tmp_path: Path,
+) -> None:
     """A join that resolves out of the root through a symlink escapes and must be refused.
 
     The join holds no dot-dot or absolute part; it is refused for its resolved destination,
@@ -188,7 +192,7 @@ def test_symlink_inside_the_root_pointing_out_is_refused(tmp_path) -> None:
 
 
 def test_a_removed_holding_directory_is_excluded_like_imports(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     """A path under the workspace's ``.removed`` holding directory is refused by name.
 
@@ -211,7 +215,9 @@ def test_a_removed_holding_directory_is_excluded_like_imports(
 @pytest.mark.skipif(
     os.name != "nt", reason="drive-relative parts are a Windows path shape"
 )
-def test_drive_relative_part_cannot_replace_the_root_anchor(tmp_path) -> None:
+def test_drive_relative_part_cannot_replace_the_root_anchor(
+    tmp_path: Path,
+) -> None:
     """A part naming another drive relocates the join off the root and must be refused.
 
     The part is neither absolute by POSIX rules nor a dot-dot segment; the join is refused for

@@ -14,6 +14,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
 import pytest
@@ -23,13 +24,22 @@ from tcip_mcp import workspace
 from tcip_web.app import app
 from tcip_web.state import store
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def test_every_test_starts_the_backend_on_its_own_scratch_workspace(tmp_path):
+    from tcip_web.state import OpenProject
+
+
+def test_every_test_starts_the_backend_on_its_own_scratch_workspace(
+    tmp_path: Path,
+) -> None:
     assert store.workspace == tmp_path.parent
     assert store.image_roots == ()
 
 
-def test_the_backend_refuses_to_start_with_no_workspace(monkeypatch):
+def test_the_backend_refuses_to_start_with_no_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import tcip_web.__main__ as entry
 
     served: list = []
@@ -51,8 +61,8 @@ def _answer(url: str) -> tuple[int, dict]:
 
 
 def test_main_publishes_the_port_and_configures_the_backend_on_one_workspace(
-    tmp_path_factory,
-):
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
     """``main`` publishes the port and configures the backend on one workspace.
 
     ``python -m tcip_web``, run as an operator runs it, records under its workspace the port it
@@ -112,7 +122,9 @@ def test_main_publishes_the_port_and_configures_the_backend_on_one_workspace(
     assert refused[0] != 200, refused
 
 
-def test_the_lifespan_opens_the_project_the_last_opened_pointer_names(made):
+def test_the_lifespan_opens_the_project_the_last_opened_pointer_names(
+    made: OpenProject,
+) -> None:
     workspace.write_last_opened(made.root.parent, made.id)
 
     with TestClient(app, base_url="http://127.0.0.1") as client:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn
 
 from PIL import Image
 
@@ -26,9 +27,18 @@ from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
 from tests._producer_fixtures import label_image, registry_over
 
+if TYPE_CHECKING:
+    import pytest
+
+    from tcip_store import Key
+
 
 def _make_dataset(
-    root: Path, *, pixel=(120, 120, 120), bud_box=(10, 10, 40, 40), ext="jpg"
+    root: Path,
+    *,
+    pixel: tuple[int, int, int] = (120, 120, 120),
+    bud_box: tuple[int, int, int, int] = (10, 10, 40, 40),
+    ext: str = "jpg",
 ) -> None:
     """Write a minimal nested-schema dataset: one dated image + its bud label + a registry."""
     date = "2026-02-11"
@@ -49,13 +59,13 @@ def _make_dataset(
 
 
 def test_fingerprint_reuses_ground_truth_digest_for_labels(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _make_dataset(tmp_path)
     calls = []
     real = selection.ground_truth_digest
 
-    def recording_digest(*a, **k):
+    def recording_digest(*a: Key | str, **k: Key | str) -> str:
         calls.append(a)
         return real(*a, **k)
 
@@ -67,7 +77,7 @@ def test_fingerprint_reuses_ground_truth_digest_for_labels(
     )
 
 
-def test_a_label_edit_changes_the_fingerprint(tmp_path):
+def test_a_label_edit_changes_the_fingerprint(tmp_path: Path) -> None:
     _make_dataset(tmp_path)
     before = dataset_fingerprint(tmp_path)
     # move the box -> label bytes change
@@ -80,7 +90,9 @@ def test_a_label_edit_changes_the_fingerprint(tmp_path):
     assert dataset_fingerprint(tmp_path) != before
 
 
-def test_pixel_reencode_under_same_filename_changes_the_fingerprint(tmp_path):
+def test_pixel_reencode_under_same_filename_changes_the_fingerprint(
+    tmp_path: Path,
+) -> None:
     """A pixel re-encode under the same file name changes the fingerprint.
 
     A BMP re-encoded with other pixels at the same file name and byte size, its labels
@@ -103,8 +115,8 @@ def test_pixel_reencode_under_same_filename_changes_the_fingerprint(tmp_path):
 
 
 def test_an_image_rewritten_at_its_size_and_mtime_changes_the_fingerprint(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An image rewritten at its size and modification time changes the fingerprint.
 
     A rewrite with other pixels that keeps the file's size and modification time moves the
@@ -127,7 +139,9 @@ def test_an_image_rewritten_at_its_size_and_mtime_changes_the_fingerprint(
     assert dataset_fingerprint(tmp_path) != before
 
 
-def test_registry_value_order_matters_but_whitespace_does_not(tmp_path):
+def test_registry_value_order_matters_but_whitespace_does_not(
+    tmp_path: Path,
+) -> None:
     _make_dataset(tmp_path)
     # add an ordered attribute -> registry (and thus fingerprint) changes
     reg2 = SubjectRegistry(
@@ -179,8 +193,8 @@ def test_registry_value_order_matters_but_whitespace_does_not(tmp_path):
 
 
 def test_an_admitted_sample_enters_at_its_admitted_version_under_the_root_as_spelled(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An admitted sample enters the labels term at its admitted version, under the root as spelled.
 
     With a dataset root spelled through a ``..`` segment, the fingerprint over the admitted
@@ -201,14 +215,16 @@ def test_an_admitted_sample_enters_at_its_admitted_version_under_the_root_as_spe
     admitted = dataset_fingerprint(root, samples)
     assert admitted is not None
 
-    def digested_again(key):
+    def digested_again(key: Key | str) -> NoReturn:
         raise AssertionError(f"{key} was digested again")
 
     monkeypatch.setattr(selection, "ground_truth_digest", digested_again)
     assert dataset_fingerprint(root, samples) == admitted
 
 
-def test_fingerprint_is_content_addressed_move_preserves_it(tmp_path):
+def test_fingerprint_is_content_addressed_move_preserves_it(
+    tmp_path: Path,
+) -> None:
     src = tmp_path / "a"
     _make_dataset(src)
     dst = tmp_path / "b"
@@ -217,7 +233,9 @@ def test_fingerprint_is_content_addressed_move_preserves_it(tmp_path):
     assert dataset_fingerprint(dst) == dataset_fingerprint(src)
 
 
-def test_the_labels_term_keys_each_document_by_its_capture(tmp_path):
+def test_the_labels_term_keys_each_document_by_its_capture(
+    tmp_path: Path,
+) -> None:
     """The labels term keys each document by its capture beside its stem.
 
     One stem's document under two different captures is two different label sets.
@@ -238,8 +256,8 @@ def test_the_labels_term_keys_each_document_by_its_capture(tmp_path):
 
 
 def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_own_determinism(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An RGB nested dataset fingerprints to the value one run of ``dataset_fingerprint`` recorded.
 
     The dataset holds fixed image bytes, one label document and a registry.
@@ -264,8 +282,8 @@ def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_
 
 
 def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A band group's manifest file is hashed itself, not only its member bands.
 
     .bandgroup is hashed as its own bytes: changing the manifest alone, with its named band
@@ -291,7 +309,10 @@ def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(
         16,
         16,
     )
-    registry_over(tmp_path, SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(
+        tmp_path,
+        SubjectRegistry(subjects=(Subject(name="bud", description=""),)),
+    )
 
     fp1 = dataset_fingerprint(tmp_path)
     assert fp1 is not None
@@ -311,8 +332,8 @@ def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(
 
 
 def test_a_malformed_registry_refuses_the_fingerprint_and_an_absent_one_admits_it(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A malformed registry refuses the fingerprint, and an absent one admits it.
 
     A registry whose bytes will not decode raises ``RegistryError``; a dataset holding no
@@ -335,7 +356,7 @@ def test_a_malformed_registry_refuses_the_fingerprint_and_an_absent_one_admits_i
     assert without is not None and without != with_registry
 
 
-def test_bespoke_dataset_has_no_fingerprint(tmp_path):
+def test_bespoke_dataset_has_no_fingerprint(tmp_path: Path) -> None:
     # images but no labels, and labels but no images, both -> None (never a fabricated identity)
     (tmp_path / "images" / "d").mkdir(parents=True)
     Image.new("RGB", (8, 8)).save(tmp_path / "images" / "d" / "x.jpg")

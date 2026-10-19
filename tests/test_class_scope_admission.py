@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -21,6 +22,9 @@ from tests.test_selection_binding import (
     SUBJECT,
     _attribute_scoped_dataset,
 )
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.split_construction import Membership
 
 CONDITION = Attribute(
     name="condition", type="categorical", values=("healthy", "damaged")
@@ -59,7 +63,7 @@ def test_a_scope_the_admission_produced_round_trips_through_the_selection_and_th
 
     drawn = read_selection(out, project=tmp_path)
     assert drawn.scope == ClassScope(SUBJECT, (CONDITION,))
-    assert result["scope"] == asdict(drawn.scope)
+    assert ClassScope.of(result) == drawn.scope
 
     *_loaders, resolved = train_val(
         tmp_path, "detection", {"split": {"selection_dir": str(out)}}
@@ -77,7 +81,7 @@ def _images_dir(root: Path) -> str:
     return str(root / "images" / DATES[0])
 
 
-def run_membership(block: dict):
+def run_membership(block: dict) -> Membership:
     """Return the membership a run's data ``block``, drawing its own split, admits."""
     from tcip_mcp.pipelines.data.split_construction import (
         run_membership as admitted,

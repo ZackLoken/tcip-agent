@@ -8,12 +8,16 @@ project entry carries its core fields and no other.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from PIL import Image
 
 import tcip_mcp.audit as audit_module
 import tcip_store as ts
+
+if TYPE_CHECKING:
+    from tcip_mcp.workspace import BoundProject
 
 CAPTURE_DATE = "2024-05-01"
 STUB_ENGINE = "tests.proposal_stub:factory"
@@ -68,7 +72,7 @@ def test_registry_write_records_in_the_dataset_named_by_its_root_argument(
 
 
 def test_label_write_records_in_the_dataset_holding_the_image_it_names(
-    project: Path, bound, dataset_root: Path
+    project: Path, bound: BoundProject, dataset_root: Path
 ) -> None:
     """A label write records in the dataset holding its image, not in the project's log.
 
@@ -157,7 +161,7 @@ def test_unscoped_mutating_tool_records_in_the_project_log_with_the_entry_shape(
 
 
 def test_a_label_write_of_an_image_under_no_dataset_refuses_and_records_nothing(
-    project: Path, bound, tmp_path: Path
+    project: Path, bound: BoundProject, tmp_path: Path
 ) -> None:
     """A label write of an image under no dataset is refused and records nothing.
 

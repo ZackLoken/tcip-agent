@@ -7,7 +7,12 @@ cap-saturation evidence that adds no failure, and the population the bias is mea
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from tcip_mcp.traits import TraitEntry
 
 torch = pytest.importorskip(
     "torch"
@@ -36,14 +41,14 @@ reaches it unless a test states a stricter one."""
 
 
 def _criterion(
-    cal,
-    hold,
+    cal: list[dict],
+    hold: list[dict],
     *,
-    entry=ENTRY,
-    floor=0.01,
-    equivalence_z=EQUIVALENCE_Z,
-    dispersion_quantile=DISPERSION_QUANTILE,
-):
+    entry: TraitEntry = ENTRY,
+    floor: float = 0.01,
+    equivalence_z: float = EQUIVALENCE_Z,
+    dispersion_quantile: float = DISPERSION_QUANTILE,
+) -> tuple[float, dict, list[str]]:
     """Run ``count_criterion`` staged at ``floor``; return ``(conf, evidence, failures)``."""
     return count_criterion(
         cal,
@@ -59,7 +64,7 @@ def _criterion(
 # ── Exact-conf holdout evaluation, not a nearest-neighbor snap ─────────────
 
 
-def _cal_picks_conf_point_nine():
+def _cal_picks_conf_point_nine() -> list[dict]:
     """Return a 20-image dense calibration reference whose count-unbiased pick is exactly 0.9.
 
     Each image carries one low-conf spurious detection, scoring 0.05.
@@ -76,7 +81,9 @@ def _cal_picks_conf_point_nine():
     )
 
 
-def _nearest_neighbor_bias_comparator(holdout_records, tolerance, conf):
+def _nearest_neighbor_bias_comparator(
+    holdout_records: list[dict], tolerance: float, conf: float
+) -> dict:
     """Return the curve entry nearest ``conf`` on the holdout's own auto-built grid."""
     from tcip_mcp.pipelines.training.evaluation import (
         derive_operating_point_curve,
@@ -90,7 +97,9 @@ def _nearest_neighbor_bias_comparator(holdout_records, tolerance, conf):
     return min(sweep["curve"], key=lambda c: abs(c["conf"] - conf))
 
 
-def test_exact_conf_eval_catches_a_catastrophic_bias_a_nearest_neighbor_comparator_misses():
+def test_exact_conf_eval_catches_a_catastrophic_bias_a_nearest_neighbor_comparator_misses() -> (
+    None
+):
     """Exact-conf evaluation catches a catastrophic bias a nearest-neighbor comparator misses.
 
     Holdout detections all score 0.05 with zero false positives: evaluated exactly at 0.9 every
@@ -125,7 +134,9 @@ def test_exact_conf_eval_catches_a_catastrophic_bias_a_nearest_neighbor_comparat
     assert "count_bias_exceeds_tolerance" in failures
 
 
-def test_exact_conf_eval_admits_a_reference_a_nearest_neighbor_comparator_would_fail():
+def test_exact_conf_eval_admits_a_reference_a_nearest_neighbor_comparator_would_fail() -> (
+    None
+):
     """Exact-conf evaluation admits a reference a nearest-neighbor comparator reads as biased.
 
     True matches score 0.99 and false positives 0.89: at exactly 0.9 the false positives drop and
@@ -162,7 +173,7 @@ def test_exact_conf_eval_admits_a_reference_a_nearest_neighbor_comparator_would_
 
 def _tp_zero_bias_zero_records(
     id_prefix: str, *, n_images: int = 10, objects_per_image: int = 50
-):
+) -> list[dict]:
     """Return ``n_images`` records of ``objects_per_image`` GT boxes and as many detections.
 
     The GT boxes are 20 px, laid on a 40 px grid, and each detection, scored 0.9, sits 2000 px
@@ -193,7 +204,7 @@ def _tp_zero_bias_zero_records(
     return records
 
 
-def test_tp_zero_bias_zero_holdout_fails_the_localization_floor():
+def test_tp_zero_bias_zero_holdout_fails_the_localization_floor() -> None:
     _conf, evidence, failures = _criterion(
         _tp_zero_bias_zero_records("c"),
         _tp_zero_bias_zero_records("h"),
@@ -204,7 +215,7 @@ def test_tp_zero_bias_zero_holdout_fails_the_localization_floor():
     assert "localization_quality_floor_failed" in failures
 
 
-def _one_bad_image():
+def _one_bad_image() -> tuple[list[dict], list[dict], TraitEntry]:
     """Return ``(cal, hold, entry)`` over ten images, one dropping 10 objects and none elsewhere.
 
     The entry's dispersion tolerance is 0.5 and its bias tolerance loose.
@@ -233,7 +244,9 @@ def _one_bad_image():
     return cal, hold, strict
 
 
-def test_an_authored_dispersion_tolerance_fails_one_bad_image_among_many():
+def test_an_authored_dispersion_tolerance_fails_one_bad_image_among_many() -> (
+    None
+):
     """An authored dispersion tolerance of 0.5 fails one bad image among many.
 
     The ninetieth-percentile per-image error (1.0) exceeds the tolerance even though the mean bias
@@ -249,7 +262,9 @@ def test_an_authored_dispersion_tolerance_fails_one_bad_image_among_many():
     assert "count_error_dispersion_too_high" in failures
 
 
-def test_the_dispersion_check_reads_the_quantile_the_assessment_states():
+def test_the_dispersion_check_reads_the_quantile_the_assessment_states() -> (
+    None
+):
     """The dispersion check reads the per-image error at the quantile the assessment states.
 
     The error is numpy's own quantile over the per-image errors, and the curve records that
@@ -276,7 +291,9 @@ def test_the_dispersion_check_reads_the_quantile_the_assessment_states():
 # ── Reference sufficiency and the equivalence criterion ─────────────────────
 
 
-def test_an_all_negative_calibration_or_holdout_fails_as_insufficient():
+def test_an_all_negative_calibration_or_holdout_fails_as_insufficient() -> (
+    None
+):
     real = _records("c")
     all_negative = [
         {
@@ -301,7 +318,7 @@ def test_an_all_negative_calibration_or_holdout_fails_as_insufficient():
     )
 
 
-def test_single_image_holdout_fails_the_non_degeneracy_floor_alone():
+def test_single_image_holdout_fails_the_non_degeneracy_floor_alone() -> None:
     _conf, evidence, failures = _criterion(
         _records("c"), [_records("h", shift=3.0)[0]], floor=0.3
     )
@@ -309,7 +326,9 @@ def test_single_image_holdout_fails_the_non_degeneracy_floor_alone():
     assert "insufficient_holdout_images" in failures
 
 
-def test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degeneracy():
+def test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degeneracy() -> (
+    None
+):
     """Per-image biases [+1, -1] cancel in the mean; the mean+SE equivalence test still refuses."""
     _conf, evidence, failures = _criterion(
         _records("c"), _records("h", shift=3.0), floor=0.3
@@ -319,7 +338,9 @@ def test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degene
     assert "count_bias_exceeds_tolerance" in failures
 
 
-def test_padding_with_empty_records_cannot_dilute_the_equivalence_test():
+def test_padding_with_empty_records_cannot_dilute_the_equivalence_test() -> (
+    None
+):
     """Eight empty records beside a real n=2 disagreement change no equivalence verdict.
 
     The evidence records ten images with two present, and the padded run fails exactly as the
@@ -357,7 +378,9 @@ def test_padding_with_empty_records_cannot_dilute_the_equivalence_test():
 
 
 @pytest.mark.parametrize("objective", ["detection_f1", "presence"])
-def test_an_f1_objective_picks_f1_max_and_labels_it_accordingly(objective):
+def test_an_f1_objective_picks_f1_max_and_labels_it_accordingly(
+    objective: str,
+) -> None:
     """The detection F1 and presence objectives each pick the F1-max conf under its label."""
     conf, evidence, _failures = _criterion(
         _records(),
@@ -374,14 +397,14 @@ def test_an_f1_objective_picks_f1_max_and_labels_it_accordingly(objective):
 # ── Cap-saturation evidence (never a failure) ─────────────────────────────────
 
 
-def test_cap_saturated_frac_is_the_share_of_records_that_hit_the_cap():
+def test_cap_saturated_frac_is_the_share_of_records_that_hit_the_cap() -> None:
     assert cap_saturated_frac(
         [{"count": 4, "cap": 4}, {"count": 3, "cap": 4}]
     ) == (pytest.approx(0.5))
     assert cap_saturated_frac([]) == 0.0
 
 
-def test_cap_saturation_is_surfaced_but_never_fails_the_criterion():
+def test_cap_saturation_is_surfaced_but_never_fails_the_criterion() -> None:
     cal = [dict(r, cap=r["count"]) for r in _records("c")]
     _conf, evidence, failures = _criterion(
         cal, _records("h", shift=3.0), floor=0.3
@@ -406,7 +429,9 @@ def _rotating_noise_pattern(
     return miss, fp
 
 
-def _noisy(n: int, obj: int, miss, fp):
+def _noisy(
+    n: int, obj: int, miss: list[int], fp: list[int]
+) -> tuple[float, dict, list[str]]:
     cal = dense_records(
         n_images=n,
         objects_per_image=obj,
@@ -429,7 +454,7 @@ def _noisy(n: int, obj: int, miss, fp):
     return _criterion(cal, hold)
 
 
-def test_a_realistic_noisy_detector_passes_at_n_equals_40():
+def test_a_realistic_noisy_detector_passes_at_n_equals_40() -> None:
     miss, fp = _rotating_noise_pattern(40)
     _conf, evidence, failures = _noisy(40, 100, miss, fp)
     hb = evidence["holdout_at_conf"]
@@ -440,7 +465,9 @@ def test_a_realistic_noisy_detector_passes_at_n_equals_40():
     assert failures == []
 
 
-def test_the_equivalence_test_runs_at_the_multiplier_the_assessment_states():
+def test_the_equivalence_test_runs_at_the_multiplier_the_assessment_states() -> (
+    None
+):
     """The equivalence test runs at the standard-error multiplier the assessment states.
 
     The same noisy detector at n=40 (bias 0, standard error about 0.32 against a tolerance of 1.0)
@@ -469,14 +496,14 @@ def test_the_equivalence_test_runs_at_the_multiplier_the_assessment_states():
         assert ("count_bias_exceeds_tolerance" not in failures) is passes
 
 
-def test_the_same_noisy_detector_on_ten_images_fails_equivalence():
+def test_the_same_noisy_detector_on_ten_images_fails_equivalence() -> None:
     miss, fp = _rotating_noise_pattern(40)
     _conf, evidence, failures = _noisy(10, 100, miss[:10], fp[:10])
     assert evidence["holdout_at_conf"]["count_bias_mean"] == pytest.approx(0.0)
     assert "count_bias_exceeds_tolerance" in failures
 
 
-def test_the_same_noise_crosses_from_fail_to_pass_as_density_rises():
+def test_the_same_noise_crosses_from_fail_to_pass_as_density_rises() -> None:
     """The same noise crosses from fail to pass as object density rises.
 
     At a fixed n=40 the identical noise fails at 30 objects/image (tolerance 0.30) and passes at
@@ -492,7 +519,9 @@ def test_the_same_noise_crosses_from_fail_to_pass_as_density_rises():
     assert dense_failures == []
 
 
-def test_a_dense_realistic_reference_passes_with_every_condition_applied():
+def test_a_dense_realistic_reference_passes_with_every_condition_applied() -> (
+    None
+):
     """A dense realistic reference passes the count criterion.
 
     The reference has perfect recall and a varying handful of low-conf spurious detections per
@@ -580,7 +609,9 @@ def _mixed_reference(
     return loaded + negatives
 
 
-def test_a_systematic_overcount_is_not_excused_by_the_negatives_beside_it():
+def test_a_systematic_overcount_is_not_excused_by_the_negatives_beside_it() -> (
+    None
+):
     cal = _mixed_reference(
         "c", n_loaded=10, n_negative=40, objects_per_image=100, fp_per_loaded=2
     )
@@ -603,7 +634,7 @@ def test_a_systematic_overcount_is_not_excused_by_the_negatives_beside_it():
     assert "count_bias_exceeds_tolerance" in failures
 
 
-def test_the_same_overcount_without_the_negatives_fails_identically():
+def test_the_same_overcount_without_the_negatives_fails_identically() -> None:
     cal = _mixed_reference(
         "c", n_loaded=10, n_negative=0, objects_per_image=100, fp_per_loaded=2
     )
@@ -624,7 +655,9 @@ def test_the_same_overcount_without_the_negatives_fails_identically():
     assert "count_bias_exceeds_tolerance" in failures
 
 
-def test_a_clean_detector_still_passes_on_a_reference_full_of_negatives():
+def test_a_clean_detector_still_passes_on_a_reference_full_of_negatives() -> (
+    None
+):
     cal = _mixed_reference(
         "c", n_loaded=10, n_negative=40, objects_per_image=100, fp_per_loaded=0
     )
@@ -643,8 +676,10 @@ def test_a_clean_detector_still_passes_on_a_reference_full_of_negatives():
     assert failures == []
 
 
-def test_a_negative_the_detector_hallucinates_on_is_evidence_not_a_discard():
-    def _hallucinating(id_prefix, shift=0.0):
+def test_a_negative_the_detector_hallucinates_on_is_evidence_not_a_discard() -> (
+    None
+):
+    def _hallucinating(id_prefix: str, shift: float = 0.0) -> list[dict]:
         loaded = dense_records(
             n_images=10,
             objects_per_image=100,
@@ -678,7 +713,7 @@ def test_a_negative_the_detector_hallucinates_on_is_evidence_not_a_discard():
     assert "count_bias_exceeds_tolerance" in failures
 
 
-def test_a_holdout_carrying_one_loaded_image_is_not_enough_evidence():
+def test_a_holdout_carrying_one_loaded_image_is_not_enough_evidence() -> None:
     cal = _mixed_reference(
         "c", n_loaded=4, n_negative=0, objects_per_image=100, fp_per_loaded=0
     )

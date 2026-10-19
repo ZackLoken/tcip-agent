@@ -7,14 +7,27 @@ and the /api/training/compare/best route.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from fastapi.testclient import TestClient
 
 from tests._training_values import drawn_split
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
+
+    from tcip_mcp.model_registry import RegistryEntry
+
 
 def _opened(
-    project, experiment_id: str, *, data_dir=None, split: dict | None = None
-):
+    project: Path,
+    experiment_id: str,
+    *,
+    data_dir: Path | None = None,
+    split: dict | None = None,
+) -> Path:
     """Open an unbuilt detector run, drawing ``split`` when one is given, and return its directory.
 
     The run is over two detection frames written under ``data_dir`` (by default a fixture
@@ -37,7 +50,9 @@ def _opened(
     return opened_run(project, config, experiment_id=experiment_id)
 
 
-def _bound(experiment_id: str, tmp_path, **split):
+def _bound(
+    experiment_id: str, tmp_path: Path, **split: int
+) -> tuple[Path, Path]:
     """Open a run bound to a selection drawn at seed 7; return its directory and the selection's.
 
     The selection is drawn once per ``tmp_path``, at ``splits/2024-01-01``, over the
@@ -70,7 +85,7 @@ def _bound(experiment_id: str, tmp_path, **split):
     ), selection_dir
 
 
-def _compared(project, *experiment_ids: str) -> list[dict]:
+def _compared(project: Path, *experiment_ids: str) -> list[dict]:
     from tcip_mcp.experiments import compare_experiments
 
     return compare_experiments(list(experiment_ids), project=project)[
@@ -79,8 +94,8 @@ def _compared(project, *experiment_ids: str) -> list[dict]:
 
 
 def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The dataset fingerprint comparison is None, not True, when one id is an error.
 
     Two runs over one dataset compare as True; the same two beside one missing run compare as
@@ -106,8 +121,8 @@ def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(
 
 
 def test_compare_experiments_reports_task_and_subject_from_the_runs_records(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """``compare_experiments`` reports a run's task and subject from its own records.
 
     The task is read off the launch record, the subject off the data section the run resolved.
@@ -118,7 +133,9 @@ def test_compare_experiments_reports_task_and_subject_from_the_runs_records(
     assert (c["task"], c["subject"]) == ("detection", "bud")
 
 
-def test_registry_lists_the_checkpoint_this_run_completed(tmp_path):
+def test_registry_lists_the_checkpoint_this_run_completed(
+    tmp_path: Path,
+) -> None:
     """A completed run's own checkpoint shows up in its registry column; an unfinished run's none.
 
     The run completes through the platform's own producer, and its entry carries its name, its
@@ -141,7 +158,7 @@ def test_registry_lists_the_checkpoint_this_run_completed(tmp_path):
     assert unfinished["registry"] == []
 
 
-def test_split_reports_a_bound_selection_directory(tmp_path):
+def test_split_reports_a_bound_selection_directory(tmp_path: Path) -> None:
     _run_dir, selection_dir = _bound("exp-bound-split", tmp_path)
 
     (c,) = _compared(tmp_path, "exp-bound-split")
@@ -153,7 +170,9 @@ def test_split_reports_a_bound_selection_directory(tmp_path):
     }
 
 
-def test_split_reports_a_redrawn_bound_selection_distinctly(tmp_path):
+def test_split_reports_a_redrawn_bound_selection_distinctly(
+    tmp_path: Path,
+) -> None:
     """A bound run and one that redrew inside the same selection report different splits."""
     _bound("exp-bound-plain", tmp_path)
     _bound("exp-bound-redrawn", tmp_path, seed=7)
@@ -166,7 +185,7 @@ def test_split_reports_a_redrawn_bound_selection_distinctly(tmp_path):
     assert (plain["redraw"], redrawn["redraw"]) == (False, True)
 
 
-def test_split_reports_a_drawn_seed_with_no_binding(tmp_path):
+def test_split_reports_a_drawn_seed_with_no_binding(tmp_path: Path) -> None:
     _opened(
         tmp_path,
         "exp-drawn-split",
@@ -177,7 +196,7 @@ def test_split_reports_a_drawn_seed_with_no_binding(tmp_path):
     assert c["split"] == {"case": "drawn", "seed": 99}
 
 
-def test_status_error_names_a_diverged_run_reason(tmp_path):
+def test_status_error_names_a_diverged_run_reason(tmp_path: Path) -> None:
     """``compare_experiments`` surfaces a diverged run's final-status error as status_error.
 
     run_training_envelope over the divergence fixture's always-diverged builder writes the final
@@ -191,10 +210,9 @@ def test_status_error_names_a_diverged_run_reason(tmp_path):
     run_dir = _stock_run(
         tmp_path, ALWAYS_DIVERGED_MODEL, 3, "exp-diverged-cmp"
     )
-    assert (
-        "2 consecutive full training passes"
-        in observe(run_dir).final["status_error"]
-    )
+    status_error = observe(run_dir).status_error
+    assert status_error is not None
+    assert "2 consecutive full training passes" in status_error
     _opened(tmp_path, "exp-healthy-cmp")
 
     diverged, healthy = _compared(
@@ -205,7 +223,7 @@ def test_status_error_names_a_diverged_run_reason(tmp_path):
 
 
 def _register(
-    project,
+    project: Path,
     experiment_id: str,
     metric_value: float,
     *,
@@ -219,7 +237,9 @@ def _register(
     )
 
 
-def test_available_metrics_excludes_an_unmarked_experiments_metric(tmp_path):
+def test_available_metrics_excludes_an_unmarked_experiments_metric(
+    tmp_path: Path,
+) -> None:
     """experiment_ids narrows ``available_metrics`` to the marked experiments' metrics."""
     from tcip_mcp.tools.model_tools import rank_registered_models
 
@@ -230,7 +250,9 @@ def test_available_metrics_excludes_an_unmarked_experiments_metric(tmp_path):
     assert {m["metric"] for m in res["available_metrics"]} == {"val_map50"}
 
 
-def test_rank_registered_models_ranks_only_within_the_marked_set(tmp_path):
+def test_rank_registered_models_ranks_only_within_the_marked_set(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.model_tools import rank_registered_models
 
     _register(tmp_path, "exp-low", 0.5)
@@ -246,8 +268,8 @@ def test_rank_registered_models_ranks_only_within_the_marked_set(tmp_path):
 
 
 def test_rank_registered_models_names_the_marked_set_when_the_filter_empties_a_non_empty_listing(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A filter naming no registered experiment is refused with text of its own.
 
     Over a registry holding another experiment's checkpoint, a filter naming only an
@@ -268,9 +290,9 @@ def test_rank_registered_models_names_the_marked_set_when_the_filter_empties_a_n
 
 
 def test_a_ranking_over_a_marked_set_that_registered_nothing_reads_the_registry_once(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import tcip_mcp.model_registry as model_registry
     from tcip_mcp.tools.model_tools import ranked_registered_model
 
@@ -278,7 +300,7 @@ def test_a_ranking_over_a_marked_set_that_registered_nothing_reads_the_registry_
     reads: list[object] = []
     real = model_registry.read_registry_index
 
-    def counted(project_path):
+    def counted(project_path: str | Path) -> list[RegistryEntry]:
         reads.append(project_path)
         return real(project_path)
 
@@ -299,8 +321,8 @@ def test_a_ranking_over_a_marked_set_that_registered_nothing_reads_the_registry_
 
 
 def test_compare_best_route_422s_with_no_registered_checkpoint(
-    opened_client: TestClient, tmp_path
-):
+    opened_client: TestClient, tmp_path: Path
+) -> None:
     """The compare-best route answers 422 for a project with no registered checkpoint.
 
     A project with no completed run and no foreign registration answers the ranking's own
@@ -322,8 +344,8 @@ def test_compare_best_route_422s_with_no_registered_checkpoint(
 
 
 def test_compare_best_route_409s_when_the_index_will_not_decode(
-    opened_client: TestClient, monkeypatch
-):
+    opened_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The compare-best route answers 409 when the registry index will not decode.
 
     The detail names the registry as unreadable.
@@ -331,7 +353,7 @@ def test_compare_best_route_409s_when_the_index_will_not_decode(
     import tcip_mcp.model_registry as model_registry
     from tcip_store import DecodeError
 
-    def _boom(project_path):
+    def _boom(project_path: str | Path) -> list[dict]:
         raise DecodeError("simulated unreadable registry index")
 
     monkeypatch.setattr(model_registry, "read_registry_index", _boom)
@@ -348,8 +370,8 @@ def test_compare_best_route_409s_when_the_index_will_not_decode(
 
 
 def test_compare_best_route_422s_on_the_tools_own_error(
-    opened_client: TestClient, tmp_path
-):
+    opened_client: TestClient, tmp_path: Path
+) -> None:
     _register(tmp_path, "exp-a", 0.7)
 
     resp = opened_client.post(
@@ -366,8 +388,8 @@ def test_compare_best_route_422s_on_the_tools_own_error(
 
 
 def test_compare_best_route_422s_when_the_marked_set_registered_nothing(
-    opened_client: TestClient, tmp_path
-):
+    opened_client: TestClient, tmp_path: Path
+) -> None:
     _register(tmp_path, "exp-other", 0.7)
 
     resp = opened_client.post(
@@ -385,8 +407,8 @@ def test_compare_best_route_422s_when_the_marked_set_registered_nothing(
 
 def test_an_empty_metric_lists_through_the_listing_route_and_refuses_through_the_ranking_one(
     opened_client: TestClient,
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     _register(tmp_path, "exp-a", 0.7)
 
     listed = opened_client.get("/api/results/models/registered")
@@ -402,8 +424,8 @@ def test_an_empty_metric_lists_through_the_listing_route_and_refuses_through_the
 
 
 def test_compare_best_route_projects_the_answer(
-    opened_client: TestClient, tmp_path
-):
+    opened_client: TestClient, tmp_path: Path
+) -> None:
     _register(tmp_path, "exp-a", 0.7)
 
     resp = opened_client.post(

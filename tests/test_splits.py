@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -19,11 +20,16 @@ from tcip_mcp.pipelines.data.splits import (
 )
 from tcip_mcp.pipelines.slicing import slice_lattice
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from tcip_mcp.pipelines.data.splits import SpatialStripSplit
+
 SIDES = ("train", "val", "holdout")
 """The train, val and holdout sides of a three-way split."""
 
 
-def test_default_group_key_strips_tile_offset():
+def test_default_group_key_strips_tile_offset() -> None:
     assert default_group_key("canopyA_128_256") == "canopyA"
     assert default_group_key("plainname") == "plainname"
     # A single trailing "_<int>" field does not match the two-field tile pattern.
@@ -31,7 +37,7 @@ def test_default_group_key_strips_tile_offset():
     assert GROUP_KEY_FNS["stem"]("a_1_2") == "a_1_2"
 
 
-def _grouped(stems):
+def _grouped(stems: int) -> list[str]:
     return [f"src{g}_{r}_0" for g in range(stems) for r in range(3)]
 
 
@@ -39,8 +45,14 @@ _SIDES = {"train": 0.6, "val": 0.2, "calibration": 0.2}
 
 
 def _split(
-    stems, *, counts=None, splits=_SIDES, seed=1, weighted=True, minimums=None
-):
+    stems: list[str],
+    *,
+    counts: dict[str, int] | None = None,
+    splits: dict[str, float] = _SIDES,
+    seed: int = 1,
+    weighted: bool = True,
+    minimums: dict[str, int] | None = None,
+) -> dict[str, list[str]]:
     """Return the draw over ``stems`` grouped by tile prefix.
 
     Each member is counted (one each when ``counts`` is None), at a minimum of one foreground
@@ -59,7 +71,7 @@ def _split(
     )
 
 
-def test_group_split_no_group_spans_splits():
+def test_group_split_no_group_spans_splits() -> None:
     stems = _grouped(6)  # 6 sources x 3 tiles
     parts = _split(stems)
     group_to_splits = defaultdict(set)
@@ -69,7 +81,7 @@ def test_group_split_no_group_spans_splits():
     assert all(len(v) == 1 for v in group_to_splits.values())
 
 
-def test_group_split_deterministic_and_partition():
+def test_group_split_deterministic_and_partition() -> None:
     stems = _grouped(8)
     a = _split(stems, seed=7)
     b = _split(stems, seed=7)
@@ -79,7 +91,7 @@ def test_group_split_deterministic_and_partition():
     assert len(union) == len(set(union)) == len(stems)
 
 
-def test_group_split_foreground_stratification():
+def test_group_split_foreground_stratification() -> None:
     fg = [f"fg{g}_{r}_0" for g in range(4) for r in range(2)]
     bg = [f"bg{g}_0_0" for g in range(4)]
     stems = fg + bg
@@ -89,13 +101,13 @@ def test_group_split_foreground_stratification():
     )
     assert set(parts) == {"train", "val"}
 
-    def has_fg(ss):
+    def has_fg(ss: list[str]) -> bool:
         return any(counts[s] > 0 for s in ss)
 
     assert has_fg(parts["train"]) and has_fg(parts["val"])
 
 
-def test_group_split_refuses_a_member_with_no_measured_count():
+def test_group_split_refuses_a_member_with_no_measured_count() -> None:
     """A member with no measured count is refused at the group split, naming the missing count."""
     stems = _grouped(4)
     counts = {s: 1 for s in stems[1:]}
@@ -103,7 +115,7 @@ def test_group_split_refuses_a_member_with_no_measured_count():
         _split(stems, counts=counts)
 
 
-def test_group_split_calibration_side_gets_its_stated_minimum():
+def test_group_split_calibration_side_gets_its_stated_minimum() -> None:
     """A stated per-side minimum raises the calibration side's floor.
 
     Over six foreground groups at a skewed (0.6, 0.2, 0.2) ratio, a one-per-side minimum
@@ -126,7 +138,9 @@ def test_group_split_calibration_side_gets_its_stated_minimum():
     )
 
 
-def test_refuse_insufficient_foreground_groups_admits_a_sufficient_tree():
+def test_refuse_insufficient_foreground_groups_admits_a_sufficient_tree() -> (
+    None
+):
     from tcip_mcp.pipelines.data.splits import (
         refuse_insufficient_foreground_groups,
     )
@@ -136,7 +150,9 @@ def test_refuse_insufficient_foreground_groups_admits_a_sufficient_tree():
     )
 
 
-def test_refuse_insufficient_foreground_groups_names_the_sides_and_the_shortfall():
+def test_refuse_insufficient_foreground_groups_names_the_sides_and_the_shortfall() -> (
+    None
+):
     from tcip_mcp.pipelines.data.splits import (
         refuse_insufficient_foreground_groups,
     )
@@ -156,7 +172,9 @@ def test_refuse_insufficient_foreground_groups_names_the_sides_and_the_shortfall
     assert "2 foreground group" in message
 
 
-def test_refuse_insufficient_foreground_groups_carries_the_callers_own_remedy():
+def test_refuse_insufficient_foreground_groups_carries_the_callers_own_remedy() -> (
+    None
+):
     """The foreground-group refusal carries the remedy it is handed.
 
     The message carries the stated remedy, annotating or confirming more foreground groups, and
@@ -177,7 +195,7 @@ def test_refuse_insufficient_foreground_groups_carries_the_callers_own_remedy():
     assert "annotate or confirm more foreground groups" in message
 
 
-def test_group_split_with_no_foreground_balances_by_tile_count():
+def test_group_split_with_no_foreground_balances_by_tile_count() -> None:
     stems = _grouped(4)
     parts = _split(
         stems,
@@ -191,22 +209,22 @@ def test_group_split_with_no_foreground_balances_by_tile_count():
 # --- resolve_group_key_fn ---
 
 
-def test_resolve_group_key_fn_unrecognized_policy_raises():
+def test_resolve_group_key_fn_unrecognized_policy_raises() -> None:
     with pytest.raises(ValueError, match="Unknown grouping policy"):
         resolve_group_key_fn("not_a_real_key", ["a", "b"])
 
 
-def test_resolve_group_key_fn_map_missing_stems_raises():
+def test_resolve_group_key_fn_map_missing_stems_raises() -> None:
     with pytest.raises(ValueError, match="missing"):
         resolve_group_key_fn({"a": "g1"}, ["a", "b"])
 
 
-def test_resolve_group_key_fn_map_used_when_it_covers_every_stem():
+def test_resolve_group_key_fn_map_used_when_it_covers_every_stem() -> None:
     fn = resolve_group_key_fn({"a": "g1", "b": "g1"}, ["a", "b"])
     assert fn("a") == fn("b") == "g1"
 
 
-def test_resolve_group_key_fn_named_policy_still_works():
+def test_resolve_group_key_fn_named_policy_still_works() -> None:
     fn = resolve_group_key_fn("tile_prefix", ["a_0_0"])
     assert fn("a_0_0") == "a"
     assert resolve_group_key_fn("stem", ["a_0_0"])("a_0_0") == "a_0_0"
@@ -215,7 +233,9 @@ def test_resolve_group_key_fn_named_policy_still_works():
 # --- spatial_strip_split ---
 
 
-def _kept_tiles(split, width, height):
+def _kept_tiles(
+    split: SpatialStripSplit, width: int, height: int
+) -> dict[str, list[tuple[int, int, int, int]]]:
     """Return the lattice tiles each side's regions contain, keyed by side name.
 
     The tiles are ``slice_lattice(height, width, split.tile_size, split.overlap)``; a tile is
@@ -234,7 +254,7 @@ def _kept_tiles(split, width, height):
     return by_name
 
 
-def test_spatial_strip_split_admits_valid_work():
+def test_spatial_strip_split_admits_valid_work() -> None:
     split = spatial_strip_split(
         4000, 3000, 320, 0.2, fractions=(0.7, 0.3, 0.0), split_names=SIDES
     )
@@ -243,7 +263,7 @@ def test_spatial_strip_split_admits_valid_work():
     assert 0.0 < split.realized_fractions["val"] < 1.0
 
 
-def test_spatial_strip_split_accounts_for_every_tile():
+def test_spatial_strip_split_accounts_for_every_tile() -> None:
     split = spatial_strip_split(
         4000, 3000, 320, 0.2, fractions=(0.7, 0.3, 0.0), split_names=SIDES
     )
@@ -255,7 +275,7 @@ def test_spatial_strip_split_accounts_for_every_tile():
     assert total == split.total_tiles
 
 
-def test_spatial_strip_split_no_tile_shared_and_buffer_respected():
+def test_spatial_strip_split_no_tile_shared_and_buffer_respected() -> None:
     width, height = 4000, 3000
     split = spatial_strip_split(
         width, height, 320, 0.2, fractions=(0.7, 0.3, 0.0), split_names=SIDES
@@ -272,7 +292,7 @@ def test_spatial_strip_split_no_tile_shared_and_buffer_respected():
             assert max(gap_x, gap_y) >= split.buffer
 
 
-def test_center_out_order_ties_resolve_in_declared_order():
+def test_center_out_order_ties_resolve_in_declared_order() -> None:
     """``_center_out_order`` resolves equal-share slots center-out in their declared order.
 
     Swapping the input order of two equal-share slots swaps which cardinal side each lands on.
@@ -288,7 +308,7 @@ def test_center_out_order_ties_resolve_in_declared_order():
     assert [name for name, _ in reversed_input] == ["test", "train", "val"]
 
 
-def test_spatial_strip_split_tied_shares_place_by_declared_order():
+def test_spatial_strip_split_tied_shares_place_by_declared_order() -> None:
     """Tied shares in a spatial strip split place by their declared order.
 
     Equal shares resolve center-out by their position in
@@ -319,7 +339,7 @@ def test_spatial_strip_split_tied_shares_place_by_declared_order():
     assert not hasattr(forward, "seed")
 
 
-def test_spatial_strip_split_deterministic():
+def test_spatial_strip_split_deterministic() -> None:
     a = spatial_strip_split(
         8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), split_names=SIDES
     )
@@ -329,14 +349,14 @@ def test_spatial_strip_split_deterministic():
     assert a == b
 
 
-def test_spatial_strip_split_buffer_defaults_to_tile_size():
+def test_spatial_strip_split_buffer_defaults_to_tile_size() -> None:
     split = spatial_strip_split(
         4000, 3000, 320, 0.2, fractions=(0.8, 0.2, 0.0), split_names=SIDES
     )
     assert split.buffer == 320
 
 
-def test_spatial_strip_split_explicit_buffer_below_tile_size_refuses():
+def test_spatial_strip_split_explicit_buffer_below_tile_size_refuses() -> None:
     with pytest.raises(ValueError, match="buffer"):
         spatial_strip_split(
             4000,
@@ -349,14 +369,14 @@ def test_spatial_strip_split_explicit_buffer_below_tile_size_refuses():
         )
 
 
-def test_spatial_strip_split_refuses_when_no_tile_fits_extent():
+def test_spatial_strip_split_refuses_when_no_tile_fits_extent() -> None:
     with pytest.raises(ValueError, match="no tile fits"):
         spatial_strip_split(
             100, 100, 320, 0.2, fractions=(0.8, 0.2, 0.0), split_names=SIDES
         )
 
 
-def test_spatial_strip_split_refuses_when_geometry_is_too_tight():
+def test_spatial_strip_split_refuses_when_geometry_is_too_tight() -> None:
     # An image barely larger than one tile: nothing survives the buffer margin on a second side.
     with pytest.raises(ValueError, match="no strip layout"):
         spatial_strip_split(
@@ -364,14 +384,14 @@ def test_spatial_strip_split_refuses_when_geometry_is_too_tight():
         )
 
 
-def test_spatial_strip_split_fractions_must_sum_to_one():
+def test_spatial_strip_split_fractions_must_sum_to_one() -> None:
     with pytest.raises(ValueError, match="sum to 1.0"):
         spatial_strip_split(
             4000, 3000, 320, 0.2, fractions=(0.7, 0.2, 0.2), split_names=SIDES
         )
 
 
-def test_spatial_strip_split_three_way_populates_every_side():
+def test_spatial_strip_split_three_way_populates_every_side() -> None:
     split = spatial_strip_split(
         8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), split_names=SIDES
     )
@@ -380,7 +400,7 @@ def test_spatial_strip_split_three_way_populates_every_side():
     assert split.kept_tiles["holdout"] > 0
 
 
-def test_spatial_strip_split_realized_fractions_stay_near_requested():
+def test_spatial_strip_split_realized_fractions_stay_near_requested() -> None:
     # A generous but real tolerance: catches a regression to arbitrary quantization, not
     # merely "nonzero on every side".
     split = spatial_strip_split(
@@ -401,8 +421,11 @@ def test_spatial_strip_split_realized_fractions_stay_near_requested():
     ],
 )
 def test_spatial_strip_split_lays_one_region_per_side(
-    width, height, fractions, names
-):
+    width: int,
+    height: int,
+    fractions: tuple[float, float, float],
+    names: tuple[str, str, str],
+) -> None:
     split = spatial_strip_split(
         width, height, 320, 0.2, fractions=fractions, split_names=names
     )
@@ -413,7 +436,7 @@ def test_spatial_strip_split_lays_one_region_per_side(
 
 
 @pytest.mark.parametrize("stated", ["stripes_per_split", "discard_ceiling"])
-def test_spatial_strip_split_takes_no_layout_parameter(stated):
+def test_spatial_strip_split_takes_no_layout_parameter(stated: str) -> None:
     with pytest.raises(TypeError, match=stated):
         spatial_strip_split(
             4000,
@@ -426,19 +449,21 @@ def test_spatial_strip_split_takes_no_layout_parameter(stated):
         )
 
 
-def test_spatial_strip_identity_roundtrip():
+def test_spatial_strip_identity_roundtrip() -> None:
     identity = spatial_strip_identity("mosaic_north_02", "strip_x_1")
     assert identity == "mosaic_north_02::strip_x_1"
     assert stem_of_spatial_identity(identity) == "mosaic_north_02"
 
 
-def test_stem_of_spatial_identity_passes_through_a_non_spatial_string():
+def test_stem_of_spatial_identity_passes_through_a_non_spatial_string() -> (
+    None
+):
     assert stem_of_spatial_identity("plain_stem_0_0") == "plain_stem_0_0"
 
 
 def test_label_document_extent_reads_the_frame_off_the_document_it_is_handed(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """``label_document_extent`` reads the frame off the document it is handed.
 
     The extent is the frame the stored document records; a document stating none refuses
@@ -468,8 +493,8 @@ def test_label_document_extent_reads_the_frame_off_the_document_it_is_handed(
 
 
 def test_count_label_lines_counts_every_instance_of_the_subject_assessed_or_not(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """``count_label_lines`` counts every instance of the subject, assessed or not.
 
     Every record of the scope's subject is foreground, whether or not it carries a value for
@@ -493,6 +518,7 @@ def test_count_label_lines_counts_every_instance_of_the_subject_assessed_or_not(
             subjects=(
                 cr.Subject(
                     name="leaf",
+                    description="",
                     attributes=(
                         cr.Attribute(
                             "condition", "categorical", ("healthy", "damaged")

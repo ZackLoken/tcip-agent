@@ -7,10 +7,14 @@ stream routes.
 from __future__ import annotations
 
 import socket
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class _RawHeaderList(list):
@@ -39,7 +43,10 @@ def test_trusted_host_rejects_foreign_host(client: TestClient) -> None:
 
 
 def test_inference_launch_confines_checkpoint_to_image_roots(
-    client, opened_project, tmp_path, tmp_path_factory: pytest.TempPathFactory
+    client: TestClient,
+    opened_project: Path,
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     # A checkpoint outside every allowed root must be rejected before it reaches
     # torch.load(weights_only=False), an arbitrary-pickle sink.
@@ -60,7 +67,7 @@ def test_inference_launch_confines_checkpoint_to_image_roots(
 
 
 def test_inference_launch_unconfined_for_a_checkpoint_inside_the_workspace(
-    client, opened_project, tmp_path
+    client: TestClient, opened_project: Path, tmp_path: Path
 ) -> None:
     # With no additive TCIP_IMAGE_ROOTS, a checkpoint under the workspace still clears the guard:
     # a missing checkpoint reaches its own 404, never a 403 from the path check.
@@ -175,7 +182,7 @@ def test_ws_inference_stream_rejects_cross_site_origin(
 
 
 def test_ws_training_stream_rejects_cross_site_origin(
-    client: TestClient, opened_project
+    client: TestClient, opened_project: Path
 ) -> None:
     """A training-stream connect from a cross-site origin closes as origin not allowed.
 
@@ -191,7 +198,7 @@ def test_ws_training_stream_rejects_cross_site_origin(
 
 
 def test_ws_training_stream_of_the_open_project_opens_and_names_an_unknown_run(
-    client: TestClient, opened_project
+    client: TestClient, opened_project: Path
 ) -> None:
     # The rail must admit valid work: with a project open the socket opens and reaches its normal
     # "unknown run" error message.

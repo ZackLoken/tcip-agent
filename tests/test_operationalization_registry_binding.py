@@ -36,6 +36,7 @@ _WITHOUT_OPEN = cr.SubjectRegistry(
     subjects=(
         cr.Subject(
             name="flower",
+            description="",
             attributes=(
                 cr.Attribute(
                     name="state", type="categorical", values=("closed",)
@@ -53,7 +54,7 @@ def project(tmp_path: Path) -> Path:
     return root
 
 
-def _propose(project: Path, **kwargs) -> dict:
+def _propose(project: Path, **kwargs: str) -> dict:
     return propose_trait(
         project, _CROSSING, rationale="the breeder's words", **kwargs
     )
@@ -85,7 +86,9 @@ def test_positive_state_problem_names_an_unknown_subject(
 def test_positive_state_problem_names_a_subject_declaring_no_such_attribute() -> (
     None
 ):
-    registry = cr.SubjectRegistry(subjects=(cr.Subject(name="bush"),))
+    registry = cr.SubjectRegistry(
+        subjects=(cr.Subject(name="bush", description=""),)
+    )
     problem = cr.positive_state_problem(registry, "bush", OPEN)
     assert problem is not None and "declares no attribute 'state'" in problem
 
@@ -277,6 +280,7 @@ def test_a_crossing_delivery_reads_the_registry_of_its_buckets_dataset_root(
             subjects=(
                 cr.Subject(
                     name=SUBJECT,
+                    description="",
                     attributes=(
                         cr.Attribute(
                             name=ATTRIBUTE,

@@ -10,15 +10,23 @@ import dataclasses
 import importlib.util
 import os
 import sys
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from tcip_web import terminal as pty_host
 from tests import REPO_ROOT
 
+if TYPE_CHECKING:
+    from pathlib import Path
+    from types import ModuleType
+
+    import pytest
+    from fastapi.testclient import TestClient
+
 SCRIPT = REPO_ROOT / "tools" / "smoke_terminal_e2e.py"
 
 
-def _load():
+def _load() -> ModuleType:
     spec = importlib.util.spec_from_file_location("smoke_terminal_e2e", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     sys.modules["smoke_terminal_e2e"] = mod
@@ -27,8 +35,8 @@ def _load():
 
 
 def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The smoke run uses the workspace it is given, not the last-opened project.
 
     Beside a workspace whose last-opened pointer names a project, the run binds the workspace
@@ -67,8 +75,8 @@ def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
 
 
 def test_the_signal_is_a_friction_report_of_the_open_project_carrying_the_token(
-    opened_project, opened_client
-):
+    opened_project: Path, opened_client: TestClient
+) -> None:
     """The smoke signal is one friction report of the open project carrying the token.
 
     ``reported`` answers only while ``report_friction`` has recorded, in the open project,
@@ -99,8 +107,8 @@ def test_the_signal_is_a_friction_report_of_the_open_project_carrying_the_token(
 
 
 def test_the_websocket_url_is_absolute_and_carries_the_served_host(
-    tmp_path, client
-):
+    tmp_path: Path, client: TestClient
+) -> None:
     """``terminal_ws_url`` is absolute and names the client's own host."""
     mod = _load()
 

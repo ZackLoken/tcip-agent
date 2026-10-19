@@ -9,6 +9,7 @@ geometry, decode inverts the recorded scope, and authoring refuses a subjectless
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -27,6 +28,9 @@ from tests._producer_fixtures import (  # noqa: E402
     write_image,
 )
 
+if TYPE_CHECKING:
+    from tcip_mcp.workspace import BoundProject
+
 
 def _write_image(images_dir: Path, stem: str) -> Path:
     """Write the 640 by 480 image ``<stem>.jpg`` of ``images_dir`` and return its path."""
@@ -40,8 +44,8 @@ def _write_registry(root: Path, *subjects: Subject) -> SubjectRegistry:
 
 
 # (a) a registry decodes its own labels after the flip.
-def test_registry_decodes_its_own_labels(tmp_path):
-    registry = _write_registry(tmp_path, Subject(name="bud"))
+def test_registry_decodes_its_own_labels(tmp_path: Path) -> None:
+    registry = _write_registry(tmp_path, Subject(name="bud", description=""))
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     image = _write_image(images_dir, "img_001")
     label_image(
@@ -65,11 +69,11 @@ def test_registry_decodes_its_own_labels(tmp_path):
 
 # (b) a geometry-less annotation round-trips and its image is not collapsed to empty/negative.
 def test_geometryless_annotation_roundtrips_and_marks_image_annotated(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.data.label_queries import admit
 
-    _write_registry(tmp_path, Subject(name="bud"))
+    _write_registry(tmp_path, Subject(name="bud", description=""))
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     image = _write_image(images_dir, "img_001")
     label_image(image, [Annotation(subject="bud")], 640, 480)
@@ -90,13 +94,16 @@ def test_geometryless_annotation_roundtrips_and_marks_image_annotated(
 
 
 # (c) the admitted scope carries every attribute the registry declares, in declared order.
-def test_the_admitted_scope_carries_the_registrys_attributes(tmp_path):
+def test_the_admitted_scope_carries_the_registrys_attributes(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.subject_registry import Attribute
 
     registry = _write_registry(
         tmp_path,
         Subject(
             name="bud",
+            description="",
             attributes=(
                 Attribute("color", "categorical", ("red", "blue")),
                 Attribute("grade", "ordinal", ("low", "high")),
@@ -118,7 +125,9 @@ def test_the_admitted_scope_carries_the_registrys_attributes(tmp_path):
 
 
 # (d) a confirmed negative is scoped to the subject its mark names.
-def test_a_confirmed_negative_is_its_own_subjects_alone(tmp_path):
+def test_a_confirmed_negative_is_its_own_subjects_alone(
+    tmp_path: Path,
+) -> None:
     from tests._producer_fixtures import mark_complete
 
     image = _write_image(tmp_path / "images" / "2-11-26", "img_009")
@@ -133,10 +142,14 @@ def test_a_confirmed_negative_is_its_own_subjects_alone(tmp_path):
 
 
 # (e) geometry-less + wrong-subject annotations are excluded from a detection run's targets.
-def test_loader_filters_by_subject_and_geometry(tmp_path):
+def test_loader_filters_by_subject_and_geometry(tmp_path: Path) -> None:
     import torch
 
-    _write_registry(tmp_path, Subject(name="bud"), Subject(name="bush"))
+    _write_registry(
+        tmp_path,
+        Subject(name="bud", description=""),
+        Subject(name="bush", description=""),
+    )
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     label_image(
         _write_image(images_dir, "img_001"),
@@ -164,7 +177,7 @@ def test_loader_filters_by_subject_and_geometry(tmp_path):
 
 
 # (f) the encoder decodes a prediction's attribute ids through the scope the loader read under.
-def test_decode_inverts_the_recorded_scope(tmp_path):
+def test_decode_inverts_the_recorded_scope(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
     from tcip_mcp.subject_registry import Attribute
 
@@ -172,6 +185,7 @@ def test_decode_inverts_the_recorded_scope(tmp_path):
         tmp_path,
         Subject(
             name="bud",
+            description="",
             attributes=(Attribute("color", "categorical", ("red", "blue")),),
         ),
     )
@@ -198,7 +212,9 @@ def test_decode_inverts_the_recorded_scope(tmp_path):
 
 
 # (g) save_annotations refuses a missing subject.
-def test_save_annotations_refuses_missing_subject(tmp_path, bound):
+def test_save_annotations_refuses_missing_subject(
+    tmp_path: Path, bound: BoundProject
+) -> None:
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     image = _write_image(tmp_path / "images" / UNDATED_BUCKET, "img_001")
@@ -218,7 +234,9 @@ def test_save_annotations_refuses_missing_subject(tmp_path, bound):
     assert ok.get("count") == 1 and tcip_store.exists(image_label_key(image))
 
 
-def test_save_annotations_prefers_points_over_bbox(tmp_path, bound):
+def test_save_annotations_prefers_points_over_bbox(
+    tmp_path: Path, bound: BoundProject
+) -> None:
     """``save_annotations`` writes the polygon when a payload carries points and a box.
 
     The stored record carries a ``segmentation``, and the annotation reads back as the polygon
@@ -249,7 +267,10 @@ def test_save_annotations_prefers_points_over_bbox(tmp_path, bound):
     assert ann.geometry.rings == [
         [(10.0, 20.0), (110.0, 20.0), (110.0, 220.0)]
     ]
-    obj = tcip_store.read(image_label_key(image))["annotations"][0]
+    stored = tcip_store.read(image_label_key(image))
+    assert isinstance(stored, dict) and isinstance(stored["annotations"], list)
+    obj = stored["annotations"][0]
+    assert isinstance(obj, dict)
     assert "segmentation" in obj  # written as a polygon
 
 
@@ -264,8 +285,8 @@ def test_save_annotations_prefers_points_over_bbox(tmp_path, bound):
     ids=["no_rings", "no_points", "one_vertex", "no_points_beside_a_box"],
 )
 def test_save_annotations_refuses_a_polygon_that_is_no_shape(
-    tmp_path, bound, geometry
-):
+    tmp_path: Path, bound: BoundProject, geometry: dict[str, list]
+) -> None:
     """``save_annotations`` refuses an empty or one-vertex polygon by name and writes nothing."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
@@ -279,7 +300,9 @@ def test_save_annotations_refuses_a_polygon_that_is_no_shape(
     assert not tcip_store.exists(image_label_key(image))
 
 
-def test_save_annotations_accepts_rings(tmp_path, bound):
+def test_save_annotations_accepts_rings(
+    tmp_path: Path, bound: BoundProject
+) -> None:
     """``save_annotations`` accepts multi-ring geometry in either vertex shape.
 
     An occlusion-split instance in either ring-vertex shape (``{x, y}`` mappings or ``[x, y]``
@@ -360,8 +383,8 @@ def test_save_annotations_accepts_rings(tmp_path, bound):
 # (h) a geometry-less-only image carries the subject and is admitted; the detection loader reads
 # no target from it and refuses it by name.
 def test_geometryless_only_image_is_refused_by_the_loader_that_reads_no_target_from_it(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An image whose labels are all geometry-less is refused by the detection loader by name.
 
     Admission keeps the image, the detection loader refuses it by name, and the boxed image
@@ -369,7 +392,7 @@ def test_geometryless_only_image_is_refused_by_the_loader_that_reads_no_target_f
     """
     from tcip_mcp.pipelines.data.label_queries import admit
 
-    _write_registry(tmp_path, Subject(name="bud"))
+    _write_registry(tmp_path, Subject(name="bud", description=""))
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     label_image(
         _write_image(images_dir, "boxed"),
@@ -405,7 +428,7 @@ def test_geometryless_only_image_is_refused_by_the_loader_that_reads_no_target_f
 
 # (i) eval accumulates every per-image record into one score, so a subject must carry the same
 # category id across images: records_from_annotation must honor a passed global name_id.
-def test_records_from_annotation_honors_a_global_name_id():
+def test_records_from_annotation_honors_a_global_name_id() -> None:
     from tcip_annotation.state import Annotation as Ann, BBox as B
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
@@ -424,12 +447,12 @@ def test_records_from_annotation_honors_a_global_name_id():
     assert {r["category_id"] for r in rec["dt"]} == {2}
 
 
-def test_uppercase_extension_image_still_yields_boxes(tmp_path):
+def test_uppercase_extension_image_still_yields_boxes(tmp_path: Path) -> None:
     """An image with an uppercase extension yields its boxes.
 
     A labeled ``IMG_1.JPG`` loads as one sample carrying its one box.
     """
-    _write_registry(tmp_path, Subject(name="bud"))
+    _write_registry(tmp_path, Subject(name="bud", description=""))
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     write_image(images_dir / "IMG_1.JPG", (640, 480))
     label_image(

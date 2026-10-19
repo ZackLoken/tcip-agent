@@ -7,12 +7,17 @@ counts over the same records.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from tcip_annotation.matching import Matching
 
 pytest.importorskip("torch")
 
 
-def _records():
+def _records() -> list[dict]:
     from tcip_mcp.pipelines.training.evaluation import (
         gt_record,
         prediction_record,
@@ -38,7 +43,9 @@ def _records():
     ]
 
 
-def test_an_evaluations_counts_are_the_matchers_inclusive_at_the_threshold():
+def test_an_evaluations_counts_are_the_matchers_inclusive_at_the_threshold() -> (
+    None
+):
     from tcip_mcp.pipelines.training.evaluation import (
         detection_metrics,
         governing_counts,
@@ -65,7 +72,9 @@ def test_an_evaluations_counts_are_the_matchers_inclusive_at_the_threshold():
     assert (m["tp"], m["fp"], m["fn"]) == (2, 0, 0)
 
 
-def test_the_scorers_matchings_and_the_evaluations_counts_agree_over_one_reference():
+def test_the_scorers_matchings_and_the_evaluations_counts_agree_over_one_reference() -> (
+    None
+):
     from tcip_annotation.matching import pair_proposals
     from tcip_annotation.state import Annotation, BBox, Polygon
     from tcip_mcp.pipelines.training.evaluation import (
@@ -102,7 +111,9 @@ def test_the_scorers_matchings_and_the_evaluations_counts_agree_over_one_referen
     assert matching.counts == (1, 1, 1)
 
 
-def test_masks_that_share_a_box_but_not_a_region_do_not_match_on_either_route():
+def test_masks_that_share_a_box_but_not_a_region_do_not_match_on_either_route() -> (
+    None
+):
     from tcip_annotation.matching import pair_proposals
     from tcip_annotation.state import Annotation, Polygon
     from tcip_mcp.pipelines.training.evaluation import (
@@ -133,8 +144,8 @@ def test_masks_that_share_a_box_but_not_a_region_do_not_match_on_either_route():
 
 
 def test_one_scoring_matches_each_class_once_per_distinct_criterion(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Scoring matches each image and class once per distinct criterion.
 
     Counts, average precision and the displayed matching share one matching per image, class and
@@ -153,7 +164,9 @@ def test_one_scoring_matches_each_class_once_per_distinct_criterion(
     calls: Counter = Counter()
     real = matching.pair_detections
 
-    def counted(gt, dt, criterion, **kwargs):
+    def counted(
+        gt: list[dict], dt: list[dict], criterion: dict, **kwargs: str
+    ) -> Matching:
         calls[
             (
                 tuple(r["category_id"] for r in (*gt, *dt)),
@@ -186,7 +199,9 @@ def test_one_scoring_matches_each_class_once_per_distinct_criterion(
     assert len(calls) == 2 * len(AP_IOU_THRESHOLDS)
 
 
-def test_a_detection_of_another_subject_on_an_object_is_a_miss_and_a_false_find_on_both_routes():
+def test_another_subjects_detection_on_an_object_is_a_miss_and_false_find_on_both_routes() -> (
+    None
+):
     from tcip_annotation.matching import pair_proposals
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.training.evaluation import (

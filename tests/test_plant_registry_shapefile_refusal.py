@@ -64,8 +64,11 @@ def test_register_plant_registry_refuses_a_shp_naming_the_command(
         site="block",
     )
 
-    assert "error" in res
-    assert "tcip shp-to-plant-csv" in res["error"]
+    match res:
+        case {"error": str() as error}:
+            assert "tcip shp-to-plant-csv" in error
+        case _:
+            raise AssertionError(res)
 
 
 def test_register_plant_registry_refuses_a_binary_csv_as_not_utf8(
@@ -83,8 +86,11 @@ def test_register_plant_registry_refuses_a_binary_csv_as_not_utf8(
         site="block",
     )
 
-    assert "error" in res
-    assert "not UTF-8 text" in res["error"]
+    match res:
+        case {"error": str() as error}:
+            assert "not UTF-8 text" in error
+        case _:
+            raise AssertionError(res)
 
 
 def test_register_plant_registry_admits_a_shapefile_converted_first(

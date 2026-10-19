@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from torch import Tensor, nn
 
 torch = pytest.importorskip("torch")
 
@@ -18,24 +23,24 @@ class TestBackboneOrdering:
     The renamed stages run finest first, and an FPN's sorted output keys run finest to coarsest.
     """
 
-    def _staged(self):
+    def _staged(self) -> nn.Module:
         import torch.nn as nn
 
         class Staged(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = nn.Conv2d(3, 64, 3, stride=2, padding=1)
                 self.b = nn.Conv2d(64, 64, 3, stride=2, padding=1)
                 self.c = nn.Conv2d(64, 64, 3, stride=2, padding=1)
 
-            def forward(self, x):
+            def forward(self, x: Tensor) -> dict[str, Tensor]:
                 lo = self.a(x)
                 mid = self.b(lo)
                 return {"low": lo, "mid": mid, "high": self.c(mid)}
 
         return Staged()
 
-    def test_self_named_stages_are_renamed_finest_first(self):
+    def test_self_named_stages_are_renamed_finest_first(self) -> None:
         from tcip_mcp.pipelines.components.backbones import BackboneWrapper
 
         out = BackboneWrapper(self._staged(), [64, 64, 64])(
@@ -46,7 +51,7 @@ class TestBackboneOrdering:
         assert out["s0"].shape[-1] == 32
         assert out["s2"].shape[-1] == 8
 
-    def test_pyramid_order_survives_into_the_neck(self):
+    def test_pyramid_order_survives_into_the_neck(self) -> None:
         from tcip_mcp.pipelines.components.backbones import BackboneWrapper
         from tcip_mcp.pipelines.components.necks import FPN
 
@@ -60,7 +65,7 @@ class TestBackboneOrdering:
             8,
         ]  # finest -> coarsest
 
-    def test_feature_keys_names_the_stages(self):
+    def test_feature_keys_names_the_stages(self) -> None:
         from tcip_mcp.pipelines.components.backbones import BackboneWrapper
 
         w = BackboneWrapper(
@@ -68,7 +73,7 @@ class TestBackboneOrdering:
         )
         assert list(w(torch.zeros(1, 3, 64, 64)).keys()) == ["p3", "p4", "p5"]
 
-    def test_feature_keys_length_mismatch_raises(self):
+    def test_feature_keys_length_mismatch_raises(self) -> None:
         from tcip_mcp.pipelines.components.backbones import BackboneWrapper
 
         w = BackboneWrapper(
@@ -81,13 +86,15 @@ class TestBackboneOrdering:
 
 
 class TestNecks:
-    def _dummy_features(self, channels=(64, 128, 256, 512)):
+    def _dummy_features(
+        self, channels: tuple[int, ...] = (64, 128, 256, 512)
+    ) -> dict[str, Tensor]:
         return {
             f"s{i}": torch.randn(1, c, 32 // (2**i), 32 // (2**i))
             for i, c in enumerate(channels)
         }
 
-    def test_fpn_forward(self):
+    def test_fpn_forward(self) -> None:
         from tcip_mcp.pipelines.components.necks import FPN
 
         fpn = FPN([64, 128, 256, 512], out_channels=64)
@@ -96,21 +103,21 @@ class TestNecks:
         for v in out.values():
             assert v.shape[1] == 64
 
-    def test_pan_forward(self):
+    def test_pan_forward(self) -> None:
         from tcip_mcp.pipelines.components.necks import PAN
 
         pan = PAN([64, 128, 256, 512], out_channels=64)
         out = pan(self._dummy_features())
         assert len(out) == 4
 
-    def test_gap_forward(self):
+    def test_gap_forward(self) -> None:
         from tcip_mcp.pipelines.components.necks import GlobalAvgPoolNeck
 
         gap = GlobalAvgPoolNeck([64, 128, 256, 512])
         out = gap(self._dummy_features())
         assert out.shape == (1, 512)
 
-    def test_identity_forward(self):
+    def test_identity_forward(self) -> None:
         from tcip_mcp.pipelines.components.necks import IdentityNeck
 
         neck = IdentityNeck([64, 128, 256, 512])
@@ -125,7 +132,7 @@ class TestNecks:
 
 
 class TestHeads:
-    def test_classification_head(self):
+    def test_classification_head(self) -> None:
         from tcip_mcp.pipelines.components.heads import ClassificationHead
 
         head = ClassificationHead(in_channels=512, num_classes=5)
@@ -142,7 +149,7 @@ class TestHeads:
         assert decoded["labels"].shape == (2,)
         assert decoded["confidences"].shape == (2,)
 
-    def test_ordinal_head(self):
+    def test_ordinal_head(self) -> None:
         from tcip_mcp.pipelines.components.heads import OrdinalHead
 
         head = OrdinalHead(in_channels=256, num_ranks=9)
@@ -162,7 +169,7 @@ class TestHeads:
             (decoded["confidences"] >= 0) & (decoded["confidences"] <= 1)
         ).all()
 
-    def test_ordinal_head_confidence_hand_computed(self):
+    def test_ordinal_head_confidence_hand_computed(self) -> None:
         from tcip_mcp.pipelines.components.heads import OrdinalHead
 
         head = OrdinalHead(in_channels=4, num_ranks=3)
@@ -175,7 +182,7 @@ class TestHeads:
         # P(Y=0) = 1 - P(Y>=1) = 1 - 0.5 = 0.5, the marginal mass at the predicted rank.
         assert decoded["confidences"].item() == pytest.approx(0.5)
 
-    def test_regression_head(self):
+    def test_regression_head(self) -> None:
         from tcip_mcp.pipelines.components.heads import RegressionHead
 
         head = RegressionHead(in_channels=256)
@@ -187,7 +194,7 @@ class TestHeads:
         loss = head.compute_loss(out, targets)
         assert "reg_loss" in loss
 
-    def test_semantic_seg_head(self):
+    def test_semantic_seg_head(self) -> None:
         from tcip_mcp.pipelines.components.heads import SemanticSegHead
 
         head = SemanticSegHead(in_channels=64, num_classes=3)
@@ -207,7 +214,7 @@ class TestHeads:
 
 
 class TestLosses:
-    def test_focal_loss(self):
+    def test_focal_loss(self) -> None:
         from tcip_mcp.pipelines.components.losses import FocalLoss
 
         loss_fn = FocalLoss(alpha=0.25, gamma=2.0)
@@ -217,7 +224,7 @@ class TestLosses:
         assert loss.shape == ()
         loss.backward()
 
-    def test_corn_loss(self):
+    def test_corn_loss(self) -> None:
         from tcip_mcp.pipelines.components.losses import CORNLoss
 
         loss_fn = CORNLoss(num_ranks=9)
@@ -227,7 +234,7 @@ class TestLosses:
         assert loss.shape == ()
         loss.backward()
 
-    def test_coral_loss(self):
+    def test_coral_loss(self) -> None:
         from tcip_mcp.pipelines.components.losses import CORALLoss
 
         loss_fn = CORALLoss(num_ranks=5)
@@ -236,7 +243,7 @@ class TestLosses:
         loss = loss_fn(preds, targets)
         loss.backward()
 
-    def test_dice_loss(self):
+    def test_dice_loss(self) -> None:
         from tcip_mcp.pipelines.components.losses import DiceLoss
 
         loss_fn = DiceLoss()
@@ -245,14 +252,14 @@ class TestLosses:
         loss = loss_fn(preds, targets)
         loss.backward()
 
-    def test_build_combined(self):
+    def test_build_combined(self) -> None:
         from tcip_mcp.pipelines.components.losses import build_loss
 
         combined = build_loss("smooth_l1+huber")
         assert hasattr(combined, "losses")
         assert len(combined.losses) == 2
 
-    def test_combined_loss_receives_class_weighting(self):
+    def test_combined_loss_receives_class_weighting(self) -> None:
         """Class weighting reaches a combined loss's weightable term.
 
         The cross-entropy term of ``cross_entropy+dice`` carries one weight per class, the
@@ -272,7 +279,7 @@ class TestLosses:
         assert weights.numel() == 3
         assert weights[0] < weights[2]  # the majority class is down-weighted
 
-    def test_combined_loss_refuses_unusable_class_weighting(self):
+    def test_combined_loss_refuses_unusable_class_weighting(self) -> None:
         """A class_distribution no term can consume raises a ValueError about weightable terms."""
         from tcip_mcp.pipelines.components.losses import build_loss
 
@@ -281,7 +288,7 @@ class TestLosses:
                 "bce+dice", class_distribution={0: 100, 1: 10}, num_classes=2
             )
 
-    def test_giou_loss(self):
+    def test_giou_loss(self) -> None:
         from tcip_mcp.pipelines.components.losses import GIoULoss
 
         loss_fn = GIoULoss()
@@ -289,3 +296,25 @@ class TestLosses:
         gt = torch.tensor([[15.0, 15.0, 55.0, 55.0]])
         loss = loss_fn(pred, gt)
         loss.backward()
+
+    def test_giou_loss_agrees_with_torchvisions_pairwise_giou(self) -> None:
+        """The GIoU loss is the mean of one minus torchvision's GIoU of each row's box pair.
+
+        Over an identical, an overlapping and a disjoint pair it equals one minus the diagonal of
+        ``torchvision.ops.generalized_box_iou``, averaged, and the known 0, 68/63 and 16/9.
+        """
+        from torchvision.ops import generalized_box_iou
+
+        from tcip_mcp.pipelines.components.losses import build_loss
+
+        pred = torch.tensor(
+            [[0.0, 0.0, 2.0, 2.0], [0.0, 0.0, 2.0, 2.0], [0.0, 0.0, 1.0, 1.0]]
+        )
+        gt = torch.tensor(
+            [[0.0, 0.0, 2.0, 2.0], [1.0, 1.0, 3.0, 3.0], [2.0, 2.0, 3.0, 3.0]]
+        )
+        loss = build_loss("giou")(pred, gt)
+        pairwise = (1.0 - generalized_box_iou(pred, gt).diagonal()).mean()
+        known = (0.0 + 68 / 63 + 16 / 9) / 3
+        assert float(loss) == pytest.approx(float(pairwise), abs=1e-6)
+        assert float(loss) == pytest.approx(known, abs=1e-6)

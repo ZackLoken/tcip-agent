@@ -1,5 +1,9 @@
 """Training-run cancellation (cancel_training; graceful stop)."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
 
 from tests._chain_fixtures import CLASSIFIER_SOURCE
@@ -10,10 +14,13 @@ from tests._training_values import (
     stage,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 torch = pytest.importorskip("torch")
 
 
-def test_cancel_training_reaches_the_runs_own_poll(tmp_path):
+def test_cancel_training_reaches_the_runs_own_poll(tmp_path: Path) -> None:
     """A cancel requested by id reaches the run's own poll; an id naming no run refuses.
 
     The cancel is the one record the run's own poll reads.
@@ -40,7 +47,7 @@ def test_cancel_training_reaches_the_runs_own_poll(tmp_path):
     assert "error" in cancel_training(tmp_path, "missing-run", actor=None)
 
 
-def test_cancel_before_training_yields_canceled(tmp_path):
+def test_cancel_before_training_yields_canceled(tmp_path: Path) -> None:
     pytest.importorskip("torchvision")
     from tcip_mcp.experiments import request_cancel
     from tcip_mcp.pipelines.training.generic_trainer import train

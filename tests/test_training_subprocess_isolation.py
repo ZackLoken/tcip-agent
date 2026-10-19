@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -20,8 +21,16 @@ from tests._chain_fixtures import (
 )
 from tests._training_values import drawn_split, tune_arguments
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
+    from types import ModuleType
+    from typing import NoReturn
 
-def _config(project: Path, data: dict | None = None, **keys) -> dict:
+    from tcip_mcp.pipelines.schemas import DataSpec
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+
+
+def _config(project: Path, data: dict | None = None, **keys: object) -> dict:
     """Return a training config of ``project`` for a detection model.
 
     The config is a :func:`~tests._chain_fixtures.training_config` of ``unbuilt_source``'s
@@ -45,8 +54,11 @@ def _config(project: Path, data: dict | None = None, **keys) -> dict:
 
 
 def _write_classes_json(
-    dataset_root, subject="bud", attribute=None, values=None
-):
+    dataset_root: Path,
+    subject: str = "bud",
+    attribute: str | None = None,
+    values: list[str] | None = None,
+) -> None:
     from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
     from tests._producer_fixtures import registry_over
 
@@ -58,11 +70,17 @@ def _write_classes_json(
             ),
         )
     registry_over(
-        dataset_root, SubjectRegistry((Subject(subject, attributes=attrs),))
+        dataset_root,
+        SubjectRegistry((Subject(subject, "", attributes=attrs),)),
     )
 
 
-def _document_dataset(root, subject="bud", attribute=None, values=None):
+def _document_dataset(
+    root: Path,
+    subject: str = "bud",
+    attribute: str | None = None,
+    values: list[str] | None = None,
+) -> Path:
     """Write two images and their own label documents under a registry naming ``subject``.
 
     Returns the images directory.
@@ -101,7 +119,7 @@ def _document_dataset(root, subject="bud", attribute=None, values=None):
     return images_dir
 
 
-def _resolved_data(project, task: str, data_cfg: dict):
+def _resolved_data(project: Path, task: str, data_cfg: dict) -> DataSpec:
     """Return the data block a ``task`` run of ``project`` over ``data_cfg`` resolves.
 
     The block is resolved through ``split_construction.auto_train_val``.
@@ -111,7 +129,9 @@ def _resolved_data(project, task: str, data_cfg: dict):
     return train_val(project, task, data_cfg)[3]
 
 
-def test_the_class_space_recorded_is_the_one_the_run_admitted(tmp_path):
+def test_the_class_space_recorded_is_the_one_the_run_admitted(
+    tmp_path: Path,
+) -> None:
     """The resolved data block's recorded scope is the one the run admitted.
 
     The scope reads ``bud`` with no attributes, and still does after ``subjects.json`` is
@@ -138,8 +158,8 @@ def test_the_class_space_recorded_is_the_one_the_run_admitted(tmp_path):
 
 
 def test_a_run_over_an_attributed_subject_records_its_attributes_in_declared_order(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A run over an attributed subject records its attributes in declared order.
 
     A run's class space is its subject and the attribute the registry declares for it, its
@@ -169,8 +189,8 @@ def test_a_run_over_an_attributed_subject_records_its_attributes_in_declared_ord
 
 
 def test_a_run_whose_ground_truth_carries_its_own_classes_records_the_empty_scope(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A run whose ground truth carries its own classes records the empty scope.
 
     A mask raster scopes no class space and no registry answers for one, so the empty scope is
@@ -201,15 +221,15 @@ def test_a_run_whose_ground_truth_carries_its_own_classes_records_the_empty_scop
 
 
 def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The launch record carries the resolution, and the child resolves nothing.
 
     The launcher writes what it resolved (data section, geometry, partition, trait revision)
     into its launch record; the child's context carries those values with both resolvers
     patched to raise, and the run directory is unchanged.
     """
-    from tcip_mcp.experiments import RUN_FILE, observe
+    from tcip_mcp.experiments import RUN_FILE, observe_run
     from tcip_mcp.pipelines.data import split_construction as sc
     from tcip_mcp.pipelines.training import subprocess_worker as worker
     from tests._verified_checkpoint_fixtures import (
@@ -222,32 +242,37 @@ def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing
         tmp_path, detection_config(tmp_path / "data", project=tmp_path)
     )
     launch_bytes = (run_dir / RUN_FILE).read_bytes()
-    resolved = observe(run_dir).record["resolved"]
-    assert set(resolved) == {"data", "geometry", "partition", "trait_revision"}
+    resolved = observe_run(run_dir).record.resolution
+    assert set(resolved.model_dump()) == {
+        "data",
+        "geometry",
+        "partition",
+        "trait_revision",
+    }
     files_before = sorted(p.name for p in run_dir.iterdir())
 
-    def resolves_again(*args, **kwargs):
+    def resolves_again(*args: object, **kwargs: object) -> NoReturn:
         raise AssertionError("the child resolved its run again")
 
     monkeypatch.setattr(sc, "auto_train_val", resolves_again)
     monkeypatch.setattr(sc, "resolve_run", resolves_again)
 
-    ctx = worker.prepare_run_context(observe(run_dir))
+    ctx = worker.prepare_run_context(observe_run(run_dir))
 
-    assert ctx.run.trait_revision is None is resolved["trait_revision"]
-    assert ctx.spec.data.record() == resolved["data"]
-    assert ctx.run.geometry.model_dump(mode="json") == resolved["geometry"]
+    assert ctx.run.trait_revision is None is resolved.trait_revision
+    assert ctx.spec.data.record() == resolved.data.record()
+    assert ctx.run.geometry == resolved.geometry
     train_ds = ctx.train_loader.dataset
     assert sorted(
         {train_ds.sample_of(key).member for key in train_ds.stems}
-    ) == partition_side(resolved["partition"], "train")
+    ) == partition_side(resolved.partition, "train")
     assert (run_dir / RUN_FILE).read_bytes() == launch_bytes
     assert sorted(p.name for p in run_dir.iterdir()) == files_before
 
 
 def test_launch_training_child_receives_its_own_run_directory(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A launched training child receives its own run directory alone.
 
     One captured child argv ends with ``--run-dir`` and the run directory of the id the launch
@@ -256,7 +281,7 @@ def test_launch_training_child_receives_its_own_run_directory(
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
 
-    from tcip_mcp.experiments import experiment_dir, observe
+    from tcip_mcp.experiments import experiment_dir, read_run
     from tcip_mcp.tools import training_tools
     from tests._producer_fixtures import (
         fake_popen,
@@ -282,17 +307,15 @@ def test_launch_training_child_receives_its_own_run_directory(
         "--run-dir",
         str(run_dir),
     ]
-    assert observe(run_dir).record["config"]["data"]["images_dir"] == str(
-        images_dir
-    )
+    assert read_run(run_dir).spec.data.images_dir == str(images_dir)
 
 
 # ── should_cancel() / the cancellation record ──────────────────────
 
 
 def test_ctx_should_cancel_and_dispatch_classification_honor_the_cancellation(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A bespoke body sees a requested cancellation and the run is classified canceled.
 
     A bespoke train(ctx) that calls ctx.should_cancel() sees a cancellation requested through
@@ -322,7 +345,7 @@ def test_ctx_should_cancel_and_dispatch_classification_honor_the_cancellation(
     assert ctx.run.status == "canceled"
 
 
-def _bespoke_loop(ctx) -> None:
+def _bespoke_loop(ctx: TrainContext) -> None:
     """Return when ctx.should_cancel() answers true, and raise AssertionError when it is false."""
     if ctx.should_cancel():
         return
@@ -338,13 +361,13 @@ BESPOKE_LOOP = f"{Path(__file__).stem}:_bespoke_loop"
 # ── run_summary ─────────────
 
 
-def test_run_summary_reads_the_run_directory(tmp_path):
+def test_run_summary_reads_the_run_directory(tmp_path: Path) -> None:
     """A live run's summary is read from its run directory.
 
     It names its config's selection metric and carries no best while no row stamps a
     ``selection``.
     """
-    from tcip_mcp.experiments import observe, read_rows, run_summary
+    from tcip_mcp.experiments import observe_run, read_rows, run_summary
     from tests._verified_checkpoint_fixtures import (
         detection_config,
         log_epoch,
@@ -356,7 +379,7 @@ def test_run_summary_reads_the_run_directory(tmp_path):
     )
     log_epoch(run_dir, 3, {"loss": 0.1})
 
-    observation = observe(run_dir)
+    observation = observe_run(run_dir)
     result = run_summary(
         observation, read_rows(observation.metrics_log)[0], None
     ).model_dump()
@@ -366,7 +389,7 @@ def test_run_summary_reads_the_run_directory(tmp_path):
     assert result["best_metric"] is None
     assert (
         result["best_metric_name"]
-        == observation.spec.evaluation.selection_metric
+        == observation.record.spec.evaluation.selection_metric
     )
 
 
@@ -376,8 +399,8 @@ def test_run_summary_reads_the_run_directory(tmp_path):
     ids=["higher-is-better", "lower-is-better"],
 )
 def test_the_live_summary_folds_its_rows_in_its_configs_metric_direction(
-    tmp_path, metric, best
-):
+    tmp_path: Path, metric: str, best: float
+) -> None:
     """The live summary folds its rows in its config's metric direction.
 
     The live summary's best is folded in the declared direction of the metric the run's
@@ -416,7 +439,9 @@ def test_the_live_summary_folds_its_rows_in_its_configs_metric_direction(
     )
 
 
-def test_run_summary_surfaces_the_wall_clock_failure_the_child_wrote(tmp_path):
+def test_run_summary_surfaces_the_wall_clock_failure_the_child_wrote(
+    tmp_path: Path,
+) -> None:
     """The run summary surfaces the wall-clock failure the child wrote.
 
     A run past its deadline ends failed, and its own final status names the wall clock.
@@ -440,8 +465,8 @@ def test_run_summary_surfaces_the_wall_clock_failure_the_child_wrote(tmp_path):
 
 
 def test_a_canceled_run_reads_canceled_whatever_its_heartbeat(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A canceled run reads canceled with its heartbeat fresh and with it stale."""
     from tcip_mcp import experiments
     from tests._verified_checkpoint_fixtures import (
@@ -464,7 +489,9 @@ def test_a_canceled_run_reads_canceled_whatever_its_heartbeat(
 # ── monitor_training / list_experiments read the directory ─────
 
 
-def test_monitor_training_reads_the_run_directory(tmp_path, monkeypatch):
+def test_monitor_training_reads_the_run_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tcip_mcp.tools.training_tools import monitor_training
     from tests._verified_checkpoint_fixtures import (
         detection_config,
@@ -484,7 +511,9 @@ def test_monitor_training_reads_the_run_directory(tmp_path, monkeypatch):
     assert result["state"] == "running"
 
 
-def test_launched_runs_view_lists_a_run_read_from_its_directory(tmp_path):
+def test_launched_runs_view_lists_a_run_read_from_its_directory(
+    tmp_path: Path,
+) -> None:
     """An opened run lists, read straight from its own run directory.
 
     The row carries the directory's last epoch and last sign of life.
@@ -524,16 +553,18 @@ def test_launched_runs_view_lists_a_run_read_from_its_directory(tmp_path):
 # ── GPU device pinning ───────────────────────────────────────────────────
 
 
-def test_gpu_device_pinning_round_robins(monkeypatch):
+def test_gpu_device_pinning_round_robins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from tcip_mcp.tools import training_tools
 
     class _FakeCuda:
         @staticmethod
-        def is_available():
+        def is_available() -> bool:
             return True
 
         @staticmethod
-        def device_count():
+        def device_count() -> int:
             return 2
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
@@ -546,17 +577,19 @@ def test_gpu_device_pinning_round_robins(monkeypatch):
     assert seen == {"0", "1"}
 
 
-def test_gpu_pinning_skipped_when_device_explicit(monkeypatch):
+def test_gpu_pinning_skipped_when_device_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A config naming an explicit device sets no CUDA_VISIBLE_DEVICES for the child."""
     from tcip_mcp.tools import training_tools
 
     class _FakeCuda:
         @staticmethod
-        def is_available():
+        def is_available() -> bool:
             return True
 
         @staticmethod
-        def device_count():
+        def device_count() -> int:
             return 2
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
@@ -567,16 +600,18 @@ def test_gpu_pinning_skipped_when_device_explicit(monkeypatch):
     assert "CUDA_VISIBLE_DEVICES" not in env
 
 
-def test_gpu_pinning_noop_with_single_gpu(monkeypatch):
+def test_gpu_pinning_noop_with_single_gpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from tcip_mcp.tools import training_tools
 
     class _FakeCuda:
         @staticmethod
-        def is_available():
+        def is_available() -> bool:
             return True
 
         @staticmethod
-        def device_count():
+        def device_count() -> int:
             return 1
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
@@ -590,8 +625,8 @@ def test_gpu_pinning_noop_with_single_gpu(monkeypatch):
 
 
 def test_max_wall_clock_seconds_terminates_a_hung_child_one_heartbeat_window_late(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The wall-clock watcher terminates a child that outlives its wall clock.
 
     With a 0.2 s wall clock and a 0.2 s heartbeat window, a process sleeping 60 s is terminated
@@ -628,13 +663,17 @@ def test_max_wall_clock_seconds_terminates_a_hung_child_one_heartbeat_window_lat
 
 
 def test_inspect_compute_resources_degrades_without_psutil(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import builtins
 
     real_import = builtins.__import__
 
-    def _no_psutil(name, *args, **kwargs):
+    def _no_psutil(
+        name: str,
+        *args: Mapping[str, object] | Sequence[str] | int | None,
+        **kwargs: Mapping[str, object] | Sequence[str] | int | None,
+    ) -> ModuleType:
         if name == "psutil":
             raise ImportError("simulated absent psutil")
         return real_import(name, *args, **kwargs)
@@ -652,19 +691,19 @@ def test_inspect_compute_resources_degrades_without_psutil(
 
 
 def test_inspect_compute_resources_reports_gpu_free_memory(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     class _FakeCuda:
         @staticmethod
-        def is_available():
+        def is_available() -> bool:
             return True
 
         @staticmethod
-        def device_count():
+        def device_count() -> int:
             return 1
 
         @staticmethod
-        def mem_get_info(idx):
+        def mem_get_info(idx: int) -> tuple[int, int]:
             return (1_000, 4_000)
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
@@ -677,7 +716,9 @@ def test_inspect_compute_resources_reports_gpu_free_memory(
     ]
 
 
-def test_inspect_compute_resources_counts_a_running_run_directory(tmp_path):
+def test_inspect_compute_resources_counts_a_running_run_directory(
+    tmp_path: Path,
+) -> None:
     """A run whose directory is fresh counts as one more active training run.
 
     The directory alone is enough.
@@ -704,16 +745,18 @@ def test_inspect_compute_resources_counts_a_running_run_directory(tmp_path):
 # ── HPO resource caps ─────────────────────────────────────────────────────────
 
 
-def test_default_trial_resources_derives_fractional_gpu_share(monkeypatch):
+def test_default_trial_resources_derives_fractional_gpu_share(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from tcip_mcp.pipelines.training import hpo
 
     class _FakeCuda:
         @staticmethod
-        def is_available():
+        def is_available() -> bool:
             return True
 
         @staticmethod
-        def device_count():
+        def device_count() -> int:
             return 2
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
@@ -728,16 +771,18 @@ def test_default_trial_resources_derives_fractional_gpu_share(monkeypatch):
     }
 
 
-def test_default_trial_resources_no_gpu(monkeypatch):
+def test_default_trial_resources_no_gpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from tcip_mcp.pipelines.training import hpo
 
     class _FakeCuda:
         @staticmethod
-        def is_available():
+        def is_available() -> bool:
             return False
 
         @staticmethod
-        def device_count():
+        def device_count() -> int:
             return 0
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
@@ -748,7 +793,9 @@ def test_default_trial_resources_no_gpu(monkeypatch):
 
 
 @pytest.mark.ray_cluster
-def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
+def test_tune_search_accepts_explicit_resources_per_trial(
+    tmp_path: Path,
+) -> None:
     """A Ray sweep runs to its end with an explicit resources_per_trial.
 
     The sweep runs a pure-math objective over four samples, and its named sweep_dir exists
@@ -757,11 +804,11 @@ def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
     pytest.importorskip("ray")
     from tcip_mcp.pipelines.training.hpo import tune_search
 
-    def obj(config, report):
+    def obj(config: dict, report: Callable[[float], None]) -> None:
         report((config["x"] - 2.0) ** 2)
 
     tune_search(
-        obj,
+        objective_fn=obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
         sweep_dir=tmp_path / "explicit",
         **tune_arguments(
@@ -773,8 +820,8 @@ def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
 
 @pytest.mark.ray_cluster
 def test_tune_search_runs_despite_deprecated_ray_result_dir_variables(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A sweep runs despite deprecated Ray result-directory variables in the environment.
 
     With TUNE_RESULT_DIR and RAY_AIR_LOCAL_CACHE_DIR set, the named sweep_dir exists afterward
@@ -789,11 +836,11 @@ def test_tune_search_runs_despite_deprecated_ray_result_dir_variables(
     monkeypatch.setenv("TUNE_RESULT_DIR", machine_scratch)
     monkeypatch.setenv("RAY_AIR_LOCAL_CACHE_DIR", machine_scratch)
 
-    def obj(config, report):
+    def obj(config: dict, report: Callable[[float], None]) -> None:
         report((config["x"] - 2.0) ** 2)
 
     tune_search(
-        obj,
+        objective_fn=obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
         sweep_dir=tmp_path / "sweep_store" / "redirected",
         **tune_arguments(

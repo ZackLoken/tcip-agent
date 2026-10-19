@@ -16,9 +16,15 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import tcip_store as ts
 from tcip_store.sqlite_backend import SqliteBackend
+
+if TYPE_CHECKING:
+    import sqlite3
+
+    from pydantic import JsonValue
 
 CAS = "contract_cas"
 LWW = "contract_lww"
@@ -38,11 +44,17 @@ class IgnoredExpectBackend(SqliteBackend):
     Its other behavior is ``SqliteBackend``'s.
     """
 
-    def replace(self, key, value, *, expect=None):
+    def replace(
+        self,
+        key: ts.Key,
+        value: JsonValue,
+        *,
+        expect: ts.Version | None = None,
+    ) -> ts.Version:
         return super().replace(key, value)
 
-    def delete(self, key, *, expect=None):
-        super().delete(key)
+    def delete(self, key: ts.Key, *, expect: ts.Version | None = None) -> bool:
+        return super().delete(key)
 
 
 class PausingCommitBackend(SqliteBackend):
@@ -54,14 +66,14 @@ class PausingCommitBackend(SqliteBackend):
     """
 
     def __init__(
-        self, *, pause_marker: Path, pause_s: float, **kwargs
+        self, *, pause_marker: Path, pause_s: float, **kwargs: float
     ) -> None:
         super().__init__(**kwargs)
         self.pause_marker = pause_marker
         self.pause_s = pause_s
         self._paused = False
 
-    def _put(self, conn, key, data):
+    def _put(self, conn: sqlite3.Connection, key: ts.Key, data: bytes) -> None:
         super()._put(conn, key, data)
         if os.environ.get("TCIP_STORE_CONTRACT_COMMITS_EACH_WRITE") == "1":
             conn.execute("commit")
@@ -72,7 +84,7 @@ class PausingCommitBackend(SqliteBackend):
             time.sleep(self.pause_s)
 
 
-def make_backend(**kwargs) -> SqliteBackend:
+def make_backend(**kwargs: float) -> SqliteBackend:
     """Return an ``IgnoredExpectBackend`` when the environment asks, else a ``SqliteBackend``.
 
     The environment asks with ``TCIP_STORE_CONTRACT_IGNORES_EXPECT=1``; ``kwargs`` are passed on.
@@ -147,7 +159,10 @@ def _cmd_increment(root: str, name: str, rounds: str) -> None:
     for _ in range(int(rounds)):
         with ts.transaction(key) as txn:
             current = txn.read(key, default={"n": 0})
-            txn.write(key, {"n": current["n"] + 1})
+            assert isinstance(current, dict)
+            n = current["n"]
+            assert isinstance(n, int)
+            txn.write(key, {"n": n + 1})
 
 
 def _cmd_two_keys(root: str, first: str, second: str, rounds: str) -> None:

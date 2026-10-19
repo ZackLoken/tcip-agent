@@ -30,7 +30,7 @@ from tests._training_values import IOU_THRESHOLD  # noqa: E402
 # --------------------------------------------------------------------------
 
 
-def test_perfect_overlap_is_one():
+def test_perfect_overlap_is_one() -> None:
     gt = torch.tensor([[0, 0, 1, 1], [0, 0, 1, 1]])
     m = semantic_seg_metrics(gt.clone(), gt, num_classes=2)
     assert m["mIoU"] == pytest.approx(1.0)
@@ -39,7 +39,7 @@ def test_perfect_overlap_is_one():
     assert m["per_class_iou"] == {0: pytest.approx(1.0), 1: pytest.approx(1.0)}
 
 
-def test_disjoint_is_zero():
+def test_disjoint_is_zero() -> None:
     gt = torch.zeros(4, 4, dtype=torch.long)
     pred = torch.ones(
         4, 4, dtype=torch.long
@@ -51,7 +51,7 @@ def test_disjoint_is_zero():
     assert m["per_class_iou"] == {0: pytest.approx(0.0), 1: pytest.approx(0.0)}
 
 
-def test_partial_overlap_hand_computed():
+def test_partial_overlap_hand_computed() -> None:
     # gt   = [0,0,0,0, 1,1,1,1]; pred = [0,0,1,1, 1,1,1,1]
     # class 0: inter=2 union=4 -> IoU 0.5,     dice 2*2/(2+4)=0.6667
     # class 1: inter=4 union=6 -> IoU 0.6667,  dice 2*4/(6+4)=0.8
@@ -67,7 +67,7 @@ def test_partial_overlap_hand_computed():
     assert m["pixel_acc"] == pytest.approx(6 / 8)  # idx 2,3 wrong
 
 
-def test_absent_class_excluded_from_mean():
+def test_absent_class_excluded_from_mean() -> None:
     # num_classes=3 but class 2 appears in neither map -> reported None, out of the mean.
     gt = torch.tensor([0, 0, 1, 1])
     pred = torch.tensor([0, 0, 1, 1])
@@ -77,7 +77,7 @@ def test_absent_class_excluded_from_mean():
     assert m["mIoU"] == pytest.approx(1.0)  # only classes 0,1 counted
 
 
-def test_ignore_index_drops_pixels():
+def test_ignore_index_drops_pixels() -> None:
     # Pixels 2,3 are ignore (255); the rest match perfectly.
     gt = torch.tensor([0, 0, 255, 255, 1, 1, 1, 1])
     pred = torch.tensor([0, 0, 1, 1, 1, 1, 1, 1])
@@ -87,7 +87,7 @@ def test_ignore_index_drops_pixels():
     assert m["pixel_acc"] == pytest.approx(1.0)
 
 
-def test_batched_shapes_flatten():
+def test_batched_shapes_flatten() -> None:
     # [N,H,W] input flattens the same way for pred and gt.
     from tests._producer_fixtures import painted_array
 
@@ -102,7 +102,7 @@ def test_batched_shapes_flatten():
 # --------------------------------------------------------------------------
 
 
-def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
+def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path) -> None:
     pytest.importorskip("torchvision")
     import numpy as np
     from PIL import Image

@@ -7,6 +7,7 @@ callable registered for a label reproduces the number the label was stamped on.
 from __future__ import annotations
 
 import importlib
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -18,14 +19,20 @@ from tcip_mcp.pipelines.derivations import DERIVATION_IMPLEMENTATIONS  # noqa: E
 from tests._dense_op_fixtures import gt_only  # noqa: E402
 from tests._trait_fixtures import IOU_JITTER_PX, IOU_MARGIN, confirm_bare  # noqa: E402
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
-def _resolve(label: str):
+
+def _resolve(label: str) -> Callable[..., float | None]:
     target = str(DERIVATION_IMPLEMENTATIONS[label])
     module, _, attr = target.rpartition(".")
     return getattr(importlib.import_module(module), attr)
 
 
-def test_every_count_objective_label_the_calibration_path_can_stamp_is_registered():
+def test_every_count_objective_label_the_calibration_path_can_stamp_is_registered() -> (
+    None
+):
     """Every count-objective label the calibration path can stamp is registered.
 
     Every label the count-objective picker registry holds is a key of the derivation registry.
@@ -42,8 +49,8 @@ def test_every_count_objective_label_the_calibration_path_can_stamp_is_registere
 
 
 def test_the_registered_callable_for_an_iou_threshold_stamp_reproduces_the_stamped_number(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The callable registered for an IoU threshold's label reproduces the stamped number.
 
     The IoU threshold a match criterion reports carries a derivation label, and the callable that
@@ -69,7 +76,9 @@ def test_the_registered_callable_for_an_iou_threshold_stamp_reproduces_the_stamp
     ) == (pytest.approx(result["iou_threshold"]))
 
 
-def test_registering_a_picker_registers_the_labels_it_can_stamp(monkeypatch):
+def test_registering_a_picker_registers_the_labels_it_can_stamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Registering a picker registers the labels it can stamp.
 
     A picker added to the picker registry under a new label finds that label in the derivation
@@ -92,8 +101,8 @@ def test_registering_a_picker_registers_the_labels_it_can_stamp(monkeypatch):
 
 
 def test_the_registered_callable_for_a_center_match_stamp_reproduces_the_stamped_tolerance(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The callable registered for a center-match label reproduces the stamped tolerance.
 
     On the center-match branch the reported tolerance is the registered callable's fraction

@@ -5,7 +5,14 @@ sample, over asymmetric fixtures: boxes wider than tall and taller than wide, a 
 and sparse ordinal ranks.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 torch = pytest.importorskip("torch")
 
@@ -21,12 +28,19 @@ from tests._producer_fixtures import (  # noqa: E402
 BUD = "bud"
 
 
-def _make_images(images_dir, stems, size):
+def _make_images(
+    images_dir: Path, stems: list[str], size: tuple[int, int]
+) -> None:
     for stem in stems:
         write_image(images_dir / f"{stem}.jpg", size)
 
 
-def _write(images_dir, stem, boxes, size):
+def _write(
+    images_dir: Path,
+    stem: str,
+    boxes: list[tuple[int, int, int, int]],
+    size: tuple[int, int],
+) -> None:
     label_image(
         images_dir / f"{stem}.jpg",
         [Annotation(subject=BUD, geometry=BBox(*b)) for b in boxes],
@@ -35,7 +49,9 @@ def _write(images_dir, stem, boxes, size):
     )
 
 
-def test_a_boxs_width_and_height_reach_the_loader_unswapped(tmp_path):
+def test_a_boxs_width_and_height_reach_the_loader_unswapped(
+    tmp_path: Path,
+) -> None:
     """A box's width and height reach the loader unswapped.
 
     One box wider than tall and one taller than wide reach the target as the pixel xyxy the
@@ -78,8 +94,8 @@ SEAM_BOXES = [
 
 @pytest.mark.parametrize("sliver_frac", [None, 0.5])
 def test_a_seam_fragment_is_not_indexed_as_a_whole_object(
-    tmp_path, sliver_frac
-):
+    tmp_path: Path, sliver_frac: float | None
+) -> None:
     """A seam fragment is not indexed as a whole object.
 
     A box a tile boundary cuts down to a two-pixel stub is indexed in no tile, whether the
@@ -117,7 +133,9 @@ def test_a_seam_fragment_is_not_indexed_as_a_whole_object(
     assert sum(per_tile.values()) == len(SEAM_BOXES)
 
 
-def test_each_detection_sample_carries_its_own_index_as_image_id(tmp_path):
+def test_each_detection_sample_carries_its_own_index_as_image_id(
+    tmp_path: Path,
+) -> None:
     """Each detection sample carries its own index as its image id, beside its own boxes."""
     size = (120, 80)
     images = tmp_path / "images" / UNDATED_BUCKET
@@ -139,8 +157,8 @@ def test_each_detection_sample_carries_its_own_index_as_image_id(tmp_path):
 
 
 def test_an_ordinal_sample_carries_the_rank_count_its_head_decodes_with(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An ordinal run's rank count is the scale's reach, not the number of samples.
 
     Over three samples ranked 0, 2 and 5, the run's rank count is six and each sample carries

@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -22,6 +23,11 @@ from tcip_mcp import audit, workspace
 from tcip_web.state import store
 from tests._web_fixtures import bound_to, named_project
 from tests.test_agent_identity_records import results_through_handshake
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+
+    from tcip_mcp.workspace import BoundProject
 
 
 def _friction_rows(project: Path) -> list[dict]:
@@ -39,8 +45,8 @@ _FRICTION = (
 
 
 def test_the_server_acts_on_the_project_it_was_started_for_while_the_backend_opens_another(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     ws = tmp_path.parent
     started = named_project(ws / "valley_block", "Valley block")
     opened = named_project(ws / "hill_block", "Hill block")
@@ -55,7 +61,9 @@ def test_the_server_acts_on_the_project_it_was_started_for_while_the_backend_ope
     assert _friction_rows(opened.root) == []
 
 
-def test_a_tool_input_spelled_like_the_bound_project_stays_the_callers(bound):
+def test_a_tool_input_spelled_like_the_bound_project_stays_the_callers(
+    bound: BoundProject,
+) -> None:
     """A tool input spelled like the bound project stays the caller's.
 
     The server binds its project context, not a tool's own input that shares a name with it:
@@ -91,7 +99,9 @@ def test_a_tool_input_spelled_like_the_bound_project_stays_the_callers(bound):
     ).startswith("# valley-bloom-trial")
 
 
-def test_a_server_for_no_project_refuses_project_tools_naming_project_and_serves_knowledge():
+def test_a_server_for_no_project_refuses_project_tools_naming_project_and_serves_knowledge() -> (
+    None
+):
     refused, knowledge = results_through_handshake(
         [_FRICTION, ("serve_domain_knowledge", {})], bound=None
     )
@@ -102,8 +112,8 @@ def test_a_server_for_no_project_refuses_project_tools_naming_project_and_serves
 
 
 def test_the_server_refuses_to_start_for_a_directory_holding_no_project(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     import tcip_mcp.server as server_module
 
     bare = tmp_path.parent / "bare"
@@ -114,8 +124,8 @@ def test_the_server_refuses_to_start_for_a_directory_holding_no_project(
 
 
 def test_a_server_started_for_no_project_needs_no_workspace_and_serves_knowledge(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from mcp.server import MCPServer
 
     import tcip_mcp.server as server_module
@@ -134,8 +144,8 @@ def test_a_server_started_for_no_project_needs_no_workspace_and_serves_knowledge
 
 
 def test_a_server_started_for_a_project_refuses_with_no_workspace_by_name(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from mcp.server import MCPServer
 
     import tcip_mcp.server as server_module
@@ -153,8 +163,8 @@ def test_a_server_started_for_a_project_refuses_with_no_workspace_by_name(
 
 
 def test_opening_two_projects_leaves_the_environment_as_it_was(
-    tmp_path, client
-):
+    tmp_path: Path, client: TestClient
+) -> None:
     ws = tmp_path.parent
     first = named_project(ws / "valley_block", "Valley block")
     second = named_project(ws / "hill_block", "Hill block")
@@ -171,9 +181,9 @@ def test_opening_two_projects_leaves_the_environment_as_it_was(
 
 
 def test_the_last_opened_pointer_holds_the_id_and_the_list_names_each_project_by_display_name(
-    tmp_path,
-    client,
-):
+    tmp_path: Path,
+    client: TestClient,
+) -> None:
     from tcip_web.routes.projects import open_last_opened
 
     ws = tmp_path.parent

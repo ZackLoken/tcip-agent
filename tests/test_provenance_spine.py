@@ -7,12 +7,17 @@ delivery event and not on its rows.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ── capture_env records code + library fingerprint ────────────────────────────
 
 
-def test_capture_env_records_code_and_libraries():
+def test_capture_env_records_code_and_libraries() -> None:
     from tcip_mcp.pipelines.model_build import capture_env
 
     env = capture_env()
@@ -26,7 +31,9 @@ def test_capture_env_records_code_and_libraries():
 # ── identity resolved off a verified, registry-matched checkpoint ──────────────
 
 
-def test_the_producer_of_a_completed_runs_checkpoint_is_that_run(tmp_path):
+def test_the_producer_of_a_completed_runs_checkpoint_is_that_run(
+    tmp_path: Path,
+) -> None:
     """The producer of a completed run's checkpoint is that run.
 
     The checkpoint resolves its producer through the binding the run's own final status recorded,
@@ -39,14 +46,13 @@ def test_the_producer_of_a_completed_runs_checkpoint_is_that_run(tmp_path):
     ckpt = registered_checkpoint(tmp_path, experiment_id="expR")
 
     producer = load_registered_checkpoint(ckpt, project=tmp_path).producer
-    assert (
-        producer["checkpoint_sha256"]
-        and len(producer["checkpoint_sha256"]) == 64
-    )
-    assert producer["experiment_id"] == "expR"
+    assert len(producer.checkpoint_sha256) == 64
+    assert producer.experiment_id == "expR"
 
 
-def test_the_producer_of_a_foreign_checkpoint_names_no_run(tmp_path):
+def test_the_producer_of_a_foreign_checkpoint_names_no_run(
+    tmp_path: Path,
+) -> None:
     """A foreign checkpoint's producer names its digest and no run.
 
     A checkpoint a run of the project wrote beside its deliverable, whose digest no completion
@@ -59,11 +65,13 @@ def test_the_producer_of_a_foreign_checkpoint_names_no_run(tmp_path):
     producer = load_registered_checkpoint(
         foreign_checkpoint(tmp_path), project=tmp_path
     ).producer
-    assert producer["checkpoint_sha256"]
-    assert producer["experiment_id"] is None
+    assert producer.checkpoint_sha256
+    assert producer.experiment_id is None
 
 
-def test_a_payloads_own_experiment_id_names_no_producer(tmp_path):
+def test_a_payloads_own_experiment_id_names_no_producer(
+    tmp_path: Path,
+) -> None:
     """A payload's own ``experiment_id`` names no producer.
 
     A checkpoint a run saved through its own writer with an ``experiment_id`` beside its weights,
@@ -84,14 +92,16 @@ def test_a_payloads_own_experiment_id_names_no_producer(tmp_path):
 
     loaded = load_registered_checkpoint(ckpt, project=tmp_path)
     assert loaded.payload["experiment_id"] == "expStamped"
-    assert loaded.producer["experiment_id"] is None
-    assert loaded.producer["checkpoint_sha256"]
+    assert loaded.producer.experiment_id is None
+    assert loaded.producer.checkpoint_sha256
 
 
 # ── draw_splits records each sample's digest and the seed ─────────────────────
 
 
-def test_draw_splits_selection_embeds_digests_and_seed(data_dir, tmp_path):
+def test_draw_splits_selection_embeds_digests_and_seed(
+    data_dir: Path, tmp_path: Path
+) -> None:
     # A selection needs at least four foreground groups to clear the floor; the fixture's own
     # three (img_001..003) need one more, added here rather than in the shared fixture.
     from PIL import Image
@@ -138,8 +148,8 @@ def test_draw_splits_selection_embeds_digests_and_seed(data_dir, tmp_path):
 
 
 def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_neither(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A delivery event names its producer and write time, and its rows repeat neither.
 
     The delivery's one event carries the bucket's producer and an ISO write time; its one row
@@ -182,10 +192,7 @@ def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_
     )
 
     (event,) = read_delivery_events(tmp_path)
-    assert (
-        event.producer.model_dump()
-        == read_bucket(bucket.root, bucket.name).producer
-    )
+    assert event.producer == read_bucket(bucket.root, bucket.name).producer
     datetime.fromisoformat(event.produced_at)
     (row,) = csv_rows(out)
     assert set(DELIVERY_COLUMNS) <= set(row)
@@ -196,7 +203,9 @@ def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_
     } & set(row)
 
 
-def test_the_phenology_schema_carries_the_delivery_columns_and_no_producer_column():
+def test_the_phenology_schema_carries_the_delivery_columns_and_no_producer_column() -> (
+    None
+):
     from tcip_mcp.delivery import DELIVERY_COLUMNS
     from tcip_mcp.pipelines.postprocessing.phenology import (
         phenology_csv_columns,

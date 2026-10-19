@@ -15,7 +15,7 @@ from __future__ import annotations
 import copy
 import importlib
 import json
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -23,10 +23,15 @@ from tests import FRONTEND_SRC
 from tests._web_fixtures import named_project
 from tools.fixture_session import opened, replaced, scratch_session
 
+if TYPE_CHECKING:
+    from types import ModuleType
+
+    from pydantic import JsonValue
+
 GENERATED = FRONTEND_SRC / "test" / "deliveryEvents.json"
 
 
-def _generator(name: str):
+def _generator(name: str) -> ModuleType:
     """Import and return the fixture generator module ``tools.<name>``."""
     return importlib.import_module(f"tools.{name}")
 
@@ -73,7 +78,7 @@ def _normalized(fixture: dict[str, dict]) -> dict[str, dict]:
 
     seen: dict[str, str] = {}
 
-    def leaf(key: str | None, value: Any) -> Any:
+    def leaf(key: str | None, value: JsonValue) -> JsonValue:
         if key in PER_RUN and isinstance(value, str):
             return seen.setdefault(value, f"<{key} {len(seen)}>")
         if isinstance(value, float):
@@ -101,7 +106,7 @@ def _normalized(fixture: dict[str, dict]) -> dict[str, dict]:
     return out
 
 
-def _changed(fixture: dict, name: str, *path_and_value: Any) -> dict:
+def _changed(fixture: dict, name: str, *path_and_value: JsonValue) -> dict:
     """Return a copy of ``fixture`` with one value under record ``name`` replaced.
 
     The value at ``path`` under record ``name`` is set to the last argument.
@@ -195,7 +200,9 @@ def test_the_delivery_fixture_is_what_a_regeneration_serves() -> None:
     )
 
 
-def test_a_scratch_session_whose_body_raises_releases_store_and_directory():
+def test_a_scratch_session_whose_body_raises_releases_store_and_directory() -> (
+    None
+):
     """A scratch session whose body raises releases its store connections and directory.
 
     The bound store is left holding no connection, the session's directory is removed, and the
@@ -217,7 +224,9 @@ def test_a_scratch_session_whose_body_raises_releases_store_and_directory():
     assert not scratch.exists()
 
 
-def test_a_scratch_session_holds_no_project_an_earlier_session_opened():
+def test_a_scratch_session_holds_no_project_an_earlier_session_opened() -> (
+    None
+):
     """A scratch session holds no project an earlier session opened.
 
     A second scratch session in the same interpreter lists no open project, though the first

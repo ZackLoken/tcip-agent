@@ -9,17 +9,25 @@ document reference, ``assess_checkpoint`` refuses it by name, and no assessment 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from PIL import Image
+    from torch import Tensor
+
+    from tcip_mcp.pipelines.data.selection import ClassScope, Sample
+
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
 
-from torch.utils.data import Dataset  # noqa: E402
-
 from tcip_mcp.assessment import ASSESSMENTS_DIR  # noqa: E402
+from tcip_mcp.pipelines.data.datasets import BaseDataset  # noqa: E402
 from tests._training_values import drawn_split  # noqa: E402
 
 IMG = 48
@@ -27,20 +35,28 @@ STEMS = ("m0", "m1", "m2", "m3")
 BOX = (8, 10, 30, 34)
 
 
-class _MaskBoxDataset(Dataset):
+class _MaskBoxDataset(BaseDataset):
     """A bespoke detection dataset over the producer's mask samples.
 
     Each item is the sample's image and a target of the box bounding its mask's nonzero pixels,
     labeled 1.
     """
 
-    def __init__(self, *, samples=None, transforms=None, **_ignored):
+    def __init__(
+        self,
+        *,
+        samples: Sequence[Sample] | None = None,
+        transforms: Callable[[Image.Image, dict], tuple[Tensor, dict]]
+        | None = None,
+        **_ignored: object,
+    ) -> None:
         self.samples = list(samples or [])
 
-    def __len__(self):
+    @property
+    def num_samples(self) -> int:
         return len(self.samples)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> tuple[Tensor, dict]:
         import numpy as np
         from PIL import Image
 
@@ -63,14 +79,20 @@ class _MaskBoxDataset(Dataset):
         }
 
     @property
-    def regions(self):
+    def regions(self) -> list:
         """The dataset's regions, one per frame, holding its served objects over its pixel area."""
         from tests._producer_fixtures import served_regions
 
         return served_regions(self)
 
 
-def build_mask_box_ds(**kwargs) -> _MaskBoxDataset:
+def build_mask_box_ds(
+    **kwargs: str
+    | Sequence[Sample]
+    | ClassScope
+    | Callable[[Image.Image, dict], tuple[Tensor, dict]]
+    | None,
+) -> _MaskBoxDataset:
     return _MaskBoxDataset(**kwargs)
 
 
@@ -99,7 +121,7 @@ def _train_and_register(data_cfg: dict, project_root: Path) -> dict:
     geometry stated at the 48 px square, and ``data_cfg``. Returns ``{"checkpoint", "data"}``:
     the observed checkpoint's path and the data block its record holds as resolved.
     """
-    from tcip_mcp.experiments import observe
+    from tcip_mcp.experiments import observe_run
     from tests._chain_fixtures import (
         REGION_BUILDER,
         stated_detector_geometry,
@@ -108,7 +130,7 @@ def _train_and_register(data_cfg: dict, project_root: Path) -> dict:
     from tests._training_values import evaluation_block
     from tests._verified_checkpoint_fixtures import worker_run
 
-    observation = observe(
+    observation = observe_run(
         worker_run(
             project_root,
             training_config(
@@ -122,14 +144,15 @@ def _train_and_register(data_cfg: dict, project_root: Path) -> dict:
     )
     assert observation.checkpoint is not None, observation.final
     return {
-        "checkpoint": observation.checkpoint["path"],
-        "data": observation.record["resolved"]["data"],
+        "checkpoint": observation.checkpoint.path,
+        "data": observation.record.resolution.data,
     }
 
 
 def test_a_run_that_recorded_no_subject_is_refused_assessment_by_name(
     tmp_path: Path,
-):
+) -> None:
+    from tcip_mcp.pipelines.data.selection import ClassScope
     from tests import _chain_fixtures as chain
 
     images, masks = _capture(tmp_path / "masks")
@@ -145,7 +168,9 @@ def test_a_run_that_recorded_no_subject_is_refused_assessment_by_name(
     trained = _train_and_register(data_cfg, tmp_path)
     checkpoint = trained["checkpoint"]
     # The producer admitted by shape and recorded an empty scope.
-    assert trained["data"]["scope"] == {"subject": None, "attributes": None}
+    assert trained["data"].recorded_scope == ClassScope(
+        subject=None, attributes=None
+    )
     chain.synthetic_capture(tmp_path / "ds")
     chain.draw_reference_selection(
         tmp_path, tmp_path / "ds", tmp_path / "selection"

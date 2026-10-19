@@ -8,6 +8,7 @@ grids whose cells are not square.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -18,8 +19,13 @@ from tcip_mcp.pipelines.raster_source import (
     sample_windows,
 )
 
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.raster_source import RasterIdentity
 
-def _identity(path: Path, *, seed: int, window_size: int, max_windows: int):
+
+def _identity(
+    path: Path, *, seed: int, window_size: int, max_windows: int
+) -> RasterIdentity:
     """Open the three-band ``path`` and return its ``raster_content_identity``."""
     with open_raster(path, 3) as src:
         return raster_content_identity(

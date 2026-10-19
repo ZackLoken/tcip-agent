@@ -74,7 +74,7 @@ def _label(bucket: Path, *stems: str) -> None:
         )
 
 
-def test_preflight_refuses_a_stem_collision(tmp_path):
+def test_preflight_refuses_a_stem_collision(tmp_path: Path) -> None:
     """Preflight refuses a stem-collided bucket with an issue naming both colliding files."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -95,7 +95,9 @@ def test_preflight_refuses_a_stem_collision(tmp_path):
     ), r["issues"]
 
 
-def test_scan_dataset_image_census_refuses_a_stem_collision(tmp_path):
+def test_scan_dataset_image_census_refuses_a_stem_collision(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.data_tools import _scan_dataset
 
     bucket = _ingested_bucket(tmp_path)
@@ -107,8 +109,8 @@ def test_scan_dataset_image_census_refuses_a_stem_collision(tmp_path):
 
 
 def test_doctor_script_reports_a_stem_collision_with_no_label_file_instead_of_crashing(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The doctor reports a stem collision with no label file as a finding, not a crash.
 
     The command exits 2 with no traceback and names both colliding files.
@@ -125,8 +127,8 @@ def test_doctor_script_reports_a_stem_collision_with_no_label_file_instead_of_cr
 
 
 def test_doctor_script_reports_a_stem_collision_once_not_once_per_check(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The doctor reports a stem collision once, with no traceback."""
     bucket = _ingested_bucket(tmp_path)
     _collide(bucket)
@@ -143,7 +145,7 @@ def test_doctor_script_reports_a_stem_collision_once_not_once_per_check(
 # ── The admitting case: a clean, uncollided bucket lists every image through each routed site ──
 
 
-def test_preflight_admits_a_clean_multi_image_bucket(tmp_path):
+def test_preflight_admits_a_clean_multi_image_bucket(tmp_path: Path) -> None:
     """Preflight admits a clean bucket of two uncollided images with no issue."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -165,8 +167,8 @@ def test_preflight_admits_a_clean_multi_image_bucket(tmp_path):
 
 
 def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A split policy over a clean two-image bucket resolves with no split issue."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -190,8 +192,8 @@ def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(
 
 
 def test_calibration_ratio_feasibility_admits_a_clean_multi_image_bucket(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Calibration feasibility over a clean bucket names a count of two admitted sources."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -220,7 +222,9 @@ def test_calibration_ratio_feasibility_admits_a_clean_multi_image_bucket(
     assert any("2 admitted sources" in i for i in r["issues"]), r["issues"]
 
 
-def test_scan_dataset_image_census_admits_a_clean_multi_image_bucket(tmp_path):
+def test_scan_dataset_image_census_admits_a_clean_multi_image_bucket(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.data_tools import _scan_dataset
 
     bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])

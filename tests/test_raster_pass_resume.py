@@ -10,15 +10,22 @@ that one batch record.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
+
+    from tcip_mcp.pipelines.execution import Stated
+    from tcip_mcp.pipelines.raster_source import RasterSource, SourceHeader
 
 torch = pytest.importorskip("torch")
 
 pytest.importorskip("torchvision")
 
 import tcip_store  # noqa: E402
-from tcip_mcp.pipelines.execution import MaskCut  # noqa: E402
+from tcip_mcp.pipelines.execution import EXECUTION_RECORD, MaskCut  # noqa: E402
 from tests._training_values import MASK_CUT  # noqa: E402
 from tests.test_orthomosaic_tools import (  # noqa: E402
     TILE,
@@ -75,7 +82,7 @@ def _run(
     conf: float = 0.0,
     masks: bool | None = None,
     mask_cut: MaskCut | None = None,
-    **kwargs,
+    **kwargs: str | int | bool | Stated | None,
 ) -> dict:
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
@@ -121,14 +128,18 @@ def _published(raster_path: Path, bucket: str) -> bool:
     return tcip_store.exists(bucket_key(root, bucket))
 
 
-def _interrupt_after_one_batch(monkeypatch) -> None:
+def _interrupt_after_one_batch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the store's replace raise on the second raster-pass batch record it is handed."""
     import tcip_store.store as store_mod
 
     real_replace = store_mod.replace
     seen = {"batches": 0}
 
-    def _flaky_replace(key, value, **kw):
+    def _flaky_replace(
+        key: tcip_store.Key,
+        value: JsonValue,
+        **kw: tcip_store.Version | None,
+    ) -> tcip_store.Version:
         if key.store == "raster_pass_progress" and key.parts[-1].startswith(
             "batch-"
         ):
@@ -142,11 +153,11 @@ def _interrupt_after_one_batch(monkeypatch) -> None:
 
 def _interrupted(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     bucket: str,
     ckpt: str,
     raster_path: Path,
-    **kwargs,
+    **kwargs: str | int | float | bool | MaskCut | Stated | None,
 ) -> None:
     _interrupt_after_one_batch(monkeypatch)
     with pytest.raises(RuntimeError, match="simulated crash"):
@@ -173,7 +184,7 @@ def _as_produced(raster_path: Path, bucket: str) -> list[tuple]:
     ]
 
 
-def test_resume_refuses_with_images_dir(tmp_path):
+def test_resume_refuses_with_images_dir(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -192,7 +203,7 @@ def test_resume_refuses_with_images_dir(tmp_path):
     assert "resume applies only to a raster_path pass" in result["error"]
 
 
-def test_resume_refuses_with_no_recorded_progress(tmp_path):
+def test_resume_refuses_with_no_recorded_progress(tmp_path: Path) -> None:
     ckpt, raster_path = _setup(tmp_path)
 
     result = _run(tmp_path, ckpt, raster_path, "preds/2026-01-01", resume=True)
@@ -202,9 +213,9 @@ def test_resume_refuses_with_no_recorded_progress(tmp_path):
 
 
 def test_an_interrupted_instance_segmentation_pass_resumes_to_the_uninterrupted_masks(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """An interrupted instance segmentation pass resumes to the uninterrupted pass's masks.
 
     The resumed pass's annotations, segmentations included, equal the uninterrupted pass's.
@@ -258,9 +269,9 @@ def test_an_interrupted_instance_segmentation_pass_resumes_to_the_uninterrupted_
 
 
 def test_an_interrupted_pass_leaves_one_identity_and_one_batch_record_and_no_bucket(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """An interrupted pass leaves one identity and one batch record, and no bucket.
 
     The progress sits under the project, apart from the bucket the pass will publish, and no
@@ -279,9 +290,9 @@ def test_an_interrupted_pass_leaves_one_identity_and_one_batch_record_and_no_buc
 
 
 def test_resume_completes_an_interrupted_pass_with_the_same_detections_and_clears_progress(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     ckpt, raster_path = _setup(tmp_path)
     interrupted = "interrupted/2026-01-01"
     _interrupted(tmp_path, monkeypatch, interrupted, ckpt, raster_path)
@@ -302,8 +313,8 @@ def test_resume_completes_an_interrupted_pass_with_the_same_detections_and_clear
 
 
 def test_a_fresh_pass_over_recorded_progress_refuses_and_leaves_it(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ckpt, raster_path = _setup(tmp_path)
     bucket = "preds/2026-01-01"
     _interrupted(tmp_path, monkeypatch, bucket, ckpt, raster_path)
@@ -319,9 +330,9 @@ def test_a_fresh_pass_over_recorded_progress_refuses_and_leaves_it(
 
 
 def test_a_published_bucket_whose_progress_clear_failed_refuses_every_later_pass(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A published bucket whose progress clear failed refuses a fresh pass and a resume.
 
     With the progress clear raising after publication, a fresh pass refuses as already recorded,
@@ -333,7 +344,7 @@ def test_a_published_bucket_whose_progress_clear_failed_refuses_every_later_pass
     ckpt, raster_path = _setup(tmp_path)
     bucket = "preds/2026-01-01"
 
-    def _raise_after_publish(*_args):
+    def _raise_after_publish(*_args: object) -> None:
         raise RuntimeError(
             "simulated crash between publication and the progress clear"
         )
@@ -356,8 +367,8 @@ def test_a_published_bucket_whose_progress_clear_failed_refuses_every_later_pass
 
 
 def test_resume_refuses_a_call_that_differs_from_the_recorded_pass(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ckpt, raster_path = _setup(tmp_path)
     bucket = "preds/2026-01-01"
     _interrupted(tmp_path, monkeypatch, bucket, ckpt, raster_path)
@@ -373,9 +384,9 @@ def test_resume_refuses_a_call_that_differs_from_the_recorded_pass(
 
 
 def test_resume_refuses_when_the_recorded_identity_carries_an_extra_top_level_key(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A resume refuses when the recorded identity carries an extra top-level key.
 
     The refusal names the extra key, ``future_field``.
@@ -398,8 +409,8 @@ def test_resume_refuses_when_the_recorded_identity_carries_an_extra_top_level_ke
 
 
 def test_content_identity_failure_after_open_refuses_naming_the_raster(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A content-identity failure after open refuses, naming the raster, and writes nothing.
 
     A raster that opens cleanly but fails partway through the sampling read refuses as a returned
@@ -410,10 +421,10 @@ def test_content_identity_failure_after_open_refuses_naming_the_raster(
     ckpt, raster_path = _setup(tmp_path)
     real_open = raster_source_module.SourceHeader.open
 
-    def _flaky_open(header, num_channels):
+    def _flaky_open(header: SourceHeader, num_channels: int) -> RasterSource:
         reader = real_open(header, num_channels)
 
-        def _raise(*args, **kwargs):
+        def _raise(*args: object, **kwargs: object) -> None:
             raise OSError("simulated disk read failure")
 
         reader.read_region = _raise
@@ -428,9 +439,9 @@ def test_content_identity_failure_after_open_refuses_naming_the_raster(
 
 
 def test_an_interrupted_pass_under_an_assessment_resumes_under_that_assessment(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """An interrupted pass under an assessment resumes under that assessment.
 
     A pass published under a reserved-regions assessment resumes under the same assessment and
@@ -490,7 +501,10 @@ def test_an_interrupted_pass_under_an_assessment_resumes_under_that_assessment(
     assert "error" not in baseline, baseline
     bucket = read_bucket(resumed["dataset_root"], interrupted)
     assert bucket.assessment_id == assessment["assessment_id"]
-    assert bucket.execution.record() == assessment["execution"]
+    assert (
+        EXECUTION_RECORD.dump_python(bucket.execution, mode="json")
+        == assessment["execution"]
+    )
     assert bucket.execution.tile_size == BLOCK_TILE
     assert _as_produced(raster_path, interrupted) == _as_produced(
         raster_path, uninterrupted

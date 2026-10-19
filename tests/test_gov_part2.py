@@ -7,9 +7,13 @@ stays human.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 
-def _load_distill():
+def _load_distill() -> ModuleType:
     from tcip_web.cli import distill_learnings
 
     return distill_learnings
@@ -34,7 +38,9 @@ def _seed_report(
     )
 
 
-def test_distill_worksheet_gathers_reports_retrospectives_and_themes(tmp_path):
+def test_distill_worksheet_gathers_reports_retrospectives_and_themes(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.tools.meta_tools import write_retrospective
 
     distill = _load_distill()
@@ -59,7 +65,7 @@ def test_distill_worksheet_gathers_reports_retrospectives_and_themes(tmp_path):
     )  # gathering only, governance stays human
 
 
-def test_distill_worksheet_surfaces_disagreements(tmp_path):
+def test_distill_worksheet_surfaces_disagreements(tmp_path: Path) -> None:
     distill = _load_distill()
     _seed_report(tmp_path, "needs_human_judgment", "kept the old default")
     _seed_report(
@@ -79,8 +85,8 @@ def test_distill_worksheet_surfaces_disagreements(tmp_path):
 
 
 def test_the_worksheet_lists_a_report_that_will_not_decode_as_malformed(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A stored report that will not decode is listed as malformed beside the decoded one.
 
     A stored report that is not a JSON object is listed as malformed beside the decoded one,
@@ -104,7 +110,7 @@ def test_the_worksheet_lists_a_report_that_will_not_decode_as_malformed(
     assert "a decoded report" in ws
 
 
-def test_themes_generic_frequency_and_recurrence_floor():
+def test_themes_generic_frequency_and_recurrence_floor() -> None:
     distill = _load_distill()
     text = (
         "the wobblesync module keeps desyncing. wobblesync desyncing again. "
@@ -118,7 +124,7 @@ def test_themes_generic_frequency_and_recurrence_floor():
     assert "zzyzx" not in themes  # single mention, below the recurrence floor
 
 
-def test_themes_picks_up_bigram_phrases():
+def test_themes_picks_up_bigram_phrases() -> None:
     distill = _load_distill()
     text = (
         "operating point drifted. operating point drifted again next session."
@@ -127,7 +133,7 @@ def test_themes_picks_up_bigram_phrases():
     assert themes.get("operating point") == 2
 
 
-def test_cross_project_themes_require_multiple_distinct_projects():
+def test_cross_project_themes_require_multiple_distinct_projects() -> None:
     distill = _load_distill()
     # "wobblesync" repeats many times within one project's own text: a pooled frequency count
     # would clear a >=2 bar on that alone. The per-project set approach must not let it.
@@ -143,7 +149,7 @@ def test_cross_project_themes_require_multiple_distinct_projects():
     )  # only 1 distinct project, no matter the internal repeats
 
 
-def test_cross_project_themes_surface_when_shared_across_projects():
+def test_cross_project_themes_surface_when_shared_across_projects() -> None:
     distill = _load_distill()
     per_project = {
         "proj_a": _term_set("GPS accuracy was too coarse for per-plant work."),
@@ -155,7 +161,9 @@ def test_cross_project_themes_surface_when_shared_across_projects():
     assert themes.get("accuracy") == 2
 
 
-def test_build_workspace_worksheet_gathers_across_projects(tmp_path):
+def test_build_workspace_worksheet_gathers_across_projects(
+    tmp_path: Path,
+) -> None:
     distill = _load_distill()
     workspace = tmp_path.parent
     for name, detail in [
@@ -174,7 +182,9 @@ def test_build_workspace_worksheet_gathers_across_projects(tmp_path):
     assert "record_distillation_pass" in ws
 
 
-def test_build_workspace_worksheet_ignores_non_project_dirs(tmp_path):
+def test_build_workspace_worksheet_ignores_non_project_dirs(
+    tmp_path: Path,
+) -> None:
     distill = _load_distill()
     (
         tmp_path.parent / "not_a_project"
@@ -183,7 +193,7 @@ def test_build_workspace_worksheet_ignores_non_project_dirs(tmp_path):
     assert "No projects with a `.tcip/` directory" in ws
 
 
-def test_workspace_mode_never_writes_anything(tmp_path):
+def test_workspace_mode_never_writes_anything(tmp_path: Path) -> None:
     """A workspace worksheet leaves a project's ``.tcip`` files unchanged, bookkeeping aside."""
     from tcip_store.file_backend import is_bookkeeping
 

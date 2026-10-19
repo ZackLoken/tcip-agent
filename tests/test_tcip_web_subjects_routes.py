@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,6 +16,9 @@ from tests._producer_fixtures import (
     image_label_key,
     label_image,
 )
+
+if TYPE_CHECKING:
+    from tcip_store import Key, Versioned
 
 DATE = "2026-03-02"
 
@@ -544,7 +548,7 @@ def test_save_subjects_confines_dataset_root_to_allowed_roots(
 def test_load_subjects_confines_the_dataset_root_before_scanning_it(
     client: TestClient,
     tmp_path_factory: pytest.TempPathFactory,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The subjects load refuses a dataset root outside the allowed roots, reading no document."""
     import tcip_annotation.json_io as json_io
@@ -552,7 +556,7 @@ def test_load_subjects_confines_the_dataset_root_before_scanning_it(
     outside = tmp_path_factory.mktemp("outside")
     _label(outside, "SECRET", [box_annotation(1, 1, 2, 2, subject="leaked")])
 
-    def _must_not_be_called(key):
+    def _must_not_be_called(key: Key) -> NoReturn:
         raise AssertionError(
             f"the dataset root must be guarded before any document is read: {key}"
         )
@@ -698,7 +702,9 @@ def test_a_registry_load_answers_content_and_version_from_one_read(
     real = tcip_store.read_blob_versioned
     interleaved: list[dict] = []
 
-    def read_then_save(key, *args, **kwargs):
+    def read_then_save(
+        key: Path, *args: object, **kwargs: object
+    ) -> Versioned:
         answer = real(key, *args, **kwargs)
         if not interleaved:
             interleaved.append({})

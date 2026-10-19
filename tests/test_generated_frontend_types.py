@@ -13,12 +13,15 @@ from __future__ import annotations
 
 import importlib.util
 import re
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 from pydantic import BaseModel
 
 from tests import FRONTEND_SRC, REPO_ROOT
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 GENERATED = FRONTEND_SRC / "api" / "types.generated.ts"
 GENERATOR = REPO_ROOT / "tools" / "generate_frontend_types.py"
@@ -35,7 +38,7 @@ _TYPE_ALIAS_UNION_RE = re.compile(
 _QUOTED_RE = re.compile(r'"([^"]+)"')
 
 
-def _generator():
+def _generator() -> ModuleType:
     """Load and return the type-module generator, ``tools/generate_frontend_types.py``."""
     spec = importlib.util.spec_from_file_location(
         "tcip_frontend_type_generator", GENERATOR

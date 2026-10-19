@@ -7,11 +7,14 @@ client name is broadcast with that field alone set.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi.testclient import TestClient
 
 from tcip_mcp.agent_identity import RECORD_FIELDS as IDENTITY_FIELDS
+
+if TYPE_CHECKING:
+    from tcip_web.state import OpenProject
 
 DECLARED_HEADERS = {
     "X-TCIP-Agent-Client-Name": "reviewing-harness",
@@ -53,7 +56,7 @@ def _post_and_capture_broadcast(
 
 def test_a_push_with_the_identity_headers_is_replayed_with_what_it_declared(
     opened_client: TestClient,
-    opened,
+    opened: OpenProject,
 ) -> None:
     posted, event = _post_and_capture_broadcast(
         opened_client,
@@ -74,7 +77,7 @@ def test_a_push_with_the_identity_headers_is_replayed_with_what_it_declared(
 
 def test_a_push_without_the_headers_is_replayed_with_the_fields_empty(
     opened_client: TestClient,
-    opened,
+    opened: OpenProject,
 ) -> None:
     posted, event = _post_and_capture_broadcast(
         opened_client, opened.id, "identity_absent", {}
@@ -88,7 +91,7 @@ def test_a_push_without_the_headers_is_replayed_with_the_fields_empty(
 
 def test_a_partial_declaration_records_only_what_was_sent(
     opened_client: TestClient,
-    opened,
+    opened: OpenProject,
 ) -> None:
     _, event = _post_and_capture_broadcast(
         opened_client,

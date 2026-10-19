@@ -18,7 +18,7 @@ from tests._web_fixtures import INVARIANCES, named_project
 # ── the record's text fields ────────────────────────────────────────────────────
 
 
-def test_a_record_refuses_a_non_string_site():
+def test_a_record_refuses_a_non_string_site() -> None:
     from pydantic import ValidationError
 
     from tcip_mcp.project_record import ProjectRecord
@@ -36,7 +36,7 @@ def test_a_record_refuses_a_non_string_site():
 
 def test_create_record_refuses_a_non_printable_character_naming_the_code_point_and_offset(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.project_record import create_record
 
     with pytest.raises(ValueError, match=r"U\+0009 at offset 5"):
@@ -45,7 +45,7 @@ def test_create_record_refuses_a_non_printable_character_naming_the_code_point_a
 
 def test_create_record_refuses_a_site_over_the_length_bound_and_admits_one_at_it(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.project_record import create_record
 
     with pytest.raises(ValueError, match="at most 200 characters"):
@@ -59,7 +59,9 @@ def test_create_record_refuses_a_site_over_the_length_bound_and_admits_one_at_it
 # ── create_record: the states of the create-only write ──────────────────────────
 
 
-def test_create_record_mints_an_id_and_writes_an_absent_record(tmp_path: Path):
+def test_create_record_mints_an_id_and_writes_an_absent_record(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.project_record import create_record, read_record
 
     record = create_record(
@@ -76,7 +78,7 @@ def test_create_record_mints_an_id_and_writes_an_absent_record(tmp_path: Path):
 
 def test_create_record_answers_the_existing_record_when_offered_it_again(
     tmp_path: Path,
-):
+) -> None:
     """Creating a project that records the same name, site and invariances keeps its id."""
     from tcip_mcp.project_record import create_record
 
@@ -90,7 +92,9 @@ def test_create_record_answers_the_existing_record_when_offered_it_again(
     )
 
 
-def test_create_record_refuses_a_different_site_naming_both(tmp_path: Path):
+def test_create_record_refuses_a_different_site_naming_both(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.project_record import (
         SiteConflictError,
         create_record,
@@ -110,7 +114,7 @@ def test_create_record_refuses_a_different_site_naming_both(tmp_path: Path):
 
 def test_create_record_refuses_a_different_display_name_naming_rename(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.project_record import create_record, read_record
 
     create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
@@ -123,7 +127,7 @@ def test_create_record_refuses_a_different_display_name_naming_rename(
 
 def test_create_record_refuses_a_present_record_missing_a_field(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.project_record import (
         ProjectRecordInvalidError,
         create_record,
@@ -142,7 +146,9 @@ def test_create_record_refuses_a_present_record_missing_a_field(
         create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
 
 
-def test_read_record_refuses_a_record_stating_no_invariances(tmp_path: Path):
+def test_read_record_refuses_a_record_stating_no_invariances(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.project_record import (
         ProjectRecordInvalidError,
         create_record,
@@ -166,7 +172,7 @@ def test_read_record_refuses_a_record_stating_no_invariances(tmp_path: Path):
 
 def test_create_record_lets_a_decode_error_through_for_an_undecodable_record(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.project_record import create_record, project_record_key
     from tests._record_damage_fixtures import damage_record
 
@@ -179,7 +185,7 @@ def test_create_record_lets_a_decode_error_through_for_an_undecodable_record(
 
 def test_create_record_refuses_different_invariances_naming_the_correction_door(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.project_record import create_record, read_record
 
     create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
@@ -204,7 +210,7 @@ def _corrections(project: Path) -> list[dict]:
 
 def test_replace_invariances_writes_the_block_and_records_one_correction_line(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.identity import actor
     from tcip_mcp.project_record import read_record, replace_invariances
 
@@ -237,7 +243,7 @@ def test_replace_invariances_writes_the_block_and_records_one_correction_line(
 
 def test_replace_invariances_refuses_a_block_the_type_refuses_writing_nothing(
     tmp_path: Path,
-):
+) -> None:
     from pydantic import ValidationError
 
     from tcip_mcp.identity import actor
@@ -256,7 +262,7 @@ def test_replace_invariances_refuses_a_block_the_type_refuses_writing_nothing(
 
 def test_replace_site_corrects_the_site_and_records_one_correction_line(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.identity import actor
     from tcip_mcp.project_record import read_record, replace_site
 
@@ -280,7 +286,7 @@ def test_replace_site_corrects_the_site_and_records_one_correction_line(
     }
 
 
-def test_replace_site_requires_an_actor_by_signature(tmp_path: Path):
+def test_replace_site_requires_an_actor_by_signature(tmp_path: Path) -> None:
     from tcip_mcp.project_record import replace_site
 
     project = named_project(tmp_path / "valley_block", "Valley block").root
@@ -290,7 +296,7 @@ def test_replace_site_requires_an_actor_by_signature(tmp_path: Path):
     assert _corrections(project) == []
 
 
-def test_replace_site_refuses_a_project_with_no_record(tmp_path: Path):
+def test_replace_site_refuses_a_project_with_no_record(tmp_path: Path) -> None:
     from tcip_mcp.identity import actor
     from tcip_mcp.project_record import ProjectRecordMissingError, replace_site
 
@@ -303,7 +309,7 @@ def test_replace_site_refuses_a_project_with_no_record(tmp_path: Path):
 
 def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no_store(
     tmp_path: Path,
-):
+) -> None:
     """Reading an absent record raises naming ``initialize_project`` and creates no database."""
     from tcip_mcp.project_record import ProjectRecordMissingError, read_record
     from tcip_store.file_backend import database_file
@@ -314,7 +320,7 @@ def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no
     assert not database_file(str(tmp_path.absolute())).is_file()
 
 
-def test_record_fields_reports_the_record(tmp_path: Path):
+def test_record_fields_reports_the_record(tmp_path: Path) -> None:
     from tcip_mcp.project_record import create_record, record_fields
 
     record = create_record(
@@ -327,7 +333,7 @@ def test_record_fields_reports_the_record(tmp_path: Path):
     }
 
 
-def test_record_fields_names_the_absent_record(tmp_path: Path):
+def test_record_fields_names_the_absent_record(tmp_path: Path) -> None:
     from tcip_mcp.project_record import record_fields
 
     fields = record_fields(tmp_path)
@@ -336,7 +342,7 @@ def test_record_fields_names_the_absent_record(tmp_path: Path):
     assert "initialize_project" in fields["record_problem"]
 
 
-def test_record_fields_names_an_undecodable_record(tmp_path: Path):
+def test_record_fields_names_an_undecodable_record(tmp_path: Path) -> None:
     from tcip_mcp.project_record import (
         create_record,
         project_record_key,
@@ -355,7 +361,7 @@ def test_record_fields_names_an_undecodable_record(tmp_path: Path):
 
 def test_existing_project_resolves_a_project_and_refuses_a_directory_with_no_record(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.project_record import create_record, existing_project
 
     bare = tmp_path / "bare"

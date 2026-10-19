@@ -11,8 +11,13 @@ from __future__ import annotations
 import inspect
 import math
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from tcip_mcp.model_registry import VerifiedCheckpoint
+    from tcip_mcp.pipelines.execution import MaskCut, Pass, Reference
 
 torch = pytest.importorskip("torch")
 
@@ -25,7 +30,7 @@ OVERLAPPING_GT = [
 derivation."""
 
 
-def _checkpoint(tmp_path: Path):
+def _checkpoint(tmp_path: Path) -> VerifiedCheckpoint:
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tests._verified_checkpoint_fixtures import project_checkpoint
 
@@ -34,7 +39,11 @@ def _checkpoint(tmp_path: Path):
     )
 
 
-def _pass(tmp_path: Path, reference=None, **stated):
+def _pass(
+    tmp_path: Path,
+    reference: Reference | None = None,
+    **stated: bool | int | float | str | MaskCut | None,
+) -> Pass:
     """Prepare a registered checkpoint of ``tmp_path`` under ``stated`` and return the pass.
 
     The statement is the sample rationale with ``stated`` merged over it, and the prepared pass
@@ -50,8 +59,9 @@ def _pass(tmp_path: Path, reference=None, **stated):
     ).runnable(reference)
 
 
-def test_stated_values_are_recorded_as_explicit(tmp_path):
+def test_stated_values_are_recorded_as_explicit(tmp_path: Path) -> None:
     """The execution record keeps each stated value and marks its source explicit."""
+    from tcip_mcp.pipelines.execution import EXECUTION_RECORD
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_DETECTOR_PASS,
         SAMPLE_OVERLAP,
@@ -65,7 +75,7 @@ def test_stated_values_are_recorded_as_explicit(tmp_path):
         **SAMPLE_DETECTOR_PASS,
     )
 
-    record = p.execution.record()
+    record = EXECUTION_RECORD.dump_python(p.execution, mode="json")
     assert {k: record[k] for k in SAMPLE_DETECTOR_PASS} == SAMPLE_DETECTOR_PASS
     assert {record["sources"][k] for k in ("conf", "cross_tile_nms")} == {
         "explicit"
@@ -73,8 +83,8 @@ def test_stated_values_are_recorded_as_explicit(tmp_path):
 
 
 def test_a_reference_derives_the_unstated_merge_threshold_and_the_density_and_keeps_stated_ones(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A reference derives an unstated merge threshold and the density and keeps stated ones.
 
     The execution record carries the merge threshold the reference's boxes derive and the
@@ -118,10 +128,9 @@ def test_a_reference_derives_the_unstated_merge_threshold_and_the_density_and_ke
         unstated.execution.sources["cross_tile_nms"]
         == CROSS_TILE_NMS_DERIVATION
     )
-    assert (
-        unstated.execution.density,
-        unstated.execution.sources["density"],
-    ) == (pytest.approx(3 / frame), OBJECT_DENSITY_DERIVATION)
+    assert unstated.execution.density is not None
+    assert unstated.execution.density == pytest.approx(3 / frame)
+    assert unstated.execution.sources["density"] == OBJECT_DENSITY_DERIVATION
     assert (
         unstated.execution.density
         != _checkpoint(tmp_path).geometry.object_density
@@ -130,7 +139,9 @@ def test_a_reference_derives_the_unstated_merge_threshold_and_the_density_and_ke
     assert stated.execution.sources["cross_tile_nms"] == "explicit"
 
 
-def test_a_detector_pass_refuses_an_unstated_conf_by_name(tmp_path):
+def test_a_detector_pass_refuses_an_unstated_conf_by_name(
+    tmp_path: Path,
+) -> None:
     """A detector pass refuses an unstated conf by name.
 
     No default stands behind a detector's conf: a pass with no reference states it, and one
@@ -142,7 +153,7 @@ def test_a_detector_pass_refuses_an_unstated_conf_by_name(tmp_path):
         _pass(tmp_path, tile=False)
 
 
-def _in_model_point(p, tmp_path: Path) -> dict:
+def _in_model_point(p: Pass, tmp_path: Path) -> dict:
     """Return the operating point the pass's model holds after predicting one 64 px frame."""
     from PIL import Image
 
@@ -157,7 +168,9 @@ def _in_model_point(p, tmp_path: Path) -> dict:
     return {attr: getattr(holder, attr) for attr in OPERATING_POINT_ATTRS}
 
 
-def test_the_record_a_prediction_is_handed_governs_the_model_it_runs(tmp_path):
+def test_the_record_a_prediction_is_handed_governs_the_model_it_runs(
+    tmp_path: Path,
+) -> None:
     """The execution record a prediction is handed governs the model it runs.
 
     The pass's own record sets the model's conf and the cap its density gives a 64 px frame,
@@ -178,8 +191,13 @@ def test_the_record_a_prediction_is_handed_governs_the_model_it_runs(tmp_path):
     }
     assert p.execution.cross_tile_nms is None
 
-    staged = p.execution.with_value("conf", 0.01, "staged").with_value(
-        "density", 5 / (64 * 64), "fit"
+    from dataclasses import replace
+
+    staged = replace(
+        p.execution,
+        conf=0.01,
+        density=5 / (64 * 64),
+        sources={**p.execution.sources, "conf": "staged", "density": "fit"},
     )
     p.predict([str(tmp_path / "frame.png")], execution=staged)
 
@@ -187,7 +205,7 @@ def test_the_record_a_prediction_is_handed_governs_the_model_it_runs(tmp_path):
     assert (holder.score_thresh, holder.detections_per_img) == (0.01, 5)
 
 
-def test_every_execution_door_takes_its_statement_with_no_default():
+def test_every_execution_door_takes_its_statement_with_no_default() -> None:
     """The four execution doors each take their statement as a required ``Stated``.
 
     ``run_inference``, ``assess_checkpoint``, ``assess_reserved_regions`` and
@@ -214,7 +232,9 @@ def test_every_execution_door_takes_its_statement_with_no_default():
     assert set(Stated.model_validate({}).model_dump().values()) == {None}
 
 
-def test_a_statement_carries_its_reason_and_nothing_stated_carries_none():
+def test_a_statement_carries_its_reason_and_nothing_stated_carries_none() -> (
+    None
+):
     """A statement carries its reason, and an empty statement carries none.
 
     A statement of conf or tile without a reason refuses naming the field, a reason with
@@ -239,8 +259,8 @@ def test_a_statement_carries_its_reason_and_nothing_stated_carries_none():
 @pytest.mark.parametrize("value", [-1.0, 1.5])
 @pytest.mark.parametrize("name", ["conf", "cross_tile_nms"])
 def test_a_stated_threshold_outside_the_unit_interval_is_refused_by_the_type(
-    name, value
-):
+    name: str, value: float
+) -> None:
     """A stated threshold outside the unit interval is refused at the statement by name.
 
     A stated confidence or cross-tile merge threshold below 0 or above 1 is refused at the
@@ -256,8 +276,8 @@ def test_a_stated_threshold_outside_the_unit_interval_is_refused_by_the_type(
 
 
 def test_the_dry_run_reports_the_stated_values_and_refuses_an_unstated_conf(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The dry run reports the stated values and refuses an unstated conf.
 
     Over images and over a raster alike, the dry-run report carries the stated conf and the

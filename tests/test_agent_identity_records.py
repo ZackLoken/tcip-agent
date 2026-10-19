@@ -31,7 +31,7 @@ from tests._audit_fixtures import audit_rows
 DECLARED = mcp_types.Implementation(name="reviewing-harness", version="1.2.3")
 
 
-def _body(result: Any) -> dict:
+def _body(result: mcp_types.CallToolResult) -> dict:
     """Return the tool's own return value, as the server serialized it."""
     if (
         isinstance(result.structured_content, dict)
@@ -114,7 +114,7 @@ def _report_call(detail: str) -> tuple[str, dict]:
 
 def test_an_audited_call_through_a_handshake_records_the_declared_harness_and_a_session(
     project: Path,
-    bound,
+    bound: BoundProject,
 ) -> None:
     call_through_handshake(
         [_report_call("first"), _report_call("second")], bound=bound
@@ -131,7 +131,7 @@ def test_an_audited_call_through_a_handshake_records_the_declared_harness_and_a_
 
 
 def test_the_terminal_session_rides_along_only_when_the_launcher_declared_one(
-    project: Path, bound, monkeypatch: pytest.MonkeyPatch
+    project: Path, bound: BoundProject, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TCIP_TERMINAL_SESSION", "term_abc123")
     call_through_handshake([_report_call("under a terminal")], bound=bound)
@@ -141,7 +141,7 @@ def test_the_terminal_session_rides_along_only_when_the_launcher_declared_one(
 
 
 def test_two_handshakes_in_two_runs_mint_two_sessions(
-    project: Path, bound
+    project: Path, bound: BoundProject
 ) -> None:
     call_through_handshake([_report_call("run one")], bound=bound)
     call_through_handshake([_report_call("run two")], bound=bound)
@@ -165,7 +165,7 @@ def test_a_call_with_no_handshake_records_no_identity(project: Path) -> None:
 
 def test_a_trait_proposed_through_a_handshake_is_named_by_its_audit_line(
     project: Path,
-    bound,
+    bound: BoundProject,
 ) -> None:
     """A trait proposed through a handshake is named by its audit line, never by its revision.
 
@@ -233,7 +233,9 @@ def captured_requests(monkeypatch: pytest.MonkeyPatch, project: Path) -> list:
     ts.replace(backend_port_key(workspace_from_environment()), "8765")
     seen: list = []
 
-    def fake_urlopen(req, timeout=None):  # noqa: ANN001
+    def fake_urlopen(
+        req: urllib.request.Request, timeout: float | None = None
+    ) -> _CapturingResponse:
         seen.append(req)
         return _CapturingResponse()
 
@@ -244,7 +246,7 @@ def captured_requests(monkeypatch: pytest.MonkeyPatch, project: Path) -> list:
 
 def test_the_push_through_a_handshake_sends_the_identity_as_headers(
     captured_requests: list,
-    bound,
+    bound: BoundProject,
 ) -> None:
     call_through_handshake(
         [
@@ -270,7 +272,7 @@ def test_the_push_through_a_handshake_sends_the_identity_as_headers(
 
 def test_the_push_with_no_handshake_sends_only_the_content_type(
     captured_requests: list,
-    bound,
+    bound: BoundProject,
 ) -> None:
     from tcip_mcp.web_client import post_panel_event
 

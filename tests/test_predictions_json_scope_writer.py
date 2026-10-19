@@ -27,7 +27,11 @@ def _scope(tmp_path: Path, *attributes: cr.Attribute) -> ClassScope:
     registry_over(
         tmp_path,
         cr.SubjectRegistry(
-            subjects=(cr.Subject(name=SUBJECT, attributes=attributes),)
+            subjects=(
+                cr.Subject(
+                    name=SUBJECT, description="", attributes=attributes
+                ),
+            )
         ),
     )
     return registry_scope(tmp_path / "images", SUBJECT)
@@ -38,7 +42,13 @@ GRADE = cr.Attribute("grade", "ordinal", ("low", "mid", "high"))
 
 
 def _result(
-    *, boxes, scores, labels, attributes=None, width=100, height=80
+    *,
+    boxes: list[list[int]],
+    scores: list[float],
+    labels: list[int],
+    attributes: list[list[int]] | None = None,
+    width: int = 100,
+    height: int = 80,
 ) -> dict:
     result = {
         "image": "img1.jpg",
@@ -60,7 +70,7 @@ def _decoded(result: dict, scope: ClassScope) -> list:
 
 
 def test_an_attributed_run_writes_every_attributes_value_on_every_box(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     scope = _scope(tmp_path, COLOR, GRADE)
     first, second = _decoded(
@@ -94,7 +104,7 @@ def test_an_empty_scope_publishes_no_name_it_cannot_decode() -> None:
 
 
 def test_a_detector_run_declaring_no_attributes_writes_the_subject_alone(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     (written,) = _decoded(
         _result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1]),
@@ -106,8 +116,8 @@ def test_a_detector_run_declaring_no_attributes_writes_the_subject_alone(
 
 @pytest.mark.parametrize("dropped", ["image", "scores", "labels", "width"])
 def test_a_result_missing_a_field_a_document_holds_refuses_naming_it(
-    tmp_path, dropped
-):
+    tmp_path: Path, dropped: str
+) -> None:
     """A result missing a field a document holds refuses, naming it.
 
     A result without its source image, scores, labels or frame size refuses naming the missing
@@ -139,8 +149,8 @@ def test_a_result_missing_a_field_a_document_holds_refuses_naming_it(
 
 
 def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A regression pass publishes its own output through the one publication, and it decodes.
 
     A head that returns no boxes publishes a document whose decoded task is regression, carrying
@@ -190,7 +200,8 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(
     document = bucket.document_key("a")
     assert document is not None
     decoded = tcip_store.read(document)
+    assert isinstance(decoded, dict)
     assert (decoded["task"], decoded["width"]) == ("regression", 32)
-    assert decoded["outputs"] and all(
-        isinstance(v, list) for v in decoded["outputs"].values()
-    )
+    outputs = decoded["outputs"]
+    assert isinstance(outputs, dict)
+    assert outputs and all(isinstance(v, list) for v in outputs.values())

@@ -11,7 +11,7 @@ import importlib
 from tcip_mcp.pipelines.derivations import DERIVATION_IMPLEMENTATIONS
 
 
-def test_registered_implementations_exist_and_are_callable():
+def test_registered_implementations_exist_and_are_callable() -> None:
     for label, target in DERIVATION_IMPLEMENTATIONS.items():
         if target in ("caller-input", "placeholder"):
             continue

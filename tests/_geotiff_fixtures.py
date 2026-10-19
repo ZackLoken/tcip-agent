@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import tifffile
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        GeoTransform,
+    )
 
 # UTM zone 15N: the real projected CRS every default below uses. Central meridian is -93
 # degrees exactly, an independently hand-verifiable reference point (test_orthomosaic_mapping.py).
@@ -100,7 +106,7 @@ def write_geotiff(
     )
 
 
-def geotransform_of_file(path: Path):
+def geotransform_of_file(path: Path) -> GeoTransform:
     """Return the geotransform ``path``'s header states.
 
     The header is read through ``raster_source.SourceHeader``; raises the reason that read

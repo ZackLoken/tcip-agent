@@ -8,6 +8,7 @@ from pathlib import Path
 
 import tcip_store as ts
 from tcip_mcp.tools.meta_tools import (
+    FrictionReport,
     load_project_memory,
     read_report,
     read_retrospective,
@@ -20,7 +21,7 @@ from tcip_mcp.tools.meta_tools import (
 from tcip_mcp.tools.project_tools import _recent_activity
 
 
-def test_report_friction_writes_one_json_document(tmp_path: Path):
+def test_report_friction_writes_one_json_document(tmp_path: Path) -> None:
     result = report_friction(
         tmp_path,
         category="missing_tool",
@@ -31,21 +32,23 @@ def test_report_friction_writes_one_json_document(tmp_path: Path):
     assert result["category"] == "missing_tool"
 
     entry = read_report(str(tmp_path), result["report_id"])
-    assert entry["category"] == "missing_tool"
-    assert entry["context"]["trait"] == "efb_damage"
-    assert "timestamp" in entry
+    assert entry.category == "missing_tool"
+    assert entry.context["trait"] == "efb_damage"
+    assert entry.timestamp
 
 
-def test_a_report_names_the_record_id_it_was_stored_under(tmp_path: Path):
+def test_a_report_names_the_record_id_it_was_stored_under(
+    tmp_path: Path,
+) -> None:
     """The record lives in the store, so the tool answers its id, the one a listing names."""
     stored = report_friction(tmp_path, category="missing_tool", detail="x")
     assert "report_path" not in stored
-    assert read_report(str(tmp_path), stored["report_id"])["detail"] == "x"
+    assert read_report(str(tmp_path), stored["report_id"]).detail == "x"
     listed = load_project_memory(tmp_path, "reports")["reports"][0]
     assert listed["report_id"] == stored["report_id"] and "path" not in listed
 
 
-def test_report_friction_rejects_invalid_category(tmp_path: Path):
+def test_report_friction_rejects_invalid_category(tmp_path: Path) -> None:
     result = report_friction(
         tmp_path,
         category="not_a_real_category",
@@ -56,7 +59,7 @@ def test_report_friction_rejects_invalid_category(tmp_path: Path):
     assert "missing_tool" in result["valid_categories"]
 
 
-def test_report_friction_one_document_per_report(tmp_path: Path):
+def test_report_friction_one_document_per_report(tmp_path: Path) -> None:
     for i in range(3):
         report_friction(
             tmp_path,
@@ -67,7 +70,7 @@ def test_report_friction_one_document_per_report(tmp_path: Path):
     assert len(report_documents(str(tmp_path))) == 3
 
 
-def test_write_retrospective_creates_new_file(tmp_path: Path):
+def test_write_retrospective_creates_new_file(tmp_path: Path) -> None:
     result = write_retrospective(
         tmp_path,
         project_id="chestnut-bur-phase0",
@@ -90,7 +93,7 @@ def test_write_retrospective_creates_new_file(tmp_path: Path):
     assert "Burs cluster near canopy edges" in content
 
 
-def test_write_retrospective_appends_to_existing(tmp_path: Path):
+def test_write_retrospective_appends_to_existing(tmp_path: Path) -> None:
     write_retrospective(
         tmp_path,
         project_id="chestnut-bur-phase0",
@@ -115,7 +118,7 @@ def test_write_retrospective_appends_to_existing(tmp_path: Path):
     assert "Second pass after three days" in content
 
 
-def test_concurrent_retrospectives_all_survive(tmp_path: Path):
+def test_concurrent_retrospectives_all_survive(tmp_path: Path) -> None:
     # Appending is a read, a concatenation and a write. Taken outside one serialized step, two
     # sessions finishing together each append to the text they read and one section is dropped.
     import threading
@@ -123,7 +126,7 @@ def test_concurrent_retrospectives_all_survive(tmp_path: Path):
     n_threads = 16
     barrier = threading.Barrier(n_threads)
 
-    def _call(index: int):
+    def _call(index: int) -> None:
         barrier.wait()  # maximize actual overlap, not just "started around the same time"
         write_retrospective(
             tmp_path,
@@ -148,7 +151,9 @@ def test_concurrent_retrospectives_all_survive(tmp_path: Path):
     assert not missing, f"sections lost: {missing}"
 
 
-def test_write_retrospective_handles_empty_optional_fields(tmp_path: Path):
+def test_write_retrospective_handles_empty_optional_fields(
+    tmp_path: Path,
+) -> None:
     write_retrospective(
         tmp_path,
         project_id="minimal",
@@ -159,14 +164,16 @@ def test_write_retrospective_handles_empty_optional_fields(tmp_path: Path):
     assert "_(none noted)_" in read_retrospective(str(tmp_path), "minimal")
 
 
-def test_load_retrospectives_returns_empty_when_none_recorded(tmp_path: Path):
+def test_load_retrospectives_returns_empty_when_none_recorded(
+    tmp_path: Path,
+) -> None:
     result = load_project_memory(tmp_path, "retrospectives")
     assert result["count"] == 0
     assert result["retrospectives"] == []
     assert "no retrospectives recorded" in result["note"]
 
 
-def test_load_retrospectives_returns_recent_first(tmp_path: Path):
+def test_load_retrospectives_returns_recent_first(tmp_path: Path) -> None:
     # Each section is stamped from the clock, whose tick is coarser than these calls, so the writes
     # are spaced far enough apart to state three different times rather than one.
     write_retrospective(
@@ -187,7 +194,7 @@ def test_load_retrospectives_returns_recent_first(tmp_path: Path):
     assert ids == ["third", "second", "first"]
 
 
-def test_load_retrospectives_respects_limit(tmp_path: Path):
+def test_load_retrospectives_respects_limit(tmp_path: Path) -> None:
     for i in range(5):
         write_retrospective(
             tmp_path,
@@ -202,7 +209,7 @@ def test_load_retrospectives_respects_limit(tmp_path: Path):
     assert result["total_available"] == 5
 
 
-def test_load_retrospectives_filter_substring(tmp_path: Path):
+def test_load_retrospectives_filter_substring(tmp_path: Path) -> None:
     write_retrospective(
         tmp_path,
         project_id="currant-efb",
@@ -232,14 +239,14 @@ def test_load_retrospectives_filter_substring(tmp_path: Path):
     assert result["retrospectives"][0]["project_id"] == "chestnut-bur"
 
 
-def test_load_reports_returns_empty_when_none_recorded(tmp_path: Path):
+def test_load_reports_returns_empty_when_none_recorded(tmp_path: Path) -> None:
     result = load_project_memory(tmp_path, "reports")
     assert result["count"] == 0
     assert result["reports"] == []
     assert "no friction reports recorded" in result["note"]
 
 
-def test_load_reports_roundtrips_a_written_report(tmp_path: Path):
+def test_load_reports_roundtrips_a_written_report(tmp_path: Path) -> None:
     report_friction(
         tmp_path,
         category="missing_tool",
@@ -257,10 +264,8 @@ def test_load_reports_roundtrips_a_written_report(tmp_path: Path):
 
 def test_a_report_missing_a_field_its_writer_records_refuses_rather_than_reading_as_blank(
     tmp_path: Path,
-):
+) -> None:
     """A stored report holding its time alone refuses the listing, naming ``category``."""
-    import pytest
-
     from tcip_mcp.tools.meta_tools import friction_report_key
 
     ts.replace(
@@ -270,12 +275,15 @@ def test_a_report_missing_a_field_its_writer_records_refuses_rather_than_reading
         {"timestamp": "2026-03-04T12:00:00+00:00"},
     )
 
-    with pytest.raises(KeyError, match="category"):
-        load_project_memory(tmp_path, "reports")
+    (row,) = load_project_memory(tmp_path, "reports")["reports"]
+    assert "category" in row["malformed"]
 
 
-def test_a_report_that_is_not_a_json_object_will_not_decode(tmp_path: Path):
+def test_a_report_that_is_not_a_json_object_will_not_decode(
+    tmp_path: Path,
+) -> None:
     import pytest
+    from pydantic import ValidationError
 
     from tcip_mcp.tools.meta_tools import friction_report_key
 
@@ -286,11 +294,11 @@ def test_a_report_that_is_not_a_json_object_will_not_decode(tmp_path: Path):
         "text",
     )
 
-    with pytest.raises(ts.DecodeError, match="not a JSON object"):
+    with pytest.raises(ValidationError, match="FrictionReport"):
         read_report(str(tmp_path), "20260304T120000Z_missing_tool_a1b2")
 
 
-def test_load_reports_recent_first_and_respects_limit(tmp_path: Path):
+def test_load_reports_recent_first_and_respects_limit(tmp_path: Path) -> None:
     # Each report is stamped from the clock, whose tick is coarser than these calls, so the writes
     # are spaced far enough apart to state four different times rather than one.
     for i in range(4):
@@ -309,7 +317,7 @@ def test_load_reports_recent_first_and_respects_limit(tmp_path: Path):
 
 def test_a_retrospective_stating_no_section_sorts_after_every_dated_one_by_name(
     tmp_path: Path,
-):
+) -> None:
     """Retrospectives stating no time list after the dated one, ordered by name."""
     write_retrospective(
         tmp_path, project_id="dated", task="t", worked="w", did_not_work="d"
@@ -330,7 +338,7 @@ def test_a_retrospective_stating_no_section_sorts_after_every_dated_one_by_name(
     ]
 
 
-def test_load_reports_filters_by_category(tmp_path: Path):
+def test_load_reports_filters_by_category(tmp_path: Path) -> None:
     report_friction(tmp_path, category="missing_tool", detail="a")
     report_friction(tmp_path, category="ambiguous_data", detail="b")
 
@@ -341,7 +349,7 @@ def test_load_reports_filters_by_category(tmp_path: Path):
     assert result["reports"][0]["detail"] == "b"
 
 
-def test_load_reports_filter_substring(tmp_path: Path):
+def test_load_reports_filter_substring(tmp_path: Path) -> None:
     report_friction(
         tmp_path, category="missing_tool", detail="trait profile lookup"
     )
@@ -356,15 +364,17 @@ def test_load_reports_filter_substring(tmp_path: Path):
     assert result["reports"][0]["detail"] == "trait profile lookup"
 
 
-def test_report_friction_defaults_user_disagreement_false(tmp_path: Path):
+def test_report_friction_defaults_user_disagreement_false(
+    tmp_path: Path,
+) -> None:
     result = report_friction(tmp_path, category="missing_tool", detail="x")
     assert result["user_disagreement"] is False
 
     entry = read_report(str(tmp_path), result["report_id"])
-    assert entry["user_disagreement"] is False
+    assert entry.user_disagreement is False
 
 
-def test_report_friction_records_user_disagreement(tmp_path: Path):
+def test_report_friction_records_user_disagreement(tmp_path: Path) -> None:
     result = report_friction(
         tmp_path,
         category="needs_human_judgment",
@@ -374,10 +384,10 @@ def test_report_friction_records_user_disagreement(tmp_path: Path):
     assert result["user_disagreement"] is True
 
     entry = read_report(str(tmp_path), result["report_id"])
-    assert entry["user_disagreement"] is True
+    assert entry.user_disagreement is True
 
 
-def test_load_reports_roundtrips_user_disagreement(tmp_path: Path):
+def test_load_reports_roundtrips_user_disagreement(tmp_path: Path) -> None:
     report_friction(
         tmp_path, category="missing_tool", detail="a", user_disagreement=False
     )
@@ -396,7 +406,7 @@ def test_load_reports_roundtrips_user_disagreement(tmp_path: Path):
 
 def test_a_friction_report_counts_toward_the_recent_activity_its_audit_line_records(
     tmp_path: Path,
-):
+) -> None:
     report_friction(tmp_path, category="missing_tool", detail="a")
     status = _recent_activity(tmp_path)
     assert status["reports_since_last_retrospective"] == 1
@@ -405,7 +415,7 @@ def test_a_friction_report_counts_toward_the_recent_activity_its_audit_line_reco
 
 def test_a_retrospective_resets_the_report_count_and_is_pointed_at_by_id(
     tmp_path: Path,
-):
+) -> None:
     report_friction(tmp_path, category="missing_tool", detail="a")
     write_retrospective(
         tmp_path, project_id="p", task="t", worked="w", did_not_work="d"
@@ -419,7 +429,9 @@ def test_a_retrospective_resets_the_report_count_and_is_pointed_at_by_id(
     )  # no retrospective text, pointer only
 
 
-def test_record_distillation_pass_resets_distillation_counters(tmp_path: Path):
+def test_record_distillation_pass_resets_distillation_counters(
+    tmp_path: Path,
+) -> None:
     report_friction(tmp_path, category="missing_tool", detail="a")
     report_friction(tmp_path, category="missing_tool", detail="b")
 
@@ -433,7 +445,7 @@ def test_record_distillation_pass_resets_distillation_counters(tmp_path: Path):
 
 def test_record_distillation_pass_never_touches_reports_or_retrospectives(
     tmp_path: Path,
-):
+) -> None:
     # Bookkeeping only: must never write/modify/delete the underlying records it's counting.
     report_friction(tmp_path, category="missing_tool", detail="a")
     before = report_documents(str(tmp_path))
@@ -442,4 +454,5 @@ def test_record_distillation_pass_never_touches_reports_or_retrospectives(
 
     after = report_documents(str(tmp_path))
     assert after == before
-    assert after[0].value["detail"] == "a"
+    report = after[0].value
+    assert isinstance(report, FrictionReport) and report.detail == "a"

@@ -8,11 +8,15 @@ and the resolution (index + mode) is what these tests check.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 from tcip_mcp.dataset_layout import image_dir, label_key
 from tcip_mcp.tools.gui_tools import focus_human_attention
+
+if TYPE_CHECKING:
+    from tcip_mcp.workspace import BoundProject
 
 
 def _scene(root: Path, date: str, images: list[str]) -> None:
@@ -54,7 +58,7 @@ def _unreadable(root: Path, date: str, stem: str) -> None:
 
 
 def test_focus_annotate_lands_on_first_annotated_polygon_frame(
-    tmp_path: Path, bound
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-03-02"
@@ -82,7 +86,7 @@ def test_focus_annotate_lands_on_first_annotated_polygon_frame(
 
 def test_a_named_bucket_sets_the_mode_from_its_own_document_not_the_label(
     tmp_path: Path,
-    bound,
+    bound: BoundProject,
 ) -> None:
     """A named bucket sets the focus mode from its own document, not the label.
 
@@ -132,7 +136,7 @@ def test_a_named_bucket_sets_the_mode_from_its_own_document_not_the_label(
 
 
 def test_focus_annotate_scopes_annotated_to_the_requested_subject(
-    tmp_path: Path, bound
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     # IMG_0001 is labeled only for 'leaf' and IMG_0002 only for 'bud': focusing on 'leaf' lands on
     # IMG_0001 in polygon mode and counts only leaf's frame, so 'annotated' is scoped by subject.
@@ -154,7 +158,7 @@ def test_focus_annotate_scopes_annotated_to_the_requested_subject(
 
 def test_focus_annotate_mode_follows_the_explicit_index_not_the_first_frame(
     tmp_path: Path,
-    bound,
+    bound: BoundProject,
 ) -> None:
     # IMG_0002 has polygons, IMG_0007 has only boxes. Asking for index 7 with mode=None must
     # infer 'box' from frame 7, not 'polygon' from the first annotated frame.
@@ -175,7 +179,7 @@ def test_focus_annotate_mode_follows_the_explicit_index_not_the_first_frame(
 
 def test_focus_annotate_index_matches_frontend_listing_ignoring_non_files(
     tmp_path: Path,
-    bound,
+    bound: BoundProject,
 ) -> None:
     # A directory named like an image must not shift the index (the frontend's image_list uses
     # is_file()); the tool must match that so it doesn't land one frame off.
@@ -197,7 +201,7 @@ def test_focus_annotate_index_matches_frontend_listing_ignoring_non_files(
 
 
 def test_focus_annotate_infers_box_mode_from_detect_labels(
-    tmp_path: Path, bound
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
@@ -211,7 +215,7 @@ def test_focus_annotate_infers_box_mode_from_detect_labels(
 
 
 def test_focus_annotate_sends_a_point_only_frame_in_point_mode(
-    tmp_path: Path, bound
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     """A frame carrying point annotations of the subject resolves to point mode."""
     root = tmp_path / "proj"
@@ -228,7 +232,7 @@ def test_focus_annotate_sends_a_point_only_frame_in_point_mode(
 
 
 def test_focus_annotate_accepts_an_explicit_point_mode(
-    tmp_path: Path, bound
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-03-02"
@@ -241,7 +245,7 @@ def test_focus_annotate_accepts_an_explicit_point_mode(
 
 
 def test_focus_annotate_still_rejects_a_mode_the_gui_has_no_tool_for(
-    tmp_path: Path, bound
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-03-02"
@@ -254,7 +258,7 @@ def test_focus_annotate_still_rejects_a_mode_the_gui_has_no_tool_for(
 
 def test_focus_annotate_rejects_a_mode_the_gui_has_no_tool_for_naming_the_real_vocabulary(
     tmp_path: Path,
-    bound,
+    bound: BoundProject,
 ) -> None:
     from tcip_mcp.web_client import ANNOTATE_MODES
 
@@ -270,7 +274,7 @@ def test_focus_annotate_rejects_a_mode_the_gui_has_no_tool_for_naming_the_real_v
 
 
 def test_focus_annotate_empty_label_is_not_a_focus_target(
-    tmp_path: Path, bound
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     # An empty label file holds no subject (nothing to show); skip it.
     root = tmp_path / "proj"
@@ -288,7 +292,7 @@ def test_focus_annotate_empty_label_is_not_a_focus_target(
 
 
 def test_focus_annotate_explicit_mode_and_index_override(
-    tmp_path: Path, bound
+    tmp_path: Path, bound: BoundProject
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-03-02"
@@ -303,7 +307,7 @@ def test_focus_annotate_explicit_mode_and_index_override(
     assert res["mode"] == "box"  # explicit override
 
 
-def test_focus_annotate_no_images(tmp_path: Path, bound) -> None:
+def test_focus_annotate_no_images(tmp_path: Path, bound: BoundProject) -> None:
     root = tmp_path / "proj"
     (Path(image_dir(root, "2026-03-02"))).mkdir(parents=True)
     res = focus_human_attention(bound, str(root), "bush", "2026-03-02")
@@ -312,7 +316,7 @@ def test_focus_annotate_no_images(tmp_path: Path, bound) -> None:
 
 def test_focus_annotate_navigates_past_an_unreadable_label_on_another_frame(
     tmp_path: Path,
-    bound,
+    bound: BoundProject,
 ) -> None:
     """The focus tool navigates past an unreadable label on another frame, naming it.
 
@@ -334,7 +338,7 @@ def test_focus_annotate_navigates_past_an_unreadable_label_on_another_frame(
 
 def test_focus_annotate_refuses_when_the_landed_frame_itself_is_unreadable(
     tmp_path: Path,
-    bound,
+    bound: BoundProject,
 ) -> None:
     """An unreadable label on the requested frame answers an error naming the document."""
     root = tmp_path / "proj"

@@ -41,7 +41,9 @@ def _dataset(root: Path) -> None:
     )
 
 
-def test_a_dataset_whose_images_were_all_removed_reports_no_identity(tmp_path):
+def test_a_dataset_whose_images_were_all_removed_reports_no_identity(
+    tmp_path: Path,
+) -> None:
     """A dataset whose images were all removed reports no identity, its labels left in place."""
     _dataset(tmp_path)
     before = dataset_fingerprint(tmp_path)
@@ -53,7 +55,9 @@ def test_a_dataset_whose_images_were_all_removed_reports_no_identity(tmp_path):
     assert dataset_fingerprint(tmp_path) is None
 
 
-def test_a_dataset_whose_labels_were_all_removed_reports_no_identity(tmp_path):
+def test_a_dataset_whose_labels_were_all_removed_reports_no_identity(
+    tmp_path: Path,
+) -> None:
     """A dataset whose labels were all removed reports no identity from its imagery alone."""
     _dataset(tmp_path)
     for key in capture_label_keys(tmp_path, _DATE):
@@ -61,7 +65,7 @@ def test_a_dataset_whose_labels_were_all_removed_reports_no_identity(tmp_path):
     assert dataset_fingerprint(tmp_path) is None
 
 
-def test_the_identity_comes_back_when_the_imagery_does(tmp_path):
+def test_the_identity_comes_back_when_the_imagery_does(tmp_path: Path) -> None:
     """Imagery rewritten byte for byte under its names recomputes to the identity it had.
 
     While the images are gone the identity is ``None``.

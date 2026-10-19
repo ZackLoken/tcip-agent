@@ -59,7 +59,9 @@ def _records(
     return recs
 
 
-def test_every_conf_label_the_registered_pickers_can_record_has_a_registered_implementation():
+def test_every_conf_label_the_registered_pickers_can_record_has_a_registered_implementation() -> (
+    None
+):
     """Every conf label a registered count picker records names a registered implementation.
 
     Each registered count objective is driven, and the two labels those runs produced are each
@@ -87,7 +89,9 @@ def test_every_conf_label_the_registered_pickers_can_record_has_a_registered_imp
     assert len(labels) == 2  # two pickers
 
 
-def test_the_lowest_score_across_the_reference_is_surfaced_and_never_fails_it():
+def test_the_lowest_score_across_the_reference_is_surfaced_and_never_fails_it() -> (
+    None
+):
     """The lowest score across the reference is surfaced as evidence and does not fail it.
 
     One holdout detection scores 0.05, the floor the reference was collected at, and the observed

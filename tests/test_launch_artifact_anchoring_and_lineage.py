@@ -32,7 +32,9 @@ def _canonical_dataset(root: Path, date: str = "2-11-26") -> Path:
 
     images_dir = root / "images" / date
     images_dir.mkdir(parents=True)
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(
+        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
+    )
     for i in range(2):
         painted_frame(
             96, 64, (110, 120, 130), [((8, 6, 40, 22), BRIGHT)]
@@ -51,7 +53,7 @@ def _detection_config(
     images_dir: Path | str,
     builder: str = BESPOKE_DETECTION,
     split: dict | None = None,
-    **data,
+    **data: object,
 ) -> dict:
     """Return a one-image-per-batch ``training_config`` of the detection ``builder``.
 
@@ -92,7 +94,7 @@ def _launch_record(res: dict) -> dict:
 
 
 def test_the_run_directory_lies_under_its_project_not_the_process_cwd(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The run directory lies under its project, not under the process's cwd.
 
@@ -125,7 +127,7 @@ def test_the_run_directory_lies_under_its_project_not_the_process_cwd(
 
 
 def test_launched_run_records_the_datasets_identity_in_its_run_record(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A launched run records its dataset's identity in its run record.
 
@@ -153,7 +155,7 @@ def test_launched_run_records_the_datasets_identity_in_its_run_record(
 
 
 def test_launch_records_what_the_smoke_contract_checked(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A launch records what its smoke contract checked, leaving the handed config alone.
 
@@ -184,7 +186,7 @@ def test_launch_records_what_the_smoke_contract_checked(
 
 
 def test_launch_omitting_overfit_check_records_null(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An omitted overfit check records ``overfit_check`` as null in the answer and the record."""
     pytest.importorskip("torchvision")
@@ -202,7 +204,7 @@ def test_launch_omitting_overfit_check_records_null(
 
 
 def test_launch_with_overfit_check_records_the_rendered_report(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A launch with the overfit check records the rendered report.
 
@@ -233,7 +235,7 @@ def test_launch_with_overfit_check_records_the_rendered_report(
 
 
 def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_safe_record(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An overfit check over a diverging model lets the launch proceed with a JSON-safe record.
 
@@ -271,7 +273,7 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
 
 
 def test_the_run_record_the_worker_reads_carries_the_seed_and_the_training_keys(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A launched run's record carries the stated seed and the trainer's keys at top level.
 

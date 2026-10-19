@@ -8,6 +8,7 @@ that record.
 from __future__ import annotations
 
 import inspect
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -24,6 +25,15 @@ from tcip_mcp.pipelines.derivations import (  # noqa: E402
 )
 from tcip_mcp.pipelines.schemas import DetectorGeometry  # noqa: E402
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from pathlib import Path
+
+    from torch import nn
+
+    from tcip_mcp.pipelines.model_build import SourceLayout
+    from tcip_mcp.pipelines.schemas import ModelSourceSchema, TrainGeometry
+
 GEOMETRY = DetectorGeometry.handed_names()
 
 
@@ -36,7 +46,9 @@ GEOMETRY = DetectorGeometry.handed_names()
         "_build_fcos",
     ],
 )
-def test_every_detector_builder_takes_its_geometry_stated(builder):
+def test_every_detector_builder_takes_its_geometry_stated(
+    builder: str,
+) -> None:
     """Each detector builder takes its geometry stated, refusing a call that leaves one out.
 
     No builder defaults its anchor base, its resize bounds or, but for the anchor-free FCOS, its
@@ -87,7 +99,9 @@ SIZES_WH = [
 """Object extents, width by height, their characteristic sizes from about 7 to 31 px."""
 
 
-def test_the_geometry_agrees_with_numpy_and_the_aspect_ratio_derivation():
+def test_the_geometry_agrees_with_numpy_and_the_aspect_ratio_derivation() -> (
+    None
+):
     """The derived detector geometry agrees with numpy and the aspect-ratio derivation.
 
     The derived resize bounds are the frame's own edges, the four doubling anchor levels bracket
@@ -113,7 +127,9 @@ def test_the_geometry_agrees_with_numpy_and_the_aspect_ratio_derivation():
     )
 
 
-def test_a_detector_built_at_the_derived_geometry_sees_a_small_tile_at_its_native_scale():
+def test_a_detector_built_at_the_derived_geometry_sees_a_small_tile_at_its_native_scale() -> (
+    None
+):
     """A detector built at the derived geometry sees a small tile at its native scale.
 
     A 64 px tile comes out of the detector's transform at 64 px.
@@ -133,7 +149,7 @@ def test_a_detector_built_at_the_derived_geometry_sees_a_small_tile_at_its_nativ
     assert image_list.image_sizes == [(64, 64)]
 
 
-def test_regions_holding_no_object_leave_a_geometry_its_type_refuses():
+def test_regions_holding_no_object_leave_a_geometry_its_type_refuses() -> None:
     """Regions holding no object derive no anchor base, which the geometry's type refuses."""
     from pydantic import ValidationError
 
@@ -142,7 +158,9 @@ def test_regions_holding_no_object_leave_a_geometry_its_type_refuses():
         derive_detector_geometry((8, 8), empty)
 
 
-def test_a_geometry_sourced_by_any_label_but_the_derivations_is_refused():
+def test_a_geometry_sourced_by_any_label_but_the_derivations_is_refused() -> (
+    None
+):
     """A detector geometry sourced by any label but the derivation's is refused.
 
     The record re-validates under the derivation's own label, and the same values under another
@@ -160,7 +178,7 @@ def test_a_geometry_sourced_by_any_label_but_the_derivations_is_refused():
         )
 
 
-def _preflight_config(tmp_path, **model_source):
+def _preflight_config(tmp_path: Path, **model_source: dict) -> dict:
     from tests._verified_checkpoint_fixtures import (
         BUILT_DETECTOR,
         detection_config,
@@ -175,8 +193,8 @@ def _preflight_config(tmp_path, **model_source):
 
 @pytest.mark.parametrize("restated", GEOMETRY)
 def test_preflight_refuses_a_builder_kwarg_restating_the_recorded_geometry(
-    tmp_path, restated
-):
+    tmp_path: Path, restated: str
+) -> None:
     """Preflight refuses a ``builder_kwargs`` entry restating the recorded geometry, naming it.
 
     ``builder_kwargs`` naming any of the four geometry keys fails preflight naming it.
@@ -194,8 +212,8 @@ def test_preflight_refuses_a_builder_kwarg_restating_the_recorded_geometry(
 
 
 def test_the_launch_builds_the_detector_at_the_geometry_its_resolution_recorded(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Preflight's smoke builds the detector at the geometry its resolution recorded.
 
     A config the chain fixtures build passes preflight's smoke; the geometry handed to the
@@ -208,7 +226,12 @@ def test_the_launch_builds_the_detector_at_the_geometry_its_resolution_recorded(
     built: list = []
     real = model_build.build_from_model_source
 
-    def record(source, layout, dims, geometry):
+    def record(
+        source: ModelSourceSchema,
+        layout: SourceLayout,
+        dims: Mapping[str, object],
+        geometry: TrainGeometry,
+    ) -> nn.Module:
         built.append((real(source, layout, dims, geometry), geometry))
         return built[-1][0]
 

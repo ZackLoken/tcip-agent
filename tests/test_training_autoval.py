@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -27,6 +28,12 @@ from tests._producer_fixtures import (  # noqa: E402
 from tests._training_values import drawn_split, stage, tiling_block  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side as recorded_side  # noqa: E402
 
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.split_construction import Partition
+    from tcip_mcp.pipelines.raster_source import SourceHeader
+    from tcip_mcp.pipelines.schemas import Rect, SpatialManifest
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+
 IMG = 64
 
 
@@ -38,26 +45,24 @@ _TILED = tiling_block(tile_size=128, overlap=0.2)
 """The tiling block the spatial-split runs here state."""
 
 
-def _drawn(**stated) -> dict:
+def _drawn(**stated: object) -> dict:
     """Return a drawn split at seed 1 grouping each source's tiles, with ``stated`` over it."""
     return drawn_split(**{"seed": 1, "grouping": "tile_prefix", **stated})
 
 
-def _manifest(partition: dict) -> dict:
-    """Return the within-image split the resolved ``partition`` records, its fields by name.
-
-    The split is read back through ``split_construction.partition_spatial``.
-    """
-    from tcip_mcp.pipelines.data.split_construction import partition_spatial
-
-    manifest = partition_spatial(partition)
-    assert manifest is not None, "the run resolved no within-image split"
-    return manifest.model_dump()
+def _manifest(partition: Partition) -> SpatialManifest:
+    """Return the within-image split the resolved ``partition`` records."""
+    assert partition.spatial is not None, (
+        "the run resolved no within-image split"
+    )
+    return partition.spatial
 
 
 def _detection_dataset(
-    root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"), tiles=2
-):
+    root: Path,
+    prefixes: tuple[str, ...] = ("srcA", "srcB", "srcC", "srcD"),
+    tiles: int = 2,
+) -> tuple[Path, list[str]]:
     """Write ``tiles`` labeled images per prefix in ``root``'s undated capture.
 
     Returns the capture's directory and the stems.
@@ -75,7 +80,7 @@ def _detection_dataset(
 
 def test_a_run_naming_a_ground_truth_place_that_does_not_exist_refuses_naming_it(
     tmp_path: Path,
-):
+) -> None:
     """A run naming a ground-truth place that does not exist is refused, naming it.
 
     A stated place that does not exist, or is empty, raises naming ``data.labels_dir``; the
@@ -102,7 +107,7 @@ def test_a_run_naming_a_ground_truth_place_that_does_not_exist_refuses_naming_it
     assert train_ds.num_samples
 
 
-def test_auto_train_val_detection_splits(tmp_path: Path):
+def test_auto_train_val_detection_splits(tmp_path: Path) -> None:
     images_dir, all_stems = _detection_dataset(tmp_path / "ds")
     data_cfg = {
         "images_dir": str(images_dir),
@@ -125,7 +130,7 @@ def test_auto_train_val_detection_splits(tmp_path: Path):
     assert val_ds.transforms is None
 
 
-def test_auto_train_val_malformed_grouping_raises(tmp_path: Path):
+def test_auto_train_val_malformed_grouping_raises(tmp_path: Path) -> None:
     """An unrecognized split.grouping policy is a caller-config error and propagates."""
     images_dir, _all_stems = _detection_dataset(tmp_path / "ds")
     data_cfg = {
@@ -137,7 +142,7 @@ def test_auto_train_val_malformed_grouping_raises(tmp_path: Path):
         _train_val(tmp_path, "detection", data_cfg)
 
 
-def test_auto_train_val_malformed_val_ratio_refuses(tmp_path: Path):
+def test_auto_train_val_malformed_val_ratio_refuses(tmp_path: Path) -> None:
     """The run refuses a malformed val_ratio, naming the value."""
     images_dir, _all_stems = _detection_dataset(tmp_path / "ds")
     data_cfg = {
@@ -149,7 +154,9 @@ def test_auto_train_val_malformed_val_ratio_refuses(tmp_path: Path):
         _train_val(tmp_path, "detection", data_cfg)
 
 
-def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
+def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(
+    tmp_path: Path,
+) -> None:
     """An ordinal run's draw partitions the samples of its table's own rows.
 
     An ordinal run's ground truth is a table, so the platform's own producer names one sample
@@ -182,7 +189,7 @@ def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
     assert sorted(
         recorded_side(partition, "train") + recorded_side(partition, "val")
     ) == [f"img{i}" for i in range(4)]
-    assert {s["ground_truth"] for s in partition["samples"]} == {str(csv_path)}
+    assert {s.ground_truth for s in partition.samples} == {str(csv_path)}
     by_row = {f"img{i}": rank for i, rank in enumerate(ranks)}
     for idx, key in enumerate(train_ds.stems):
         assert (
@@ -192,7 +199,7 @@ def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
 
 def test_auto_train_val_single_untiled_source_refuses_validation_and_trains_without_it(
     tmp_path: Path,
-):
+) -> None:
     """A single untiled source refuses a requested validation and builds without one if stated.
 
     A requested val share raises naming every share zero; with a val_ratio of zero, the training
@@ -214,7 +221,9 @@ def test_auto_train_val_single_untiled_source_refuses_validation_and_trains_with
     assert val_ds is None and train_ds.num_samples == 1
 
 
-def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
+def test_auto_train_val_single_source_tiled_spatial_split(
+    tmp_path: Path,
+) -> None:
     """A single tiled detection source derives a real, disjoint spatial val split.
 
     It does not degrade to no validation; train and val tiles share no tile and no strip
@@ -237,19 +246,19 @@ def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
     # The partition holds the one source and its spatial regions.
     assert recorded_side(partition, "train") == [stem]
     manifest = _manifest(partition)
-    assert manifest["train_identities"] and manifest["val_identities"]
-    assert set(manifest["train_identities"]).isdisjoint(
-        set(manifest["val_identities"])
+    assert manifest.train_identities and manifest.val_identities
+    assert set(manifest.train_identities).isdisjoint(
+        set(manifest.val_identities)
     )
     assert all(
-        i.startswith(f"{stem}::strip_") for i in manifest["train_identities"]
+        i.startswith(f"{stem}::strip_") for i in manifest.train_identities
     )
-    assert manifest["kept_holdout_tiles"] > 0
+    assert manifest.kept_holdout_tiles > 0
 
 
 def test_a_single_tiled_source_with_no_val_share_refuses_by_name(
     tmp_path: Path,
-):
+) -> None:
     """A single tiled source with a reserved share and no val share is refused by name.
 
     The refusal asks for a val_ratio above zero.
@@ -267,7 +276,7 @@ def test_a_single_tiled_source_with_no_val_share_refuses_by_name(
 
 def test_spatial_manifest_tied_val_holdout_fractions_place_by_declared_order(
     tmp_path: Path,
-):
+) -> None:
     """Tied val and holdout shares are placed by declared order.
 
     ``val_ratio == holdout_ratio`` ties their shares in the center-out tie-break, so which
@@ -288,15 +297,15 @@ def test_spatial_manifest_tied_val_holdout_fractions_place_by_declared_order(
     )
     assert val_ds is not None
     manifest = _manifest(partition)
-    assert manifest["train_region"] == [(1030, 0, 3218, 3000)]
-    assert manifest["val_region"] == [(0, 0, 849, 3000)]
-    assert manifest["holdout_region"] == [(3399, 0, 4000, 3000)]
-    assert "seed" not in manifest
+    assert manifest.train_region == [(1030, 0, 3218, 3000)]
+    assert manifest.val_region == [(0, 0, 849, 3000)]
+    assert manifest.holdout_region == [(3399, 0, 4000, 3000)]
+    assert "seed" not in manifest.model_dump()
 
 
 def test_spatial_manifest_tied_holdout_calibration_fractions_place_by_declared_order(
     tmp_path: Path,
-):
+) -> None:
     """Tied holdout and calibration shares are placed by declared order.
 
     ``calibration_ratio == holdout_ratio`` ties their shares in the center-out tie-break; the
@@ -317,14 +326,14 @@ def test_spatial_manifest_tied_holdout_calibration_fractions_place_by_declared_o
     )
     assert val_ds is not None
     manifest = _manifest(partition)
-    assert manifest["calibration_region"] == [(0, 0, 643, 3000)]
-    assert manifest["holdout_region"] == [(3605, 0, 4000, 3000)]
-    assert "seed" not in manifest
+    assert manifest.calibration_region == [(0, 0, 643, 3000)]
+    assert manifest.holdout_region == [(3605, 0, 4000, 3000)]
+    assert "seed" not in manifest.model_dump()
 
 
 def test_spatial_manifest_pins_train_val_and_holdout_regions_for_distinct_fractions(
     tmp_path: Path,
-):
+) -> None:
     """The spatial manifest places the train, val and holdout regions for distinct shares.
 
     With shares 0.65/0.25/0.1 over a 4000x3000 source, train is pinned at (1236, 0, 3630,
@@ -342,12 +351,14 @@ def test_spatial_manifest_pins_train_val_and_holdout_regions_for_distinct_fracti
     )
     assert val_ds is not None
     manifest = _manifest(partition)
-    assert manifest["train_region"] == [(1236, 0, 3630, 3000)]
-    assert manifest["val_region"] == [(0, 0, 1055, 3000)]
-    assert manifest["holdout_region"] == [(3811, 0, 4000, 3000)]
+    assert manifest.train_region == [(1236, 0, 3630, 3000)]
+    assert manifest.val_region == [(0, 0, 1055, 3000)]
+    assert manifest.holdout_region == [(3811, 0, 4000, 3000)]
 
 
-def test_spatial_manifest_persists_train_and_val_regions_too(tmp_path: Path):
+def test_spatial_manifest_persists_train_and_val_regions_too(
+    tmp_path: Path,
+) -> None:
     """The spatial manifest persists train and val regions as real rects.
 
     train_region, val_region and holdout_region each hold real four-number rects, not just
@@ -362,14 +373,14 @@ def test_spatial_manifest_persists_train_and_val_regions_too(tmp_path: Path):
     }
     manifest = _manifest(_train_val(tmp_path, "detection", data_cfg)[2])
     assert (
-        manifest["train_region"]
-        and manifest["val_region"]
-        and manifest["holdout_region"]
+        manifest.train_region
+        and manifest.val_region
+        and manifest.holdout_region
     )
     for region in (
-        manifest["train_region"],
-        manifest["val_region"],
-        manifest["holdout_region"],
+        manifest.train_region,
+        manifest.val_region,
+        manifest.holdout_region,
     ):
         for rect in region:
             assert len(rect) == 4
@@ -377,7 +388,7 @@ def test_spatial_manifest_persists_train_and_val_regions_too(tmp_path: Path):
 
 def test_auto_train_val_single_source_spatial_split_ignores_a_stray_keep_regions_in_tiling(
     tmp_path: Path,
-):
+) -> None:
     """A single-source spatial split builds a validation loader beside a stray keep_regions.
 
     The tiling block names its own keep_regions, and the run still has a validation side.
@@ -405,7 +416,7 @@ def _two_mosaic_tiles(tmp_path: Path) -> tuple[Path, list[str]]:
 
 def test_auto_train_val_degenerate_grouping_refuses_and_a_stem_grouping_draws(
     tmp_path: Path,
-):
+) -> None:
     """A degenerate grouping is refused, and the same tree grouped by stem draws.
 
     Two stems whose default tile_prefix grouping collapses to one group hold one foreground
@@ -431,12 +442,12 @@ def test_auto_train_val_degenerate_grouping_refuses_and_a_stem_grouping_draws(
     assert sorted(
         Path(s).stem for s in train_ds.stems + val_ds.stems
     ) == sorted(stems)
-    assert partition["group_by"] == "stem"
+    assert partition.group_by == "stem"
 
 
 def test_auto_train_val_explicit_grouping_map_starving_val_refuses(
     tmp_path: Path,
-):
+) -> None:
     """A caller-supplied grouping map that starves val is refused through the draw's floor."""
     images_dir, stems = _two_mosaic_tiles(tmp_path)
     group_key_map = {
@@ -455,7 +466,7 @@ def test_auto_train_val_explicit_grouping_map_starving_val_refuses(
 
 def test_a_calibration_ratio_of_zero_reserves_no_calibration_region(
     tmp_path: Path,
-):
+) -> None:
     """A calibration_ratio stated at zero reserves no calibration region.
 
     The spatial_manifest carries no calibration_region and still holds its train, val and
@@ -473,18 +484,18 @@ def test_a_calibration_ratio_of_zero_reserves_no_calibration_region(
     )
     assert val_ds is not None
     manifest = _manifest(partition)
-    assert manifest["calibration_region"] == []
-    assert manifest["kept_calibration_tiles"] == 0
+    assert manifest.calibration_region == []
+    assert manifest.kept_calibration_tiles == 0
     assert (
-        manifest["train_region"]
-        and manifest["val_region"]
-        and manifest["holdout_region"]
+        manifest.train_region
+        and manifest.val_region
+        and manifest.holdout_region
     )
 
 
 def test_a_single_source_spatial_run_builds_its_loaders_at_the_stated_band_count(
     tmp_path: Path,
-):
+) -> None:
     """A single-source spatial run builds its loaders at the stated band count.
 
     A run configured for one channel builds both loaders at one channel and reads its tiles at
@@ -503,18 +514,20 @@ def test_a_single_source_spatial_run_builds_its_loaders_at_the_stated_band_count
     )
     assert val_ds is not None
     assert recorded_side(partition, "train") == [stem]
-    assert partition["spatial"] is not None
+    assert partition.spatial is not None
     assert train_ds.expected_channels == val_ds.expected_channels == 1
     image, _target = train_ds[0]
     assert image.shape[0] == 1
 
 
-def _within_image_context(tmp_path: Path):
+def _within_image_context(
+    tmp_path: Path,
+) -> tuple[TrainContext, Partition, str]:
     """Return a within-image split run's ``prepare_run_context`` context, partition and stem.
 
     The run is opened by ``opened_run`` over a 4000x3000 single source.
     """
-    from tcip_mcp.experiments import observe
+    from tcip_mcp.experiments import observe_run
     from tcip_mcp.pipelines.training.subprocess_worker import (
         prepare_run_context,
     )
@@ -527,7 +540,7 @@ def _within_image_context(tmp_path: Path):
         "tiling": _TILED,
         "split": _drawn(val_ratio=0.25, holdout_ratio=0.1),
     }
-    observation = observe(
+    observation = observe_run(
         opened_run(
             tmp_path,
             training_config(tmp_path, unbuilt_source("detection"), data_cfg),
@@ -535,30 +548,26 @@ def _within_image_context(tmp_path: Path):
     )
     return (
         prepare_run_context(observation),
-        observation.resolution["partition"],
+        observation.record.resolution.partition,
         stem,
     )
 
 
 def test_a_bodys_loader_on_a_within_image_split_run_holds_only_train_region_tiles(
     tmp_path: Path,
-):
+) -> None:
     """A body's loader on a within-image split run holds only train-region tiles.
 
     A training body's loader over the run's one sample is that sample's train view: every tile
     it serves lies inside the train region the run recorded.
     """
-    from tcip_mcp.pipelines.data.split_construction import (
-        partition_samples,
-        partition_spatial,
-    )
     from tcip_mcp.pipelines.raster_source import rect_contains_rect
 
     ctx, partition, _stem = _within_image_context(tmp_path)
-    spatial = partition_spatial(partition)
+    spatial = partition.spatial
     assert spatial is not None
 
-    served = ctx.build_dataset(samples=partition_samples(partition))
+    served = ctx.build_dataset(samples=partition.samples)
     assert served.tile_entries
     assert all(
         any(rect_contains_rect(r, box) for r in spatial.train_region)
@@ -568,7 +577,7 @@ def test_a_bodys_loader_on_a_within_image_split_run_holds_only_train_region_tile
 
 def test_a_bodys_loader_on_a_within_image_split_run_refuses_another_sample_naming_its_own(
     tmp_path: Path,
-):
+) -> None:
     """A body's loader on a within-image split run refuses another sample, naming its own.
 
     A loader over a sample list that is not the run's one sample refuses naming that sample.
@@ -609,7 +618,7 @@ def _multiband_source(images_dir: Path, stem: str, bands: int) -> None:
 
 def test_a_runs_band_count_is_read_over_every_source_and_a_disagreement_refuses(
     tmp_path: Path,
-):
+) -> None:
     """Sources agreeing on a band count size both loaders at it, and a disagreement is refused.
 
     Two five-band sources drawn to the two sides size both loaders at 5; adding a three-band
@@ -632,7 +641,7 @@ def test_a_runs_band_count_is_read_over_every_source_and_a_disagreement_refuses(
         _train_val(tmp_path, "detection", {**base_cfg, "split": split})
 
 
-def _probe_spy(monkeypatch) -> list[str]:
+def _probe_spy(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Record every source whose header's own band count is read; return the record.
 
     A header's first band-count read appends its source, in call order.
@@ -644,7 +653,7 @@ def _probe_spy(monkeypatch) -> list[str]:
     probed: list[str] = []
     real_channels = raster_source.SourceHeader.channels.func
 
-    def _record(header):
+    def _record(header: SourceHeader) -> int:
         probed.append(str(header.source))
         return real_channels(header)
 
@@ -655,8 +664,8 @@ def _probe_spy(monkeypatch) -> list[str]:
 
 
 def test_a_stated_band_count_reads_every_source_at_it_and_probes_none(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A stated band count sizes both loaders at it and probes no source.
 
     A run over an L source and an RGB one, stated at one channel, builds both loaders at one
@@ -691,8 +700,8 @@ def test_a_stated_band_count_reads_every_source_at_it_and_probes_none(
 
 
 def test_a_runs_sources_are_probed_once_each_for_the_whole_run(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Each of a run's sources is probed once for the whole run.
 
     Four five-band sources are each probed exactly once while the run builds both loaders.
@@ -715,8 +724,8 @@ def test_a_runs_sources_are_probed_once_each_for_the_whole_run(
 
 
 def test_one_preflight_reads_a_sources_header_once_for_its_sizes(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A valid smoke preflight with a reserved calibration share reads a band count twice.
 
     The run is a single tiled source with val, holdout and calibration shares.
@@ -749,7 +758,9 @@ def test_one_preflight_reads_a_sources_header_once_for_its_sizes(
     assert len(probed) == 2, probed
 
 
-def test_a_bound_run_records_the_width_it_read_its_sources_at(tmp_path: Path):
+def test_a_bound_run_records_the_width_it_read_its_sources_at(
+    tmp_path: Path,
+) -> None:
     """A bound run records the band width it read its sources at on its data config.
 
     The resolved data block records five channels, and ``recorded_model_dims`` reads them back
@@ -783,7 +794,7 @@ def test_a_bound_run_records_the_width_it_read_its_sources_at(tmp_path: Path):
 
 def test_a_calibration_ratio_adds_a_disjoint_calibration_region(
     tmp_path: Path,
-):
+) -> None:
     """A reserved calibration region is real, non-empty geometry disjoint from the other sides."""
     images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
@@ -799,22 +810,26 @@ def test_a_calibration_ratio_adds_a_disjoint_calibration_region(
     )
     assert val_ds is not None
     manifest = _manifest(partition)
-    assert manifest["calibration_region"]
-    assert manifest["kept_calibration_tiles"] > 0
+    assert manifest.calibration_region
+    assert manifest.kept_calibration_tiles > 0
 
-    def _rects(region):
+    def _rects(region: list[Rect]) -> list[tuple[int, ...]]:
         return [tuple(r) for r in region]
 
     from tcip_mcp.pipelines.raster_source import rects_overlap
 
-    cal_rects = _rects(manifest["calibration_region"])
-    for other_key in ("train_region", "val_region", "holdout_region"):
-        for other in _rects(manifest[other_key]):
+    cal_rects = _rects(manifest.calibration_region)
+    for other_region in (
+        manifest.train_region,
+        manifest.val_region,
+        manifest.holdout_region,
+    ):
+        for other in _rects(other_region):
             for cr in cal_rects:
                 assert not rects_overlap(cr, other)
 
 
-def test_a_spatial_split_raises_on_unresolvable_extent(tmp_path: Path):
+def test_a_spatial_split_raises_on_unresolvable_extent(tmp_path: Path) -> None:
     """A spatial split over a label document with no width/height is refused.
 
     The refusal says the document states no positive width and height. The one source is
@@ -839,7 +854,7 @@ def test_a_spatial_split_raises_on_unresolvable_extent(tmp_path: Path):
         }
     )
 
-    def _split_over(images_dir: Path):
+    def _split_over(images_dir: Path) -> SpatialManifest:
         admitted = admit_over(images_dir, subject="bud")
         samples = admitted.every_sample()
         block = _with_lattice(
@@ -865,8 +880,8 @@ def test_a_spatial_split_raises_on_unresolvable_extent(tmp_path: Path):
 
 
 def test_single_tiled_source_raises_on_an_unreadable_label(
-    tmp_path: Path, caplog
-):
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """A single tiled source with an unreadable label document raises.
 
     The document is stored as a list, not an object; the run raises
@@ -892,7 +907,7 @@ def test_single_tiled_source_raises_on_an_unreadable_label(
     assert "training without validation" not in caplog.text
 
 
-def test_a_spatial_split_raises_on_infeasible_layout(tmp_path: Path):
+def test_a_spatial_split_raises_on_infeasible_layout(tmp_path: Path) -> None:
     """A spatial split whose layout is infeasible at the mosaic size is refused.
 
     With val, holdout and calibration shares of 0.33 each over a 4000x3000 source, the refusal
@@ -911,7 +926,9 @@ def test_a_spatial_split_raises_on_infeasible_layout(tmp_path: Path):
         _train_val(tmp_path, "detection", data_cfg)
 
 
-def test_a_spatial_split_raises_on_empty_gt_bearing_side(tmp_path: Path):
+def test_a_spatial_split_raises_on_empty_gt_bearing_side(
+    tmp_path: Path,
+) -> None:
     """A spatial split with a side holding no ground truth under skip_empty is refused.
 
     With tiling.skip_empty set, ground truth placed between x 1300 and 3960 of a 4000-wide
@@ -944,7 +961,9 @@ def test_a_spatial_split_raises_on_empty_gt_bearing_side(tmp_path: Path):
         _train_val(tmp_path, "detection", data_cfg)
 
 
-def test_a_spatial_split_records_raster_content_identity(tmp_path: Path):
+def test_a_spatial_split_records_raster_content_identity(
+    tmp_path: Path,
+) -> None:
     """A spatial split records the single source raster's content identity.
 
     A real, decodable single-source raster gets a raster_content_identity in its
@@ -958,13 +977,13 @@ def test_a_spatial_split_records_raster_content_identity(tmp_path: Path):
         "split": _drawn(val_ratio=0.25, holdout_ratio=0.1),
     }
     manifest = _manifest(_train_val(tmp_path, "detection", data_cfg)[2])
-    identity = manifest["raster_content_identity"]
+    identity = manifest.raster_content_identity
     assert identity is not None
-    assert identity["width"] == 4000 and identity["height"] == 3000
-    assert identity["pixel_checksum"]
+    assert identity.width == 4000 and identity.height == 3000
+    assert identity.pixel_checksum
 
 
-def test_train_emits_val_loss_with_autoval(tmp_path: Path):
+def test_train_emits_val_loss_with_autoval(tmp_path: Path) -> None:
     from tests._producer_fixtures import seed_labeled_images
 
     images_dir = seed_labeled_images(

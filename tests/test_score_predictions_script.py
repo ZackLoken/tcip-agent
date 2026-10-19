@@ -50,7 +50,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, str]:
     return img, "baseline"
 
 
-def test_refuses_a_trait_scoped_run_naming_no_project(tmp_path):
+def test_refuses_a_trait_scoped_run_naming_no_project(tmp_path: Path) -> None:
     img, bucket = _fixture(tmp_path)
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
@@ -74,7 +74,7 @@ def test_refuses_a_trait_scoped_run_naming_no_project(tmp_path):
     assert not (cwd / ".tcip").exists()
 
 
-def test_scores_a_single_image_with_no_project_named(tmp_path):
+def test_scores_a_single_image_with_no_project_named(tmp_path: Path) -> None:
     img, bucket = _fixture(tmp_path)
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()

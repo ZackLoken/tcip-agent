@@ -11,6 +11,20 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
+    from subprocess import _FILE
+    from typing import NoReturn, TypedDict, Unpack
+
+    import pytest
+
+    class _PopenStreams(TypedDict, total=False):
+        """The stream keywords ``launch_tensorboard`` hands ``Popen``."""
+
+        stdout: _FILE
+        stderr: _FILE
 
 
 class DyingChild(subprocess.Popen):
@@ -19,7 +33,9 @@ class DyingChild(subprocess.Popen):
     It runs in place of the command it was handed, and construction waits for its exit.
     """
 
-    def __init__(self, cmd, **kwargs) -> None:
+    def __init__(
+        self, cmd: list[str], **kwargs: Unpack[_PopenStreams]
+    ) -> None:
         super().__init__(
             [
                 sys.executable,
@@ -34,15 +50,17 @@ class DyingChild(subprocess.Popen):
 class LivingChild(subprocess.Popen):
     """A real child that sleeps for thirty seconds, in place of the command it was handed."""
 
-    def __init__(self, cmd, **kwargs) -> None:
+    def __init__(
+        self, cmd: list[str], **kwargs: Unpack[_PopenStreams]
+    ) -> None:
         super().__init__(
             [sys.executable, "-c", "import time; time.sleep(30)"], **kwargs
         )
 
 
 def test_launch_reports_the_failure_when_the_process_exits_immediately(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     monkeypatch.setattr(tb.subprocess, "Popen", DyingChild)
@@ -55,7 +73,7 @@ def test_launch_reports_the_failure_when_the_process_exits_immediately(
     assert tb.running_url(str(tmp_path)) is None
 
 
-def _never_confirms_kill_popen_class(spawned: list):
+def _never_confirms_kill_popen_class(spawned: list[subprocess.Popen]) -> type:
     """Return a ``Popen`` stand-in class whose own ``wait`` always raises ``TimeoutExpired``.
 
     It starts a real sleeping process, appended to ``spawned``, which ``kill()`` kills;
@@ -64,23 +82,23 @@ def _never_confirms_kill_popen_class(spawned: list):
     real_popen = subprocess.Popen
 
     class _NeverConfirmsKillPopen:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *args: object, **kwargs: object) -> None:
             self._real = real_popen(
                 [sys.executable, "-c", "import time; time.sleep(120)"]
             )
             spawned.append(self._real)
             self.pid = self._real.pid
 
-        def poll(self):
+        def poll(self) -> int | None:
             return self._real.poll()
 
-        def terminate(self):
+        def terminate(self) -> None:
             pass  # never lets the graceful path succeed, so the caller always reaches kill().
 
-        def kill(self):
+        def kill(self) -> None:
             self._real.kill()
 
-        def wait(self, timeout=None):
+        def wait(self, timeout: float | None = None) -> NoReturn:
             raise subprocess.TimeoutExpired(
                 cmd="standin", timeout=timeout or 0
             )
@@ -89,8 +107,8 @@ def _never_confirms_kill_popen_class(spawned: list):
 
 
 def test_launch_folds_an_unconfirmed_kill_into_the_error_after_a_raising_tie_assignment(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A failed tie assignment whose child's kill goes unconfirmed returns an error naming both.
 
     The error names the assignment failure, the unconfirmed kill and the pid.
@@ -126,7 +144,11 @@ def test_launch_folds_an_unconfirmed_kill_into_the_error_after_a_raising_tie_ass
             proc.wait(timeout=30)
 
 
-def test_stop_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplog):
+def test_stop_logs_a_kill_that_never_confirms(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """A stop whose kill goes unconfirmed returns ``kill_unconfirmed``.
 
     A warning names the run and the pid.
@@ -161,8 +183,10 @@ def test_stop_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplog):
 
 
 def test_exit_sweep_logs_a_kill_that_never_confirms(
-    monkeypatch, tmp_path, caplog
-):
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """The exit sweep logs a run whose kill goes unconfirmed.
 
     Its ``Exit sweep`` warning names the run and its pid.
@@ -195,8 +219,8 @@ def test_exit_sweep_logs_a_kill_that_never_confirms(
 
 
 def test_launch_returns_a_url_for_a_process_that_stays_up(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     monkeypatch.setattr(tb.subprocess, "Popen", LivingChild)
@@ -212,7 +236,9 @@ def test_launch_returns_a_url_for_a_process_that_stays_up(
     assert tb.running_url(str(tmp_path)) is None
 
 
-def test_launch_reports_the_platform_lifetime_tie(monkeypatch, tmp_path):
+def test_launch_reports_the_platform_lifetime_tie(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A launch's lifetime_tie is ``job`` on Windows and ``guardian`` elsewhere.
 
     The board's argv is replaced by a sleeping Python process.
@@ -239,8 +265,8 @@ def test_launch_reports_the_platform_lifetime_tie(monkeypatch, tmp_path):
 
 
 def test_a_board_is_tracked_under_the_one_spelling_the_store_keys_its_directory_by(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A board is tracked under the one spelling the store keys its directory by.
 
     A board launched at the not-yet-existing ``Board`` is found and stopped under ``BOARD``
@@ -274,7 +300,7 @@ def test_a_board_is_tracked_under_the_one_spelling_the_store_keys_its_directory_
         tb.stop_tensorboard(other)
 
 
-def test_the_guardians_grace_leaves_a_second_under_the_stop_wait():
+def test_the_guardians_grace_leaves_a_second_under_the_stop_wait() -> None:
     """The guardian's term grace sits more than a second under the stop wait."""
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 

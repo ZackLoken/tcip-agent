@@ -11,12 +11,18 @@ over a stub engine installed at ``tcip_mcp.pipelines.proposal.resolve_proposer``
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._producer_fixtures import write_image
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.raster_source import RasterSource
+    from tcip_mcp.tools.vision_tools import DisplayRead
+    from tcip_store import Key
 
 
 def _install_stub(
@@ -55,7 +61,7 @@ def _make_image(path: Path, fill: tuple[int, int, int] = (50, 50, 50)) -> None:
     write_image(path, (64, 64), fill)
 
 
-def _staged(root: Path, bucket: str, stem: str):
+def _staged(root: Path, bucket: str, stem: str) -> Key:
     """Return the key of ``stem``'s document in the staged bucket ``bucket`` under ``root``."""
     from tcip_mcp.dataset_layout import prediction_key
 
@@ -178,7 +184,10 @@ def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_r
     displayed: list = []
     real = vision_tools._read_for_display
 
-    def counted(*args, **kwargs):
+    def counted(
+        *args: RasterSource,
+        **kwargs: int | tuple[float, float, float, float] | None,
+    ) -> DisplayRead:
         displayed.append(args)
         return real(*args, **kwargs)
 
@@ -222,8 +231,10 @@ def test_the_envelope_carries_image_identity_at_the_dataset_rooted_location(
         PROPOSAL_STAGING_STORE, str(tmp_path), ("2026-04-01", "sample")
     )
     envelope = ts.read(key)
-    assert "image_path" not in envelope
-    assert set(envelope["image_identity"]) >= {
+    assert isinstance(envelope, dict) and "image_path" not in envelope
+    identity = envelope["image_identity"]
+    assert isinstance(identity, dict)
+    assert set(identity) >= {
         "width",
         "height",
         "num_channels",
@@ -599,7 +610,9 @@ def test_a_region_proposal_and_its_accept_each_open_the_image_once(
     opened: list = []
     real = raster_source.SourceHeader.open
 
-    def counted(*args, **kwargs):
+    def counted(
+        *args: raster_source.SourceHeader | int, **kwargs: int
+    ) -> RasterSource:
         opened.append(args[0])
         return real(*args, **kwargs)
 

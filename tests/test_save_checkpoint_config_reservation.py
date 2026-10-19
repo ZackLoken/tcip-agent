@@ -6,7 +6,12 @@ from, and a bespoke ``train(ctx)`` loop's own ``state`` carrying that key is ref
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 torch = pytest.importorskip("torch")
 
@@ -20,7 +25,7 @@ from tcip_mcp.pipelines.model_build import (  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
 
 
-def _ctx(tmp_path) -> tuple[TrainContext, dict]:
+def _ctx(tmp_path: Path) -> tuple[TrainContext, dict]:
     """Return a run's context and the config its spec records.
 
     The run is one the launcher's own writer opened under ``tmp_path``.
@@ -35,7 +40,7 @@ def _ctx(tmp_path) -> tuple[TrainContext, dict]:
 
 
 def test_save_checkpoint_refuses_a_state_carrying_its_own_config_key(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     ctx, launched = _ctx(tmp_path)
 
@@ -45,7 +50,7 @@ def test_save_checkpoint_refuses_a_state_carrying_its_own_config_key(
 
 @pytest.mark.parametrize("key", [CONFIG_KEY, SNAPSHOT_KEY, GEOMETRY_KEY])
 def test_a_checkpoint_written_past_the_stamp_refuses_naming_the_key_it_lacks(
-    tmp_path, key
+    tmp_path: Path, key: str
 ) -> None:
     """A checkpoint lacking a key the stamp writes refuses where it is read, naming the key.
 
@@ -74,7 +79,7 @@ def test_a_checkpoint_written_past_the_stamp_refuses_naming_the_key_it_lacks(
 
 
 def test_save_checkpoint_writes_the_launch_config_never_the_loops_own(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     """``save_checkpoint`` writes the run's launch config.
 
@@ -96,6 +101,7 @@ def test_save_checkpoint_writes_the_launch_config_never_the_loops_own(
         CONFIG_PATHS,
         tmp_path,
     )
+    assert isinstance(stored, dict)
     locations = {"images_dir", "labels_dir"}
     assert {k: v for k, v in stored.items() if k != "data"} == {
         k: v for k, v in launched.items() if k != "data"
@@ -107,7 +113,7 @@ def test_save_checkpoint_writes_the_launch_config_never_the_loops_own(
 
 
 def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     """The default trainer and a bespoke loop stamp one checkpoint config.
 
@@ -117,7 +123,7 @@ def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(
     it, and no field of the run's data locations (``experiments.DATA_PATHS``), one
     ``SNAPSHOT_KEY``, the run's own snapshot digest, and one ``GEOMETRY_KEY``.
     """
-    from tcip_mcp.experiments import DATA_PATHS, observe
+    from tcip_mcp.experiments import DATA_PATHS, observe_run
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.registry_paths import _each_path, stored_path
     from tests.test_dataset_source_seam import BESPOKE_DS, BESPOKE_DS_FILE
@@ -143,7 +149,7 @@ def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(
         project=tmp_path,
     )
     ctx = run_context(tmp_path, config)
-    observation = observe(ctx.run_dir)
+    observation = observe_run(ctx.run_dir)
     trained = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
     assert trained.status == "completed", trained.status_error
     path = ctx.save_checkpoint({STATE_DICT_KEY: {}}, "model_bespoke")
@@ -161,7 +167,7 @@ def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(
     assert set(by_loop) == stamped
     stored = by_loop[CONFIG_KEY]
 
-    snapshot = observation.record["source"]["files"]
+    snapshot = observation.record.source["files"]
 
     def copies(declared: list[str]) -> list[str]:
         return [
@@ -192,7 +198,7 @@ def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(
 
 
 def test_a_bound_runs_checkpoint_carries_its_split_whole_and_reads_it_back_bound(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     """A bound run's checkpoint stamps its selection directory and reads it back bound.
 

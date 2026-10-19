@@ -28,7 +28,9 @@ class _DisconnectedParameter(torch.nn.Module):
         super().__init__()
         self.scale = torch.nn.Parameter(torch.tensor(1.0))
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: torch.Tensor, targets: dict | None = None
+    ) -> dict[str, torch.Tensor]:
         if self.training and targets is not None:
             return {"loss": self.scale * 0.0 + 5.0}
         return {"logits": torch.zeros(2, 1)}
@@ -41,7 +43,9 @@ class _LinearProbe(torch.nn.Module):
         super().__init__()
         self.fc = torch.nn.Linear(in_chans, num_classes)
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: torch.Tensor, targets: dict | None = None
+    ) -> dict[str, torch.Tensor]:
         logits = self.fc(images.mean(dim=(2, 3)))
         if self.training and targets is not None:
             return {
@@ -52,7 +56,7 @@ class _LinearProbe(torch.nn.Module):
         return {"logits": logits}
 
 
-def test_a_model_whose_loss_never_moves_is_refused():
+def test_a_model_whose_loss_never_moves_is_refused() -> None:
     """``overfit_check`` fails a model whose loss is identical at its last and first steps."""
     report = overfit_check(
         _DisconnectedParameter(),
@@ -69,7 +73,7 @@ def test_a_model_whose_loss_never_moves_is_refused():
     assert report["final"] == report["initial"]
 
 
-def test_a_model_that_really_learns_passes():
+def test_a_model_that_really_learns_passes() -> None:
     """A model with a real learnable path drives the loss down and passes the overfit check."""
     report = overfit_check(
         _LinearProbe(),
@@ -93,7 +97,9 @@ class _AllFrozen(torch.nn.Module):
         for p in self.fc.parameters():
             p.requires_grad = False
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: torch.Tensor, targets: dict | None = None
+    ) -> dict[str, torch.Tensor]:
         logits = self.fc(images.mean(dim=(2, 3)))
         if self.training and targets is not None:
             return {
@@ -104,7 +110,7 @@ class _AllFrozen(torch.nn.Module):
         return {"logits": logits}
 
 
-def test_an_all_frozen_model_reports_rather_than_raises():
+def test_an_all_frozen_model_reports_rather_than_raises() -> None:
     """An all-frozen model yields a failed overfit report naming the empty parameter list.
 
     The report records no losses and no initial or final loss.

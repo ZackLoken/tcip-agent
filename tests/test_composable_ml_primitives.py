@@ -6,9 +6,19 @@ active-learning scorers.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from torch.optim import Optimizer
+
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
 torch = pytest.importorskip("torch")
 import torch.nn as nn
@@ -22,7 +32,7 @@ from tests._training_values import adamw_optimizer, sgd_optimizer  # noqa: E402
 
 
 class TestDatasets:
-    def test_build_dataset_classification(self, tmp_path):
+    def test_build_dataset_classification(self, tmp_path: Path) -> None:
         """A classification dataset over a four-row table holds four samples of two classes."""
         from tests.tiny_trainer_fixtures import write_regression_dataset
 
@@ -35,7 +45,7 @@ class TestDatasets:
         assert ds.num_samples == 4
         assert ds.task_type == "classification"
 
-    def test_build_dataset_detection(self, tmp_path):
+    def test_build_dataset_detection(self, tmp_path: Path) -> None:
         """A detection dataset over one labeled image holds one sample."""
         from tcip_annotation.state import Annotation, BBox
         from tests._producer_fixtures import label_image
@@ -72,7 +82,7 @@ class TestDatasets:
 # ====================================================================
 
 
-def _built(block: dict, model):
+def _built(block: dict, model: nn.Module) -> Optimizer:
     """Build the optimizer ``block`` states over ``model`` at its own rates and return it.
 
     The block is validated through ``schemas.OptimizerSpec``.
@@ -87,18 +97,18 @@ def _built(block: dict, model):
 
 
 class TestOptimizerFactory:
-    def test_build_adamw(self):
+    def test_build_adamw(self) -> None:
         assert isinstance(
             _built(adamw_optimizer(backbone_lr=1e-3), nn.Linear(10, 5)),
             torch.optim.AdamW,
         )
 
-    def test_build_sgd_at_its_stated_momentum(self):
+    def test_build_sgd_at_its_stated_momentum(self) -> None:
         opt = _built(sgd_optimizer(backbone_lr=1e-2), nn.Linear(10, 5))
         assert isinstance(opt, torch.optim.SGD)
         assert opt.param_groups[0]["momentum"] == sgd_optimizer()["momentum"]
 
-    def test_a_builder_refuses_a_setting_it_does_not_read(self):
+    def test_a_builder_refuses_a_setting_it_does_not_read(self) -> None:
         from tcip_mcp.pipelines.training.optimizer_factory import (
             _OPTIMIZER_BUILDERS,
         )
@@ -111,7 +121,7 @@ class TestOptimizerFactory:
                 momentum=0.8,
             )
 
-    def test_optimizer_builders_available(self):
+    def test_optimizer_builders_available(self) -> None:
         from tcip_mcp.pipelines.training.optimizer_factory import (
             _OPTIMIZER_BUILDERS,
         )
@@ -119,7 +129,7 @@ class TestOptimizerFactory:
         assert "adamw" in _OPTIMIZER_BUILDERS
         assert "sgd" in _OPTIMIZER_BUILDERS
 
-    def test_lamb_raises_when_torch_optimizer_missing(self):
+    def test_lamb_raises_when_torch_optimizer_missing(self) -> None:
         """Building Lamb without torch_optimizer installed raises ImportError naming it."""
         from importlib.util import find_spec
 
@@ -140,8 +150,8 @@ class TestOptimizerFactory:
 # GenericPredictor no longer opens a path itself; a missing file is load_registered_checkpoint's
 # own contract now, the one load every predictor construction goes through.
 def test_load_registered_checkpoint_raises_filenotfounderror_on_a_missing_file(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.model_registry import load_registered_checkpoint
 
     with pytest.raises(FileNotFoundError):
@@ -156,19 +166,19 @@ def test_load_registered_checkpoint_raises_filenotfounderror_on_a_missing_file(
 
 
 class TestActiveLearningScoringLogic:
-    def test_uncertainty_scorer_init(self):
+    def test_uncertainty_scorer_init(self) -> None:
         from tcip_mcp.pipelines.active_learning.scorer import UncertaintyScorer
 
         scorer = UncertaintyScorer(task="classification")
         assert scorer.task == "classification"
 
-    def test_uncertainty_scorer_detection_init(self):
+    def test_uncertainty_scorer_detection_init(self) -> None:
         from tcip_mcp.pipelines.active_learning.scorer import UncertaintyScorer
 
         scorer = UncertaintyScorer(task="detection")
         assert scorer.task == "detection"
 
-    def test_combined_scorer_normalization(self):
+    def test_combined_scorer_normalization(self) -> None:
         from tcip_mcp.pipelines.active_learning.scorer import CombinedScorer
 
         scorer = CombinedScorer(
@@ -176,7 +186,64 @@ class TestActiveLearningScoringLogic:
         )
         assert scorer.uw == 0.5
 
-    def test_review_queue(self):
+    def test_combined_scorer_ranks_a_grouped_capture_beside_a_plain_image(
+        self, tmp_path: Path
+    ) -> None:
+        """The combined ranking joins its two scorers' answers over a band group and a raster."""
+        import numpy as np
+        import tifffile
+
+        from tcip_mcp.pipelines.active_learning.scorer import (
+            BaseScorer,
+            CombinedScorer,
+        )
+        from tcip_mcp.pipelines.data.band_groups import (
+            write_band_group_manifest,
+        )
+        from tcip_mcp.pipelines.image_utils import list_logical_images, stem_of
+
+        images = tmp_path / "images"
+        images.mkdir()
+        bands = {name: images / f"cap_{name}.tif" for name in ("G", "R")}
+        for path in [*bands.values(), images / "plain.tif"]:
+            tifffile.imwrite(str(path), np.zeros((8, 8), dtype=np.uint16))
+        write_band_group_manifest(
+            images,
+            "cap",
+            bands,
+            central_wavelength_nm=None,
+            identity_tolerance={},
+        )
+        candidates = list(list_logical_images(images).values())
+
+        class _Fixed(BaseScorer):
+            """Score each candidate by its stem from a fixed table."""
+
+            def score(
+                self,
+                image_paths: list[Path | BandGroupRef],
+                predictor: GenericPredictor | None,
+            ) -> list[tuple[Path | BandGroupRef, float]]:
+                """Return each candidate at its stem's table score, descending."""
+                by_stem = {"cap": 1.0, "plain": 0.0}
+                return sorted(
+                    ((p, by_stem[stem_of(p)]) for p in image_paths),
+                    key=lambda pair: pair[1],
+                    reverse=True,
+                )
+
+        scorer = CombinedScorer(
+            task="classification", uncertainty_weight=1.0, diversity_weight=1.0
+        )
+        scorer.unc = _Fixed()
+        scorer.div = _Fixed()
+        ranked = scorer.score(candidates, predictor=None)
+        assert [(stem_of(p), s) for p, s in ranked] == [
+            ("cap", 2.0),
+            ("plain", 0.0),
+        ]
+
+    def test_review_queue(self) -> None:
         from tcip_mcp.pipelines.active_learning.selector import review_queue
 
         predictions = [

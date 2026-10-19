@@ -9,12 +9,16 @@ reads ``ok``, a body that returned a refusal leaves no line, and a body that rai
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 import tcip_mcp.audit as audit_module
 import tcip_store as ts
 from tests._training_values import COMBINED_SCORER, RATIONALE
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 
 def _rows(project: Path) -> list[dict]:
@@ -90,7 +94,7 @@ def test_read_only_doors_leave_no_line(tmp_path: Path) -> None:
 
 
 def test_a_phenology_look_on_screen_leaves_no_line(
-    tmp_path: Path, client
+    tmp_path: Path, client: TestClient
 ) -> None:
     """A phenology measurement shown on screen leaves no audit line.
 

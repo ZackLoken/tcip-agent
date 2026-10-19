@@ -7,6 +7,7 @@ compare_experiments reports whether two runs share a dataset fingerprint.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
@@ -14,6 +15,11 @@ from tcip_mcp.experiments import compare_experiments
 from tests._chain_fixtures import FRAME_STATISTICS, training_config
 from tests._training_values import drawn_split
 from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, opened_run
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from tcip_mcp.pipelines.data.selection import Sample
 
 SUBJECT = "bud"
 
@@ -37,7 +43,10 @@ def _make_dataset(root: Path, *, shade: int = 0) -> Path:
             64,
             (shade, 10 * i, 0),
         )
-    registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
+    registry_over(
+        root,
+        SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
+    )
     return images_dir
 
 
@@ -54,7 +63,9 @@ def _config(project: Path, images_dir: Path) -> dict:
     )
 
 
-def test_compare_experiments_surfaces_shared_fingerprint(tmp_path):
+def test_compare_experiments_surfaces_shared_fingerprint(
+    tmp_path: Path,
+) -> None:
     first = _config(tmp_path, _make_dataset(tmp_path / "first"))
     opened_run(tmp_path, first, experiment_id="a")
     opened_run(tmp_path, first, experiment_id="b")
@@ -78,8 +89,8 @@ def test_compare_experiments_surfaces_shared_fingerprint(tmp_path):
 
 
 def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Comparing a run of known fingerprint with one of none reports unknown identity, not same.
 
     The second run is over a dataset holding no label document, and the comparison's
@@ -121,7 +132,7 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(
     )
 
 
-def test_dataset_identity_helper_registered_vs_bespoke(tmp_path):
+def test_dataset_identity_helper_registered_vs_bespoke(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
     from tcip_mcp.pipelines.schemas import DataSpec
     from tcip_mcp.tools.project_tools import register_dataset
@@ -144,8 +155,8 @@ def test_dataset_identity_helper_registered_vs_bespoke(tmp_path):
 
 
 def test_dataset_identity_raises_a_fingerprint_read_failure(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A fingerprint read failure raises out of ``dataset_identity`` by name.
 
     A fingerprint read raising ``OSError`` mid-scan raises that error out of the call.
@@ -158,7 +169,7 @@ def test_dataset_identity_raises_a_fingerprint_read_failure(
     _make_dataset(tmp_path)
     register_dataset(tmp_path, str(tmp_path), crop="currant")
 
-    def _raise(_root, _admitted):
+    def _raise(_root: str | Path, _admitted: Iterable[Sample]) -> NoReturn:
         raise OSError("simulated I/O error mid-scan")
 
     # dataset_identity reads the fingerprint through its own module at call time, so it is
@@ -176,15 +187,15 @@ def test_dataset_identity_raises_a_fingerprint_read_failure(
 
 
 def test_a_trial_over_a_data_axis_records_the_dataset_its_own_input_names(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A sweep trial over a data axis records the identity of the dataset its own input names.
 
     A sweep trial whose sampled point names another dataset records that dataset's id and
     fingerprint.
     """
     pytest.importorskip("torch")
-    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.experiments import read_run
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.tools.training_tools import open_trial
     from tests._verified_checkpoint_fixtures import opened_sweep
@@ -202,19 +213,22 @@ def test_a_trial_over_a_data_axis_records_the_dataset_its_own_input_names(
         {"data.images_dir": str(other_images)},
     )
 
-    dataset = read_record(trial_dir / RUN_FILE)["dataset"]
-    assert dataset == {"id": other["id"], "fingerprint": other["fingerprint"]}
+    dataset = read_run(trial_dir).dataset
+    assert (dataset.id, dataset.fingerprint) == (
+        other["id"],
+        other["fingerprint"],
+    )
 
 
 def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A launch records the identity of the dataset its config names.
 
     The run's launch record carries the registered dataset's id and fingerprint.
     """
     pytest.importorskip("torch")
-    from tcip_mcp.experiments import RUN_FILE, read_record
+    from tcip_mcp.experiments import read_run
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.tools.training_tools import launch_training
     from tests._producer_fixtures import fake_popen
@@ -240,8 +254,8 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(
     )
     assert "error" not in launched, launched
 
-    dataset = read_record(Path(launched["output_dir"]) / RUN_FILE)["dataset"]
-    assert dataset == {
-        "id": registered["id"],
-        "fingerprint": registered["fingerprint"],
-    }
+    dataset = read_run(Path(launched["output_dir"])).dataset
+    assert (dataset.id, dataset.fingerprint) == (
+        registered["id"],
+        registered["fingerprint"],
+    )

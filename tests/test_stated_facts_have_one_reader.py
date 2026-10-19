@@ -7,6 +7,7 @@ from annotations and a completion digest's stored grid.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -15,12 +16,15 @@ from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._producer_fixtures import image_label_key, label_image
 
+if TYPE_CHECKING:
+    from tcip_store import Key
+
 SUBJECT = "strig"
 IMG = 100
 BOX = BBox(10.0, 10.0, 30.0, 30.0)
 
 
-def _stored(image: Path, anns: list[Annotation]):
+def _stored(image: Path, anns: list[Annotation]) -> Key:
     """Write ``anns`` as the document of ``image`` and return its key."""
     label_image(image, anns, IMG, IMG)
     return image_label_key(image)
@@ -32,7 +36,7 @@ def _read_back(image: Path, anns: list[Annotation]) -> list[Annotation]:
 
 def test_a_prediction_document_stating_no_score_is_refused_where_it_is_read(
     tmp_path: Path,
-):
+) -> None:
     key = _stored(
         tmp_path / "images" / UNDATED_BUCKET / "p.png",
         [
@@ -47,7 +51,7 @@ def test_a_prediction_document_stating_no_score_is_refused_where_it_is_read(
         json_io.read_predictions(key)
 
 
-def test_a_scored_prediction_document_reads_whole(tmp_path: Path):
+def test_a_scored_prediction_document_reads_whole(tmp_path: Path) -> None:
     key = _stored(
         tmp_path / "images" / UNDATED_BUCKET / "p.png",
         [Annotation(subject=SUBJECT, geometry=BOX, score=0.8)],
@@ -61,7 +65,7 @@ def test_a_scored_prediction_document_reads_whole(tmp_path: Path):
 @pytest.mark.parametrize("reader", ["pairing", "evaluation_record"])
 def test_no_reader_stands_in_a_score_for_a_prediction_stating_none(
     tmp_path: Path, reader: str
-):
+) -> None:
     from tcip_annotation.matching import pair_proposals
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
@@ -83,7 +87,7 @@ def test_no_reader_stands_in_a_score_for_a_prediction_stating_none(
 
 def test_the_instance_loader_builds_its_target_from_the_polygons_it_reads(
     tmp_path: Path,
-):
+) -> None:
     """The instance loader builds its target from the polygons it reads.
 
     Over the geometry the loader declares it reads, a box beside the polygon is no instance and
@@ -116,7 +120,7 @@ def test_the_instance_loader_builds_its_target_from_the_polygons_it_reads(
 
 def test_the_completion_digest_reads_a_box_on_the_writers_own_grid(
     tmp_path: Path,
-):
+) -> None:
     """The completion digest reads a box on the label writer's own grid.
 
     A box off the stored grid digests the same before it is written as after it is read back.

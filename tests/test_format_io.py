@@ -4,7 +4,10 @@ These tests cover its category naming, its image grouping, its per-record faults
 independent faults of one document returned together.
 """
 
+from __future__ import annotations
+
 import json
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
@@ -12,20 +15,27 @@ from tcip_annotation.format_io import coco_categories, parse_coco_annotations
 from tcip_annotation.state import RING_MIN_POINTS, Polygon
 from tests._training_values import VERTEX_SPACING
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def _no_run_length(segmentation):
+    from tcip_annotation.state import Annotation
+
+
+def _no_run_length(segmentation: dict) -> NoReturn:
     raise AssertionError(
         f"no run-length mask in this fixture, got {segmentation!r}"
     )
 
 
-def _parse(coco):
+def _parse(
+    coco: dict,
+) -> tuple[dict[int, str], dict[int, list[Annotation]], list[str]]:
     return parse_coco_annotations(
         coco, decode_rle=_no_run_length, vertex_spacing=VERTEX_SPACING
     )
 
 
-def _sample_coco_detect():
+def _sample_coco_detect() -> dict:
     return {
         "images": [
             {"id": 1, "file_name": "IMG_0001.jpg", "width": 640, "height": 480}
@@ -52,7 +62,7 @@ def _sample_coco_detect():
     }
 
 
-def test_parse_coco_detect():
+def test_parse_coco_detect() -> None:
     categories, by_image, problems = _parse(_sample_coco_detect())
     anns = by_image[1]
     assert problems == []
@@ -66,7 +76,7 @@ def test_parse_coco_detect():
     assert anns[0].geometry.y2 == 260
 
 
-def test_parse_coco_keys_records_by_the_image_each_names():
+def test_parse_coco_keys_records_by_the_image_each_names() -> None:
     coco = _sample_coco_detect()
     coco["images"].append(
         {"id": 2, "file_name": "IMG_0002.jpg", "width": 640, "height": 480}
@@ -79,7 +89,7 @@ def test_parse_coco_keys_records_by_the_image_each_names():
     }
 
 
-def test_a_crowd_record_reads_with_its_flag():
+def test_a_crowd_record_reads_with_its_flag() -> None:
     coco = _sample_coco_detect()
     coco["annotations"][1]["iscrowd"] = 1
     _, by_image, problems = _parse(coco)
@@ -87,7 +97,7 @@ def test_a_crowd_record_reads_with_its_flag():
     assert [a.iscrowd for a in by_image[1]] == [False, True]
 
 
-def test_parse_coco_refuses_a_document_without_the_coco_shape():
+def test_parse_coco_refuses_a_document_without_the_coco_shape() -> None:
     """A per-image document handed to the COCO reader is refused by name."""
     with pytest.raises(ValueError, match="not a dataset-level COCO document"):
         _parse({"image": "a", "annotations": []})
@@ -98,7 +108,9 @@ def test_parse_coco_refuses_a_document_without_the_coco_shape():
     ["0", 0.0, None, 99, True],
     ids=["string", "float", "missing", "undeclared", "bool"],
 )
-def test_a_record_naming_no_valid_category_is_a_fault_by_index(category_id):
+def test_a_record_naming_no_valid_category_is_a_fault_by_index(
+    category_id: str | float | int | bool | None,
+) -> None:
     coco = _sample_coco_detect()
     coco["annotations"][0]["category_id"] = category_id
     _, by_image, problems = _parse(coco)
@@ -111,7 +123,9 @@ def test_a_record_naming_no_valid_category_is_a_fault_by_index(category_id):
 @pytest.mark.parametrize(
     "image_id", [None, "1", 1.0], ids=["missing", "string", "float"]
 )
-def test_a_record_with_no_integer_image_id_is_a_fault_by_index(image_id):
+def test_a_record_with_no_integer_image_id_is_a_fault_by_index(
+    image_id: str | float | None,
+) -> None:
     """A COCO record with no integer image id is a fault named by its index.
 
     The record joins no image: image 1 holds its other record alone.
@@ -135,8 +149,8 @@ def test_a_record_with_no_integer_image_id_is_a_fault_by_index(image_id):
     ids=["float_null", "string_id", "not_an_object"],
 )
 def test_a_malformed_category_declaration_is_a_fault_by_index_never_a_coercion(
-    declaration,
-):
+    declaration: dict[str, float | None] | dict[str, str] | str,
+) -> None:
     problems: list[str] = []
     categories = coco_categories(
         {"categories": [{"id": 0, "name": "tree"}, declaration]},
@@ -148,7 +162,7 @@ def test_a_malformed_category_declaration_is_a_fault_by_index_never_a_coercion(
     )
 
 
-def test_parse_coco_refuses_two_categories_declared_under_one_id():
+def test_parse_coco_refuses_two_categories_declared_under_one_id() -> None:
     """Two categories declared under one id are a fault naming the id and both names."""
     coco = _sample_coco_detect()
     coco["categories"].append({"id": 0, "name": "leaf"})
@@ -156,7 +170,7 @@ def test_parse_coco_refuses_two_categories_declared_under_one_id():
     assert problems == ["category id 0 is declared twice ('tree' and 'leaf')"]
 
 
-def test_every_independent_fault_is_returned_together():
+def test_every_independent_fault_is_returned_together() -> None:
     """The first malformed declaration or record hides nothing after it."""
     coco = _sample_coco_detect()
     coco["categories"].append({"id": 0, "name": "leaf"})
@@ -181,8 +195,8 @@ def test_every_independent_fault_is_returned_together():
     ids=["null", "null_record"],
 )
 def test_parse_coco_names_a_malformed_annotations_container(
-    annotations, fault
-):
+    annotations: list[None] | None, fault: str
+) -> None:
     coco = _sample_coco_detect()
     coco["annotations"] = annotations
     assert _parse(coco)[2] == [fault]
@@ -202,8 +216,10 @@ def test_parse_coco_names_a_malformed_annotations_container(
     ],
 )
 def test_parse_coco_decodes_every_record_through_the_per_image_decoder(
-    key, value, fault
-):
+    key: str,
+    value: dict[str, str] | list[int] | str | list[list[float]],
+    fault: str,
+) -> None:
     """The COCO reader refuses a record's malformed value as a fault naming the record's index."""
     coco = _sample_coco_detect()
     coco["annotations"][1][key] = value
@@ -216,7 +232,7 @@ def test_parse_coco_decodes_every_record_through_the_per_image_decoder(
     assert [a.subject for a in by_image[1]] == ["tree"]
 
 
-def test_parse_coco_annotations_keeps_an_empty_string_accepted_by():
+def test_parse_coco_annotations_keeps_an_empty_string_accepted_by() -> None:
     """The COCO reader keeps an empty-string ``accepted_by``."""
     coco = _sample_coco_detect()
     coco["annotations"][0]["accepted_by"] = ""
@@ -227,7 +243,7 @@ def test_parse_coco_annotations_keeps_an_empty_string_accepted_by():
 # ── COCO polygon parse ──────────────────────────────────────────────────────
 
 
-def _sample_coco_segment():
+def _sample_coco_segment() -> dict:
     return {
         "images": [
             {"id": 1, "file_name": "IMG_0001.jpg", "width": 640, "height": 480}
@@ -249,7 +265,7 @@ def _sample_coco_segment():
     }
 
 
-def test_parse_coco_segment():
+def test_parse_coco_segment() -> None:
     anns = _parse(_sample_coco_segment())[1][1]
     assert len(anns) == 1
     assert anns[0].subject == "leaf"
@@ -266,7 +282,7 @@ LOBE_A = [(10.0, 10.0), (30.0, 10.0), (30.0, 50.0), (10.0, 50.0)]
 LOBE_B = [(70.0, 12.0), (90.0, 12.0), (90.0, 48.0), (70.0, 48.0)]
 
 
-def test_parse_coco_multi_ring_segmentation_keeps_every_ring():
+def test_parse_coco_multi_ring_segmentation_keeps_every_ring() -> None:
     # COCO's segmentation is a list of rings and always was; the reader must decode all of them into
     # one polygon rather than taking the first and dropping the rest.
     coco = _sample_coco_segment()
@@ -281,7 +297,9 @@ def test_parse_coco_multi_ring_segmentation_keeps_every_ring():
 # ── the one decode of a document's bytes ────────────────────────────────────
 
 
-def test_the_coco_reader_admits_a_byte_order_marked_document(tmp_path):
+def test_the_coco_reader_admits_a_byte_order_marked_document(
+    tmp_path: Path,
+) -> None:
     """The COCO reader reads both records of a document opening with a UTF-8 byte-order mark."""
     from tcip_mcp.pipelines.data.coco_import import _read_coco
 

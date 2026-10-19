@@ -8,11 +8,13 @@ synthetic segments over a real registered-dataset raster (:mod:`tests._geotiff_f
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tcip_annotation.json_io import LabelDocument, read_label_document
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
+from tcip_mcp.pipelines.data.split_construction import raster_identity
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     OrthomosaicGeoreference,
 )
@@ -30,17 +32,29 @@ from tests._geotiff_fixtures import (
 from tests._mapping_fixtures import POSITION_ERROR_M
 from tests._producer_fixtures import image_label_key, label_image
 
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        GeoTransform,
+    )
+    from tcip_mcp.pipelines.postprocessing.segment_attribution import (
+        SegmentTie,
+    )
+    from tcip_mcp.pipelines.raster_source import RasterIdentity
+
 WIDTH = HEIGHT = 64
 
 
-def _setup(tmp_path: Path) -> tuple[Path, Path, OrthomosaicGeoreference, dict]:
+def _setup(
+    tmp_path: Path,
+) -> tuple[Path, Path, OrthomosaicGeoreference, RasterIdentity]:
     dataset_root = tmp_path / "ds"
     raster_path = write_canonical_dataset_raster(
         dataset_root, width=WIDTH, height=HEIGHT
     )
     georef = OrthomosaicGeoreference(geotransform_of_file(raster_path))
-    raster_identity = {"width": WIDTH, "height": HEIGHT}
-    return dataset_root, raster_path, georef, raster_identity
+    return dataset_root, raster_path, georef, raster_identity(raster_path)
 
 
 def _stored(raster_path: Path) -> LabelDocument:
@@ -344,7 +358,7 @@ def test_load_canopy_segments_refuses_a_machine_authored_polygon_with_no_persons
 
 def test_load_canopy_segments_admits_a_proposed_polygon_accepted_through_the_save_door(
     tmp_path: Path,
-    client,
+    client: TestClient,
     opened_project: Path,
 ) -> None:
     """A polygon proposal accepted through the editor's save door loads as a canopy segment.
@@ -397,7 +411,7 @@ def test_load_canopy_segments_admits_a_proposed_polygon_accepted_through_the_sav
 def test_tie_segments_to_plants_ties_two_disjoint_segments_each_to_one_plant(
     tmp_path: Path,
 ) -> None:
-    _, raster_path, georef, _identity = _setup(tmp_path)
+    _, raster_path, georef, identity = _setup(tmp_path)
     segments_data = _write_document(
         raster_path,
         [
@@ -417,7 +431,7 @@ def test_tie_segments_to_plants_ties_two_disjoint_segments_each_to_one_plant(
         segments_data,
         subject="canopy",
         raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT},
+        raster_identity=identity,
     )
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", 40, 40)]
 
@@ -446,7 +460,7 @@ def test_tie_segments_to_plants_leaves_a_plant_within_the_position_error_untied(
     position error is not tied, and a detection in its segment is attributed to no plant. A
     negative, NaN or infinite bound refuses.
     """
-    _, raster_path, georef, _identity = _setup(tmp_path)
+    _, raster_path, georef, identity = _setup(tmp_path)
     segments_data = _write_document(
         raster_path,
         [
@@ -466,7 +480,7 @@ def test_tie_segments_to_plants_leaves_a_plant_within_the_position_error_untied(
         segments_data,
         subject="canopy",
         raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT},
+        raster_identity=identity,
     )
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", 31, 40)]
 
@@ -517,11 +531,11 @@ def test_tie_segments_to_plants_leaves_a_plant_within_the_position_error_untied(
 
 
 def _one_segment_tie(
-    transform,
+    transform: GeoTransform,
     plant_px: tuple[float, float],
     segment: Polygon,
     position_error_m: float,
-):
+) -> SegmentTie:
     """Return the tie of ``segment`` to one plant at pixel ``plant_px``.
 
     The tie is made under the georeference ``transform`` states, on a 100-pixel frame.
@@ -541,7 +555,7 @@ def _one_segment_tie(
     )
 
 
-def test_the_clearance_is_measured_in_meters_on_a_raster_in_feet():
+def test_the_clearance_is_measured_in_meters_on_a_raster_in_feet() -> None:
     """The clearance is measured in meters on a raster whose units are feet.
 
     EPSG:2263 states its coordinates in US survey feet: a plant two feet (0.61 m) inside its
@@ -578,7 +592,9 @@ def test_the_clearance_is_measured_in_meters_on_a_raster_in_feet():
     )
 
 
-def test_the_clearance_is_the_nearest_boundary_in_meters_on_anisotropic_pixels():
+def test_the_clearance_is_the_nearest_boundary_in_meters_on_anisotropic_pixels() -> (
+    None
+):
     """The clearance is the nearest boundary in meters on anisotropic pixels.
 
     Pixels 10 m wide and 1 m tall: a plant 2 pixels (20 m) from the segment's left edge and 5
@@ -613,7 +629,7 @@ def test_the_clearance_is_the_nearest_boundary_in_meters_on_anisotropic_pixels()
 def test_tie_segments_to_plants_leaves_a_plantless_segment_untied(
     tmp_path: Path,
 ) -> None:
-    _, raster_path, georef, _identity = _setup(tmp_path)
+    _, raster_path, georef, identity = _setup(tmp_path)
     segments_data = _write_document(
         raster_path,
         [
@@ -633,7 +649,7 @@ def test_tie_segments_to_plants_leaves_a_plantless_segment_untied(
         segments_data,
         subject="canopy",
         raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT},
+        raster_identity=identity,
     )
     plants = [_plant(georef, "plot0", 10, 10)]
 
@@ -654,7 +670,7 @@ def test_tie_segments_to_plants_leaves_a_plantless_segment_untied(
 def test_tie_segments_to_plants_refuses_a_segment_containing_two_plants(
     tmp_path: Path,
 ) -> None:
-    _, raster_path, georef, _identity = _setup(tmp_path)
+    _, raster_path, georef, identity = _setup(tmp_path)
     segments_data = _write_document(
         raster_path,
         [
@@ -669,7 +685,7 @@ def test_tie_segments_to_plants_refuses_a_segment_containing_two_plants(
         segments_data,
         subject="canopy",
         raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT},
+        raster_identity=identity,
     )
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", 15, 15)]
 
@@ -687,7 +703,7 @@ def test_tie_segments_to_plants_refuses_a_segment_containing_two_plants(
 def test_tie_segments_to_plants_refuses_a_plant_inside_two_segments(
     tmp_path: Path,
 ) -> None:
-    _, raster_path, georef, _identity = _setup(tmp_path)
+    _, raster_path, georef, identity = _setup(tmp_path)
     segments_data = _write_document(
         raster_path,
         [
@@ -707,7 +723,7 @@ def test_tie_segments_to_plants_refuses_a_plant_inside_two_segments(
         segments_data,
         subject="canopy",
         raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT},
+        raster_identity=identity,
     )
     plants = [_plant(georef, "plot0", 15, 15)]
 
@@ -725,7 +741,7 @@ def test_tie_segments_to_plants_refuses_a_plant_inside_two_segments(
 def test_tie_segments_to_plants_refuses_a_blank_named_plant(
     tmp_path: Path,
 ) -> None:
-    _, raster_path, georef, _identity = _setup(tmp_path)
+    _, raster_path, georef, identity = _setup(tmp_path)
     segments_data = _write_document(
         raster_path,
         [
@@ -740,7 +756,7 @@ def test_tie_segments_to_plants_refuses_a_blank_named_plant(
         segments_data,
         subject="canopy",
         raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT},
+        raster_identity=identity,
     )
     plants = [_plant(georef, "", 10, 10)]
 
@@ -758,7 +774,7 @@ def test_tie_segments_to_plants_refuses_a_blank_named_plant(
 def test_tie_segments_to_plants_refuses_a_duplicate_plant_id(
     tmp_path: Path,
 ) -> None:
-    _, raster_path, georef, _identity = _setup(tmp_path)
+    _, raster_path, georef, identity = _setup(tmp_path)
     segments_data = _write_document(
         raster_path,
         [
@@ -778,7 +794,7 @@ def test_tie_segments_to_plants_refuses_a_duplicate_plant_id(
         segments_data,
         subject="canopy",
         raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT},
+        raster_identity=identity,
     )
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot0", 40, 40)]
 
@@ -796,7 +812,7 @@ def test_tie_segments_to_plants_refuses_a_duplicate_plant_id(
 def test_tie_segments_to_plants_refuses_when_no_plant_is_in_frame(
     tmp_path: Path,
 ) -> None:
-    _, raster_path, georef, _identity = _setup(tmp_path)
+    _, raster_path, georef, identity = _setup(tmp_path)
     segments_data = _write_document(
         raster_path,
         [
@@ -811,7 +827,7 @@ def test_tie_segments_to_plants_refuses_when_no_plant_is_in_frame(
         segments_data,
         subject="canopy",
         raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT},
+        raster_identity=identity,
     )
     plants = [_plant(georef, "plot0", -50, -50)]
 
@@ -829,7 +845,7 @@ def test_tie_segments_to_plants_refuses_when_no_plant_is_in_frame(
 def test_tie_segments_to_plants_names_a_plant_outside_the_raster(
     tmp_path: Path,
 ) -> None:
-    _, raster_path, georef, _identity = _setup(tmp_path)
+    _, raster_path, georef, identity = _setup(tmp_path)
     segments_data = _write_document(
         raster_path,
         [
@@ -844,7 +860,7 @@ def test_tie_segments_to_plants_names_a_plant_outside_the_raster(
         segments_data,
         subject="canopy",
         raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT},
+        raster_identity=identity,
     )
     plants = [
         _plant(georef, "plot0", 10, 10),
@@ -867,7 +883,7 @@ def test_tie_segments_to_plants_names_a_plant_outside_the_raster(
 def test_tie_segments_to_plants_names_an_in_frame_plant_with_no_segment(
     tmp_path: Path,
 ) -> None:
-    _, raster_path, georef, _identity = _setup(tmp_path)
+    _, raster_path, georef, identity = _setup(tmp_path)
     segments_data = _write_document(
         raster_path,
         [
@@ -882,7 +898,7 @@ def test_tie_segments_to_plants_names_an_in_frame_plant_with_no_segment(
         segments_data,
         subject="canopy",
         raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT},
+        raster_identity=identity,
     )
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", 45, 45)]
 
@@ -905,7 +921,7 @@ def test_tie_segments_to_plants_names_an_in_frame_plant_with_no_segment(
 def test_assign_detections_to_segments_attributes_a_containment_and_names_the_rest(
     tmp_path: Path,
 ) -> None:
-    _, raster_path, georef, _identity = _setup(tmp_path)
+    _, raster_path, georef, identity = _setup(tmp_path)
     segments_data = _write_document(
         raster_path,
         [
@@ -925,7 +941,7 @@ def test_assign_detections_to_segments_attributes_a_containment_and_names_the_re
         segments_data,
         subject="canopy",
         raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT},
+        raster_identity=identity,
     )
     plants = [
         _plant(georef, "plot0", 10, 10)
@@ -970,7 +986,7 @@ def test_assign_detections_to_segments_attributes_a_containment_and_names_the_re
 def test_assign_detections_to_segments_attributes_an_overlap_to_neither(
     tmp_path: Path,
 ) -> None:
-    _, raster_path, georef, _identity = _setup(tmp_path)
+    _, raster_path, georef, identity = _setup(tmp_path)
     segments_data = _write_document(
         raster_path,
         [
@@ -990,7 +1006,7 @@ def test_assign_detections_to_segments_attributes_an_overlap_to_neither(
         segments_data,
         subject="canopy",
         raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT},
+        raster_identity=identity,
     )
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", 40, 10)]
     tie = tie_segments_to_plants(
@@ -1016,7 +1032,7 @@ def test_assign_detections_to_segments_attributes_an_overlap_to_neither(
 def test_assign_detections_to_segments_no_boxes_returns_empty(
     tmp_path: Path,
 ) -> None:
-    _, raster_path, georef, _identity = _setup(tmp_path)
+    _, raster_path, georef, identity = _setup(tmp_path)
     segments_data = _write_document(
         raster_path,
         [
@@ -1031,7 +1047,7 @@ def test_assign_detections_to_segments_no_boxes_returns_empty(
         segments_data,
         subject="canopy",
         raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT},
+        raster_identity=identity,
     )
     plants = [_plant(georef, "plot0", 10, 10)]
     tie = tie_segments_to_plants(

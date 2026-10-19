@@ -6,6 +6,8 @@ the envelope, and the WebSocket route replays that log from the run's own direct
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from tests._verified_checkpoint_fixtures import (
     detection_config,
     finished_run,
@@ -13,8 +15,17 @@ from tests._verified_checkpoint_fixtures import (
     opened_run,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def _drain(ws) -> list[dict]:
+    import pytest
+    from fastapi.testclient import TestClient
+    from starlette.testclient import WebSocketTestSession
+
+    from tcip_mcp.experiments import RunObservation, RunRecord
+
+
+def _drain(ws: WebSocketTestSession) -> list[dict]:
     """Return the frames the stream sends, through the terminal status frame."""
     frames = []
     while True:
@@ -26,10 +37,10 @@ def _drain(ws) -> list[dict]:
 
 
 def test_logged_rows_reach_the_training_stream_reader_with_their_epoch_and_values(
-    tmp_path,
-    opened_project,
-    client,
-):
+    tmp_path: Path,
+    opened_project: Path,
+    client: TestClient,
+) -> None:
     run_id = "exp-021-currant-bud-det"
     finished_run(
         tmp_path,
@@ -55,10 +66,10 @@ def test_logged_rows_reach_the_training_stream_reader_with_their_epoch_and_value
 
 
 def test_training_stream_serves_a_relaunched_run_by_its_own_minted_id(
-    tmp_path,
-    opened_project,
-    client,
-):
+    tmp_path: Path,
+    opened_project: Path,
+    client: TestClient,
+) -> None:
     """The training stream serves a relaunched run by its own minted id."""
     from tcip_mcp.experiments import mint_experiment_id
 
@@ -79,11 +90,11 @@ def test_training_stream_serves_a_relaunched_run_by_its_own_minted_id(
 
 
 def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
-    tmp_path,
-    opened_project,
-    client,
-    monkeypatch,
-):
+    tmp_path: Path,
+    opened_project: Path,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The stream drains a row landing between its read and its terminal check.
 
     A row the run appends as it ends, after the stream's last log read, still reaches the
@@ -111,10 +122,10 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
     )
     log_epoch(run_dir, 1, {"loss": 0.5})
 
-    real_observe = experiments.observe
+    real_observe = experiments.observe_run
     calls = {"n": 0}
 
-    def finish_then_observe(directory, *args):
+    def finish_then_observe(directory: Path) -> RunObservation[RunRecord]:
         calls["n"] += 1
         if calls["n"] == 2:
             run_training_envelope(
@@ -123,9 +134,9 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
                     train_loader=None,
                 )
             )
-        return real_observe(directory, *args)
+        return real_observe(directory)
 
-    monkeypatch.setattr(experiments, "observe", finish_then_observe)
+    monkeypatch.setattr(experiments, "observe_run", finish_then_observe)
 
     with client.websocket_connect(
         f"ws://127.0.0.1/api/training/runs/{run_id}/stream",
@@ -139,9 +150,9 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
 
 
 def test_training_stream_serves_no_metric_frames_for_a_run_no_directory_holds(
-    opened_project,
-    client,
-):
+    opened_project: Path,
+    client: TestClient,
+) -> None:
     """A stream for an id no run directory holds serves no metric frame.
 
     Its last frame is a status frame carrying no status and an error.

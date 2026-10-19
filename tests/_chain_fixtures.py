@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.execution import Stated
@@ -29,6 +29,15 @@ from tests._training_values import (
 )
 
 if TYPE_CHECKING:
+    from PIL import Image
+    from torch import nn
+
+    from tcip_mcp.buckets import Bucket
+    from tcip_mcp.pipelines.data.selection import Selection
+    from tcip_mcp.pipelines.data.split_construction import Partition
+    from tcip_mcp.pipelines.schemas import DetectorGeometry
+    from tcip_mcp.subject_registry import SubjectRegistry
+    from tcip_mcp.traits import TraitRevision
     from tcip_web.state import OpenProject
 
 
@@ -92,7 +101,9 @@ BLOB_BUILDER = {
 }
 
 
-def detector_geometry(frame: tuple[int, int] = (64, 64)):
+def detector_geometry(
+    frame: tuple[int, int] = (64, 64),
+) -> DetectorGeometry:
     """Return the ``schemas.DetectorGeometry`` derived for ``frame``.
 
     ``derivations.derive_detector_geometry`` gives it over two boxes, one a square a quarter of
@@ -201,18 +212,9 @@ def own_statistics(config: dict, project: Path) -> dict:
     return {**config, "model_source": {**source, "normalization": statistics}}
 
 
-def train_sources(partition: dict) -> list[str]:
-    """Return the sources of the train side of a resolved ``partition``, in its order.
-
-    The samples are read through ``split_construction.partition_samples``.
-    """
-    from tcip_mcp.pipelines.data.split_construction import partition_samples
-
-    return [
-        str(s.source)
-        for s in partition_samples(partition)
-        if s.side == "train"
-    ]
+def train_sources(partition: Partition) -> list[str]:
+    """Return the sources of the train side of a resolved ``partition``, in its order."""
+    return [str(s.source) for s in partition.samples if s.side == "train"]
 
 
 _NOISE: dict = {}
@@ -299,7 +301,9 @@ def synthetic_capture(root: Path, *, date: str = DATE) -> Path:
     return images_dir
 
 
-def draw_reference_selection(project: Path, root: Path, out: Path):
+def draw_reference_selection(
+    project: Path, root: Path, out: Path
+) -> Selection:
     """Draw ``root``'s labels into train, val, calibration and holdout sides with ``draw_splits``.
 
     Returns the selection as recorded.
@@ -328,7 +332,7 @@ def run_config(
     project: Path,
     selection_dir: Path,
     model_source: dict = REGION_BUILDER,
-    **overrides: Any,
+    **overrides: object,
 ) -> dict:
     """Return a :func:`training_config` binding ``project``'s drawn selection at ``selection_dir``.
 
@@ -343,7 +347,7 @@ def run_config(
 
 
 def training_config(
-    project: Path, model_source: dict, data: dict, **overrides: Any
+    project: Path, model_source: dict, data: dict, **overrides: object
 ) -> dict:
     """Return a run config of ``project`` over a copy of ``model_source`` and ``data``.
 
@@ -382,7 +386,9 @@ def training_config(
     return own_statistics(config, project)
 
 
-def built_model(config: dict, detector=None):
+def built_model(
+    config: dict, detector: DetectorGeometry | None = None
+) -> nn.Module:
     """Return the model a run over ``config`` builds.
 
     The model is its validated ``model_source``, imported from the layout its admission stages
@@ -428,10 +434,10 @@ def train_on(
     )
     checkpoint = observation.checkpoint
     assert checkpoint is not None, observation.final
-    return checkpoint["path"]
+    return checkpoint.path
 
 
-def confirm_count_trait(project_root: Path, **fields: Any):
+def confirm_count_trait(project_root: Path, **fields: object) -> TraitRevision:
     """Propose the count trait and confirm it as the user ``chain-breeder``.
 
     The trait states its per-image count of :data:`SUBJECT`, with ``fields`` over the fixture
@@ -458,7 +464,7 @@ def assess(
     selection_dir: Path,
     *,
     device: str | None = None,
-    **stated: Any,
+    **stated: object,
 ) -> dict:
     """Assess the count trait's per-image count over ``selection_dir`` with ``assess_checkpoint``.
 
@@ -497,7 +503,7 @@ class Chain:
     bucket: str
     published: dict
 
-    def read(self):
+    def read(self) -> Bucket:
         """Return the chain's published bucket, as its record states it."""
         from tcip_mcp.buckets import read_bucket
 
@@ -506,7 +512,7 @@ class Chain:
 
 def unassessed_bucket(
     project: Path, *, experiment_id: str, bucket_name: str = "plain"
-):
+) -> Bucket:
     """Return a bucket published under no assessment.
 
     Ingests, draws, trains and publishes under ``project``.
@@ -531,13 +537,13 @@ def unassessed_bucket(
     return read_bucket(root, bucket)
 
 
-def acknowledged(
+def acknowledged[T](
     project: Path,
-    deliver: Callable[[str | None], Any],
+    deliver: Callable[[str | None], T],
     *,
     by: str = "user:breeder",
     reason: str = "fixture: shipped before any assessment",
-) -> Any:
+) -> T:
     """Run ``deliver`` refused, then again under a recorded acknowledgment by ``by``.
 
     ``deliver`` is a delivery taking a recorded acknowledgment's id. It is refused first, the
@@ -571,8 +577,8 @@ def deliver_acknowledged(
     value_key: str,
     delivery_kind: str,
     buckets: list | None = None,
-    **kwargs: Any,
-):
+    **kwargs: str | dict | None,
+) -> dict:
     """Deliver the per-image ``records``' ``value_key`` per plant, under an acknowledgment.
 
     ``deliver_per_plant_aggregate`` runs for the plants the records carry, over ``buckets`` (by
@@ -641,9 +647,9 @@ def published(
     results: list[dict],
     *,
     scope: dict,
-    registry: Any = None,
+    registry: SubjectRegistry | None = None,
     raster_path: Path | None = None,
-) -> Any:
+) -> Bucket:
     """Publish ``results`` as the bucket named ``name`` and return the bucket.
 
     :func:`~tcip_mcp.buckets.publish` writes it under their images' dataset root, under an
@@ -655,7 +661,6 @@ def published(
     from tcip_mcp.pipelines.data.split_construction import raster_identity
     from tcip_mcp.pipelines.execution import prepare
     from tcip_mcp.pipelines.image_utils import resolve_image_path
-    from tcip_store import decode_value, encode_record
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_CONF,
         project_checkpoint,
@@ -670,9 +675,7 @@ def published(
         project=project,
     )
     identity = (
-        decode_value(
-            encode_record(raster_identity(resolve_image_path(raster_path)))
-        )
+        raster_identity(resolve_image_path(raster_path))
         if raster_path is not None
         else None
     )
@@ -724,7 +727,7 @@ def blob_boxes(values: list[str], index: int) -> list[tuple[str, BBox]]:
     return out
 
 
-def blob_frame(values: list[str], index: int):
+def blob_frame(values: list[str], index: int) -> Image.Image:
     """Return a painted frame of a gray shade set by ``index``, with each :func:`blob_boxes` box.
 
     Each box is painted 230 in its value's band of :data:`VALUES` and 20 in the others.
@@ -763,6 +766,7 @@ def write_attributed_registry(
         subjects=(
             cr.Subject(
                 name=SUBJECT,
+                description="",
                 attributes=attributes
                 or (
                     cr.Attribute(
@@ -777,7 +781,9 @@ def write_attributed_registry(
         registry_over(root, registry)
 
 
-def confirm_crossing_trait(project_root: Path, **fields: Any):
+def confirm_crossing_trait(
+    project_root: Path, **fields: object
+) -> TraitRevision:
     """Confirm ``bud_opening`` stating its crossing dates over :data:`SUBJECT`.
 
     Over ``_trait_fixtures.BUD_OPENING``, ``count_bias_tolerance_frac`` is authored at 0.1,
@@ -824,7 +830,7 @@ class Series:
     project: OpenProject
     trait: str = "bud_opening"
 
-    def body(self, **extra: Any) -> dict:
+    def body(self, **extra: object) -> dict:
         """Return the request body a phenology door takes over this series."""
         return {
             "mapping_name": self.mapping_name,
@@ -864,7 +870,7 @@ def attributed_series(
     experiment_id: str = "exp-attributed",
     attributes: tuple | None = None,
     model_source: dict | None = None,
-    stated: Any = None,
+    stated: Stated | None = None,
 ) -> Series:
     """Ingest, train, assess and publish an attributed series, then open ``project``.
 
@@ -992,7 +998,7 @@ def attributed_series(
         worker_run(project, config, experiment_id=experiment_id)
     ).checkpoint
     assert checkpoint is not None
-    checkpoint_path = checkpoint["path"]
+    checkpoint_path = checkpoint.path
     confirm_crossing_trait(project)
 
     assessment = None

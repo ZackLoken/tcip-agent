@@ -14,7 +14,9 @@ from PIL import Image
 from tests._cli_fixtures import run_tcip
 
 
-def test_refuses_without_a_project_and_plants_no_store(tmp_path):
+def test_refuses_without_a_project_and_plants_no_store(
+    tmp_path: Path,
+) -> None:
     img = tmp_path / "a.jpg"
     Image.new("RGB", (640, 480), color=(90, 110, 70)).save(img)
     cwd = tmp_path / "operator_cwd"
@@ -28,8 +30,8 @@ def test_refuses_without_a_project_and_plants_no_store(tmp_path):
 
 
 def test_renders_the_overlay_and_echoes_grid_geometry_under_the_named_project(
-    project, tmp_path
-):
+    project: Path, tmp_path: Path
+) -> None:
     img = project / "images" / "a.jpg"
     img.parent.mkdir()
     Image.new("RGB", (640, 480), color=(90, 110, 70)).save(img)

@@ -6,8 +6,12 @@ A later run can bind to the selection, which holds the run's own drawn train/val
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 torch = pytest.importorskip("torch")
 
@@ -20,10 +24,7 @@ from tcip_mcp.experiments import (  # noqa: E402
     run_resolution,
 )
 from tcip_mcp.pipelines.data.selection import read_selection  # noqa: E402
-from tcip_mcp.pipelines.data.split_construction import (
-    partition_samples,
-    resolve_run,
-)  # noqa: E402
+from tcip_mcp.pipelines.data.split_construction import resolve_run  # noqa: E402
 from tcip_mcp.pipelines.model_build import staged_sources  # noqa: E402
 from tcip_mcp.pipelines.schemas import train_config  # noqa: E402
 from tests._chain_fixtures import DETECTION_SOURCE, run_config, training_config  # noqa: E402
@@ -84,7 +85,9 @@ def _real_drawn_experiment(
     return run_resolution(experiment_id, project=project).data
 
 
-def _damage_resolved(project: Path, experiment_id: str, change) -> None:
+def _damage_resolved(
+    project: Path, experiment_id: str, change: Callable[[dict], None]
+) -> None:
     """Rewrite what a run's launch record says it resolved, on disk, bypassing its writer.
 
     The record is the run's under ``project``, rewritten on disk with ``change`` applied to its
@@ -94,14 +97,19 @@ def _damage_resolved(project: Path, experiment_id: str, change) -> None:
 
     path = experiment_dir(experiment_id, project=project) / RUN_FILE
     record = read_record(path)
-    change(record["resolved"])
+    assert isinstance(record, dict)
+    resolved = record["resolved"]
+    assert isinstance(resolved, dict)
+    change(resolved)
     path.write_bytes(encode_record(record))
 
 
 # -- admits valid work: freeze, read back, bind a second run -------------------
 
 
-def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
+def test_freeze_selection_round_trips_through_a_real_bind(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.data.split_construction import (
         selection_compatibility,
     )
@@ -146,7 +154,7 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
 
 def test_freeze_selection_names_the_sources_the_run_read_not_the_launch_input(
     tmp_path: Path,
-):
+) -> None:
     """A frozen selection names the sources the run read, not its launch input.
 
     With the launch record's stated config edited to name another images directory holding
@@ -167,7 +175,12 @@ def test_freeze_selection_names_the_sources_the_run_read_not_the_launch_input(
         Image.new("RGB", (16, 16), (200, 10, 10)).save(other / image.name)
     run_dir = experiment_dir("exp-elsewhere", project=tmp_path)
     launch = read_record(run_dir / RUN_FILE)
-    launch["config"]["data"]["images_dir"] = str(other)
+    assert isinstance(launch, dict)
+    config = launch["config"]
+    assert isinstance(config, dict)
+    data = config["data"]
+    assert isinstance(data, dict)
+    data["images_dir"] = str(other)
     (run_dir / RUN_FILE).write_bytes(encode_record(launch))
 
     result = freeze_selection(
@@ -183,14 +196,14 @@ def test_freeze_selection_names_the_sources_the_run_read_not_the_launch_input(
 
 def test_freeze_selection_keeps_two_scopes_same_named_members_apart(
     tmp_path: Path,
-):
+) -> None:
     """A frozen selection keeps two scopes' same-named members apart.
 
     A launch record whose partition holds one member name under two dates freezes into a
     selection carrying both dates' samples, each side's count and each sample's ground truth.
     """
     from tcip_mcp.pipelines.data.selection import Sample, ground_truth_digest
-    from tcip_mcp.pipelines.data.split_construction import _partition_record
+    from tcip_mcp.pipelines.data.split_construction import Partition
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -218,13 +231,13 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(
         tmp_path,
         "exp-two-scope",
         lambda resolved: resolved.update(
-            partition=_partition_record(
-                train + val,
+            partition=Partition(
                 seed=0,
                 group_by="stem",
+                samples=train + val,
                 selection=None,
                 spatial=None,
-            )
+            ).model_dump(mode="json")
         ),
     )
 
@@ -243,7 +256,7 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(
 
 def test_freeze_selection_carries_an_explicit_grouping_map_onto_its_samples(
     tmp_path: Path,
-):
+) -> None:
     """A frozen selection records an explicit grouping map's group values on its samples.
 
     The run drew under a map from member identity to group ``g1`` or ``g2``; the frozen
@@ -286,7 +299,7 @@ def test_freeze_selection_carries_an_explicit_grouping_map_onto_its_samples(
 # -- refusals ------------------------------------------------------------------
 
 
-def test_freeze_selection_refuses_an_id_naming_no_run(tmp_path: Path):
+def test_freeze_selection_refuses_an_id_naming_no_run(tmp_path: Path) -> None:
     from tcip_mcp.tools.data_tools import freeze_selection
 
     result = freeze_selection(tmp_path, "exp-no-run")
@@ -294,7 +307,7 @@ def test_freeze_selection_refuses_an_id_naming_no_run(tmp_path: Path):
 
 
 def _bound_run(
-    root: Path, tmp_path: Path, experiment_id: str, **split_extra
+    root: Path, tmp_path: Path, experiment_id: str, **split_extra: int
 ) -> None:
     from tcip_mcp.tools.data_tools import draw_splits
 
@@ -329,7 +342,7 @@ def _bound_run(
 def test_a_bound_run_freezes_and_a_later_run_rebinds_to_its_membership(
     tmp_path: Path,
     split_extra: dict,
-):
+) -> None:
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -346,9 +359,9 @@ def test_a_bound_run_freezes_and_a_later_run_rebinds_to_its_membership(
     )
 
     def _sides(experiment_id: str) -> dict:
-        samples = partition_samples(
-            run_resolution(experiment_id, project=tmp_path).partition
-        )
+        samples = run_resolution(
+            experiment_id, project=tmp_path
+        ).partition.samples
         return {
             side: {s.ground_truth for s in samples if s.side == side}
             for side in ("train", "val")
@@ -357,7 +370,7 @@ def test_a_bound_run_freezes_and_a_later_run_rebinds_to_its_membership(
     assert _sides("exp-rebound") == _sides("exp-bound")
 
 
-def test_freeze_selection_refuses_a_spatial_split(tmp_path: Path):
+def test_freeze_selection_refuses_a_spatial_split(tmp_path: Path) -> None:
     """freeze_selection refuses a run drawn under a within-image spatial split, naming it."""
     from tcip_mcp.tools.data_tools import freeze_selection
     from tests._producer_fixtures import big_single_source
@@ -382,7 +395,7 @@ def test_freeze_selection_refuses_a_spatial_split(tmp_path: Path):
 
 def test_freeze_selection_refuses_a_member_whose_ground_truth_moved(
     tmp_path: Path,
-):
+) -> None:
     """freeze_selection refuses naming a member whose ground truth moved since the run.
 
     A label edited after the run refuses the freeze, naming that member.
@@ -412,7 +425,7 @@ def test_freeze_selection_refuses_a_member_whose_ground_truth_moved(
 
 def test_freeze_selection_reads_a_members_removed_document_as_moved(
     tmp_path: Path,
-):
+) -> None:
     """freeze_selection reads a member's removed document as moved and refuses, naming it."""
     from tcip_mcp.tools.data_tools import freeze_selection
 
@@ -426,7 +439,7 @@ def test_freeze_selection_reads_a_members_removed_document_as_moved(
     assert "'a'" in result["error"]
 
 
-def test_freeze_selection_refuses_an_empty_val_side(tmp_path: Path):
+def test_freeze_selection_refuses_an_empty_val_side(tmp_path: Path) -> None:
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -438,7 +451,7 @@ def test_freeze_selection_refuses_an_empty_val_side(tmp_path: Path):
 
 def test_freeze_selection_refuses_a_resolved_scope_missing_its_attributes(
     tmp_path: Path,
-):
+) -> None:
     """freeze_selection answers the selection writer's refusal of a scope without attributes.
 
     A resolved record edited past its writer to drop its scope's attributes composes a
@@ -458,7 +471,9 @@ def test_freeze_selection_refuses_a_resolved_scope_missing_its_attributes(
     assert "error" in result and "records no attributes" in result["error"]
 
 
-def test_freeze_selection_refuses_labels_changed_since_the_run(tmp_path: Path):
+def test_freeze_selection_refuses_labels_changed_since_the_run(
+    tmp_path: Path,
+) -> None:
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.data_tools import freeze_selection
@@ -480,7 +495,7 @@ def test_freeze_selection_refuses_labels_changed_since_the_run(tmp_path: Path):
 
 def test_freeze_selection_refuses_when_a_selection_already_exists_at_the_output(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")

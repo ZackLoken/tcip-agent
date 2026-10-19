@@ -8,6 +8,7 @@ and completion writes the final status whose checkpoint the registry reads.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -16,7 +17,7 @@ import tcip_store as ts
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.audit import audit_log_key  # noqa: E402
-from tcip_mcp.experiments import observe  # noqa: E402
+from tcip_mcp.experiments import observe_run  # noqa: E402
 from tcip_mcp.pipelines.model_build import (
     CONFIG_KEY,
     METRICS_KEY,
@@ -40,19 +41,39 @@ from tests._verified_checkpoint_fixtures import (  # noqa: E402
     detector_declaring,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+    from typing import NoReturn, TypedDict, Unpack
 
-def _audit_events(root, tool="training_run"):
+    from pydantic import JsonValue
+    from torch.utils.data import DataLoader
+
+    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tcip_store import Key
+
+    class _ContextKeywords(TypedDict, total=False):
+        """The ``TrainContext`` fields a test states beside its run."""
+
+        val_loader: DataLoader | None
+        resume_from: str
+        epoch_hook: Callable[[int, dict], None] | None
+
+
+def _audit_events(
+    root: Path, tool: str = "training_run"
+) -> list[Mapping[str, JsonValue]]:
     events = ts.read_log(audit_log_key(root)).records
     return [e for e in events if e.get("tool") == tool]
 
 
-def _context(tmp_path, config: dict, **kwargs) -> tuple[TrainContext, Path]:
+def _context(
+    tmp_path: Path, config: dict, **kwargs: Unpack[_ContextKeywords]
+) -> tuple[TrainContext, Path]:
     """Return a context over a run directory the launcher's own writer opened over ``config``.
 
     Its run is the record ``observed_run`` reads back from that directory, and its train_loader
     is None unless ``kwargs`` give one.
     """
-    from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import opened_run
 
@@ -60,11 +81,12 @@ def _context(tmp_path, config: dict, **kwargs) -> tuple[TrainContext, Path]:
         tmp_path, config, resume_from=kwargs.get("resume_from")
     )
     return TrainContext(
-        run=observed_run(observe(run_dir)), **{"train_loader": None, **kwargs}
+        run=observed_run(observe_run(run_dir)),
+        **{"train_loader": None, **kwargs},
     ), run_dir
 
 
-def _bespoke(tmp_path, body: str) -> dict:
+def _bespoke(tmp_path: Path, body: str) -> dict:
     """Return a detector run config over two frames whose training body is ``body`` here."""
     return detection_config(
         tmp_path / "data",
@@ -74,7 +96,7 @@ def _bespoke(tmp_path, body: str) -> dict:
     )
 
 
-def _agent_train(ctx):
+def _agent_train(ctx: TrainContext) -> None:
     """Assert no cancel, log one metrics row and save ``model_best`` through ctx, no status."""
     assert ctx.should_cancel() is False
     ctx.log_metrics(1, {"train_loss": 0.5, "val_loss": 0.4})
@@ -85,8 +107,8 @@ def _agent_train(ctx):
 
 
 def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.experiments import METRICS_FILE, read_rows
     from tcip_mcp.model_registry import load_registered_checkpoint
 
@@ -104,7 +126,10 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(
     best = torch.load(run_dir / "model_best.pt", weights_only=False)
     stored = best[CONFIG_KEY]["model_source"]
     resolved = runtime_paths(best[CONFIG_KEY], CONFIG_PATHS, tmp_path)
-    assert {**resolved["model_source"], "source_files": None} == {
+    assert isinstance(resolved, dict)
+    resolved_source = resolved["model_source"]
+    assert isinstance(resolved_source, dict)
+    assert {**resolved_source, "source_files": None} == {
         **config["model_source"],
         "source_files": None,
     }
@@ -120,7 +145,9 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(
     # Body is bracketed on the append-only audit log (open running + close completed).
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "completed"]
-    assert events[-1]["arguments"]["experiment_id"] == run_dir.name
+    arguments = events[-1]["arguments"]
+    assert isinstance(arguments, dict)
+    assert arguments["experiment_id"] == run_dir.name
 
     # Completion names the checkpoint, and the registry reads that one record for its producer.
     checkpoint = completed_checkpoint(run_dir)
@@ -131,13 +158,13 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(
     assert verified.experiment_id == run_dir.name
 
 
-def _refuse_the_closing_audit_line(monkeypatch) -> None:
+def _refuse_the_closing_audit_line(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make every ``audit.append`` but a ``running`` line raise a full-disk ``OSError``."""
     import tcip_mcp.audit as audit
 
     real_append = audit.append
 
-    def refuse_the_closing_line(key, entry):
+    def refuse_the_closing_line(key: Key, entry: dict[str, JsonValue]) -> None:
         if entry["status"] != "running":
             raise OSError("the log's disk is full")
         real_append(key, entry)
@@ -146,8 +173,8 @@ def _refuse_the_closing_audit_line(monkeypatch) -> None:
 
 
 def test_a_run_whose_closing_audit_line_is_refused_ends_failed_naming_it(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A run whose closing audit line is refused ends failed, naming the line.
 
     The body completes and saves its deliverable; the closing ``training_run`` append is
@@ -158,22 +185,23 @@ def test_a_run_whose_closing_audit_line_is_refused_ends_failed_naming_it(
     ctx, run_dir = _context(tmp_path, _bespoke(tmp_path, "_agent_train"))
     run_training_envelope(ctx)
 
-    final = observe(run_dir).final
-    assert final["state"] == "failed"
-    assert "audit entry could not be written" in final["status_error"]
+    final = observe_run(run_dir).final
+    assert final is not None and final.status_error is not None
+    assert final.state == "failed"
+    assert "audit entry could not be written" in final.status_error
     assert completed_checkpoint(run_dir) is None
     assert [e["status"] for e in _audit_events(tmp_path)] == ["running"]
 
 
-def _agent_train_raises(ctx):
+def _agent_train_raises(ctx: TrainContext) -> NoReturn:
     """Raise an error of the body's own."""
     raise RuntimeError("the body exploded")
 
 
 def test_a_failed_run_whose_closing_audit_line_is_refused_names_both_causes(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A failed run whose closing audit line is refused names both causes.
 
     The final status names the body's error and the unwritten line, neither hiding the other.
@@ -184,20 +212,21 @@ def test_a_failed_run_whose_closing_audit_line_is_refused_names_both_causes(
     )
     run_training_envelope(ctx)
 
-    final = observe(run_dir).final
-    assert final["state"] == "failed"
-    assert "the body exploded" in final["status_error"]
-    assert "audit entry could not be written" in final["status_error"]
+    final = observe_run(run_dir).final
+    assert final is not None and final.status_error is not None
+    assert final.state == "failed"
+    assert "the body exploded" in final.status_error
+    assert "audit entry could not be written" in final.status_error
 
 
-def _agent_train_default_tag_no_override(ctx):
+def _agent_train_default_tag_no_override(ctx: TrainContext) -> None:
     """Save one checkpoint under the default tag, ``checkpoint``, declaring no final weights."""
     ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}})
 
 
 def test_envelope_default_tag_with_no_override_fails_run_and_completes_nothing(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A run saving under the default tag alone fails naming final weights and completes nothing."""
     ctx, run_dir = _context(
         tmp_path, _bespoke(tmp_path, "_agent_train_default_tag_no_override")
@@ -205,21 +234,22 @@ def test_envelope_default_tag_with_no_override_fails_run_and_completes_nothing(
     run_training_envelope(ctx)
 
     assert ctx.run.status == "failed"
-    assert "final weights" in observe(run_dir).final["status_error"]
+    status_error = observe_run(run_dir).status_error
+    assert status_error is not None and "final weights" in status_error
     assert completed_checkpoint(run_dir) is None
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "failed"]
 
 
-def _agent_train_declares_a_path_it_never_wrote(ctx):
+def _agent_train_declares_a_path_it_never_wrote(ctx: TrainContext) -> None:
     """Write ``never_written.pt`` directly and declare it through set_final_weights."""
     (ctx.run_dir / "never_written.pt").write_bytes(b"")
     ctx.set_final_weights("never_written")
 
 
 def test_envelope_declared_deliverable_never_written_fails_run_and_completes_nothing(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A deliverable declared but not saved through the context fails the run, naming its tag."""
     ctx, run_dir = _context(
         tmp_path,
@@ -228,13 +258,14 @@ def test_envelope_declared_deliverable_never_written_fails_run_and_completes_not
     run_training_envelope(ctx)
 
     assert ctx.run.status == "failed"
-    assert "'never_written'" in observe(run_dir).final["status_error"]
+    status_error = observe_run(run_dir).status_error
+    assert status_error is not None and "'never_written'" in status_error
     assert completed_checkpoint(run_dir) is None
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "failed"]
 
 
-def _agent_train_explicit_override(ctx):
+def _agent_train_explicit_override(ctx: TrainContext) -> None:
     """Save under the tag ``custom_tag`` and declare it the final weights."""
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}}, "custom_tag"
@@ -242,7 +273,9 @@ def _agent_train_explicit_override(ctx):
     ctx.set_final_weights("custom_tag")
 
 
-def test_envelope_explicit_set_final_weights_overrides_convention(tmp_path):
+def test_envelope_explicit_set_final_weights_overrides_convention(
+    tmp_path: Path,
+) -> None:
     ctx, run_dir = _context(
         tmp_path, _bespoke(tmp_path, "_agent_train_explicit_override")
     )
@@ -254,7 +287,9 @@ def test_envelope_explicit_set_final_weights_overrides_convention(tmp_path):
     assert checkpoint["path"].endswith("custom_tag.pt")
 
 
-def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
+def test_a_resumed_run_records_its_resume_checkpoint_and_completes(
+    tmp_path: Path,
+) -> None:
     """The run resumed from a checkpoint names it in its launch record and completes."""
     pytest.importorskip("torchvision")
     from tcip_mcp.experiments import RUN_FILE, read_record
@@ -270,7 +305,7 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
         width=32,
     )
 
-    def build_loader(run):
+    def build_loader(run: TrainRun) -> DataLoader:
         """Return ``run``'s training loader, built by ``run_loaders`` over the six-frame dataset."""
         ds = dataset_over("classification", str(images_dir), str(csv_path))
         return run_loaders(run, ds, None)[0]
@@ -305,15 +340,15 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
     run_training_envelope(ctx)
 
     assert ctx.run.status == "completed"
-    assert read_record(run_dir / RUN_FILE)["resume_from"] == stored_path(
-        ckpt, tmp_path
-    )
+    record = read_record(run_dir / RUN_FILE)
+    assert isinstance(record, dict)
+    assert record["resume_from"] == stored_path(ckpt, tmp_path)
     assert completed_checkpoint(run_dir) is not None
 
 
 def test_report_objective_records_a_selection_row_that_reaches_the_epoch_hook(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A reported objective records a selection row that reaches the epoch hook.
 
     A bespoke body's reported value is one metrics row stamping it the ``selection`` under
@@ -341,12 +376,11 @@ def test_report_objective_records_a_selection_row_that_reaches_the_epoch_hook(
 
 
 def test_ctx_evaluate_counts_at_the_runs_validated_conf_and_takes_none_of_its_own(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A bespoke body's evaluation is handed the run's validated conf and takes none of its own.
 
-    The stubbed ``evaluate`` receives the conf the run's validated evaluation block states, and
-    a call naming another conf raises TypeError naming ``conf_threshold``.
+    The stubbed ``evaluate`` receives the conf the run's validated evaluation block states.
     """
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tests._training_values import VALIDATION_CONF
@@ -361,27 +395,49 @@ def test_ctx_evaluate_counts_at_the_runs_validated_conf_and_takes_none_of_its_ow
 
     ctx.evaluate(object(), loader=[])
     assert handed["conf_threshold"] == VALIDATION_CONF
-    with pytest.raises(TypeError, match="conf_threshold"):
-        ctx.evaluate(object(), loader=[], conf_threshold=0.1)
+
+
+def test_ctx_evaluate_with_no_loader_on_a_run_without_validation_refuses_naming_val_loader(
+    tmp_path: Path,
+) -> None:
+    """``ctx.evaluate`` given no loader, on a run with no validation side, names ``val_loader``."""
+    from tests.tiny_trainer_fixtures import (
+        TRAIN_INTENSITIES,
+        frames_data,
+        regressor_config,
+        run_context,
+    )
+
+    data = frames_data(
+        tmp_path / "ds",
+        TRAIN_INTENSITIES,
+        [2.0 * c for c in TRAIN_INTENSITIES],
+    )
+    ctx = run_context(
+        tmp_path, regressor_config(1, data=data, project=tmp_path)
+    )
+    assert ctx.val_loader is None
+    with pytest.raises(ValueError, match="val_loader"):
+        ctx.evaluate(ctx.build_model())
 
 
 def test_envelope_default_path_runs_default_train_and_audits(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import tcip_mcp.pipelines.training.generic_trainer as gt
 
-    captured = {}
+    captured: dict[str, object] = {}
 
     from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     def _stub_train(
-        run,
-        train_loader,
-        val_loader=None,
-        epoch_callback=None,
-        batch_callback=None,
-        resume_from="",
-    ):
+        run: TrainRun,
+        train_loader: DataLoader,
+        val_loader: DataLoader | None = None,
+        epoch_callback: Callable[[int, dict], None] | None = None,
+        batch_callback: Callable[[int, int, dict], None] | None = None,
+        resume_from: str = "",
+    ) -> TrainRun:
         captured["epoch_callback"] = epoch_callback
         captured["batch_callback"] = batch_callback
         captured["called"] = True

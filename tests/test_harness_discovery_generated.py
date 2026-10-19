@@ -8,15 +8,22 @@ from __future__ import annotations
 import importlib.util
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import REPO_ROOT
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from types import ModuleType
+
+    from tcip_mcp.knowledge import DocumentInfo
+
 GENERATOR = REPO_ROOT / "tools" / "generate_harness_discovery.py"
 
 
-def _generator():
+def _generator() -> ModuleType:
     spec = importlib.util.spec_from_file_location(
         "tcip_generate_harness_discovery", GENERATOR
     )
@@ -26,13 +33,15 @@ def _generator():
     return module
 
 
-def _documents():
+def _documents() -> list[DocumentInfo]:
     from tcip_mcp.knowledge import list_documents
 
     return list_documents()
 
 
-def _trees(generator):
+def _trees(
+    generator: ModuleType,
+) -> list[tuple[Path, Callable[[str, str, Path], str]]]:
     """Return each generated skill tree with the renderer that produces it."""
     return [
         (generator.CLAUDE_SKILLS_DIR, generator.render_skill),
@@ -40,7 +49,7 @@ def _trees(generator):
     ]
 
 
-def test_every_generated_skill_matches_its_document():
+def test_every_generated_skill_matches_its_document() -> None:
     generator = _generator()
     documents = _documents()
     assert documents, (
@@ -53,7 +62,9 @@ def test_every_generated_skill_matches_its_document():
         )
 
 
-def test_the_claude_settings_grant_exactly_the_research_documents_hosts():
+def test_the_claude_settings_grant_exactly_the_research_documents_hosts() -> (
+    None
+):
     from tcip_web.terminal import CLAUDE_SETTINGS
 
     assert (
@@ -64,7 +75,7 @@ def test_the_claude_settings_grant_exactly_the_research_documents_hosts():
     )
 
 
-def test_research_hosts_are_read_from_the_source_list_alone():
+def test_research_hosts_are_read_from_the_source_list_alone() -> None:
     text = (
         "## 1. Research\n\nThe allowed/preferred set:\n\n- arXiv (`arxiv.org`): preprints.\n\n"
         "Search discipline:\n\n- See `crops.yml` for an unrelated example.\n"
@@ -72,7 +83,7 @@ def test_research_hosts_are_read_from_the_source_list_alone():
     assert _generator().research_hosts(text) == ["arxiv.org"]
 
 
-def test_no_stray_generated_skill_directories():
+def test_no_stray_generated_skill_directories() -> None:
     generator = _generator()
     documents = _documents()
     for skills_dir, _render in _trees(generator):
@@ -80,7 +91,7 @@ def test_no_stray_generated_skill_directories():
         assert not stray, f"{skills_dir}: stray directories {stray}"
 
 
-def test_no_file_sits_directly_under_a_generated_skills_tree():
+def test_no_file_sits_directly_under_a_generated_skills_tree() -> None:
     generator = _generator()
     for skills_dir, _render in _trees(generator):
         stray_files = [p for p in skills_dir.iterdir() if p.is_file()]
@@ -89,7 +100,7 @@ def test_no_file_sits_directly_under_a_generated_skills_tree():
         )
 
 
-def test_each_generated_skill_directory_holds_only_skill_md():
+def test_each_generated_skill_directory_holds_only_skill_md() -> None:
     generator = _generator()
     for skills_dir, _render in _trees(generator):
         for skill_dir in skills_dir.iterdir():
@@ -101,7 +112,7 @@ def test_each_generated_skill_directory_holds_only_skill_md():
             )
 
 
-def test_the_generator_writes_lf_line_endings():
+def test_the_generator_writes_lf_line_endings() -> None:
     generator = _generator()
     for skills_dir, _render in _trees(generator):
         for skill_dir in skills_dir.iterdir():
@@ -113,7 +124,7 @@ def test_the_generator_writes_lf_line_endings():
             )
 
 
-def test_agents_md_generated_block_matches_the_canonical_documents():
+def test_agents_md_generated_block_matches_the_canonical_documents() -> None:
     generator = _generator()
     text = generator.AGENTS_MD_PATH.read_text(encoding="utf-8")
     start = text.find(generator.AGENTS_BLOCK_START)
@@ -126,13 +137,13 @@ def test_agents_md_generated_block_matches_the_canonical_documents():
     )
 
 
-def test_agents_md_generated_block_stays_under_the_byte_budget():
+def test_agents_md_generated_block_stays_under_the_byte_budget() -> None:
     generator = _generator()
     block = generator.render_agents_block(_documents())
     assert len(block.encode("utf-8")) <= generator.AGENTS_BLOCK_MAX_BYTES
 
 
-def _agents_md_between_text(generator, tmp_path: Path) -> Path:
+def _agents_md_between_text(generator: ModuleType, tmp_path: Path) -> Path:
     """Write an `AGENTS.md` holding the generated block between hand-written text."""
     fixture = tmp_path / "AGENTS.md"
     fixture.write_text(
@@ -145,8 +156,8 @@ def _agents_md_between_text(generator, tmp_path: Path) -> Path:
 
 
 def test_regenerating_the_block_keeps_the_text_around_it_and_changes_nothing_twice(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     generator = _generator()
     fixture = _agents_md_between_text(generator, tmp_path)
 
@@ -159,26 +170,22 @@ def test_regenerating_the_block_keeps_the_text_around_it_and_changes_nothing_twi
     assert fixture.read_bytes() == first
 
 
-def test_write_agents_block_creates_the_file_when_absent(tmp_path):
+def test_write_agents_block_creates_the_file_when_absent(
+    tmp_path: Path,
+) -> None:
     generator = _generator()
     fixture = tmp_path / "AGENTS.md"
     generator.write_agents_block(_documents(), path=fixture)
     assert generator.AGENTS_BLOCK_START in fixture.read_text(encoding="utf-8")
 
 
-def test_write_agents_block_refuses_an_oversized_block(tmp_path):
+def test_write_agents_block_refuses_an_oversized_block(tmp_path: Path) -> None:
+    from tcip_mcp.knowledge import DocumentInfo
+
     generator = _generator()
 
-    class _FakeDocument:
-        def __init__(self, name, description, path):
-            self.name = name
-            self.description = description
-            self.path = path
-
     huge_documents = [
-        _FakeDocument(
-            f"doc-{i}", "x" * 2000, generator.REPO_ROOT / "CLAUDE.md"
-        )
+        DocumentInfo(f"doc-{i}", "x" * 2000, generator.REPO_ROOT / "CLAUDE.md")
         for i in range(20)
     ]
     with pytest.raises(ValueError):
@@ -187,7 +194,7 @@ def test_write_agents_block_refuses_an_oversized_block(tmp_path):
         )
 
 
-def test_write_agents_block_refuses_a_lone_marker(tmp_path):
+def test_write_agents_block_refuses_a_lone_marker(tmp_path: Path) -> None:
     generator = _generator()
     fixture = tmp_path / "AGENTS.md"
     fixture.write_text(
@@ -200,7 +207,9 @@ def test_write_agents_block_refuses_a_lone_marker(tmp_path):
         generator.write_agents_block(_documents(), path=fixture)
 
 
-def test_write_agents_block_refuses_an_end_marker_above_the_start(tmp_path):
+def test_write_agents_block_refuses_an_end_marker_above_the_start(
+    tmp_path: Path,
+) -> None:
     generator = _generator()
     fixture = tmp_path / "AGENTS.md"
     fixture.write_text(
@@ -216,13 +225,13 @@ def test_write_agents_block_refuses_an_end_marker_above_the_start(tmp_path):
         generator.write_agents_block(_documents(), path=fixture)
 
 
-def _perturbed_agents_tree(generator, tmp_path: Path) -> Path:
+def _perturbed_agents_tree(generator: ModuleType, tmp_path: Path) -> Path:
     copy_dir = tmp_path / "agents-skills"
     shutil.copytree(generator.AGENTS_SKILLS_DIR, copy_dir)
     return copy_dir
 
 
-def test_a_deleted_skill_is_named_stale(tmp_path):
+def test_a_deleted_skill_is_named_stale(tmp_path: Path) -> None:
     generator = _generator()
     documents = _documents()
     copy_dir = _perturbed_agents_tree(generator, tmp_path)
@@ -233,7 +242,7 @@ def test_a_deleted_skill_is_named_stale(tmp_path):
     ) == [documents[0].name]
 
 
-def test_an_edited_skill_is_named_stale(tmp_path):
+def test_an_edited_skill_is_named_stale(tmp_path: Path) -> None:
     generator = _generator()
     documents = _documents()
     copy_dir = _perturbed_agents_tree(generator, tmp_path)
@@ -248,7 +257,7 @@ def test_an_edited_skill_is_named_stale(tmp_path):
     ) == [documents[0].name]
 
 
-def test_an_extra_skill_directory_is_named_stray(tmp_path):
+def test_an_extra_skill_directory_is_named_stray(tmp_path: Path) -> None:
     generator = _generator()
     copy_dir = _perturbed_agents_tree(generator, tmp_path)
     stray_dir = copy_dir / "not-a-real-document"
@@ -261,8 +270,8 @@ def test_an_extra_skill_directory_is_named_stray(tmp_path):
 
 
 def test_the_entry_point_writes_the_checked_in_files_and_the_same_bytes_twice(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_web.terminal import CLAUDE_SETTINGS
 
     generator = _generator()

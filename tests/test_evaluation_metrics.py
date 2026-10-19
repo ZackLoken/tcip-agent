@@ -9,10 +9,21 @@ from __future__ import annotations
 
 import math
 from functools import partial
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests._chain_fixtures import BESPOKE_CLASSIFIER, FRAME_STATISTICS
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from torch import Tensor
+
+    from tcip_annotation.json_io import LabelDocument
+    from tcip_annotation.state import Annotation
+    from tcip_mcp.pipelines.schemas import TrainConfigSchema
+    from tcip_mcp.pipelines.training.envelope import TrainContext
 
 torch = pytest.importorskip(
     "torch"
@@ -25,7 +36,6 @@ from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tcip_mcp.pipelines.schemas import COMPARABILITY_IOU, ScoreWeights  # noqa: E402
 from tcip_mcp.pipelines.training.eval_runners import (  # noqa: E402
-    evaluation_result,
     run_test_evaluation,
 )
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
@@ -77,7 +87,7 @@ _with_bud_trait = pytest.mark.usefixtures("seed_bud_trait_spec")
 # --------------------------------------------------------------------------
 
 
-def test_composite_objective_matches_reference():
+def test_composite_objective_matches_reference() -> None:
     """The objective weights each term by the weights it is handed."""
     expected = 0.5 * 2.0 + 0.3 * 0.5 * 10 + 0.2 * 0.6 * 10  # 3.7
     assert compute_composite_objective(
@@ -85,7 +95,7 @@ def test_composite_objective_matches_reference():
     ) == pytest.approx(expected, abs=1e-9)
 
 
-def test_composite_objective_has_no_score_for_a_degenerate_epoch():
+def test_composite_objective_has_no_score_for_a_degenerate_epoch() -> None:
     """The composite objective is None for a degenerate epoch.
 
     A non-positive or non-finite loss, or both quality terms at zero, is an epoch with no
@@ -108,7 +118,7 @@ def test_composite_objective_has_no_score_for_a_degenerate_epoch():
 # --------------------------------------------------------------------------
 
 
-def _rec(gt, dt, w=100, h=100):
+def _rec(gt: list[dict], dt: list[dict], w: int = 100, h: int = 100) -> dict:
     return prediction_record(
         dt, gt, width=w, height=h, cap=None, count=len(dt)
     )
@@ -142,7 +152,7 @@ def _masked(gt_ring: list, dt_ring: list) -> dict:
     )
 
 
-def test_detection_map50_perfect():
+def test_detection_map50_perfect() -> None:
     gt = _gt([10, 10, 20, 20])
     dt = _dt(([10, 10, 20, 20], 0.9))
     m = detection_metrics(
@@ -156,7 +166,7 @@ def test_detection_map50_perfect():
     assert m["map"] == pytest.approx(1.0)
 
 
-def test_detection_operating_point_tp_fp_fn():
+def test_detection_operating_point_tp_fp_fn() -> None:
     gt = _gt([10, 10, 20, 20], [50, 50, 10, 10])
     dt = _dt(([10, 10, 20, 20], 0.9), ([80, 80, 10, 10], 0.7))  # a TP, an FP
     m = detection_metrics(
@@ -173,7 +183,7 @@ def test_detection_operating_point_tp_fp_fn():
     assert m["map50"] > 0.0
 
 
-def test_detection_conf_threshold_filters():
+def test_detection_conf_threshold_filters() -> None:
     gt = _gt([10, 10, 20, 20])
     # A TP, and an FP below 0.8.
     dt = _dt(([10, 10, 20, 20], 0.9), ([80, 80, 10, 10], 0.7))
@@ -188,7 +198,9 @@ def test_detection_conf_threshold_filters():
     assert m["fp"] == 0
 
 
-def test_detection_metrics_write_nothing_to_stdout(capsys):
+def test_detection_metrics_write_nothing_to_stdout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     gt = _gt([10, 10, 20, 20])
     dt = _dt(([10, 10, 20, 20], 0.9))
     detection_metrics(
@@ -202,7 +214,7 @@ def test_detection_metrics_write_nothing_to_stdout(capsys):
     assert captured.out == ""  # nothing reaches stdout (MCP stdio safety)
 
 
-def test_detection_mask_path():
+def test_detection_mask_path() -> None:
     ring = [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]
     m = detection_metrics(
         [_masked(ring, ring)],
@@ -215,7 +227,7 @@ def test_detection_mask_path():
     assert m["governing_criterion"]["kind"] == "mask_iou_match"
 
 
-def test_a_mask_match_counts_by_region_where_the_box_match_would_not():
+def test_a_mask_match_counts_by_region_where_the_box_match_would_not() -> None:
     """A detection matched by box is missed by mask when their regions do not overlap.
 
     An L-shaped object whose box the box of a detection filling its inner corner overlaps at
@@ -244,11 +256,11 @@ def test_a_mask_match_counts_by_region_where_the_box_match_would_not():
     assert (by_mask["tp"], by_mask["fp"], by_mask["fn"]) == (0, 1, 1)
 
 
-def test_detection_metrics_over_an_empty_side():
+def test_detection_metrics_over_an_empty_side() -> None:
     gt = _gt([10, 10, 20, 20])
     dt = _dt(([10, 10, 20, 20], 0.9))
 
-    def metrics(gt, dt):
+    def metrics(gt: list[dict], dt: list[dict]) -> dict:
         return detection_metrics(
             [_rec(gt, dt)],
             trait=None,
@@ -274,7 +286,7 @@ def test_detection_metrics_over_an_empty_side():
 # --------------------------------------------------------------------------
 
 
-def test_golden_gt_class_avg_size():
+def test_golden_gt_class_avg_size() -> None:
     assert gt_class_avg_size(toy_records(), class_id=0) == pytest.approx(20.0)
 
 
@@ -287,7 +299,7 @@ def _points(centers: list[tuple[float, float]]) -> list[dict]:
     return [{"bbox": [x, y, 0.0, 0.0]} for x, y in centers]
 
 
-def test_golden_derive_operating_point_curve():
+def test_golden_derive_operating_point_curve() -> None:
     sweep = derive_operating_point_curve(
         toy_records(),
         criterion=CENTER_10,
@@ -309,7 +321,7 @@ def test_golden_derive_operating_point_curve():
     assert at[0.9]["count_bias_mean"] == pytest.approx(-0.5)  # mean of [0, -1]
 
 
-def test_golden_operating_point_pickers():
+def test_golden_operating_point_pickers() -> None:
     sweep = derive_operating_point_curve(
         toy_records(),
         criterion=CENTER_10,
@@ -326,7 +338,9 @@ def test_golden_operating_point_pickers():
 # the classifier pairing), under a center or an IoU criterion; coverage of the pinned tie rules.
 
 
-def test_match_pairs_score_first_and_distance_first_disagree_on_cardinality():
+def test_match_pairs_score_first_and_distance_first_disagree_on_cardinality() -> (
+    None
+):
     """Score-first and distance-first matching disagree on how many pairs they claim.
 
     Over two ground truths and a detection within tolerance of both, score-first claims one
@@ -345,7 +359,7 @@ def test_match_pairs_score_first_and_distance_first_disagree_on_cardinality():
     ]
 
 
-def test_match_pairs_score_first_tie_keeps_the_last_index():
+def test_match_pairs_score_first_tie_keeps_the_last_index() -> None:
     """Among equidistant unused ground truths, score-first keeps the last index."""
     pairs = match_pairs(
         _points([(0.0, 0.0), (2.0, 0.0)]),
@@ -356,7 +370,9 @@ def test_match_pairs_score_first_tie_keeps_the_last_index():
     assert pairs == [(1, 0)]
 
 
-def test_match_pairs_distance_first_tie_breaks_by_gt_then_detection_index():
+def test_match_pairs_distance_first_tie_breaks_by_gt_then_detection_index() -> (
+    None
+):
     """Distance-first breaks a tied distance by ground-truth index, then detection index.
 
     The tie-break is ascending, so a fully degenerate 2x2 assigns each detection to the ground
@@ -371,7 +387,7 @@ def test_match_pairs_distance_first_tie_breaks_by_gt_then_detection_index():
     assert pairs == [(0, 0), (1, 1)]
 
 
-def test_match_pairs_under_an_iou_criterion_matches_by_overlap():
+def test_match_pairs_under_an_iou_criterion_matches_by_overlap() -> None:
     """``match_pairs`` under an IoU criterion pairs by overlap, not by nearness.
 
     At a 0.5 threshold, a detection 1 px off its ground truth pairs, and one 6 px off the other
@@ -388,7 +404,7 @@ def test_match_pairs_under_an_iou_criterion_matches_by_overlap():
     assert pairs == [(0, 0)]
 
 
-def test_match_pairs_refuses_an_unknown_policy_by_name():
+def test_match_pairs_refuses_an_unknown_policy_by_name() -> None:
     """``match_pairs`` refuses a policy outside the two stated ones, naming the policy."""
     with pytest.raises(ValueError, match="policy"):
         match_pairs(
@@ -399,7 +415,9 @@ def test_match_pairs_refuses_an_unknown_policy_by_name():
         )
 
 
-def test_dt_score_refuses_a_record_without_a_score_or_with_none_by_name():
+def test_dt_score_refuses_a_record_without_a_score_or_with_none_by_name() -> (
+    None
+):
     """``_dt_score`` refuses a record with no score or a None score, naming which.
 
     ``derive_operating_point_curve`` over a detection with no score refuses with the same
@@ -432,7 +450,9 @@ def test_dt_score_refuses_a_record_without_a_score_or_with_none_by_name():
 # resolve_match_criterion reads the revision's stated localization and never derives one.
 
 
-def test_resolve_match_criterion_refuses_an_unauthored_localization_asking_the_breeder():
+def test_resolve_match_criterion_refuses_an_unauthored_localization_asking_the_breeder() -> (
+    None
+):
     """A revision stating no localization refuses at ``resolve_match_criterion``.
 
     The refusal names the ``localization`` field, with ground-truth boxes in hand.
@@ -446,7 +466,7 @@ def test_resolve_match_criterion_refuses_an_unauthored_localization_asking_the_b
         )
 
 
-def test_resolve_match_criterion_reads_the_stated_kind_as_is():
+def test_resolve_match_criterion_reads_the_stated_kind_as_is() -> None:
     """A revision stating IoU resolves an IoU match over boxes small enough for a center match."""
     trait = fx.entry(
         "leaf",
@@ -462,7 +482,9 @@ def test_resolve_match_criterion_reads_the_stated_kind_as_is():
     )
 
 
-def test_resolve_match_criterion_scales_a_center_match_to_the_reference():
+def test_resolve_match_criterion_scales_a_center_match_to_the_reference() -> (
+    None
+):
     """A center match's tolerance scales with the reference's average object size.
 
     A center match carries its tolerance as a fraction of the average object size and the
@@ -478,14 +500,16 @@ def test_resolve_match_criterion_scales_a_center_match_to_the_reference():
     )
 
 
-def test_the_comparability_criterion_is_iou_matching_under_no_trait():
+def test_the_comparability_criterion_is_iou_matching_under_no_trait() -> None:
     result = comparability_criterion(COMPARABILITY_IOU, by_mask=False)
     assert result["kind"] == "iou_match"
     assert result["iou_threshold"] == COMPARABILITY_IOU
     assert result["trait"] is None
 
 
-def test_resolve_match_criterion_iou_match_derives_a_real_threshold_not_pinned_0_5():
+def test_resolve_match_criterion_iou_match_derives_a_real_threshold_not_pinned_0_5() -> (
+    None
+):
     """An IoU match's threshold is derived from the ground truth in hand, not pinned to 0.5.
 
     The derivation is ``derive_iou_match_threshold``, and the record names it.
@@ -507,7 +531,9 @@ def test_resolve_match_criterion_iou_match_derives_a_real_threshold_not_pinned_0
     assert result["derived_from"] == IOU_MATCH_DERIVATION
 
 
-def test_resolve_match_criterion_iou_match_refuses_an_unauthored_jitter_or_margin():
+def test_resolve_match_criterion_iou_match_refuses_an_unauthored_jitter_or_margin() -> (
+    None
+):
     """An IoU match refuses an unauthored jitter or margin by name.
 
     The jitter and margin the IoU derivation models are the trait's to author; nothing stands
@@ -523,7 +549,9 @@ def test_resolve_match_criterion_iou_match_refuses_an_unauthored_jitter_or_margi
         resolve_match_criterion(half, gt_only([(0, 0, 300, 300)]))
 
 
-def test_resolve_match_criterion_iou_match_refuses_a_reference_with_no_box_to_derive_from():
+def test_resolve_match_criterion_iou_match_refuses_a_reference_with_no_box_to_derive_from() -> (
+    None
+):
     """An IoU match over a reference holding no box refuses naming it."""
     trait = fx.entry(
         "leaf",
@@ -541,7 +569,7 @@ def test_resolve_match_criterion_iou_match_refuses_a_reference_with_no_box_to_de
 # --------------------------------------------------------------------------
 
 
-def test_golden_box_and_mask_map():
+def test_golden_box_and_mask_map() -> None:
     gt = _gt([10, 10, 20, 20])
     dt_perfect = _dt(([10, 10, 20, 20], 0.9))
     m = detection_metrics(
@@ -590,7 +618,7 @@ def test_golden_box_and_mask_map():
 # --------------------------------------------------------------------------
 
 
-def test_classification_metrics():
+def test_classification_metrics() -> None:
     pred = torch.tensor([0, 1, 1, 0])
     gt = torch.tensor([0, 1, 0, 0])
     m = classification_metrics(pred, gt, num_classes=2)
@@ -598,14 +626,14 @@ def test_classification_metrics():
     assert m["f1"] == pytest.approx((0.8 + 2 / 3) / 2, abs=1e-3)
 
 
-def test_ordinal_metrics():
+def test_ordinal_metrics() -> None:
     m = ordinal_metrics(torch.tensor([0, 1, 2]), torch.tensor([0, 2, 2]), 3)
     assert m["mae"] == pytest.approx(1 / 3)
     assert m["rank_acc"] == pytest.approx(2 / 3)
     assert m["quadratic_weighted_kappa"] == pytest.approx(0.8)
 
 
-def test_regression_metrics():
+def test_regression_metrics() -> None:
     m = regression_metrics(
         torch.tensor([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 4.0])
     )
@@ -614,14 +642,14 @@ def test_regression_metrics():
     assert m["r_squared"] == pytest.approx(11 / 14)
 
 
-def test_quadratic_weighted_kappa_perfect_agreement_is_one():
+def test_quadratic_weighted_kappa_perfect_agreement_is_one() -> None:
     kappa = quadratic_weighted_kappa(
         torch.tensor([0, 1, 2, 1]), torch.tensor([0, 1, 2, 1]), 3
     )
     assert kappa == pytest.approx(1.0)
 
 
-def test_quadratic_weighted_kappa_hand_computed():
+def test_quadratic_weighted_kappa_hand_computed() -> None:
     # true=[0,2,2], pred=[0,1,2]: one item off by one rank out of three, worked out by hand
     # against the expected-disagreement-under-independence formula -> kappa = 1 - 1/5.
     kappa = quadratic_weighted_kappa(
@@ -630,7 +658,9 @@ def test_quadratic_weighted_kappa_hand_computed():
     assert kappa == pytest.approx(0.8)
 
 
-def test_quadratic_weighted_kappa_reads_a_fractional_prediction_at_its_nearest_rank():
+def test_quadratic_weighted_kappa_reads_a_fractional_prediction_at_its_nearest_rank() -> (
+    None
+):
     """Quadratic weighted kappa reads a fractional prediction at its nearest rank.
 
     A head that emits continuous rank estimates is scored at the rank each estimate is nearest
@@ -641,7 +671,9 @@ def test_quadratic_weighted_kappa_reads_a_fractional_prediction_at_its_nearest_r
     assert quadratic_weighted_kappa(fractional, gt, 4) == pytest.approx(1.0)
 
 
-def test_quadratic_weighted_kappa_scores_a_single_rank_guess_at_chance():
+def test_quadratic_weighted_kappa_scores_a_single_rank_guess_at_chance() -> (
+    None
+):
     """Quadratic weighted kappa scores a single-rank guess at chance.
 
     A predictor that always guesses the majority rank is right on 7 of 10 items and scores 0.
@@ -654,13 +686,13 @@ def test_quadratic_weighted_kappa_scores_a_single_rank_guess_at_chance():
     )
 
 
-def test_quadratic_weighted_kappa_empty_is_none():
+def test_quadratic_weighted_kappa_empty_is_none() -> None:
     assert (
         quadratic_weighted_kappa(torch.tensor([]), torch.tensor([]), 3) is None
     )
 
 
-def test_quadratic_weighted_kappa_degenerate_single_rank_is_none():
+def test_quadratic_weighted_kappa_degenerate_single_rank_is_none() -> None:
     # every item shares the same true and predicted rank: no expected disagreement to correct for.
     kappa = quadratic_weighted_kappa(
         torch.tensor([1, 1, 1]), torch.tensor([1, 1, 1]), num_ranks=3
@@ -668,38 +700,40 @@ def test_quadratic_weighted_kappa_degenerate_single_rank_is_none():
     assert kappa is None
 
 
-def test_r_squared_perfect_fit_is_one():
+def test_r_squared_perfect_fit_is_one() -> None:
     assert r_squared(
         torch.tensor([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 3.0])
     ) == pytest.approx(1.0)
 
 
-def test_r_squared_worse_than_mean_baseline_is_negative():
+def test_r_squared_worse_than_mean_baseline_is_negative() -> None:
     r2 = r_squared(
         torch.tensor([5.0, -5.0, 5.0]), torch.tensor([1.0, 2.0, 3.0])
     )
     assert r2 < 0
 
 
-def test_r_squared_empty_is_none():
+def test_r_squared_empty_is_none() -> None:
     assert r_squared(torch.tensor([]), torch.tensor([])) is None
 
 
-def test_r_squared_constant_gt_is_none():
+def test_r_squared_constant_gt_is_none() -> None:
     assert (
         r_squared(torch.tensor([1.0, 2.0, 3.0]), torch.tensor([5.0, 5.0, 5.0]))
         is None
     )
 
 
-def test_concordance_correlation_coefficient_perfect_agreement_is_one():
+def test_concordance_correlation_coefficient_perfect_agreement_is_one() -> (
+    None
+):
     ccc = concordance_correlation_coefficient(
         torch.tensor([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 3.0])
     )
     assert ccc == pytest.approx(1.0)
 
 
-def test_concordance_correlation_coefficient_hand_computed():
+def test_concordance_correlation_coefficient_hand_computed() -> None:
     # pred=[1,2,3], gt=[1,2,4] (the same pair test_regression_metrics uses), population statistics:
     # pred_mean=2, gt_mean=7/3; pred_var=mean((pred-2)^2)=(1+0+1)/3=2/3;
     # gt_var=mean((gt-7/3)^2)=((-4/3)^2+(-1/3)^2+(5/3)^2)/3=(16/9+1/9+25/9)/3=(42/9)/3=14/9;
@@ -712,14 +746,14 @@ def test_concordance_correlation_coefficient_hand_computed():
     assert ccc == pytest.approx(6 / 7)
 
 
-def test_concordance_correlation_coefficient_empty_is_none():
+def test_concordance_correlation_coefficient_empty_is_none() -> None:
     assert (
         concordance_correlation_coefficient(torch.tensor([]), torch.tensor([]))
         is None
     )
 
 
-def test_concordance_correlation_coefficient_zero_variance_is_none():
+def test_concordance_correlation_coefficient_zero_variance_is_none() -> None:
     # constant predictions against varying GT: pred_var=0, denominator undefined.
     assert (
         concordance_correlation_coefficient(
@@ -736,7 +770,7 @@ def test_concordance_correlation_coefficient_zero_variance_is_none():
     )
 
 
-def test_selection_value_prefers_objective_for_detection():
+def test_selection_value_prefers_objective_for_detection() -> None:
     assert (
         _selection_value(
             "detection",
@@ -755,14 +789,18 @@ def test_selection_value_prefers_objective_for_detection():
     assert _selection_value("detection", {}, 0.2, "loss") == 0.2
 
 
-def test_selection_value_raises_when_the_metric_is_not_among_this_epochs_val_metrics():
+def test_selection_value_raises_when_the_metric_is_not_among_this_epochs_val_metrics() -> (
+    None
+):
     with pytest.raises(
         ValueError, match="not among this epoch's validation metrics"
     ):
         _selection_value("detection", {"val_loss": 0.1}, 0.2, "objective")
 
 
-def test_resolve_selection_metric_admits_a_weighted_objective_and_a_plain_metric():
+def test_resolve_selection_metric_admits_a_weighted_objective_and_a_plain_metric() -> (
+    None
+):
     resolve_selection_metric(
         None, "objective", score_weights=WEIGHTS, has_val_loader=True
     )
@@ -771,7 +809,9 @@ def test_resolve_selection_metric_admits_a_weighted_objective_and_a_plain_metric
     )
 
 
-def test_resolve_selection_metric_with_no_val_loader_accepts_only_loss():
+def test_resolve_selection_metric_with_no_val_loader_accepts_only_loss() -> (
+    None
+):
     resolve_selection_metric(
         None, "loss", score_weights=None, has_val_loader=False
     )
@@ -786,7 +826,9 @@ def test_resolve_selection_metric_with_no_val_loader_accepts_only_loss():
 
 
 @_with_bud_trait
-def test_resolve_selection_metric_rejects_incoherent_explicit_choice(tmp_path):
+def test_resolve_selection_metric_rejects_incoherent_explicit_choice(
+    tmp_path: Path,
+) -> None:
     trait = fx.latest("bud_opening", tmp_path)
     with pytest.raises(ValueError, match="comparability-only"):
         resolve_selection_metric(
@@ -795,7 +837,9 @@ def test_resolve_selection_metric_rejects_incoherent_explicit_choice(tmp_path):
 
 
 @_with_bud_trait
-def test_resolve_selection_metric_allows_coherent_explicit_choice(tmp_path):
+def test_resolve_selection_metric_allows_coherent_explicit_choice(
+    tmp_path: Path,
+) -> None:
     # A legitimate explicit choice must still succeed: a rail must admit valid work, not
     # only reject invalid work.
     trait = fx.latest("bud_opening", tmp_path)
@@ -808,7 +852,9 @@ def test_resolve_selection_metric_allows_coherent_explicit_choice(tmp_path):
     )  # no trait -> no gate
 
 
-def test_an_evaluation_block_selecting_on_a_metric_with_no_declared_direction_is_refused():
+def test_an_evaluation_block_selecting_on_a_metric_with_no_declared_direction_is_refused() -> (
+    None
+):
     """A selection metric with no declared ranking direction is refused by the field's type.
 
     ``selection_metric="not_a_real_metric"`` is refused naming the field, and ``"f1"`` is
@@ -826,8 +872,8 @@ def test_an_evaluation_block_selecting_on_a_metric_with_no_declared_direction_is
 
 
 def test_a_detector_run_selecting_on_the_objective_refuses_unweighted_and_resolves_weighted(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A detector selecting on the objective refuses unweighted and resolves weighted.
 
     A detector config selecting on ``objective`` with no ``score_weights`` refuses at its
@@ -874,7 +920,9 @@ def test_a_detector_run_selecting_on_the_objective_refuses_unweighted_and_resolv
     )
 
 
-def test_score_weights_missing_a_term_or_stating_another_refuse_at_admission():
+def test_score_weights_missing_a_term_or_stating_another_refuse_at_admission() -> (
+    None
+):
     """Score weights missing a term or stating another refuse at admission by name.
 
     A config whose ``score_weights`` omits a term refuses at admission naming each missing
@@ -885,7 +933,7 @@ def test_score_weights_missing_a_term_or_stating_another_refuse_at_admission():
     from tests._chain_fixtures import training_config, weights_statistics
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
-    def admitted(weights: dict):
+    def admitted(weights: dict) -> TrainConfigSchema:
         return train_config(
             training_config(
                 REPO_ROOT,
@@ -908,7 +956,9 @@ def test_score_weights_missing_a_term_or_stating_another_refuse_at_admission():
 # HIGHER_IS_BETTER_BY_METRIC held against what evaluate()/governing_counts really return.
 
 
-def _detection_batch(num_images: int = 2, img_size: int = 64):
+def _detection_batch(
+    num_images: int = 2, img_size: int = 64
+) -> tuple[list[Tensor], list[dict]]:
     from tcip_mcp.pipelines.training.collation import task_collate
 
     items = []
@@ -927,8 +977,8 @@ def _detection_batch(num_images: int = 2, img_size: int = 64):
 
 @_with_bud_trait
 def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """``HIGHER_IS_BETTER_BY_METRIC`` matches the ranking keys the two metric producers return.
 
     Over each synthesizable task's ``evaluate`` and one ``governing_counts`` call, each declared
@@ -957,7 +1007,10 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
                 num_classes=1, **detector_values()
             )
             images, targets = _detection_batch(img_size=img_size)
-            loader = [(images, targets)]
+            loader: (
+                list[tuple[list[Tensor], list[dict]]]
+                | list[tuple[Tensor, dict[str, Tensor]]]
+            ) = [(images, targets)]
         elif task == "instance_seg":
             model = bespoke_models.build_bespoke_instance_seg(
                 num_classes=1, **detector_values()
@@ -1010,9 +1063,12 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
         trait = (
             fx.latest("bud_opening", tmp_path) if task == "detection" else None
         )
-        dims = {"ordinal": {"num_ranks": 3}, "regression": {}}.get(
-            task, {"num_classes": 2}
-        )
+        from tcip_mcp.pipelines.schemas import ModelDims
+
+        dims = {
+            "ordinal": ModelDims(in_chans=3, num_ranks=3),
+            "regression": ModelDims(in_chans=3),
+        }.get(task, ModelDims(in_chans=3, num_classes=2))
         from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 
         detector = task in DETECTOR_TASKS
@@ -1021,7 +1077,7 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
             loader,
             device,
             task,
-            dims={"in_chans": 3, **dims},
+            dims=dims,
             trait=trait,
             conf_threshold=VALIDATION_CONF if detector else None,
             iou_threshold=IOU_THRESHOLD,
@@ -1077,8 +1133,8 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
 
 
 def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Both evaluation regimes carry the common keys and keep their own fields apart.
 
     The results of ``run_test_evaluation`` and ``run_full_frame_evaluation`` each carry the
@@ -1187,8 +1243,11 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(
     ],
 )
 def test_a_full_frame_evaluation_merges_at_the_threshold_its_ground_truth_derives(
-    tmp_path, monkeypatch, boxes, derives
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    boxes: list[tuple[int, int, int, int]],
+    derives: bool,
+) -> None:
     """A full-frame evaluation merges at the threshold its ground truth derives.
 
     An unstated merge threshold is the one the evaluated reference's ground truth derives;
@@ -1265,22 +1324,68 @@ def test_a_full_frame_evaluation_merges_at_the_threshold_its_ground_truth_derive
     )
 
 
-def test_evaluation_result_refuses_a_key_extra_shares_with_common():
-    """A key present in both common and extra is refused naming the key."""
-    from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
+def test_an_evaluation_metric_sharing_an_identity_key_refuses_naming_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A regime's field sharing a key with the evaluation's identity refuses naming the key."""
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.execution import prepare
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_DETECTOR_PASS,
+        registered_checkpoint,
+    )
 
-    common = {
-        "model_path": "m.pt",
-        "task": "detection",
-        "checkpoint_sha256": "abc",
-        "experiment_id": "e1",
-        "iou_threshold": 0.5,
-        "execution": dict(SAMPLE_DETECTOR_PASS),
-        "eval_regime": "full-frame-single-pass",
-    }
-    extra = {"precision": 0.9, "task": "classification"}
+    monkeypatch.setattr(
+        evaluation,
+        "evaluate",
+        lambda *a, **k: {"precision": 0.9, "task": "classification"},
+    )
+    checkpoint = load_registered_checkpoint(
+        registered_checkpoint(tmp_path), project=tmp_path
+    )
     with pytest.raises(ValueError, match="task"):
-        evaluation_result(common, extra)
+        run_test_evaluation(
+            prepare(
+                checkpoint, Stated(tile=False, **SAMPLE_DETECTOR_PASS)
+            ).runnable(),
+            None,
+            "cpu",
+            iou_threshold=IOU_THRESHOLD,
+            trait=None,
+        )
+
+
+def test_an_evaluation_identity_stated_without_its_regime_refuses_naming_it(
+    tmp_path: Path,
+) -> None:
+    """An evaluation identity stated without ``eval_regime`` refuses at construction naming it."""
+    from pydantic import ValidationError
+
+    import tcip_mcp.pipelines.training.eval_runners as eval_runners
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.execution import prepare
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_DETECTOR_PASS,
+        registered_checkpoint,
+    )
+
+    checkpoint = load_registered_checkpoint(
+        registered_checkpoint(tmp_path), project=tmp_path
+    )
+    stated = {
+        **dict(checkpoint.producer),
+        "model_path": checkpoint.path,
+        "task": checkpoint.task,
+        "iou_threshold": IOU_THRESHOLD,
+        "execution": prepare(
+            checkpoint, Stated(tile=False, **SAMPLE_DETECTOR_PASS)
+        )
+        .runnable()
+        .execution,
+    }
+    with pytest.raises(ValidationError, match="eval_regime"):
+        eval_runners.EvaluationIdentity.model_validate(stated)
 
 
 # --------------------------------------------------------------------------
@@ -1298,7 +1403,7 @@ IMG = 64
 _save_png = partial(write_noise_image, size=IMG)
 
 
-def _four_bud_images(tmp_path):
+def _four_bud_images(tmp_path: Path) -> Path:
     """Write four noise images, each labeled with one ``bud`` box at (19.2, 19.2, 44.8, 44.8).
 
     The images land in ``tmp_path``'s undated capture; return their directory.
@@ -1318,7 +1423,9 @@ def _four_bud_images(tmp_path):
     return images_dir
 
 
-def _stored(tmp_path, annotations, size: int = 100):
+def _stored(
+    tmp_path: Path, annotations: list[Annotation], size: int = 100
+) -> LabelDocument:
     """Write ``annotations`` as one image's label document and return it read back.
 
     The document is that of a ``size``-pixel image ``a`` under ``tmp_path``.
@@ -1331,7 +1438,9 @@ def _stored(tmp_path, annotations, size: int = 100):
     return json_io.read_label_document(key)
 
 
-def _context(tmp_path, model_source, data: dict, **overrides):
+def _context(
+    tmp_path: Path, model_source: dict, data: dict, **overrides: object
+) -> TrainContext:
     """Return the context of a run of ``model_source`` over the data block ``data``.
 
     The run draws its split at a validation ratio of 0.25, with ``overrides`` in the config, and
@@ -1352,7 +1461,9 @@ def _context(tmp_path, model_source, data: dict, **overrides):
     )
 
 
-def test_validate_detection_returns_metrics_and_objective(tmp_path):
+def test_validate_detection_returns_metrics_and_objective(
+    tmp_path: Path,
+) -> None:
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     ctx = _context(
@@ -1390,7 +1501,9 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
 
 
 @_with_bud_trait
-def test_train_center_match_trait_records_governing_criterion(tmp_path):
+def test_train_center_match_trait_records_governing_criterion(
+    tmp_path: Path,
+) -> None:
     """A center-match trait's run records its governing criterion in the metrics row.
 
     The untrained detector's run fails as having no selectable epoch, and its last metrics row
@@ -1418,7 +1531,7 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
     assert last["selection_trait"] == "bud_opening"
 
 
-def test_validate_classification_metrics(tmp_path):
+def test_validate_classification_metrics(tmp_path: Path) -> None:
     from tests._chain_fixtures import BESPOKE_MODELS
     from tests.tiny_trainer_fixtures import (
         distinct_intensities,
@@ -1454,8 +1567,8 @@ def test_validate_classification_metrics(tmp_path):
 
 
 def test_score_predictions_folder_counts_every_image_through_the_matcher(
-    data_dir,
-):
+    data_dir: Path,
+) -> None:
     from tcip_mcp.tools.annotation_tools import score_predictions
     from tests.conftest import DATA_DIR_BUCKET
 
@@ -1496,7 +1609,9 @@ def _crowd_records() -> list[dict]:
     ]
 
 
-def test_a_detection_in_a_crowd_region_is_neither_true_nor_false_and_the_region_no_miss():
+def test_a_detection_in_a_crowd_region_is_neither_true_nor_false_and_the_region_no_miss() -> (
+    None
+):
     m = detection_metrics(
         _crowd_records(),
         trait=None,
@@ -1507,7 +1622,9 @@ def test_a_detection_in_a_crowd_region_is_neither_true_nor_false_and_the_region_
     assert (m["tp"], m["fp"], m["fn"]) == (1, 0, 0)
 
 
-def test_the_center_match_count_treats_a_crowd_region_as_the_iou_count_does():
+def test_the_center_match_count_treats_a_crowd_region_as_the_iou_count_does() -> (
+    None
+):
     from tcip_mcp.pipelines.training.evaluation import governing_counts
 
     counts = governing_counts(
@@ -1519,8 +1636,8 @@ def test_the_center_match_count_treats_a_crowd_region_as_the_iou_count_does():
 
 
 def test_a_targets_records_are_one_shape_on_the_stored_grid_whatever_the_target_holds(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """``gt_records`` builds one record shape on the stored grid from lists, arrays and tensors.
 
     The loader's own target, as lists, as an array and as tensors, becomes the same evaluation
@@ -1573,7 +1690,9 @@ def test_a_targets_records_are_one_shape_on_the_stored_grid_whatever_the_target_
         gt_records(flagless)
 
 
-def test_a_detector_output_stating_no_boxes_refuses_rather_than_reading_as_no_detections():
+def test_a_detector_output_stating_no_boxes_refuses_rather_than_reading_as_no_detections() -> (
+    None
+):
     from tcip_mcp.pipelines.training.evaluation import records_from_detector
 
     target = {
@@ -1609,8 +1728,8 @@ def test_a_detector_output_stating_no_boxes_refuses_rather_than_reading_as_no_de
 
 
 def test_a_ground_truth_record_is_one_shape_from_a_target_and_from_its_annotation(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A ground-truth record is one shape from a target and from its annotation.
 
     The loader's target route and the annotation route build a document's ground truth as
@@ -1652,7 +1771,9 @@ def test_a_ground_truth_record_is_one_shape_from_a_target_and_from_its_annotatio
     assert [g["index"] for g in record["gt"]] == [0, 1]
 
 
-def test_a_detectors_record_reads_both_sides_on_the_stored_grid(tmp_path):
+def test_a_detectors_record_reads_both_sides_on_the_stored_grid(
+    tmp_path: Path,
+) -> None:
     """``records_from_detector`` reads both sides on the stored label grid.
 
     The ground-truth record holds the box the document stores, and the detection's record sits
@@ -1690,7 +1811,7 @@ def test_a_detectors_record_reads_both_sides_on_the_stored_grid(tmp_path):
 
 
 def _reference_records(
-    tmp_path, reference: list, detections: list
+    tmp_path: Path, reference: list, detections: list
 ) -> list[dict]:
     """Return one image's records, its reference read back through the label document."""
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
@@ -1710,8 +1831,8 @@ def _reference_records(
     "crowd_only", [True, False], ids=["crowd_only", "empty"]
 )
 def test_a_detection_outside_a_reference_with_no_object_is_a_false_positive(
-    tmp_path, crowd_only
-):
+    tmp_path: Path, crowd_only: bool
+) -> None:
     """A detection outside a reference with no object is one false positive.
 
     Over a reference holding a crowd region alone or nothing, a detection outside the crowd
@@ -1754,8 +1875,8 @@ def test_a_detection_outside_a_reference_with_no_object_is_a_false_positive(
 
 
 def test_a_reference_with_objects_and_no_detection_scores_every_object_a_miss(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_annotation.state import Annotation, BBox
 
     records = _reference_records(
@@ -1785,7 +1906,9 @@ def test_a_reference_with_objects_and_no_detection_scores_every_object_a_miss(
     assert (m["tp"], m["fp"], m["fn"]) == (0, 0, 2)
 
 
-def test_a_crowd_region_is_no_object_in_a_ground_truth_count(tmp_path):
+def test_a_crowd_region_is_no_object_in_a_ground_truth_count(
+    tmp_path: Path,
+) -> None:
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.splits import count_label_lines
     from tcip_mcp.pipelines.training.evaluation import gt_class_typical_count

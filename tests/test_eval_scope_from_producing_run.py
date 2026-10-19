@@ -8,10 +8,19 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
+if TYPE_CHECKING:
+    import torch
+    from torch.utils.data import DataLoader
+
+    from tcip_mcp.pipelines.execution import Pass
+    from tcip_mcp.pipelines.schemas import TilingSpec
+    from tcip_mcp.traits import TraitEntry
 
 pytest.importorskip("torchvision")
 
@@ -34,7 +43,12 @@ def _two_subject_dataset(root: Path) -> Path:
     images_dir.mkdir(parents=True, exist_ok=True)
     registry_over(
         root,
-        SubjectRegistry(subjects=(Subject(name="bud"), Subject(name="leaf"))),
+        SubjectRegistry(
+            subjects=(
+                Subject(name="bud", description=""),
+                Subject(name="leaf", description=""),
+            )
+        ),
     )
     for i in range(3):
         buds = [
@@ -60,7 +74,7 @@ def _two_subject_dataset(root: Path) -> Path:
 
 
 def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Evaluating by run id reads ground truth in the scope the run's checkpoint records.
 
@@ -88,7 +102,12 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
 
     captured: dict = {}
 
-    def _fake(pass_, loader, device, **kw):
+    def _fake(
+        pass_: Pass,
+        loader: DataLoader,
+        device: torch.device,
+        **kw: float | TilingSpec | TraitEntry | None,
+    ) -> dict:
         captured["ds"] = loader.dataset
         return {"eval_regime": "tile-level"}
 

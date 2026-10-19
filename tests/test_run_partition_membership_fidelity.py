@@ -9,15 +9,19 @@ disjointness check.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests._producer_fixtures import big_single_source
 
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.schemas import Rect, SpatialManifest
+
 pytest.importorskip("torchvision")
 
 
-def _data_cfg(images_dir: Path, **split) -> dict:
+def _data_cfg(images_dir: Path, **split: object) -> dict:
     from tests._training_values import drawn_split, tiling_block
 
     return {
@@ -30,7 +34,9 @@ def _data_cfg(images_dir: Path, **split) -> dict:
     }
 
 
-def _persisted_split(project: Path, experiment_id: str, data_cfg: dict):
+def _persisted_split(
+    project: Path, experiment_id: str, data_cfg: dict
+) -> SpatialManifest:
     """Resolve the run ``experiment_id`` over ``data_cfg`` and return its spatial manifest.
 
     The manifest is the one the run under ``project`` resolved and recorded; the helper asserts
@@ -45,8 +51,8 @@ def _persisted_split(project: Path, experiment_id: str, data_cfg: dict):
     resolved_run(project, data_cfg, experiment_id=experiment_id)
     resolved = run_resolution(experiment_id, project=project)
     assert partition_side(resolved.partition, "train") == ["mosaic"]
-    assert resolved.spatial is not None
-    return resolved.spatial
+    assert resolved.partition.spatial is not None
+    return resolved.partition.spatial
 
 
 def test_spatial_split_records_val_membership_from_the_val_side(
@@ -68,7 +74,7 @@ def test_spatial_split_records_val_membership_from_the_val_side(
 
     # The two sides are not interchangeable: 0.65 of the axis trains against 0.25 validating, so
     # the recorded regions differ in width as well as in membership.
-    def _axis_width(region):
+    def _axis_width(region: list[Rect]) -> int:
         return sum(x1 - x0 for x0, _y0, x1, _y1 in region)
 
     assert (
@@ -100,7 +106,7 @@ def test_persisted_calibration_region_is_reserved_away_from_train(
         for train_rect in train_region:
             assert not rects_overlap(cal_rect, train_rect)
 
-    def _shrunk(rect):
+    def _shrunk(rect: Rect) -> Rect:
         x0, y0, x1, y1 = rect
         return (x0 + 1, y0 + 1, x1 - 1, y1 - 1)
 

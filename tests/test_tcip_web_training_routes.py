@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
 
 from tests._training_values import fifo_search, sweep_space
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from tcip_mcp.pipelines.training.envelope import TrainContext
 
 
 def test_the_run_list_refuses_while_no_project_is_open(
@@ -21,7 +27,7 @@ def _opened(
     experiment_id: str,
     tmp_path: Path,
     builder: str = "my_models:chestnut_burr_det",
-):
+) -> Path:
     """Open a detector run built by ``builder`` over two frames of its own under ``tmp_path``.
 
     The builder's module is an empty file of its own, and the run is opened by the launcher's
@@ -51,7 +57,7 @@ def _opened(
 
 
 def test_a_listed_run_row_carries_what_the_launch_picker_shows(
-    opened_client: TestClient, opened_project
+    opened_client: TestClient, opened_project: Path
 ) -> None:
     _opened("exp-picker-1", opened_project, builder="my_models:leaf_det")
 
@@ -70,7 +76,7 @@ def test_a_listed_run_row_carries_what_the_launch_picker_shows(
 
 
 def test_a_run_is_read_by_its_id_and_an_unknown_id_refuses_naming_it(
-    opened_client: TestClient, opened_project
+    opened_client: TestClient, opened_project: Path
 ) -> None:
     _opened("exp-read", opened_project)
 
@@ -97,7 +103,7 @@ def test_relaunch_route_404s_for_an_unknown_experiment(
 
 
 def test_relaunch_route_422s_with_preflight_issues_for_a_refused_config(
-    tmp_path, opened_client: TestClient
+    tmp_path: Path, opened_client: TestClient
 ) -> None:
     _opened("exp-refused", tmp_path, builder="not.a:module")
 
@@ -380,7 +386,7 @@ def test_cancel_unknown_run_returns_404(opened_client: TestClient) -> None:
 
 
 def test_a_cancel_naming_its_person_is_admitted_and_its_line_names_them(
-    tmp_path, opened_client: TestClient
+    tmp_path: Path, opened_client: TestClient
 ) -> None:
     from tcip_mcp.audit import audit_log_key
     from tcip_store import read_log
@@ -449,7 +455,7 @@ def test_tensorboard_route_404s_with_no_logs_for_a_run_with_no_event_file(
 
 
 def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
-    tmp_path,
+    tmp_path: Path,
     opened_client: TestClient,
 ) -> None:
     """The TensorBoard route's ``no_logs`` refusal carries the run's recorded error.
@@ -480,13 +486,13 @@ def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
     assert detail["message"] == "could not open the dataset's images_dir"
 
 
-def _fails_at_data_load(ctx) -> None:
+def _fails_at_data_load(ctx: TrainContext) -> None:
     """Raise a RuntimeError naming the dataset's unopenable images_dir."""
     raise RuntimeError("could not open the dataset's images_dir")
 
 
 def test_list_runs_reads_every_training_run_directory(
-    opened_project, monkeypatch
+    opened_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The run listing's rows come from the project's run directories.
 
@@ -503,7 +509,7 @@ def test_list_runs_reads_every_training_run_directory(
 
 
 def test_list_runs_route_is_a_pure_pass_through_to_the_tool(
-    opened_project,
+    opened_project: Path,
 ) -> None:
     """The run listing route's answer equals the agent's tool's, exactly."""
     from tcip_mcp.tools.experiment_tools import list_experiments
@@ -515,7 +521,9 @@ def test_list_runs_route_is_a_pure_pass_through_to_the_tool(
 
 
 def test_a_route_launch_shows_its_declaration_from_its_launch_event(
-    tmp_path, monkeypatch, opened_client: TestClient
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    opened_client: TestClient,
 ) -> None:
     """A run launched through the browser-facing door shows its launch event's declaration.
 
@@ -526,7 +534,7 @@ def test_a_route_launch_shows_its_declaration_from_its_launch_event(
     monkeypatch.chdir(tmp_path)
     fake_popen(monkeypatch, [])
 
-    from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
+    from tcip_mcp.experiments import experiment_dir, read_run
     from tests._verified_checkpoint_fixtures import (
         detection_config,
         opened_run,
@@ -553,11 +561,9 @@ def test_a_route_launch_shows_its_declaration_from_its_launch_event(
     minted = resp.json()["experiment_id"]
     (line,) = read_log(audit_log_key(tmp_path)).records[before:]
     assert (line["tool"], line["actor"]) == ("launch_training", "user:tester")
-    relaunched = read_record(
-        experiment_dir(minted, project=tmp_path) / RUN_FILE
-    )
-    assert "launched_by" not in relaunched
-    assert relaunched["relaunched_from"] == "exp-gui-relaunch"
+    relaunched = read_run(experiment_dir(minted, project=tmp_path))
+    assert "launched_by" not in relaunched.model_dump()
+    assert relaunched.relaunched_from == "exp-gui-relaunch"
     row = next(
         r
         for r in opened_client.get("/api/training/runs").json()["runs"]
@@ -582,7 +588,9 @@ def _regression_config(tmp_path: Path) -> dict:
 
 
 def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
-    tmp_path, monkeypatch, opened_client: TestClient
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    opened_client: TestClient,
 ) -> None:
     """The relaunch route forks a run's config and names the parent.
 
@@ -610,20 +618,18 @@ def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
     assert forked_id != parent_id
     assert run_to_end(tmp_path, forked_id)["state"] == "completed"
 
-    from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
+    from tcip_mcp.experiments import experiment_dir, read_run
 
-    parent = read_record(
-        experiment_dir(parent_id, project=tmp_path) / RUN_FILE
-    )
-    forked = read_record(
-        experiment_dir(forked_id, project=tmp_path) / RUN_FILE
-    )
-    assert forked["relaunched_from"] == parent_id
-    assert forked["config"] == parent["config"]
+    parent = read_run(experiment_dir(parent_id, project=tmp_path))
+    forked = read_run(experiment_dir(forked_id, project=tmp_path))
+    assert forked.relaunched_from == parent_id
+    assert forked.config == parent.config
 
 
 def test_list_runs_route_names_the_run_s_selection_metric(
-    tmp_path, monkeypatch, opened_client: TestClient
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    opened_client: TestClient,
 ) -> None:
     """The run listing names a launched run's selection metric and its best value.
 
@@ -716,7 +722,7 @@ def test_a_sweep_and_its_trial_each_have_one_board_whichever_door_launches_it(
     opened_client: TestClient,
     opened_project: Path,
     real_hpo_base_config: dict,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tb_launches: list[str],
 ) -> None:
     """TensorBoard launches for a sweep and its trial name the sweep's and the trial's directories.
@@ -730,7 +736,14 @@ def test_a_sweep_and_its_trial_each_have_one_board_whichever_door_launches_it(
 
     trials: list[Path] = []
 
-    def one_trial_search(**kw) -> None:
+    def one_trial_search(
+        **kw: Callable[[dict, Callable[[float], None]], object]
+        | dict
+        | str
+        | int
+        | Path
+        | None,
+    ) -> None:
         trial = tt.open_trial(
             kw["sweep_dir"], "t0", {"optimizer.head_lr": 0.1}
         )
@@ -768,7 +781,7 @@ def test_a_recorded_sweep_relaunches_through_the_run_launch_door(
     opened_client: TestClient,
     opened_project: Path,
     real_hpo_base_config: dict,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A recorded sweep relaunches through the run launch door.
 
@@ -779,7 +792,7 @@ def test_a_recorded_sweep_relaunches_through_the_run_launch_door(
     """
     import tcip_store as ts
     from tcip_mcp.audit import audit_log_key
-    from tcip_mcp.experiments import find_sweep, observe
+    from tcip_mcp.experiments import find_sweep, observe_sweep
     from tests._producer_fixtures import fake_popen
     from tests._verified_checkpoint_fixtures import opened_sweep
 
@@ -796,7 +809,7 @@ def test_a_recorded_sweep_relaunches_through_the_run_launch_door(
     assert resp.status_code == 200, resp.text
     minted = find_sweep(resp.json()["sweep_id"], project=opened_project)
     assert minted is not None
-    assert observe(minted).record["input"]["relaunched_from"] == source
+    assert observe_sweep(minted).record.input.relaunched_from == source
     (line,) = ts.read_log(audit_log_key(opened_project)).records[before:]
     assert (line["tool"], line["actor"]) == ("open_sweep", "user:tester")
     assert [argv[-2:] for argv in started] == [["--run-dir", str(minted)]]

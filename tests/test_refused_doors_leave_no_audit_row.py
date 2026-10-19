@@ -7,6 +7,7 @@ a write (the registry's ownership rail) each leave the audit log as it was.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -19,6 +20,11 @@ from tests._training_values import (
     VERTEX_SPACING,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from tcip_mcp.workspace import BoundProject
+
 
 def _rows(tmp_path: Path) -> list[dict]:
     from tcip_mcp.audit import audit_log_key
@@ -26,7 +32,7 @@ def _rows(tmp_path: Path) -> list[dict]:
     return list(ts.read_log(audit_log_key(tmp_path)).records)
 
 
-def _register_model(tmp_path: Path):
+def _register_model(tmp_path: Path) -> dict:
     from tcip_mcp.tools.model_tools import register_model
 
     return register_model(
@@ -34,7 +40,7 @@ def _register_model(tmp_path: Path):
     )
 
 
-def _deliver_per_image_counts(tmp_path: Path):
+def _deliver_per_image_counts(tmp_path: Path) -> dict:
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
     return deliver_per_image_counts(
@@ -46,7 +52,7 @@ def _deliver_per_image_counts(tmp_path: Path):
     )
 
 
-def _import_coco(tmp_path: Path):
+def _import_coco(tmp_path: Path) -> dict:
     from tcip_mcp.tools.ingest_tools import import_coco
 
     document = tmp_path / "external.json"
@@ -63,7 +69,7 @@ def _import_coco(tmp_path: Path):
     )
 
 
-def _build_plant_mapping(tmp_path: Path):
+def _build_plant_mapping(tmp_path: Path) -> dict:
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
 
     return build_plant_mapping(
@@ -74,7 +80,7 @@ def _build_plant_mapping(tmp_path: Path):
     )
 
 
-def _deliver_per_plant_csv(tmp_path: Path):
+def _deliver_per_plant_csv(tmp_path: Path) -> dict:
     from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
 
     return deliver_per_plant_csv(
@@ -90,7 +96,7 @@ def _deliver_per_plant_csv(tmp_path: Path):
     )
 
 
-def _deliver_orthomosaic_plant_counts(tmp_path: Path):
+def _deliver_orthomosaic_plant_counts(tmp_path: Path) -> dict:
     from tcip_mcp.tools.orthomosaic_tools import (
         deliver_orthomosaic_plant_counts,
     )
@@ -106,7 +112,7 @@ def _deliver_orthomosaic_plant_counts(tmp_path: Path):
     )
 
 
-def _deliver_phenology_milestones(tmp_path: Path):
+def _deliver_phenology_milestones(tmp_path: Path) -> dict:
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     return deliver_phenology_milestones(
@@ -120,7 +126,7 @@ def _deliver_phenology_milestones(tmp_path: Path):
     )
 
 
-def _assess_an_unregistered_checkpoint(tmp_path: Path):
+def _assess_an_unregistered_checkpoint(tmp_path: Path) -> dict:
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
 
     return assess_checkpoint(
@@ -136,7 +142,9 @@ def _assess_an_unregistered_checkpoint(tmp_path: Path):
     )
 
 
-def _assess_the_reserved_regions_of_an_unregistered_checkpoint(tmp_path: Path):
+def _assess_the_reserved_regions_of_an_unregistered_checkpoint(
+    tmp_path: Path,
+) -> dict:
     from tcip_mcp.tools.calibration_tools import assess_reserved_regions
 
     return assess_reserved_regions(
@@ -153,7 +161,7 @@ def _assess_the_reserved_regions_of_an_unregistered_checkpoint(tmp_path: Path):
     )
 
 
-def _calibrate_scale_for_no_such_trait(tmp_path: Path):
+def _calibrate_scale_for_no_such_trait(tmp_path: Path) -> dict:
     from tcip_mcp.tools.calibration_tools import calibrate_physical_scale
 
     return calibrate_physical_scale(
@@ -183,7 +191,9 @@ DOORS = [
 @pytest.mark.parametrize(
     "door", DOORS, ids=[d.__name__.lstrip("_") for d in DOORS]
 )
-def test_a_door_refused_before_it_acts_leaves_no_row(tmp_path: Path, door):
+def test_a_door_refused_before_it_acts_leaves_no_row(
+    tmp_path: Path, door: Callable[[Path], dict]
+) -> None:
     try:
         result = door(tmp_path)
     except (ValueError, FileNotFoundError):
@@ -192,7 +202,9 @@ def test_a_door_refused_before_it_acts_leaves_no_row(tmp_path: Path, door):
     assert _rows(tmp_path) == []
 
 
-def test_a_save_on_a_missing_image_leaves_no_row(bound) -> None:
+def test_a_save_on_a_missing_image_leaves_no_row(
+    bound: BoundProject,
+) -> None:
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     before = _rows(bound.root)

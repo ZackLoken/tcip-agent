@@ -8,7 +8,14 @@ run do not trip the check.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from tcip_mcp.pipelines.training.run_registry import TrainRun
 
 torch = pytest.importorskip("torch")
 
@@ -33,7 +40,7 @@ DIVERGED_PASSES_PHRASE = "2 consecutive full training passes"
 
 
 def _trained(
-    tmp_path,
+    tmp_path: Path,
     builder: str,
     builder_kwargs: dict,
     *,
@@ -42,7 +49,7 @@ def _trained(
     stages: list[dict] | None = None,
     experiment_id: str | None = None,
     nonfinite_passes: int = 2,
-):
+) -> TrainRun:
     """Train a regression run of ``builder`` over six frames with no validation side; return it.
 
     The config passes ``horizon``, ``batch_size``, ``builder`` with ``builder_kwargs``, and the
@@ -76,8 +83,8 @@ def _trained(
     ids=["three_batches_per_epoch", "one_batch_per_epoch"],
 )
 def test_a_run_whose_loss_never_recovers_stops_after_two_diverged_epochs(
-    tmp_path, batch_size
-):
+    tmp_path: Path, batch_size: int
+) -> None:
     """A run whose loss never recovers stops after two diverged epochs, at either loader shape.
 
     Every batch is non-finite, and at both loader shapes the run fails at epoch two naming two
@@ -93,7 +100,9 @@ def test_a_run_whose_loss_never_recovers_stops_after_two_diverged_epochs(
     assert run.current_epoch == 2
 
 
-def test_a_run_stops_at_the_diverged_pass_count_its_stop_rule_states(tmp_path):
+def test_a_run_stops_at_the_diverged_pass_count_its_stop_rule_states(
+    tmp_path: Path,
+) -> None:
     """A run stops at the diverged-pass count its stop rule states.
 
     A stop rule stating three diverged passes stops an always-diverged run at its third epoch
@@ -123,7 +132,9 @@ def test_a_run_stops_at_the_diverged_pass_count_its_stop_rule_states(tmp_path):
     assert len(recovered.metrics_history) == 4
 
 
-def test_a_healthy_run_never_trips_the_divergence_check(tmp_path):
+def test_a_healthy_run_never_trips_the_divergence_check(
+    tmp_path: Path,
+) -> None:
     """A healthy run does not trip the divergence check.
 
     A run whose loss stays finite throughout completes its three epochs and carries no
@@ -134,11 +145,13 @@ def test_a_healthy_run_never_trips_the_divergence_check(tmp_path):
     )
 
     assert run.status == "completed", run.status_error
-    assert "diverged" not in run.status_error
+    assert run.status_error is None
     assert len(run.metrics_history) == 3
 
 
-def test_one_fully_diverged_epoch_followed_by_recovery_completes(tmp_path):
+def test_one_fully_diverged_epoch_followed_by_recovery_completes(
+    tmp_path: Path,
+) -> None:
     """One fully diverged epoch followed by recovery completes the run.
 
     One fully diverged epoch, short of the two-pass rule, followed by a recovery to finite
@@ -152,13 +165,13 @@ def test_one_fully_diverged_epoch_followed_by_recovery_completes(tmp_path):
     )
 
     assert run.status == "completed", run.status_error
-    assert "diverged" not in run.status_error
+    assert run.status_error is None
     assert len(run.metrics_history) == 3
 
 
 def test_a_single_finite_loss_among_bad_batches_does_not_count_the_epoch_as_diverged(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A single finite loss among bad batches keeps the epoch off the diverged count.
 
     With one finite loss among the first epoch's nan losses and a fully diverged second epoch,
@@ -175,7 +188,9 @@ def test_a_single_finite_loss_among_bad_batches_does_not_count_the_epoch_as_dive
     assert len(run.metrics_history) == 2
 
 
-def test_stage_boundary_resets_the_diverged_epoch_counter(tmp_path):
+def test_stage_boundary_resets_the_diverged_epoch_counter(
+    tmp_path: Path,
+) -> None:
     """A stage boundary resets the diverged-epoch counter.
 
     One fully diverged epoch at the end of stage 0 and another at the start of stage 1 do not
@@ -195,8 +210,8 @@ def test_stage_boundary_resets_the_diverged_epoch_counter(tmp_path):
 
 
 def test_cancel_requested_during_the_second_diverged_epoch_still_ends_failed(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A cancel requested during the second diverged epoch ends the run failed, not canceled.
 
     A run whose cancel is requested partway through the epoch that trips the two-pass rule ends
@@ -219,8 +234,8 @@ def test_cancel_requested_during_the_second_diverged_epoch_still_ends_failed(
 
 
 def test_launch_training_real_subprocess_reports_the_diverged_stop(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A real ``launch_training`` subprocess reports the diverged stop.
 
     A model dividing by its batch's spread across bands, over gray frames of different

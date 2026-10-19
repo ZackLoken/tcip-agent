@@ -8,10 +8,14 @@ module.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 import tifffile
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.band_stats import (
@@ -28,7 +32,9 @@ from tcip_mcp.pipelines.band_stats import (
 )
 
 
-def _composite_route_stretch(band, mode, orig_dtype):
+def _composite_route_stretch(
+    band: np.ndarray, mode: str, orig_dtype: np.dtype
+) -> NDArray[np.uint8]:
     """Return ``band`` stretched to uint8 under ``mode``, written out apart from the primitive.
 
     ``none`` divides by the integer dtype's maximum, or for a float band by its maximum when
@@ -55,7 +61,7 @@ def _composite_route_stretch(band, mode, orig_dtype):
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
-def _preview_renderer_stretch(band):
+def _preview_renderer_stretch(band: np.ndarray) -> NDArray[np.uint8]:
     """Return ``band`` min-max stretched to 0..255 and cast to uint8, with no clip of its own."""
     raw = band.astype(np.float64)
     lo, hi = float(raw.min()), float(raw.max())
@@ -93,8 +99,8 @@ BANDS = _bands()
 @pytest.mark.parametrize("mode", STRETCH_MODES)
 @pytest.mark.parametrize("name", sorted(BANDS))
 def test_stretch_band_is_byte_identical_to_the_composite_display_expression(
-    name, mode
-):
+    name: str, mode: str
+) -> None:
     band = BANDS[name]
     assert np.array_equal(
         stretch_band(band, mode, band.dtype),
@@ -102,7 +108,7 @@ def test_stretch_band_is_byte_identical_to_the_composite_display_expression(
     )
 
 
-def test_a_none_stretch_of_an_all_negative_float_band_renders_black():
+def test_a_none_stretch_of_an_all_negative_float_band_renders_black() -> None:
     """A ``none`` stretch of an all-negative float band renders uniformly black."""
     band = BANDS["float32_negative"]
     assert np.array_equal(
@@ -112,7 +118,9 @@ def test_a_none_stretch_of_an_all_negative_float_band_renders_black():
 
 
 @pytest.mark.parametrize("name", sorted(BANDS))
-def test_minmax_stretch_is_byte_identical_to_the_band_preview_expression(name):
+def test_minmax_stretch_is_byte_identical_to_the_band_preview_expression(
+    name: str,
+) -> None:
     band = BANDS[name]
     assert np.array_equal(
         stretch_band(band, "minmax", band.dtype),
@@ -121,13 +129,13 @@ def test_minmax_stretch_is_byte_identical_to_the_band_preview_expression(name):
 
 
 @pytest.mark.parametrize("mode", STRETCH_MODES)
-def test_stretch_band_returns_uint8_display_pixels(mode):
+def test_stretch_band_returns_uint8_display_pixels(mode: str) -> None:
     out = stretch_band(BANDS["uint16"], mode, BANDS["uint16"].dtype)
     assert out.dtype == np.uint8
     assert out.shape == BANDS["uint16"].shape
 
 
-def test_stretch_band_refuses_a_mode_it_does_not_implement():
+def test_stretch_band_refuses_a_mode_it_does_not_implement() -> None:
     with pytest.raises(ValueError, match="stretch mode"):
         stretch_band(BANDS["uint8"], "bogus", BANDS["uint8"].dtype)
 
@@ -135,7 +143,9 @@ def test_stretch_band_refuses_a_mode_it_does_not_implement():
 # ── Stretching against bounds read from somewhere wider than the band in hand ────────────
 
 
-def _derived_bounds(band, mode, orig_dtype) -> tuple[float, float]:
+def _derived_bounds(
+    band: np.ndarray, mode: str, orig_dtype: np.dtype
+) -> tuple[float, float]:
     """Return the ``(low, high)`` a mode reads off the band itself, written out on its own.
 
     ``none`` reads 0 to the integer dtype's maximum, or a float band's own minimum and maximum;
@@ -156,8 +166,8 @@ def _derived_bounds(band, mode, orig_dtype) -> tuple[float, float]:
 @pytest.mark.parametrize("mode", STRETCH_MODES)
 @pytest.mark.parametrize("name", sorted(BANDS))
 def test_bounds_in_stretch_reproduces_the_stretch_that_derives_its_own_bounds(
-    name, mode
-):
+    name: str, mode: str
+) -> None:
     band = BANDS[name]
     assert np.array_equal(
         stretch_band(
@@ -169,8 +179,8 @@ def test_bounds_in_stretch_reproduces_the_stretch_that_derives_its_own_bounds(
 
 @pytest.mark.parametrize("mode", STRETCH_MODES)
 def test_a_region_stretched_against_the_whole_bands_bounds_matches_that_bands_own_stretch(
-    mode,
-):
+    mode: str,
+) -> None:
     """A region stretched against the whole band's bounds matches the whole band's stretch there.
 
     Two regions of one raster stretched against one bounds pair are the pixels that raster's
@@ -187,7 +197,9 @@ def test_a_region_stretched_against_the_whole_bands_bounds_matches_that_bands_ow
     )
 
 
-def test_a_none_stretch_of_an_integer_band_keeps_its_dtype_ceiling_whatever_bounds_say():
+def test_a_none_stretch_of_an_integer_band_keeps_its_dtype_ceiling_whatever_bounds_say() -> (
+    None
+):
     band = BANDS["uint16"]
     assert np.array_equal(
         stretch_band(band, "none", band.dtype, (0.0, 100.0)),
@@ -195,7 +207,9 @@ def test_a_none_stretch_of_an_integer_band_keeps_its_dtype_ceiling_whatever_boun
     )
 
 
-def test_a_none_stretch_of_a_float_band_divides_by_the_maximum_it_is_handed():
+def test_a_none_stretch_of_a_float_band_divides_by_the_maximum_it_is_handed() -> (
+    None
+):
     """A ``none`` stretch of a float band divides by the maximum it is handed.
 
     Handed twice the band's own maximum, the stretch scales by that value and not the band's.
@@ -210,7 +224,7 @@ def test_a_none_stretch_of_a_float_band_divides_by_the_maximum_it_is_handed():
     )
 
 
-def test_band_ranges_reports_each_bands_own_exact_min_and_max():
+def test_band_ranges_reports_each_bands_own_exact_min_and_max() -> None:
     arr = np.stack(
         [
             np.full((4, 3), 7, dtype=np.uint16),
@@ -221,13 +235,13 @@ def test_band_ranges_reports_each_bands_own_exact_min_and_max():
     assert band_ranges(arr) == [BandRange(7.0, 7.0), BandRange(0.0, 11.0)]
 
 
-def test_band_ranges_reads_a_2d_array_as_one_band():
+def test_band_ranges_reads_a_2d_array_as_one_band() -> None:
     assert band_ranges(np.arange(12, dtype=np.uint16).reshape(4, 3)) == [
         BandRange(0.0, 11.0)
     ]
 
 
-def test_clip_bounds_cuts_at_the_display_clip_percentiles():
+def test_clip_bounds_cuts_at_the_display_clip_percentiles() -> None:
     band = BANDS["uint16"]
     expected = np.percentile(
         band.astype(np.float64), list(DISPLAY_CLIP_PERCENTILES)
@@ -235,14 +249,18 @@ def test_clip_bounds_cuts_at_the_display_clip_percentiles():
     assert clip_bounds(band) == (float(expected[0]), float(expected[1]))
 
 
-def test_full_scale_denominator_is_the_dtype_ceiling_for_an_integer_raster():
+def test_full_scale_denominator_is_the_dtype_ceiling_for_an_integer_raster() -> (
+    None
+):
     assert (
         full_scale_denominator(BANDS["uint16"], np.dtype("uint16")) == 65535.0
     )
     assert full_scale_denominator(BANDS["uint8"], np.dtype("uint8")) == 255.0
 
 
-def test_full_scale_denominator_is_a_float_bands_own_maximum_when_positive():
+def test_full_scale_denominator_is_a_float_bands_own_maximum_when_positive() -> (
+    None
+):
     band = BANDS["float32"]
     assert full_scale_denominator(band, band.dtype) == float(band.max())
     assert (
@@ -251,7 +269,9 @@ def test_full_scale_denominator_is_a_float_bands_own_maximum_when_positive():
     )
 
 
-def test_full_scale_denominator_is_the_magnitude_of_the_minimum_for_a_non_positive_band():
+def test_full_scale_denominator_is_the_magnitude_of_the_minimum_for_a_non_positive_band() -> (
+    None
+):
     band = BANDS["float32_negative"]
     assert full_scale_denominator(band, band.dtype) == float(-band.min())
 
@@ -279,7 +299,7 @@ def _multiband_strip_tiff(
 
 def test_the_multiband_render_input_is_the_preview_expression_band_for_band(
     tmp_path: Path,
-):
+) -> None:
     """A multi-band raster's display pixels are its first three bands, each min-max stretched.
 
     ``_display_of`` over a six-band raster returns the first three bands through
@@ -299,7 +319,7 @@ def test_the_multiband_render_input_is_the_preview_expression_band_for_band(
 # ── The shared band-select, stretch and stack composite ─────────────────────────────────
 
 
-def _multiband_array(channels: int = 4, dtype="uint16") -> np.ndarray:
+def _multiband_array(channels: int = 4, dtype: str = "uint16") -> np.ndarray:
     """Return seeded values below 4096 plus 17 times the band index, cast to ``dtype``."""
     rng = np.random.default_rng(21)
     arr = rng.integers(0, 4096, size=(6, 5, channels))
@@ -309,8 +329,8 @@ def _multiband_array(channels: int = 4, dtype="uint16") -> np.ndarray:
 @pytest.mark.parametrize("mode", STRETCH_MODES)
 @pytest.mark.parametrize("idxs", [[0, 1, 2], [3, 0, 1], [2, 2, 2]])
 def test_the_composite_is_each_selected_band_through_the_display_expression(
-    mode, idxs
-):
+    mode: str, idxs: list[int]
+) -> None:
     arr = _multiband_array()
     expected = np.stack(
         [
@@ -322,7 +342,7 @@ def test_the_composite_is_each_selected_band_through_the_display_expression(
     assert np.array_equal(composite_display_rgb(arr, idxs, mode), expected)
 
 
-def test_the_composite_is_uint8_rgb_whatever_the_sources_dtype():
+def test_the_composite_is_uint8_rgb_whatever_the_sources_dtype() -> None:
     for dtype in ("uint8", "uint16", "float32"):
         out = composite_display_rgb(
             _multiband_array(dtype=dtype), [0, 1, 2], "minmax"
@@ -331,7 +351,7 @@ def test_the_composite_is_uint8_rgb_whatever_the_sources_dtype():
         assert out.shape == (6, 5, 3)
 
 
-def test_a_composite_of_a_2d_array_reads_it_as_one_band():
+def test_a_composite_of_a_2d_array_reads_it_as_one_band() -> None:
     band = BANDS["uint16"]
     out = composite_display_rgb(band, [0, 0, 0], "minmax")
     assert out.shape == band.shape + (3,)
@@ -340,7 +360,9 @@ def test_a_composite_of_a_2d_array_reads_it_as_one_band():
     )
 
 
-def test_a_composite_stretches_each_band_against_the_bounds_it_is_handed():
+def test_a_composite_stretches_each_band_against_the_bounds_it_is_handed() -> (
+    None
+):
     arr = _multiband_array()
     bounds = [(100.0, 900.0), (0.0, 4095.0), (2000.0, 2100.0)]
     raw = arr.astype(np.float64)
@@ -358,7 +380,9 @@ def test_a_composite_stretches_each_band_against_the_bounds_it_is_handed():
     )
 
 
-def test_a_none_composite_of_an_integer_source_divides_by_that_dtypes_ceiling():
+def test_a_none_composite_of_an_integer_source_divides_by_that_dtypes_ceiling() -> (
+    None
+):
     arr = _multiband_array(dtype="uint16")
     expected = np.clip(
         arr[:, :, :3].astype(np.float64) / 65535.0 * 255.0, 0, 255
@@ -368,7 +392,9 @@ def test_a_none_composite_of_an_integer_source_divides_by_that_dtypes_ceiling():
     )
 
 
-def test_a_none_composite_of_a_float_source_divides_by_each_bands_own_maximum():
+def test_a_none_composite_of_a_float_source_divides_by_each_bands_own_maximum() -> (
+    None
+):
     arr = _multiband_array(dtype="float32")
     raw = arr.astype(np.float64)
     expected = np.stack(
@@ -383,7 +409,7 @@ def test_a_none_composite_of_a_float_source_divides_by_each_bands_own_maximum():
     )
 
 
-def test_a_composite_refuses_a_selection_it_cannot_display():
+def test_a_composite_refuses_a_selection_it_cannot_display() -> None:
     arr = _multiband_array()
     with pytest.raises(ValueError, match="3 bands"):
         composite_display_rgb(arr, [0, 1], "minmax")
@@ -400,13 +426,17 @@ def test_a_composite_refuses_a_selection_it_cannot_display():
 # ── Sampled ranges: read through the windowed raster layer, never a full decode ──────────
 
 
-def _sampled(path: Path, num_channels: int, **kwargs) -> SampledBandRanges:
+def _sampled(
+    path: Path, num_channels: int, **kwargs: int | tuple[float, float]
+) -> SampledBandRanges:
     """Return ``sampled_band_ranges`` over ``path`` opened by ``raster_source.open_raster``."""
     with raster_source.open_raster(path, num_channels) as src:
         return sampled_band_ranges(src, **kwargs)
 
 
-def test_sampled_band_ranges_read_through_the_windowed_backend(tmp_path: Path):
+def test_sampled_band_ranges_read_through_the_windowed_backend(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
     with raster_source.open_raster(path, arr.shape[-1]) as src:
@@ -415,7 +445,7 @@ def test_sampled_band_ranges_read_through_the_windowed_backend(tmp_path: Path):
 
 def test_sampled_band_ranges_over_full_coverage_equal_the_exact_ranges(
     tmp_path: Path,
-):
+) -> None:
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
     sampled = _sampled(
@@ -432,7 +462,7 @@ def test_sampled_band_ranges_over_full_coverage_equal_the_exact_ranges(
 
 def test_partial_sampled_band_ranges_are_the_exact_ranges_of_the_windows_drawn(
     tmp_path: Path,
-):
+) -> None:
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
     sampled = _sampled(
@@ -465,7 +495,9 @@ def test_partial_sampled_band_ranges_are_the_exact_ranges_of_the_windows_drawn(
     assert sampled.ranges == band_ranges(read[None, :, :])
 
 
-def test_sampled_band_ranges_repeat_exactly_for_the_same_seed(tmp_path: Path):
+def test_sampled_band_ranges_repeat_exactly_for_the_same_seed(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
     kwargs = {
@@ -484,7 +516,7 @@ def test_sampled_band_ranges_repeat_exactly_for_the_same_seed(tmp_path: Path):
 
 def test_sampled_clip_bounds_are_exact_when_the_reservoir_holds_every_pixel_walked(
     tmp_path: Path,
-):
+) -> None:
     """Sampled clip bounds are exact when the reservoir holds every pixel walked.
 
     With a reservoir the size of the raster and windows covering all of it, each band's cut points
@@ -509,7 +541,7 @@ def test_sampled_clip_bounds_are_exact_when_the_reservoir_holds_every_pixel_walk
 
 def test_sampled_clip_bounds_answer_the_percentiles_they_were_asked_for(
     tmp_path: Path,
-):
+) -> None:
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
     sampled = _sampled(
@@ -531,8 +563,8 @@ def test_sampled_clip_bounds_answer_the_percentiles_they_were_asked_for(
 
 
 def test_the_clip_reservoir_holds_at_most_the_size_it_was_given(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A clip reservoir sized 500 holds 500 values of a band covering more pixels.
 
     Over a full-coverage pass of a raster 160 wide by 200 high, each of its three bands' cut
@@ -547,7 +579,10 @@ def test_the_clip_reservoir_holds_at_most_the_size_it_was_given(
     read_off: list[int] = []
     real = band_stats.clip_bounds
 
-    def counted(band, percentiles=DISPLAY_CLIP_PERCENTILES):
+    def counted(
+        band: np.ndarray,
+        percentiles: tuple[float, float] = DISPLAY_CLIP_PERCENTILES,
+    ) -> tuple[float, float]:
         read_off.append(len(band))
         return real(band, percentiles)
 
@@ -565,7 +600,9 @@ def test_the_clip_reservoir_holds_at_most_the_size_it_was_given(
     assert read_off == [500] * arr.shape[-1]
 
 
-def test_sampled_clip_bounds_repeat_exactly_for_the_same_seed(tmp_path: Path):
+def test_sampled_clip_bounds_repeat_exactly_for_the_same_seed(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(
         path, height=200, width=160, channels=3, rowsperstrip=20
@@ -581,7 +618,7 @@ def test_sampled_clip_bounds_repeat_exactly_for_the_same_seed(tmp_path: Path):
 
 def test_sampled_band_ranges_refuses_a_reservoir_it_cannot_fill(
     tmp_path: Path,
-):
+) -> None:
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
     with pytest.raises(ValueError, match="reservoir_size must be positive"):
@@ -598,7 +635,9 @@ def test_sampled_band_ranges_refuses_a_reservoir_it_cannot_fill(
 # ── The window sampler the sampled statistics are drawn with ────────────────────────────
 
 
-def test_sample_windows_covers_every_pixel_once_when_it_can_take_every_cell():
+def test_sample_windows_covers_every_pixel_once_when_it_can_take_every_cell() -> (
+    None
+):
     windows = raster_source.sample_windows(
         20, 24, seed=1, window_size=8, max_windows=999
     )
@@ -608,7 +647,7 @@ def test_sample_windows_covers_every_pixel_once_when_it_can_take_every_cell():
     assert covered.min() == covered.max() == 1
 
 
-def test_sample_windows_draws_the_requested_count_without_overlap():
+def test_sample_windows_draws_the_requested_count_without_overlap() -> None:
     windows = raster_source.sample_windows(
         20, 24, seed=1, window_size=8, max_windows=4
     )
@@ -619,7 +658,7 @@ def test_sample_windows_draws_the_requested_count_without_overlap():
     assert covered.max() == 1
 
 
-def test_sample_windows_is_deterministic_per_seed():
+def test_sample_windows_is_deterministic_per_seed() -> None:
     first = raster_source.sample_windows(
         200, 240, seed=5, window_size=8, max_windows=4
     )
@@ -633,7 +672,7 @@ def test_sample_windows_is_deterministic_per_seed():
     assert first != other
 
 
-def test_sample_windows_refuses_a_geometry_it_cannot_sample():
+def test_sample_windows_refuses_a_geometry_it_cannot_sample() -> None:
     with pytest.raises(ValueError, match="raster"):
         raster_source.sample_windows(
             0, 10, seed=1, window_size=4, max_windows=1

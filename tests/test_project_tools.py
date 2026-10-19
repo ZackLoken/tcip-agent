@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 
 import tcip_store
 from tcip_mcp.registry_paths import stored_path
 from tcip_mcp.tools.project_tools import (
+    DatasetEntry,
     ZipBundle,
     _external_dataset_paths,
     archive_project,
@@ -23,6 +25,11 @@ from tcip_mcp.tools.project_tools import (
 from tests._record_damage_fixtures import damage_record
 from tests._server_calls import called_through_the_server
 from tests._web_fixtures import INVARIANCES
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue, TypeAdapter
+
+    from tcip_mcp.workspace import BoundProject
 
 
 def _make_dataset(root: Path) -> None:
@@ -39,7 +46,9 @@ def _make_dataset(root: Path) -> None:
     label_image(
         image, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32
     )
-    registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
+    registry_over(
+        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
+    )
 
 
 def _initialized(path: Path) -> dict:
@@ -51,7 +60,9 @@ def _initialized(path: Path) -> dict:
     return result
 
 
-def test_register_dataset_writes_identity_and_registers(tmp_path: Path):
+def test_register_dataset_writes_identity_and_registers(
+    tmp_path: Path,
+) -> None:
     import json
 
     src = tmp_path / "proj"
@@ -70,13 +81,13 @@ def test_register_dataset_writes_identity_and_registers(tmp_path: Path):
     }
     # the project registry knows the dataset by id and path, its identity held by dataset.json.
     assert read_datasets(tmp_path) == [
-        {"id": res["id"], "path": stored_path(src, tmp_path)}
+        DatasetEntry(id=res["id"], path=stored_path(src, tmp_path))
     ]
 
 
 def test_register_dataset_refuses_an_empty_crop_by_type_and_admits_a_named_one(
-    bound,
-):
+    bound: BoundProject,
+) -> None:
     src = bound.root / "proj"
     _make_dataset(src)
 
@@ -91,13 +102,14 @@ def test_register_dataset_refuses_an_empty_crop_by_type_and_admits_a_named_one(
         {"dataset_root": str(src), "crop": "currant"},
         bound=bound,
     )
+    assert isinstance(registered, dict), registered
     assert registered["crop"] == "currant" and registered["id"], registered
     assert read_datasets(bound.root) == [
-        {"id": registered["id"], "path": stored_path(src, bound.root)}
+        DatasetEntry(id=registered["id"], path=stored_path(src, bound.root))
     ]
 
 
-def test_register_dataset_keeps_id_stable(tmp_path: Path):
+def test_register_dataset_keeps_id_stable(tmp_path: Path) -> None:
     src = tmp_path / "proj"
     _make_dataset(src)
 
@@ -109,7 +121,7 @@ def test_register_dataset_keeps_id_stable(tmp_path: Path):
     assert len(read_datasets(tmp_path)) == 1  # not duplicated in the registry
 
 
-def test_register_dataset_reconciles_a_move_by_id(tmp_path: Path):
+def test_register_dataset_reconciles_a_move_by_id(tmp_path: Path) -> None:
     import shutil
 
     src = tmp_path / "orig"
@@ -122,14 +134,16 @@ def test_register_dataset_reconciles_a_move_by_id(tmp_path: Path):
     register_dataset(tmp_path, str(moved), crop="currant")
 
     regs = read_datasets(tmp_path)
-    same = [r for r in regs if r["id"] == reg["id"]]
+    same = [r for r in regs if r.id == reg["id"]]
     assert (
         len(same) == 1
     )  # one entry for the id: the move updated the path, not duplicated
-    assert same[0] == {"id": reg["id"], "path": stored_path(moved, tmp_path)}
+    assert same[0] == DatasetEntry(
+        id=reg["id"], path=stored_path(moved, tmp_path)
+    )
 
 
-def test_initialize_project(tmp_path: Path):
+def test_initialize_project(tmp_path: Path) -> None:
     result = _initialized(tmp_path)
     assert (tmp_path / ".tcip").is_dir()
     assert (tmp_path / ".tcip" / "artifacts").is_dir()
@@ -137,7 +151,7 @@ def test_initialize_project(tmp_path: Path):
     assert result["display_name"] == "Test project" and result["id"]
 
 
-def test_inspect_project(tmp_path: Path):
+def test_inspect_project(tmp_path: Path) -> None:
     status = inspect_project(tmp_path)
     assert status["id"] is None
     assert "initialize_project" in status["record_problem"]
@@ -151,7 +165,7 @@ def test_inspect_project(tmp_path: Path):
     assert status["record_problem"] is None
 
 
-def test_inspect_project_folds_in_recent_activity(tmp_path: Path):
+def test_inspect_project_folds_in_recent_activity(tmp_path: Path) -> None:
     from tcip_mcp.tools.meta_tools import report_friction
 
     _initialized(tmp_path)
@@ -171,7 +185,7 @@ def test_inspect_project_folds_in_recent_activity(tmp_path: Path):
 
 def test_inspect_project_folds_in_last_retrospective_by_id_not_path(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.tools.meta_tools import write_retrospective
 
     _initialized(tmp_path)
@@ -191,7 +205,7 @@ def test_inspect_project_folds_in_last_retrospective_by_id_not_path(
 
 def test_inspect_project_surfaces_an_undecodable_audit_log_honestly(
     tmp_path: Path,
-):
+) -> None:
     import sqlite3
 
     from tcip_mcp.tools.meta_tools import report_friction
@@ -218,8 +232,8 @@ def test_inspect_project_surfaces_an_undecodable_audit_log_honestly(
 
 
 def test_inspect_project_against_a_nonexistent_workspace_creates_nothing(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ws = tmp_path / "no_such_workspace"
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
     proj = tmp_path / "proj"
@@ -230,7 +244,7 @@ def test_inspect_project_against_a_nonexistent_workspace_creates_nothing(
     assert not ws.exists()
 
 
-def test_export_import_roundtrip(tmp_path: Path):
+def test_export_import_roundtrip(tmp_path: Path) -> None:
     """archive_project -> import_project -> inspect_project recovers the project."""
     from PIL import Image
 
@@ -340,7 +354,7 @@ def test_export_import_roundtrip(tmp_path: Path):
 
 def test_external_dataset_paths_names_an_external_registry_entry(
     tmp_path: Path,
-):
+) -> None:
     """A registered dataset outside the project is named as external."""
     project = tmp_path / "project"
     dataset = (
@@ -351,14 +365,14 @@ def test_external_dataset_paths_names_an_external_registry_entry(
     _make_dataset(dataset)
     register_dataset(project, str(dataset), crop="currant")
     entry = read_datasets(project)[0]
-    assert entry["path"] == str(
+    assert entry.path == str(
         dataset.resolve()
     )  # external entries store absolute
 
     assert _external_dataset_paths(project) == [str(dataset.resolve())]
 
 
-def test_archive_project_includes_bespoke_model_source(tmp_path: Path):
+def test_archive_project_includes_bespoke_model_source(tmp_path: Path) -> None:
     """The archive carries a bespoke run's snapshotted model source.
 
     A bespoke run's snapshotted .py source (model_src/, written by snapshot_model_source) and its
@@ -396,7 +410,7 @@ def test_archive_project_includes_bespoke_model_source(tmp_path: Path):
 
 def test_archive_project_reports_checkpoints_excluded_by_default(
     tmp_path: Path,
-):
+) -> None:
     """A checkpoint under .tcip/models is dropped by include_models=False, and counted."""
     src = tmp_path / "src_project"
     _initialized(src)
@@ -419,7 +433,7 @@ def test_archive_project_reports_checkpoints_excluded_by_default(
 
 def test_archive_project_includes_a_registered_run_checkpoint_outside_tcip_models(
     tmp_path: Path,
-):
+) -> None:
     """``include_models=True`` bundles a registered run checkpoint outside ``.tcip/models/``.
 
     A completed run's checkpoint sits in its own run directory,
@@ -450,7 +464,7 @@ def test_archive_project_includes_a_registered_run_checkpoint_outside_tcip_model
 
 def test_import_project_admits_a_bundle_holding_a_registered_run_checkpoint(
     tmp_path: Path,
-):
+) -> None:
     """import_project admits a bundle holding a completed run's registered checkpoint.
 
     archive_project(include_models=True) bundles the checkpoint from its run directory, and after
@@ -476,9 +490,9 @@ def test_import_project_admits_a_bundle_holding_a_registered_run_checkpoint(
 
     assert "error" not in imported, imported
     restored = observe(experiment_dir(exp_id, project=dest)).checkpoint
-    assert restored is not None and Path(restored["path"]).is_file()
+    assert restored is not None and Path(restored.path).is_file()
     assert exp_id in {
-        m["name"] for m in ModelRegistry(str(dest)).list_models()
+        m.entry.name for m in ModelRegistry(str(dest)).list_models()
     }
 
 
@@ -496,17 +510,13 @@ def _internal_foreign_checkpoint(src: Path) -> Path:
 
 def test_import_project_admits_a_registered_checkpoint_with_no_disclosure(
     tmp_path: Path,
-):
+) -> None:
     """A checkpoint registered under the project's tree round-trips with nothing to disclose.
 
     The import reports no unresolved dataset or checkpoint and no external checkpoint; the stored
     entry stays relative, and the resolved path is absolute and names an existing file.
     """
-    from tcip_mcp.model_registry import (
-        ModelRegistry,
-        read_registry_index,
-        registry_index_key,
-    )
+    from tcip_mcp.model_registry import ModelRegistry, read_registry_index
 
     src = tmp_path / "src_project"
     _initialized(src)
@@ -526,18 +536,15 @@ def test_import_project_admits_a_registered_checkpoint_with_no_disclosure(
     assert imported["checkpoint_paths_unresolved"] == []
     assert imported["external_checkpoints"] == []
 
-    raw = tcip_store.read(registry_index_key(dest))
-    stored = raw["entries"][0]["checkpoint_path"]
+    entries = read_registry_index(dest)
+    stored = entries[0].checkpoint_path
     assert not Path(stored).is_absolute(), stored
     assert ".." not in Path(stored).parts
 
-    entries = read_registry_index(dest)
-    assert entries[0]["checkpoint_path"] == stored
-
     (resolved,) = [
-        m["checkpoint_path"]
+        m.entry.checkpoint_path
         for m in ModelRegistry(str(dest)).list_models()
-        if m["name"] == entries[0]["name"]
+        if m.entry.name == entries[0].name
     ]
     assert Path(resolved).is_absolute()
     assert Path(resolved).is_file()
@@ -545,7 +552,7 @@ def test_import_project_admits_a_registered_checkpoint_with_no_disclosure(
 
 def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries_no_checkpoint(
     tmp_path: Path,
-):
+) -> None:
     """Import keeps a relative entry relative when the archive carries no checkpoint.
 
     A relative registry entry whose weights the archive legitimately dropped
@@ -553,13 +560,13 @@ def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries
     and not as an external checkpoint; the registry holds no path into the import's staging
     directory, which the door deletes.
     """
-    from tcip_mcp.model_registry import read_registry_index, registry_index_key
+    from tcip_mcp.model_registry import read_registry_index
 
     src = tmp_path / "src_project"
     _initialized(src)
     _internal_foreign_checkpoint(src)
 
-    stored_before = read_registry_index(src)[0]["checkpoint_path"]
+    stored_before = read_registry_index(src)[0].checkpoint_path
     assert not Path(stored_before).is_absolute(), stored_before
 
     zip_path = tmp_path / "export.zip"
@@ -572,9 +579,7 @@ def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries
     imported = import_project(str(zip_path), str(dest))
 
     assert "error" not in imported, imported
-    stored_after = tcip_store.read(registry_index_key(dest))["entries"][0][
-        "checkpoint_path"
-    ]
+    stored_after = read_registry_index(dest)[0].checkpoint_path
     assert stored_after == stored_before
     assert imported["checkpoint_paths_unresolved"] == [stored_before]
     assert imported["external_checkpoints"] == []
@@ -582,7 +587,7 @@ def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries
 
 def test_import_project_discloses_a_designed_external_checkpoint_separately_from_unresolved(
     tmp_path: Path,
-):
+) -> None:
     """Import discloses a designed-external checkpoint apart from the unresolved entries.
 
     A registry entry outside the project tree appears in ``external_checkpoints`` as existing,
@@ -626,7 +631,7 @@ def test_import_project_discloses_a_designed_external_checkpoint_separately_from
 
 def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(
     tmp_path: Path,
-):
+) -> None:
     """A registered checkpoint under ``.tcip/models/`` lands in the archive bundle once.
 
     The checkpoint is both a file under ``.tcip/models/`` and a registry entry, and the archive
@@ -659,7 +664,7 @@ def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(
 
 def test_a_checkpoint_registered_from_anywhere_in_the_project_travels_only_with_models(
     tmp_path: Path,
-):
+) -> None:
     """A checkpoint registered from a project directory of its own travels only with models.
 
     For a checkpoint registered from a directory that is neither ``.tcip/models`` nor a run's,
@@ -697,7 +702,9 @@ def test_a_checkpoint_registered_from_anywhere_in_the_project_travels_only_with_
     assert with_models["checkpoints_excluded"] == 0
 
 
-def test_archive_project_admits_a_symlink_spelled_project(tmp_path: Path):
+def test_archive_project_admits_a_symlink_spelled_project(
+    tmp_path: Path,
+) -> None:
     """A project reached through a symlink and ``existing_project`` archives its files."""
     from tcip_mcp.project_record import existing_project
     from tests._web_fixtures import new_project
@@ -720,36 +727,55 @@ def test_archive_project_admits_a_symlink_spelled_project(tmp_path: Path):
     assert result["files_added"] > 0
 
 
-class _BarrierId(str):
-    """A dataset id whose first string conversion waits at the class's ``barrier``."""
+class _ParkingRegistry:
+    """The dataset registry's adapter, its writes each first waiting once at ``barrier``."""
 
-    barrier: threading.Barrier
+    def __init__(
+        self,
+        real: TypeAdapter[list[DatasetEntry]],
+        barrier: threading.Barrier,
+    ) -> None:
+        self.real = real
+        self.barrier = barrier
 
-    def __str__(self) -> str:
-        if not self.__dict__.get("parked"):
-            self.__dict__["parked"] = True
-            try:
-                type(self).barrier.wait()
-            except threading.BrokenBarrierError:
-                pass
-        return str.__str__(self)
+    def validate_python(self, value: JsonValue) -> list[DatasetEntry]:
+        return self.real.validate_python(value)
+
+    def dump_python(
+        self, value: list[DatasetEntry], *, mode: Literal["json", "python"]
+    ) -> list[dict[str, str]]:
+        try:
+            self.barrier.wait()
+        except threading.BrokenBarrierError:
+            pass
+        return self.real.dump_python(value, mode=mode)
 
 
-def test_concurrent_registrations_both_survive_in_the_registry(tmp_path: Path):
+def test_concurrent_registrations_both_survive_in_the_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Two writers adding different datasets at once both land in the registry.
 
     Both writers park at a barrier between reading and writing the registry, both succeed, and
     the registry lists both dataset ids.
     """
+    from tcip_mcp.tools import project_tools
+
     project = tmp_path / "proj"
     project.mkdir()
-    _BarrierId.barrier = threading.Barrier(2, timeout=1.0)
+    monkeypatch.setattr(
+        project_tools,
+        "_DATASET_REGISTRY",
+        _ParkingRegistry(
+            project_tools._DATASET_REGISTRY, threading.Barrier(2, timeout=1.0)
+        ),
+    )
     failures: list[BaseException] = []
 
     def register(name: str) -> None:
         try:
             upsert_dataset(
-                project, {"id": _BarrierId(name), "path": str(tmp_path / name)}
+                project, DatasetEntry(id=name, path=str(tmp_path / name))
             )
         except (
             BaseException
@@ -766,12 +792,12 @@ def test_concurrent_registrations_both_survive_in_the_registry(tmp_path: Path):
         t.join(timeout=60)
 
     assert not failures, failures
-    assert sorted(r["id"] for r in read_datasets(project)) == ["aaa", "bbb"]
+    assert sorted(r.id for r in read_datasets(project)) == ["aaa", "bbb"]
 
 
 def test_an_undecodable_dataset_registry_refuses_and_an_absent_one_reads_empty(
     tmp_path: Path,
-):
+) -> None:
     """An undecodable dataset registry raises ``DecodeError``, and an absent one reads empty."""
     from tcip_mcp.tools.project_tools import dataset_registry_key
 
@@ -782,7 +808,7 @@ def test_an_undecodable_dataset_registry_refuses_and_an_absent_one_reads_empty(
         read_datasets(project) == []
     )  # a project with nothing registered yet
 
-    upsert_dataset(project, {"id": "aaa", "path": str(project)})
+    upsert_dataset(project, DatasetEntry(id="aaa", path=str(project)))
     damage_record(
         dataset_registry_key(project), b'[{"id": "aaa"'
     )  # truncated mid-list
@@ -791,8 +817,8 @@ def test_an_undecodable_dataset_registry_refuses_and_an_absent_one_reads_empty(
 
 
 def test_an_identity_minted_while_this_registration_ran_is_adopted_not_overwritten(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An identity minted while this registration ran is adopted, not overwritten.
 
     A competing identity is committed between reading the absent identity and writing the minted
@@ -808,7 +834,7 @@ def test_an_identity_minted_while_this_registration_ran_is_adopted_not_overwritt
     real_uuid4 = uuid_module.uuid4
     raced: list[str] = []
 
-    def racing_uuid4():
+    def racing_uuid4() -> uuid_module.UUID:
         if not raced:
             raced.append("minted")
             (src / "dataset.json").write_bytes(committed)
@@ -825,12 +851,12 @@ def test_an_identity_minted_while_this_registration_ran_is_adopted_not_overwritt
         json.loads((src / "dataset.json").read_text(encoding="utf-8"))["id"]
         == "committed_id"
     )
-    assert [r["id"] for r in read_datasets(tmp_path)] == ["committed_id"]
+    assert [r.id for r in read_datasets(tmp_path)] == ["committed_id"]
 
 
 def test_an_undecodable_identity_document_refuses_rather_than_minting_a_fresh_id(
     tmp_path: Path,
-):
+) -> None:
     """An undecodable identity document refuses, named, and stays byte for byte as it was.
 
     No dataset is registered.
@@ -849,7 +875,9 @@ def test_an_undecodable_identity_document_refuses_rather_than_minting_a_fresh_id
     assert read_datasets(tmp_path) == []
 
 
-def test_initializing_twice_leaves_what_the_first_run_created(tmp_path: Path):
+def test_initializing_twice_leaves_what_the_first_run_created(
+    tmp_path: Path,
+) -> None:
     """Initializing twice keeps the record's id, the models directory and an artifact file.
 
     The second creation has the same display name and site; a file written into the artifacts
@@ -874,7 +902,7 @@ def test_initializing_twice_leaves_what_the_first_run_created(tmp_path: Path):
 
 def test_initialize_project_records_the_id_display_name_site_and_invariances(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.project_record import read_record
 
     result = _initialized(tmp_path)
@@ -889,7 +917,7 @@ def test_initialize_project_records_the_id_display_name_site_and_invariances(
 
 def test_initialize_project_refuses_unstated_invariances_and_one_unstated_invariance_by_type(
     tmp_path: Path,
-):
+) -> None:
     """``initialize_project`` refuses an absent invariances block, and one lacking ``scale``.
 
     Both refusals are validation errors naming what is missing, and nothing is created; a whole
@@ -921,6 +949,7 @@ def test_initialize_project_refuses_unstated_invariances_and_one_unstated_invari
     admitted = called_through_the_server(
         "initialize_project", {**stated, "invariances": answers}
     )
+    assert isinstance(admitted, dict), admitted
     assert admitted["display_name"] == "Test project", admitted
     for read in (inspect_project, record_fields):
         invariances = read(tmp_path / "stated")["invariances"]
@@ -950,8 +979,8 @@ def test_initialize_project_refuses_unstated_invariances_and_one_unstated_invari
     ],
 )
 def test_initialize_project_refuses_a_rotation_angle_outside_its_range_by_type(
-    tmp_path: Path, angle, refusal
-):
+    tmp_path: Path, angle: int | float | str | bool, refusal: str
+) -> None:
     """A rotation outside a finite 0 to 180 degrees is refused by type, and nothing is written.
 
     The record's type names the field in the refusal.
@@ -972,7 +1001,7 @@ def test_initialize_project_refuses_a_rotation_angle_outside_its_range_by_type(
 
 def test_initialize_project_refuses_different_invariances_than_the_ones_already_recorded(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.project_record import CaptureInvariances, read_record
 
     _initialized(tmp_path)
@@ -991,7 +1020,7 @@ def test_initialize_project_refuses_different_invariances_than_the_ones_already_
 
 def test_initialize_project_refuses_a_different_site_than_the_one_already_recorded(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.project_record import read_record
 
     _initialized(tmp_path)
@@ -1008,7 +1037,7 @@ def test_initialize_project_refuses_a_different_site_than_the_one_already_record
 
 def test_initialize_project_refuses_a_different_display_name_than_the_one_already_recorded(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.project_record import read_record
 
     _initialized(tmp_path)
@@ -1024,7 +1053,7 @@ def test_initialize_project_refuses_a_different_display_name_than_the_one_alread
 
 def test_initialize_project_refuses_an_empty_site_leaving_nothing_on_disk(
     tmp_path: Path,
-):
+) -> None:
     """``initialize_project`` refuses an empty site and leaves nothing on disk.
 
     The refusal is an error, and the destination does not exist afterward.
@@ -1039,7 +1068,7 @@ def test_initialize_project_refuses_an_empty_site_leaving_nothing_on_disk(
 
 def test_initialize_project_refuses_an_empty_display_name_leaving_nothing_on_disk(
     tmp_path: Path,
-):
+) -> None:
     dest = tmp_path / "fresh_project"
 
     result = initialize_project(str(dest), "  ", "north orchard", INVARIANCES)
@@ -1049,8 +1078,8 @@ def test_initialize_project_refuses_an_empty_display_name_leaving_nothing_on_dis
 
 
 def test_initialize_project_refuses_a_relative_path_and_scaffolds_nothing(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``initialize_project`` refuses a relative path, naming the absolute spelling.
 
     A door that holds no project has no root to read a relative project_path against, and nothing
@@ -1068,7 +1097,7 @@ def test_initialize_project_refuses_a_relative_path_and_scaffolds_nothing(
 
 def test_initialize_project_refuses_a_present_but_invalid_record(
     tmp_path: Path,
-):
+) -> None:
     """``initialize_project`` over a present but invalid record returns the reader's refusal."""
     from tcip_mcp.project_record import project_record_key
 
@@ -1085,7 +1114,9 @@ def test_initialize_project_refuses_a_present_but_invalid_record(
     assert "is not a project record" in result["error"]
 
 
-def test_initialize_project_refuses_an_undecodable_record(tmp_path: Path):
+def test_initialize_project_refuses_an_undecodable_record(
+    tmp_path: Path,
+) -> None:
     """``initialize_project`` over an undecodable record returns the decode failure as its error."""
     from tcip_mcp.project_record import project_record_key
 
@@ -1102,7 +1133,7 @@ def test_initialize_project_refuses_an_undecodable_record(tmp_path: Path):
 
 def test_initialize_project_records_on_a_directory_that_gained_tcip_with_no_creating_door(
     tmp_path: Path,
-):
+) -> None:
     """``initialize_project`` records on a directory that gained ``.tcip`` with no creating door.
 
     That state is the one a store write with no door leaves (``report_friction`` on a bare
@@ -1120,7 +1151,7 @@ def test_initialize_project_records_on_a_directory_that_gained_tcip_with_no_crea
 
 def test_inspect_project_reports_the_record_fields_across_project_states(
     tmp_path: Path,
-):
+) -> None:
     """``inspect_project`` reports the record's fields, or its absence, across project states.
 
     A path with no record carries the absent-record problem text; a project with a record carries
@@ -1148,7 +1179,7 @@ def test_inspect_project_reports_the_record_fields_across_project_states(
     assert status["record_problem"] is None
 
 
-def test_inspect_project_reports_an_invalid_record(tmp_path: Path):
+def test_inspect_project_reports_an_invalid_record(tmp_path: Path) -> None:
     from tcip_mcp.project_record import project_record_key
 
     _initialized(tmp_path)
@@ -1162,7 +1193,7 @@ def test_inspect_project_reports_an_invalid_record(tmp_path: Path):
     assert "is not a project record" in status["record_problem"]
 
 
-def test_archive_and_import_carry_the_project_record(tmp_path: Path):
+def test_archive_and_import_carry_the_project_record(tmp_path: Path) -> None:
     """Archive and import carry the project record, its id included.
 
     initialize_project -> archive_project -> import_project round-trips a project's record inside
@@ -1195,7 +1226,7 @@ def test_archive_and_import_carry_the_project_record(tmp_path: Path):
 
 def test_an_archive_of_an_open_database_carries_every_record_and_entry_it_holds(
     tmp_path: Path,
-):
+) -> None:
     """An archive of an open database carries every record and log entry it holds.
 
     The project's database is open, its latest commits still in its write-ahead log, when the

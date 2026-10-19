@@ -12,10 +12,22 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
-torch = pytest.importorskip("torch")
+pytest.importorskip("torch")
+import torch  # noqa: E402
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch import Tensor, nn
+    from torch.optim import SGD, Optimizer
+    from torch.optim.lr_scheduler import LRScheduler
+
+    from tcip_mcp.pipelines.schemas import OptimizerSpec, SchedulerSpec
+    from tcip_mcp.pipelines.training.run_registry import TrainRun
 
 from tcip_mcp.experiments import experiment_dir  # noqa: E402
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
@@ -68,7 +80,10 @@ def _consistent(root: Path) -> dict:
 
 
 def _config(
-    project: Path, stages: list[dict], frames=_opposed, **extra
+    project: Path,
+    stages: list[dict],
+    frames: Callable[[Path], dict] = _opposed,
+    **extra: object,
 ) -> dict:
     """Return a regression config of ``project`` over ``stages``, at seed 3 by default.
 
@@ -83,7 +98,7 @@ def _config(
     )
 
 
-def _unrun(**extra) -> dict:
+def _unrun(**extra: object) -> dict:
     """Return a regression config of this repository with one band and no data.
 
     It normalizes by the weights' statistics (``_chain_fixtures.weights_normalization``), and
@@ -101,7 +116,14 @@ def _unrun(**extra) -> dict:
     )
 
 
-def _train(tmp_path, config: dict, name: str, **kwargs):
+def _train(
+    tmp_path: Path,
+    config: dict,
+    name: str,
+    **kwargs: Callable[[int, dict], None]
+    | Callable[[int, int, dict], None]
+    | str,
+) -> TrainRun:
     """Open and train the run ``name`` under ``tmp_path`` over ``config``, and return it.
 
     The run is opened by the launcher's own producer and trained over its own loaders with
@@ -113,7 +135,7 @@ def _train(tmp_path, config: dict, name: str, **kwargs):
     )
 
 
-def _tensors(value):
+def _tensors(value: object) -> list[Tensor]:
     """Return the tensors nested in ``value``, in a fixed order."""
     if torch.is_tensor(value):
         return [value]
@@ -127,8 +149,8 @@ def _tensors(value):
 
 
 def test_a_stage_starts_from_the_weights_and_optimizer_state_of_the_prior_stage_best_epoch(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A stage starts from the weights and optimizer state of the prior stage's best epoch.
 
     The next stage starts from its predecessor's best epoch whole: the weight, its optimizer
@@ -143,7 +165,9 @@ def test_a_stage_starts_from_the_weights_and_optimizer_state_of_the_prior_stage_
     optimizers: list = []
     real_build_optimizer = gt.build_optimizer
 
-    def recording_build_optimizer(*args, **kwargs):
+    def recording_build_optimizer(
+        *args: OptimizerSpec | nn.Module, **kwargs: float
+    ) -> Optimizer:
         optimizer = real_build_optimizer(*args, **kwargs)
         optimizers.append(optimizer)
         return optimizer
@@ -152,7 +176,9 @@ def test_a_stage_starts_from_the_weights_and_optimizer_state_of_the_prior_stage_
     at_stage_start: list = []
     real_build_scheduler = gt._build_scheduler
 
-    def recording_build_scheduler(optimizer, config, **direction):
+    def recording_build_scheduler(
+        optimizer: Optimizer, config: SchedulerSpec, **direction: bool
+    ) -> LRScheduler:
         weight = models[0].weight
         at_stage_start.append(
             (
@@ -169,7 +195,9 @@ def test_a_stage_starts_from_the_weights_and_optimizer_state_of_the_prior_stage_
     taken: list = []
     real_epoch_state = gt._epoch_state
 
-    def recording_epoch_state(*args, **kwargs):
+    def recording_epoch_state(
+        *args: nn.Module | Optimizer, **kwargs: float | int | dict
+    ) -> dict:
         state = real_epoch_state(*args, **kwargs)
         taken.append(
             (
@@ -231,8 +259,8 @@ def test_a_stage_starts_from_the_weights_and_optimizer_state_of_the_prior_stage_
 
 
 def test_a_resume_puts_back_the_buffer_and_the_tensor_setting_its_capture_holds(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A resume puts back the buffer and the tensor setting its capture holds.
 
     What a capture of a model and its optimizer holds, a resume's restore puts back into a
@@ -259,7 +287,7 @@ def test_a_resume_puts_back_the_buffer_and_the_tensor_setting_its_capture_holds(
     assert regime is not None
     stated = regime.optimizer
 
-    def built_pair():
+    def built_pair() -> tuple[nn.Module, Optimizer]:
         model = ctx.build_model()
         return model, build_optimizer(
             stated,
@@ -290,7 +318,9 @@ def test_a_resume_puts_back_the_buffer_and_the_tensor_setting_its_capture_holds(
     assert torch.equal(captured[GROUPS_KEY][0]["settings"]["rates"], held)
 
 
-def test_a_stage_ends_on_its_own_plateau_and_the_next_stage_runs(tmp_path):
+def test_a_stage_ends_on_its_own_plateau_and_the_next_stage_runs(
+    tmp_path: Path,
+) -> None:
     """A stage ends on its own plateau and the next stage runs.
 
     A stage whose first epoch is its best ends one epoch later, before its schedule's
@@ -325,8 +355,11 @@ def test_a_stage_ends_on_its_own_plateau_and_the_next_stage_runs(tmp_path):
     ],
 )
 def test_the_run_ends_with_the_first_stage_that_does_not_improve_on_the_one_before(
-    tmp_path, frames, min_delta, stages_run
-):
+    tmp_path: Path,
+    frames: Callable[[Path], dict],
+    min_delta: float,
+    stages_run: list[int],
+) -> None:
     """The run ends with the first stage that does not improve on its predecessor.
 
     A run runs its stages while each stage's best improves by ``min_delta`` on its
@@ -353,8 +386,8 @@ def test_the_run_ends_with_the_first_stage_that_does_not_improve_on_the_one_befo
 
 
 def test_a_stage_under_a_schedule_with_no_horizon_runs_until_its_plateau(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A stage under a schedule with no horizon runs until its plateau.
 
     A stage carries no epoch count: under a step schedule holding its rate, a model whose
@@ -380,8 +413,8 @@ def test_a_stage_under_a_schedule_with_no_horizon_runs_until_its_plateau(
 
 @pytest.mark.parametrize("kind", ["cosine", "onecycle"])
 def test_a_horizon_bound_schedule_is_built_over_its_horizon_and_ends_the_stage_there(
-    tmp_path, monkeypatch, kind
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
     """A horizon-bound schedule is built over its horizon and ends the stage there.
 
     The block's ``horizon_epochs`` is what the scheduler is built over and where a stage
@@ -390,7 +423,9 @@ def test_a_horizon_bound_schedule_is_built_over_its_horizon_and_ends_the_stage_t
     built: list = []
     real_build_scheduler = gt._build_scheduler
 
-    def recording_build_scheduler(optimizer, config, **direction):
+    def recording_build_scheduler(
+        optimizer: Optimizer, config: SchedulerSpec, **direction: bool
+    ) -> LRScheduler:
         built.append(real_build_scheduler(optimizer, config, **direction))
         return built[-1]
 
@@ -423,8 +458,8 @@ def test_a_horizon_bound_schedule_is_built_over_its_horizon_and_ends_the_stage_t
 
 
 def test_a_run_with_no_validation_loader_ends_its_stage_on_the_training_loss_plateau(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A run with no validation loader ends its stage on the training-loss plateau.
 
     Selecting on ``loss`` with no validation loader, the training loss is the selection value
@@ -458,7 +493,9 @@ def test_a_run_with_no_validation_loader_ends_its_stage_on_the_training_loss_pla
     ]
 
 
-def test_a_stage_with_no_selectable_epoch_fails_the_run_naming_it(tmp_path):
+def test_a_stage_with_no_selectable_epoch_fails_the_run_naming_it(
+    tmp_path: Path,
+) -> None:
     """A stage with no selectable epoch fails the run, naming the stage.
 
     A model whose predictions are all non-finite gives its prediction-derived selection metric
@@ -482,8 +519,8 @@ def test_a_stage_with_no_selectable_epoch_fails_the_run_naming_it(tmp_path):
 @pytest.mark.parametrize("warmup_epochs", [0, 2])
 @pytest.mark.parametrize("resume_epoch", [1, 2, 3])
 def test_a_run_resumed_across_a_stage_boundary_trains_as_the_uninterrupted_run(
-    tmp_path, resume_epoch, warmup_epochs, scheduler
-):
+    tmp_path: Path, resume_epoch: int, warmup_epochs: int, scheduler: str
+) -> None:
     config = _config(
         tmp_path,
         [stage(0), stage(0)],
@@ -527,8 +564,8 @@ def test_a_run_resumed_across_a_stage_boundary_trains_as_the_uninterrupted_run(
 
 
 def test_a_resume_whose_optimizer_orders_its_groups_differently_warms_up_as_the_straight_run(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A resume into an optimizer with reordered groups warms up as the straight run does.
 
     Two param groups at different rates, two stages with a three-epoch warmup, and a resume
@@ -537,7 +574,7 @@ def test_a_resume_whose_optimizer_orders_its_groups_differently_warms_up_as_the_
     ``train_loss`` and ``val_loss``, and the final ``weight`` and ``bias`` are equal.
     """
 
-    def two_rate_config(**builder_kwargs) -> dict:
+    def two_rate_config(**builder_kwargs: bool) -> dict:
         return _config(
             tmp_path,
             [stage(0), stage(0)],
@@ -577,7 +614,7 @@ def test_a_resume_whose_optimizer_orders_its_groups_differently_warms_up_as_the_
     assert all(torch.equal(a[name], b[name]) for name in ("weight", "bias"))
 
 
-def _canceled_at(tmp_path, call: int):
+def _canceled_at(tmp_path: Path, call: int) -> tuple[TrainRun, Path]:
     """Train the run ``canceled-at-<call>`` under ``tmp_path``; return the run and its directory.
 
     The run is over frames at ``TRAIN_INTENSITIES``, each target twice its intensity, with no
@@ -608,8 +645,8 @@ def _canceled_at(tmp_path, call: int):
 
 
 def test_a_cancel_inside_an_epoch_leaves_that_epoch_no_row_best_or_checkpoint(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A cancel inside an epoch leaves that epoch no row, no best and no checkpoint.
 
     A cancel requested partway through the second epoch's batches ends the run canceled: that
@@ -630,8 +667,8 @@ def test_a_cancel_inside_an_epoch_leaves_that_epoch_no_row_best_or_checkpoint(
 
 
 def test_a_cancel_seen_at_an_epoch_top_saves_the_final_weights_with_their_row(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A cancel at the sixth training forward ends the run with its last epoch's loss saved.
 
     The run ends canceled with two epoch rows, and ``model_final``'s metrics carry the last
@@ -648,8 +685,8 @@ def test_a_cancel_seen_at_an_epoch_top_saves_the_final_weights_with_their_row(
 
 
 def test_a_cancel_seen_as_a_stage_starts_saves_its_best_epoch_with_that_epoch_row(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A cancel seen as a stage starts saves its best epoch with that epoch's row.
 
     A cancel requested after the second stage has started from the first stage's best epoch,
@@ -663,7 +700,9 @@ def test_a_cancel_seen_as_a_stage_starts_saves_its_best_epoch_with_that_epoch_ro
     real_build_scheduler = gt._build_scheduler
     built: list = []
 
-    def cancel_at_the_second_stage(optimizer, config, **direction):
+    def cancel_at_the_second_stage(
+        optimizer: Optimizer, config: SchedulerSpec, **direction: bool
+    ) -> LRScheduler:
         built.append(config)
         if len(built) == 2:
             request_cancel(run_dir)
@@ -689,8 +728,8 @@ def test_a_cancel_seen_as_a_stage_starts_saves_its_best_epoch_with_that_epoch_ro
 
 
 def test_a_resumed_run_canceled_at_its_first_poll_saves_the_checkpoint_row(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A resumed run canceled at its first poll saves the checkpoint's row.
 
     A run resumed from a periodic checkpoint and canceled before its first epoch ends canceled
@@ -725,8 +764,8 @@ def test_a_resumed_run_canceled_at_its_first_poll_saves_the_checkpoint_row(
 
 @pytest.mark.parametrize("warmup_epochs", [0, 2])
 def test_the_scheduler_steps_every_epoch_outside_a_stage_warmup(
-    tmp_path, warmup_epochs
-):
+    tmp_path: Path, warmup_epochs: int
+) -> None:
     """The scheduler steps every epoch outside a stage warmup.
 
     Under a schedule halving the rate each step, each epoch row's rate is the one it trained
@@ -781,8 +820,8 @@ def test_the_scheduler_steps_every_epoch_outside_a_stage_warmup(
     ],
 )
 def test_the_trainer_runs_the_config_its_schema_admits(
-    tmp_path, stated, read_as
-):
+    tmp_path: Path, stated: dict, read_as: int
+) -> None:
     """The trainer runs the config as its schema admits it.
 
     A config the schema admits trains as the schema reads it: what validation coerced or
@@ -806,7 +845,9 @@ def test_the_trainer_runs_the_config_its_schema_admits(
         assert steps == [2, 4, 6, 8, 10, 12]
 
 
-def test_a_worker_run_validates_its_config_once(tmp_path, monkeypatch):
+def test_a_worker_run_validates_its_config_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A worker run validates its config once.
 
     A run the worker trains, from its observed record through the default trainer and the
@@ -830,8 +871,8 @@ def test_a_worker_run_validates_its_config_once(tmp_path, monkeypatch):
 
 
 def test_a_stage_stating_an_epoch_count_is_refused_and_one_stating_none_is_admitted(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.schemas import checked_train_config
 
     refused = _config(tmp_path, [stage(0, epochs=3)])
@@ -846,7 +887,9 @@ def test_a_stage_stating_an_epoch_count_is_refused_and_one_stating_none_is_admit
     assert admitted.status == "completed", admitted.status_error
 
 
-def test_an_unknown_scheduler_is_refused_and_a_named_one_is_admitted(tmp_path):
+def test_an_unknown_scheduler_is_refused_and_a_named_one_is_admitted(
+    tmp_path: Path,
+) -> None:
     with pytest.raises(ValueError, match="scheduler.*cosine_warm"):
         _train(
             tmp_path,
@@ -867,7 +910,7 @@ def test_an_unknown_scheduler_is_refused_and_a_named_one_is_admitted(tmp_path):
     assert admitted.status == "completed", admitted.status_error
 
 
-def test_a_onecycle_schedule_trains_at_the_stated_sgd_momentum():
+def test_a_onecycle_schedule_trains_at_the_stated_sgd_momentum() -> None:
     """A one-cycle schedule steps an optimizer at the stated SGD momentum.
 
     After one optimizer step and one scheduler step, the optimizer's momentum is the one the
@@ -902,7 +945,9 @@ def test_a_onecycle_schedule_trains_at_the_stated_sgd_momentum():
     ]
 
 
-def _built(scheduler_block: dict, selection_metric: str = "mae"):
+def _built(
+    scheduler_block: dict, selection_metric: str = "mae"
+) -> tuple[LRScheduler, SGD]:
     """Return the scheduler the trainer builds for ``scheduler_block``, and its SGD optimizer.
 
     The config is :func:`_unrun`'s with an SGD optimizer, ``scheduler_block`` and selection on
@@ -939,8 +984,8 @@ def _built(scheduler_block: dict, selection_metric: str = "mae"):
     ("selection_metric", "mode"), [("mae", "min"), ("r_squared", "max")]
 )
 def test_a_plateau_schedule_builds_at_every_setting_it_states(
-    selection_metric, mode
-):
+    selection_metric: str, mode: str
+) -> None:
     """A plateau schedule builds at every setting it states.
 
     Each setting a plateau block states is the one the torch scheduler holds, and it watches
@@ -972,7 +1017,7 @@ def test_a_plateau_schedule_builds_at_every_setting_it_states(
     ) == (mode, 0.4, 5, 1e-3, "abs", 2, [1e-5], 1e-7)
 
 
-def test_a_onecycle_schedule_builds_at_every_setting_it_states():
+def test_a_onecycle_schedule_builds_at_every_setting_it_states() -> None:
     """A one-cycle schedule builds at every setting it states.
 
     Each setting a one-cycle block states is the one the torch scheduler holds: its horizon,

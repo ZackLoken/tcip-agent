@@ -83,7 +83,7 @@ def _multi_source_dataset(root: Path) -> Path:
     return root
 
 
-def test_draw_splits_stats_golden(tmp_path: Path):
+def test_draw_splits_stats_golden(tmp_path: Path) -> None:
     from tcip_mcp.tools.data_tools import draw_splits
 
     root = _multi_source_dataset(tmp_path / "ds")
@@ -96,7 +96,7 @@ def test_draw_splits_stats_golden(tmp_path: Path):
         **_DRAW,
     )
     result.pop("selection_dir")
-    assert result.pop("scope") == {"subject": "bud", "attributes": ()}
+    assert result.pop("scope") == {"subject": "bud", "attributes": []}
     assert result.pop("tallies") == {"partial": 12}
     assert (
         result.pop("calibration_foreground_groups")
@@ -106,7 +106,7 @@ def test_draw_splits_stats_golden(tmp_path: Path):
     assert result == GOLDEN_DRAW_SPLITS
 
 
-def test_draw_splits_selection_document_golden(tmp_path: Path):
+def test_draw_splits_selection_document_golden(tmp_path: Path) -> None:
     """The selection is the draw's one record, in the database under its directory.
 
     Every sample's source lies in the dataset's capture directory and its ground truth is that

@@ -7,7 +7,12 @@ unchanged.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
@@ -17,7 +22,10 @@ QUANTIZED_BOX = [10.12, 20.99, 20.38, 19.51]
 ON_GRID_BOX = (12.25, 30.5, 60.75, 80.0)
 
 
-def _detector_pass(gt_boxes, pred_boxes):
+def _detector_pass(
+    gt_boxes: list[tuple[float, float, float, float]],
+    pred_boxes: list[tuple[float, float, float, float]],
+) -> tuple[dict, dict]:
     """Return a target of ``gt_boxes`` and an output of ``pred_boxes`` scored 0.9, all class 1."""
     target = {
         "boxes": torch.tensor(gt_boxes, dtype=torch.float32),
@@ -35,7 +43,9 @@ def _detector_pass(gt_boxes, pred_boxes):
     return target, output
 
 
-def test_a_prediction_off_the_stored_grid_is_put_on_it_before_scoring():
+def test_a_prediction_off_the_stored_grid_is_put_on_it_before_scoring() -> (
+    None
+):
     """``records_from_detector`` quantizes a raw prediction to the stored label grid."""
     from tcip_mcp.pipelines.training.evaluation import records_from_detector
 
@@ -52,7 +62,7 @@ def test_a_prediction_off_the_stored_grid_is_put_on_it_before_scoring():
     assert record["dt"][0]["bbox"] == QUANTIZED_BOX
 
 
-def test_ground_truth_already_on_the_stored_grid_is_unchanged():
+def test_ground_truth_already_on_the_stored_grid_is_unchanged() -> None:
     """Ground truth already on the stored grid leaves ``records_from_detector`` unchanged."""
     from tcip_mcp.pipelines.training.evaluation import records_from_detector
 
@@ -70,7 +80,9 @@ def test_ground_truth_already_on_the_stored_grid_is_unchanged():
     assert record["gt"][0]["bbox"] == [x1, y1, x2 - x1, y2 - y1]
 
 
-def test_an_annotation_prediction_off_the_stored_grid_is_put_on_it_before_scoring():
+def test_an_annotation_prediction_off_the_stored_grid_is_put_on_it_before_scoring() -> (
+    None
+):
     """``records_from_annotation`` puts both sides of a match on the stored label grid."""
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
@@ -91,7 +103,7 @@ def test_an_annotation_prediction_off_the_stored_grid_is_put_on_it_before_scorin
     assert record["dt"][0]["bbox"] == QUANTIZED_BOX
 
 
-def test_the_grid_is_the_one_the_label_writer_owns():
+def test_the_grid_is_the_one_the_label_writer_owns() -> None:
     """The scorer's box conversion is the label writer's own."""
     from tcip_annotation import json_io
     from tcip_mcp.pipelines.training import evaluation
@@ -101,8 +113,8 @@ def test_the_grid_is_the_one_the_label_writer_owns():
 
 
 def test_scoring_labels_read_back_from_disk_is_unaffected_by_the_shared_grid(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Stored labels scored against predictions reproducing them match exactly."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox

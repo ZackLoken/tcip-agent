@@ -10,16 +10,16 @@ the tiler, the spatial split and the pass.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from torch.utils.data import Dataset  # noqa: E402
-
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
+from tcip_mcp.pipelines.data.datasets import BaseDataset  # noqa: E402
 from tcip_mcp.pipelines.execution import ExecutionRefusedError, Stated  # noqa: E402
 from tests import REPO_ROOT  # noqa: E402
 from tests._training_values import (  # noqa: E402
@@ -32,6 +32,23 @@ from tests._verified_checkpoint_fixtures import (
     SAMPLE_DETECTOR_PASS,
 )  # noqa: E402
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
+
+    from PIL import Image
+    from torch import Tensor, device, nn
+    from torch.utils.data import DataLoader
+
+    from tcip_mcp.model_registry import VerifiedCheckpoint
+    from tcip_mcp.pipelines.data.selection import ClassScope, Sample
+    from tcip_mcp.pipelines.data.split_construction import ResolvedRun
+    from tcip_mcp.pipelines.derivations import Region
+    from tcip_mcp.pipelines.execution import MaskCut
+    from tcip_mcp.pipelines.model_contract import TCIPModel
+    from tcip_mcp.pipelines.schemas import ScoreWeights
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+    from tcip_mcp.traits import TraitEntry
+
 MOSAIC_WIDTH, MOSAIC_HEIGHT = 5000, 600
 """A mosaic wide enough for a strip split at the lattice its 100 px long objects derive."""
 
@@ -39,7 +56,14 @@ THIS_FILE = str(REPO_ROOT / "tests" / "test_density_and_derived_lattice.py")
 """The file this module's dataset builders are defined in, which a run naming one declares."""
 
 
-def build_regions_ds(*, samples, scope, transforms=None, **_ignored):
+def build_regions_ds(
+    *,
+    samples: Sequence[Sample],
+    scope: ClassScope,
+    transforms: Callable[[Image.Image, dict], tuple[Tensor, dict]]
+    | None = None,
+    **_ignored: object,
+) -> BaseDataset:
     """Build a ``dataset_source`` builder's detection dataset over ``samples``.
 
     The dataset is the platform's own three-band loader, exposing its ``regions``.
@@ -55,20 +79,27 @@ def build_regions_ds(*, samples, scope, transforms=None, **_ignored):
     )
 
 
-class _NoRegions(Dataset):
+class _NoRegions(BaseDataset):
     """A detection dataset serving ``inner``'s items and exposing no ``regions``."""
 
-    def __init__(self, inner) -> None:
+    def __init__(self, inner: BaseDataset) -> None:
         self.inner = inner
 
-    def __len__(self) -> int:
+    @property
+    def num_samples(self) -> int:
         return len(self.inner)
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: int) -> tuple[Tensor, dict]:
         return self.inner[index]
 
 
-def build_no_regions_ds(**kwargs) -> _NoRegions:
+def build_no_regions_ds(
+    **kwargs: str
+    | Sequence[Sample]
+    | ClassScope
+    | Callable[[Image.Image, dict], tuple[Tensor, dict]]
+    | None,
+) -> _NoRegions:
     """Build a ``dataset_source`` builder's detection dataset exposing no ``regions``."""
     return _NoRegions(build_regions_ds(**kwargs))
 
@@ -77,7 +108,7 @@ COMPOSED_LATTICE = (32, 0.25)
 """The lattice :func:`compose_tiles` composes its tiler at."""
 
 
-def compose_tiles(ctx) -> None:
+def compose_tiles(ctx: TrainContext) -> None:
     """Tile the training loader's dataset at :data:`COMPOSED_LATTICE`, validate and save.
 
     The training body tiles through ``ctx.tiled_dataset``, logs the lattice its tiler serves,
@@ -110,7 +141,7 @@ def compose_tiles(ctx) -> None:
     ctx.save_checkpoint({STATE_DICT_KEY: model.state_dict()}, "model_final")
 
 
-def _in_model_caps(model) -> list:
+def _in_model_caps(model: nn.Module) -> list:
     """Return the list of ``detections_per_img`` each forward of ``model`` runs under.
 
     Each forward appends its value as it runs.
@@ -129,7 +160,7 @@ def _in_model_caps(model) -> list:
 
 def test_a_pass_with_no_reference_caps_each_frame_at_the_checkpoints_density_times_its_pixels(
     tmp_path: Path,
-):
+) -> None:
     """A pass with no reference caps each frame at the checkpoint's density times its pixels.
 
     With two frames of different sizes in one pass, each runs its forward under, and its row
@@ -170,7 +201,7 @@ def test_a_pass_with_no_reference_caps_each_frame_at_the_checkpoints_density_tim
     assert sorted(forwards) == sorted(caps)
 
 
-def _without_density(project: Path):
+def _without_density(project: Path) -> VerifiedCheckpoint:
     """Return a checkpoint no run produced, recording no density, loaded through the registry.
 
     Its bytes are :func:`project_checkpoint`'s with the density its geometry records set to
@@ -195,7 +226,7 @@ def _without_density(project: Path):
 
 def test_a_checkpoint_recording_no_density_refuses_a_detector_pass_naming_the_primitive(
     tmp_path: Path,
-):
+) -> None:
     """A detector pass over a checkpoint recording no density refuses naming the primitive.
 
     A detector checkpoint no run of the platform produced records no density of its training
@@ -260,7 +291,9 @@ def _mosaic(root: Path) -> Path:
     return images_dir
 
 
-def _resolved(project: Path, data: dict, monkeypatch) -> tuple:
+def _resolved(
+    project: Path, data: dict, monkeypatch: pytest.MonkeyPatch
+) -> tuple[ResolvedRun, int]:
     """Return ``(run, lattice derivations)`` for a detection config over ``data``.
 
     The run is the one the config resolves under ``project``
@@ -280,7 +313,9 @@ def _resolved(project: Path, data: dict, monkeypatch) -> tuple:
     calls: list = []
     real = derivations.derive_tile_geometry
 
-    def counted(*args, **kwargs):
+    def counted(
+        *args: Sequence[Region], **kwargs: int | float | None
+    ) -> tuple[int, float]:
         calls.append(args)
         return real(*args, **kwargs)
 
@@ -293,8 +328,8 @@ def _resolved(project: Path, data: dict, monkeypatch) -> tuple:
 
 
 def test_the_tiler_the_spatial_split_and_the_pass_derive_one_lattice_from_one_ground_truth(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The tiler, the spatial split and the pass derive one lattice from one ground truth.
 
     Over one mosaic's ground truth of long, thin objects, three routes' own records agree: the
@@ -326,7 +361,7 @@ def test_the_tiler_the_spatial_split_and_the_pass_derive_one_lattice_from_one_gr
         },
         monkeypatch,
     )
-    assert run.spatial is not None and derivations == 1
+    assert run.partition.spatial is not None and derivations == 1
     run_lattice = (run.data.tiling.tile_size, run.data.tiling.overlap)
     tiler_lattice = (run.train_ds.tile_size, run.train_ds.overlap)
 
@@ -370,8 +405,8 @@ def test_the_tiler_the_spatial_split_and_the_pass_derive_one_lattice_from_one_gr
 
 
 def test_a_drawn_tiled_run_resolves_its_lattice_once(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A drawn tiled run resolves its lattice once, and its tiler serves that one.
 
     The run draws train and val over several frames.
@@ -401,7 +436,7 @@ def test_a_drawn_tiled_run_resolves_its_lattice_once(
 
 def test_an_object_as_long_as_the_derived_overlap_lies_whole_in_a_tile_at_a_stated_edge(
     tmp_path: Path,
-):
+) -> None:
     """An object as long as the derived overlap lies whole in some tile at a stated edge.
 
     For a frame holding one 29 px object, at a stated 100 px edge, the tiler keeps the 100 px
@@ -442,7 +477,7 @@ def test_an_object_as_long_as_the_derived_overlap_lies_whole_in_a_tile_at_a_stat
 )
 def test_a_tiled_pass_with_nothing_stated_recorded_or_referenced_refuses_naming_the_three(
     tmp_path: Path, stated: dict
-):
+) -> None:
     """A tiled pass with no lattice stated, recorded or referenced refuses naming all three.
 
     A checkpoint recording untiled frames of no square edge records no lattice: a tiled
@@ -480,8 +515,8 @@ def test_a_tiled_pass_with_nothing_stated_recorded_or_referenced_refuses_naming_
 
 
 def test_validation_runs_every_frame_under_the_cap_its_density_gives_it(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Validation runs each frame under the cap the run's density gives it.
 
     Each of two frames whose cap is one keeps at most one detection, though the same detector
@@ -515,7 +550,9 @@ def test_validation_runs_every_frame_under_the_cap_its_density_gives_it(
     kept: list[int] = []
     real = evaluation.records_from_detector
 
-    def counting(target, output, **kwargs):
+    def counting(
+        target: dict, output: dict, **kwargs: int | MaskCut | None
+    ) -> dict:
         kept.append(len(output["boxes"]))
         return real(target, output, **kwargs)
 
@@ -538,8 +575,8 @@ def test_validation_runs_every_frame_under_the_cap_its_density_gives_it(
 
 
 def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_floor(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Validation keeps each box the cap admits, past a builder's score floor above every score.
 
     A built detector holding a score threshold above every score it gives reports in each
@@ -582,7 +619,9 @@ def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_flo
     rows: list[dict] = []
     real = evaluation.records_from_detector
 
-    def recording(target, output, **kwargs):
+    def recording(
+        target: dict, output: dict, **kwargs: int | MaskCut | None
+    ) -> dict:
         rows.append(real(target, output, **kwargs))
         return rows[-1]
 
@@ -606,7 +645,7 @@ def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_flo
     ]
 
 
-def _frames_config(project: Path, name: str, **data) -> dict:
+def _frames_config(project: Path, name: str, **data: dict) -> dict:
     """Return ``training_config`` of the declared detector over four frames named by ``name``.
 
     The frames are ``detection_images`` under ``fixture_data_dir(project, name)``; the split is
@@ -644,8 +683,8 @@ def _frames_config(project: Path, name: str, **data) -> dict:
 
 
 def test_the_density_the_trainer_validates_under_is_the_one_its_checkpoint_records(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The density a run's validation is handed is the one its checkpoint records.
 
     It is the density the run's own resolution recorded.
@@ -658,7 +697,15 @@ def test_the_density_the_trainer_validates_under_is_the_one_its_checkpoint_recor
     handed: list = []
     real = trainer._validate
 
-    def recording(*args, **kwargs):
+    def recording(
+        *args: TCIPModel | DataLoader | device | str,
+        **kwargs: Mapping[str, object]
+        | float
+        | ScoreWeights
+        | TraitEntry
+        | MaskCut
+        | None,
+    ) -> dict:
         handed.append(kwargs["density"])
         return real(*args, **kwargs)
 
@@ -669,14 +716,14 @@ def test_the_density_the_trainer_validates_under_is_the_one_its_checkpoint_recor
     assert observation.checkpoint is not None, observation.final
 
     recorded = load_registered_checkpoint(
-        observation.checkpoint["path"], project=tmp_path
+        observation.checkpoint.path, project=tmp_path
     )
     assert handed and set(handed) == {recorded.geometry.object_density}
 
 
 def test_a_bespoke_detection_dataset_exposing_regions_records_its_density_and_validates(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A bespoke detection dataset exposing regions records its density and validates under it.
 
     A run whose loaders a ``dataset_source`` builder makes records the density of the regions
@@ -691,7 +738,15 @@ def test_a_bespoke_detection_dataset_exposing_regions_records_its_density_and_va
     validated: list = []
     real = trainer._validate
 
-    def recording(*args, **kwargs):
+    def recording(
+        *args: TCIPModel | DataLoader | device | str,
+        **kwargs: Mapping[str, object]
+        | float
+        | ScoreWeights
+        | TraitEntry
+        | MaskCut
+        | None,
+    ) -> dict:
         validated.append(kwargs["density"])
         return real(*args, **kwargs)
 
@@ -711,7 +766,7 @@ def test_a_bespoke_detection_dataset_exposing_regions_records_its_density_and_va
     )
     assert observation.checkpoint is not None, observation.final
     trained = load_registered_checkpoint(
-        observation.checkpoint["path"], project=tmp_path
+        observation.checkpoint.path, project=tmp_path
     )
     assert trained.geometry.object_density == pytest.approx(1 / (64 * 48))
     assert validated == [trained.geometry.object_density]
@@ -732,17 +787,17 @@ def test_a_bespoke_detection_dataset_exposing_regions_records_its_density_and_va
 
 def test_a_bespoke_body_tiles_at_the_lattice_it_states_and_validates_over_its_tiles(
     tmp_path: Path,
-):
+) -> None:
     """A bespoke body tiles at the lattice it states and validates over its tiles.
 
     A run whose loaders a ``dataset_source`` builder makes records no lattice; its training body
     composes the tiler at the pair it states, the tiler serves that pair, and the run validates
     over those tiles and completes.
     """
-    from tcip_mcp.experiments import observe, read_rows
+    from tcip_mcp.experiments import observe_run, read_rows
     from tests._verified_checkpoint_fixtures import worker_run
 
-    observation = observe(
+    observation = observe_run(
         worker_run(
             tmp_path,
             _frames_config(
@@ -764,14 +819,14 @@ def test_a_bespoke_body_tiles_at_the_lattice_it_states_and_validates_over_its_ti
         r for r in read_rows(observation.metrics_log)[0] if "tile_size" in r
     ]
     assert (row["tile_size"], row["overlap"]) == COMPOSED_LATTICE
-    assert observation.record["resolved"]["data"].get("tiling") is None
-    geometry = observation.resolved_geometry
-    assert geometry is not None and geometry.native_size is None
+    resolution = observation.record.resolution
+    assert resolution.data.tiling is None
+    assert resolution.geometry.native_size is None
 
 
 def test_a_tiling_stated_beside_a_builder_refuses_at_admission_naming_both(
     tmp_path: Path,
-):
+) -> None:
     """A tiling stated beside a dataset builder refuses at admission naming both.
 
     A config stating ``data.tiling`` beside a ``dataset_source`` refuses naming both keys; the
@@ -804,7 +859,7 @@ def test_a_tiling_stated_beside_a_builder_refuses_at_admission_naming_both(
 
 def test_an_enabled_tiling_without_its_lattice_refuses_naming_its_resolver(
     tmp_path: Path,
-):
+) -> None:
     """An enabled tiling without its lattice refuses naming the edge, the overlap and the resolver.
 
     A tiling block reaching the factory with no edge or overlap refuses naming both and the
@@ -852,18 +907,30 @@ def test_an_enabled_tiling_without_its_lattice_refuses_naming_its_resolver(
 
 @pytest.mark.parametrize("built", ["recording", "counting"])
 def test_a_stand_in_datasets_density_is_the_one_its_served_objects_give(
-    built: str,
-):
+    tmp_path: Path, built: str
+) -> None:
     """A stand-in dataset's density is the one its served objects give.
 
     The density of its regions is the objects it serves per item over its 8 by 8 frame.
     """
     from tcip_mcp.pipelines.derivations import derive_object_density
+    from tests._producer_fixtures import samples_over, seed_labeled_images
     from tests.test_dataset_source_seam import build_bespoke_ds
     from tests.test_selection_binding import build_recording_dataset
 
     dataset = (
-        build_recording_dataset(samples=["s0", "s1"])
+        build_recording_dataset(
+            samples=samples_over(
+                seed_labeled_images(
+                    tmp_path / "images" / UNDATED_BUCKET,
+                    [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))],
+                    n=2,
+                    width=8,
+                    height=8,
+                ),
+                subject="bud",
+            )
+        )
         if built == "recording"
         else build_bespoke_ds(rows=["s0", "s1"])
     )
@@ -875,8 +942,8 @@ def test_a_stand_in_datasets_density_is_the_one_its_served_objects_give(
 
 
 def test_a_bespoke_detector_under_cap_one_keeps_one_through_validation_and_a_pass(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A bespoke detector under a cap of one keeps one through validation and a pass.
 
     A producer-built bespoke detector over frames holding two objects each keeps one under a cap
@@ -921,16 +988,25 @@ def test_a_bespoke_detector_under_cap_one_keeps_one_through_validation_and_a_pas
     with torch.no_grad():
         assert len(model([images[0]])[0]["boxes"]) == 2
 
+    from dataclasses import replace
+
     one = 1 / (64 * 48)
     rows = p.predictor.predict_batch(
-        p.paths, p.execution.with_value("density", one, "explicit")
+        p.paths,
+        replace(
+            p.execution,
+            density=one,
+            sources={**p.execution.sources, "density": "explicit"},
+        ),
     )
     assert [(r["cap"], r["count"]) for r in rows] == [(1, 1), (1, 1)]
 
     kept: list[int] = []
     real = evaluation.records_from_detector
 
-    def counting(target, output, **kwargs):
+    def counting(
+        target: dict, output: dict, **kwargs: int | MaskCut | None
+    ) -> dict:
         kept.append(len(output["boxes"]))
         return real(target, output, **kwargs)
 
@@ -962,7 +1038,7 @@ def test_a_bespoke_detector_under_cap_one_keeps_one_through_validation_and_a_pas
 )
 def test_an_operating_point_knob_stated_to_the_builder_refuses_by_name(
     knob: str,
-):
+) -> None:
     """An operating-point knob stated to a detector builder refuses by name.
 
     A detector builder handed the cap or the score threshold refuses naming it, and the same
@@ -983,13 +1059,13 @@ def test_an_operating_point_knob_stated_to_the_builder_refuses_by_name(
 
 def test_a_restored_record_missing_its_overlap_or_density_refuses_and_a_complete_one_predicts(
     tmp_path: Path,
-):
+) -> None:
     """A restored record missing its overlap or density refuses; a complete one predicts.
 
     A stored detector's tiled execution record missing its overlap or its density refuses
     naming the missing field, and the complete record restores and predicts.
     """
-    from tcip_mcp.pipelines.execution import Execution, prepare
+    from tcip_mcp.pipelines.execution import EXECUTION_RECORD, prepare
     from tests._producer_fixtures import gray_frame
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_OVERLAP,
@@ -1009,26 +1085,26 @@ def test_a_restored_record_missing_its_overlap_or_density_refuses_and_a_complete
         tile_size=64,
         overlap=SAMPLE_OVERLAP,
     )
-    record = p.execution.record()
+    record = EXECUTION_RECORD.dump_python(p.execution, mode="json")
 
     with pytest.raises(ValueError, match="overlap"):
-        Execution.of({**record, "overlap": None})
+        EXECUTION_RECORD.validate_python({**record, "overlap": None})
     with pytest.raises(ValueError, match="density"):
-        Execution.of({**record, "density": None})
+        EXECUTION_RECORD.validate_python({**record, "density": None})
     restored = prepare(
         checkpoint,
         Stated(),
         images_dir=images_dir,
         device="cpu",
-        restored=Execution.of(record),
+        restored=EXECUTION_RECORD.validate_python(record),
     ).runnable()
     (result,) = restored.predict(restored.paths)
     assert result["tiles"] >= 1
 
 
 def test_the_published_cap_reaches_the_row_scoring_its_bucket(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The published cap reaches the row scoring its bucket.
 
     The row scoring a published bucket against the 96 px frame's ground truth carries the
@@ -1084,7 +1160,9 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
     scored: list[dict] = []
     real = evaluation.records_from_annotation
 
-    def recording(*args, **kwargs):
+    def recording(
+        *args: list[Annotation], **kwargs: int | dict[str, int] | None
+    ) -> dict:
         scored.append(real(*args, **kwargs))
         return scored[-1]
 

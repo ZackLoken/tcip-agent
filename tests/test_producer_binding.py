@@ -10,8 +10,12 @@ why.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
@@ -28,7 +32,9 @@ def _deliver(project: Path, root: Path, bucket: str, out: Path) -> dict:
     )
 
 
-def _edit_record(root: Path, bucket: str, edit) -> None:
+def _edit_record(
+    root: Path, bucket: str, edit: Callable[[dict], None]
+) -> None:
     """Read ``bucket``'s published record, apply ``edit`` to it, and replace it in the store."""
     import tcip_store
     from tcip_mcp.dataset_layout import bucket_key
@@ -41,7 +47,7 @@ def _edit_record(root: Path, bucket: str, edit) -> None:
 
 def test_a_bucket_record_edited_to_another_execution_answers_for_nothing(
     tmp_path: Path,
-):
+) -> None:
     """A bucket record edited to another execution refuses delivery under its assessment.
 
     The assessment measured one execution record; a bucket stating another, under the same
@@ -73,7 +79,7 @@ def test_a_bucket_record_edited_to_another_execution_answers_for_nothing(
 
 def test_a_bucket_record_naming_an_assessment_nobody_ran_answers_for_nothing(
     tmp_path: Path,
-):
+) -> None:
     chain = run_the_chain(tmp_path, experiment_id="exp-binding-forged-id")
 
     _edit_record(
@@ -93,7 +99,7 @@ def test_a_bucket_record_naming_an_assessment_nobody_ran_answers_for_nothing(
 
 def test_a_capture_outside_the_assessments_reference_answers_for_nothing(
     tmp_path: Path,
-):
+) -> None:
     """A capture outside the assessment's reference refuses delivery, naming its date.
 
     The checkpoint and execution are the assessed ones, but the capture is not among those the

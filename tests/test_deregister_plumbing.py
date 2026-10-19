@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 
-def test_deregistered_wrappers_absent_from_registry():
+def test_deregistered_wrappers_absent_from_registry() -> None:
     """The three machine-plumbing wrappers are absent from the MCP registry."""
     from tcip_mcp.server import list_registered_tools
 

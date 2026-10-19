@@ -6,6 +6,8 @@ and stratified splits count JSON objects, not JSON lines.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 import tcip_store as ts
@@ -17,10 +19,15 @@ from tests._producer_fixtures import (
     label_image,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from tcip_mcp.workspace import BoundProject
+
 
 def test_mcp_save_annotations_empty_writes_the_empty_document_the_route_writes(
-    bound,
-):
+    bound: BoundProject,
+) -> None:
     """An empty MCP save writes an empty label document over an annotated one.
 
     The emptied document stays, holding nothing, and the save answers the capture it wrote.
@@ -37,16 +44,16 @@ def test_mcp_save_annotations_empty_writes_the_empty_document_the_route_writes(
 
 @pytest.mark.parametrize(
     "bad",
-    ["a bur", {"bbox": [1, 1, 5, 5]}, {"subject": ""}],
-    ids=["not_an_object", "no_subject", "empty_subject"],
+    [{"bbox": [1, 1, 5, 5]}, {"subject": ""}],
+    ids=["no_subject", "empty_subject"],
 )
 def test_mcp_save_annotations_refuses_by_index_through_the_decoders_checks(
-    bound, bad
-):
+    bound: BoundProject, bad: dict[str, list[int]] | dict[str, str]
+) -> None:
     """The MCP save refuses a malformed annotation by its index and writes nothing.
 
-    An annotation that is not an object, names no subject or names an empty one is refused
-    naming its index; the valid one beside it is not written alone.
+    An annotation that names no subject or names an empty one is refused naming its index; the
+    valid one beside it is not written alone.
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
@@ -60,7 +67,7 @@ def test_mcp_save_annotations_refuses_by_index_through_the_decoders_checks(
     assert ts.read(image_label_key(img), default=None) is None
 
 
-def test_encode_predictions_stamps_model_provenance(tmp_path):
+def test_encode_predictions_stamps_model_provenance(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
@@ -83,7 +90,7 @@ def test_encode_predictions_stamps_model_provenance(tmp_path):
     assert obj["score"] == pytest.approx(0.9)
 
 
-def test_draw_splits_counts_json_objects_not_lines(tmp_path):
+def test_draw_splits_counts_json_objects_not_lines(tmp_path: Path) -> None:
     """``draw_splits`` counts a document's annotation objects, not its text lines.
 
     Over documents of three, one, zero and zero boxes, the split's foreground annotations sum

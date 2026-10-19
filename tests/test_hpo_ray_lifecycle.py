@@ -12,8 +12,12 @@ import os
 import sys
 import threading
 from types import ModuleType, SimpleNamespace
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class _FakeDaemonProcess:
@@ -31,14 +35,14 @@ class _FakeDaemonProcess:
         self.wait_calls = 0
         self.terminate_calls = 0
 
-    def poll(self):
+    def poll(self) -> int | None:
         return None if self._alive else 0
 
     def kill(self) -> None:
         self.kill_calls += 1
         self._alive = False
 
-    def wait(self, timeout=None) -> None:
+    def wait(self, timeout: float | None = None) -> None:
         self.wait_calls += 1
 
     def terminate(self) -> None:
@@ -48,7 +52,9 @@ class _FakeDaemonProcess:
         self._alive = False
 
 
-def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
+def _install_fake_ray(
+    monkeypatch: pytest.MonkeyPatch, entered: list, release: list
+) -> ModuleType:
     """Put a counting, blocking stand-in for Ray on ``sys.modules``.
 
     The nth ``Tuner`` built sets ``entered[n]`` when its ``fit`` starts and returns when
@@ -64,7 +70,7 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
     from tcip_mcp.pipelines.training.hpo import _SCHEDULERS
     from tests._training_values import tune_arguments
 
-    def fake_psutil_process(pid):
+    def fake_psutil_process(pid: int) -> NoReturn:
         raise psutil.NoSuchProcess(pid)
 
     monkeypatch.setattr(psutil, "Process", fake_psutil_process)
@@ -95,7 +101,7 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
     def is_initialized() -> bool:
         return ray.live
 
-    def init(**kwargs):
+    def init(**kwargs: int | bool | dict[str, dict[str, str]]) -> None:
         ray.init_calls += 1
         ray.live = True
         ray.init_kwargs = dict(kwargs)
@@ -117,7 +123,7 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
     order_lock = threading.Lock()
 
     class _Tuner:
-        def __init__(self, *args, **kwargs) -> None:
+        def __init__(self, *args: object, **kwargs: object) -> None:
             with order_lock:
                 self.index = next(order)
 
@@ -145,7 +151,7 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
         pass
 
     class BasicVariantGenerator(Searcher):
-        def __init__(self, **kwargs):
+        def __init__(self, **kwargs: list[dict] | int | bool | None) -> None:
             self.kwargs = kwargs
 
     basic_variant = ModuleType("ray.tune.search.basic_variant")
@@ -171,7 +177,7 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
     return ray
 
 
-def _run_one_search(project) -> None:
+def _run_one_search(project: Path) -> None:
     from tcip_mcp.pipelines.training.hpo import tune_search
     from tests._training_values import sweep_space, tune_arguments
 
@@ -184,7 +190,9 @@ def _run_one_search(project) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _isolated_lifecycle_state(tmp_path, monkeypatch):
+def _isolated_lifecycle_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Reset the cluster lifecycle state to idle and unowned."""
     import tcip_mcp.pipelines.training.hpo as hpo
 
@@ -195,8 +203,8 @@ def _isolated_lifecycle_state(tmp_path, monkeypatch):
 
 
 def test_finished_sweep_leaves_a_concurrent_sweep_s_cluster_running(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     entered = [threading.Event(), threading.Event()]
     release = [threading.Event(), threading.Event()]
     ray = _install_fake_ray(monkeypatch, entered, release)
@@ -226,8 +234,8 @@ def test_finished_sweep_leaves_a_concurrent_sweep_s_cluster_running(
 
 
 def test_a_cluster_this_process_did_not_start_is_never_shut_down(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     entered = [threading.Event()]
     release = [threading.Event()]
     release[0].set()
@@ -241,8 +249,8 @@ def test_a_cluster_this_process_did_not_start_is_never_shut_down(
 
 
 def test_ray_init_propagates_this_process_s_import_search_path_to_trial_workers(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``ray.init``'s runtime environment carries this process's import path, less layout roots.
 
     Each ``sys.path`` entry that is not a layout root appears in that environment's
@@ -270,10 +278,10 @@ def test_ray_init_propagates_this_process_s_import_search_path_to_trial_workers(
 
 
 def test_a_concurrent_sweep_warns_when_the_running_cluster_s_import_path_has_gone_stale(
-    monkeypatch,
-    caplog,
-    tmp_path,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+) -> None:
     """A concurrent sweep warns when the running cluster's import path has gone stale.
 
     With ``sys.path`` gaining an entry while a first sweep's cluster is up, a second sweep
@@ -310,10 +318,10 @@ def test_a_concurrent_sweep_warns_when_the_running_cluster_s_import_path_has_gon
 
 
 def test_a_concurrent_sweep_does_not_warn_when_the_import_path_is_unchanged(
-    tmp_path,
-    monkeypatch,
-    caplog,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """A concurrent sweep raises no warning when the import path is unchanged.
 
     Entering a second sweep against a cluster this module started, with the import path
@@ -348,8 +356,8 @@ def test_a_concurrent_sweep_does_not_warn_when_the_import_path_is_unchanged(
 
 
 def test_sequential_sweeps_each_start_and_stop_their_own_cluster(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     entered = [threading.Event(), threading.Event()]
     release = [threading.Event(), threading.Event()]
     for event in release:
@@ -364,8 +372,8 @@ def test_sequential_sweeps_each_start_and_stop_their_own_cluster(
 
 
 def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A console-free exit kills Ray's daemons, leaving ``ray.shutdown()`` none to signal.
 
     With no console attached and daemons whose terminate raises, the sweep's exit raises
@@ -402,8 +410,8 @@ def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(
 
 
 def test_a_process_with_a_console_lets_ray_shutdown_signal_its_daemons_directly(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A process with a console lets ``ray.shutdown()`` signal its daemons directly.
 
     Asserts nothing is killed ahead of ``ray.shutdown()``, which signals each daemon through the
@@ -432,8 +440,8 @@ def test_a_process_with_a_console_lets_ray_shutdown_signal_its_daemons_directly(
 
 
 def test_a_cluster_this_process_starts_is_sized_to_the_sweep_s_own_request(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A cluster this process starts is sized to the sweep's own CPU request.
 
     Three concurrent half-CPU trials ask Ray for two whole CPUs, and the sample one-CPU,

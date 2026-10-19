@@ -18,7 +18,9 @@ from tcip_mcp.pipelines.derivations import (
 )
 
 
-def test_num_classes_sizes_the_head_for_the_highest_id_not_the_ids_present():
+def test_num_classes_sizes_the_head_for_the_highest_id_not_the_ids_present() -> (
+    None
+):
     """The class count sizes the head for the highest id, not the count of ids present.
 
     A label set whose observed ids are sparse, 0 and 3 say, sizes for one more than its highest
@@ -37,8 +39,8 @@ def test_num_classes_sizes_the_head_for_the_highest_id_not_the_ids_present():
     ],
 )
 def test_anchor_ratios_keep_square_coverage_on_a_uniformly_open_dataset(
-    boxes, label_ratio
-):
+    boxes: list[tuple[float, float]], label_ratio: float
+) -> None:
     """The derived anchor ratios keep square coverage on a uniformly elongated dataset.
 
     Over uniformly tall or uniformly wide boxes, the derived set holds the boxes' own ratio
@@ -51,7 +53,9 @@ def test_anchor_ratios_keep_square_coverage_on_a_uniformly_open_dataset(
     assert min(ratios) <= 1.0 <= max(ratios)
 
 
-def test_localization_tolerance_normalizes_by_the_characteristic_size_its_siblings_share():
+def test_localization_tolerance_normalizes_by_the_characteristic_size_its_siblings_share() -> (
+    None
+):
     """The localization tolerance normalizes by the characteristic size its siblings share.
 
     The center-match tolerance is a fraction of ``sqrt(w*h)``, the characteristic size
@@ -76,7 +80,9 @@ def test_localization_tolerance_normalizes_by_the_characteristic_size_its_siblin
     assert tol_open == pytest.approx(tol_square)
 
 
-def test_block_scale_takes_the_typical_spacing_not_one_dragged_up_by_isolated_objects():
+def test_block_scale_takes_the_typical_spacing_not_one_dragged_up_by_isolated_objects() -> (
+    None
+):
     """The block scale takes the typical object spacing, not one dragged up by isolated objects.
 
     Over a row of six objects 100 px apart and a pair 900 px apart, the GT object-spacing scale

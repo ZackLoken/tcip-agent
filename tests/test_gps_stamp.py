@@ -19,7 +19,7 @@ _WHEN = datetime(2024, 5, 1, 10, 0, 0)
 
 def test_a_latitude_missing_its_hemisphere_reference_refuses_naming_the_image(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         read_image_stamp,
     )
@@ -32,7 +32,9 @@ def test_a_latitude_missing_its_hemisphere_reference_refuses_naming_the_image(
     assert str(path) in str(refused.value)
 
 
-def test_a_stamp_with_every_reference_reads_its_position(tmp_path: Path):
+def test_a_stamp_with_every_reference_reads_its_position(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         read_image_stamp,
     )
@@ -49,7 +51,7 @@ def test_a_stamp_with_every_reference_reads_its_position(tmp_path: Path):
 
 def test_a_latitude_with_no_longitude_is_unattributed_never_measured_at_longitude_zero(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         MatchRadius,
         PlantRecord,

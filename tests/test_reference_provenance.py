@@ -10,6 +10,7 @@ prediction a reviewer accepted and a signed rule-based admission all remain a re
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -17,11 +18,18 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tests import REFUSED_NAMES
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 IMG = 32
 PRODUCER = "model:m_best@c9f632ba98b2"  # the shape a publication stamps on every prediction
 
 
-def _documents(root: Path, stems, annotations) -> list[Annotation]:
+def _documents(
+    root: Path,
+    stems: list[str],
+    annotations: Callable[[str], list[Annotation]],
+) -> list[Annotation]:
     """Write one label document per stem and return the annotations they hold, read back.
 
     Each document holds ``annotations(stem)``.
@@ -38,7 +46,9 @@ def _documents(root: Path, stems, annotations) -> list[Annotation]:
     return held
 
 
-def _prediction(box=(2, 2, 10, 10)):
+def _prediction(
+    box: tuple[int, int, int, int] = (2, 2, 10, 10),
+) -> Annotation:
     return Annotation(
         subject="bud",
         geometry=BBox(*box),
@@ -48,14 +58,19 @@ def _prediction(box=(2, 2, 10, 10)):
     )
 
 
-def _hand(box=(2, 2, 10, 10), **kw):
+def _hand(
+    box: tuple[int, int, int, int] = (2, 2, 10, 10),
+    **kw: dict[str, str] | float | bool | str | None,
+) -> Annotation:
     return Annotation(subject="bud", geometry=BBox(*box), **kw)
 
 
 STEMS = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
 
 
-def test_a_reference_of_the_models_own_predictions_refuses_whole(tmp_path):
+def test_a_reference_of_the_models_own_predictions_refuses_whole(
+    tmp_path: Path,
+) -> None:
     documents = _documents(
         tmp_path,
         STEMS,
@@ -70,8 +85,8 @@ def test_a_reference_of_the_models_own_predictions_refuses_whole(tmp_path):
 
 
 def test_a_mixed_reference_refuses_whole_rather_than_keeping_its_clean_subset(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     documents = _documents(
         tmp_path,
         STEMS,
@@ -82,7 +97,9 @@ def test_a_mixed_reference_refuses_whole_rather_than_keeping_its_clean_subset(
         json_io.require_reference_ground_truth(documents)
 
 
-def test_ground_truth_an_agent_authored_that_nobody_ruled_on_refuses(tmp_path):
+def test_ground_truth_an_agent_authored_that_nobody_ruled_on_refuses(
+    tmp_path: Path,
+) -> None:
     """Ground truth an agent authored and no reviewer accepted is refused whole, naming it."""
     documents = _documents(
         tmp_path,
@@ -101,7 +118,7 @@ def test_ground_truth_an_agent_authored_that_nobody_ruled_on_refuses(tmp_path):
     assert "confirm these records in the editor" in message
 
 
-def test_a_bare_tool_name_reads_as_a_machine_author(tmp_path):
+def test_a_bare_tool_name_reads_as_a_machine_author(tmp_path: Path) -> None:
     documents = _documents(
         tmp_path, ["a"], lambda s: [_hand(created_by="sam")]
     )
@@ -114,7 +131,9 @@ def test_a_bare_tool_name_reads_as_a_machine_author(tmp_path):
     "producer",
     [n for n in REFUSED_NAMES if n.startswith(json_io.PERSON_IDENTITY_PREFIX)],
 )
-def test_the_prefix_naming_no_one_is_no_persons_authorship(tmp_path, producer):
+def test_the_prefix_naming_no_one_is_no_persons_authorship(
+    tmp_path: Path, producer: str
+) -> None:
     documents = _documents(
         tmp_path, ["a"], lambda s: [_hand(created_by=producer)]
     )
@@ -138,15 +157,17 @@ def test_the_prefix_naming_no_one_is_no_persons_authorship(tmp_path, producer):
     ],
     ids=["unattributed", "a-persons", "reviewer-accepted"],
 )
-def test_ground_truth_a_person_stands_behind_is_a_reference(tmp_path, record):
+def test_ground_truth_a_person_stands_behind_is_a_reference(
+    tmp_path: Path, record: Annotation
+) -> None:
     json_io.require_reference_ground_truth(
         _documents(tmp_path, STEMS, lambda s: [record])
     )
 
 
 def test_the_assessment_refuses_a_reference_of_the_models_own_predictions(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The assessment refuses a reference holding a prediction-scored record."""
     pytest.importorskip("torch")
     from tests._chain_fixtures import (

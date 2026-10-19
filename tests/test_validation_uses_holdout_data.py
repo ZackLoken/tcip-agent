@@ -7,6 +7,8 @@ show which side was scored.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -23,8 +25,15 @@ from tests.tiny_trainer_fixtures import (
     run_context,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def _context(tmp_path, horizon: int, **overrides):
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+
+
+def _context(
+    tmp_path: Path, horizon: int, **overrides: object
+) -> TrainContext:
     """Return the context of a regression run over opposed frames under ``tmp_path``.
 
     The run is opened by the launcher's own producer.
@@ -44,21 +53,23 @@ def _context(tmp_path, horizon: int, **overrides):
     )
 
 
-def test_the_run_a_test_trains_is_the_one_its_directory_records(tmp_path):
+def test_the_run_a_test_trains_is_the_one_its_directory_records(
+    tmp_path: Path,
+) -> None:
     """The context ``_context`` builds holds the run its directory records.
 
     Its run is the one ``observed_run`` reads back from the directory the launcher's own producer
     opened, its loaders hold the recorded partition's sides, and the validation side holds the
     validation frames the fixture wrote and no other.
     """
-    from tcip_mcp.experiments import observe
+    from tcip_mcp.experiments import observe_run
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import partition_side
 
     ctx = _context(tmp_path, 1)
-    observation = observe(ctx.run_dir)
+    observation = observe_run(ctx.run_dir)
     recorded = observed_run(observation)
-    partition = observation.record["resolved"]["partition"]
+    partition = observation.record.resolution.partition
 
     assert (ctx.run.id, ctx.run.spec.record(), ctx.run.trait_revision) == (
         recorded.id,
@@ -76,8 +87,8 @@ def test_the_run_a_test_trains_is_the_one_its_directory_records(tmp_path):
 
 
 def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An epoch's recorded ``val_`` metrics match an evaluation of the holdout loader.
 
     They agree, within 1e-6, with a real evaluation of that epoch's model on the holdout
@@ -143,8 +154,8 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(
 
 
 def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The best checkpoint and early stopping follow the holdout loader.
 
     With holdout loss worsening while training loss improves, the run stops after two of its

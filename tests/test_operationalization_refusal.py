@@ -68,7 +68,7 @@ def _confirmed_aggregate(project: Path, kind: str) -> traits.TraitRevision:
 
 def test_a_kind_the_confirmed_revision_does_not_state_refuses_and_names_the_proposing_tool(
     project: Path,
-):
+) -> None:
     with pytest.raises(OperationalizationRefusedError) as excinfo:
         confirmed_revision(
             STATE_CROSSING_DATES, project=project, trait=fx.CROSSING_TRAIT
@@ -85,7 +85,7 @@ def test_a_kind_the_confirmed_revision_does_not_state_refuses_and_names_the_prop
 
 def test_a_trait_with_no_confirmed_revision_refuses_and_names_who_confirms(
     tmp_path: Path,
-):
+) -> None:
     fx.propose(
         tmp_path,
         fx.with_operationalization(
@@ -105,7 +105,7 @@ def test_a_trait_with_no_confirmed_revision_refuses_and_names_who_confirms(
     }
 
 
-def test_a_value_key_outside_the_confirmed_set_refuses(project: Path):
+def test_a_value_key_outside_the_confirmed_set_refuses(project: Path) -> None:
     _confirmed_aggregate(project, PER_PLANT_COUNT_AGGREGATE)
 
     with pytest.raises(OperationalizationRefusedError, match="leaf_length"):
@@ -119,7 +119,7 @@ def test_a_value_key_outside_the_confirmed_set_refuses(project: Path):
 
 def test_a_delivered_phenotype_outside_the_confirmed_set_refuses(
     project: Path,
-):
+) -> None:
     _confirmed_crossing(project)
 
     with pytest.raises(
@@ -133,7 +133,9 @@ def test_a_delivered_phenotype_outside_the_confirmed_set_refuses(
         )
 
 
-def test_a_bucket_not_counting_the_measured_subject_refuses(project: Path):
+def test_a_bucket_not_counting_the_measured_subject_refuses(
+    project: Path,
+) -> None:
     revision = fx.seed_confirmed_count(project)
 
     with pytest.raises(OperationalizationRefusedError) as excinfo:
@@ -150,7 +152,7 @@ def test_a_bucket_not_counting_the_measured_subject_refuses(project: Path):
 
 def test_a_registry_no_longer_declaring_the_positive_state_refuses_with_its_problem(
     project: Path,
-):
+) -> None:
     from tcip_mcp import subject_registry as cr
 
     _confirmed_crossing(project)
@@ -158,6 +160,7 @@ def test_a_registry_no_longer_declaring_the_positive_state_refuses_with_its_prob
         subjects=(
             cr.Subject(
                 name="flower",
+                description="",
                 attributes=(
                     cr.Attribute(
                         name="state", type="categorical", values=("shed",)
@@ -188,7 +191,7 @@ def test_a_registry_no_longer_declaring_the_positive_state_refuses_with_its_prob
 
 def test_an_unconfirmed_trait_reports_that_rather_than_a_binding(
     tmp_path: Path,
-):
+) -> None:
     fx.propose(
         tmp_path,
         fx.with_operationalization(
@@ -215,7 +218,9 @@ def test_an_unconfirmed_trait_reports_that_rather_than_a_binding(
 # ── what the rail admits ─────────────────────────────────────────────────────
 
 
-def test_a_confirmed_revision_passes_every_binding_it_covers(project: Path):
+def test_a_confirmed_revision_passes_every_binding_it_covers(
+    project: Path,
+) -> None:
     crossing = _confirmed_crossing(project)
 
     assert (
@@ -239,7 +244,7 @@ def test_a_confirmed_revision_passes_every_binding_it_covers(project: Path):
 )
 def test_an_aggregate_revision_admits_its_named_value_keys(
     project: Path, delivery_kind: str
-):
+) -> None:
     revision = _confirmed_aggregate(project, delivery_kind)
 
     assert (
@@ -256,7 +261,7 @@ def test_an_aggregate_revision_admits_its_named_value_keys(
 
 def test_a_trait_the_named_project_does_not_hold_refuses(
     project: Path, tmp_path: Path
-):
+) -> None:
     with pytest.raises(TraitUnknownError):
         confirmed_revision(PER_IMAGE_COUNT, project=project, trait="not_here")
     with pytest.raises(TraitUnknownError):
@@ -292,7 +297,11 @@ def _withdraw(project_root: Path, trait: str) -> None:
 
 
 def _web_refusal(
-    client: TestClient, body: dict, route: str, headers=None, **extra
+    client: TestClient,
+    body: dict,
+    route: str,
+    headers: dict[str, str] | None = None,
+    **extra: dict[str, str],
 ) -> dict:
     sent = (
         {
@@ -317,7 +326,7 @@ def _rows(text: str) -> list[dict]:
     ]
 
 
-def test_unconfirmed_crossing_door_refuses(tmp_path: Path):
+def test_unconfirmed_crossing_door_refuses(tmp_path: Path) -> None:
     """The crossing tool door refuses an entry nobody confirmed and writes nothing.
 
     An entry nobody confirmed is the agent's own definition.
@@ -336,7 +345,7 @@ def test_unconfirmed_crossing_door_refuses(tmp_path: Path):
 def test_both_web_doors_refuse_identically_and_an_acknowledgment_does_not_clear_it(
     client: TestClient,
     tmp_path: Path,
-):
+) -> None:
     """Both web doors refuse with one body, and an acknowledgment does not clear the refusal.
 
     The phenology screen route and the CSV export answer the same operationalization refusal
@@ -369,7 +378,7 @@ def test_both_web_doors_refuse_identically_and_an_acknowledgment_does_not_clear_
 def test_an_acknowledgment_clears_the_gate_once_the_meaning_is_confirmed(
     client: TestClient,
     tmp_path: Path,
-):
+) -> None:
     body = _series(tmp_path, assessed=False)
 
     from tests._web_fixtures import acknowledged_post
@@ -387,7 +396,7 @@ def test_an_acknowledgment_clears_the_gate_once_the_meaning_is_confirmed(
 
 def test_the_tool_and_the_web_export_write_the_same_rows(
     client: TestClient, tmp_path: Path
-):
+) -> None:
     """The tool and the web export write the same rows, apart from each delivery's event id.
 
     The web door's saved file is included in the comparison.
@@ -423,7 +432,7 @@ def test_the_tool_and_the_web_export_write_the_same_rows(
 
 def test_a_changed_majority_crossing_ships_only_once_confirmed_and_then_needs_assessing_again(
     tmp_path: Path,
-):
+) -> None:
     """A changed majority crossing ships the confirmed one until confirmed, then needs assessing.
 
     The majority crossing is part of the entry: changing it proposes a revision, and the delivery
@@ -449,7 +458,7 @@ def test_a_changed_majority_crossing_ships_only_once_confirmed_and_then_needs_as
 
 def test_an_assessment_answers_for_its_own_revision_never_a_later_one_of_equal_content(
     tmp_path: Path,
-):
+) -> None:
     """An assessment answers for no later revision of equal content than the one it judged.
 
     A revision is named by its number and its content together: re-proposing the identical entry
@@ -475,7 +484,7 @@ def test_an_assessment_answers_for_its_own_revision_never_a_later_one_of_equal_c
 def test_the_screen_door_still_honors_show_unvalidated_for_the_evidence_gate(
     client: TestClient,
     tmp_path: Path,
-):
+) -> None:
     """A confirmed meaning plus unassessed buckets still reaches the screen, marked provisional."""
     body = _series(tmp_path, assessed=False)
 
@@ -498,7 +507,7 @@ def test_the_screen_door_still_honors_show_unvalidated_for_the_evidence_gate(
 def test_an_unconfirmed_and_unassessed_delivery_reports_the_meaning_alone(
     client: TestClient,
     tmp_path: Path,
-):
+) -> None:
     """An unconfirmed, unassessed delivery reports the missing meaning and not the assessment."""
     body = _series(tmp_path, assessed=False)
     _withdraw(tmp_path, "bud_opening")
@@ -520,7 +529,7 @@ def delivery_root(tmp_path: Path) -> Path:
 
 def test_a_count_under_a_revision_stating_no_count_refuses(
     delivery_root: Path,
-):
+) -> None:
     with pytest.raises(OperationalizationRefusedError) as excinfo:
         confirmed_revision(
             PER_IMAGE_COUNT, project=delivery_root, trait=fx.COUNT_TRAIT
@@ -532,7 +541,7 @@ def test_a_count_under_a_revision_stating_no_count_refuses(
 
 def test_the_count_tool_hands_back_no_counts_when_it_refuses(
     delivery_root: Path, tmp_path: Path
-):
+) -> None:
     """The count tool's refusal hands back no counts and writes no CSV.
 
     A count delivery whose trait states no operationalization refuses, naming that.
@@ -564,7 +573,7 @@ def test_the_count_tool_hands_back_no_counts_when_it_refuses(
 def test_a_phenotype_no_confirmed_trait_delivers_refuses_and_names_the_proposing_tool(
     delivery_root: Path,
     tmp_path: Path,
-):
+) -> None:
     """A trait delivering the phenotype only in an unconfirmed revision is named in the refusal."""
     fx.propose(tmp_path, fx.entry("nut", ("cluster_nut_count",)))
 
@@ -586,7 +595,7 @@ def test_a_phenotype_no_confirmed_trait_delivers_refuses_and_names_the_proposing
 def test_a_phenotype_two_confirmed_traits_deliver_refuses_as_ambiguous(
     delivery_root: Path,
     tmp_path: Path,
-):
+) -> None:
     fx.propose_and_confirm(
         tmp_path, fx.with_fields(fx.COUNT_SPEC, name="second_deliverer")
     )
@@ -605,7 +614,7 @@ def test_a_phenotype_two_confirmed_traits_deliver_refuses_as_ambiguous(
 
 def test_a_revision_states_each_aggregate_kind_it_delivers(
     delivery_root: Path, tmp_path: Path
-):
+) -> None:
     """A revision states each aggregate kind it delivers.
 
     One trait, two aggregate shapes: a revision stating only the ordinal one admits ordinal and
@@ -645,7 +654,7 @@ def test_a_revision_states_each_aggregate_kind_it_delivers(
 
 def test_deliver_per_image_counts_refuses_with_no_trait_argument(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
     with pytest.raises(TypeError, match="'trait'"):

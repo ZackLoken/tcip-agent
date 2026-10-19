@@ -12,6 +12,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,6 +23,11 @@ from tcip_web.routes import terminal as terminal_routes
 from tcip_web.state import OpenProject
 from tests._audit_fixtures import audit_rows
 from tests._web_fixtures import INVARIANCES
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from starlette.testclient import WebSocketTestSession
 
 FAKE = Path(__file__).parent / "fake_terminal_app.py"
 LAUNCH = {"provider": pty_host.PROVIDERS[0].id, "user": "tester"}
@@ -48,13 +54,15 @@ if pty_host.os.name == "nt":
 
 
 @pytest.fixture(autouse=True)
-def _fake_terminal(monkeypatch):
+def _fake_terminal(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("TCIP_TERMINAL_CMD", f"{sys.executable} -u {FAKE}")
     yield
     terminal_routes.shutdown_all()
 
 
-def _read_until(ws, needle: str, tries: int = 200) -> str:
+def _read_until(
+    ws: WebSocketTestSession, needle: str, tries: int = 200
+) -> str:
     """Accumulate up to ``tries`` WS text frames until ``needle`` appears; return the text.
 
     Raises AssertionError naming the needle when ``tries`` frames pass without it.
@@ -69,7 +77,9 @@ def _read_until(ws, needle: str, tries: int = 200) -> str:
     )
 
 
-def _rows_with(monkeypatch, **changes: str) -> tuple[pty_host.Provider, ...]:
+def _rows_with(
+    monkeypatch: pytest.MonkeyPatch, **changes: str
+) -> tuple[pty_host.Provider, ...]:
     """Install and return every provider row with ``changes`` applied as the table.
 
     The override is cleared so the rows themselves launch.
@@ -118,7 +128,7 @@ def _ritual_doctor_line(ritual: str) -> str:
 # ── unit-ish: command resolution + preflight ────────────────────────────
 
 
-def test_resolve_command_override(monkeypatch):
+def test_resolve_command_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TCIP_TERMINAL_CMD", "python fake.py")
     assert pty_host.resolve_terminal_command(pty_host.PROVIDERS[0]) == (
         ["python", "fake.py"],
@@ -126,12 +136,16 @@ def test_resolve_command_override(monkeypatch):
     )
 
 
-def test_resolve_command_none_when_the_rows_executable_is_absent(monkeypatch):
+def test_resolve_command_none_when_the_rows_executable_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     (row, *_) = _rows_with(monkeypatch, executable=ABSENT)
     assert pty_host.resolve_terminal_command(row) is None
 
 
-def test_status_lists_every_row_available_with_fake(client):
+def test_status_lists_every_row_available_with_fake(
+    client: TestClient,
+) -> None:
     assert client.get("/api/terminal/status").json() == {
         "providers": [
             {"id": row.id, "name": row.name, "unavailable_reason": None}
@@ -141,9 +155,9 @@ def test_status_lists_every_row_available_with_fake(client):
 
 
 def test_a_row_whose_executable_is_absent_reports_its_own_reason_and_refuses_create(
-    client,
-    monkeypatch,
-):
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     rows = _rows_with(monkeypatch, executable=ABSENT)
     body = client.get("/api/terminal/status").json()
     assert [entry["unavailable_reason"] for entry in body["providers"]] == [
@@ -162,8 +176,8 @@ def test_a_row_whose_executable_is_absent_reports_its_own_reason_and_refuses_cre
 
 
 def test_a_create_naming_an_unlisted_provider_refuses_by_name_and_a_listed_one_launches(
-    client,
-):
+    client: TestClient,
+) -> None:
     for unlisted in ("no-such-harness", LAUNCH["provider"].upper()):
         resp = client.post(
             "/api/terminal/sessions", json={**LAUNCH, "provider": unlisted}
@@ -179,8 +193,8 @@ def test_a_create_naming_an_unlisted_provider_refuses_by_name_and_a_listed_one_l
 
 
 def test_rendering_replaces_each_placeholder_and_leaves_every_other_argument(
-    opened,
-):
+    opened: OpenProject,
+) -> None:
     from tcip_web.state import store
 
     literal, workspace, config = pty_host.render_argv(
@@ -201,20 +215,22 @@ def test_rendering_replaces_each_placeholder_and_leaves_every_other_argument(
     ]
 
 
-def test_the_ritual_for_no_project_says_the_session_has_none():
+def test_the_ritual_for_no_project_says_the_session_has_none() -> None:
     ritual = pty_host.session_ritual(pty_host.project_launch(None))
     assert "has no project" in ritual
     assert "initialize_project" in ritual
 
 
-def test_prewarm_runs_without_raising():
+def test_prewarm_runs_without_raising() -> None:
     pty_host.prewarm()
     pty_host._prewarm_blocking()
 
     assert "tcip_mcp.server" in sys.modules
 
 
-def test_the_agent_runs_at_the_repo_root(tmp_path, monkeypatch):
+def test_the_agent_runs_at_the_repo_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``terminal_cwd()`` resolves the repository root, unmoved by a working-directory change.
 
     The directory it names holds ``.mcp.json`` and ``packages``.
@@ -228,8 +244,8 @@ def test_the_agent_runs_at_the_repo_root(tmp_path, monkeypatch):
 
 
 def test_winpty_terminate_polls_isalive_rather_than_trusting_taskkills_return(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``_WinPty.terminate`` polls ``isalive()`` after taskkill returns.
 
     A process dead by the first poll ends the wait with no sleep.
@@ -265,7 +281,7 @@ def test_winpty_terminate_polls_isalive_rather_than_trusting_taskkills_return(
 # ── session lifecycle over a real PTY ───────────────────────────────────
 
 
-def test_create_session_spawns_and_streams_banner(client):
+def test_create_session_spawns_and_streams_banner(client: TestClient) -> None:
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
@@ -277,13 +293,13 @@ def test_create_session_spawns_and_streams_banner(client):
 
 @pytest.mark.parametrize("row", pty_host.PROVIDERS, ids=lambda row: row.id)
 def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
-    row,
-    client,
-    monkeypatch,
-    tmp_path,
-    opened,
-    opened_project,
-):
+    row: pty_host.Provider,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    opened: OpenProject,
+    opened_project: Path,
+) -> None:
     """Each provider row's rendered argv spawns in a real PTY and streams.
 
     The fake program, standing as the row's executable, receives exactly the arguments the
@@ -395,11 +411,11 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
 
 
 def test_a_launch_preparation_that_fails_refuses_the_launch_naming_it(
-    client,
-    monkeypatch,
-    tmp_path,
-    opened_project,
-):
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    opened_project: Path,
+) -> None:
     """A row whose preparation step exits non-zero is refused, naming the failure.
 
     The launch answers 503, registers no session and records no start line.
@@ -437,8 +453,8 @@ def test_a_launch_preparation_that_fails_refuses_the_launch_naming_it(
 
 
 def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempotent(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.server import list_registered_tools
 
     settings = tmp_path / "settings.json"
@@ -500,9 +516,9 @@ def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempoten
 
 
 def test_the_doctor_line_runs_the_console_command_under_the_mcp_servers_interpreter(
-    opened,
-    monkeypatch,
-):
+    opened: OpenProject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The doctor line names the console command under the MCP server's interpreter.
 
     The line starts with the launch's MCP server command and ``-m tcip_web.cli doctor``, and
@@ -539,7 +555,9 @@ def test_the_doctor_line_runs_the_console_command_under_the_mcp_servers_interpre
     assert reached == [True] and exited.value.code == 0
 
 
-def test_the_doctor_allowance_is_the_rituals_own_line_and_nothing_else(opened):
+def test_the_doctor_allowance_is_the_rituals_own_line_and_nothing_else(
+    opened: OpenProject,
+) -> None:
     """The doctor allowance admits the ritual's own doctor line and nothing else.
 
     One renderer spells the ritual's doctor step, and agy's entry admits exactly that line
@@ -624,11 +642,11 @@ def test_the_doctor_allowance_is_the_rituals_own_line_and_nothing_else(opened):
     "interpreter", [INTERPRETER, "/env bin/python"], ids=["spelled", "refused"]
 )
 def test_the_ritual_agys_entry_and_claudes_settings_name_one_doctor_line(
-    interpreter,
-    opened,
-    tmp_path,
-    monkeypatch,
-):
+    interpreter: str,
+    opened: OpenProject,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The ritual, agy's entry and Claude's settings name one doctor line.
 
     The ritual's doctor step, the command agy's regex entry admits and the command Claude's
@@ -748,11 +766,11 @@ _REFUSED = [
     ids=[f"{where.split()[-1]}-U+{ord(c):04X}" for where, c in _REFUSED],
 )
 def test_a_doctor_line_argument_holding_a_refused_character_is_refused_by_name(
-    where,
-    held,
-    tmp_path,
-    monkeypatch,
-):
+    where: str,
+    held: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A doctor line argument holding a refused character is refused by name.
 
     The renderer refuses a project path or an interpreter holding a character the doctor
@@ -810,8 +828,8 @@ def test_a_doctor_line_argument_holding_a_refused_character_is_refused_by_name(
 
 
 def test_the_written_mcp_configuration_is_the_one_server_the_launch_states(
-    opened,
-):
+    opened: OpenProject,
+) -> None:
     launch = pty_host.project_launch(opened)
     server = pty_host.mcp_server(launch)
     assert server.args == (
@@ -836,8 +854,8 @@ def test_the_written_mcp_configuration_is_the_one_server_the_launch_states(
 
 
 def test_the_codex_overrides_name_the_one_server_and_forward_the_spawn_environment(
-    opened,
-):
+    opened: OpenProject,
+) -> None:
     """The Codex overrides name the one server and forward the spawn environment.
 
     Each rendered ``-c`` override parses as TOML, and together they state the server
@@ -897,7 +915,7 @@ def _echoes(scrollback: str) -> list[str]:
 
 
 @pytest.fixture
-def pastes_after(monkeypatch):
+def pastes_after(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the fake agent turn bracketed paste on one second after it starts.
 
     The fake then writes the first provider row's composer sequence.
@@ -909,9 +927,9 @@ def pastes_after(monkeypatch):
 
 
 def test_the_ritual_then_a_submitted_request_reach_the_agent_once_it_turns_paste_on(
-    client,
-    pastes_after,
-):
+    client: TestClient,
+    pastes_after: None,
+) -> None:
     sid = client.post(
         "/api/terminal/sessions", json={**LAUNCH, "cols": 500}
     ).json()["session_id"]
@@ -934,7 +952,9 @@ def test_the_ritual_then_a_submitted_request_reach_the_agent_once_it_turns_paste
     ]
 
 
-def test_the_ritual_and_the_requests_staged_before_paste_is_on_go_as_one_paste():
+def test_the_ritual_and_the_requests_staged_before_paste_is_on_go_as_one_paste() -> (
+    None
+):
     """The ritual and the requests staged before paste is on go as one paste.
 
     The ritual and every request queued by the time the agent turns bracketed paste on are
@@ -966,9 +986,9 @@ def test_the_ritual_and_the_requests_staged_before_paste_is_on_go_as_one_paste()
 
 
 def test_a_restart_delivers_its_own_ritual_then_the_request_submitted_during_it(
-    client,
-    pastes_after,
-):
+    client: TestClient,
+    pastes_after: None,
+) -> None:
     sid = client.post(
         "/api/terminal/sessions", json={**LAUNCH, "cols": 500}
     ).json()["session_id"]
@@ -988,11 +1008,11 @@ def test_a_restart_delivers_its_own_ritual_then_the_request_submitted_during_it(
 
 
 def test_overlapping_creates_deliver_one_ritual_before_the_request(
-    client, pastes_after
-):
+    client: TestClient, pastes_after: None
+) -> None:
     from concurrent.futures import ThreadPoolExecutor
 
-    def create(_):
+    def create(_: int) -> dict:
         return (
             TestClient(app, base_url="http://127.0.0.1")
             .post("/api/terminal/sessions", json={**LAUNCH, "cols": 500})
@@ -1011,7 +1031,7 @@ def test_overlapping_creates_deliver_one_ritual_before_the_request(
     assert _echoes(text) == [_RITUAL_ECHO, "echo:tab request"]
 
 
-class _RecordingPty:
+class _RecordingPty(pty_host._WinPty):
     """A PTY stand-in whose ``isalive`` answers true and whose ``write`` appends to ``writes``."""
 
     def __init__(self) -> None:
@@ -1086,8 +1106,8 @@ composer without submitting it, since its session had not started."""
 
 @pytest.mark.parametrize("row", pty_host.PROVIDERS, ids=lambda row: row.id)
 def test_the_ritual_is_pasted_at_the_read_where_the_harness_composer_goes_live(
-    row,
-):
+    row: pty_host.Provider,
+) -> None:
     """The ritual is pasted at the read where the harness composer goes live.
 
     Fed the reads its harness wrote at startup, a launch of ``row`` pastes nothing before the
@@ -1118,8 +1138,8 @@ def test_the_ritual_is_pasted_at_the_read_where_the_harness_composer_goes_live(
 
 @pytest.mark.parametrize("row", pty_host.PROVIDERS, ids=lambda row: row.id)
 def test_a_launch_names_the_versions_when_its_harness_is_not_the_recorded_one(
-    row,
-):
+    row: pty_host.Provider,
+) -> None:
     """A launch names both versions when its harness is not the recorded one.
 
     The recorded version draws no note, version ``9.9.9`` draws a note naming both versions,
@@ -1135,7 +1155,9 @@ def test_a_launch_names_the_versions_when_its_harness_is_not_the_recorded_one(
     assert row.delivery_unverified(None) is not None
 
 
-def test_bracketed_paste_follows_the_last_mode_change_the_agent_wrote():
+def test_bracketed_paste_follows_the_last_mode_change_the_agent_wrote() -> (
+    None
+):
     assert pty_host.bracketed_paste("\x1b[?2004h", False) is True
     assert (
         pty_host.bracketed_paste("\x1b[?1004;2004h\x1b[?2004l", True) is False
@@ -1143,7 +1165,7 @@ def test_bracketed_paste_follows_the_last_mode_change_the_agent_wrote():
     assert pty_host.bracketed_paste("\x1b[?1049h plain output", True) is True
 
 
-def test_input_round_trip(client):
+def test_input_round_trip(client: TestClient) -> None:
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
@@ -1155,14 +1177,16 @@ def test_input_round_trip(client):
         _read_until(ws, "echo:hello agent")
 
 
-def test_attach_semantics_second_create_returns_live_session(client):
+def test_attach_semantics_second_create_returns_live_session(
+    client: TestClient,
+) -> None:
     first = client.post("/api/terminal/sessions", json=LAUNCH).json()
     second = client.post("/api/terminal/sessions", json=LAUNCH).json()
     assert second["session_id"] == first["session_id"]
     assert second["existing"] is True
 
 
-def test_scrollback_replays_on_reconnect(client):
+def test_scrollback_replays_on_reconnect(client: TestClient) -> None:
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
@@ -1180,7 +1204,7 @@ def test_scrollback_replays_on_reconnect(client):
         assert "FAKE_TERMINAL_READY" in acc
 
 
-def test_resize_does_not_crash_stream(client):
+def test_resize_does_not_crash_stream(client: TestClient) -> None:
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
@@ -1196,7 +1220,9 @@ def test_resize_does_not_crash_stream(client):
         _read_until(ws, "echo:after resize")
 
 
-def test_a_resize_that_raises_does_not_end_the_stream(client, monkeypatch):
+def test_a_resize_that_raises_does_not_end_the_stream(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A resize that raises does not end the terminal stream.
 
     A ``ValueError`` from the session's resize is swallowed at the session boundary, and input
@@ -1220,7 +1246,7 @@ def test_a_resize_that_raises_does_not_end_the_stream(client, monkeypatch):
         _read_until(ws, "echo:after raising resize")
 
 
-def test_process_exit_is_visible_in_stream(client):
+def test_process_exit_is_visible_in_stream(client: TestClient) -> None:
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
@@ -1233,7 +1259,7 @@ def test_process_exit_is_visible_in_stream(client):
         assert "FAKE_TERMINAL_BYE" in acc
 
 
-def test_restart_gives_fresh_process(client):
+def test_restart_gives_fresh_process(client: TestClient) -> None:
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
@@ -1254,7 +1280,7 @@ def test_restart_gives_fresh_process(client):
         assert "exited" not in acc
 
 
-def test_ws_rejects_unknown_session(client):
+def test_ws_rejects_unknown_session(client: TestClient) -> None:
     with pytest.raises(Exception):
         with client.websocket_connect(
             "ws://127.0.0.1/api/terminal/ws/nonexistent"
@@ -1262,7 +1288,7 @@ def test_ws_rejects_unknown_session(client):
             pass
 
 
-def test_ws_rejects_cross_site_origin(client):
+def test_ws_rejects_cross_site_origin(client: TestClient) -> None:
     """A live session's socket refuses a foreign origin."""
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
@@ -1278,7 +1304,7 @@ def test_ws_rejects_cross_site_origin(client):
 # ── the terminate/restart survivor branch (unit-level: no real process needed) ──
 
 
-class _StubPty:
+class _StubPty(pty_host._WinPty):
     """A process that, on ``terminate``, survives or stops as ``survives`` says, counting calls."""
 
     def __init__(self, *, survives: bool) -> None:
@@ -1361,7 +1387,7 @@ def test_restart_on_a_died_cleanly_process_calls_start(
 
 
 def test_shutdown_all_logs_a_survivor(
-    monkeypatch: pytest.MonkeyPatch, caplog
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     from tcip_web.routes import terminal as terminal_routes
 
@@ -1405,7 +1431,7 @@ def _refuse_record_start(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_create_session_registers_a_survivor_and_answers_503(
-    client,
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A session whose start line fails and whose process survives is registered and answers 503.
@@ -1427,7 +1453,7 @@ def test_create_session_registers_a_survivor_and_answers_503(
 
 
 def test_restart_session_answers_503_on_a_survivor_with_no_new_spawn(
-    client,
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tcip_web.routes import terminal as terminal_routes
@@ -1452,7 +1478,7 @@ def test_restart_session_answers_503_on_a_survivor_with_no_new_spawn(
 
 
 def test_restart_session_answers_503_after_the_process_dies_cleanly(
-    client,
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A relaunch whose audit line fails after a clean termination answers 503.
@@ -1498,7 +1524,7 @@ def _os_pid_alive(pid: int) -> bool:
         return True
 
 
-def test_shutdown_all_terminates_process(client):
+def test_shutdown_all_terminates_process(client: TestClient) -> None:
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
@@ -1513,7 +1539,9 @@ def test_shutdown_all_terminates_process(client):
     assert terminal_routes._SESSIONS == {}
 
 
-def test_write_and_resize_after_process_death_do_not_raise(client):
+def test_write_and_resize_after_process_death_do_not_raise(
+    client: TestClient,
+) -> None:
     # pywinpty raises EOFError/WinptyError (not OSError) on a dead PTY: a keystroke or
     # resize racing process exit must degrade, never crash the WS handler.
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
@@ -1533,10 +1561,10 @@ def test_write_and_resize_after_process_death_do_not_raise(client):
     session.resize(10, 10)  # no raise
 
 
-def test_concurrent_creates_spawn_single_session():
+def test_concurrent_creates_spawn_single_session() -> None:
     from concurrent.futures import ThreadPoolExecutor
 
-    def create(_):
+    def create(_: int) -> str:
         return (
             TestClient(app, base_url="http://127.0.0.1")
             .post("/api/terminal/sessions", json=LAUNCH)
@@ -1557,8 +1585,8 @@ def test_concurrent_creates_spawn_single_session():
 
 
 def test_create_answers_the_launched_executable_and_no_version_for_an_override(
-    client,
-):
+    client: TestClient,
+) -> None:
     """An override's launch records its argv, no version and no row's confinement."""
     body = client.post("/api/terminal/sessions", json=LAUNCH).json()
 
@@ -1569,7 +1597,9 @@ def test_create_answers_the_launched_executable_and_no_version_for_an_override(
     assert launched["delivery_unverified"] is None
 
 
-def test_the_resolved_cli_is_probed_for_the_version_it_declares(monkeypatch):
+def test_the_resolved_cli_is_probed_for_the_version_it_declares(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     (row, *_) = _rows_with(monkeypatch, executable=Path(sys.executable).name)
     command = pty_host.resolve_terminal_command(row)
     assert command is not None
@@ -1582,8 +1612,8 @@ def test_the_resolved_cli_is_probed_for_the_version_it_declares(monkeypatch):
 
 
 def test_the_resolved_command_decides_whether_its_version_is_probed(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     command = pty_host.resolve_terminal_command(pty_host.PROVIDERS[0])
     assert command is not None
     monkeypatch.delenv("TCIP_TERMINAL_CMD")
@@ -1617,11 +1647,11 @@ def _versioned_executable(directory: Path, version_file: Path) -> Path:
 
 
 def test_a_harness_updated_in_place_is_seen_at_its_next_launch_without_a_backend_restart(
-    client,
-    monkeypatch,
-    tmp_path,
-    opened_project,
-):
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    opened_project: Path,
+) -> None:
     """A harness updated in place is seen at its next launch without a backend restart.
 
     The second launch of the same executable reports the version it declares then, and the
@@ -1664,7 +1694,9 @@ def test_a_harness_updated_in_place_is_seen_at_its_next_launch_without_a_backend
     assert second["arguments"]["delivery_unverified"] == note
 
 
-def test_the_spawned_process_inherits_the_terminal_session_id(client):
+def test_the_spawned_process_inherits_the_terminal_session_id(
+    client: TestClient,
+) -> None:
     """The spawned process's environment names the session id."""
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
@@ -1677,8 +1709,8 @@ def test_the_spawned_process_inherits_the_terminal_session_id(client):
 
 
 def test_each_launch_leaves_one_audit_line_in_the_open_projects_log(
-    client, opened_project
-):
+    client: TestClient, opened_project: Path
+) -> None:
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
@@ -1702,10 +1734,10 @@ def test_each_launch_leaves_one_audit_line_in_the_open_projects_log(
 
 
 def test_create_session_answers_503_and_terminates_the_process_when_the_start_line_fails(
-    client,
-    monkeypatch,
-    opened_project,
-):
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    opened_project: Path,
+) -> None:
     """A spawn whose launch line fails to append answers 503 and terminates the process.
 
     The refusal says the line could not be written, no start line is recorded, and no session
@@ -1725,8 +1757,8 @@ def test_create_session_answers_503_and_terminates_the_process_when_the_start_li
 
 
 def test_the_create_and_restart_responses_answer_the_launched_provider_and_program(
-    client,
-):
+    client: TestClient,
+) -> None:
     created = client.post("/api/terminal/sessions", json=LAUNCH).json()
     sid = created["session_id"]
     assert created["launched"]["provider"] == LAUNCH["provider"]
@@ -1746,9 +1778,9 @@ def test_the_create_and_restart_responses_answer_the_launched_provider_and_progr
 
 
 def test_create_and_restart_answer_the_ritual_the_library_builds_for_the_open_project(
-    client,
-    opened,
-):
+    client: TestClient,
+    opened: OpenProject,
+) -> None:
     created = client.post("/api/terminal/sessions", json=LAUNCH).json()
     assert created["ritual"] == pty_host.session_ritual(
         pty_host.project_launch(opened)
@@ -1770,8 +1802,8 @@ def test_create_and_restart_answer_the_ritual_the_library_builds_for_the_open_pr
 
 
 def test_a_launch_after_a_rename_of_the_open_project_names_its_new_name(
-    client, opened
-):
+    client: TestClient, opened: OpenProject
+) -> None:
     """A launch after a rename of the open project names its new name.
 
     After a rename made while the project is open, the next launch's ritual states the new name.
@@ -1793,9 +1825,9 @@ def test_a_launch_after_a_rename_of_the_open_project_names_its_new_name(
 
 
 def test_a_launch_for_an_open_project_whose_record_will_not_read_refuses_naming_why(
-    client,
-    opened,
-):
+    client: TestClient,
+    opened: OpenProject,
+) -> None:
     from tcip_mcp.project_record import project_record_key
     from tests._record_damage_fixtures import damage_record
 

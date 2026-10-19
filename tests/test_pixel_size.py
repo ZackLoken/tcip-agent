@@ -7,6 +7,7 @@ names a refusal by.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -18,6 +19,9 @@ from tests._geotiff_fixtures import (
     UTM_15N_EPSG as _UTM_15N_EPSG,
     write_geotiff as _write_shared_geotiff,
 )
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.pixel_size import PixelSize
 
 
 def _write_geotiff(
@@ -44,7 +48,7 @@ def _write_geotiff(
     )
 
 
-def resolve_pixel_size(path: Path):
+def resolve_pixel_size(path: Path) -> tuple[PixelSize | None, str]:
     """Resolve the pixel size of ``path``'s header."""
     return _resolve_header(SourceHeader(path))
 
@@ -57,7 +61,9 @@ def _refused(path: Path) -> str:
 
 
 class TestRasterPixelSize:
-    def test_a_projected_geotiff_resolves_its_pixel_size(self, tmp_path):
+    def test_a_projected_geotiff_resolves_its_pixel_size(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "mosaic.tif"
         _write_geotiff(path, pixel_scale=(0.5, 0.5, 0.0))
         size, reason = resolve_pixel_size(path)
@@ -66,23 +72,23 @@ class TestRasterPixelSize:
         assert reason == ""
 
     def test_a_foot_unit_raster_converts_through_the_pyproj_factor(
-        self, tmp_path
-    ):
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "mosaic.tif"
         _write_geotiff(path, pixel_scale=(1.0, 1.0, 0.0), projected_epsg=2264)
         size, _reason = resolve_pixel_size(path)
         assert size is not None
         assert size.meters_per_px == pytest.approx(0.3048, abs=1e-3)
 
-    def test_a_rotated_raster_has_no_pixel_size(self, tmp_path):
+    def test_a_rotated_raster_has_no_pixel_size(self, tmp_path: Path) -> None:
         path = tmp_path / "rotated.tif"
         _write_geotiff(path, include_transformation_tag=True)
         assert _refused(path) == "it is rotated or sheared"
 
     def test_missing_georeferencing_tags_names_a_short_clause_never_the_server_path(
         self,
-        tmp_path,
-    ):
+        tmp_path: Path,
+    ) -> None:
         path = tmp_path / "plain.tif"
         Image.fromarray(np.zeros((5, 5, 3), dtype=np.uint8)).save(path)
         reason = _refused(path)
@@ -91,8 +97,8 @@ class TestRasterPixelSize:
         assert "\\" not in reason and "/" not in reason
 
     def test_a_geographic_model_type_is_refused_by_the_tag_reads_own_check(
-        self, tmp_path
-    ):
+        self, tmp_path: Path
+    ) -> None:
         """A geographic model type is refused by the header's own georeference read.
 
         GTModelTypeGeoKey itself names the geographic model type (2), so the clause is the tag
@@ -102,19 +108,23 @@ class TestRasterPixelSize:
         _write_geotiff(path, model_type=2)
         assert _refused(path) == "its georeferencing tags are incomplete"
 
-    def test_a_zero_pixel_scale_has_no_pixel_size(self, tmp_path):
+    def test_a_zero_pixel_scale_has_no_pixel_size(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "zero.tif"
         _write_geotiff(path, pixel_scale=(0.0, 0.0, 0.0))
         assert _refused(path) == "its pixel scale is zero or negative"
 
-    def test_a_negative_pixel_scale_has_no_pixel_size(self, tmp_path):
+    def test_a_negative_pixel_scale_has_no_pixel_size(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "negative.tif"
         _write_geotiff(path, pixel_scale=(-0.5, 0.5, 0.0))
         assert _refused(path) == "its pixel scale is zero or negative"
 
     def test_a_geographic_crs_under_a_projected_model_type_has_no_pixel_size(
-        self, tmp_path
-    ):
+        self, tmp_path: Path
+    ) -> None:
         """A geographic CRS under a projected model type has no pixel size.
 
         The raster's own GTModelTypeGeoKey says Projected (the tag read admits it), but the EPSG it
@@ -126,8 +136,8 @@ class TestRasterPixelSize:
         assert _refused(path) == "its georeferencing is not projected"
 
     def test_an_unresolvable_epsg_has_no_pixel_size_naming_it_user_defined(
-        self, tmp_path
-    ):
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "userdef.tif"
         _write_geotiff(path, projected_epsg=32767)
         reason = _refused(path)
@@ -135,39 +145,47 @@ class TestRasterPixelSize:
         assert "user-defined" in reason
 
     def test_a_compound_epsg_has_no_pixel_size_naming_it_compound(
-        self, tmp_path
-    ):
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "compound.tif"
         _write_geotiff(path, projected_epsg=7415)
         reason = _refused(path)
         assert "7415" in reason
         assert "compound" in reason
 
-    def test_an_anisotropic_raster_has_no_pixel_size(self, tmp_path):
+    def test_an_anisotropic_raster_has_no_pixel_size(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "aniso.tif"
         _write_geotiff(path, pixel_scale=(0.5, 0.6, 0.0))
         assert _refused(path) == "its pixel scales differ by axis"
 
     def test_pixel_scales_within_the_isotropy_slack_still_resolve(
-        self, tmp_path
-    ):
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "slack.tif"
         _write_geotiff(path, pixel_scale=(0.03, 0.030000001, 0.0))
         size, _reason = resolve_pixel_size(path)
         assert size is not None
         assert size.meters_per_px == pytest.approx(0.03)
 
-    def test_a_npy_raster_is_skipped_as_not_a_tiff(self, tmp_path):
+    def test_a_npy_raster_is_skipped_as_not_a_tiff(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "array.npy"
         np.save(path, np.zeros((5, 5, 3), dtype=np.uint8))
         assert _refused(path) == "it is not a TIFF"
 
-    def test_an_unreadable_tiff_could_not_be_read(self, tmp_path):
+    def test_an_unreadable_tiff_could_not_be_read(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "broken.tif"
         path.write_bytes(b"not a real tiff")
         assert _refused(path) == "it could not be read"
 
-    def test_a_photographic_capture_has_no_pixel_size(self, tmp_path):
+    def test_a_photographic_capture_has_no_pixel_size(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "photo.jpg"
         Image.fromarray(np.zeros((5, 5, 3), dtype=np.uint8)).save(path)
         assert _refused(path) == "it is not a raster"

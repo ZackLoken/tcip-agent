@@ -12,15 +12,21 @@ date column.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi.testclient import TestClient
 
 from tcip_mcp import subject_registry as cr
 
+if TYPE_CHECKING:
+    from httpx import Response
+
 BLOOM_STATE = cr.Attribute("bloom_state", "categorical", ("closed", "open"))
 """The attribute of ``flower`` the second trait's positive state names."""
 FLOWERS = cr.SubjectRegistry(
-    subjects=(cr.Subject(name="flower", attributes=(BLOOM_STATE,)),)
+    subjects=(
+        cr.Subject(name="flower", description="", attributes=(BLOOM_STATE,)),
+    )
 )
 
 
@@ -98,8 +104,11 @@ def _currant_bloom_body(tmp_path: Path) -> dict:
 
 
 def _export(
-    client: TestClient, body: dict, payload: str = "milestones", **extra
-):
+    client: TestClient,
+    body: dict,
+    payload: str = "milestones",
+    **extra: object,
+) -> Response:
     return client.post(
         "/api/results/export_csv",
         json={
@@ -114,7 +123,7 @@ def _export(
 
 def test_currant_bloom_is_registered_and_distinct_from_bud_opening(
     tmp_path: Path,
-):
+) -> None:
     from tcip_mcp.traits import read_trait, trait_names
 
     _seed_currant_bloom_trait(tmp_path)

@@ -28,7 +28,7 @@ def _fixture(root: Path) -> Path:
     return img
 
 
-def test_refuses_without_a_project_and_plants_no_store(tmp_path):
+def test_refuses_without_a_project_and_plants_no_store(tmp_path: Path) -> None:
     img = _fixture(tmp_path)
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
@@ -42,7 +42,7 @@ def test_refuses_without_a_project_and_plants_no_store(tmp_path):
     assert not (cwd / ".tcip").exists()
 
 
-def test_refuses_a_directory_holding_no_project_record(tmp_path):
+def test_refuses_a_directory_holding_no_project_record(tmp_path: Path) -> None:
     img = _fixture(tmp_path)
     bare = tmp_path / "bare"
     bare.mkdir()
@@ -65,7 +65,9 @@ def test_refuses_a_directory_holding_no_project_record(tmp_path):
     assert not (bare / ".tcip").exists()
 
 
-def test_renders_annotations_under_the_named_project(project, tmp_path):
+def test_renders_annotations_under_the_named_project(
+    project: Path, tmp_path: Path
+) -> None:
     img = _fixture(project)
     cwd = tmp_path.parent / "operator_cwd"
     cwd.mkdir()

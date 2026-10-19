@@ -35,7 +35,7 @@ from tests._training_values import (  # noqa: E402
 
 
 @pytest.fixture()
-def tiny_classification_data(tmp_path):
+def tiny_classification_data(tmp_path: Path) -> tuple[str, str]:
     """Write a two-class classification dataset and return its images and table paths.
 
     Six dark frames of class 0 and six bright ones of class 1, plus their ground-truth table.
@@ -60,7 +60,9 @@ def tiny_classification_data(tmp_path):
 class TestFullClassificationPipeline:
     """Tests of the bespoke classification pipeline from builder through checkpoint to predict."""
 
-    def test_build_train_infer(self, tiny_classification_data, tmp_path):
+    def test_build_train_infer(
+        self, tiny_classification_data: tuple[str, str], tmp_path: Path
+    ) -> None:
         # --- Step 1: A bespoke classification model_source ---
         model_source = {
             "builder": BESPOKE_CLASSIFIER,
@@ -140,7 +142,7 @@ class TestFullClassificationPipeline:
 
         assert observation.checkpoint is not None
         checkpoint = load_registered_checkpoint(
-            observation.checkpoint["path"], project=tmp_path
+            observation.checkpoint.path, project=tmp_path
         )
         p = prepare(
             checkpoint, Stated(tile=False, rationale=RATIONALE), device="cpu"
@@ -191,7 +193,7 @@ def _sample_date() -> str | None:
 class TestDetectionPipelineRealData:
     """Tests of the detection pipeline, build to train to infer, over real bud images."""
 
-    def test_build_train_infer(self, tmp_path):
+    def test_build_train_infer(self, tmp_path: Path) -> None:
         from tests._chain_fixtures import detector_values
         from tests._verified_checkpoint_fixtures import built_detector
 
@@ -264,7 +266,7 @@ class TestDetectionPipelineRealData:
 
         assert observation.checkpoint is not None
         checkpoint = load_registered_checkpoint(
-            observation.checkpoint["path"], project=tmp_path
+            observation.checkpoint.path, project=tmp_path
         )
         detector = prepare(
             checkpoint,

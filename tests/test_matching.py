@@ -16,7 +16,7 @@ IOU = {"kind": "iou", "iou_threshold": 0.5}
 # ── iou_matrix ───────────────────────────────────────────────────────────
 
 
-def test_iou_matrix_perfect_none_and_partial_overlap():
+def test_iou_matrix_perfect_none_and_partial_overlap() -> None:
     iou = iou_matrix(
         [[0, 0, 100, 100]],
         [[0, 0, 100, 100], [100, 100, 150, 150], [50, 50, 150, 150]],
@@ -30,7 +30,7 @@ def test_iou_matrix_perfect_none_and_partial_overlap():
 # ── box_ring ─────────────────────────────────────────────────────────────
 
 
-def test_box_ring_corner_order():
+def test_box_ring_corner_order() -> None:
     b = BBox(1.0, 2.0, 5.0, 8.0)
     assert box_ring(b) == [(1.0, 2.0), (5.0, 2.0), (5.0, 8.0), (1.0, 8.0)]
 
@@ -38,17 +38,17 @@ def test_box_ring_corner_order():
 # ── point_in_polygon ─────────────────────────────────────────────────────
 
 
-def test_point_in_polygon_inside():
+def test_point_in_polygon_inside() -> None:
     poly = Polygon([[(0, 0), (100, 0), (100, 100), (0, 100)]])
     assert point_in_polygon(50, 50, poly) is True
 
 
-def test_point_in_polygon_outside():
+def test_point_in_polygon_outside() -> None:
     poly = Polygon([[(0, 0), (100, 0), (100, 100), (0, 100)]])
     assert point_in_polygon(200, 200, poly) is False
 
 
-def test_point_in_polygon_on_edge():
+def test_point_in_polygon_on_edge() -> None:
     """Points on the boundary are not inside (Shapely convention)."""
     poly = Polygon([[(0, 0), (100, 0), (100, 100), (0, 100)]])
     assert point_in_polygon(0, 50, poly) is False
@@ -66,7 +66,7 @@ LOBE_B = [
 ]  # area 2500
 
 
-def test_point_in_polygon_hits_a_ring_that_is_not_the_first():
+def test_point_in_polygon_hits_a_ring_that_is_not_the_first() -> None:
     """``point_in_polygon`` hits a point inside either ring and misses the gap between them."""
     poly = Polygon([LOBE_A, LOBE_B])
     assert point_in_polygon(20, 30, poly) is True  # inside the first lobe
@@ -76,7 +76,7 @@ def test_point_in_polygon_hits_a_ring_that_is_not_the_first():
     )  # the occluded gap between them
 
 
-def test_a_multi_ring_instance_pairs_by_the_box_spanning_every_ring():
+def test_a_multi_ring_instance_pairs_by_the_box_spanning_every_ring() -> None:
     """A two-ring instance pairs by the box spanning both rings.
 
     A proposal holding the whole instance pairs, and one holding one lobe of the two pairs
@@ -100,7 +100,9 @@ def test_a_multi_ring_instance_pairs_by_the_box_spanning_every_ring():
 # ── the one matcher ──────────────────────────────────────────────────────
 
 
-def test_a_proposal_pairs_with_the_annotation_it_overlaps_and_no_other():
+def test_a_proposal_pairs_with_the_annotation_it_overlaps_and_no_other() -> (
+    None
+):
     gt = [Annotation(subject="bud", geometry=BBox(100, 100, 200, 200))]
     preds = [
         Annotation(
@@ -115,7 +117,9 @@ def test_a_proposal_pairs_with_the_annotation_it_overlaps_and_no_other():
     assert pair_proposals(gt, [], IOU).missed == [0]
 
 
-def test_the_confidence_floor_leaves_a_low_scoring_proposal_out_of_every_count():
+def test_the_confidence_floor_leaves_a_low_scoring_proposal_out_of_every_count() -> (
+    None
+):
     gt = [Annotation(subject="bud", geometry=BBox(100, 100, 200, 200))]
     preds = [
         Annotation(
@@ -129,7 +133,7 @@ def test_the_confidence_floor_leaves_a_low_scoring_proposal_out_of_every_count()
     assert (m.pairs, m.unpaired, m.missed) == ([], [], [0])
 
 
-def test_a_proposal_of_another_subject_pairs_nothing():
+def test_a_proposal_of_another_subject_pairs_nothing() -> None:
     gt = [Annotation(subject="bud", geometry=BBox(100, 100, 200, 200))]
     preds = [
         Annotation(
@@ -140,7 +144,7 @@ def test_a_proposal_of_another_subject_pairs_nothing():
     assert (m.pairs, m.unpaired, m.missed) == ([], [0], [0])
 
 
-def test_a_polygon_pairs_by_its_box():
+def test_a_polygon_pairs_by_its_box() -> None:
     gt = [
         Annotation(
             subject="bud",
@@ -157,7 +161,9 @@ def test_a_polygon_pairs_by_its_box():
     assert pair_proposals(gt, preds, IOU).pairs == [(0, 0)]
 
 
-def test_the_criterion_limit_is_inclusive_and_a_lower_overlap_pairs_nothing():
+def test_the_criterion_limit_is_inclusive_and_a_lower_overlap_pairs_nothing() -> (
+    None
+):
     """A pair exactly at the stated IoU pairs; one below it does not."""
     gt = [{"bbox": [0.0, 0.0, 100.0, 100.0], "iscrowd": False}]
     at_half = [{"bbox": [0.0, 0.0, 50.0, 100.0]}]  # IoU exactly 0.5
@@ -167,7 +173,7 @@ def test_the_criterion_limit_is_inclusive_and_a_lower_overlap_pairs_nothing():
     assert (m.pairs, m.unpaired, m.ignored, m.missed) == ([], [0], set(), [0])
 
 
-def test_an_unpaired_detection_centered_in_a_crowd_region_is_ignored():
+def test_an_unpaired_detection_centered_in_a_crowd_region_is_ignored() -> None:
     """An unpaired detection centered in a crowd region is ignored.
 
     COCO's crowd rule as evaluation states it: a detection left unpaired whose center lies in
@@ -189,7 +195,7 @@ def test_an_unpaired_detection_centered_in_a_crowd_region_is_ignored():
     assert m.missed == []
 
 
-def test_a_center_match_pairs_within_its_tolerance():
+def test_a_center_match_pairs_within_its_tolerance() -> None:
     gt = [{"bbox": [0.0, 0.0, 10.0, 10.0], "iscrowd": False}]
     near = [{"bbox": [3.0, 0.0, 10.0, 10.0]}]  # centers 3 px apart
     far = [{"bbox": [6.0, 0.0, 10.0, 10.0]}]  # centers 6 px apart

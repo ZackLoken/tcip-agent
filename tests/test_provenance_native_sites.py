@@ -5,20 +5,30 @@ The read path is the one that carries the stamped provenance back out.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from tests._producer_fixtures import blank_image
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from tcip_annotation.state import Annotation
+    from tcip_mcp.workspace import BoundProject
 
 # ── MCP save_annotations: the tool is the producer ───────────────────────────
 
 
-def _records(img) -> list[dict]:
+def _records(img: Path) -> list[Annotation]:
     """Return the records of ``img``'s label document as stored."""
-    import tcip_store
+    from tcip_annotation.json_io import read_label_document
     from tests._producer_fixtures import image_label_key
 
-    return tcip_store.read(image_label_key(img))["annotations"]
+    return read_label_document(image_label_key(img)).annotations
 
 
-def test_save_annotations_takes_no_producer_and_names_itself(tmp_path, bound):
+def test_save_annotations_takes_no_producer_and_names_itself(
+    tmp_path: Path, bound: BoundProject
+) -> None:
     """``save_annotations`` takes no producer and stamps each record with its own and a time.
 
     The producer is the tool's own, which no caller states.
@@ -35,11 +45,13 @@ def test_save_annotations_takes_no_producer_and_names_itself(tmp_path, bound):
         annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}],
     )
     obj = _records(img)[0]
-    assert obj["created_by"] == "save_annotations"
-    assert obj["created_at"]
+    assert obj.created_by == "save_annotations"
+    assert obj.created_at
 
 
-def test_save_annotations_never_reads_provenance_off_a_shape(tmp_path, bound):
+def test_save_annotations_never_reads_provenance_off_a_shape(
+    tmp_path: Path, bound: BoundProject
+) -> None:
     """A shape's own ``created_by`` is not an author: both new shapes carry the door's."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
@@ -56,7 +68,7 @@ def test_save_annotations_never_reads_provenance_off_a_shape(tmp_path, bound):
             {"subject": "bud", "bbox": [40, 40, 60, 60]},
         ],
     )
-    assert [o["created_by"] for o in _records(img)] == [
+    assert [o.created_by for o in _records(img)] == [
         "save_annotations",
         "save_annotations",
     ]
@@ -65,7 +77,7 @@ def test_save_annotations_never_reads_provenance_off_a_shape(tmp_path, bound):
 # ── MCP read_annotations: authorship travels back out of the read path ───────
 
 
-def test_the_read_path_carries_authorship_out_of_the_record():
+def test_the_read_path_carries_authorship_out_of_the_record() -> None:
     """``client_annotation`` carries a record's authorship out on the read path.
 
     ``client_annotation`` is what ``read_annotations`` returns per annotation; it carries the
@@ -91,7 +103,7 @@ def test_the_read_path_carries_authorship_out_of_the_record():
     assert d["accepted_at"] == "2026-01-02T00:00:00+00:00"
 
 
-def test_the_read_path_omits_provenance_a_record_does_not_carry():
+def test_the_read_path_omits_provenance_a_record_does_not_carry() -> None:
     """An unattributed label reads back with no ``created_by`` or ``accepted_by`` key."""
     from tcip_annotation.json_io import client_annotation
     from tcip_annotation.state import Annotation, BBox

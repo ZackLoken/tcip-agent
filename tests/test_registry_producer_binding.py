@@ -6,8 +6,13 @@ weights the run did not complete with.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def test_two_runs_each_produce_only_their_own_weights(tmp_path):
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+def test_two_runs_each_produce_only_their_own_weights(tmp_path: Path) -> None:
     """Each of two runs' checkpoints loads naming the run that produced it.
 
     Each checkpoint loads naming the run whose final status names its digest, never the other.
@@ -23,16 +28,19 @@ def test_two_runs_each_produce_only_their_own_weights(tmp_path):
         finished_run(tmp_path, experiment_id="exp-rail11-next")
     ).checkpoint
 
-    assert first["sha256"] != second["sha256"]
+    assert first is not None and second is not None
+    assert first.sha256 != second.sha256
     assert load_registered_checkpoint(
-        first["path"], project=tmp_path
+        first.path, project=tmp_path
     ).experiment_id == ("exp-rail11-base")
     assert load_registered_checkpoint(
-        second["path"], project=tmp_path
+        second.path, project=tmp_path
     ).experiment_id == ("exp-rail11-next")
 
 
-def test_a_tag_naming_a_run_never_makes_that_run_a_producer(tmp_path):
+def test_a_tag_naming_a_run_never_makes_that_run_a_producer(
+    tmp_path: Path,
+) -> None:
     """A foreign checkpoint tagged with a run's id loads naming no producing run.
 
     The checkpoint, one a run completed under another root, is registered with an
@@ -69,7 +77,9 @@ def test_a_tag_naming_a_run_never_makes_that_run_a_producer(tmp_path):
     )
 
 
-def test_a_replacements_registry_event_names_the_superseded_entry(tmp_path):
+def test_a_replacements_registry_event_names_the_superseded_entry(
+    tmp_path: Path,
+) -> None:
     import tcip_store as ts
     from tcip_mcp.audit import audit_log_key
     from tcip_mcp.model_registry import ModelRegistry
@@ -85,11 +95,13 @@ def test_a_replacements_registry_event_names_the_superseded_entry(tmp_path):
         e for e in events if "superseded_name" in e.get("arguments", {})
     ]
     assert len(replace) == 1 and replace[0]["tool"] == "model_registered"
-    assert replace[0]["arguments"]["superseded_name"] == "m"
-    assert replace[0]["arguments"]["superseded_tags"] == ["first"]
+    arguments = replace[0]["arguments"]
+    assert isinstance(arguments, dict)
+    assert arguments["superseded_name"] == "m"
+    assert arguments["superseded_tags"] == ["first"]
 
 
-def test_caller_tag_still_round_trips_and_filters(tmp_path):
+def test_caller_tag_still_round_trips_and_filters(tmp_path: Path) -> None:
     from tcip_mcp.model_registry import ModelRegistry
     from tests._verified_checkpoint_fixtures import produced_checkpoint
 
@@ -97,13 +109,13 @@ def test_caller_tag_still_round_trips_and_filters(tmp_path):
     ckpt = produced_checkpoint(tmp_path / "m.pt", "weights")
     reg.register_model("m", str(ckpt), tags=["current"])
 
-    assert [m["name"] for m in reg.list_models(tag="current")] == ["m"]
+    assert [m.entry.name for m in reg.list_models(tag="current")] == ["m"]
     assert reg.list_models(tag="nonexistent") == []
 
 
 def test_a_checkpoint_carrying_no_weights_refuses_at_registration_naming_the_field(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A checkpoint payload carrying no weights is refused at registration naming the field.
 
     A checkpoint is admitted for the weights it loads: a payload carrying none refuses at
@@ -127,12 +139,12 @@ def test_a_checkpoint_carrying_no_weights_refuses_at_registration_naming_the_fie
     registry.register_model(
         "weighted", str(produced_checkpoint(tmp_path / "w.pt", "weights"))
     )
-    assert [m["name"] for m in registry.list_models()] == ["weighted"]
+    assert [m.entry.name for m in registry.list_models()] == ["weighted"]
 
 
 def test_an_indexed_checkpoint_carrying_no_weights_refuses_at_load_naming_the_field(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An indexed weightless checkpoint is refused at load naming the field.
 
     The load boundary states the weights rail itself: an index entry naming a weightless

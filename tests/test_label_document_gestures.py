@@ -7,6 +7,7 @@ completion marks, and what the admission, the queue and the editor's own listing
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -20,6 +21,11 @@ from tcip_mcp.dataset_layout import (
     verdict_key_of,
 )
 from tests._producer_fixtures import image_label_key, write_image
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+
+    from tcip_annotation.state import Annotation
 
 ANSWER_ONLY = {"status", "accepted"}
 """What a save answers beside the document a load answers."""
@@ -43,7 +49,7 @@ def _save(
     author: str = "user:breeder",
     expect: ts.Version | None = None,
     gestures: Gestures = Gestures(),
-):
+) -> tuple[ts.Version, json_io.LabelDocument, dict[int, int]]:
     return save_label_document(
         root,
         image_label_key(image),
@@ -220,7 +226,7 @@ def test_accepting_a_model_proposal_carries_no_attribute_value_into_the_document
     image = _image(tmp_path)
     color = cr.Attribute("color", "categorical", ("red", "blue"))
     registry = cr.SubjectRegistry(
-        subjects=(cr.Subject(name="bud", attributes=(color,)),)
+        subjects=(cr.Subject(name="bud", description="", attributes=(color,)),)
     )
     result = {
         **predicted(image, ["blue"], (color,)),
@@ -310,7 +316,11 @@ def test_a_decision_or_a_completion_mark_by_no_person_does_not_read(
     with pytest.raises(ValueError, match="a person"):
         decode_verdict(encode_verdict(replace(decided, by="save_annotations")))
     stored = ts.read(image_label_key(image))
-    (mark,) = stored[json_io.COMPLETION_KEY]["bud"]
+    assert isinstance(stored, dict)
+    marks = stored[json_io.COMPLETION_KEY]
+    assert isinstance(marks, dict) and isinstance(marks["bud"], list)
+    (mark,) = marks["bud"]
+    assert isinstance(mark, dict)
     assert _stored(tmp_path, image).marks["bud"][0].by == mark["by"]
     ts.replace(
         image_label_key(image),
@@ -328,7 +338,7 @@ def test_a_decision_or_a_completion_mark_by_no_person_does_not_read(
 
 
 def test_rejecting_a_paired_proposal_records_the_rejection_and_keeps_the_annotation(
-    tmp_path: Path, client
+    tmp_path: Path, client: TestClient
 ) -> None:
     from tests._web_fixtures import open_new_project
 
@@ -407,7 +417,7 @@ def test_authorship_counts_only_a_persons_hand_as_standing_behind_a_record() -> 
 ):
     from tcip_annotation.state import Annotation
 
-    def of(**provenance) -> str:
+    def of(**provenance: str) -> str:
         return json_io.authorship_of(Annotation("bud", **provenance))
 
     assert of(created_by="user:breeder") == "person"
@@ -467,7 +477,7 @@ def test_confirming_a_position_the_save_writes_nothing_at_refuses_before_any_wri
 
 
 def test_the_save_route_confirms_an_annotation_once_and_refuses_it_named_twice(
-    tmp_path: Path, client
+    tmp_path: Path, client: TestClient
 ) -> None:
     from tests._web_fixtures import open_new_project
 
@@ -534,7 +544,7 @@ def test_an_accepted_proposal_answers_the_annotation_it_resolved_to(
 
 
 def test_the_save_route_answers_the_annotation_an_accepted_proposal_resolved_to(
-    tmp_path: Path, client
+    tmp_path: Path, client: TestClient
 ) -> None:
     from tests._web_fixtures import open_new_project
 
@@ -561,7 +571,7 @@ def test_the_save_route_answers_the_annotation_an_accepted_proposal_resolved_to(
 
 
 def test_the_save_answers_the_document_it_stored(
-    tmp_path: Path, client
+    tmp_path: Path, client: TestClient
 ) -> None:
     """The save answers the document it stored, the same answer a load gives.
 
@@ -654,7 +664,7 @@ def test_a_proposal_both_accepted_and_rejected_refuses_before_any_write(
 
 
 def test_a_proposal_named_twice_refuses_at_the_save_route_before_any_write(
-    tmp_path: Path, client
+    tmp_path: Path, client: TestClient
 ) -> None:
     from tests._web_fixtures import open_new_project
 
@@ -683,7 +693,7 @@ def test_a_proposal_named_twice_refuses_at_the_save_route_before_any_write(
 
 
 def test_a_bucket_document_that_will_not_read_answers_400_at_the_proposals_route(
-    tmp_path: Path, client
+    tmp_path: Path, client: TestClient
 ) -> None:
     from tcip_mcp.buckets import read_bucket
     from tests._web_fixtures import open_new_project
@@ -719,19 +729,18 @@ def test_the_queue_refuses_a_label_document_that_will_not_read_by_name(
 
     image = _image(tmp_path)
     _save(tmp_path, image, [], gestures=Gestures(complete={"bud": True}))
-    _sources, skipped, error = _prepare_queue_sources(str(image.parent), "bud")
-    assert (skipped, error) == (1, None)
+    queued = _prepare_queue_sources(str(image.parent), "bud")
+    assert not isinstance(queued, dict), queued
+    assert queued[1] == 1
 
     ts.replace(image_label_key(image), {"annotations": {}})
 
-    _sources, _skipped, error = _prepare_queue_sources(
-        str(image.parent), "bud"
-    )
-    assert error is not None and "annotations" in error["error"]
+    refused = _prepare_queue_sources(str(image.parent), "bud")
+    assert isinstance(refused, dict) and "annotations" in refused["error"]
 
 
 def test_the_proposals_payload_carries_what_the_editor_reads_and_no_more(
-    tmp_path: Path, client
+    tmp_path: Path, client: TestClient
 ) -> None:
     from tests._web_fixtures import open_new_project
 
@@ -756,7 +765,7 @@ def test_the_proposals_payload_carries_what_the_editor_reads_and_no_more(
 
 
 def test_a_staged_bucket_serves_no_operating_point_and_says_why(
-    tmp_path: Path, client
+    tmp_path: Path, client: TestClient
 ) -> None:
     """A staged bucket serves no operating point and says why.
 
@@ -778,7 +787,7 @@ def test_a_staged_bucket_serves_no_operating_point_and_says_why(
 
 
 def test_the_loaded_annotations_carry_the_index_a_pairing_names(
-    tmp_path: Path, client
+    tmp_path: Path, client: TestClient
 ) -> None:
     """The loaded annotations carry the document index a proposal's pairing names.
 
@@ -865,7 +874,7 @@ def test_a_mark_made_with_proposals_hidden_says_so(tmp_path: Path) -> None:
 
 
 def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(
-    tmp_path: Path, client
+    tmp_path: Path, client: TestClient
 ) -> None:
     """Three readers see an empty document as a negative when marked and not while unmarked.
 
@@ -886,15 +895,14 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(
             members=[image.stem],
             scope=registry_scope(image.parent, "bud"),
         ).tallies
-        _sources, skipped, _error = _prepare_queue_sources(
-            str(image.parent), "bud"
-        )
+        queued = _prepare_queue_sources(str(image.parent), "bud")
+        assert not isinstance(queued, dict), queued
         listed = client.get(
             "/api/annotate/labels", params={"image_path": str(image)}
         ).json()
         return (
             counts.get("negative", 0),
-            skipped,
+            queued[1],
             listed["completion"].get("bud", "unannotated"),
         )
 
@@ -906,7 +914,7 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(
 
 
 def test_saved_provenance_is_the_requests_actor_whatever_the_browser_sends(
-    tmp_path: Path, client
+    tmp_path: Path, client: TestClient
 ) -> None:
     from tests._web_fixtures import open_new_project
 
@@ -950,7 +958,7 @@ def _counted(annotations: list, proposals: list, criterion: dict) -> dict:
         prediction_record,
     )
 
-    def box(a) -> list[float]:
+    def box(a: Annotation) -> list[float]:
         g = a.geometry
         return xywh(g.x1, g.y1, g.x2, g.y2)
 
@@ -1086,9 +1094,10 @@ def test_the_editor_pairs_a_bucket_under_its_assessments_center_match(
     annotations = json_io.read_label_document(
         image_label_key(image)
     ).annotations
-    criterion = read_assessment(tmp_path, bucket.assessment_id).criterion[
-        "count"
-    ]["localization"]
+    count = read_assessment(tmp_path, bucket.assessment_id).criterion["count"]
+    assert isinstance(count, dict)
+    criterion = count["localization"]
+    assert isinstance(criterion, dict)
 
     paired = proposal_pairs(tmp_path, bucket, annotations, proposals)
 
@@ -1106,7 +1115,7 @@ def test_the_editor_pairs_a_bucket_under_its_assessments_center_match(
 class DottedProposer:
     """A proposer the agent brings by dotted path, returning one fixed candidate for any image."""
 
-    def propose(self, image_path: str, **params) -> list[dict]:
+    def propose(self, image_path: str, **params: object) -> list[dict]:
         return [
             {
                 "candidate_id": 1,
@@ -1121,12 +1130,12 @@ class DottedProposer:
 
 
 def test_propose_annotations_refuses_an_unnamed_proposer_and_runs_a_dotted_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    from tcip_mcp.pipelines import proposal
+    from tcip_mcp.pipelines.proposal import register_proposal_engine
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
-    monkeypatch.setitem(proposal._ENGINES, "registered_here", DottedProposer())
+    register_proposal_engine("registered_here", DottedProposer())
     image = _image(tmp_path)
 
     refused = propose_annotations(tmp_path, str(image), engine="")

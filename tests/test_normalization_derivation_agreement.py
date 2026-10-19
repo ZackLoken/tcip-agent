@@ -6,7 +6,12 @@ own as numpy computes them over the frames, and the weights statement a model so
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 torch = pytest.importorskip("torch")
 
@@ -23,7 +28,9 @@ TORCHVISION_ENUM = "EfficientNet_V2_L_Weights.IMAGENET1K_V1"
 read from the enum's metadata without fetching them."""
 
 
-def test_timm_weights_yield_the_created_models_own_pretrained_statistics():
+def test_timm_weights_yield_the_created_models_own_pretrained_statistics() -> (
+    None
+):
     """The record holds the mean and std of the timm model created at those weights.
 
     The statistics are those of the created model's ``pretrained_cfg``, also when created
@@ -47,7 +54,9 @@ def test_timm_weights_yield_the_created_models_own_pretrained_statistics():
     ).image_mean == list(features.pretrained_cfg["mean"])
 
 
-def test_torchvision_weights_yield_the_statistics_their_preset_normalizes_by():
+def test_torchvision_weights_yield_the_statistics_their_preset_normalizes_by() -> (
+    None
+):
     """The record's mean and std are those the torchvision weights' own preset applies to pixels.
 
     They are read back from what the preset transform makes of a black and a white frame.
@@ -67,7 +76,9 @@ def test_torchvision_weights_yield_the_statistics_their_preset_normalizes_by():
     assert record.image_std == pytest.approx(std.tolist(), abs=1e-5)
 
 
-def test_the_data_route_yields_the_numpy_mean_and_std_of_the_frames(tmp_path):
+def test_the_data_route_yields_the_numpy_mean_and_std_of_the_frames(
+    tmp_path: Path,
+) -> None:
     """With no weights, the band statistics are numpy's mean and std of every frame's pixels.
 
     The frames are read with PIL and scaled to [0, 1] before ``numpy.mean`` and ``numpy.std``.
@@ -97,7 +108,9 @@ def test_the_data_route_yields_the_numpy_mean_and_std_of_the_frames(tmp_path):
     assert record.image_std == pytest.approx(pixels.std(axis=0).tolist())
 
 
-def test_a_band_of_one_value_has_no_statistics_to_normalize_by(tmp_path):
+def test_a_band_of_one_value_has_no_statistics_to_normalize_by(
+    tmp_path: Path,
+) -> None:
     """A frame whose bands each hold one value is refused by the record's type.
 
     Its std is zero, which no normalization divides by, so the refusal comes where the derivation
@@ -114,8 +127,8 @@ def test_a_band_of_one_value_has_no_statistics_to_normalize_by(tmp_path):
 
 
 def test_every_model_source_records_its_normalization_and_the_weights_it_names(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A model source requires its normalization record and names the weights it loads.
 
     An omitted record is refused by the field's type. The weights a builder loads are read off its

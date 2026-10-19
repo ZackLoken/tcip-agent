@@ -7,6 +7,7 @@ reduced-resolution reads GDAL serves from it.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -21,6 +22,9 @@ from tcip_mcp.pipelines.overviews import (
     sidecar_valid,
 )
 from tcip_mcp.pipelines.raster_source import Rect, TiffWholeSource, open_raster
+
+if TYPE_CHECKING:
+    from rasterio.io import DatasetReader, DatasetWriter
 
 
 def _wide_raster(
@@ -125,7 +129,9 @@ def test_an_open_reader_enumerates_its_levels_without_reopening_the_raster(
     opened: list[int | None] = []
     real = raster_source.open_gdal_dataset
 
-    def counting(dataset_path, overview=None):
+    def counting(
+        dataset_path: str | Path, overview: int | None = None
+    ) -> DatasetReader:
         opened.append(overview)
         return real(dataset_path, overview)
 
@@ -138,7 +144,7 @@ def test_an_open_reader_enumerates_its_levels_without_reopening_the_raster(
 class _InProcessChild:
     """A stand-in for the build's child process that runs the child program, unchanged, here."""
 
-    def __init__(self, args: list, **_kwargs) -> None:
+    def __init__(self, args: list, **_kwargs: object) -> None:
         import contextlib
         import io
         import sys
@@ -184,12 +190,19 @@ def test_a_build_acquires_the_raster_once_across_parent_and_child(
     mains: list = []
     real_init, real_open = tifffile.TiffFile.__init__, rasterio.open
 
-    def header(self, file, *args, **kwargs):
+    def header(
+        self: tifffile.TiffFile,
+        file: str,
+        *args: str | int | bool | None,
+        **kwargs: str | int | bool | None,
+    ) -> None:
         if Path(str(file)) == path:
             headers.append(file)
         real_init(self, file, *args, **kwargs)
 
-    def gdal(fp, *args, **kwargs):
+    def gdal(
+        fp: str, *args: str, **kwargs: int | None
+    ) -> DatasetReader | DatasetWriter:
         if Path(str(fp)) == path and "overview_level" not in kwargs:
             mains.append(fp)
         return real_open(fp, *args, **kwargs)

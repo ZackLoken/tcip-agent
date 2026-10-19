@@ -9,7 +9,7 @@ from __future__ import annotations
 import csv
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote
 
 import pytest
@@ -21,6 +21,12 @@ from tcip_mcp.pipelines.execution import Stated
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import refuse_audit_appends
 from tests._web_fixtures import BROWSER, acknowledged_post, open_new_project
+
+if TYPE_CHECKING:
+    from httpx import Response
+
+    from tcip_mcp.buckets import Bucket
+    from tests._chain_fixtures import Series
 
 
 def _rows(text: str) -> list[dict]:
@@ -106,7 +112,9 @@ def test_plant_mapping_load_of_an_unstored_name_answers_404_naming_it(
 # ── The phenology measurement and its export ────────────────────────────
 
 
-def _series(tmp_path: Path, **kwargs):
+def _series(
+    tmp_path: Path, **kwargs: tuple | int | bool | str | dict | Stated | None
+) -> Series:
     pytest.importorskip("torch")
     from tests._chain_fixtures import attributed_series
 
@@ -117,9 +125,9 @@ def _export(
     client: TestClient,
     body: dict,
     payload: str = "milestones",
-    headers=None,
-    **extra,
-):
+    headers: dict[str, str] | None = None,
+    **extra: object,
+) -> Response:
     return client.post(
         "/api/results/export_csv",
         headers=headers,
@@ -272,10 +280,9 @@ def test_an_acknowledged_export_ships_unvalidated_and_its_event_names_the_act(
         for e in tcip_store.read_log(audit_log_key(root)).records
         if e["tool"] in ("delivery_acknowledged", "delivery_event")
     ]
-    assert sorted(e["tool"] for e in lines) == [
-        "delivery_acknowledged",
-        "delivery_event",
-    ]
+    assert sorted(
+        tool for e in lines if isinstance(tool := e["tool"], str)
+    ) == ["delivery_acknowledged", "delivery_event"]
     assert {e["actor"] for e in lines} == {"user:breeder"}
     assert all("acknowledged_by" not in e["arguments"] for e in lines)
 
@@ -533,7 +540,9 @@ def test_phenology_measurement_refuses_when_the_delivered_dataset_carries_no_reg
 COUNT_SCOPE = {"subject": fx.COUNT_SUBJECT}
 
 
-def _unassessed_count_bucket(project: Path, *, scope: dict = COUNT_SCOPE):
+def _unassessed_count_bucket(
+    project: Path, *, scope: dict = COUNT_SCOPE
+) -> Bucket:
     """Publish and return an unassessed bucket of two frames with three detections each.
 
     The bucket is ``live/counts`` of the project's own images, in a project whose count trait is
@@ -558,7 +567,9 @@ def _unassessed_count_bucket(project: Path, *, scope: dict = COUNT_SCOPE):
     return bucket
 
 
-def _per_image(bucket, trait: str = fx.COUNT_TRAIT, **extra) -> dict:
+def _per_image(
+    bucket: Bucket, trait: str = fx.COUNT_TRAIT, **extra: object
+) -> dict:
     """Return an export body for ``bucket`` with ``extra`` merged over it last.
 
     Before the merge, the body's ``delivery`` is a ``per_image_count`` of ``bucket``'s root and
@@ -580,7 +591,9 @@ def _per_image(bucket, trait: str = fx.COUNT_TRAIT, **extra) -> dict:
 COUNT_ROUTE = "/api/results/export_count_csv"
 
 
-def _export_count(client: TestClient, body: dict, headers=None):
+def _export_count(
+    client: TestClient, body: dict, headers: dict[str, str] | None = None
+) -> Response:
     return client.post(COUNT_ROUTE, json=body, headers=headers)
 
 
@@ -861,7 +874,11 @@ def _orthomosaic(project: Path) -> tuple[Any, str]:
 
 
 def _per_plant(
-    bucket, registry: str, *, filename: str = "plant_counts.csv", **extra
+    bucket: Bucket,
+    registry: str,
+    *,
+    filename: str = "plant_counts.csv",
+    **extra: object,
 ) -> dict:
     return {
         "delivery": {
@@ -1081,9 +1098,11 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
             for r in read_log(audit_log_key(opened_project)).records[before:]
             if r["tool"] == "inference_canceled"
         ]
-        assert [(r["arguments"]["job_id"], r["actor"]) for r in lines] == [
-            (job_id, "user:tester")
-        ]
+        assert [
+            (arguments["job_id"], r["actor"])
+            for r in lines
+            if isinstance(arguments := r["arguments"], dict)
+        ] == [(job_id, "user:tester")]
     finally:
         job = inference_routes._get(job_id)
         if job is not None and job.thread is not None:

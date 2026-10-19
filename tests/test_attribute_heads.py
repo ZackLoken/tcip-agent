@@ -14,8 +14,12 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from tcip_annotation.state import Annotation
 
 pytest.importorskip("torch")
 
@@ -46,22 +50,24 @@ SUBJECT = "object"
 COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
 GRADE = cr.Attribute("grade", "ordinal", ("low", "mid", "high"))
 REGISTRY = cr.SubjectRegistry(
-    subjects=(cr.Subject(name=SUBJECT, attributes=(COLOR, GRADE)),)
+    subjects=(
+        cr.Subject(name=SUBJECT, description="", attributes=(COLOR, GRADE)),
+    )
 )
 OPENING = cr.Attribute(ATTRIBUTE, "ordinal", VALUES)
 """The series' opening attribute declared ordinal, the one its crossing trait's state names."""
 
 
-def _documents(root: Path, bucket: str) -> dict[str, list[dict]]:
+def _documents(root: Path, bucket: str) -> dict[str, list[Annotation]]:
     """Return every prediction document of the bucket named ``bucket`` under ``root`` by stem.
 
     Each document's annotations are as written.
     """
-    import tcip_store
+    from tcip_annotation.json_io import read_predictions
     from tcip_mcp.buckets import read_bucket
 
     return {
-        key.parts[-1]: tcip_store.read(key)["annotations"]
+        key.parts[-1]: read_predictions(key).annotations
         for key in read_bucket(root, bucket).document_keys
     }
 
@@ -84,7 +90,7 @@ def _frames(where: Path, values: dict[str, str]) -> str:
 
 def test_two_attributes_train_two_heads_publish_both_values_and_deliver(
     tmp_path: Path,
-):
+) -> None:
     """Two attributes on one subject train two heads, publish both values and deliver.
 
     A registry declares an ordinal and a categorical attribute on one subject: the drawn
@@ -122,10 +128,10 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(
         b: _documents(series.root, b) for b in series.buckets.values()
     }
     for a in boxes:
-        assert set(a["attributes"]) == {ATTRIBUTE, COLOR.name}, a
+        assert set(a.attributes) == {ATTRIBUTE, COLOR.name}, a
         assert (
-            a["attributes"][ATTRIBUTE] in VALUES
-            and a["attributes"]["color"] in COLOR.values
+            a.attributes[ATTRIBUTE] in VALUES
+            and a.attributes["color"] in COLOR.values
         )
 
     assessed = assess_checkpoint(
@@ -169,7 +175,7 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(
 
 def test_a_selection_and_the_bucket_a_run_over_it_publishes_carry_one_scope_record(
     tmp_path: Path,
-):
+) -> None:
     """A selection and the bucket a run over it publishes carry one scope record.
 
     Each bucket the run's checkpoint publishes states the drawn selection's scope, in its read
@@ -191,9 +197,9 @@ def test_a_selection_and_the_bucket_a_run_over_it_publishes_carry_one_scope_reco
     for bucket in series.buckets.values():
         published = read_bucket(series.root, bucket).scope
         assert published == drawn
-        assert tcip_store.read(bucket_key(series.root, bucket))[
-            "scope"
-        ] == json.loads(json.dumps(asdict(drawn)))
+        stored = tcip_store.read(bucket_key(series.root, bucket))
+        assert isinstance(stored, dict)
+        assert stored["scope"] == json.loads(json.dumps(asdict(drawn)))
 
 
 # --- zero attributes --------------------------------------------------------
@@ -201,7 +207,7 @@ def test_a_selection_and_the_bucket_a_run_over_it_publishes_carry_one_scope_reco
 
 def test_a_scope_with_no_attribute_builds_the_plain_detector_and_writes_no_attribute_row(
     tmp_path: Path,
-):
+) -> None:
     """A scope with no attribute builds the plain detector and writes no attribute.
 
     A subject its registry declares no attribute for builds the torchvision detector
@@ -240,12 +246,12 @@ def test_a_scope_with_no_attribute_builds_the_plain_detector_and_writes_no_attri
     assert "error" not in published, published
     assert len(_documents(tmp_path, "plain")) == 2
     for written in _documents(tmp_path, "plain").values():
-        assert all(not a.get("attributes") for a in written), written
+        assert all(not a.attributes for a in written), written
 
 
 def test_a_document_scope_whose_attributes_were_never_read_sizes_no_model(
     tmp_path: Path,
-):
+) -> None:
     """A scope whose attributes were never read sizes no model; one read by admission does.
 
     A run config naming a subject but recording no attributes was never admitted, so its
@@ -285,7 +291,7 @@ def test_a_document_scope_whose_attributes_were_never_read_sizes_no_model(
 
 def test_an_instance_unassessed_for_one_attribute_trains_that_head_on_nothing_and_the_other(
     tmp_path: Path,
-):
+) -> None:
     """``color``, assessed by no instance, gives its head no gradient while ``grade``'s gets one.
 
     Every object assesses ``grade`` and none assesses ``color``: both frames are admitted and the
@@ -333,7 +339,9 @@ def test_an_instance_unassessed_for_one_attribute_trains_that_head_on_nothing_an
 @pytest.mark.parametrize(
     "name", ["faster_rcnn", "fcos", "retinanet", "mask_rcnn"]
 )
-def test_each_builtin_detector_carries_one_head_per_attribute(name: str):
+def test_each_builtin_detector_carries_one_head_per_attribute(
+    name: str,
+) -> None:
     """Each built-in detector carries one attribute head per attribute.
 
     Around each built-in detector, the attribute module returns one loss per attribute in train
@@ -381,8 +389,8 @@ def test_each_builtin_detector_carries_one_head_per_attribute(name: str):
 
 def test_the_tiler_carries_exactly_the_per_box_keys_the_loader_names(
     tmp_path: Path,
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The tiler carries ``attributes`` while ``PER_BOX_KEYS`` names it and omits it otherwise.
 
     While named, each tile carries one ``attributes`` row per box, holding the objects' values.
@@ -425,7 +433,7 @@ WHOLE = cr.Attribute("whole", "categorical", ("cut", "whole"))
 def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_call(
     tmp_path: Path,
     postprocess: str,
-):
+) -> None:
     """Two tiles calling one object differently merge into one box with the higher-scoring call.
 
     The second column's tile holds the object whole and the first column's tile cuts it at its
@@ -450,7 +458,9 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
         },
         data={"num_channels": 3, "scope": {"subject": SUBJECT}},
         registry=cr.SubjectRegistry(
-            subjects=(cr.Subject(name=SUBJECT, attributes=(WHOLE,)),)
+            subjects=(
+                cr.Subject(name=SUBJECT, description="", attributes=(WHOLE,)),
+            )
         ),
     )
     source = tmp_path / "frame.png"
@@ -497,7 +507,9 @@ class _CallsEveryFrameOnce(torch.nn.Module):
         self.score_thresh = 0.0
         self.detections_per_img = 100
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: list[torch.Tensor], targets: list[dict] | None = None
+    ) -> dict[str, torch.Tensor] | list[dict[str, torch.Tensor]]:
         if self.training:
             return {"loss": torch.zeros(())}
         return [
@@ -513,7 +525,7 @@ class _CallsEveryFrameOnce(torch.nn.Module):
 
 def test_evaluate_reports_each_attributes_agreement_over_the_pairs_it_assesses(
     tmp_path: Path,
-):
+) -> None:
     """``evaluate`` reports each attribute's agreement over the pairs its reference assesses.
 
     Two frames whose one object each assesses ``color`` and only the first assesses ``grade``:

@@ -8,11 +8,17 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 import tcip_store
 from tests._producer_fixtures import BRIGHT, label_image, painted_frame
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from tcip_mcp.pipelines.data.selection import Sample, Selection
 
 torch = pytest.importorskip("torch")
 
@@ -27,7 +33,7 @@ DATES = ("2026-02-11", "2026-02-25")
 _STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
 
 
-def _dataset(root: Path, stems=_STEMS) -> Path:
+def _dataset(root: Path, stems: tuple[str, ...] = _STEMS) -> Path:
     """Write a dataset of two capture dates holding ``stems`` each, and return its root.
 
     Each stem's image is a painted frame written with a label document of one ``leaf`` box;
@@ -49,7 +55,7 @@ def _dataset(root: Path, stems=_STEMS) -> Path:
     return root
 
 
-def _draw(project: Path, root: Path, out: Path, *, seed: int = 2):
+def _draw(project: Path, root: Path, out: Path, *, seed: int = 2) -> Selection:
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
 
@@ -155,17 +161,18 @@ def test_the_run_binding_records_the_selection_digest_once_never_on_a_sample(
 
     selection = read_selection(out, project=tmp_path)
     assert selection_digest(selection, tmp_path) == _manifest_sha256(out)
-    assert resolved.partition["selection"][
-        "selection_sha256"
-    ] == _manifest_sha256(out)
+    assert resolved.partition.selection is not None
+    assert resolved.partition.selection.selection_sha256 == _manifest_sha256(
+        out
+    )
     assert not any(
         "selection_sha256" in sample
-        for sample in resolved.partition["samples"]
+        for sample in resolved.partition.model_dump(mode="json")["samples"]
     )
 
 
 def test_a_document_emptied_after_its_admission_never_trains_as_empty(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A document emptied after its admission is held by its loader with its annotations.
 
@@ -181,7 +188,11 @@ def test_a_document_emptied_after_its_admission_never_trains_as_empty(
     images_dir = root / "images" / DATES[0]
     real_samples = label_queries.Admission.samples
 
-    def emptied_first(self, assignment, group_of):
+    def emptied_first(
+        self: label_queries.Admission,
+        assignment: dict[str, str],
+        group_of: Callable[[str], str],
+    ) -> list[Sample]:
         label_image(images_dir / "a.jpg", [], IMG, IMG, keep_empty=True)
         return real_samples(self, assignment, group_of)
 
@@ -229,13 +240,12 @@ def test_the_partition_alone_carries_the_per_sample_digests(
         project=tmp_path,
     )
 
-    assert resolved.partition["samples"]
-    assert all(
-        sample["ground_truth_digest"]
-        for sample in resolved.partition["samples"]
-    )
+    samples = resolved.partition.samples
+    assert samples
+    assert all(sample.ground_truth_digest for sample in samples)
+    assert resolved.partition.selection is not None
     for block in (
         resolved.data.record()["split"],
-        resolved.partition["selection"],
+        resolved.partition.selection.model_dump(),
     ):
         assert "samples" not in block

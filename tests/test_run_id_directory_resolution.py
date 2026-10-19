@@ -6,14 +6,19 @@ that id, off the directory.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from tests._verified_checkpoint_fixtures import (
     detection_config,
     log_epoch,
     opened_run,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def test_a_custom_named_run_is_monitored_by_its_own_id(tmp_path):
+
+def test_a_custom_named_run_is_monitored_by_its_own_id(tmp_path: Path) -> None:
     from tcip_mcp.tools.training_tools import monitor_training
 
     run_dir = opened_run(
@@ -29,7 +34,7 @@ def test_a_custom_named_run_is_monitored_by_its_own_id(tmp_path):
     assert result["output_dir"] == str(run_dir)
 
 
-def test_a_custom_named_run_is_canceled_by_its_own_id(tmp_path):
+def test_a_custom_named_run_is_canceled_by_its_own_id(tmp_path: Path) -> None:
     from tcip_mcp.experiments import cancel_requested
     from tcip_mcp.tools.training_tools import cancel_training
 
@@ -45,7 +50,7 @@ def test_a_custom_named_run_is_canceled_by_its_own_id(tmp_path):
     assert cancel_requested(run_dir)
 
 
-def test_an_id_naming_no_run_resolves_to_nothing(tmp_path):
+def test_an_id_naming_no_run_resolves_to_nothing(tmp_path: Path) -> None:
     from tcip_mcp.experiments import find_run
     from tcip_mcp.tools.training_tools import cancel_training, monitor_training
 

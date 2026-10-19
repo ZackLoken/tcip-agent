@@ -6,12 +6,23 @@ This drives the real writer (``run_inference``'s publication) and the real reade
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from tcip_mcp.pipelines.execution import MaskCut
 
 torch = pytest.importorskip("torch")
 
 
-def _publish(tmp_path, monkeypatch, **stated) -> dict:
+def _publish(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    **stated: bool | int | float | str | MaskCut | None,
+) -> dict:
     """Run ``run_inference`` over one dated capture of the dataset ``dataset``, stubbed."""
     from PIL import Image
 
@@ -42,10 +53,12 @@ def _publish(tmp_path, monkeypatch, **stated) -> dict:
 
 
 def test_the_record_the_publication_writes_is_the_record_the_reader_takes_back(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.model_registry import Producer
+    from tcip_mcp.pipelines.execution import EXECUTION_RECORD
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_CROSS_TILE_NMS,
         SAMPLE_OVERLAP,
@@ -65,7 +78,10 @@ def test_the_record_the_publication_writes_is_the_record_the_reader_takes_back(
 
     assert "error" not in result, result
     bucket = read_bucket(result["dataset_root"], result["bucket"])
-    assert bucket.execution.record() == result["execution"]
+    assert (
+        EXECUTION_RECORD.dump_python(bucket.execution, mode="json")
+        == result["execution"]
+    )
     assert (
         bucket.execution.tile_size,
         bucket.execution.sources["tile_size"],
@@ -73,4 +89,7 @@ def test_the_record_the_publication_writes_is_the_record_the_reader_takes_back(
     assert bucket.date == "2026-03-01" and bucket.documents == {
         "capture_a": "capture_a.png"
     }
-    assert bucket.producer["checkpoint_sha256"] == result["checkpoint_sha256"]
+    assert bucket.producer == Producer(
+        checkpoint_sha256=result["checkpoint_sha256"],
+        experiment_id=result["experiment_id"],
+    )

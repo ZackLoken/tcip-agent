@@ -6,8 +6,15 @@ region IoU, a threshold known in advance and objects of several sizes drawn at o
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from numpy.typing import NDArray
 
 pytest.importorskip("torch")
 pytest.importorskip("cv2")
@@ -73,7 +80,9 @@ def _shapely_mean_iou(pairs: list, cut: float) -> float:
     return float(np.mean(ious))
 
 
-def test_the_derived_mask_threshold_is_the_cut_the_objects_were_drawn_at():
+def test_the_derived_mask_threshold_is_the_cut_the_objects_were_drawn_at() -> (
+    None
+):
     """The derived mask threshold is the cut the objects were drawn at.
 
     Objects that are their soft masks cut at a known probability derive that
@@ -107,7 +116,9 @@ def _empty_pair() -> tuple:
     return np.zeros((0, 0)), (0, 0), [[(px + 300, py) for px, py in rings[0]]]
 
 
-def test_a_matched_mask_holding_no_positive_value_offers_no_cut_and_still_counts():
+def test_a_matched_mask_holding_no_positive_value_offers_no_cut_and_still_counts() -> (
+    None
+):
     """A matched mask holding no positive value offers no cut and still counts.
 
     With a matched pair of empty soft mask added, the known cut still derives and the mean
@@ -140,7 +151,9 @@ def _drawn_pair(
     axes: tuple[int, int],
     turn: float,
     spacing: int,
-):
+) -> tuple[
+    NDArray[np.float32], tuple[int, int], list[list[tuple[float, float]]]
+]:
     """Return ``(soft, origin, [ring])`` for an ellipse of half-axes ``axes``.
 
     ``soft`` is a float32 array with ``cv2.ellipse`` filled at 1.0 over those half-axes, and
@@ -175,8 +188,8 @@ def _closed_length(points: np.ndarray) -> float:
 
 @pytest.mark.parametrize("spacing", [15, 30, 60])
 def test_the_derived_vertex_spacing_leaves_each_prediction_its_objects_vertex_count(
-    spacing,
-):
+    spacing: int,
+) -> None:
     """The derived vertex spacing leaves each prediction its object's vertex count within one.
 
     Objects of four sizes drawn at one spacing, each predicted as a filled ellipse of that
@@ -221,7 +234,7 @@ def test_the_derived_vertex_spacing_leaves_each_prediction_its_objects_vertex_co
     assert spacing <= derived <= 1.15 * spacing
 
 
-def test_a_ring_at_vertex_spacing_zero_keeps_every_contour_vertex():
+def test_a_ring_at_vertex_spacing_zero_keeps_every_contour_vertex() -> None:
     """At spacing zero ``mask_to_polygon_rings`` returns each contour's own vertices."""
     from tcip_annotation.mask_contours import (
         mask_contours,
@@ -238,7 +251,9 @@ def test_a_ring_at_vertex_spacing_zero_keeps_every_contour_vertex():
     ]
 
 
-def test_a_ring_already_under_its_count_at_any_admitted_spacing_is_kept():
+def test_a_ring_already_under_its_count_at_any_admitted_spacing_is_kept() -> (
+    None
+):
     """A small square's rings at a mask-cut spacing of 1e-310 equal its rings at spacing zero.
 
     ``MaskCut`` admits the spacing 1e-310, and ``mask_to_polygon_rings`` returns the 3x3
@@ -256,7 +271,9 @@ def test_a_ring_already_under_its_count_at_any_admitted_spacing_is_kept():
     ) == mask_to_polygon_rings(square, threshold=None, vertex_spacing=0.0)
 
 
-def test_a_pair_with_no_contour_or_no_ring_contributes_nothing_to_the_spacing():
+def test_a_pair_with_no_contour_or_no_ring_contributes_nothing_to_the_spacing() -> (
+    None
+):
     """A pair with no contour or no ring contributes nothing to the derived spacing.
 
     A matched object holding no ring and a detection whose mask cuts to nothing leave
@@ -282,8 +299,8 @@ def test_a_pair_with_no_contour_or_no_ring_contributes_nothing_to_the_spacing():
 
 
 def test_an_untiled_instance_segmentation_assessment_records_the_mask_threshold_it_derives(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An untiled instance segmentation assessment records the mask cut it derives.
 
     An instance segmentation assessment stating no mask threshold or vertex spacing derives
@@ -315,7 +332,7 @@ def test_an_untiled_instance_segmentation_assessment_records_the_mask_threshold_
         samples[:1],
         samples[1:],
         fx.COUNT_SPEC,
-        "per_image_count",
+        None,
         source_digests(samples),
         **COUNT_TEST,
     )
@@ -335,8 +352,8 @@ def test_an_untiled_instance_segmentation_assessment_records_the_mask_threshold_
 
 
 def test_a_mask_collecting_pass_stating_no_block_and_no_reference_names_the_blocks_fields(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A mask-collecting pass with no block and no reference refuses naming the block's fields.
 
     An instance segmentation pass collecting masks that states no ``mask_cut`` and has
@@ -367,7 +384,9 @@ def test_a_mask_collecting_pass_stating_no_block_and_no_reference_names_the_bloc
 
 
 @pytest.mark.parametrize("missing", ["mask_binarize", "vertex_spacing"])
-def test_a_stated_mask_cut_missing_either_value_is_refused_naming_it(missing):
+def test_a_stated_mask_cut_missing_either_value_is_refused_naming_it(
+    missing: str,
+) -> None:
     """A stated ``mask_cut`` missing either value is refused by the type, naming it.
 
     A statement's ``mask_cut`` carries both of its values or none is stated: one missing either

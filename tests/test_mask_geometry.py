@@ -18,14 +18,21 @@ from tests._training_values import MASK_BINARIZE
 # ── rectangle: every pixel quantity is exact ─────────────────────────────
 
 
-def _rect_mask(h=64, w=64, r0=5, r1=24, c0=10, c1=49):
+def _rect_mask(
+    h: int = 64,
+    w: int = 64,
+    r0: int = 5,
+    r1: int = 24,
+    c0: int = 10,
+    c1: int = 49,
+) -> np.ndarray:
     """Return a solid rectangle mask over rows r0..r1 and cols c0..c1, both inclusive."""
     from tests._producer_fixtures import painted_array
 
     return painted_array(w, h, [((c0, r0, c1 + 1, r1 + 1), 1)])
 
 
-def test_rectangle_pixel_measurements_exact():
+def test_rectangle_pixel_measurements_exact() -> None:
     m = _rect_mask()  # 40 wide (cols 10..49), 20 tall (rows 5..24)
     g = mask_geometry(m, unit="mm", threshold=MASK_BINARIZE)
     assert g["empty"] is False
@@ -43,7 +50,7 @@ def test_rectangle_pixel_measurements_exact():
     )  # horizontal major axis
 
 
-def test_rectangle_physical_scale_converts_px_to_mm():
+def test_rectangle_physical_scale_converts_px_to_mm() -> None:
     m = _rect_mask()
     g = mask_geometry(m, scale=0.5, unit="mm", threshold=MASK_BINARIZE)
     assert g["mm_per_px"] == 0.5
@@ -55,7 +62,7 @@ def test_rectangle_physical_scale_converts_px_to_mm():
     assert g["centroid_mm"] == pytest.approx((14.75, 7.25))
 
 
-def test_scale_unit_is_the_callers_fact_never_assumed_to_be_mm():
+def test_scale_unit_is_the_callers_fact_never_assumed_to_be_mm() -> None:
     """A cm/px scale reports area in cm² and axis extents, perimeter and centroid in cm.
 
     The result carries no mm-labeled field.
@@ -72,7 +79,7 @@ def test_scale_unit_is_the_callers_fact_never_assumed_to_be_mm():
     assert not any(k.endswith(("_mm", "_mm2")) or k == "mm_per_px" for k in g)
 
 
-def test_no_gsd_parameter_survives_anywhere_in_the_module():
+def test_no_gsd_parameter_survives_anywhere_in_the_module() -> None:
     """No callable in the mask geometry module takes a ``gsd`` or ``mm_per_px`` parameter."""
     import importlib
     import inspect
@@ -90,7 +97,7 @@ def test_no_gsd_parameter_survives_anywhere_in_the_module():
         )
 
 
-def test_no_length_or_width_key_survives_under_any_alias():
+def test_no_length_or_width_key_survives_under_any_alias() -> None:
     """The geometry carries no length or width key, and unit lookup reads such keys by vocabulary.
 
     Over two geometries no key starts with ``length`` or ``width``; ``unit_from_value_key`` reads
@@ -120,7 +127,7 @@ def test_no_length_or_width_key_survives_under_any_alias():
 # ── ellipse: area/axes correct within a pixel-discretization tolerance ─────
 
 
-def test_ellipse_area_and_axes():
+def test_ellipse_area_and_axes() -> None:
     h = w = 128
     cx, cy, a, b = (
         64.0,
@@ -140,7 +147,7 @@ def test_ellipse_area_and_axes():
 # ── degenerate / empty masks ──────────────────────────────────────────────
 
 
-def test_empty_mask_is_handled_without_inventing_a_measurement():
+def test_empty_mask_is_handled_without_inventing_a_measurement() -> None:
     g = mask_geometry(
         np.zeros((32, 32), dtype=np.uint8),
         scale=2.0,
@@ -157,7 +164,7 @@ def test_empty_mask_is_handled_without_inventing_a_measurement():
     assert g["area_mm2"] == 0.0  # scale still applied, still zero
 
 
-def test_single_row_line_is_1px_wide():
+def test_single_row_line_is_1px_wide() -> None:
     m = _rect_mask(
         h=16, w=16, r0=8, r1=8, c0=3, c1=12
     )  # a 10 px horizontal line
@@ -173,13 +180,13 @@ def test_single_row_line_is_1px_wide():
 # ── input shapes: [1,H,W], torch tensor, and [N,H,W] instance stacks ──────
 
 
-def test_accepts_chw_and_soft_masks_cut_at_the_stated_threshold():
+def test_accepts_chw_and_soft_masks_cut_at_the_stated_threshold() -> None:
     soft = _rect_mask().astype(np.float32)[None] * 0.6
     assert mask_geometry(soft, unit="mm", threshold=0.6)["area_px"] == 40 * 20
     assert mask_geometry(soft, unit="mm", threshold=0.7)["empty"] is True
 
 
-def test_accepts_torch_tensor():
+def test_accepts_torch_tensor() -> None:
     torch = pytest.importorskip("torch")
     g = mask_geometry(
         torch.from_numpy(_rect_mask()), unit="mm", threshold=MASK_BINARIZE
@@ -187,7 +194,7 @@ def test_accepts_torch_tensor():
     assert g["area_px"] == 40 * 20 and g["principal_axis_extent_px"] == 40.0
 
 
-def test_instance_geometries_over_a_stack():
+def test_instance_geometries_over_a_stack() -> None:
     stack = np.stack(
         [_rect_mask(), np.zeros((64, 64), dtype=np.uint8)]
     )  # one real, one empty
@@ -199,7 +206,7 @@ def test_instance_geometries_over_a_stack():
     assert out[1]["empty"] is True
 
 
-def test_instance_geometries_carries_the_callers_unit():
+def test_instance_geometries_carries_the_callers_unit() -> None:
     out = instance_geometries(
         _rect_mask()[None], scale=0.5, unit="cm", threshold=MASK_BINARIZE
     )
@@ -210,7 +217,7 @@ def test_instance_geometries_carries_the_callers_unit():
 # ── the binarize threshold the caller states ──────────────────────────────
 
 
-def test_an_unstated_threshold_is_refused_by_the_signatures():
+def test_an_unstated_threshold_is_refused_by_the_signatures() -> None:
     for measure in (mask_geometry, instance_geometries):
         with pytest.raises(TypeError, match="threshold"):
             measure(_rect_mask(), unit="mm")  # type: ignore[call-arg]

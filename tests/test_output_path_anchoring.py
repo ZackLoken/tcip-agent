@@ -13,7 +13,7 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 
 def test_launch_training_defaults_into_the_projects_experiment_store(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A launched run's directory is its own under the project's experiments store.
 

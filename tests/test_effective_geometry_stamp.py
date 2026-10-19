@@ -8,6 +8,7 @@ tiling stated for classification or semantic segmentation is refused.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -26,6 +27,16 @@ from tests._training_values import (  # noqa: E402
     tiling_block,
 )
 
+if TYPE_CHECKING:
+    from pydantic import JsonValue
+    from torch.utils.data import Dataset
+
+    from tcip_mcp.pipelines.derivations import Region
+    from tcip_mcp.pipelines.schemas import (
+        StatedDetectorGeometry,
+        TrainGeometry,
+    )
+
 torch = pytest.importorskip("torch")
 
 
@@ -35,7 +46,7 @@ class _TiledStub:
     tile_size = 96
 
     @property
-    def regions(self):
+    def regions(self) -> list[Region]:
         from tests._verified_checkpoint_fixtures import objects_over
 
         return [objects_over([[0, 0, 4, 4], [10, 10, 14, 14]], 96 * 96)]
@@ -45,7 +56,7 @@ class _OpaqueStub:
     """A dataset stub with no regions and no source list."""
 
 
-def _stated():
+def _stated() -> StatedDetectorGeometry:
     """Return a detector geometry a model source states with its reason."""
     from tcip_mcp.pipelines.schemas import StatedDetectorGeometry
     from tests._chain_fixtures import stated_detector_geometry
@@ -53,7 +64,12 @@ def _stated():
     return StatedDetectorGeometry.model_validate(stated_detector_geometry())
 
 
-def _geometry(data_cfg: dict, train_ds, task: str = "detection", stated=None):
+def _geometry(
+    data_cfg: dict,
+    train_ds: Dataset | _TiledStub | _OpaqueStub,
+    task: str = "detection",
+    stated: StatedDetectorGeometry | None = None,
+) -> TrainGeometry:
     """Return the geometry a ``task`` run reads off what ``train_ds`` serves.
 
     The run's data block is ``data_cfg`` and its model source states the detector geometry
@@ -72,7 +88,9 @@ def _geometry(data_cfg: dict, train_ds, task: str = "detection", stated=None):
     )
 
 
-def test_stamp_tiled_run_records_its_tiles_density_and_no_native_frame():
+def test_stamp_tiled_run_records_its_tiles_density_and_no_native_frame() -> (
+    None
+):
     """A tiled run records its tiles' density, no native frame and a tile-edge detector geometry.
 
     The detector geometry is the one derived at its tile edge.
@@ -89,7 +107,7 @@ def test_stamp_tiled_run_records_its_tiles_density_and_no_native_frame():
     assert stamped.detector.source == DETECTOR_GEOMETRY_DERIVATION
 
 
-def test_a_detector_dataset_records_its_density_whoever_built_it():
+def test_a_detector_dataset_records_its_density_whoever_built_it() -> None:
     """A detector dataset records its density whoever built it.
 
     A bespoke builder's detector dataset exposing regions records their density and the
@@ -109,7 +127,9 @@ def test_a_detector_dataset_records_its_density_whoever_built_it():
     )
 
 
-def _detection_dataset(tmp_path, sizes):
+def _detection_dataset(
+    tmp_path: Path, sizes: list[tuple[int, int]]
+) -> Dataset:
     """Return a real DetectionDataset over tiny images, one per (width, height) in ``sizes``."""
     from PIL import Image
 
@@ -119,7 +139,7 @@ def _detection_dataset(tmp_path, sizes):
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
-    registry_over(tmp_path, SubjectRegistry((Subject("bud"),)))
+    registry_over(tmp_path, SubjectRegistry((Subject("bud", ""),)))
     for i, (w, h) in enumerate(sizes):
         Image.new("RGB", (w, h)).save(images_dir / f"img{i}.png")
         label_image(
@@ -131,7 +151,9 @@ def _detection_dataset(tmp_path, sizes):
     return dataset_over("detection", str(images_dir), subject="bud")
 
 
-def test_stamp_untiled_uniform_frames_record_their_native_size(tmp_path):
+def test_stamp_untiled_uniform_frames_record_their_native_size(
+    tmp_path: Path,
+) -> None:
     """An untiled run of uniform frames records their shared native size as (width, height).
 
     It also records the object density counted over those frames.
@@ -144,7 +166,9 @@ def test_stamp_untiled_uniform_frames_record_their_native_size(tmp_path):
     assert stamped.object_density == pytest.approx(1 / (64 * 48))
 
 
-def test_stamp_untiled_mixed_frames_record_no_native_frame(tmp_path):
+def test_stamp_untiled_mixed_frames_record_no_native_frame(
+    tmp_path: Path,
+) -> None:
     """An untiled run of mixed frame sizes records no native frame.
 
     Over frames of 64 by 48 and 32 by 32, no native size is recorded, and the detector takes the
@@ -161,8 +185,8 @@ def test_stamp_untiled_mixed_frames_record_no_native_frame(tmp_path):
 
 
 def test_a_detector_resolving_no_frame_and_stating_no_geometry_refuses_naming_both(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A detector resolving no frame and stating no geometry refuses naming both.
 
     With no one frame to derive at and no stated geometry, a detector's resolution refuses
@@ -179,8 +203,8 @@ def test_a_detector_resolving_no_frame_and_stating_no_geometry_refuses_naming_bo
 
 
 def test_a_stated_geometry_beside_a_resolved_frame_refuses_naming_the_derivation(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A stated detector geometry beside a resolved frame refuses naming the derivation.
 
     Beside two 64 by 48 frames, a stated geometry refuses naming the derivation and the field to
@@ -198,8 +222,8 @@ def test_a_stated_geometry_beside_a_resolved_frame_refuses_naming_the_derivation
 
 
 def test_uniform_frames_derive_the_detector_geometry_at_their_own_frame(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Untiled uniform frames derive the detector geometry at the frame they share.
 
     The geometry is the one ``derivations.derive_detector_geometry`` gives over the same
@@ -221,15 +245,15 @@ def test_uniform_frames_derive_the_detector_geometry_at_their_own_frame(
     [{"train_native_size": [64, 48]}, {"train_object_density": 0.001}],
 )
 def test_a_config_stating_a_resolved_geometry_key_refuses_at_the_door_naming_it(
-    tmp_path, stated
-):
+    tmp_path: Path, stated: dict[str, list[int]] | dict[str, float]
+) -> None:
     """A config stating a resolved geometry key refuses at the launch door naming it.
 
     A config stating the native frame or the object density fails preflight naming the key, and
     the same config without it opens a run whose resolution records the 64 by 48 frame its
     untiled frames share, the geometry the observed run reads back.
     """
-    from tcip_mcp.experiments import observe
+    from tcip_mcp.experiments import observe_run
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._verified_checkpoint_fixtures import opened_run
@@ -243,17 +267,21 @@ def test_a_config_stating_a_resolved_geometry_key_refuses_at_the_door_naming_it(
     assert any(key in issue for issue in report["issues"]), report["issues"]
 
     run_dir = opened_run(tmp_path, config)
-    geometry = observe(run_dir).resolved_geometry
-    assert geometry is not None and geometry.native_size == (64, 48)
-    assert observed_run(observe(run_dir)).geometry == geometry
+    geometry = observe_run(run_dir).record.resolution.geometry
+    assert geometry.native_size == (64, 48)
+    assert observed_run(observe_run(run_dir)).geometry == geometry
 
 
 # ── the run's resolved record, for a launched run and an HPO trial alike ──
 
 
 def _base_config(
-    tiling, project: Path, *, task: str = "detection", refused: bool = False
-):
+    tiling: dict | None,
+    project: Path,
+    *,
+    task: str = "detection",
+    refused: bool = False,
+) -> dict:
     """Return a ``task`` run's config over frames of its own under ``project``, stating ``tiling``.
 
     A detection run's frames are labeled by documents, a classification run's by a table;
@@ -298,11 +326,17 @@ def _base_config(
     )
 
 
-def _resolved_data(run_dir) -> dict:
+def _resolved_data(run_dir: Path) -> dict[str, JsonValue]:
     """Return the data section ``run_dir``'s launch record says its run resolved."""
-    from tcip_mcp.experiments import observe
+    from tcip_mcp.experiments import RUN_FILE, read_run_record
 
-    return observe(run_dir).record["resolved"]["data"]
+    record = read_run_record(run_dir / RUN_FILE)
+    assert isinstance(record, dict)
+    resolved = record["resolved"]
+    assert isinstance(resolved, dict)
+    data = resolved["data"]
+    assert isinstance(data, dict)
+    return data
 
 
 @pytest.mark.parametrize(
@@ -313,8 +347,8 @@ def _resolved_data(run_dir) -> dict:
     ],
 )
 def test_a_tiling_stated_on_a_task_that_trains_whole_frames_refuses_at_the_door(
-    task, builder
-):
+    task: str, builder: str
+) -> None:
     """A tiling stated for classification or semantic segmentation is refused at validation.
 
     A classification or semantic segmentation run stating a ``data.tiling`` is refused when its
@@ -347,8 +381,8 @@ def test_a_tiling_stated_on_a_task_that_trains_whole_frames_refuses_at_the_door(
 
 
 def test_the_tiling_question_and_the_detector_question_each_read_their_own_set(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The tiling question and the detector question each read their own task set.
 
     A task admitted to the tiling set alone tiles where a config's tiling is admitted, and is a
@@ -387,14 +421,16 @@ def test_the_tiling_question_and_the_detector_question_each_read_their_own_set(
     assert task_collate("semantic_seg") is task_collate("classification")
 
 
-def test_an_untiled_runs_resolved_record_carries_no_tiling(tmp_path):
+def test_an_untiled_runs_resolved_record_carries_no_tiling(
+    tmp_path: Path,
+) -> None:
     """An untiled run's resolved record carries ``tiling: None``; a tiled one carries its block.
 
     A classification run stating no tiling opens through the launcher's own producer, and the
     record it resolved, read raw and validated again through ``observed_run``, carries
     ``tiling: None``.
     """
-    from tcip_mcp.experiments import observe
+    from tcip_mcp.experiments import observe_run
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import opened_run
 
@@ -404,7 +440,7 @@ def test_an_untiled_runs_resolved_record_carries_no_tiling(tmp_path):
     data = _resolved_data(run_dir)
     assert "tiling" in data and data["tiling"] is None
     assert data["images_dir"] == config["data"]["images_dir"]
-    assert observed_run(observe(run_dir)).spec.data.tiling is None
+    assert observed_run(observe_run(run_dir)).spec.data.tiling is None
 
     tiled = _resolved_data(
         opened_run(
@@ -414,10 +450,11 @@ def test_an_untiled_runs_resolved_record_carries_no_tiling(tmp_path):
             ),
         )
     )["tiling"]
+    assert isinstance(tiled, dict)
     assert tiled["tile_size"] == 32 and tiled["rationale"]
 
 
-def _trial(tmp_path, base_config):
+def _trial(tmp_path: Path, base_config: dict) -> Path:
     """Open one HPO trial of a sweep over ``base_config`` and return its run directory.
 
     The trial is opened by the sweep's own trial producer.
@@ -430,7 +467,9 @@ def _trial(tmp_path, base_config):
     )
 
 
-def test_a_sweep_over_a_tiling_its_task_never_reads_opens_nothing(tmp_path):
+def test_a_sweep_over_a_tiling_its_task_never_reads_opens_nothing(
+    tmp_path: Path,
+) -> None:
     """A sweep stating a tiling its classification task does not read opens nothing.
 
     A sweep whose classification base config states a tiling is refused by name and opens no
@@ -468,8 +507,8 @@ def test_a_sweep_over_a_tiling_its_task_never_reads_opens_nothing(tmp_path):
 
 
 def test_an_hpo_trials_resolved_record_carries_the_effective_tile_geometry(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """An HPO trial's resolved record carries the effective tile geometry.
 
     A tiled trial records the 32 px edge its config stated and a float overlap where the config
@@ -481,5 +520,6 @@ def test_an_hpo_trials_resolved_record_carries_the_effective_tile_geometry(
     )
 
     tiling = _resolved_data(trial_dir)["tiling"]
+    assert isinstance(tiling, dict)
     assert tiling["tile_size"] == 32
     assert isinstance(tiling["overlap"], float)

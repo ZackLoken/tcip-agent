@@ -12,10 +12,14 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import REPO_ROOT
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 SCRIPT = REPO_ROOT / "tools" / "prove_test_fails_before.py"
 SCRIPT_SOURCE = SCRIPT.read_text(encoding="utf-8")
@@ -71,7 +75,9 @@ def _run(
     )
 
 
-def test_a_fixture_shaped_type_error_in_the_test_body_is_refused(tmp_path):
+def test_a_fixture_shaped_type_error_in_the_test_body_is_refused(
+    tmp_path: Path,
+) -> None:
     """A fixture-shaped TypeError in the test body is refused.
 
     A constructor called with a keyword the baseline does not accept raises TypeError at the call
@@ -111,7 +117,7 @@ def test_a_fixture_shaped_type_error_in_the_test_body_is_refused(tmp_path):
     assert "[fixture]" in result.stdout
 
 
-def test_a_setup_fixture_error_is_refused(tmp_path):
+def test_a_setup_fixture_error_is_refused(tmp_path: Path) -> None:
     """A setup fixture error is refused.
 
     A fixture that fails during setup is reported REFUSED, fixture-shaped.
@@ -155,7 +161,7 @@ def test_a_setup_fixture_error_is_refused(tmp_path):
     assert "fixture-shaped" in result.stdout
 
 
-def test_an_assertion_failure_guards(tmp_path):
+def test_an_assertion_failure_guards(tmp_path: Path) -> None:
     """An assertion failure at the baseline scores GUARDS.
 
     The test's own assert failing on the value the baseline produced is reported GUARDS,
@@ -181,7 +187,9 @@ def test_an_assertion_failure_guards(tmp_path):
     assert "[behavioral]" in result.stdout
 
 
-def test_a_value_error_raised_from_code_under_test_guards(tmp_path):
+def test_a_value_error_raised_from_code_under_test_guards(
+    tmp_path: Path,
+) -> None:
     """A ValueError raised from the code under test scores GUARDS.
 
     An uncaught ValueError the code under test raises is reported GUARDS, behavioral, naming
@@ -220,7 +228,9 @@ def test_a_value_error_raised_from_code_under_test_guards(tmp_path):
     assert "ValueError" in result.stdout
 
 
-def test_a_fixture_calling_package_code_that_raises_is_refused(tmp_path):
+def test_a_fixture_calling_package_code_that_raises_is_refused(
+    tmp_path: Path,
+) -> None:
     """A fixture calling package code that raises is refused.
 
     A fixture whose call into package code raises before the fixture returns is reported REFUSED,
@@ -286,8 +296,8 @@ def _snapshot(repo: Path, test_file: str) -> subprocess.CompletedProcess:
 
 
 def test_baseline_from_working_tree_captures_tracked_and_untracked_changes_untouched(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A working-tree baseline captures tracked and untracked changes and leaves them untouched.
 
     A tracked modification and an untracked file both land in the printed snapshot's tree, and the
@@ -313,7 +323,9 @@ def test_baseline_from_working_tree_captures_tracked_and_untracked_changes_untou
     assert _git(repo, "stash", "list").strip() == ""
 
 
-def test_baseline_from_working_tree_excludes_ignored_files(tmp_path):
+def test_baseline_from_working_tree_excludes_ignored_files(
+    tmp_path: Path,
+) -> None:
     repo = _scratch_repo(tmp_path)
     _write(repo / ".gitignore", "ignored.txt\n")
     _write(repo / "widgets.py", "def double(x):\n    return x\n")
@@ -329,8 +341,8 @@ def test_baseline_from_working_tree_excludes_ignored_files(tmp_path):
 
 
 def test_baseline_from_working_tree_together_with_baseline_is_refused(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     repo = _scratch_repo(tmp_path)
     _write(repo / "widgets.py", "def double(x):\n    return x\n")
     baseline = _commit_all(repo, "double is a no-op")
@@ -353,8 +365,8 @@ def test_baseline_from_working_tree_together_with_baseline_is_refused(
 
 
 def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Snapshot, then fix, then a run against the snapshot as baseline reports GUARDS.
 
     The snapshot is taken before the fix, the fix applied, then the tool runs normally with
@@ -383,8 +395,8 @@ def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(
 
 
 def test_a_bare_file_not_found_error_outside_the_assertion_is_refused_not_guards(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A bare FileNotFoundError outside the assertion scores REFUSED as unreached, not GUARDS.
 
     A helper module outside tests/ opens a data file the baseline commit does not carry, and the
@@ -423,8 +435,8 @@ def test_a_bare_file_not_found_error_outside_the_assertion_is_refused_not_guards
 
 
 def test_a_file_not_found_error_at_the_tests_own_assertion_line_guards(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A FileNotFoundError at the test's own assertion line scores GUARDS.
 
     The fix writes a file and the guard test's own assertion line reads it back, so at the
@@ -462,7 +474,7 @@ def test_a_file_not_found_error_at_the_tests_own_assertion_line_guards(
 # ── --per-test-timeout ───────────────────────────────────────────────────────
 
 
-def _load_tool():
+def _load_tool() -> ModuleType:
     """Import the real module under test by path and return it."""
     spec = importlib.util.spec_from_file_location(
         "prove_test_fails_before_under_test", SCRIPT
@@ -480,8 +492,8 @@ def _load_tool():
     ],
 )
 def test_the_signal_method_timeout_message_is_a_timeout_not_a_behavioral_pass(
-    headline,
-):
+    headline: str,
+) -> None:
     """The signal-method timeout message reads as a timeout, not a behavioral pass.
 
     Where SIGALRM exists, pytest-timeout raises pytest.fail(PYTEST_FAILURE_MESSAGE), a Failed
@@ -493,8 +505,8 @@ def test_the_signal_method_timeout_message_is_a_timeout_not_a_behavioral_pass(
 
 
 def test_a_hung_test_under_per_test_timeout_reports_indeterminate_naming_it(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """A hung test under a per-test timeout scores INDETERMINATE and is named.
 
     The tool's output names INDETERMINATE and the hung test.
@@ -526,7 +538,7 @@ def test_a_hung_test_under_per_test_timeout_reports_indeterminate_naming_it(
     assert "test_hangs_forever" in proc.stdout
 
 
-def test_a_key_error_on_a_package_result_guards(tmp_path):
+def test_a_key_error_on_a_package_result_guards(tmp_path: Path) -> None:
     """A KeyError on a package result at the assert line scores GUARDS.
 
     An assertion that inspects a package result by a key the baseline's result lacks raises

@@ -8,9 +8,14 @@ inside the frame, and the rank key an ordinal head consumes.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytest.importorskip("torch")
 pytest.importorskip("PIL")
@@ -41,7 +46,9 @@ class _DetectionTargetRecorder(torch.nn.Module):
         self.scale = torch.nn.Parameter(torch.tensor(1.0))
         self.seen: list = []
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: list[torch.Tensor], targets: list[dict] | None = None
+    ) -> dict[str, torch.Tensor] | list[dict[str, torch.Tensor]]:
         if self.training and targets is not None:
             self.seen.append(targets)
             return {"loss": self.scale * 1.0}
@@ -67,7 +74,9 @@ class _OrdinalProbe(torch.nn.Module):
         self.head = OrdinalHead(in_chans, num_ranks)
         self.seen: list = []
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: torch.Tensor, targets: dict | None = None
+    ) -> dict[str, torch.Tensor]:
         out = self.head(images.mean(dim=(2, 3)))
         if self.training and targets is not None:
             self.seen.append(targets)
@@ -78,7 +87,7 @@ class _OrdinalProbe(torch.nn.Module):
         return self.head.decode(out)
 
 
-def _real_detection_item(tmp_path):
+def _real_detection_item(tmp_path: Path) -> tuple[torch.Tensor, dict]:
     """Return one ``(image, target)`` from a real ``DetectionDataset``.
 
     It writes a 96 by 48 image labeled with one ``bud`` box ``(4, 6, 40, 19)`` under a registry
@@ -92,7 +101,9 @@ def _real_detection_item(tmp_path):
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
-    registry_over(tmp_path, SubjectRegistry((Subject("bush"), Subject("bud"))))
+    registry_over(
+        tmp_path, SubjectRegistry((Subject("bush", ""), Subject("bud", "")))
+    )
     Image.new("RGB", (96, 48)).save(images_dir / "a.png")
     label_image(
         images_dir / "a.png",
@@ -103,11 +114,11 @@ def _real_detection_item(tmp_path):
     return dataset_over("detection", str(images_dir), subject="bud")[0]
 
 
-def _real_detection_target(tmp_path):
+def _real_detection_target(tmp_path: Path) -> dict:
     return _real_detection_item(tmp_path)[1]
 
 
-def _real_ordinal_items(tmp_path):
+def _real_ordinal_items(tmp_path: Path) -> list[tuple[torch.Tensor, dict]]:
     """Return two ``(image, target)`` items from a real ``OrdinalDataset``.
 
     The dataset is over two blank 96 by 48 frames ranked 0 and 3.
@@ -124,11 +135,11 @@ def _real_ordinal_items(tmp_path):
     return [dataset[0], dataset[1]]
 
 
-def _real_ordinal_target(tmp_path):
+def _real_ordinal_target(tmp_path: Path) -> dict:
     return _real_ordinal_items(tmp_path)[1][1]
 
 
-def _synthetic_detection_target():
+def _synthetic_detection_target() -> dict:
     recorder = _DetectionTargetRecorder()
     check_model_contract(recorder, "detection", dims=DET_DIMS)
     assert len(recorder.seen) == 1, (
@@ -139,7 +150,9 @@ def _synthetic_detection_target():
     return targets[0]
 
 
-def test_synthetic_detection_target_labels_a_foreground_object(tmp_path):
+def test_synthetic_detection_target_labels_a_foreground_object(
+    tmp_path: Path,
+) -> None:
     """The synthetic detection target labels a foreground object, as the real loader does.
 
     Label 0 is background to a torchvision detector. The real loader and the synthetic stand-in
@@ -155,7 +168,9 @@ def test_synthetic_detection_target_labels_a_foreground_object(tmp_path):
     assert int(synth_labels.min()) >= 1
 
 
-def test_synthetic_detection_box_covers_a_positive_area_inside_the_frame():
+def test_synthetic_detection_box_covers_a_positive_area_inside_the_frame() -> (
+    None
+):
     """The synthetic detection box covers a positive area inside a non-square frame."""
     width, height = 96, 48
     recorder = _DetectionTargetRecorder()
@@ -173,8 +188,8 @@ def test_synthetic_detection_box_covers_a_positive_area_inside_the_frame():
 
 
 def test_synthetic_detection_target_carries_only_keys_the_real_loader_carries(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The synthetic detection target carries only keys the real loader emits.
 
     It carries ``boxes`` and ``labels``, and no key the real loader's target lacks.
@@ -188,8 +203,8 @@ def test_synthetic_detection_target_carries_only_keys_the_real_loader_carries(
 
 
 def test_synthetic_ordinal_target_carries_only_keys_the_real_loader_carries(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The synthetic ordinal rank target carries only keys the real ordinal loader emits."""
     probe = _OrdinalProbe(num_ranks=4)
     check_model_contract(probe, "ordinal", dims=ORD_DIMS)
@@ -201,7 +216,7 @@ def test_synthetic_ordinal_target_carries_only_keys_the_real_loader_carries(
     assert set(synth) <= set(real), (sorted(synth), sorted(real))
 
 
-def test_an_ordinal_head_consumes_the_synthetic_ordinal_batch():
+def test_an_ordinal_head_consumes_the_synthetic_ordinal_batch() -> None:
     """A model on the real ordinal head passes the contract on the synthetic batch.
 
     The report is ok, carries a training loss, and names a dict eval output.
@@ -227,7 +242,9 @@ class _BatchRecorder(torch.nn.Module):
         self.scale = torch.nn.Parameter(torch.tensor(1.0))
         self.seen: list = []
 
-    def forward(self, images, targets=None):
+    def forward(
+        self, images: torch.Tensor, targets: dict | None = None
+    ) -> dict[str, torch.Tensor]:
         if self.training and targets is not None:
             self.seen.append((images, targets))
             return {"loss": self.scale * 1.0}
@@ -235,8 +252,8 @@ class _BatchRecorder(torch.nn.Module):
 
 
 def test_synthetic_detection_batch_is_assembled_by_the_loader_collate(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """The contract's detection target carries the loader-collated target's keys and types.
 
     Its per-image target holds exactly the keys the real loader's collated target holds, each at
@@ -263,7 +280,9 @@ def test_synthetic_detection_batch_is_assembled_by_the_loader_collate(
         assert type(synth_target[key]) is type(real_value), key
 
 
-def test_synthetic_ordinal_batch_is_assembled_by_the_loader_collate(tmp_path):
+def test_synthetic_ordinal_batch_is_assembled_by_the_loader_collate(
+    tmp_path: Path,
+) -> None:
     """The contract's ordinal batch matches the loader-collated batch's keys, dtypes and ranks.
 
     Each target is batched along the same axis as the images.
@@ -280,6 +299,7 @@ def test_synthetic_ordinal_batch_is_assembled_by_the_loader_collate(tmp_path):
     )
 
     assert isinstance(synth_images, torch.Tensor)
+    assert isinstance(real_targets, dict)
     assert synth_images.ndim == real_images.ndim
     assert set(synth_targets) == set(real_targets), (
         sorted(synth_targets),
@@ -291,7 +311,7 @@ def test_synthetic_ordinal_batch_is_assembled_by_the_loader_collate(tmp_path):
         assert synth_targets[key].shape[0] == synth_images.shape[0], key
 
 
-def test_real_models_still_smoke_green_on_the_collated_batch():
+def test_real_models_still_smoke_green_on_the_collated_batch() -> None:
     """A real detector and an ordinal-head model pass on the collated batch.
 
     A real torchvision detector passes the contract on the collated batch, per-image key

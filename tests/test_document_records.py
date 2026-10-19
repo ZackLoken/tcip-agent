@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -32,6 +33,9 @@ from tests._producer_fixtures import (
     registry_over,
 )
 from tests._training_values import RATIONALE, VERTEX_SPACING
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.raster_source import RasterIdentity
 
 DATE = "2026-03-02"
 SIZE = 64
@@ -63,7 +67,12 @@ def _audit_tools(root: Path) -> list[str]:
     ]
 
 
-def _save(root: Path, image: Path, payloads: list[dict], **kwargs):
+def _save(
+    root: Path,
+    image: Path,
+    payloads: list[dict],
+    **kwargs: ts.Version | Gestures | None,
+) -> ts.Version:
     return save_label_document(
         root,
         image_label_key(image),
@@ -179,7 +188,7 @@ def _coco(where: Path, images: list[Path]) -> Path:
 
 
 def test_a_coco_import_writes_every_document_or_none(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A COCO import writes every document or none.
 
@@ -305,17 +314,23 @@ def test_a_publication_commits_whole_and_a_second_of_one_name_writes_nothing(
     tmp_path: Path,
 ) -> None:
     pytest.importorskip("torch")
+    from dataclasses import replace
+
     from tcip_mcp.buckets import (
         BucketExistsError,
         Document,
         publish,
         read_bucket,
     )
+    from tcip_mcp.pipelines.data.split_construction import raster_identity
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
     from tests._chain_fixtures import predicted, published
 
     root = tmp_path / "ds"
     images = _capture(root)
+    unwritable = replace(
+        raster_identity(images[0]), pixel_fraction=float("nan")
+    )
     first = published(
         tmp_path,
         f"m/{DATE}",
@@ -333,7 +348,7 @@ def test_a_publication_commits_whole_and_a_second_of_one_name_writes_nothing(
         for p in images[1:]
     ]
 
-    def again(name: str, raster_identity: dict | None) -> None:
+    def again(name: str, identity: RasterIdentity | None) -> None:
         publish(
             tmp_path,
             root,
@@ -343,15 +358,17 @@ def test_a_publication_commits_whole_and_a_second_of_one_name_writes_nothing(
             scope=first.scope,
             execution=first.execution,
             raster_path=None,
-            raster_identity=raster_identity,
+            raster_identity=identity,
             assessment_id=None,
             actor=None,
         )
 
     with pytest.raises(BucketExistsError):
         again(first.name, None)
-    with pytest.raises(ts.StoreError, match="raster_identity.width is nan"):
-        again(f"n/{DATE}", {"width": float("nan")})
+    with pytest.raises(
+        ts.StoreError, match=r"raster_identity\.dict\.pixel_fraction"
+    ):
+        again(f"n/{DATE}", unwritable)
 
     assert [
         ts.read(prediction_key(root, name, p.stem), default=None)

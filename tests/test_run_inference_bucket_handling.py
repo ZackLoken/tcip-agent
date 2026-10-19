@@ -13,6 +13,7 @@ import pytest
 torch = pytest.importorskip("torch")
 import tcip_store  # noqa: E402
 from tcip_mcp.dataset_layout import bucket_key  # noqa: E402
+from tcip_mcp.model_registry import Producer  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
 from tests._producer_fixtures import gray_frame  # noqa: E402
@@ -30,7 +31,7 @@ UNTILED = Stated(
 BUCKET = "out/2026-01-01"
 
 
-def _stubbed(monkeypatch) -> StubPredictor:
+def _stubbed(monkeypatch: pytest.MonkeyPatch) -> StubPredictor:
     return install(monkeypatch, StubPredictor(task="detection", in_chans=3))
 
 
@@ -40,11 +41,13 @@ def _images(directory: Path) -> Path:
 
 
 def test_run_inference_publishes_each_document_the_record_and_one_audit_line(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import hashlib
 
+    from tcip_annotation.json_io import read_predictions
+    from tcip_annotation.state import BBox
     from tcip_mcp.audit import audit_log_key
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
@@ -62,23 +65,20 @@ def test_run_inference_publishes_each_document_the_record_and_one_audit_line(
     key = bucket.document_key("img")
     assert key is not None
     data = tcip_store.read(key)
+    assert isinstance(data, dict)
     assert key.parts[-1] == "img" and "image" not in data
-    assert (data["width"], data["height"]) == (100, 100)
-    (ann,) = data["annotations"]
-    assert (
-        ann["subject"] == "bud"
-    )  # label 1 -> id 0 -> the checkpoint's own map
-    assert ann["score"] == pytest.approx(0.9)
-    assert ann["bbox"] == pytest.approx(
-        [10.0, 10.0, 20.0, 20.0]
-    )  # COCO xywh of xyxy [10,10,30,30]
+    document = read_predictions(key)
+    assert (document.width, document.height) == (100, 100)
+    (ann,) = document.annotations
+    assert ann.subject == "bud"  # label 1 -> id 0 -> the checkpoint's own map
+    assert ann.score == pytest.approx(0.9)
+    assert ann.geometry == BBox(10.0, 10.0, 30.0, 30.0)
     digest = hashlib.sha256(ckpt.read_bytes()).hexdigest()
-    assert ann["created_by"] == f"model:{ckpt.stem}@{digest[:12]}"
+    assert ann.created_by == f"model:{ckpt.stem}@{digest[:12]}"
     assert bucket.documents == {"img": "img.png"}
-    assert (
-        bucket.producer["checkpoint_sha256"] == digest
-        and bucket.assessment_id is None
-    )
+    assert isinstance(bucket.producer, Producer)
+    assert bucket.producer.checkpoint_sha256 == digest
+    assert bucket.assessment_id is None
     rows = [
         r
         for r in tcip_store.read_log(audit_log_key(tmp_path)).records
@@ -90,8 +90,8 @@ def test_run_inference_publishes_each_document_the_record_and_one_audit_line(
 
 
 def test_a_second_run_into_a_published_bucket_refuses_and_leaves_it(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A second run into a published bucket refuses and leaves the bucket as it was.
 
     A second run naming the same bucket refuses, leaving the first bucket's documents and record
@@ -144,9 +144,9 @@ def test_a_second_run_into_a_published_bucket_refuses_and_leaves_it(
 
 
 def test_a_run_over_an_empty_images_directory_refuses_and_publishes_nothing(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from tcip_mcp.tools.inference_tools import run_inference
 
     empty = tmp_path / "images" / "2026-01-01"
@@ -171,8 +171,8 @@ def test_a_run_over_an_empty_images_directory_refuses_and_publishes_nothing(
     ids=["no_image_tree", "the_image_tree", "inside_a_capture"],
 )
 def test_an_images_dir_that_is_no_capture_refuses_naming_it(
-    tmp_path, monkeypatch, where
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: tuple[str, ...]
+) -> None:
     """An images directory that is no capture is refused at the door naming it.
 
     A directory that is no capture (``<root>/images/<capture>``) refuses at the door naming it,
@@ -195,7 +195,9 @@ def test_an_images_dir_that_is_no_capture_refuses_naming_it(
     assert not tcip_store.exists(bucket_key(tmp_path, BUCKET))
 
 
-def test_a_raster_outside_a_capture_is_admitted(tmp_path, monkeypatch):
+def test_a_raster_outside_a_capture_is_admitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A raster under the image tree but in no capture directory is admitted."""
     import numpy as np
     import tifffile
@@ -220,7 +222,7 @@ def test_a_raster_outside_a_capture_is_admitted(tmp_path, monkeypatch):
     assert result["dataset_root"] == str(tmp_path)
 
 
-def test_a_dry_run_previews_the_both_sources_refusal(tmp_path):
+def test_a_dry_run_previews_the_both_sources_refusal(tmp_path: Path) -> None:
     """A dry run naming both an images directory and a raster is refused, naming the rule."""
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -243,8 +245,8 @@ def test_a_dry_run_previews_the_both_sources_refusal(tmp_path):
 
 
 def test_a_dry_run_names_the_bucket_and_the_execution_and_writes_nothing(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tcip_mcp.tools.inference_tools import run_inference
 
     images_dir = _images(tmp_path / "images" / "2026-01-01")

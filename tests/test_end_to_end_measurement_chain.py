@@ -8,8 +8,14 @@ bucket published twice the second publish refuses.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from tcip_mcp.assessment import RetainedFile
+    from tcip_mcp.pipelines.data.selection import Sample
+    from tcip_store import Key, Versioned
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
@@ -32,7 +38,7 @@ from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS  # noqa: E4
 
 def test_a_drawn_reference_selection_records_each_samples_ground_truth_digest(
     tmp_path: Path,
-):
+) -> None:
     """Each calibration sample of a drawn selection records its ground truth's digest."""
     root = tmp_path / "ds"
     synthetic_capture(root)
@@ -49,7 +55,7 @@ def test_a_drawn_reference_selection_records_each_samples_ground_truth_digest(
 
 def test_the_draw_and_the_delivery_check_digest_a_ground_truth_the_same_way(
     tmp_path: Path,
-):
+) -> None:
     """The draw and the delivery-time check digest a ground truth the same way.
 
     The digest the draw records for each sample's ground truth is the one the delivery-time
@@ -72,7 +78,7 @@ def test_the_draw_and_the_delivery_check_digest_a_ground_truth_the_same_way(
 
 def test_the_tiny_detector_trains_and_finds_one_object_per_frame(
     tmp_path: Path,
-):
+) -> None:
     """The tiny detector trains and finds the one object in each of three frames.
 
     Each frame's predicted box lies within one pixel of its object's.
@@ -108,8 +114,8 @@ def test_the_tiny_detector_trains_and_finds_one_object_per_frame(
 
 
 def test_a_reference_document_edited_after_its_read_is_never_measured(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The assessment records the reference version its read retained, not a later edit.
 
     A document edited after the assessment's read leaves the assessment standing, and the
@@ -128,7 +134,11 @@ def test_a_reference_document_edited_after_its_read_is_never_measured(
     real_retained = assessment_mod._retained
     edited: list = []
 
-    def edited_first(run_dir, samples, reads):
+    def edited_first(
+        run_dir: Path,
+        samples: list[Sample],
+        reads: dict[Key | str, Versioned],
+    ) -> tuple[list[RetainedFile], list[Sample]]:
         edited.append(samples[0].ground_truth)
         json_io.write_label_document(
             samples[0].ground_truth, [], IMG, IMG, keep_empty=True
@@ -151,7 +161,7 @@ def test_a_reference_document_edited_after_its_read_is_never_measured(
 
 def test_a_frame_assessments_reference_derives_the_density_that_governs_its_pass(
     tmp_path: Path,
-):
+) -> None:
     """A frame assessment's calibration objects derive the density its record carries.
 
     With a second object added to each calibration frame, the assessment's record carries a
@@ -195,7 +205,7 @@ def test_a_frame_assessments_reference_derives_the_density_that_governs_its_pass
 
 def test_the_assessment_passes_and_the_bucket_published_under_it_names_it(
     tmp_path: Path,
-):
+) -> None:
     """The assessment passes and the bucket published under it names it.
 
     The assessment passes with its holdout sharing no group or source with calibration,
@@ -210,7 +220,8 @@ def test_the_assessment_passes_and_the_bucket_published_under_it_names_it(
 
     record = read_assessment(tmp_path, chain.assessment["assessment_id"])
     assert record.passed is True and record.failures == []
-    assert record.producer["experiment_id"] == "exp-chain-publish"
+    assert record.producer is not None
+    assert record.producer.experiment_id == "exp-chain-publish"
     disjointness = record.disjointness
     assert disjointness["holdout_shares_calibration"] == [], disjointness
     for side in ("training", "selection"):
@@ -233,7 +244,7 @@ def test_the_assessment_passes_and_the_bucket_published_under_it_names_it(
 
 def test_the_chain_delivers_a_csv_whose_validated_column_reads_true(
     tmp_path: Path,
-):
+) -> None:
     """The chain delivers a CSV whose validated column reads true, and refuses an unassessed one.
 
     Ingest synthetic images, train a tiny model, publish a bucket, assess it against a reference
@@ -295,7 +306,7 @@ def test_the_chain_delivers_a_csv_whose_validated_column_reads_true(
 def test_editing_the_reference_labels_after_the_assessment_refuses_the_delivery(
     tmp_path: Path,
     edit: str,
-):
+) -> None:
     """A reference label edited after the assessment refuses the delivery by name.
 
     The edit lands on either side of the reference or in the copy the assessment retained of
@@ -311,7 +322,7 @@ def test_editing_the_reference_labels_after_the_assessment_refuses_the_delivery(
         tmp_path, chain.assessment["assessment_id"]
     ).reference
     side = "calibration" if edit == "retained_copy" else edit
-    member = next(s for s in reference.samples if s.side == side)
+    member = next(s.sample for s in reference.samples if s.sample.side == side)
     annotations = [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 9, 9))]
     if edit == "retained_copy":
         retained = next(
@@ -351,7 +362,7 @@ def test_editing_the_reference_labels_after_the_assessment_refuses_the_delivery(
 
 def test_publishing_the_same_bucket_twice_refuses_the_second_publish(
     tmp_path: Path,
-):
+) -> None:
     """Publishing the same bucket a second time refuses.
 
     A second publish through the inference door and through ``publish`` itself each refuses,

@@ -9,6 +9,7 @@ grouped capture.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn
 
 import numpy as np
 import pytest
@@ -18,8 +19,13 @@ from PIL import Image
 
 from tests._training_values import RATIONALE
 
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.execution import Execution
 
-def _write_group(images_dir: Path, stem: str, base=(111, 222, 333)) -> None:
+
+def _write_group(
+    images_dir: Path, stem: str, base: tuple[int, int, int] = (111, 222, 333)
+) -> None:
     """Write band TIFFs for group ``stem`` into ``images_dir`` and pass them to the manifest writer.
 
     For each pair of ``zip(("Green", "Red", "NIR"), base)`` a 20 by 24 uint16 TIFF is written
@@ -62,7 +68,7 @@ def test_dataset_select_route_folds_the_group(
     client: TestClient,
     grouped_dataset: Path,
     opened_project: Path,
-):
+) -> None:
     resp = client.post(
         "/api/dataset/select",
         json={
@@ -81,7 +87,7 @@ def test_dataset_select_route_folds_the_group(
 def test_annotate_labels_route_measures_a_grouped_captures_real_frame(
     client: TestClient,
     grouped_dataset: Path,
-):
+) -> None:
     manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
     resp = client.get(
         "/api/annotate/labels", params={"image_path": str(manifest)}
@@ -94,14 +100,14 @@ def test_annotate_labels_route_measures_a_grouped_captures_real_frame(
 # ── routes/images.py: serve_image bands/stretch + /api/images/bands ─────────────────────
 
 
-def _view(path: Path, **params) -> dict:
+def _view(path: Path, **params: str | int) -> dict:
     """Return the image request for ``path`` at a 3840 by 2160 display, ``params`` over it."""
     return {"path": str(path), "display_pixels": 3840 * 2160, **params}
 
 
 def test_serve_image_plain_photo_unaffected_by_new_params(
     client: TestClient, grouped_dataset: Path
-):
+) -> None:
     """The band params at their defaults serve a plain photo exactly as omitting them does."""
     plain = grouped_dataset / "images" / "2026-05-01" / "plain_002.jpg"
     baseline = client.get("/api/images", params=_view(plain))
@@ -115,7 +121,7 @@ def test_serve_image_plain_photo_unaffected_by_new_params(
 
 def test_serve_image_refuses_a_band_members_own_path_naming_its_manifest(
     client: TestClient, grouped_dataset: Path
-):
+) -> None:
     """The serve door answers a band member's own path with a 404 naming its manifest.
 
     A band of a grouped capture is no image of its own: its path answers 404 naming the
@@ -129,7 +135,7 @@ def test_serve_image_refuses_a_band_members_own_path_naming_its_manifest(
 
 def test_serve_image_composites_a_band_group_by_default(
     client: TestClient, grouped_dataset: Path
-):
+) -> None:
     manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
     resp = client.get("/api/images", params=_view(manifest))
     assert resp.status_code == 200
@@ -141,7 +147,7 @@ def test_serve_image_composites_a_band_group_by_default(
 
 def test_serve_image_bands_param_changes_the_composite(
     client: TestClient, grouped_dataset: Path
-):
+) -> None:
     manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
     # stretch="none" (absolute, by dtype max) so each band's distinct base level survives:
     # min-max stretch would remove it entirely (every band shares the same gradient shape),
@@ -163,7 +169,7 @@ def test_serve_image_bands_param_changes_the_composite(
 
 def test_serve_image_stretch_param_changes_the_cache_key(
     client: TestClient, grouped_dataset: Path
-):
+) -> None:
     manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
     r1 = client.get("/api/images", params=_view(manifest, stretch="minmax"))
     r2 = client.get("/api/images", params=_view(manifest, stretch="none"))
@@ -172,7 +178,7 @@ def test_serve_image_stretch_param_changes_the_cache_key(
 
 def test_serve_image_rejects_an_unknown_stretch(
     client: TestClient, grouped_dataset: Path
-):
+) -> None:
     manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
     resp = client.get("/api/images", params=_view(manifest, stretch="bogus"))
     assert resp.status_code == 400
@@ -180,7 +186,7 @@ def test_serve_image_rejects_an_unknown_stretch(
 
 def test_serve_image_rejects_a_band_count_other_than_3(
     client: TestClient, grouped_dataset: Path
-):
+) -> None:
     manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
     resp = client.get("/api/images", params=_view(manifest, bands="Green,Red"))
     assert resp.status_code == 400
@@ -188,7 +194,7 @@ def test_serve_image_rejects_a_band_count_other_than_3(
 
 def test_serve_image_rejects_an_undeclared_band_name(
     client: TestClient, grouped_dataset: Path
-):
+) -> None:
     manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
     resp = client.get(
         "/api/images", params=_view(manifest, bands="Green,Red,Blue")
@@ -198,7 +204,7 @@ def test_serve_image_rejects_an_undeclared_band_name(
 
 def test_get_bands_endpoint_reports_the_group(
     client: TestClient, grouped_dataset: Path
-):
+) -> None:
     manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
     resp = client.get("/api/images/bands", params={"path": str(manifest)})
     assert resp.status_code == 200
@@ -213,7 +219,7 @@ def test_get_bands_endpoint_reports_the_group(
 
 def test_get_bands_endpoint_reports_3_for_a_plain_rgb_photo(
     client: TestClient, grouped_dataset: Path
-):
+) -> None:
     plain = grouped_dataset / "images" / "2026-05-01" / "plain_002.jpg"
     resp = client.get("/api/images/bands", params={"path": str(plain)})
     assert resp.status_code == 200
@@ -223,8 +229,8 @@ def test_get_bands_endpoint_reports_3_for_a_plain_rgb_photo(
 def test_get_bands_endpoint_never_decodes_pixels_for_a_plain_rgb_photo(
     client: TestClient,
     grouped_dataset: Path,
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``/api/images/bands`` opens no raster for a plain RGB photo.
 
     The raster factory is spied on, and the endpoint answers a plain 3-band photo without
@@ -234,7 +240,7 @@ def test_get_bands_endpoint_never_decodes_pixels_for_a_plain_rgb_photo(
 
     called = []
 
-    def _fail_if_called(*a, **kw):
+    def _fail_if_called(*a: object, **kw: object) -> NoReturn:
         called.append(1)
         raise AssertionError(
             "no raster should be opened for a plain <=3-band source"
@@ -251,7 +257,7 @@ def test_get_bands_endpoint_never_decodes_pixels_for_a_plain_rgb_photo(
 
 def test_serve_image_stale_group_returns_409(
     client: TestClient, grouped_dataset: Path
-):
+) -> None:
     date_dir = grouped_dataset / "images" / "2026-05-01"
     manifest = date_dir / "cap_001.bandgroup"
     (date_dir / "cap_001_NIR.tif").unlink()
@@ -263,9 +269,9 @@ def test_serve_image_stale_group_returns_409(
 
 
 def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
-    tmp_path,
-    monkeypatch,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The inference worker hands its predictor a grouped capture as a ``BandGroupRef``.
 
     The job completes with one image done, and the published bucket names the capture by its
@@ -274,7 +280,11 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     pytest.importorskip("torch")
 
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.execution import Stated
+    from tcip_mcp.pipelines.execution import (
+        DEFAULT_IMAGE_BATCH_SIZE,
+        DEFAULT_TILE_BATCH_SIZE,
+        Stated,
+    )
     from tcip_web.routes.inference import InferenceJob, _worker
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -295,12 +305,25 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
         It answers the stub's empty prediction, each named by its source's ``source_path_of``.
         """
 
-        def predict_batch(self, paths, execution=None, **kw):
-            seen.extend(paths)
+        def predict_batch(
+            self,
+            image_paths: list[str | Path | BandGroupRef],
+            execution: Execution,
+            *,
+            tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
+            batch_size: int = DEFAULT_IMAGE_BATCH_SIZE,
+        ) -> list[dict]:
+            seen.extend(image_paths)
             return [
                 {**result, "image": source_path_of(p)}
                 for p, result in zip(
-                    paths, super().predict_batch(paths, execution, **kw)
+                    image_paths,
+                    super().predict_batch(
+                        image_paths,
+                        execution,
+                        tile_batch_size=tile_batch_size,
+                        batch_size=batch_size,
+                    ),
                 )
             ]
 

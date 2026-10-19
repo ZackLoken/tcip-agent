@@ -20,7 +20,9 @@ def _image(tmp_path: Path) -> Path:
     )
 
 
-def test_a_render_command_leaves_no_audit_line_anywhere(tmp_path):
+def test_a_render_command_leaves_no_audit_line_anywhere(
+    tmp_path: Path,
+) -> None:
     """A render command adds no audit line and leaves no state in the cwd or image directory.
 
     A render is a read: the named project's log gains no line, and the operator's cwd and the
@@ -49,7 +51,9 @@ def test_a_render_command_leaves_no_audit_line_anywhere(tmp_path):
     assert not (image.parent / ".tcip").exists()
 
 
-def test_a_command_naming_no_project_refuses_and_writes_nothing(tmp_path):
+def test_a_command_naming_no_project_refuses_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
     not_a_project = tmp_path / "plain"
     not_a_project.mkdir()
     image = _image(tmp_path)

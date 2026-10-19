@@ -12,6 +12,7 @@ Also tests prediction overlay data roundtrip for the proposals the editor shows.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -20,8 +21,11 @@ from tcip_annotation.json_io import read_label_document, write_label_document
 from tcip_annotation.matching import pair_proposals
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key, prediction_key
 
+if TYPE_CHECKING:
+    from tcip_store import Key
 
-def _write(key, annotations) -> list[Annotation]:
+
+def _write(key: Key, annotations: list[Annotation]) -> list[Annotation]:
     """Write ``annotations`` as the 640x480 document ``key`` names and return them read back."""
     write_label_document(key, annotations, 640, 480)
     return read_label_document(key).annotations
@@ -44,11 +48,11 @@ def img_dir(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _label(root: Path):
+def _label(root: Path) -> Key:
     return label_key(root, UNDATED_BUCKET, "test_001")
 
 
-def _prediction(root: Path):
+def _prediction(root: Path) -> Key:
     return prediction_key(root, "m", "test_001")
 
 

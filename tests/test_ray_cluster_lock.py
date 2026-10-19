@@ -10,8 +10,12 @@ from __future__ import annotations
 import json
 import os
 import textwrap
+from typing import TYPE_CHECKING
 
 from tests import child_basetemp, child_pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 TWO_MARKED_TESTS = textwrap.dedent(
     """
@@ -42,7 +46,9 @@ TWO_MARKED_TESTS = textwrap.dedent(
 )
 
 
-def test_two_marked_tests_on_two_workers_run_one_after_the_other(tmp_path):
+def test_two_marked_tests_on_two_workers_run_one_after_the_other(
+    tmp_path: Path,
+) -> None:
     test_file = tmp_path / "test_two_clusters.py"
     test_file.write_text(TWO_MARKED_TESTS, encoding="utf-8")
     intervals_dir = tmp_path / "intervals"

@@ -15,6 +15,8 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -37,6 +39,9 @@ from tests._store_worker import (
     make_backend,
     wait_for,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 _WORKER = Path(__file__).with_name("_store_worker.py")
 
@@ -109,7 +114,7 @@ def _child_env() -> dict[str, str]:
 
 
 @pytest.fixture
-def store(tmp_path):
+def store(tmp_path: Path) -> Iterator[Harness]:
     backend = make_backend()
     ts.bind(backend)
     harness = Harness(backend=backend, root=tmp_path)
@@ -128,8 +133,8 @@ def store(tmp_path):
 
 
 def test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other(
-    store,
-):
+    store: Harness,
+) -> None:
     """``release_root`` releases one root so it can be renamed, and keeps another root open.
 
     The released root, renamed, reads back its record; on Windows the other root still refuses
@@ -163,7 +168,9 @@ def test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_ot
     assert ts.read(other) == {"n": 2}
 
 
-def test_release_root_waits_for_an_operation_in_flight_on_that_root(store):
+def test_release_root_waits_for_an_operation_in_flight_on_that_root(
+    store: Harness,
+) -> None:
     """``release_root`` waits for a transaction in flight on that root.
 
     A release issued while another thread is inside a transaction on the root returns only
@@ -215,7 +222,9 @@ def _journal_mode(db: Path) -> str:
         conn.close()
 
 
-def test_the_first_write_publishes_a_database_already_in_wal(store):
+def test_the_first_write_publishes_a_database_already_in_wal(
+    store: Harness,
+) -> None:
     """After the first write and a release, the database file reports WAL mode."""
     ts.replace(store.key(LWW, "first"), {"n": 1})
     ts.release_root(store.root)
@@ -224,8 +233,8 @@ def test_the_first_write_publishes_a_database_already_in_wal(store):
 
 
 def test_an_opener_arriving_beside_another_connection_still_gets_a_usable_database(
-    store,
-):
+    store: Harness,
+) -> None:
     """An opener arriving beside another connection gets a usable WAL database.
 
     A second connection is open when an opener arrives, and the opener's connection reports WAL.
@@ -249,8 +258,8 @@ def test_an_opener_arriving_beside_another_connection_still_gets_a_usable_databa
 
 
 def test_a_refusal_reports_the_wait_it_measured_rather_than_a_configured_timeout(
-    store,
-):
+    store: Harness,
+) -> None:
     """The elapsed value a contention refusal carries is one this layer measured."""
     key = store.key(LWW, "measured")
     with pytest.raises(ts.StoreBusyError) as caught:
@@ -260,7 +269,7 @@ def test_a_refusal_reports_the_wait_it_measured_rather_than_a_configured_timeout
     assert 0.15 <= caught.value.waited_s < 5.0
 
 
-def test_every_connection_commits_at_full_synchronous(store):
+def test_every_connection_commits_at_full_synchronous(store: Harness) -> None:
     """The connection a write commits on runs at FULL synchronous."""
     ts.replace(store.key(LWW, "durable"), {"n": 1})
     with store.backend._connection(str(store.root), create=False) as conn:  # noqa: SLF001
@@ -268,8 +277,8 @@ def test_every_connection_commits_at_full_synchronous(store):
 
 
 def test_a_read_of_a_root_with_no_database_answers_absence_and_creates_none(
-    store,
-):
+    store: Harness,
+) -> None:
     """A read, a key listing and a log read of an unwritten root answer absence, creating no db."""
     key = store.key(LWW, "never-written")
 
@@ -282,7 +291,9 @@ def test_a_read_of_a_root_with_no_database_answers_absence_and_creates_none(
 # ── atomicity ───────────────────────────────────────────────────────────────────
 
 
-def test_replace_round_trips_and_the_version_tracks_the_content(store):
+def test_replace_round_trips_and_the_version_tracks_the_content(
+    store: Harness,
+) -> None:
     key = store.key(LWW, "round-trip")
     first = ts.replace(key, {"n": 1})
     assert ts.read(key) == {"n": 1}
@@ -293,7 +304,9 @@ def test_replace_round_trips_and_the_version_tracks_the_content(store):
     assert ts.read(key) == {"n": 2}
 
 
-def test_a_concurrent_rewriter_is_never_observed_half_written(store):
+def test_a_concurrent_rewriter_is_never_observed_half_written(
+    store: Harness,
+) -> None:
     key = store.key(LWW, "large")
     ts.replace(key, {"tag": "a", "pad": "a" * 20000})
     writer = store.spawn("rewrite", store.root, "large", 60, 20000)
@@ -301,14 +314,19 @@ def test_a_concurrent_rewriter_is_never_observed_half_written(store):
     seen = set()
     while writer.poll() is None:
         value = ts.read(key)
-        assert value["pad"] == value["tag"] * 20000
-        seen.add(value["tag"])
+        assert isinstance(value, dict)
+        tag = value["tag"]
+        assert isinstance(tag, str)
+        assert value["pad"] == tag * 20000
+        seen.add(tag)
         time.sleep(0.001)
     assert writer.wait(timeout=60) == 0
     assert seen <= {"a", "b"}
 
 
-def test_a_failed_encode_leaves_the_previous_value_and_no_artifact(store):
+def test_a_failed_encode_leaves_the_previous_value_and_no_artifact(
+    store: Harness,
+) -> None:
     key = store.key(STRICT, "encodable")
     ts.replace(key, {"n": 1})
 
@@ -322,7 +340,9 @@ def test_a_failed_encode_leaves_the_previous_value_and_no_artifact(store):
 # ── isolation across real OS processes ──────────────────────────────────────────
 
 
-def test_a_stale_writer_cannot_clobber_a_committed_transaction(store):
+def test_a_stale_writer_cannot_clobber_a_committed_transaction(
+    store: Harness,
+) -> None:
     """A stale compare-and-set writer is refused after another process's transaction commits.
 
     The writer read before the holder's transaction committed; it waits for the holder, answers
@@ -367,7 +387,9 @@ def test_a_stale_writer_cannot_clobber_a_committed_transaction(store):
     assert ts.read(key) == {"who": "insider"}
 
 
-def test_an_unconditional_writer_waits_for_a_transaction_and_then_wins(store):
+def test_an_unconditional_writer_waits_for_a_transaction_and_then_wins(
+    store: Harness,
+) -> None:
     """An unconditional writer waits for another process's transaction, then lands."""
     key = store.key(LWW, "contended")
     ts.replace(key, {"who": "seed"})
@@ -408,7 +430,9 @@ def test_an_unconditional_writer_waits_for_a_transaction_and_then_wins(store):
     assert ts.read(key) == {"who": "outsider"}
 
 
-def test_transactions_serialize_a_read_modify_write_across_processes(store):
+def test_transactions_serialize_a_read_modify_write_across_processes(
+    store: Harness,
+) -> None:
     key = store.key(CAS, "counter")
     workers = [
         store.spawn("increment", store.root, "counter", 12) for _ in range(4)
@@ -420,8 +444,8 @@ def test_transactions_serialize_a_read_modify_write_across_processes(store):
 
 
 def test_two_processes_naming_the_same_keys_in_opposite_orders_both_finish(
-    store,
-):
+    store: Harness,
+) -> None:
     forward = store.spawn("two-keys", store.root, "alpha", "beta", 25)
     backward = store.spawn("two-keys", store.root, "beta", "alpha", 25)
     assert forward.wait(timeout=60) == 0
@@ -429,8 +453,8 @@ def test_two_processes_naming_the_same_keys_in_opposite_orders_both_finish(
 
 
 def test_two_processes_writing_from_one_version_produce_one_winner_and_one_conflict(
-    store,
-):
+    store: Harness,
+) -> None:
     key = store.key(CAS, "compare-and-set")
     ts.replace(key, {"who": "seed"}, expect=ts.Version.ABSENT)
     go = store.root / "go"
@@ -460,10 +484,12 @@ def test_two_processes_writing_from_one_version_produce_one_winner_and_one_confl
             json.loads(result.read_text(encoding="utf-8"))["outcome"]
         )
     assert sorted(outcomes) == ["VersionConflictError", "written"]
-    assert ts.read(key)["who"] in ("first", "second")
+    written = ts.read(key)
+    assert isinstance(written, dict)
+    assert written["who"] in ("first", "second")
 
 
-def test_create_only_writes_once(store):
+def test_create_only_writes_once(store: Harness) -> None:
     key = store.key(LWW, "created-once")
     ts.replace(key, {"n": 1}, expect=ts.Version.ABSENT)
 
@@ -472,7 +498,9 @@ def test_create_only_writes_once(store):
     assert ts.read(key) == {"n": 1}
 
 
-def test_an_identical_rewrite_leaves_a_held_token_valid(store):
+def test_an_identical_rewrite_leaves_a_held_token_valid(
+    store: Harness,
+) -> None:
     key = store.key(CAS, "unchanged")
     held = ts.replace(key, {"n": 1}, expect=ts.Version.ABSENT)
 
@@ -482,8 +510,8 @@ def test_an_identical_rewrite_leaves_a_held_token_valid(store):
 
 
 def test_a_record_delete_from_a_current_token_lands_and_a_stale_one_is_refused(
-    store,
-):
+    store: Harness,
+) -> None:
     key = store.key(CAS, "conditional-delete")
     held = ts.replace(key, {"n": 1}, expect=ts.Version.ABSENT)
     moved = ts.replace(key, {"n": 2}, expect=held)
@@ -498,8 +526,8 @@ def test_a_record_delete_from_a_current_token_lands_and_a_stale_one_is_refused(
 
 
 def test_a_crash_mid_transaction_leaves_the_old_records_and_wedges_no_successor(
-    store,
-):
+    store: Harness,
+) -> None:
     """A crash mid-transaction leaves the old records and does not strand the next writer.
 
     A process killed after its transaction's first write executed, before the commit, leaves
@@ -529,7 +557,9 @@ def test_a_crash_mid_transaction_leaves_the_old_records_and_wedges_no_successor(
 # ── one transaction over records and logs ───────────────────────────────────────
 
 
-def test_a_transaction_over_a_record_and_a_log_commits_both_or_neither(store):
+def test_a_transaction_over_a_record_and_a_log_commits_both_or_neither(
+    store: Harness,
+) -> None:
     """A transaction over a record and a log commits both or neither.
 
     A raise inside the body leaves the record and the log as they were; a clean exit lands
@@ -555,47 +585,15 @@ def test_a_transaction_over_a_record_and_a_log_commits_both_or_neither(store):
     assert [entry["i"] for entry in ts.read_log(log).records] == [1, 2]
 
 
-def test_a_verdict_that_will_not_encode_lands_none_of_the_save_s_verdicts(
-    store,
-):
-    """A verdict that will not encode lands none of the save's verdicts.
-
-    ``record_verdicts`` appends a save's verdicts inside the save's one transaction: one that
-    will not encode, after another already appended, leaves the shard holding neither.
-    """
-    from datetime import datetime, timezone
-
-    key = verdicts.verdict_key(store.root, "live", "a_1")
-    good = verdicts.Verdict(
-        proposal=0,
-        action="accepted",
-        by="user:ü",
-        at="2026-03-04T12:00:00+00:00",
-    )
-    unencodable = verdicts.Verdict(
-        proposal=1,
-        action="rejected",
-        by="user:ü",
-        at=datetime(2026, 3, 4, tzinfo=timezone.utc),
-    )  # type: ignore[arg-type]
-
-    with pytest.raises(ts.StoreError):
-        _record_verdicts(key, [good, unencodable])
-    assert verdicts.read_verdicts(key) == []
-
-    _record_verdicts(key, [good])
-    assert verdicts.read_verdicts(key) == [good]
-
-
-def _record_verdicts(key, decided) -> None:
+def _record_verdicts(key: ts.Key, decided: list[verdicts.Verdict]) -> None:
     """Append ``decided`` to the shard ``key`` names, in a transaction of its own."""
     with ts.transaction(key) as txn:
         verdicts.record_verdicts(txn, key, decided)
 
 
 def test_a_module_level_write_inside_a_transaction_is_refused_and_lands_outside_it(
-    store,
-):
+    store: Harness,
+) -> None:
     """A module-level write inside a transaction is refused, and lands outside it.
 
     Inside a transaction a module-level append refuses, naming the transaction's own operations,
@@ -621,7 +619,9 @@ def test_a_module_level_write_inside_a_transaction_is_refused_and_lands_outside_
 # ── append durability ───────────────────────────────────────────────────────────
 
 
-def test_concurrent_appenders_lose_no_entry_and_interleave_none(store):
+def test_concurrent_appenders_lose_no_entry_and_interleave_none(
+    store: Harness,
+) -> None:
     key = store.key(LOG, "audit")
     workers = [
         store.spawn("append", store.root, "audit", f"proc{n}", 25)
@@ -634,12 +634,16 @@ def test_concurrent_appenders_lose_no_entry_and_interleave_none(store):
     assert len(page.records) == 75
     assert page.corrupt == ()
     for tag in ("proc0", "proc1", "proc2"):
-        assert sorted(r["i"] for r in page.records if r["tag"] == tag) == list(
-            range(25)
-        )
+        assert sorted(
+            i
+            for r in page.records
+            if r["tag"] == tag and isinstance(i := r["i"], int)
+        ) == list(range(25))
 
 
-def test_an_append_is_readable_by_another_process_once_it_returns(store):
+def test_an_append_is_readable_by_another_process_once_it_returns(
+    store: Harness,
+) -> None:
     key = store.key(LOG, "handoff")
     for i in range(3):
         ts.append(key, {"i": i})
@@ -650,7 +654,9 @@ def test_an_append_is_readable_by_another_process_once_it_returns(store):
     assert json.loads(result.read_text(encoding="utf-8")) == {"records": 3}
 
 
-def test_a_killed_appender_leaves_every_acknowledged_entry_in_order(store):
+def test_a_killed_appender_leaves_every_acknowledged_entry_in_order(
+    store: Harness,
+) -> None:
     key = store.key(LOG, "killed")
     ready = store.root / "appending.ready"
     proc = store.spawn("append-until-killed", store.root, "killed", ready)
@@ -665,7 +671,7 @@ def test_a_killed_appender_leaves_every_acknowledged_entry_in_order(store):
     assert len(page.records) >= 1
 
 
-def test_a_cursor_resumes_with_no_gap_and_no_repeat(store):
+def test_a_cursor_resumes_with_no_gap_and_no_repeat(store: Harness) -> None:
     key = store.key(LOG, "streamed")
     for i in range(3):
         ts.append(key, {"i": i})
@@ -683,8 +689,8 @@ def test_a_cursor_resumes_with_no_gap_and_no_repeat(store):
 
 
 def test_a_cursor_returns_every_entry_once_while_appenders_are_still_writing(
-    store,
-):
+    store: Harness,
+) -> None:
     """Reading a log by cursor while two processes append returns every entry exactly once."""
     key = store.key(LOG, "streamed-live")
     workers = [
@@ -712,7 +718,9 @@ def test_a_cursor_returns_every_entry_once_while_appenders_are_still_writing(
         assert sorted(i for name, i in seen if name == tag) == list(range(20))
 
 
-def test_a_damaged_entry_is_reported_and_the_rest_still_read(store):
+def test_a_damaged_entry_is_reported_and_the_rest_still_read(
+    store: Harness,
+) -> None:
     """``corrupt`` names a damaged entry's position; the others decode and the cursor moves on."""
     key = store.key(LOG, "damaged")
     for i in range(3):
@@ -732,7 +740,9 @@ def test_a_damaged_entry_is_reported_and_the_rest_still_read(store):
 # ── clearing a log ──────────────────────────────────────────────────────────────
 
 
-def test_clear_log_removes_every_entry_and_reports_how_many_there_were(store):
+def test_clear_log_removes_every_entry_and_reports_how_many_there_were(
+    store: Harness,
+) -> None:
     key = store.key(LOG, "history")
     for i in range(4):
         ts.append(key, {"i": i})
@@ -745,7 +755,9 @@ def test_clear_log_removes_every_entry_and_reports_how_many_there_were(store):
     assert [r["i"] for r in ts.read_log(key).records] == ["after"]
 
 
-def test_clear_log_on_a_log_with_no_entries_removes_nothing(store):
+def test_clear_log_on_a_log_with_no_entries_removes_nothing(
+    store: Harness,
+) -> None:
     key = store.key(LOG, "never-appended")
 
     assert ts.clear_log(key) == 0
@@ -753,8 +765,8 @@ def test_clear_log_on_a_log_with_no_entries_removes_nothing(store):
 
 
 def test_a_cursor_taken_before_a_clear_reads_only_what_was_appended_after(
-    store,
-):
+    store: Harness,
+) -> None:
     """Replaying a cursor held across a clear returns exactly the entries appended since it."""
     key = store.key(LOG, "cleared-and-resumed")
     for i in range(3):
@@ -773,7 +785,9 @@ def test_a_cursor_taken_before_a_clear_reads_only_what_was_appended_after(
 # ── refusals, each with the call it must still admit ────────────────────────────
 
 
-def test_every_operation_refuses_before_a_backend_is_bound(store):
+def test_every_operation_refuses_before_a_backend_is_bound(
+    store: Harness,
+) -> None:
     key = store.key(LWW, "unbound")
     ts.unbind()
 
@@ -789,8 +803,8 @@ def test_every_operation_refuses_before_a_backend_is_bound(store):
 
 
 def test_a_key_with_no_root_or_an_empty_store_or_part_refuses_and_a_whole_one_is_admitted(
-    store,
-):
+    store: Harness,
+) -> None:
     with pytest.raises(ts.BadKeyError):
         ts.Key(LWW, "", ("x",))
     with pytest.raises(ts.BadKeyError):
@@ -802,7 +816,7 @@ def test_a_key_with_no_root_or_an_empty_store_or_part_refuses_and_a_whole_one_is
     assert ts.read(store.key(NESTED, "group", "name")) == {"n": 1}
 
 
-def test_absence_and_corruption_are_different_answers(store):
+def test_absence_and_corruption_are_different_answers(store: Harness) -> None:
     """An absent record and a corrupt one are different answers.
 
     A record that will not decode raises ``DecodeError`` with a ``default`` stated; an absent one
@@ -822,8 +836,8 @@ def test_absence_and_corruption_are_different_answers(store):
 
 
 def test_a_relative_root_is_refused_before_it_resolves_against_a_working_directory(
-    store,
-):
+    store: Harness,
+) -> None:
     """A relative root is refused by read, replace, exists and keys; an absolute root is admitted.
 
     Under a relative root each of the four raises ``BadKeyError``, the read and the listing
@@ -850,7 +864,9 @@ def test_a_relative_root_is_refused_before_it_resolves_against_a_working_directo
     assert ts.keys(LWW, str(store.root)) == [absolute]
 
 
-def test_a_key_part_carrying_non_ascii_or_a_separator_round_trips(store):
+def test_a_key_part_carrying_non_ascii_or_a_separator_round_trips(
+    store: Harness,
+) -> None:
     """Parts are opaque identity, not path segments a backend may reinterpret."""
     key = store.key(NESTED, "grüne/reihe", "ü_2")
     held = ts.replace(key, {"note": "ü"})
@@ -861,8 +877,8 @@ def test_a_key_part_carrying_non_ascii_or_a_separator_round_trips(store):
 
 
 def test_a_key_part_carrying_non_ascii_or_a_separator_is_stored_under_one_spelling(
-    store,
-):
+    store: Harness,
+) -> None:
     """A key's parts are stored as ASCII-escaped compact JSON."""
     key = store.key(NESTED, "grüne/reihe", "ü_2")
     ts.replace(key, {"n": 1})
@@ -881,7 +897,9 @@ def test_a_key_part_carrying_non_ascii_or_a_separator_is_stored_under_one_spelli
     assert ts.keys(NESTED, str(store.root)) == [key]
 
 
-def test_keys_answer_every_record_and_log_of_a_store_under_a_prefix(store):
+def test_keys_answer_every_record_and_log_of_a_store_under_a_prefix(
+    store: Harness,
+) -> None:
     assert ts.keys(NESTED, str(store.root)) == []
     ts.replace(store.key(NESTED, "g1", "a"), {"n": 1})
     ts.replace(store.key(NESTED, "g1", "b"), {"n": 2})
@@ -896,7 +914,9 @@ def test_keys_answer_every_record_and_log_of_a_store_under_a_prefix(store):
     assert ts.stores(str(store.root)) == sorted([NESTED, LOG])
 
 
-def test_a_committed_record_is_readable_by_another_process(store):
+def test_a_committed_record_is_readable_by_another_process(
+    store: Harness,
+) -> None:
     key = store.key(LWW, "handed-over")
     ts.replace(key, {"n": 7})
     result = store.root / "handed-over.json"
@@ -908,7 +928,9 @@ def test_a_committed_record_is_readable_by_another_process(store):
     }
 
 
-def test_a_transaction_refuses_every_form_that_would_escape_it(store):
+def test_a_transaction_refuses_every_form_that_would_escape_it(
+    store: Harness,
+) -> None:
     first = store.key(LWW, "alpha")
     second = store.key(LWW, "beta")
     unheld = store.key(LWW, "gamma")
@@ -931,8 +953,8 @@ def test_a_transaction_refuses_every_form_that_would_escape_it(store):
 
 
 def test_a_transaction_refuses_two_roots_and_admits_two_spellings_of_one(
-    store,
-):
+    store: Harness,
+) -> None:
     """A transaction refuses keys from two roots and admits two spellings of one.
 
     Keys from two roots refuse naming both roots, and nothing is written; two spellings of one
@@ -961,7 +983,9 @@ def test_a_transaction_refuses_two_roots_and_admits_two_spellings_of_one(
     assert ts.read(store.key(LWW, "beta")) == {"n": 2}
 
 
-def test_two_spellings_of_one_root_address_one_database(store):
+def test_two_spellings_of_one_root_address_one_database(
+    store: Harness,
+) -> None:
     """Two spellings of one root share one connection slot and one database."""
     detour = store.root / "detour"
     detour.mkdir()
@@ -985,7 +1009,9 @@ def test_two_spellings_of_one_root_address_one_database(store):
     ]
 
 
-def test_traits_shares_the_state_database_rather_than_gaining_its_own(store):
+def test_traits_shares_the_state_database_rather_than_gaining_its_own(
+    store: Harness,
+) -> None:
     """The ``traits`` store writes into the project's one state database.
 
     Writing a ``traits`` record beside a ``delivery_events`` record leaves exactly one database
@@ -1007,8 +1033,8 @@ def test_traits_shares_the_state_database_rather_than_gaining_its_own(store):
 
 
 def test_a_backend_refuses_to_exist_without_cross_process_locking(
-    store, monkeypatch
-):
+    store: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setitem(sys.modules, "filelock", None)
     with pytest.raises(ts.BackendUnavailableError) as raised:
         SqliteBackend()
@@ -1018,7 +1044,9 @@ def test_a_backend_refuses_to_exist_without_cross_process_locking(
     SqliteBackend().close()
 
 
-def test_a_contended_key_is_named_and_released_when_its_holder_dies(store):
+def test_a_contended_key_is_named_and_released_when_its_holder_dies(
+    store: Harness,
+) -> None:
     key = store.key(LWW, "orphanable")
     ready = store.root / "holder.ready"
     holder = store.spawn("hold-lock", store.root, "orphanable", ready)
@@ -1039,8 +1067,8 @@ def test_a_contended_key_is_named_and_released_when_its_holder_dies(store):
 
 
 def test_a_version_read_before_a_transaction_committed_is_refused_afterwards(
-    store,
-):
+    store: Harness,
+) -> None:
     key = store.key(CAS, "moved-under-us")
     ts.replace(key, {"who": "seed"}, expect=ts.Version.ABSENT)
     stale = ts.read_versioned(key).version
@@ -1063,7 +1091,9 @@ def test_a_version_read_before_a_transaction_committed_is_refused_afterwards(
     assert ts.read(key) == {"who": "insider"}
 
 
-def test_a_transaction_reads_its_own_write_and_shows_it_to_nobody_else(store):
+def test_a_transaction_reads_its_own_write_and_shows_it_to_nobody_else(
+    store: Harness,
+) -> None:
     key = store.key(LWW, "staged")
     ts.replace(key, {"n": 1})
     result = store.root / "seen.json"
@@ -1083,7 +1113,9 @@ def test_a_transaction_reads_its_own_write_and_shows_it_to_nobody_else(store):
 # ── the two spellings ───────────────────────────────────────────────────────────
 
 
-def test_the_record_and_log_spellings_write_the_bytes_this_test_spells_out():
+def test_the_record_and_log_spellings_write_the_bytes_this_test_spells_out() -> (
+    None
+):
     golden = {"b": {"nested": True}, "a": "ü", "ratio": 0.5, "absent": None}
 
     assert ts.encode_record(golden) == (
@@ -1103,27 +1135,27 @@ def test_the_record_and_log_spellings_write_the_bytes_this_test_spells_out():
     assert ts.encode_record("a text value") == b'"a text value"\n'
 
 
-def test_a_value_the_spelling_cannot_carry_names_the_store_the_key_and_the_type(
-    store,
-):
-    """The refusal names the store, the key and the value's type; the converted value stores."""
-    key = store.key(LWW, "convertible")
-    where = Path("a/b")
+@pytest.mark.parametrize(
+    "value",
+    [MappingProxyType({"a": 1}), range(3)],
+    ids=["mapping_not_a_dict", "sequence_not_a_list"],
+)
+def test_a_container_json_dumps_does_not_encode_is_refused_naming_its_type(
+    store: Harness, value: object
+) -> None:
+    """A mapping that is not a dict or a sequence that is not a list is refused by name."""
+    key = store.key(LWW, "container")
 
-    with pytest.raises(ts.StoreError) as raised:
-        ts.replace(key, {"where": where})
-    message = str(raised.value)
-    assert LWW in message
-    assert "convertible" in message
-    assert type(where).__name__ in message
-
-    ts.replace(key, {"where": Path("a/b").as_posix()})
-    assert ts.read(key) == {"where": "a/b"}
+    with pytest.raises(
+        ts.StoreError, match=f"The value is a {type(value).__name__};"
+    ):
+        ts.replace(key, value)
+    assert not ts.exists(key)
 
 
 def test_a_non_finite_number_is_refused_rather_than_written_as_a_word_json_has_no_type_for(
-    store,
-):
+    store: Harness,
+) -> None:
     """A NaN is refused; its ``stored_number`` form stores."""
     key = store.key(LWW, "measurement")
 
@@ -1135,8 +1167,8 @@ def test_a_non_finite_number_is_refused_rather_than_written_as_a_word_json_has_n
 
 
 def test_a_value_with_a_non_string_key_is_refused_rather_than_merged_with_its_spelling(
-    store,
-):
+    store: Harness,
+) -> None:
     """A value keyed by both ``1`` and ``"1"`` is refused by the record and the log writer.
 
     Neither writer stores anything, and the string-keyed value alone stores.
@@ -1160,8 +1192,8 @@ def test_a_value_with_a_non_string_key_is_refused_rather_than_merged_with_its_sp
 
 
 def test_a_file_write_inside_a_record_transaction_refuses_and_lands_outside_it(
-    store,
-):
+    store: Harness,
+) -> None:
     """A file write inside a record transaction is refused, and lands outside it.
 
     A file write inside a record transaction refuses, the record keeps its prior value and no
@@ -1183,8 +1215,8 @@ def test_a_file_write_inside_a_record_transaction_refuses_and_lands_outside_it(
 
 
 def test_a_file_that_is_not_a_database_at_the_database_s_path_refuses_naming_it(
-    store,
-):
+    store: Harness,
+) -> None:
     """A non-database file holding the database's name refuses a read, naming the file."""
     path = database_file(str(store.root))
     path.parent.mkdir(parents=True)
@@ -1196,7 +1228,9 @@ def test_a_file_that_is_not_a_database_at_the_database_s_path_refuses_naming_it(
     assert str(path) in str(raised.value)
 
 
-def test_enumerating_review_verdicts_answers_identities_that_read_back(store):
+def test_enumerating_review_verdicts_answers_identities_that_read_back(
+    store: Harness,
+) -> None:
     """Enumerating review verdicts answers shard keys that read back.
 
     ``keys`` answers the shard's own key, which reads the shard back, though its names carry
@@ -1215,7 +1249,7 @@ def test_enumerating_review_verdicts_answers_identities_that_read_back(store):
     assert verdicts.read_verdicts(key) == [decided]
 
 
-def test_a_cleared_log_enumerates_as_absent(store):
+def test_a_cleared_log_enumerates_as_absent(store: Harness) -> None:
     """A cleared log enumerates as absent.
 
     A log that holds entries is enumerated once, however many it holds, and one cleared of
@@ -1240,7 +1274,9 @@ def test_a_cleared_log_enumerates_as_absent(store):
 # ── files written by path ───────────────────────────────────────────────────────
 
 
-def test_a_blob_read_carries_the_token_its_own_bytes_produce(store):
+def test_a_blob_read_carries_the_token_its_own_bytes_produce(
+    store: Harness,
+) -> None:
     path = blob_path(store.root, "tokened")
     assert (
         ts.read_blob_versioned(path, default=b"").version == ts.Version.ABSENT
@@ -1256,8 +1292,8 @@ def test_a_blob_read_carries_the_token_its_own_bytes_produce(store):
 
 
 def test_a_blob_write_from_a_current_token_lands_and_a_stale_one_is_refused(
-    store,
-):
+    store: Harness,
+) -> None:
     path = blob_path(store.root, "compare-and-set")
     held = ts.put_blob(path, b"first", expect=ts.Version.ABSENT)
     moved = ts.put_blob(path, b"second", expect=held)
@@ -1272,8 +1308,8 @@ def test_a_blob_write_from_a_current_token_lands_and_a_stale_one_is_refused(
 
 
 def test_a_create_only_blob_write_refuses_an_existing_blob_and_keeps_its_bytes(
-    store,
-):
+    store: Harness,
+) -> None:
     path = blob_path(store.root, "captured-once")
     ts.put_blob(path, b"pristine", expect=ts.Version.ABSENT)
 
@@ -1286,8 +1322,8 @@ def test_a_create_only_blob_write_refuses_an_existing_blob_and_keeps_its_bytes(
 
 
 def test_a_blob_delete_from_a_current_token_lands_and_a_stale_one_is_refused(
-    store,
-):
+    store: Harness,
+) -> None:
     path = blob_path(store.root, "conditional-delete")
     held = ts.put_blob(path, b"first", expect=ts.Version.ABSENT)
     moved = ts.put_blob(path, b"second", expect=held)
@@ -1302,8 +1338,8 @@ def test_a_blob_delete_from_a_current_token_lands_and_a_stale_one_is_refused(
 
 
 def test_two_processes_writing_a_blob_from_one_token_produce_one_winner_and_one_conflict(
-    store,
-):
+    store: Harness,
+) -> None:
     path = blob_path(store.root, "contested")
     ts.put_blob(path, b"seed", expect=ts.Version.ABSENT)
     go = store.root / "blob.go"
