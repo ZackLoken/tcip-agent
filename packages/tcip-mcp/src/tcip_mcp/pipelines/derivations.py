@@ -85,16 +85,15 @@ def _neighbor_min_center_distances(boxes: np.ndarray) -> list[float]:
 
     Fewer than 2 boxes -> [].
     """
-    import numpy as np
+    from scipy.spatial import KDTree
 
     from tcip_annotation.matching import box_centers
 
     if len(boxes) < 2:
         return []
     centers = box_centers(boxes)
-    dist = np.linalg.norm(centers[:, None, :] - centers[None, :, :], axis=-1)
-    np.fill_diagonal(dist, np.inf)
-    return dist.min(axis=1).tolist()
+    dist, _ = KDTree(centers).query(centers, k=2)
+    return dist[:, 1].tolist()
 
 
 LOCALIZATION_TOLERANCE_DERIVATION = (

@@ -68,8 +68,9 @@ class Bucket:
     ``root`` is the dataset root its source images belong to and ``name`` the name it was
     published under. ``producer`` is a checkpoint's sha256 and run
     (:attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`), or the engine or agent that
-    proposed the documents (:class:`Proposed`), which no execution record governs
-    (``execution`` ``None``) and no class scope decodes (``scope`` empty). ``documents`` maps each
+    proposed the documents (:class:`Proposed`), whose ``execution`` is the record of the inference
+    pass an engine's proposal ran through (``None`` for a proposal no such pass made) and which no
+    class scope decodes (``scope`` empty). ``documents`` maps each
     document's stem to the source file name it was predicted from, and ``raster_path`` is the
     raster as stored against the project (:meth:`raster`).
     """
@@ -252,14 +253,16 @@ def _one_root(roots: Iterable[Path], what: str) -> Path:
 def source_root(sources: Iterable[str | Path]) -> Path:
     """Return the one dataset root every source image of a bucket lies under.
 
-    Each source's root is :func:`~tcip_mcp.dataset_layout.dataset_root_of`'s. A source under no
-    dataset image tree, and sources under more than one root, refuse (``ValueError``) naming
-    them.
+    Each source's root is :func:`~tcip_mcp.dataset_layout.dataset_root_of` its directory: the
+    capture's, or the image tree's for a raster in no capture, a directory position reads both
+    ways read by which root carries its own state. A source under no dataset image tree, one
+    whose directory neither or both roots claim, and sources under more than one root, refuse
+    (``ValueError``) naming them.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
 
     def root_of(source: str | Path) -> Path:
-        root = dataset_root_of(source)
+        root = dataset_root_of(Path(source).parent)
         if root is None:
             raise ValueError(
                 f"{source} lies under no dataset image tree, so no dataset root holds "

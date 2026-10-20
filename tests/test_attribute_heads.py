@@ -146,7 +146,7 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(
         stated=UNFILTERED,
     )
     assert "error" not in assessed, assessed
-    assert "passed" in assessed
+    assert "failures" in assessed
 
     measurement = measure_phenology(
         tmp_path,

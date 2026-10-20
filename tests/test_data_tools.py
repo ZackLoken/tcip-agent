@@ -1702,8 +1702,8 @@ def test_read_selection_refuses_one_group_on_two_sides(tmp_path: Path) -> None:
     out = tmp_path / "m"
     _write_one_sample_selection(tmp_path, out)
     document, samples = _stored_selection(out)
-    ground_truth = samples[0]["ground_truth"]
-    assert isinstance(ground_truth, dict)
+    ground_truth, source = samples[0]["ground_truth"], samples[0]["source"]
+    assert isinstance(ground_truth, dict) and isinstance(source, str)
     ts.replace(
         selection_key(out),
         {
@@ -1712,7 +1712,7 @@ def test_read_selection_refuses_one_group_on_two_sides(tmp_path: Path) -> None:
                 *samples,
                 {
                     "member": "a_0_1",
-                    "source": "images/a_0_1.jpg",
+                    "source": Path(source).with_name("a_0_1.jpg").as_posix(),
                     "ground_truth": {**ground_truth, "stem": "a_0_1"},
                     "group": "a",
                     "side": "val",

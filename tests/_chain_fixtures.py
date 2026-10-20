@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.assessment import read_assessment
 from tcip_mcp.pipelines.execution import Stated
 from tests._training_values import (
     DISPERSION_QUANTILE,
@@ -1015,7 +1016,9 @@ def attributed_series(
             stated=collection_pass(),
         )
         assert "error" not in assessment, assessment
-        assert assessment["passed"] is True, assessment["failures"]
+        assert read_assessment(project, assessment["assessment_id"]).passed, (
+            assessment["failures"]
+        )
 
     if stated is None:
         stated = Stated() if assessment else chain_pass()
@@ -1078,7 +1081,9 @@ def run_the_chain(
 
     assessment = assess(project, checkpoint_path, selection_dir)
     assert "error" not in assessment, assessment
-    assert assessment["passed"] is True, assessment["failures"]
+    assert read_assessment(project, assessment["assessment_id"]).passed, (
+        assessment["failures"]
+    )
 
     bucket = f"{bucket_name}/{DATE}"
     published = run_inference(

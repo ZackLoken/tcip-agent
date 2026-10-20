@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tcip_mcp.assessment import read_assessment
 from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.postprocessing.aggregation import _per_plant
 from tcip_mcp.traits import PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE
@@ -305,7 +306,9 @@ def _assessed(project: Path, kind: str, experiment_id: str) -> Bucket:
         rationale=RATIONALE,
         stated=collection_pass(),
     )
-    assert assessment.get("passed") is True, assessment
+    assert read_assessment(project, assessment["assessment_id"]).passed, (
+        assessment
+    )
     bucket = f"{kind}/{DATE}"
     published = run_inference(
         project,

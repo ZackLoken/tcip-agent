@@ -38,8 +38,8 @@ def freeze_selection(
         experiment_id: The finished run to freeze the drawn partition of.
         output_path: Where to write the selection. Defaults to
             ``<dataset_root>/splits/frozen-<experiment_id>``, resolved from the run's own recorded
-            sources through ``dataset_root_of``; refused when that does not resolve (a source
-            outside the canonical ``<dataset_root>/images/...`` layout).
+            sources' directory through ``dataset_root_of``; refused when that does not resolve
+            (a source outside the canonical ``<dataset_root>/images/...`` layout).
 
     """
     from tcip_annotation.json_io import UnreadableLabelDocumentError
@@ -87,7 +87,7 @@ def freeze_selection(
         }
 
     a_source = samples[0].source
-    dataset_root = dataset_root_of(a_source)
+    dataset_root = dataset_root_of(Path(a_source).parent)
     if dataset_root is None:
         return {
             "error": f"this run's own source {a_source!r} does not resolve under a dataset "

@@ -125,11 +125,11 @@ regions are attested complete and while the recorded mosaic no longer reads at i
 
 The record states the producer (the checkpoint's digest and producing run), the execution record
 the pass ran under (each value beside its source), the reference (each sample's source digest and
-ground-truth digest, the captures it covers), the disjointness checks (the holdout shares no
-source digest with the calibration side, and neither shares a group or a source digest
-with the producing run's training or selection sides), the criterion's evidence and the failures,
-empty when it passed. It is written once. A mosaic reference region that does not lie inside a
-held-out region, or overlaps a training region, refuses the assessment.
+ground-truth digest, and the dataset identity its root recorded when measured), the disjointness
+checks (the holdout shares no source digest with the calibration side, and neither shares a group
+or a source digest with the producing run's training or selection sides), the criterion's
+evidence and the failures, empty when it passed. It is written once. A mosaic reference region
+that does not lie inside a held-out region, or overlaps a training region, refuses the assessment.
 
 A bucket is published under an assessment with `run_inference(assessment_id=...)`: the pass
 restores the execution record the assessment measured, and a value `stated` records differently

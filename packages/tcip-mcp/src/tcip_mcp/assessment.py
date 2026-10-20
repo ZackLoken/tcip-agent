@@ -5,8 +5,8 @@ assessment is a directory under the project's ``.tcip/assessments/``, opened onc
 ``assessment.json`` and, under ``reference/``, a copy of every reference ground truth it measured
 from, label document, mask, table and physical-extent table alike. It records the reference, the
 source digest of every reference sample, the disjointness and criterion evidence and the trait
-revision it was judged under; its ``passed`` says a number from that checkpoint, under that
-execution record, is validated.
+revision it was judged under; one naming no failure says a number from that checkpoint, under
+that execution record, is validated.
 """
 
 from __future__ import annotations
@@ -107,13 +107,14 @@ class ReferenceSample:
 class Reference:
     """What an assessment measured.
 
-    It holds the selection it came from, or the mosaic's ``raster_identity``, the captures it
-    spans, each retained ground-truth file and every sample.
+    It holds the selection it came from, or the mosaic's ``raster_identity``, the identity id
+    the samples' dataset root recorded when it was measured (``None`` for a root that recorded
+    none), each retained ground-truth file and every sample.
     """
 
     selection_dir: str | None
     raster_identity: RasterIdentity | None
-    captures: list[tuple[str | None, str | None]]
+    dataset_id: str | None
     ground_truth: list[RetainedFile]
     samples: list[ReferenceSample]
 
@@ -126,11 +127,16 @@ class Reference:
     ) -> bool:
         """Return whether this reference spans a capture.
 
-        For a raster it is the same mosaic; for per-image predictions, one of its captures.
+        For a raster it is the same mosaic; for per-image predictions, the recorded
+        ``dataset_id`` and the capture of one of its samples' sources
+        (:func:`~tcip_mcp.dataset_layout.image_capture`).
         """
+        from tcip_mcp.dataset_layout import image_capture
+
         if raster_identity is not None:
             return self.raster_identity == raster_identity
-        return (dataset_id, date) in self.captures
+        dates = {image_capture(s.sample.source)[1] for s in self.samples}
+        return dataset_id == self.dataset_id and date in dates
 
     def moved(self, run_dir: Path) -> list[str]:
         """Return what of this reference no longer digests as recorded.
@@ -190,8 +196,14 @@ class Assessment:
     criterion: dict[str, JsonValue]
     scale: dict[str, JsonValue] | None
     failures: list[str]
-    passed: bool
-    __pydantic_config__ = ConfigDict(ser_json_inf_nan="constants")
+    __pydantic_config__ = ConfigDict(
+        ser_json_inf_nan="constants", extra="forbid"
+    )
+
+    @property
+    def passed(self) -> bool:
+        """Whether the assessment names no failure."""
+        return not self.failures
 
 
 ASSESSMENT_RECORD = TypeAdapter(Assessment)
@@ -255,8 +267,7 @@ def _finish(
 ) -> Assessment:
     """Write the assessment judged under ``revision`` as the run's ``assessment.json`` once.
 
-    It passes when it names no failure. Then its one audit line, ``assessment_recorded``, is
-    written; returns it as read back.
+    Then its one audit line, ``assessment_recorded``, is written; returns it as read back.
     """
     from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.experiments import write_once
@@ -273,7 +284,6 @@ def _finish(
         criterion=criterion,
         scale=scale,
         failures=failures,
-        passed=not failures,
     )
     write_once(
         run_dir / ASSESSMENT_FILE,
@@ -371,15 +381,16 @@ def _reference(
 ) -> Reference:
     """Return what an assessment measured.
 
-    It holds where the reference came from, the captures its samples span, every retained file,
-    and each sample beside its source digest (``digest_of``).
+    It holds where the reference came from, the identity id the one dataset root of its samples
+    records as it is measured (:func:`~tcip_mcp.dataset_layout.capture_of` of its first sample),
+    every retained file, and each sample beside its source digest (``digest_of``).
     """
     from tcip_mcp.dataset_layout import capture_of
 
     return Reference(
         selection_dir=selection_dir,
         raster_identity=raster_identity,
-        captures=sorted({capture_of(s.source) for s in samples}, key=str),
+        dataset_id=capture_of(samples[0].source)[0],
         ground_truth=retained,
         samples=[
             ReferenceSample(sample=s, source_digest=digest_of[s.location])
