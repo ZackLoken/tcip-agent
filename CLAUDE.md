@@ -67,7 +67,11 @@ implementation is replaceable and the guarantee is not.
 - Scientific defensibility: every phenotype reproducible and auditable end to end, from data and
   environment through predictions and operating point to the measurement. Parameters are derived
   from the data at runtime, never frozen constants; when a threshold varies by dataset, model or
-  trait, the deliverable is the capability to derive it, never the value.
+  trait, the deliverable is the capability to derive it, never the value. A pass that proposes
+  labels is inference whose producer is an engine instead of a checkpoint: it runs through the one
+  tiled pass, its execution record derived by the same derivations and published on its bucket;
+  a stated number, a knob or a toggle standing where a derivation exists is the defect, and a
+  second pass beside the first is one too.
 - Agent-legible and breeder-coherent: a discoverable toolkit with docs that match the code, and a
   GUI that guides the breeder without stranding them, at equal weight.
 - Every state change leaves a record, and a record that cannot be written is raised rather than
