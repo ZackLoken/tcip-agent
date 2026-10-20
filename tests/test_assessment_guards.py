@@ -210,7 +210,6 @@ def test_a_training_image_copied_under_a_new_name_into_the_reference_fails_disjo
     record = assess(tmp_path, checkpoint, reference)
 
     assert "error" not in record, record
-    assert record["passed"] is False
     assert "reference_shares_training" in record["failures"], record[
         "failures"
     ]
@@ -256,6 +255,80 @@ def test_a_reference_frame_in_a_training_group_fails_even_when_its_pixels_are_it
     assert len(record["disjointness"]["training"]["groups"]) == 1, record[
         "disjointness"
     ]
+
+
+def test_a_selection_spanning_two_dataset_roots_refuses_naming_both(
+    tmp_path: Path,
+) -> None:
+    """A selection whose samples lie under two dataset roots refuses at its write, naming both.
+
+    A reference drawn over one dataset is joined, through the admission's own sample producer, by
+    holdout frames of a second dataset; writing that selection refuses naming both roots and
+    draw_splits, and the drawn selection stays as it was written.
+    """
+    from PIL import Image
+
+    from tcip_mcp import subject_registry as cr
+    from tcip_mcp.pipelines.data.label_queries import admit
+    from tcip_mcp.pipelines.data.selection import (
+        REFERENCE_SIDES,
+        Selection,
+        read_selection,
+        write_selection,
+    )
+    from tcip_mcp.pipelines.data.splits import recorded_group_key_fn
+    from tests._producer_fixtures import label_image, registry_over
+    from tests.test_physical_scale_assessment import (
+        DATE as SCALE_DATE,
+        SUBJECT as BAR,
+        _rect,
+        _reference,
+    )
+
+    fx.seed_delivery_traits(tmp_path)
+    selection_dir, _csv_path = _reference(tmp_path)
+    other = tmp_path / "ds2"
+    images = other / "images" / SCALE_DATE
+    images.mkdir(parents=True)
+    registry_over(
+        other,
+        cr.SubjectRegistry(subjects=(cr.Subject(name=BAR, description=""),)),
+    )
+    for i in range(2):
+        Image.new("RGB", (120, 120), color=(200, 20 + i, 20)).save(
+            images / f"s{i}.png"
+        )
+        label_image(
+            images / f"s{i}.png",
+            [Annotation(subject=BAR, geometry=Polygon(rings=[_rect(100.0)]))],
+            120,
+            120,
+        )
+    drawn = read_selection(selection_dir, project=tmp_path)
+    joined = admit(images, scope=drawn.scope)
+    spanning = Selection(
+        samples=(
+            *(s for s in drawn.samples if s.side in REFERENCE_SIDES),
+            *joined.samples(
+                {"s0": "holdout", "s1": "holdout"},
+                recorded_group_key_fn(drawn.group_by, date=joined.date),
+            ),
+        ),
+        scope=drawn.scope,
+        seed=drawn.seed,
+        group_by=drawn.group_by,
+        ratios=drawn.ratios,
+        stratify_foreground=drawn.stratify_foreground,
+        rationale=drawn.rationale,
+        dataset_fingerprint=drawn.dataset_fingerprint,
+    )
+
+    with pytest.raises(ValueError, match="draw_splits") as refused:
+        write_selection(selection_dir, spanning, project=tmp_path)
+
+    for root in (tmp_path / "ds", other):
+        assert str(root) in str(refused.value), refused.value
+    assert read_selection(selection_dir, project=tmp_path) == drawn
 
 
 def test_a_mosaic_reference_band_is_held_out_only_inside_a_non_training_region() -> (

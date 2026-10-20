@@ -121,19 +121,68 @@ def test_subjects_path_is_the_single_dataset_registry() -> None:
     assert subjects_path("/ds") == Path("/ds/subjects.json")
 
 
-def test_dataset_root_of_recovers_the_root_from_its_image_tree() -> None:
-    from tcip_mcp.dataset_layout import dataset_root_of
+def test_every_reader_of_a_dataset_root_answers_the_root_the_layout_wrote(
+    tmp_path: Path,
+) -> None:
+    """Every reader of a dataset root answers the root its image and capture were written under.
 
-    assert dataset_root_of("/ds/images/2026-03-02") == Path("/ds")
-    assert dataset_root_of("/ds/images/2026-03-02/IMG_1.JPG") == Path("/ds")
-    assert dataset_root_of("/some/where/else") is None
-    # Anchors on the last images segment: a dataset nested under an ancestor named 'images'
-    # still resolves to the real root, not the ancestor.
-    assert dataset_root_of("/data/images/proj/images/2026-03-02") == Path(
-        "/data/images/proj"
+    For a capture named ``images``, and for a dataset nested under an ancestor named ``images``,
+    each registered, a bucket's source root, an image's capture, a capture directory's parse, the
+    root of a capture directory or image tree, and an audit scope each answer the root
+    :func:`image_path` was handed. For a registered root itself named ``images``, a raster in its
+    image tree answers that root and no capture; a directory neither root claims refuses naming
+    both, and a path under no image tree answers none.
+    """
+    from tcip_mcp.audit import dataset_scope_of
+    from tcip_mcp.buckets import source_root
+    from tcip_mcp.dataset_layout import (
+        dataset_root_of,
+        image_capture,
+        image_dir,
+        image_path,
+        image_root,
+        parse_capture_dir,
     )
-    # A bare segment with nothing above it is not inside a dataset.
-    assert dataset_root_of("images/2026-03-02") is None
+    from tcip_mcp.tools.project_tools import register_dataset
+    from tcip_mcp.traits import registered_crops
+
+    crop = sorted(registered_crops())[0]
+    for root, capture in (
+        (tmp_path / "data", "images"),
+        (tmp_path / "images" / "proj", "2026-03-02"),
+    ):
+        image = image_path(root, capture, "a", ".png")
+        image.parent.mkdir(parents=True)
+        image.write_bytes(b"\x89PNG")
+        assert "error" not in register_dataset(tmp_path, str(root), crop=crop)
+        assert image_capture(image) == (root, capture)
+        assert parse_capture_dir(image_dir(root, capture)) == (root, capture)
+        assert source_root([image]) == root
+        for directory in (image_dir(root, capture), image_root(root)):
+            assert dataset_root_of(directory) == root
+            assert dataset_scope_of(directory) == root
+        assert dataset_scope_of(image) == root
+
+    named = tmp_path / "scratch" / "images"
+    raster = image_root(named) / "raster.tif"
+    raster.parent.mkdir(parents=True)
+    raster.write_bytes(b"II*\x00")
+    assert "error" not in register_dataset(tmp_path, str(named), crop=crop)
+    assert source_root([raster]) == named
+    assert image_capture(raster) == (None, None)
+    assert dataset_scope_of(raster) == named
+    assert dataset_root_of(image_root(named)) == named
+    assert dataset_scope_of(image_root(named)) == named
+    with pytest.raises(ValueError, match="is not a capture"):
+        parse_capture_dir(image_root(named))
+
+    unclaimed = image_root(tmp_path / "bare" / "images")
+    with pytest.raises(ValueError, match="neither carries") as refused:
+        dataset_root_of(unclaimed)
+    assert str(tmp_path / "bare") in str(refused.value)
+    assert str(unclaimed.parent) in str(refused.value)
+    assert image_capture("/some/where/else.png") == (None, None)
+    assert dataset_root_of("/some/where/else") is None
 
 
 def test_a_capture_directory_sits_under_the_image_root() -> None:

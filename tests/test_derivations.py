@@ -165,6 +165,49 @@ def test_derive_localization_tolerance_frac_refuses_a_zero_spacing_percentile_on
     )
 
 
+def _broadcast_nearest_other(centers: np.ndarray) -> np.ndarray:
+    """Return each center's distance to its nearest other center over the all-pairs matrix."""
+    n = len(centers)
+    dist = np.linalg.norm(centers[:, None] - centers[None, :], axis=-1)
+    return dist[~np.eye(n, dtype=bool)].reshape(n, n - 1).min(axis=1)
+
+
+def test_nearest_neighbor_center_distances_agree_with_the_all_pairs_matrix() -> (
+    None
+):
+    """Each box's nearest-neighbor center distance equals the all-pairs matrix's row minimum.
+
+    Twenty seeded boxes and a set holding one coincident pair beside a distinct box each agree
+    with the matrix built here by broadcasting, the pair answering zero for both; two boxes answer
+    their one spacing each, and one box answers nothing.
+    """
+    from tcip_annotation.matching import box_centers
+    from tcip_mcp.pipelines.derivations import _neighbor_min_center_distances
+
+    rng = np.random.default_rng(0)
+    corner = rng.uniform(0.0, 1000.0, size=(20, 2))
+    size = rng.uniform(5.0, 50.0, size=(20, 2))
+    scattered = np.hstack([corner, corner + size])
+    paired = np.array(
+        [
+            [0.0, 0.0, 20.0, 20.0],
+            [5.0, 5.0, 15.0, 15.0],
+            [30.0, 40.0, 50.0, 60.0],
+        ]
+    )
+    for boxes in (scattered, paired):
+        np.testing.assert_allclose(
+            _neighbor_min_center_distances(boxes),
+            _broadcast_nearest_other(box_centers(boxes)),
+            rtol=0.0,
+            atol=1e-9,
+        )
+    assert _neighbor_min_center_distances(paired)[:2] == [0.0, 0.0]
+    two = np.array([[0.0, 0.0, 10.0, 10.0], [30.0, 40.0, 40.0, 50.0]])
+    assert _neighbor_min_center_distances(two) == pytest.approx([50.0, 50.0])
+    assert _neighbor_min_center_distances(two[:1]) == []
+
+
 def test_derive_localization_tolerance_frac_no_same_image_neighbor_returns_none() -> (
     None
 ):

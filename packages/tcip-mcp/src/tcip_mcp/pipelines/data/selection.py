@@ -468,15 +468,25 @@ def as_selection(document: JsonValue, *, where: str) -> Selection:
 
     The document is validated as the record (``pydantic.ValidationError`` naming each field that
     does not decode, a side outside :data:`SIDES` among them). ``where`` names the document in
-    every other refusal: an empty ``samples`` list, a partition whose sides cross
+    every other refusal: an empty ``samples`` list, samples whose sources lie under more than one
+    dataset root (:func:`~tcip_mcp.dataset_layout.image_capture`), a partition whose sides cross
     (:func:`refuse_crossing_sides`), and a scope its samples' shape cannot be read under
     (:meth:`ClassScope.admitted_for`).
     """
+    from tcip_mcp.dataset_layout import image_capture
+
     selection = _SELECTION.validate_python(document)
     if not selection.samples:
         raise ValueError(
             f"the selection at {where} lists no samples: a selection is its sample list, so an "
             "empty one binds nothing. Draw it again over the current data."
+        )
+    roots = {image_capture(s.source)[0] for s in selection.samples}
+    if len(roots) > 1:
+        raise ValueError(
+            f"the selection at {where} holds samples under the dataset roots "
+            f"{', '.join(sorted(map(str, roots)))}: a selection is drawn over one dataset "
+            "root. Draw it over one with draw_splits."
         )
     refuse_crossing_sides(selection.samples)
     selection.scope.admitted_for(

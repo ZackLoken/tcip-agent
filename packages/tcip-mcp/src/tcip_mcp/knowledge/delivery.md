@@ -57,7 +57,7 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 
 | Tool | Purpose |
 |------|---------|
-| `assess_checkpoint` | Assess a checkpoint against the calibration and holdout sides of a drawn selection, for one delivery kind of a trait's latest confirmed revision; records the assessment (its execution record, the retained reference, the disjointness from the producing run, the criterion and whether it passed) under `.tcip/assessments/<id>/`, write-once |
+| `assess_checkpoint` | Assess a checkpoint against the calibration and holdout sides of a drawn selection, for one delivery kind of a trait's latest confirmed revision; records the assessment (its execution record, the retained reference, the disjointness from the producing run, the criterion and its failures, none when it passed) under `.tcip/assessments/<id>/`, write-once |
 | `assess_reserved_regions` | The same assessment for a whole-mosaic checkpoint, over the reserved regions its training run held out of one mosaic |
 | `calibrate_physical_scale` | Derive a per-pixel physical scale from reference objects of breeder-measured length on a selection's calibration side and check it on its holdout side; recorded as an assessment a dimensional delivery names |
 | `run_inference` | Run a checkpoint over images or a raster and publish the predictions as a new bucket named `bucket` under the images' dataset root: one document per image (one for a raster) and the bucket's record of the checkpoint, class scope, execution record, capture and assessment behind them, in one commit. A bucket is published once; a name already published refuses. With `assessment_id` the pass runs exactly that assessment's execution record and the bucket names it |

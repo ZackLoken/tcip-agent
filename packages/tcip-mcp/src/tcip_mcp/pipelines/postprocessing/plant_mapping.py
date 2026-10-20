@@ -1661,15 +1661,13 @@ def build_plant_mapping(
     identity record; :class:`PlantRegistryNotFoundError`; and every refusal of the two steps.
     """
     from tcip_mcp.dataset_layout import (
-        dataset_root_of,
-        image_root,
+        image_tree_root,
         require_dataset_identity,
     )
-    from tcip_mcp.pipelines.data.splits import same_directory
 
     plant_mapping_key(project, name)
-    dataset = dataset_root_of(images_root)
-    if dataset is None or not same_directory(image_root(dataset), images_root):
+    dataset = image_tree_root(images_root)
+    if dataset is None:
         raise ValueError(
             f"{images_root} is not a dataset's own images/ root; a mapping maps the "
             "image tree of a dataset registered with register_dataset"

@@ -508,12 +508,17 @@ def test_a_subject_registry_reads_back_as_written_and_one_missing_a_field_refuse
 def test_a_scale_assessment_reads_back_as_its_producer_answered_it(
     tmp_path: Path,
 ) -> None:
-    """A scale assessment reads back as calibrated; one stored without failures refuses."""
+    """A scale assessment reads back as calibrated, covering the one capture its samples span.
+
+    One stored without failures refuses, and so does one carrying a ``passed`` beside its failures
+    or a reference carrying ``captures`` beside its samples.
+    """
     from tcip_mcp.assessment import (
         ASSESSMENT_FILE,
         assessment_dir,
         read_assessment,
     )
+    from tcip_mcp.dataset_layout import read_dataset_identity
     from tests import _trait_fixtures as fx
     from tests.test_physical_scale_assessment import (
         DATE as SCALE_DATE,
@@ -536,15 +541,47 @@ def test_a_scale_assessment_reads_back_as_its_producer_answered_it(
     assert Path(assessment.reference.selection_dir) == selection.resolve()
     n_samples = produced["reference"]["n_samples"]
     assert len(assessment.reference.samples) == n_samples
-    assert {date for _id, date in assessment.reference.captures} == {
-        SCALE_DATE
+    identity = read_dataset_identity(tmp_path / "ds")
+    assert identity is not None
+    assert assessment.reference.dataset_id == identity["id"]
+    other_date = "2026-02-01"
+    assert {
+        (dataset_id, date): assessment.reference.covers(
+            dataset_id=dataset_id, date=date, raster_identity=None
+        )
+        for dataset_id in (identity["id"], None)
+        for date in (SCALE_DATE, other_date)
+    } == {
+        (identity["id"], SCALE_DATE): True,
+        (identity["id"], other_date): False,
+        (None, SCALE_DATE): False,
+        (None, other_date): False,
     }
 
     path = (
         assessment_dir(tmp_path, produced["assessment_id"]) / ASSESSMENT_FILE
     )
     stored = json.loads(path.read_text(encoding="utf-8"))
-    del stored["failures"]
-    path.write_text(json.dumps(stored), encoding="utf-8")
-    with pytest.raises(ValidationError, match=r"failures\s+Field required"):
-        read_assessment(tmp_path, produced["assessment_id"])
+    for record, match in (
+        (
+            {**stored, "passed": True},
+            r"passed\s+Unexpected keyword argument",
+        ),
+        (
+            {
+                **stored,
+                "reference": {
+                    **stored["reference"],
+                    "captures": [[identity["id"], SCALE_DATE]],
+                },
+            },
+            r"reference\.captures\s+Unexpected keyword argument",
+        ),
+        (
+            {k: v for k, v in stored.items() if k != "failures"},
+            r"failures\s+Field required",
+        ),
+    ):
+        path.write_text(json.dumps(record), encoding="utf-8")
+        with pytest.raises(ValidationError, match=match):
+            read_assessment(tmp_path, produced["assessment_id"])

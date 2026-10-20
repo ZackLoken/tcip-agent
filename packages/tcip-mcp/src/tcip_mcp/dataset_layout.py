@@ -63,19 +63,67 @@ def is_bucket_name(name: str) -> bool:
     return is_valid_name(name) and not name.startswith(".")
 
 
+def image_tree_root(images_root: str | Path) -> Path | None:
+    """Return the dataset root whose image tree (:func:`image_root`) is ``images_root``.
+
+    ``None`` for a directory that is no image tree.
+    """
+    tree = Path(images_root)
+    return tree.parent if tree.name == "images" else None
+
+
+def carries_root_state(directory: str | Path) -> bool:
+    """Return whether ``directory`` carries dataset or project state of its own.
+
+    That is its own ``.tcip/`` store, a subject registry (:func:`subjects_path`) or an identity
+    record (:func:`dataset_identity_path`).
+    """
+    path = Path(directory)
+    return (path / ".tcip").is_dir() or any(
+        f(path).is_file() for f in (subjects_path, dataset_identity_path)
+    )
+
+
+def _capture(directory: str | Path) -> tuple[Path, str] | None:
+    """Return ``(dataset_root, capture)`` of a capture ``<root>/images/<capture>``, else ``None``.
+
+    A directory named ``images`` inside one also named ``images`` is by position either a capture
+    or the image tree of a root named ``images``: it is the one whose root carries its own state
+    (:func:`carries_root_state`), and neither or both refuses (``ValueError``) naming both.
+    """
+    path = Path(directory)
+    root = image_tree_root(path.parent)
+    if root is None:
+        return None
+    if path.name == "images":
+        as_capture, as_tree = (
+            carries_root_state(r) for r in (root, path.parent)
+        )
+        if as_capture == as_tree:
+            raise ValueError(
+                f"{path} is by position the capture 'images' of the dataset {root} or the "
+                f"image tree of the dataset {path.parent}, and "
+                f"{'both carry' if as_capture else 'neither carries'} state of its own; "
+                "register the one it belongs to with register_dataset."
+            )
+        if as_tree:
+            return None
+    return root, path.name
+
+
 def parse_capture_dir(images_dir: str | Path) -> tuple[Path, str]:
     """Return ``(dataset_root, capture)`` of a capture directory ``<root>/images/<capture>``.
 
-    Any other directory, the image tree ``<root>/images`` itself included, raises ``ValueError``
-    naming it.
+    Any other directory raises ``ValueError`` naming it, the image tree ``<root>/images`` itself
+    included (:func:`_capture`).
     """
-    directory = Path(images_dir)
-    if directory.parent.name != "images":
+    found = _capture(images_dir)
+    if found is None:
         raise ValueError(
-            f"{str(directory)!r} is not a capture: a capture's images sit at "
+            f"{str(Path(images_dir))!r} is not a capture: a capture's images sit at "
             f"<root>/images/<capture>/<stem>, a dateless capture's under {UNDATED_BUCKET!r}."
         )
-    return directory.parent.parent, directory.name
+    return found
 
 
 def parse_image_path(image_path: str | Path) -> tuple[Path, str, str]:
@@ -87,23 +135,41 @@ def parse_image_path(image_path: str | Path) -> tuple[Path, str, str]:
     return (*parse_capture_dir(img.parent), img.stem)
 
 
+def image_capture(source: str | Path) -> tuple[Path | None, str | None]:
+    """Return ``(dataset_root, capture)`` of an image source, :func:`parse_image_path`'s first two.
+
+    Both are ``None`` for a source that is no image of a capture (:func:`_capture` of its
+    directory, whose refusal of an ambiguous one propagates).
+    """
+    return _capture(Path(source).parent) or (None, None)
+
+
 def capture_of(source: str | Path) -> tuple[str | None, str | None]:
     """Return ``(dataset_id, capture)`` of an image source.
 
     The id is the identity record's id of the dataset root whose image tree holds it (``None``
-    when the root records none); both are ``None`` for a source that is no image of a capture.
+    when the root records none); both are ``None`` for a source that is no image of a capture
+    (:func:`image_capture`).
     """
-    try:
-        root, capture, _stem = parse_image_path(source)
-    except ValueError:
-        return None, None
-    identity = read_dataset_identity(root)
+    root, capture = image_capture(source)
+    identity = None if root is None else read_dataset_identity(root)
     return (identity["id"] if identity is not None else None), capture
 
 
 def image_root(dataset_root: str | Path) -> Path:
     """Return the whole image-tree path ``<dataset_root>/images/``, every capture under it."""
     return Path(dataset_root, "images")
+
+
+def dataset_root_of(directory: str | Path) -> Path | None:
+    """Return the dataset root of the capture directory or the image tree ``directory`` is.
+
+    Both are read by position, a directory position reads both ways taking the reading whose
+    root carries its own state (:func:`_capture`, which refuses one it cannot tell). ``None``
+    for any other directory.
+    """
+    found = _capture(directory)
+    return image_tree_root(directory) if found is None else found[0]
 
 
 def image_dir(dataset_root: str | Path, capture: str) -> Path:
@@ -143,23 +209,6 @@ def list_dates(dataset_root: str | Path) -> list[str]:
     return sorted(
         p.name for p in imgs.iterdir() if p.is_dir() and is_bucket_name(p.name)
     )
-
-
-def dataset_root_of(path: str | Path) -> Path | None:
-    """Return the ``<dataset_root>`` a path under ``<dataset_root>/images/`` lives under.
-
-    Returns ``None`` when it lives under none.
-
-    Anchors on the *last* ``images`` segment in the path, so a dataset physically nested under an
-    ancestor named ``images`` still resolves to the real root rather than the ancestor. A bare
-    segment with nothing above it is not inside a dataset -> ``None``.
-    """
-    parts = Path(path).parts
-    idxs = [k for k, p in enumerate(parts) if p == "images"]
-    if not idxs:
-        return None
-    i = max(idxs)
-    return Path(*parts[:i]) if i > 0 else None
 
 
 def subjects_path(dataset_root: str | Path) -> Path:

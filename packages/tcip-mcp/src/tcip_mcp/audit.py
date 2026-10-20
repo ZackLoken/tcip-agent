@@ -181,23 +181,16 @@ def record_event_or_raise(
 def dataset_scope_of(value: Path) -> Path | None:
     """Return the dataset root ``value`` names, or ``None`` when it does not name one.
 
-    ``value`` is an established location; one naming a root is a path inside the dataset's
-    ``images/`` tree (an image, a capture directory), or the dataset root itself. A path under
-    ``images/`` resolves through :func:`dataset_layout.dataset_root_of`. A path that is not under
-    one counts as a root only when it is a directory that actually carries dataset or project
-    state (its own ``.tcip/`` or a subject registry); anything else yields ``None``.
+    ``value`` is an established location naming a root: a directory that carries dataset or
+    project state of its own (:func:`dataset_layout.carries_root_state`) is that root; otherwise
+    it is :func:`dataset_layout.dataset_root_of` the capture directory or image tree ``value`` is,
+    or, for a file, the one it lies in. Anything else yields ``None``.
     """
-    from tcip_mcp.dataset_layout import SUBJECTS_FILENAME, dataset_root_of
+    from tcip_mcp.dataset_layout import carries_root_state, dataset_root_of
 
-    root = dataset_root_of(value)
-    if root is None and not (
-        value.is_dir()
-        and (
-            (value / ".tcip").is_dir() or (value / SUBJECTS_FILENAME).is_file()
-        )
-    ):
-        return None
-    return value if root is None else root
+    if value.is_dir() and carries_root_state(value):
+        return value
+    return dataset_root_of(value.parent if value.is_file() else value)
 
 
 _Door = TypeVar("_Door", bound=Callable[..., Any])

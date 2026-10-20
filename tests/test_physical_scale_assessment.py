@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tcip_annotation.state import Annotation, BBox, Polygon
+from tcip_mcp.assessment import read_assessment
 from tests import _trait_fixtures as fx, csv_rows
 from tests._producer_fixtures import label_image
 from tests._training_values import drawn_split
@@ -195,7 +196,7 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
     )
     selection, csv_path = _reference(tmp_path)
     scale = _calibrate(tmp_path, selection, csv_path)
-    assert scale["passed"] is True, scale
+    assert read_assessment(tmp_path, scale["assessment_id"]).passed, scale
     assert scale["scale"]["value"] == pytest.approx(
         0.1
     )  # 10 mm over a 100 px reference length
@@ -254,7 +255,7 @@ def test_a_bar_annotated_at_45_degrees_implies_the_same_scale_as_an_axis_aligned
 
     result = _calibrate(tmp_path, selection, csv_path)
 
-    assert result["passed"] is True, result
+    assert read_assessment(tmp_path, result["assessment_id"]).passed, result
     assert result["scale"]["value"] == pytest.approx(0.1)
 
 
@@ -349,7 +350,6 @@ def test_too_few_references_on_a_side_fail_as_unreplicated(
 
     result = _calibrate(tmp_path, selection, csv_path)
 
-    assert result["passed"] is False
     assert any(f.startswith("insufficient_") for f in result["failures"]), (
         result["failures"]
     )
@@ -366,7 +366,9 @@ def test_a_reference_set_disagreeing_with_itself_beyond_the_tolerance_fails(
 
     result = _calibrate(tmp_path, selection, csv_path)
 
-    assert result["passed"] is False, result
+    assert not read_assessment(tmp_path, result["assessment_id"]).passed, (
+        result
+    )
 
 
 def test_a_holdout_image_identical_to_a_calibration_image_fails_disjointness(
@@ -387,8 +389,7 @@ def test_a_holdout_image_identical_to_a_calibration_image_fails_disjointness(
 
     result = _calibrate(tmp_path, selection, csv_path)
 
-    assert result["passed"] is False, result
-    assert "holdout_shares_calibration_image" in result["failures"]
+    assert "holdout_shares_calibration_image" in result["failures"], result
 
 
 # ── the reference CSV reader: read by name, refuse rather than guess ──────

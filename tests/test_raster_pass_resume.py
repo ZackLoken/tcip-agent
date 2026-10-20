@@ -110,10 +110,10 @@ def _run(
 
 def _progress(project: Path, raster_path: Path, bucket: str) -> list[str]:
     """Return the segments of every progress record a pass toward ``bucket`` left in ``project``."""
-    from tcip_mcp.dataset_layout import dataset_root_of
+    from tcip_mcp.dataset_layout import image_capture
     from tcip_mcp.tools.inference_tools import _progress_keys
 
-    root = dataset_root_of(raster_path)
+    root, _capture = image_capture(raster_path)
     assert root is not None
     return sorted(
         key.parts[-1] for key in _progress_keys(project, root, bucket)
@@ -121,9 +121,9 @@ def _progress(project: Path, raster_path: Path, bucket: str) -> list[str]:
 
 
 def _published(raster_path: Path, bucket: str) -> bool:
-    from tcip_mcp.dataset_layout import bucket_key, dataset_root_of
+    from tcip_mcp.dataset_layout import bucket_key, image_capture
 
-    root = dataset_root_of(raster_path)
+    root, _capture = image_capture(raster_path)
     assert root is not None
     return tcip_store.exists(bucket_key(root, bucket))
 
@@ -168,9 +168,9 @@ def _interrupted(
 def _document(raster_path: Path, bucket: str) -> dict:
     """Return the stored document of ``raster_path``'s stem in the bucket ``bucket``."""
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.dataset_layout import dataset_root_of
+    from tcip_mcp.dataset_layout import image_capture
 
-    root = dataset_root_of(raster_path)
+    root, _capture = image_capture(raster_path)
     assert root is not None
     key = read_bucket(root, bucket).document_key(raster_path.stem)
     assert key is not None
