@@ -684,3 +684,31 @@ def test_child_pythonpath_carries_sys_path_and_the_existing_env_value(
 
     assert extra_dir in entries
     assert entries[-1] == "/already/set/path"
+
+
+@pytest.mark.parametrize(("seen", "placed"), [(True, "cuda"), (False, "cpu")])
+def test_an_unstated_device_places_on_cuda_only_when_torch_sees_one(
+    monkeypatch: pytest.MonkeyPatch, seen: bool, placed: str
+) -> None:
+    from tcip_mcp.pipelines.model_build import placement
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: seen)
+
+    assert placement(None) == torch.device(placed)
+
+
+def test_a_stated_device_is_placed_as_stated_while_torch_sees_cuda(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tcip_mcp.pipelines.model_build import placement
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+
+    assert placement("cpu") == torch.device("cpu")
+
+
+def test_a_stated_empty_device_is_refused_by_torch() -> None:
+    from tcip_mcp.pipelines.model_build import placement
+
+    with pytest.raises(RuntimeError, match="must not be empty"):
+        placement("")

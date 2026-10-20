@@ -48,13 +48,18 @@ describe("applyAnnotateFocus", () => {
       selection: selection({ subject: "bush", date: "2026-03-02" }),
     });
 
-    await applyAnnotateFocus({
-      dataset_root: "/ws/proj",
-      subject: "bush",
-      date: "2026-03-02",
-      image_index: 47,
-      mode: "polygon",
-    });
+    const outcome = await applyAnnotateFocus(
+      {
+        dataset_root: "/ws/proj",
+        subject: "bush",
+        date: "2026-03-02",
+        image_index: 47,
+        mode: "polygon",
+      },
+      () => true,
+    );
+
+    expect(outcome).toBe("adopted");
 
     // Switched the dataset (identity differed).
     expect(api.dataset.select).toHaveBeenCalledTimes(1);
@@ -78,13 +83,17 @@ describe("applyAnnotateFocus", () => {
       selection: newIdentity,
     });
 
-    await applyAnnotateFocus({
-      dataset_root: "/ws/proj",
-      subject: "bush",
-      date: "2026-03-02",
-      image_index: 47,
-      mode: "polygon",
-    });
+    const outcome = await applyAnnotateFocus(
+      {
+        dataset_root: "/ws/proj",
+        subject: "bush",
+        date: "2026-03-02",
+        image_index: 47,
+        mode: "polygon",
+      },
+      () => true,
+    );
+    expect(outcome).toBe("adopted");
 
     // Emulate the backend's /select broadcast landing after the local setters: same identity
     // now, so mergeSnapshot must keep the local (focus) index, not reset to 0.
@@ -107,14 +116,18 @@ describe("applyAnnotateFocus", () => {
       current_image_index: 0,
     });
 
-    await applyAnnotateFocus({
-      dataset_root: "/ws/proj",
-      subject: "bush",
-      date: "2026-03-02",
-      image_index: 12,
-      mode: "polygon",
-    });
+    const outcome = await applyAnnotateFocus(
+      {
+        dataset_root: "/ws/proj",
+        subject: "bush",
+        date: "2026-03-02",
+        image_index: 12,
+        mode: "polygon",
+      },
+      () => true,
+    );
 
+    expect(outcome).toBe("adopted");
     expect(api.dataset.select).not.toHaveBeenCalled();
     const g = useStore.getState().gui;
     expect(g.dataset.current_image_index).toBe(12);
@@ -129,14 +142,18 @@ describe("applyAnnotateFocus", () => {
       selection: selection({ subject: "bush", date: "2026-03-02", bucket: "m1/2026-03-02" }),
     });
 
-    await applyAnnotateFocus({
-      dataset_root: "/ws/proj",
-      subject: "bush",
-      date: "2026-03-02",
-      bucket: "m1/2026-03-02",
-      proposal: 3,
-    });
+    const outcome = await applyAnnotateFocus(
+      {
+        dataset_root: "/ws/proj",
+        subject: "bush",
+        date: "2026-03-02",
+        bucket: "m1/2026-03-02",
+        proposal: 3,
+      },
+      () => true,
+    );
 
+    expect(outcome).toBe("adopted");
     expect(vi.mocked(api.dataset.select).mock.calls[0][0]).toMatchObject({
       bucket: "m1/2026-03-02",
     });
@@ -152,14 +169,50 @@ describe("applyAnnotateFocus", () => {
       label_problem: "label_documents['2026-02-11', 'IMG_0000'] under /ws/proj: is a list",
     });
 
-    await applyAnnotateFocus({
-      dataset_root: "/ws/proj",
-      subject: "subject_a",
-      date: "2026-02-11",
-    });
+    const outcome = await applyAnnotateFocus(
+      { dataset_root: "/ws/proj", subject: "subject_a", date: "2026-02-11" },
+      () => true,
+    );
 
+    expect(outcome).toBe("adopted");
     expect(pushToast).toHaveBeenCalledWith(
       "label_documents['2026-02-11', 'IMG_0000'] under /ws/proj: is a list",
     );
+  });
+
+  it("adopts nothing and answers declined-selected when the focus is no longer wanted once the selection resolves", async () => {
+    seedDataset({
+      dataset_root: "/ws/proj",
+      subject: "subject_a",
+      date: "2026-02-11",
+      current_image_index: 4,
+    });
+    vi.mocked(api.dataset.select).mockResolvedValue({
+      status: "ok",
+      selection: selection({ subject: "bush", date: "2026-03-02", bucket: "m1/2026-03-02" }),
+    });
+    let asked = 0;
+
+    const outcome = await applyAnnotateFocus(
+      {
+        dataset_root: "/ws/proj",
+        subject: "bush",
+        date: "2026-03-02",
+        bucket: "m1/2026-03-02",
+        image_index: 9,
+      },
+      () => asked++ === 0,
+    );
+
+    expect(outcome).toBe("declined-selected");
+    expect(api.dataset.select).toHaveBeenCalledTimes(1);
+    const g = useStore.getState().gui;
+    expect(g.dataset).toMatchObject({
+      subject: "subject_a",
+      date: "2026-02-11",
+      bucket: null,
+      current_image_index: 4,
+    });
+    expect(api.dataset.nav).not.toHaveBeenCalled();
   });
 });

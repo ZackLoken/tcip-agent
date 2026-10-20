@@ -654,6 +654,20 @@ def capture_env() -> Environment:
     )
 
 
+def placement(device: str | None) -> torch.device:
+    """Return the torch device a model runs on: ``device`` as stated, else ``cuda`` or ``cpu``.
+
+    An unstated ``device`` (``None``) places on ``cuda`` when torch sees one and on ``cpu``
+    otherwise. A stated one, empty included, is ``torch.device``'s as given, refused as torch
+    refuses it (``RuntimeError``).
+    """
+    import torch
+
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    return torch.device(device)
+
+
 SNAPSHOT_DIR = "model_src"
 """The run-directory subdirectory a bespoke run's copied source files land in."""
 

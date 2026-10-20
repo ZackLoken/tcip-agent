@@ -307,6 +307,7 @@ def test_the_overfit_probe_drives_the_model_with_objects_only(
         "detection",
         seed=0,
         deterministic=False,
+        device=torch.device("cpu"),
         sample_batch=batch,
         steps=2,
     )

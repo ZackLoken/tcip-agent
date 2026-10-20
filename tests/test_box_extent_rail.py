@@ -526,6 +526,7 @@ def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(
         tmp_path,
         str(image),
         model_name="sam",
+        actor=None,
         boxes=[
             {
                 "subject": "leaf",
@@ -582,7 +583,7 @@ def test_stage_proposals_refuses_a_shape_stating_no_confidence(
     )
 
     result = stage_proposals(
-        tmp_path, str(image), model_name="sam", **unscored
+        tmp_path, str(image), model_name="sam", actor=None, **unscored
     )
 
     assert "conf" in result.get("error", ""), result
@@ -612,7 +613,7 @@ def test_stage_proposals_refuses_a_shape_stating_no_subject_by_its_index(
     )
 
     result = stage_proposals(
-        tmp_path, str(image), model_name="sam", **unstated
+        tmp_path, str(image), model_name="sam", actor=None, **unstated
     )
 
     assert result.get("error", "").startswith(f"{shape} 0: "), result

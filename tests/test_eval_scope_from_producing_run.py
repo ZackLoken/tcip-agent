@@ -15,7 +15,6 @@ import pytest
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 if TYPE_CHECKING:
-    import torch
     from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.execution import Pass
@@ -105,7 +104,6 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
     def _fake(
         pass_: Pass,
         loader: DataLoader,
-        device: torch.device,
         **kw: float | TilingSpec | TraitEntry | None,
     ) -> dict:
         captured["ds"] = loader.dataset

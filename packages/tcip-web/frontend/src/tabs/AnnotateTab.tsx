@@ -4,6 +4,7 @@ import { Rect } from "react-konva";
 
 import { api, type SaveLabelsBody, SaveResult } from "@/api/client";
 import { subjectColor } from "@/api/subjects";
+import type { ProposePayload } from "@/api/types.generated";
 import { AnnotateLegend } from "@/components/annotate/AnnotateLegend";
 import { AnnotationShapes } from "@/components/annotate/AnnotationShapes";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
@@ -22,6 +23,7 @@ import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
 import { useRegionServes } from "@/hooks/useRegionServes";
+import { applyAnnotateFocus } from "@/lib/annotateFocus";
 import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 import { compositeParams } from "@/lib/bandSelection";
 import {
@@ -252,6 +254,56 @@ export function AnnotateTab() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proposalKey, hideProposals, proposalTick]);
+  // ── Engine prompts: a point, a box or a phrase asks for proposals, never an annotation ──
+  const [proposing, setProposing] = useState(false);
+  /** Send one prompt about the image in view, its proposals staged under the active subject; one
+   *  in flight refuses another. The answer's bucket is selected with the proposals shown only
+   *  while the tab is mounted on the selection and image the prompt was sent from; otherwise a
+   *  toast names the bucket, and whether it is now the selected one, and the view stays. */
+  async function sendPrompt(prompt: ProposePayload["prompt"]) {
+    const { dataset_root, date, subject, current_image_index } = dataset;
+    if (proposing || !imgPath || !dataset_root || !date || !requireSubject()) return;
+    const [sentFrom, sentName] = [imgPath, currentImageName];
+    setProposing(true);
+    try {
+      const answer = await api.annotate.propose({
+        image_path: sentFrom,
+        subject: activeSubject!,
+        user: useStore.getState().user,
+        prompt,
+      });
+      if (answer.bucket === null) {
+        useStore.getState().pushToast("The engine proposed nothing for this prompt.");
+        return;
+      }
+      const inView = () => {
+        const now = useStore.getState().gui.dataset;
+        return (
+          mountedRef.current &&
+          now.dataset_root === dataset_root &&
+          now.date === date &&
+          now.subject === subject &&
+          currentImage(now).path === sentFrom
+        );
+      };
+      const outcome = await applyAnnotateFocus(
+        { dataset_root, subject, date, bucket: answer.bucket, image_index: current_image_index },
+        inView,
+      );
+      const staged = `Proposals for ${sentName} were staged as ${answer.bucket}`;
+      if (outcome === "adopted") setHideProposals(false);
+      else if (outcome === "declined-unselected")
+        useStore.getState().pushToast(`${staged}; select it in Setup.`);
+      else useStore.getState().pushToast(`${staged}, now the selected bucket.`);
+    } catch (e) {
+      useStore
+        .getState()
+        .pushToast(`Could not propose: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      if (mountedRef.current) setProposing(false);
+    }
+  }
+
   const reviewing = !!bucket && !hideProposals && served?.key === proposalKey;
   const proposals = useMemo(() => (reviewing ? served.served.proposals : []), [reviewing, served]);
   const operatingPoint = reviewing ? served.served.operating_point : null;
@@ -1236,6 +1288,9 @@ export function AnnotateTab() {
       const box: Box = { x1, y1, x2, y2, subject: drawing.subject, attributes: {} };
       if (belowMinSide(x1, y1, x2, y2)) {
         useStore.getState().pushToast("Box too small to keep. Drag out a bigger area.");
+      } else if (annotateUi.prompt) {
+        // Armed, the drawn box is a prompt the engine answers and never a box of the labels.
+        void sendPrompt({ box: [x1, y1, x2, y2] });
       } else {
         counted(() => add("boxes", box));
       }
@@ -1257,16 +1312,16 @@ export function AnnotateTab() {
         setFocus(null);
         return;
       }
+      const x = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
+      const y = Math.max(0, Math.min(canvas.imgHeight || iy, iy));
+      // Armed, the click is a prompt the engine answers and never a point of the labels.
+      if (annotateUi.prompt) {
+        void sendPrompt({ point: [x, y] });
+        return;
+      }
       if (!requireSubject()) return;
       // One click commits it: a point has nothing to drag out and no second vertex to wait for.
-      counted(() =>
-        add("points", {
-          x: Math.max(0, Math.min(canvas.imgWidth || ix, ix)),
-          y: Math.max(0, Math.min(canvas.imgHeight || iy, iy)),
-          subject: activeSubject!,
-          attributes: {},
-        }),
-      );
+      counted(() => add("points", { x, y, subject: activeSubject!, attributes: {} }));
       return;
     }
     if (mode !== "polygon") return;
@@ -1479,6 +1534,8 @@ export function AnnotateTab() {
           dirty={canvas.dirty}
           subjectState={null}
           onComplete={(next) => void markComplete(next)}
+          proposing={proposing}
+          onPrompt={(prompt) => void sendPrompt(prompt)}
         />
         <div className="flex-1 flex items-center justify-center bg-tcip-canvas px-4">
           <div className="max-w-lg rounded-lg border border-tcip-border bg-tcip-panel px-5 py-4 text-center">
@@ -1515,6 +1572,8 @@ export function AnnotateTab() {
         onCompleteView={
           viewIsRegion && viewRect ? () => void markComplete(true, viewRect) : undefined
         }
+        proposing={proposing}
+        onPrompt={(prompt) => void sendPrompt(prompt)}
       />
       <ReviewStrip
         bucket={bucket ?? null}

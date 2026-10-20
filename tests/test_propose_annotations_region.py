@@ -16,28 +16,33 @@ from PIL import Image
 
 from tcip_annotation.state import RING_MIN_POINTS
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.pipelines.proposal import Proposal
 
 
 class PatchProposer:
     """A proposer that reports the red patch in the pixels it is handed."""
 
-    def propose(self, image_path: str, **params: object) -> list[dict]:
+    def propose(self, image_path: str, **params: object) -> Proposal:
         arr = np.asarray(Image.open(image_path).convert("RGB"))
         mask = (arr[:, :, 0] > 200) & (arr[:, :, 1] < 50) & (arr[:, :, 2] < 50)
         ys, xs = np.nonzero(mask)
         bx1, by1 = float(xs.min()), float(ys.min())
         bx2, by2 = float(xs.max() + 1), float(ys.max() + 1)
-        return [
-            {
-                "candidate_id": 0,
-                "bbox": [bx1, by1, bx2, by2],
-                "area": int(mask.sum()),
-                "score": 0.9,
-                "engine": "patch",
-                "engine_meta": {},
-                "rings": [[(bx1, by1), (bx2, by1), (bx2, by2), (bx1, by2)]],
-            }
-        ]
+        return Proposal(
+            [
+                {
+                    "candidate_id": 0,
+                    "bbox": [bx1, by1, bx2, by2],
+                    "area": int(mask.sum()),
+                    "score": 0.9,
+                    "engine_meta": {},
+                    "rings": [
+                        [(bx1, by1), (bx2, by1), (bx2, by2), (bx1, by2)]
+                    ],
+                }
+            ],
+            None,
+        )
 
 
 #: The upright (as-viewed) frame this fixture draws the patch against.
@@ -150,9 +155,9 @@ def test_region_scoped_proposal_lands_at_the_full_frame_coordinates(
         "grid_cells": ["B1", "C1"],
         "tile_size": TILE_SIZE,
     }
-    refused = propose_annotations(tmp_path, **region)
+    refused = propose_annotations(tmp_path, **region, actor=None)
     assert "overlap" in refused.get("error", ""), refused
-    result = propose_annotations(tmp_path, **region, overlap=0.0)
+    result = propose_annotations(tmp_path, **region, overlap=0.0, actor=None)
     assert "error" not in result, result
     assert result["candidate_count"] == 1
     bbox = result["candidates"][0]["bbox"]
@@ -180,7 +185,7 @@ def test_region_scoped_proposal_cleans_up_temp_crop_on_engine_failure(
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
     class BoomProposer:
-        def propose(self, image_path: str, **params: object) -> list[dict]:
+        def propose(self, image_path: str, **params: object) -> Proposal:
             raise RuntimeError("engine exploded")
 
     monkeypatch.setattr(
@@ -196,6 +201,7 @@ def test_region_scoped_proposal_cleans_up_temp_crop_on_engine_failure(
             grid_cells=["B1", "C1"],
             tile_size=TILE_SIZE,
             overlap=0.0,
+            actor=None,
         )
     after = set(Path(tempfile_gettempdir()).glob("tcip_propose_crop_*"))
     assert after - before == set(), (
@@ -298,6 +304,7 @@ class TestRegionFrameIsTheResolvedImageSources:
             grid_cells=["B1", "C1"],
             tile_size=TILE_SIZE,
             overlap=0.0,
+            actor=None,
         )
         assert "error" not in result, result
         assert result["candidates"][0]["bbox"] == [float(v) for v in PATCH_BOX]
@@ -338,7 +345,7 @@ class TestRegionFrameIsTheResolvedImageSources:
         )
 
         class NeverProposer:
-            def propose(self, image_path: str, **params: object) -> list[dict]:
+            def propose(self, image_path: str, **params: object) -> Proposal:
                 raise AssertionError(
                     "the engine ran on a source with no RGB frame"
                 )
@@ -354,6 +361,7 @@ class TestRegionFrameIsTheResolvedImageSources:
             grid_cells=["B1"],
             tile_size=TILE_SIZE,
             overlap=0.0,
+            actor=None,
         )
         assert "2 band(s) of uint16" in result.get("error", "")
 
@@ -385,20 +393,22 @@ class TestRegionFrameIsTheResolvedImageSources:
         crops: list[tuple[str, tuple[int, int]]] = []
 
         class RecordingProposer:
-            def propose(self, image_path: str, **params: object) -> list[dict]:
+            def propose(self, image_path: str, **params: object) -> Proposal:
                 with Image.open(image_path) as im:
                     crops.append((im.mode, im.size))
-                return [
-                    {
-                        "candidate_id": 0,
-                        "bbox": [1.0, 0.0, 3.0, 1.0],
-                        "area": 2,
-                        "score": 0.9,
-                        "engine": "patch",
-                        "engine_meta": {},
-                        "rings": [[(1, 0), (3, 0), (3, 1), (1, 1)]],
-                    }
-                ]
+                return Proposal(
+                    [
+                        {
+                            "candidate_id": 0,
+                            "bbox": [1.0, 0.0, 3.0, 1.0],
+                            "area": 2,
+                            "score": 0.9,
+                            "engine_meta": {},
+                            "rings": [[(1, 0), (3, 0), (3, 1), (1, 1)]],
+                        }
+                    ],
+                    None,
+                )
 
         monkeypatch.setattr(
             proposal, "resolve_proposer", lambda engine: RecordingProposer()
@@ -411,6 +421,7 @@ class TestRegionFrameIsTheResolvedImageSources:
             grid_cells=["A1"],
             tile_size=1024,
             overlap=0.0,
+            actor=None,
         )
         assert "error" not in result, result
         assert crops == [("RGB", (1024, 1))]
@@ -441,18 +452,22 @@ class TestWholeFrameDefaultIsUnaffected:
         )
 
         class OneBoxProposer:
-            def propose(self, image_path: str, **params: object) -> list[dict]:
-                return [
-                    {
-                        "candidate_id": 0,
-                        "bbox": [10.0, 10.0, 30.0, 30.0],
-                        "area": 400,
-                        "score": 0.9,
-                        "engine": "stub",
-                        "engine_meta": {},
-                        "rings": [[(10, 10), (30, 10), (30, 30), (10, 30)]],
-                    }
-                ]
+            def propose(self, image_path: str, **params: object) -> Proposal:
+                return Proposal(
+                    [
+                        {
+                            "candidate_id": 0,
+                            "bbox": [10.0, 10.0, 30.0, 30.0],
+                            "area": 400,
+                            "score": 0.9,
+                            "engine_meta": {},
+                            "rings": [
+                                [(10, 10), (30, 10), (30, 30), (10, 30)]
+                            ],
+                        }
+                    ],
+                    None,
+                )
 
         monkeypatch.setattr(
             proposal, "resolve_proposer", lambda engine: OneBoxProposer()
@@ -462,7 +477,7 @@ class TestWholeFrameDefaultIsUnaffected:
         Image.new("RGB", (64, 64), color=(50, 50, 50)).save(img_path)
 
         result = proposal_tools.propose_annotations(
-            tmp_path, image_path=str(img_path), engine="stub"
+            tmp_path, image_path=str(img_path), engine="stub", actor=None
         )
         assert "error" not in result, result
         assert called == []
@@ -478,18 +493,20 @@ class TestWholeFrameDefaultIsUnaffected:
         from tcip_mcp.tools import proposal_tools
 
         class OneBoxProposer:
-            def propose(self, image_path: str, **params: object) -> list[dict]:
-                return [
-                    {
-                        "candidate_id": 0,
-                        "bbox": [1.0, 1.0, 2.0, 2.0],
-                        "area": 1,
-                        "score": 0.5,
-                        "engine": "stub",
-                        "engine_meta": {},
-                        "rings": [[(1, 1), (2, 1), (2, 2)]],
-                    }
-                ]
+            def propose(self, image_path: str, **params: object) -> Proposal:
+                return Proposal(
+                    [
+                        {
+                            "candidate_id": 0,
+                            "bbox": [1.0, 1.0, 2.0, 2.0],
+                            "area": 1,
+                            "score": 0.5,
+                            "engine_meta": {},
+                            "rings": [[(1, 1), (2, 1), (2, 2)]],
+                        }
+                    ],
+                    None,
+                )
 
         monkeypatch.setattr(
             proposal, "resolve_proposer", lambda engine: OneBoxProposer()
@@ -501,12 +518,21 @@ class TestWholeFrameDefaultIsUnaffected:
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
         result = proposal_tools.propose_annotations(
-            tmp_path, image_path=str(img_path), engine="stub"
+            tmp_path, image_path=str(img_path), engine="stub", actor=None
         )
         assert "error" not in result, result
 
-        envelope = ts.read(proposal_tools._staging_key_for(str(img_path)))
-        assert set(envelope) == {"engine", "candidates", "image_identity"}
+        envelope = ts.read(
+            proposal_tools._staging_key_for(
+                str(img_path), result["staging_id"]
+            )
+        )
+        assert set(envelope) == {
+            "engine",
+            "candidates",
+            "image_identity",
+            "execution",
+        }
 
     def test_a_candidate_whose_rings_are_no_polygon_is_refused_where_it_arrives(
         self,
@@ -523,18 +549,20 @@ class TestWholeFrameDefaultIsUnaffected:
         from tcip_mcp.tools import proposal_tools
 
         class TwoPointProposer:
-            def propose(self, image_path: str, **params: object) -> list[dict]:
-                return [
-                    {
-                        "candidate_id": 0,
-                        "bbox": [1.0, 1.0, 2.0, 2.0],
-                        "area": 1,
-                        "score": 0.5,
-                        "engine": "stub",
-                        "engine_meta": {},
-                        "rings": [[(1, 1), (2, 2)]],
-                    }
-                ]
+            def propose(self, image_path: str, **params: object) -> Proposal:
+                return Proposal(
+                    [
+                        {
+                            "candidate_id": 0,
+                            "bbox": [1.0, 1.0, 2.0, 2.0],
+                            "area": 1,
+                            "score": 0.5,
+                            "engine_meta": {},
+                            "rings": [[(1, 1), (2, 2)]],
+                        }
+                    ],
+                    None,
+                )
 
         monkeypatch.setattr(
             proposal, "resolve_proposer", lambda engine: TwoPointProposer()
@@ -545,17 +573,14 @@ class TestWholeFrameDefaultIsUnaffected:
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
         result = proposal_tools.propose_annotations(
-            tmp_path, image_path=str(img_path), engine="stub"
+            tmp_path, image_path=str(img_path), engine="stub", actor=None
         )
 
         assert f"{RING_MIN_POINTS} or more points" in result.get(
             "error", ""
         ), result
         assert (
-            ts.read(
-                proposal_tools._staging_key_for(str(img_path)), default=None
-            )
-            is None
+            ts.keys(proposal_tools.PROPOSAL_STAGING_STORE, str(tmp_path)) == []
         )
 
     def test_an_ordinary_candidate_is_still_staged(
@@ -569,18 +594,20 @@ class TestWholeFrameDefaultIsUnaffected:
         from tcip_mcp.tools import proposal_tools
 
         class OneBoxProposer:
-            def propose(self, image_path: str, **params: object) -> list[dict]:
-                return [
-                    {
-                        "candidate_id": 0,
-                        "bbox": [1.0, 1.0, 2.0, 2.0],
-                        "area": 1,
-                        "score": 0.5,
-                        "engine": "stub",
-                        "engine_meta": {},
-                        "rings": [[(1, 1), (2, 1), (2, 2)]],
-                    }
-                ]
+            def propose(self, image_path: str, **params: object) -> Proposal:
+                return Proposal(
+                    [
+                        {
+                            "candidate_id": 0,
+                            "bbox": [1.0, 1.0, 2.0, 2.0],
+                            "area": 1,
+                            "score": 0.5,
+                            "engine_meta": {},
+                            "rings": [[(1, 1), (2, 1), (2, 2)]],
+                        }
+                    ],
+                    None,
+                )
 
         monkeypatch.setattr(
             proposal, "resolve_proposer", lambda engine: OneBoxProposer()
@@ -592,12 +619,16 @@ class TestWholeFrameDefaultIsUnaffected:
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
         result = proposal_tools.propose_annotations(
-            tmp_path, image_path=str(img_path), engine="stub"
+            tmp_path, image_path=str(img_path), engine="stub", actor=None
         )
 
         assert "error" not in result, result
         envelope = proposal_tools.ProposalStaging.model_validate(
-            ts.read(proposal_tools._staging_key_for(str(img_path)))
+            ts.read(
+                proposal_tools._staging_key_for(
+                    str(img_path), result["staging_id"]
+                )
+            )
         )
         assert envelope.candidates[0].bbox == (1.0, 1.0, 2.0, 2.0)
 
@@ -611,17 +642,19 @@ class TestWholeFrameDefaultIsUnaffected:
         from tcip_mcp.tools import proposal_tools
 
         class UnscoredProposer:
-            def propose(self, image_path: str, **params: object) -> list[dict]:
-                return [
-                    {
-                        "candidate_id": 0,
-                        "bbox": [1.0, 1.0, 2.0, 2.0],
-                        "area": 1,
-                        "engine": "unscored",
-                        "engine_meta": {},
-                        "rings": [[(1, 1), (2, 1), (2, 2)]],
-                    }
-                ]
+            def propose(self, image_path: str, **params: object) -> Proposal:
+                return Proposal(
+                    [
+                        {
+                            "candidate_id": 0,
+                            "bbox": [1.0, 1.0, 2.0, 2.0],
+                            "area": 1,
+                            "engine_meta": {},
+                            "rings": [[(1, 1), (2, 1), (2, 2)]],
+                        }
+                    ],
+                    None,
+                )
 
         register_proposal_engine("unscored", UnscoredProposer())  # type: ignore[arg-type]
         images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -630,13 +663,10 @@ class TestWholeFrameDefaultIsUnaffected:
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
         result = proposal_tools.propose_annotations(
-            tmp_path, image_path=str(img_path), engine="unscored"
+            tmp_path, image_path=str(img_path), engine="unscored", actor=None
         )
 
         assert "0.score" in result.get("error", ""), result
         assert (
-            ts.read(
-                proposal_tools._staging_key_for(str(img_path)), default=None
-            )
-            is None
+            ts.keys(proposal_tools.PROPOSAL_STAGING_STORE, str(tmp_path)) == []
         )

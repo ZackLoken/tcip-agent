@@ -129,11 +129,15 @@ derive from the data, not from the phrasing (see
 There must be something to train on. Three paths (see
 `packages/tcip-mcp/src/tcip_mcp/knowledge/annotation.md`):
 
-- Agent/MCP path: `propose_annotations` a starter batch with an `engine` you name (a registered
-  one or a dotted `module:factory` you bring; none ships built in) → review the candidates visually
+- Agent/MCP path: `propose_annotations` a starter batch with an `engine` you name (`sam` or
+  `grounding_dino`, which ship registered and take their prompts in `engine_params`, the
+  detector also its merge's `postprocess` and `cross_tile_nms`, run by the platform's tiled
+  inference pass on a lattice its own whole-frame pass derives unless stated, another
+  registered one, or a dotted `module:factory` you bring) → review the candidates visually
   (`vision_tools.visualize`, a library call, or `tcip visualize`, then your client's
   image-capable read tool on the returned `image_path`) → `stage_proposals`
-  with `assignments=[...]` for the good ones. `grid_cells=[...]` restricts a pass to a region of a large or crowded image
+  with `assignments={staging_id, candidates: [...]}` for the good ones, `staging_id` the one the
+  run answered. `grid_cells=[...]` restricts a pass to a region of a large or crowded image
   instead of the whole frame. Trial engines and keep the one whose high-conf
   proposals survive review. An empty label document is not a negative on its own; it trains as
   one only once the breeder marks that image complete for the subject (a completion mark in the

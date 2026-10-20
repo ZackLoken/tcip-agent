@@ -263,6 +263,7 @@ def test_the_proposals_route_confines_the_image_whose_bucket_it_reads(
         inside,
         str(image),
         model_name="sketch",
+        actor=None,
         boxes=[
             {
                 "subject": "bud",

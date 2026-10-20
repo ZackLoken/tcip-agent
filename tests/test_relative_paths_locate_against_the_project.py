@@ -180,7 +180,15 @@ def _save_annotations(project: Path) -> Path:
     return result
 
 
-def _stage_proposals(project: Path) -> Path:
+def _stage_proposals(project: Path) -> dict:
+    """Stage one box on the image and return the answer, its bucket as its record reads back.
+
+    The bucket's name carries the staging's own fresh id, so the answer holds the documents the
+    record names in its place.
+    """
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import parse_image_path
+    from tcip_mcp.registry_paths import located
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     box = {
@@ -191,9 +199,13 @@ def _stage_proposals(project: Path) -> Path:
         "w": 0.25,
         "h": 0.25,
     }
-    result = stage_proposals(project, IMAGE, boxes=[box], model_name="stub")
+    result = stage_proposals(
+        project, IMAGE, boxes=[box], model_name="stub", actor=None
+    )
     assert "error" not in result, result
-    return result
+    root = parse_image_path(located(IMAGE, project))[0]
+    published = read_bucket(root, result.pop("bucket"))
+    return {**result, "documents": published.documents}
 
 
 def _visualize(project: Path) -> Path:
@@ -381,8 +393,8 @@ def _calibrate_physical_scale(project: Path) -> Path:
         Path(_relative(selection, project)),
         Path(_relative(table, project)),
     )
-    assert scale["passed"] is True, scale
     recorded = read_assessment(project, scale["assessment_id"])
+    assert recorded.passed, scale
     (cited,) = [
         f.ground_truth
         for f in recorded.reference.ground_truth

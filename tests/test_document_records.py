@@ -98,6 +98,7 @@ def test_a_save_commits_its_verdicts_and_its_document_together_or_neither(
         tmp_path,
         str(image),
         model_name="detector",
+        actor=None,
         boxes=[
             {
                 "subject": BUD,
@@ -438,6 +439,7 @@ def test_the_dump_decodes_to_the_documents_the_platform_reads(
         tmp_path,
         str(images[2]),
         model_name="detector",
+        actor=None,
         boxes=[
             {
                 "subject": BUD,

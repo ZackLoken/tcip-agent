@@ -152,10 +152,11 @@ def make_uncertainty_scorer(task: str) -> object:
 
 def make_proposer() -> object:
     """Build a proposer whose every proposal is empty, as an agent's dotted factory would."""
+    from tcip_mcp.pipelines.proposal import Proposal
 
     class _Empty:
-        def propose(self, image_path: str, **params: object) -> list[dict]:
-            return []
+        def propose(self, image_path: str, **params: object) -> Proposal:
+            return Proposal([], None)
 
     return _Empty()
 
@@ -194,12 +195,16 @@ def test_a_dotted_scorer_factory_building_anything_else_is_refused_naming_it() -
 
 def test_a_dotted_proposal_factory_building_a_proposer_is_admitted() -> None:
     """A dotted factory that builds a ``Proposer`` resolves to what it built."""
-    from tcip_mcp.pipelines.proposal import Proposer, resolve_proposer
+    from tcip_mcp.pipelines.proposal import (
+        Proposal,
+        Proposer,
+        resolve_proposer,
+    )
 
     built = resolve_proposer(f"{__name__}:make_proposer")
 
     assert isinstance(built, Proposer)
-    assert built.propose("image.png") == []
+    assert built.propose("image.png") == Proposal([], None)
 
 
 def test_a_dotted_proposal_factory_building_anything_else_is_refused_naming_it() -> (

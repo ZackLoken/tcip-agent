@@ -35,6 +35,7 @@ from tcip_mcp.pipelines.model_build import (
     SNAPSHOT_KEY,
     STATE_DICT_KEY,
     build_from_model_source,
+    placement,
 )
 from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 from tcip_mcp.pipelines.schemas import (
@@ -97,16 +98,6 @@ def batch_row_ends(n_batches: int) -> set[int]:
     """
     rows = min(BATCH_ROWS_PER_EPOCH, n_batches)
     return {math.ceil(k * n_batches / rows) for k in range(1, rows + 1)}
-
-
-def run_device(spec: TrainConfigSchema) -> torch.device:
-    """Return the device a validated config (``schemas.train_config``) trains on.
-
-    That is its ``device``, or cuda when available and cpu otherwise.
-    """
-    return torch.device(
-        spec.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    )
 
 
 def _warmup_starts(
@@ -855,7 +846,7 @@ def train(
     ``default_trainer_regime`` states, refusing naming whatever is unstated), and its checkpoints
     carry that spec and the run's source snapshot (:func:`checkpoint_stamp`):
 
-    - ``device`` (str, default cuda-if-available else cpu)
+    - ``device`` (str or ``None``), placed by ``model_build.placement``.
     - ``seed`` (int) and ``deterministic`` (bool), RNG seeding before model build.
     - ``mixed_precision`` (bool), AMP, only when ``device`` is cuda.
     - ``stages`` (list of ``{freeze_to, gradient_accumulation_steps}``), at least one.
@@ -927,7 +918,7 @@ def train(
         out_dir.mkdir(parents=True, exist_ok=True)
         stamp = checkpoint_stamp(run)
 
-        device = run_device(spec)
+        device = placement(spec.device)
 
         # Seed before model build so pretrained=False init + shuffle are reproducible.
         set_seed(spec.seed, deterministic=spec.deterministic)

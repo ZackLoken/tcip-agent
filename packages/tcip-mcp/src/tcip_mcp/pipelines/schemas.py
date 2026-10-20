@@ -849,7 +849,7 @@ class TrainConfigSchema(_Recorded):
     """``None`` draws every sample once an epoch in shuffled order."""
     augmentation: AugmentationSpec | None = None
     device: str | None = None
-    """``None``: cuda when available, else cpu."""
+    """The device the run trains on, placed by ``model_build.placement``."""
     seed: int
     deterministic: bool
     """Whether cuDNN runs its deterministic algorithms."""

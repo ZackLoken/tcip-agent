@@ -141,7 +141,9 @@ def _real_ordinal_target(tmp_path: Path) -> dict:
 
 def _synthetic_detection_target() -> dict:
     recorder = _DetectionTargetRecorder()
-    check_model_contract(recorder, "detection", dims=DET_DIMS)
+    check_model_contract(
+        recorder, "detection", device=torch.device("cpu"), dims=DET_DIMS
+    )
     assert len(recorder.seen) == 1, (
         "the contract never ran a train-mode forward"
     )
@@ -175,7 +177,10 @@ def test_synthetic_detection_box_covers_a_positive_area_inside_the_frame() -> (
     width, height = 96, 48
     recorder = _DetectionTargetRecorder()
     check_model_contract(
-        recorder, "detection", dims={**DET_DIMS, "img_size": (width, height)}
+        recorder,
+        "detection",
+        device=torch.device("cpu"),
+        dims={**DET_DIMS, "img_size": (width, height)},
     )
     boxes = recorder.seen[0][0]["boxes"]
 
@@ -207,7 +212,9 @@ def test_synthetic_ordinal_target_carries_only_keys_the_real_loader_carries(
 ) -> None:
     """The synthetic ordinal rank target carries only keys the real ordinal loader emits."""
     probe = _OrdinalProbe(num_ranks=4)
-    check_model_contract(probe, "ordinal", dims=ORD_DIMS)
+    check_model_contract(
+        probe, "ordinal", device=torch.device("cpu"), dims=ORD_DIMS
+    )
     assert len(probe.seen) == 1, "the contract never ran a train-mode forward"
     synth = probe.seen[0]
     real = _real_ordinal_target(tmp_path)
@@ -222,7 +229,10 @@ def test_an_ordinal_head_consumes_the_synthetic_ordinal_batch() -> None:
     The report is ok, carries a training loss, and names a dict eval output.
     """
     report = check_model_contract(
-        _OrdinalProbe(num_ranks=4), "ordinal", dims=ORD_DIMS
+        _OrdinalProbe(num_ranks=4),
+        "ordinal",
+        device=torch.device("cpu"),
+        dims=ORD_DIMS,
     )
 
     assert report["ok"], report["issues"]
@@ -260,7 +270,9 @@ def test_synthetic_detection_batch_is_assembled_by_the_loader_collate(
     the same Python type.
     """
     recorder = _DetectionTargetRecorder()
-    check_model_contract(recorder, "detection", dims=DET_DIMS)
+    check_model_contract(
+        recorder, "detection", device=torch.device("cpu"), dims=DET_DIMS
+    )
     assert len(recorder.seen) == 1, (
         "the contract never ran a train-mode forward"
     )
@@ -288,7 +300,9 @@ def test_synthetic_ordinal_batch_is_assembled_by_the_loader_collate(
     Each target is batched along the same axis as the images.
     """
     recorder = _BatchRecorder()
-    check_model_contract(recorder, "ordinal", dims=ORD_DIMS)
+    check_model_contract(
+        recorder, "ordinal", device=torch.device("cpu"), dims=ORD_DIMS
+    )
     assert len(recorder.seen) == 1, (
         "the contract never ran a train-mode forward"
     )
@@ -324,7 +338,9 @@ def test_real_models_still_smoke_green_on_the_collated_batch() -> None:
     detector = bespoke_models.build_bespoke_detection(
         num_classes=1, **detector_values()
     )
-    report = check_model_contract(detector, "detection", dims=DET_DIMS)
+    report = check_model_contract(
+        detector, "detection", device=torch.device("cpu"), dims=DET_DIMS
+    )
     assert report["ok"], report["issues"]
     assert report["eval_output_type"] == "list[dict]"
 
@@ -335,5 +351,6 @@ def test_real_models_still_smoke_green_on_the_collated_batch() -> None:
         dims=ORD_DIMS,
         seed=0,
         deterministic=False,
+        device=torch.device("cpu"),
     )
     assert learned["passed"], learned["issue"]

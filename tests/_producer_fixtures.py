@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.model_build import SourceLayout
     from tcip_mcp.pipelines.schemas import DataSpec
     from tcip_mcp.subject_registry import SubjectRegistry
+    from tcip_mcp.tools.proposal_tools import StagedAssignments
     from tcip_store import Version
 
     Color = float | tuple[int, ...]
@@ -598,3 +599,19 @@ def fake_popen(
         lambda *a, **k: {},
     )
     return _RecordedChild
+
+
+def kept(proposed: dict, *assigned: tuple[int, str]) -> StagedAssignments:
+    """Return the assignments keeping each ``(candidate_id, subject)`` of the run ``proposed``.
+
+    ``proposed`` is a ``propose_annotations`` answer, whose ``staging_id`` names the run.
+    """
+    from tcip_mcp.tools.proposal_tools import Assignment, StagedAssignments
+
+    return StagedAssignments(
+        staging_id=proposed["staging_id"],
+        candidates=[
+            Assignment(candidate_id=candidate_id, subject=subject)
+            for candidate_id, subject in assigned
+        ],
+    )

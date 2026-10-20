@@ -7,6 +7,7 @@ import type { LoadedLabels, SaveResult } from "@/api/client";
 import { StructuredRefusalError } from "@/api/http";
 import { sessionsApi } from "@/api/sessions";
 import { subjectsApi, subjectColor } from "@/api/subjects";
+import type { DetectorParams } from "@/api/types.generated";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { CUT_MISSES_REFUSAL } from "@/lib/polygonGeometry";
@@ -100,17 +101,29 @@ vi.mock("@/components/AnnotateToolbar", () => ({
     subjectState: string | null;
     onComplete: (next: boolean) => void;
     onCancelSave: () => void;
+    proposing: boolean;
+    onPrompt: (prompt: DetectorParams) => void;
   }) => (
     <div
       data-testid="toolbar"
       data-band-count={props.bandsInfo?.band_count ?? ""}
       data-subject-state={props.subjectState ?? ""}
+      data-proposing={props.proposing}
     >
       <button onClick={() => props.onComplete(true)}>toolbar-complete</button>
       <button onClick={props.onCancelSave}>toolbar-cancel-save</button>
+      <button onClick={() => props.onPrompt(PHRASE_PROMPT)}>toolbar-phrase</button>
     </div>
   ),
 }));
+
+const PHRASE_PROMPT: DetectorParams = {
+  phrase: "open bud",
+  box_threshold: 0.3,
+  text_threshold: 0.2,
+  postprocess: "nms",
+  cross_tile_nms: 0.6,
+};
 
 // The review strip's proposals toggle, the one place proposals are shown or hidden.
 const toggleProposals = () => fireEvent.click(screen.getByRole("checkbox", { name: "Proposals" }));
@@ -3016,6 +3029,180 @@ describe("AnnotateTab flags", () => {
     pressSave();
     await flush();
     expect(screen.getByRole("button", { name: /^.?Flag$/ })).toBeInTheDocument();
+  });
+});
+
+describe("AnnotateTab engine prompt", () => {
+  const stage = () => screen.getByTestId("canvas-stage");
+  const BUCKET = "sam/2026-01-01/img1/staging_1_abcdef";
+
+  async function mountArmed(mode: "point" | "box") {
+    useStore.setState((s) => ({ gui: { ...s.gui, mode } }));
+    useStore.getState().setPrompt(true);
+    const propose = vi
+      .spyOn(api.annotate, "propose")
+      .mockResolvedValue({ bucket: BUCKET, proposal_count: 2 });
+    const select = vi.spyOn(api.dataset, "select").mockImplementation((body) =>
+      Promise.resolve({
+        status: "ok",
+        selection: { ...useStore.getState().gui.dataset, bucket: body.bucket ?? null },
+        label_problem: null,
+      }),
+    );
+    vi.spyOn(api.dataset, "nav").mockResolvedValue({ status: "ok", current_image_index: 0 });
+    const proposals = vi.spyOn(api.annotate, "proposals").mockResolvedValue({
+      bucket: BUCKET,
+      operating_point: { conf: null, reason: "" },
+      proposals: [],
+    });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    return { propose, select, proposals };
+  }
+
+  it("armed, a click in point mode sends a point prompt and places no point", async () => {
+    const { propose } = await mountArmed("point");
+    fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    await flush();
+
+    expect(propose).toHaveBeenCalledWith({
+      image_path: "C:/data/images/2026-01-01/img1.jpg",
+      subject: "subject_a",
+      user: "grower",
+      prompt: { point: [120, 340] },
+    });
+    expect(useStore.getState().canvas.points).toEqual([]);
+  });
+
+  it("armed, a box drawn in box mode sends a box prompt and adds no box", async () => {
+    const { propose } = await mountArmed("box");
+    fireEvent.mouseDown(stage(), { clientX: 10, clientY: 20, button: 0 });
+    fireEvent.mouseUp(stage(), { clientX: 90, clientY: 80 });
+    await flush();
+
+    expect(propose).toHaveBeenCalledWith({
+      image_path: "C:/data/images/2026-01-01/img1.jpg",
+      subject: "subject_a",
+      user: "grower",
+      prompt: { box: [10, 20, 90, 80] },
+    });
+    expect(useStore.getState().canvas.boxes).toEqual([]);
+  });
+
+  it("sends the phrase with both thresholds and the tiling the control states", async () => {
+    const { propose } = await mountArmed("box");
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-phrase" }));
+    await flush();
+
+    expect(propose).toHaveBeenCalledWith({
+      image_path: "C:/data/images/2026-01-01/img1.jpg",
+      subject: "subject_a",
+      user: "grower",
+      prompt: PHRASE_PROMPT,
+    });
+  });
+
+  it("selects the answered bucket on the current selection and shows its proposals", async () => {
+    const { select, proposals } = await mountArmed("point");
+    fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    await flush();
+    await flush();
+
+    expect(select).toHaveBeenCalledWith({
+      dataset_root: "C:/data",
+      subject: "subject_a",
+      date: "2026-01-01",
+      bucket: BUCKET,
+    });
+    await waitFor(() =>
+      expect(proposals).toHaveBeenCalledWith("C:/data/images/2026-01-01/img1.jpg", BUCKET),
+    );
+    expect(screen.getByRole("checkbox", { name: "Proposals" })).toBeChecked();
+  });
+
+  it("refuses a second prompt while one is in flight", async () => {
+    const { propose } = await mountArmed("point");
+    propose.mockReturnValue(new Promise(() => {}));
+    fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    await flush();
+    fireEvent.click(stage(), { clientX: 200, clientY: 200 });
+    await flush();
+
+    expect(propose).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("toolbar")).toHaveAttribute("data-proposing", "true");
+  });
+
+  it("an answer arriving after the person moved on selects nothing and names its bucket", async () => {
+    const { propose, select } = await mountArmed("point");
+    let answer: (a: { bucket: string; proposal_count: number }) => void = () => {};
+    propose.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    await flush();
+    act(() => {
+      const s = useStore.getState();
+      s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
+    });
+    await flush();
+    act(() => answer({ bucket: BUCKET, proposal_count: 2 }));
+    await flush();
+
+    expect(useStore.getState().gui.dataset.current_image_index).toBe(1);
+    expect(select).not.toHaveBeenCalled();
+    expect(useStore.getState().toasts.at(-1)?.message).toBe(
+      `Proposals for img1.jpg were staged as ${BUCKET}; select it in Setup.`,
+    );
+  });
+
+  it("a selection resolving after the person moved on adopts nothing and names its bucket as selected", async () => {
+    const { select } = await mountArmed("point");
+    let selected: (r: Awaited<ReturnType<typeof api.dataset.select>>) => void = () => {};
+    select.mockReturnValueOnce(new Promise((resolve) => (selected = resolve)));
+    fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    await flush();
+    expect(select).toHaveBeenCalledTimes(1);
+    act(() => {
+      const s = useStore.getState();
+      s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
+    });
+    await flush();
+    act(() =>
+      selected({
+        status: "ok",
+        selection: { ...useStore.getState().gui.dataset, current_image_index: 0, bucket: BUCKET },
+        label_problem: null,
+      }),
+    );
+    await flush();
+    await flush();
+
+    expect(useStore.getState().gui.dataset.current_image_index).toBe(1);
+    expect(useStore.getState().gui.dataset.bucket).toBeNull();
+    expect(useStore.getState().toasts.at(-1)?.message).toBe(
+      `Proposals for img1.jpg were staged as ${BUCKET}, now the selected bucket.`,
+    );
+  });
+
+  it("a refused prompt reaches the person as a toast carrying the route's text", async () => {
+    const { propose, select } = await mountArmed("point");
+    propose.mockRejectedValue(new Error("no checkpoint at the stated name"));
+    fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    await flush();
+
+    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/no checkpoint at the stated name/);
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it("disarmed, a click in point mode places a point and sends no prompt", async () => {
+    const { propose } = await mountArmed("point");
+    act(() => useStore.getState().setPrompt(false));
+    fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    await flush();
+
+    expect(propose).not.toHaveBeenCalled();
+    expect(useStore.getState().canvas.points).toEqual([
+      { x: 120, y: 340, subject: "subject_a", attributes: {} },
+    ]);
   });
 });
 

@@ -46,6 +46,7 @@ dependencies:
       - torch>=2.2
       - torchvision>=0.17
       - timm>=1.0
+      - transformers>=5  # the sam and grounding_dino proposal engines
       - opencv-python>=4.12.0.88  # sahi's own OpenCV; on Linux it imports libGL (libgl1)
       - scikit-image>=0.22
       - pycocotools>=2.0.7

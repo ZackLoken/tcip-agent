@@ -15,6 +15,7 @@ import pytest
 from pydantic import ValidationError
 
 import tcip_store as ts
+from tests._producer_fixtures import kept
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -136,7 +137,10 @@ def test_a_dataset_entry_missing_its_path_is_refused_naming_it(
 
 
 def _proposed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
-    """Propose the stub engine's one candidate on a dated image; return the image and candidate."""
+    """Propose the stub engine's one candidate on a dated image.
+
+    Returns the image, the candidate and the run's answer.
+    """
     from tcip_mcp.tools.proposal_tools import propose_annotations
     from tests.test_proposal_staging_record import (
         _candidate,
@@ -149,10 +153,10 @@ def _proposed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
     candidate = _candidate(0, 5.0)
     _install_stub(monkeypatch, [candidate])
     result = propose_annotations(
-        tmp_path, image_path=str(image), engine="stub"
+        tmp_path, image_path=str(image), engine="stub", actor=None
     )
     assert result["staged"] is True, result
-    return image, candidate
+    return image, candidate, result
 
 
 def test_a_staged_proposal_reads_back_as_the_engine_candidates_and_image_identity(
@@ -161,10 +165,10 @@ def test_a_staged_proposal_reads_back_as_the_engine_candidates_and_image_identit
     from tcip_mcp.pipelines.raster_source import SourceHeader, content_identity
     from tcip_mcp.tools.proposal_tools import ProposalStaging, _staging_key_for
 
-    image, candidate = _proposed(tmp_path, monkeypatch)
+    image, candidate, proposed = _proposed(tmp_path, monkeypatch)
 
     staging = ProposalStaging.model_validate(
-        ts.read(_staging_key_for(str(image)))
+        ts.read(_staging_key_for(str(image), proposed["staging_id"]))
     )
     with SourceHeader(image).open_at_route_count() as raster:
         identity = content_identity(raster)
@@ -180,8 +184,8 @@ def test_a_staged_proposal_missing_its_engine_is_refused_naming_it(
 ) -> None:
     from tcip_mcp.tools.proposal_tools import _staging_key_for, stage_proposals
 
-    image, _candidate = _proposed(tmp_path, monkeypatch)
-    key = _staging_key_for(str(image))
+    image, _candidate, proposed = _proposed(tmp_path, monkeypatch)
+    key = _staging_key_for(str(image), proposed["staging_id"])
     stored = dict(ts.read(key))
     del stored["engine"]
     ts.replace(key, stored)
@@ -190,7 +194,8 @@ def test_a_staged_proposal_missing_its_engine_is_refused_naming_it(
         stage_proposals(
             tmp_path,
             image_path=str(image),
-            assignments=[{"candidate_id": 0, "subject": "bud"}],
+            assignments=kept(proposed, (0, "bud")),
+            actor=None,
         )
 
 

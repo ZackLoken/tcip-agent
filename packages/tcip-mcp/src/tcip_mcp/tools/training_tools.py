@@ -230,6 +230,7 @@ def _preflight(
         try:
             from tcip_mcp.pipelines.model_build import (
                 build_from_model_source,
+                placement,
                 recorded_model_dims,
                 resolve_contract_dims,
             )
@@ -243,6 +244,7 @@ def _preflight(
                 update={"data": resolution.data}
             )
             task = resolved_spec.model_source.task
+            device = placement(resolved_spec.device)
             built_at = recorded_model_dims(resolved_spec)
             dims = resolve_contract_dims(
                 resolved_spec, built_at, resolution.geometry
@@ -253,7 +255,9 @@ def _preflight(
                 built_at,
                 resolution.geometry,
             )
-            report = check_model_contract(model, task, dims=dims)
+            report = check_model_contract(
+                model, task, device=device, dims=dims
+            )
             batch: Batch | None = None
             why_no_batch: str | None = None
             if report.get("not_smokeable"):
@@ -265,7 +269,7 @@ def _preflight(
                 else:
                     batch = real
                     report = check_model_contract(
-                        model, task, sample_batch=batch
+                        model, task, device=device, sample_batch=batch
                     )
             # ``dims`` shape the synthetic batch only, so they describe nothing once a real batch
             # is used, record which reference actually proved the contract.
@@ -302,6 +306,7 @@ def _preflight(
                             task,
                             seed=resolved_spec.seed,
                             deterministic=resolved_spec.deterministic,
+                            device=device,
                             sample_batch=batch,
                             dims=dims,
                         )
@@ -1839,7 +1844,6 @@ def evaluate_model(
             labeled comparability metrics. Absent -> the IoU convention governs.
 
     """
-    import torch
     from torch.utils.data import DataLoader
 
     from tcip_mcp.operationalization import (
@@ -1944,12 +1948,10 @@ def evaluate_model(
         return {"error": f"Failed to build dataset: {exc}"}
 
     loader = DataLoader(dataset, batch_size=4, collate_fn=task_collate(task))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     try:
         return run_test_evaluation(
             pass_,
             loader,
-            device,
             iou_threshold=iou_threshold,
             tiling=tiling,
             trait=trait_entry,

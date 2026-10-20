@@ -40,6 +40,7 @@ def _staged(
         project,
         str(image),
         model_name="detector",
+        actor=None,
         boxes=[
             {
                 "subject": "bud",

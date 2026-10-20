@@ -13,6 +13,7 @@ from PIL import Image
 from tcip_annotation.matching import REVIEW_CONF_FLOOR
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.raster_source import SourceHeader
+from tests._producer_fixtures import kept
 from tests._training_values import IOU_THRESHOLD, TRIAGE_WEIGHTS
 
 if TYPE_CHECKING:
@@ -1414,7 +1415,7 @@ class TestProposeAnnotationsTool:
         from tcip_mcp.tools.proposal_tools import propose_annotations
 
         result = propose_annotations(
-            tmp_path, image_path="/nonexistent.jpg", engine="stub"
+            tmp_path, image_path="/nonexistent.jpg", engine="stub", actor=None
         )
         assert "error" in result
 
@@ -1427,6 +1428,7 @@ class TestProposeAnnotationsTool:
                 viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"
             ),
             engine="does_not_exist",
+            actor=None,
         )
         assert "error" in result
         assert "does_not_exist" in result["error"]
@@ -1441,10 +1443,12 @@ class TestAcceptProposalsTool:
             image_path=str(
                 viz_dataset / "images" / UNDATED_BUCKET / "img_003.jpg"
             ),
-            assignments=[{"candidate_id": 0, "subject": "bud"}],
+            actor=None,
+            assignments=kept({"staging_id": "staging_0_000000"}, (0, "bud")),
         )
         assert "error" in result
-        assert "Run propose_annotations first" in result["error"]
+        assert "staging_0_000000" in result["error"]
+        assert "Run propose_annotations" in result["error"]
 
     def test_with_cached_proposals(
         self, viz_dataset: Path, monkeypatch: pytest.MonkeyPatch
@@ -1462,7 +1466,6 @@ class TestAcceptProposalsTool:
                 "bbox": [100.0, 100.0, 200.0, 200.0],
                 "area": 10000,
                 "score": 0.90,
-                "engine": "stub",
                 "engine_meta": {
                     "stability_score": 0.95,
                     "predicted_iou": 0.90,
@@ -1474,7 +1477,6 @@ class TestAcceptProposalsTool:
                 "bbox": [300.0, 300.0, 400.0, 400.0],
                 "area": 5000,
                 "score": 0.85,
-                "engine": "stub",
                 "engine_meta": {
                     "stability_score": 0.88,
                     "predicted_iou": 0.85,
@@ -1484,8 +1486,10 @@ class TestAcceptProposalsTool:
         ]
 
         class StubProposer:
-            def propose(self, image_path: str, **params: object) -> list[dict]:
-                return candidates
+            def propose(
+                self, image_path: str, **params: object
+            ) -> proposal.Proposal:
+                return proposal.Proposal(candidates, None)
 
         monkeypatch.setattr(
             proposal, "resolve_proposer", lambda engine: StubProposer()
@@ -1497,6 +1501,7 @@ class TestAcceptProposalsTool:
                 viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"
             ),
             engine="stub",
+            actor=None,
         )
         assert "error" not in propose_result, propose_result
         assert propose_result["staged"] is True
@@ -1506,10 +1511,8 @@ class TestAcceptProposalsTool:
             image_path=str(
                 viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"
             ),
-            assignments=[
-                {"candidate_id": 0, "subject": "bud"},
-                {"candidate_id": 1, "subject": "nut"},
-            ],
+            actor=None,
+            assignments=kept(propose_result, (0, "bud"), (1, "nut")),
         )
         assert "error" not in result
         assert result["proposal_count"] == 2
@@ -1539,7 +1542,6 @@ MOCK_CANDIDATES: list[dict[str, Any]] = [
         "bbox": [50.0, 40.0, 200.0, 180.0],
         "area": 21000,
         "score": 0.93,
-        "engine": "stub",
         "engine_meta": {"stability_score": 0.96, "predicted_iou": 0.93},
         "rings": [
             [
@@ -1555,7 +1557,6 @@ MOCK_CANDIDATES: list[dict[str, Any]] = [
         "bbox": [300.0, 250.0, 450.0, 400.0],
         "area": 15000,
         "score": 0.88,
-        "engine": "stub",
         "engine_meta": {"stability_score": 0.91, "predicted_iou": 0.88},
         "rings": [
             [
@@ -1571,7 +1572,6 @@ MOCK_CANDIDATES: list[dict[str, Any]] = [
         "bbox": [500.0, 100.0, 600.0, 200.0],
         "area": 8000,
         "score": 0.80,
-        "engine": "stub",
         "engine_meta": {"stability_score": 0.85, "predicted_iou": 0.80},
         "rings": [
             [
@@ -1671,8 +1671,8 @@ class TestFullPipelineIntegration:
         project: Path,
         image_path: str,
         candidates: list[dict],
-    ) -> None:
-        """Stage ``candidates`` for ``project`` through the real writer.
+    ) -> dict:
+        """Stage ``candidates`` for ``project`` through the real writer and return its answer.
 
         A stub engine hands them back verbatim, driven by an actual ``propose_annotations`` call.
         """
@@ -1680,16 +1680,19 @@ class TestFullPipelineIntegration:
         from tcip_mcp.tools.proposal_tools import propose_annotations
 
         class StubProposer:
-            def propose(self, image_path: str, **params: object) -> list[dict]:
-                return candidates
+            def propose(
+                self, image_path: str, **params: object
+            ) -> proposal.Proposal:
+                return proposal.Proposal(candidates, None)
 
         monkeypatch.setattr(
             proposal, "resolve_proposer", lambda engine: StubProposer()
         )
         result = propose_annotations(
-            project, image_path=image_path, engine="stub"
+            project, image_path=image_path, engine="stub", actor=None
         )
         assert "error" not in result, result
+        return result
 
     def test_accept_writes_json_detect(
         self,
@@ -1707,15 +1710,15 @@ class TestFullPipelineIntegration:
         img_path = str(
             pipeline_dataset / "images" / UNDATED_BUCKET / "sample.jpg"
         )
-        self._propose(monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES)
+        proposed = self._propose(
+            monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES
+        )
 
         result = stage_proposals(
             pipeline_dataset,
             image_path=img_path,
-            assignments=[
-                {"candidate_id": 0, "subject": "bud"},
-                {"candidate_id": 1, "subject": "nut"},
-            ],
+            actor=None,
+            assignments=kept(proposed, (0, "bud"), (1, "nut")),
         )
         assert "error" not in result
         assert result["proposal_count"] == 2
@@ -1742,12 +1745,15 @@ class TestFullPipelineIntegration:
         img_path = str(
             pipeline_dataset / "images" / UNDATED_BUCKET / "sample.jpg"
         )
-        self._propose(monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES)
+        proposed = self._propose(
+            monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES
+        )
 
         result = stage_proposals(
             pipeline_dataset,
             image_path=img_path,
-            assignments=[{"candidate_id": 0, "subject": "bud"}],
+            actor=None,
+            assignments=kept(proposed, (0, "bud")),
         )
         assert "error" not in result
         assert result["proposal_count"] == 1
@@ -1775,15 +1781,15 @@ class TestFullPipelineIntegration:
         img_path = str(
             pipeline_dataset / "images" / UNDATED_BUCKET / "sample.jpg"
         )
-        self._propose(monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES)
+        proposed = self._propose(
+            monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES
+        )
 
         result = stage_proposals(
             pipeline_dataset,
             image_path=img_path,
-            assignments=[
-                {"candidate_id": 0, "subject": "bud"},
-                {"candidate_id": 2, "subject": "nut"},
-            ],
+            actor=None,
+            assignments=kept(proposed, (0, "bud"), (2, "nut")),
         )
         assert result["proposal_count"] == 2
 
@@ -1809,13 +1815,16 @@ class TestFullPipelineIntegration:
         img_path = str(
             pipeline_dataset / "images" / UNDATED_BUCKET / "sample.jpg"
         )
-        self._propose(monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES)
+        proposed = self._propose(
+            monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES
+        )
 
         # Accept only candidate 1 out of 3
         result = stage_proposals(
             pipeline_dataset,
             image_path=img_path,
-            assignments=[{"candidate_id": 1, "subject": "bud"}],
+            actor=None,
+            assignments=kept(proposed, (1, "bud")),
         )
         assert result["proposal_count"] == 1
 
@@ -1830,15 +1839,16 @@ class TestFullPipelineIntegration:
         img_path = str(
             pipeline_dataset / "images" / UNDATED_BUCKET / "sample.jpg"
         )
-        self._propose(monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES)
+        proposed = self._propose(
+            monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES
+        )
 
+        # Candidate 999 does not exist; candidate 0 does.
         result = stage_proposals(
             pipeline_dataset,
             image_path=img_path,
-            assignments=[
-                {"candidate_id": 999, "subject": "bud"},  # non-existent
-                {"candidate_id": 0, "subject": "nut"},  # valid
-            ],
+            actor=None,
+            assignments=kept(proposed, (999, "bud"), (0, "nut")),
         )
         assert result["proposal_count"] == 1
 
@@ -1875,17 +1885,16 @@ class TestFullPipelineIntegration:
         assert Path(grid_render).is_file()
 
         # Step 3: propose_annotations stages the candidates for real
-        self._propose(monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES)
+        proposed = self._propose(
+            monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES
+        )
 
         # Step 4: Accept with subject assignments
         result = stage_proposals(
             pipeline_dataset,
             image_path=img_path,
-            assignments=[
-                {"candidate_id": 0, "subject": "bud"},
-                {"candidate_id": 1, "subject": "nut"},
-                {"candidate_id": 2, "subject": "bud"},
-            ],
+            actor=None,
+            assignments=kept(proposed, (0, "bud"), (1, "nut"), (2, "bud")),
         )
         assert "error" not in result
         assert result["proposal_count"] == 3
@@ -1907,8 +1916,8 @@ class TestEnginePredictionStaging:
 
     def _propose(
         self, monkeypatch: pytest.MonkeyPatch, project: Path, image_path: str
-    ) -> None:
-        """Stage MOCK_CANDIDATES for ``project`` through the real writer.
+    ) -> dict:
+        """Stage MOCK_CANDIDATES for ``project`` through the real writer and return its answer.
 
         A stub engine hands them back verbatim, driven by an actual ``propose_annotations`` call.
         """
@@ -1916,16 +1925,19 @@ class TestEnginePredictionStaging:
         from tcip_mcp.tools.proposal_tools import propose_annotations
 
         class StubProposer:
-            def propose(self, image_path: str, **params: object) -> list[dict]:
-                return MOCK_CANDIDATES
+            def propose(
+                self, image_path: str, **params: object
+            ) -> proposal.Proposal:
+                return proposal.Proposal(MOCK_CANDIDATES, None)
 
         monkeypatch.setattr(
             proposal, "resolve_proposer", lambda engine: StubProposer()
         )
         result = propose_annotations(
-            project, image_path=image_path, engine="stub"
+            project, image_path=image_path, engine="stub", actor=None
         )
         assert "error" not in result, result
+        return result
 
     def test_json_detect_and_segment_written(
         self,
@@ -1938,11 +1950,12 @@ class TestEnginePredictionStaging:
         img_path = str(
             format_dataset / "images" / UNDATED_BUCKET / "fmt_test.jpg"
         )
-        self._propose(monkeypatch, format_dataset, img_path)
+        proposed = self._propose(monkeypatch, format_dataset, img_path)
         result = stage_proposals(
             format_dataset,
             image_path=img_path,
-            assignments=[{"candidate_id": 0, "subject": "bud"}],
+            actor=None,
+            assignments=kept(proposed, (0, "bud")),
         )
         assert "error" not in result
         assert "format" not in result
@@ -1965,11 +1978,12 @@ class TestEnginePredictionStaging:
         img_path = str(
             format_dataset / "images" / UNDATED_BUCKET / "fmt_test.jpg"
         )
-        self._propose(monkeypatch, format_dataset, img_path)
+        proposed = self._propose(monkeypatch, format_dataset, img_path)
         staged = stage_proposals(
             format_dataset,
             image_path=img_path,
-            assignments=[{"candidate_id": 0, "subject": "bud"}],
+            actor=None,
+            assignments=kept(proposed, (0, "bud")),
         )
         _anns, objs = _staged(format_dataset, Path(img_path), staged)
         assert objs

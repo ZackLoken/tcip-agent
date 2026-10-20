@@ -8,7 +8,6 @@ from tcip_mcp.model_registry import Producer
 from tcip_mcp.pipelines.execution import Execution
 
 if TYPE_CHECKING:
-    import torch
     from torch.utils.data import DataLoader
 
     from tcip_mcp.model_registry import VerifiedCheckpoint
@@ -52,7 +51,6 @@ def evaluation_result(identity: EvaluationIdentity, extra: dict) -> dict:
 def run_test_evaluation(
     pass_: Pass,
     loader: DataLoader,
-    device: torch.device,
     *,
     iou_threshold: float,
     tiling: TilingSpec | None = None,
@@ -80,9 +78,9 @@ def run_test_evaluation(
     task = checkpoint.task
 
     metrics = evaluate(
-        predictor.model.to(device),
+        predictor.model,
         loader,
-        device,
+        predictor.device,
         task,
         dims=predictor.dims,
         conf_threshold=execution.conf,

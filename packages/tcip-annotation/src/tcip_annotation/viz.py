@@ -396,13 +396,14 @@ def render_candidates(
 ) -> str:
     """Render numbered proposal candidates on display pixels.
 
-    Every ring of each is a semi-transparent polygon in its palette color, with one number and
-    score per candidate.
+    Every ring of each is a semi-transparent polygon in its palette color, a candidate whose rings
+    are ``None`` its box outline in that color, with one number and score per candidate at the
+    center of its ``bbox``.
 
     Args:
         image: Display pixels (uint8 RGB array or PIL image).
-        candidates: Candidate dicts, each with candidate_id, rings and score, coordinates in the
-            native frame.
+        candidates: Candidate dicts, each with candidate_id, bbox, rings and score, coordinates
+            in the native frame.
         native_size: ``(width, height)`` of the frame the candidates are measured in.
         output_path: Where to save.
         alpha: Fill transparency (0=transparent, 1=opaque).
@@ -423,19 +424,27 @@ def render_candidates(
     font_label = _try_font(16)
     font_small = _try_font(10)
 
+    from tcip_annotation.matching import box_centers
+
     for cand in candidates:
         cid = cand["candidate_id"]
         color = _color_for_class(cid)
-        rings = [[(x * sx, y * sy) for x, y in ring] for ring in cand["rings"]]
-
-        # Fill every ring; one number for the candidate as a whole
-        fill = color + (int(255 * alpha),)
-        for ring in rings:
-            overlay_draw.polygon(ring, fill=fill, outline=color)
-
-        pts = [p for ring in rings for p in ring]
-        cx = sum(p[0] for p in pts) / len(pts)
-        cy = sum(p[1] for p in pts) / len(pts)
+        if cand["rings"] is None:
+            x1, y1, x2, y2 = cand["bbox"]
+            overlay_draw.rectangle(
+                [x1 * sx, y1 * sy, x2 * sx, y2 * sy], outline=color
+            )
+        else:
+            # Fill every ring; one number for the candidate as a whole
+            fill = color + (int(255 * alpha),)
+            for ring in cand["rings"]:
+                overlay_draw.polygon(
+                    [(x * sx, y * sy) for x, y in ring],
+                    fill=fill,
+                    outline=color,
+                )
+        center_x, center_y = box_centers(cand["bbox"])[0]
+        cx, cy = center_x * sx, center_y * sy
 
         # White circle background for number
         num_text = str(cid)

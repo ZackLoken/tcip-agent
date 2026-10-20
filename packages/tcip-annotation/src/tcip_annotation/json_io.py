@@ -16,7 +16,7 @@ Schema::
                 "point": [
                     x,
                     y,
-                ],  # pixel point, a prompt or keypoint (optional)
+                ],  # pixel point, a keypoint or landmark (optional)
                 "attributes": {
                     "<attribute>": "<value>"
                 },  # attr name -> value name
@@ -206,7 +206,7 @@ def annotation_from_payload(payload: Mapping) -> Annotation:
     too. The translation: ``bbox`` corners ``[x1, y1, x2, y2]`` become the record's ``[x, y, w,
     h]``; ``rings`` (a list of rings) and ``points`` (one ring) become ``segmentation``, ``rings``
     winning when both are given, each vertex an ``[x, y]`` pair or an ``{"x", "y"}`` mapping;
-    ``point`` (a single placed prompt or keypoint) is kept as it is. A polygon then wins over a box
+    ``point`` (a single keypoint or landmark) is kept as it is. A polygon then wins over a box
     and a box over a point. A payload's provenance keys and ``score`` are
     not read. A payload box quantizes to the stored two-decimal grid (:func:`xywh`).
     """
@@ -930,7 +930,7 @@ def client_annotation(a: Annotation) -> dict:
     """Return ``a`` as a plain dict with its box in corner form.
 
     ``bbox`` in corner form ``[x1, y1, x2, y2]``; ``rings`` for a polygon, every ring; ``point``
-    for a placed prompt or keypoint, the stored key; ``attributes``; ``score`` for a prediction;
+    for a keypoint or landmark, the stored key; ``attributes``; ``score`` for a prediction;
     ``iscrowd`` always stated; and the provenance fields the record holds
     (:func:`_held_provenance`).
     """

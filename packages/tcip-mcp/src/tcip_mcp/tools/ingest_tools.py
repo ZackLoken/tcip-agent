@@ -402,8 +402,9 @@ def state_capture_date(
     ``images/<date>/`` in three phases: its files copied there (a grouped capture's band files
     beside its manifest), the call making the bucket directory through the store's own route
     (:func:`tcip_store.ensure_parent`) when it is absent; then every record keyed by its capture
-    and stem (its label document, its flags and its staged proposals) re-keyed unchanged to the
-    new capture in one transaction with the act's audit line, in the dataset root's log, naming
+    and stem (its label document, its flags and every proposal run staged for it) re-keyed
+    unchanged to the new capture in one transaction with the act's audit line, in the dataset
+    root's log, naming
     the images, the date and the rationale; then the original files deleted. A copy or the
     transaction that raises removes what the call made (each copy with its lock file, then the
     directory it made, which stays when another writer's file sits in it) and propagates the
@@ -429,13 +430,15 @@ def state_capture_date(
         resolve_image_paths,
         stem_of,
     )
-    from tcip_mcp.tools.proposal_tools import proposal_staging_key
+    from tcip_mcp.tools.proposal_tools import (
+        PROPOSAL_STAGING_STORE,
+        proposal_staging_key,
+    )
     from tcip_store.file_backend import lock_file_for
 
     record_keys = (
         dataset_layout.label_key,
         lambda *at: flag_key(dataset_layout.label_key(*at)),
-        proposal_staging_key,
     )
     bucket = date.isoformat()
     try:
@@ -469,6 +472,11 @@ def state_capture_date(
         rekeyed += [
             (key_of(root, capture, stem), key_of(root, bucket, stem))
             for key_of in record_keys
+        ] + [
+            (run, proposal_staging_key(root, bucket, stem, run.parts[-1]))
+            for run in tcip_store.keys(
+                PROPOSAL_STAGING_STORE, str(root), (capture, stem)
+            )
         ]
     if held:
         return {

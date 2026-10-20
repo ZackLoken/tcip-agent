@@ -105,7 +105,7 @@ def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_ag
 
     image = dataset_root / "images" / CAPTURE_DATE / "IMG_0001.JPG"
     result = propose_annotations(
-        project, image_path=str(image), engine=STUB_ENGINE
+        project, image_path=str(image), engine=STUB_ENGINE, actor=None
     )
     assert "error" not in result, result
 
@@ -130,7 +130,7 @@ def test_propose_annotations_staging_nothing_leaves_no_audit_line(
     Image.new("RGB", (100, 80)).save(image)
 
     result = propose_annotations(
-        project, image_path=str(image), engine=STUB_ENGINE
+        project, image_path=str(image), engine=STUB_ENGINE, actor=None
     )
     assert "error" not in result, result
     assert result["staged"] is False

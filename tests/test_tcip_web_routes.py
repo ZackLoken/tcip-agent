@@ -13,6 +13,7 @@ from PIL import Image
 import tcip_store
 from tcip_annotation.json_io import read_label_document
 from tcip_annotation.state import Annotation, BBox, Polygon
+from tcip_mcp.pipelines.proposal import Proposal
 from tcip_mcp.subject_registry import Subject, SubjectRegistry
 from tcip_web import jobstore
 from tcip_web.paths import safe_join
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from httpx import Response
+    from pydantic import JsonValue
 
     from tcip_mcp.buckets import Bucket
     from tcip_web.routes.inference import InferenceJob
@@ -1153,6 +1155,402 @@ def test_a_document_the_bucket_record_does_not_name_is_no_prediction_of_it(
 
     assert bucket.document_key("IMG_0000") is not None
     assert bucket.document_key("IMG_0001") is None
+
+
+# ── /api/annotate/propose ────────────────────────────────────────────────
+
+
+class _PromptedEngine:
+    """An engine answering one ringless candidate and one with rings, keeping each prompt."""
+
+    def __init__(self) -> None:
+        self.prompts: list[dict[str, JsonValue]] = []
+
+    def propose(self, image_path: str, **params: JsonValue) -> Proposal:
+        self.prompts.append(params)
+        return Proposal(
+            [
+                {
+                    "candidate_id": 0,
+                    "bbox": [10.0, 10.0, 30.0, 30.0],
+                    "area": 400.0,
+                    "rings": None,
+                    "score": 0.8,
+                },
+                {
+                    "candidate_id": 1,
+                    "bbox": [40.0, 20.0, 60.0, 50.0],
+                    "area": 600.0,
+                    "rings": [
+                        [
+                            (40.0, 20.0),
+                            (60.0, 20.0),
+                            (60.0, 50.0),
+                            (40.0, 50.0),
+                        ]
+                    ],
+                    "score": 0.7,
+                },
+            ],
+            None,
+        )
+
+
+@pytest.fixture
+def engines(monkeypatch: pytest.MonkeyPatch) -> dict[str, _PromptedEngine]:
+    """Register a :class:`_PromptedEngine` under each shipped engine's name, for this test only.
+
+    The registry is a copy of the shipped one for the test's duration, so the shipped engines are
+    back once it ends; the stubs are keyed by the name each stands in for.
+    """
+    from tcip_mcp.pipelines import proposal
+    from tcip_mcp.pipelines.proposal_engines import (
+        PromptableSegmenter,
+        TextPromptedDetector,
+    )
+
+    monkeypatch.setattr(proposal, "_ENGINES", dict(proposal._ENGINES))
+    stubs = {
+        name: _PromptedEngine()
+        for name in (PromptableSegmenter.name, TextPromptedDetector.name)
+    }
+    for name, stub in stubs.items():
+        proposal.register_proposal_engine(name, stub)
+    return stubs
+
+
+_PHRASE: dict[str, JsonValue] = {
+    "phrase": "open bud",
+    "box_threshold": 0.3,
+    "text_threshold": 0.2,
+    "postprocess": "greedynmm",
+    "cross_tile_nms": 0.5,
+}
+"""A phrase prompt stating the detector's two thresholds and its cross-tile merge."""
+
+
+def _image_of(dataset_root: Path) -> Path:
+    return dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+
+
+def _propose(
+    client: TestClient, image: Path, prompt: dict[str, JsonValue]
+) -> Response:
+    return client.post(
+        "/api/annotate/propose",
+        json={
+            "image_path": str(image),
+            "subject": "bud",
+            "user": "breeder",
+            "prompt": prompt,
+        },
+    )
+
+
+def test_a_placed_point_prompts_the_segmenter_and_stages_every_candidate(
+    opened_client: TestClient,
+    dataset_root: Path,
+    engines: dict[str, _PromptedEngine],
+) -> None:
+    """A placed point prompts the segmenter alone and stages both candidates under the subject.
+
+    The segmenter is asked for its one best mask at the point; the answered bucket holds a box and
+    a polygon of the subject, and the proposals route serves them by index.
+    """
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.pipelines.proposal_engines import (
+        PromptableSegmenter,
+        SegmenterParams,
+        TextPromptedDetector,
+    )
+
+    image = _image_of(dataset_root)
+    resp = _propose(opened_client, image, {"point": [20, 20]})
+
+    assert resp.status_code == 200, resp.text
+    answer = resp.json()
+    assert answer["proposal_count"] == 2
+    (prompt,) = engines[PromptableSegmenter.name].prompts
+    assert SegmenterParams.model_validate(prompt) == SegmenterParams(
+        points=[(20.0, 20.0)], multimask_output=False
+    )
+    assert engines[TextPromptedDetector.name].prompts == []
+    bucket = read_bucket(dataset_root, answer["bucket"])
+    key = bucket.document_key(image.stem)
+    assert key is not None
+    staged = read_label_document(key).annotations
+    assert [a.subject for a in staged] == ["bud", "bud"]
+    assert [type(a.geometry) for a in staged] == [BBox, Polygon]
+    served = opened_client.get(
+        "/api/annotate/proposals",
+        params={"image_path": str(image), "bucket": answer["bucket"]},
+    )
+    assert served.status_code == 200, served.text
+    assert [p["index"] for p in served.json()["proposals"]] == [0, 1]
+
+
+def test_a_prompt_records_the_person_who_sent_it_on_both_audit_lines(
+    opened_client: TestClient,
+    dataset_root: Path,
+    engines: dict[str, _PromptedEngine],
+) -> None:
+    """The proposal's and the publication's audit lines both name the person the prompt names."""
+    from tcip_mcp.audit import ACTOR_KEY
+
+    resp = _propose(
+        opened_client, _image_of(dataset_root), {"point": [20, 20]}
+    )
+
+    assert resp.status_code == 200, resp.text
+    actors = {
+        tool: [row.get(ACTOR_KEY) for row in audit_rows(dataset_root, tool)]
+        for tool in ("propose_annotations", "prediction_bucket_published")
+    }
+    assert actors == {
+        "propose_annotations": ["user:breeder"],
+        "prediction_bucket_published": ["user:breeder"],
+    }
+
+
+def test_a_drawn_box_prompts_the_segmenter_with_that_box(
+    opened_client: TestClient,
+    dataset_root: Path,
+    engines: dict[str, _PromptedEngine],
+) -> None:
+    from tcip_mcp.pipelines.proposal_engines import (
+        PromptableSegmenter,
+        SegmenterParams,
+    )
+
+    resp = _propose(
+        opened_client, _image_of(dataset_root), {"box": [10, 10, 50, 40]}
+    )
+
+    assert resp.status_code == 200, resp.text
+    (prompt,) = engines[PromptableSegmenter.name].prompts
+    assert SegmenterParams.model_validate(prompt) == SegmenterParams(
+        boxes=[(10.0, 10.0, 50.0, 40.0)], multimask_output=False
+    )
+
+
+def test_a_phrase_prompts_the_detector_with_both_thresholds(
+    opened_client: TestClient,
+    dataset_root: Path,
+    engines: dict[str, _PromptedEngine],
+) -> None:
+    from tcip_mcp.pipelines.proposal_engines import (
+        DetectorParams,
+        PromptableSegmenter,
+        TextPromptedDetector,
+    )
+
+    resp = _propose(opened_client, _image_of(dataset_root), _PHRASE)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["proposal_count"] == 2
+    (prompt,) = engines[TextPromptedDetector.name].prompts
+    assert DetectorParams.model_validate(
+        prompt
+    ) == DetectorParams.model_validate(_PHRASE)
+    assert engines[PromptableSegmenter.name].prompts == []
+
+
+@pytest.mark.parametrize("unstated", ["postprocess", "cross_tile_nms"])
+def test_a_phrase_stating_no_cross_tile_merge_is_refused_by_the_payload(
+    opened_client: TestClient,
+    dataset_root: Path,
+    engines: dict[str, _PromptedEngine],
+    unstated: str,
+) -> None:
+    prompt = {k: v for k, v in _PHRASE.items() if k != unstated}
+
+    resp = _propose(opened_client, _image_of(dataset_root), prompt)
+
+    assert resp.status_code == 422
+    assert unstated in resp.text
+    assert all(stub.prompts == [] for stub in engines.values())
+
+
+def test_a_prompt_naming_no_subject_or_two_kinds_is_refused_by_the_payload(
+    opened_client: TestClient,
+    dataset_root: Path,
+    engines: dict[str, _PromptedEngine],
+) -> None:
+    """A prompt naming no subject or no user, or holding a point and a phrase, answers 422.
+
+    None of them runs an engine.
+    """
+    image = str(_image_of(dataset_root))
+    whole = {
+        "image_path": image,
+        "subject": "bud",
+        "user": "breeder",
+        "prompt": {"point": [20, 20]},
+    }
+
+    unnamed, anonymous = (
+        opened_client.post(
+            "/api/annotate/propose",
+            json={k: v for k, v in whole.items() if k != unstated},
+        )
+        for unstated in ("subject", "user")
+    )
+    both = _propose(opened_client, Path(image), {"point": [20, 20], **_PHRASE})
+
+    assert [r.status_code for r in (unnamed, anonymous, both)] == [422] * 3
+    assert "user" in anonymous.text
+    assert all(stub.prompts == [] for stub in engines.values())
+
+
+def test_a_second_prompt_on_one_image_stages_a_second_bucket_beside_the_first(
+    opened_client: TestClient,
+    dataset_root: Path,
+    engines: dict[str, _PromptedEngine],
+) -> None:
+    """A second prompt on an image stages a bucket of its own; the first's document is unchanged."""
+    from tcip_mcp.buckets import read_bucket
+
+    image = _image_of(dataset_root)
+    first = _propose(opened_client, image, {"point": [20, 20]}).json()
+    key = read_bucket(dataset_root, first["bucket"]).document_key(image.stem)
+    assert key is not None
+    written = tcip_store.read_versioned(key).version
+
+    second = _propose(opened_client, image, {"box": [10, 10, 50, 40]})
+
+    assert second.status_code == 200, second.text
+    assert second.json()["bucket"] != first["bucket"]
+    assert read_bucket(dataset_root, second.json()["bucket"]).documents
+    assert tcip_store.read_versioned(key).version == written
+
+
+class _PromptPlacedEngine:
+    """An engine answering one ringless 10 px box whose left edge is the prompt's x."""
+
+    def propose(self, image_path: str, **params: JsonValue) -> Proposal:
+        from tcip_mcp.pipelines.proposal_engines import SegmenterParams
+
+        stated = SegmenterParams.model_validate(params)
+        x = (stated.points or [(b[0], b[1]) for b in stated.boxes])[0][0]
+        return Proposal(
+            [
+                {
+                    "candidate_id": 0,
+                    "bbox": [x, 10.0, x + 10.0, 20.0],
+                    "area": 100.0,
+                    "rings": None,
+                    "score": 0.9,
+                }
+            ],
+            None,
+        )
+
+
+def test_a_prompt_overtaken_by_another_stages_its_own_run(
+    opened_client: TestClient,
+    dataset_root: Path,
+    engines: dict[str, _PromptedEngine],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A prompt whose run is overtaken before it stages publishes its own run's geometry.
+
+    A second prompt on the same image runs whole between the first prompt's two doors; each
+    answered bucket holds the box at its own prompt's x.
+    """
+    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.pipelines.proposal import register_proposal_engine
+    from tcip_mcp.pipelines.proposal_engines import PromptableSegmenter
+    from tcip_mcp.tools import proposal_tools
+    from tcip_web.routes import annotate
+
+    register_proposal_engine(PromptableSegmenter.name, _PromptPlacedEngine())
+    image = _image_of(dataset_root)
+    real_stage = proposal_tools.stage_proposals
+    overtaking: list[annotate.ProposeAnswer] = []
+    overtaken: list[bool] = []
+
+    def stage_after_another_prompt(
+        project: Path,
+        image_path: str,
+        *,
+        assignments: proposal_tools.StagedAssignments,
+        actor: str | None,
+    ) -> dict:
+        if not overtaken:
+            overtaken.append(True)
+            overtaking.append(
+                annotate.propose(
+                    annotate.ProposePayload.model_validate(
+                        {
+                            "image_path": str(image),
+                            "subject": "bud",
+                            "user": "breeder",
+                            "prompt": {"point": [60, 15]},
+                        }
+                    )
+                )
+            )
+        return real_stage(
+            project, image_path, assignments=assignments, actor=actor
+        )
+
+    monkeypatch.setattr(
+        proposal_tools, "stage_proposals", stage_after_another_prompt
+    )
+    first = _propose(opened_client, image, {"point": [40, 15]})
+
+    assert first.status_code == 200, first.text
+
+    def staged_x(bucket: str | None) -> float:
+        assert bucket is not None
+        key = read_bucket(dataset_root, bucket).document_key(image.stem)
+        assert key is not None
+        (staged,) = read_label_document(key).annotations
+        assert isinstance(staged.geometry, BBox)
+        return staged.geometry.x1
+
+    assert staged_x(first.json()["bucket"]) == pytest.approx(40.0)
+    assert staged_x(overtaking[0].bucket) == pytest.approx(60.0)
+
+
+def test_an_engine_proposing_nothing_answers_no_bucket(
+    opened_client: TestClient,
+    dataset_root: Path,
+    engines: dict[str, _PromptedEngine],
+) -> None:
+    from tcip_mcp.buckets import buckets_under
+    from tcip_mcp.pipelines.proposal import register_proposal_engine
+    from tcip_mcp.pipelines.proposal_engines import PromptableSegmenter
+
+    class Empty:
+        def propose(self, image_path: str, **params: JsonValue) -> Proposal:
+            return Proposal([], None)
+
+    register_proposal_engine(PromptableSegmenter.name, Empty())
+    resp = _propose(opened_client, _image_of(dataset_root), {"point": [5, 5]})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"bucket": None, "proposal_count": 0}
+    assert buckets_under(dataset_root) == []
+
+
+def test_a_doors_error_answers_400_carrying_its_text(
+    opened_client: TestClient,
+    dataset_root: Path,
+    engines: dict[str, _PromptedEngine],
+) -> None:
+    from tcip_mcp.pipelines.proposal import register_proposal_engine
+    from tcip_mcp.pipelines.proposal_engines import PromptableSegmenter
+
+    class Unloadable:
+        def propose(self, image_path: str, **params: JsonValue) -> Proposal:
+            raise FileNotFoundError("no checkpoint at the stated name")
+
+    register_proposal_engine(PromptableSegmenter.name, Unloadable())
+    resp = _propose(opened_client, _image_of(dataset_root), {"point": [5, 5]})
+
+    assert resp.status_code == 400
+    assert "no checkpoint at the stated name" in resp.json()["detail"]
 
 
 def _launch_setup(

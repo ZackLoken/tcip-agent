@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict, dataclass, field, fields
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from tcip_mcp.model_registry import VerifiedCheckpoint
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.derivations import Region
@@ -28,17 +30,49 @@ DEFAULT_TILE_BATCH_SIZE = 96
 """Tiles per forward batch: a throughput setting that changes no prediction."""
 DEFAULT_IMAGE_BATCH_SIZE = 16
 """Untiled images per forward batch: a throughput setting that changes no prediction."""
-CROSS_TILE_MERGES: dict[str, tuple[str, str]] = {
-    "nms": ("NMS", "IOU"),
-    "nmm": ("NMM", "IOS"),
-    "greedynmm": ("GREEDYNMM", "IOS"),
+
+
+class CrossTileMerge(NamedTuple):
+    """One cross-tile merge.
+
+    The SAHI postprocess type it runs, the match metric that type compares over (intersection
+    over union, or over the smaller box), and the description, in the person's words, of what it
+    does to two matching boxes from neighboring tiles.
+    """
+
+    sahi_type: str
+    match_metric: str
+    description: str
+
+
+CROSS_TILE_MERGES: dict[str, CrossTileMerge] = {
+    "nms": CrossTileMerge(
+        "NMS",
+        "IOU",
+        "Keep the surer of two matching boxes from neighboring tiles"
+        " and drop the other",
+    ),
+    "nmm": CrossTileMerge(
+        "NMM",
+        "IOS",
+        "Join two matching boxes from neighboring tiles into one box taking"
+        " both outlines, the surer box claiming the boxes that match it and"
+        " a box already claimed staying where it is",
+    ),
+    "greedynmm": CrossTileMerge(
+        "GREEDYNMM",
+        "IOS",
+        "Join two matching boxes from neighboring tiles into one box taking"
+        " both outlines, the surer box joining only boxes that match it"
+        " directly",
+    ),
 }
-"""Every cross-tile merge a caller may name, as the SAHI postprocess type it runs and the match
-metric that type compares over (intersection over union, or over the smaller box)."""
+"""Every cross-tile merge a caller may name, by name, each its SAHI postprocess type, match
+metric and description."""
 
 
-def cross_tile_merge_of(name: str) -> tuple[str, str]:
-    """Return the SAHI postprocess type and match metric the cross-tile merge ``name`` runs.
+def cross_tile_merge_of(name: str) -> CrossTileMerge:
+    """Return the SAHI postprocess type, match metric and description of the merge ``name``.
 
     The merges are :data:`CROSS_TILE_MERGES`; a name it does not hold refuses (``ValueError``)
     naming the ones it does.
@@ -366,11 +400,9 @@ def execution_record(
     import sahi
 
     from tcip_mcp.pipelines.derivations import (
-        CROSS_TILE_NMS_DERIVATION,
         OBJECT_DENSITY_DERIVATION,
         TILE_EDGE_DERIVATION,
         TILE_OVERLAP_DERIVATION,
-        derive_cross_tile_nms,
         derive_object_density,
         derive_tile_geometry,
     )
@@ -470,28 +502,12 @@ def execution_record(
             f"a tiled pass of {checkpoint.path} states no postprocess: state the cross-tile "
             f"merge, one of {sorted(CROSS_TILE_MERGES)}, or run under an assessment's record"
         )
-    match_metric = cross_tile_merge_of(merge)[1]
-    threshold = stated.cross_tile_nms
-    if threshold is not None:
-        sources["cross_tile_nms"] = "explicit"
-    elif match_metric != "IOU":
-        raise ExecutionRefusedError(
-            f"a tiled pass merging by {merge!r} compares by {match_metric} and has no "
-            "cross_tile_nms: state it, since no derivation stands behind an IoS threshold"
-        )
-    elif reference is None:
-        raise ExecutionRefusedError(
-            f"a tiled pass merging by {merge!r} has no cross_tile_nms: state it, since this pass "
-            "holds no reference ground truth to derive it from"
-        )
-    else:
-        threshold = derive_cross_tile_nms(reference.regions)
-        if threshold is None:
-            raise ExecutionRefusedError(
-                "the reference's ground truth derives no cross-tile merge threshold, since no two "
-                "of its objects in one region overlap; state cross_tile_nms"
-            )
-        sources["cross_tile_nms"] = CROSS_TILE_NMS_DERIVATION
+    threshold, sources["cross_tile_nms"] = cross_tile_threshold(
+        merge,
+        stated.cross_tile_nms,
+        None if reference is None else reference.regions,
+        basis="the reference's ground truth",
+    )
     return Execution(
         conf=values.get("conf"),
         density=values.get("density"),
@@ -506,3 +522,84 @@ def execution_record(
         rationale=stated.rationale,
         sources=sources,
     )
+
+
+def proposal_execution(
+    *,
+    tile_size: int,
+    overlap: float,
+    geometry_sources: dict[str, str],
+    postprocess: str,
+    cross_tile_nms: float,
+) -> Execution:
+    """Return the record of a proposal engine's tiled pass.
+
+    The engine states no confidence or density of its own, collects no mask and resizes no tile.
+    It is tiled at ``tile_size`` and ``overlap``, whose sources ``geometry_sources`` names, and
+    merges by ``postprocess`` at the stated ``cross_tile_nms`` (:func:`cross_tile_threshold`,
+    recorded ``explicit``).
+    """
+    import sahi
+
+    threshold, source = cross_tile_threshold(
+        postprocess,
+        cross_tile_nms,
+        None,
+        basis="the proposal pass",
+    )
+    return Execution(
+        conf=None,
+        density=None,
+        masks=False,
+        mask_cut=None,
+        tile_size=tile_size,
+        overlap=overlap,
+        tile_resize=None,
+        postprocess=postprocess,
+        cross_tile_nms=threshold,
+        sahi_version=sahi.__version__,
+        rationale=None,
+        sources={**geometry_sources, "cross_tile_nms": source},
+    )
+
+
+def cross_tile_threshold(
+    merge: str,
+    stated: float | None,
+    regions: Sequence[Region] | None,
+    *,
+    basis: str,
+) -> tuple[float, str]:
+    """Return the threshold a tiled pass merging by ``merge`` merges at, beside its source.
+
+    A ``stated`` threshold is the threshold, its source ``explicit``. Otherwise a merge comparing
+    by IoU takes the one ``regions`` derive (``derivations.derive_cross_tile_nms``), its source
+    that derivation's label. Refuses (:class:`ExecutionRefusedError`) naming ``cross_tile_nms``
+    an unstated threshold for a merge comparing by anything else, for no ``regions``, and for
+    regions no two of whose objects in one region overlap, ``basis`` naming what they are.
+    """
+    from tcip_mcp.pipelines.derivations import (
+        CROSS_TILE_NMS_DERIVATION,
+        derive_cross_tile_nms,
+    )
+
+    match_metric = cross_tile_merge_of(merge).match_metric
+    if stated is not None:
+        return float(stated), "explicit"
+    if match_metric != "IOU":
+        raise ExecutionRefusedError(
+            f"a tiled pass merging by {merge!r} compares by {match_metric} and has no "
+            "cross_tile_nms: state it, since no derivation stands behind an IoS threshold"
+        )
+    if regions is None:
+        raise ExecutionRefusedError(
+            f"a tiled pass merging by {merge!r} has no cross_tile_nms: state it, since this pass "
+            "holds no reference ground truth to derive it from"
+        )
+    threshold = derive_cross_tile_nms(regions)
+    if threshold is None:
+        raise ExecutionRefusedError(
+            f"{basis} derives no cross-tile merge threshold, since no two of its objects in one "
+            "region overlap; state cross_tile_nms"
+        )
+    return threshold, CROSS_TILE_NMS_DERIVATION

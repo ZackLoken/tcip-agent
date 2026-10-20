@@ -1,11 +1,12 @@
 """Tests of the proposal staging record.
 
-An image's staged run is addressed by its place in the dataset and carries the content identity
-of the pixels the engine ran on.
+Each staged run is addressed by its image's place in the dataset and the run's own id, and carries
+the content identity of the pixels the engine ran on.
 
-``propose_annotations`` writes the record; ``stage_proposals`` reads it back through the same
-address and refuses when the image does not match the identity that run recorded. Both tools run
-over a stub engine installed at ``tcip_mcp.pipelines.proposal.resolve_proposer``.
+``propose_annotations`` writes the record and answers its ``staging_id``; ``stage_proposals``
+reads back the run that id names and refuses when the image does not match the identity that run
+recorded. Both tools run over a stub engine installed at
+``tcip_mcp.pipelines.proposal.resolve_proposer``.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import numpy as np
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tests._producer_fixtures import write_image
+from tests._producer_fixtures import kept, write_image
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.raster_source import RasterSource
@@ -35,8 +36,10 @@ def _install_stub(
     from tcip_mcp.pipelines import proposal
 
     class StubProposer:
-        def propose(self, image_path: str, **params: object) -> list[dict]:
-            return candidates
+        def propose(
+            self, image_path: str, **params: object
+        ) -> proposal.Proposal:
+            return proposal.Proposal(candidates, None)
 
     monkeypatch.setattr(
         proposal, "resolve_proposer", lambda engine: StubProposer()
@@ -51,7 +54,6 @@ def _candidate(candidate_id: int, x0: float) -> dict:
         "bbox": [x0, 10.0, x1, 30.0],
         "area": 400,
         "score": 0.9,
-        "engine": "stub",
         "engine_meta": {},
         "rings": [[(x0, 10.0), (x1, 10.0), (x1, 30.0), (x0, 30.0)]],
     }
@@ -66,6 +68,15 @@ def _staged(root: Path, bucket: str, stem: str) -> Key:
     from tcip_mcp.dataset_layout import prediction_key
 
     return prediction_key(root, bucket, stem)
+
+
+def _staged_capture(root: Path, bucket: str) -> str | None:
+    """Return the capture the record of the staged bucket ``bucket`` under ``root`` states."""
+    from tcip_mcp.buckets import Proposed, read_bucket
+
+    record = read_bucket(root, bucket)
+    assert record.producer == Proposed(proposed_by="stub"), record
+    return record.date
 
 
 def _staged_annotations(root: Path, bucket: str, stem: str) -> list:
@@ -95,14 +106,14 @@ def test_two_dated_buckets_with_the_same_stem_stage_and_read_back_independently(
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
     proposed_first = propose_annotations(
-        tmp_path, image_path=str(first), engine="stub"
+        tmp_path, image_path=str(first), engine="stub", actor=None
     )
     assert "error" not in proposed_first, proposed_first
     assert proposed_first["staged"] is True
 
     _install_stub(monkeypatch, [_candidate(0, 300.0)])
     proposed_second = propose_annotations(
-        tmp_path, image_path=str(second), engine="stub"
+        tmp_path, image_path=str(second), engine="stub", actor=None
     )
     assert "error" not in proposed_second, proposed_second
     assert proposed_second["staged"] is True
@@ -110,15 +121,27 @@ def test_two_dated_buckets_with_the_same_stem_stage_and_read_back_independently(
     accepted = stage_proposals(
         tmp_path,
         image_path=str(first),
-        assignments=[{"candidate_id": 0, "subject": "bud"}],
+        actor=None,
+        assignments=kept(proposed_first, (0, "bud")),
     )
     assert "error" not in accepted, accepted
 
-    assert accepted["bucket"] == "stub/2026-01-01/leaf"
+    assert _staged_capture(tmp_path, accepted["bucket"]) == "2026-01-01"
     anns = _staged_annotations(tmp_path, accepted["bucket"], "leaf")
     assert len(anns) == 1
     xs = [p[0] for ring in anns[0].geometry.rings for p in ring]
     assert min(xs) == pytest.approx(5.0)
+
+
+def test_assignments_naming_no_run_are_refused_by_their_type() -> None:
+    from pydantic import ValidationError
+
+    from tcip_mcp.tools.proposal_tools import StagedAssignments
+
+    with pytest.raises(ValidationError, match="staging_id"):
+        StagedAssignments.model_validate(
+            {"candidates": [{"candidate_id": 0, "subject": "bud"}]}
+        )
 
 
 def test_an_assignment_naming_no_subject_is_refused_never_skipped(
@@ -137,23 +160,21 @@ def test_an_assignment_naming_no_subject_is_refused_never_skipped(
     img_path = tmp_path / "images" / "2026-01-01" / "bur.jpg"
     _make_image(img_path)
     _install_stub(monkeypatch, [_candidate(0, 5.0), _candidate(1, 30.0)])
-    assert "error" not in propose_annotations(
-        tmp_path, image_path=str(img_path), engine="stub"
+    proposed = propose_annotations(
+        tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
+    assert "error" not in proposed, proposed
 
     staged = stage_proposals(
         tmp_path,
         image_path=str(img_path),
-        assignments=[
-            {"candidate_id": 0, "subject": "bur"},
-            {"candidate_id": 1, "subject": ""},
-        ],
+        actor=None,
+        assignments=kept(proposed, (0, "bur"), (1, "")),
     )
-    import tcip_store
-    from tcip_mcp.dataset_layout import bucket_key
+    from tcip_mcp.buckets import buckets_under
 
     assert staged["error"].startswith("assignment 1: ")
-    assert not tcip_store.exists(bucket_key(tmp_path, "stub/2026-01-01/bur"))
+    assert buckets_under(tmp_path) == []
 
 
 def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_ran(
@@ -176,7 +197,7 @@ def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_r
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
     proposed = propose_annotations(
-        tmp_path, image_path=str(img_path), engine="stub"
+        tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
     assert "error" not in proposed, proposed
 
@@ -195,7 +216,8 @@ def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_r
     accepted = stage_proposals(
         tmp_path,
         image_path=str(img_path),
-        assignments=[{"candidate_id": 0, "subject": "bud"}],
+        actor=None,
+        assignments=kept(proposed, (0, "bud")),
     )
     assert "error" in accepted
     assert str(img_path) in accepted["error"]
@@ -209,7 +231,8 @@ def test_the_envelope_carries_image_identity_at_the_dataset_rooted_location(
     """The staging envelope carries image identity at the dataset-rooted location.
 
     The record sits at a key naming the dataset root, capture date and stem, which name the image,
-    and its envelope carries the identity of the pixels it was staged from.
+    and the id the run answers, and its envelope carries the identity of the pixels it was staged
+    from.
     """
     import tcip_store as ts
     from tcip_mcp.tools.proposal_tools import (
@@ -222,13 +245,15 @@ def test_the_envelope_carries_image_identity_at_the_dataset_rooted_location(
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
 
     result = propose_annotations(
-        tmp_path, image_path=str(img_path), engine="stub"
+        tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
     assert "error" not in result, result
     assert result["staged"] is True
 
     key = ts.Key(
-        PROPOSAL_STAGING_STORE, str(tmp_path), ("2026-04-01", "sample")
+        PROPOSAL_STAGING_STORE,
+        str(tmp_path),
+        ("2026-04-01", "sample", result["staging_id"]),
     )
     envelope = ts.read(key)
     assert isinstance(envelope, dict) and "image_path" not in envelope
@@ -258,10 +283,10 @@ def test_propose_outside_a_dataset_tree_runs_the_engine_and_stages_nothing(
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
 
     result = propose_annotations(
-        tmp_path, image_path=str(img_path), engine="stub"
+        tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
     assert "error" not in result, result
-    assert result["staged"] is False
+    assert (result["staged"], result["staging_id"]) == (False, None)
     assert result["candidate_count"] == 1
     assert Path(result["image_path"]).is_file()
     assert not (tmp_path / ".tcip" / "state" / "proposals").exists()
@@ -284,7 +309,7 @@ def test_propose_then_accept_stages_a_prediction_at_the_expected_location(
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
 
     proposed = propose_annotations(
-        tmp_path, image_path=str(img_path), engine="stub"
+        tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
     assert "error" not in proposed, proposed
     assert proposed["staged"] is True
@@ -292,11 +317,12 @@ def test_propose_then_accept_stages_a_prediction_at_the_expected_location(
     accepted = stage_proposals(
         tmp_path,
         image_path=str(img_path),
-        assignments=[{"candidate_id": 0, "subject": "bud"}],
+        actor=None,
+        assignments=kept(proposed, (0, "bud")),
     )
     assert "error" not in accepted, accepted
 
-    assert accepted["bucket"] == f"stub/{capture}/sample"
+    assert _staged_capture(tmp_path, accepted["bucket"]) == capture
     assert (
         len(_staged_annotations(tmp_path, accepted["bucket"], "sample")) == 1
     )
@@ -336,7 +362,7 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
     proposed = propose_annotations(
-        tmp_path, image_path=str(manifest), engine="stub"
+        tmp_path, image_path=str(manifest), engine="stub", actor=None
     )
     assert "error" not in proposed, proposed
     assert proposed["staged"] is True
@@ -344,11 +370,12 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
     accepted = stage_proposals(
         tmp_path,
         image_path=str(manifest),
-        assignments=[{"candidate_id": 0, "subject": "bud"}],
+        actor=None,
+        assignments=kept(proposed, (0, "bud")),
     )
     assert "error" not in accepted, accepted
 
-    assert accepted["bucket"] == f"stub/{UNDATED_BUCKET}/capture"
+    assert _staged_capture(tmp_path, accepted["bucket"]) == UNDATED_BUCKET
     assert (
         len(_staged_annotations(tmp_path, accepted["bucket"], "capture")) == 1
     )
@@ -368,7 +395,7 @@ def test_propose_on_a_band_groups_member_path_refuses_naming_the_manifest(
     import tcip_store as ts
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
     from tcip_mcp.tools.proposal_tools import (
-        _staging_key_for,
+        PROPOSAL_STAGING_STORE,
         propose_annotations,
     )
 
@@ -390,13 +417,13 @@ def test_propose_on_a_band_groups_member_path_refuses_naming_the_manifest(
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
     member_path = bands["Red"]
     proposed = propose_annotations(
-        tmp_path, image_path=str(member_path), engine="stub"
+        tmp_path, image_path=str(member_path), engine="stub", actor=None
     )
     assert manifest.name in proposed["error"]
-    assert ts.read(_staging_key_for(str(member_path)), default=None) is None
+    assert ts.keys(PROPOSAL_STAGING_STORE, str(tmp_path)) == []
 
     admitted = propose_annotations(
-        tmp_path, image_path=str(manifest), engine="stub"
+        tmp_path, image_path=str(manifest), engine="stub", actor=None
     )
     assert admitted["staged"] is True, admitted
 
@@ -405,9 +432,10 @@ def test_a_second_accept_of_the_same_staged_run_refuses_and_keeps_the_first(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A second accept of the same staged run refuses as already accepted and keeps the first.
+    """A second accept of the same staged run refuses, naming the run's bucket, and keeps the first.
 
-    The staged document's version is the one the first accept wrote.
+    The run's bucket is named for the run, so it is published once; the first document's version
+    is the one the first accept wrote.
     """
     import tcip_store
     from tcip_mcp.tools.proposal_tools import (
@@ -420,14 +448,15 @@ def test_a_second_accept_of_the_same_staged_run_refuses_and_keeps_the_first(
     _install_stub(monkeypatch, [_candidate(0, 5.0), _candidate(1, 40.0)])
 
     proposed = propose_annotations(
-        tmp_path, image_path=str(img_path), engine="stub"
+        tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
     assert "error" not in proposed, proposed
 
     first = stage_proposals(
         tmp_path,
         image_path=str(img_path),
-        assignments=[{"candidate_id": 0, "subject": "bud"}],
+        actor=None,
+        assignments=kept(proposed, (0, "bud")),
     )
     assert "error" not in first, first
     document = _staged(tmp_path, first["bucket"], "twice")
@@ -436,17 +465,22 @@ def test_a_second_accept_of_the_same_staged_run_refuses_and_keeps_the_first(
     second = stage_proposals(
         tmp_path,
         image_path=str(img_path),
-        assignments=[{"candidate_id": 1, "subject": "nut"}],
+        actor=None,
+        assignments=kept(proposed, (1, "nut")),
     )
-    assert "already" in second["error"]
+    assert "already" in second["error"] and first["bucket"] in second["error"]
     assert tcip_store.read_versioned(document).version == written
 
 
-def test_a_second_proposal_run_replaces_the_first_and_accept_reads_the_newest(
+def test_two_runs_on_one_image_stay_their_own_and_each_accept_stages_its_own(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A second proposal run replaces the first, and accept stages the newest candidates."""
+    """Two proposal runs on one image each keep their record, and an accept stages its own run.
+
+    The earlier run's candidates are still the ones its ``staging_id`` stages after a later run,
+    and each run publishes under a bucket named for its own id.
+    """
     from tcip_mcp.tools.proposal_tools import (
         propose_annotations,
         stage_proposals,
@@ -457,37 +491,39 @@ def test_a_second_proposal_run_replaces_the_first_and_accept_reads_the_newest(
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
     first = propose_annotations(
-        tmp_path, image_path=str(img_path), engine="stub"
+        tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
-    assert "error" not in first, first
-
     _install_stub(monkeypatch, [_candidate(0, 40.0)])
     second = propose_annotations(
-        tmp_path, image_path=str(img_path), engine="stub"
+        tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
-    assert "error" not in second, second
+    assert first["staging_id"] != second["staging_id"], (first, second)
 
-    accepted = stage_proposals(
-        tmp_path,
-        image_path=str(img_path),
-        assignments=[{"candidate_id": 0, "subject": "bud"}],
-    )
-    assert "error" not in accepted, accepted
+    def staged_x(proposed: dict) -> float:
+        accepted = stage_proposals(
+            tmp_path,
+            image_path=str(img_path),
+            actor=None,
+            assignments=kept(proposed, (0, "bud")),
+        )
+        assert "error" not in accepted, accepted
+        assert accepted["bucket"].endswith(f"/{proposed['staging_id']}")
+        (ann,) = _staged_annotations(tmp_path, accepted["bucket"], "rerun")
+        return min(p[0] for ring in ann.geometry.rings for p in ring)
 
-    anns = _staged_annotations(tmp_path, accepted["bucket"], "rerun")
-    xs = [p[0] for ring in anns[0].geometry.rings for p in ring]
-    assert min(xs) == pytest.approx(40.0)
+    assert staged_x(first) == pytest.approx(5.0)
+    assert staged_x(second) == pytest.approx(40.0)
 
 
-def test_a_re_run_finding_nothing_clears_the_previous_runs_record(
+def test_a_run_finding_nothing_stages_nothing_and_leaves_an_earlier_run_staged(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A re-run finding nothing clears the previous run's record.
+    """A run that proposes nothing answers no ``staging_id`` and leaves an earlier run as it was.
 
-    A run that proposes zero candidates stages nothing, and a later accept refuses pointing to
-    ``propose_annotations``.
+    The empty run records no act, and the earlier run's id still stages its candidate.
     """
+    from tcip_mcp.audit import acts_of
     from tcip_mcp.tools.proposal_tools import (
         propose_annotations,
         stage_proposals,
@@ -498,56 +534,27 @@ def test_a_re_run_finding_nothing_clears_the_previous_runs_record(
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
     first = propose_annotations(
-        tmp_path, image_path=str(img_path), engine="stub"
+        tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
-    assert "error" not in first, first
-    assert first["staged"] is True
+    assert first["staged"] is True, first
 
     _install_stub(monkeypatch, [])
     second = propose_annotations(
-        tmp_path, image_path=str(img_path), engine="stub"
+        tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
-    assert "error" not in second, second
-    assert second["staged"] is False
+    assert (second["staged"], second["staging_id"]) == (False, None), second
+    acts, _cursor = acts_of(tmp_path, ("propose_annotations",))
+    assert [act["arguments"]["staging_id"] for act in acts] == [
+        first["staging_id"]
+    ]
 
     accepted = stage_proposals(
         tmp_path,
         image_path=str(img_path),
-        assignments=[{"candidate_id": 0, "subject": "bud"}],
+        actor=None,
+        assignments=kept(first, (0, "bud")),
     )
-    assert "error" in accepted
-    assert "propose_annotations" in accepted["error"]
-
-
-def test_a_first_run_finding_nothing_leaves_no_audit_line_and_a_clearing_run_leaves_one(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A first run finding nothing leaves no audit line, and a clearing run leaves one.
-
-    An image with no staged record that the engine finds nothing on records no act; a run that
-    clears a prior run's record adds a second act, staging zero.
-    """
-    from tcip_mcp.audit import acts_of
-    from tcip_mcp.tools.proposal_tools import propose_annotations
-
-    img_path = tmp_path / "images" / UNDATED_BUCKET / "fresh.jpg"
-    _make_image(img_path)
-
-    _install_stub(monkeypatch, [])
-    result = propose_annotations(
-        tmp_path, image_path=str(img_path), engine="stub"
-    )
-    assert "error" not in result, result
-    assert acts_of(tmp_path, ("propose_annotations",))[0] == []
-
-    _install_stub(monkeypatch, [_candidate(0, 5.0)])
-    propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
-    _install_stub(monkeypatch, [])
-    propose_annotations(tmp_path, image_path=str(img_path), engine="stub")
-    acts, _cursor = acts_of(tmp_path, ("propose_annotations",))
-    assert [act["arguments"]["staged"] for act in acts][-1] == 0
-    assert len(acts) == 2, acts
+    assert "error" not in accepted, accepted
 
 
 def test_accept_reports_an_unsampleable_image_as_an_error_dict(
@@ -569,7 +576,7 @@ def test_accept_reports_an_unsampleable_image_as_an_error_dict(
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
     proposed = propose_annotations(
-        tmp_path, image_path=str(img_path), engine="stub"
+        tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
     assert "error" not in proposed, proposed
 
@@ -583,7 +590,8 @@ def test_accept_reports_an_unsampleable_image_as_an_error_dict(
     accepted = stage_proposals(
         tmp_path,
         image_path=str(img_path),
-        assignments=[{"candidate_id": 0, "subject": "bud"}],
+        actor=None,
+        assignments=kept(proposed, (0, "bud")),
     )
     assert "error" in accepted
     assert str(img_path) in accepted["error"]
@@ -621,6 +629,7 @@ def test_a_region_proposal_and_its_accept_each_open_the_image_once(
         tmp_path,
         image_path=str(img_path),
         engine="stub",
+        actor=None,
         grid_cells=["A1"],
         tile_size=32,
         overlap=0.0,
@@ -633,7 +642,8 @@ def test_a_region_proposal_and_its_accept_each_open_the_image_once(
     accepted = stage_proposals(
         tmp_path,
         image_path=str(img_path),
-        assignments=[{"candidate_id": 0, "subject": "bud"}],
+        actor=None,
+        assignments=kept(proposed, (0, "bud")),
     )
     assert "error" not in accepted, accepted
     assert len(opened) == 1
@@ -663,14 +673,16 @@ def test_a_staging_is_one_publication_with_one_audit_line(
     image = tmp_path / "images" / "2026-01-01" / "leaf.jpg"
     _make_image(image)
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
-    assert "error" not in propose_annotations(
-        tmp_path, image_path=str(image), engine="stub"
+    proposed = propose_annotations(
+        tmp_path, image_path=str(image), engine="stub", actor=None
     )
+    assert "error" not in proposed, proposed
 
     accepted = stage_proposals(
         tmp_path,
         image_path=str(image),
-        assignments=[{"candidate_id": 0, "subject": "bud"}],
+        actor=None,
+        assignments=kept(proposed, (0, "bud")),
     )
 
     assert "error" not in accepted, accepted

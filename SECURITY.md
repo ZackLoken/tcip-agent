@@ -48,12 +48,12 @@ that variable.
 
 ## Channel 4: inbound fetches a firewalled adopter must allow
 
-The platform reaches out at install and first use: conda and PyPI at environment creation, the SAM-2
-source from GitHub, and pretrained backbone weights from the timm and Hugging Face hosts on first
-backbone build. SAM-2 checkpoint weights are not fetched automatically; the wrapper raises with a
-manual-download instruction, which is adopter-initiated rather than an egress. An adopter behind a
-restrictive firewall needs these hosts allow-listed, or the platform will fail at install and at
-first model build.
+The platform reaches out at install and first use: conda and PyPI at environment creation,
+pretrained backbone weights from the timm and Hugging Face hosts on first backbone build, and the
+two proposal engines' checkpoints (`sam` and `grounding_dino`) from the Hugging Face host into the
+user-profile cache on each engine's first call. An adopter behind a restrictive firewall needs
+these hosts allow-listed, or the platform will fail at install, at first model build and at
+first proposal.
 
 ## What does not phone home
 

@@ -1,37 +1,61 @@
 """Annotation-proposal engines: a method-neutral seam for auto-labeling.
 
-An auto-labeling engine turns an image into candidate shapes. Register one
-(``register_proposal_engine``) or bring it by dotted ``module:factory`` path (Grounding DINO,
-open-vocab, a bespoke proposer).
+An auto-labeling engine turns an image into candidate shapes. Two ship registered: ``sam``, a
+promptable segmenter whose prompts are ``points`` and ``boxes``, and ``grounding_dino``, a
+text-prompted detector whose prompt is a ``phrase``
+(:mod:`~tcip_mcp.pipelines.proposal_engines`). Register another (``register_proposal_engine``) or
+bring it by dotted ``module:factory`` path.
 
-An engine implements :class:`Proposer`: ``propose`` for candidates over an image. Candidates use a
-neutral schema (``candidate_id`` / ``bbox`` / ``area`` / ``rings`` / ``score`` / ``engine`` /
+An engine implements :class:`Proposer`: ``propose`` answers a :class:`Proposal`, its candidates
+over an image beside the execution record of the platform's inference pass that produced them.
+Candidates use a neutral schema (``candidate_id`` / ``bbox`` / ``area`` / ``rings`` / ``score`` /
 ``engine_meta``); engine-specific signals live under ``engine_meta``.
 
-``rings`` is a candidate's geometry as ``Polygon.rings``: one closed contour per connected region
-of the proposed mask.
+``rings`` is a candidate's geometry as ``Polygon.rings``, one closed contour per connected region
+of the proposed mask, or ``None`` for a candidate whose geometry is its ``bbox``.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, NamedTuple, Protocol, runtime_checkable
+
+from tcip_mcp.pipelines.proposal_engines import (
+    PromptableSegmenter,
+    TextPromptedDetector,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from pydantic import JsonValue
 
+    from tcip_mcp.pipelines.execution import Execution
+
+
+class Proposal(NamedTuple):
+    """What one ``propose`` call answers.
+
+    ``candidates`` are its candidate shapes in the neutral schema, and ``execution`` the record
+    of the inference pass that produced them, ``None`` for a proposal no such pass made.
+    """
+
+    candidates: list[dict]
+    execution: Execution | None
+
 
 @runtime_checkable
 class Proposer(Protocol):
     """A source of annotation proposals for a human to review (see module docstring)."""
 
-    def propose(self, image_path: str, **params: JsonValue) -> list[dict]:
-        """Return candidate shapes over the image in the neutral schema."""
+    def propose(self, image_path: str, **params: JsonValue) -> Proposal:
+        """Return the :class:`Proposal` over the image."""
         ...
 
 
-_ENGINES: dict[str, Callable[[], Proposer]] = {}
+_ENGINES: dict[str, Callable[[], Proposer]] = {
+    PromptableSegmenter.name: PromptableSegmenter,
+    TextPromptedDetector.name: TextPromptedDetector,
+}
 """Each registered engine, as the factory that answers it."""
 
 
