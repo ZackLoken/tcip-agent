@@ -1,9 +1,9 @@
 """Proposal-workflow tools: turn an auto-labeling engine's output into staged predictions.
 
 propose_annotations asks a named engine (one registered, or a 'module:factory' the agent brings)
-to look at pixels and offer candidates. stage_proposals publishes either an engine's reviewed
-candidates or explicit boxes/polygons once as a proposal bucket under the image's dataset root,
-refusing one already published. It never writes ground truth.
+to look at pixels and offer candidates, staging each run under an id of its own. stage_proposals
+publishes either one run's reviewed candidates or explicit boxes/polygons once, as a proposal
+bucket under the image's dataset root named for that id. It never writes ground truth.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from tcip_annotation.json_io import stored_box_extent_ok
 from tcip_annotation.state import Rings
 from tcip_annotation.viz import render_candidates, render_detections
 from tcip_mcp.audit import now_iso, record_event_or_raise
+from tcip_mcp.pipelines.execution import Execution, ExecutionRefusedError
 from tcip_mcp.pipelines.image_utils import (
     BandGroupIncompleteError,
     resolve_image_path,
@@ -57,8 +58,9 @@ class _StatedSubject(BaseModel):
 class ProposalCandidate(BaseModel):
     """One engine candidate in the neutral schema, coordinates in the source image's frame.
 
-    ``rings`` is a :class:`~tcip_annotation.Polygon`'s, refused as that polygon refuses it. The
-    engine's other keys (its ``engine_meta`` signals) are kept as given, each a JSON value.
+    ``rings`` is a :class:`~tcip_annotation.Polygon`'s, refused as that polygon refuses it, or
+    ``None`` for a candidate whose geometry is its ``bbox``. The engine's other keys (its
+    ``engine_meta`` signals) are kept as given, each a JSON value.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -67,15 +69,20 @@ class ProposalCandidate(BaseModel):
     candidate_id: int
     bbox: tuple[float, float, float, float]
     area: float
-    rings: Annotated[Rings, AfterValidator(lambda rings: Polygon(rings).rings)]
+    rings: (
+        Annotated[Rings, AfterValidator(lambda rings: Polygon(rings).rings)]
+        | None
+    )
     score: float
 
 
 class ProposalStaging(BaseModel):
-    """The candidates the latest proposal run produced for one dataset image.
+    """The candidates one proposal run produced for one dataset image.
 
-    It names the ``engine`` and the content identity of the pixels it ran on;
-    :func:`proposal_staging_key` addresses it.
+    It names the ``engine``, the content identity of the pixels it ran on, and the ``execution``
+    record of the inference pass that produced the candidates (``None`` for a proposal no such
+    pass made), which the bucket its accepted candidates publish to carries;
+    :func:`proposal_staging_key` addresses it by the run's id.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -83,28 +90,53 @@ class ProposalStaging(BaseModel):
     engine: str
     candidates: list[ProposalCandidate]
     image_identity: RasterIdentity
+    execution: Execution | None
+
+
+class Assignment(BaseModel):
+    """One staged candidate a reviewer kept, by its id, and the subject it is of."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: int
+    subject: str
+
+
+class StagedAssignments(BaseModel):
+    """The candidates of one proposal run a reviewer kept, each assigned a subject.
+
+    ``staging_id`` names the run, as :func:`propose_annotations` answers it; a rejected candidate
+    is simply omitted.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    staging_id: str
+    candidates: list[Assignment]
 
 
 def proposal_staging_key(
-    dataset_root: str | Path, capture: str, stem: str
+    dataset_root: str | Path, capture: str, stem: str, staging_id: str
 ) -> ts.Key:
-    """Return the key of the candidates the latest proposal run produced for one dataset image.
+    """Return the key of the candidates proposal run ``staging_id`` produced for a dataset image.
 
     The record holds the candidates whole, under the dataset root, by the image's capture and
-    stem.
+    stem and the run's id.
     """
-    return ts.Key(PROPOSAL_STAGING_STORE, str(dataset_root), (capture, stem))
+    return ts.Key(
+        PROPOSAL_STAGING_STORE, str(dataset_root), (capture, stem, staging_id)
+    )
 
 
-def _staging_key_for(image_path: str) -> ts.Key:
-    """Return the :func:`proposal_staging_key` of the dataset image at ``image_path``.
+def _staging_key_for(image_path: str, staging_id: str) -> ts.Key:
+    """Return the :func:`proposal_staging_key` of run ``staging_id`` on the image at ``image_path``.
 
     Raises ``ValueError``, :func:`~tcip_mcp.dataset_layout.parse_image_path`'s own, for an image of
     no capture.
     """
     from tcip_mcp.dataset_layout import parse_image_path
 
-    return proposal_staging_key(*parse_image_path(image_path))
+    return proposal_staging_key(*parse_image_path(image_path), staging_id)
 
 
 def _region_rect_from_cells(cells: list, names: list[str]) -> Rect:
@@ -146,23 +178,14 @@ def _offset_candidates(
 ) -> list[ProposalCandidate]:
     """Translate candidates from a region crop's own pixels into the source image's full frame.
 
-    Each candidate's box and rings are shifted into the source image's native coordinates by the
-    crop's own origin.
+    Each candidate is moved by the crop's own origin
+    (:func:`~tcip_mcp.pipelines.proposal_engines.shifted_candidate`).
     """
-    ox, oy = origin
+    from tcip_mcp.pipelines.proposal_engines import shifted_candidate
+
     return [
-        c.model_copy(
-            update={
-                "bbox": (
-                    c.bbox[0] + ox,
-                    c.bbox[1] + oy,
-                    c.bbox[2] + ox,
-                    c.bbox[3] + oy,
-                ),
-                "rings": [
-                    [(x + ox, y + oy) for x, y in ring] for ring in c.rings
-                ],
-            }
+        ProposalCandidate.model_validate(
+            shifted_candidate(c.model_dump(), origin)
         )
         for c in candidates
     ]
@@ -177,33 +200,55 @@ def propose_annotations(
     grid_cells: list[str] | None = None,
     tile_size: int | None = None,
     overlap: float | None = None,
+    *,
+    actor: str | None,
 ) -> dict:
     """Propose candidate annotations on an image for review, using a named auto-labeling engine.
 
     Runs the engine's whole-image proposal pass, renders the numbered candidates, and returns the
-    render path and neutral candidate data. Read the render with your own image-capable read tool,
-    then call stage_proposals with subject assignments to stage the accepted ones as predictions.
+    render path, the neutral candidate data and the ``staging_id`` a ``stage_proposals``
+    acceptance names.
 
     Each candidate renders as a colored, semi-transparent filled polygon (every ring of an
-    occlusion-split candidate drawn, not just the largest) with a large numbered label at its
-    centroid, colors cycling through the shared class palette; the candidate id in that number is
-    the same id ``stage_proposals``' ``assignments`` parameter names.
+    occlusion-split candidate drawn, not just the largest), or a box outline for a candidate whose
+    ``rings`` is ``None``, with a large numbered label at the center of its ``bbox``, colors
+    cycling through the shared class palette; the candidate id in that number is the same id
+    ``stage_proposals``' ``assignments`` names.
 
-    On an image under a dataset's ``images/`` tree, the candidates are staged keyed by the dataset,
-    capture date and stem, alongside the content identity of the pixels the engine ran on. On a
-    path outside any dataset's ``images/`` tree the engine still runs and the render and
-    candidates are returned the same way, but nothing is staged (the response's ``staged`` is
-    ``false``, naming why). A path naming no logical image (a band of a grouped capture, which
-    names its manifest) refuses (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`).
-    Writing or clearing the staged record leaves one audit line in the dataset's log; a call that
-    writes neither leaves none.
+    On an image under a dataset's ``images/`` tree, the run's candidates are staged as a record of
+    their own, keyed by the dataset, capture date, stem and the run's fresh id
+    (:func:`~tcip_mcp.experiments.mint_experiment_id`), which the response answers as
+    ``staging_id``, alongside the content identity of the pixels the engine ran on; an earlier
+    run's record stays as it was. On a path outside any dataset's ``images/`` tree the engine
+    still runs and the render and candidates are returned the same way, but nothing is staged
+    (``staged`` is ``false`` and ``staging_id`` ``None``, the summary naming why), and a run
+    proposing nothing stages nothing the same way. A path naming no logical image (a band of a
+    grouped capture, which names its manifest) refuses
+    (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`). Writing the staged record leaves
+    one audit line in the dataset's log naming its ``staging_id``, by ``actor`` (the person who
+    prompted the run, or ``None`` for a call no person makes); a call that writes none leaves none.
 
-    ``engine`` names one registered (``register_proposal_engine``) or a dotted 'module:factory'.
-    An empty or unknown name refuses, naming the registered ones.
+    ``engine`` names one registered or a dotted 'module:factory'. Two ship registered: ``sam``, a
+    promptable segmenter (``engine_params``: ``points``, a list of ``[x, y]`` pixel points, and
+    ``boxes``, a list of ``[x1, y1, x2, y2]`` pixel boxes, each its own prompt, at least one
+    stated; ``multimask_output``; optional ``checkpoint``), and ``grounding_dino``, a
+    text-prompted detector proposing boxes (``engine_params``: ``phrase``, ``box_threshold``,
+    ``text_threshold``, ``postprocess``, ``cross_tile_nms``; optional ``tile_size``, ``overlap``
+    and ``checkpoint``). The segmenter runs each prompt on a window cut at its processor's
+    ``longest_edge`` around it, a wider box taking its own extent, and the processor scales the
+    window's longer side to that edge, so a window whose longer side is the edge reaches the model
+    at native resolution, a frame shorter than it upsampled and a wider box downsampled by its
+    ratio to the edge; the detector is run by the platform's tiled inference pass on a lattice a
+    whole-frame pass derives unless stated (``TILE_EDGE_DERIVATION``,
+    ``TILE_OVERLAP_DERIVATION``), its execution record staged with the candidates. Each
+    downloads its checkpoint's weights from the Hugging Face host on first use. An agent brings
+    its own by ``register_proposal_engine`` or a dotted factory. An empty or unknown name
+    refuses, naming the registered ones; ``engine_params`` the engine's own parameter model
+    refuses, and a derivation the pass cannot make, come back as the error.
 
-    ``grid_cells`` restricts the pass to a region instead of the whole frame: name the
-    reference-grid cells the region spans (e.g. ``['B3', 'C3', 'B4', 'C4']``), and the engine
-    proposes only over their bounding rect. The crop is taken and the results offset back to
+    ``grid_cells`` restricts the pass to a region instead of the whole frame: they are the
+    reference-grid cell names (e.g. ``['B3', 'C3', 'B4', 'C4']``) whose bounding rect the engine
+    proposes over. The crop is taken and the results offset back to
     full-frame coordinates on this side of the engine seam; an engine that keys behavior off the
     image path itself (a cache, a sidecar lookup keyed by the original file) receives the temp
     crop's path, which it cannot resolve back to the source image. Omitting ``grid_cells`` runs
@@ -213,11 +258,11 @@ def propose_annotations(
         image_path: The image file (:func:`~tcip_mcp.registry_paths.located` against the
             project).
         engine: Proposal engine: a registered name or a dotted 'module:factory' the agent brings.
-        engine_params: Engine-specific knobs forwarded to the engine. Omit for the engine's own
-            defaults.
+        engine_params: The engine's own parameters, forwarded to its ``propose``, which
+            validates them; the prompts travel here.
         grid_cells: Reference-grid cell names bounding the region to propose over (e.g. ['B3',
             'D5']); the engine sees the bounding rect of the named cells, not the whole frame.
-            Requires ``tile_size`` and ``overlap``. Omit for the whole frame.
+            Requires ``tile_size`` and ``overlap``.
         tile_size: Cell edge, in native pixels, of the grid the cells were read off. Required with
             ``grid_cells``.
         overlap: Overlap fraction of the grid the cells were read off. Required with
@@ -287,19 +332,22 @@ def propose_annotations(
                 proposed = proposer.propose(
                     propose_path, **(engine_params or {})
                 )
-            except ImportError as e:
-                return {"error": str(e)}
-            except FileNotFoundError as e:
+            except (
+                ImportError,
+                FileNotFoundError,
+                ValidationError,
+                ExecutionRefusedError,
+            ) as e:
                 return {"error": str(e)}
         finally:
             if crop_tmp is not None:
                 crop_tmp.unlink(missing_ok=True)
 
-        # An engine's own candidates are refused here, where they arrive, when unstorable, no
-        # polygon or stating no confidence of their own.
+        # An engine's own candidates are refused here, where they arrive, when unstorable, rings
+        # that are no polygon or stating no confidence of their own.
         try:
             candidates = TypeAdapter(list[ProposalCandidate]).validate_python(
-                proposed
+                proposed.candidates
             )
         except ValidationError as exc:
             return {
@@ -310,24 +358,12 @@ def propose_annotations(
             candidates = _offset_candidates(candidates, origin)
 
         if not candidates:
-            # A prior run's record must not outlive this one finding nothing to propose.
-            try:
-                stale = _staging_key_for(image_path)
-            except ValueError:
-                pass
-            else:
-                if ts.delete(stale):
-                    record_event_or_raise(
-                        "propose_annotations",
-                        {"image_path": image_path, "staged": 0},
-                        actor=None,
-                        scope=stale.root,
-                    )
             return {
                 "image_path": None,
                 "engine": engine,
                 "summary": f"Engine {engine!r} proposed no candidates",
                 "staged": False,
+                "staging_id": None,
                 "candidates": [],
             }
 
@@ -341,10 +377,14 @@ def propose_annotations(
             output_path=viz_output_path(project, "candidates"),
         )
 
+        from tcip_mcp.experiments import mint_experiment_id
+
+        minted = mint_experiment_id("staging")
+        staging_id: str | None = minted
         try:
-            address = _staging_key_for(image_path)
+            address = _staging_key_for(image_path, minted)
         except ValueError as exc:
-            staged = False
+            staging_id = None
             stage_note = f" Not staged: {exc}"
         else:
             from tcip_mcp.pipelines.raster_source import content_identity
@@ -357,15 +397,20 @@ def propose_annotations(
                     engine=engine,
                     candidates=candidates,
                     image_identity=content_identity(raster),
+                    execution=proposed.execution,
                 ).model_dump(mode="json"),
+                expect=ts.Version.ABSENT,
             )
             record_event_or_raise(
                 "propose_annotations",
-                {"image_path": image_path, "staged": len(candidates)},
-                actor=None,
+                {
+                    "image_path": image_path,
+                    "staged": len(candidates),
+                    "staging_id": staging_id,
+                },
+                actor=actor,
                 scope=address.root,
             )
-            staged = True
             stage_note = ""
 
     region_note = f" (region {grid_cells})" if origin is not None else ""
@@ -376,7 +421,8 @@ def propose_annotations(
         f"{stage_note} Review the numbered overlay, then call stage_proposals "
         f"with subject assignments.",
         "candidate_count": len(candidates),
-        "staged": staged,
+        "staged": staging_id is not None,
+        "staging_id": staging_id,
         "candidates": [
             {
                 "id": c.candidate_id,
@@ -394,23 +440,25 @@ def _stage_assignments_regime(
     image_path: str,
     img: Path,
     address: ts.Key,
-    assignments: list[dict],
+    assignments: StagedAssignments,
+    actor: str | None,
 ) -> dict:
-    """Stage the candidates ``assignments`` names, each with its subject, for ``img``.
+    """Stage the candidates ``assignments`` names, each with its subject, for ``img``, by ``actor``.
 
-    The candidates come from the record staged at ``address``; refuses when that record is absent
-    or the image's content no longer matches the content identity it recorded.
+    The candidates come from the record of the run ``assignments`` names, staged at ``address``;
+    refuses when that record is absent or the image's content no longer matches the content
+    identity it recorded.
     """
     try:
         source = resolve_image_path(img)
     except (FileNotFoundError, BandGroupIncompleteError, ValueError) as exc:
         return {"error": str(exc)}
 
-    # Load cached proposals from the same record propose_annotations staged them in.
     stored = ts.read(address, default=None)
     if stored is None:
         return {
-            "error": f"No proposals found for {img.stem}. Run propose_annotations first."
+            "error": f"No proposal run {assignments.staging_id!r} is staged for {img.stem}. "
+            "Run propose_annotations and pass the staging_id it answers."
         }
     staging = ProposalStaging.model_validate(stored)
 
@@ -444,21 +492,21 @@ def _stage_assignments_regime(
     engine = staging.engine
     cand_map = {c.candidate_id: c for c in staging.candidates}
 
-    # Build name-based predictions (created_by=<engine>, score = the proposal score); each keeps
-    # every ring, so an occlusion-split object stays split rather than its largest fragment.
+    # A polygon keeps every ring, so an occlusion-split object stays split; no rings is a box.
     staged_at = now_iso()
     proposals: list[Annotation] = []
-    n_poly = 0
 
-    for i, assign in enumerate(assignments):
-        cand = cand_map.get(assign["candidate_id"])
+    for i, assign in enumerate(assignments.candidates):
+        cand = cand_map.get(assign.candidate_id)
         if cand is None:
             continue
         try:
             proposals.append(
                 Annotation(
-                    subject=_StatedSubject.model_validate(assign).subject,
-                    geometry=Polygon(rings=cand.rings),
+                    subject=assign.subject,
+                    geometry=BBox(*cand.bbox)
+                    if cand.rings is None
+                    else Polygon(rings=cand.rings),
                     score=cand.score,
                     created_by=engine,
                     created_at=staged_at,
@@ -466,7 +514,6 @@ def _stage_assignments_regime(
             )
         except ValueError as exc:
             return {"error": f"assignment {i}: {exc}"}
-        n_poly += 1
 
     # Model output for a human to accept on the Annotate canvas, never written straight to
     # ground truth.
@@ -479,6 +526,8 @@ def _stage_assignments_regime(
             annotations=proposals,
             img_w=identity.width,
             img_h=identity.height,
+            execution=staging.execution,
+            actor=actor,
         )
     except ValueError as exc:
         return {"error": str(exc)}
@@ -493,7 +542,8 @@ def _stage_assignments_regime(
     )
 
     note = (
-        f"Staged {n_poly} proposal(s) from {len(assignments)} {engine!r} candidates as "
+        f"Staged {len(proposals)} proposal(s) from {len(assignments.candidates)} {engine!r} "
+        "candidates as "
         f"predictions (created_by={engine!r}) for review, not ground truth."
     )
 
@@ -502,7 +552,7 @@ def _stage_assignments_regime(
         "engine": engine,
         "bucket": bucket,
         "summary": note,
-        "proposal_count": n_poly,
+        "proposal_count": len(proposals),
     }
 
 
@@ -515,14 +565,18 @@ def _stage_document(
     annotations: list[Annotation],
     img_w: int,
     img_h: int,
+    execution: Execution | None,
+    actor: str | None,
 ) -> str | None:
     """Publish ``annotations`` as the bucket of one staged proposal for ``image``; return its name.
 
-    The bucket is named ``<producer>/<capture>/<stem>`` under the image's dataset root (both read
-    off the image's staging key ``address``) (:func:`~tcip_mcp.buckets.publish`), its record
-    naming ``producer`` as what proposed them; no annotations publishes nothing and returns
-    ``None``. A bucket of that name already published refuses
-    (:class:`~tcip_mcp.buckets.BucketExistsError`).
+    The bucket is named ``<producer>/<capture>/<stem>/<id>`` under the image's dataset root, all
+    three read off the staging key ``address`` (:func:`proposal_staging_key`), so the name says
+    which staging it publishes and never lands on an earlier one
+    (:func:`~tcip_mcp.buckets.publish`); its record names ``producer`` as what proposed them and
+    carries ``execution``, the record of the inference pass that produced them, and its
+    publication's audit line ``actor`` as who staged them. No annotations publishes nothing and
+    returns ``None``.
     """
     from tcip_annotation import json_io
     from tcip_mcp.buckets import Document, Proposed, publish
@@ -540,11 +594,11 @@ def _stage_document(
         [Document(str(image), data)],
         producer=Proposed(proposed_by=producer),
         scope=ClassScope(),
-        execution=None,
+        execution=execution,
         raster_path=None,
         raster_identity=None,
         assessment_id=None,
-        actor=None,
+        actor=actor,
     ).name
 
 
@@ -556,10 +610,11 @@ def _stage_explicit_regime(
     model_name: str,
     boxes: list[dict],
     polygons: list[dict],
+    actor: str | None,
 ) -> dict:
     """Stage explicit boxes and polygons, each carrying a ``subject``, as one staged proposal.
 
-    The proposal is ``model_name``'s for the image (:func:`_stage_document`).
+    The proposal is ``model_name``'s for the image, staged by ``actor`` (:func:`_stage_document`).
     """
     from tcip_annotation.json_io import ring_vertex
     from tcip_mcp.workspace import is_valid_name
@@ -717,6 +772,8 @@ def _stage_explicit_regime(
             annotations=proposals,
             img_w=img_w,
             img_h=img_h,
+            execution=None,
+            actor=actor,
         )
     except ValueError as exc:
         return {"error": str(exc)}
@@ -746,10 +803,11 @@ def stage_proposals(
     project: Path,
     image_path: str,
     *,
-    assignments: list[dict] | None = None,
+    assignments: StagedAssignments | None = None,
     boxes: list[dict] | None = None,
     polygons: list[dict] | None = None,
     model_name: str | None = None,
+    actor: str | None,
 ) -> dict:
     """Stage model-/agent-proposed shapes as an image's proposal bucket of predictions.
 
@@ -757,12 +815,14 @@ def stage_proposals(
 
     Exactly one input regime per call:
 
-    - ``assignments``: candidates ``propose_annotations`` staged for this image, reviewed and each
-      assigned a subject; a mapping from candidate id to subject, rejected candidates simply
-      omitted. Reads back the record staged at this exact image (dataset, capture date and stem)
-      and refuses if the image's content no longer matches the content identity that run recorded.
-      The masks are staged with ``created_by=<engine>`` and ``score`` = the engine's proposal
-      score; ``model_name`` is refused alongside ``assignments``.
+    - ``assignments``: the candidates one ``propose_annotations`` run staged for this image, named
+      by the run's ``staging_id``, reviewed and each assigned a subject
+      (``{staging_id, candidates: [{candidate_id, subject}]}``), rejected candidates simply
+      omitted. Reads back that run's record for this exact image (dataset, capture date, stem and
+      id) and refuses if the image's content no longer matches the content identity that run
+      recorded. Each is staged as its polygon, or its box when it has no rings, with
+      ``created_by=<engine>`` and ``score`` = the engine's proposal score; ``model_name`` is
+      refused alongside ``assignments``.
     - ``boxes``/``polygons``: explicit shapes an agent or another model already has in hand, with
       no cached record to read back. ``model_name`` is required, the real producer stamped as
       ``created_by``. ``boxes`` is
@@ -773,12 +833,16 @@ def stage_proposals(
       same ``Polygon`` through ``json_io.ring_vertex``.
 
     Either regime resolves the dataset root, capture date and stem from ``image_path`` itself, and
-    publishes the image's proposal once as its own bucket named ``<producer>/<date>/<stem>`` under
-    that root, returned as ``bucket``, its record naming the engine or ``model_name`` as
-    what proposed it and no checkpoint, execution record or class scope: a proposal already staged
-    for the image under the same producer refuses, so a re-run never overwrites reviewed
-    predictions or orphans their verdicts. Pair with ``focus_human_attention`` to send the human
-    straight to the result.
+    publishes the image's proposal as a new bucket named ``<producer>/<date>/<stem>/<id>`` under
+    that root, returned as ``bucket``: ``id`` is the run's ``staging_id`` for ``assignments`` and
+    a fresh one (:func:`~tcip_mcp.experiments.mint_experiment_id`) for explicit shapes. Its record
+    names the engine or ``model_name`` as what proposed it, carries the execution record of the
+    tiled pass the proposal ran through, ``None`` where none ran (a prompt window, explicit
+    shapes), and names no checkpoint or class scope. A bucket is published once: a second stage
+    of the same run refuses (:class:`~tcip_mcp.buckets.BucketExistsError`), and a new run or new
+    explicit shapes publish a bucket of their own, so nothing overwrites reviewed predictions or
+    orphans their verdicts. The publication's audit line names ``actor``, the person who staged
+    it, or ``None`` for a call no person makes.
 
     A staged annotation's ``subject`` is whatever ``assignments``/``boxes``/``polygons`` named;
     the platform validates no subject name.
@@ -786,8 +850,9 @@ def stage_proposals(
     Args:
         image_path: The dataset image, as propose_annotations takes it (the same one, for the
             assignments regime).
-        assignments: List of dicts, each with 'candidate_id' (int) and 'subject' (name). Refused
-            alongside boxes/polygons or model_name.
+        assignments: The run's ``staging_id`` and its kept ``candidates``, each a
+            ``candidate_id`` (int) and a ``subject`` (name). Refused alongside boxes/polygons or
+            model_name.
         boxes: Explicit boxes; see above. Refused alongside assignments.
         polygons: Explicit polygons; see above. Refused alongside assignments.
         model_name: The producer the explicit regime stages under. Required with
@@ -810,8 +875,15 @@ def stage_proposals(
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
+    from tcip_mcp.experiments import mint_experiment_id
+
     try:
-        address = _staging_key_for(image_path)
+        address = _staging_key_for(
+            image_path,
+            assignments.staging_id
+            if assignments is not None
+            else mint_experiment_id("staging"),
+        )
     except ValueError as exc:
         return {"error": str(exc)}
 
@@ -822,7 +894,7 @@ def stage_proposals(
                 "own engine names the bucket."
             }
         return _stage_assignments_regime(
-            project, image_path, img, address, assignments
+            project, image_path, img, address, assignments, actor
         )
 
     if model_name is None:
@@ -838,4 +910,5 @@ def stage_proposals(
         model_name,
         boxes or [],
         polygons or [],
+        actor,
     )

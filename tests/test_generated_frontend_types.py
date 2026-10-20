@@ -180,7 +180,8 @@ def test_no_other_frontend_module_declares_an_interface_with_a_generated_field_s
 def _generated_vocabularies() -> list[set[str]]:
     """Return the vocabularies the generator emits.
 
-    Each generated field's literal union, each runtime constant, and each literal alias.
+    Each generated field's literal union, each tuple constant, each record constant's keys, and
+    each literal alias.
     """
     text = GENERATED.read_text(encoding="utf-8")
     generator = _generator()
@@ -190,6 +191,7 @@ def _generated_vocabularies() -> list[set[str]]:
             for m in _FIELD_UNION_RE.finditer(text)
         ]
         + [set(v) for v in generator.tuple_constants().values()]
+        + [set(v) for v in generator.record_constants().values()]
         + [set(v) for v in generator.literal_aliases().values()]
     )
 

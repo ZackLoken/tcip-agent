@@ -11,7 +11,7 @@ dependencies = [
     "torchvision>=0.15",
     "timm>=1.0",
     "numpy",
-    # scipy.spatial, read by the band-group identity tolerance.
+    # scipy.spatial, read by the band-group identity tolerance and the nearest-neighbor spacing.
     "scipy",
     # sklearn.metrics.metric_at_thresholds (added in 1.9), read by the mask threshold derivation.
     "scikit-learn>=1.9",
@@ -28,6 +28,8 @@ dependencies = [
     "pycocotools>=2.0.7",
     # Tiled inference: the slice lattice, the detection-model wrapper and the cross-tile merge.
     "sahi>=0.12.6",
+    # The sam and grounding_dino proposal engines: their models, processors and checkpoints.
+    "transformers>=5",
     "pydantic>=2",
     "tcip-store",
     "tcip-annotation",

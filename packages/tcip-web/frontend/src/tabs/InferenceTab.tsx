@@ -11,7 +11,7 @@ import {
   type InferenceStatus,
 } from "@/api/inference";
 import {
-  CROSS_TILE_MERGES,
+  CROSS_TILE_MERGE_DESCRIPTIONS,
   type MaskCut,
   type RegisteredModel,
   type Stated,
@@ -513,9 +513,9 @@ export function InferenceTab() {
           onChange={(e) => setMerge(e.target.value)}
         >
           <option value="">None stated</option>
-          {CROSS_TILE_MERGES.map((name) => (
+          {Object.entries(CROSS_TILE_MERGE_DESCRIPTIONS).map(([name, description]) => (
             <option key={name} value={name}>
-              {name}
+              {description}
             </option>
           ))}
         </select>

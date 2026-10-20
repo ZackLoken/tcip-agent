@@ -1,10 +1,11 @@
 """The model-side contract: the measurement boundary, as a behavioral check.
 
-* ``check_model_contract(model, task)``: a behavioral smoke: a train-mode forward yields a finite
-loss with a gradient, and an eval-mode forward yields the documented shape for the task
-(``list[dict]`` per image for detection/instance_seg, a ``dict`` of tensors otherwise).
-* ``overfit_check(model, task, steps)``: a few optimizer steps on one fixed tiny batch (seeded,
-CPU) must drive the loss down.
+* ``check_model_contract(model, task, *, device)``: a behavioral smoke on ``device``: a
+train-mode forward yields a finite loss with a gradient, and an eval-mode forward yields the
+documented shape for the task (``list[dict]`` per image for detection/instance_seg, a ``dict``
+of tensors otherwise).
+* ``overfit_check(model, task, *, seed, deterministic, device)``: a few optimizer steps on one
+fixed tiny batch, seeded, on ``device``, must drive the loss down.
 """
 
 from __future__ import annotations
@@ -43,19 +44,18 @@ target is a value, so neither reads one."""
 
 
 class ContractKeywords(TypedDict, total=False):
-    """The keywords :func:`check_model_contract` takes beside its model and task.
+    """The keywords :func:`check_model_contract` takes beside its model, task and device.
 
-    ``dims`` is the run's resolved dimensions, ``device`` the device it runs on (``"cpu"``
-    unstated) and ``sample_batch`` an ``(images, targets)`` pair from the run's own dataset.
+    ``dims`` is the run's resolved dimensions and ``sample_batch`` an ``(images, targets)`` pair
+    from the run's own dataset.
     """
 
     dims: ContractDims | None
-    device: str
     sample_batch: Batch | None
 
 
 class OverfitKeywords(ContractKeywords, total=False):
-    """The keywords :func:`overfit_check` takes beside its model, task, seed and determinism.
+    """The keywords :func:`overfit_check` takes beside its model, task, seed, determinism, device.
 
     Those of :class:`ContractKeywords`, and the optimizer ``steps`` (20 unstated) and learning
     rate ``lr`` (0.01 unstated).
@@ -297,9 +297,11 @@ def _forward_loss(model: torch.nn.Module, batch: Batch) -> torch.Tensor:
 def check_model_contract(
     model: torch.nn.Module,
     task: str,
+    *,
+    device: torch.device,
     **keywords: Unpack[ContractKeywords],
 ) -> ContractReport:
-    """Check the model's behavior at the measurement boundary.
+    """Check the model's behavior at the measurement boundary, the model moved to ``device``.
 
     Returns the :class:`ContractReport`; a failed train or eval pass is recorded in it, not
     raised. The ``keywords`` are :class:`ContractKeywords`.
@@ -328,14 +330,13 @@ def check_model_contract(
     )
     if report["not_smokeable"] is not None:
         return report
-    dev = torch.device(keywords.get("device", "cpu"))
-    model.to(dev)
+    model.to(device)
 
     # Train pass: finite loss with a gradient.
     try:
         model.train()
         loss = _forward_loss(
-            model, _driving_batch(task, dims, sample_batch, dev)
+            model, _driving_batch(task, dims, sample_batch, device)
         )
         if not loss.requires_grad:
             issues.append(
@@ -373,7 +374,7 @@ def check_model_contract(
     # Eval pass: documented output shape.
     try:
         model.eval()
-        images, _ = _driving_batch(task, dims, sample_batch, dev)
+        images, _ = _driving_batch(task, dims, sample_batch, device)
         with torch.no_grad():
             out = model(images)
         if task in DETECTOR_TASKS:
@@ -422,13 +423,14 @@ def overfit_check(
     *,
     seed: int,
     deterministic: bool,
+    device: torch.device,
     **keywords: Unpack[OverfitKeywords],
 ) -> OverfitReport:
     """Drive ``steps`` optimizer updates on one fixed tiny batch; the loss must fall.
 
     The ``keywords`` are :class:`OverfitKeywords`; ``dims`` is as for
-    :func:`check_model_contract`. Seeded at the run's own ``seed`` and
-    ``deterministic``, on CPU by default. Returns the :class:`OverfitReport`, ``passed`` iff
+    :func:`check_model_contract`. Seeded at the run's own ``seed`` and ``deterministic``, the
+    model moved to ``device``. Returns the :class:`OverfitReport`, ``passed`` iff
     every step completes with no recorded ``issue``, every loss is finite and the final loss is
     strictly below the initial one.
 
@@ -452,11 +454,10 @@ def overfit_check(
             "issue": reason,
         }
     set_seed(seed, deterministic=deterministic)
-    dev = torch.device(keywords.get("device", "cpu"))
-    model.to(dev)
+    model.to(device)
 
     try:
-        batch = _driving_batch(task, dims, sample_batch, dev)
+        batch = _driving_batch(task, dims, sample_batch, device)
     except ValueError as exc:  # report, never raise: this returns a dict
         return {
             "passed": False,

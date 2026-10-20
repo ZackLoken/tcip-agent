@@ -27,8 +27,6 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from torch import device as torch_device
-
     from tcip_mcp.buckets import Bucket
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.execution import Execution
@@ -478,10 +476,6 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
 
     from PIL import Image
 
-    class _DummyModel:
-        def to(self, device: torch_device) -> _DummyModel:
-            return self
-
     class _StubPredictor:
         task = "detection"
         train_tile_size = 64
@@ -489,7 +483,8 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
         train_native_size = train_augmentation = None
         in_chans = 3
         dims = {"in_chans": 3, "num_classes": 1}
-        model = _DummyModel()
+        model = object()
+        device = torch.device("cpu")
 
         def predict_sliced(
             self,

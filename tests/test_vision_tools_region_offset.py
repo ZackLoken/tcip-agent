@@ -14,6 +14,8 @@ import pytest
 from PIL import Image
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.pipelines.proposal import Proposal
+from tests._producer_fixtures import kept
 
 #: The frame, deliberately not square so a swapped or unshifted axis cannot look plausible.
 FRAME_W, FRAME_H = 300, 160
@@ -32,26 +34,28 @@ class PatchProposer:
     no candidate when no pixel passes.
     """
 
-    def propose(self, image_path: str, **params: object) -> list[dict]:
+    def propose(self, image_path: str, **params: object) -> Proposal:
         with Image.open(image_path) as im:
             arr = np.asarray(im.convert("RGB"))
         mask = (arr[:, :, 0] > 200) & (arr[:, :, 1] < 60) & (arr[:, :, 2] < 60)
         ys, xs = np.nonzero(mask)
         if len(xs) == 0:
-            return []
+            return Proposal([], None)
         x1, y1 = float(xs.min()), float(ys.min())
         x2, y2 = float(xs.max()), float(ys.max())
-        return [
-            {
-                "candidate_id": 0,
-                "bbox": [x1, y1, x2, y2],
-                "area": int(mask.sum()),
-                "score": 0.9,
-                "engine": "patch",
-                "engine_meta": {},
-                "rings": [[(x1, y1), (x2, y1), (x2, y2), (x1, y2)]],
-            }
-        ]
+        return Proposal(
+            [
+                {
+                    "candidate_id": 0,
+                    "bbox": [x1, y1, x2, y2],
+                    "area": int(mask.sum()),
+                    "score": 0.9,
+                    "engine_meta": {},
+                    "rings": [[(x1, y1), (x2, y1), (x2, y2), (x1, y2)]],
+                }
+            ],
+            None,
+        )
 
 
 @pytest.fixture
@@ -88,6 +92,7 @@ def _propose_over_the_region(project: Path, image: Path) -> dict:
         grid_cells=REGION_CELLS,
         tile_size=TILE_SIZE,
         overlap=0.0,
+        actor=None,
     )
     assert "error" not in result, result
     assert result["candidate_count"] == 1
@@ -98,17 +103,18 @@ def test_accept_refuses_an_image_no_run_staged_proposals_for(
     patched_frame: Path,
     tmp_path: Path,
 ) -> None:
-    """Staging for an image with no proposals is refused, naming the tool to run first."""
+    """Staging a run no proposal staged for the image is refused, naming the tool to run first."""
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     accepted = stage_proposals(
         tmp_path,
         image_path=str(patched_frame),
-        assignments=[{"candidate_id": 0, "subject": "leaf"}],
+        assignments=kept({"staging_id": "staging_0_000000"}, (0, "leaf")),
+        actor=None,
     )
-    assert (
-        accepted["error"]
-        == "No proposals found for region. Run propose_annotations first."
+    assert accepted["error"] == (
+        "No proposal run 'staging_0_000000' is staged for region. Run "
+        "propose_annotations and pass the staging_id it answers."
     )
 
 
@@ -127,11 +133,12 @@ def test_region_scoped_mask_rings_are_staged_at_their_full_frame_location(
     from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
-    _propose_over_the_region(tmp_path, patched_frame)
+    proposed = _propose_over_the_region(tmp_path, patched_frame)
     accepted = stage_proposals(
         tmp_path,
         image_path=str(patched_frame),
-        assignments=[{"candidate_id": 0, "subject": "leaf"}],
+        assignments=kept(proposed, (0, "leaf")),
+        actor=None,
     )
     assert "error" not in accepted, accepted
     assert accepted["proposal_count"] == 1
@@ -169,7 +176,7 @@ def test_region_scoped_bbox_and_mask_rings_describe_the_same_place(
     reported = result["candidates"][0]["bbox"]
 
     staging = ProposalStaging.model_validate(
-        ts.read(_staging_key_for(str(patched_frame)))
+        ts.read(_staging_key_for(str(patched_frame), result["staging_id"]))
     )
     rings = staging.candidates[0].rings
     pts = [p for ring in rings for p in ring]

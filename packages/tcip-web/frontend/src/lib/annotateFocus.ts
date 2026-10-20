@@ -1,9 +1,14 @@
 /**
- * Drive the Annotate tab to a specific (subject, date, image, mode, proposal bucket) in response
- * to the agent's `annotate_focus` event. Uses local store setters, never the state snapshot:
- * `mergeSnapshot` deliberately keeps `mode` and `current_image_index` browser-local so a passive
- * re-broadcast can't yank the user mid-edit. An `annotate_focus` event is a deliberate command,
- * so applying it locally is correct and safe, and preserves that invariant.
+ * Drive the Annotate tab to a dataset, subject, date, bucket, image, mode and proposal.
+ *
+ * `wanted` is asked first and again once a requested selection resolves; while it answers true,
+ * a dataset root differing from the selection in root, subject, date or bucket is selected
+ * through `/dataset/select` and adopted, a label problem it names toasted, then each stated image
+ * index (persisted), mode, active subject and focused proposal applied and the Annotate tab
+ * shown. Answers `adopted` when the focus was applied, `declined-unselected` when `wanted`
+ * answered false before any selection was requested, and `declined-selected` when it answered
+ * false after the selection resolved, the backend now holding that selection; a decline adopts
+ * and applies nothing.
  */
 
 import { api } from "@/api/client";
@@ -22,7 +27,13 @@ export interface AnnotateFocusData {
   proposal?: number | null;
 }
 
-export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
+export type AnnotateFocusOutcome = "adopted" | "declined-unselected" | "declined-selected";
+
+export async function applyAnnotateFocus(
+  d: AnnotateFocusData,
+  wanted: () => boolean,
+): Promise<AnnotateFocusOutcome> {
+  if (!wanted()) return "declined-unselected";
   const cur = useStore.getState().gui.dataset;
   const needsSwitch =
     !!d.dataset_root &&
@@ -38,6 +49,7 @@ export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
       date: d.date,
       bucket: d.bucket ?? null,
     });
+    if (!wanted()) return "declined-selected";
     useStore.getState().applyRestoredDataset(res.selection, project);
     toastLabelProblem(res.label_problem);
   }
@@ -57,4 +69,5 @@ export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
   if (d.active_subject) store.setActiveSubject(d.active_subject);
   store.setFocus(typeof d.proposal === "number" ? { kind: "proposal", index: d.proposal } : null);
   store.setActiveTab("annotate");
+  return "adopted";
 }

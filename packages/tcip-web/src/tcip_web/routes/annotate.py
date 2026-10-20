@@ -1,7 +1,7 @@
 """Annotation routes: an image's label document, its bucket proposals and the review queue.
 
 The label document is read and saved; the proposals are those a prediction bucket offers for
-the image.
+the image, staged there by an engine the person prompts from the canvas or by the agent.
 
 Reads the canonical per-image label document (every subject's annotations by name and their
 completion marks) by the key of the image the request names; its one save is
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from tcip_annotation.json_io import (
     LabelDocument,
@@ -28,9 +28,10 @@ from tcip_annotation.json_io import (
 )
 from tcip_annotation.state import Annotation
 from tcip_mcp.pipelines.active_learning import ScorerSpec
+from tcip_mcp.pipelines.proposal_engines import DetectorParams
 from tcip_store import Key, Version, VersionConflictError
 from tcip_web import jobstore
-from tcip_web.paths import allowed_image, allowed_path
+from tcip_web.paths import allowed_file, allowed_image, allowed_path
 from tcip_web.state import store
 
 router = APIRouter(prefix="/api/annotate", tags=["annotate"])
@@ -41,7 +42,7 @@ class AnnotationPayload(BaseModel):
     """One annotation's content: its subject, a geometry, its attribute values and its crowd flag.
 
     The ``subject`` is the object it is about; the geometry is ``bbox`` corners, ``points`` for
-    one ring, ``rings`` for a multi-ring shape, ``point`` for a placed prompt or keypoint, or
+    one ring, ``rings`` for a multi-ring shape, ``point`` for a keypoint or landmark, or
     none of them for an image-level label; the attribute values are by name.
 
     Every field but the subject is carried uninterpreted.
@@ -306,6 +307,120 @@ def load_proposals(image_path: str, bucket: str) -> dict:
             for i, p in enumerate(proposals)
         ],
     }
+
+
+class PointPrompt(BaseModel):
+    """A point the person placed, ``(x, y)`` in the image's pixels: a segmenter prompt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    point: tuple[float, float]
+
+
+class BoxPrompt(BaseModel):
+    """A box the person drew, ``(x1, y1, x2, y2)`` in the image's pixels: a segmenter prompt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    box: tuple[float, float, float, float]
+
+
+class ProposePayload(BaseModel):
+    """One prompt the person ``user`` names sends about an image, and its proposals' subject.
+
+    The prompt is a placed point or a drawn box, which the segmenter answers, or a phrase with the
+    detector's thresholds, slice lattice and merge
+    (:class:`~tcip_mcp.pipelines.proposal_engines.DetectorParams`), which the detector answers;
+    exactly one, by the key it carries.
+    """
+
+    image_path: str
+    subject: str
+    user: str
+    prompt: PointPrompt | BoxPrompt | DetectorParams
+
+
+class ProposeAnswer(BaseModel):
+    """What one prompt staged: the proposal bucket's name and how many proposals it holds.
+
+    ``bucket`` is ``None`` and the count zero when the engine proposed nothing.
+    """
+
+    bucket: str | None
+    proposal_count: int
+
+
+def _door(result: dict) -> dict:
+    """Return a door's ``result``; one carrying an ``error`` answers 400 with its text."""
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@router.post("/propose")
+def propose(payload: ProposePayload) -> ProposeAnswer:
+    """Run the engine ``payload``'s prompt names on the image and stage every candidate it answers.
+
+    The image is admitted by :func:`~tcip_web.paths.allowed_file`. A point or a box prompts the
+    segmenter for its one best mask, a phrase the detector, through
+    :func:`~tcip_mcp.tools.proposal_tools.propose_annotations`, and every candidate of that run,
+    named by the ``staging_id`` it answers, is staged under ``subject`` through
+    :func:`~tcip_mcp.tools.proposal_tools.stage_proposals`, both on the open project and both by
+    the person :func:`~tcip_mcp.identity.actor` makes of ``user``. Either door's error, and
+    candidates the first door could not stage, answer 400 carrying its text; no project open
+    answers 409.
+    """
+    from tcip_mcp.identity import actor
+    from tcip_mcp.pipelines.proposal_engines import (
+        PromptableSegmenter,
+        TextPromptedDetector,
+    )
+    from tcip_mcp.tools.proposal_tools import (
+        Assignment,
+        StagedAssignments,
+        propose_annotations,
+        stage_proposals,
+    )
+
+    person = actor(payload.user)
+    project = store.held().root
+    image = str(allowed_file(payload.image_path))
+    match payload.prompt:
+        case PointPrompt(point=point):
+            engine = PromptableSegmenter.name
+            params: dict = {"points": [point], "multimask_output": False}
+        case BoxPrompt(box=box):
+            engine = PromptableSegmenter.name
+            params = {"boxes": [box], "multimask_output": False}
+        case DetectorParams() as detector:
+            engine = TextPromptedDetector.name
+            params = detector.model_dump()
+    proposed = _door(
+        propose_annotations(
+            project, image, engine, engine_params=params, actor=person
+        )
+    )
+    if proposed["staging_id"] is None:
+        if proposed["candidates"]:
+            raise HTTPException(400, proposed["summary"])
+        return ProposeAnswer(bucket=None, proposal_count=0)
+    staged = _door(
+        stage_proposals(
+            project,
+            image,
+            assignments=StagedAssignments(
+                staging_id=proposed["staging_id"],
+                candidates=[
+                    Assignment(candidate_id=c["id"], subject=payload.subject)
+                    for c in proposed["candidates"]
+                ],
+            ),
+            actor=person,
+        )
+    )
+    return ProposeAnswer(
+        bucket=staged["bucket"], proposal_count=staged["proposal_count"]
+    )
 
 
 class PriorityQueueJob(BaseModel):

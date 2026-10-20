@@ -373,6 +373,7 @@ def test_load_canopy_segments_admits_a_proposed_polygon_accepted_through_the_sav
         tmp_path,
         str(raster_path),
         model_name="segmenter",
+        actor=None,
         polygons=[{"subject": "canopy", "conf": 0.9, "rings": [ring]}],
     )
     assert "error" not in staged, staged

@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from torch import device
     from torch.utils.data import DataLoader
 
     from tcip_mcp.model_registry import VerifiedCheckpoint
@@ -127,9 +126,7 @@ def _captured_execution(monkeypatch: pytest.MonkeyPatch) -> dict:
 
     captured: dict = {}
 
-    def _fake(
-        pass_: Pass, loader: DataLoader, device: device, **kw: object
-    ) -> dict:
+    def _fake(pass_: Pass, loader: DataLoader, **kw: object) -> dict:
         captured["execution"] = pass_.execution
         return {"eval_regime": "tile-level"}
 

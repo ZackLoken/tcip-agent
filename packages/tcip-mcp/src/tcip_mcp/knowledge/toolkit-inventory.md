@@ -143,20 +143,29 @@ and how many runs this process's own registry currently reports running.
 
 ## Auto-labeling: the proposal-engine registry (`pipelines.proposal`)
 
-An auto-label engine turns an image into candidate shapes for a human to review. The seam is as
-open as `model_source`: implement the `Proposer` protocol (`propose(image)` for whole-image
-candidates) and register it with `register_proposal_engine(name, engine)` so `engine=<name>`
-resolves to it, or bring one by dotted `module:factory` with no registration at all, so you can
-wire, trial, and compare techniques and deduce which serves a task best by how well each engine's
-high-conf proposals survive breeder review. No engine ships registered: `propose_annotations`
-names its engine, and an empty or unknown name refuses, listing every name registered in this
-process.
+An auto-label engine turns an image into candidate shapes for a human to review. Two ship
+registered (`pipelines.proposal_engines`): `sam`, a promptable segmenter whose `engine_params`
+are `points`, `boxes`, `multimask_output` and `checkpoint`, and `grounding_dino`, a
+text-prompted detector whose `engine_params` are `phrase`, `box_threshold`, `text_threshold`,
+`postprocess`, `cross_tile_nms`, an optionally stated `tile_size` and `overlap`, and
+`checkpoint`, run by the platform's tiled inference pass (`slicing.sliced_predictions`,
+`slicing.cross_tile_merge`) on a lattice a whole-frame pass derives unless stated
+(`TILE_EDGE_DERIVATION`, `TILE_OVERLAP_DERIVATION`), its execution record carried into the
+proposal's bucket (`annotation.md` states each). The seam is as open as
+`model_source`: implement the `Proposer` protocol (`propose(image_path, **params)` answering a
+`Proposal`, its candidates beside its pass's execution record or `None`) and register it
+with `register_proposal_engine(name, engine)` so `engine=<name>` resolves to it, or bring one by
+dotted `module:factory` with no registration at all, so you can wire, trial, and compare
+techniques and deduce which serves a task best by how well each engine's high-conf proposals
+survive breeder review. `propose_annotations` names its engine, and an empty or unknown name
+refuses, listing every name registered in this process.
 
-Candidates use a neutral schema (`candidate_id` / `bbox` / `area` / `rings` / `score` / `engine`
-/ `engine_meta`) so the shared review/staging path stays method-agnostic. `rings` is `Polygon.rings`
+Candidates use a neutral schema (`candidate_id` / `bbox` / `area` / `rings` / `score` /
+`engine_meta`) so the shared review/staging path stays method-agnostic. `rings` is `Polygon.rings`
 (one contour per connected region), extracted by `tcip_annotation.mask_contours.mask_to_polygon_rings`
 at the threshold and vertex spacing its caller states, the same extractor a predictor's masks go through, so proposal-derived GT and model predictions describe an
-occlusion-split object identically.
+occlusion-split object identically; a detector's candidate carries `rings` `null` and stages as
+its `bbox`.
 
 ## Active learning: the scorer registry (`pipelines.active_learning.scorer`)
 

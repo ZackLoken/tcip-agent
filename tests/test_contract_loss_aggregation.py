@@ -105,7 +105,10 @@ def test_train_loss_is_the_sum_of_every_returned_loss_term() -> None:
     The three terms, 1, 10 and 100 at scale 1, report a train loss of 111.
     """
     report = check_model_contract(
-        _ThreeTermLoss(), "classification", dims=CLS_DIMS
+        _ThreeTermLoss(),
+        "classification",
+        device=torch.device("cpu"),
+        dims=CLS_DIMS,
     )
     assert report["ok"], report["issues"]
     assert report["train_loss"] == pytest.approx(111.0)
@@ -114,7 +117,10 @@ def test_train_loss_is_the_sum_of_every_returned_loss_term() -> None:
 def test_a_non_finite_later_loss_term_fails_the_smoke() -> None:
     """A non-finite second loss term fails the smoke despite a finite first term."""
     report = check_model_contract(
-        _NonFiniteSecondTerm(), "classification", dims=CLS_DIMS
+        _NonFiniteSecondTerm(),
+        "classification",
+        device=torch.device("cpu"),
+        dims=CLS_DIMS,
     )
     assert report["ok"] is False
     assert any("not finite" in issue for issue in report["issues"]), report[
@@ -132,6 +138,7 @@ def test_overfit_check_judges_the_whole_objective_not_the_first_term() -> None:
         dims=CLS_DIMS,
         seed=0,
         deterministic=False,
+        device=torch.device("cpu"),
     )
     assert report["passed"] is False
     assert "did not decrease" in report["issue"], report["issue"]
@@ -148,6 +155,7 @@ def test_a_multi_term_model_that_optimizes_every_term_passes() -> None:
         dims=CLS_DIMS,
         seed=0,
         deterministic=False,
+        device=torch.device("cpu"),
     )
     assert report["passed"], report["issue"]
     assert report["final"] < report["initial"]

@@ -74,6 +74,7 @@ def _bucket(root: Path, image: Path) -> str:
         root,
         str(image),
         model_name="detector",
+        actor=None,
         boxes=[
             {
                 "subject": "bud",

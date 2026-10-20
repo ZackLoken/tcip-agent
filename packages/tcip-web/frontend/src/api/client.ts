@@ -13,6 +13,8 @@ import {
   type LaunchPriorityQueuePayload,
   type OpenRequest,
   type ProjectSummary,
+  type ProposeAnswer,
+  type ProposePayload,
   type RemovalRequest,
   type PriorityQueueJob,
   type RenameRequest,
@@ -327,6 +329,9 @@ export const api = {
         return { status: "conflict" };
       }
     },
+
+    // Send one prompt to the engine its kind names; the answer names the bucket it staged.
+    propose: (body: ProposePayload) => postJson<ProposeAnswer>(ROUTES.postAnnotatePropose, body),
 
     // Launch the review queue as a background job; poll its job_id via queueJob until terminal.
     launchQueue: (body: LaunchPriorityQueuePayload) =>

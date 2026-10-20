@@ -1144,6 +1144,7 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
         tmp_path,
         str(image),
         model_name="detector",
+        actor=None,
         boxes=[
             {
                 "subject": "bud",

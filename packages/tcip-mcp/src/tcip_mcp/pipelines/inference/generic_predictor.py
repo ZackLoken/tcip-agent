@@ -37,6 +37,7 @@ from tcip_mcp.pipelines.image_utils import (
 from tcip_mcp.pipelines.model_build import (
     STATE_DICT_KEY,
     build_from_model_source,
+    placement,
     recorded_model_dims,
 )
 from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS, TILING_TASKS
@@ -87,15 +88,13 @@ class GenericPredictor:
     def __init__(
         self, checkpoint: VerifiedCheckpoint, device: str | None = None
     ) -> None:
-        """Build ``checkpoint``'s model with its weights, in eval mode on ``device``.
+        """Build ``checkpoint``'s model with its weights, in eval mode on ``device``'s placement.
 
-        ``device`` defaults to CUDA when available, else the CPU.
+        The placement is :func:`~tcip_mcp.pipelines.model_build.placement`'s.
         """
         from tcip_mcp.pipelines.schemas import run_tiling
 
-        self.device = torch.device(
-            device or ("cuda" if torch.cuda.is_available() else "cpu")
-        )
+        self.device = placement(device)
         self.checkpoint_path = checkpoint.path
         self.checkpoint_sha256 = checkpoint.sha256
         spec = checkpoint.spec
@@ -319,6 +318,7 @@ class GenericPredictor:
             prediction_rows,
             predictions_from_rows,
             slice_lattice,
+            sliced_predictions,
         )
 
         windowed = hasattr(source, "read_window")
@@ -390,18 +390,10 @@ class GenericPredictor:
             prior.predictions, [height, width], self.attribute_sizes
         )
         pending = [(i, s) for i, s in enumerate(slices) if s not in done]
-        for start in range(0, len(pending), tile_batch_size):
-            batch = pending[start : start + tile_batch_size]
-            model.perform_batch_inference([read(*s) for _, s in batch])
-            model.convert_original_predictions(
-                shift_amount=[[s[0], s[1]] for _, s in batch],
-                full_shape=[[height, width]] * len(batch),
-            )
-            new = [
-                p.get_shifted_object_prediction()
-                for per_slice in model.object_prediction_list_per_image
-                for p in per_slice
-            ]
+        for batch, per_slice in sliced_predictions(
+            model, read, pending, (height, width), tile_batch_size
+        ):
+            new = [p for shifted in per_slice for p in shifted]
             predictions.extend(new)
             if progress is not None:
                 progress(

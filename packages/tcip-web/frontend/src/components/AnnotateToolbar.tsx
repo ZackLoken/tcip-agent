@@ -1,7 +1,7 @@
 /**
  * Annotate-tab context toolbar. Two rows:
- *   Row 1: tool mode (Point/Box/Polygon), the subject picker pill, an Editor toggle, then the
- *          image stepper and the Complete checkbox.
+ *   Row 1: tool mode (Point/Box/Polygon), the engine prompt, the subject picker pill, an Editor
+ *          toggle, then the image stepper and the Complete checkbox.
  *   Editor: a second toolbar (collapsed by default, remembered) holding the tools you
  *           flip constantly (Snap / Stream / Show labels) plus Undo / Redo / Save.
  */
@@ -10,6 +10,8 @@ import { useMemo, useState } from "react";
 
 import type { ImageBandsResponse } from "@/api/client";
 import { subjectColor } from "@/api/subjects";
+import type { DetectorParams } from "@/api/types.generated";
+import { EnginePrompt } from "@/components/annotate/EnginePrompt";
 import { BandPicker } from "@/components/BandPicker";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { Stepper } from "@/components/Stepper";
@@ -69,6 +71,8 @@ export function AnnotateToolbar({
   subjectState,
   onComplete,
   onCompleteView,
+  proposing,
+  onPrompt,
 }: {
   onSave: () => void;
   /** Abandon the save in flight, which the Save button offers while one is. */
@@ -85,6 +89,9 @@ export function AnnotateToolbar({
   onComplete: (next: boolean) => void;
   // Mark the dataset subject complete over the region in view; omitted when the view holds it all.
   onCompleteView?: () => void;
+  // Whether an engine prompt is in flight, and the send of a phrase prompt.
+  proposing: boolean;
+  onPrompt: (prompt: DetectorParams) => void;
 }) {
   const dataset = useStore((s) => s.gui.dataset);
   const projectRoot = useStore(selectProjectRoot);
@@ -165,7 +172,7 @@ export function AnnotateToolbar({
           <button
             aria-pressed={mode === "point"}
             onClick={() => setMode("point")}
-            title="Point: click to place one location (a prompt or landmark), drag it to move, right-click to remove"
+            title="Point: click to place one keypoint or landmark, drag it to move, right-click to remove"
             className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
               mode === "point" ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
             }`}
@@ -225,6 +232,8 @@ export function AnnotateToolbar({
             Polygon
           </button>
         </div>
+
+        <EnginePrompt proposing={proposing} onPrompt={onPrompt} />
 
         {/* Subject picker pill */}
         <div className="relative">

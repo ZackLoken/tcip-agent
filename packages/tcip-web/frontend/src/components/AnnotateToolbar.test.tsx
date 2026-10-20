@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Auto-cleanup needs vitest globals (not enabled here), so clean up explicitly.
 
@@ -6,6 +6,7 @@ import type { ImageBandsResponse } from "@/api/client";
 import { api } from "@/api/client";
 import { StructuredRefusalError } from "@/api/http";
 import { subjectsApi } from "@/api/subjects";
+import { CROSS_TILE_MERGE_DESCRIPTIONS, type DetectorParams } from "@/api/types.generated";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import { useStore } from "@/store";
@@ -46,6 +47,8 @@ function renderToolbar(
     onComplete?: (next: boolean) => void;
     onCompleteView?: () => void;
     onCancelSave?: () => void;
+    proposing?: boolean;
+    onPrompt?: (prompt: DetectorParams) => void;
   },
 ) {
   render(
@@ -60,6 +63,8 @@ function renderToolbar(
       subjectState={extra?.subjectState ?? null}
       onComplete={extra?.onComplete ?? (() => {})}
       onCompleteView={extra?.onCompleteView}
+      proposing={extra?.proposing ?? false}
+      onPrompt={extra?.onPrompt ?? (() => {})}
     />,
   );
 }
@@ -97,6 +102,80 @@ describe("AnnotateToolbar save state", () => {
     expect(save()).toHaveTextContent("Saving");
     fireEvent.click(save());
     expect(onCancelSave).toHaveBeenCalledOnce();
+  });
+});
+
+describe("AnnotateToolbar engine prompt", () => {
+  const promptToggle = () => screen.getByRole("button", { name: /^(Prompt|Proposing)$/ });
+
+  it("arms the next point or box as a prompt, and disarmed shows no phrase", () => {
+    renderToolbar();
+    expect(promptToggle()).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("textbox", { name: "Phrase" })).toBeNull();
+    fireEvent.click(promptToggle());
+    expect(useStore.getState().annotateUi.prompt).toBe(true);
+    expect(screen.getByRole("textbox", { name: "Phrase" })).toBeInTheDocument();
+  });
+
+  it("sends the phrase with both thresholds and the tiling, prefilled from their libraries", () => {
+    const onPrompt = vi.fn();
+    renderToolbar(null, null, { onPrompt });
+    fireEvent.click(promptToggle());
+    fireEvent.change(screen.getByRole("textbox", { name: "Phrase" }), {
+      target: { value: "open bud" },
+    });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Box" }), {
+      target: { value: "0.3" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Find" }));
+
+    expect(onPrompt).toHaveBeenCalledWith({
+      phrase: "open bud",
+      box_threshold: 0.3,
+      text_threshold: 0.25,
+      postprocess: "greedynmm",
+      cross_tile_nms: 0.5,
+    });
+  });
+
+  it("keeps the tiling under one disclosure, each merge described and sent by its name", () => {
+    const onPrompt = vi.fn();
+    renderToolbar(null, null, { onPrompt });
+    fireEvent.click(promptToggle());
+    expect(screen.queryByRole("combobox", { name: "Merge" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Tiling" }));
+    const options = within(screen.getByRole("combobox", { name: "Merge" })).getAllByRole("option");
+    expect(options.map((o) => [o.getAttribute("value"), o.textContent])).toEqual(
+      Object.entries(CROSS_TILE_MERGE_DESCRIPTIONS),
+    );
+    fireEvent.change(screen.getByRole("combobox", { name: "Merge" }), {
+      target: { value: "nms" },
+    });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Match" }), {
+      target: { value: "0.6" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Phrase" }), {
+      target: { value: "open bud" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Find" }));
+
+    expect(onPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ postprocess: "nms", cross_tile_nms: 0.6 }),
+    );
+  });
+
+  it("while a prompt is in flight, says so and refuses another send", () => {
+    const onPrompt = vi.fn();
+    renderToolbar(null, null, { onPrompt, proposing: true });
+    fireEvent.click(promptToggle());
+    fireEvent.change(screen.getByRole("textbox", { name: "Phrase" }), {
+      target: { value: "open bud" },
+    });
+
+    expect(promptToggle()).toHaveTextContent("Proposing");
+    expect(screen.getByRole("button", { name: "Find" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Find" }));
+    expect(onPrompt).not.toHaveBeenCalled();
   });
 });
 

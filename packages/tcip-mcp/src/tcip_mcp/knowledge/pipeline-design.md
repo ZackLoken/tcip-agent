@@ -20,10 +20,10 @@ Derive it by measuring the dataset, not by classifying the trait:
   assumed shape.
 - Object scale against your tile size: whether objects survive tiling, and whether a seam cuts
   them. `pipelines.derivations.derive_cross_tile_nms` reads the GT's neighbor-IoU tail for an
-  `nms` merge, and returns `None` when the GT gives no basis for a threshold. An assessment or a
-  full-frame evaluation derives an unstated threshold from its reference this way and refuses
-  when nothing derives; any other tiled pass, and every IoS merge (`nmm`/`greedynmm`), states
-  `cross_tile_nms`. An `iou_match` trait's match threshold derives from the GT's box size at the jitter
+  merge matching over IoU, and returns `None` when the GT gives no basis for a threshold. An
+  assessment or a full-frame evaluation derives an unstated threshold from its reference this
+  way and refuses when nothing derives; any other tiled pass, and every merge matching over IoS,
+  states `cross_tile_nms` (`pipelines.execution.CROSS_TILE_MERGES` names each merge's metric). An `iou_match` trait's match threshold derives from the GT's box size at the jitter
   and margin the trait itself authors.
 - Capture-date bucketing from `ingest_images`: whether a time series exists at all, and at what
   cadence.

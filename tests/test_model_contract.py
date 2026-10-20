@@ -146,7 +146,9 @@ def test_build_from_model_source_bad_builder_raises() -> None:
 
 def test_check_model_contract_classification_ok() -> None:
     model = _classifier()
-    report = check_model_contract(model, "classification", dims=CLS_DIMS)
+    report = check_model_contract(
+        model, "classification", device=torch.device("cpu"), dims=CLS_DIMS
+    )
     assert report["ok"], report["issues"]
     assert report["eval_output_type"] == "dict"
     assert report["train_loss"] is not None
@@ -160,7 +162,9 @@ def test_check_model_contract_records_per_parameter_gradient_magnitudes() -> (
     Each reported name is a parameter of the model, and each magnitude is a non-negative float.
     """
     model = _classifier()
-    report = check_model_contract(model, "classification", dims=CLS_DIMS)
+    report = check_model_contract(
+        model, "classification", device=torch.device("cpu"), dims=CLS_DIMS
+    )
     assert report["ok"], report["issues"]
     mags = report["gradient_magnitudes"]
     assert isinstance(mags, dict) and mags
@@ -198,7 +202,10 @@ def test_check_model_contract_gradient_norm_survives_a_float32_overflow() -> (
             return {"logits": self.lin(torch.rand(1, 4))}
 
     report = check_model_contract(
-        _NearOverflowGradient(), "classification", dims=CLS_DIMS
+        _NearOverflowGradient(),
+        "classification",
+        device=torch.device("cpu"),
+        dims=CLS_DIMS,
     )
     assert report["ok"], report["issues"]
     norm = report["gradient_magnitudes"]["w"]
@@ -222,7 +229,9 @@ def test_check_model_contract_rejects_prediction_free_eval_output() -> None:
                 return {"loss": self.lin(torch.rand(1, 4)).sum()}
             return {"note": "done"}
 
-    report = check_model_contract(_Empty(), "classification", dims=CLS_DIMS)
+    report = check_model_contract(
+        _Empty(), "classification", device=torch.device("cpu"), dims=CLS_DIMS
+    )
     assert report["ok"] is False
     assert any("no tensor value" in i for i in report["issues"]), report[
         "issues"
@@ -250,7 +259,9 @@ def test_check_model_contract_accepts_a_ragged_nested_eval_output() -> None:
             # Ragged: a different number of per-instance score tensors per image.
             return {"per_image": [torch.rand(3), torch.rand(1), torch.rand(0)]}
 
-    report = check_model_contract(_Ragged(), "classification", dims=CLS_DIMS)
+    report = check_model_contract(
+        _Ragged(), "classification", device=torch.device("cpu"), dims=CLS_DIMS
+    )
     assert report["ok"], report["issues"]
 
 
@@ -260,7 +271,9 @@ def test_check_model_contract_detection_ok() -> None:
     model = bespoke_models.build_bespoke_detection(
         num_classes=1, **detector_values()
     )
-    report = check_model_contract(model, "detection", dims=DET_DIMS)
+    report = check_model_contract(
+        model, "detection", device=torch.device("cpu"), dims=DET_DIMS
+    )
     assert report["ok"], report["issues"]
     assert report["eval_output_type"] == "list[dict]"
 
@@ -279,6 +292,7 @@ def test_overfit_check_classification_passes() -> None:
         dims=CLS_DIMS,
         seed=0,
         deterministic=False,
+        device=torch.device("cpu"),
     )
     assert report["passed"], report["issue"]
     assert report["final"] < report["initial"]
@@ -299,6 +313,7 @@ def test_render_overfit_report_passes_through_a_finite_report() -> None:
         dims=CLS_DIMS,
         seed=0,
         deterministic=False,
+        device=torch.device("cpu"),
     )
     rendered = render_overfit_report(raw)
     check_json_value(

@@ -33,7 +33,7 @@ export interface Annotation extends CarriedFields {
   // Every ring of a polygon, pixel: an occlusion-split instance_seg shape is genuinely more than
   // one region, and both load routes (annotation_dict in annotate.py) always send them all.
   rings?: [number, number][][] | null;
-  // A single labeled location, pixel: a placed prompt or a keypoint/landmark. Geometry is a union
+  // A single labeled location, pixel: a keypoint or landmark. Geometry is a union
   // server-side (tcip_annotation.state.Annotation), so this never arrives alongside bbox/rings, and
   // a point carries no extent: never derive a box from it (see bbox_of, which refuses one).
   point?: [number, number] | null;

@@ -13,8 +13,8 @@ stem (a prediction by its bucket's name and stem), carrying `created_by` / `crea
 `accepted_by` / `accepted_at` provenance per object. Every tool addresses a document through its
 image; a person reads the documents as files through `tcip dump-store`. `stage_proposals`
 publishes this schema as a bucket of its own per image, its record naming the engine or agent that
-proposed it (its `assignments` regime reads back the proposal record `propose_annotations` staged
-in a prior run, not a label document). It is the one label document shape the platform
+proposed it (its `assignments` regime reads back the record of the one `propose_annotations` run
+its `staging_id` names, not a label document). It is the one label document shape the platform
 writes; object ground truth trains from it, beside the mask rasters and tables other tasks read.
 Provenance is stamped by the save on the server from the person saving: a record unchanged since
 it was stored keeps its own, any other is that person's at the save's time, and nothing a client
@@ -119,16 +119,46 @@ bearing (denormalizing, cropping, drawing); read the frame and the pixels throug
 ## Engine-assisted auto-labeling (the engine is a capability, not a fixed method)
 
 Auto-labeling runs through a method-neutral proposal seam (`tcip_mcp.pipelines.proposal`): the
-agent names an `engine` and the platform runs it. No engine ships built in: name one registered
-(`register_proposal_engine`) or pass a dotted `module:factory` you wrote, a SAM-family segmenter, a
-Grounding DINO / open-vocab detector, or a bespoke proposer, exactly the way `model_source` lets
-you bring a model. An empty or unregistered name refuses, listing the registered ones. Engine-specific knobs travel in `engine_params`; the candidate schema is
-neutral (`candidate_id` / `bbox` / `area` / `rings` / `score`), engine signals under `engine_meta`
+agent names an `engine` and the platform runs it. Two engines ship registered, each prompted
+through `engine_params`:
+
+- `sam`, a promptable segmenter of the SAM family: `points` (a list of `[x, y]` pixel points) and
+  `boxes` (a list of `[x1, y1, x2, y2]` pixel boxes), each point and each box a prompt of its own
+  and at least one stated; `multimask_output` (required: the model's several ranked masks per
+  prompt, or its one best); `checkpoint` (default `facebook/sam-vit-base`). Every mask is one
+  polygon candidate, `engine_meta` naming its prompt (indexed over `points` then `boxes`) and its
+  rank.
+- `grounding_dino`, a text-prompted detector of the Grounding DINO family: `phrase`,
+  `box_threshold`, `text_threshold`, `postprocess` (the cross-tile merge, named as a tiled
+  inference pass names it) and `cross_tile_nms` (the merge's match threshold), all required;
+  `tile_size` and `overlap` (the lattice, stated, else derived); `checkpoint` (default
+  `IDEA-Research/grounding-dino-tiny`). Every detection is one box candidate, `engine_meta`
+  naming its text label.
+
+The segmenter runs each prompt on a window of the frame cut at its processor's `longest_edge`
+around the prompt (`engine_meta`'s `window`, a box wider than the edge taking its own extent), and
+the processor scales the window's longer side to that edge: a window whose longer side is the edge
+reaches the model at native resolution, a frame shorter than the edge is upsampled and a wider box
+downsampled by its ratio to the edge. The detector is run by the tiled pass a checkpoint's inference
+runs, on a lattice a whole-frame pass's boxes derive the way inference derives one from ground
+truth: the edge five times the objects' p99 side (`TILE_EDGE_DERIVATION`), never under the
+model's own input edge (recorded `derived` where that floor applies), and the overlap that holds
+such an object whole in a tile (`TILE_OVERLAP_DERIVATION`). A lattice whose edge reaches the
+frame's longer side is the frame itself. A frame larger than the model's input edge that the
+whole-frame pass finds nothing on refuses, naming `tile_size` and `overlap` to state. The
+pass's execution record, each value beside its source, travels with the staged proposal into
+the bucket its accepted candidates publish to.
+
+Each engine downloads its checkpoint's weights from the Hugging Face host on its first call.
+Prompts are pixel coordinates in the upright frame the canvas shows. Bring any other engine,
+an open-vocabulary detector or a bespoke proposer, by `register_proposal_engine` or a dotted
+`module:factory` you wrote, exactly the way `model_source` lets you bring a model. An empty or
+unregistered name refuses, listing the registered ones. The candidate schema is neutral
+(`candidate_id` / `bbox` / `area` / `rings` / `score`), engine signals under `engine_meta`
 (`rings` is `Polygon.rings`, one contour per connected region of the proposed mask, so an
-occlusion-split object stays split from proposal through accept).
-That bespoke proposer may be classical-analysis-based (an OpenCV pipeline the agent
-writes), one option among engines, not a prescribed step; its proposals are soft and prove out only
-by surviving review.
+occlusion-split object stays split from proposal through accept, or `null` for a box candidate,
+which stages as its box). A bespoke proposer may be classical-analysis-based (an OpenCV pipeline
+the agent writes); its proposals are soft and prove out only by surviving review.
 
 Trial and compare by review: pick the engine the data justifies. Don't assume one engine; wire
 two or three, propose on the same images, and let the breeder's review decide: the useful engine is
@@ -147,15 +177,17 @@ Full workflow:
    `overlay_reference_grid`) restricts the pass to the named cells' bounding rect instead of the
    whole frame, useful on a large or crowded image; the engine itself never sees a region, only a
    crop, and the returned candidates are already in full-frame coordinates. On a dataset image
-   this stages the run (`staged: true`) keyed by the dataset, capture date and stem, alongside the
-   content identity of the pixels the engine ran on; on a path outside any dataset's `images/`
-   tree the render and candidates still come back (`staged: false`, naming why), but there is
-   nothing for `stage_proposals`'s `assignments` regime to read back later
+   this stages the run as a record of its own (`staged: true`) under a fresh `staging_id` the
+   answer carries, keyed by the dataset, capture date, stem and that id, alongside the content
+   identity of the pixels the engine ran on; an earlier run's record stays as it was. On a path
+   outside any dataset's `images/` tree the render and candidates still come back
+   (`staged: false`, `staging_id: null`, naming why), but there is nothing for
+   `stage_proposals`'s `assignments` regime to read back later
 2. Agent reads the overlay with its own image-capable read tool → identifies and classifies each candidate
-3. `stage_proposals(image_path, assignments=[{candidate_id: 0, subject: "leaf"}, ...])` → reads
-   the proposals staged for that image's content, refusing if the image has changed since that
-   run, then stages accepted candidates as predictions (`created_by=<engine>`) in the predictions
-   tree for a person to accept or reject on the Annotate canvas; it never writes GT directly
+3. `stage_proposals(image_path, assignments={staging_id: <the run's>, candidates: [{candidate_id: 0, subject: "leaf"}, ...]})`
+   → reads that run's candidates, refusing if the image has changed since the run, then stages
+   the accepted ones as predictions (`created_by=<engine>`) in a bucket named for the run's id,
+   for a person to accept or reject on the Annotate canvas; it never writes GT directly
 4. Agent reads the staged result with its own image-capable read tool → visual QA pass
 
 Visual QA is not optional: read what each tool actually leaves. `stage_proposals` stages
@@ -170,7 +202,8 @@ Corrective loop (for missed objects):
 2. Agent reads the grid overlay with its own image-capable read tool → identifies missed regions by grid cell
 3. `propose_annotations(image_path, engine=<name>, grid_cells=["B3", "D5"], tile_size=<echoed>, overlap=<echoed>)`
    → the engine proposes over those cells' bounding rect
-4. Stage the right candidates with `stage_proposals(assignments=...)` for the person to accept
+4. Stage the right candidates with `stage_proposals(assignments={staging_id, candidates})`, the
+   `staging_id` this run answered, for the person to accept
 
 Grid cell system:
 - `vision_tools.overlay_reference_grid(image_path, overlap=, tile_size=)` renders square cells of
@@ -241,18 +274,26 @@ bucket and drive the human to review them:
 - `stage_proposals(image_path, *, assignments=None, boxes=None, polygons=None, model_name=None)`
   publishes model-/agent-proposed shapes as prediction documents, never the image's label
   document, so nothing here becomes ground truth before a human reviews it. Exactly one input regime per call:
-  `assignments` reads back the candidates `propose_annotations` staged for this image, each a
+  `assignments` (`{staging_id, candidates}`) reads back the candidates of the one
+  `propose_annotations` run its `staging_id` names, each kept candidate a
   `{candidate_id, subject}` mapping, stamped `created_by=<engine>`; `model_name` is refused
   alongside `assignments`, since the staged record already names the engine. `boxes`/`polygons`
   are explicit shapes an agent or another model already has in hand, with no cached record to
-  read back; they require `model_name`, stamped as each object's `created_by`. Either way the
-  image's proposal is published once as its own bucket named `<producer>/[<date>/]<stem>`, the
-  name the answer's `bucket` carries, its record naming the engine or `model_name` as what
-  proposed it and no checkpoint or execution record, and renders on the Annotate canvas for the
-  person to accept, correct or reject; for the explicit regime, name the real producer in
-  `model_name` (`claude`, `groundingdino`, `model:<run>`), not a generic placeholder. A second
-  stage of the same image under the same producer refuses, since a reviewer may already have
-  judged it, so further shapes go under another `model_name`. No delivery ships a proposal.
+  read back; they require `model_name`, the producer of the shapes (`claude`, `groundingdino`,
+  `model:<run>`), as each object's `created_by` records it. Either way the image's proposal is
+  published as a new bucket named `<producer>/<date>/<stem>/<id>`, `id` the run's `staging_id`
+  (a fresh one for explicit shapes), the name the answer's `bucket` carries, its record naming
+  the engine or `model_name` as what proposed it, carrying the execution record of the tiled pass
+  the proposal ran through (`null` where none ran: a prompt window, explicit shapes) and naming
+  no checkpoint or class scope, and renders on the Annotate canvas for the person to accept,
+  correct or reject. A run's bucket is published once:
+  a second stage of the same run refuses, and a new run on the image publishes a bucket of its
+  own beside the first, so a published bucket is never overwritten and the verdicts a reviewer
+  gave an earlier one stay with it. The audit line `propose_annotations` writes with a run's
+  staged record and the one its publication writes each name the actor that door was given: the
+  signed-in person for a prompt sent from the Annotate canvas (`identity.actor` of the request's
+  `user`, as the label save records it), and `None` for a call the MCP server makes on an agent's
+  behalf. No delivery ships a proposal.
 - `focus_human_attention(dataset_root, subject, date, image_index, mode, bucket, proposal)` drives
   the live Annotate tab to a frame, showing the proposals of the bucket named `bucket` under
   `dataset_root` (a published bucket, a proposal's included) with `proposal` selected, so the

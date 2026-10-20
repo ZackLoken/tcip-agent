@@ -119,7 +119,7 @@ export function ProjectShell() {
 
       // Agent → GUI "focus the Annotate tab" through local setters (see applyAnnotateFocus).
       if (ev.event_type === PANEL_EVENT_ANNOTATE_FOCUS) {
-        void applyAnnotateFocus(ev.data as unknown as AnnotateFocusData).catch(() => {
+        void applyAnnotateFocus(ev.data as unknown as AnnotateFocusData, () => true).catch(() => {
           useStore
             .getState()
             .pushToast("Agent tried to focus the Annotate tab, but it couldn't be applied.");

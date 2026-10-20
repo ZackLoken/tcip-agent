@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Unpack
 
 import pytest
 
@@ -18,12 +18,14 @@ from tests._chain_fixtures import BESPOKE_CLASSIFIER, FRAME_STATISTICS
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from torch import Tensor
+    from torch import Tensor, device as torch_device, nn
+    from torch.utils.data import DataLoader
 
     from tcip_annotation.json_io import LabelDocument
     from tcip_annotation.state import Annotation
     from tcip_mcp.pipelines.schemas import TrainConfigSchema
     from tcip_mcp.pipelines.training.envelope import TrainContext
+    from tcip_mcp.pipelines.training.evaluation import EvaluationKeywords
 
 torch = pytest.importorskip(
     "torch"
@@ -1189,7 +1191,6 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(
             checkpoint, Stated(tile=False, **SAMPLE_DETECTOR_PASS)
         ).runnable(),
         None,
-        "cpu",
         iou_threshold=IOU_THRESHOLD,
         trait=None,
     )
@@ -1350,10 +1351,48 @@ def test_an_evaluation_metric_sharing_an_identity_key_refuses_naming_it(
                 checkpoint, Stated(tile=False, **SAMPLE_DETECTOR_PASS)
             ).runnable(),
             None,
-            "cpu",
             iou_threshold=IOU_THRESHOLD,
             trait=None,
         )
+
+
+def test_a_tile_level_evaluation_scores_on_the_device_its_pass_model_sits_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The evaluation is handed the pass's own predictor device, while torch sees CUDA."""
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.execution import prepare
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_DETECTOR_PASS,
+        registered_checkpoint,
+    )
+
+    checkpoint = load_registered_checkpoint(
+        registered_checkpoint(tmp_path), project=tmp_path
+    )
+    pass_ = prepare(
+        checkpoint, Stated(tile=False, **SAMPLE_DETECTOR_PASS), device="cpu"
+    ).runnable()
+    handed: list[torch_device] = []
+
+    def _observed(
+        model: nn.Module,
+        loader: DataLoader,
+        device: torch_device,
+        task: str,
+        **keywords: Unpack[EvaluationKeywords],
+    ) -> dict:
+        handed.append(device)
+        return {"precision": 0.9}
+
+    monkeypatch.setattr(evaluation, "evaluate", _observed)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+
+    run_test_evaluation(pass_, None, iou_threshold=IOU_THRESHOLD, trait=None)
+
+    assert len(handed) == 1
+    assert handed[0] is pass_.predictor.device
 
 
 def test_an_evaluation_identity_stated_without_its_regime_refuses_naming_it(

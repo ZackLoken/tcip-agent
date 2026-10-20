@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Unpack
 from tcip_mcp.pipelines import measurement
 from tcip_mcp.pipelines.components import losses
 from tcip_mcp.pipelines.data import samplers
+from tcip_mcp.pipelines.model_build import placement
 from tcip_mcp.pipelines.training import generic_trainer, optimizer_factory
 from tcip_store import stored_number
 
@@ -105,8 +106,8 @@ class TrainContext:
 
     @property
     def device(self) -> torch.device:
-        """The device the validated config trains on (``generic_trainer.run_device``)."""
-        return generic_trainer.run_device(self.spec)
+        """The device the validated config's ``device`` places on (``model_build.placement``)."""
+        return placement(self.spec.device)
 
     def set_seed(self) -> None:
         """Seed every random stream at the validated config's ``seed`` and ``deterministic``.
@@ -164,7 +165,7 @@ class TrainContext:
         model: torch.nn.Module | None = None,
         **overrides: Unpack[ContractKeywords],
     ) -> ContractReport:
-        """Run the measurement-boundary contract on ``model``, built if omitted.
+        """Run the measurement-boundary contract on ``model``, built if omitted, on :attr:`device`.
 
         The contract runs at the arguments :meth:`_contract_args` gives, ``overrides`` laid over
         them.
@@ -174,6 +175,7 @@ class TrainContext:
         return check_model_contract(
             model or self.build_model(),
             self.task,
+            device=self.device,
             **(self._contract_args() | overrides),
         )
 
@@ -185,7 +187,7 @@ class TrainContext:
         """Drive a few steps on one tiny batch of ``model`` and report whether the loss falls.
 
         The steps (``model_contract.overfit_check``) run at the arguments :meth:`_contract_args`
-        gives, ``overrides`` laid over them, with the run's ``seed`` and ``deterministic``.
+        gives, ``overrides`` laid over them, on the run's ``seed``, ``deterministic`` and device.
         """
         from tcip_mcp.pipelines.model_contract import overfit_check
 
@@ -194,6 +196,7 @@ class TrainContext:
             self.task,
             seed=self.spec.seed,
             deterministic=self.spec.deterministic,
+            device=self.device,
             **(self._contract_args() | overrides),
         )
 

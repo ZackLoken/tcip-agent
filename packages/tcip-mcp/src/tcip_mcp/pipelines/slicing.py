@@ -7,7 +7,7 @@ SAHI detection model, and a cross-tile merge.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -188,6 +188,41 @@ def slice_lattice(
     ]
 
 
+def sliced_predictions(
+    model: DetectionModel,
+    read: Callable[[int, int, int, int], np.ndarray],
+    slices: Sequence[tuple[int, tuple[int, int, int, int]]],
+    full_shape: tuple[int, int],
+    batch_size: int,
+) -> Iterator[
+    tuple[
+        list[tuple[int, tuple[int, int, int, int]]],
+        list[list[ObjectPrediction]],
+    ]
+]:
+    """Yield each batch of the indexed ``slices`` beside each slice's predictions in the frame.
+
+    The slices are half-open ``(x0, y0, x1, y1)`` boxes of a ``(height, width)`` frame, each beside
+    its index in its lattice, run ``batch_size`` at a time through ``model``, each cut by ``read``;
+    every slice's predictions are moved into the frame by SAHI's own shift.
+    """
+    height, width = full_shape
+    for start in range(0, len(slices), batch_size):
+        batch = list(slices[start : start + batch_size])
+        model.perform_batch_inference([read(*s) for _, s in batch])
+        model.convert_original_predictions(
+            shift_amount=[[s[0], s[1]] for _, s in batch],
+            full_shape=[[height, width]] * len(batch),
+        )
+        yield (
+            batch,
+            [
+                [p.get_shifted_object_prediction() for p in per_slice]
+                for per_slice in model.object_prediction_list_per_image
+            ],
+        )
+
+
 def overlap_ratio(tile_size: int, pixels: int) -> float:
     """Return the ``overlap`` at which neighboring slices overlap by at least ``pixels``.
 
@@ -249,20 +284,23 @@ def predictions_from_rows(
 
 
 def cross_tile_merge(execution: Execution) -> PostprocessPredictions:
-    """Build the SAHI postprocess a tiled execution record's merge names.
+    """Build the SAHI postprocess a tiled execution record's merge names, at its threshold.
 
-    It runs at the record's threshold over that postprocess's match metric
+    It runs over that postprocess's match metric
     (:func:`~tcip_mcp.pipelines.execution.cross_tile_merge_of`), class-agnostic over the one
-    subject so two slices' calls of one object merge whatever their attribute values (a merged box
+    subject so two slices' calls of one object merge whatever their categories (a merged box
     keeps the category of the member SAHI keeps, the higher-scoring), on SAHI's numpy backend.
     """
     # SAHI's torchvision backend picks its device by writing CUDA_VISIBLE_DEVICES for the process.
     set_postprocess_backend("numpy")
-    assert execution.postprocess is not None, "a tiled record names its merge"
-    merge_type, match_metric = cross_tile_merge_of(execution.postprocess)
-    return POSTPROCESS_NAME_TO_CLASS[merge_type](
+    assert (
+        execution.postprocess is not None
+        and execution.cross_tile_nms is not None
+    ), "a tiled record names its merge and the threshold it merges at"
+    merge = cross_tile_merge_of(execution.postprocess)
+    return POSTPROCESS_NAME_TO_CLASS[merge.sahi_type](
         match_threshold=execution.cross_tile_nms,
-        match_metric=match_metric,
+        match_metric=merge.match_metric,
         class_agnostic=True,
     )
 

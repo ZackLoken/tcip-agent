@@ -556,9 +556,9 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(
         {"in_chans": smoked["in_chans"], "num_classes": smoked["num_classes"]},
         resolution.geometry,
     )
-    assert check_model_contract(model, "semantic_seg", sample_batch=batch)[
-        "ok"
-    ]
+    assert check_model_contract(
+        model, "semantic_seg", device=torch.device("cpu"), sample_batch=batch
+    )["ok"]
 
 
 def test_preflight_smokes_bespoke_task_on_a_real_batch(

@@ -545,8 +545,8 @@ STATED = date(2026, 5, 15)
 """The capture date the stated-date tests state."""
 
 
-def _image_records(image: Path) -> list:
-    """Return the keys of ``image``'s label document, flags and staged proposals."""
+def _image_records(image: Path, staging_ids: list[str]) -> list:
+    """Return the keys of ``image``'s label document, flags and each of its staged runs."""
     from tcip_annotation.flags import flag_key
     from tcip_mcp.tools.proposal_tools import proposal_staging_key
 
@@ -554,7 +554,10 @@ def _image_records(image: Path) -> list:
     return [
         label,
         flag_key(label),
-        proposal_staging_key(*dataset_layout.parse_image_path(image)),
+        *(
+            proposal_staging_key(*dataset_layout.parse_image_path(image), run)
+            for run in staging_ids
+        ),
     ]
 
 
@@ -587,26 +590,40 @@ def test_a_stated_date_moves_an_undated_image_with_every_record_keyed_by_it(
     )
 
     class _Engine:
-        def propose(self, image_path: str, **params: object) -> list[dict]:
-            return [
-                {
-                    "candidate_id": 0,
-                    "bbox": [4.0, 4.0, 12.0, 12.0],
-                    "area": 64,
-                    "score": 0.9,
-                    "engine": "stub",
-                    "engine_meta": {},
-                    "rings": [
-                        [(4.0, 4.0), (12.0, 4.0), (12.0, 12.0), (4.0, 12.0)]
-                    ],
-                }
-            ]
+        def propose(
+            self, image_path: str, **params: object
+        ) -> proposal.Proposal:
+            return proposal.Proposal(
+                [
+                    {
+                        "candidate_id": 0,
+                        "bbox": [4.0, 4.0, 12.0, 12.0],
+                        "area": 64,
+                        "score": 0.9,
+                        "engine_meta": {},
+                        "rings": [
+                            [
+                                (4.0, 4.0),
+                                (12.0, 4.0),
+                                (12.0, 12.0),
+                                (4.0, 12.0),
+                            ]
+                        ],
+                    }
+                ],
+                None,
+            )
 
     monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: _Engine())
-    staged = propose_annotations(project, image_path=str(image), engine="stub")
-    assert "error" not in staged, staged
+    runs = [
+        propose_annotations(
+            project, image_path=str(image), engine="stub", actor=None
+        )["staging_id"]
+        for _ in range(2)
+    ]
+    assert None not in runs, runs
     before = saved_annotations(image)
-    records = [ts.read(key) for key in _image_records(image)]
+    records = [ts.read(key) for key in _image_records(image, runs)]
 
     moved = state_capture_date(
         project,
@@ -622,8 +639,8 @@ def test_a_stated_date_moves_an_undated_image_with_every_record_keyed_by_it(
     }
     assert dest.is_file() and not image.exists()
     assert saved_annotations(dest) == before
-    assert [ts.read(key) for key in _image_records(dest)] == records
-    assert not any(ts.exists(key) for key in _image_records(image))
+    assert [ts.read(key) for key in _image_records(dest, runs)] == records
+    assert not any(ts.exists(key) for key in _image_records(image, runs))
     (line,) = [
         e
         for e in ts.read_log(audit_mod.audit_log_key(project)).records

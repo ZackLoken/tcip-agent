@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
     from PIL import Image
-    from torch import Tensor, device, nn
+    from torch import Tensor, nn
     from torch.utils.data import DataLoader, Dataset
 
     from tcip_annotation.state import Annotation
@@ -193,7 +193,6 @@ def _capture_run_test_evaluation(monkeypatch: pytest.MonkeyPatch) -> dict:
     def _fake(
         pass_: Pass,
         loader: DataLoader,
-        device: device,
         **kw: float | TilingSpec | TraitEntry | None,
     ) -> dict:
         captured["ds"] = loader.dataset
@@ -467,13 +466,15 @@ def test_the_scored_model_is_the_one_the_door_already_built(
     def _record(
         pass_: Pass,
         loader: DataLoader,
-        device: device,
         **kw: float | TilingSpec | TraitEntry | None,
     ) -> dict:
         recorded.update(
-            loader=loader, device=device, task=pass_.checkpoint.task, kw=kw
+            loader=loader,
+            device=pass_.predictor.device,
+            task=pass_.checkpoint.task,
+            kw=kw,
         )
-        return run_test_evaluation(pass_, loader, device, **kw)
+        return run_test_evaluation(pass_, loader, **kw)
 
     monkeypatch.setattr(runners, "run_test_evaluation", _record)
 

@@ -65,6 +65,7 @@ def test_a_model_whose_loss_never_moves_is_refused() -> None:
         dims=CLS_DIMS,
         seed=0,
         deterministic=False,
+        device=torch.device("cpu"),
     )
     assert report["passed"] is False
     assert report["issue"] is not None
@@ -82,6 +83,7 @@ def test_a_model_that_really_learns_passes() -> None:
         dims=CLS_DIMS,
         seed=0,
         deterministic=False,
+        device=torch.device("cpu"),
     )
     assert report["passed"], report["issue"]
     assert report["issue"] is None
@@ -122,6 +124,7 @@ def test_an_all_frozen_model_reports_rather_than_raises() -> None:
         dims=CLS_DIMS,
         seed=0,
         deterministic=False,
+        device=torch.device("cpu"),
     )
     assert report["passed"] is False
     assert "empty parameter list" in report["issue"], report["issue"]

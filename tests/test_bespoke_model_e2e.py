@@ -197,6 +197,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path) -> None:
         "detection",
         seed=0,
         deterministic=False,
+        device=torch.device("cpu"),
         steps=30,
         lr=5e-3,
         dims={"in_chans": 3, "num_classes": 1, "img_size": (64, 64)},

@@ -20,6 +20,7 @@ from tcip_mcp.dataset_layout import (
     save_label_document,
     verdict_key_of,
 )
+from tcip_mcp.pipelines.proposal import Proposal
 from tests._producer_fixtures import image_label_key, write_image
 
 if TYPE_CHECKING:
@@ -86,6 +87,7 @@ def _bucket(root: Path, image: Path) -> str:
         root,
         str(image),
         model_name="detector",
+        actor=None,
         boxes=[
             {
                 "subject": "bud",
@@ -1015,6 +1017,7 @@ def test_the_assessment_count_and_the_editor_pairing_agree_under_a_crowd_region(
         tmp_path,
         str(image),
         model_name="detector",
+        actor=None,
         boxes=[
             norm(11, 11, 31, 31, 0.9),
             norm(60, 20, 70, 30, 0.8),
@@ -1115,18 +1118,26 @@ def test_the_editor_pairs_a_bucket_under_its_assessments_center_match(
 class DottedProposer:
     """A proposer the agent brings by dotted path, returning one fixed candidate for any image."""
 
-    def propose(self, image_path: str, **params: object) -> list[dict]:
-        return [
-            {
-                "candidate_id": 1,
-                "bbox": [10.0, 10.0, 20.0, 20.0],
-                "area": 400.0,
-                "rings": [
-                    [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]
-                ],
-                "score": 0.9,
-            }
-        ]
+    def propose(self, image_path: str, **params: object) -> Proposal:
+        return Proposal(
+            [
+                {
+                    "candidate_id": 1,
+                    "bbox": [10.0, 10.0, 20.0, 20.0],
+                    "area": 400.0,
+                    "rings": [
+                        [
+                            (10.0, 10.0),
+                            (30.0, 10.0),
+                            (30.0, 30.0),
+                            (10.0, 30.0),
+                        ]
+                    ],
+                    "score": 0.9,
+                }
+            ],
+            None,
+        )
 
 
 def test_propose_annotations_refuses_an_unnamed_proposer_and_runs_a_dotted_one(
@@ -1138,12 +1149,13 @@ def test_propose_annotations_refuses_an_unnamed_proposer_and_runs_a_dotted_one(
     register_proposal_engine("registered_here", DottedProposer())
     image = _image(tmp_path)
 
-    refused = propose_annotations(tmp_path, str(image), engine="")
+    refused = propose_annotations(tmp_path, str(image), engine="", actor=None)
     assert "registered_here" in refused["error"]
 
     proposed = propose_annotations(
         tmp_path,
         str(image),
         engine="tests.test_label_document_gestures:DottedProposer",
+        actor=None,
     )
     assert proposed["staged"] is True and proposed["candidate_count"] == 1

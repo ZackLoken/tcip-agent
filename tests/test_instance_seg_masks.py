@@ -84,7 +84,10 @@ def test_contract_rejects_maskless_instance_seg_model() -> None:
             ]
 
     report = check_model_contract(
-        _BoxesOnly(), "instance_seg", dims=_SMOKE_DIMS
+        _BoxesOnly(),
+        "instance_seg",
+        device=torch.device("cpu"),
+        dims=_SMOKE_DIMS,
     )
     assert report["ok"] is False
     assert any("masks" in i for i in report["issues"]), report["issues"]
@@ -94,7 +97,9 @@ def test_contract_accepts_real_masked_instance_seg_model() -> None:
     model = bespoke_models.build_bespoke_instance_seg(
         num_classes=1, **detector_values()
     )
-    report = check_model_contract(model, "instance_seg", dims=_SMOKE_DIMS)
+    report = check_model_contract(
+        model, "instance_seg", device=torch.device("cpu"), dims=_SMOKE_DIMS
+    )
     assert report["ok"], report["issues"]
     assert report["eval_output_type"] == "list[dict]"
 
@@ -104,7 +109,9 @@ def test_contract_detection_task_unaffected_by_mask_requirement() -> None:
     model = bespoke_models.build_bespoke_detection(
         num_classes=1, **detector_values()
     )
-    report = check_model_contract(model, "detection", dims=_SMOKE_DIMS)
+    report = check_model_contract(
+        model, "detection", device=torch.device("cpu"), dims=_SMOKE_DIMS
+    )
     assert report["ok"], report["issues"]
 
 

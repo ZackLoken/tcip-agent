@@ -15,17 +15,19 @@ import pytest
 import tcip_store
 from tcip_annotation import json_io
 from tcip_annotation.state import RING_MIN_POINTS, BBox, Polygon
+from tcip_mcp.buckets import Proposed, buckets_under, read_bucket
 from tcip_mcp.dataset_layout import (
     LABEL_DOCUMENTS,
-    bucket_key,
     image_dir,
     prediction_key,
 )
+from tcip_mcp.pipelines.proposal import Proposal
 from tcip_mcp.tools.gui_tools import focus_human_attention
 from tcip_mcp.tools.proposal_tools import stage_proposals
-from tests._producer_fixtures import write_image
+from tests._producer_fixtures import kept, write_image
 
 if TYPE_CHECKING:
+    from tcip_mcp.tools.proposal_tools import StagedAssignments
     from tcip_mcp.workspace import BoundProject
 
 
@@ -48,14 +50,22 @@ def _images(root: Path, date: str, names: list[str]) -> None:
         (idir / name).write_bytes(b"x")
 
 
-def _staged_name(producer: str, date: str, stem: str) -> str:
-    """Return the bucket name ``<producer>/<date>/<stem>``."""
-    return f"{producer}/{date}/{stem}"
+def _staged(
+    root: Path, staged: dict, producer: str, date: str, stem: str
+) -> tcip_store.Key:
+    """Return the key of ``stem``'s document in the bucket the staging answer ``staged`` names.
 
-
-def _staged(root: Path, producer: str, date: str, stem: str) -> tcip_store.Key:
-    """Return the key of the document staged for ``stem`` under ``producer``."""
-    return prediction_key(root, _staged_name(producer, date, stem), stem)
+    The bucket's record is asserted to name ``producer`` as what proposed it and ``date`` as its
+    capture, and to hold a document for ``stem``.
+    """
+    bucket = read_bucket(root, staged["bucket"])
+    assert (bucket.producer, bucket.date) == (
+        Proposed(proposed_by=producer),
+        date,
+    )
+    key = bucket.document_key(stem)
+    assert key is not None, bucket
+    return key
 
 
 def _publish(root: Path, date: str, preds: dict[str, list[float]]) -> str:
@@ -241,13 +251,13 @@ def test_stage_proposals_writes_prediction_format_not_gt(
     res = stage_proposals(
         tmp_path,
         _img_path(root, date, "IMG_0001"),
+        actor=None,
         model_name="claude",
         boxes=boxes,
     )
     assert res["staged"] == 2
 
-    out = _staged(root, "claude", date, "IMG_0001")
-    assert res["bucket"] == _staged_name("claude", date, "IMG_0001")
+    out = _staged(root, res, "claude", date, "IMG_0001")
     preds = json_io.read_label_document(out).annotations
     # Normalized cx/cy/w/h denormalized against a 640x480 image, carrying per-object confidence.
     assert len(preds) == 2
@@ -287,6 +297,7 @@ def test_stage_proposals_rejects_unnormalized_coords(tmp_path: Path) -> None:
     res = stage_proposals(
         tmp_path,
         _img_path(root, date, "IMG_0001"),
+        actor=None,
         model_name="agent_proposals",
         boxes=boxes,
     )
@@ -327,7 +338,7 @@ def test_stage_proposals_rejects_a_model_name_that_is_no_single_segment(
         "",
     ):
         res = stage_proposals(
-            tmp_path, image_path, model_name=bad_model, boxes=good
+            tmp_path, image_path, actor=None, model_name=bad_model, boxes=good
         )
         assert "error" in res
     assert _no_ground_truth(root)  # nothing leaked into ground truth
@@ -355,6 +366,7 @@ def test_stage_proposals_rejects_box_missing_subject(tmp_path: Path) -> None:
     res = stage_proposals(
         tmp_path,
         _img_path(root, date, "IMG_0001"),
+        actor=None,
         model_name="agent_proposals",
         boxes=boxes,
     )
@@ -398,6 +410,7 @@ def test_stage_proposals_refuses_a_shape_naming_no_subject_by_index(
     res = stage_proposals(
         tmp_path,
         _img_path(root, date, "IMG_0001"),
+        actor=None,
         model_name="agent_proposals",
         **{shape: [good, bad]},
     )
@@ -405,9 +418,7 @@ def test_stage_proposals_refuses_a_shape_naming_no_subject_by_index(
         f"{'box' if shape == 'boxes' else 'polygon'} 1: "
     )
     assert "subject" in res["error"]
-    assert not tcip_store.exists(
-        _staged(root, "agent_proposals", date, "IMG_0001")
-    )
+    assert buckets_under(root) == []
 
 
 def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
@@ -425,6 +436,7 @@ def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
     res = stage_proposals(
         tmp_path,
         _img_path(root, date, "IMG_0132"),
+        actor=None,
         model_name="sam",
         polygons=polygons,
     )
@@ -432,8 +444,7 @@ def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
         res["staged"] == 1 and res["n_segment"] == 1 and res["n_detect"] == 0
     )
 
-    out = _staged(root, "sam", date, "IMG_0132")
-    assert res["bucket"] == _staged_name("sam", date, "IMG_0132")
+    out = _staged(root, res, "sam", date, "IMG_0132")
     polys = json_io.read_label_document(out).annotations
     # Polygon denormalized to pixel space, mask-quality score carried as confidence.
     assert len(polys) == 1
@@ -483,6 +494,7 @@ def test_stage_proposals_stages_boxes_and_polygons_together(
     res = stage_proposals(
         tmp_path,
         _img_path(root, date, "IMG_0001"),
+        actor=None,
         model_name="claude",
         boxes=boxes,
         polygons=polygons,
@@ -491,9 +503,8 @@ def test_stage_proposals_stages_boxes_and_polygons_together(
         res["n_detect"] == 1 and res["n_segment"] == 1 and res["staged"] == 2
     )
     # Boxes and polygons alike land in the one per-image prediction document.
-    assert res["bucket"] == _staged_name("claude", date, "IMG_0001")
     objs = json_io.read_label_document(
-        _staged(root, "claude", date, "IMG_0001")
+        _staged(root, res, "claude", date, "IMG_0001")
     ).annotations
     assert len(objs) == 2
     # Both the box and the polygon stamp the producer (model_name) as created_by + a created_at.
@@ -518,6 +529,7 @@ def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
     res = stage_proposals(
         tmp_path,
         image_path,
+        actor=None,
         model_name="sam",
         polygons=[
             {
@@ -532,6 +544,7 @@ def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
     res = stage_proposals(
         tmp_path,
         image_path,
+        actor=None,
         model_name="sam",
         polygons=[
             {
@@ -543,9 +556,7 @@ def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
     )
     assert "error" in res and "normal" in res["error"].lower()
     # A rejected shape must leave no partial stage.
-    assert not tcip_store.exists(
-        bucket_key(root, _staged_name("sam", date, "IMG_0001"))
-    )
+    assert buckets_under(root) == []
 
 
 def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
@@ -553,6 +564,7 @@ def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
     res = stage_proposals(
         tmp_path,
         str(tmp_path / "proj" / "images" / "2026-02-11" / "IMG_0001.jpg"),
+        actor=None,
     )
     assert "error" in res and "boxes/polygons" in res["error"]
 
@@ -560,22 +572,35 @@ def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
 class _FakeSingleBoxEngine:
     """A proposal engine whose ``propose`` answers one fixed candidate with one ring."""
 
-    def propose(self, image_path: str, **params: object) -> list[dict]:
-        return [
-            {
-                "candidate_id": 1,
-                "bbox": [10.0, 10.0, 40.0, 30.0],
-                "area": 1200.0,
-                "rings": [
-                    [(10.0, 10.0), (50.0, 10.0), (50.0, 40.0), (10.0, 40.0)]
-                ],
-                "score": 0.9,
-            }
-        ]
+    def propose(self, image_path: str, **params: object) -> Proposal:
+        return Proposal(
+            [
+                {
+                    "candidate_id": 1,
+                    "bbox": [10.0, 10.0, 40.0, 30.0],
+                    "area": 1200.0,
+                    "rings": [
+                        [
+                            (10.0, 10.0),
+                            (50.0, 10.0),
+                            (50.0, 40.0),
+                            (10.0, 40.0),
+                        ]
+                    ],
+                    "score": 0.9,
+                }
+            ],
+            None,
+        )
 
 
-def _staged_assignments_image(tmp_path: Path) -> str:
-    """Return a real image with one candidate already staged by ``propose_annotations``."""
+def _staged_assignments_image(
+    tmp_path: Path,
+) -> tuple[str, StagedAssignments]:
+    """Return a real image with one candidate staged, and the assignments keeping it as a leaf.
+
+    The candidate is staged by ``propose_annotations``, whose ``staging_id`` the assignments name.
+    """
     from tcip_mcp.pipelines.proposal import register_proposal_engine
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
@@ -585,17 +610,16 @@ def _staged_assignments_image(tmp_path: Path) -> str:
     _image(root, date, "IMG_0205", size=(640, 480))
     image_path = _img_path(root, date, "IMG_0205")
     proposed = propose_annotations(
-        tmp_path, image_path, engine="fake_single_box"
+        tmp_path, image_path, actor=None, engine="fake_single_box"
     )
     assert proposed["staged"] is True
-    return image_path
+    return image_path, kept(proposed, (1, "leaf"))
 
 
 def test_stage_proposals_refuses_assignments_combined_with_boxes_or_polygons(
     tmp_path: Path,
 ) -> None:
-    image_path = _staged_assignments_image(tmp_path)
-    assignments = [{"candidate_id": 1, "subject": "leaf"}]
+    image_path, assignments = _staged_assignments_image(tmp_path)
     a_box = [
         {
             "subject": "leaf",
@@ -615,7 +639,7 @@ def test_stage_proposals_refuses_assignments_combined_with_boxes_or_polygons(
     ]
 
     res_boxes = stage_proposals(
-        tmp_path, image_path, assignments=assignments, boxes=a_box
+        tmp_path, image_path, assignments=assignments, boxes=a_box, actor=None
     )
     assert (
         "error" in res_boxes
@@ -623,7 +647,11 @@ def test_stage_proposals_refuses_assignments_combined_with_boxes_or_polygons(
     )
 
     res_polygons = stage_proposals(
-        tmp_path, image_path, assignments=assignments, polygons=a_polygon
+        tmp_path,
+        image_path,
+        assignments=assignments,
+        polygons=a_polygon,
+        actor=None,
     )
     assert (
         "error" in res_polygons
@@ -631,7 +659,9 @@ def test_stage_proposals_refuses_assignments_combined_with_boxes_or_polygons(
     )
 
     # The admit case: assignments alone, the regime the combined calls above tried to pair.
-    admitted = stage_proposals(tmp_path, image_path, assignments=assignments)
+    admitted = stage_proposals(
+        tmp_path, image_path, assignments=assignments, actor=None
+    )
     assert "error" not in admitted and admitted["proposal_count"] == 1
 
 
@@ -642,11 +672,10 @@ def test_stage_proposals_treats_an_empty_boxes_list_beside_assignments_as_no_sha
 
     Beside an empty ``boxes`` list, the assignments regime stages its one proposal.
     """
-    image_path = _staged_assignments_image(tmp_path)
-    assignments = [{"candidate_id": 1, "subject": "leaf"}]
+    image_path, assignments = _staged_assignments_image(tmp_path)
 
     admitted = stage_proposals(
-        tmp_path, image_path, assignments=assignments, boxes=[]
+        tmp_path, image_path, assignments=assignments, boxes=[], actor=None
     )
     assert "error" not in admitted and admitted["proposal_count"] == 1
 
@@ -654,11 +683,14 @@ def test_stage_proposals_treats_an_empty_boxes_list_beside_assignments_as_no_sha
 def test_stage_proposals_refuses_model_name_beside_assignments(
     tmp_path: Path,
 ) -> None:
-    image_path = _staged_assignments_image(tmp_path)
-    assignments = [{"candidate_id": 1, "subject": "leaf"}]
+    image_path, assignments = _staged_assignments_image(tmp_path)
 
     res = stage_proposals(
-        tmp_path, image_path, assignments=assignments, model_name="sam"
+        tmp_path,
+        image_path,
+        assignments=assignments,
+        actor=None,
+        model_name="sam",
     )
     assert (
         "error" in res
@@ -666,7 +698,9 @@ def test_stage_proposals_refuses_model_name_beside_assignments(
     )
 
     # The admit case: the identical assignments call with no model_name.
-    admitted = stage_proposals(tmp_path, image_path, assignments=assignments)
+    admitted = stage_proposals(
+        tmp_path, image_path, assignments=assignments, actor=None
+    )
     assert "error" not in admitted and admitted["proposal_count"] == 1
 
 
@@ -695,12 +729,14 @@ def test_stage_proposals_refuses_boxes_or_polygons_without_model_name(
         }
     ]
 
-    res_boxes = stage_proposals(tmp_path, image_path, boxes=a_box)
+    res_boxes = stage_proposals(tmp_path, image_path, boxes=a_box, actor=None)
     assert (
         "error" in res_boxes and "model_name is required" in res_boxes["error"]
     )
 
-    res_polygons = stage_proposals(tmp_path, image_path, polygons=a_polygon)
+    res_polygons = stage_proposals(
+        tmp_path, image_path, polygons=a_polygon, actor=None
+    )
     assert (
         "error" in res_polygons
         and "model_name is required" in res_polygons["error"]
@@ -708,7 +744,7 @@ def test_stage_proposals_refuses_boxes_or_polygons_without_model_name(
 
     # The admit case: the identical boxes call with model_name stated.
     admitted = stage_proposals(
-        tmp_path, image_path, model_name="sam", boxes=a_box
+        tmp_path, image_path, actor=None, model_name="sam", boxes=a_box
     )
     assert "error" not in admitted and admitted["staged"] == 1
 
@@ -727,23 +763,26 @@ class _FakeMultiRingEngine:
         [(100.0, 100.0), (140.0, 100.0), (120.0, 140.0)],
     ]
 
-    def propose(self, image_path: str, **params: object) -> list[dict]:
+    def propose(self, image_path: str, **params: object) -> Proposal:
         xs = [x for ring in self._RINGS for x, _ in ring]
         ys = [y for ring in self._RINGS for _, y in ring]
-        return [
-            {
-                "candidate_id": 1,
-                "bbox": [
-                    min(xs),
-                    min(ys),
-                    max(xs) - min(xs),
-                    max(ys) - min(ys),
-                ],
-                "area": 1900.0,
-                "rings": self._RINGS,
-                "score": 0.9,
-            }
-        ]
+        return Proposal(
+            [
+                {
+                    "candidate_id": 1,
+                    "bbox": [
+                        min(xs),
+                        min(ys),
+                        max(xs) - min(xs),
+                        max(ys) - min(ys),
+                    ],
+                    "area": 1900.0,
+                    "rings": self._RINGS,
+                    "score": 0.9,
+                }
+            ],
+            None,
+        )
 
 
 def test_stage_proposals_admits_a_two_ring_pixel_proposal_with_pair_vertices(
@@ -760,13 +799,14 @@ def test_stage_proposals_admits_a_two_ring_pixel_proposal_with_pair_vertices(
     res = stage_proposals(
         tmp_path,
         _img_path(root, date, "IMG_0200"),
+        actor=None,
         model_name="sam",
         polygons=[{"subject": "leaf", "conf": 0.9, "rings": rings}],
     )
 
     assert res["staged"] == 1 and "error" not in res
     polys = json_io.read_label_document(
-        _staged(root, "sam", date, "IMG_0200")
+        _staged(root, res, "sam", date, "IMG_0200")
     ).annotations
     assert len(polys) == 1
     assert isinstance(polys[0].geometry, Polygon)
@@ -796,14 +836,15 @@ def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
     _image(root, date, "IMG_0201_b", size=(640, 480))
     accept_image_path = str(Path(image_dir(root, date)) / "IMG_0201_b.jpg")
     proposed = propose_annotations(
-        tmp_path, accept_image_path, engine="fake_multi_ring"
+        tmp_path, accept_image_path, actor=None, engine="fake_multi_ring"
     )
     assert proposed["staged"] is True and proposed["candidate_count"] == 1
 
     accepted = stage_proposals(
         tmp_path,
         accept_image_path,
-        assignments=[{"candidate_id": 1, "subject": "leaf"}],
+        assignments=kept(proposed, (1, "leaf")),
+        actor=None,
     )
     assert "error" not in accepted
 
@@ -822,6 +863,7 @@ def test_stage_proposals_refuses_both_points_and_rings(tmp_path: Path) -> None:
     res = stage_proposals(
         tmp_path,
         _img_path(root, date, "IMG_0202"),
+        actor=None,
         model_name="sam",
         polygons=[
             {
@@ -836,9 +878,7 @@ def test_stage_proposals_refuses_both_points_and_rings(tmp_path: Path) -> None:
     assert (
         "error" in res and "exactly one of 'points' or 'rings'" in res["error"]
     )
-    assert not tcip_store.exists(
-        bucket_key(root, _staged_name("sam", date, "IMG_0202"))
-    )
+    assert buckets_under(root) == []
 
 
 def test_stage_proposals_refuses_neither_points_nor_rings(
@@ -851,6 +891,7 @@ def test_stage_proposals_refuses_neither_points_nor_rings(
     res = stage_proposals(
         tmp_path,
         _img_path(root, date, "IMG_0203"),
+        actor=None,
         model_name="sam",
         polygons=[{"subject": "leaf", "conf": 0.9}],
     )
@@ -870,6 +911,7 @@ def test_stage_proposals_refuses_a_short_ring_under_rings(
     res = stage_proposals(
         tmp_path,
         _img_path(root, date, "IMG_0204"),
+        actor=None,
         model_name="sam",
         polygons=[
             {
@@ -881,9 +923,7 @@ def test_stage_proposals_refuses_a_short_ring_under_rings(
     )
 
     assert "error" in res and f"{RING_MIN_POINTS} or more" in res["error"]
-    assert not tcip_store.exists(
-        bucket_key(root, _staged_name("sam", date, "IMG_0204"))
-    )
+    assert buckets_under(root) == []
 
 
 def test_stage_proposals_refuses_a_pixel_vertex_outside_the_image_bounds(
@@ -896,6 +936,7 @@ def test_stage_proposals_refuses_a_pixel_vertex_outside_the_image_bounds(
     res = stage_proposals(
         tmp_path,
         _img_path(root, date, "IMG_0205"),
+        actor=None,
         model_name="sam",
         polygons=[
             {
@@ -907,9 +948,7 @@ def test_stage_proposals_refuses_a_pixel_vertex_outside_the_image_bounds(
     )
 
     assert "error" in res and "pixel bounds" in res["error"]
-    assert not tcip_store.exists(
-        bucket_key(root, _staged_name("sam", date, "IMG_0205"))
-    )
+    assert buckets_under(root) == []
 
 
 def test_stage_proposals_refuses_an_out_of_range_coordinate_under_rings(
@@ -927,6 +966,7 @@ def test_stage_proposals_refuses_an_out_of_range_coordinate_under_rings(
     res = stage_proposals(
         tmp_path,
         _img_path(root, date, "IMG_0206"),
+        actor=None,
         model_name="sam",
         polygons=[
             {
@@ -938,9 +978,7 @@ def test_stage_proposals_refuses_an_out_of_range_coordinate_under_rings(
     )
 
     assert "error" in res and "pixel bounds" in res["error"]
-    assert not tcip_store.exists(
-        bucket_key(root, _staged_name("sam", date, "IMG_0206"))
-    )
+    assert buckets_under(root) == []
 
 
 def test_stage_proposals_refuses_a_normalized_ring_handed_under_rings(
@@ -959,6 +997,7 @@ def test_stage_proposals_refuses_a_normalized_ring_handed_under_rings(
     res = stage_proposals(
         tmp_path,
         _img_path(root, date, "IMG_0207"),
+        actor=None,
         model_name="sam",
         polygons=[
             {
@@ -970,45 +1009,48 @@ def test_stage_proposals_refuses_a_normalized_ring_handed_under_rings(
     )
 
     assert "error" in res and "span under a pixel" in res["error"]
-    assert not tcip_store.exists(
-        bucket_key(root, _staged_name("sam", date, "IMG_0207"))
-    )
+    assert buckets_under(root) == []
 
 
-# ── Staged documents are written once ──────────────────────────────────────
+# ── Each staging is a publication of its own ───────────────────────────────
 
 _BOX = [
     {"subject": "bud", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}
 ]
 
 
-def test_stage_proposals_refuses_a_second_stage_of_the_same_stem(
+def test_a_second_stage_of_the_same_stem_publishes_a_second_bucket(
     tmp_path: Path,
 ) -> None:
-    """A second stage of the same stem is refused and the first document stays unchanged.
+    """A second stage of one stem under one producer publishes its own bucket.
 
-    The second stage answers an error naming the bucket as already staged, and the first
-    document keeps its version.
+    Both buckets read back, each holding its own staging, and the first document keeps its
+    version.
     """
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001", size=(640, 480))
     image_path = _img_path(root, date, "IMG_0001")
     first = stage_proposals(
-        tmp_path, image_path, model_name="claude", boxes=_BOX
+        tmp_path, image_path, actor=None, model_name="claude", boxes=_BOX
     )
-    document = _staged(root, "claude", date, "IMG_0001")
+    document = _staged(root, first, "claude", date, "IMG_0001")
     written = tcip_store.read_versioned(document).version
 
-    res = stage_proposals(
+    second = stage_proposals(
         tmp_path,
         image_path,
+        actor=None,
         model_name="claude",
         boxes=[{**_BOX[0], "conf": 0.3}],
     )
 
-    assert "already" in res["error"]
-    assert first["bucket"] in res["error"]
+    assert "error" not in second, second
+    assert second["bucket"] != first["bucket"]
+    (restaged,) = json_io.read_label_document(
+        _staged(root, second, "claude", date, "IMG_0001")
+    ).annotations
+    assert restaged.score == pytest.approx(0.3)
     assert tcip_store.read_versioned(document).version == written
 
 
@@ -1024,16 +1066,18 @@ def test_stage_proposals_admits_two_stems_staged_in_turn(
     first = stage_proposals(
         tmp_path,
         _img_path(root, date, "IMG_0001"),
+        actor=None,
         model_name="claude",
         boxes=_BOX,
     )
     second = stage_proposals(
         tmp_path,
         _img_path(root, date, "IMG_0002"),
+        actor=None,
         model_name="claude",
         boxes=_BOX,
     )
 
     assert "error" not in first and "error" not in second
-    assert first["bucket"] == _staged_name("claude", date, "IMG_0001")
-    assert second["bucket"] == _staged_name("claude", date, "IMG_0002")
+    _staged(root, first, "claude", date, "IMG_0001")
+    _staged(root, second, "claude", date, "IMG_0002")

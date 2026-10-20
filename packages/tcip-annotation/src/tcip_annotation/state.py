@@ -83,8 +83,7 @@ class Polygon:
 class Point:
     """A single labeled location in pixel coordinates.
 
-    It is a placed prompt (human- or agent-supplied, for a promptable method like SAM) or a
-    keypoint/landmark. Has no bounding box and no area.
+    It is a keypoint or landmark. Has no bounding box and no area.
     """
 
     x: float
