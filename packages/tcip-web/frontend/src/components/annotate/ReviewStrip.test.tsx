@@ -36,7 +36,6 @@ const openFlag: Flag = {
 
 function renderStrip(over: Partial<Parameters<typeof ReviewStrip>[0]> = {}) {
   const handlers = {
-    onProposalsShown: vi.fn(),
     onFilters: vi.fn(),
     onScope: vi.fn(),
     onStep: vi.fn(),
@@ -50,7 +49,6 @@ function renderStrip(over: Partial<Parameters<typeof ReviewStrip>[0]> = {}) {
   };
   render(
     <ReviewStrip
-      proposalsShown
       reviewing
       operatingPoint={{ conf: 0.42, reason: "" }}
       filters={{ confidence: 0.42, match: "all" }}
@@ -78,10 +76,8 @@ describe("ReviewStrip", () => {
     expect(itemName(null)).toBeNull();
   });
 
-  it("carries the filters, the toggle and the scope to the tab", () => {
+  it("carries the filters and the scope to the tab", () => {
     const h = renderStrip();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Proposals" }));
-    expect(h.onProposalsShown).toHaveBeenCalledWith(false);
     fireEvent.change(screen.getByRole("spinbutton", { name: "Confidence floor" }), {
       target: { value: "0.6" },
     });

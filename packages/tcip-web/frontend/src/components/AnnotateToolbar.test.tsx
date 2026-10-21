@@ -9,7 +9,7 @@ import { subjectsApi } from "@/api/subjects";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import { useStore } from "@/store";
-import type { SubjectState } from "@/store/types";
+import type { AnnotateView, SubjectState } from "@/store/types";
 import { openTestProject } from "@/test/store";
 
 const initialStoreState = useStore.getState();
@@ -38,10 +38,16 @@ function renderToolbar(
     proposing?: boolean;
     onPhrase?: (phrase: string) => void;
     onPropose?: () => void;
+    view?: AnnotateView;
+    onView?: (next: AnnotateView) => void;
+    predictionsAvailable?: boolean;
   },
 ) {
   render(
     <AnnotateToolbar
+      view={extra?.view ?? { proposals: true, predictions: true }}
+      onView={extra?.onView ?? (() => {})}
+      predictionsAvailable={extra?.predictionsAvailable ?? false}
       onSave={() => {}}
       onCancelSave={extra?.onCancelSave ?? (() => {})}
       saveDisabled={false}
@@ -209,7 +215,7 @@ describe("AnnotateToolbar draw mode", () => {
     expect(screen.getByRole("menuitemcheckbox", { name: "Stream" })).toBeDisabled();
   });
 
-  it("the Edit menu holds the six editing tools and nothing else", () => {
+  it("the Edit menu holds the five editing tools and nothing else", () => {
     renderToolbar();
     openEdit();
     const items = screen.getByRole("menu").querySelectorAll("button");
@@ -217,11 +223,45 @@ describe("AnnotateToolbar draw mode", () => {
       "Snap",
       "Stream",
       "Cut",
-      "Show labels",
       "Undo",
       "Redo",
     ]);
     expect(screen.queryByRole("button", { name: "Editor" })).toBeNull();
+  });
+
+  it("the View menu toggles labels, proposals and predictions, the last only with a bucket", () => {
+    const onView = vi.fn();
+    renderToolbar(null, null, { onView });
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    const items = screen.getByRole("menu").querySelectorAll("button");
+    expect(Array.from(items, (item) => item.textContent)).toEqual([
+      "Labels",
+      "Proposals",
+      "Predictions",
+    ]);
+    expect(screen.getByRole("menuitemcheckbox", { name: "Predictions" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Labels" }));
+    expect(useStore.getState().annotateUi.visible).toBe(false);
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Proposals" }));
+    expect(onView).toHaveBeenCalledWith({ proposals: false, predictions: true });
+
+    cleanup();
+    renderToolbar(null, null, { onView, predictionsAvailable: true });
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Predictions" }));
+    expect(onView).toHaveBeenLastCalledWith({ proposals: true, predictions: false });
+  });
+
+  it("groups the tools and prompt, the editing menus and Save, and the image controls", () => {
+    renderToolbar();
+    const row = screen.getByRole("group", { name: "Tool" }).parentElement!;
+    const order = Array.from(row.children, (child) =>
+      child.getAttribute("aria-hidden") === "true" ? "|" : (child.textContent ?? ""),
+    );
+    expect(order.filter((o) => o === "|")).toHaveLength(2);
+    expect(order.indexOf("|")).toBeGreaterThan(order.findIndex((o) => o.includes("Point")));
+    expect(order.lastIndexOf("|")).toBeLessThan(order.findIndex((o) => o.includes("Complete")));
   });
 
   it("renders Point immediately to the left of Box (Point, Box, Polygon)", () => {

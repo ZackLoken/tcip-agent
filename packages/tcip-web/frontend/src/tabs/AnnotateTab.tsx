@@ -88,6 +88,7 @@ import {
   TOOL_ARRAY,
   type Box,
   type DrawingBox,
+  type AnnotateView,
   type PolygonShape,
   type Proposal,
   type ServedProposals,
@@ -234,8 +235,9 @@ export function AnnotateTab() {
   // ── Proposals: the selected bucket's and every staging of the image, paired and decided
   // server-side, each carrying its bucket ──
   const bucket = dataset.bucket;
-  // Per image: hiding proposals while annotating is recorded on the mark the person then makes.
-  const [hideProposals, setHideProposals] = useState(false);
+  // Hiding either while annotating is recorded on the mark the person then makes.
+  const [shown, setShown] = useState<AnnotateView>({ proposals: true, predictions: true });
+  const predictionsShown = !!bucket && shown.predictions;
   const [proposalTick, setProposalTick] = useState(0);
   const [served, setServed] = useState<{
     key: string;
@@ -248,14 +250,17 @@ export function AnnotateTab() {
     setServed(null);
     setProposalTick((t) => t + 1);
   };
-  const proposalKey = `${imgPath ?? ""}\0${bucket ?? ""}`;
+  const proposalKey = `${imgPath ?? ""}\0${predictionsShown ? bucket : ""}\0${shown.proposals}`;
   useEffect(() => {
-    if (!imgPath || !currentImageName || hideProposals) return;
+    if (!imgPath || !currentImageName) return;
     let canceled = false;
     void (async () => {
       try {
-        const staged = (await api.annotate.stagings(imgPath)).buckets;
-        const buckets = [...(bucket ? [bucket] : []), ...staged.filter((b) => b !== bucket)];
+        const staged = shown.proposals ? (await api.annotate.stagings(imgPath)).buckets : [];
+        const buckets = [
+          ...(predictionsShown ? [bucket] : []),
+          ...staged.filter((b) => b !== bucket),
+        ];
         const answers = await Promise.all(buckets.map((b) => api.annotate.proposals(imgPath, b)));
         if (canceled) return;
         setServed({
@@ -264,7 +269,7 @@ export function AnnotateTab() {
           proposals: answers.flatMap((a, i) =>
             a.proposals.map((p) => ({ ...p, bucket: buckets[i] })),
           ),
-          operatingPoint: bucket ? answers[0].operating_point : null,
+          operatingPoint: predictionsShown ? answers[0].operating_point : null,
         });
       } catch (e) {
         if (!canceled)
@@ -277,7 +282,7 @@ export function AnnotateTab() {
       canceled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [proposalKey, hideProposals, proposalTick]);
+  }, [proposalKey, proposalTick]);
   // ── Engine prompts: held points and boxes, or a phrase, ask for proposals, never an annotation ──
   const [proposing, setProposing] = useState(false);
   // The bucket whose first proposal is focused once its proposals are served.
@@ -329,7 +334,7 @@ export function AnnotateTab() {
         currentImage(now).path === sentFrom;
       if (inView) {
         focusOnServeRef.current = answer.bucket;
-        setHideProposals(false);
+        setShown((v) => ({ ...v, proposals: true }));
         refreshProposals();
         useStore.getState().pushToast(count, "success");
       } else {
@@ -384,7 +389,7 @@ export function AnnotateTab() {
     }
   }
 
-  const reviewing = !hideProposals && served?.key === proposalKey && served.buckets.length > 0;
+  const reviewing = served?.key === proposalKey && served.buckets.length > 0;
   const proposals = useMemo(() => (reviewing ? served.proposals : []), [reviewing, served]);
   const operatingPoint = reviewing ? served.operatingPoint : null;
 
@@ -557,7 +562,7 @@ export function AnnotateTab() {
       gestures: {
         complete: { [subject]: next },
         rect: null,
-        proposals_hidden: hideProposals,
+        proposals_hidden: !shown.proposals || (!!bucket && !shown.predictions),
       },
     });
     if (before !== "negative" && stateOf() === "negative") {
@@ -568,7 +573,6 @@ export function AnnotateTab() {
   // Leaving an image drops any drag (and ends a live freehand stream so it can't bleed vertices
   // onto the next image).
   useEffect(() => {
-    setHideProposals(false);
     settleGestures();
     setCutStart(null);
     useStore.getState().setCut(false);
@@ -1014,7 +1018,14 @@ export function AnnotateTab() {
       action: () => void markComplete(!subjectFinished),
       when: () => !!dataset.subject && subjectState !== null,
     },
-    { keys: K.hideProposals.keys, action: () => setHideProposals((h) => !h) },
+    {
+      keys: K.hideProposals.keys,
+      action: () =>
+        setShown((v) => {
+          const any = v.proposals || v.predictions;
+          return { proposals: !any, predictions: !any };
+        }),
+    },
     {
       keys: K.stream.keys,
       action: () => useStore.getState().setStream(!annotateUi.stream),
@@ -1641,6 +1652,9 @@ export function AnnotateTab() {
           proposing={proposing}
           onPhrase={(phrase) => void findByPhrase(phrase)}
           onPropose={proposeHeld}
+          view={shown}
+          onView={setShown}
+          predictionsAvailable={!!bucket}
         />
         <div className="flex-1 flex items-center justify-center bg-tcip-canvas px-4">
           <p className="text-tcip-muted">No image. Choose a date with images.</p>
@@ -1672,11 +1686,12 @@ export function AnnotateTab() {
         proposing={proposing}
         onPhrase={(phrase) => void findByPhrase(phrase)}
         onPropose={proposeHeld}
+        view={shown}
+        onView={setShown}
+        predictionsAvailable={!!bucket}
       />
       <ReviewStrip
-        proposalsShown={!hideProposals}
         reviewing={reviewing}
-        onProposalsShown={(shown) => setHideProposals(!shown)}
         operatingPoint={operatingPoint}
         filters={filters}
         onFilters={setFilters}
@@ -1780,9 +1795,7 @@ export function AnnotateTab() {
               </>
             }
           >
-            {renderLabels && (
-              <ProposalShapes proposals={drawnProposals} focused={focused} widths={widths} />
-            )}
+            <ProposalShapes proposals={drawnProposals} focused={focused} widths={widths} />
             {/* Committed shapes: memoized, cursor-independent (see AnnotationShapes) */}
             <AnnotationShapes
               boxes={canvas.boxes}
@@ -1797,7 +1810,7 @@ export function AnnotateTab() {
               renderLabels={renderLabels}
               widths={widths}
             />
-            {renderLabels && <FlagMarks places={flagMarks} size={widths.labelSize} />}
+            <FlagMarks places={flagMarks} size={widths.labelSize} />
           </CanvasStage>
 
           {ioError && (

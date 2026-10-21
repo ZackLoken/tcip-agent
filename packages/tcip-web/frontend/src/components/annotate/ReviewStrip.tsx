@@ -12,13 +12,11 @@ import {
 import { MATCH_HINTS, MATCH_TYPES, MATCH_WORDS, type MatchType } from "@/lib/symbology";
 import type { Flag } from "@/store/types";
 
-/** The status strip under the toolbar: the proposals toggle, the confidence floor and the match
- *  filter; the accept, edit, reject and flag controls; and the item stepper with the scope it
- *  steps through, each scope naming how many items it holds. */
+/** The status strip under the toolbar: the confidence floor and the match filter while
+ *  proposals are shown; the accept, edit, reject and flag controls; and the item stepper with
+ *  the scope it steps through, each scope naming how many items it holds. */
 export function ReviewStrip({
-  proposalsShown,
   reviewing,
-  onProposalsShown,
   operatingPoint,
   filters,
   onFilters,
@@ -42,11 +40,8 @@ export function ReviewStrip({
   onFlag,
   onResolve,
 }: {
-  /** The toggle's own state: whether the person wants proposals shown. */
-  proposalsShown: boolean;
   /** Whether proposals are on the canvas now: shown, and served for this image. */
   reviewing: boolean;
-  onProposalsShown: (next: boolean) => void;
   /** The bucket's validated operating point, or the reason it has none; null until served. */
   operatingPoint: { conf: number | null; reason: string } | null;
   filters: ItemFilters;
@@ -78,18 +73,6 @@ export function ReviewStrip({
   const K = ANNOTATE_KEYS;
   return (
     <div className="flex h-9 shrink-0 items-center gap-3 border-b border-tcip-border bg-tcip-panel px-3 text-[13px]">
-      <label
-        className="flex items-center gap-1.5"
-        title={`Show proposals (${K.hideProposals.label})`}
-      >
-        <input
-          type="checkbox"
-          checked={proposalsShown}
-          onChange={(e) => onProposalsShown(e.target.checked)}
-        />
-        Proposals
-      </label>
-
       {reviewing && (
         <>
           <label

@@ -31,7 +31,7 @@ export const ANNOTATE_KEYS = {
   hideProposals: {
     keys: "h",
     label: "h",
-    desc: "Hide or show proposals on this image; a mark made while hidden records it",
+    desc: "Hide or show the proposals and predictions; a mark made while hidden records it",
   },
   complete: {
     keys: "c",

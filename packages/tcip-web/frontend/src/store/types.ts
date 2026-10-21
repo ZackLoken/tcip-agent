@@ -105,6 +105,13 @@ export interface PointShape extends CanvasShape {
   y: number;
 }
 
+/** Which overlays the Annotate canvas shows beside the labels: the proposals staged on the image,
+ *  and the selected bucket's predictions. */
+export interface AnnotateView {
+  proposals: boolean;
+  predictions: boolean;
+}
+
 /** Whether a subject in `state` on its image is finished (the backend's FINISHED_STATES). */
 export function isFinished(state: SubjectState | null | undefined): boolean {
   return (FINISHED_STATES as readonly string[]).includes(state ?? "");
