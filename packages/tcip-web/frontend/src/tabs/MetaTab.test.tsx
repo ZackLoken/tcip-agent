@@ -34,6 +34,20 @@ describe("MetaTab heading", () => {
   });
 });
 
+describe("MetaTab before its loads answer", () => {
+  it("shows no empty line before the loads answer", () => {
+    vi.mocked(metaApi.reports).mockReturnValue(new Promise(() => {}));
+    vi.mocked(metaApi.retrospectives).mockReturnValue(new Promise(() => {}));
+    vi.spyOn(sessionsApi, "load").mockReturnValue(new Promise(() => {}));
+
+    render(<MetaTab />);
+
+    expect(screen.queryByText("No reports.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No retrospectives.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No sessions.")).not.toBeInTheDocument();
+  });
+});
+
 describe("MetaTab annotation sessions", () => {
   it("shows a rejected sessions load as the tab's error, never as no sessions", async () => {
     vi.spyOn(sessionsApi, "load").mockRejectedValue(new Error("a label document does not decode"));
@@ -47,7 +61,7 @@ describe("MetaTab annotation sessions", () => {
     expect(screen.queryByText("No sessions.")).not.toBeInTheDocument();
   });
 
-  it("lists a friction report's context as key and value pairs, not a JSON block", async () => {
+  it("lists a report's context as key and value pairs", async () => {
     vi.spyOn(sessionsApi, "load").mockResolvedValue({ sessions: [] });
     vi.mocked(metaApi.reports).mockResolvedValue({
       reports: [
