@@ -57,7 +57,7 @@ describe("StatusBar canvas facts", () => {
     expect(screen.getByText("1 box")).toBeInTheDocument();
   });
 
-  it("shows no zoom, image size or shape count on a tab other than Annotate", () => {
+  it("shows no canvas facts off the Annotate tab", () => {
     useStore.getState().setActiveTab("inference");
     useStore.setState((s) => ({
       canvas: {
