@@ -6,7 +6,7 @@ import { api } from "@/api/client";
 import type { LoadedLabels, SaveResult } from "@/api/client";
 import { StructuredRefusalError } from "@/api/http";
 import { sessionsApi } from "@/api/sessions";
-import { subjectsApi, subjectColor } from "@/api/subjects";
+import { subjectColor } from "@/api/subjects";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { CUT_MISSES_REFUSAL } from "@/lib/polygonGeometry";
@@ -106,6 +106,7 @@ vi.mock("@/components/AnnotateToolbar", () => ({
     view: { proposals: boolean; predictions: boolean };
     onView: (next: { proposals: boolean; predictions: boolean }) => void;
     predictionsAvailable: boolean;
+    focused: { kind: string; shape: string; ref: number } | null;
   }) => (
     <div
       data-testid="toolbar"
@@ -115,6 +116,9 @@ vi.mock("@/components/AnnotateToolbar", () => ({
       data-view-proposals={props.view.proposals}
       data-view-predictions={props.view.predictions}
       data-predictions-available={props.predictionsAvailable}
+      data-focused={
+        props.focused ? `${props.focused.kind} ${props.focused.shape} ${props.focused.ref}` : ""
+      }
     >
       <button onClick={() => props.onComplete(true)}>toolbar-complete</button>
       <button onClick={props.onCancelSave}>toolbar-cancel-save</button>
@@ -1090,166 +1094,18 @@ describe("AnnotateTab point tool", () => {
   });
 });
 
-describe("AnnotateTab AttributePanel", () => {
-  it("is absent with no active subject, nothing selected and no image-level ratings", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
-    act(() => useStore.getState().setActiveSubject(null)); // beforeEach's setupDataset sets one
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-
-    expect(screen.queryByTestId("attribute-column")).not.toBeInTheDocument();
-  });
-
-  it("an active subject shows the column with its attribute block and the add control", async () => {
-    useStore.getState().setRegistry({ subject_a: {} }); // beforeEach's setupDataset already made it active
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-
-    expect(screen.getByText("subject_a attributes")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add attribute" })).toBeInTheDocument();
-  });
-
-  it("shows the selected shape's subject once a shape is selected", async () => {
+describe("AnnotateTab focused item", () => {
+  it("hands the focused box to the toolbar, whose subject menu edits its attributes", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
+    expect(screen.getByTestId("toolbar")).toHaveAttribute("data-focused", "");
 
     act(addBox);
     fireEvent.mouseDown(screen.getByTestId("canvas-stage"), { clientX: 30, clientY: 30 });
-    expect(useStore.getState().canvas.focus?.kind).toBe("box"); // sanity: a box, not a polygon, is focused
-    expect(
-      within(screen.getByTestId("attribute-column")).getByText("subject_a"),
-    ).toBeInTheDocument();
-  });
-});
-
-describe("AnnotateTab AttributePanel authoring", () => {
-  async function openPanelOnASelectedBox() {
-    useStore.getState().setRegistry({ subject_a: {} });
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-    act(addBox);
-    fireEvent.mouseDown(screen.getByTestId("canvas-stage"), { clientX: 30, clientY: 30 });
-  }
-
-  async function declareAttribute() {
-    fireEvent.click(screen.getByRole("button", { name: "Add attribute" }));
-    fireEvent.change(screen.getByLabelText("attribute name"), {
-      target: { value: "size" },
-    });
-    fireEvent.change(screen.getByLabelText("attribute values"), {
-      target: { value: "small\nlarge" },
-    });
-    await act(() => Promise.resolve(fireEvent.click(screen.getByRole("button", { name: "Add" }))));
-  }
-
-  it("posts the grown registry through subjectsApi.save with the loaded version and installs it", async () => {
-    await openPanelOnASelectedBox();
-    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue({
-      status: "ok",
-      n_subjects: 1,
-      subjects_path: "C:/data/subjects.json",
-      version: "v2",
-    });
-
-    await declareAttribute();
-
-    expect(saveSpy).toHaveBeenCalledTimes(1);
-    expect(saveSpy.mock.calls[0][0]).toEqual({
-      subject_a: { attributes: { size: { type: "categorical", values: ["small", "large"] } } },
-    });
-    expect(saveSpy.mock.calls[0][2]).toBeNull(); // no version was ever loaded in this test
-    expect(useStore.getState().registry.version).toBe("v2");
-    expect(useStore.getState().registry.subjects.subject_a.attributes?.size.values).toEqual([
-      "small",
-      "large",
-    ]);
-  });
-
-  it("reloads the registry from the server when the save is refused, same as the subject add", async () => {
-    await openPanelOnASelectedBox();
-    vi.spyOn(subjectsApi, "save").mockRejectedValue(new Error("409 stale version"));
-    vi.spyOn(subjectsApi, "load").mockResolvedValue({
-      subjects: { subject_a: {} },
-      discovered: [],
-      version: "v3",
-      unreadable: [],
-    });
-
-    await declareAttribute();
-
-    expect(useStore.getState().registry.subjects).toEqual({ subject_a: {} });
-    expect(useStore.getState().registry.version).toBe("v3");
-  });
-
-  it("counts the active subject's shapes carrying no value for each declared attribute", async () => {
-    await openPanelOnASelectedBox();
-    vi.spyOn(subjectsApi, "save").mockResolvedValue({
-      status: "ok",
-      n_subjects: 1,
-      subjects_path: "C:/data/subjects.json",
-      version: "v2",
-    });
-
-    await declareAttribute();
-
-    // The one drawn box carries no value for the attribute just declared.
-    expect(screen.getByText("size: 1 of 1 subject_a shapes unset")).toBeInTheDocument();
-  });
-
-  it("refuses a name the subject already declares, inline, and posts nothing", async () => {
-    await openPanelOnASelectedBox();
-    const saveSpy = vi.spyOn(subjectsApi, "save");
-    act(() => {
-      useStore
-        .getState()
-        .setRegistry(
-          { subject_a: { attributes: { size: { type: "categorical", values: ["small"] } } } },
-          "v1",
-        );
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Add attribute" }));
-    fireEvent.change(screen.getByLabelText("attribute name"), {
-      target: { value: "size" },
-    });
-    fireEvent.change(screen.getByLabelText("attribute values"), {
-      target: { value: "large" },
-    });
-    await act(() => Promise.resolve(fireEvent.click(screen.getByRole("button", { name: "Add" }))));
-
-    expect(screen.getByText("size is already declared.")).toBeInTheDocument();
-    expect(saveSpy).not.toHaveBeenCalled();
-  });
-});
-
-describe("AnnotateTab AttributePanel accessible names", () => {
-  it("names the value select by the attribute alone, the + value button named and outside it", async () => {
-    useStore.getState().setRegistry({
-      subject_a: { attributes: { ripeness: { type: "ordinal", values: ["green", "ripe"] } } },
-    });
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-    act(addBox);
-    fireEvent.mouseDown(screen.getByTestId("canvas-stage"), { clientX: 30, clientY: 30 });
-
-    expect(screen.getByRole("combobox", { name: "ripeness" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add a ripeness value" })).toBeInTheDocument();
-  });
-
-  it("names the new-attribute type select", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
-    render(<AnnotateTab />);
-    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
-    await flush();
-
-    fireEvent.click(screen.getByRole("button", { name: "Add attribute" }));
-    expect(screen.getByRole("combobox", { name: "attribute type" })).toBeInTheDocument();
+    expect(screen.getByTestId("toolbar")).toHaveAttribute("data-focused", "annotation box 0");
+    expect(screen.queryByTestId("subject-attributes")).toBeNull();
   });
 });
 

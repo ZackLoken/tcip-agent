@@ -8,6 +8,7 @@ import { StructuredRefusalError } from "@/api/http";
 import { subjectsApi } from "@/api/subjects";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
+import type { ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
 import type { AnnotateView, SubjectState } from "@/store/types";
 import { openTestProject } from "@/test/store";
@@ -41,6 +42,7 @@ function renderToolbar(
     view?: AnnotateView;
     onView?: (next: AnnotateView) => void;
     predictionsAvailable?: boolean;
+    focused?: ReviewItem | null;
   },
 ) {
   render(
@@ -48,6 +50,7 @@ function renderToolbar(
       view={extra?.view ?? { proposals: true, predictions: true }}
       onView={extra?.onView ?? (() => {})}
       predictionsAvailable={extra?.predictionsAvailable ?? false}
+      focused={extra?.focused ?? null}
       onSave={() => {}}
       onCancelSave={extra?.onCancelSave ?? (() => {})}
       saveDisabled={false}
@@ -489,6 +492,54 @@ describe("AnnotateToolbar subject authoring", () => {
     // active subject is kept rather than reverted (unlike an ordinary refusal above).
     expect(useStore.getState().registry.version).toBe("v2");
     expect(useStore.getState().gui.active_subject).toBe("husk");
+  });
+});
+
+describe("AnnotateToolbar subject menu attributes", () => {
+  it("holds the active subject's attributes under the subject list, absent with no subject", () => {
+    openTestProject({ dataset_root: "C:/data", date: "2026-01-01" });
+    act(() => useStore.getState().setRegistry({ leaf: {} }));
+    renderToolbar();
+    fireEvent.click(screen.getByRole("button", { name: /select subject/ }));
+    expect(screen.queryByTestId("subject-attributes")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^leaf/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^leaf/ }));
+    expect(screen.getByTestId("subject-attributes")).toBeInTheDocument();
+    expect(screen.getByText("leaf attributes")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add attribute" })).toBeInTheDocument();
+  });
+
+  it("edits the focused box's attributes inside the menu", () => {
+    openTestProject({ dataset_root: "C:/data", date: "2026-01-01" });
+    act(() => {
+      useStore
+        .getState()
+        .setRegistry({ leaf: { attributes: { stage: { type: "ordinal", values: ["early"] } } } });
+      useStore.getState().setActiveSubject("leaf");
+      useStore
+        .getState()
+        .add("boxes", { x1: 0, y1: 0, x2: 5, y2: 5, subject: "leaf", attributes: {} });
+    });
+    renderToolbar(null, null, {
+      focused: {
+        kind: "annotation",
+        shape: "box",
+        ref: 0,
+        subject: "leaf",
+        bbox: [0, 0, 5, 5],
+        match: null,
+        reviewed: false,
+        score: null,
+        at: [2, 2],
+        flags: [],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^leaf/ }));
+    fireEvent.change(screen.getByRole("combobox", { name: "stage" }), {
+      target: { value: "early" },
+    });
+    expect(useStore.getState().canvas.boxes[0].attributes).toEqual({ stage: "early" });
   });
 });
 
