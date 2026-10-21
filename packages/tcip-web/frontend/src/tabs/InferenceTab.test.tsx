@@ -205,7 +205,7 @@ describe("InferenceTab assessment", () => {
     vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({ models: [BASELINE_MODEL] });
   });
 
-  it("lists the chosen model's assessments, chooses its first passed one, hides the stated inputs and runs under it", async () => {
+  it("runs under the model's first passed assessment with no stated inputs", async () => {
     vi.mocked(resultsApi.assessments).mockResolvedValue({
       assessments: [
         { ...PASSED_ASSESSMENT, assessment_id: "assessment-failed", passed: false },
@@ -239,7 +239,7 @@ describe("InferenceTab assessment", () => {
     });
   });
 
-  it("chooses None for a model with no passed assessment, revealing the stated inputs", async () => {
+  it("shows the stated inputs when no assessment passed", async () => {
     vi.mocked(resultsApi.assessments).mockResolvedValue({
       assessments: [{ ...PASSED_ASSESSMENT, passed: false }],
     });
@@ -284,6 +284,41 @@ describe("InferenceTab job table", () => {
     expect(stops).toHaveLength(1);
     fireEvent.click(stops[0]);
     await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("inf-live", "jordan"));
+  });
+
+  it("shows canceling until the poll reports the job ended", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(inferenceApi.listJobs).mockResolvedValue({ jobs: [job({ job_id: "inf-live" })] });
+      vi.spyOn(inferenceApi, "cancel").mockResolvedValue({
+        job_id: "inf-live",
+        status: "running",
+        cancel_requested: true,
+      });
+
+      render(<InferenceTab />);
+      await vi.waitFor(() => expect(screen.getByText("inf-live")).toBeInTheDocument());
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+      await vi.waitFor(() => expect(screen.getByText("canceling")).toBeInTheDocument());
+      expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+
+      // The next poll still reports running: the row keeps canceling rather than flipping back.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect(screen.getByText("canceling")).toBeInTheDocument();
+
+      vi.mocked(inferenceApi.listJobs).mockResolvedValue({
+        jobs: [job({ job_id: "inf-live", status: "canceled" })],
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect(screen.getByText("canceled")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows a failed job's reason, not just its status badge", async () => {

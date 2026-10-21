@@ -392,15 +392,28 @@ export function InferenceTab() {
     setActiveJobListed(row !== undefined);
   }
 
+  // Jobs whose cancel was requested and not yet reported terminal by the backend; the row reads
+  // "canceling" until the poll reports the state the worker ended in.
+  const [cancelRequested, setCancelRequested] = useState<ReadonlySet<string>>(new Set());
+
   async function onCancel(jobId: string) {
-    // Optimistically flip the row so the button disappears immediately; the poll +
-    // the worker's next-image-boundary stop will confirm the terminal state.
-    setJobs((prev) => prev.map((j) => (j.job_id === jobId ? { ...j, status: "canceled" } : j)));
+    setCancelRequested((prev) => new Set(prev).add(jobId));
     try {
       await inferenceApi.cancel(jobId, useStore.getState().user);
     } catch (e) {
+      setCancelRequested((prev) => {
+        const next = new Set(prev);
+        next.delete(jobId);
+        return next;
+      });
       useStore.getState().pushToast(`Cancel failed: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  /** A job's state as the row reads it: the backend's, or "canceling" while a cancel it has
+   *  not yet honored is requested. */
+  function shownStatus(j: InferenceJob): string {
+    return CANCELLABLE.has(j.status) && cancelRequested.has(j.job_id) ? "canceling" : j.status;
   }
 
   return (
@@ -617,7 +630,9 @@ export function InferenceTab() {
                 <tr key={j.job_id} className="border-t border-tcip-border">
                   <td className="py-1.5 pr-3 font-mono">{j.job_id}</td>
                   <td className="pr-3">
-                    <span className={`tcip-badge ${statusBadgeClass(j.status)}`}>{j.status}</span>
+                    <span className={`tcip-badge ${statusBadgeClass(j.status)}`}>
+                      {shownStatus(j)}
+                    </span>
                   </td>
                   <td className="pr-3 tabular-nums">
                     {j.total > 0 ? `${j.done} / ${j.total}` : j.done}
@@ -641,7 +656,7 @@ export function InferenceTab() {
                       >
                         Watch
                       </button>
-                      {CANCELLABLE.has(j.status) && (
+                      {CANCELLABLE.has(j.status) && !cancelRequested.has(j.job_id) && (
                         <button className="tcip-btn" onClick={() => void onCancel(j.job_id)}>
                           Cancel
                         </button>
