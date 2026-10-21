@@ -114,10 +114,7 @@ export function ProjectBreadcrumb() {
 
   return (
     <div ref={rootRef} className="relative flex items-center">
-      <span
-        title={`Annotator: ${user}, set on the workspace page; stamped as the author of your labels`}
-        className="font-mono"
-      >
+      <span title="Your name" className="font-mono">
         {user}
       </span>
       <span className="mx-1.5 text-tcip-border">|</span>
@@ -127,7 +124,7 @@ export function ProjectBreadcrumb() {
         title="Recent projects"
         className="max-w-[16rem] truncate font-mono hover:text-tcip-fg transition-colors"
       >
-        {projectName}
+        {projectName || "Loading…"}
       </button>
       <span className="mx-1.5 text-tcip-border">|</span>
       {dataset.date ? (
@@ -140,25 +137,16 @@ export function ProjectBreadcrumb() {
           {dataset.date}
         </button>
       ) : (
-        <span
-          className="font-mono text-tcip-muted"
-          title="This project has no dated images yet; ask the agent to ingest images first."
-        >
-          no dated images
-          <span className="sr-only">
-            {" "}
-            This project has no dated images yet; ask the agent to ingest images first.
-          </span>
-        </span>
+        <span className="font-mono text-tcip-muted">No dated images</span>
       )}
       <span className="mx-1.5 text-tcip-border">|</span>
       <button
         onClick={switchProject}
         disabled={busy}
-        title="Open the full project list"
+        title="All projects"
         className="text-tcip-season-1 hover:text-tcip-fg transition-colors"
       >
-        Switch Project
+        Switch project
       </button>
 
       {menu === "project" && (

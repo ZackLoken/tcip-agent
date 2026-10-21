@@ -83,7 +83,7 @@ export function HelpOverlay({ activeTab }: HelpOverlayProps) {
     >
       <div className="tcip-panel p-5 w-[520px] max-w-[90vw] max-h-[80vh] overflow-auto flex flex-col gap-4">
         <div className="flex items-center justify-between">
-          <div className="text-[13px] font-semibold">Keyboard & mouse reference</div>
+          <div className="tcip-heading">Shortcuts</div>
           <button className="tcip-btn text-[13px]" onClick={() => setOpen(false)}>
             Close
           </button>

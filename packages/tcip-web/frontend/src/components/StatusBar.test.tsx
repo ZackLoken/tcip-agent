@@ -20,14 +20,16 @@ describe("StatusBar agent activity footer", () => {
       .pushAgentActivity("annotate", "labels_written", { stem: "IMG_1" }, "claude-code 2.1.238");
     render(<StatusBar />);
 
-    expect(await screen.findByText(/claude-code 2\.1\.238: labels_written/)).toBeInTheDocument();
+    expect(
+      await screen.findByText("claude-code 2.1.238: labels written on IMG_1"),
+    ).toBeInTheDocument();
   });
 
   it("reads Process for a write the sender declared no harness on", async () => {
     useStore.getState().pushAgentActivity("annotate", "labels_written", { stem: "IMG_1" }, null);
     render(<StatusBar />);
 
-    expect(await screen.findByText(/Process: labels_written/)).toBeInTheDocument();
+    expect(await screen.findByText("Process: labels written on IMG_1")).toBeInTheDocument();
   });
 });
 

@@ -82,9 +82,9 @@ export function StatusBar() {
       {activeTab === "annotate" && dirty && <span className="text-tcip-warn">Unsaved changes</span>}
       <div className="flex-1" />
       {showAgent && agentActivity && (
-        <span className="text-tcip-accent" title={JSON.stringify(agentActivity.data)}>
-          ⚡ {agentActivity.client ?? "Process"}: {agentActivity.eventType}
-          {agentStem ? ` (${agentStem})` : ""}
+        <span className="text-tcip-accent">
+          {`${agentActivity.client ?? "Process"}: ${agentActivity.eventType.replaceAll("_", " ")}`}
+          {agentStem ? ` on ${agentStem}` : ""}
         </span>
       )}
       {/* Project breadcrumb, lower-right: project (recent) · date (switch) · Switch Project (all). */}
