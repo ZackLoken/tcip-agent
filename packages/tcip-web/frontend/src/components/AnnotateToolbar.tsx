@@ -1,7 +1,8 @@
 /**
- * Annotate-tab toolbar, one row: the tool mode (Point, Box, Polygon), the engine prompt, the
- * subject picker, the Edit menu (Snap, Stream, Cut, Show labels, Undo, Redo), Save, the band
- * picker for a multispectral image, then the image stepper and the Complete control.
+ * Annotate-tab toolbar, one row in three groups: the tool mode (Point, Box, Polygon) with the
+ * engine prompt; the subject picker, the Edit menu (Snap, Stream, Cut, Undo, Redo), the View menu
+ * (Labels, Proposals, Predictions), Save and the band picker for a multispectral image; then the
+ * image stepper and the Complete control.
  */
 
 import { useMemo, useState, type ReactNode } from "react";
@@ -12,12 +13,13 @@ import { EnginePrompt } from "@/components/annotate/EnginePrompt";
 import { BandPicker } from "@/components/BandPicker";
 import { Stepper } from "@/components/Stepper";
 import { useImageNav } from "@/hooks/useImageNav";
+import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 import { showsBandPicker, type BandSelection } from "@/lib/bandSelection";
 import { saveRegistry } from "@/lib/registrySave";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { useStore } from "@/store";
 import { selectProjectRoot } from "@/store/slices/gui";
-import { isFinished, type SubjectState } from "@/store/types";
+import { isFinished, type AnnotateView, type SubjectState } from "@/store/types";
 
 /** A button that drops a menu beneath itself; the menu closes on any click outside it. */
 function MenuButton({
@@ -129,6 +131,11 @@ const MODE_TITLES = {
   polygon: "Polygon: click each vertex, double-click to close",
 } as const;
 
+/** A thin vertical rule between the toolbar's groups. */
+function Divider() {
+  return <div className="h-5 w-px shrink-0 bg-tcip-border" aria-hidden />;
+}
+
 export function AnnotateToolbar({
   onSave,
   onCancelSave,
@@ -142,6 +149,9 @@ export function AnnotateToolbar({
   proposing,
   onPhrase,
   onPropose,
+  view,
+  onView,
+  predictionsAvailable,
 }: {
   onSave: () => void;
   /** Abandon the save in flight, which the Save button offers while one is. */
@@ -160,6 +170,11 @@ export function AnnotateToolbar({
   proposing: boolean;
   onPhrase: (phrase: string) => void;
   onPropose: () => void;
+  // Which overlays the canvas shows beside the labels.
+  view: AnnotateView;
+  onView: (next: AnnotateView) => void;
+  // Whether a predictions bucket is selected, so the Predictions entry has something to show.
+  predictionsAvailable: boolean;
 }) {
   const dataset = useStore((s) => s.gui.dataset);
   const projectRoot = useStore(selectProjectRoot);
@@ -250,6 +265,8 @@ export function AnnotateToolbar({
         </div>
 
         <EnginePrompt proposing={proposing} onPhrase={onPhrase} onPropose={onPropose} />
+
+        <Divider />
 
         {/* Subject picker */}
         <div className="relative">
@@ -354,12 +371,6 @@ export function AnnotateToolbar({
               />
               <div className="my-1 border-t border-tcip-border" />
               <MenuItem
-                label="Show labels"
-                pressed={annotateUi.visible}
-                onClick={() => setVisible(!annotateUi.visible)}
-              />
-              <div className="my-1 border-t border-tcip-border" />
-              <MenuItem
                 label="Undo"
                 onClick={() => {
                   undo();
@@ -374,6 +385,40 @@ export function AnnotateToolbar({
                   close();
                 }}
                 title="Ctrl+Shift+Z"
+              />
+            </>
+          )}
+        </MenuButton>
+
+        <MenuButton
+          label="View"
+          pressed={
+            !annotateUi.visible || !view.proposals || (predictionsAvailable && !view.predictions)
+          }
+        >
+          {() => (
+            <>
+              <MenuItem
+                label="Labels"
+                pressed={annotateUi.visible}
+                onClick={() => setVisible(!annotateUi.visible)}
+              />
+              <MenuItem
+                label="Proposals"
+                pressed={view.proposals}
+                onClick={() => onView({ ...view, proposals: !view.proposals })}
+                title={`The proposals staged on this image (${ANNOTATE_KEYS.hideProposals.label})`}
+              />
+              <MenuItem
+                label="Predictions"
+                pressed={view.predictions}
+                onClick={() => onView({ ...view, predictions: !view.predictions })}
+                disabled={!predictionsAvailable}
+                title={
+                  predictionsAvailable
+                    ? `The selected model's predictions (${ANNOTATE_KEYS.hideProposals.label})`
+                    : "Choose predictions on the project card"
+                }
               />
             </>
           )}
@@ -404,6 +449,8 @@ export function AnnotateToolbar({
           )}
 
         <div className="flex-1" />
+
+        <Divider />
 
         <Stepper
           label="Image"

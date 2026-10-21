@@ -103,23 +103,35 @@ vi.mock("@/components/AnnotateToolbar", () => ({
     proposing: boolean;
     onPhrase: (phrase: string) => void;
     onPropose: () => void;
+    view: { proposals: boolean; predictions: boolean };
+    onView: (next: { proposals: boolean; predictions: boolean }) => void;
+    predictionsAvailable: boolean;
   }) => (
     <div
       data-testid="toolbar"
       data-band-count={props.bandsInfo?.band_count ?? ""}
       data-subject-state={props.subjectState ?? ""}
       data-proposing={props.proposing}
+      data-view-proposals={props.view.proposals}
+      data-view-predictions={props.view.predictions}
+      data-predictions-available={props.predictionsAvailable}
     >
       <button onClick={() => props.onComplete(true)}>toolbar-complete</button>
       <button onClick={props.onCancelSave}>toolbar-cancel-save</button>
       <button onClick={() => props.onPhrase("open bud")}>toolbar-phrase</button>
       <button onClick={props.onPropose}>toolbar-propose</button>
+      <button onClick={() => props.onView({ ...props.view, proposals: !props.view.proposals })}>
+        toolbar-view-proposals
+      </button>
+      <button onClick={() => props.onView({ ...props.view, predictions: !props.view.predictions })}>
+        toolbar-view-predictions
+      </button>
     </div>
   ),
 }));
 
-// The review strip's proposals toggle, the one place proposals are shown or hidden.
-const toggleProposals = () => fireEvent.click(screen.getByRole("checkbox", { name: "Proposals" }));
+// The key that hides or shows every proposal and prediction at once.
+const toggleProposals = () => fireEvent.keyDown(window, { key: "h" });
 
 const initialStoreState = useStore.getState();
 
@@ -3240,7 +3252,7 @@ describe("AnnotateTab engine prompt", () => {
       expect(proposals).toHaveBeenCalledWith("C:/data/images/2026-01-01/img1.jpg", BUCKET),
     );
     expect(useStore.getState().gui.dataset.bucket).toBeNull();
-    expect(screen.getByRole("checkbox", { name: "Proposals" })).toBeChecked();
+    expect(screen.getByTestId("toolbar")).toHaveAttribute("data-view-proposals", "true");
     expect(useStore.getState().toasts.at(-1)?.message).toBe("2 proposals for img1.jpg");
     await waitFor(() =>
       expect(useStore.getState().canvas.focus).toEqual({
