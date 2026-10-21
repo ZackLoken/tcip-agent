@@ -7,7 +7,7 @@ import { LaunchPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
 afterEach(cleanup);
 
 describe("LaunchPicker", () => {
-  it("shows the empty message and no Start when there are no configs", () => {
+  it("shows the empty message when there are no configs", () => {
     render(
       <LaunchPicker
         list={{
