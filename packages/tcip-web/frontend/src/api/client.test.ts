@@ -55,8 +55,10 @@ describe("annotate.save lost-update handling", () => {
     }
   });
 
-  it("returns a conflict (not a thrown error) on a 409", async () => {
-    stubFetch(409, { detail: { message: "label document changed since it was loaded" } });
+  it("returns a conflict on the version-conflict 409", async () => {
+    stubFetch(409, {
+      detail: { kind: "version_conflict", message: "label document changed since it was loaded" },
+    });
     const res = await api.annotate.save({
       image_path: "x",
       annotations: [],
@@ -64,6 +66,23 @@ describe("annotate.save lost-update handling", () => {
       user: "breeder",
     });
     expect(res.status).toBe("conflict");
+  });
+
+  it("throws an audit-gap 409 rather than reading it as a conflict", async () => {
+    stubFetch(409, {
+      detail: {
+        error: "audit_entry_not_written",
+        message: "the line was not written",
+        committed: null,
+      },
+    });
+    const save = api.annotate.save({
+      image_path: "x",
+      annotations: [],
+      base_mtime: "1",
+      user: "breeder",
+    });
+    await expect(save).rejects.toThrow("the line was not written");
   });
 
   it("throws on a 409 whose body carries no detail, as every JSON call does", async () => {

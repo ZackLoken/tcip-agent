@@ -248,7 +248,11 @@ def save_labels(payload: SavePayload) -> dict:
         )
     except VersionConflictError as exc:
         raise HTTPException(
-            409, {"message": "label document changed since it was loaded"}
+            409,
+            {
+                "kind": "version_conflict",
+                "message": "label document changed since it was loaded",
+            },
         ) from exc
     except (ValueError, UnreadableLabelDocumentError) as exc:
         raise HTTPException(400, str(exc)) from exc
