@@ -389,7 +389,7 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
                     *server.args,
                 ]
             ),
-            f"allowed {len(list_registered_tools()) + 1} tcip entries in {settings}, dropped 0 "
+            f"allowed {len(list_registered_tools()) + 2} tcip entries in {settings}, dropped 0 "
             "other doctor entries",
         ]
         allowed = json.loads(settings.read_text(encoding="utf-8"))[
@@ -398,6 +398,7 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
         assert allowed == [
             *(f"mcp(tcip/{name})" for name in list_registered_tools()),
             _doctor_entry(INTERPRETER, opened.root),
+            f"unsandboxed({pty_host.doctor_command(INTERPRETER, opened.root)})",
         ]
     assert created["launched"]["prepared"] == expected_prepared
     assert created["launched"]["confinement"] == row.confinement
@@ -459,6 +460,10 @@ def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempoten
     line = pty_host.doctor_command(INTERPRETER, project)
     other_project = _doctor_entry(INTERPRETER, tmp_path / "other project")
     other_interpreter = _doctor_entry("/old/env/bin/python", project)
+    other_line = pty_host.doctor_command(
+        INTERPRETER, tmp_path / "other project"
+    )
+    other_unsandboxed = f"unsandboxed({other_line})"
     settings.write_text(
         json.dumps(
             {
@@ -468,6 +473,8 @@ def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempoten
                         "command(git log)",
                         other_project,
                         other_interpreter,
+                        other_unsandboxed,
+                        "unsandboxed(git log)",
                     ],
                     "deny": ["x"],
                 },
@@ -481,7 +488,7 @@ def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempoten
 
     names = list_registered_tools()
     assert first == (
-        f"allowed {len(names) + 1} tcip entries in {settings}, dropped 2 other "
+        f"allowed {len(names) + 2} tcip entries in {settings}, dropped 3 other "
         "doctor entries"
     )
     assert (
@@ -493,17 +500,23 @@ def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempoten
     assert body["permissions"]["deny"] == ["x"]
     assert body["permissions"]["allow"] == [
         "command(git log)",
+        "unsandboxed(git log)",
         *(f"mcp(tcip/{name})" for name in names),
         pty_host._command_entry(line),
+        f"unsandboxed({line})",
     ]
 
-    # A launch with no project runs no doctor: the entry of the last project goes too.
+    # A launch with no project runs no doctor: both entries of the last project go too.
     assert pty_host.allow_tcip_tools(settings, None) == (
-        f"allowed 0 tcip entries in {settings}, dropped 1 other doctor entries"
+        f"allowed 0 tcip entries in {settings}, dropped 2 other doctor entries"
     )
     assert json.loads(settings.read_text(encoding="utf-8"))["permissions"][
         "allow"
-    ] == ["command(git log)", *(f"mcp(tcip/{name})" for name in names)]
+    ] == [
+        "command(git log)",
+        "unsandboxed(git log)",
+        *(f"mcp(tcip/{name})" for name in names),
+    ]
 
     settings.write_text("[]", encoding="utf-8")
     with pytest.raises(
@@ -680,14 +693,12 @@ def test_the_ritual_agys_entry_and_claudes_settings_name_one_doctor_line(
         return
     line = _ritual_doctor_line(ritual)
     pty_host.prepare_antigravity("agy", launch)
-    (agy_entry,) = [
-        entry
-        for entry in json.loads(settings.read_text(encoding="utf-8"))[
-            "permissions"
-        ]["allow"]
-        if entry.startswith("command(regex:")
+    allowed = json.loads(settings.read_text(encoding="utf-8"))["permissions"][
+        "allow"
     ]
+    (agy_entry,) = [e for e in allowed if e.startswith("command(regex:")]
     assert re.compile(agy_entry[len("command(regex:") : -1]).fullmatch(line)
+    assert f"unsandboxed({line})" in allowed
     assert doctor_entries == [f"Bash({line})", f"PowerShell({line})"]
 
 

@@ -36,7 +36,8 @@ writing when its composer appeared (`composer_ready`; no harness promises it), w
 leaves open (`confinement`, recorded on every launch), and the preparation the launch runs first
 when the harness takes its MCP server or its tool approvals only through its own configuration (the
 Antigravity row registers the server through `agy mcp add` and allows every tcip tool and, when the
-launch spelled it, the ritual's own doctor line for the open project in agy's settings file, keeping
+launch spelled it, the ritual's own doctor line for the open project, as a command and as an
+unsandboxed run, in agy's settings file, keeping
 the file's other entries, both writes to the breeder's own agy configuration, recorded on the
 launch). The ritual's doctor line has one producer, `doctor_command`, running `tcip_web.cli doctor`
 under the backend's own interpreter, the one `mcp_server` runs, so the line is the same literal

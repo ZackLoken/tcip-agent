@@ -300,14 +300,42 @@ _DOCTOR_ENTRY = re.compile(
 :data:`_DOCTOR_ARGUMENTS` admits."""
 
 
+def _unsandboxed_entry(line: str) -> str:
+    """Return Agy's entry allowing exactly the command ``line`` to run outside its sandbox."""
+    return f"unsandboxed({line})"
+
+
+_LINE_PARTS = _DOCTOR_LINE.format(*("\0" for _ in _DOCTOR_ARGUMENTS)).split(
+    "\0"
+)
+_UNSANDBOXED_DOCTOR_ENTRY = re.compile(
+    re.escape(_unsandboxed_entry("\0")).replace(
+        "\0",
+        re.escape(_LINE_PARTS[0])
+        + "".join(
+            "[^"
+            + re.escape("".join(sorted(refused)))
+            + ("\\s" if blank else "")
+            + "]+"
+            + re.escape(part)
+            for (_, refused, blank), part in zip(
+                _DOCTOR_ARGUMENTS, _LINE_PARTS[1:]
+            )
+        ),
+    )
+)
+"""A pattern matching the :func:`_unsandboxed_entry` of :data:`_DOCTOR_LINE` with any arguments
+:data:`_DOCTOR_ARGUMENTS` admits."""
+
+
 def allow_tcip_tools(settings: Path, doctor_line: str | None) -> str:
     """Allow every registered tool and the doctor line in the Antigravity settings ``settings``.
 
     It adds an ``mcp(tcip/<tool>)`` entry for every registered tool and, when given, the
-    :func:`_command_entry` of ``doctor_line`` to the file's ``permissions.allow`` list, dropping
-    every other doctor entry and keeping everything else in it, and returns one line saying how
-    many were added and dropped; raises :class:`PreparationFailedError` when the file does not
-    parse as a JSON object.
+    :func:`_command_entry` and the :func:`_unsandboxed_entry` of ``doctor_line`` to the file's
+    ``permissions.allow`` list, dropping every other doctor entry of either kind and keeping
+    everything else in it, and returns one line saying how many were added and dropped; raises
+    :class:`PreparationFailedError` when the file does not parse as a JSON object.
     """
     from tcip_mcp.server import list_registered_tools
 
@@ -327,10 +355,15 @@ def allow_tcip_tools(settings: Path, doctor_line: str | None) -> str:
     wanted = [f"mcp(tcip/{name})" for name in list_registered_tools()]
     if doctor_line is not None:
         wanted.append(_command_entry(doctor_line))
+        wanted.append(_unsandboxed_entry(doctor_line))
     stale = [
         entry
         for entry in allow
-        if _DOCTOR_ENTRY.fullmatch(entry) and entry not in wanted
+        if entry not in wanted
+        and (
+            _DOCTOR_ENTRY.fullmatch(entry)
+            or _UNSANDBOXED_DOCTOR_ENTRY.fullmatch(entry)
+        )
     ]
     missing = [entry for entry in wanted if entry not in allow]
     if missing or stale:
@@ -351,8 +384,9 @@ def prepare_antigravity(
     """Prepare an Antigravity launch: register the tcip server and allow its tools and doctor line.
 
     The server is :func:`mcp_server` for ``launch``, registered as ``tcip`` through ``agy mcp
-    add``; every tcip tool and the launch's doctor line are allowed in its settings file. A
-    doctor step that could not be spelled fails the preparation naming why.
+    add``; every tcip tool and the launch's doctor line, as a command and as an unsandboxed
+    run, are allowed in its settings file. A doctor step that could not be spelled fails the
+    preparation naming why.
     """
     server = mcp_server(launch)
     add = run_to_completion(
