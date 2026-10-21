@@ -1305,7 +1305,7 @@ describe("AnnotateTab ioError banner", () => {
     expect(screen.queryByText("Reload")).not.toBeInTheDocument();
   });
 
-  it("sits in the row below the Overview pill, never on top of it", async () => {
+  it("sits in the row below the Fit pill, never on top of it", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1316,9 +1316,9 @@ describe("AnnotateTab ioError banner", () => {
     await flush();
 
     const banner = screen.getByText(/changed elsewhere/).closest("div");
-    const overview = screen.getByRole("button", { name: "Overview" });
+    const fit = screen.getByRole("button", { name: "Fit" });
     expect(banner).toHaveClass("top-12");
-    expect(overview).toHaveClass("top-3");
+    expect(fit).toHaveClass("top-3");
   });
 });
 
@@ -2376,6 +2376,11 @@ describe("AnnotateTab review symbology", () => {
   };
   const strokes = () => screen.getAllByTestId("k-rect").map((r) => r.getAttribute("data-stroke"));
   const position = () => screen.getByRole("textbox", { name: "Item position" });
+  const scopes = () =>
+    Array.from(
+      screen.getByRole("combobox", { name: "Step through" }).querySelectorAll("option"),
+      (o) => o.textContent,
+    );
   const down = async () => {
     fireEvent.keyDown(window, { key: "ArrowDown" });
     await flush();
@@ -2417,13 +2422,13 @@ describe("AnnotateTab review symbology", () => {
     await mountReviewing();
     const floor = screen.getByRole("spinbutton", { name: "Confidence floor" });
     expect(floor).toHaveValue(0.5);
-    // Three boxes and one unpaired proposal; box 1, with its undecided paired proposal, and that
-    // unpaired proposal await a decision.
-    expect(screen.getByText("4 items, 2 unreviewed")).toBeInTheDocument();
+    // Three boxes, the polygon and one unpaired proposal; box 1, with its undecided paired
+    // proposal, and that unpaired proposal await a decision.
+    expect(scopes()).toEqual(["all (5)", "unreviewed (2)", "flagged (0)"]);
 
     fireEvent.change(floor, { target: { value: "0.1" } });
     await flush();
-    expect(screen.getByText("5 items, 3 unreviewed")).toBeInTheDocument();
+    expect(scopes()).toEqual(["all (6)", "unreviewed (3)", "flagged (0)"]);
     expect(dottedRects()).toHaveLength(3);
   });
 
@@ -2445,33 +2450,33 @@ describe("AnnotateTab review symbology", () => {
 
   it("the match filter keeps one match type on the canvas and in the path", async () => {
     await mountReviewing();
-    const filter = screen.getByRole("combobox", { name: "Match type" });
+    const filter = screen.getByRole("combobox", { name: "Show" });
 
     fireEvent.change(filter, { target: { value: "annotation_only" } });
     await flush();
-    expect(screen.getByText("1 item, 0 unreviewed")).toBeInTheDocument();
+    expect(scopes()).toEqual(["all (2)", "unreviewed (0)", "flagged (0)"]);
     expect(dottedRects()).toHaveLength(0);
 
     fireEvent.change(filter, { target: { value: "proposal_only" } });
     await flush();
-    expect(screen.getByText("1 item, 1 unreviewed")).toBeInTheDocument();
+    expect(scopes()).toEqual(["all (1)", "unreviewed (1)", "flagged (0)"]);
     expect(dottedRects()).toHaveLength(1);
   });
 
   it("a match filter applies only while proposals are shown", async () => {
     await mountReviewing();
-    fireEvent.change(screen.getByRole("combobox", { name: "Match type" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Show" }), {
       target: { value: "annotation_only" },
     });
     await flush();
-    expect(screen.getByText("1 item, 0 unreviewed")).toBeInTheDocument();
+    expect(scopes()).toEqual(["all (2)", "unreviewed (0)", "flagged (0)"]);
 
     toggleProposals();
     await flush();
-    expect(screen.getByText("3 items")).toBeInTheDocument();
+    expect(scopes()).toEqual(["all (4)", "unreviewed (0)", "flagged (0)"]);
   });
 
-  it("the items are the selected tool's geometry, and switching tools drops the focus", async () => {
+  it("the items span every shape, and the tool follows the focused item", async () => {
     await mountReviewing();
     await down();
     expect(position()).toHaveValue("1");
@@ -2479,12 +2484,19 @@ describe("AnnotateTab review symbology", () => {
 
     act(() => useStore.getState().setMode("polygon"));
     await flush();
-    // One polygon and no polygon proposal: the boxes and the box proposals left the path.
-    expect(screen.getByText("1 item, 0 unreviewed")).toBeInTheDocument();
+    // The path keeps every item whatever the tool; a tool change drops the focus as before.
+    expect(scopes()).toEqual(["all (5)", "unreviewed (2)", "flagged (0)"]);
     expect(position()).toHaveValue("");
-    expect(screen.queryAllByTestId("k-rect")).toHaveLength(0);
 
     await down();
+    expect(position()).toHaveValue("1");
+    expect(useStore.getState().gui.mode).toBe("box");
+
+    const jump = position();
+    fireEvent.focus(jump);
+    fireEvent.change(jump, { target: { value: "5" } });
+    fireEvent.keyDown(jump, { key: "Enter" });
+    await flush();
     expect(screen.getByText("subject_a polygon")).toBeInTheDocument();
     expect(useStore.getState().gui.mode).toBe("polygon");
   });
@@ -2552,8 +2564,7 @@ describe("AnnotateTab review symbology", () => {
 
   it("e accepts the focused unpaired proposal so it can be corrected as an annotation", async () => {
     await mountReviewing();
-    fireEvent.keyDown(window, { key: "ArrowUp" });
-    await flush();
+    for (let i = 0; i < 4; i++) await down();
     expect(screen.getByText("subject_a proposal 0.90")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "e" });
@@ -2576,7 +2587,7 @@ describe("AnnotateTab review symbology", () => {
     vi.spyOn(api.annotate, "proposals").mockResolvedValue(served());
     await mountTab();
     await flush();
-    expect(screen.getByText("4 items, 3 unreviewed")).toBeInTheDocument();
+    expect(scopes()).toEqual(["all (5)", "unreviewed (3)", "flagged (0)"]);
 
     fireEvent.mouseDown(screen.getByTestId("canvas-stage"), {
       clientX: 520,
@@ -3080,7 +3091,11 @@ describe("AnnotateTab engine prompt", () => {
         boxes: [],
       },
     });
-    expect(useStore.getState().annotateUi.pendingPrompts).toEqual({ points: [], boxes: [] });
+    expect(useStore.getState().annotateUi.pendingPrompts).toEqual({
+      points: [],
+      boxes: [],
+      found: [],
+    });
   });
 
   it("armed, a box drawn in box mode is held as a prompt and adds no box", async () => {
@@ -3140,7 +3155,7 @@ describe("AnnotateTab engine prompt", () => {
       user: "grower",
     });
     expect(propose).not.toHaveBeenCalled();
-    expect(useStore.getState().annotateUi.pendingPrompts.boxes).toEqual([
+    expect(useStore.getState().annotateUi.pendingPrompts.found).toEqual([
       [10, 10, 40, 40],
       [100, 100, 300, 300],
     ]);
@@ -3151,11 +3166,45 @@ describe("AnnotateTab engine prompt", () => {
     fireEvent.contextMenu(stage(), { clientX: 20, clientY: 20 });
     await flush();
 
-    expect(useStore.getState().annotateUi.pendingPrompts.boxes).toEqual([[100, 100, 300, 300]]);
+    expect(useStore.getState().annotateUi.pendingPrompts.found).toEqual([[100, 100, 300, 300]]);
     fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
     expect(propose).toHaveBeenCalledWith(
       expect.objectContaining({ prompt: { points: [], boxes: [[100, 100, 300, 300]] } }),
+    );
+  });
+
+  it("a second Find replaces what the first found and keeps the boxes the person drew", async () => {
+    const { propose } = await mountArmed("box");
+    fireEvent.mouseDown(stage(), { clientX: 10, clientY: 20, button: 0 });
+    fireEvent.mouseUp(stage(), { clientX: 90, clientY: 80 });
+    await flush();
+    const find = vi
+      .spyOn(api.annotate, "find")
+      .mockResolvedValueOnce({ boxes: [[10, 10, 40, 40]] });
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-phrase" }));
+    await flush();
+    find.mockResolvedValueOnce({ boxes: [[200, 200, 260, 260]] });
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-phrase" }));
+    await flush();
+
+    expect(useStore.getState().annotateUi.pendingPrompts).toEqual({
+      points: [],
+      boxes: [[10, 20, 90, 80]],
+      found: [[200, 200, 260, 260]],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
+    await flush();
+    expect(propose).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: {
+          points: [],
+          boxes: [
+            [10, 20, 90, 80],
+            [200, 200, 260, 260],
+          ],
+        },
+      }),
     );
   });
 
@@ -3165,7 +3214,7 @@ describe("AnnotateTab engine prompt", () => {
     fireEvent.click(screen.getByRole("button", { name: "toolbar-phrase" }));
     await flush();
 
-    expect(useStore.getState().annotateUi.pendingPrompts.boxes).toEqual([]);
+    expect(useStore.getState().annotateUi.pendingPrompts.found).toEqual([]);
     expect(useStore.getState().toasts.at(-1)?.message).toBe('Nothing found for "open bud".');
   });
 

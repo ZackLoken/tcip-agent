@@ -48,9 +48,10 @@ describe("Stepper", () => {
     expect(onJump).toHaveBeenCalledWith(4);
   });
 
-  it("shows an empty position and the unset glyph with nothing current", () => {
+  it("shows an empty position and no name with nothing current", () => {
     renderStepper({ name: null, position: 0, total: 0, canPrev: false, canNext: false });
     expect(screen.getByRole("textbox", { name: "Item position" })).toHaveValue("");
     expect(screen.getByRole("button", { name: "Next item" })).toBeDisabled();
+    expect(screen.queryByText(":")).not.toBeInTheDocument();
   });
 });

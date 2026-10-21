@@ -216,7 +216,7 @@ export function AnnotateTab() {
     const vp = computeViewport(view, host, canvas.imgWidth, canvas.imgHeight);
     return vp ? [vp.x, vp.y, vp.w, vp.h] : null;
   }
-  // A region mark is offered only while the view holds less than the whole image.
+  // Fit is offered only while the view holds less than the whole image.
   const viewRect = viewportRect();
   const viewIsRegion =
     !!viewRect &&
@@ -225,7 +225,7 @@ export function AnnotateTab() {
       viewRect[0] + viewRect[2] < canvas.imgWidth ||
       viewRect[1] + viewRect[3] < canvas.imgHeight);
 
-  function overview() {
+  function fit() {
     const host = measureCanvasHost();
     if (!host || canvas.imgWidth <= 0 || canvas.imgHeight <= 0) return;
     setView(fitView(host, canvas.imgWidth, canvas.imgHeight));
@@ -338,14 +338,15 @@ export function AnnotateTab() {
       if (mountedRef.current) setProposing(false);
     }
   }
-  /** Send the held points and boxes as one prompt. */
+  /** Send the held points and boxes, placed and found, as one prompt. */
   function proposeHeld() {
-    const { points, boxes } = useStore.getState().annotateUi.pendingPrompts;
-    if (points.length + boxes.length === 0) return;
-    void sendPrompt({ points, boxes });
+    const { points, boxes, found } = useStore.getState().annotateUi.pendingPrompts;
+    if (points.length + boxes.length + found.length === 0) return;
+    void sendPrompt({ points, boxes: [...boxes, ...found] });
   }
   /** Ask the detector what the phrase describes on the image in view; its boxes are held as
-   *  prompts beside the placed ones, for the person to keep, drop or add to before Propose. */
+   *  prompts beside the placed ones, replacing what the previous Find found, for the person to
+   *  keep, drop or add to before Propose. */
   async function findByPhrase(phrase: string) {
     if (proposing || !imgPath || !requireSubject()) return;
     const [sentFrom, sentName] = [imgPath, currentImageName];
@@ -360,7 +361,7 @@ export function AnnotateTab() {
         useStore.getState().pushToast(`${answer.boxes.length} found on ${sentName}, not held.`);
         return;
       }
-      for (const box of answer.boxes) useStore.getState().addPromptBox(box);
+      useStore.getState().setFoundBoxes(answer.boxes);
       useStore
         .getState()
         .pushToast(
@@ -407,7 +408,8 @@ export function AnnotateTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [canvas.boxes, canvas.polygons, canvas.points, proposals, reviewing],
   );
-  // The items are the selected tool's geometry only: a review steps boxes, polygons or points.
+  // The items are every geometry's: a review steps boxes, polygons and points alike, and the
+  // tool follows the focused item.
   const items = useMemo(
     () =>
       reviewItems({
@@ -415,7 +417,6 @@ export function AnnotateTab() {
         proposals,
         matches,
         reviewing,
-        mode,
         flags: canvas.flags,
         bucket: bucket ?? null,
       }),
@@ -428,7 +429,6 @@ export function AnnotateTab() {
       proposals,
       matches,
       reviewing,
-      mode,
       bucket,
     ],
   );
@@ -439,9 +439,9 @@ export function AnnotateTab() {
   );
   const order = useMemo(() => scopedOrder(nearestNeighborOrder(kept), scope), [kept, scope]);
   const drawnProposals = useMemo(
-    () => shownProposals(proposals, filters, mode),
+    () => shownProposals(proposals, filters),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [proposals, filters.confidence, filters.match, mode],
+    [proposals, filters.confidence, filters.match],
   );
 
   const focused: ReviewItem | null = useMemo(
@@ -449,12 +449,13 @@ export function AnnotateTab() {
     [items, proposals, canvas.focus],
   );
   // The pointer handlers read the focus as the item the canvas draws handles on, so a proposal
-  // pairing with an annotation focuses that annotation for them too; items are the tool's own.
-  const focusedIdx = focused?.kind === "annotation" ? focused.ref : null;
+  // pairing with an annotation focuses that annotation for them too; only the tool's own shape.
+  const focusedIdx = focused?.kind === "annotation" && focused.shape === mode ? focused.ref : null;
 
-  /** Focus one item: make its subject active and zoom the view to it, padded by its own extent
-   *  (a point by a fortieth of the image's longer side, since it has none). */
+  /** Focus one item: switch the tool to its shape, make its subject active and zoom the view to
+   *  it, padded by its own extent (a point by a fortieth of the image's longer side). */
   function focusItem(item: ReviewItem) {
+    if (useStore.getState().gui.mode !== item.shape) setMode(item.shape);
     setFocus({ kind: item.kind === "proposal" ? "proposal" : item.shape, index: item.ref });
     setActiveSubject(item.subject);
     const host = measureCanvasHost();
@@ -509,21 +510,15 @@ export function AnnotateTab() {
     const target = answer.accepted[String(proposal)];
     if (target === undefined) return;
     const adopted = useStore.getState().canvas;
-    for (const shape of ["box", "polygon", "point"] as const) {
-      const item = reviewItems({
-        canvas: adopted,
-        proposals: [],
-        matches: NO_MATCHES,
-        reviewing: false,
-        mode: shape,
-        flags: adopted.flags,
-        bucket: null,
-      }).find((i) => i.index === target);
-      if (!item) continue;
-      if (useStore.getState().gui.mode !== shape) setMode(shape);
-      focusItem(item);
-      return;
-    }
+    const item = reviewItems({
+      canvas: adopted,
+      proposals: [],
+      matches: NO_MATCHES,
+      reviewing: false,
+      flags: adopted.flags,
+      bucket: null,
+    }).find((i) => i.index === target);
+    if (item) focusItem(item);
   }
 
   // ── Flags: a comment on the focused item, or on the image when nothing is focused ──
@@ -542,7 +537,7 @@ export function AnnotateTab() {
     void save({ gestures: { resolve: { [id]: reply } } });
   }
 
-  async function markComplete(next: boolean, rect?: [number, number, number, number]) {
+  async function markComplete(next: boolean) {
     const subject = dataset.subject;
     if (!subject) return;
     const stateOf = () => useStore.getState().canvas.completion[subject];
@@ -550,7 +545,7 @@ export function AnnotateTab() {
     await save({
       gestures: {
         complete: { [subject]: next },
-        rect: rect ?? null,
+        rect: null,
         proposals_hidden: hideProposals,
       },
     });
@@ -1522,19 +1517,25 @@ export function AnnotateTab() {
     // Armed, a right-click drops the held prompt under the cursor: a point within its grab
     // radius, else the smallest box holding the cursor.
     if (annotateUi.prompt) {
-      const { points, boxes } = annotateUi.pendingPrompts;
+      const { points, boxes, found } = annotateUi.pendingPrompts;
       const reach = POINT_HIT_CANVAS / (view.scale || 1);
       const pointHit = points.findIndex(([x, y]) => Math.hypot(x - ix, y - iy) <= reach);
       if (pointHit !== -1) {
         useStore.getState().removePromptPoint(pointHit);
         return;
       }
-      const holding = boxes
-        .map((b, i) => ({ i, area: (b[2] - b[0]) * (b[3] - b[1]), b }))
+      const holding = [
+        ...boxes.map((b, i) => ({ found: false, i, b })),
+        ...found.map((b, i) => ({ found: true, i, b })),
+      ]
         .filter(({ b }) => ix >= b[0] && ix <= b[2] && iy >= b[1] && iy <= b[3])
-        .sort((p, q) => p.area - q.area);
+        .sort(
+          (p, q) => (p.b[2] - p.b[0]) * (p.b[3] - p.b[1]) - (q.b[2] - q.b[0]) * (q.b[3] - q.b[1]),
+        );
       if (holding.length > 0) {
-        useStore.getState().removePromptBox(holding[0].i);
+        const hit = holding[0];
+        if (hit.found) useStore.getState().removeFoundBox(hit.i);
+        else useStore.getState().removePromptBox(hit.i);
         return;
       }
     }
@@ -1657,9 +1658,6 @@ export function AnnotateTab() {
         onBandSelectionChange={setBandSelection}
         subjectState={subjectState}
         onComplete={(next) => void markComplete(next)}
-        onCompleteView={
-          viewIsRegion && viewRect ? () => void markComplete(true, viewRect) : undefined
-        }
         proposing={proposing}
         onPhrase={(phrase) => void findByPhrase(phrase)}
         onPropose={proposeHeld}
@@ -1676,11 +1674,12 @@ export function AnnotateTab() {
         onScope={setScope}
         canAccept={acceptTarget !== null}
         canReject={rejectTarget !== null}
-        counts={{
-          items: kept.length,
+        scopeCounts={{
+          all: kept.length,
           unreviewed: unreviewedKept.length,
-          flags: openFlags.length,
+          flagged: scopedOrder(kept, "flagged").length,
         }}
+        flagCount={openFlags.length}
         flags={focused ? focused.flags : imageFlags(canvas.flags)}
         flagsOpen={flagsOpen}
         onFlagsOpen={setFlagsOpen}
@@ -1731,18 +1730,20 @@ export function AnnotateTab() {
                     label=""
                   />
                 ))}
-                {annotateUi.pendingPrompts.boxes.map(([x1, y1, x2, y2], i) => (
-                  <Rect
-                    key={`prompt-box-${i}`}
-                    x={x1}
-                    y={y1}
-                    width={x2 - x1}
-                    height={y2 - y1}
-                    stroke={activeSubject ? subjectColor(activeSubject) : NO_SUBJECT_DRAFT_COLOR}
-                    strokeWidth={boxStroke}
-                    dash={dashAt(DRAFT_DASH, boxStroke)}
-                  />
-                ))}
+                {[...annotateUi.pendingPrompts.boxes, ...annotateUi.pendingPrompts.found].map(
+                  ([x1, y1, x2, y2], i) => (
+                    <Rect
+                      key={`prompt-box-${i}`}
+                      x={x1}
+                      y={y1}
+                      width={x2 - x1}
+                      height={y2 - y1}
+                      stroke={activeSubject ? subjectColor(activeSubject) : NO_SUBJECT_DRAFT_COLOR}
+                      strokeWidth={boxStroke}
+                      dash={dashAt(DRAFT_DASH, boxStroke)}
+                    />
+                  ),
+                )}
 
                 {/* Box draft */}
                 {boxDraftScene && (
@@ -1816,11 +1817,12 @@ export function AnnotateTab() {
             bottom-left, bottom-right) so tab order matches what a sighted user reads first. */}
           <button
             type="button"
-            onClick={overview}
+            onClick={fit}
+            disabled={!viewIsRegion}
             title="Fit the whole image"
-            className="absolute top-3 left-3 z-20 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-tcip-muted backdrop-blur-sm hover:border-tcip-border-hover hover:text-tcip-fg"
+            className="absolute top-3 left-3 z-20 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-tcip-muted backdrop-blur-sm hover:border-tcip-border-hover hover:text-tcip-fg disabled:opacity-40 disabled:hover:border-tcip-border disabled:hover:text-tcip-muted"
           >
-            Overview
+            Fit
           </button>
 
           <AnnotateLegend reviewing={reviewing} />

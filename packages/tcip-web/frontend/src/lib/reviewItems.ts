@@ -1,6 +1,6 @@
 /**
- * The review path over one image: the items of the selected tool's geometry (its annotations
- * and, while a bucket's proposals are shown, the undecided proposals pairing with none of them),
+ * The review path over one image: the items of every geometry (the annotations and, while a
+ * bucket's proposals are shown, the undecided proposals pairing with none of them),
  * each item's match type, whether it has been reviewed and whether it is flagged, the filters
  * that keep a subset, the nearest-neighbor order laid over the kept items, and the scope that
  * steps through a subsequence of that order.
@@ -106,33 +106,32 @@ export function proposalGeometry(p: Proposal): { shape: Mode; bbox: Bbox } | nul
   return null;
 }
 
-/** Every item of `mode`'s geometry: the annotations in canvas order, each matched one carrying
- *  the undecided proposal pairing with it, then, while reviewing, the undecided proposals that
- *  pair with nothing. `flags` are the image's; each item holds its open ones. */
+/** Every item of every geometry: the boxes, polygons and points in canvas order, each matched
+ *  one carrying the undecided proposal pairing with it, then, while reviewing, the undecided
+ *  proposals that pair with nothing. `flags` are the image's; each item holds its open ones. */
 export function reviewItems(args: {
   canvas: ToolContent;
   proposals: Proposal[];
   /** The canvas's match types (`matchTypes`), resolved once for every consumer. */
   matches: MatchTypes;
   reviewing: boolean;
-  mode: Mode;
   flags: Flag[];
   bucket: string | null;
 }): ReviewItem[] {
-  const { canvas, proposals, reviewing, mode } = args;
-  const matchOf = args.matches[TOOL_ARRAY[mode]];
+  const { canvas, proposals, reviewing } = args;
   const open = args.flags.filter((f) => f.resolved_by === null);
   const annotation = (
+    shape: Mode,
     ref: number,
     of: { subject: string; index?: number; authorship?: string | null },
     bbox: Bbox,
     at: [number, number],
   ): ReviewItem => {
-    const match = matchOf[ref] ?? null;
+    const match = args.matches[TOOL_ARRAY[shape]][ref] ?? null;
     const pair = match === "matched" ? pairOf(of.index, proposals) : undefined;
     return {
       kind: "annotation",
-      shape: mode,
+      shape,
       ref,
       subject: of.subject,
       bbox,
@@ -153,28 +152,27 @@ export function reviewItems(args: {
       ),
     };
   };
-  const annotations: ReviewItem[] =
-    mode === "box"
-      ? canvas.boxes.map((b, i) => {
-          const bbox: Bbox = [b.x1, b.y1, b.x2, b.y2];
-          return annotation(i, b, bbox, center(bbox));
-        })
-      : mode === "polygon"
-        ? canvas.polygons.map((p, i) => {
-            const bbox = ringsBbox(p.rings);
-            const mid = center(bbox);
-            // The bbox center of a concave shape can fall outside it; a vertex never does.
-            return annotation(i, p, bbox, pointInRings(mid, p.rings) ? mid : p.rings[0][0]);
-          })
-        : canvas.points.map((p, i) => annotation(i, p, [p.x, p.y, p.x, p.y], [p.x, p.y]));
+  const annotations: ReviewItem[] = [
+    ...canvas.boxes.map((b, i) => {
+      const bbox: Bbox = [b.x1, b.y1, b.x2, b.y2];
+      return annotation("box", i, b, bbox, center(bbox));
+    }),
+    ...canvas.polygons.map((p, i) => {
+      const bbox = ringsBbox(p.rings);
+      const mid = center(bbox);
+      // The bbox center of a concave shape can fall outside it; a vertex never does.
+      return annotation("polygon", i, p, bbox, pointInRings(mid, p.rings) ? mid : p.rings[0][0]);
+    }),
+    ...canvas.points.map((p, i) => annotation("point", i, p, [p.x, p.y, p.x, p.y], [p.x, p.y])),
+  ];
   if (!reviewing) return annotations;
   const unpaired: ReviewItem[] = [];
   for (const p of proposals) {
     const geometry = proposalGeometry(p);
-    if (p.decision !== null || p.paired !== null || geometry?.shape !== mode) continue;
+    if (p.decision !== null || p.paired !== null || !geometry) continue;
     unpaired.push({
       kind: "proposal",
-      shape: mode,
+      shape: geometry.shape,
       ref: p.index,
       subject: p.subject,
       bbox: geometry.bbox,
@@ -244,13 +242,13 @@ export function keptItems(items: ReviewItem[], filters: ItemFilters): ReviewItem
   );
 }
 
-/** The proposals the canvas draws: the undecided ones of `mode`'s geometry that clear the
+/** The proposals the canvas draws: the undecided ones carrying a geometry that clear the
  *  confidence floor and the match filter, the ones pairing with an annotation among them. */
-export function shownProposals(proposals: Proposal[], filters: ItemFilters, mode: Mode) {
+export function shownProposals(proposals: Proposal[], filters: ItemFilters) {
   return proposals.filter(
     (p) =>
       p.decision === null &&
-      proposalGeometry(p)?.shape === mode &&
+      proposalGeometry(p) !== null &&
       clearsFloor(p.score, filters) &&
       (filters.match === "all" || proposalMatch(p) === filters.match),
   );
@@ -290,7 +288,7 @@ export const STEP_SCOPES = ["all", "unreviewed", "flagged"] as const;
 export type StepScope = (typeof STEP_SCOPES)[number];
 
 export const STEP_SCOPE_WORDS: Record<StepScope, string> = {
-  all: "every item",
+  all: "all",
   unreviewed: "unreviewed",
   flagged: "flagged",
 };
