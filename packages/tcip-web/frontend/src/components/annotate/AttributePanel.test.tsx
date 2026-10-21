@@ -24,9 +24,9 @@ afterEach(() => {
 // Runs outside any act() wrapper so each fireEvent's own act() flushes before the next query;
 // only the final submit (fillAttributeDraft's caller wraps that one) kicks off the async save.
 function fillAttributeDraft(name: string, values: string) {
-  fireEvent.click(screen.getByText("+ Attribute"));
-  fireEvent.change(screen.getByPlaceholderText("attribute name"), { target: { value: name } });
-  fireEvent.change(screen.getByPlaceholderText("one value per line"), {
+  fireEvent.click(screen.getByText("Add attribute"));
+  fireEvent.change(screen.getByLabelText("attribute name"), { target: { value: name } });
+  fireEvent.change(screen.getByLabelText("attribute values"), {
     target: { value: values },
   });
 }
@@ -34,7 +34,7 @@ function fillAttributeDraft(name: string, values: string) {
 describe("AttributePanel attribute kinds", () => {
   it("offers exactly the kinds the backend's registry declares", () => {
     render(<AttributePanel focused={null} />);
-    fireEvent.click(screen.getByText("+ Attribute"));
+    fireEvent.click(screen.getByText("Add attribute"));
     const options = screen.getByLabelText("attribute type").querySelectorAll("option");
     expect(Array.from(options, (o) => o.value)).toEqual([...ATTR_TYPES]);
   });

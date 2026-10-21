@@ -102,8 +102,8 @@ describe("ReviewStrip", () => {
     expect(Array.from(options, (o) => o.textContent)).toEqual([
       "all",
       "Matched",
-      "Proposal only",
-      "Annotation only",
+      "Proposed only",
+      "Labeled only",
     ]);
     expect(screen.queryByRole("combobox", { name: "Item type" })).not.toBeInTheDocument();
   });
@@ -144,7 +144,7 @@ describe("ReviewStrip", () => {
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
   });
 
-  it("with no bucket the proposal controls are disabled and say why, the stepper still works", () => {
+  it("with no bucket the proposals toggle is disabled and the filters are absent, the stepper still works", () => {
     const h = renderStrip({
       bucket: null,
       reviewing: false,
@@ -155,24 +155,24 @@ describe("ReviewStrip", () => {
     expect(screen.getByRole("checkbox", { name: "Proposals" })).toBeDisabled();
     expect(screen.getByRole("checkbox", { name: "Proposals" }).closest("label")).toHaveAttribute(
       "title",
-      expect.stringMatching(/prediction bucket/),
+      expect.stringMatching(/project card/),
     );
-    expect(screen.getByRole("spinbutton", { name: "Confidence floor" })).toBeDisabled();
-    expect(screen.getByRole("combobox", { name: "Match type" })).toBeDisabled();
+    expect(screen.queryByRole("spinbutton", { name: "Confidence floor" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Match type" })).toBeNull();
     expect(screen.getByRole("button", { name: "Accept" })).toBeDisabled();
     expect(screen.getByText("7 items")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Next item" }));
     expect(h.onStep).toHaveBeenCalledWith(1);
   });
 
-  it("says why no operating point seeds the confidence floor", () => {
+  it("says that no operating point seeds the confidence floor", () => {
     renderStrip({
       operatingPoint: { conf: null, reason: "bucket 'm1' holds no detector's predictions" },
       filters: { confidence: null, match: "all" },
     });
     expect(
       screen.getByRole("spinbutton", { name: "Confidence floor" }).closest("label"),
-    ).toHaveAttribute("title", expect.stringMatching(/No validated operating point: bucket/));
+    ).toHaveAttribute("title", "No validated operating point");
   });
 });
 

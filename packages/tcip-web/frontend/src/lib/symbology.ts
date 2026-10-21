@@ -23,11 +23,11 @@ export function lineStyleOf(authorship: string | null | undefined): LineStyle {
 }
 
 /** A dash pattern as (on, off) lengths in stroke widths, so it scales with the stroke on the
- *  canvas and in the agent's render alike; set by eye, provisional. */
+ *  canvas and in the agent's render alike. */
 export type DashUnits = [number, number];
 
-/** The pattern of a dotted stroke. */
-export const DOTTED_DASH: DashUnits = [1, 3];
+/** The pattern of a dotted stroke, the owner's choice on screen (2026-10-20). */
+export const DOTTED_DASH: DashUnits = [2, 2];
 
 /** The pattern of a shape still being drawn: its rubber band and the box dragged out. */
 export const DRAFT_DASH: DashUnits = [4, 4];
@@ -63,8 +63,8 @@ export const MATCH_COLORS: Record<MatchType, string> = {
 
 export const MATCH_WORDS: Record<MatchType, string> = {
   matched: "Matched",
-  proposal_only: "Proposal only",
-  annotation_only: "Annotation only",
+  proposal_only: "Proposed only",
+  annotation_only: "Labeled only",
 };
 
 /** What each match type holds, and the detection reading it has if the labels are complete. */
@@ -149,7 +149,7 @@ export interface LegendRow {
 }
 
 /** The legend's rows, from the constants above: the match types while proposals are shown, else
- *  each subject in its color; then the line styles, the focus halo and the flag mark. */
+ *  each subject in its color; then the line styles and the focus halo. */
 export function legendRows(subjects: string[], reviewing: boolean): LegendRow[] {
   const colors: LegendRow[] = reviewing
     ? MATCH_TYPES.map((match) => ({
@@ -165,9 +165,8 @@ export function legendRows(subjects: string[], reviewing: boolean): LegendRow[] 
       }));
   return [
     ...colors,
-    { color: "currentColor", style: "solid", text: "Solid: drawn or accepted by a person" },
-    { color: "currentColor", style: "dotted", text: "Dotted: no person has stood behind it yet" },
-    { color: "currentColor", style: "solid", halo: true, text: "Halo: the focused item" },
-    { color: FLAG_MARK.color, style: "solid", text: `${FLAG_MARK.glyph} An open flag` },
+    { color: "currentColor", style: "solid", text: "Solid: confirmed" },
+    { color: "currentColor", style: "dotted", text: "Dotted: proposed" },
+    { color: "currentColor", style: "solid", halo: true, text: "Halo: selected" },
   ];
 }

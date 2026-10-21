@@ -32,14 +32,14 @@ describe("line style says whose shape it is", () => {
   });
 
   it("a dotted stroke's dash scales with the width and a solid stroke has none", () => {
-    expect(dashFor("dotted", 2)).toEqual([2, 6]);
+    expect(dashFor("dotted", 2)).toEqual([4, 4]);
     expect(dashFor("solid", 2)).toBeUndefined();
   });
 
   it("a dash pattern is stated in stroke widths and resolved at the stroke it is drawn on", () => {
     expect(dashAt(DRAFT_DASH, 0.5)).toEqual([2, 2]);
-    expect(dashFor("dotted", 3)).toEqual([3, 9]);
-    expect(DOTTED_DASH).toEqual([1, 3]);
+    expect(dashFor("dotted", 3)).toEqual([6, 6]);
+    expect(DOTTED_DASH).toEqual([2, 2]);
   });
 });
 
@@ -93,11 +93,10 @@ describe("the legend is drawn from the constants", () => {
       ["fruit", subjectColor("fruit"), "fruit"],
       ["leaf", subjectColor("leaf"), "leaf"],
     ]);
-    expect(rows.slice(2).map((r) => [r.style, !!r.halo, r.color])).toEqual([
-      ["solid", false, "currentColor"],
-      ["dotted", false, "currentColor"],
-      ["solid", true, "currentColor"],
-      ["solid", false, FLAG_MARK.color],
+    expect(rows.slice(2).map((r) => [r.style, !!r.halo, r.color, r.text])).toEqual([
+      ["solid", false, "currentColor", "Solid: confirmed"],
+      ["dotted", false, "currentColor", "Dotted: proposed"],
+      ["solid", true, "currentColor", "Halo: selected"],
     ]);
   });
 
@@ -110,6 +109,6 @@ describe("the legend is drawn from the constants", () => {
   });
 
   it("names each match type by what each side holds, never by a verdict on the labels", () => {
-    expect(Object.values(MATCH_WORDS)).toEqual(["Matched", "Proposal only", "Annotation only"]);
+    expect(Object.values(MATCH_WORDS)).toEqual(["Matched", "Proposed only", "Labeled only"]);
   });
 });

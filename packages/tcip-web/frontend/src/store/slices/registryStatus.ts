@@ -29,9 +29,14 @@ interface AnnotateUiState {
   stream: boolean;
   /** Cut toggle (polygon mode): arms the two-click split gesture. */
   cut: boolean;
-  /** Prompt toggle: the next placed point or drawn box asks an engine for proposals instead of
+  /** Prompt toggle: a placed point or drawn box is held as a prompt for the segmenter instead of
    *  becoming an annotation. */
   prompt: boolean;
+  /** The prompts held while the toggle is on, sent together as one proposal. */
+  pendingPrompts: {
+    points: [number, number][];
+    boxes: [number, number, number, number][];
+  };
   /** Currently hovered polygon index (for vertex-handle rendering). */
   hoveredPolygonIdx: number | null;
   /** Active vertex drag: [polygonIdx, ringIdx, vertexIdx]; a vertex belongs to one ring of one
@@ -53,6 +58,8 @@ interface SessionTrackingState {
   /** The project the visit was opened under, which it keeps. */
   projectId: string | null;
 }
+
+const NO_PROMPTS: AnnotateUiState["pendingPrompts"] = { points: [], boxes: [] };
 
 const EMPTY_SESSION_TRACKING: SessionTrackingState = {
   currentImageName: null,
@@ -90,7 +97,11 @@ export interface RegistryStatusSlice {
   setSnap: (v: boolean) => void;
   setStream: (v: boolean) => void;
   setCut: (v: boolean) => void;
+  /** Arm or disarm the prompt toggle; disarming drops the held prompts. */
   setPrompt: (v: boolean) => void;
+  addPromptPoint: (point: [number, number]) => void;
+  addPromptBox: (box: [number, number, number, number]) => void;
+  clearPrompts: () => void;
   setHoveredPolygon: (idx: number | null) => void;
   setDraggingVertex: (v: [number, number, number] | null) => void;
 
@@ -196,6 +207,7 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
     stream: false,
     cut: false,
     prompt: false,
+    pendingPrompts: NO_PROMPTS,
     hoveredPolygonIdx: null,
     draggingVertex: null,
   },
@@ -220,7 +232,35 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
   setSnap: (snap) => set((s) => ({ annotateUi: { ...s.annotateUi, snap } })),
   setStream: (stream) => set((s) => ({ annotateUi: { ...s.annotateUi, stream } })),
   setCut: (cut) => set((s) => ({ annotateUi: { ...s.annotateUi, cut } })),
-  setPrompt: (prompt) => set((s) => ({ annotateUi: { ...s.annotateUi, prompt } })),
+  setPrompt: (prompt) =>
+    set((s) => ({
+      annotateUi: {
+        ...s.annotateUi,
+        prompt,
+        pendingPrompts: prompt ? s.annotateUi.pendingPrompts : NO_PROMPTS,
+      },
+    })),
+  addPromptPoint: (point) =>
+    set((s) => ({
+      annotateUi: {
+        ...s.annotateUi,
+        pendingPrompts: {
+          ...s.annotateUi.pendingPrompts,
+          points: [...s.annotateUi.pendingPrompts.points, point],
+        },
+      },
+    })),
+  addPromptBox: (box) =>
+    set((s) => ({
+      annotateUi: {
+        ...s.annotateUi,
+        pendingPrompts: {
+          ...s.annotateUi.pendingPrompts,
+          boxes: [...s.annotateUi.pendingPrompts.boxes, box],
+        },
+      },
+    })),
+  clearPrompts: () => set((s) => ({ annotateUi: { ...s.annotateUi, pendingPrompts: NO_PROMPTS } })),
   setHoveredPolygon: (hoveredPolygonIdx) =>
     set((s) => ({ annotateUi: { ...s.annotateUi, hoveredPolygonIdx } })),
   setDraggingVertex: (draggingVertex) =>
