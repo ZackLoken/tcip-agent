@@ -322,7 +322,7 @@ def image_proposals(bucket: str, key: Key) -> tuple[Bucket, list]:
     """Return the published bucket ``bucket`` and its proposals for the image ``key`` names.
 
     The bucket is the one under the root of the label document ``key``; the proposals are in
-    document order. A bucket that names no document for the image refuses (``ValueError``).
+    document order, empty for an image the bucket holds no document of.
     """
     from tcip_annotation.json_io import read_predictions
     from tcip_mcp.buckets import read_bucket
@@ -330,9 +330,7 @@ def image_proposals(bucket: str, key: Key) -> tuple[Bucket, list]:
     found = read_bucket(key.root, bucket)
     document = found.document_key(key.parts[-1])
     if document is None:
-        raise ValueError(
-            f"bucket {bucket!r} holds no proposals for {key.parts[-1]}"
-        )
+        return found, []
     return found, read_predictions(document).annotations
 
 

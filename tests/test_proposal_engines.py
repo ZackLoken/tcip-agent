@@ -170,6 +170,44 @@ def test_the_detectors_parameters_refuse_a_key_they_do_not_declare() -> None:
         DetectorParams.model_validate({**DETECTOR_PARAMS, "stride": 2})
 
 
+def test_the_detectors_defaults_are_its_libraries_own_and_complete_a_phrase() -> (
+    None
+):
+    """The defaults read off transformers' and SAHI's signatures complete a phrase prompt.
+
+    They are compared against the two libraries' documented defaults, read here from the same
+    signatures, and the merge name is one the platform's merge table holds.
+    """
+    import inspect
+
+    from sahi.predict import get_sliced_prediction
+    from transformers import GroundingDinoProcessor
+
+    from tcip_mcp.pipelines.execution import CROSS_TILE_MERGES
+    from tcip_mcp.pipelines.proposal_engines import (
+        DetectorParams,
+        detector_defaults,
+    )
+
+    defaults = detector_defaults()
+    grounded = inspect.signature(
+        GroundingDinoProcessor.post_process_grounded_object_detection
+    ).parameters
+    sliced = inspect.signature(get_sliced_prediction).parameters
+
+    stated = DetectorParams(phrase="open bud", **defaults)
+    assert stated.box_threshold == grounded["threshold"].default
+    assert stated.text_threshold == grounded["text_threshold"].default
+    assert stated.postprocess in CROSS_TILE_MERGES
+    assert (
+        CROSS_TILE_MERGES[stated.postprocess].sahi_type
+        == sliced["postprocess_type"].default
+    )
+    assert (
+        stated.cross_tile_nms == sliced["postprocess_match_threshold"].default
+    )
+
+
 EDGE = 1024
 """An input edge for the window geometry: SAM's ``longest_edge`` in the base checkpoint."""
 
