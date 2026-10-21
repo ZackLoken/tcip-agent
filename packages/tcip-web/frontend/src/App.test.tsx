@@ -309,7 +309,7 @@ describe("App visit attribution across a change of person", () => {
     await admit("Valley farm", "first");
     expect(useStore.getState().sessionTracking.projectId).toBe(VALLEY.id);
 
-    fireEvent.click(screen.getByRole("button", { name: "Switch Project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Switch project" }));
     await screen.findByText("Open a project");
     await admit("Ridge farm", "second");
 

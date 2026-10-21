@@ -11,13 +11,13 @@ afterEach(cleanup);
 describe("HelpOverlay", () => {
   it("toggles with '?' and closes with Escape", () => {
     render(<HelpOverlay activeTab="annotate" />);
-    expect(screen.queryByText(/keyboard & mouse reference/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Shortcuts$/)).not.toBeInTheDocument();
 
     fireEvent.keyDown(document.body, { key: "?" });
-    expect(screen.getByText(/keyboard & mouse reference/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Shortcuts$/)).toBeInTheDocument();
 
     fireEvent.keyDown(document.body, { key: "Escape" });
-    expect(screen.queryByText(/keyboard & mouse reference/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Shortcuts$/)).not.toBeInTheDocument();
   });
 
   it("ignores '?' typed into a focused form control", () => {
@@ -29,11 +29,11 @@ describe("HelpOverlay", () => {
     );
     // "?" aimed at a text field must insert the character, not toggle the overlay.
     fireEvent.keyDown(screen.getByTestId("field"), { key: "?" });
-    expect(screen.queryByText(/keyboard & mouse reference/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Shortcuts$/)).not.toBeInTheDocument();
 
     // Same key with no form control focused still toggles.
     fireEvent.keyDown(document.body, { key: "?" });
-    expect(screen.getByText(/keyboard & mouse reference/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Shortcuts$/)).toBeInTheDocument();
   });
 
   it("lists every Annotate binding from the one declaration the tab binds", () => {
