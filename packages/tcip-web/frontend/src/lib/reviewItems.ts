@@ -97,7 +97,9 @@ function center(bbox: Bbox): [number, number] {
   return [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
 }
 
-function proposalGeometry(p: Proposal): { shape: Mode; bbox: Bbox } | null {
+/** The shape a proposal is drawn and reviewed as, with its bounding box; null for one carrying
+ *  no geometry. */
+export function proposalGeometry(p: Proposal): { shape: Mode; bbox: Bbox } | null {
   if (p.rings?.length) return { shape: "polygon", bbox: ringsBbox(p.rings) };
   if (p.bbox) return { shape: "box", bbox: p.bbox };
   if (p.point) return { shape: "point", bbox: [p.point[0], p.point[1], p.point[0], p.point[1]] };

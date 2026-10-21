@@ -6,7 +6,6 @@ import type { ImageBandsResponse } from "@/api/client";
 import { api } from "@/api/client";
 import { StructuredRefusalError } from "@/api/http";
 import { subjectsApi } from "@/api/subjects";
-import type { PhrasePrompt } from "@/api/types.generated";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import { useStore } from "@/store";
@@ -38,7 +37,7 @@ function renderToolbar(
     onCompleteView?: () => void;
     onCancelSave?: () => void;
     proposing?: boolean;
-    onPhrase?: (prompt: PhrasePrompt) => void;
+    onPhrase?: (phrase: string) => void;
     onPropose?: () => void;
   },
 ) {
@@ -124,7 +123,7 @@ describe("AnnotateToolbar engine prompt", () => {
     expect(screen.queryByRole("button", { name: "Tiling" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Find" }));
 
-    expect(onPhrase).toHaveBeenCalledWith({ phrase: "open bud" });
+    expect(onPhrase).toHaveBeenCalledWith("open bud");
   });
 
   it("counts the held prompts on Propose and sends them together once asked", () => {

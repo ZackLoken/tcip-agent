@@ -1,18 +1,17 @@
 import { useState } from "react";
 
-import type { PhrasePrompt } from "@/api/types.generated";
 import { useStore } from "@/store";
 
 /** The engine prompt control: one toggle holding each placed point and drawn box as a prompt
- *  for the segmenter, a Propose button sending them together, and a phrase for the detector
- *  sent through `onPhrase`. While `proposing`, every send is refused. */
+ *  for the segmenter, a phrase whose Find asks the detector for boxes to hold beside them, and
+ *  a Propose button sending them all. While `proposing`, every send is refused. */
 export function EnginePrompt({
   proposing,
   onPhrase,
   onPropose,
 }: {
   proposing: boolean;
-  onPhrase: (prompt: PhrasePrompt) => void;
+  onPhrase: (phrase: string) => void;
   onPropose: () => void;
 }) {
   const armed = useStore((s) => s.annotateUi.prompt);
@@ -61,7 +60,7 @@ export function EnginePrompt({
             className="flex items-center gap-1.5"
             onSubmit={(e) => {
               e.preventDefault();
-              if (canFind) onPhrase({ phrase });
+              if (canFind) onPhrase(phrase.trim());
             }}
           >
             <input

@@ -60,6 +60,7 @@ import {
   matchTypes,
   NO_MATCHES,
   nearestNeighborOrder,
+  proposalGeometry,
   reviewItems,
   sameItem,
   scopedOrder,
@@ -268,7 +269,12 @@ export function AnnotateTab() {
   useEffect(() => {
     if (!served || served.key !== proposalKey || focusOnServeRef.current !== bucket) return;
     focusOnServeRef.current = null;
-    if (served.served.proposals.length > 0) setFocus({ kind: "proposal", index: 0 });
+    const first = served.served.proposals[0];
+    if (!first) return;
+    // The strip and the canvas show the selected tool's shape, so the tool follows the answer.
+    const shape = proposalGeometry(first)?.shape;
+    if (shape && useStore.getState().gui.mode !== shape) setMode(shape);
+    setFocus({ kind: "proposal", index: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [served]);
   // Prompts held on one image are not carried to the next.
@@ -337,6 +343,39 @@ export function AnnotateTab() {
     const { points, boxes } = useStore.getState().annotateUi.pendingPrompts;
     if (points.length + boxes.length === 0) return;
     void sendPrompt({ points, boxes });
+  }
+  /** Ask the detector what the phrase describes on the image in view; its boxes are held as
+   *  prompts beside the placed ones, for the person to keep, drop or add to before Propose. */
+  async function findByPhrase(phrase: string) {
+    if (proposing || !imgPath || !requireSubject()) return;
+    const [sentFrom, sentName] = [imgPath, currentImageName];
+    setProposing(true);
+    try {
+      const answer = await api.annotate.find({
+        image_path: sentFrom,
+        phrase,
+        user: useStore.getState().user,
+      });
+      if (!mountedRef.current || currentImage(useStore.getState().gui.dataset).path !== sentFrom) {
+        useStore.getState().pushToast(`${answer.boxes.length} found on ${sentName}, not held.`);
+        return;
+      }
+      for (const box of answer.boxes) useStore.getState().addPromptBox(box);
+      useStore
+        .getState()
+        .pushToast(
+          answer.boxes.length === 0
+            ? `Nothing found for "${phrase}".`
+            : `${answer.boxes.length} found for "${phrase}". Add or drop boxes, then propose.`,
+          "success",
+        );
+    } catch (e) {
+      useStore
+        .getState()
+        .pushToast(`Could not find: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      if (mountedRef.current) setProposing(false);
+    }
   }
 
   const reviewing = !!bucket && !hideProposals && served?.key === proposalKey;
@@ -1481,6 +1520,25 @@ export function AnnotateTab() {
   const onContextMenu = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     ev.evt.preventDefault();
     if (canvas.saving || outsideImage(ix, iy)) return;
+    // Armed, a right-click drops the held prompt under the cursor: a point within its grab
+    // radius, else the smallest box holding the cursor.
+    if (annotateUi.prompt) {
+      const { points, boxes } = annotateUi.pendingPrompts;
+      const reach = POINT_HIT_CANVAS / (view.scale || 1);
+      const pointHit = points.findIndex(([x, y]) => Math.hypot(x - ix, y - iy) <= reach);
+      if (pointHit !== -1) {
+        useStore.getState().removePromptPoint(pointHit);
+        return;
+      }
+      const holding = boxes
+        .map((b, i) => ({ i, area: (b[2] - b[0]) * (b[3] - b[1]), b }))
+        .filter(({ b }) => ix >= b[0] && ix <= b[2] && iy >= b[1] && iy <= b[3])
+        .sort((p, q) => p.area - q.area);
+      if (holding.length > 0) {
+        useStore.getState().removePromptBox(holding[0].i);
+        return;
+      }
+    }
     // Point mode: right-click deletes the point under the cursor (a box's right-click delete,
     // scoped to one coordinate). Nothing under the cursor just clears the selection.
     if (mode === "point") {
@@ -1570,7 +1628,7 @@ export function AnnotateTab() {
           subjectState={null}
           onComplete={(next) => void markComplete(next)}
           proposing={proposing}
-          onPhrase={(prompt) => void sendPrompt(prompt)}
+          onPhrase={(phrase) => void findByPhrase(phrase)}
           onPropose={proposeHeld}
         />
         <div className="flex-1 flex items-center justify-center bg-tcip-canvas px-4">
@@ -1604,7 +1662,7 @@ export function AnnotateTab() {
           viewIsRegion && viewRect ? () => void markComplete(true, viewRect) : undefined
         }
         proposing={proposing}
-        onPhrase={(prompt) => void sendPrompt(prompt)}
+        onPhrase={(phrase) => void findByPhrase(phrase)}
         onPropose={proposeHeld}
       />
       <ReviewStrip

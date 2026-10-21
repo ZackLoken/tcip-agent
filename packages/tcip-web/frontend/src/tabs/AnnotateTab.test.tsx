@@ -7,7 +7,6 @@ import type { LoadedLabels, SaveResult } from "@/api/client";
 import { StructuredRefusalError } from "@/api/http";
 import { sessionsApi } from "@/api/sessions";
 import { subjectsApi, subjectColor } from "@/api/subjects";
-import type { PhrasePrompt } from "@/api/types.generated";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { CUT_MISSES_REFUSAL } from "@/lib/polygonGeometry";
@@ -102,7 +101,7 @@ vi.mock("@/components/AnnotateToolbar", () => ({
     onComplete: (next: boolean) => void;
     onCancelSave: () => void;
     proposing: boolean;
-    onPhrase: (prompt: PhrasePrompt) => void;
+    onPhrase: (phrase: string) => void;
     onPropose: () => void;
   }) => (
     <div
@@ -113,13 +112,11 @@ vi.mock("@/components/AnnotateToolbar", () => ({
     >
       <button onClick={() => props.onComplete(true)}>toolbar-complete</button>
       <button onClick={props.onCancelSave}>toolbar-cancel-save</button>
-      <button onClick={() => props.onPhrase(PHRASE_PROMPT)}>toolbar-phrase</button>
+      <button onClick={() => props.onPhrase("open bud")}>toolbar-phrase</button>
       <button onClick={props.onPropose}>toolbar-propose</button>
     </div>
   ),
 }));
-
-const PHRASE_PROMPT: PhrasePrompt = { phrase: "open bud" };
 
 // The review strip's proposals toggle, the one place proposals are shown or hidden.
 const toggleProposals = () => fireEvent.click(screen.getByRole("checkbox", { name: "Proposals" }));
@@ -3114,20 +3111,53 @@ describe("AnnotateTab engine prompt", () => {
     expect(useStore.getState().annotateUi.pendingPrompts.points).toEqual([]);
   });
 
-  it("sends the phrase alone", async () => {
+  it("Find holds the detector's boxes as prompts, stages nothing, and a right-click drops one", async () => {
     const { propose } = await mountArmed("box");
+    const find = vi.spyOn(api.annotate, "find").mockResolvedValue({
+      boxes: [
+        [10, 10, 40, 40],
+        [100, 100, 300, 300],
+      ],
+    });
     fireEvent.click(screen.getByRole("button", { name: "toolbar-phrase" }));
     await flush();
 
-    expect(propose).toHaveBeenCalledWith({
+    expect(find).toHaveBeenCalledWith({
       image_path: "C:/data/images/2026-01-01/img1.jpg",
-      subject: "subject_a",
+      phrase: "open bud",
       user: "grower",
-      prompt: PHRASE_PROMPT,
     });
+    expect(propose).not.toHaveBeenCalled();
+    expect(useStore.getState().annotateUi.pendingPrompts.boxes).toEqual([
+      [10, 10, 40, 40],
+      [100, 100, 300, 300],
+    ]);
+    expect(useStore.getState().toasts.at(-1)?.message).toBe(
+      '2 found for "open bud". Add or drop boxes, then propose.',
+    );
+
+    fireEvent.contextMenu(stage(), { clientX: 20, clientY: 20 });
+    await flush();
+
+    expect(useStore.getState().annotateUi.pendingPrompts.boxes).toEqual([[100, 100, 300, 300]]);
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
+    await flush();
+    expect(propose).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: { points: [], boxes: [[100, 100, 300, 300]] } }),
+    );
   });
 
-  it("selects the answered bucket on the current selection, shows its proposals, says how many and focuses the first", async () => {
+  it("Find with nothing found says so and holds nothing", async () => {
+    await mountArmed("box");
+    vi.spyOn(api.annotate, "find").mockResolvedValue({ boxes: [] });
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-phrase" }));
+    await flush();
+
+    expect(useStore.getState().annotateUi.pendingPrompts.boxes).toEqual([]);
+    expect(useStore.getState().toasts.at(-1)?.message).toBe('Nothing found for "open bud".');
+  });
+
+  it("selects the answered bucket on the current selection, shows its proposals, says how many, switches the tool to the first proposal's shape and focuses it", async () => {
     const { select, proposals } = await mountArmed("point");
     proposals.mockResolvedValue({
       bucket: BUCKET,
@@ -3164,6 +3194,7 @@ describe("AnnotateTab engine prompt", () => {
     await waitFor(() =>
       expect(useStore.getState().canvas.focus).toEqual({ kind: "proposal", index: 0 }),
     );
+    expect(useStore.getState().gui.mode).toBe("box");
   });
 
   it("refuses a second send while one is in flight", async () => {

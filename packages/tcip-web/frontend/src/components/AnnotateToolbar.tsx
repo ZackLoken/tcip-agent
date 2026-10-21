@@ -8,7 +8,6 @@ import { useMemo, useState, type ReactNode } from "react";
 
 import type { ImageBandsResponse } from "@/api/client";
 import { subjectColor } from "@/api/subjects";
-import type { PhrasePrompt } from "@/api/types.generated";
 import { EnginePrompt } from "@/components/annotate/EnginePrompt";
 import { BandPicker } from "@/components/BandPicker";
 import { Stepper } from "@/components/Stepper";
@@ -160,9 +159,9 @@ export function AnnotateToolbar({
   onComplete: (next: boolean) => void;
   // Mark the dataset subject complete over the region in view; omitted when the view holds it all.
   onCompleteView?: () => void;
-  // Whether an engine prompt is in flight, the send of a phrase, and the send of the held prompts.
+  // Whether an engine call is in flight, the find by phrase, and the send of the held prompts.
   proposing: boolean;
-  onPhrase: (prompt: PhrasePrompt) => void;
+  onPhrase: (phrase: string) => void;
   onPropose: () => void;
 }) {
   const dataset = useStore((s) => s.gui.dataset);
