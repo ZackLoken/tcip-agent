@@ -58,11 +58,13 @@ export function StatusBar() {
 
   return (
     <div className="h-statusbar flex items-center gap-4 px-3 border-t border-tcip-border bg-tcip-panel text-[12px] text-tcip-muted shrink-0">
-      <span className="tabular-nums">Zoom: {(view.scale * 100).toFixed(0)}%</span>
+      {activeTab === "annotate" && (
+        <span className="tabular-nums">Zoom: {(view.scale * 100).toFixed(0)}%</span>
+      )}
       {activeTab === "annotate" && sessionTracking.currentImageName ? (
         <span className="tabular-nums">Image time: {fmtSeconds(imageSeconds)}</span>
       ) : null}
-      {canvasDims.w && canvasMatchesDataset ? (
+      {activeTab === "annotate" && canvasDims.w && canvasMatchesDataset ? (
         <span className="tabular-nums">
           Image: {canvasDims.w}×{canvasDims.h}
         </span>

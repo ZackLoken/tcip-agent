@@ -57,6 +57,24 @@ describe("StatusBar canvas facts", () => {
     expect(screen.getByText("1 box")).toBeInTheDocument();
   });
 
+  it("shows no zoom, image size or shape count on a tab other than Annotate", () => {
+    useStore.getState().setActiveTab("inference");
+    useStore.setState((s) => ({
+      canvas: {
+        ...s.canvas,
+        loadedImagePath: "/data/images/2026-01-01/img1.jpg",
+        imgWidth: 800,
+        imgHeight: 600,
+        boxes: [{ x1: 0, y1: 0, x2: 10, y2: 10, subject: "fruit", attributes: {} }],
+      },
+    }));
+    render(<StatusBar />);
+
+    expect(screen.queryByText(/Zoom: /)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Image: /)).not.toBeInTheDocument();
+    expect(screen.queryByText("1 box")).not.toBeInTheDocument();
+  });
+
   it("hides the image size and shape counts for a canvas loaded from another dataset", () => {
     useStore.setState((s) => ({
       canvas: {
