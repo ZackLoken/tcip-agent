@@ -3,11 +3,9 @@
  * opens one: the human never browses the filesystem for two roots. Opening a project makes it the
  * backend's open project; a date/subject/model can be picked per project. The chosen project and
  * an open in flight live in the store, so they survive the picker being replaced when the
- * Annotator field's draft is committed (Enter or Open). The first picker mounted with a committed
- * name opens the project the backend already holds open (the workspace's last-opened one) when
- * its default date has labeled subjects, else preselects its card, unless a project is already
- * chosen. Project creation is agent-driven; the user hands the agent data paths rather than
- * hand-structuring a folder here.
+ * name field's draft is committed (Enter or Open). The project the backend already holds open
+ * (the workspace's last-opened one) is preselected unless a project is already chosen. Project
+ * creation is agent-driven.
  */
 
 import { useEffect, useId, useRef, useState } from "react";
@@ -19,13 +17,10 @@ import { UNSET_GLYPH } from "@/lib/glyphs";
 import {
   bucketsForDate,
   defaultDate,
-  initialOpenWanted,
   openable,
   type OpenableProject,
-  releaseOpenHold,
   startOpen,
   subjectsForDate,
-  takeOpenHold,
 } from "@/lib/openProject";
 import { forgetRecentProject } from "@/lib/recentProjects";
 import { useStore } from "@/store";
@@ -75,13 +70,7 @@ function RemovalDialog({
       }
       if (useStore.getState().openProject?.id === project.id) useStore.getState().clearDataset();
       const archiveName = res.archive_path.split(/[/\\]/).filter(Boolean).pop() ?? res.archive_path;
-      useStore
-        .getState()
-        .pushToast(
-          `Removed ${name}: archived as ${archiveName} and moved into the workspace's holding ` +
-            "directory. Nothing is deleted.",
-          "success",
-        );
+      useStore.getState().pushToast(`Removed ${name}. Archived as ${archiveName}.`, "success");
       onRemoved();
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : String(e));
@@ -92,17 +81,13 @@ function RemovalDialog({
 
   return (
     <ConfirmDialog heading={`Remove ${name}`} onClose={onClose} busy={submitting}>
-      <div className="flex flex-col gap-3 text-[12px]">
+      <div className="flex flex-col gap-3 text-[13px]">
         {submitError && (
-          <p className="text-tcip-fp" aria-live="polite">
+          <p className="tcip-problem" aria-live="polite">
             {submitError}
           </p>
         )}
-        <p className="text-tcip-muted">
-          {name} is archived to the workspace&apos;s holding directory and moved there. Nothing is
-          deleted; the archive imports back through{" "}
-          <span className="font-mono">tcip import-project</span>.
-        </p>
+        <p className="text-tcip-muted">{name} is archived, not deleted.</p>
         <label className="flex flex-col gap-1" htmlFor={nameFieldId}>
           <span className="tcip-label">Type the project name to confirm</span>
           <input
@@ -164,15 +149,12 @@ function RenameDialog({
 
   return (
     <ConfirmDialog heading={`Rename ${name}`} onClose={onClose} busy={submitting}>
-      <div className="flex flex-col gap-3 text-[12px]">
+      <div className="flex flex-col gap-3 text-[13px]">
         {submitError && (
-          <p className="text-tcip-fp" aria-live="polite">
+          <p className="tcip-problem" aria-live="polite">
             {submitError}
           </p>
         )}
-        <p className="text-tcip-muted">
-          The name the project list shows changes; its folder and everything in it stay as they are.
-        </p>
         <label className="flex flex-col gap-1" htmlFor={newNameFieldId}>
           <span className="tcip-label">New name</span>
           <input
@@ -268,47 +250,20 @@ export function ProjectPicker() {
 
   useEffect(() => {
     let canceled = false;
-    // The attempt is consumed when a listing decides it, so an effect replayed before its
-    // listing returns takes the hold again.
-    const state = useStore.getState();
-    const initial = selectAnnotatorNamed(state) && !state.initialOpenAttempted;
-    const held = initial ? takeOpenHold(null) : null;
-    let handedOver = false;
-    const settle = () => {
-      if (held !== null && !handedOver) releaseOpenHold(held);
-    };
     api.projects
       .list()
       .then((res) => {
         if (canceled) return;
         showListing(res);
-        if (held !== null) useStore.getState().consumeInitialOpen();
-        // Open the backend's open project when its default date has labeled subjects, else
-        // preselect its card; nothing happens once the person has chosen a project.
+        // The backend's open project is preselected; nothing opens until the person does.
         const open = res.projects.filter(openable).find((p) => p.id === res.open_id);
-        if (
-          held === null ||
-          !open ||
-          useStore.getState().openChoice.projectId ||
-          !initialOpenWanted(held, open.id)
-        ) {
-          settle();
-          return;
-        }
-        selectCard(open);
-        const chosen = useStore.getState().openChoice;
-        if (chosen.date && subjectsForDate(open, chosen.date).length > 0) {
-          handedOver = true;
-          void startOpen(open, chosen.date, chosen.subject, chosen.bucket, held);
-        } else settle();
+        if (open && !useStore.getState().openChoice.projectId) selectCard(open);
       })
       .catch((e) => {
-        settle();
         if (!canceled) setLoadError(String(e));
       });
     return () => {
       canceled = true;
-      settle();
     };
     // Run once on mount.
   }, []);
@@ -316,19 +271,15 @@ export function ProjectPicker() {
   return (
     <div className="h-full w-full overflow-auto bg-linear-to-b from-tcip-bg to-[#181a12] p-6 flex justify-center">
       <div className="w-full max-w-3xl flex flex-col gap-5">
-        <div className="animate-tcip-rise">
-          <span className="tcip-eyebrow">Field station</span>
-          <h1 className="text-xl font-semibold text-tcip-fg mt-2">Open a project</h1>
-        </div>
+        <h1 className="text-xl font-semibold text-tcip-fg">Open a project</h1>
 
-        <div className="flex flex-col gap-1 animate-tcip-rise">
+        <div className="flex flex-col gap-1">
           <label className="flex flex-col gap-1">
-            <span className="tcip-label">Annotator</span>
+            <span className="tcip-label">Your name</span>
             <input
               ref={annotatorFieldRef}
               type="text"
               className="tcip-input max-w-xs"
-              placeholder="your name (e.g. jordan)"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -341,36 +292,26 @@ export function ProjectPicker() {
             />
           </label>
           {!annotatorNamed && (
-            <span id={annotatorHintId} className="text-[11px] text-tcip-warn">
-              Enter your name and press Enter, or open a project. It is recorded on the labels,
-              decisions and runs you make.
+            <span id={annotatorHintId} className="text-tcip-muted">
+              Enter your name.
             </span>
           )}
         </div>
 
         {loadError && (
-          <div className="tcip-panel p-4 text-[12px] text-tcip-fp">
+          <div className="tcip-panel p-4 text-[13px] tcip-problem">
             Could not load projects. {loadError}
           </div>
         )}
 
         {lastOpenedProblem && (
-          <div className="tcip-panel p-4 text-[12px] text-tcip-warn">
+          <div className="tcip-panel p-4 text-[13px] text-tcip-warn">
             The project opened last could not be opened again: {lastOpenedProblem}
           </div>
         )}
 
         {projects && projects.length === 0 && (
-          <div className="tcip-panel p-6 text-[12px] text-tcip-muted flex flex-col gap-2">
-            <span className="text-tcip-fg font-medium">No projects yet</span>
-            <span>
-              Ask the agent to structure your images into a project; it creates one with{" "}
-              <span className="font-mono">initialize_project</span>, given a name, a site, whether a
-              flip, a color, intensity or scale change leaves your trait&apos;s measurement the
-              same, and the largest rotation in degrees that does. The Setup tab shows those answers
-              and corrects them.
-            </span>
-          </div>
+          <div className="tcip-panel p-6 text-tcip-muted">No projects.</div>
         )}
 
         {projects && projects.length > 0 && (
@@ -378,11 +319,11 @@ export function ProjectPicker() {
             {projects.map((p, index) => {
               if (!openable(p)) {
                 return (
-                  <div key={p.path} className="tcip-panel p-4 flex flex-col gap-1 text-[11px]">
+                  <div key={p.path} className="tcip-panel p-4 flex flex-col gap-1 text-[13px]">
                     <span className="font-mono text-tcip-fg truncate" title={p.path}>
                       {p.path}
                     </span>
-                    <span className="text-tcip-fp">{p.record_problem}</span>
+                    <span className="tcip-problem">{p.record_problem}</span>
                   </div>
                 );
               }
@@ -390,7 +331,7 @@ export function ProjectPicker() {
               return (
                 <div
                   key={p.id}
-                  className={`tcip-panel p-4 flex flex-col gap-2 animate-tcip-rise transition-colors ${
+                  className={`tcip-panel p-4 flex flex-col gap-2 transition-colors ${
                     isSelected ? "border-tcip-accent" : "hover:border-tcip-border-hover"
                   }`}
                 >
@@ -416,12 +357,12 @@ export function ProjectPicker() {
                         </span>
                       )}
                       {p.site && (
-                        <span className="text-[11px] text-tcip-muted truncate" title={p.site}>
+                        <span className="text-[13px] text-tcip-muted truncate" title={p.site}>
                           {p.site}
                         </span>
                       )}
                       {p.label_problem && (
-                        <span className="text-[11px] text-tcip-fp truncate" title={p.label_problem}>
+                        <span className="text-[13px] tcip-problem truncate" title={p.label_problem}>
                           {p.label_problem}
                         </span>
                       )}
@@ -432,7 +373,7 @@ export function ProjectPicker() {
                         active={date || null}
                         className="my-0.5"
                       />
-                      <div className="text-[11px] text-tcip-muted flex flex-wrap gap-x-3 gap-y-0.5">
+                      <div className="text-[13px] text-tcip-muted flex flex-wrap gap-x-3 gap-y-0.5">
                         <span>{p.image_count} image(s)</span>
                         <span>
                           {p.dates.length} date{p.dates.length === 1 ? "" : "s"}
@@ -442,7 +383,7 @@ export function ProjectPicker() {
                         </span>
                         <span>{Object.values(p.buckets_by_date).flat().length} bucket(s)</span>
                       </div>
-                      <span className="text-[10px] text-tcip-muted">
+                      <span className="text-[12px] text-tcip-muted">
                         Updated {relativeTime(p.modified)}
                       </span>
                     </div>
@@ -479,7 +420,7 @@ export function ProjectPicker() {
                                 subjectsForDate(p, date).length ? "no subject chosen" : undefined
                               }
                             >
-                              {subjectsForDate(p, date).length ? UNSET_GLYPH : "no labels"}
+                              {subjectsForDate(p, date).length ? UNSET_GLYPH : "none"}
                             </option>
                             {subjectsForDate(p, date).map((t) => (
                               <option key={t} value={t}>
@@ -489,7 +430,7 @@ export function ProjectPicker() {
                           </select>
                         </label>
                         <label className="flex flex-col gap-1">
-                          <span className="tcip-label">Model</span>
+                          <span className="tcip-label">Predictions</span>
                           <select
                             className="tcip-select"
                             value={bucket}
@@ -498,10 +439,10 @@ export function ProjectPicker() {
                             <option
                               value=""
                               aria-label={
-                                bucketsForDate(p, date).length ? "no model chosen" : undefined
+                                bucketsForDate(p, date).length ? "no predictions chosen" : undefined
                               }
                             >
-                              {bucketsForDate(p, date).length ? UNSET_GLYPH : "no preds"}
+                              {bucketsForDate(p, date).length ? UNSET_GLYPH : "none"}
                             </option>
                             {bucketsForDate(p, date).map((name) => (
                               <option key={name} value={name}>
@@ -512,7 +453,7 @@ export function ProjectPicker() {
                         </label>
                       </div>
                       {openError?.projectId === p.id && (
-                        <span className="text-[11px] text-tcip-fp">{openError.message}</span>
+                        <span className="text-[13px] tcip-problem">{openError.message}</span>
                       )}
                       <div className="flex items-center gap-2 flex-wrap">
                         <button
@@ -523,11 +464,7 @@ export function ProjectPicker() {
                             void startOpen(p, date, subject, bucket);
                           }}
                         >
-                          {opening
-                            ? "Opening…"
-                            : !date
-                              ? "This project has no dated images"
-                              : "Open project"}
+                          {opening ? "Opening…" : !date ? "No dated images" : "Open"}
                         </button>
                         <fieldset disabled={!annotatorNamed} className="contents">
                           <button
@@ -554,8 +491,10 @@ export function ProjectPicker() {
           </div>
         )}
 
-        {!projects && !loadError && (
-          <div className="text-[12px] text-tcip-muted">Loading projects…</div>
+        {!projects && !loadError && <div className="text-tcip-muted">Loading projects…</div>}
+
+        {projects && (
+          <p className="text-tcip-muted">The agent creates projects. Ask it in the terminal.</p>
         )}
       </div>
 

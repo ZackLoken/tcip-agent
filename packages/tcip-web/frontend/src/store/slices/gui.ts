@@ -128,14 +128,12 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
   },
 
   mergeSnapshot: (incoming, version, project, epoch) => {
-    let accepted = false;
     let adoptedOther = false;
     set((s) => {
       // A moved epoch is a restarted backend's own replay: accepted regardless of version, since
       // its lower-numbered first snapshot would otherwise drop as a stale one.
       const epochChanged = epoch != null && epoch !== s.wsEpoch;
       if (!epochChanged && version != null && version < s.wsVersion) return s;
-      accepted = true;
       const nextVersion = epochChanged
         ? (version ?? 0)
         : version != null
@@ -198,7 +196,6 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
         wsEpoch: nextEpoch,
       };
     });
-    if (accepted) get().recordAcceptedProject(project?.id ?? null);
     if (adoptedOther) {
       get().leaveProjectSession(project?.id ?? null);
       get().supersedeOpen(project?.id ?? null);
