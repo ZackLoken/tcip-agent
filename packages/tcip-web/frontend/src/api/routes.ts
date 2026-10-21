@@ -21,6 +21,7 @@ export const ROUTES = {
   getMetaReports: "/api/meta/reports",
   getMetaRetrospectives: "/api/meta/retrospectives",
   getProjects: "/api/projects",
+  getResultsAssessments: "/api/results/assessments",
   getResultsDeliveryEvents: "/api/results/delivery-events",
   getResultsModelsRegistered: "/api/results/models/registered",
   getResultsPlantMappingList: "/api/results/plant_mapping/list",

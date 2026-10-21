@@ -975,6 +975,55 @@ def test_registered_models_answers_the_open_project_with_none_registered(
     assert resp.json()["models"] == []
 
 
+def test_assessments_refuses_while_no_project_is_open(
+    client: TestClient,
+) -> None:
+    assert client.get("/api/results/assessments").status_code == 409
+
+
+def test_assessments_answers_the_open_project_with_none_recorded(
+    client: TestClient,
+    opened_project: Path,
+) -> None:
+    resp = client.get("/api/results/assessments")
+    assert resp.status_code == 200
+    assert resp.json()["assessments"] == []
+
+
+def test_assessments_lists_each_recorded_assessment_with_the_checkpoint_it_judged(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    """An assessment the platform recorded is listed with its producer's digest and run.
+
+    The digest is the one the registered-models listing answers for the same checkpoint, so
+    the two listings pair without a path comparison.
+    """
+    pytest.importorskip("torch")
+    from tests._chain_fixtures import run_the_chain
+
+    chain = run_the_chain(tmp_path, experiment_id="exp-web-assessed")
+    open_new_project(tmp_path)
+
+    listed = client.get("/api/results/assessments")
+    models = client.get("/api/results/models/registered")
+
+    assert listed.status_code == 200, listed.text
+    (row,) = listed.json()["assessments"]
+    (model,) = [
+        m
+        for m in models.json()["models"]
+        if m["experiment_id"] == "exp-web-assessed"
+    ]
+    assert row == {
+        "assessment_id": chain.assessment["assessment_id"],
+        "checkpoint_sha256": model["sha256"],
+        "experiment_id": "exp-web-assessed",
+        "delivery_kind": "per_image_count",
+        "passed": True,
+    }
+
+
 def test_registered_models_answers_a_resolved_absolute_checkpoint_path(
     client: TestClient,
     opened_project: Path,

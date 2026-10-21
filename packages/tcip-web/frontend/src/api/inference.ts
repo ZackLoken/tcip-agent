@@ -3,6 +3,7 @@
 import { getJson, postForBlob, postJson, StructuredRefusalError, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import type {
+  Assessments,
   CanopySegmentDisclosure,
   ConfirmRevisionPayload,
   DeliveryEventRecord as StoredDeliveryEventRecord,
@@ -292,6 +293,9 @@ export type DeliveryEventRecord = StoredDeliveryEventRecord & {
 
 export const resultsApi = {
   registeredModels: () => getJson<RegisteredModels>(ROUTES.getResultsModelsRegistered),
+
+  // Every assessment recorded under the open project, each naming the checkpoint it judged.
+  assessments: () => getJson<Assessments>(ROUTES.getResultsAssessments),
 
   // The open project's own trait records, so a tab resolves which trait it works on from the
   // project instead of assuming one, and the Setup tab shows each revision for confirmation.

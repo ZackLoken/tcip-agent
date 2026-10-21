@@ -140,6 +140,8 @@ def declared_models() -> list[type[BaseModel]]:
     )
     from tcip_web.routes.results import (
         AcknowledgmentPayload,
+        Assessments,
+        AssessmentSummary,
         ConfirmRevisionPayload,
         ExportCountCsvPayload,
         ExportCsvPayload,
@@ -211,6 +213,8 @@ def declared_models() -> list[type[BaseModel]]:
         PhenologyPayload,
         RegisteredModel,
         RegisteredModels,
+        AssessmentSummary,
+        Assessments,
         AcknowledgmentPayload,
         ExportCsvPayload,
         PerImageCountDelivery,
