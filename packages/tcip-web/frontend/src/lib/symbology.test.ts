@@ -109,6 +109,6 @@ describe("the legend is drawn from the constants", () => {
   });
 
   it("names each match type by what each side holds, never by a verdict on the labels", () => {
-    expect(Object.values(MATCH_WORDS)).toEqual(["Matched", "Proposed only", "Labeled only"]);
+    expect(Object.values(MATCH_WORDS)).toEqual(["Matched", "Proposed", "Labeled"]);
   });
 });

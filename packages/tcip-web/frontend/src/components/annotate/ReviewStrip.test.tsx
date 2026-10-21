@@ -102,8 +102,8 @@ describe("ReviewStrip", () => {
     expect(Array.from(options, (o) => o.textContent)).toEqual([
       "all",
       "Matched",
-      "Proposed only",
-      "Labeled only",
+      "Proposed",
+      "Labeled",
     ]);
     expect(screen.queryByRole("combobox", { name: "Item type" })).not.toBeInTheDocument();
   });
