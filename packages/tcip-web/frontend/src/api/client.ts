@@ -16,6 +16,7 @@ import {
   type FindAnswer,
   type FindPayload,
   type ImageStagings,
+  type ImageStates,
   type ProposeAnswer,
   type ProposePayload,
   type RemovalRequest,
@@ -326,6 +327,10 @@ export const api = {
     // Every bucket an engine or the agent staged that holds a document for the image.
     stagings: (image_path: string) =>
       getJson<ImageStagings>(`${ROUTES.getAnnotateStagings}?${q({ image_path })}`),
+
+    // What each image of the selected capture's label document says about the subject.
+    states: (subject: string) =>
+      getJson<ImageStates>(`${ROUTES.getAnnotateStates}?${q({ subject })}`),
 
     // A 409 (the label document changed underneath the client) is an expected outcome the
     // caller resolves, not an error.

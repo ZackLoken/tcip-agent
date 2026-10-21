@@ -116,6 +116,10 @@ export interface ImageStagings {
   buckets: string[];
 }
 
+export interface ImageStates {
+  states: Record<string, "complete" | "negative" | "partial" | "unannotated">;
+}
+
 export interface ProposeAnswer {
   bucket: string | null;
   proposal_count: number;

@@ -208,6 +208,7 @@ beforeEach(() => {
     .mockImplementation((imagePath) => Promise.resolve(labelsFor(imagePath)));
   saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue(saved("1"));
   vi.spyOn(api.annotate, "stagings").mockResolvedValue({ buckets: [] });
+  vi.spyOn(api.annotate, "states").mockResolvedValue({ states: {} });
   vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({
     status: "ok",
     session: { started: "2026-10-07T14:00:00+00:00", ended: false },
@@ -1091,6 +1092,29 @@ describe("AnnotateTab point tool", () => {
     expect(useStore.getState().gui.mode).toBe("polygon");
     fireEvent.keyDown(window, { key: "m" });
     expect(useStore.getState().gui.mode).toBe("point");
+  });
+});
+
+describe("AnnotateTab image states", () => {
+  it("reads every image's state for the selection, then follows each load and save", async () => {
+    const statesSpy = vi.spyOn(api.annotate, "states").mockResolvedValue({
+      states: { "img1.jpg": "unannotated", "img2.jpg": "partial" },
+    });
+    loadSpy.mockImplementation((imagePath) =>
+      Promise.resolve({ ...labelsFor(imagePath), completion: { subject_a: "complete" } }),
+    );
+    await mountTab();
+    expect(statesSpy).toHaveBeenCalledWith("subject_a");
+    // The read says unannotated; the document the load answered says complete.
+    expect(useStore.getState().annotateUi.imageStates).toEqual({
+      "img1.jpg": "complete",
+      "img2.jpg": "partial",
+    });
+
+    saveSpy.mockResolvedValueOnce(saved("2", { completion: { subject_a: "negative" } }));
+    fireEvent.click(screen.getByText("toolbar-complete"));
+    await flush();
+    expect(useStore.getState().annotateUi.imageStates["img1.jpg"]).toBe("negative");
   });
 });
 

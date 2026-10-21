@@ -2,7 +2,7 @@ import Konva from "konva";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Rect } from "react-konva";
 
-import { api, type SaveLabelsBody, SaveResult } from "@/api/client";
+import { api, type LoadedLabels, type SaveLabelsBody, SaveResult } from "@/api/client";
 import { subjectColor } from "@/api/subjects";
 import type { ProposePayload } from "@/api/types.generated";
 import { AnnotateLegend } from "@/components/annotate/AnnotateLegend";
@@ -119,6 +119,8 @@ export function AnnotateTab() {
 
   const canvas = useStore((s) => s.canvas);
   const loadLabels = useStore((s) => s.loadLabelsIntoCanvas);
+  const setImageStates = useStore((s) => s.setImageStates);
+  const setImageState = useStore((s) => s.setImageState);
   const add = useStore((s) => s.add);
   const update = useStore((s) => s.update);
   const drag = useStore((s) => s.drag);
@@ -824,7 +826,7 @@ export function AnnotateTab() {
     setIoError(null);
     setConflict(false);
     refreshProposals();
-    loadLabels(result.labels);
+    adoptLabels(result.labels);
     if (opts?.focusAccepted !== undefined) focusAccepted(result, opts.focusAccepted);
     return result;
   }
@@ -867,6 +869,43 @@ export function AnnotateTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentActivity?.seq]);
 
+  /** Adopt a loaded or saved document as the canvas, and record what it says of the dataset
+   *  subject on the image in view for the image filter. */
+  function adoptLabels(labels: LoadedLabels) {
+    loadLabels(labels);
+    const subject = dataset.subject;
+    if (currentImageName && subject) {
+      setImageState(currentImageName, labels.completion[subject] ?? "unannotated");
+    }
+  }
+
+  // The states of every image of the selection, read once per selection for the image filter.
+  useEffect(() => {
+    const subject = dataset.subject;
+    if (!subject || !dataset.images_dir) {
+      setImageStates({});
+      return;
+    }
+    let canceled = false;
+    api.annotate.states(subject).then(
+      (r) => {
+        if (!canceled) setImageStates(r.states);
+      },
+      (e: unknown) => {
+        if (!canceled)
+          useStore
+            .getState()
+            .pushToast(
+              `Could not read the images' states: ${e instanceof Error ? e.message : String(e)}`,
+            );
+      },
+    );
+    return () => {
+      canceled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataset.dataset_root, dataset.date, dataset.subject, dataset.image_list]);
+
   // The one load: an image the canvas does not hold yet, or a reload of the one it holds that
   // `requestReload` asked for.
   useEffect(() => {
@@ -888,7 +927,7 @@ export function AnnotateTab() {
       try {
         const labels = await api.annotate.load(imgPath);
         if (canceled) return;
-        loadLabels(labels);
+        adoptLabels(labels);
         loadedKeyRef.current = key;
         loadedPathsRef.current = { image: imgPath, mtime: labels.base_mtime };
         setSaveBlocked(false);

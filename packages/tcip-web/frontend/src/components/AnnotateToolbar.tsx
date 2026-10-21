@@ -2,7 +2,7 @@
  * Annotate-tab toolbar, one row in three groups: the tool mode (Point, Box, Polygon) with the
  * engine prompt; the subject picker, the Edit menu (Snap, Stream, Cut, Undo, Redo), the View menu
  * (Labels, Proposals, Predictions), Save and the band picker for a multispectral image; then the
- * image stepper and the Complete control.
+ * image stepper with its filter by annotation status, and the Complete control.
  */
 
 import { useMemo, useState, type ReactNode } from "react";
@@ -16,6 +16,12 @@ import { Stepper } from "@/components/Stepper";
 import { useImageNav } from "@/hooks/useImageNav";
 import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 import { showsBandPicker, type BandSelection } from "@/lib/bandSelection";
+import {
+  filteredIndices,
+  IMAGE_FILTER_WORDS,
+  IMAGE_FILTERS,
+  type ImageFilter,
+} from "@/lib/imageFilter";
 import { saveRegistry } from "@/lib/registrySave";
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useSubjectColors } from "@/lib/subjectColors";
@@ -195,6 +201,7 @@ export function AnnotateToolbar({
   const canvasImageAnnotations = useStore((s) => s.canvas.imageAnnotations);
   const saving = useStore((s) => s.canvas.saving !== null);
   const annotateUi = useStore((s) => s.annotateUi);
+  const setImageFilter = useStore((s) => s.setImageFilter);
   const setVisible = useStore((s) => s.setVisible);
   const setSnap = useStore((s) => s.setSnap);
   const setStream = useStore((s) => s.setStream);
@@ -469,6 +476,20 @@ export function AnnotateToolbar({
           onStep={nav.stepImage}
           onJump={nav.jumpToPosition}
         />
+
+        <select
+          aria-label="Images"
+          className="tcip-select h-[30px]"
+          value={annotateUi.imageFilter}
+          onChange={(e) => setImageFilter(e.target.value as ImageFilter)}
+          title={`Which images the stepper steps through, by what the labels say of ${dataset.subject ?? "the subject"}`}
+        >
+          {IMAGE_FILTERS.map((f) => (
+            <option key={f} value={f}>
+              {`${IMAGE_FILTER_WORDS[f]} (${filteredIndices(dataset.image_list, annotateUi.imageStates, f).length})`}
+            </option>
+          ))}
+        </select>
 
         <label
           className="flex items-center gap-1.5"

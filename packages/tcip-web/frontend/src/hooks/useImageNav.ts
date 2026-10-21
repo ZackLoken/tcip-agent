@@ -1,11 +1,12 @@
 /**
- * Single source of truth for image navigation: arrow keys and the TopBar Prev/Next + jump counter
- * all step through the dataset's image list in its own order through this hook.
+ * Single source of truth for image navigation: arrow keys and the toolbar's stepper all step
+ * through the images the filter keeps, in the dataset's own order, through this hook.
  */
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 
 import { api } from "@/api/client";
+import { filteredIndices } from "@/lib/imageFilter";
 import { useStore } from "@/store";
 
 // Debounced: only the settled position persists; a dropped sync leaves the snapshot one image stale.
@@ -18,24 +19,35 @@ function syncNavIndex(index: number): void {
   }, 400);
 }
 
-/** The image index `delta` steps from `current` in a list of `total`, clamped to its ends, or
- *  null when the step would not move. */
-export function stepTarget(total: number, current: number, delta: number): number | null {
-  if (total === 0) return null;
-  const next = Math.max(0, Math.min(total - 1, current + delta));
-  return next === current ? null : next;
+/** The image index `delta` steps from `current` along `indices`, the kept images' indices in
+ *  list order: from an image the filter drops, the nearest kept one in that direction. Null when
+ *  the step would not move. */
+export function stepTarget(indices: number[], current: number, delta: number): number | null {
+  if (indices.length === 0) return null;
+  const at = indices.indexOf(current);
+  let next: number | undefined;
+  if (at >= 0) next = indices[Math.max(0, Math.min(indices.length - 1, at + delta))];
+  else if (delta > 0) next = indices.find((i) => i > current);
+  else next = indices.filter((i) => i < current).at(-1);
+  return next === undefined || next === current ? null : next;
 }
 
-/** The image index at 1-based `oneBased` position in a list of `total` (clamped). */
-export function jumpTarget(total: number, oneBased: number): number | null {
-  if (total === 0) return null;
-  return Math.max(1, Math.min(total, oneBased)) - 1;
+/** The image index at 1-based `oneBased` position among `indices` (clamped). */
+export function jumpTarget(indices: number[], oneBased: number): number | null {
+  if (indices.length === 0) return null;
+  return indices[Math.max(1, Math.min(indices.length, oneBased)) - 1];
 }
 
 export function useImageNav() {
-  const total = useStore((s) => s.gui.dataset.image_list.length);
+  const imageList = useStore((s) => s.gui.dataset.image_list);
   const currentIndex = useStore((s) => s.gui.dataset.current_image_index);
+  const states = useStore((s) => s.annotateUi.imageStates);
+  const filter = useStore((s) => s.annotateUi.imageFilter);
   const patchGui = useStore((s) => s.patchGui);
+  const indices = useMemo(
+    () => filteredIndices(imageList, states, filter),
+    [imageList, states, filter],
+  );
 
   const goTo = useCallback(
     (index: number | null) => {
@@ -50,23 +62,25 @@ export function useImageNav() {
   );
 
   const stepImage = useCallback(
-    (delta: number) => goTo(stepTarget(total, currentIndex, delta)),
-    [total, currentIndex, goTo],
+    (delta: number) => goTo(stepTarget(indices, currentIndex, delta)),
+    [indices, currentIndex, goTo],
   );
 
   const jumpToPosition = useCallback(
-    (oneBased: number) => goTo(jumpTarget(total, oneBased)),
-    [total, goTo],
+    (oneBased: number) => goTo(jumpTarget(indices, oneBased)),
+    [indices, goTo],
   );
 
-  const position = total > 0 ? currentIndex + 1 : 0;
+  const total = indices.length;
+  // 0 when the image in view is one the filter drops.
+  const position = indices.indexOf(currentIndex) + 1;
 
   return {
     total,
     position,
     stepImage,
     jumpToPosition,
-    canPrev: total > 0 && position > 1,
-    canNext: total > 0 && position < total,
+    canPrev: stepTarget(indices, currentIndex, -1) !== null,
+    canNext: stepTarget(indices, currentIndex, 1) !== null,
   };
 }

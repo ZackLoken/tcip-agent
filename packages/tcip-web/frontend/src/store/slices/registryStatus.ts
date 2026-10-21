@@ -3,7 +3,9 @@ import type { StateCreator } from "zustand";
 import { setSubjectColorRegistry } from "@/api/subjects";
 import type { AttributeDef, Registry } from "@/api/subjects";
 import type { ImageEventPayload, SessionRef } from "@/api/types.generated";
+import type { ImageFilter } from "@/lib/imageFilter";
 import type { AppState } from "@/store/appState";
+import type { SubjectState } from "@/store/types";
 
 interface RegistryState {
   /** The dataset's nested subject registry (subject -> {description?, attributes?}), by name:
@@ -44,6 +46,11 @@ interface AnnotateUiState {
   /** Active vertex drag: [polygonIdx, ringIdx, vertexIdx]; a vertex belongs to one ring of one
    *  polygon. */
   draggingVertex: [number, number, number] | null;
+  /** What each image's label document says about the dataset subject, by image name, as last
+   *  read for the selection; an image's entry follows its own load or save. */
+  imageStates: Record<string, SubjectState>;
+  /** Which images the image stepper steps through. */
+  imageFilter: ImageFilter;
 }
 
 interface SessionTrackingState {
@@ -111,6 +118,11 @@ export interface RegistryStatusSlice {
   clearPrompts: () => void;
   setHoveredPolygon: (idx: number | null) => void;
   setDraggingVertex: (v: [number, number, number] | null) => void;
+  /** Replace every image's state with what the backend read for the selection. */
+  setImageStates: (states: Record<string, SubjectState>) => void;
+  /** Record one image's state as its loaded or saved document says it. */
+  setImageState: (imageName: string, state: SubjectState) => void;
+  setImageFilter: (filter: ImageFilter) => void;
 
   /** Per-image session telemetry helpers. A visit opens under the current person and project;
    *  closing it holds its contribution when a project was named, naming the recorded session
@@ -217,6 +229,8 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
     pendingPrompts: NO_PROMPTS,
     hoveredPolygonIdx: null,
     draggingVertex: null,
+    imageStates: {},
+    imageFilter: "all",
   },
   sessionTracking: EMPTY_SESSION_TRACKING,
   heldContributions: [],
@@ -302,6 +316,15 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
       },
     })),
   clearPrompts: () => set((s) => ({ annotateUi: { ...s.annotateUi, pendingPrompts: NO_PROMPTS } })),
+  setImageStates: (imageStates) => set((s) => ({ annotateUi: { ...s.annotateUi, imageStates } })),
+  setImageState: (imageName, state) =>
+    set((s) => ({
+      annotateUi: {
+        ...s.annotateUi,
+        imageStates: { ...s.annotateUi.imageStates, [imageName]: state },
+      },
+    })),
+  setImageFilter: (imageFilter) => set((s) => ({ annotateUi: { ...s.annotateUi, imageFilter } })),
   setHoveredPolygon: (hoveredPolygonIdx) =>
     set((s) => ({ annotateUi: { ...s.annotateUi, hoveredPolygonIdx } })),
   setDraggingVertex: (draggingVertex) =>
