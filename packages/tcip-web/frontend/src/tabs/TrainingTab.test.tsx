@@ -188,16 +188,17 @@ describe("TrainingTab run list", () => {
     expect(screen.queryByText(/best.*0\.500/)).not.toBeInTheDocument();
   });
 
-  it("states how the run list is ordered", async () => {
-    listing([run({ experiment_id: "train-a" })]);
+  it("says No runs. for an empty listing and no ordering sentence for a filled one", async () => {
+    const listRuns = listing([]);
 
     render(<TrainingTab />);
+    expect(await screen.findByText("No runs.")).toBeInTheDocument();
+
+    cleanup();
+    listRuns.mockResolvedValue({ runs: [run({ experiment_id: "train-a" })], sweeps: [] });
+    render(<TrainingTab />);
     expect(await screen.findByText("train-a")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Every recorded run, sorted by experiment id, then every sweep with its trials.",
-      ),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/sorted by experiment id/)).not.toBeInTheDocument();
   });
 
   it("names the row's own select control with the id and state", async () => {
@@ -391,7 +392,23 @@ describe("TrainingTab run launcher mark", () => {
 
     const describedBy = button.getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
-    expect(document.getElementById(describedBy as string)).toHaveTextContent("claude-code 2.1.238");
+    expect(document.getElementById(describedBy as string)).toHaveTextContent(
+      "Launched by the agent claude-code 2.1.238.",
+    );
+  });
+
+  it("describes a launch with no agent identity in one sentence", async () => {
+    listing([run({ experiment_id: "train-undeclared-desc", launch: {} })]);
+
+    render(<TrainingTab />);
+    const button = await screen.findByRole("button", {
+      name: "train-undeclared-desc running, started with no agent declared",
+    });
+
+    const describedBy = button.getAttribute("aria-describedby");
+    expect(document.getElementById(describedBy as string)).toHaveTextContent(
+      "Launched with no agent named.",
+    );
   });
 
   it("makes a missing launch event's explanation reachable by assistive technology", async () => {
@@ -405,7 +422,7 @@ describe("TrainingTab run launcher mark", () => {
     const describedBy = button.getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
     expect(document.getElementById(describedBy as string)).toHaveTextContent(
-      "No launch event in this project's audit log names this run.",
+      "No launch event names this run.",
     );
   });
 });
@@ -581,12 +598,13 @@ describe("TrainingTab epoch table", () => {
     expect(within(rows[2]).getByText(UNSET_GLYPH)).toBeInTheDocument();
   });
 
-  it("gives a bookkeeping field or a non-finite state companion no column", async () => {
+  it("gives a bookkeeping field or a non-finite state companion no column, and spells a key's underscores as spaces", async () => {
     listing([run({ experiment_id: "train-bookkeeping" })]);
     streamFrames(
       metricFrame({
         epoch: 1,
         loss: 0.5,
+        val_map50: 0.4,
         [`loss${NOT_FINITE_SUFFIX}`]: "nan",
         timestamp: "2026-01-01T00:00:00Z",
       }),
@@ -598,7 +616,7 @@ describe("TrainingTab epoch table", () => {
     const headers = within(await screen.findByRole("table"))
       .getAllByRole("columnheader")
       .map((h) => h.textContent);
-    expect(headers).toEqual(["epoch", "loss"]);
+    expect(headers).toEqual(["epoch", "loss", "val map50"]);
   });
 
   it("shows the latest batch row as the in-progress epoch's line, with no column of its own", async () => {
@@ -916,15 +934,11 @@ describe("TrainingTab launch picker", () => {
     expect(
       await within(picker).findByText("Could not load training runs: network error"),
     ).toBeInTheDocument();
-    expect(
-      within(picker).queryByText("No run or sweep exists in this project yet."),
-    ).not.toBeInTheDocument();
+    expect(within(picker).queryByText("No runs.")).not.toBeInTheDocument();
 
     fireEvent.click(within(picker).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(listRuns).toHaveBeenCalledTimes(2));
-    expect(
-      await within(picker).findByText("No run or sweep exists in this project yet."),
-    ).toBeInTheDocument();
+    expect(await within(picker).findByText("No runs.")).toBeInTheDocument();
   });
 });
 
