@@ -15,7 +15,7 @@ dependencies = [
     "scipy",
     # sklearn.metrics.metric_at_thresholds (added in 1.9), read by the mask threshold derivation.
     "scikit-learn>=1.9",
-    "pillow>=9.0",
+    "pillow>=13.0",
     "tifffile>=2023.1",
     "imagecodecs>=2023.1",
     # Bundles its own GDAL and ships wheels for every supported platform, so no osgeo binding.
