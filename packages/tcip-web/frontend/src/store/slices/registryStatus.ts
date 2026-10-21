@@ -101,6 +101,8 @@ export interface RegistryStatusSlice {
   setPrompt: (v: boolean) => void;
   addPromptPoint: (point: [number, number]) => void;
   addPromptBox: (box: [number, number, number, number]) => void;
+  removePromptPoint: (index: number) => void;
+  removePromptBox: (index: number) => void;
   clearPrompts: () => void;
   setHoveredPolygon: (idx: number | null) => void;
   setDraggingVertex: (v: [number, number, number] | null) => void;
@@ -257,6 +259,26 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
         pendingPrompts: {
           ...s.annotateUi.pendingPrompts,
           boxes: [...s.annotateUi.pendingPrompts.boxes, box],
+        },
+      },
+    })),
+  removePromptPoint: (index) =>
+    set((s) => ({
+      annotateUi: {
+        ...s.annotateUi,
+        pendingPrompts: {
+          ...s.annotateUi.pendingPrompts,
+          points: s.annotateUi.pendingPrompts.points.filter((_, i) => i !== index),
+        },
+      },
+    })),
+  removePromptBox: (index) =>
+    set((s) => ({
+      annotateUi: {
+        ...s.annotateUi,
+        pendingPrompts: {
+          ...s.annotateUi.pendingPrompts,
+          boxes: s.annotateUi.pendingPrompts.boxes.filter((_, i) => i !== index),
         },
       },
     })),
