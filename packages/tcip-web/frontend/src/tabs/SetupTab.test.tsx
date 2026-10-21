@@ -45,7 +45,8 @@ describe("SetupTab capture invariances", () => {
         expect(screen.getByLabelText(ROTATION)).toHaveValue(value);
       }
     }
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   });
 
   it("posts the whole block with the person's name and names what changed", async () => {
