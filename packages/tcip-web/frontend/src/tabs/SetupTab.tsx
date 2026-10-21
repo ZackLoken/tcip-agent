@@ -310,7 +310,7 @@ function InvariancesPanel({ projectId }: { projectId: string }) {
         onClick={() => void correct(draft)}
         disabled={unchanged || submitting}
       >
-        {submitting ? "Saving…" : "Save"}
+        {submitting ? "Saving…" : unchanged ? "Saved" : "Save"}
       </button>
       {problem && (
         <div className="mt-2 tcip-problem" aria-live="polite">
