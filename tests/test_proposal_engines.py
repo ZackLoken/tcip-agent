@@ -938,8 +938,12 @@ def _cache_without_weights(repo_id: str, cache: Path) -> Path:
     import shutil
 
     from huggingface_hub import scan_cache_dir
+    from huggingface_hub.errors import CacheNotFound
 
-    repos = [r for r in scan_cache_dir().repos if r.repo_id == repo_id]
+    try:
+        repos = [r for r in scan_cache_dir().repos if r.repo_id == repo_id]
+    except CacheNotFound:
+        repos = []
     if not repos:
         pytest.skip(f"{repo_id} is not in the Hugging Face cache")
     [repo] = repos
