@@ -95,15 +95,21 @@ export interface SegmenterPrompt {
   boxes?: [number, number, number, number][];
 }
 
-export interface PhrasePrompt {
-  phrase: string;
-}
-
 export interface ProposePayload {
   image_path: string;
   subject: string;
   user: string;
-  prompt: SegmenterPrompt | PhrasePrompt;
+  prompt: SegmenterPrompt;
+}
+
+export interface FindPayload {
+  image_path: string;
+  phrase: string;
+  user: string;
+}
+
+export interface FindAnswer {
+  boxes: [number, number, number, number][];
 }
 
 export interface ProposeAnswer {
