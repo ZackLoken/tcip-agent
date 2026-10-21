@@ -1277,6 +1277,18 @@ describe("AnnotateTab legend keyboard access", () => {
 });
 
 describe("AnnotateTab ioError banner", () => {
+  it("names why the labels failed to load", async () => {
+    loadSpy.mockRejectedValueOnce(new Error("label document will not decode"));
+
+    render(<AnnotateTab />);
+
+    expect(
+      await screen.findByText(
+        "Could not load this image's labels: label document will not decode. Saving is off.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("can be dismissed manually, independent of the conditional Reload button", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -3157,7 +3169,7 @@ describe("AnnotateTab engine prompt", () => {
     expect(useStore.getState().toasts.at(-1)?.message).toBe('Nothing found for "open bud".');
   });
 
-  it("selects the answered bucket on the current selection, shows its proposals, says how many, switches the tool to the first proposal's shape and focuses it", async () => {
+  it("shows the answered proposals under their shape's tool and focuses the first", async () => {
     const { select, proposals } = await mountArmed("point");
     proposals.mockResolvedValue({
       bucket: BUCKET,
