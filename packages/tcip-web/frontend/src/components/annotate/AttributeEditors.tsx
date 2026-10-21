@@ -38,7 +38,7 @@ export function AttributeEditors({
                 {name}
               </span>
               <select
-                className="tcip-select flex-1 text-[11px]"
+                className="tcip-select flex-1 text-[13px]"
                 value={attributes[name] ?? ""}
                 onChange={(e) => onChange(name, e.target.value)}
               >
@@ -70,14 +70,14 @@ export function AttributeEditors({
           {addingValueFor === name && (
             <div className="mt-1 flex items-center gap-1.5 pl-[5.5rem]">
               <input
-                className="tcip-input flex-1 text-[11px]"
+                className="tcip-input flex-1 text-[13px]"
                 placeholder="new value name"
                 value={valueDraft}
                 onChange={(e) => setValueDraft(e.target.value)}
               />
               <button
                 type="button"
-                className="tcip-btn text-[11px]"
+                className="tcip-btn text-[13px]"
                 disabled={!valueDraft.trim()}
                 onClick={() => {
                   onAddValue?.(name, valueDraft.trim());

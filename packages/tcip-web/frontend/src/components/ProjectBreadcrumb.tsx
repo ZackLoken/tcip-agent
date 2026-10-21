@@ -206,9 +206,7 @@ export function ProjectBreadcrumb() {
 function Dropdown({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="absolute bottom-full right-0 z-30 mb-2 max-h-80 w-64 overflow-auto rounded-md border border-tcip-border bg-tcip-panel p-1.5 shadow-lg">
-      <div className="px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-tcip-muted">
-        {title}
-      </div>
+      <div className="px-1.5 py-1 tcip-label">{title}</div>
       {children}
     </div>
   );
@@ -236,7 +234,7 @@ function MenuButton({
         {active ? "● " : ""}
         {label}
       </span>
-      {sub && <span className="block truncate text-[10px] text-tcip-muted">{sub}</span>}
+      {sub && <span className="block truncate text-[12px] text-tcip-muted">{sub}</span>}
     </button>
   );
 }

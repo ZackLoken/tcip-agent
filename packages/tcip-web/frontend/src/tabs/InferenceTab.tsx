@@ -71,21 +71,21 @@ function RefusedLaunchEntry({
 }) {
   const { refusal, date } = entry;
   return (
-    <li className="border border-tcip-border rounded p-2 flex flex-col gap-1 text-[11px]">
+    <li className="border border-tcip-border rounded p-2 flex flex-col gap-1 text-[13px]">
       <p>
         {date}: job {refusal.job_id} is still writing the bucket{" "}
         <span className="font-mono">{refusal.requested_bucket}</span>. A bucket is published once,
         so nothing was launched; name another bucket to publish this run.
       </p>
       <button
-        className="tcip-btn text-[11px] self-start"
+        className="tcip-btn text-[13px] self-start"
         aria-label={`Watch job ${refusal.job_id} for ${date}`}
         onClick={() => onWatch(refusal)}
       >
         {`Watch job ${refusal.job_id}`}
       </button>
       <button
-        className="tcip-btn text-[11px] self-start"
+        className="tcip-btn text-[13px] self-start"
         aria-label={`Dismiss refusal for ${date}`}
         onClick={() => onDismiss(date)}
       >
@@ -97,7 +97,7 @@ function RefusedLaunchEntry({
 
 function statusBadgeClass(status: InferenceStatus): string {
   if (status === "completed") return "bg-tcip-tp/20 text-tcip-tp";
-  if (status === "failed" || status === "canceled") return "bg-tcip-fp/20 text-tcip-fp";
+  if (status === "failed" || status === "canceled") return "bg-tcip-fp/20 tcip-problem";
   return "bg-tcip-fn/20 text-tcip-fn"; // pending / running
 }
 
@@ -395,9 +395,9 @@ export function InferenceTab() {
           Model checkpoint
         </label>
         {modelsError && (
-          <div className="text-[11px] text-tcip-fp mb-1">
+          <div className="text-[13px] tcip-problem mb-1">
             {modelsError}{" "}
-            <button className="tcip-btn text-[11px] ml-1" onClick={refreshModels}>
+            <button className="tcip-btn text-[13px] ml-1" onClick={refreshModels}>
               Retry
             </button>
           </div>
@@ -422,7 +422,7 @@ export function InferenceTab() {
         ) : (
           !modelsError &&
           projectRoot && (
-            <p className="text-[11px] text-tcip-muted mb-3">
+            <p className="text-[13px] text-tcip-muted mb-3">
               No model is registered for this project yet. Train one, or ask the agent in the
               terminal to register a checkpoint, and it will appear here.
             </p>
@@ -431,20 +431,20 @@ export function InferenceTab() {
 
         <div className="tcip-label mb-1">Capture dates</div>
         {datesError && (
-          <div className="text-[11px] text-tcip-fp mb-1">
+          <div className="text-[13px] tcip-problem mb-1">
             {datesError}{" "}
-            <button className="tcip-btn text-[11px] ml-1" onClick={refreshDates}>
+            <button className="tcip-btn text-[13px] ml-1" onClick={refreshDates}>
               Retry
             </button>
           </div>
         )}
         {!datasetRoot ? (
-          <p className="text-[11px] text-tcip-muted mb-3">
+          <p className="text-[13px] text-tcip-muted mb-3">
             No project is open. Open one from the top bar to choose which dates to run on.
           </p>
         ) : dates.length === 0 ? (
           !datesError && (
-            <p className="text-[11px] text-tcip-muted mb-3">
+            <p className="text-[13px] text-tcip-muted mb-3">
               This dataset has no capture dates yet. Ingest images (or ask the agent in the terminal
               to) before running inference.
             </p>
@@ -452,7 +452,7 @@ export function InferenceTab() {
         ) : (
           <div className="mb-3 max-h-48 overflow-auto border border-tcip-border rounded p-2 flex flex-col gap-1">
             {dates.map((d) => (
-              <label key={d} className="flex items-center gap-2 text-[12px]">
+              <label key={d} className="flex items-center gap-2 text-[13px]">
                 <input
                   type="checkbox"
                   checked={selectedDates.includes(d)}
@@ -545,7 +545,7 @@ export function InferenceTab() {
           placeholder="the reason this run states the values above"
         />
 
-        <p className="text-[11px] text-tcip-muted mb-3">
+        <p className="text-[13px] text-tcip-muted mb-3">
           Every execution value (conf, object density, tiling, cross-tile merge) is the named
           assessment&apos;s own. Without one, a detector&apos;s run states its conf above, an
           instance segmentation run whether it collects masks and, when it does, the threshold it
@@ -586,17 +586,17 @@ export function InferenceTab() {
       <div className="p-4 overflow-auto">
         <div className="tcip-heading mb-3">Jobs</div>
         {jobsError && (
-          <div className="text-[11px] text-tcip-fp mb-2">
+          <div className="text-[13px] tcip-problem mb-2">
             {jobsError}{" "}
-            <button className="tcip-btn text-[11px] ml-1" onClick={() => void refreshJobs()}>
+            <button className="tcip-btn text-[13px] ml-1" onClick={() => void refreshJobs()}>
               Retry
             </button>
           </div>
         )}
         {jobs.length === 0 ? (
-          !jobsError && <div className="text-[11px] text-tcip-muted">No jobs yet.</div>
+          !jobsError && <div className="text-[13px] text-tcip-muted">No jobs yet.</div>
         ) : (
-          <table className="w-full text-[11px]">
+          <table className="w-full text-[13px]">
             <thead>
               <tr className="border-b border-tcip-border">
                 <th className="tcip-th">Job</th>
@@ -630,7 +630,7 @@ export function InferenceTab() {
                   <td>
                     <div className="flex gap-1">
                       <button
-                        className="tcip-btn text-[11px]"
+                        className="tcip-btn text-[13px]"
                         onClick={() => {
                           setActiveJob(j);
                           setActiveJobListed(true);
@@ -640,7 +640,7 @@ export function InferenceTab() {
                       </button>
                       {CANCELLABLE.has(j.status) && (
                         <button
-                          className="tcip-btn text-[11px]"
+                          className="tcip-btn text-[13px]"
                           onClick={() => void onCancel(j.job_id)}
                         >
                           Cancel
@@ -657,18 +657,18 @@ export function InferenceTab() {
           <div className="mt-4 tcip-panel p-4">
             <div className="mb-1 flex items-center gap-2">
               <span className="tcip-heading">Active</span>
-              <span className="font-mono text-[12px]">{activeJob.job_id}</span>
+              <span className="font-mono text-[13px]">{activeJob.job_id}</span>
             </div>
-            <div className="text-[11px] text-tcip-muted">
+            <div className="text-[13px] text-tcip-muted">
               Bucket: <span className="font-mono">{activeJob.bucket}</span>
             </div>
             {activeJobListed && (
-              <div className="text-[11px] mt-1 tabular-nums">
+              <div className="text-[13px] mt-1 tabular-nums">
                 Status: {activeJob.status} · {activeJob.done} / {activeJob.total}
               </div>
             )}
             {activeJob.error && (
-              <div className="text-[11px] text-tcip-fp mt-1">Error: {activeJob.error}</div>
+              <div className="text-[13px] tcip-problem mt-1">Error: {activeJob.error}</div>
             )}
           </div>
         )}

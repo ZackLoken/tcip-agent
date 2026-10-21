@@ -133,7 +133,7 @@ export function SeasonRail({ dates, active, className, showLabels }: SeasonRailP
         </div>
       )}
       {undated > 0 && (
-        <span className="text-[10px] text-tcip-muted whitespace-nowrap">
+        <span className="text-[12px] text-tcip-muted whitespace-nowrap">
           <span className="inline-block h-2 w-2 rounded-full bg-tcip-muted/60 align-middle mr-1" />
           {undated} undated
         </span>

@@ -38,7 +38,7 @@ export function FlagPanel({
       <div
         role="dialog"
         aria-label={`Flags on ${target}`}
-        className="absolute right-0 top-full z-30 mt-1 w-80 rounded-md border border-tcip-border-hover bg-tcip-panel p-3 text-[12px] shadow-lg"
+        className="absolute right-0 top-full z-30 mt-1 w-80 rounded-md border border-tcip-border-hover bg-tcip-panel p-3 text-[13px] shadow-lg"
       >
         <div className="mb-2 flex items-center justify-between">
           <h4 className="font-semibold text-tcip-fg">Flags on {target}</h4>
@@ -56,13 +56,13 @@ export function FlagPanel({
           {flags.map((flag) => (
             <li key={flag.id} className="rounded border border-tcip-border p-2">
               <p className="text-tcip-fg">{flag.text}</p>
-              <p className="mb-1.5 text-[11px] text-tcip-muted">
+              <p className="mb-1.5 text-[13px] text-tcip-muted">
                 {flag.by}, {flag.at.slice(0, 10)}
               </p>
               <div className="flex gap-1.5">
                 <input
                   aria-label={`Reply to "${flag.text}"`}
-                  className="tcip-input h-7 flex-1 text-[11px]"
+                  className="tcip-input h-7 flex-1 text-[13px]"
                   placeholder="reply (optional)"
                   value={replies[flag.id] ?? ""}
                   onChange={(e) => setReplies({ ...replies, [flag.id]: e.target.value })}
@@ -72,7 +72,7 @@ export function FlagPanel({
                 />
                 <button
                   type="button"
-                  className="tcip-btn h-7 text-[11px]"
+                  className="tcip-btn h-7 text-[13px]"
                   onClick={() => onResolve(flag.id, (replies[flag.id] ?? "").trim())}
                 >
                   Resolve
@@ -84,7 +84,7 @@ export function FlagPanel({
         <div className="flex gap-1.5">
           <input
             aria-label="New flag comment"
-            className="tcip-input h-7 flex-1 text-[11px]"
+            className="tcip-input h-7 flex-1 text-[13px]"
             placeholder="what needs a second look?"
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -94,7 +94,7 @@ export function FlagPanel({
           />
           <button
             type="button"
-            className="tcip-btn-primary h-7 text-[11px]"
+            className="tcip-btn-primary h-7 text-[13px]"
             disabled={!text.trim()}
             onClick={() => void raise()}
           >

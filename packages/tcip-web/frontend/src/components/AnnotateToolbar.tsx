@@ -45,7 +45,7 @@ function Etool({
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`flex h-7 items-center gap-2 rounded border px-3 text-[12px] transition-colors disabled:opacity-40 ${
+      className={`flex h-7 items-center gap-2 rounded border px-3 text-[13px] transition-colors disabled:opacity-40 ${
         pressed
           ? "border-tcip-accent/55 bg-tcip-accent/20 text-tcip-fg"
           : "border-tcip-border bg-tcip-bg text-tcip-muted hover:border-tcip-border-hover hover:text-tcip-fg"
@@ -173,7 +173,7 @@ export function AnnotateToolbar({
             aria-pressed={mode === "point"}
             onClick={() => setMode("point")}
             title="Point: click to place one keypoint or landmark, drag it to move, right-click to remove"
-            className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
+            className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[13px] font-semibold transition-colors ${
               mode === "point" ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
             }`}
           >
@@ -194,7 +194,7 @@ export function AnnotateToolbar({
             aria-pressed={mode === "box"}
             onClick={() => setMode("box")}
             title="Box: drag a rectangle, release to draw"
-            className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
+            className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[13px] font-semibold transition-colors ${
               mode === "box" ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
             }`}
           >
@@ -215,7 +215,7 @@ export function AnnotateToolbar({
             aria-pressed={mode === "polygon"}
             onClick={() => setMode("polygon")}
             title="Polygon: click to lay vertices, double-click to close"
-            className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
+            className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[13px] font-semibold transition-colors ${
               mode === "polygon"
                 ? "bg-tcip-accent text-white"
                 : "text-tcip-muted hover:text-tcip-fg"
@@ -241,7 +241,7 @@ export function AnnotateToolbar({
             type="button"
             onClick={() => setSubjectMenuOpen((o) => !o)}
             aria-expanded={subjectMenuOpen}
-            className="flex h-[30px] items-center gap-2 rounded border border-tcip-border bg-tcip-bg px-2.5 text-[12px] text-tcip-fg hover:border-tcip-border-hover"
+            className="flex h-[30px] items-center gap-2 rounded border border-tcip-border bg-tcip-bg px-2.5 text-[13px] text-tcip-fg hover:border-tcip-border-hover"
           >
             <span
               className="h-2.5 w-2.5 rounded-xs"
@@ -268,7 +268,7 @@ export function AnnotateToolbar({
                 className="fixed inset-0 z-10"
                 onClick={() => setSubjectMenuOpen(false)}
               />
-              <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-md border border-tcip-border bg-tcip-panel py-1 text-[12px] shadow-lg">
+              <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-md border border-tcip-border bg-tcip-panel py-1 text-[13px] shadow-lg">
                 {subjectNames.map((name) => (
                   <div key={name} className="flex items-center gap-2 px-2 hover:bg-tcip-hover">
                     <span
@@ -313,7 +313,7 @@ export function AnnotateToolbar({
           type="button"
           onClick={toggleEditor}
           aria-expanded={editorOpen}
-          className={`flex h-[30px] items-center gap-2 rounded border px-3 text-[12px] font-semibold transition-colors ${
+          className={`flex h-[30px] items-center gap-2 rounded border px-3 text-[13px] font-semibold transition-colors ${
             editorOpen
               ? "border-tcip-border bg-tcip-hover text-tcip-fg"
               : "border-tcip-border bg-tcip-bg text-tcip-muted hover:border-tcip-border-hover hover:text-tcip-fg"
@@ -340,7 +340,7 @@ export function AnnotateToolbar({
         {onCompleteView && (
           <button
             type="button"
-            className="tcip-btn text-[11px]"
+            className="tcip-btn text-[13px]"
             onClick={onCompleteView}
             disabled={!dataset.subject || subjectState === null}
             title={`Mark every ${dataset.subject ?? "subject"} instance in view annotated`}
@@ -350,7 +350,7 @@ export function AnnotateToolbar({
         )}
 
         <label
-          className="flex items-center gap-1.5 text-[12px]"
+          className="flex items-center gap-1.5 text-[13px]"
           title={
             !dataset.subject
               ? "Select a subject before marking Complete."
@@ -424,18 +424,18 @@ export function AnnotateToolbar({
             )}
           <div className="flex-1" />
           <div className="flex items-center gap-2">
-            <button className="tcip-btn text-[12px]" onClick={() => undo()} title="Undo (Ctrl+Z)">
+            <button className="tcip-btn text-[13px]" onClick={() => undo()} title="Undo (Ctrl+Z)">
               ↶&nbsp;&nbsp;Undo
             </button>
             <button
-              className="tcip-btn text-[12px]"
+              className="tcip-btn text-[13px]"
               onClick={() => redo()}
               title="Redo (Ctrl+Shift+Z)"
             >
               ↷&nbsp;&nbsp;Redo
             </button>
             <button
-              className={dirty ? "tcip-btn-primary text-[12px]" : "tcip-btn text-[12px]"}
+              className={dirty ? "tcip-btn-primary text-[13px]" : "tcip-btn text-[13px]"}
               onClick={saving ? onCancelSave : onSave}
               disabled={saveDisabled && !saving}
               title={

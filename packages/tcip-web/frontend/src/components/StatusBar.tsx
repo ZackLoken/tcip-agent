@@ -57,7 +57,7 @@ export function StatusBar() {
     agentActivity && typeof agentActivity.data.stem === "string" ? agentActivity.data.stem : null;
 
   return (
-    <div className="h-statusbar flex items-center gap-4 px-3 border-t border-tcip-border bg-tcip-panel text-[11px] text-tcip-muted shrink-0">
+    <div className="h-statusbar flex items-center gap-4 px-3 border-t border-tcip-border bg-tcip-panel text-[12px] text-tcip-muted shrink-0">
       <span className="tabular-nums">Zoom: {(view.scale * 100).toFixed(0)}%</span>
       {activeTab === "annotate" && sessionTracking.currentImageName ? (
         <span className="tabular-nums">Image time: {fmtSeconds(imageSeconds)}</span>

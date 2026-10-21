@@ -466,7 +466,7 @@ export function CanvasStage(props: CanvasStageProps) {
           className="absolute inset-0 flex items-center justify-center pointer-events-none p-4"
           data-testid="overview-building"
         >
-          <div className="max-w-sm rounded-md border border-tcip-border bg-tcip-panel/95 px-4 py-3 text-center text-[12px] text-tcip-fg">
+          <div className="max-w-sm rounded-md border border-tcip-border bg-tcip-panel/95 px-4 py-3 text-center text-[13px] text-tcip-fg">
             <p className="font-semibold">Preparing this image for display</p>
             <p className="mt-1 text-tcip-muted">
               It is larger than the server serves in one read, so a reduced-resolution copy is being
@@ -478,7 +478,7 @@ export function CanvasStage(props: CanvasStageProps) {
       )}
       {imgError && !overview.building && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4">
-          <div className="max-w-sm rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-4 py-3 text-center text-[12px] text-tcip-fp">
+          <div className="max-w-sm rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-4 py-3 text-center text-[13px] tcip-problem">
             {overview.error ? (
               <>Could not prepare this image for display: {overview.error}</>
             ) : (

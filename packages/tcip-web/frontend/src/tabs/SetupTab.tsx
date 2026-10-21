@@ -187,11 +187,11 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
           >
             {building ? "Building…" : "Build + save mapping"}
           </button>
-          {buildMsg && <div className="text-[11px] text-tcip-muted">{buildMsg}</div>}
+          {buildMsg && <div className="text-[13px] text-tcip-muted">{buildMsg}</div>}
         </div>
       </div>
       {buildSummary && (
-        <div className="mt-2 text-[11px] text-tcip-muted tabular-nums">
+        <div className="mt-2 text-[13px] text-tcip-muted tabular-nums">
           {Object.entries(buildSummary.per_date).map(([d, s]) => (
             <div key={d}>
               {`${d}: mapped ${s.n_mapped} of ${s.n_images}, ${s.n_unattributed} attributed to no plant · avg ${s.avg_distance_m === null ? "no distances" : `${s.avg_distance_m.toFixed(1)} m`}${d in buildRadius ? ` · ${radiusPhrase(buildRadius[d])}` : ""}`}
@@ -242,7 +242,7 @@ function InvariancesPanel({ projectId }: { projectId: string }) {
 
   if (!recorded || !draft) {
     return problem ? (
-      <div className="tcip-panel p-4 text-[11px] text-tcip-fp">{problem}</div>
+      <div className="tcip-panel p-4 text-[13px] tcip-problem">{problem}</div>
     ) : null;
   }
   const answers = Object.entries(draft) as Answer[];
@@ -274,7 +274,7 @@ function InvariancesPanel({ projectId }: { projectId: string }) {
   return (
     <div className="tcip-panel p-4">
       <div className="tcip-heading mb-1">Capture invariances</div>
-      <p className="mb-3 text-[11px] text-tcip-muted">
+      <p className="mb-3 text-[13px] text-tcip-muted">
         Whether each transform of an image leaves the trait&apos;s measurement what it was; every
         augmentation a training run states is judged against these answers.
       </p>
@@ -321,7 +321,7 @@ function InvariancesPanel({ projectId }: { projectId: string }) {
         {submitting ? "Correcting…" : "Correct invariances"}
       </button>
       {problem && (
-        <div className="mt-2 text-[11px] text-tcip-fp" aria-live="polite">
+        <div className="mt-2 text-[13px] tcip-problem" aria-live="polite">
           {problem}
         </div>
       )}

@@ -459,14 +459,14 @@ export function TerminalRail() {
       </div>
       <div className="h-9 shrink-0 flex items-center justify-between px-3 border-b border-tcip-border bg-tcip-panel">
         <div className="flex items-center gap-2">
-          <span className="tcip-eyebrow">TCIP Agent</span>
+          <span className="text-[12px] font-medium text-tcip-muted">TCIP Agent</span>
           {table?.rows && (
             <select
               aria-label="Agent harness"
               title="The agent harness this terminal runs; changing it restarts the agent"
               value={row?.id ?? ""}
               onChange={(e) => choose(e.target.value)}
-              className="h-6 max-w-[11rem] rounded border border-tcip-border bg-tcip-panel px-1 text-[11px] text-tcip-fg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
+              className="h-6 max-w-[11rem] rounded border border-tcip-border bg-tcip-panel px-1 text-[13px] text-tcip-fg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
             >
               {table.rows.map((r) => (
                 <option
@@ -534,7 +534,7 @@ export function TerminalRail() {
 
       {table !== null && reason !== null ? (
         <div className="p-4 flex flex-col gap-3">
-          <p className="text-[12px] text-tcip-muted">{reason}</p>
+          <p className="text-[13px] text-tcip-muted">{reason}</p>
           <button className="tcip-btn self-start" onClick={() => setTable(null)}>
             Retry
           </button>
@@ -545,7 +545,7 @@ export function TerminalRail() {
             <div
               data-testid="terminal-delivery-unverified"
               role="alert"
-              className="shrink-0 px-3 py-2 border-b border-tcip-border bg-tcip-panel text-[11px] text-tcip-fp"
+              className="shrink-0 px-3 py-2 border-b border-tcip-border bg-tcip-panel text-[13px] tcip-problem"
             >
               {deliveryUnverified}
             </div>
@@ -553,7 +553,7 @@ export function TerminalRail() {
           {ritual && (
             <div
               data-testid="terminal-ritual"
-              className="shrink-0 px-3 py-2 border-b border-tcip-border bg-tcip-panel text-[11px] text-tcip-muted"
+              className="shrink-0 px-3 py-2 border-b border-tcip-border bg-tcip-panel text-[13px] text-tcip-muted"
             >
               {ritual}
             </div>
@@ -561,7 +561,7 @@ export function TerminalRail() {
           <div className="flex-1 min-h-0 relative">
             <div ref={hostRef} data-testid="terminal-host" className="absolute inset-0 p-2" />
             {error && (
-              <div className="absolute bottom-2 left-2 right-2 text-[11px] text-tcip-fp bg-tcip-panel/90 border border-tcip-border rounded p-2">
+              <div className="absolute bottom-2 left-2 right-2 text-[13px] tcip-problem bg-tcip-panel/90 border border-tcip-border rounded p-2">
                 {error}
               </div>
             )}

@@ -129,12 +129,12 @@ function runLaunchRow(
     key: run.experiment_id,
     content: (
       <>
-        <span className="block font-mono text-[11px]">{run.experiment_id}</span>
-        <span className="block text-[10px] text-tcip-muted">
+        <span className="block font-mono text-[13px]">{run.experiment_id}</span>
+        <span className="block text-[12px] text-tcip-muted">
           {run.builder} · {run.task}
           {run.sweep ? ` · trial of ${run.sweep}` : ""}
         </span>
-        <span className="block text-[10px] text-tcip-muted">
+        <span className="block text-[12px] text-tcip-muted">
           {new Date(run.created).toLocaleString()} · {run.state}
           {run.relaunched_from ? ` · from ${run.relaunched_from}` : ""}
         </span>
@@ -156,8 +156,8 @@ function sweepLaunchRow(sweep: SweepGroup, onStart: () => Promise<void>): Launch
     key: sweep.sweep_id,
     content: (
       <>
-        <span className="block font-mono text-[11px]">{sweep.sweep_id}</span>
-        <span className="block text-[10px] text-tcip-muted">
+        <span className="block font-mono text-[13px]">{sweep.sweep_id}</span>
+        <span className="block text-[12px] text-tcip-muted">
           sweep of {String(sweep.input.n_trials)} trials · {String(sweep.input.search_alg)} ·{" "}
           {sweep.state}
         </span>
@@ -204,8 +204,8 @@ function RunItem({
         className="flex-1 min-w-0 text-left"
         onClick={onSelect}
       >
-        <div className="font-mono text-[11px]">{id}</div>
-        <div className="text-[10px] text-tcip-muted flex justify-between">
+        <div className="font-mono text-[13px]">{id}</div>
+        <div className="text-[12px] text-tcip-muted flex justify-between">
           <span>
             {stateLine(run.state, run.heartbeat)}
             <span title={launcherDescription(run.launch)}>
@@ -232,7 +232,7 @@ function RunItem({
             type="button"
             aria-pressed={marked}
             aria-label={`Compare ${id}`}
-            className={`px-2 py-1 text-[10px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
+            className={`px-2 py-1 text-[12px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
               marked ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
             }`}
             onClick={onToggleMarked}
@@ -274,7 +274,7 @@ function CancelButton({
       aria-label={`Cancel ${id}`}
       aria-describedby={cancelError ? `cancel-error-${id}` : undefined}
       disabled={canceling}
-      className="px-2 py-1 text-[10px] border-l border-tcip-border first:border-l-0 hover:bg-tcip-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
+      className="px-2 py-1 text-[12px] border-l border-tcip-border first:border-l-0 hover:bg-tcip-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
       onClick={onCancel}
     >
       {canceling ? "Canceling…" : "Cancel"}
@@ -285,7 +285,7 @@ function CancelButton({
 function CancelError({ id, cancelError }: { id: string; cancelError: string | undefined }) {
   if (!cancelError) return null;
   return (
-    <span id={`cancel-error-${id}`} className="text-[10px] text-tcip-fp text-right max-w-[150px]">
+    <span id={`cancel-error-${id}`} className="text-[12px] tcip-problem text-right max-w-[150px]">
       {cancelError}
     </span>
   );
@@ -611,7 +611,7 @@ export function TrainingTab() {
           <button
             type="button"
             aria-expanded={pickerOpen}
-            className={pickerOpen ? "tcip-btn text-[11px]" : "tcip-btn-primary text-[11px]"}
+            className={pickerOpen ? "tcip-btn text-[13px]" : "tcip-btn-primary text-[13px]"}
             onClick={() => setPickerOpen((open) => !open)}
           >
             Start a run
@@ -621,14 +621,14 @@ export function TrainingTab() {
           comparing ? (
             <>
               <span className="tcip-heading">Comparing</span>
-              <span className="text-[11px] text-tcip-muted">
+              <span className="text-[13px] text-tcip-muted">
                 {marked.length} of {MAX_MARKED_RUNS} runs
               </span>
             </>
           ) : selectedRun ? (
             <>
               <h2 className="tcip-heading">{selectedSweep ? "Sweep" : "Metrics"}</h2>
-              <span className="font-mono text-[12px] text-tcip-fg">{selectedRun}</span>
+              <span className="font-mono text-[13px] text-tcip-fg">{selectedRun}</span>
             </>
           ) : (
             <span className="tcip-heading">Select a run to view metrics</span>
@@ -642,7 +642,7 @@ export function TrainingTab() {
               {streaming &&
                 (metrics.length > 0 || batch ? (
                   <div className="overflow-auto max-h-64 shrink-0">
-                    <table className="w-full text-[11px]">
+                    <table className="w-full text-[13px]">
                       <caption className="sr-only">{`${selectedRun} metrics by epoch`}</caption>
                       <thead>
                         <tr className="border-b border-tcip-border">
@@ -689,12 +689,12 @@ export function TrainingTab() {
                     </table>
                   </div>
                 ) : (
-                  <div role="status" className="text-tcip-muted text-[12px]">
+                  <div role="status" className="text-tcip-muted text-[13px]">
                     {selectedTerminal ? "This run recorded no metrics." : "Waiting for metrics…"}
                   </div>
                 ))}
               {!selectedRun && (
-                <div role="status" className="text-tcip-muted text-[12px]">
+                <div role="status" className="text-tcip-muted text-[13px]">
                   No run selected.
                 </div>
               )}
@@ -734,9 +734,9 @@ export function TrainingTab() {
         )}
 
         {runsError && (
-          <div className="text-[11px] text-tcip-fp mb-2">
+          <div className="text-[13px] tcip-problem mb-2">
             {runsError}{" "}
-            <button className="tcip-btn text-[11px] ml-1" onClick={() => void refreshRuns()}>
+            <button className="tcip-btn text-[13px] ml-1" onClick={() => void refreshRuns()}>
               Retry
             </button>
           </div>
@@ -745,7 +745,7 @@ export function TrainingTab() {
           <RunMonitorEmpty>No runs yet. Use &quot;Start a run&quot; above.</RunMonitorEmpty>
         )}
         {!empty && (
-          <div className="text-[10px] text-tcip-muted mb-1">
+          <div className="text-[12px] text-tcip-muted mb-1">
             Every recorded run, sorted by experiment id, then every sweep with its trials.
           </div>
         )}
@@ -765,8 +765,8 @@ export function TrainingTab() {
                     className="flex-1 min-w-0 text-left"
                     onClick={() => setSelectedRun(sweep.sweep_id)}
                   >
-                    <div className="font-mono text-[11px]">{sweep.sweep_id}</div>
-                    <div className="text-[10px] text-tcip-muted">
+                    <div className="font-mono text-[13px]">{sweep.sweep_id}</div>
+                    <div className="text-[12px] text-tcip-muted">
                       sweep · {stateLine(sweep.state, sweep.heartbeat)} · {sweepOutcomeLine(sweep)}
                     </div>
                   </button>
@@ -784,7 +784,7 @@ export function TrainingTab() {
                   </div>
                 </div>
                 {sweep.status_error && (
-                  <div className="text-[10px] text-tcip-fp">{sweep.status_error}</div>
+                  <div className="text-[12px] tcip-problem">{sweep.status_error}</div>
                 )}
                 <ul className="mt-1 pl-3 space-y-1">{sweep.trials.map(runItem)}</ul>
               </div>
