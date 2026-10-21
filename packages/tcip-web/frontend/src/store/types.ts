@@ -180,6 +180,9 @@ export interface Proposal extends Annotation {
   index: number;
   paired: number | null;
   decision: VerdictAction | null;
+  /** The bucket it was served from, set by the tab when several buckets' proposals are shown
+   *  together; absent for a proposal of the one bucket a caller named. */
+  bucket?: string;
 }
 
 /** What the proposals route serves: the bucket, its validated operating point (the conf a

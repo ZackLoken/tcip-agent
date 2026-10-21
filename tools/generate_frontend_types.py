@@ -123,6 +123,7 @@ def declared_models() -> list[type[BaseModel]]:
     from tcip_web.routes.annotate import (
         FindAnswer,
         FindPayload,
+        ImageStagings,
         LaunchPriorityQueuePayload,
         PriorityQueueJob,
         ProposeAnswer,
@@ -179,6 +180,7 @@ def declared_models() -> list[type[BaseModel]]:
         ProposePayload,
         FindPayload,
         FindAnswer,
+        ImageStagings,
         ProposeAnswer,
         CanvasStatePayload,
         ImageEntry,

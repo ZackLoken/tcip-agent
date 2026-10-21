@@ -19,6 +19,8 @@ import {
 export interface Focus {
   kind: Mode | "proposal";
   index: number;
+  /** A proposal's bucket, when several buckets' proposals are shown together. */
+  bucket?: string;
 }
 
 /** A content array's name, and the item it holds. */

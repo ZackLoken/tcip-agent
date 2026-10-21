@@ -50,7 +50,6 @@ function renderStrip(over: Partial<Parameters<typeof ReviewStrip>[0]> = {}) {
   };
   render(
     <ReviewStrip
-      bucket="m1/2026-01-01"
       proposalsShown
       reviewing
       operatingPoint={{ conf: 0.42, reason: "" }}
@@ -153,19 +152,13 @@ describe("ReviewStrip", () => {
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
   });
 
-  it("with no bucket the proposals toggle is disabled and the filters are absent, the stepper still works", () => {
+  it("with nothing served the filters are absent and the stepper still works", () => {
     const h = renderStrip({
-      bucket: null,
       reviewing: false,
       operatingPoint: null,
       canAccept: false,
       canReject: false,
     });
-    expect(screen.getByRole("checkbox", { name: "Proposals" })).toBeDisabled();
-    expect(screen.getByRole("checkbox", { name: "Proposals" }).closest("label")).toHaveAttribute(
-      "title",
-      expect.stringMatching(/project card/),
-    );
     expect(screen.queryByRole("spinbutton", { name: "Confidence floor" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Show" })).toBeNull();
     expect(screen.getByRole("button", { name: "Accept" })).toBeDisabled();

@@ -16,7 +16,6 @@ import type { Flag } from "@/store/types";
  *  filter; the accept, edit, reject and flag controls; and the item stepper with the scope it
  *  steps through, each scope naming how many items it holds. */
 export function ReviewStrip({
-  bucket,
   proposalsShown,
   reviewing,
   onProposalsShown,
@@ -43,11 +42,9 @@ export function ReviewStrip({
   onFlag,
   onResolve,
 }: {
-  /** The prediction bucket under review; null when the dataset selection names none. */
-  bucket: string | null;
-  /** The toggle's own state: whether the person wants the bucket's proposals shown. */
+  /** The toggle's own state: whether the person wants proposals shown. */
   proposalsShown: boolean;
-  /** Whether the bucket's proposals are on the canvas now: shown, and served for this image. */
+  /** Whether proposals are on the canvas now: shown, and served for this image. */
   reviewing: boolean;
   onProposalsShown: (next: boolean) => void;
   /** The bucket's validated operating point, or the reason it has none; null until served. */
@@ -83,16 +80,11 @@ export function ReviewStrip({
     <div className="flex h-9 shrink-0 items-center gap-3 border-b border-tcip-border bg-tcip-panel px-3 text-[13px]">
       <label
         className="flex items-center gap-1.5"
-        title={
-          bucket
-            ? `Show proposals (${K.hideProposals.label})`
-            : "Choose predictions on the project card"
-        }
+        title={`Show proposals (${K.hideProposals.label})`}
       >
         <input
           type="checkbox"
-          checked={!!bucket && proposalsShown}
-          disabled={!bucket}
+          checked={proposalsShown}
           onChange={(e) => onProposalsShown(e.target.checked)}
         />
         Proposals

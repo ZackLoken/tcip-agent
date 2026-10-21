@@ -22,8 +22,9 @@ export const ProposalShapes = memo(function ProposalShapes({
   return (
     <>
       {proposals.map((p) => {
-        const isFocused = focusesProposal(focused, p.index);
+        const isFocused = focusesProposal(focused, p.index, p.bucket);
         const label = proposalLabel(p, isFocused);
+        const key = `proposal-${p.bucket ?? ""}-${p.index}`;
         const shared = {
           stroke: outlineColor(p.subject, proposalMatch(p)),
           style: "dotted" as const,
@@ -35,11 +36,11 @@ export const ProposalShapes = memo(function ProposalShapes({
         const { boxes, polygons, points } = annotationsToCanvas([p]);
         return [
           ...boxes.map((b) => (
-            <BoxOverlay key={`proposal-${p.index}`} box={b} width={widths.boxStroke} {...shared} />
+            <BoxOverlay key={key} box={b} width={widths.boxStroke} {...shared} />
           )),
           ...polygons.map((poly) => (
             <PolygonOverlay
-              key={`proposal-${p.index}`}
+              key={key}
               polygon={poly}
               width={widths.polyStroke}
               vertexRadius={0}
@@ -49,7 +50,7 @@ export const ProposalShapes = memo(function ProposalShapes({
           )),
           ...points.map((point) => (
             <PointOverlay
-              key={`proposal-${p.index}`}
+              key={key}
               point={point}
               coreR={isFocused ? widths.pointSelCoreR : widths.pointCoreR}
               tickInner={widths.pointTickInner}
