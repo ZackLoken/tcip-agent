@@ -50,7 +50,9 @@ waits until the harness has bracketed paste on and has written its row's `compos
 harness can turn bracketed paste on while a loading screen still discards input. Each launch probes
 the version its harness declares and records it, so a harness updated in place is seen at its next
 launch. No timer-free signal tells a launch whose sequence never arrives from one still starting,
-and a sequence that moved earlier still pastes early. Session create and restart name a row by its exact
+and a sequence that moved earlier still pastes early. The child's environment is this process's
+own less every `CLAUDE`-prefixed variable, so a backend started from a Claude Code session does not
+launch its agent as a nested session. Session create and restart name a row by its exact
 id; the status route lists every row with the reason it cannot launch, if any, and the rail lets the
 breeder pick one. A row is added only after its harness's real flags are read from the installed CLI
 and one live smoke (`tools/smoke_terminal_e2e.py <id>`) passes: the smoke opens a scratch project,

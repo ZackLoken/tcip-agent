@@ -650,8 +650,12 @@ def launched_program(argv: list[str], override: bool) -> dict:
 
 
 def spawn_env(session_id: str) -> dict[str, str]:
-    """Return the child's environment: this process's own plus the terminal session id."""
-    return {**os.environ, TERMINAL_SESSION_ENV: session_id}
+    """Return the child's environment: this process's own plus the terminal session id.
+
+    Every variable a Claude Code session set (the ``CLAUDE`` prefix) is left out.
+    """
+    kept = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
+    return {**kept, TERMINAL_SESSION_ENV: session_id}
 
 
 def _prewarm_blocking() -> None:

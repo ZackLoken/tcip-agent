@@ -1679,6 +1679,25 @@ def test_the_spawned_process_inherits_the_terminal_session_id(
     assert f"[session:{sid}]" in banner
 
 
+def test_the_spawned_environment_carries_no_variable_of_a_claude_code_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every ``CLAUDE``-prefixed variable of this process is absent from the child's environment.
+
+    The child would otherwise read itself as a nested Claude Code session; the other variables
+    and the terminal session id pass through.
+    """
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("CLAUDE_CODE_CHILD_SESSION", "1")
+    monkeypatch.setenv("TCIP_KEPT_FOR_THE_TEST", "yes")
+
+    env = pty_host.spawn_env("t1")
+
+    assert not [k for k in env if k.startswith("CLAUDE")]
+    assert env["TCIP_KEPT_FOR_THE_TEST"] == "yes"
+    assert env[pty_host.TERMINAL_SESSION_ENV] == "t1"
+
+
 def test_each_launch_leaves_one_audit_line_in_the_open_projects_log(
     client: TestClient, opened_project: Path
 ) -> None:
