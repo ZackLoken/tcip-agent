@@ -91,10 +91,9 @@ class Provider:
     It carries the id a session names it by, its display name, the executable looked up on
     ``PATH``, the arguments after it, which may include the placeholders :data:`WORKSPACE_ARG`,
     :data:`MCP_CONFIG_ARG`, :data:`CLAUDE_SETTINGS_ARG` and :data:`CODEX_MCP_ARG` as whole
-    arguments, the output sequence the harness
-    version ``composer_ready_version`` names (its ``--version`` line) was recorded writing when
-    its composer appeared, what the harness's own enforcement restricts under those arguments
-    and leaves open, and the preparation the launch runs first, ``None`` for none.
+    arguments, the output sequence one installed version of the harness was recorded writing
+    when its composer appeared, what the harness's own enforcement restricts under those
+    arguments and leaves open, and the preparation the launch runs first, ``None`` for none.
     """
 
     id: str
@@ -102,7 +101,6 @@ class Provider:
     executable: str
     args: tuple[str, ...]
     composer_ready: str
-    composer_ready_version: str
     confinement: str
     prepare: PrepareFn | None = None
 
@@ -112,21 +110,6 @@ class Provider:
         return (
             f"{self.name} is not available: no `{self.executable}` executable is on PATH. "
             "Install it and sign in to enable the agent terminal."
-        )
-
-    def delivery_unverified(self, version: str | None) -> str | None:
-        """Return why delivery to a launch declaring ``version`` rests on an unrecorded sequence.
-
-        The reason names both versions; ``None`` when ``version`` is the one ``composer_ready``
-        was recorded on.
-        """
-        if version == self.composer_ready_version:
-            return None
-        return (
-            f"{self.name}'s composer sequence was recorded on {self.composer_ready_version}, "
-            f"and this launch runs {version or 'a version it does not declare'}: the ritual "
-            "and requests may never reach it, or reach its loading screen and be lost. If "
-            "nothing arrives, type the request in the terminal yourself."
         )
 
 
@@ -405,7 +388,6 @@ PROVIDERS: tuple[Provider, ...] = (
             "--strict-mcp-config",
         ),
         composer_ready="\x1b[?1049h",
-        composer_ready_version="2.1.292 (Claude Code)",
         confinement=(
             "Claude Code enforces the deny and allow lists of "
             "agent_terminal.settings.json, with the read-only tcip console commands "
@@ -420,7 +402,6 @@ PROVIDERS: tuple[Provider, ...] = (
         executable="agy",
         args=("--add-dir", WORKSPACE_ARG, "--sandbox"),
         composer_ready="\x1b[0 q\r\x1b[J",
-        composer_ready_version="1.3.1",
         confinement=(
             "agy's --sandbox turns on its terminal restrictions, whose extent agy "
             "defines; every tcip tool and, when the launch spelled it, the ritual's own "
@@ -442,7 +423,6 @@ PROVIDERS: tuple[Provider, ...] = (
             CODEX_MCP_ARG,
         ),
         composer_ready="\x1b]0;",
-        composer_ready_version="codex-cli 0.160.1",
         confinement=(
             "Codex's read-only sandbox holds the shell commands the model runs, which "
             "write nothing and never ask to leave it; the tcip server is not one of "

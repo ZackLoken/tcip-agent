@@ -275,7 +275,6 @@ export interface LaunchedProgram {
   argv: string[];
   version: string | null;
   confinement: string | null;
-  delivery_unverified: string | null;
   prepared: string[];
 }
 
