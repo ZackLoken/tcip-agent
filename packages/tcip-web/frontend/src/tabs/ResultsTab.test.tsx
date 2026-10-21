@@ -133,7 +133,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
 });
 
 describe("ResultsTab unreadable trait visibility", () => {
-  it("names an unreadable trait in one line with no navigation control", async () => {
+  it("names an unreadable trait", async () => {
     vi.spyOn(resultsApi, "traits").mockResolvedValue({
       ...TRAIT_LISTINGS.results,
       unreadable: [{ trait: "leaf_area", reason: "delivers: off-vocab ['leaf_size']" }],
@@ -153,7 +153,7 @@ describe("ResultsTab unreadable trait visibility", () => {
     expect(screen.queryByText(/will not read/)).not.toBeInTheDocument();
   });
 
-  it("says no revision of the trait is confirmed and shows no phenology panel", async () => {
+  it("hides phenology while no revision is confirmed", async () => {
     vi.spyOn(resultsApi, "traits").mockResolvedValue(TRAIT_LISTINGS.unconfirmed);
 
     render(<ResultsTab />);
@@ -214,7 +214,7 @@ describe("ResultsTab evidence gate", () => {
     fireEvent.click(screen.getByRole("button", { name: "Compute" }));
   }
 
-  it("answers a delivery refusal with one sentence and the unvalidated-numbers action, not the raw error line", async () => {
+  it("answers a delivery refusal in one sentence", async () => {
     mockDatasetTree({ subjects: [] });
     const message = UNVALIDATED.unvalidated_reason;
     vi.spyOn(resultsApi, "phenologyMeasurement").mockRejectedValue(
@@ -315,7 +315,7 @@ describe("ResultsTab evidence gate", () => {
     });
   });
 
-  it("renders no explanatory paragraph beside the measurement, and the row count only once computed", async () => {
+  it("shows the row count only after a compute", async () => {
     mockDatasetTree({ subjects: [] });
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
       curves: { rows: [CURVE_ROW], n_plants: 1 },
@@ -336,6 +336,24 @@ describe("ResultsTab evidence gate", () => {
     expect(screen.getByRole("heading", { name: /Milestones\s*1 row/ })).toBeInTheDocument();
     expect(screen.queryByText(/positive-state fraction is the share/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/acknowledged and exported unvalidated/i)).not.toBeInTheDocument();
+  });
+
+  it("clears the rows when a compute fails", async () => {
+    mockDatasetTree({ subjects: [] });
+    const measurement = vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
+      curves: { rows: [CURVE_ROW], n_plants: 1 },
+      milestones: { rows: [ONSET_ROW], columns: STAGE_COLUMNS },
+      ...VALIDATED,
+    });
+
+    await renderAndCompute();
+    await waitFor(() => expect(screen.getByRole("cell", { name: "P1" })).toBeInTheDocument());
+
+    measurement.mockRejectedValue(new Error("the mapping's plant CSV moved"));
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
+
+    expect(await screen.findByText("the mapping's plant CSV moved")).toBeInTheDocument();
+    expect(screen.queryByRole("cell", { name: "P1" })).not.toBeInTheDocument();
   });
 
   it("renders the delivery-scoped unattributed count beside the measurement", async () => {
