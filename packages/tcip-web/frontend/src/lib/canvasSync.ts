@@ -241,7 +241,7 @@ export function buildAnnotateShapes(
     });
   });
   (args.proposals ?? []).forEach((p) => {
-    const proposalFocused = focusesProposal(focused, p.index);
+    const proposalFocused = focusesProposal(focused, p.index, p.bucket);
     const base = {
       color: outlineColor(p.subject, proposalMatch(p)),
       ...strokeOf("tool", proposalFocused),

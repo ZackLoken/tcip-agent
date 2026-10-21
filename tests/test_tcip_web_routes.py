@@ -1290,6 +1290,33 @@ def test_placed_points_and_drawn_boxes_prompt_the_segmenter_together_and_stage_e
     assert [p["index"] for p in served.json()["proposals"]] == [0, 1]
 
 
+def test_stagings_list_each_staged_bucket_of_an_image_and_none_of_another(
+    opened_client: TestClient,
+    dataset_root: Path,
+    engines: dict[str, _PromptedEngine],
+) -> None:
+    """Two prompts on one image stage two buckets, both listed for it and neither for the next."""
+    image = _image_of(dataset_root)
+    first = _propose(opened_client, image, {"points": [[20, 20]]}).json()
+    second = _propose(
+        opened_client, image, {"boxes": [[10, 10, 50, 40]]}
+    ).json()
+    other = dataset_root / "images" / "2-11-26" / "IMG_0001.JPG"
+
+    listed = opened_client.get(
+        "/api/annotate/stagings", params={"image_path": str(image)}
+    )
+    none = opened_client.get(
+        "/api/annotate/stagings", params={"image_path": str(other)}
+    )
+
+    assert listed.status_code == 200, listed.text
+    assert sorted(listed.json()["buckets"]) == sorted(
+        [first["bucket"], second["bucket"]]
+    )
+    assert none.json()["buckets"] == []
+
+
 def test_a_bucket_holding_no_document_for_an_image_serves_no_proposals(
     opened_client: TestClient,
     dataset_root: Path,

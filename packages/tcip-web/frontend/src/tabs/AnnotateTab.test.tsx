@@ -191,6 +191,7 @@ beforeEach(() => {
     .spyOn(api.annotate, "load")
     .mockImplementation((imagePath) => Promise.resolve(labelsFor(imagePath)));
   saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue(saved("1"));
+  vi.spyOn(api.annotate, "stagings").mockResolvedValue({ buckets: [] });
   vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({
     status: "ok",
     session: { started: "2026-10-07T14:00:00+00:00", ended: false },
@@ -3044,14 +3045,7 @@ describe("AnnotateTab engine prompt", () => {
     const propose = vi
       .spyOn(api.annotate, "propose")
       .mockResolvedValue({ bucket: BUCKET, proposal_count: 2 });
-    const select = vi.spyOn(api.dataset, "select").mockImplementation((body) =>
-      Promise.resolve({
-        status: "ok",
-        selection: { ...useStore.getState().gui.dataset, bucket: body.bucket ?? null },
-        label_problem: null,
-      }),
-    );
-    vi.spyOn(api.dataset, "nav").mockResolvedValue({ status: "ok", current_image_index: 0 });
+    const stagings = vi.spyOn(api.annotate, "stagings").mockResolvedValue({ buckets: [] });
     const proposals = vi.spyOn(api.annotate, "proposals").mockResolvedValue({
       bucket: BUCKET,
       operating_point: { conf: null, reason: "" },
@@ -3060,7 +3054,7 @@ describe("AnnotateTab engine prompt", () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
-    return { propose, select, proposals };
+    return { propose, stagings, proposals };
   }
 
   it("armed, clicks in point mode hold point prompts and place no point until Propose sends them", async () => {
@@ -3218,8 +3212,9 @@ describe("AnnotateTab engine prompt", () => {
     expect(useStore.getState().toasts.at(-1)?.message).toBe('Nothing found for "open bud".');
   });
 
-  it("shows the answered proposals under their shape's tool and focuses the first", async () => {
-    const { select, proposals } = await mountArmed("point");
+  it("shows the answered proposals under their shape's tool and focuses the first, the bucket unselected", async () => {
+    const { stagings, proposals } = await mountArmed("point");
+    stagings.mockResolvedValue({ buckets: [BUCKET] });
     proposals.mockResolvedValue({
       bucket: BUCKET,
       operating_point: { conf: null, reason: "" },
@@ -3241,21 +3236,60 @@ describe("AnnotateTab engine prompt", () => {
     await flush();
     await flush();
 
-    expect(select).toHaveBeenCalledWith({
-      dataset_root: "C:/data",
-      subject: "subject_a",
-      date: "2026-01-01",
-      bucket: BUCKET,
-    });
     await waitFor(() =>
       expect(proposals).toHaveBeenCalledWith("C:/data/images/2026-01-01/img1.jpg", BUCKET),
     );
+    expect(useStore.getState().gui.dataset.bucket).toBeNull();
     expect(screen.getByRole("checkbox", { name: "Proposals" })).toBeChecked();
     expect(useStore.getState().toasts.at(-1)?.message).toBe("2 proposals for img1.jpg");
     await waitFor(() =>
-      expect(useStore.getState().canvas.focus).toEqual({ kind: "proposal", index: 0 }),
+      expect(useStore.getState().canvas.focus).toEqual({
+        kind: "proposal",
+        index: 0,
+        bucket: BUCKET,
+      }),
     );
     expect(useStore.getState().gui.mode).toBe("box");
+  });
+
+  it("serves a staging beside the selected bucket's proposals, each decided in its own bucket", async () => {
+    const { stagings, proposals } = await mountArmed("box");
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, bucket: "m1/2026-01-01" } },
+    }));
+    stagings.mockResolvedValue({ buckets: [BUCKET] });
+    const one = (index: number, x: number) => ({
+      subject: "subject_a",
+      bbox: [x, 10, x + 40, 50] as [number, number, number, number],
+      attributes: {},
+      iscrowd: false,
+      score: 0.9,
+      index,
+      paired: null,
+      decision: null,
+    });
+    proposals.mockImplementation((_image, bucket) =>
+      Promise.resolve({
+        bucket,
+        operating_point: { conf: null, reason: "" },
+        proposals: bucket === BUCKET ? [one(0, 600)] : [one(0, 10)],
+      }),
+    );
+    await waitFor(() => expect(proposals).toHaveBeenCalledWith(expect.any(String), BUCKET));
+    await flush();
+
+    expect(dottedRects()).toHaveLength(2);
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    await flush();
+    expect(useStore.getState().canvas.focus).toEqual({
+      kind: "proposal",
+      index: 0,
+      bucket: BUCKET,
+    });
+    fireEvent.keyDown(window, { key: "a" });
+    await flush();
+    expect(saveSpy.mock.calls[0][0]).toMatchObject({ bucket: BUCKET, accept: [0] });
   });
 
   it("refuses a second send while one is in flight", async () => {
@@ -3272,8 +3306,8 @@ describe("AnnotateTab engine prompt", () => {
     expect(screen.getByTestId("toolbar")).toHaveAttribute("data-proposing", "true");
   });
 
-  it("an answer arriving after the person moved on selects nothing and names its bucket", async () => {
-    const { propose, select } = await mountArmed("point");
+  it("an answer arriving after the person moved on serves nothing and names its bucket", async () => {
+    const { propose, proposals } = await mountArmed("point");
     let answer: (a: { bucket: string; proposal_count: number }) => void = () => {};
     propose.mockReturnValue(new Promise((resolve) => (answer = resolve)));
     fireEvent.click(stage(), { clientX: 120, clientY: 340 });
@@ -3288,51 +3322,20 @@ describe("AnnotateTab engine prompt", () => {
     await flush();
 
     expect(useStore.getState().gui.dataset.current_image_index).toBe(1);
-    expect(select).not.toHaveBeenCalled();
+    expect(proposals).not.toHaveBeenCalledWith(expect.any(String), BUCKET);
     expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      `2 proposals for img1.jpg, staged under ${BUCKET}; choose it on the project card.`,
-    );
-  });
-
-  it("a selection resolving after the person moved on adopts nothing and names its bucket as selected", async () => {
-    const { select } = await mountArmed("point");
-    let selected: (r: Awaited<ReturnType<typeof api.dataset.select>>) => void = () => {};
-    select.mockReturnValueOnce(new Promise((resolve) => (selected = resolve)));
-    fireEvent.click(stage(), { clientX: 120, clientY: 340 });
-    fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
-    await flush();
-    expect(select).toHaveBeenCalledTimes(1);
-    act(() => {
-      const s = useStore.getState();
-      s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
-    });
-    await flush();
-    act(() =>
-      selected({
-        status: "ok",
-        selection: { ...useStore.getState().gui.dataset, current_image_index: 0, bucket: BUCKET },
-        label_problem: null,
-      }),
-    );
-    await flush();
-    await flush();
-
-    expect(useStore.getState().gui.dataset.current_image_index).toBe(1);
-    expect(useStore.getState().gui.dataset.bucket).toBeNull();
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      `2 proposals for img1.jpg, staged under ${BUCKET}; now the selected predictions.`,
+      `2 proposals for img1.jpg, staged under ${BUCKET}.`,
     );
   });
 
   it("a refused prompt reaches the person as a toast carrying the route's text", async () => {
-    const { propose, select } = await mountArmed("point");
+    const { propose } = await mountArmed("point");
     propose.mockRejectedValue(new Error("no checkpoint at the stated name"));
     fireEvent.click(stage(), { clientX: 120, clientY: 340 });
     fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
 
     expect(useStore.getState().toasts.at(-1)?.message).toMatch(/no checkpoint at the stated name/);
-    expect(select).not.toHaveBeenCalled();
   });
 
   it("disarmed, a click in point mode places a point and sends no prompt", async () => {

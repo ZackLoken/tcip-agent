@@ -312,6 +312,34 @@ def load_proposals(image_path: str, bucket: str) -> dict:
     }
 
 
+class ImageStagings(BaseModel):
+    """The buckets staged by an engine or the agent that hold a document for one image."""
+
+    buckets: list[str]
+
+
+@router.get("/stagings")
+def image_stagings(image_path: str) -> ImageStagings:
+    """List the staged proposal buckets holding a document for ``image_path``, in name order.
+
+    A staged bucket is one a proposal engine or the agent published
+    (:class:`~tcip_mcp.buckets.Proposed`); a model's prediction bucket is never listed. The
+    buckets are read under the image's dataset root; no project open answers 409.
+    """
+    from tcip_mcp.buckets import Proposed, buckets_under
+
+    store.held()
+    key, _w, _h = _admitted(image_path)
+    stem = key.parts[-1]
+    return ImageStagings(
+        buckets=[
+            b.name
+            for b in buckets_under(key.root)
+            if isinstance(b.producer, Proposed) and stem in b.documents
+        ]
+    )
+
+
 class SegmenterPrompt(BaseModel):
     """The points the person placed and the boxes they drew, in the image's pixels.
 

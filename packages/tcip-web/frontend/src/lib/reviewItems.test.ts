@@ -150,7 +150,7 @@ describe("reviewItems", () => {
   it("a matched annotation carries the undecided proposal pairing with it, as one item", () => {
     const [decided, pending] = items();
     expect(decided.pairing).toBeUndefined();
-    expect(pending.pairing).toBe(1);
+    expect(pending.pairing).toEqual({ index: 1 });
   });
 
   it("an annotation awaits review until a person stands behind it, with or without a bucket", () => {
@@ -189,7 +189,7 @@ describe("reviewItems", () => {
   it("a person's annotation with an undecided proposal pairing it still awaits that decision", () => {
     const listed = items();
     const personsWithUndecided = listed[1];
-    expect(personsWithUndecided).toMatchObject({ reviewed: true, pairing: 1 });
+    expect(personsWithUndecided).toMatchObject({ reviewed: true, pairing: { index: 1 } });
     expect(scopedOrder(listed, "unreviewed").map((i) => [i.kind, i.ref])).toEqual([
       ["annotation", 1],
       ["proposal", 2],

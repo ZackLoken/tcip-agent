@@ -112,6 +112,10 @@ export interface FindAnswer {
   boxes: [number, number, number, number][];
 }
 
+export interface ImageStagings {
+  buckets: string[];
+}
+
 export interface ProposeAnswer {
   bucket: string | null;
   proposal_count: number;

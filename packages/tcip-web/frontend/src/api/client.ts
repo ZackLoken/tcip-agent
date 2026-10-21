@@ -15,6 +15,7 @@ import {
   type ProjectSummary,
   type FindAnswer,
   type FindPayload,
+  type ImageStagings,
   type ProposeAnswer,
   type ProposePayload,
   type RemovalRequest,
@@ -321,6 +322,10 @@ export const api = {
     // bucket's validated operating point.
     proposals: (image_path: string, bucket: string) =>
       getJson<ServedProposals>(`${ROUTES.getAnnotateProposals}?${q({ image_path, bucket })}`),
+
+    // Every bucket an engine or the agent staged that holds a document for the image.
+    stagings: (image_path: string) =>
+      getJson<ImageStagings>(`${ROUTES.getAnnotateStagings}?${q({ image_path })}`),
 
     // A 409 (the label document changed underneath the client) is an expected outcome the
     // caller resolves, not an error.

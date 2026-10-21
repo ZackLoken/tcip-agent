@@ -24,7 +24,6 @@ import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
 import { useRegionServes } from "@/hooks/useRegionServes";
-import { applyAnnotateFocus } from "@/lib/annotateFocus";
 import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 import { compositeParams } from "@/lib/bandSelection";
 import {
@@ -90,6 +89,7 @@ import {
   type Box,
   type DrawingBox,
   type PolygonShape,
+  type Proposal,
   type ServedProposals,
   type SubjectState,
 } from "@/store/types";
@@ -231,12 +231,18 @@ export function AnnotateTab() {
     setView(fitView(host, canvas.imgWidth, canvas.imgHeight));
   }
 
-  // ── Proposals: the selected bucket's, paired and decided server-side ────────
+  // ── Proposals: the selected bucket's and every staging of the image, paired and decided
+  // server-side, each carrying its bucket ──
   const bucket = dataset.bucket;
   // Per image: hiding proposals while annotating is recorded on the mark the person then makes.
   const [hideProposals, setHideProposals] = useState(false);
   const [proposalTick, setProposalTick] = useState(0);
-  const [served, setServed] = useState<{ key: string; served: ServedProposals } | null>(null);
+  const [served, setServed] = useState<{
+    key: string;
+    buckets: string[];
+    proposals: Proposal[];
+    operatingPoint: ServedProposals["operating_point"] | null;
+  } | null>(null);
   // Proposals pair by document index, so a new document drops them until they are served again.
   const refreshProposals = () => {
     setServed(null);
@@ -244,19 +250,29 @@ export function AnnotateTab() {
   };
   const proposalKey = `${imgPath ?? ""}\0${bucket ?? ""}`;
   useEffect(() => {
-    if (!imgPath || !currentImageName || !bucket || hideProposals) return;
+    if (!imgPath || !currentImageName || hideProposals) return;
     let canceled = false;
-    api.annotate.proposals(imgPath, bucket).then(
-      (r) => {
-        if (!canceled) setServed({ key: proposalKey, served: r });
-      },
-      (e: unknown) => {
+    void (async () => {
+      try {
+        const staged = (await api.annotate.stagings(imgPath)).buckets;
+        const buckets = [...(bucket ? [bucket] : []), ...staged.filter((b) => b !== bucket)];
+        const answers = await Promise.all(buckets.map((b) => api.annotate.proposals(imgPath, b)));
+        if (canceled) return;
+        setServed({
+          key: proposalKey,
+          buckets,
+          proposals: answers.flatMap((a, i) =>
+            a.proposals.map((p) => ({ ...p, bucket: buckets[i] })),
+          ),
+          operatingPoint: bucket ? answers[0].operating_point : null,
+        });
+      } catch (e) {
         if (!canceled)
           useStore
             .getState()
             .pushToast(`Could not load proposals: ${e instanceof Error ? e.message : String(e)}`);
-      },
-    );
+      }
+    })();
     return () => {
       canceled = true;
     };
@@ -267,14 +283,15 @@ export function AnnotateTab() {
   // The bucket whose first proposal is focused once its proposals are served.
   const focusOnServeRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!served || served.key !== proposalKey || focusOnServeRef.current !== bucket) return;
+    const staged = focusOnServeRef.current;
+    if (!served || served.key !== proposalKey || staged === null) return;
     focusOnServeRef.current = null;
-    const first = served.served.proposals[0];
+    const first = served.proposals.find((p) => p.bucket === staged);
     if (!first) return;
     // The strip and the canvas show the selected tool's shape, so the tool follows the answer.
     const shape = proposalGeometry(first)?.shape;
     if (shape && useStore.getState().gui.mode !== shape) setMode(shape);
-    setFocus({ kind: "proposal", index: 0 });
+    setFocus({ kind: "proposal", index: first.index, bucket: staged });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [served]);
   // Prompts held on one image are not carried to the next.
@@ -282,12 +299,11 @@ export function AnnotateTab() {
     useStore.getState().clearPrompts();
   }, [imgPath]);
   /** Send one prompt about the image in view, its proposals staged under the active subject; one
-   *  in flight refuses another. The answer's bucket is selected with the proposals shown and the
-   *  first focused only while the tab is mounted on the selection and image the prompt was sent
-   *  from; otherwise a toast names the bucket, and whether it is now the selected one, and the
-   *  view stays. */
+   *  in flight refuses another. While the tab still shows the selection and image the prompt was
+   *  sent from, the staged proposals are served with the first focused; otherwise a toast names
+   *  the bucket and the view stays. */
   async function sendPrompt(prompt: ProposePayload["prompt"]) {
-    const { dataset_root, date, subject, current_image_index } = dataset;
+    const { dataset_root, date, subject } = dataset;
     if (proposing || !imgPath || !dataset_root || !date || !requireSubject()) return;
     const [sentFrom, sentName] = [imgPath, currentImageName];
     setProposing(true);
@@ -303,32 +319,21 @@ export function AnnotateTab() {
         useStore.getState().pushToast(`No proposal for ${sentName}.`);
         return;
       }
-      const inView = () => {
-        const now = useStore.getState().gui.dataset;
-        return (
-          mountedRef.current &&
-          now.dataset_root === dataset_root &&
-          now.date === date &&
-          now.subject === subject &&
-          currentImage(now).path === sentFrom
-        );
-      };
-      focusOnServeRef.current = answer.bucket;
-      const outcome = await applyAnnotateFocus(
-        { dataset_root, subject, date, bucket: answer.bucket, image_index: current_image_index },
-        inView,
-      );
       const count = `${answer.proposal_count} ${answer.proposal_count === 1 ? "proposal" : "proposals"} for ${sentName}`;
-      if (outcome === "adopted") {
+      const now = useStore.getState().gui.dataset;
+      const inView =
+        mountedRef.current &&
+        now.dataset_root === dataset_root &&
+        now.date === date &&
+        now.subject === subject &&
+        currentImage(now).path === sentFrom;
+      if (inView) {
+        focusOnServeRef.current = answer.bucket;
         setHideProposals(false);
+        refreshProposals();
         useStore.getState().pushToast(count, "success");
       } else {
-        focusOnServeRef.current = null;
-        const where =
-          outcome === "declined-unselected"
-            ? "choose it on the project card"
-            : "now the selected predictions";
-        useStore.getState().pushToast(`${count}, staged under ${answer.bucket}; ${where}.`);
+        useStore.getState().pushToast(`${count}, staged under ${answer.bucket}.`);
       }
     } catch (e) {
       useStore
@@ -379,9 +384,9 @@ export function AnnotateTab() {
     }
   }
 
-  const reviewing = !!bucket && !hideProposals && served?.key === proposalKey;
-  const proposals = useMemo(() => (reviewing ? served.served.proposals : []), [reviewing, served]);
-  const operatingPoint = reviewing ? served.served.operating_point : null;
+  const reviewing = !hideProposals && served?.key === proposalKey && served.buckets.length > 0;
+  const proposals = useMemo(() => (reviewing ? served.proposals : []), [reviewing, served]);
+  const operatingPoint = reviewing ? served.operatingPoint : null;
 
   // ── The review path: items, filters, order and focus ───────────────────────
 
@@ -456,7 +461,11 @@ export function AnnotateTab() {
    *  it, padded by its own extent (a point by a fortieth of the image's longer side). */
   function focusItem(item: ReviewItem) {
     if (useStore.getState().gui.mode !== item.shape) setMode(item.shape);
-    setFocus({ kind: item.kind === "proposal" ? "proposal" : item.shape, index: item.ref });
+    setFocus({
+      kind: item.kind === "proposal" ? "proposal" : item.shape,
+      index: item.ref,
+      ...(item.bucket !== undefined ? { bucket: item.bucket } : {}),
+    });
     setActiveSubject(item.subject);
     const host = measureCanvasHost();
     if (!host || canvas.imgWidth <= 0 || canvas.imgHeight <= 0) return;
@@ -489,8 +498,9 @@ export function AnnotateTab() {
 
   function decide(action: "accept" | "reject") {
     const target = action === "accept" ? acceptTarget : rejectTarget;
-    if (target?.kind === "proposal" && bucket) {
-      void save({ gestures: { bucket, [action]: [target.index] } });
+    const own = target?.kind === "proposal" ? (target.bucket ?? bucket) : null;
+    if (target?.kind === "proposal" && own) {
+      void save({ gestures: { bucket: own, [action]: [target.index] } });
     } else if (target?.kind === "confirm") {
       void save({ gestures: {}, confirm: [target.item] });
     }
@@ -500,8 +510,9 @@ export function AnnotateTab() {
    *  to, a new one or one already drawn, is focused in its place. A save the canvas did not adopt
    *  focuses nothing. */
   async function edit() {
-    if (focused?.kind !== "proposal" || !bucket) return;
-    await save({ gestures: { bucket, accept: [focused.ref] }, focusAccepted: focused.ref });
+    const own = focused?.bucket ?? bucket;
+    if (focused?.kind !== "proposal" || !own) return;
+    await save({ gestures: { bucket: own, accept: [focused.ref] }, focusAccepted: focused.ref });
   }
 
   /** Focus the annotation of the adopted canvas that `proposal` resolved to, from the answer's
@@ -1003,7 +1014,7 @@ export function AnnotateTab() {
       action: () => void markComplete(!subjectFinished),
       when: () => !!dataset.subject && subjectState !== null,
     },
-    { keys: K.hideProposals.keys, action: () => setHideProposals((h) => !h), when: () => !!bucket },
+    { keys: K.hideProposals.keys, action: () => setHideProposals((h) => !h) },
     {
       keys: K.stream.keys,
       action: () => useStore.getState().setStream(!annotateUi.stream),
@@ -1663,7 +1674,6 @@ export function AnnotateTab() {
         onPropose={proposeHeld}
       />
       <ReviewStrip
-        bucket={bucket ?? null}
         proposalsShown={!hideProposals}
         reviewing={reviewing}
         onProposalsShown={(shown) => setHideProposals(!shown)}
