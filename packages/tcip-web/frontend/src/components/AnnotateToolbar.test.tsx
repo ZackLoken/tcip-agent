@@ -34,7 +34,6 @@ function renderToolbar(
   extra?: {
     subjectState?: SubjectState | null;
     onComplete?: (next: boolean) => void;
-    onCompleteView?: () => void;
     onCancelSave?: () => void;
     proposing?: boolean;
     onPhrase?: (phrase: string) => void;
@@ -52,7 +51,6 @@ function renderToolbar(
       onBandSelectionChange={() => {}}
       subjectState={extra?.subjectState ?? null}
       onComplete={extra?.onComplete ?? (() => {})}
-      onCompleteView={extra?.onCompleteView}
       proposing={extra?.proposing ?? false}
       onPhrase={extra?.onPhrase ?? (() => {})}
       onPropose={extra?.onPropose ?? (() => {})}
@@ -146,7 +144,11 @@ describe("AnnotateToolbar engine prompt", () => {
     act(() => useStore.getState().addPromptPoint([10, 10]));
     fireEvent.click(promptToggle());
 
-    expect(useStore.getState().annotateUi.pendingPrompts).toEqual({ points: [], boxes: [] });
+    expect(useStore.getState().annotateUi.pendingPrompts).toEqual({
+      points: [],
+      boxes: [],
+      found: [],
+    });
   });
 
   it("while a prompt is in flight, says so and refuses another send", () => {
@@ -517,17 +519,5 @@ describe("AnnotateToolbar Complete toggle", () => {
     cleanup();
     renderToolbar(null, null, { subjectState: null, onComplete });
     expect(screen.getByRole("checkbox", { name: /Complete/ })).toBeDisabled();
-  });
-
-  it("offers the region mark under the Complete control only when the tab supplies one", () => {
-    seedSubject("subject_a");
-    const onCompleteView = vi.fn();
-    renderToolbar(null, null, { subjectState: "partial", onCompleteView });
-    fireEvent.click(screen.getByRole("button", { name: "▾" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Complete the region in view" }));
-    expect(onCompleteView).toHaveBeenCalledTimes(1);
-    cleanup();
-    renderToolbar(null, null, { subjectState: "partial" });
-    expect(screen.queryByRole("button", { name: "▾" })).not.toBeInTheDocument();
   });
 });

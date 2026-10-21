@@ -18,7 +18,7 @@ export function EnginePrompt({
   const pending = useStore((s) => s.annotateUi.pendingPrompts);
   const setPrompt = useStore((s) => s.setPrompt);
   const [phrase, setPhrase] = useState("");
-  const held = pending.points.length + pending.boxes.length;
+  const held = pending.points.length + pending.boxes.length + pending.found.length;
   const canFind = !proposing && phrase.trim() !== "";
 
   return (

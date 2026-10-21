@@ -139,7 +139,6 @@ export function AnnotateToolbar({
   onBandSelectionChange,
   subjectState,
   onComplete,
-  onCompleteView,
   proposing,
   onPhrase,
   onPropose,
@@ -157,8 +156,6 @@ export function AnnotateToolbar({
   subjectState: SubjectState | null;
   // Mark the dataset subject complete over the whole image (true) or withdraw its marks (false).
   onComplete: (next: boolean) => void;
-  // Mark the dataset subject complete over the region in view; omitted when the view holds it all.
-  onCompleteView?: () => void;
   // Whether an engine call is in flight, the find by phrase, and the send of the held prompts.
   proposing: boolean;
   onPhrase: (phrase: string) => void;
@@ -438,20 +435,6 @@ export function AnnotateToolbar({
           />
           {subjectState === "negative" ? "Complete (none)" : "Complete"}
         </label>
-        {onCompleteView && (
-          <MenuButton label="▾">
-            {(close) => (
-              <MenuItem
-                label="Complete the region in view"
-                onClick={() => {
-                  onCompleteView();
-                  close();
-                }}
-                disabled={!dataset.subject || subjectState === null}
-              />
-            )}
-          </MenuButton>
-        )}
       </div>
     </div>
   );

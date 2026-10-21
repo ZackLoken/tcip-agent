@@ -12,9 +12,9 @@ import {
 import { MATCH_HINTS, MATCH_TYPES, MATCH_WORDS, type MatchType } from "@/lib/symbology";
 import type { Flag } from "@/store/types";
 
-/** The status strip under the toolbar: the proposals toggle, the confidence floor, the match
- *  filter and the counts the filters leave; the accept, edit, reject and flag controls; and the
- *  item stepper with the scope it steps through. */
+/** The status strip under the toolbar: the proposals toggle, the confidence floor and the match
+ *  filter; the accept, edit, reject and flag controls; and the item stepper with the scope it
+ *  steps through, each scope naming how many items it holds. */
 export function ReviewStrip({
   bucket,
   proposalsShown,
@@ -27,7 +27,8 @@ export function ReviewStrip({
   onScope,
   canAccept,
   canReject,
-  counts,
+  scopeCounts,
+  flagCount,
   focused,
   position,
   total,
@@ -58,8 +59,10 @@ export function ReviewStrip({
   /** Whether an accept, or a reject, has an item to act on. */
   canAccept: boolean;
   canReject: boolean;
-  /** The items the filters leave, those among them unreviewed, and the image's open flags. */
-  counts: { items: number; unreviewed: number; flags: number };
+  /** How many items each scope steps through, of those the filters leave. */
+  scopeCounts: Record<StepScope, number>;
+  /** The image's open flags. */
+  flagCount: number;
   focused: ReviewItem | null;
   position: number;
   total: number;
@@ -127,9 +130,9 @@ export function ReviewStrip({
             className="flex items-center gap-1.5 text-tcip-muted"
             title={filters.match === "all" ? undefined : MATCH_HINTS[filters.match]}
           >
-            Match
+            Show
             <select
-              aria-label="Match type"
+              aria-label="Show"
               className="tcip-select h-7"
               value={filters.match}
               onChange={(e) =>
@@ -146,11 +149,6 @@ export function ReviewStrip({
           </label>
         </>
       )}
-
-      <span className="text-tcip-muted tabular-nums" aria-live="polite">
-        {counts.items} {counts.items === 1 ? "item" : "items"}
-        {reviewing ? `, ${counts.unreviewed} unreviewed` : ""}
-      </span>
 
       <div className="flex-1" />
 
@@ -189,7 +187,7 @@ export function ReviewStrip({
           onClick={() => onFlagsOpen(!flagsOpen)}
           title={`${K.flag.desc} (${K.flag.label})`}
         >
-          Flag{counts.flags > 0 ? ` (${counts.flags})` : ""}
+          Flag{flagCount > 0 ? ` (${flagCount})` : ""}
         </button>
         {flagsOpen && (
           <FlagPanel
@@ -213,18 +211,21 @@ export function ReviewStrip({
         onStep={onStep}
         onJump={onJump}
       />
-      <select
-        aria-label="Step through"
-        className="tcip-select h-7 text-[13px]"
-        value={scope}
-        onChange={(e) => onScope(e.target.value as StepScope)}
-      >
-        {STEP_SCOPES.map((s) => (
-          <option key={s} value={s}>
-            {STEP_SCOPE_WORDS[s]}
-          </option>
-        ))}
-      </select>
+      <label className="flex items-center gap-1.5 text-tcip-muted">
+        Step
+        <select
+          aria-label="Step through"
+          className="tcip-select h-7 text-[13px]"
+          value={scope}
+          onChange={(e) => onScope(e.target.value as StepScope)}
+        >
+          {STEP_SCOPES.map((s) => (
+            <option key={s} value={s}>
+              {`${STEP_SCOPE_WORDS[s]} (${scopeCounts[s]})`}
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }

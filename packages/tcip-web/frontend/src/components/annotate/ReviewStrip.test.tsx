@@ -58,7 +58,8 @@ function renderStrip(over: Partial<Parameters<typeof ReviewStrip>[0]> = {}) {
       scope="all"
       canAccept
       canReject
-      counts={{ items: 7, unreviewed: 3, flags: 0 }}
+      scopeCounts={{ all: 7, unreviewed: 3, flagged: 0 }}
+      flagCount={0}
       focused={focusedProposal}
       position={2}
       total={7}
@@ -86,7 +87,7 @@ describe("ReviewStrip", () => {
       target: { value: "0.6" },
     });
     expect(h.onFilters).toHaveBeenCalledWith({ confidence: 0.6, match: "all" });
-    fireEvent.change(screen.getByRole("combobox", { name: "Match type" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Show" }), {
       target: { value: "proposal_only" },
     });
     expect(h.onFilters).toHaveBeenCalledWith({ confidence: 0.42, match: "proposal_only" });
@@ -98,7 +99,7 @@ describe("ReviewStrip", () => {
 
   it("offers the three match types by their plain names and no geometry filter", () => {
     renderStrip();
-    const options = screen.getByRole("combobox", { name: "Match type" }).querySelectorAll("option");
+    const options = screen.getByRole("combobox", { name: "Show" }).querySelectorAll("option");
     expect(Array.from(options, (o) => o.textContent)).toEqual([
       "all",
       "Matched",
@@ -108,9 +109,17 @@ describe("ReviewStrip", () => {
     expect(screen.queryByRole("combobox", { name: "Item type" })).not.toBeInTheDocument();
   });
 
-  it("shows the counts the filters leave and the position in the review path", () => {
+  it("names each scope with its count and shows the position in the review path", () => {
     renderStrip();
-    expect(screen.getByText("7 items, 3 unreviewed")).toBeInTheDocument();
+    const options = screen
+      .getByRole("combobox", { name: "Step through" })
+      .querySelectorAll("option");
+    expect(Array.from(options, (o) => o.textContent)).toEqual([
+      "all (7)",
+      "unreviewed (3)",
+      "flagged (0)",
+    ]);
+    expect(screen.queryByText(/items/)).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Item position" })).toHaveValue("2");
     expect(screen.getByText("/ 7")).toBeInTheDocument();
   });
@@ -158,9 +167,8 @@ describe("ReviewStrip", () => {
       expect.stringMatching(/project card/),
     );
     expect(screen.queryByRole("spinbutton", { name: "Confidence floor" })).toBeNull();
-    expect(screen.queryByRole("combobox", { name: "Match type" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Show" })).toBeNull();
     expect(screen.getByRole("button", { name: "Accept" })).toBeDisabled();
-    expect(screen.getByText("7 items")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Next item" }));
     expect(h.onStep).toHaveBeenCalledWith(1);
   });
@@ -178,7 +186,7 @@ describe("ReviewStrip", () => {
 
 describe("ReviewStrip flags", () => {
   it("counts the image's open flags on the button and opens the panel", () => {
-    const h = renderStrip({ counts: { items: 7, unreviewed: 3, flags: 2 } });
+    const h = renderStrip({ flagCount: 2 });
     const button = screen.getByRole("button", { name: /Flag \(2\)/ });
     fireEvent.click(button);
     expect(h.onFlagsOpen).toHaveBeenCalledWith(true);

@@ -1,7 +1,5 @@
 import { useRef, useState } from "react";
 
-import { UNSET_GLYPH } from "@/lib/glyphs";
-
 /** A stepper over a list: its label, the current entry's name, a previous button, a position
  *  entry that jumps on Enter, the total and a next button. The image stepper and the item
  *  stepper are both this component, so they read and work the same way. */
@@ -20,7 +18,7 @@ export function Stepper({
   label: string;
   /** The singular noun the controls are named by ("Previous image", "Item position"). */
   noun: string;
-  /** The current entry's name, shown truncated; the unset glyph when there is none. */
+  /** The current entry's name, shown truncated; nothing when there is none. */
   name: string | null;
   /** 1-based; 0 when nothing is current. */
   position: number;
@@ -36,12 +34,11 @@ export function Stepper({
   return (
     <div className="flex items-center gap-2">
       <span className="tcip-label">{label}</span>
-      <span
-        className="max-w-[150px] truncate font-mono text-[13px] text-tcip-fg"
-        title={name ?? UNSET_GLYPH}
-      >
-        {name ?? UNSET_GLYPH}
-      </span>
+      {name !== null && (
+        <span className="max-w-[150px] truncate font-mono text-[13px] text-tcip-fg" title={name}>
+          {name}
+        </span>
+      )}
       <button
         className="tcip-btn text-[13px]"
         onClick={() => onStep(-1)}
