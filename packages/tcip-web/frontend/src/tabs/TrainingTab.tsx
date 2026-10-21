@@ -215,6 +215,7 @@ function RunItem({
             </span>
           )}
         </div>
+        {run.status_error && <div className="text-[12px] tcip-problem">{run.status_error}</div>}
       </button>
       <div className="flex flex-col items-end gap-1 shrink-0">
         <div
