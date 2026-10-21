@@ -125,14 +125,14 @@ through `engine_params`:
 - `sam`, a promptable segmenter of the SAM family: `points` (a list of `[x, y]` pixel points) and
   `boxes` (a list of `[x1, y1, x2, y2]` pixel boxes), each point and each box a prompt of its own
   and at least one stated; `multimask_output` (required: the model's several ranked masks per
-  prompt, or its one best); `checkpoint` (default `facebook/sam-vit-base`). Every mask is one
+  prompt, or its one best); `checkpoint` (default `facebook/sam-vit-large`). Every mask is one
   polygon candidate, `engine_meta` naming its prompt (indexed over `points` then `boxes`) and its
   rank.
 - `grounding_dino`, a text-prompted detector of the Grounding DINO family: `phrase`,
   `box_threshold`, `text_threshold`, `postprocess` (the cross-tile merge, named as a tiled
   inference pass names it) and `cross_tile_nms` (the merge's match threshold), all required;
   `tile_size` and `overlap` (the lattice, stated, else derived); `checkpoint` (default
-  `IDEA-Research/grounding-dino-tiny`). Every detection is one box candidate, `engine_meta`
+  `IDEA-Research/grounding-dino-base`). Every detection is one box candidate, `engine_meta`
   naming its text label.
 
 The segmenter runs each prompt on a window of the frame cut at its processor's `longest_edge`

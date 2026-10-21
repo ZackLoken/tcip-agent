@@ -36,8 +36,8 @@ if TYPE_CHECKING:
 
 exif_rotated_source = region.exif_rotated_source
 
-SEGMENTER_CHECKPOINT = "facebook/sam-vit-base"
-DETECTOR_CHECKPOINT = "IDEA-Research/grounding-dino-tiny"
+SEGMENTER_CHECKPOINT = "facebook/sam-vit-large"
+DETECTOR_CHECKPOINT = "IDEA-Research/grounding-dino-base"
 
 
 @pytest.mark.parametrize("name", ["sam", "grounding_dino"])

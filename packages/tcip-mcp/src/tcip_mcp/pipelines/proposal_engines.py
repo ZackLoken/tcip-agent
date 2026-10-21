@@ -68,8 +68,8 @@ class SegmenterParams(BaseModel):
     """Boxes ``(x1, y1, x2, y2)`` in pixels of the upright frame, each a prompt of its own."""
     multimask_output: bool
     """Whether each prompt answers the model's several ranked masks, or its one best mask."""
-    checkpoint: str = "facebook/sam-vit-base"
-    """A SAM-family Hugging Face checkpoint; the default is the owner's choice of base SAM."""
+    checkpoint: str = "facebook/sam-vit-large"
+    """A SAM-family Hugging Face checkpoint; the default is the owner's choice of large SAM."""
 
     @model_validator(mode="after")
     def _prompted(self) -> Self:
@@ -117,8 +117,8 @@ class DetectorParams(BaseModel):
     """The lattice's edge in pixels, stated; unstated, derived."""
     overlap: float | None = None
     """The fraction of the edge neighboring slices share, stated; unstated, derived."""
-    checkpoint: str = "IDEA-Research/grounding-dino-tiny"
-    """A Grounding DINO Hugging Face checkpoint; the default is the owner's choice, the tiny one."""
+    checkpoint: str = "IDEA-Research/grounding-dino-base"
+    """A Grounding DINO Hugging Face checkpoint; the default is the owner's choice, the base one."""
 
 
 class DetectorDefaults(TypedDict):
