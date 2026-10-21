@@ -269,7 +269,7 @@ function InvariancesPanel({ projectId }: { projectId: string }) {
 
   return (
     <div className="tcip-panel p-5">
-      <div className="tcip-heading mb-3">Capture invariances</div>
+      <div className="tcip-heading mb-3">Variation across photos</div>
       <div className="grid grid-cols-3 gap-4">
         {answers.map(([name, value]) => {
           const id = `invariance-${name}`;
