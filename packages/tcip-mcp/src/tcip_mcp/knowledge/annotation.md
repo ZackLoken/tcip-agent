@@ -32,9 +32,10 @@ the loss of its marks are one write of one document; another subject's marks are
 
 Nothing here trains or calibrates on a dataset-level COCO file (an `images` or `categories`
 key): it is never a per-image document, and the only way in is the import. An external COCO
-export becomes per-image documents through `import_coco(document, dataset_root, date, vertex_spacing,
-rationale)`, over images `ingest_images` already placed. `date` names the capture: the dated folder under
-`images/`, or the flat `images/` root for a dataset with no dated folders. Every declared category
+export becomes per-image documents through `import_coco(document, dataset_root, date,
+vertex_spacing, rationale)`, over images `ingest_images` already placed. `date` names the capture:
+the dated folder under `images/`, or the flat `images/` root for a dataset with no dated folders.
+Every declared category
 must be a subject the dataset's registry declares. An ordinary image is the capture's image with
 exactly the document's `file_name`; a `.bandgroup` capture is tied by stem. An image with no
 annotations writes nothing. Before anything is written the import reports every fault it finds
@@ -46,8 +47,9 @@ document and the import's audit event then commit together, or none does: a labe
 meanwhile refuses the whole import. A crowd region keeps its `iscrowd` flag, and a run-length mask
 becomes the rings `mask_contours.mask_to_polygon_rings` extracts from it, simplified at the
 stated `vertex_spacing`, pixels of perimeter per vertex: each ring keeps at most the vertex count
-its own perimeter implies at that spacing (the nearest integer, at least `state.RING_MIN_POINTS`), as the subset of
-the contour's own vertices `cv2.approxPolyDP` keeps at the least tolerance reaching it, so 0 keeps
+its own perimeter implies at that spacing (the nearest integer, at least
+`state.RING_MIN_POINTS`), as the subset of the contour's own vertices `cv2.approxPolyDP` keeps at
+the least tolerance reaching it, so 0 keeps
 every contour vertex. The records keep the provenance the COCO carried and gain none. The
 audit event records the COCO file's path, the digest of the bytes read, the stated spacing with
 its rationale and the documents written; an import that writes no document, whether
@@ -63,11 +65,11 @@ it under `iscrowd`, so a `train(ctx)` of your own can act on it.
 The per-image document is read by `json_io.read_label_document`, wrapped for the agent by
 `annotation_tools.read_annotations`, a library call, not a tool of its own, and written by
 `save_annotations`. A missing label document reads as no annotations; a present one the reader
-cannot make sense of raises `json_io.UnreadableLabelDocumentError` naming the document or the malformed
-record's index, rather than reading short: a stored value that does not decode, a non-dict
-document, a completion mark missing any of its fields, an `annotations` value that is not a list, a record
-that is not a dict,
-a record with no string subject, and a record carrying a value that is not what the schema states,
+cannot make sense of raises `json_io.UnreadableLabelDocumentError` naming the document or the
+malformed record's index, rather than reading short: a stored value that does not decode, a
+non-dict document, a completion mark missing any of its fields, an `annotations` value that is
+not a list, a record that is not a dict, a record with no string subject, and a record carrying a
+value that is not what the schema states,
 whichever geometry the record resolves to (a `bbox` that is not four numbers or has no positive
 extent, a `segmentation` that is not rings `state.is_ring` admits, a `point` that is not two
 numbers, a `score` that is not a number, an attribute value that is not a non-empty name, an
@@ -172,6 +174,7 @@ The agent labels images by using a proposal engine for geometry and its multimod
 classification and QA.
 
 Full workflow:
+
 1. `propose_annotations(image_path, engine=<name>)` → the engine proposes candidates, renders a
    numbered overlay. `grid_cells=[...]` (with `tile_size`, `overlap` echoed by
    `overlay_reference_grid`) restricts the pass to the named cells' bounding rect instead of the
@@ -183,8 +186,10 @@ Full workflow:
    outside any dataset's `images/` tree the render and candidates still come back
    (`staged: false`, `staging_id: null`, naming why), but there is nothing for
    `stage_proposals`'s `assignments` regime to read back later
-2. Agent reads the overlay with its own image-capable read tool → identifies and classifies each candidate
-3. `stage_proposals(image_path, assignments={staging_id: <the run's>, candidates: [{candidate_id: 0, subject: "leaf"}, ...]})`
+2. Agent reads the overlay with its own image-capable read tool → identifies and classifies each
+   candidate
+3. `stage_proposals(image_path, assignments={staging_id: <the run's>, candidates: [{candidate_id:
+   0, subject: "leaf"}, ...]})`
    → reads that run's candidates, refusing if the image has changed since the run, then stages
    the accepted ones as predictions (`created_by=<engine>`) in a bucket named for the run's id,
    for a person to accept or reject on the Annotate canvas; it never writes GT directly
@@ -198,14 +203,18 @@ viewport, and unsaved or in-progress shapes), so the agent can comment on work i
 before they save.
 
 Corrective loop (for missed objects):
-1. `vision_tools.overlay_reference_grid(image_path, overlap=)` (library call, or `tcip overlay-reference-grid`) → labeled reference grid ('A1' top-left) for spatial reference
-2. Agent reads the grid overlay with its own image-capable read tool → identifies missed regions by grid cell
-3. `propose_annotations(image_path, engine=<name>, grid_cells=["B3", "D5"], tile_size=<echoed>, overlap=<echoed>)`
-   → the engine proposes over those cells' bounding rect
+
+1. `vision_tools.overlay_reference_grid(image_path, overlap=)` (library call, or
+   `tcip overlay-reference-grid`) → labeled reference grid ('A1' top-left) for spatial reference
+2. Agent reads the grid overlay with its own image-capable read tool → identifies missed regions
+   by grid cell
+3. `propose_annotations(image_path, engine=<name>, grid_cells=["B3", "D5"], tile_size=<echoed>,
+   overlap=<echoed>)` → the engine proposes over those cells' bounding rect
 4. Stage the right candidates with `stage_proposals(assignments={staging_id, candidates})`, the
    `staging_id` this run answered, for the person to accept
 
 Grid cell system:
+
 - `vision_tools.overlay_reference_grid(image_path, overlap=, tile_size=)` renders square cells of
   `tile_size` native pixels (omitted, it derives a legible default from the image dims) stepping
   by the stated `overlap`, and echoes the full grid geometry back in every response:
@@ -273,7 +282,8 @@ bucket and drive the human to review them:
 
 - `stage_proposals(image_path, *, assignments=None, boxes=None, polygons=None, model_name=None)`
   publishes model-/agent-proposed shapes as prediction documents, never the image's label
-  document, so nothing here becomes ground truth before a human reviews it. Exactly one input regime per call:
+  document, so nothing here becomes ground truth before a human reviews it. Exactly one input
+  regime per call:
   `assignments` (`{staging_id, candidates}`) reads back the candidates of the one
   `propose_annotations` run its `staging_id` names, each kept candidate a
   `{candidate_id, subject}` mapping, stamped `created_by=<engine>`; `model_name` is refused
@@ -320,6 +330,7 @@ person to the weakest/flagged frames → they accept on the canvas → only then
 ## Active Learning
 
 `prioritize_review_queue` ranks images by model uncertainty/diversity:
+
 - High uncertainty = model unsure = most valuable to annotate
 - The scorer is a stated block, `{"name": ..., **values}`: the built-in `uncertainty` and
   `diversity` take no values and `combined` requires `uncertainty_weight` and
