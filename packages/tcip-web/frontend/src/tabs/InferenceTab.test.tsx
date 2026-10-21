@@ -9,7 +9,7 @@ import {
   type BucketExistsRefusal,
   type InferenceJob,
 } from "@/api/inference";
-import type { RegisteredModel } from "@/api/types.generated";
+import type { AssessmentSummary, RegisteredModel } from "@/api/types.generated";
 import { useStore } from "@/store";
 import { InferenceTab } from "@/tabs/InferenceTab";
 import { mockDatasetTree } from "@/test/datasetTree";
@@ -27,8 +27,17 @@ const initialStoreState = useStore.getState();
 const BASELINE_MODEL: RegisteredModel = {
   name: "baseline",
   checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt",
+  sha256: "baseline-digest",
   tags: [],
   experiment_id: null,
+};
+
+const PASSED_ASSESSMENT: AssessmentSummary = {
+  assessment_id: "assessment-passed",
+  checkpoint_sha256: "baseline-digest",
+  experiment_id: null,
+  delivery_kind: "per_image_count",
+  passed: true,
 };
 
 function job(overrides: Partial<InferenceJob> & { job_id: string }): InferenceJob {
@@ -53,10 +62,10 @@ function mockTree(dates: string[]) {
 }
 
 function selectBaseline() {
-  fireEvent.change(screen.getByRole("combobox", { name: "Model checkpoint" }), {
+  fireEvent.change(screen.getByRole("combobox", { name: "Model" }), {
     target: { value: "C:/proj/.tcip/models/baseline/best.pt" },
   });
-  fireEvent.change(screen.getByLabelText("Bucket name"), {
+  fireEvent.change(screen.getByLabelText("Predictions"), {
     target: { value: "baseline" },
   });
 }
@@ -99,6 +108,7 @@ beforeEach(() => {
   useStore.setState(initialStoreState, true);
   setupDataset();
   vi.spyOn(inferenceApi, "listJobs").mockResolvedValue({ jobs: [] });
+  vi.spyOn(resultsApi, "assessments").mockResolvedValue({ assessments: [] });
 });
 
 afterEach(() => {
@@ -123,7 +133,7 @@ describe("InferenceTab date selection", () => {
     selectBaseline();
     fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-01" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-08" }));
-    fireEvent.click(screen.getByRole("button", { name: /launch inference/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     await waitFor(() => expect(launchSpy).toHaveBeenCalledTimes(2));
     expect(launchSpy.mock.calls.map(([body]) => body)).toEqual([
@@ -148,7 +158,7 @@ describe("InferenceTab date selection", () => {
     ]);
   });
 
-  it("states the conf, cross-tile merge and threshold the breeder enters with their reason, and no cap", async () => {
+  it("states the conf, merge and merge threshold the breeder enters with their reason, and no cap", async () => {
     mockTree(["2026-01-01"]);
     vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
       models: [BASELINE_MODEL],
@@ -161,19 +171,15 @@ describe("InferenceTab date selection", () => {
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
 
     selectBaseline();
-    fireEvent.change(screen.getByLabelText(/confidence threshold/i), { target: { value: "0.35" } });
+    fireEvent.change(screen.getByLabelText("Confidence"), { target: { value: "0.35" } });
     expect(screen.queryByLabelText(/detection cap/i)).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/cross-tile merge threshold/i), {
-      target: { value: "0.45" },
-    });
-    fireEvent.change(screen.getByLabelText(/cross-tile merge \(/i), {
-      target: { value: "nmm" },
-    });
-    fireEvent.change(screen.getByLabelText(/why these values/i), {
+    fireEvent.change(screen.getByLabelText("Merge threshold"), { target: { value: "0.45" } });
+    fireEvent.change(screen.getByLabelText("Merge"), { target: { value: "nmm" } });
+    fireEvent.change(screen.getByLabelText("Reason"), {
       target: { value: "the breeder's own reason" },
     });
     fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-01" }));
-    fireEvent.click(screen.getByRole("button", { name: /launch inference/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     await waitFor(() => expect(launchSpy).toHaveBeenCalledTimes(1));
     expect(launchSpy.mock.calls[0][0].stated).toEqual({
@@ -189,7 +195,64 @@ describe("InferenceTab date selection", () => {
     vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({ models: [] });
 
     render(<InferenceTab />);
-    await waitFor(() => expect(screen.getByText(/no capture dates yet/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("No dates with images.")).toBeInTheDocument());
+  });
+});
+
+describe("InferenceTab assessment", () => {
+  beforeEach(() => {
+    mockTree(["2026-01-01"]);
+    vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({ models: [BASELINE_MODEL] });
+  });
+
+  it("lists the chosen model's assessments, chooses its first passed one, hides the stated inputs and runs under it", async () => {
+    vi.mocked(resultsApi.assessments).mockResolvedValue({
+      assessments: [
+        { ...PASSED_ASSESSMENT, assessment_id: "assessment-failed", passed: false },
+        PASSED_ASSESSMENT,
+        { ...PASSED_ASSESSMENT, assessment_id: "assessment-other", checkpoint_sha256: "other" },
+      ],
+    });
+    const launchSpy = vi
+      .spyOn(inferenceApi, "launch")
+      .mockImplementation((body) => Promise.resolve(launched(body.date, body.bucket)));
+
+    render(<InferenceTab />);
+    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    selectBaseline();
+
+    const select = screen.getByRole("combobox", { name: "Assessment" });
+    await waitFor(() => expect(select).toHaveValue("assessment-passed"));
+    expect(screen.getByRole("option", { name: "assessment-failed (failed)" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /assessment-other/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Confidence")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Reason")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Every execution value/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-01" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() => expect(launchSpy).toHaveBeenCalledTimes(1));
+    expect(launchSpy.mock.calls[0][0]).toMatchObject({
+      assessment_id: "assessment-passed",
+      stated: {},
+    });
+  });
+
+  it("chooses None for a model with no passed assessment, revealing the stated inputs", async () => {
+    vi.mocked(resultsApi.assessments).mockResolvedValue({
+      assessments: [{ ...PASSED_ASSESSMENT, passed: false }],
+    });
+
+    render(<InferenceTab />);
+    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    selectBaseline();
+
+    expect(screen.getByRole("combobox", { name: "Assessment" })).toHaveValue("");
+    expect(screen.getByLabelText("Confidence")).toBeInTheDocument();
+    expect(screen.getByLabelText("Mask threshold")).toBeInTheDocument();
+    expect(screen.getByLabelText("Ring spacing")).toBeInTheDocument();
+    expect(screen.getByLabelText("Masks")).toBeInTheDocument();
   });
 });
 
@@ -260,7 +323,7 @@ describe("InferenceTab job table", () => {
       }),
     );
 
-    expect(await screen.findByText(/Status: running · 4 \/ 9/)).toBeInTheDocument();
+    expect(await screen.findByText("running, 4 of 9")).toBeInTheDocument();
   });
 
   it("carries a final frame's error into the watched job panel", async () => {
@@ -273,7 +336,7 @@ describe("InferenceTab job table", () => {
     const onFrame = vi.mocked(openInferenceStream).mock.calls[0][1];
     act(() => onFrame({ type: "final", status: "failed", error: "job not found" }));
 
-    expect(await screen.findByText(/Error: job not found/)).toBeInTheDocument();
+    expect(await screen.findByText("job not found")).toBeInTheDocument();
   });
 
   it("shows the frame's error alone once the poll no longer lists the watched job", async () => {
@@ -289,16 +352,16 @@ describe("InferenceTab job table", () => {
 
       const onFrame = vi.mocked(openInferenceStream).mock.calls[0][1];
       act(() => onFrame({ type: "final", error: "job not found" }));
-      expect(screen.getByText(/Error: job not found/)).toBeInTheDocument();
-      expect(screen.getByText(/Status: running/)).toBeInTheDocument();
+      expect(screen.getByText("job not found")).toBeInTheDocument();
+      expect(screen.getByText(/^running, /)).toBeInTheDocument();
 
       vi.mocked(inferenceApi.listJobs).mockResolvedValue({ jobs: [] });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3000);
       });
 
-      expect(screen.getByText(/Error: job not found/)).toBeInTheDocument();
-      expect(screen.queryByText(/Status:/)).not.toBeInTheDocument();
+      expect(screen.getByText("job not found")).toBeInTheDocument();
+      expect(screen.queryByText(/^running, /)).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -318,7 +381,7 @@ describe("InferenceTab bucket refusals", () => {
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
     selectBaseline();
     fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-01" }));
-    fireEvent.click(screen.getByRole("button", { name: /launch inference/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
   }
 
   it("renders the job still writing the bucket and its name, with no toast", async () => {
@@ -327,9 +390,7 @@ describe("InferenceTab bucket refusals", () => {
 
     expect(
       await screen.findByText(
-        paragraphMatching(
-          /2026-01-01: job inf-live is still writing the bucket baseline\/2026-01-01\./,
-        ),
+        paragraphMatching(/2026-01-01: job inf-live is still writing baseline\/2026-01-01\./),
       ),
     ).toBeInTheDocument();
     expect(useStore.getState().toasts).toHaveLength(0);
@@ -345,7 +406,7 @@ describe("InferenceTab bucket refusals", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Watch job inf-live for 2026-01-01" }),
     );
-    expect(await screen.findByText(/Status: running/)).toBeInTheDocument();
+    expect(await screen.findByText("running, 1 of 9")).toBeInTheDocument();
   });
 
   it("seeds the watched stub's bucket from the refusal when the poll hasn't listed the job yet", async () => {
@@ -373,7 +434,7 @@ describe("InferenceTab bucket refusals", () => {
     selectBaseline();
     fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-01" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-08" }));
-    fireEvent.click(screen.getByRole("button", { name: /launch inference/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     expect(await screen.findByText("inf-2026-01-01")).toBeInTheDocument();
     expect(
@@ -393,7 +454,7 @@ describe("InferenceTab bucket refusals", () => {
     selectBaseline();
     fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-01" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-08" }));
-    fireEvent.click(screen.getByRole("button", { name: /launch inference/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     expect(
       await screen.findByRole("button", { name: "Dismiss refusal for 2026-01-01" }),
@@ -408,7 +469,7 @@ describe("InferenceTab bucket refusals", () => {
     await launchOneRefused();
 
     fireEvent.click(await screen.findByRole("button", { name: "Dismiss refusal for 2026-01-01" }));
-    expect(screen.queryByText("Refused launches")).not.toBeInTheDocument();
+    expect(screen.queryByText("Refused")).not.toBeInTheDocument();
   });
 
   it("still toasts, and renders no entry, for a launch failure of another kind", async () => {
@@ -416,7 +477,7 @@ describe("InferenceTab bucket refusals", () => {
     await launchOneRefused();
 
     await waitFor(() => expect(useStore.getState().toasts).toHaveLength(1));
-    expect(screen.queryByText("Refused launches")).not.toBeInTheDocument();
+    expect(screen.queryByText("Refused")).not.toBeInTheDocument();
   });
 
   it("drops refused entries on a model change", async () => {
@@ -426,6 +487,7 @@ describe("InferenceTab bucket refusals", () => {
         {
           name: "other",
           checkpoint_path: "C:/proj/.tcip/models/other/best.pt",
+          sha256: "other-digest",
           tags: [],
           experiment_id: null,
         },
@@ -433,25 +495,25 @@ describe("InferenceTab bucket refusals", () => {
     });
     vi.spyOn(inferenceApi, "launch").mockRejectedValue(existsRefusal());
     await launchOneRefused();
-    expect(await screen.findByText("Refused launches")).toBeInTheDocument();
+    expect(await screen.findByText("Refused")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Model checkpoint" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Model" }), {
       target: { value: "C:/proj/.tcip/models/other/best.pt" },
     });
-    expect(screen.queryByText("Refused launches")).not.toBeInTheDocument();
+    expect(screen.queryByText("Refused")).not.toBeInTheDocument();
   });
 
   it("drops refused entries on a dataset change", async () => {
     vi.spyOn(inferenceApi, "launch").mockRejectedValue(existsRefusal());
     await launchOneRefused();
-    expect(await screen.findByText("Refused launches")).toBeInTheDocument();
+    expect(await screen.findByText("Refused")).toBeInTheDocument();
 
     act(() => {
       useStore.setState((s) => ({
         gui: { ...s.gui, dataset: { ...s.gui.dataset, dataset_root: "C:/data2" } },
       }));
     });
-    expect(screen.queryByText("Refused launches")).not.toBeInTheDocument();
+    expect(screen.queryByText("Refused")).not.toBeInTheDocument();
   });
 
   it("disables the launch button while onLaunch's loop is in flight", async () => {
@@ -467,7 +529,7 @@ describe("InferenceTab bucket refusals", () => {
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
     selectBaseline();
     fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-01" }));
-    const launchButton = screen.getByRole("button", { name: /launch inference/i });
+    const launchButton = screen.getByRole("button", { name: "Run" });
     fireEvent.click(launchButton);
 
     await waitFor(() => expect(launchButton).toBeDisabled());
@@ -481,7 +543,7 @@ describe("InferenceTab bucket refusals", () => {
 
     const list = await screen.findByRole("list");
     expect(list).toHaveAttribute("aria-live", "polite");
-    expect(screen.getByText("Refused launches").tagName).not.toBe("H1");
+    expect(screen.getByText("Refused").tagName).not.toBe("H1");
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
@@ -496,7 +558,7 @@ describe("InferenceTab bucket refusals", () => {
 
     selectBaseline();
     fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-01" }));
-    fireEvent.click(screen.getByRole("button", { name: /launch inference/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(1));
     expect(screen.getByRole("list")).toHaveAttribute("aria-live", "polite");
@@ -511,15 +573,13 @@ describe("InferenceTab bucket refusals", () => {
     fireEvent.click(dismiss);
 
     await waitFor(() =>
-      expect(document.activeElement).toBe(
-        screen.getByRole("button", { name: /launch inference/i }),
-      ),
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Run" })),
     );
   });
 });
 
 describe("InferenceTab model select", () => {
-  it("associates the model checkpoint label with the select by accessible name", async () => {
+  it("associates the model label with the select by accessible name", async () => {
     mockTree([]);
     vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
       models: [BASELINE_MODEL],
@@ -527,7 +587,7 @@ describe("InferenceTab model select", () => {
 
     render(<InferenceTab />);
 
-    expect(await screen.findByRole("combobox", { name: "Model checkpoint" })).toBeInTheDocument();
+    expect(await screen.findByRole("combobox", { name: "Model" })).toBeInTheDocument();
   });
 });
 

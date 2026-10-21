@@ -12,6 +12,7 @@ import {
 } from "@/api/inference";
 import {
   CROSS_TILE_MERGE_DESCRIPTIONS,
+  type AssessmentSummary,
   type MaskCut,
   type RegisteredModel,
   type Stated,
@@ -29,28 +30,15 @@ const MASK_CUT_FIELDS: ReadonlySet<StatedField> = new Set(["mask_binarize", "ver
 
 /** The execution values a run without an assessment states, one input each, their ranges the
  *  server's to refuse; the two mask cut inputs are stated together as its one ``mask_cut``. */
-const STATED_INPUTS: { field: StatedField; label: string; placeholder: string }[] = [
-  {
-    field: "conf",
-    label: "Confidence threshold (a detector run without an assessment)",
-    placeholder: "the score a box is kept at",
-  },
-  {
-    field: "mask_binarize",
-    label: "Mask threshold (an instance segmentation run without an assessment)",
-    placeholder: "the probability a mask pixel is foreground at",
-  },
-  {
-    field: "vertex_spacing",
-    label: "Mask ring vertex spacing (an instance segmentation run without an assessment)",
-    placeholder: "the pixels of each ring's perimeter per vertex, 0 for every vertex",
-  },
-  {
-    field: "cross_tile_nms",
-    label: "Cross-tile merge threshold (a tiled run without an assessment)",
-    placeholder: "the IoU above which two tiles' detections are one object",
-  },
+const STATED_INPUTS: { field: StatedField; label: string }[] = [
+  { field: "conf", label: "Confidence" },
+  { field: "mask_binarize", label: "Mask threshold" },
+  { field: "vertex_spacing", label: "Ring spacing" },
+  { field: "cross_tile_nms", label: "Merge threshold" },
 ];
+
+/** The assessment select's value for a run that states its own values. */
+const NO_ASSESSMENT = "";
 
 /** A launch refused for one date, holding what it was refused for. */
 interface RefusedLaunch {
@@ -71,26 +59,27 @@ function RefusedLaunchEntry({
 }) {
   const { refusal, date } = entry;
   return (
-    <li className="border border-tcip-border rounded p-2 flex flex-col gap-1 text-[13px]">
+    <li className="border border-tcip-border rounded p-2 flex flex-col gap-1">
       <p>
-        {date}: job {refusal.job_id} is still writing the bucket{" "}
-        <span className="font-mono">{refusal.requested_bucket}</span>. A bucket is published once,
-        so nothing was launched; name another bucket to publish this run.
+        {date}: job {refusal.job_id} is still writing{" "}
+        <span className="font-mono">{refusal.requested_bucket}</span>. Choose another name.
       </p>
-      <button
-        className="tcip-btn text-[13px] self-start"
-        aria-label={`Watch job ${refusal.job_id} for ${date}`}
-        onClick={() => onWatch(refusal)}
-      >
-        {`Watch job ${refusal.job_id}`}
-      </button>
-      <button
-        className="tcip-btn text-[13px] self-start"
-        aria-label={`Dismiss refusal for ${date}`}
-        onClick={() => onDismiss(date)}
-      >
-        Dismiss
-      </button>
+      <div className="flex gap-1">
+        <button
+          className="tcip-btn"
+          aria-label={`Watch job ${refusal.job_id} for ${date}`}
+          onClick={() => onWatch(refusal)}
+        >
+          Watch
+        </button>
+        <button
+          className="tcip-btn"
+          aria-label={`Dismiss refusal for ${date}`}
+          onClick={() => onDismiss(date)}
+        >
+          Dismiss
+        </button>
+      </div>
     </li>
   );
 }
@@ -101,6 +90,11 @@ function statusBadgeClass(status: InferenceStatus): string {
   return "bg-tcip-fn/20 text-tcip-fn"; // pending / running
 }
 
+/** The assessments among `assessments` that judged `model`'s checkpoint. */
+function assessmentsOf(assessments: AssessmentSummary[], model: RegisteredModel | undefined) {
+  return model ? assessments.filter((a) => a.checkpoint_sha256 === model.sha256) : [];
+}
+
 export function InferenceTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const projectRoot = useStore(selectProjectRoot);
@@ -109,13 +103,16 @@ export function InferenceTab() {
   const [models, setModels] = useState<RegisteredModel[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [modelPath, setModelPath] = useState<string>("");
+  const [assessments, setAssessments] = useState<AssessmentSummary[]>([]);
+  const [assessmentsError, setAssessmentsError] = useState<string | null>(null);
   const [dates, setDates] = useState<string[]>([]);
   const [datesError, setDatesError] = useState<string | null>(null);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
   // The name the run's buckets publish under, one ``<name>/<date>`` per date; the breeder names it.
   const [bucketName, setBucketName] = useState("");
-  // The assessment whose execution record the run takes and publishes under; empty for none.
-  const [assessmentId, setAssessmentId] = useState("");
+  // The assessment whose execution record the run takes and publishes under; NO_ASSESSMENT for a
+  // run stating its own values.
+  const [assessmentId, setAssessmentId] = useState(NO_ASSESSMENT);
   const [statedInputs, setStatedInputs] = useState<Record<StatedField, string>>({
     conf: "",
     mask_binarize: "",
@@ -142,6 +139,8 @@ export function InferenceTab() {
   const launchButtonRef = useRef<HTMLButtonElement>(null);
   const prevRefusedDatesRef = useRef<string[]>([]);
   const activeJobId = activeJob?.job_id ?? null;
+  const model = models.find((m) => m.checkpoint_path === modelPath);
+  const modelAssessments = assessmentsOf(assessments, model);
 
   // A refused entry's control can unmount while focused (Dismiss, or its action succeeding),
   // dropping focus to body; restore it to the launch button instead of stranding it there.
@@ -160,6 +159,13 @@ export function InferenceTab() {
     setRefusedLaunches({});
   }, [modelPath, datasetRoot]);
 
+  // The chosen model's first passed assessment answers for its run unless the person chooses
+  // otherwise; a model with none states its own values.
+  useEffect(() => {
+    setAssessmentId(modelAssessments.find((a) => a.passed)?.assessment_id ?? NO_ASSESSMENT);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelPath, assessments]);
+
   const refreshModels = useCallback(() => {
     if (!projectRoot) return;
     void resultsApi
@@ -172,6 +178,18 @@ export function InferenceTab() {
         setModels([]);
         setModelsError(
           `Could not load registered models: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      });
+    void resultsApi
+      .assessments()
+      .then((r) => {
+        setAssessments(r.assessments);
+        setAssessmentsError(null);
+      })
+      .catch((e) => {
+        setAssessments([]);
+        setAssessmentsError(
+          `Could not load assessments: ${e instanceof Error ? e.message : String(e)}`,
         );
       });
   }, [projectRoot]);
@@ -276,9 +294,10 @@ export function InferenceTab() {
     });
   }
 
-  // What the run states of its execution record: each filled value, the mask cut's filled values
-  // as its one block, the chosen merge, and the reason for them.
+  /** What the run states of its execution record: each filled value, the mask cut's filled
+   *  values as its one block, the chosen merge, and the reason; nothing under an assessment. */
   function statement(): Stated {
+    if (assessmentId !== NO_ASSESSMENT) return {};
     const filled = Object.entries(statedInputs)
       .filter(([, value]) => value.trim() !== "")
       .map(([field, value]) => [field, Number(value)] as const);
@@ -303,7 +322,7 @@ export function InferenceTab() {
         date,
         bucket: `${bucketName.replace(/\/+$/, "")}/${date}`,
         stated: statement(),
-        assessment_id: assessmentId.trim() || null,
+        assessment_id: assessmentId === NO_ASSESSMENT ? null : assessmentId,
         user: useStore.getState().user,
       });
       if (res.job_id) {
@@ -338,7 +357,6 @@ export function InferenceTab() {
   }
 
   async function onLaunch() {
-    const model = models.find((m) => m.checkpoint_path === modelPath);
     if (!model || !datasetRoot || !bucketName || selectedDates.length === 0) return;
     setRefusedLaunches((prev) => {
       const next = { ...prev };
@@ -389,15 +407,13 @@ export function InferenceTab() {
     <div className="flex-1 grid grid-cols-[440px_1fr] overflow-hidden">
       <TabHeading tab="inference" />
       <div className="border-r border-tcip-border p-4 overflow-auto">
-        <div className="tcip-heading mb-3">Inference config</div>
-
         <label className="tcip-label mb-1" htmlFor="inference-model-select">
-          Model checkpoint
+          Model
         </label>
         {modelsError && (
-          <div className="text-[13px] tcip-problem mb-1">
+          <div className="tcip-problem mb-1">
             {modelsError}{" "}
-            <button className="tcip-btn text-[13px] ml-1" onClick={refreshModels}>
+            <button className="tcip-btn ml-1" onClick={refreshModels}>
               Retry
             </button>
           </div>
@@ -409,50 +425,35 @@ export function InferenceTab() {
             value={modelPath}
             onChange={(e) => setModelPath(e.target.value)}
           >
-            <option value="">Select a registered model…</option>
+            <option value="">Choose a model</option>
             {models.map((m) => (
               <option key={m.checkpoint_path} value={m.checkpoint_path}>
                 {m.name}
-                {m.experiment_id ? ` [${m.experiment_id}]` : ""}{" "}
-                {m.tags?.length ? `(${m.tags.join(", ")})` : ""} -{" "}
-                {m.checkpoint_path.split(/[/\\]/).slice(-3).join("/")}
               </option>
             ))}
           </select>
         ) : (
           !modelsError &&
-          projectRoot && (
-            <p className="text-[13px] text-tcip-muted mb-3">
-              No model is registered for this project yet. Train one, or ask the agent in the
-              terminal to register a checkpoint, and it will appear here.
-            </p>
-          )
+          projectRoot && <p className="text-tcip-muted mb-3">No model is registered.</p>
         )}
 
-        <div className="tcip-label mb-1">Capture dates</div>
+        <div className="tcip-label mb-1">Dates</div>
         {datesError && (
-          <div className="text-[13px] tcip-problem mb-1">
+          <div className="tcip-problem mb-1">
             {datesError}{" "}
-            <button className="tcip-btn text-[13px] ml-1" onClick={refreshDates}>
+            <button className="tcip-btn ml-1" onClick={refreshDates}>
               Retry
             </button>
           </div>
         )}
         {!datasetRoot ? (
-          <p className="text-[13px] text-tcip-muted mb-3">
-            No project is open. Open one from the top bar to choose which dates to run on.
-          </p>
+          <p className="text-tcip-muted mb-3">No project is open.</p>
         ) : dates.length === 0 ? (
-          !datesError && (
-            <p className="text-[13px] text-tcip-muted mb-3">
-              This dataset has no capture dates yet. Ingest images (or ask the agent in the terminal
-              to) before running inference.
-            </p>
-          )
+          !datesError && <p className="text-tcip-muted mb-3">No dates with images.</p>
         ) : (
           <div className="mb-3 max-h-48 overflow-auto border border-tcip-border rounded p-2 flex flex-col gap-1">
             {dates.map((d) => (
-              <label key={d} className="flex items-center gap-2 text-[13px]">
+              <label key={d} className="flex items-center gap-2">
                 <input
                   type="checkbox"
                   checked={selectedDates.includes(d)}
@@ -465,97 +466,103 @@ export function InferenceTab() {
         )}
 
         <label className="tcip-label mb-1" htmlFor="inference-bucket-root">
-          Bucket name
+          Predictions
         </label>
         <input
           id="inference-bucket-root"
           className="tcip-input w-full mb-3 font-mono"
           value={bucketName}
           onChange={(e) => setBucketName(e.target.value)}
-          placeholder="a name no bucket of this dataset is published under"
         />
 
         <label className="tcip-label mb-1" htmlFor="inference-assessment">
-          Assessment (optional)
+          Assessment
         </label>
-        <input
+        {assessmentsError && (
+          <div className="tcip-problem mb-1">
+            {assessmentsError}{" "}
+            <button className="tcip-btn ml-1" onClick={refreshModels}>
+              Retry
+            </button>
+          </div>
+        )}
+        <select
           id="inference-assessment"
-          className="tcip-input w-full mb-3 font-mono"
+          className="tcip-select w-full mb-3"
           value={assessmentId}
           onChange={(e) => setAssessmentId(e.target.value)}
-          placeholder="the assessment id this checkpoint earned"
-        />
-
-        {STATED_INPUTS.map(({ field, label, placeholder }) => (
-          <div key={field}>
-            <label className="tcip-label mb-1" htmlFor={`inference-${field}`}>
-              {label}
-            </label>
-            <input
-              id={`inference-${field}`}
-              className="tcip-input w-full mb-3 font-mono"
-              type="number"
-              step="any"
-              value={statedInputs[field]}
-              onChange={(e) => setStatedInputs((prev) => ({ ...prev, [field]: e.target.value }))}
-              placeholder={placeholder}
-            />
-          </div>
-        ))}
-
-        <label className="tcip-label mb-1" htmlFor="inference-merge">
-          Cross-tile merge (a tiled run without an assessment)
-        </label>
-        <select
-          id="inference-merge"
-          className="tcip-select w-full mb-3"
-          value={merge}
-          onChange={(e) => setMerge(e.target.value)}
         >
-          <option value="">None stated</option>
-          {Object.entries(CROSS_TILE_MERGE_DESCRIPTIONS).map(([name, description]) => (
-            <option key={name} value={name}>
-              {description}
+          <option value={NO_ASSESSMENT}>None</option>
+          {modelAssessments.map((a) => (
+            <option key={a.assessment_id} value={a.assessment_id}>
+              {a.assessment_id}
+              {a.passed ? "" : " (failed)"}
             </option>
           ))}
         </select>
 
-        <label className="tcip-label mb-1" htmlFor="inference-masks">
-          Collect masks (an instance segmentation run without an assessment)
-        </label>
-        <select
-          id="inference-masks"
-          className="tcip-select w-full mb-3"
-          value={masks}
-          onChange={(e) => setMasks(e.target.value)}
-        >
-          <option value="">None stated</option>
-          <option value="true">Collect masks</option>
-          <option value="false">Boxes only</option>
-        </select>
+        {assessmentId === NO_ASSESSMENT && (
+          <>
+            {STATED_INPUTS.map(({ field, label }) => (
+              <div key={field}>
+                <label className="tcip-label mb-1" htmlFor={`inference-${field}`}>
+                  {label}
+                </label>
+                <input
+                  id={`inference-${field}`}
+                  className="tcip-input w-full mb-3 font-mono"
+                  type="number"
+                  step="any"
+                  value={statedInputs[field]}
+                  onChange={(e) =>
+                    setStatedInputs((prev) => ({ ...prev, [field]: e.target.value }))
+                  }
+                />
+              </div>
+            ))}
 
-        <label className="tcip-label mb-1" htmlFor="inference-rationale">
-          Why these values (a statement and its reason go together)
-        </label>
-        <input
-          id="inference-rationale"
-          className="tcip-input w-full mb-3"
-          value={rationale}
-          onChange={(e) => setRationale(e.target.value)}
-          placeholder="the reason this run states the values above"
-        />
+            <label className="tcip-label mb-1" htmlFor="inference-merge">
+              Merge
+            </label>
+            <select
+              id="inference-merge"
+              className="tcip-select w-full mb-3"
+              value={merge}
+              onChange={(e) => setMerge(e.target.value)}
+            >
+              <option value="">None</option>
+              {Object.entries(CROSS_TILE_MERGE_DESCRIPTIONS).map(([name, description]) => (
+                <option key={name} value={name}>
+                  {description}
+                </option>
+              ))}
+            </select>
 
-        <p className="text-[13px] text-tcip-muted mb-3">
-          Every execution value (conf, object density, tiling, cross-tile merge) is the named
-          assessment&apos;s own. Without one, a detector&apos;s run states its conf above, an
-          instance segmentation run whether it collects masks and, when it does, the threshold it
-          cuts them at and the simplification of their rings, and a tiled run its merge and merge
-          threshold, since no reference stands behind any, with the reason it states them; the
-          density is the one this checkpoint recorded, each image keeping at most its density times
-          its pixels, rounded up, and the tiling follows this checkpoint as the agent-facing door
-          resolves it. Only predictions published under an assessment can deliver validated numbers.
-          Each date publishes once, as its own bucket under the name above.
-        </p>
+            <label className="tcip-label mb-1" htmlFor="inference-masks">
+              Masks
+            </label>
+            <select
+              id="inference-masks"
+              className="tcip-select w-full mb-3"
+              value={masks}
+              onChange={(e) => setMasks(e.target.value)}
+            >
+              <option value="">None</option>
+              <option value="true">Collect masks</option>
+              <option value="false">Boxes only</option>
+            </select>
+
+            <label className="tcip-label mb-1" htmlFor="inference-rationale">
+              Reason
+            </label>
+            <input
+              id="inference-rationale"
+              className="tcip-input w-full mb-3"
+              value={rationale}
+              onChange={(e) => setRationale(e.target.value)}
+            />
+          </>
+        )}
 
         <button
           ref={launchButtonRef}
@@ -563,12 +570,12 @@ export function InferenceTab() {
           onClick={() => void onLaunch()}
           disabled={launching || !modelPath || !bucketName || selectedDates.length === 0}
         >
-          ▶&nbsp;&nbsp;Launch inference
+          Run
         </button>
 
         <div className="mt-3">
           {Object.keys(refusedLaunches).length > 0 && (
-            <div className="tcip-heading mb-1">Refused launches</div>
+            <div className="tcip-heading mb-1">Refused</div>
           )}
           <ul aria-live="polite" className="flex flex-col gap-1">
             {Object.values(refusedLaunches).map((entry) => (
@@ -586,23 +593,22 @@ export function InferenceTab() {
       <div className="p-4 overflow-auto">
         <div className="tcip-heading mb-3">Jobs</div>
         {jobsError && (
-          <div className="text-[13px] tcip-problem mb-2">
+          <div className="tcip-problem mb-2">
             {jobsError}{" "}
-            <button className="tcip-btn text-[13px] ml-1" onClick={() => void refreshJobs()}>
+            <button className="tcip-btn ml-1" onClick={() => void refreshJobs()}>
               Retry
             </button>
           </div>
         )}
         {jobs.length === 0 ? (
-          !jobsError && <div className="text-[13px] text-tcip-muted">No jobs yet.</div>
+          !jobsError && <div className="text-tcip-muted">No jobs.</div>
         ) : (
-          <table className="w-full text-[13px]">
+          <table className="w-full">
             <thead>
               <tr className="border-b border-tcip-border">
                 <th className="tcip-th">Job</th>
-                <th className="tcip-th">Status</th>
+                <th className="tcip-th">State</th>
                 <th className="tcip-th">Progress</th>
-                <th className="tcip-th">Images dir</th>
                 <th className="tcip-th"></th>
               </tr>
             </thead>
@@ -624,13 +630,10 @@ export function InferenceTab() {
                       </div>
                     )}
                   </td>
-                  <td className="pr-3 truncate max-w-xs font-mono text-tcip-muted">
-                    {j.images_dir}
-                  </td>
                   <td>
                     <div className="flex gap-1">
                       <button
-                        className="tcip-btn text-[13px]"
+                        className="tcip-btn"
                         onClick={() => {
                           setActiveJob(j);
                           setActiveJobListed(true);
@@ -639,10 +642,7 @@ export function InferenceTab() {
                         Watch
                       </button>
                       {CANCELLABLE.has(j.status) && (
-                        <button
-                          className="tcip-btn text-[13px]"
-                          onClick={() => void onCancel(j.job_id)}
-                        >
+                        <button className="tcip-btn" onClick={() => void onCancel(j.job_id)}>
                           Cancel
                         </button>
                       )}
@@ -657,19 +657,19 @@ export function InferenceTab() {
           <div className="mt-4 tcip-panel p-4">
             <div className="mb-1 flex items-center gap-2">
               <span className="tcip-heading">Active</span>
-              <span className="font-mono text-[13px]">{activeJob.job_id}</span>
+              <span className="font-mono">{activeJob.job_id}</span>
             </div>
-            <div className="text-[13px] text-tcip-muted">
-              Bucket: <span className="font-mono">{activeJob.bucket}</span>
-            </div>
-            {activeJobListed && (
-              <div className="text-[13px] mt-1 tabular-nums">
-                Status: {activeJob.status} · {activeJob.done} / {activeJob.total}
+            {activeJob.bucket && (
+              <div className="text-tcip-muted">
+                Prediction set <span className="font-mono">{activeJob.bucket}</span>
               </div>
             )}
-            {activeJob.error && (
-              <div className="text-[13px] tcip-problem mt-1">Error: {activeJob.error}</div>
+            {activeJobListed && (
+              <div className="mt-1 tabular-nums">
+                {activeJob.status}, {activeJob.done} of {activeJob.total}
+              </div>
             )}
+            {activeJob.error && <div className="tcip-problem mt-1">{activeJob.error}</div>}
           </div>
         )}
       </div>
