@@ -80,7 +80,7 @@ export function TopBar() {
             tabIndex={activeTab === id ? 0 : -1}
             onClick={() => setActiveTab(id)}
             onKeyDown={(e) => onTabKeyDown(e, index)}
-            className={`px-3 h-7 rounded text-[12px] font-medium transition-colors ${
+            className={`px-3 h-7 rounded text-[13px] font-medium transition-colors ${
               activeTab === id
                 ? "bg-tcip-accent text-white"
                 : "bg-transparent text-tcip-muted hover:text-tcip-fg hover:bg-tcip-hover"
@@ -95,7 +95,7 @@ export function TopBar() {
         {/* Connection state: visible only when something is wrong; it self-dismisses once the
             connection recovers. */}
         {degraded && (
-          <div className="flex items-center gap-1.5 h-6 px-2 mr-2 rounded-full border border-tcip-border bg-tcip-bg text-[11px]">
+          <div className="flex items-center gap-1.5 h-6 px-2 mr-2 rounded-full border border-tcip-border bg-tcip-bg text-[12px]">
             <span
               className={`w-2 h-2 rounded-full ${
                 wsStatus === "connecting" ? "bg-tcip-fn" : "bg-tcip-fp"
@@ -110,7 +110,7 @@ export function TopBar() {
           onClick={() => setTerminalOpen(!terminalOpen)}
           aria-pressed={terminalOpen}
           aria-label="Toggle agent terminal"
-          className={`px-2.5 h-7 rounded text-[12px] font-medium transition-colors ${
+          className={`px-2.5 h-7 rounded text-[13px] font-medium transition-colors ${
             terminalOpen
               ? "bg-tcip-accent text-white"
               : "bg-transparent text-tcip-muted hover:text-tcip-fg hover:bg-tcip-hover"

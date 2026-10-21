@@ -23,7 +23,7 @@ export function TabBanner() {
     banner.text.length > MAX_CHARS ? `${banner.text.slice(0, MAX_CHARS).trimEnd()}…` : banner.text;
 
   return (
-    <div className="flex items-start gap-3 border-l-2 border-tcip-accent/40 pl-3 pr-4 py-2 text-[11px] leading-relaxed text-tcip-muted">
+    <div className="flex items-start gap-3 border-l-2 border-tcip-accent/40 pl-3 pr-4 py-2 text-[13px] leading-relaxed text-tcip-muted">
       <span className="flex-1">{text}</span>
       <button
         type="button"

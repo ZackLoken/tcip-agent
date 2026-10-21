@@ -45,10 +45,10 @@ interface DateRow {
 /** A note whose remedy is on the Setup tab, with the one action that opens it. */
 function SetupTabNote({ children }: { children: ReactNode }) {
   return (
-    <div className="tcip-panel p-3 text-[11px] text-tcip-fp flex items-center gap-2">
+    <div className="tcip-panel p-3 text-[13px] tcip-problem flex items-center gap-2">
       <div>{children}</div>
       <button
-        className="tcip-btn text-[11px]"
+        className="tcip-btn text-[13px]"
         onClick={() => useStore.getState().setActiveTab("setup")}
       >
         Open the Setup tab
@@ -509,7 +509,7 @@ export function ResultsTab() {
   return (
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
       <TabHeading tab="results" />
-      {traitError && <div className="tcip-panel p-3 text-[11px] text-tcip-fp">{traitError}</div>}
+      {traitError && <div className="tcip-panel p-3 text-[13px] tcip-problem">{traitError}</div>}
       {unreadableTraits.length > 0 && (
         <SetupTabNote>
           These traits&apos; records will not read:{" "}
@@ -548,7 +548,7 @@ export function ResultsTab() {
 
       <div className="tcip-panel p-4">
         <div className="tcip-heading mb-3">Count export</div>
-        <p className="text-[10px] text-tcip-muted mb-2">
+        <p className="text-[12px] text-tcip-muted mb-2">
           A per-image count (a bucket, no plant identity) or a per-plant count through the
           orthomosaic composition (a bucket plus a registered plant registry). The ordinal and
           regression aggregates and the per-plant walked-capture count, each aggregated under the
@@ -620,7 +620,7 @@ export function ResultsTab() {
                 </label>
                 <textarea
                   id="count-plants"
-                  className="tcip-input text-[11px] font-mono h-20"
+                  className="tcip-input text-[13px] font-mono h-20"
                   value={plantsText}
                   onChange={(e) => setPlantsText(e.target.value)}
                   placeholder={"PLOT-01\nPLOT-02"}
@@ -691,16 +691,16 @@ export function ResultsTab() {
           </div>
 
           <div className="flex flex-col gap-2">
-            {countError && <div className="text-[11px] text-tcip-fp">{countError}</div>}
+            {countError && <div className="text-[13px] tcip-problem">{countError}</div>}
             {countOperationalizationRefusal && (
               <SetupTabNote>{countOperationalizationRefusal.message}</SetupTabNote>
             )}
             {countGateRefusal && (
-              <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
+              <div className="text-[13px] tcip-problem border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
                 <div>{countGateRefusal.message}</div>
                 {countShowAck && (
                   <input
-                    className="tcip-input text-[11px]"
+                    className="tcip-input text-[13px]"
                     placeholder="Reason for delivering unvalidated"
                     value={countAckReason}
                     onChange={(e) => setCountAckReason(e.target.value)}
@@ -709,7 +709,7 @@ export function ResultsTab() {
               </div>
             )}
             {countResultHeaders && (
-              <div className="text-[11px] text-tcip-muted">
+              <div className="text-[13px] text-tcip-muted">
                 Saved to {countResultHeaders.savedTo}.
                 {countResultHeaders.validated ? "" : " Not validated."}
                 {countResultHeaders.acknowledgedBy
@@ -737,12 +737,12 @@ export function ResultsTab() {
       {trait && confirmedEntry && !hasMilestones && (
         <div className="tcip-panel p-4 flex flex-col gap-2">
           <div className="tcip-heading">Nothing to compute here for {trait}</div>
-          <p className="text-[11px] text-tcip-muted">
+          <p className="text-[13px] text-tcip-muted">
             This trait&apos;s confirmed revision declares no milestone fractions, so there are no
             curves or milestones to compute for it.
           </p>
           <button
-            className="tcip-btn-primary text-[11px] self-start"
+            className="tcip-btn-primary text-[13px] self-start"
             onClick={() => useStore.getState().sendToAgentTerminal(milestoneAbsenceRequest())}
           >
             Ask the agent what this trait delivers
@@ -758,23 +758,23 @@ export function ResultsTab() {
               <div className="flex flex-col gap-1">
                 <div className="tcip-label">Predictions by date</div>
                 {datesError && (
-                  <div className="text-[11px] text-tcip-fp mb-1">
+                  <div className="text-[13px] tcip-problem mb-1">
                     {datesError}{" "}
-                    <button className="tcip-btn text-[11px] ml-1" onClick={refreshDatasetTree}>
+                    <button className="tcip-btn text-[13px] ml-1" onClick={refreshDatasetTree}>
                       Retry
                     </button>
                   </div>
                 )}
                 {!datesError && labelProblem && (
-                  <div className="text-[11px] text-tcip-fp mb-1">{labelProblem}</div>
+                  <div className="text-[13px] tcip-problem mb-1">{labelProblem}</div>
                 )}
                 {dates.length === 0 ? (
                   !datesError && (
-                    <div className="text-[11px] text-tcip-muted">No dates in this dataset yet.</div>
+                    <div className="text-[13px] text-tcip-muted">No dates in this dataset yet.</div>
                   )
                 ) : (
                   <div className="max-h-40 overflow-auto rounded border border-tcip-border">
-                    <table className="w-full text-[11px]">
+                    <table className="w-full text-[13px]">
                       <tbody>
                         {dates.map((d) => {
                           const opts = bucketsFor(d);
@@ -783,7 +783,7 @@ export function ResultsTab() {
                               <td className="py-1 pl-2 pr-2 font-mono tabular-nums">{d}</td>
                               <td className="py-1 pr-2">
                                 <select
-                                  className="tcip-select text-[11px] w-full"
+                                  className="tcip-select text-[13px] w-full"
                                   value={dateBucket[d] ?? ""}
                                   onChange={(e) =>
                                     setDateBucket((prev) => ({ ...prev, [d]: e.target.value }))
@@ -819,7 +819,7 @@ export function ResultsTab() {
                 </label>
                 <select
                   id="phenology-mapping"
-                  className="tcip-select text-[11px]"
+                  className="tcip-select text-[13px]"
                   value={mappingName}
                   onChange={(e) => setMappingName(e.target.value)}
                 >
@@ -835,27 +835,27 @@ export function ResultsTab() {
                 </label>
                 <textarea
                   id="phenology-plants"
-                  className="tcip-input text-[11px] font-mono h-20"
+                  className="tcip-input text-[13px] font-mono h-20"
                   value={plantsText}
                   onChange={(e) => setPlantsText(e.target.value)}
                   placeholder={"PLOT-01\nPLOT-02"}
                   title="The plant ids this measurement delivers, one row each; the mapping's own plot list is not the population"
                 />
-                <p className="text-[11px] text-tcip-muted">
+                <p className="text-[13px] text-tcip-muted">
                   The positive-state fraction is the share of a plant&apos;s detected objects that
                   are in the trait&apos;s positive state. That state is a value of one attribute the
                   assessed model calls on every detection, not a bbox measurement; the
                   predictions&apos; scope must declare that attribute.
                 </p>
                 {positiveClassUnassessed && (
-                  <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2">
+                  <div className="text-[13px] tcip-problem border border-tcip-fp/40 rounded p-2">
                     These predictions carry no value of the positive state&apos;s attribute, so the
                     curves below are not a valid phenology measurement and CSV export is disabled.
                     Publish predictions from a model whose scope declares that attribute first.
                   </div>
                 )}
                 {unvalidatedRefusal && (
-                  <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
+                  <div className="text-[13px] tcip-problem border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
                     <div>
                       No passing assessment answers for these predictions (see detail below), so
                       this is not yet a deliverable phenology measurement. Assess first, or look at
@@ -864,14 +864,14 @@ export function ResultsTab() {
                     <div className="text-tcip-muted">{unvalidatedRefusal}</div>
                     <div className="flex gap-2">
                       <button
-                        className="tcip-btn text-[11px] self-start"
+                        className="tcip-btn text-[13px] self-start"
                         onClick={() => void compute(true)}
                         disabled={loading}
                       >
                         Show unvalidated numbers
                       </button>
                       <button
-                        className="tcip-btn-primary text-[11px] self-start"
+                        className="tcip-btn-primary text-[13px] self-start"
                         onClick={() =>
                           useStore
                             .getState()
@@ -884,13 +884,13 @@ export function ResultsTab() {
                   </div>
                 )}
                 {unvalidated && (
-                  <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
+                  <div className="text-[13px] tcip-problem border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
                     <div>
                       Not validated: {unvalidatedReason}. Assess to deliver a validated phenotype,
                       or acknowledge and export it unvalidated below.
                     </div>
                     <button
-                      className="tcip-btn-primary text-[11px] self-start"
+                      className="tcip-btn-primary text-[13px] self-start"
                       onClick={() =>
                         useStore
                           .getState()
@@ -902,12 +902,12 @@ export function ResultsTab() {
                   </div>
                 )}
                 {datesDelivered.length > 0 && (
-                  <div className="text-[11px] text-tcip-muted">
+                  <div className="text-[13px] text-tcip-muted">
                     {`Delivered dates ${datesDelivered.join(", ")}: ${imagesUnattributed} attributed to no plant`}
                   </div>
                 )}
                 {(capturesUnverified.length > 0 || plantCsvsUnverified.length > 0) && (
-                  <div className="text-[11px] text-tcip-muted border border-tcip-border rounded p-2">
+                  <div className="text-[13px] text-tcip-muted border border-tcip-border rounded p-2">
                     Not verified at delivery time:
                     {capturesUnverified.length > 0 && ` ${capturesUnverified.join(", ")}`}
                     {capturesUnverified.length > 0 && plantCsvsUnverified.length > 0 && ";"}
@@ -924,11 +924,11 @@ export function ResultsTab() {
                     ? "Verifying the mapping's captures…"
                     : "Compute curves + milestone dates"}
                 </button>
-                <p className="text-[10px] text-tcip-muted">
+                <p className="text-[12px] text-tcip-muted">
                   One computed measurement in two shapes: every (plant, date) point, or the
                   milestone dates read off it.
                 </p>
-                <p className="text-[10px] text-tcip-muted">
+                <p className="text-[12px] text-tcip-muted">
                   A phenology milestone delivery here, and a per-image or per-plant-orthomosaic
                   count in the section below, can each be acknowledged and exported unvalidated.
                   Every other count kind (ordinal, regression, a per-plant walked-capture count) has
@@ -939,7 +939,7 @@ export function ResultsTab() {
                   <div className="flex gap-1">
                     {unvalidated ? (
                       <button
-                        className="tcip-btn flex-1 text-[11px]"
+                        className="tcip-btn flex-1 text-[13px]"
                         onClick={() => setShowAckExport(true)}
                         disabled={exportBlocked}
                       >
@@ -948,14 +948,14 @@ export function ResultsTab() {
                     ) : (
                       <>
                         <button
-                          className="tcip-btn flex-1 text-[11px]"
+                          className="tcip-btn flex-1 text-[13px]"
                           onClick={downloadCurvesCsv}
                           disabled={curves.length === 0 || exportBlocked}
                         >
                           Curves CSV
                         </button>
                         <button
-                          className="tcip-btn flex-1 text-[11px]"
+                          className="tcip-btn flex-1 text-[13px]"
                           onClick={downloadOnsetCsv}
                           disabled={onset.length === 0 || exportBlocked}
                         >
@@ -967,21 +967,21 @@ export function ResultsTab() {
                 ) : (
                   <div className="flex flex-col gap-1">
                     <input
-                      className="tcip-input text-[11px]"
+                      className="tcip-input text-[13px]"
                       placeholder="Reason for delivering unvalidated"
                       value={ackReason}
                       onChange={(e) => setAckReason(e.target.value)}
                     />
                     <div className="flex gap-1">
                       <button
-                        className="tcip-btn flex-1 text-[11px]"
+                        className="tcip-btn flex-1 text-[13px]"
                         onClick={downloadCurvesCsv}
                         disabled={curves.length === 0 || !ackReason.trim()}
                       >
                         Curves CSV
                       </button>
                       <button
-                        className="tcip-btn flex-1 text-[11px]"
+                        className="tcip-btn flex-1 text-[13px]"
                         onClick={downloadOnsetCsv}
                         disabled={onset.length === 0 || !ackReason.trim()}
                       >
@@ -992,7 +992,7 @@ export function ResultsTab() {
                 )}
               </div>
             </div>
-            {error && <div className="mt-2 text-[11px] text-tcip-fp">{error}</div>}
+            {error && <div className="mt-2 text-[13px] tcip-problem">{error}</div>}
             {operationalizationRefusal && (
               <div className="mt-2">
                 <SetupTabNote>{operationalizationRefusal.message}</SetupTabNote>
@@ -1037,7 +1037,7 @@ export function ResultsTab() {
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-full text-tcip-muted text-[12px]">
+              <div className="flex items-center justify-center h-full text-tcip-muted text-[13px]">
                 No data. Configure mapping + predictions above, then compute.
               </div>
             )}
@@ -1050,7 +1050,7 @@ export function ResultsTab() {
             </div>
             {onset.length > 0 ? (
               <div className="overflow-auto max-h-96">
-                <table className="w-full text-[11px]">
+                <table className="w-full text-[13px]">
                   <thead className="sticky top-0 bg-tcip-panel">
                     <tr className="border-b border-tcip-border">
                       <th className="tcip-th">Plant ID</th>
@@ -1092,7 +1092,7 @@ export function ResultsTab() {
                               // up and scrolls out of view, so the row must say so where it is read:
                               // a phenology date beside a plain "valid" would be an unearned precision claim.
                               <span
-                                className="text-tcip-fp"
+                                className="tcip-problem"
                                 title="Coverage is complete, but the operating point behind these dates is not validated on disk: unvalidated, not a deliverable phenotype."
                               >
                                 unvalidated
@@ -1101,7 +1101,7 @@ export function ResultsTab() {
                               <span className="text-tcip-muted">valid</span>
                             ) : (
                               <span
-                                className="text-tcip-fp"
+                                className="tcip-problem"
                                 title={`${r.n_dates_unclassified} unclassified date(s), ${r.n_dates_missing_images} missing-image date(s)`}
                               >
                                 incomplete
@@ -1120,14 +1120,14 @@ export function ResultsTab() {
                               bound === "left_censored"
                                 ? {
                                     symbol: "≤",
-                                    className: "text-tcip-fp",
+                                    className: "tcip-problem",
                                     title:
                                       "Left-censored: the first observation already met this target, so the true date is at or before this one.",
                                   }
                                 : bound === "right_censored"
                                   ? {
                                       symbol: ">",
-                                      className: "text-tcip-fp",
+                                      className: "tcip-problem",
                                       title:
                                         "Right-censored: the last observation still hadn't met this target, so the true date, if any, is after this one.",
                                     }
@@ -1156,7 +1156,7 @@ export function ResultsTab() {
                 </table>
               </div>
             ) : (
-              <div className="text-[11px] text-tcip-muted">Run the compute step to populate.</div>
+              <div className="text-[13px] text-tcip-muted">Run the compute step to populate.</div>
             )}
           </div>
         </>

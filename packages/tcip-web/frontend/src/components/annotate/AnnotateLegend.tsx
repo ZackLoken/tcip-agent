@@ -45,7 +45,7 @@ export function AnnotateLegend({ reviewing }: { reviewing: boolean }) {
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[11px] text-tcip-muted backdrop-blur-sm hover:border-tcip-border-hover hover:text-tcip-fg"
+        className="flex items-center gap-1.5 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[13px] text-tcip-muted backdrop-blur-sm hover:border-tcip-border-hover hover:text-tcip-fg"
       >
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.4" />
@@ -65,7 +65,7 @@ export function AnnotateLegend({ reviewing }: { reviewing: boolean }) {
           (open ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none opacity-0")
         }
       >
-        <h4 className="mb-2 text-[11px] font-semibold tracking-wide text-tcip-fg">
+        <h4 className="mb-2 text-[13px] font-semibold tracking-wide text-tcip-fg">
           Annotate Legend
         </h4>
         <ul className="space-y-1.5">
@@ -76,14 +76,14 @@ export function AnnotateLegend({ reviewing }: { reviewing: boolean }) {
                   type="button"
                   onClick={() => setPickerSubject(row.subject!)}
                   title={`Change ${row.subject}'s color (this browser only)`}
-                  className="flex w-full items-center gap-2.5 rounded text-[12px] hover:bg-tcip-hover"
+                  className="flex w-full items-center gap-2.5 rounded text-[13px] hover:bg-tcip-hover"
                 >
                   <Swatch row={row} />
                   <span className="text-tcip-fg">{row.text}</span>
                 </button>
               </li>
             ) : (
-              <li key={row.text} className="flex items-center gap-2.5 text-[12px]">
+              <li key={row.text} className="flex items-center gap-2.5 text-[13px]">
                 <Swatch row={row} />
                 <span className={row.color === "currentColor" ? "text-tcip-muted" : "text-tcip-fg"}>
                   {row.text}

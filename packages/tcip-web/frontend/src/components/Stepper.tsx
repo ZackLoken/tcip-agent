@@ -35,15 +35,15 @@ export function Stepper({
   const Noun = noun.charAt(0).toUpperCase() + noun.slice(1);
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] font-bold uppercase tracking-wide text-tcip-muted">{label}</span>
+      <span className="tcip-label">{label}</span>
       <span
-        className="max-w-[150px] truncate font-mono text-[11px] text-tcip-fg"
+        className="max-w-[150px] truncate font-mono text-[13px] text-tcip-fg"
         title={name ?? UNSET_GLYPH}
       >
         {name ?? UNSET_GLYPH}
       </span>
       <button
-        className="tcip-btn text-[11px]"
+        className="tcip-btn text-[13px]"
         onClick={() => onStep(-1)}
         disabled={!canPrev}
         aria-label={`Previous ${noun}`}
@@ -54,7 +54,7 @@ export function Stepper({
         ref={inputRef}
         aria-label={`${Noun} position`}
         title={`${Noun} position: type a number and press Enter to jump`}
-        className="tcip-input w-10 text-center font-mono text-[11px]"
+        className="tcip-input w-10 text-center font-mono text-[13px]"
         value={draft ?? (position > 0 ? String(position) : "")}
         onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
         onFocus={() => setDraft(String(position || 1))}
@@ -71,9 +71,9 @@ export function Stepper({
           }
         }}
       />
-      <span className="font-mono text-[11px] tabular-nums text-tcip-muted">/ {total}</span>
+      <span className="font-mono text-[13px] tabular-nums text-tcip-muted">/ {total}</span>
       <button
-        className="tcip-btn text-[11px]"
+        className="tcip-btn text-[13px]"
         onClick={() => onStep(1)}
         disabled={!canNext}
         aria-label={`Next ${noun}`}

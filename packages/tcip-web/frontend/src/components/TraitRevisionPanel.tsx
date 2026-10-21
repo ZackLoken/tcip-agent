@@ -55,7 +55,7 @@ function RevisionEntry({
   const { operationalizations, ...fields } = revision.entry;
   return (
     <>
-      <dl className="mt-2 grid grid-cols-[190px_1fr] gap-x-3 gap-y-1 text-[11px]">
+      <dl className="mt-2 grid grid-cols-[190px_1fr] gap-x-3 gap-y-1 text-[13px]">
         {Object.entries(fields).map(([field, value]) => (
           <Fragment key={field}>
             <dt className="text-tcip-muted">{field}</dt>
@@ -66,7 +66,7 @@ function RevisionEntry({
       {Object.entries(operationalizations).map(([kind, op]) => (
         <div
           key={kind}
-          className="mt-2 rounded border border-tcip-border p-2 text-[11px]"
+          className="mt-2 rounded border border-tcip-border p-2 text-[13px]"
           data-testid={`operationalization-${kind}`}
         >
           <div className="font-mono">{kind}</div>
@@ -111,9 +111,9 @@ function TraitRow({
   return (
     <li className="rounded border border-tcip-border p-3" data-testid={`trait-${record.trait}`}>
       <div className="flex items-baseline gap-2">
-        <span className="font-mono text-[12px]">{record.trait}</span>
+        <span className="font-mono text-[13px]">{record.trait}</span>
         <span
-          className={`ml-auto text-[11px] ${record.latest_confirmed === null ? "text-tcip-fp" : "text-tcip-muted"}`}
+          className={`ml-auto text-[13px] ${record.latest_confirmed === null ? "tcip-problem" : "text-tcip-muted"}`}
         >
           {record.latest_confirmed === null
             ? "No revision is confirmed; nothing delivers under this trait"
@@ -121,14 +121,14 @@ function TraitRow({
         </span>
       </div>
       <ol
-        className="mt-2 flex flex-wrap gap-1 text-[11px]"
+        className="mt-2 flex flex-wrap gap-1 text-[13px]"
         aria-label={`${record.trait} revisions`}
       >
         {record.revisions.map((r) => (
           <li key={r.number}>
             <button
               className={
-                r.number === shown.number ? "tcip-btn-primary text-[11px]" : "tcip-btn text-[11px]"
+                r.number === shown.number ? "tcip-btn-primary text-[13px]" : "tcip-btn text-[13px]"
               }
               aria-pressed={r.number === shown.number}
               onClick={() => setShownNumber(r.number)}
@@ -138,8 +138,8 @@ function TraitRow({
           </li>
         ))}
       </ol>
-      <div className="mt-2 text-[11px]">
-        <div className={shown.confirmed ? "text-tcip-muted" : "text-tcip-fp"}>
+      <div className="mt-2 text-[13px]">
+        <div className={shown.confirmed ? "text-tcip-muted" : "tcip-problem"}>
           {revisionStateText(shown)}
         </div>
         <div className="mt-1 text-tcip-muted">
@@ -149,13 +149,13 @@ function TraitRow({
       </div>
       <RevisionEntry revision={shown} definitions={definitions} />
       {auditWarning && (
-        <div className="mt-2 text-[11px] text-tcip-warn">Warning: {auditWarning}</div>
+        <div className="mt-2 text-[13px] text-tcip-warn">Warning: {auditWarning}</div>
       )}
-      {note && <div className="mt-2 text-[11px] text-tcip-fp">{note}</div>}
+      {note && <div className="mt-2 text-[13px] tcip-problem">{note}</div>}
       <div className="mt-2 flex items-center gap-2">
         {!shown.confirmed_at && (
           <button
-            className="tcip-btn-primary text-[11px]"
+            className="tcip-btn-primary text-[13px]"
             onClick={() => onDecide(shown, true)}
             disabled={pending}
           >
@@ -164,7 +164,7 @@ function TraitRow({
         )}
         {shown.confirmed && (
           <button
-            className="tcip-btn text-[11px]"
+            className="tcip-btn text-[13px]"
             onClick={() => onDecide(shown, false)}
             disabled={pending}
           >
@@ -172,7 +172,7 @@ function TraitRow({
           </button>
         )}
         <button
-          className="tcip-btn text-[11px]"
+          className="tcip-btn text-[13px]"
           aria-expanded={correcting}
           onClick={() => setCorrecting((open) => !open)}
         >
@@ -183,14 +183,14 @@ function TraitRow({
       {correcting && (
         <div className="mt-2 flex flex-col gap-1">
           <textarea
-            className="tcip-input h-20 w-full resize-none text-[11px] leading-4"
+            className="tcip-input h-20 w-full resize-none text-[13px] leading-4"
             value={request}
             onChange={(e) => setRequest(e.target.value)}
             spellCheck={true}
             aria-label={`Correction for ${record.trait}`}
           />
           <button
-            className="tcip-btn self-start text-[11px]"
+            className="tcip-btn self-start text-[13px]"
             onClick={() => useStore.getState().sendToAgentTerminal(request)}
             disabled={!request.trim()}
           >
@@ -259,15 +259,15 @@ export function TraitRevisionPanel() {
   return (
     <div className="tcip-panel p-4">
       <div className="tcip-heading mb-1">What each trait&apos;s delivered numbers mean</div>
-      <p className="mb-3 text-[11px] text-tcip-muted">
+      <p className="mb-3 text-[13px] text-tcip-muted">
         The agent proposes each trait&apos;s entry, from what it measures to what each delivered
         number means, as a numbered revision. A delivery reads the latest revision you confirmed.
         Read the revision shown, then confirm it or send the agent a correction. A confirmation you
         gave stands until you withdraw it.
       </p>
-      {loadError && <div className="mb-3 text-[11px] text-tcip-fp">{loadError}</div>}
+      {loadError && <div className="mb-3 text-[13px] tcip-problem">{loadError}</div>}
       {listing && listing.unreadable.length > 0 && (
-        <div className="mb-3 text-[11px] text-tcip-fp">
+        <div className="mb-3 text-[13px] tcip-problem">
           <div>These traits&apos; records will not read:</div>
           <ul className="mt-1 list-disc pl-4">
             {listing.unreadable.map((u) => (
@@ -279,7 +279,7 @@ export function TraitRevisionPanel() {
         </div>
       )}
       {listing && listing.traits.length === 0 ? (
-        <div className="text-[11px] text-tcip-muted">
+        <div className="text-[13px] text-tcip-muted">
           No trait is proposed for this project yet. The agent proposes one before anything can
           deliver under it.
         </div>

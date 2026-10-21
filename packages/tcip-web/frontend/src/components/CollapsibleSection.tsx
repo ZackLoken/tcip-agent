@@ -76,9 +76,9 @@ export function CollapsibleSection({
           <DisclosureChevron open={isOpen} />
           <span className="tcip-heading">{title}</span>
         </button>
-        {right && <div className="text-[11px] text-tcip-muted">{right}</div>}
+        {right && <div className="text-[13px] text-tcip-muted">{right}</div>}
       </div>
-      {caption && <p className="mt-1 text-[11px] text-tcip-muted">{caption}</p>}
+      {caption && <p className="mt-1 text-[13px] text-tcip-muted">{caption}</p>}
       {isOpen && (
         <div id={contentId} className="mt-3">
           {children}

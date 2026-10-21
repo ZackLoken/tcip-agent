@@ -16,19 +16,19 @@ const MARKDOWN_COMPONENTS: Components = {
   h1: ({ children }) => <div className="tcip-heading mt-2 mb-1">{children}</div>,
   h2: ({ children }) => <div className="tcip-heading mt-2 mb-1">{children}</div>,
   h3: ({ children }) => (
-    <div className="text-[11px] font-semibold text-tcip-fg mt-2 mb-1">{children}</div>
+    <div className="text-[13px] font-semibold text-tcip-fg mt-2 mb-1">{children}</div>
   ),
-  p: ({ children }) => <p className="text-[11px] leading-4 my-1">{children}</p>,
-  ul: ({ children }) => <ul className="list-disc pl-4 text-[11px] leading-4 my-1">{children}</ul>,
+  p: ({ children }) => <p className="text-[13px] leading-4 my-1">{children}</p>,
+  ul: ({ children }) => <ul className="list-disc pl-4 text-[13px] leading-4 my-1">{children}</ul>,
   ol: ({ children }) => (
-    <ol className="list-decimal pl-4 text-[11px] leading-4 my-1">{children}</ol>
+    <ol className="list-decimal pl-4 text-[13px] leading-4 my-1">{children}</ol>
   ),
   li: ({ children }) => <li className="my-0.5">{children}</li>,
   strong: ({ children }) => <strong className="font-semibold text-tcip-fg">{children}</strong>,
   em: ({ children }) => <em className="italic text-tcip-muted">{children}</em>,
-  code: ({ children }) => <code className="font-mono text-[10px] text-tcip-fg">{children}</code>,
+  code: ({ children }) => <code className="font-mono text-[12px] text-tcip-fg">{children}</code>,
   pre: ({ children }) => (
-    <pre className="text-[10px] leading-4 overflow-auto my-1 whitespace-pre-wrap">{children}</pre>
+    <pre className="text-[12px] leading-4 overflow-auto my-1 whitespace-pre-wrap">{children}</pre>
   ),
   blockquote: ({ children }) => (
     <blockquote className="border-l-2 border-tcip-border pl-2 text-tcip-muted">
@@ -103,10 +103,10 @@ export function MetaTab() {
       <TabHeading tab="meta" />
       <div className="flex items-center gap-3">
         <div className="tcip-heading">Agent meta-loop</div>
-        <button className="tcip-btn text-[11px]" onClick={() => void refresh()} disabled={loading}>
+        <button className="tcip-btn text-[13px]" onClick={() => void refresh()} disabled={loading}>
           {loading ? "Loading…" : <>↻&nbsp;&nbsp;Refresh</>}
         </button>
-        {error && <div className="text-[11px] text-tcip-fp">{error}</div>}
+        {error && <div className="text-[13px] tcip-problem">{error}</div>}
       </div>
 
       <CollapsibleSection
@@ -123,17 +123,17 @@ export function MetaTab() {
                 key={r.report_id}
                 className="border-t border-tcip-border pt-2 first:border-t-0 first:pt-0"
               >
-                <div className="flex items-center gap-2 text-[11px] text-tcip-muted">
+                <div className="flex items-center gap-2 text-[13px] text-tcip-muted">
                   <span className="tcip-badge bg-tcip-border/60 text-tcip-fg">
                     {r.category || UNSET_GLYPH}
                   </span>
                   <span className="font-mono">{r.timestamp ?? r.report_id}</span>
                 </div>
-                <div className="text-[12px] mt-1 whitespace-pre-wrap">
+                <div className="text-[13px] mt-1 whitespace-pre-wrap">
                   {r.detail ?? r.malformed}
                 </div>
                 {r.context && Object.keys(r.context).length > 0 && (
-                  <pre className="text-[10px] text-tcip-muted mt-1 overflow-auto">
+                  <pre className="text-[12px] text-tcip-muted mt-1 overflow-auto">
                     {JSON.stringify(r.context, null, 2)}
                   </pre>
                 )}
@@ -141,7 +141,7 @@ export function MetaTab() {
             ))}
           </div>
         ) : (
-          <div className="text-[11px] text-tcip-muted">No friction reports yet.</div>
+          <div className="text-[13px] text-tcip-muted">No friction reports yet.</div>
         )}
       </CollapsibleSection>
 
@@ -159,7 +159,7 @@ export function MetaTab() {
                 key={rt.project_id}
                 className="border-t border-tcip-border pt-2 first:border-t-0 first:pt-0"
               >
-                <div className="flex items-center gap-2 text-[11px] text-tcip-muted">
+                <div className="flex items-center gap-2 text-[13px] text-tcip-muted">
                   <span className="font-semibold text-tcip-fg">{rt.project_id}</span>
                   <span className="font-mono">{rt.timestamp}</span>
                 </div>
@@ -170,7 +170,7 @@ export function MetaTab() {
             ))}
           </div>
         ) : (
-          <div className="text-[11px] text-tcip-muted">No retrospectives yet.</div>
+          <div className="text-[13px] text-tcip-muted">No retrospectives yet.</div>
         )}
       </CollapsibleSection>
 
@@ -182,11 +182,11 @@ export function MetaTab() {
         defaultOpen
       >
         {sessions === null ? (
-          <div className="text-[11px] text-tcip-fp">
+          <div className="text-[13px] tcip-problem">
             Annotation sessions could not be loaded: {error}
           </div>
         ) : shownSessions.length > 0 ? (
-          <table className="w-full text-[11px]">
+          <table className="w-full text-[13px]">
             <thead>
               <tr className="border-b border-tcip-border">
                 <th className="tcip-th">Started</th>
@@ -223,7 +223,7 @@ export function MetaTab() {
             </tbody>
           </table>
         ) : (
-          <div className="text-[11px] text-tcip-muted">
+          <div className="text-[13px] text-tcip-muted">
             No annotation sessions yet; they&apos;re recorded automatically while you annotate.
           </div>
         )}

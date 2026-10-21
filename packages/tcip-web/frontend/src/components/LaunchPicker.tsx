@@ -128,18 +128,18 @@ export function LaunchPicker({
       <div>
         <div className="tcip-heading mb-1">{list.title}</div>
         {list.error ? (
-          <div className="text-[11px] text-tcip-fp">
+          <div className="text-[13px] tcip-problem">
             {list.error}{" "}
             <button
               type="button"
-              className="tcip-btn text-[11px] ml-1"
+              className="tcip-btn text-[13px] ml-1"
               onClick={() => list.onRetry?.()}
             >
               Retry
             </button>
           </div>
         ) : list.rows.length === 0 ? (
-          <div className="text-[11px] text-tcip-muted">{list.emptyMessage}</div>
+          <div className="text-[13px] text-tcip-muted">{list.emptyMessage}</div>
         ) : (
           <ul className="space-y-1">
             {list.rows.map((row) => {
@@ -167,29 +167,29 @@ export function LaunchPicker({
                   </button>
                   {selected && (
                     <div className="mt-1 pl-2">
-                      <div className="text-[10px] text-tcip-muted mb-1">
+                      <div className="text-[12px] text-tcip-muted mb-1">
                         {selectedDataDir && row.branchLineForData
                           ? row.branchLineForData
                           : row.branchLine}
                       </div>
                       {row.dataLoading && (
-                        <div className="mb-2 text-[10px] text-tcip-muted">
+                        <div className="mb-2 text-[12px] text-tcip-muted">
                           Loading data choices…
                         </div>
                       )}
                       {row.dataError && (
-                        <div className="mb-2 text-[10px] text-tcip-fp">{row.dataError}</div>
+                        <div className="mb-2 text-[12px] tcip-problem">{row.dataError}</div>
                       )}
                       {row.data && (
                         <div className="mb-2">
                           <div className="tcip-heading mb-1">Data</div>
-                          <div className="text-[10px] text-tcip-muted mb-1">
+                          <div className="text-[12px] text-tcip-muted mb-1">
                             Members are checked against the labels at launch; an unadmitted member
                             refuses the run.
                           </div>
                           <ul className="space-y-1">
                             <li>
-                              <label className="flex items-start gap-1 text-[10px]">
+                              <label className="flex items-start gap-1 text-[12px]">
                                 <input
                                   type="radio"
                                   name={`data-${row.key}`}
@@ -202,7 +202,7 @@ export function LaunchPicker({
                                   {row.data.asRecordedDisabled &&
                                     row.data.asRecordedReason &&
                                     selectedDataDir !== null && (
-                                      <span className="block text-tcip-fp">
+                                      <span className="block tcip-problem">
                                         {row.data.asRecordedReason}
                                       </span>
                                     )}
@@ -210,19 +210,19 @@ export function LaunchPicker({
                               </label>
                             </li>
                             {row.data.choices.length === 0 ? (
-                              <li className="text-[10px] text-tcip-muted pl-4">
+                              <li className="text-[12px] text-tcip-muted pl-4">
                                 {row.data.absenceMessage}
                               </li>
                             ) : (
                               <>
-                                <li className="text-[10px] text-tcip-muted pl-4">
+                                <li className="text-[12px] text-tcip-muted pl-4">
                                   Choosing a partition replaces any recorded explicit validation
                                   source with its own val side; admission then reads confirmed
                                   negatives under the labels&apos; date.
                                 </li>
                                 {row.data.choices.map((choice) => (
                                   <li key={choice.selectionDir}>
-                                    <label className="flex items-start gap-1 text-[10px]">
+                                    <label className="flex items-start gap-1 text-[12px]">
                                       <input
                                         type="radio"
                                         name={`data-${row.key}`}
@@ -242,7 +242,7 @@ export function LaunchPicker({
                                         {choice.disabled &&
                                           choice.reason &&
                                           choice.selectionDir !== selectedDataDir && (
-                                            <span className="block text-tcip-fp">
+                                            <span className="block tcip-problem">
                                               {choice.reason}
                                             </span>
                                           )}
@@ -257,22 +257,22 @@ export function LaunchPicker({
                       )}
                       <button
                         type="button"
-                        className="tcip-btn-primary text-[11px]"
+                        className="tcip-btn-primary text-[13px]"
                         disabled={starting || startBlocked || dataStillLoading}
                         onClick={() => void start(row)}
                       >
                         Start
                       </button>
                       {dataStillLoading ? (
-                        <div className="mt-1 text-[10px] text-tcip-muted" role="status">
+                        <div className="mt-1 text-[12px] text-tcip-muted" role="status">
                           checking the data choice
                         </div>
                       ) : startBlocked && selectedChoice?.reason ? (
-                        <div className="mt-1 text-[10px] text-tcip-fp" role="status">
+                        <div className="mt-1 text-[12px] tcip-problem" role="status">
                           {selectedChoice.reason}
                         </div>
                       ) : refusal?.key === row.key ? (
-                        <ul role="status" className="mt-1 text-[11px] text-tcip-fp list-disc pl-4">
+                        <ul role="status" className="mt-1 text-[13px] tcip-problem list-disc pl-4">
                           {refusal.issues.map((issue) => (
                             <li key={issue}>{issue}</li>
                           ))}
@@ -293,14 +293,14 @@ export function LaunchPicker({
         </label>
         <textarea
           id={composerLabelId}
-          className="tcip-input w-full h-28 text-[11px] leading-4 resize-none mb-2"
+          className="tcip-input w-full h-28 text-[13px] leading-4 resize-none mb-2"
           value={request}
           onChange={(e) => onRequestChange(e.target.value)}
           spellCheck={true}
         />
         <button
           type="button"
-          className="tcip-btn-primary text-[11px]"
+          className="tcip-btn-primary text-[13px]"
           onClick={onSend}
           disabled={!request.trim()}
         >

@@ -89,13 +89,13 @@ export function ColorPickerModal({ title, initialColor, onSubmit, onCancel, onRe
           <div id={titleId} className="text-[13px] font-semibold">
             {title}
           </div>
-          <button className="tcip-btn text-[11px]" onClick={onCancel}>
+          <button className="tcip-btn text-[13px]" onClick={onCancel}>
             Cancel
           </button>
         </div>
 
         <div className="flex items-center gap-2 mb-3">
-          <span className="text-[11px] text-tcip-muted">Selected:</span>
+          <span className="text-[13px] text-tcip-muted">Selected:</span>
           <div
             className="w-7 h-7 rounded border border-tcip-border"
             style={{ background: color }}
@@ -115,7 +115,7 @@ export function ColorPickerModal({ title, initialColor, onSubmit, onCancel, onRe
             }}
           />
           <button
-            className="tcip-btn text-[11px]"
+            className="tcip-btn text-[13px]"
             onClick={() => {
               const el = document.createElement("input");
               el.type = "color";

@@ -5,9 +5,9 @@ import type { Toast } from "@/store";
 import { textOf } from "@/store/slices/toasts";
 
 const LEVEL_CLASS: Record<Toast["level"], string> = {
-  error: "border-tcip-fp/50 text-tcip-fp",
-  info: "border-tcip-border text-tcip-fg",
-  success: "border-tcip-tp/50 text-tcip-tp",
+  error: "tcip-problem",
+  info: "text-tcip-fg",
+  success: "text-tcip-fg",
 };
 
 const DISMISS_LABEL_WORDS = 6;
@@ -32,7 +32,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
     <div
       role={isError ? "alert" : "status"}
       aria-live={isError ? "assertive" : "polite"}
-      className={`flex items-start gap-2 rounded-md border bg-tcip-panel/95 px-3 py-2 text-[12px] shadow-lg ${LEVEL_CLASS[toast.level]}`}
+      className={`flex items-start gap-2 rounded-md border border-tcip-border bg-tcip-panel/95 px-3 py-2 shadow-lg ${LEVEL_CLASS[toast.level]}`}
     >
       <span className="flex-1 break-words">
         {text}

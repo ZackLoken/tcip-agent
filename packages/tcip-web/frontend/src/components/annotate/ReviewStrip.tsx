@@ -77,7 +77,7 @@ export function ReviewStrip({
 }) {
   const K = ANNOTATE_KEYS;
   return (
-    <div className="flex h-9 shrink-0 items-center gap-3 border-b border-tcip-border bg-tcip-panel px-3 text-[12px]">
+    <div className="flex h-9 shrink-0 items-center gap-3 border-b border-tcip-border bg-tcip-panel px-3 text-[13px]">
       <label
         className="flex items-center gap-1.5"
         title={
@@ -109,7 +109,7 @@ export function ReviewStrip({
         <input
           type="number"
           aria-label="Confidence floor"
-          className="tcip-input h-7 w-16 text-[11px]"
+          className="tcip-input h-7 w-16 text-[13px]"
           min={0}
           max={1}
           step={0.01}
@@ -131,7 +131,7 @@ export function ReviewStrip({
         Match
         <select
           aria-label="Match type"
-          className="tcip-select h-7 text-[11px]"
+          className="tcip-select h-7 text-[13px]"
           value={filters.match}
           disabled={!reviewing}
           onChange={(e) => onFilters({ ...filters, match: e.target.value as MatchType | "all" })}
@@ -145,7 +145,7 @@ export function ReviewStrip({
         </select>
       </label>
 
-      <span className="font-mono text-[11px] text-tcip-muted" aria-live="polite">
+      <span className="font-mono text-[13px] text-tcip-muted" aria-live="polite">
         {counts.items} {counts.items === 1 ? "item" : "items"}
         {reviewing ? `, ${counts.unreviewed} unreviewed` : ""}
       </span>
@@ -155,7 +155,7 @@ export function ReviewStrip({
       <div className="relative flex items-center gap-1.5" role="group" aria-label="Decide">
         <button
           type="button"
-          className="tcip-btn h-7 text-[11px]"
+          className="tcip-btn h-7 text-[13px]"
           disabled={!canAccept}
           onClick={onAccept}
           title={`${K.accept.desc} (${K.accept.label})`}
@@ -164,7 +164,7 @@ export function ReviewStrip({
         </button>
         <button
           type="button"
-          className="tcip-btn h-7 text-[11px]"
+          className="tcip-btn h-7 text-[13px]"
           disabled={focused?.kind !== "proposal"}
           onClick={onEdit}
           title={`${K.edit.desc} (${K.edit.label})`}
@@ -173,7 +173,7 @@ export function ReviewStrip({
         </button>
         <button
           type="button"
-          className="tcip-btn h-7 text-[11px]"
+          className="tcip-btn h-7 text-[13px]"
           disabled={!canReject}
           onClick={onReject}
           title={`${K.reject.desc} (${K.reject.label})`}
@@ -182,7 +182,7 @@ export function ReviewStrip({
         </button>
         <button
           type="button"
-          className="tcip-btn h-7 text-[11px]"
+          className="tcip-btn h-7 text-[13px]"
           aria-expanded={flagsOpen}
           onClick={() => onFlagsOpen(!flagsOpen)}
           title={`${K.flag.desc} (${K.flag.label})`}
@@ -216,7 +216,7 @@ export function ReviewStrip({
       />
       <select
         aria-label="Step through"
-        className="tcip-select h-7 text-[11px]"
+        className="tcip-select h-7 text-[13px]"
         value={scope}
         onChange={(e) => onScope(e.target.value as StepScope)}
       >

@@ -51,14 +51,12 @@ export function BandPicker({
 
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-[10px] font-bold uppercase tracking-wide text-tcip-muted">
-        {single ? "Band" : "Bands"}
-      </span>
+      <span className="tcip-label">{single ? "Band" : "Bands"}</span>
       {channels.map((channel) => (
         <select
           key={channel}
           aria-label={single ? "Band" : `${channel.toUpperCase()} band`}
-          className="tcip-select text-[11px]"
+          className="tcip-select text-[13px]"
           value={selection[channel]}
           onChange={(e) => {
             const value = e.target.value;
@@ -78,7 +76,7 @@ export function BandPicker({
       ))}
       <select
         aria-label="Stretch"
-        className="tcip-select text-[11px]"
+        className="tcip-select text-[13px]"
         value={selection.stretch}
         onChange={(e) => onChange({ ...selection, stretch: e.target.value as Stretch })}
       >
@@ -87,7 +85,7 @@ export function BandPicker({
       </select>
       {sampled && (
         <span
-          className="text-[10px] text-tcip-muted"
+          className="text-[12px] text-tcip-muted"
           title="These band ranges were read from a seeded sample of this raster's pixels, not from every pixel, so a more extreme value in a window the sample missed is not in them."
         >
           {pixelFraction == null
@@ -97,7 +95,7 @@ export function BandPicker({
       )}
       {!sampled && overviewSize != null && (
         <span
-          className="text-[10px] text-tcip-muted"
+          className="text-[12px] text-tcip-muted"
           title="These band ranges were read from a reduced-resolution overview of this raster, not from its native pixels; averaged overview values sit inside the native range, so the true extremes can lie outside these numbers."
         >
           {`stats from a ${overviewSize[0]}x${overviewSize[1]} overview`}

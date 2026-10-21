@@ -1672,16 +1672,16 @@ export function AnnotateTab() {
         </CanvasStage>
 
         {ioError && (
-          <div className="absolute top-12 left-3 right-3 z-30 flex items-center gap-2 rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-3 py-1.5 text-[11px] text-tcip-fp">
+          <div className="absolute top-12 left-3 right-3 z-30 flex items-center gap-2 rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-3 py-1.5 text-[13px] tcip-problem">
             <span className="flex-1">{ioError}</span>
             {conflict && (
-              <button className="tcip-btn text-[11px]" onClick={requestReload}>
+              <button className="tcip-btn text-[13px]" onClick={requestReload}>
                 Reload
               </button>
             )}
             <button
               type="button"
-              className="text-tcip-fp/70 hover:text-tcip-fp"
+              className="tcip-problem/70 hover:tcip-problem"
               aria-label="Dismiss"
               title="Dismiss"
               onClick={() => {
@@ -1700,7 +1700,7 @@ export function AnnotateTab() {
           type="button"
           onClick={overview}
           title="Overview: fit the whole image to the canvas"
-          className="absolute top-3 left-3 z-20 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[11px] text-tcip-muted backdrop-blur-sm hover:border-tcip-border-hover hover:text-tcip-fg"
+          className="absolute top-3 left-3 z-20 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[13px] text-tcip-muted backdrop-blur-sm hover:border-tcip-border-hover hover:text-tcip-fg"
         >
           Overview
         </button>

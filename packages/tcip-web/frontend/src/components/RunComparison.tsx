@@ -224,17 +224,17 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
 
   if (compareError) {
     return (
-      <div className="text-[11px] text-tcip-fp">Could not load the comparison: {compareError}</div>
+      <div className="text-[13px] tcip-problem">Could not load the comparison: {compareError}</div>
     );
   }
   if (!result) {
-    return <div className="text-[11px] text-tcip-muted">Loading comparison...</div>;
+    return <div className="text-[13px] text-tcip-muted">Loading comparison...</div>;
   }
 
   return (
     <div className="flex flex-col gap-4">
       <div className="overflow-x-auto tcip-panel">
-        <table className="w-full text-[11px]">
+        <table className="w-full text-[13px]">
           <thead>
             <tr className="border-b border-tcip-border">
               <th className="tcip-th" />
@@ -250,7 +250,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
               <tr className="border-b border-tcip-border">
                 <th className="tcip-th">Read error</th>
                 {columns.map((c) => (
-                  <td key={c.experimentId} className="px-2 py-1 text-tcip-fp">
+                  <td key={c.experimentId} className="px-2 py-1 tcip-problem">
                     {c.exp?.error ?? ""}
                   </td>
                 ))}
@@ -280,7 +280,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
                 <td key={c.experimentId} className="px-2 py-1">
                   {c.hasEntry ? (c.exp?.state ?? UNRECORDED) : NOT_IN_ANSWER}
                   {c.exp?.status_error ? (
-                    <span className="block text-tcip-fp">{c.exp.status_error}</span>
+                    <span className="block tcip-problem">{c.exp.status_error}</span>
                   ) : null}
                 </td>
               ))}
@@ -319,7 +319,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
         <div className="tcip-heading px-2 pt-2">
           Logged metrics (last logged, not a verified result)
         </div>
-        <table className="w-full text-[11px]">
+        <table className="w-full text-[13px]">
           <thead>
             <tr className="border-b border-tcip-border">
               <th className="tcip-th" />
@@ -357,7 +357,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
 
       <div className="overflow-x-auto tcip-panel">
         <div className="tcip-heading px-2 pt-2">Registered checkpoints</div>
-        <table className="w-full text-[11px]">
+        <table className="w-full text-[13px]">
           <thead>
             <tr className="border-b border-tcip-border">
               <th className="tcip-th" />
@@ -403,14 +403,14 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
         <div className="tcip-heading mb-2">Rank</div>
         <div className="flex flex-wrap items-center gap-2">
           {noMarkedCheckpoint ? (
-            <span id={RANK_REASON_ID} className="text-[11px] text-tcip-muted">
+            <span id={RANK_REASON_ID} className="text-[13px] text-tcip-muted">
               {NO_MARKED_CHECKPOINT}
             </span>
           ) : (
             <>
               <select
                 aria-label="Rank by metric"
-                className="tcip-select text-[11px]"
+                className="tcip-select text-[13px]"
                 value={rankMetric}
                 onChange={(e) => onRankMetricChange(e.target.value)}
               >
@@ -446,7 +446,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
               <button
                 type="button"
                 aria-pressed={rankDirection === true}
-                className={`px-2 py-1 text-[11px] transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
+                className={`px-2 py-1 text-[13px] transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
                   rankDirection === true ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
                 }`}
                 onClick={() => onChooseDirection(true)}
@@ -456,7 +456,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
               <button
                 type="button"
                 aria-pressed={rankDirection === false}
-                className={`px-2 py-1 text-[11px] border-l border-tcip-border transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
+                className={`px-2 py-1 text-[13px] border-l border-tcip-border transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
                   rankDirection === false ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
                 }`}
                 onClick={() => onChooseDirection(false)}
@@ -466,7 +466,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
             </div>
           )}
           {needsUnverifiedOption && (
-            <label className="inline-flex items-center gap-1 text-[11px]">
+            <label className="inline-flex items-center gap-1 text-[13px]">
               <input
                 type="checkbox"
                 checked={includeUnverified}
@@ -477,7 +477,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
           )}
           <button
             type="button"
-            className="tcip-btn text-[11px]"
+            className="tcip-btn text-[13px]"
             disabled={rankDisabledReason !== null}
             aria-describedby={rankDisabledReason !== null ? RANK_REASON_ID : undefined}
             onClick={() => void onRank()}
@@ -486,12 +486,12 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
           </button>
         </div>
         {rankError && (
-          <div role="status" className="mt-2 text-[11px] text-tcip-fp">
+          <div role="status" className="mt-2 text-[13px] tcip-problem">
             {rankError}
           </div>
         )}
         {rankResult && (
-          <div role="status" className="mt-2 text-[11px]">
+          <div role="status" className="mt-2 text-[13px]">
             <span className="font-mono">{rankResult.name}</span>
             {rankResult.experiment_id && rankResult.experiment_id !== rankResult.name && (
               <span className="text-tcip-muted"> ({rankResult.experiment_id})</span>
@@ -528,7 +528,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
       </div>
 
       {result.experiments.some((e) => e.rows_after_end) && (
-        <div className="tcip-panel p-2 text-[11px] text-tcip-muted">
+        <div className="tcip-panel p-2 text-[13px] text-tcip-muted">
           {result.experiments.map((e) =>
             e.rows_after_end ? (
               <div key={e.experiment_id}>

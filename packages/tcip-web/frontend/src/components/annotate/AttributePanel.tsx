@@ -140,7 +140,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
       <button
         type="button"
         onClick={() => setDismissed(false)}
-        className="absolute top-3 right-3 z-20 flex items-center gap-1.5 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[11px] text-tcip-muted backdrop-blur-sm hover:border-tcip-border-hover hover:text-tcip-fg"
+        className="absolute top-3 right-3 z-20 flex items-center gap-1.5 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[13px] text-tcip-muted backdrop-blur-sm hover:border-tcip-border-hover hover:text-tcip-fg"
       >
         Attributes
       </button>
@@ -148,9 +148,9 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
   }
 
   return (
-    <div className="absolute top-3 right-3 z-20 w-60 rounded-md border border-tcip-border bg-tcip-panel/95 p-3 text-[11px] shadow-lg backdrop-blur-sm">
+    <div className="absolute top-3 right-3 z-20 w-60 rounded-md border border-tcip-border bg-tcip-panel/95 p-3 text-[13px] shadow-lg backdrop-blur-sm">
       <div className="mb-1 flex items-center justify-between">
-        <h4 className="text-[11px] font-semibold tracking-wide text-tcip-fg">Attributes</h4>
+        <h4 className="text-[13px] font-semibold tracking-wide text-tcip-fg">Attributes</h4>
         <button
           type="button"
           onClick={() => setDismissed(true)}
@@ -202,7 +202,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
           {addingAttribute && (
             <div className="mt-1.5 space-y-1.5 border-t border-tcip-border pt-1.5">
               <input
-                className="tcip-input w-full text-[11px]"
+                className="tcip-input w-full text-[13px]"
                 placeholder="attribute name"
                 value={attrName}
                 onChange={(e) => {
@@ -210,9 +210,9 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
                   setAttrNameError(null);
                 }}
               />
-              {attrNameError && <p className="text-tcip-fp">{attrNameError}</p>}
+              {attrNameError && <p className="tcip-problem">{attrNameError}</p>}
               <select
-                className="tcip-select w-full text-[11px]"
+                className="tcip-select w-full text-[13px]"
                 aria-label="attribute type"
                 value={attrType}
                 onChange={(e) => setAttrType(e.target.value as AttrType)}
@@ -224,7 +224,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
                 ))}
               </select>
               <textarea
-                className="tcip-input w-full text-[11px]"
+                className="tcip-input w-full text-[13px]"
                 placeholder={
                   "one value per line" + (attrType === "ordinal" ? ", lowest first" : "")
                 }
@@ -235,7 +235,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
               <div className="flex gap-1.5">
                 <button
                   type="button"
-                  className="tcip-btn-primary flex-1 text-[11px]"
+                  className="tcip-btn-primary flex-1 text-[13px]"
                   disabled={!attrName.trim() || !attrValues.trim()}
                   onClick={submitAttrDraft}
                 >
@@ -243,7 +243,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
                 </button>
                 <button
                   type="button"
-                  className="tcip-btn flex-1 text-[11px]"
+                  className="tcip-btn flex-1 text-[13px]"
                   onClick={resetAttrDraft}
                 >
                   Cancel
@@ -270,7 +270,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
               <span className="font-semibold text-tcip-fg">{a.subject}</span>
               <button
                 type="button"
-                className="ml-auto text-tcip-muted hover:text-tcip-fp"
+                className="ml-auto text-tcip-muted hover:tcip-problem"
                 title="Remove this rating"
                 onClick={() => remove("imageAnnotations", i)}
               >
@@ -293,7 +293,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
         ))}
         <button
           type="button"
-          className="tcip-btn mt-1 w-full text-[11px]"
+          className="tcip-btn mt-1 w-full text-[13px]"
           disabled={!activeSubject}
           onClick={() =>
             activeSubject &&

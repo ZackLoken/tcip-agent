@@ -6,7 +6,7 @@
 import type { ReactNode } from "react";
 
 export function RunMonitorEmpty({ children }: { children: ReactNode }) {
-  return <div className="text-[11px] text-tcip-muted">{children}</div>;
+  return <div className="text-[13px] text-tcip-muted">{children}</div>;
 }
 
 export function RunMonitorLayout({

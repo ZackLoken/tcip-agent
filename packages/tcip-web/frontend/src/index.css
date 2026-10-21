@@ -6,7 +6,9 @@
   --color-tcip-bg: #1e1e1e; /* held fixed (focus-ring offset test) */
   --color-tcip-canvas: #26271f; /* warm-neutral canvas host, annotation colors read true */
   --color-tcip-fg: #e7e5dc; /* field-notebook paper (warm off-white) */
-  --color-tcip-muted: #8c9082; /* sage gray */
+  --color-tcip-muted: #a4a89a; /* sage gray, 6.8:1 on the panel tone; labels only */
+  --color-tcip-problem: #d9a3a0; /* an error line's tone, 7.2:1 on the panel; the detection
+                                    red stays on the canvas and the legend */
   --color-tcip-border: #33352c; /* bark border */
   --color-tcip-panel: #20211b; /* bark panel surface */
   --color-tcip-hover: #282922; /* warm raised hover surface (secondary controls) */
@@ -32,18 +34,6 @@
 
   --spacing-topbar: 44px;
   --spacing-statusbar: 28px;
-
-  --animate-tcip-rise: tcip-rise 0.32s ease-out both;
-  @keyframes tcip-rise {
-    0% {
-      opacity: 0;
-      transform: translateY(6px);
-    }
-    100% {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
 }
 
 /* Preflight leaves buttons on the default cursor and placeholders at half the text color. */
@@ -109,6 +99,11 @@ body,
   padding: 0;
 }
 
+#root {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 /* Scrollbar polish: warm bark tones matching the field-station palette. */
 ::-webkit-scrollbar {
   width: 10px;
@@ -139,7 +134,7 @@ body,
 /* Secondary buttons hover to a neutral raised surface; only tcip-btn-primary
    hovers SI green, so action hierarchy survives the hover state. */
 @utility tcip-btn {
-  @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded border border-tcip-border bg-tcip-panel text-tcip-fg text-[12px]
+  @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded border border-tcip-border bg-tcip-panel text-tcip-fg text-[13px]
          hover:bg-tcip-hover hover:border-tcip-border-hover transition-colors disabled:opacity-40 disabled:hover:bg-tcip-panel
          disabled:hover:border-tcip-border disabled:cursor-not-allowed
          focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg;
@@ -157,8 +152,8 @@ body,
 }
 
 @utility tcip-input {
-  @apply h-8 px-2 rounded bg-tcip-panel border border-tcip-border text-tcip-fg text-[12px]
-         placeholder:text-tcip-muted placeholder:italic
+  @apply h-8 px-2 rounded bg-tcip-panel border border-tcip-border text-tcip-fg text-[13px]
+         placeholder:text-tcip-muted
          focus:outline-hidden focus:border-tcip-accent
          focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg;
 }
@@ -174,35 +169,25 @@ body,
 }
 
 @utility tcip-badge {
-  @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium;
+  @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-[12px] font-medium;
 }
 
-/* Section header: the small uppercase "instrument label" used on every panel
-   and sidebar section, so all tabs share one typographic hierarchy. */
+/* Section heading: sentence case in the foreground tone, one size on every panel. */
 @utility tcip-heading {
-  @apply text-[11px] font-semibold uppercase tracking-wider text-tcip-muted;
-}
-
-/* Hero "specimen tag" eyebrow: an uppercase instrument label led by a small green to persimmon
-   rule (canopy to fruit). Used sparingly, on the front door and section heroes. */
-@utility tcip-eyebrow {
-  @apply inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-tcip-muted;
-
-  &::before {
-    content: "";
-    width: 16px;
-    height: 2px;
-    border-radius: 2px;
-    background: linear-gradient(90deg, #507754, #e6976b);
-  }
+  @apply text-[15px] font-semibold text-tcip-fg;
 }
 
 /* Form-field label. */
 @utility tcip-label {
-  @apply block text-[11px] font-medium text-tcip-muted;
+  @apply block text-[12px] font-medium text-tcip-muted;
 }
 
-/* Table column header: matches tcip-heading at table scale. */
+/* An error or refusal line: one quiet tone, no box. */
+@utility tcip-problem {
+  @apply text-tcip-problem;
+}
+
+/* Table column header. */
 @utility tcip-th {
-  @apply py-1.5 pr-3 text-left text-[10px] font-semibold uppercase tracking-wider text-tcip-muted;
+  @apply py-1.5 pr-3 text-left text-[12px] font-medium text-tcip-muted;
 }

@@ -29,7 +29,7 @@ export function EmbeddedTool({
         <span className="flex-1" />
         {url && (
           <a
-            className="text-[11px] text-tcip-accent underline"
+            className="text-[13px] text-tcip-accent underline"
             href={url}
             target="_blank"
             rel="noopener noreferrer"
@@ -43,7 +43,7 @@ export function EmbeddedTool({
         {url ? (
           <iframe src={url} className="w-full h-full border-0" title={title} />
         ) : loading ? (
-          <div className="flex h-full items-center justify-center text-[11px] text-tcip-muted">
+          <div className="flex h-full items-center justify-center text-[13px] text-tcip-muted">
             Starting…
           </div>
         ) : (
@@ -52,11 +52,11 @@ export function EmbeddedTool({
             aria-live="polite"
             className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center"
           >
-            <span className="text-[11px] text-tcip-fp">{error}</span>
+            <span className="text-[13px] tcip-problem">{error}</span>
             {onRetry && (
               <button
                 type="button"
-                className="tcip-btn text-[11px]"
+                className="tcip-btn text-[13px]"
                 onClick={onRetry}
                 aria-label={`Try again: ${title}`}
               >

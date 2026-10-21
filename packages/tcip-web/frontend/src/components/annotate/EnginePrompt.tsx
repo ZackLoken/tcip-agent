@@ -23,12 +23,12 @@ function Setting({
   title: string;
 }) {
   return (
-    <label className="flex items-center gap-1 text-[11px] text-tcip-muted" title={title}>
+    <label className="flex items-center gap-1 text-[13px] text-tcip-muted" title={title}>
       {label}
       <input
         type="number"
         aria-label={label}
-        className="tcip-input h-6 w-14 text-[11px]"
+        className="tcip-input h-6 w-14 text-[13px]"
         min={0}
         max={1}
         step={0.05}
@@ -77,7 +77,7 @@ export function EnginePrompt({
         aria-pressed={armed}
         onClick={() => setPrompt(!armed)}
         title="Prompt: while on, click an object or draw a box around it to get its outline, or describe what to look for and find every one; each comes back as a proposal to accept, correct or reject"
-        className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
+        className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[13px] font-semibold transition-colors ${
           armed ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
         }`}
       >
@@ -115,7 +115,7 @@ export function EnginePrompt({
             type="text"
             aria-label="Phrase"
             placeholder="Describe what to find"
-            className="tcip-input h-6 w-44 text-[11px]"
+            className="tcip-input h-6 w-44 text-[13px]"
             value={phrase}
             onChange={(e) => setPhrase(e.target.value)}
           />
@@ -136,12 +136,12 @@ export function EnginePrompt({
             onClick={tiling.toggle}
             aria-expanded={tiling.open}
             aria-controls={tilingId}
-            className="flex h-6 items-center gap-1 px-1 text-[11px] text-tcip-muted hover:text-tcip-fg"
+            className="flex h-6 items-center gap-1 px-1 text-[13px] text-tcip-muted hover:text-tcip-fg"
           >
             <DisclosureChevron open={tiling.open} />
             Tiling
           </button>
-          <button type="submit" className="tcip-btn h-6 text-[11px]" disabled={!canFind}>
+          <button type="submit" className="tcip-btn h-6 text-[13px]" disabled={!canFind}>
             Find
           </button>
           {tiling.open && (
@@ -150,11 +150,11 @@ export function EnginePrompt({
               title="The image is searched in tiles sized from what is found on it, and an object two tiles both see is joined into one box"
               className="absolute left-0 top-full z-20 mt-1 flex items-center gap-2 rounded-md border border-tcip-border bg-tcip-panel px-2 py-1.5 shadow-lg"
             >
-              <label className="flex items-center gap-1 text-[11px] text-tcip-muted">
+              <label className="flex items-center gap-1 text-[13px] text-tcip-muted">
                 Merge
                 <select
                   aria-label="Merge"
-                  className="tcip-select h-6 text-[11px]"
+                  className="tcip-select h-6 text-[13px]"
                   value={merge.postprocess}
                   onChange={(e) => setMerge({ ...merge, postprocess: e.target.value })}
                 >

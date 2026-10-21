@@ -37,7 +37,7 @@ function Section({ title, items }: { title: string; items: Shortcut[] }) {
   return (
     <div>
       <div className="tcip-heading mb-1">{title}</div>
-      <table className="w-full text-[11px]">
+      <table className="w-full text-[13px]">
         <tbody>
           {items.map((s) => (
             <tr key={s.key}>
@@ -84,7 +84,7 @@ export function HelpOverlay({ activeTab }: HelpOverlayProps) {
       <div className="tcip-panel p-5 w-[520px] max-w-[90vw] max-h-[80vh] overflow-auto flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div className="text-[13px] font-semibold">Keyboard & mouse reference</div>
-          <button className="tcip-btn text-[11px]" onClick={() => setOpen(false)}>
+          <button className="tcip-btn text-[13px]" onClick={() => setOpen(false)}>
             Close
           </button>
         </div>

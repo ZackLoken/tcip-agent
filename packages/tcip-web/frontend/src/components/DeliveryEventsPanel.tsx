@@ -18,13 +18,13 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
       data-testid={`delivery-${record.event_id}`}
     >
       <div className="flex items-baseline gap-2">
-        <span className="font-mono text-[12px]">{record.trait}</span>
-        <span className="text-[11px] text-tcip-muted">
+        <span className="font-mono text-[13px]">{record.trait}</span>
+        <span className="text-[13px] text-tcip-muted">
           {`revision ${record.trait_revision}, ${record.delivery_kind}`}
         </span>
-        <span className="ml-auto text-[11px] text-tcip-muted">{record.produced_at}</span>
+        <span className="ml-auto text-[13px] text-tcip-muted">{record.produced_at}</span>
       </div>
-      <dl className="mt-2 grid grid-cols-[170px_1fr] gap-x-3 gap-y-1 text-[11px]">
+      <dl className="mt-2 grid grid-cols-[170px_1fr] gap-x-3 gap-y-1 text-[13px]">
         <dt className="text-tcip-muted">Door</dt>
         <dd className="font-mono">{record.door}</dd>
         <dt className="text-tcip-muted">Output path</dt>
@@ -41,11 +41,11 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
         )}
       </dl>
       <div className="mt-2 flex flex-col gap-0.5">
-        <div className="text-[11px] text-tcip-muted">Buckets delivered</div>
+        <div className="text-[13px] text-tcip-muted">Buckets delivered</div>
         {record.buckets.map((bucket) => (
           <div
             key={`${bucket.dataset_root}\0${bucket.bucket}`}
-            className="font-mono text-[11px] text-tcip-muted"
+            className="font-mono text-[13px] text-tcip-muted"
           >
             {`${bucket.bucket}: ` +
               (bucket.validated
@@ -55,7 +55,7 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
         ))}
       </div>
       {record.plant_mapping && isCanopySegmentDisclosure(record.plant_mapping) && (
-        <div className="mt-2 text-[11px] text-tcip-muted" data-testid="canopy-disclosure">
+        <div className="mt-2 text-[13px] text-tcip-muted" data-testid="canopy-disclosure">
           {(() => {
             const pm = record.plant_mapping;
             return (
@@ -83,7 +83,7 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
         </div>
       )}
       {record.plant_mapping && isPlantRegistryDisclosure(record.plant_mapping) && (
-        <div className="mt-2 text-[11px] text-tcip-muted">
+        <div className="mt-2 text-[13px] text-tcip-muted">
           <div>
             {`Plant registry ${record.plant_mapping.plant_registry.name}: ` +
               `${record.plant_mapping.detections_unattributed} detection(s) attributed to no ` +
@@ -98,7 +98,7 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
         </div>
       )}
       {record.plant_mapping && isPlantMappingDisclosure(record.plant_mapping) && (
-        <div className="mt-2 text-[11px] text-tcip-muted">
+        <div className="mt-2 text-[13px] text-tcip-muted">
           {`Delivered dates ${record.plant_mapping.dates_delivered.join(", ")}: ` +
             `${record.plant_mapping.images_unattributed} attributed to no plant ` +
             `(${record.plant_mapping.plant_attribution}-level attribution)`}
@@ -123,15 +123,15 @@ export function DeliveryEventsPanel({
   return (
     <div className="tcip-panel p-4">
       <div className="tcip-heading mb-1">Delivery events</div>
-      <p className="mb-3 text-[11px] text-tcip-muted">
+      <p className="mb-3 text-[13px] text-tcip-muted">
         What has shipped from this project, and for each delivered bucket the assessment that
         answered for it or why none did. A delivery event is a fact, not a statement: there is
         nothing here to confirm.
       </p>
       {loadError ? (
-        <div className="text-[11px] text-tcip-fp">{loadError}</div>
+        <div className="text-[13px] tcip-problem">{loadError}</div>
       ) : records.length === 0 ? (
-        <div className="text-[11px] text-tcip-muted">
+        <div className="text-[13px] text-tcip-muted">
           Nothing has shipped from this project yet.
         </div>
       ) : (
