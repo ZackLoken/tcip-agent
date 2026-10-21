@@ -90,19 +90,20 @@ export interface ScorerSpec {
   [key: string]: unknown;
 }
 
-export interface PointPrompt {
-  point: [number, number];
+export interface SegmenterPrompt {
+  points?: [number, number][];
+  boxes?: [number, number, number, number][];
 }
 
-export interface BoxPrompt {
-  box: [number, number, number, number];
+export interface PhrasePrompt {
+  phrase: string;
 }
 
 export interface ProposePayload {
   image_path: string;
   subject: string;
   user: string;
-  prompt: PointPrompt | BoxPrompt | DetectorParams;
+  prompt: SegmenterPrompt | PhrasePrompt;
 }
 
 export interface ProposeAnswer {
@@ -658,17 +659,6 @@ export interface CanvasPolyline {
   kind: "polyline";
   points: [number, number][];
   vertices?: boolean;
-}
-
-export interface DetectorParams {
-  phrase: string;
-  box_threshold: number;
-  text_threshold: number;
-  postprocess: string;
-  cross_tile_nms: number;
-  tile_size?: number | null;
-  overlap?: number | null;
-  checkpoint?: string;
 }
 
 export interface RasterIdentity {

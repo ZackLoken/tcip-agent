@@ -121,12 +121,12 @@ def declared_models() -> list[type[BaseModel]]:
         TraitRevision,
     )
     from tcip_web.routes.annotate import (
-        BoxPrompt,
         LaunchPriorityQueuePayload,
-        PointPrompt,
+        PhrasePrompt,
         PriorityQueueJob,
         ProposeAnswer,
         ProposePayload,
+        SegmenterPrompt,
     )
     from tcip_web.routes.canvas import CanvasStatePayload
     from tcip_web.routes.images import ServingCell, ViewReads
@@ -172,8 +172,8 @@ def declared_models() -> list[type[BaseModel]]:
         LaunchPriorityQueuePayload,
         PriorityQueueJob,
         ScorerSpec,
-        PointPrompt,
-        BoxPrompt,
+        SegmenterPrompt,
+        PhrasePrompt,
         ProposePayload,
         ProposeAnswer,
         CanvasStatePayload,

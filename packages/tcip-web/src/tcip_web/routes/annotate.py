@@ -28,7 +28,6 @@ from tcip_annotation.json_io import (
 )
 from tcip_annotation.state import Annotation
 from tcip_mcp.pipelines.active_learning import ScorerSpec
-from tcip_mcp.pipelines.proposal_engines import DetectorParams
 from tcip_store import Key, Version, VersionConflictError
 from tcip_web import jobstore
 from tcip_web.paths import allowed_file, allowed_image, allowed_path
@@ -270,8 +269,8 @@ def load_proposals(image_path: str, bucket: str) -> dict:
     records; beside them the bucket's ``operating_point``, the ``conf`` a review may accept at on
     its assessment's authority or ``None`` with the ``reason``
     (:func:`~tcip_mcp.delivery.admitted_conf`), both read against the open project. A bucket that
-    names no document for the image, or one that will not read, answers 400; no project open
-    answers 409.
+    names no document for the image answers no proposals; one that will not read answers 400; no
+    project open answers 409.
     """
     from tcip_annotation.verdicts import read_verdicts
     from tcip_mcp.dataset_layout import (
@@ -309,35 +308,40 @@ def load_proposals(image_path: str, bucket: str) -> dict:
     }
 
 
-class PointPrompt(BaseModel):
-    """A point the person placed, ``(x, y)`` in the image's pixels: a segmenter prompt."""
+class SegmenterPrompt(BaseModel):
+    """The points the person placed and the boxes they drew, in the image's pixels.
+
+    Each ``(x, y)`` point and each ``(x1, y1, x2, y2)`` box is a prompt of its own to the
+    segmenter; the engine refuses a prompt stating neither.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    point: tuple[float, float]
+    points: list[tuple[float, float]] = []
+    boxes: list[tuple[float, float, float, float]] = []
 
 
-class BoxPrompt(BaseModel):
-    """A box the person drew, ``(x1, y1, x2, y2)`` in the image's pixels: a segmenter prompt."""
+class PhrasePrompt(BaseModel):
+    """A phrase describing what to find: a detector prompt."""
 
     model_config = ConfigDict(extra="forbid")
 
-    box: tuple[float, float, float, float]
+    phrase: str
 
 
 class ProposePayload(BaseModel):
     """One prompt the person ``user`` names sends about an image, and its proposals' subject.
 
-    The prompt is a placed point or a drawn box, which the segmenter answers, or a phrase with the
-    detector's thresholds, slice lattice and merge
-    (:class:`~tcip_mcp.pipelines.proposal_engines.DetectorParams`), which the detector answers;
-    exactly one, by the key it carries.
+    The prompt is the placed points and drawn boxes, which the segmenter answers, or a phrase,
+    which the detector answers under its libraries' own thresholds and merge
+    (:func:`~tcip_mcp.pipelines.proposal_engines.detector_defaults`); one of the two, by the
+    keys it carries.
     """
 
     image_path: str
     subject: str
     user: str
-    prompt: PointPrompt | BoxPrompt | DetectorParams
+    prompt: SegmenterPrompt | PhrasePrompt
 
 
 class ProposeAnswer(BaseModel):
@@ -361,8 +365,8 @@ def _door(result: dict) -> dict:
 def propose(payload: ProposePayload) -> ProposeAnswer:
     """Run the engine ``payload``'s prompt names on the image and stage every candidate it answers.
 
-    The image is admitted by :func:`~tcip_web.paths.allowed_file`. A point or a box prompts the
-    segmenter for its one best mask, a phrase the detector, through
+    The image is admitted by :func:`~tcip_web.paths.allowed_file`. The points and boxes prompt
+    the segmenter for one best mask each, a phrase the detector, through
     :func:`~tcip_mcp.tools.proposal_tools.propose_annotations`, and every candidate of that run,
     named by the ``staging_id`` it answers, is staged under ``subject`` through
     :func:`~tcip_mcp.tools.proposal_tools.stage_proposals`, both on the open project and both by
@@ -372,8 +376,10 @@ def propose(payload: ProposePayload) -> ProposeAnswer:
     """
     from tcip_mcp.identity import actor
     from tcip_mcp.pipelines.proposal_engines import (
+        DetectorParams,
         PromptableSegmenter,
         TextPromptedDetector,
+        detector_defaults,
     )
     from tcip_mcp.tools.proposal_tools import (
         Assignment,
@@ -386,15 +392,18 @@ def propose(payload: ProposePayload) -> ProposeAnswer:
     project = store.held().root
     image = str(allowed_file(payload.image_path))
     match payload.prompt:
-        case PointPrompt(point=point):
+        case SegmenterPrompt(points=points, boxes=boxes):
             engine = PromptableSegmenter.name
-            params: dict = {"points": [point], "multimask_output": False}
-        case BoxPrompt(box=box):
-            engine = PromptableSegmenter.name
-            params = {"boxes": [box], "multimask_output": False}
-        case DetectorParams() as detector:
+            params: dict = {
+                "points": points,
+                "boxes": boxes,
+                "multimask_output": False,
+            }
+        case PhrasePrompt(phrase=phrase):
             engine = TextPromptedDetector.name
-            params = detector.model_dump()
+            params = DetectorParams(
+                phrase=phrase, **detector_defaults()
+            ).model_dump()
     proposed = _door(
         propose_annotations(
             project, image, engine, engine_params=params, actor=person

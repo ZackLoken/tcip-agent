@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import functools
 import threading
-from typing import TYPE_CHECKING, Annotated, Self
+from typing import TYPE_CHECKING, Annotated, Self, TypedDict
 
 from pydantic import (
     AfterValidator,
@@ -121,15 +121,51 @@ class DetectorParams(BaseModel):
     """A Grounding DINO Hugging Face checkpoint; the default is the owner's choice, the tiny one."""
 
 
+class DetectorDefaults(TypedDict):
+    """The detector's thresholds and merge as its libraries default them."""
+
+    box_threshold: float
+    text_threshold: float
+    postprocess: str
+    cross_tile_nms: float
+
+
+def detector_defaults() -> DetectorDefaults:
+    """Return the detector's thresholds and cross-tile merge as the libraries' own defaults.
+
+    The two thresholds are read from the signature of transformers'
+    ``GroundingDinoProcessor.post_process_grounded_object_detection``, the merge name and its
+    match threshold from SAHI's ``get_sliced_prediction``, so no number is stated here.
+    """
+    import inspect
+
+    from sahi.predict import get_sliced_prediction
+    from transformers import GroundingDinoProcessor
+
+    grounded = inspect.signature(
+        GroundingDinoProcessor.post_process_grounded_object_detection
+    ).parameters
+    sliced = inspect.signature(get_sliced_prediction).parameters
+    return {
+        "box_threshold": grounded["threshold"].default,
+        "text_threshold": grounded["text_threshold"].default,
+        "postprocess": sliced["postprocess_type"].default.lower(),
+        "cross_tile_nms": sliced["postprocess_match_threshold"].default,
+    }
+
+
 def upright_pixels(image_path: str) -> np.ndarray:
     """Return the image at ``image_path`` as ``[H, W, C]`` pixels, EXIF-upright in RGB.
 
-    The read is :func:`~tcip_mcp.pipelines.image_utils.load_image` at three channels.
+    The read is :func:`~tcip_mcp.pipelines.image_utils.load_image` at three channels; the
+    array is the caller's own copy, writable.
     """
+    import numpy as np
+
     from tcip_mcp.pipelines.image_utils import load_image
     from tcip_mcp.pipelines.raster_source import hwc_array
 
-    return hwc_array(load_image(image_path, 3))
+    return np.array(hwc_array(load_image(image_path, 3)))
 
 
 def mask_candidate(
