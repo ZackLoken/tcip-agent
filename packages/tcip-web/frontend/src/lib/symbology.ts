@@ -63,8 +63,8 @@ export const MATCH_COLORS: Record<MatchType, string> = {
 
 export const MATCH_WORDS: Record<MatchType, string> = {
   matched: "Matched",
-  proposal_only: "Proposed only",
-  annotation_only: "Labeled only",
+  proposal_only: "Proposed",
+  annotation_only: "Labeled",
 };
 
 /** What each match type holds, and the detection reading it has if the labels are complete. */
