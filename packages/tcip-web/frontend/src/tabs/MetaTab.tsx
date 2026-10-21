@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 
 import { metaApi, type FrictionReport, type Retrospective } from "@/api/meta";
@@ -102,16 +102,15 @@ export function MetaTab() {
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
       <TabHeading tab="meta" />
       <div className="flex items-center gap-3">
-        <div className="tcip-heading">Agent meta-loop</div>
-        <button className="tcip-btn text-[13px]" onClick={() => void refresh()} disabled={loading}>
-          {loading ? "Loading…" : <>↻&nbsp;&nbsp;Refresh</>}
+        <button className="tcip-btn" onClick={() => void refresh()} disabled={loading}>
+          Refresh
         </button>
-        {error && <div className="text-[13px] tcip-problem">{error}</div>}
+        {error && <div className="tcip-problem">{error}</div>}
       </div>
 
       <CollapsibleSection
         className="tcip-panel p-4"
-        title="Friction reports"
+        title="Friction"
         right={`${reports.length} shown`}
         storageKey="tcip.meta.frictionOpen"
         defaultOpen
@@ -123,25 +122,30 @@ export function MetaTab() {
                 key={r.report_id}
                 className="border-t border-tcip-border pt-2 first:border-t-0 first:pt-0"
               >
-                <div className="flex items-center gap-2 text-[13px] text-tcip-muted">
+                <div className="flex items-center gap-2 text-tcip-muted">
                   <span className="tcip-badge bg-tcip-border/60 text-tcip-fg">
                     {r.category || UNSET_GLYPH}
                   </span>
                   <span className="font-mono">{r.timestamp ?? r.report_id}</span>
                 </div>
-                <div className="text-[13px] mt-1 whitespace-pre-wrap">
-                  {r.detail ?? r.malformed}
-                </div>
+                <div className="mt-1 whitespace-pre-wrap">{r.detail ?? r.malformed}</div>
                 {r.context && Object.keys(r.context).length > 0 && (
-                  <pre className="text-[12px] text-tcip-muted mt-1 overflow-auto">
-                    {JSON.stringify(r.context, null, 2)}
-                  </pre>
+                  <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5 text-tcip-muted">
+                    {Object.entries(r.context).map(([key, value]) => (
+                      <Fragment key={key}>
+                        <dt className="font-mono">{key}</dt>
+                        <dd className="font-mono whitespace-pre-wrap break-all">
+                          {typeof value === "string" ? value : JSON.stringify(value)}
+                        </dd>
+                      </Fragment>
+                    ))}
+                  </dl>
                 )}
               </div>
             ))}
           </div>
         ) : (
-          <div className="text-[13px] text-tcip-muted">No friction reports yet.</div>
+          <div className="text-tcip-muted">No reports.</div>
         )}
       </CollapsibleSection>
 
@@ -159,7 +163,7 @@ export function MetaTab() {
                 key={rt.project_id}
                 className="border-t border-tcip-border pt-2 first:border-t-0 first:pt-0"
               >
-                <div className="flex items-center gap-2 text-[13px] text-tcip-muted">
+                <div className="flex items-center gap-2 text-tcip-muted">
                   <span className="font-semibold text-tcip-fg">{rt.project_id}</span>
                   <span className="font-mono">{rt.timestamp}</span>
                 </div>
@@ -170,23 +174,21 @@ export function MetaTab() {
             ))}
           </div>
         ) : (
-          <div className="text-[13px] text-tcip-muted">No retrospectives yet.</div>
+          <div className="text-tcip-muted">No retrospectives.</div>
         )}
       </CollapsibleSection>
 
       <CollapsibleSection
         className="tcip-panel p-4"
-        title="Annotation sessions"
+        title="Sessions"
         right={sessions === null ? "not loaded" : `${shownSessions.length} recorded`}
         storageKey="tcip.meta.sessionsOpen"
         defaultOpen
       >
         {sessions === null ? (
-          <div className="text-[13px] tcip-problem">
-            Annotation sessions could not be loaded: {error}
-          </div>
+          <div className="tcip-problem">Sessions could not be loaded: {error}</div>
         ) : shownSessions.length > 0 ? (
-          <table className="w-full text-[13px]">
+          <table className="w-full">
             <thead>
               <tr className="border-b border-tcip-border">
                 <th className="tcip-th">Started</th>
@@ -223,9 +225,7 @@ export function MetaTab() {
             </tbody>
           </table>
         ) : (
-          <div className="text-[13px] text-tcip-muted">
-            No annotation sessions yet; they&apos;re recorded automatically while you annotate.
-          </div>
+          <div className="text-tcip-muted">No sessions.</div>
         )}
       </CollapsibleSection>
     </div>

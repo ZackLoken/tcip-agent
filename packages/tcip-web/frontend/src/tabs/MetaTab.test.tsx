@@ -41,12 +41,36 @@ describe("MetaTab annotation sessions", () => {
     render(<MetaTab />);
 
     expect(
-      await screen.findByText(
-        /Annotation sessions could not be loaded: .*a label document does not decode/,
-      ),
+      await screen.findByText(/Sessions could not be loaded: .*a label document does not decode/),
     ).toBeInTheDocument();
     expect(screen.getByText("not loaded")).toBeInTheDocument();
-    expect(screen.queryByText(/No annotation sessions yet/)).not.toBeInTheDocument();
+    expect(screen.queryByText("No sessions.")).not.toBeInTheDocument();
+  });
+
+  it("lists a friction report's context as key and value pairs, not a JSON block", async () => {
+    vi.spyOn(sessionsApi, "load").mockResolvedValue({ sessions: [] });
+    vi.mocked(metaApi.reports).mockResolvedValue({
+      reports: [
+        {
+          report_id: "r1",
+          category: "missing_tool",
+          detail: "no lister of assessments",
+          timestamp: "2026-10-20T10:00:00+00:00",
+          context: { route: "/api/results/assessments", attempts: 2 },
+        },
+      ],
+      count: 1,
+      total_available: 1,
+    });
+
+    render(<MetaTab />);
+
+    expect(await screen.findByText("no lister of assessments")).toBeInTheDocument();
+    expect(screen.getByText("route")).toBeInTheDocument();
+    expect(screen.getByText("/api/results/assessments")).toBeInTheDocument();
+    expect(screen.getByText("attempts")).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(document.querySelector("pre")).toBeNull();
   });
 
   it("lists the sessions a load returns", async () => {
