@@ -289,11 +289,11 @@ export function ResultsTab() {
       const delivery = deliveryRefusalOf(e);
       if (delivery) {
         setUnvalidatedRefusal(delivery.message);
-        setCurves([]);
-        setOnset([]);
       } else {
         setError(e instanceof Error ? e.message : String(e));
       }
+      setCurves([]);
+      setOnset([]);
     } finally {
       setLoading(false);
     }
