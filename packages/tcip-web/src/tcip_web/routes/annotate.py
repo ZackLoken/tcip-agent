@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict
 
 from tcip_annotation.json_io import (
     LabelDocument,
+    SubjectState,
     UnreadableLabelDocumentError,
     authorship_of,
     client_annotation,
@@ -338,6 +339,36 @@ def image_stagings(image_path: str) -> ImageStagings:
             if isinstance(b.producer, Proposed) and stem in b.documents
         ]
     )
+
+
+class ImageStates(BaseModel):
+    """Each image of the selected capture, by name, with what its document says of a subject."""
+
+    states: dict[str, SubjectState]
+
+
+@router.get("/states")
+def image_states(subject: str) -> ImageStates:
+    """Read what every image of the selected capture's label document says about ``subject``.
+
+    The state is :meth:`~tcip_annotation.json_io.LabelDocument.state`'s, keyed by the image's
+    name in the selection's list. No project open answers 409; no capture selected answers 400;
+    a document that will not read answers 400.
+    """
+    from tcip_mcp.dataset_layout import label_key_of
+
+    _project, held = store.held_state()
+    selection = held.dataset
+    if selection.images_dir is None:
+        raise HTTPException(400, "no capture is selected")
+    states: dict[str, SubjectState] = {}
+    for name in selection.image_list:
+        try:
+            key = label_key_of(Path(selection.images_dir) / name)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        states[name] = _read(key)[0].state(subject)
+    return ImageStates(states=states)
 
 
 class SegmenterPrompt(BaseModel):

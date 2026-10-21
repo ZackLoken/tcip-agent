@@ -591,6 +591,41 @@ describe("AnnotateToolbar image stepping", () => {
   });
 });
 
+describe("AnnotateToolbar image filter", () => {
+  it("names each filter with its count and steps through the kept images only", () => {
+    useStore.setState((s) => ({
+      gui: {
+        ...s.gui,
+        dataset: {
+          ...s.gui.dataset,
+          subject: "leaf",
+          image_list: ["a.jpg", "b.jpg", "c.jpg"],
+          current_image_index: 0,
+        },
+      },
+    }));
+    act(() =>
+      useStore
+        .getState()
+        .setImageStates({ "a.jpg": "unannotated", "b.jpg": "complete", "c.jpg": "unannotated" }),
+    );
+    renderToolbar();
+    const filter = screen.getByRole("combobox", { name: "Images" });
+    expect(Array.from(filter.querySelectorAll("option"), (o) => o.textContent)).toEqual([
+      "all (3)",
+      "unannotated (2)",
+      "in progress (0)",
+      "complete (1)",
+    ]);
+
+    fireEvent.change(filter, { target: { value: "unannotated" } });
+    expect(screen.getByRole("textbox", { name: "Image position" })).toHaveValue("1");
+    fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+    expect(useStore.getState().gui.dataset.current_image_index).toBe(2);
+    expect(screen.getByRole("button", { name: "Next image" })).toBeDisabled();
+  });
+});
+
 describe("AnnotateToolbar Complete toggle", () => {
   it("reads checked from the served state, with or without annotations", () => {
     seedSubject("subject_a");

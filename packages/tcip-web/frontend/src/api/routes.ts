@@ -11,6 +11,7 @@ export const ROUTES = {
   getAnnotateProposals: "/api/annotate/proposals",
   getAnnotateQueueByJobId: (jobId: string) => `/api/annotate/queue/${encodeURIComponent(jobId)}`,
   getAnnotateStagings: "/api/annotate/stagings",
+  getAnnotateStates: "/api/annotate/states",
   getDatasetTree: "/api/dataset/tree",
   getFsList: "/api/fs/list",
   getHealth: "/health",

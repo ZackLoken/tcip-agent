@@ -1290,6 +1290,43 @@ def test_placed_points_and_drawn_boxes_prompt_the_segmenter_together_and_stage_e
     assert [p["index"] for p in served.json()["proposals"]] == [0, 1]
 
 
+def test_states_read_each_image_of_the_selected_capture_for_one_subject(
+    opened_client: TestClient, dataset_root: Path
+) -> None:
+    """A labeled image reads partial, a marked one complete, the untouched one unannotated."""
+    images = dataset_root / "images" / "2-11-26"
+    _write_gt(images / "IMG_0000.JPG", [(10, 10, 30, 30)])
+    opened_client.post(
+        "/api/dataset/select",
+        json={
+            "dataset_root": str(dataset_root),
+            "subject": "bud",
+            "date": "2-11-26",
+        },
+    )
+    marked = opened_client.post(
+        "/api/annotate/labels",
+        json={
+            "image_path": str(images / "IMG_0001.JPG"),
+            "annotations": [{"subject": "bud", "bbox": [10, 20, 50, 60]}],
+            "complete": {"bud": True},
+            "user": "breeder",
+        },
+    )
+    assert marked.status_code == 200, marked.text[:300]
+
+    states = opened_client.get(
+        "/api/annotate/states", params={"subject": "bud"}
+    )
+
+    assert states.status_code == 200, states.text
+    assert states.json()["states"] == {
+        "IMG_0000.JPG": "partial",
+        "IMG_0001.JPG": "complete",
+        "IMG_0002.JPG": "unannotated",
+    }
+
+
 def test_stagings_list_each_staged_bucket_of_an_image_and_none_of_another(
     opened_client: TestClient,
     dataset_root: Path,
