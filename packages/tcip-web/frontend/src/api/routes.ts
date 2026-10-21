@@ -36,6 +36,7 @@ export const ROUTES = {
     `/api/training/runs/${encodeURIComponent(experimentId)}`,
   getTrainingRunsByExperimentIdSplits: (experimentId: string) =>
     `/api/training/runs/${encodeURIComponent(experimentId)}/splits`,
+  postAnnotateFind: "/api/annotate/find",
   postAnnotateLabels: "/api/annotate/labels",
   postAnnotatePropose: "/api/annotate/propose",
   postAnnotateQueueLaunch: "/api/annotate/queue/launch",

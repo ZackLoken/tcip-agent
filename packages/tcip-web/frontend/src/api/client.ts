@@ -13,6 +13,8 @@ import {
   type LaunchPriorityQueuePayload,
   type OpenRequest,
   type ProjectSummary,
+  type FindAnswer,
+  type FindPayload,
   type ProposeAnswer,
   type ProposePayload,
   type RemovalRequest,
@@ -330,8 +332,11 @@ export const api = {
       }
     },
 
-    // Send one prompt to the engine its kind names; the answer names the bucket it staged.
+    // Send the held points and boxes to the segmenter; the answer names the bucket it staged.
     propose: (body: ProposePayload) => postJson<ProposeAnswer>(ROUTES.postAnnotatePropose, body),
+
+    // Ask the detector for the boxes a phrase describes; they come back as prompts, unstaged.
+    find: (body: FindPayload) => postJson<FindAnswer>(ROUTES.postAnnotateFind, body),
 
     // Launch the review queue as a background job; poll its job_id via queueJob until terminal.
     launchQueue: (body: LaunchPriorityQueuePayload) =>

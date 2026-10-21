@@ -121,8 +121,9 @@ def declared_models() -> list[type[BaseModel]]:
         TraitRevision,
     )
     from tcip_web.routes.annotate import (
+        FindAnswer,
+        FindPayload,
         LaunchPriorityQueuePayload,
-        PhrasePrompt,
         PriorityQueueJob,
         ProposeAnswer,
         ProposePayload,
@@ -173,8 +174,9 @@ def declared_models() -> list[type[BaseModel]]:
         PriorityQueueJob,
         ScorerSpec,
         SegmenterPrompt,
-        PhrasePrompt,
         ProposePayload,
+        FindPayload,
+        FindAnswer,
         ProposeAnswer,
         CanvasStatePayload,
         ImageEntry,

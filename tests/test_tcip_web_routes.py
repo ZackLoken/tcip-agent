@@ -1220,7 +1220,7 @@ def engines(monkeypatch: pytest.MonkeyPatch) -> dict[str, _PromptedEngine]:
 
 
 _PHRASE: dict[str, JsonValue] = {"phrase": "open bud"}
-"""A phrase prompt: the phrase alone, the detector's thresholds and merge being its libraries'."""
+"""A phrase, which the find door takes and the prompt door refuses."""
 
 
 def _image_of(dataset_root: Path) -> Path:
@@ -1332,12 +1332,23 @@ def test_a_prompt_records_the_person_who_sent_it_on_both_audit_lines(
     }
 
 
-def test_a_phrase_prompts_the_detector_under_its_libraries_defaults(
+def _find(client: TestClient, image: Path, phrase: str) -> Response:
+    return client.post(
+        "/api/annotate/find",
+        json={"image_path": str(image), "phrase": phrase, "user": "breeder"},
+    )
+
+
+def test_find_answers_the_detectors_boxes_under_its_libraries_defaults_and_stages_nothing(
     opened_client: TestClient,
     dataset_root: Path,
     engines: dict[str, _PromptedEngine],
 ) -> None:
-    """The phrase reaches the detector with the thresholds and merge its libraries default to."""
+    """The phrase reaches the detector with its libraries' defaults; its boxes come back unstaged.
+
+    The boxes are prompts for the person to send on, so no bucket is published by a find.
+    """
+    from tcip_mcp.buckets import buckets_under
     from tcip_mcp.pipelines.proposal_engines import (
         DetectorParams,
         PromptableSegmenter,
@@ -1345,30 +1356,29 @@ def test_a_phrase_prompts_the_detector_under_its_libraries_defaults(
         detector_defaults,
     )
 
-    resp = _propose(opened_client, _image_of(dataset_root), _PHRASE)
+    resp = _find(opened_client, _image_of(dataset_root), "open bud")
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["proposal_count"] == 2
+    assert resp.json() == {
+        "boxes": [[10.0, 10.0, 30.0, 30.0], [40.0, 20.0, 60.0, 50.0]]
+    }
     (prompt,) = engines[TextPromptedDetector.name].prompts
     assert DetectorParams.model_validate(prompt) == DetectorParams(
         phrase="open bud", **detector_defaults()
     )
     assert engines[PromptableSegmenter.name].prompts == []
+    assert buckets_under(dataset_root) == []
 
 
-@pytest.mark.parametrize("stated", ["box_threshold", "postprocess"])
-def test_a_phrase_stating_a_threshold_or_merge_is_refused_by_the_payload(
+def test_a_phrase_sent_as_a_prompt_is_refused_by_the_payload(
     opened_client: TestClient,
     dataset_root: Path,
     engines: dict[str, _PromptedEngine],
-    stated: str,
 ) -> None:
-    prompt: dict[str, JsonValue] = {**_PHRASE, stated: 0.3}
-
-    resp = _propose(opened_client, _image_of(dataset_root), prompt)
+    resp = _propose(opened_client, _image_of(dataset_root), _PHRASE)
 
     assert resp.status_code == 422
-    assert stated in resp.text
+    assert "phrase" in resp.text
     assert all(stub.prompts == [] for stub in engines.values())
 
 

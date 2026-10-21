@@ -321,27 +321,33 @@ class SegmenterPrompt(BaseModel):
     boxes: list[tuple[float, float, float, float]] = []
 
 
-class PhrasePrompt(BaseModel):
-    """A phrase describing what to find: a detector prompt."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    phrase: str
-
-
 class ProposePayload(BaseModel):
     """One prompt the person ``user`` names sends about an image, and its proposals' subject.
 
-    The prompt is the placed points and drawn boxes, which the segmenter answers, or a phrase,
-    which the detector answers under its libraries' own thresholds and merge
-    (:func:`~tcip_mcp.pipelines.proposal_engines.detector_defaults`); one of the two, by the
-    keys it carries.
+    The prompt is the placed points and drawn boxes, which the segmenter answers.
     """
 
     image_path: str
     subject: str
     user: str
-    prompt: SegmenterPrompt | PhrasePrompt
+    prompt: SegmenterPrompt
+
+
+class FindPayload(BaseModel):
+    """A phrase the person ``user`` names describes what to find on an image."""
+
+    image_path: str
+    phrase: str
+    user: str
+
+
+class FindAnswer(BaseModel):
+    """The boxes the detector found for a phrase, ``(x1, y1, x2, y2)`` in the image's pixels.
+
+    They are the person's to keep, drop or add to before a prompt sends them to the segmenter.
+    """
+
+    boxes: list[tuple[float, float, float, float]]
 
 
 class ProposeAnswer(BaseModel):
@@ -363,10 +369,10 @@ def _door(result: dict) -> dict:
 
 @router.post("/propose")
 def propose(payload: ProposePayload) -> ProposeAnswer:
-    """Run the engine ``payload``'s prompt names on the image and stage every candidate it answers.
+    """Run the segmenter on the image's prompts and stage every candidate it answers.
 
     The image is admitted by :func:`~tcip_web.paths.allowed_file`. The points and boxes prompt
-    the segmenter for one best mask each, a phrase the detector, through
+    the segmenter for one best mask each through
     :func:`~tcip_mcp.tools.proposal_tools.propose_annotations`, and every candidate of that run,
     named by the ``staging_id`` it answers, is staged under ``subject`` through
     :func:`~tcip_mcp.tools.proposal_tools.stage_proposals`, both on the open project and both by
@@ -375,12 +381,7 @@ def propose(payload: ProposePayload) -> ProposeAnswer:
     answers 409.
     """
     from tcip_mcp.identity import actor
-    from tcip_mcp.pipelines.proposal_engines import (
-        DetectorParams,
-        PromptableSegmenter,
-        TextPromptedDetector,
-        detector_defaults,
-    )
+    from tcip_mcp.pipelines.proposal_engines import PromptableSegmenter
     from tcip_mcp.tools.proposal_tools import (
         Assignment,
         StagedAssignments,
@@ -391,22 +392,17 @@ def propose(payload: ProposePayload) -> ProposeAnswer:
     person = actor(payload.user)
     project = store.held().root
     image = str(allowed_file(payload.image_path))
-    match payload.prompt:
-        case SegmenterPrompt(points=points, boxes=boxes):
-            engine = PromptableSegmenter.name
-            params: dict = {
-                "points": points,
-                "boxes": boxes,
-                "multimask_output": False,
-            }
-        case PhrasePrompt(phrase=phrase):
-            engine = TextPromptedDetector.name
-            params = DetectorParams(
-                phrase=phrase, **detector_defaults()
-            ).model_dump()
     proposed = _door(
         propose_annotations(
-            project, image, engine, engine_params=params, actor=person
+            project,
+            image,
+            PromptableSegmenter.name,
+            engine_params={
+                "points": payload.prompt.points,
+                "boxes": payload.prompt.boxes,
+                "multimask_output": False,
+            },
+            actor=person,
         )
     )
     if proposed["staging_id"] is None:
@@ -430,6 +426,43 @@ def propose(payload: ProposePayload) -> ProposeAnswer:
     return ProposeAnswer(
         bucket=staged["bucket"], proposal_count=staged["proposal_count"]
     )
+
+
+@router.post("/find")
+def find(payload: FindPayload) -> FindAnswer:
+    """Run the detector on the image for the phrase and answer the boxes it found, unstaged.
+
+    The image is admitted by :func:`~tcip_web.paths.allowed_file`. The phrase prompts the
+    detector under its libraries' own thresholds and merge
+    (:func:`~tcip_mcp.pipelines.proposal_engines.detector_defaults`) through
+    :func:`~tcip_mcp.tools.proposal_tools.propose_annotations`, on the open project and by the
+    person :func:`~tcip_mcp.identity.actor` makes of ``user``; nothing is staged, the boxes being
+    prompts for the person to send on. The door's error answers 400 carrying its text; no project
+    open answers 409.
+    """
+    from tcip_mcp.identity import actor
+    from tcip_mcp.pipelines.proposal_engines import (
+        DetectorParams,
+        TextPromptedDetector,
+        detector_defaults,
+    )
+    from tcip_mcp.tools.proposal_tools import propose_annotations
+
+    person = actor(payload.user)
+    project = store.held().root
+    image = str(allowed_file(payload.image_path))
+    proposed = _door(
+        propose_annotations(
+            project,
+            image,
+            TextPromptedDetector.name,
+            engine_params=DetectorParams(
+                phrase=payload.phrase, **detector_defaults()
+            ).model_dump(),
+            actor=person,
+        )
+    )
+    return FindAnswer(boxes=[tuple(c["bbox"]) for c in proposed["candidates"]])
 
 
 class PriorityQueueJob(BaseModel):
