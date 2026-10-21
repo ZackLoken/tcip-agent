@@ -887,10 +887,11 @@ export function AnnotateTab() {
         setConflict(false);
         if (reload) refreshProposals();
         else startImageSessionTracking(currentImageName);
-      } catch {
+      } catch (e) {
         if (canceled) return;
+        const detail = e instanceof Error ? e.message : String(e);
         if (reload) {
-          setIoError("Reload failed. Check the connection and try again.");
+          setIoError(`Reload failed: ${detail}`);
           return;
         }
         // A blank canvas with saving blocked: a transient load failure never overwrites the labels.
@@ -906,9 +907,7 @@ export function AnnotateTab() {
         loadedPathsRef.current = null;
         setSaveBlocked(true);
         setConflict(false);
-        setIoError(
-          "Could not load this image's labels. Saving is disabled to avoid overwriting the labels on disk.",
-        );
+        setIoError(`Could not load this image's labels: ${detail}. Saving is off.`);
         startImageSessionTracking(currentImageName);
       }
     })();
