@@ -30,7 +30,7 @@ dependencies:
       # --- core runtime ---
       - mcp>=2
       - numpy
-      - pillow>=9.0
+      - pillow>=13.0
       - tifffile>=2023.1
       # LZW/JPEG decode for compressed multi-band GeoTIFF (e.g. a drone orthomosaic).
       - imagecodecs>=2023.1
