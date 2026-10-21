@@ -14,7 +14,14 @@ import {
 import { draftStrokes } from "@/lib/draftStrokes";
 import { ringsBbox } from "@/lib/polygonGeometry";
 import type { ReviewItem } from "@/lib/reviewItems";
-import { DOTTED_DASH, DRAFT_DASH, FLAG_MARK, FOCUS_HALO, MATCH_COLORS } from "@/lib/symbology";
+import {
+  CASING,
+  DOTTED_DASH,
+  DRAFT_DASH,
+  FLAG_MARK,
+  FOCUS_HALO,
+  MATCH_COLORS,
+} from "@/lib/symbology";
 import type { Box, PointShape, Proposal } from "@/store/types";
 
 const RED = subjectColor("subject_a");
@@ -140,6 +147,17 @@ describe("buildAnnotateShapes", () => {
     expect(shapes[0]).toMatchObject({ kind: "polygon", color: RED, tag: "gt" });
     expect(shapes[0].label).toBeUndefined();
     expect(shapes[0].halo).toBeUndefined();
+  });
+
+  it("every committed shape carries the casing, focused or not", () => {
+    const casing = {
+      color: CASING.color,
+      opacity: CASING.opacity,
+      width_factor: CASING.widthFactor,
+    };
+    expect(buildAnnotateShapes(base)[0]).toMatchObject({ casing });
+    const focused = buildAnnotateShapes({ ...base, focused: focusOn("polygon", 1) });
+    expect(focused.every((s) => "casing" in s)).toBe(true);
   });
 
   it("a focused polygon of another subject is included, haloed and labeled, its color kept", () => {

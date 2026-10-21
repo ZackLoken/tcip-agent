@@ -592,8 +592,8 @@ HexColor = Annotated[
 _FINITE = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
 
-class CanvasHalo(BaseModel):
-    """The wider translucent stroke the GUI draws under its focused shape."""
+class CanvasUnderStroke(BaseModel):
+    """A wider translucent stroke the GUI draws under a shape's own: its casing or its halo."""
 
     model_config = _FINITE
 
@@ -606,8 +606,9 @@ class _CanvasStroke(BaseModel):
     """What every pushed canvas shape carries beside its geometry.
 
     ``color`` is its stroke, ``tag`` what it stands for, ``dash`` its ``(on, off)`` pattern in
-    stroke widths (``None`` for a solid stroke), ``halo`` its focus halo and ``label`` its text,
-    each ``None`` when the GUI draws none.
+    stroke widths (``None`` for a solid stroke), ``casing`` the dark stroke under its outline,
+    ``halo`` its focus halo over the casing and ``label`` its text, each ``None`` when the GUI
+    draws none.
     """
 
     model_config = _FINITE
@@ -621,7 +622,8 @@ class _CanvasStroke(BaseModel):
         ]
         | None
     ) = None
-    halo: CanvasHalo | None = None
+    casing: CanvasUnderStroke | None = None
+    halo: CanvasUnderStroke | None = None
     label: str | None = None
 
 
@@ -699,6 +701,20 @@ def _draw_path(
         draw.line(seg_pts, fill=color, width=width, joint="curve")
 
 
+def _point_ticks(at: Coord, dot_r: float) -> list[list[Coord]]:
+    """Return the four radial ticks of a point's mark at ``at``, each as its two ends."""
+    px, py = at
+    core = dot_r * 1.6
+    inner, outer = core * 1.9, core * 3.2
+    return [
+        [
+            (px + dx * inner, py + dy * inner),
+            (px + dx * outer, py + dy * outer),
+        ]
+        for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0))
+    ]
+
+
 def render_canvas_state(
     image: Pixels,
     shapes: Sequence[CanvasShape],
@@ -709,8 +725,9 @@ def render_canvas_state(
     """Render the live GUI canvas: display-resolved shapes over the pixels the human is viewing.
 
     ``shapes`` come from the canvas-state push, each already carrying the exact symbology the GUI
-    rendered. A point draws as the GUI's mark (a core with radial ticks); a shape carrying a halo
-    draws that wider translucent stroke under its own, and one carrying a dash draws its outline
+    rendered. A point draws as the GUI's mark (a core with radial ticks); a shape carrying a
+    casing draws that wider translucent stroke under its own, dashed as its outline is, one
+    carrying a halo draws that one over the casing, and one carrying a dash draws its outline
     dashed to that pattern.
 
     ``image`` is whatever region of the raster the caller read (the human's viewport, or the whole
@@ -760,8 +777,20 @@ def render_canvas_state(
             and len(shape.pts) >= 3
         ):
             draw.polygon(shape.pts, fill=shape.color + (38,))
-    for shape in parsed:  # pass 2: halos, under every outline
-        s, pts, closed = shape.spec, shape.pts, shape.closed
+    for shape in parsed:  # pass 2: casings, then halos, under every outline
+        s, pts, closed, dash = shape.spec, shape.pts, shape.closed, shape.dash
+        if s.casing is not None:
+            casing = _hex_rgb(s.casing.color) + (
+                round(255 * s.casing.opacity),
+            )
+            casing_w = max(1, round(lw * s.casing.width_factor))
+            if isinstance(s, CanvasPoint):
+                for tick in _point_ticks(pts[0], dot_r):
+                    _draw_path(
+                        draw, tick, casing, casing_w, dash, closed=False
+                    )
+            else:
+                _draw_path(draw, pts, casing, casing_w, dash, closed=closed)
         if s.halo is None:
             continue
         halo = _hex_rgb(s.halo.color) + (round(255 * s.halo.opacity),)
@@ -783,23 +812,12 @@ def render_canvas_state(
             # mark that distinguishes a location from a very small box on the same canvas.
             px, py = pts[0]
             core = dot_r * 1.6
-            inner, outer = core * 1.9, core * 3.2
             draw.ellipse(
                 [px - core, py - core, px + core, py + core],
                 fill=color + (255,),
             )
-            for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
-                _draw_path(
-                    draw,
-                    [
-                        (px + dx * inner, py + dy * inner),
-                        (px + dx * outer, py + dy * outer),
-                    ],
-                    color + (255,),
-                    lw,
-                    dash,
-                    closed=False,
-                )
+            for tick in _point_ticks(pts[0], dot_r):
+                _draw_path(draw, tick, color + (255,), lw, dash, closed=False)
             continue
         _draw_path(draw, pts, color + (255,), lw, dash, closed=closed)
         if (

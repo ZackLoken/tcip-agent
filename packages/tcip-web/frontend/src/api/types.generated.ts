@@ -642,24 +642,20 @@ export interface CanvasBox {
   color: string;
   tag: string;
   dash?: [number, number] | null;
-  halo?: CanvasHalo | null;
+  casing?: CanvasUnderStroke | null;
+  halo?: CanvasUnderStroke | null;
   label?: string | null;
   kind: "box";
   xyxy: [number, number, number, number];
   fill?: boolean;
 }
 
-export interface CanvasHalo {
-  color: string;
-  opacity: number;
-  width_factor: number;
-}
-
 export interface CanvasPoint {
   color: string;
   tag: string;
   dash?: [number, number] | null;
-  halo?: CanvasHalo | null;
+  casing?: CanvasUnderStroke | null;
+  halo?: CanvasUnderStroke | null;
   label?: string | null;
   kind: "point";
   points: [[number, number]];
@@ -669,7 +665,8 @@ export interface CanvasPolygon {
   color: string;
   tag: string;
   dash?: [number, number] | null;
-  halo?: CanvasHalo | null;
+  casing?: CanvasUnderStroke | null;
+  halo?: CanvasUnderStroke | null;
   label?: string | null;
   kind: "polygon";
   points: [number, number][];
@@ -680,11 +677,18 @@ export interface CanvasPolyline {
   color: string;
   tag: string;
   dash?: [number, number] | null;
-  halo?: CanvasHalo | null;
+  casing?: CanvasUnderStroke | null;
+  halo?: CanvasUnderStroke | null;
   label?: string | null;
   kind: "polyline";
   points: [number, number][];
   vertices?: boolean;
+}
+
+export interface CanvasUnderStroke {
+  color: string;
+  opacity: number;
+  width_factor: number;
 }
 
 export interface RasterIdentity {

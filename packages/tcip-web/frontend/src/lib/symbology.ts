@@ -1,8 +1,8 @@
 /**
  * The Annotate canvas' symbology, one rule per channel, stated once for the overlays, the legend
  * and the agent's canvas mirror: line style says whose shape it is, outline color says match
- * type while proposals are shown and subject otherwise, focus is a halo under the item's own
- * stroke, and line widths derive from the zoom.
+ * type while proposals are shown and subject otherwise, every outline sits on a dark casing,
+ * focus is a halo under the item's own stroke, and line widths derive from the zoom.
  */
 
 import { subjectColor } from "@/api/subjects";
@@ -76,8 +76,24 @@ export const MATCH_HINTS: Record<MatchType, string> = {
     "The labels hold it and the bucket does not propose it (a false negative if the label is right)",
 };
 
-/** The focus halo: a wider translucent stroke under the focused item's own; set by eye,
- *  provisional. */
+/** The casing: a dark translucent rim around every outline, so a light outline stays legible
+ *  over a light image. On screen it is the stroke's own shadow, blurred to `widthFactor` stroke
+ *  widths; the agent's render draws it as a stroke that much wider. Set by eye, provisional. */
+export const CASING = { color: "#000000", opacity: 0.6, widthFactor: 2 } as const;
+
+/** The shadow props that draw the casing under a Konva stroke of `width`. */
+export function casingShadow(width: number) {
+  return {
+    shadowColor: CASING.color,
+    shadowOpacity: CASING.opacity,
+    shadowBlur: width * CASING.widthFactor,
+    shadowOffset: { x: 0, y: 0 },
+    shadowForStrokeEnabled: true,
+  };
+}
+
+/** The focus halo: a wider translucent stroke under the focused item's own and over its
+ *  casing; set by eye, provisional. */
 export const FOCUS_HALO = { color: "#FFFFFF", opacity: 0.55, widthFactor: 3 } as const;
 
 /** The mark an open flag draws at its place; set by eye, provisional. */

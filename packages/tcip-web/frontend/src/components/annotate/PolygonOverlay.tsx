@@ -2,7 +2,7 @@ import { memo } from "react";
 import { Circle, Line } from "react-konva";
 
 import { HaloLabel } from "@/components/HaloLabel";
-import { dashFor, FOCUS_HALO, type LineStyle } from "@/lib/symbology";
+import { casingShadow, dashFor, FOCUS_HALO, type LineStyle } from "@/lib/symbology";
 import type { PolygonShape } from "@/store/types";
 
 export const PolygonOverlay = memo(function PolygonOverlay({
@@ -58,6 +58,7 @@ export const PolygonOverlay = memo(function PolygonOverlay({
           stroke={stroke}
           strokeWidth={width}
           dash={dash}
+          {...casingShadow(width)}
         />
       ))}
       {showVertices &&

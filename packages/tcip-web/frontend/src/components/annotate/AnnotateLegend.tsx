@@ -7,11 +7,14 @@ import {
   setSubjectColorOverride,
   useSubjectColors,
 } from "@/lib/subjectColors";
-import { FOCUS_HALO, legendRows, type LegendRow } from "@/lib/symbology";
+import { CASING, FOCUS_HALO, legendRows, type LegendRow } from "@/lib/symbology";
 import { useStore } from "@/store";
 
-/** One row's swatch, drawn with the row's own color and line style, haloed for the focus row. */
+/** One row's swatch, drawn with the row's own color and line style on its casing, haloed for the
+ *  focus row. */
 function Swatch({ row }: { row: LegendRow }) {
+  const casing = `0 0 0 1px color-mix(in srgb, ${CASING.color} ${CASING.opacity * 100}%, transparent)`;
+  const halo = `0 0 0 ${FOCUS_HALO.widthFactor}px color-mix(in srgb, ${FOCUS_HALO.color} ${FOCUS_HALO.opacity * 100}%, transparent)`;
   return (
     <span
       className={`inline-block h-[13px] w-[18px] shrink-0 rounded-[2px] border-[2.5px] ${
@@ -19,9 +22,7 @@ function Swatch({ row }: { row: LegendRow }) {
       }`}
       style={{
         borderColor: row.color,
-        boxShadow: row.halo
-          ? `0 0 0 ${FOCUS_HALO.widthFactor}px color-mix(in srgb, ${FOCUS_HALO.color} ${FOCUS_HALO.opacity * 100}%, transparent)`
-          : undefined,
+        boxShadow: row.halo ? `${casing}, ${halo}` : casing,
       }}
     />
   );

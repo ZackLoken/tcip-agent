@@ -38,6 +38,7 @@ import {
 } from "@/lib/reviewItems";
 import {
   authorshipLabel,
+  CASING,
   dashUnitsFor,
   DRAFT_DASH,
   FLAG_MARK,
@@ -108,11 +109,13 @@ export function shapeVisible(args: {
   return args.mode === ownMode && (args.focused || args.subject === args.activeSubject);
 }
 
-/** The line style and focus halo a mirrored shape carries, from the symbology's own rules. */
+/** The line style, casing and focus halo a mirrored shape carries, from the symbology's own
+ *  rules. */
 function strokeOf(authorship: string | null | undefined, focused: boolean) {
   const dash = dashUnitsFor(lineStyleOf(authorship));
   return {
     ...(dash ? { dash } : {}),
+    casing: { color: CASING.color, opacity: CASING.opacity, width_factor: CASING.widthFactor },
     ...(focused
       ? {
           halo: {
