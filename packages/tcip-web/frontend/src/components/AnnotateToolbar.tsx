@@ -1,21 +1,17 @@
 /**
- * Annotate-tab context toolbar. Two rows:
- *   Row 1: tool mode (Point/Box/Polygon), the engine prompt, the subject picker pill, an Editor
- *          toggle, then the image stepper and the Complete checkbox.
- *   Editor: a second toolbar (collapsed by default, remembered) holding the tools you
- *           flip constantly (Snap / Stream / Show labels) plus Undo / Redo / Save.
+ * Annotate-tab toolbar, one row: the tool mode (Point, Box, Polygon), the engine prompt, the
+ * subject picker, the Edit menu (Snap, Stream, Cut, Show labels, Undo, Redo), Save, the band
+ * picker for a multispectral image, then the image stepper and the Complete control.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import type { ImageBandsResponse } from "@/api/client";
 import { subjectColor } from "@/api/subjects";
-import type { DetectorParams } from "@/api/types.generated";
+import type { PhrasePrompt } from "@/api/types.generated";
 import { EnginePrompt } from "@/components/annotate/EnginePrompt";
 import { BandPicker } from "@/components/BandPicker";
-import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { Stepper } from "@/components/Stepper";
-import { useDisclosure } from "@/hooks/useDisclosure";
 import { useImageNav } from "@/hooks/useImageNav";
 import { showsBandPicker, type BandSelection } from "@/lib/bandSelection";
 import { saveRegistry } from "@/lib/registrySave";
@@ -24,41 +20,115 @@ import { useStore } from "@/store";
 import { selectProjectRoot } from "@/store/slices/gui";
 import { isFinished, type SubjectState } from "@/store/types";
 
-/** A pressed-state tool button with a status dot. */
-function Etool({
+/** A button that drops a menu beneath itself; the menu closes on any click outside it. */
+function MenuButton({
   label,
   pressed,
+  children,
+}: {
+  label: string;
+  pressed?: boolean;
+  children: (close: () => void) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className={`flex h-[30px] items-center gap-2 rounded border px-2.5 font-semibold transition-colors ${
+          open || pressed
+            ? "border-tcip-border bg-tcip-hover text-tcip-fg"
+            : "border-tcip-border bg-tcip-bg text-tcip-muted hover:border-tcip-border-hover hover:text-tcip-fg"
+        }`}
+      >
+        {label}
+      </button>
+      {open && (
+        <>
+          <div role="presentation" className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div
+            role="menu"
+            className="absolute left-0 top-full z-20 mt-1 min-w-44 rounded-md border border-tcip-border bg-tcip-panel py-1 shadow-lg"
+          >
+            {children(() => setOpen(false))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** One menu row: a tool that stays pressed, or an action that closes the menu. */
+function MenuItem({
+  label,
   onClick,
+  pressed,
   disabled,
   title,
 }: {
   label: string;
-  pressed: boolean;
   onClick: () => void;
+  pressed?: boolean;
   disabled?: boolean;
   title?: string;
 }) {
   return (
     <button
       type="button"
-      aria-pressed={pressed}
+      role={pressed === undefined ? "menuitem" : "menuitemcheckbox"}
+      aria-checked={pressed}
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`flex h-7 items-center gap-2 rounded border px-3 text-[13px] transition-colors disabled:opacity-40 ${
-        pressed
-          ? "border-tcip-accent/55 bg-tcip-accent/20 text-tcip-fg"
-          : "border-tcip-border bg-tcip-bg text-tcip-muted hover:border-tcip-border-hover hover:text-tcip-fg"
-      }`}
+      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-tcip-fg hover:bg-tcip-hover disabled:opacity-40 disabled:hover:bg-transparent"
     >
-      <span
-        className={`h-2 w-2 rounded-full ${pressed ? "bg-tcip-accent" : "bg-tcip-muted"}`}
-        aria-hidden
-      />
+      {pressed !== undefined && (
+        <span
+          className={`h-2 w-2 rounded-full ${pressed ? "bg-tcip-accent" : "bg-tcip-border"}`}
+          aria-hidden
+        />
+      )}
       {label}
     </button>
   );
 }
+
+const MODE_ICONS = {
+  point: (
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
+      <path
+        d="M8 1.6v2.7M8 11.7v2.7M1.6 8h2.7M11.7 8h2.7"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <circle cx="8" cy="8" r="2" fill="currentColor" />
+    </svg>
+  ),
+  box: (
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
+      <rect x="2.5" y="3.5" width="11" height="9" rx="1" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  ),
+  polygon: (
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
+      <path
+        d="M8 2l5 3.5-2 6H5l-2-6z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+    </svg>
+  ),
+} as const;
+
+const MODE_TITLES = {
+  point: "Point: click to place, drag to move, right-click to remove",
+  box: "Box: drag to draw",
+  polygon: "Polygon: click each vertex, double-click to close",
+} as const;
 
 export function AnnotateToolbar({
   onSave,
@@ -72,7 +142,8 @@ export function AnnotateToolbar({
   onComplete,
   onCompleteView,
   proposing,
-  onPrompt,
+  onPhrase,
+  onPropose,
 }: {
   onSave: () => void;
   /** Abandon the save in flight, which the Save button offers while one is. */
@@ -89,9 +160,10 @@ export function AnnotateToolbar({
   onComplete: (next: boolean) => void;
   // Mark the dataset subject complete over the region in view; omitted when the view holds it all.
   onCompleteView?: () => void;
-  // Whether an engine prompt is in flight, and the send of a phrase prompt.
+  // Whether an engine prompt is in flight, the send of a phrase, and the send of the held prompts.
   proposing: boolean;
-  onPrompt: (prompt: DetectorParams) => void;
+  onPhrase: (prompt: PhrasePrompt) => void;
+  onPropose: () => void;
 }) {
   const dataset = useStore((s) => s.gui.dataset);
   const projectRoot = useStore(selectProjectRoot);
@@ -117,9 +189,6 @@ export function AnnotateToolbar({
   const subjectNames = useMemo(() => Object.keys(registry), [registry]);
   useSubjectColors(); // re-render on a recolor: the swatches below call subjectColor() fresh
 
-  // Editor shelf: collapsed by default, remembered across sessions.
-  const { open: editorOpen, toggle: toggleEditor } = useDisclosure("tcip.annotate.editorOpen");
-
   const [subjectMenuOpen, setSubjectMenuOpen] = useState(false);
 
   // Counts per subject across everything on the current canvas (boxes + polygons + points + ratings).
@@ -136,6 +205,7 @@ export function AnnotateToolbar({
   const currentImage = dataset.image_list[dataset.current_image_index] ?? null;
   const nav = useImageNav();
   const finished = isFinished(subjectState);
+  const polygonTools = mode === "polygon";
 
   const activeCount = activeSubject ? (subjectCounts.get(activeSubject) ?? 0) : 0;
 
@@ -143,8 +213,8 @@ export function AnnotateToolbar({
     const found = discovered.filter((n) => !subjectNames.includes(n));
     const name = window.prompt(
       found.length
-        ? `New subject name (in this dataset's labels: ${found.join(", ")}):`
-        : "New subject name:",
+        ? `New subject (in this dataset's labels: ${found.join(", ")}):`
+        : "New subject:",
     );
     if (!name) return;
     const trimmed = name.trim();
@@ -155,93 +225,43 @@ export function AnnotateToolbar({
     }
     const previousSubject = activeSubject;
     setActiveSubject(trimmed);
-    const landed = await saveRegistry({ ...registry, [trimmed]: {} }, "Could not add subject");
+    const landed = await saveRegistry({ ...registry, [trimmed]: {} }, "Could not add the subject");
     if (!landed && projectRoot && dataset.dataset_root) setActiveSubject(previousSubject);
   }
 
   return (
     <div className="shrink-0 border-b border-tcip-border bg-tcip-panel">
-      {/* Row 1: mode + subject + Editor toggle, then navigation */}
       <div className="h-topbar flex items-center gap-3 px-3">
-        {/* Draw mode */}
         <div
           className="inline-flex gap-0.5 rounded border border-tcip-border bg-tcip-bg p-0.5"
           role="group"
           aria-label="Tool"
         >
-          <button
-            aria-pressed={mode === "point"}
-            onClick={() => setMode("point")}
-            title="Point: click to place one keypoint or landmark, drag it to move, right-click to remove"
-            className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[13px] font-semibold transition-colors ${
-              mode === "point" ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
-            }`}
-          >
-            {/* The canvas mark in miniature: ticks converging on a core, so the tool and the shape
-                it authors read as the same thing. */}
-            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
-              <path
-                d="M8 1.6v2.7M8 11.7v2.7M1.6 8h2.7M11.7 8h2.7"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-              <circle cx="8" cy="8" r="2" fill="currentColor" />
-            </svg>
-            Point
-          </button>
-          <button
-            aria-pressed={mode === "box"}
-            onClick={() => setMode("box")}
-            title="Box: drag a rectangle, release to draw"
-            className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[13px] font-semibold transition-colors ${
-              mode === "box" ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
-            }`}
-          >
-            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
-              <rect
-                x="2.5"
-                y="3.5"
-                width="11"
-                height="9"
-                rx="1"
-                stroke="currentColor"
-                strokeWidth="1.6"
-              />
-            </svg>
-            Box
-          </button>
-          <button
-            aria-pressed={mode === "polygon"}
-            onClick={() => setMode("polygon")}
-            title="Polygon: click to lay vertices, double-click to close"
-            className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[13px] font-semibold transition-colors ${
-              mode === "polygon"
-                ? "bg-tcip-accent text-white"
-                : "text-tcip-muted hover:text-tcip-fg"
-            }`}
-          >
-            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
-              <path
-                d="M8 2l5 3.5-2 6H5l-2-6z"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinejoin="round"
-              />
-            </svg>
-            Polygon
-          </button>
+          {(["point", "box", "polygon"] as const).map((tool) => (
+            <button
+              key={tool}
+              aria-pressed={mode === tool}
+              onClick={() => setMode(tool)}
+              title={MODE_TITLES[tool]}
+              className={`flex h-7 items-center gap-1.5 rounded-[4px] px-2.5 font-semibold transition-colors ${
+                mode === tool ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
+              }`}
+            >
+              {MODE_ICONS[tool]}
+              {tool.charAt(0).toUpperCase() + tool.slice(1)}
+            </button>
+          ))}
         </div>
 
-        <EnginePrompt proposing={proposing} onPrompt={onPrompt} />
+        <EnginePrompt proposing={proposing} onPhrase={onPhrase} onPropose={onPropose} />
 
-        {/* Subject picker pill */}
+        {/* Subject picker */}
         <div className="relative">
           <button
             type="button"
             onClick={() => setSubjectMenuOpen((o) => !o)}
             aria-expanded={subjectMenuOpen}
-            className="flex h-[30px] items-center gap-2 rounded border border-tcip-border bg-tcip-bg px-2.5 text-[13px] text-tcip-fg hover:border-tcip-border-hover"
+            className="flex h-[30px] items-center gap-2 rounded border border-tcip-border bg-tcip-bg px-2.5 text-tcip-fg hover:border-tcip-border-hover"
           >
             <span
               className="h-2.5 w-2.5 rounded-xs"
@@ -268,7 +288,7 @@ export function AnnotateToolbar({
                 className="fixed inset-0 z-10"
                 onClick={() => setSubjectMenuOpen(false)}
               />
-              <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-md border border-tcip-border bg-tcip-panel py-1 text-[13px] shadow-lg">
+              <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-md border border-tcip-border bg-tcip-panel py-1 shadow-lg">
                 {subjectNames.map((name) => (
                   <div key={name} className="flex items-center gap-2 px-2 hover:bg-tcip-hover">
                     <span
@@ -300,7 +320,7 @@ export function AnnotateToolbar({
                     }}
                     className="w-full px-2 py-1 text-left text-tcip-accent hover:bg-tcip-hover"
                   >
-                    + New subject
+                    New subject
                   </button>
                 </div>
               </div>
@@ -308,20 +328,84 @@ export function AnnotateToolbar({
           )}
         </div>
 
-        {/* Editor toggle: drops the second toolbar */}
+        <MenuButton label="Edit" pressed={annotateUi.snap || annotateUi.stream || annotateUi.cut}>
+          {(close) => (
+            <>
+              <MenuItem
+                label="Snap"
+                pressed={annotateUi.snap}
+                onClick={() => setSnap(!annotateUi.snap)}
+                disabled={!polygonTools}
+                title="Snap to the nearest vertex (s)"
+              />
+              <MenuItem
+                label="Stream"
+                pressed={annotateUi.stream}
+                onClick={() => setStream(!annotateUi.stream)}
+                disabled={!polygonTools}
+                title="Freehand vertices (v)"
+              />
+              <MenuItem
+                label="Cut"
+                pressed={annotateUi.cut}
+                onClick={() => setCut(!annotateUi.cut)}
+                disabled={!polygonTools}
+                title={
+                  polygonTools
+                    ? "Click two points on either side of the selected polygon to split it (x)"
+                    : "Cut: in polygon mode only"
+                }
+              />
+              <div className="my-1 border-t border-tcip-border" />
+              <MenuItem
+                label="Show labels"
+                pressed={annotateUi.visible}
+                onClick={() => setVisible(!annotateUi.visible)}
+              />
+              <div className="my-1 border-t border-tcip-border" />
+              <MenuItem
+                label="Undo"
+                onClick={() => {
+                  undo();
+                  close();
+                }}
+                title="Ctrl+Z"
+              />
+              <MenuItem
+                label="Redo"
+                onClick={() => {
+                  redo();
+                  close();
+                }}
+                title="Ctrl+Shift+Z"
+              />
+            </>
+          )}
+        </MenuButton>
+
         <button
-          type="button"
-          onClick={toggleEditor}
-          aria-expanded={editorOpen}
-          className={`flex h-[30px] items-center gap-2 rounded border px-3 text-[13px] font-semibold transition-colors ${
-            editorOpen
-              ? "border-tcip-border bg-tcip-hover text-tcip-fg"
-              : "border-tcip-border bg-tcip-bg text-tcip-muted hover:border-tcip-border-hover hover:text-tcip-fg"
-          }`}
+          className={dirty ? "tcip-btn-primary h-[30px]" : "tcip-btn h-[30px]"}
+          onClick={saving ? onCancelSave : onSave}
+          disabled={saveDisabled && !saving}
+          title={saving ? "Click to cancel this save" : "Save (Ctrl+S)"}
         >
-          <DisclosureChevron open={editorOpen} />
-          Editor
+          {saving ? "Saving" : dirty ? "Save" : "Saved"}
         </button>
+
+        {bandsInfo &&
+          bandSelection &&
+          onBandSelectionChange &&
+          showsBandPicker(bandsInfo, bandSelection) && (
+            <BandPicker
+              bandCount={bandsInfo.band_count}
+              bands={bandsInfo.bands}
+              selection={bandSelection}
+              onChange={onBandSelectionChange}
+              sampled={bandsInfo.sampled}
+              pixelFraction={bandsInfo.pixel_fraction}
+              overviewSize={bandsInfo.overview_size}
+            />
+          )}
 
         <div className="flex-1" />
 
@@ -337,26 +421,14 @@ export function AnnotateToolbar({
           onJump={nav.jumpToPosition}
         />
 
-        {onCompleteView && (
-          <button
-            type="button"
-            className="tcip-btn text-[13px]"
-            onClick={onCompleteView}
-            disabled={!dataset.subject || subjectState === null}
-            title={`Mark every ${dataset.subject ?? "subject"} instance in view annotated`}
-          >
-            Complete view
-          </button>
-        )}
-
         <label
-          className="flex items-center gap-1.5 text-[13px]"
+          className="flex items-center gap-1.5"
           title={
             !dataset.subject
-              ? "Select a subject before marking Complete."
+              ? "Select a subject first"
               : subjectState !== null
-                ? `Marks every ${dataset.subject} instance on this image annotated (c)`
-                : "Loading this image's labels…"
+                ? `Every ${dataset.subject} on this image is annotated (c)`
+                : "Loading this image's labels"
           }
         >
           <input
@@ -367,88 +439,21 @@ export function AnnotateToolbar({
           />
           {subjectState === "negative" ? "Complete (none)" : "Complete"}
         </label>
-      </div>
-
-      {/* Editor second toolbar: the tools, plus Undo / Redo / Save */}
-      {editorOpen && (
-        <div className="flex items-center gap-3 border-t border-tcip-border px-3 py-2">
-          <div className="flex items-center gap-2.5">
-            <Etool
-              label="Snap"
-              pressed={annotateUi.snap}
-              onClick={() => setSnap(!annotateUi.snap)}
-              disabled={mode !== "polygon"}
-              title="Snap to nearest vertex (s)"
-            />
-            <Etool
-              label="Stream"
-              pressed={annotateUi.stream}
-              onClick={() => setStream(!annotateUi.stream)}
-              disabled={mode !== "polygon"}
-              title="Freehand: click to start laying vertices, click to pause, double-click to close (v)"
-            />
-            <Etool
-              label="Cut"
-              pressed={annotateUi.cut}
-              onClick={() => setCut(!annotateUi.cut)}
-              disabled={mode !== "polygon"}
-              title={
-                mode !== "polygon"
-                  ? "Cut: in polygon mode only"
-                  : "Click two points on either side of the selected polygon to split it (x)"
-              }
-            />
-            <Etool
-              label="Show labels"
-              pressed={annotateUi.visible}
-              onClick={() => setVisible(!annotateUi.visible)}
-              title="Show or hide annotation overlays"
-            />
-          </div>
-          {bandsInfo &&
-            bandSelection &&
-            onBandSelectionChange &&
-            showsBandPicker(bandsInfo, bandSelection) && (
-              <>
-                <span aria-hidden className="h-5 w-px bg-tcip-border" />
-                <BandPicker
-                  bandCount={bandsInfo.band_count}
-                  bands={bandsInfo.bands}
-                  selection={bandSelection}
-                  onChange={onBandSelectionChange}
-                  sampled={bandsInfo.sampled}
-                  pixelFraction={bandsInfo.pixel_fraction}
-                  overviewSize={bandsInfo.overview_size}
-                />
-              </>
+        {onCompleteView && (
+          <MenuButton label="▾">
+            {(close) => (
+              <MenuItem
+                label="Complete the region in view"
+                onClick={() => {
+                  onCompleteView();
+                  close();
+                }}
+                disabled={!dataset.subject || subjectState === null}
+              />
             )}
-          <div className="flex-1" />
-          <div className="flex items-center gap-2">
-            <button className="tcip-btn text-[13px]" onClick={() => undo()} title="Undo (Ctrl+Z)">
-              ↶&nbsp;&nbsp;Undo
-            </button>
-            <button
-              className="tcip-btn text-[13px]"
-              onClick={() => redo()}
-              title="Redo (Ctrl+Shift+Z)"
-            >
-              ↷&nbsp;&nbsp;Redo
-            </button>
-            <button
-              className={dirty ? "tcip-btn-primary text-[13px]" : "tcip-btn text-[13px]"}
-              onClick={saving ? onCancelSave : onSave}
-              disabled={saveDisabled && !saving}
-              title={
-                saving
-                  ? "Saving; click to cancel this save and keep editing"
-                  : "Save (Ctrl+S), also auto-saves on image change"
-              }
-            >
-              {saving ? "Saving" : dirty ? "Save" : "Saved"}
-            </button>
-          </div>
-        </div>
-      )}
+          </MenuButton>
+        )}
+      </div>
     </div>
   );
 }

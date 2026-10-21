@@ -85,4 +85,12 @@ describe("ProposalShapes", () => {
     expect(Number(rects[0].getAttribute("data-opacity"))).toBe(FOCUS_HALO.opacity);
     expect(rects[1]).toHaveAttribute("data-stroke", MATCH_COLORS.proposal_only);
   });
+
+  it("draws a point proposal as a point mark", () => {
+    const point: Proposal = { ...proposal(0, null), bbox: undefined, point: [30, 30] };
+    render(<ProposalShapes proposals={[point]} focused={null} widths={strokeWidths(1)} />);
+    expect(screen.getAllByTestId("k-line").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("k-circle").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("k-rect")).toBeNull();
+  });
 });

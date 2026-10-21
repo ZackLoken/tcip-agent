@@ -1,6 +1,7 @@
 import { memo } from "react";
 
 import { BoxOverlay } from "@/components/annotate/BoxOverlay";
+import { PointOverlay } from "@/components/annotate/PointOverlay";
 import { PolygonOverlay } from "@/components/annotate/PolygonOverlay";
 import { annotationsToCanvas } from "@/lib/labelSerde";
 import { focusesProposal, proposalMatch, type ReviewItem } from "@/lib/reviewItems";
@@ -31,7 +32,7 @@ export const ProposalShapes = memo(function ProposalShapes({
           showLabel: label !== null,
           focused: isFocused,
         };
-        const { boxes, polygons } = annotationsToCanvas([p]);
+        const { boxes, polygons, points } = annotationsToCanvas([p]);
         return [
           ...boxes.map((b) => (
             <BoxOverlay key={`proposal-${p.index}`} box={b} width={widths.boxStroke} {...shared} />
@@ -43,6 +44,17 @@ export const ProposalShapes = memo(function ProposalShapes({
               width={widths.polyStroke}
               vertexRadius={0}
               showVertices={false}
+              {...shared}
+            />
+          )),
+          ...points.map((point) => (
+            <PointOverlay
+              key={`proposal-${p.index}`}
+              point={point}
+              coreR={isFocused ? widths.pointSelCoreR : widths.pointCoreR}
+              tickInner={widths.pointTickInner}
+              tickOuter={widths.pointTickOuter}
+              lineW={widths.scaleLineW * 1.6}
               {...shared}
             />
           )),

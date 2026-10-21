@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Auto-cleanup needs vitest globals (not enabled here), so clean up explicitly.
 
@@ -6,7 +6,7 @@ import type { ImageBandsResponse } from "@/api/client";
 import { api } from "@/api/client";
 import { StructuredRefusalError } from "@/api/http";
 import { subjectsApi } from "@/api/subjects";
-import { CROSS_TILE_MERGE_DESCRIPTIONS, type DetectorParams } from "@/api/types.generated";
+import type { PhrasePrompt } from "@/api/types.generated";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import { useStore } from "@/store";
@@ -20,16 +20,6 @@ const modeButton = (name: "Box" | "Polygon" | "Point") =>
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
-  // The Editor shelf's open/closed state persists to localStorage, which some environments keep
-  // across every test in this file (one jsdom instance per file, not per test): an earlier test
-  // leaving it open would make a later test's fresh render start open too. Guarded because
-  // `localStorage` itself is unavailable in some Node/environment combinations (the component's
-  // own read/write of this key is guarded the same way, for the same reason).
-  try {
-    localStorage.removeItem("tcip.annotate.editorOpen");
-  } catch {
-    /* not available in this environment, nothing to clear */
-  }
   // The toolbar's nav hook persists the settled index; nothing here should reach the backend.
   vi.spyOn(api.dataset, "nav").mockResolvedValue({ status: "ok" } as never);
 });
@@ -48,7 +38,8 @@ function renderToolbar(
     onCompleteView?: () => void;
     onCancelSave?: () => void;
     proposing?: boolean;
-    onPrompt?: (prompt: DetectorParams) => void;
+    onPhrase?: (prompt: PhrasePrompt) => void;
+    onPropose?: () => void;
   },
 ) {
   render(
@@ -64,9 +55,15 @@ function renderToolbar(
       onComplete={extra?.onComplete ?? (() => {})}
       onCompleteView={extra?.onCompleteView}
       proposing={extra?.proposing ?? false}
-      onPrompt={extra?.onPrompt ?? (() => {})}
+      onPhrase={extra?.onPhrase ?? (() => {})}
+      onPropose={extra?.onPropose ?? (() => {})}
     />,
   );
+}
+
+function openEdit() {
+  const btn = screen.getByRole("button", { name: "Edit" });
+  if (btn.getAttribute("aria-expanded") !== "true") fireEvent.click(btn);
 }
 
 const FOUR_BANDS: ImageBandsResponse = {
@@ -95,7 +92,6 @@ describe("AnnotateToolbar save state", () => {
   it("shows a save in flight, and the button then cancels it rather than saving again", () => {
     const onCancelSave = vi.fn();
     renderToolbar(null, null, { onCancelSave });
-    fireEvent.click(screen.getByRole("button", { name: "Editor" }));
     const save = () => screen.getByRole("button", { name: /^Saved$|^Saving$/ });
     expect(save()).toHaveTextContent("Saved");
     act(() => void useStore.getState().holdForSave("x"));
@@ -117,56 +113,46 @@ describe("AnnotateToolbar engine prompt", () => {
     expect(screen.getByRole("textbox", { name: "Phrase" })).toBeInTheDocument();
   });
 
-  it("sends the phrase with both thresholds and the tiling, prefilled from their libraries", () => {
-    const onPrompt = vi.fn();
-    renderToolbar(null, null, { onPrompt });
+  it("sends the phrase alone, with no threshold, tiling or merge control", () => {
+    const onPhrase = vi.fn();
+    renderToolbar(null, null, { onPhrase });
     fireEvent.click(promptToggle());
     fireEvent.change(screen.getByRole("textbox", { name: "Phrase" }), {
       target: { value: "open bud" },
     });
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Box" }), {
-      target: { value: "0.3" },
-    });
+    expect(screen.queryByRole("spinbutton")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Tiling" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Find" }));
 
-    expect(onPrompt).toHaveBeenCalledWith({
-      phrase: "open bud",
-      box_threshold: 0.3,
-      text_threshold: 0.25,
-      postprocess: "greedynmm",
-      cross_tile_nms: 0.5,
-    });
+    expect(onPhrase).toHaveBeenCalledWith({ phrase: "open bud" });
   });
 
-  it("keeps the tiling under one disclosure, each merge described and sent by its name", () => {
-    const onPrompt = vi.fn();
-    renderToolbar(null, null, { onPrompt });
+  it("counts the held prompts on Propose and sends them together once asked", () => {
+    const onPropose = vi.fn();
+    renderToolbar(null, null, { onPropose });
     fireEvent.click(promptToggle());
-    expect(screen.queryByRole("combobox", { name: "Merge" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Tiling" }));
-    const options = within(screen.getByRole("combobox", { name: "Merge" })).getAllByRole("option");
-    expect(options.map((o) => [o.getAttribute("value"), o.textContent])).toEqual(
-      Object.entries(CROSS_TILE_MERGE_DESCRIPTIONS),
-    );
-    fireEvent.change(screen.getByRole("combobox", { name: "Merge" }), {
-      target: { value: "nms" },
+    expect(screen.getByRole("button", { name: "Propose" })).toBeDisabled();
+    act(() => {
+      useStore.getState().addPromptPoint([10, 10]);
+      useStore.getState().addPromptBox([20, 20, 40, 40]);
     });
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Match" }), {
-      target: { value: "0.6" },
-    });
-    fireEvent.change(screen.getByRole("textbox", { name: "Phrase" }), {
-      target: { value: "open bud" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Find" }));
+    fireEvent.click(screen.getByRole("button", { name: "Propose 2" }));
 
-    expect(onPrompt).toHaveBeenCalledWith(
-      expect.objectContaining({ postprocess: "nms", cross_tile_nms: 0.6 }),
-    );
+    expect(onPropose).toHaveBeenCalledTimes(1);
+  });
+
+  it("disarming drops the held prompts", () => {
+    renderToolbar();
+    fireEvent.click(promptToggle());
+    act(() => useStore.getState().addPromptPoint([10, 10]));
+    fireEvent.click(promptToggle());
+
+    expect(useStore.getState().annotateUi.pendingPrompts).toEqual({ points: [], boxes: [] });
   });
 
   it("while a prompt is in flight, says so and refuses another send", () => {
-    const onPrompt = vi.fn();
-    renderToolbar(null, null, { onPrompt, proposing: true });
+    const onPhrase = vi.fn();
+    renderToolbar(null, null, { onPhrase, proposing: true });
     fireEvent.click(promptToggle());
     fireEvent.change(screen.getByRole("textbox", { name: "Phrase" }), {
       target: { value: "open bud" },
@@ -175,7 +161,7 @@ describe("AnnotateToolbar engine prompt", () => {
     expect(promptToggle()).toHaveTextContent("Proposing");
     expect(screen.getByRole("button", { name: "Find" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Find" }));
-    expect(onPrompt).not.toHaveBeenCalled();
+    expect(onPhrase).not.toHaveBeenCalled();
   });
 });
 
@@ -216,14 +202,25 @@ describe("AnnotateToolbar draw mode", () => {
 
   it("Snap and Stream stay polygon-only in point mode (they have no meaning for a point)", () => {
     renderToolbar();
-    // The shelf's open/closed state persists to localStorage, which vitest keeps across every
-    // test in this file (one jsdom environment per file, not per test): a blind toggle click can
-    // close a shelf an earlier test left open instead of opening it.
-    const editorBtn = screen.getByRole("button", { name: /Editor/ });
-    if (editorBtn.getAttribute("aria-expanded") !== "true") fireEvent.click(editorBtn);
     fireEvent.click(modeButton("Point"));
-    expect(screen.getByRole("button", { name: /Snap/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Stream/ })).toBeDisabled();
+    openEdit();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Snap" })).toBeDisabled();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Stream" })).toBeDisabled();
+  });
+
+  it("the Edit menu holds the six editing tools and nothing else", () => {
+    renderToolbar();
+    openEdit();
+    const items = screen.getByRole("menu").querySelectorAll("button");
+    expect(Array.from(items, (item) => item.textContent)).toEqual([
+      "Snap",
+      "Stream",
+      "Cut",
+      "Show labels",
+      "Undo",
+      "Redo",
+    ]);
+    expect(screen.queryByRole("button", { name: "Editor" })).toBeNull();
   });
 
   it("renders Point immediately to the left of Box (Point, Box, Polygon)", () => {
@@ -251,27 +248,22 @@ describe("AnnotateToolbar draw mode", () => {
   });
 });
 
-describe("AnnotateToolbar Cut button", () => {
-  function openEditor() {
-    const btn = screen.getByRole("button", { name: /Editor/ });
-    if (btn.getAttribute("aria-expanded") !== "true") fireEvent.click(btn);
-  }
-
+describe("AnnotateToolbar Cut item", () => {
   it("states the disabled reason outside polygon mode", () => {
     renderToolbar();
-    openEditor();
-    const cutButton = screen.getByRole("button", { name: "Cut" });
-    expect(cutButton).toBeDisabled();
-    expect(cutButton).toHaveAttribute("title", "Cut: in polygon mode only");
+    openEdit();
+    const cutItem = screen.getByRole("menuitemcheckbox", { name: "Cut" });
+    expect(cutItem).toBeDisabled();
+    expect(cutItem).toHaveAttribute("title", "Cut: in polygon mode only");
   });
 
   it("states the how-to once enabled, in polygon mode", () => {
     renderToolbar();
-    openEditor();
     fireEvent.click(modeButton("Polygon"));
-    const cutButton = screen.getByRole("button", { name: "Cut" });
-    expect(cutButton).not.toBeDisabled();
-    expect(cutButton).toHaveAttribute(
+    openEdit();
+    const cutItem = screen.getByRole("menuitemcheckbox", { name: "Cut" });
+    expect(cutItem).not.toBeDisabled();
+    expect(cutItem).toHaveAttribute(
       "title",
       "Click two points on either side of the selected polygon to split it (x)",
     );
@@ -305,7 +297,7 @@ describe("AnnotateToolbar subject authoring", () => {
     renderToolbar();
 
     openSubjectMenu();
-    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
     expect(Object.keys(useStore.getState().registry.subjects)).toEqual(["leaf", "husk"]);
     expect(useStore.getState().gui.active_subject).toBe("husk");
@@ -329,7 +321,7 @@ describe("AnnotateToolbar subject authoring", () => {
     renderToolbar();
 
     openSubjectMenu();
-    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
     expect(useStore.getState().registry.subjects).toEqual({ leaf: leafDef, husk: {} });
     expect(useStore.getState().gui.active_subject).toBe("leaf");
@@ -349,12 +341,12 @@ describe("AnnotateToolbar subject authoring", () => {
     renderToolbar();
 
     openSubjectMenu();
-    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
     expect(Object.keys(useStore.getState().registry.subjects)).toEqual(["leaf"]);
 
     promptSpy.mockReturnValue("   ");
     openSubjectMenu();
-    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
     expect(Object.keys(useStore.getState().registry.subjects)).toEqual(["leaf"]);
     expect(useStore.getState().gui.active_subject).toBeNull();
@@ -374,7 +366,7 @@ describe("AnnotateToolbar subject authoring", () => {
     renderToolbar();
 
     openSubjectMenu();
-    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
     expect(saveSpy.mock.calls[0][2]).toBe("v1");
     expect(useStore.getState().registry.version).toBe("v2");
@@ -394,7 +386,7 @@ describe("AnnotateToolbar subject authoring", () => {
     renderToolbar();
 
     openSubjectMenu();
-    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
     // The refused optimistic add is discarded in favor of what the server actually holds.
     expect(useStore.getState().registry.subjects).toEqual({ leaf: {} });
@@ -419,7 +411,7 @@ describe("AnnotateToolbar subject authoring", () => {
 
     // "leaf" is already active, so the pill reads its name rather than the default placeholder.
     fireEvent.click(screen.getByRole("button", { name: /leaf|select subject/ }));
-    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
     // "husk" was set optimistically as active; the refusal must not leave it active.
     expect(useStore.getState().gui.active_subject).toBe("leaf");
@@ -450,7 +442,7 @@ describe("AnnotateToolbar subject authoring", () => {
 
     // "leaf" is already active, so the pill reads its name rather than the default placeholder.
     fireEvent.click(screen.getByRole("button", { name: /leaf|select subject/ }));
-    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
     // The committed body is adopted as though the save had answered 200, and the optimistic
     // active subject is kept rather than reverted (unlike an ordinary refusal above).
@@ -460,35 +452,22 @@ describe("AnnotateToolbar subject authoring", () => {
 });
 
 describe("AnnotateToolbar band picker (progressive disclosure)", () => {
-  function openEditor() {
-    const btn = screen.getByRole("button", { name: /Editor/ });
-    if (btn.getAttribute("aria-expanded") !== "true") fireEvent.click(btn);
-  }
-
   it("is absent with no bandsInfo at all (a project with no channel-count fact yet)", () => {
     renderToolbar(null, null);
-    openEditor();
     expect(screen.queryByLabelText("R band")).not.toBeInTheDocument();
   });
 
   it("is hidden for a standard 3-band RGB dataset", () => {
     renderToolbar(THREE_BANDS, defaultBandSelection(THREE_BANDS.bands));
-    openEditor();
     expect(screen.queryByLabelText("R band")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Band")).not.toBeInTheDocument();
   });
 
   it("is shown for a >3-band (multispectral) dataset", () => {
     renderToolbar(FOUR_BANDS, defaultBandSelection(FOUR_BANDS.bands));
-    openEditor();
     expect(screen.getByLabelText("R band")).toBeInTheDocument();
     expect(screen.getByLabelText("G band")).toBeInTheDocument();
     expect(screen.getByLabelText("B band")).toBeInTheDocument();
-  });
-
-  it("stays hidden while the Editor shelf itself is collapsed, even for a multispectral dataset", () => {
-    renderToolbar(FOUR_BANDS, defaultBandSelection(FOUR_BANDS.bands));
-    expect(screen.queryByLabelText("R band")).not.toBeInTheDocument();
   });
 });
 
@@ -541,14 +520,15 @@ describe("AnnotateToolbar Complete toggle", () => {
     expect(screen.getByRole("checkbox", { name: /Complete/ })).toBeDisabled();
   });
 
-  it("offers the region mark only when the tab supplies one", () => {
+  it("offers the region mark under the Complete control only when the tab supplies one", () => {
     seedSubject("subject_a");
     const onCompleteView = vi.fn();
     renderToolbar(null, null, { subjectState: "partial", onCompleteView });
-    fireEvent.click(screen.getByRole("button", { name: "Complete view" }));
+    fireEvent.click(screen.getByRole("button", { name: "▾" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Complete the region in view" }));
     expect(onCompleteView).toHaveBeenCalledTimes(1);
     cleanup();
     renderToolbar(null, null, { subjectState: "partial" });
-    expect(screen.queryByRole("button", { name: "Complete view" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "▾" })).not.toBeInTheDocument();
   });
 });

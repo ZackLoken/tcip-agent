@@ -1,18 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { AttrType, AttributeDef, Registry } from "@/api/subjects";
 import { ATTR_TYPES } from "@/api/types.generated";
 import { AttributeEditors } from "@/components/annotate/AttributeEditors";
-import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { saveRegistry } from "@/lib/registrySave";
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
 import { TOOL_ARRAY } from "@/store/types";
 
-/** Per-instance attribute editing + a geometry-less (image/plant-level) rating entry, plus
- *  authoring new attributes and values onto the active subject: the selected shape's
- *  attributes, the image-level ratings that ride in the same label document with no box, and the
- *  registry-growing controls a breeder otherwise has no way to reach without a shell. */
+/** The column beside the canvas: the selected shape's attributes, the active subject's declared
+ *  attributes with the control that declares a new one, and the image-level ratings that ride in
+ *  the label document with no shape. Absent while there is no subject, no selection and no
+ *  rating to show. */
 export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
   const activeSubject = useStore((s) => s.gui.active_subject);
   const registry = useStore((s) => s.registry.subjects);
@@ -49,7 +48,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
   };
 
   function saveGrownRegistry(next: Registry) {
-    void saveRegistry(next, "Could not update attributes");
+    void saveRegistry(next, "Could not update the attributes");
   }
 
   function addAttribute(subject: string, name: string, type: AttrType, values: string[]) {
@@ -102,7 +101,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
       .filter((v) => v.length > 0);
     if (!name || values.length === 0) return;
     if (activeAttributes[name]) {
-      setAttrNameError(`${name} is already declared; add values to it with + value.`);
+      setAttrNameError(`${name} is already declared.`);
       return;
     }
     addAttribute(activeSubject, name, attrType, values);
@@ -121,51 +120,16 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
   }, [activeSubject, boxes, polygons, points]);
   const activeAttributes = activeSubject ? (registry[activeSubject]?.attributes ?? {}) : {};
 
-  // Open until the user collapses it, and never re-keyed on the active image: for many traits this
-  // is the only way to record a rating, so it must not be hidden when an image loads.
-  const [ratingsOpen, setRatingsOpen] = useState(true);
-
-  /** Manually dismissible (unlike the legends, this panel holds real inputs, so hover-to-reveal
-   *  would fight the user reaching into it). Re-opens on a fresh selection so a stale dismiss
-   *  can't hide the one shape you're now trying to edit. */
-  const [dismissed, setDismissed] = useState(false);
-  useEffect(() => {
-    if (selected) setDismissed(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.kind, selected?.idx]);
-
-  const hasContent = !!activeSubject || !!selected || imageAnnotations.length > 0;
-  if (dismissed || !hasContent) {
-    return (
-      <button
-        type="button"
-        onClick={() => setDismissed(false)}
-        className="absolute top-3 right-3 z-20 flex items-center gap-1.5 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[13px] text-tcip-muted backdrop-blur-sm hover:border-tcip-border-hover hover:text-tcip-fg"
-      >
-        Attributes
-      </button>
-    );
-  }
+  if (!activeSubject && !selected && imageAnnotations.length === 0) return null;
 
   return (
-    <div className="absolute top-3 right-3 z-20 w-60 rounded-md border border-tcip-border bg-tcip-panel/95 p-3 text-[13px] shadow-lg backdrop-blur-sm">
-      <div className="mb-1 flex items-center justify-between">
-        <h4 className="text-[13px] font-semibold tracking-wide text-tcip-fg">Attributes</h4>
-        <button
-          type="button"
-          onClick={() => setDismissed(true)}
-          aria-label="Close attributes panel"
-          title="Close"
-          className="text-tcip-muted hover:text-tcip-fg"
-        >
-          ✕
-        </button>
-      </div>
-      {selected ? (
-        <div className="mb-2">
-          <div className="mb-1 text-tcip-muted">
-            Selected <span className="font-semibold text-tcip-fg">{selected.shape.subject}</span>
-          </div>
+    <div
+      className="w-64 shrink-0 overflow-auto border-l border-tcip-border bg-tcip-panel p-4"
+      data-testid="attribute-column"
+    >
+      {selected && (
+        <div className="mb-5">
+          <div className="mb-2 font-semibold">{selected.shape.subject}</div>
           <AttributeEditors
             subject={selected.shape.subject}
             attributes={selected.shape.attributes}
@@ -174,36 +138,34 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
             onAddValue={(attr, value) => addValue(selected.shape.subject, attr, value)}
           />
         </div>
-      ) : (
-        <p className="mb-2 text-tcip-muted">Select a shape to set its attributes.</p>
       )}
 
       {activeSubject && (
-        <div className="mb-2 rounded border border-tcip-border bg-tcip-bg/60 p-2">
-          <div className="mb-1 flex items-center justify-between">
-            <span className="text-tcip-muted">Attributes for {activeSubject}</span>
+        <div className="mb-5">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="tcip-label">{`${activeSubject} attributes`}</span>
             <button
               type="button"
               className="text-tcip-accent hover:underline"
               onClick={() => setAddingAttribute((o) => !o)}
             >
-              + Attribute
+              Add attribute
             </button>
           </div>
           {Object.entries(activeAttributes).map(([name]) => {
             const unassessed = activeSubjectShapes.filter((s) => !s.attributes[name]).length;
             return (
               <p key={name} className="text-tcip-muted">
-                {unassessed} of {activeSubjectShapes.length} {activeSubject} shapes on this image
-                carry no {name} value.
+                {`${name}: ${unassessed} of ${activeSubjectShapes.length} ${activeSubject} shapes unset`}
               </p>
             );
           })}
           {addingAttribute && (
-            <div className="mt-1.5 space-y-1.5 border-t border-tcip-border pt-1.5">
+            <div className="mt-2 space-y-2">
               <input
-                className="tcip-input w-full text-[13px]"
-                placeholder="attribute name"
+                className="tcip-input w-full"
+                placeholder="Attribute"
+                aria-label="attribute name"
                 value={attrName}
                 onChange={(e) => {
                   setAttrName(e.target.value);
@@ -212,7 +174,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
               />
               {attrNameError && <p className="tcip-problem">{attrNameError}</p>}
               <select
-                className="tcip-select w-full text-[13px]"
+                className="tcip-select w-full"
                 aria-label="attribute type"
                 value={attrType}
                 onChange={(e) => setAttrType(e.target.value as AttrType)}
@@ -224,28 +186,23 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
                 ))}
               </select>
               <textarea
-                className="tcip-input w-full text-[13px]"
-                placeholder={
-                  "one value per line" + (attrType === "ordinal" ? ", lowest first" : "")
-                }
+                className="tcip-input h-20 w-full py-1"
+                placeholder={attrType === "ordinal" ? "Values, lowest first" : "Values"}
+                aria-label="attribute values"
                 rows={3}
                 value={attrValues}
                 onChange={(e) => setAttrValues(e.target.value)}
               />
-              <div className="flex gap-1.5">
+              <div className="flex gap-2">
                 <button
                   type="button"
-                  className="tcip-btn-primary flex-1 text-[13px]"
+                  className="tcip-btn-primary flex-1"
                   disabled={!attrName.trim() || !attrValues.trim()}
                   onClick={submitAttrDraft}
                 >
                   Add
                 </button>
-                <button
-                  type="button"
-                  className="tcip-btn flex-1 text-[13px]"
-                  onClick={resetAttrDraft}
-                >
+                <button type="button" className="tcip-btn flex-1" onClick={resetAttrDraft}>
                   Cancel
                 </button>
               </div>
@@ -254,24 +211,17 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
         </div>
       )}
 
-      <CollapsibleSection
-        className="mt-2 rounded border border-tcip-border bg-tcip-bg/60 p-2"
-        title="Ratings for this whole image"
-        caption="Applies to the whole image, not to any shape."
-        open={ratingsOpen}
-        onToggle={() => setRatingsOpen((o) => !o)}
-      >
-        {imageAnnotations.length === 0 && (
-          <p className="mb-1 text-tcip-muted">None on this image.</p>
-        )}
+      <div>
+        <div className="mb-2 tcip-label">Image ratings</div>
         {imageAnnotations.map((a, i) => (
-          <div key={i} className="mb-1.5 rounded border border-tcip-border p-1.5">
+          <div key={i} className="mb-2 rounded border border-tcip-border p-2">
             <div className="mb-1 flex items-center gap-1">
-              <span className="font-semibold text-tcip-fg">{a.subject}</span>
+              <span className="font-semibold">{a.subject}</span>
               <button
                 type="button"
-                className="ml-auto text-tcip-muted hover:tcip-problem"
+                className="ml-auto text-tcip-muted hover:text-tcip-fg"
                 title="Remove this rating"
+                aria-label="Remove this rating"
                 onClick={() => remove("imageAnnotations", i)}
               >
                 ✕
@@ -293,16 +243,16 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
         ))}
         <button
           type="button"
-          className="tcip-btn mt-1 w-full text-[13px]"
+          className="tcip-btn w-full"
           disabled={!activeSubject}
           onClick={() =>
             activeSubject &&
             add("imageAnnotations", { subject: activeSubject, attributes: {}, iscrowd: false })
           }
         >
-          + Rating for {activeSubject ?? "…"}
+          Add rating
         </button>
-      </CollapsibleSection>
+      </div>
     </div>
   );
 }

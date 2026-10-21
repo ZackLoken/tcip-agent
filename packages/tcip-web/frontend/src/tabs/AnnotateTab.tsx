@@ -10,6 +10,7 @@ import { AnnotationShapes } from "@/components/annotate/AnnotationShapes";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { FlagMarks } from "@/components/annotate/FlagMarks";
 import { InProgressPolygon } from "@/components/annotate/InProgressPolygon";
+import { PointOverlay } from "@/components/annotate/PointOverlay";
 import { ProposalShapes } from "@/components/annotate/ProposalShapes";
 import { ReviewStrip } from "@/components/annotate/ReviewStrip";
 import { SnapIndicator } from "@/components/annotate/SnapIndicator";
@@ -70,7 +71,13 @@ import {
 } from "@/lib/reviewItems";
 import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useSubjectColors } from "@/lib/subjectColors";
-import { dashAt, DRAFT_DASH, POINT_HIT_CANVAS, strokeWidths } from "@/lib/symbology";
+import {
+  dashAt,
+  DRAFT_DASH,
+  NO_SUBJECT_DRAFT_COLOR,
+  POINT_HIT_CANVAS,
+  strokeWidths,
+} from "@/lib/symbology";
 import { nextMode } from "@/lib/toolMode";
 import { fitView, zoomToRect } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
@@ -254,12 +261,25 @@ export function AnnotateTab() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proposalKey, hideProposals, proposalTick]);
-  // ── Engine prompts: a point, a box or a phrase asks for proposals, never an annotation ──
+  // ── Engine prompts: held points and boxes, or a phrase, ask for proposals, never an annotation ──
   const [proposing, setProposing] = useState(false);
+  // The bucket whose first proposal is focused once its proposals are served.
+  const focusOnServeRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!served || served.key !== proposalKey || focusOnServeRef.current !== bucket) return;
+    focusOnServeRef.current = null;
+    if (served.served.proposals.length > 0) setFocus({ kind: "proposal", index: 0 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [served]);
+  // Prompts held on one image are not carried to the next.
+  useEffect(() => {
+    useStore.getState().clearPrompts();
+  }, [imgPath]);
   /** Send one prompt about the image in view, its proposals staged under the active subject; one
-   *  in flight refuses another. The answer's bucket is selected with the proposals shown only
-   *  while the tab is mounted on the selection and image the prompt was sent from; otherwise a
-   *  toast names the bucket, and whether it is now the selected one, and the view stays. */
+   *  in flight refuses another. The answer's bucket is selected with the proposals shown and the
+   *  first focused only while the tab is mounted on the selection and image the prompt was sent
+   *  from; otherwise a toast names the bucket, and whether it is now the selected one, and the
+   *  view stays. */
   async function sendPrompt(prompt: ProposePayload["prompt"]) {
     const { dataset_root, date, subject, current_image_index } = dataset;
     if (proposing || !imgPath || !dataset_root || !date || !requireSubject()) return;
@@ -272,8 +292,9 @@ export function AnnotateTab() {
         user: useStore.getState().user,
         prompt,
       });
+      useStore.getState().clearPrompts();
       if (answer.bucket === null) {
-        useStore.getState().pushToast("The engine proposed nothing for this prompt.");
+        useStore.getState().pushToast(`No proposal for ${sentName}.`);
         return;
       }
       const inView = () => {
@@ -286,15 +307,23 @@ export function AnnotateTab() {
           currentImage(now).path === sentFrom
         );
       };
+      focusOnServeRef.current = answer.bucket;
       const outcome = await applyAnnotateFocus(
         { dataset_root, subject, date, bucket: answer.bucket, image_index: current_image_index },
         inView,
       );
-      const staged = `Proposals for ${sentName} were staged as ${answer.bucket}`;
-      if (outcome === "adopted") setHideProposals(false);
-      else if (outcome === "declined-unselected")
-        useStore.getState().pushToast(`${staged}; select it in Setup.`);
-      else useStore.getState().pushToast(`${staged}, now the selected bucket.`);
+      const count = `${answer.proposal_count} ${answer.proposal_count === 1 ? "proposal" : "proposals"} for ${sentName}`;
+      if (outcome === "adopted") {
+        setHideProposals(false);
+        useStore.getState().pushToast(count, "success");
+      } else {
+        focusOnServeRef.current = null;
+        const where =
+          outcome === "declined-unselected"
+            ? "choose it on the project card"
+            : "now the selected predictions";
+        useStore.getState().pushToast(`${count}, staged under ${answer.bucket}; ${where}.`);
+      }
     } catch (e) {
       useStore
         .getState()
@@ -302,6 +331,12 @@ export function AnnotateTab() {
     } finally {
       if (mountedRef.current) setProposing(false);
     }
+  }
+  /** Send the held points and boxes as one prompt. */
+  function proposeHeld() {
+    const { points, boxes } = useStore.getState().annotateUi.pendingPrompts;
+    if (points.length + boxes.length === 0) return;
+    void sendPrompt({ points, boxes });
   }
 
   const reviewing = !!bucket && !hideProposals && served?.key === proposalKey;
@@ -889,7 +924,7 @@ export function AnnotateTab() {
     if (activeSubject) return true;
     if (noSubjectNoticeRef.current !== currentImageName) {
       noSubjectNoticeRef.current = currentImageName;
-      useStore.getState().pushToast("Select a subject before drawing (use the subject picker).");
+      useStore.getState().pushToast("Choose a subject first.");
     }
     return false;
   }
@@ -1289,8 +1324,8 @@ export function AnnotateTab() {
       if (belowMinSide(x1, y1, x2, y2)) {
         useStore.getState().pushToast("Box too small to keep. Drag out a bigger area.");
       } else if (annotateUi.prompt) {
-        // Armed, the drawn box is a prompt the engine answers and never a box of the labels.
-        void sendPrompt({ box: [x1, y1, x2, y2] });
+        // Armed, the drawn box is held as a prompt and never becomes a box of the labels.
+        if (requireSubject()) useStore.getState().addPromptBox([x1, y1, x2, y2]);
       } else {
         counted(() => add("boxes", box));
       }
@@ -1314,9 +1349,9 @@ export function AnnotateTab() {
       }
       const x = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
       const y = Math.max(0, Math.min(canvas.imgHeight || iy, iy));
-      // Armed, the click is a prompt the engine answers and never a point of the labels.
+      // Armed, the click is held as a prompt and never becomes a point of the labels.
       if (annotateUi.prompt) {
-        void sendPrompt({ point: [x, y] });
+        if (requireSubject()) useStore.getState().addPromptPoint([x, y]);
         return;
       }
       if (!requireSubject()) return;
@@ -1535,15 +1570,11 @@ export function AnnotateTab() {
           subjectState={null}
           onComplete={(next) => void markComplete(next)}
           proposing={proposing}
-          onPrompt={(prompt) => void sendPrompt(prompt)}
+          onPhrase={(prompt) => void sendPrompt(prompt)}
+          onPropose={proposeHeld}
         />
         <div className="flex-1 flex items-center justify-center bg-tcip-canvas px-4">
-          <div className="max-w-lg rounded-lg border border-tcip-border bg-tcip-panel px-5 py-4 text-center">
-            <p className="text-sm font-semibold text-tcip-fg">No image loaded</p>
-            <p className="mt-1 text-xs text-tcip-muted">
-              Pick a dataset/date with images, then use Prev/Next and the image counter to navigate.
-            </p>
-          </div>
+          <p className="text-tcip-muted">No image. Choose a date with images.</p>
         </div>
       </div>
     );
@@ -1573,7 +1604,8 @@ export function AnnotateTab() {
           viewIsRegion && viewRect ? () => void markComplete(true, viewRect) : undefined
         }
         proposing={proposing}
-        onPrompt={(prompt) => void sendPrompt(prompt)}
+        onPhrase={(prompt) => void sendPrompt(prompt)}
+        onPropose={proposeHeld}
       />
       <ReviewStrip
         bucket={bucket ?? null}
@@ -1606,108 +1638,138 @@ export function AnnotateTab() {
         onEdit={() => void edit()}
         onReject={() => decide("reject")}
       />
-      <div className="relative flex-1 flex flex-col min-h-0">
-        <CanvasStage
-          imageUrl={imageUrl}
-          imagePath={imgPath}
-          imgWidth={canvas.imgWidth}
-          imgHeight={canvas.imgHeight}
-          regions={regions}
-          onBaseFacts={setBaseFacts}
-          onStageRef={(st) => (stageRef.current = st)}
-          onPixelDown={onDown}
-          onPixelMove={onMove}
-          onPixelUp={onUp}
-          onPixelClick={onClick}
-          onPixelDoubleClick={onDoubleClick}
-          onPixelContextMenu={onContextMenu}
-          overlay={
-            <>
-              {/* In-progress polygon and pending cut, each rubber-banding to the cursor */}
-              <InProgressPolygon strokes={draft()} strokeW={polyStroke} vertR={vertR} />
+      <div className="flex-1 flex min-h-0">
+        <div className="relative flex-1 flex flex-col min-h-0 min-w-0">
+          <CanvasStage
+            imageUrl={imageUrl}
+            imagePath={imgPath}
+            imgWidth={canvas.imgWidth}
+            imgHeight={canvas.imgHeight}
+            regions={regions}
+            onBaseFacts={setBaseFacts}
+            onStageRef={(st) => (stageRef.current = st)}
+            onPixelDown={onDown}
+            onPixelMove={onMove}
+            onPixelUp={onUp}
+            onPixelClick={onClick}
+            onPixelDoubleClick={onDoubleClick}
+            onPixelContextMenu={onContextMenu}
+            overlay={
+              <>
+                {/* In-progress polygon and pending cut, each rubber-banding to the cursor */}
+                <InProgressPolygon strokes={draft()} strokeW={polyStroke} vertR={vertR} />
 
-              {/* Box draft */}
-              {boxDraftScene && (
-                <Rect
-                  x={boxDraftScene.bounds[0]}
-                  y={boxDraftScene.bounds[1]}
-                  width={boxDraftScene.bounds[2] - boxDraftScene.bounds[0]}
-                  height={boxDraftScene.bounds[3] - boxDraftScene.bounds[1]}
-                  stroke={boxDraftScene.color}
-                  strokeWidth={boxStroke}
-                  dash={dashAt(DRAFT_DASH, boxStroke)}
-                />
-              )}
+                {/* Held prompts: each point and box waiting for Propose */}
+                {annotateUi.pendingPrompts.points.map(([x, y], i) => (
+                  <PointOverlay
+                    key={`prompt-point-${i}`}
+                    point={{ x, y, subject: activeSubject ?? "", attributes: {} }}
+                    stroke={activeSubject ? subjectColor(activeSubject) : NO_SUBJECT_DRAFT_COLOR}
+                    style="dotted"
+                    coreR={widths.pointCoreR}
+                    tickInner={widths.pointTickInner}
+                    tickOuter={widths.pointTickOuter}
+                    lineW={widths.scaleLineW * 1.6}
+                    labelSize={widths.labelSize}
+                    label=""
+                  />
+                ))}
+                {annotateUi.pendingPrompts.boxes.map(([x1, y1, x2, y2], i) => (
+                  <Rect
+                    key={`prompt-box-${i}`}
+                    x={x1}
+                    y={y1}
+                    width={x2 - x1}
+                    height={y2 - y1}
+                    stroke={activeSubject ? subjectColor(activeSubject) : NO_SUBJECT_DRAFT_COLOR}
+                    strokeWidth={boxStroke}
+                    dash={dashAt(DRAFT_DASH, boxStroke)}
+                  />
+                ))}
 
-              {/* Snap indicator */}
-              {annotateUi.snap && cursor && mode === "polygon" && (
-                <SnapIndicator
-                  cursor={cursor}
-                  polygons={canvas.polygons}
-                  scale={s}
-                  radius={SNAP_RADIUS_CANVAS / s}
-                />
-              )}
-            </>
-          }
-        >
-          {renderLabels && (
-            <ProposalShapes proposals={drawnProposals} focused={focused} widths={widths} />
-          )}
-          {/* Committed shapes: memoized, cursor-independent (see AnnotationShapes) */}
-          <AnnotationShapes
-            boxes={canvas.boxes}
-            polygons={canvas.polygons}
-            points={canvas.points}
-            mode={mode}
-            activeSubject={activeSubject}
-            matches={matches}
-            focused={focused}
-            hoveredIdx={hoveredIdx}
-            draggingIdx={draggingIdx}
-            renderLabels={renderLabels}
-            widths={widths}
-          />
-          {renderLabels && <FlagMarks places={flagMarks} size={widths.labelSize} />}
-        </CanvasStage>
+                {/* Box draft */}
+                {boxDraftScene && (
+                  <Rect
+                    x={boxDraftScene.bounds[0]}
+                    y={boxDraftScene.bounds[1]}
+                    width={boxDraftScene.bounds[2] - boxDraftScene.bounds[0]}
+                    height={boxDraftScene.bounds[3] - boxDraftScene.bounds[1]}
+                    stroke={boxDraftScene.color}
+                    strokeWidth={boxStroke}
+                    dash={dashAt(DRAFT_DASH, boxStroke)}
+                  />
+                )}
 
-        {ioError && (
-          <div className="absolute top-12 left-3 right-3 z-30 flex items-center gap-2 rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-3 py-1.5 text-[13px] tcip-problem">
-            <span className="flex-1">{ioError}</span>
-            {conflict && (
-              <button className="tcip-btn text-[13px]" onClick={requestReload}>
-                Reload
-              </button>
+                {/* Snap indicator */}
+                {annotateUi.snap && cursor && mode === "polygon" && (
+                  <SnapIndicator
+                    cursor={cursor}
+                    polygons={canvas.polygons}
+                    scale={s}
+                    radius={SNAP_RADIUS_CANVAS / s}
+                  />
+                )}
+              </>
+            }
+          >
+            {renderLabels && (
+              <ProposalShapes proposals={drawnProposals} focused={focused} widths={widths} />
             )}
-            <button
-              type="button"
-              className="tcip-problem/70 hover:tcip-problem"
-              aria-label="Dismiss"
-              title="Dismiss"
-              onClick={() => {
-                setIoError(null);
-                setConflict(false);
-              }}
-            >
-              ✕
-            </button>
-          </div>
-        )}
+            {/* Committed shapes: memoized, cursor-independent (see AnnotationShapes) */}
+            <AnnotationShapes
+              boxes={canvas.boxes}
+              polygons={canvas.polygons}
+              points={canvas.points}
+              mode={mode}
+              activeSubject={activeSubject}
+              matches={matches}
+              focused={focused}
+              hoveredIdx={hoveredIdx}
+              draggingIdx={draggingIdx}
+              renderLabels={renderLabels}
+              widths={widths}
+            />
+            {renderLabels && <FlagMarks places={flagMarks} size={widths.labelSize} />}
+          </CanvasStage>
 
-        {/* Floating canvas chrome, DOM order following the reading order (top-left, top-right,
+          {ioError && (
+            <div className="absolute top-12 left-3 right-3 z-30 flex items-center gap-2 rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-3 py-1.5 text-[13px] tcip-problem">
+              <span className="flex-1">{ioError}</span>
+              {conflict && (
+                <button className="tcip-btn text-[13px]" onClick={requestReload}>
+                  Reload
+                </button>
+              )}
+              <button
+                type="button"
+                className="tcip-problem/70 hover:tcip-problem"
+                aria-label="Dismiss"
+                title="Dismiss"
+                onClick={() => {
+                  setIoError(null);
+                  setConflict(false);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* Floating canvas chrome, DOM order following the reading order (top-left, top-right,
             bottom-left, bottom-right) so tab order matches what a sighted user reads first. */}
-        <button
-          type="button"
-          onClick={overview}
-          title="Overview: fit the whole image to the canvas"
-          className="absolute top-3 left-3 z-20 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[13px] text-tcip-muted backdrop-blur-sm hover:border-tcip-border-hover hover:text-tcip-fg"
-        >
-          Overview
-        </button>
+          <button
+            type="button"
+            onClick={overview}
+            title="Fit the whole image"
+            className="absolute top-3 left-3 z-20 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-tcip-muted backdrop-blur-sm hover:border-tcip-border-hover hover:text-tcip-fg"
+          >
+            Overview
+          </button>
+
+          <AnnotateLegend reviewing={reviewing} />
+        </div>
 
         <AttributePanel focused={focused} />
-
-        <AnnotateLegend reviewing={reviewing} />
       </div>
     </div>
   );

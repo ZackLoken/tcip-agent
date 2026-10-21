@@ -589,17 +589,17 @@ def test_render_lays_a_dash_down_in_stroke_widths_at_the_renders_own_stroke(
 ) -> None:
     """A dash pattern is laid down in stroke widths at the render's own stroke.
 
-    The two-pixel stroke of a 1400-pixel frame makes [1, 3] two pixels on, six off: the gap
+    The two-pixel stroke of a 1400-pixel frame makes [2, 2] four pixels on, four off: the gap
     after a dash is dark where a solid outline lights it.
     """
     dashed = _wide_render(tmp_path, TOOL_POLYGON, dashed=True)
     solid = _wide_render(tmp_path, TOOL_POLYGON, dashed=False)
     rows = range(49, 52)
     assert _red_in_rows(dashed, 301, rows) > 40  # inside a dash
-    assert _red_in_rows(dashed, 304, rows) < 10  # inside the gap after it
+    assert _red_in_rows(dashed, 306, rows) < 10  # inside the gap after it
     assert _red_in_rows(dashed, 309, rows) > 40  # the next dash
     assert (
-        _red_in_rows(solid, 304, rows) > 40
+        _red_in_rows(solid, 306, rows) > 40
     )  # the gap's pixel on a solid outline
 
 
@@ -614,8 +614,8 @@ def test_render_dashes_a_points_ticks_as_it_does_any_outline(
     dashed = _wide_render(tmp_path, TOOL_POINT, dashed=True)
     solid = _wide_render(tmp_path, TOOL_POINT, dashed=False)
     assert _red_in_rows(dashed, 700, range(90, 91)) > 40
-    assert _red_in_rows(dashed, 700, range(86, 87)) < 10
-    assert _red_in_rows(solid, 700, range(86, 87)) > 40
+    assert _red_in_rows(dashed, 700, range(84, 85)) < 10
+    assert _red_in_rows(solid, 700, range(84, 85)) > 40
 
 
 def test_render_admits_the_one_vertex_polyline_a_drawing_in_progress_pushes(

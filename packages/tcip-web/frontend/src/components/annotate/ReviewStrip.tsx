@@ -9,7 +9,7 @@ import {
   type ReviewItem,
   type StepScope,
 } from "@/lib/reviewItems";
-import { FLAG_MARK, MATCH_HINTS, MATCH_TYPES, MATCH_WORDS, type MatchType } from "@/lib/symbology";
+import { MATCH_HINTS, MATCH_TYPES, MATCH_WORDS, type MatchType } from "@/lib/symbology";
 import type { Flag } from "@/store/types";
 
 /** The status strip under the toolbar: the proposals toggle, the confidence floor, the match
@@ -82,8 +82,8 @@ export function ReviewStrip({
         className="flex items-center gap-1.5"
         title={
           bucket
-            ? `Show the bucket's proposals; a mark made while hidden records it (${K.hideProposals.label})`
-            : "Choose a prediction bucket in Setup to review its proposals"
+            ? `Show proposals (${K.hideProposals.label})`
+            : "Choose predictions on the project card"
         }
       >
         <input
@@ -95,57 +95,59 @@ export function ReviewStrip({
         Proposals
       </label>
 
-      <label
-        className="flex items-center gap-1.5 text-tcip-muted"
-        title={
-          operatingPoint === null
-            ? "The confidence floor starts at the bucket's operating point once its proposals load"
-            : operatingPoint.conf === null
-              ? `No validated operating point: ${operatingPoint.reason}`
-              : `The bucket's validated operating point is ${operatingPoint.conf.toFixed(2)}`
-        }
-      >
-        Confidence
-        <input
-          type="number"
-          aria-label="Confidence floor"
-          className="tcip-input h-7 w-16 text-[13px]"
-          min={0}
-          max={1}
-          step={0.01}
-          disabled={!reviewing}
-          value={filters.confidence ?? ""}
-          onChange={(e) =>
-            onFilters({
-              ...filters,
-              confidence: e.target.value === "" ? null : Number(e.target.value),
-            })
-          }
-        />
-      </label>
+      {reviewing && (
+        <>
+          <label
+            className="flex items-center gap-1.5 text-tcip-muted"
+            title={
+              operatingPoint === null || operatingPoint.conf === null
+                ? "No validated operating point"
+                : `Validated operating point ${operatingPoint.conf.toFixed(2)}`
+            }
+          >
+            Confidence
+            <input
+              type="number"
+              aria-label="Confidence floor"
+              className="tcip-input h-7 w-16"
+              min={0}
+              max={1}
+              step={0.01}
+              value={filters.confidence ?? ""}
+              onChange={(e) =>
+                onFilters({
+                  ...filters,
+                  confidence: e.target.value === "" ? null : Number(e.target.value),
+                })
+              }
+            />
+          </label>
 
-      <label
-        className="flex items-center gap-1.5 text-tcip-muted"
-        title={filters.match === "all" ? undefined : MATCH_HINTS[filters.match]}
-      >
-        Match
-        <select
-          aria-label="Match type"
-          className="tcip-select h-7 text-[13px]"
-          value={filters.match}
-          disabled={!reviewing}
-          onChange={(e) => onFilters({ ...filters, match: e.target.value as MatchType | "all" })}
-        >
-          <option value="all">all</option>
-          {MATCH_TYPES.map((match) => (
-            <option key={match} value={match} title={MATCH_HINTS[match]}>
-              {MATCH_WORDS[match]}
-            </option>
-          ))}
-        </select>
-      </label>
+          <label
+            className="flex items-center gap-1.5 text-tcip-muted"
+            title={filters.match === "all" ? undefined : MATCH_HINTS[filters.match]}
+          >
+            Match
+            <select
+              aria-label="Match type"
+              className="tcip-select h-7"
+              value={filters.match}
+              onChange={(e) =>
+                onFilters({ ...filters, match: e.target.value as MatchType | "all" })
+              }
+            >
+              <option value="all">all</option>
+              {MATCH_TYPES.map((match) => (
+                <option key={match} value={match} title={MATCH_HINTS[match]}>
+                  {MATCH_WORDS[match]}
+                </option>
+              ))}
+            </select>
+          </label>
+        </>
+      )}
 
-      <span className="font-mono text-[13px] text-tcip-muted" aria-live="polite">
+      <span className="text-tcip-muted tabular-nums" aria-live="polite">
         {counts.items} {counts.items === 1 ? "item" : "items"}
         {reviewing ? `, ${counts.unreviewed} unreviewed` : ""}
       </span>
@@ -187,9 +189,6 @@ export function ReviewStrip({
           onClick={() => onFlagsOpen(!flagsOpen)}
           title={`${K.flag.desc} (${K.flag.label})`}
         >
-          <span style={{ color: FLAG_MARK.color }} aria-hidden>
-            {FLAG_MARK.glyph}
-          </span>
           Flag{counts.flags > 0 ? ` (${counts.flags})` : ""}
         </button>
         {flagsOpen && (

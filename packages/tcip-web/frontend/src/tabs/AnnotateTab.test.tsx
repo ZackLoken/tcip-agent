@@ -7,7 +7,7 @@ import type { LoadedLabels, SaveResult } from "@/api/client";
 import { StructuredRefusalError } from "@/api/http";
 import { sessionsApi } from "@/api/sessions";
 import { subjectsApi, subjectColor } from "@/api/subjects";
-import type { DetectorParams } from "@/api/types.generated";
+import type { PhrasePrompt } from "@/api/types.generated";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { CUT_MISSES_REFUSAL } from "@/lib/polygonGeometry";
@@ -102,7 +102,8 @@ vi.mock("@/components/AnnotateToolbar", () => ({
     onComplete: (next: boolean) => void;
     onCancelSave: () => void;
     proposing: boolean;
-    onPrompt: (prompt: DetectorParams) => void;
+    onPhrase: (prompt: PhrasePrompt) => void;
+    onPropose: () => void;
   }) => (
     <div
       data-testid="toolbar"
@@ -112,18 +113,13 @@ vi.mock("@/components/AnnotateToolbar", () => ({
     >
       <button onClick={() => props.onComplete(true)}>toolbar-complete</button>
       <button onClick={props.onCancelSave}>toolbar-cancel-save</button>
-      <button onClick={() => props.onPrompt(PHRASE_PROMPT)}>toolbar-phrase</button>
+      <button onClick={() => props.onPhrase(PHRASE_PROMPT)}>toolbar-phrase</button>
+      <button onClick={props.onPropose}>toolbar-propose</button>
     </div>
   ),
 }));
 
-const PHRASE_PROMPT: DetectorParams = {
-  phrase: "open bud",
-  box_threshold: 0.3,
-  text_threshold: 0.2,
-  postprocess: "nms",
-  cross_tile_nms: 0.6,
-};
+const PHRASE_PROMPT: PhrasePrompt = { phrase: "open bud" };
 
 // The review strip's proposals toggle, the one place proposals are shown or hidden.
 const toggleProposals = () => fireEvent.click(screen.getByRole("checkbox", { name: "Proposals" }));
@@ -831,13 +827,13 @@ describe("AnnotateTab authorship symbology", () => {
     ).toBe(true);
   });
 
-  it("the legend states the dotted stroke means no person has stood behind it yet", async () => {
+  it("the legend states the dotted stroke means proposed", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    expect(screen.getByText("Dotted: no person has stood behind it yet")).toBeInTheDocument();
+    expect(screen.getByText("Dotted: proposed")).toBeInTheDocument();
   });
 });
 
@@ -881,7 +877,7 @@ describe("AnnotateTab point tool", () => {
     await flush();
 
     expect(useStore.getState().canvas.points).toHaveLength(0);
-    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/Select a subject before drawing/);
+    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/Choose a subject first/);
   });
 
   it("a press-drag repositions a placed point, with one undo snapshot for the whole drag", async () => {
@@ -1085,29 +1081,27 @@ describe("AnnotateTab point tool", () => {
 });
 
 describe("AnnotateTab AttributePanel", () => {
-  it("collapses to a pill with no active subject, nothing selected, no image-level ratings", async () => {
+  it("is absent with no active subject, nothing selected and no image-level ratings", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
     act(() => useStore.getState().setActiveSubject(null)); // beforeEach's setupDataset sets one
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    expect(screen.queryByText("Select a shape to set its attributes.")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Attributes" })).toBeInTheDocument();
+    expect(screen.queryByTestId("attribute-column")).not.toBeInTheDocument();
   });
 
-  it("an active subject opens the panel even with nothing selected, showing the subject block", async () => {
+  it("an active subject shows the column with its attribute block and the add control", async () => {
     useStore.getState().setRegistry({ subject_a: {} }); // beforeEach's setupDataset already made it active
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    expect(screen.getByText("Select a shape to set its attributes.")).toBeInTheDocument();
-    expect(screen.getByText("Attributes for subject_a")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "+ Attribute" })).toBeInTheDocument();
+    expect(screen.getByText("subject_a attributes")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add attribute" })).toBeInTheDocument();
   });
 
-  it("reopens on its own when a shape gets selected, and can be closed manually", async () => {
+  it("shows the selected shape's subject once a shape is selected", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -1115,16 +1109,10 @@ describe("AnnotateTab AttributePanel", () => {
 
     act(addBox);
     fireEvent.mouseDown(screen.getByTestId("canvas-stage"), { clientX: 30, clientY: 30 });
-    // The subject registry also has a "subject_a" entry in the (always-mounted, hover-revealed)
-    // legend, so assert on the panel's own close button rather than ambiguous shared text.
-    expect(screen.getByRole("button", { name: "Close attributes panel" })).toBeInTheDocument();
     expect(useStore.getState().canvas.focus?.kind).toBe("box"); // sanity: a box, not a polygon, is focused
-
-    fireEvent.click(screen.getByRole("button", { name: "Close attributes panel" }));
     expect(
-      screen.queryByRole("button", { name: "Close attributes panel" }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Attributes" })).toBeInTheDocument();
+      within(screen.getByTestId("attribute-column")).getByText("subject_a"),
+    ).toBeInTheDocument();
   });
 });
 
@@ -1139,11 +1127,11 @@ describe("AnnotateTab AttributePanel authoring", () => {
   }
 
   async function declareAttribute() {
-    fireEvent.click(screen.getByRole("button", { name: "+ Attribute" }));
-    fireEvent.change(screen.getByPlaceholderText("attribute name"), {
+    fireEvent.click(screen.getByRole("button", { name: "Add attribute" }));
+    fireEvent.change(screen.getByLabelText("attribute name"), {
       target: { value: "size" },
     });
-    fireEvent.change(screen.getByPlaceholderText(/one value per line/), {
+    fireEvent.change(screen.getByLabelText("attribute values"), {
       target: { value: "small\nlarge" },
     });
     await act(() => Promise.resolve(fireEvent.click(screen.getByRole("button", { name: "Add" }))));
@@ -1200,9 +1188,7 @@ describe("AnnotateTab AttributePanel authoring", () => {
     await declareAttribute();
 
     // The one drawn box carries no value for the attribute just declared.
-    expect(
-      screen.getByText("1 of 1 subject_a shapes on this image carry no size value."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("size: 1 of 1 subject_a shapes unset")).toBeInTheDocument();
   });
 
   it("refuses a name the subject already declares, inline, and posts nothing", async () => {
@@ -1217,18 +1203,16 @@ describe("AnnotateTab AttributePanel authoring", () => {
         );
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "+ Attribute" }));
-    fireEvent.change(screen.getByPlaceholderText("attribute name"), {
+    fireEvent.click(screen.getByRole("button", { name: "Add attribute" }));
+    fireEvent.change(screen.getByLabelText("attribute name"), {
       target: { value: "size" },
     });
-    fireEvent.change(screen.getByPlaceholderText(/one value per line/), {
+    fireEvent.change(screen.getByLabelText("attribute values"), {
       target: { value: "large" },
     });
     await act(() => Promise.resolve(fireEvent.click(screen.getByRole("button", { name: "Add" }))));
 
-    expect(
-      screen.getByText("size is already declared; add values to it with + value."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("size is already declared.")).toBeInTheDocument();
     expect(saveSpy).not.toHaveBeenCalled();
   });
 });
@@ -1254,7 +1238,7 @@ describe("AnnotateTab AttributePanel accessible names", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    fireEvent.click(screen.getByRole("button", { name: "+ Attribute" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add attribute" }));
     expect(screen.getByRole("combobox", { name: "attribute type" })).toBeInTheDocument();
   });
 });
@@ -1271,7 +1255,7 @@ describe("AnnotateTab legend keyboard access", () => {
     fireEvent.click(legendButton);
     expect(legendButton).toHaveAttribute("aria-expanded", "true");
 
-    const subjectRow = screen.getByTitle("Change subject_a's color (this browser only)");
+    const subjectRow = screen.getByRole("button", { name: "subject_a" });
     expect(subjectRow).toBeInTheDocument();
     // DOM order: the panel follows the button, so a forward Tab from it reaches the row.
     expect(
@@ -1286,13 +1270,11 @@ describe("AnnotateTab legend keyboard access", () => {
     await flush();
 
     fireEvent.click(screen.getByRole("button", { name: "Legend" }));
-    fireEvent.click(screen.getByTitle("Change subject_a's color (this browser only)"));
+    fireEvent.click(screen.getByRole("button", { name: "subject_a" }));
 
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(dialog).toHaveAccessibleName(
-      "subject_a's color (this browser only; derives from the name elsewhere)",
-    );
+    expect(dialog).toHaveAccessibleName("subject_a color");
     expect(screen.getByRole("textbox", { name: "hex color" })).toBeInTheDocument();
   });
 });
@@ -3061,36 +3043,78 @@ describe("AnnotateTab engine prompt", () => {
     return { propose, select, proposals };
   }
 
-  it("armed, a click in point mode sends a point prompt and places no point", async () => {
+  it("armed, clicks in point mode hold point prompts and place no point until Propose sends them", async () => {
     const { propose } = await mountArmed("point");
     fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    fireEvent.click(stage(), { clientX: 200, clientY: 100 });
+    await flush();
+
+    expect(propose).not.toHaveBeenCalled();
+    expect(useStore.getState().annotateUi.pendingPrompts.points).toEqual([
+      [120, 340],
+      [200, 100],
+    ]);
+    expect(useStore.getState().canvas.points).toEqual([]);
+
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
 
     expect(propose).toHaveBeenCalledWith({
       image_path: "C:/data/images/2026-01-01/img1.jpg",
       subject: "subject_a",
       user: "grower",
-      prompt: { point: [120, 340] },
+      prompt: {
+        points: [
+          [120, 340],
+          [200, 100],
+        ],
+        boxes: [],
+      },
     });
-    expect(useStore.getState().canvas.points).toEqual([]);
+    expect(useStore.getState().annotateUi.pendingPrompts).toEqual({ points: [], boxes: [] });
   });
 
-  it("armed, a box drawn in box mode sends a box prompt and adds no box", async () => {
+  it("armed, a box drawn in box mode is held as a prompt and adds no box", async () => {
     const { propose } = await mountArmed("box");
     fireEvent.mouseDown(stage(), { clientX: 10, clientY: 20, button: 0 });
     fireEvent.mouseUp(stage(), { clientX: 90, clientY: 80 });
     await flush();
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
+    await flush();
 
     expect(propose).toHaveBeenCalledWith({
       image_path: "C:/data/images/2026-01-01/img1.jpg",
       subject: "subject_a",
       user: "grower",
-      prompt: { box: [10, 20, 90, 80] },
+      prompt: { points: [], boxes: [[10, 20, 90, 80]] },
     });
     expect(useStore.getState().canvas.boxes).toEqual([]);
   });
 
-  it("sends the phrase with both thresholds and the tiling the control states", async () => {
+  it("armed, a click with no subject holds nothing and says so", async () => {
+    const { propose } = await mountArmed("point");
+    act(() => useStore.getState().setActiveSubject(null));
+    fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    await flush();
+
+    expect(propose).not.toHaveBeenCalled();
+    expect(useStore.getState().annotateUi.pendingPrompts.points).toEqual([]);
+    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/Choose a subject first/);
+  });
+
+  it("held prompts are dropped when the image changes", async () => {
+    await mountArmed("point");
+    fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    act(() => {
+      const s = useStore.getState();
+      s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
+    });
+    await flush();
+
+    expect(useStore.getState().annotateUi.pendingPrompts.points).toEqual([]);
+  });
+
+  it("sends the phrase alone", async () => {
     const { propose } = await mountArmed("box");
     fireEvent.click(screen.getByRole("button", { name: "toolbar-phrase" }));
     await flush();
@@ -3103,9 +3127,26 @@ describe("AnnotateTab engine prompt", () => {
     });
   });
 
-  it("selects the answered bucket on the current selection and shows its proposals", async () => {
+  it("selects the answered bucket on the current selection, shows its proposals, says how many and focuses the first", async () => {
     const { select, proposals } = await mountArmed("point");
+    proposals.mockResolvedValue({
+      bucket: BUCKET,
+      operating_point: { conf: null, reason: "" },
+      proposals: [
+        {
+          subject: "subject_a",
+          bbox: [10, 10, 50, 50],
+          attributes: {},
+          iscrowd: false,
+          score: 0.9,
+          index: 0,
+          paired: null,
+          decision: null,
+        },
+      ],
+    });
     fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
     await flush();
 
@@ -3119,14 +3160,20 @@ describe("AnnotateTab engine prompt", () => {
       expect(proposals).toHaveBeenCalledWith("C:/data/images/2026-01-01/img1.jpg", BUCKET),
     );
     expect(screen.getByRole("checkbox", { name: "Proposals" })).toBeChecked();
+    expect(useStore.getState().toasts.at(-1)?.message).toBe("2 proposals for img1.jpg");
+    await waitFor(() =>
+      expect(useStore.getState().canvas.focus).toEqual({ kind: "proposal", index: 0 }),
+    );
   });
 
-  it("refuses a second prompt while one is in flight", async () => {
+  it("refuses a second send while one is in flight", async () => {
     const { propose } = await mountArmed("point");
     propose.mockReturnValue(new Promise(() => {}));
     fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
     fireEvent.click(stage(), { clientX: 200, clientY: 200 });
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
 
     expect(propose).toHaveBeenCalledTimes(1);
@@ -3138,6 +3185,7 @@ describe("AnnotateTab engine prompt", () => {
     let answer: (a: { bucket: string; proposal_count: number }) => void = () => {};
     propose.mockReturnValue(new Promise((resolve) => (answer = resolve)));
     fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
     act(() => {
       const s = useStore.getState();
@@ -3150,7 +3198,7 @@ describe("AnnotateTab engine prompt", () => {
     expect(useStore.getState().gui.dataset.current_image_index).toBe(1);
     expect(select).not.toHaveBeenCalled();
     expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      `Proposals for img1.jpg were staged as ${BUCKET}; select it in Setup.`,
+      `2 proposals for img1.jpg, staged under ${BUCKET}; choose it on the project card.`,
     );
   });
 
@@ -3159,6 +3207,7 @@ describe("AnnotateTab engine prompt", () => {
     let selected: (r: Awaited<ReturnType<typeof api.dataset.select>>) => void = () => {};
     select.mockReturnValueOnce(new Promise((resolve) => (selected = resolve)));
     fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
     expect(select).toHaveBeenCalledTimes(1);
     act(() => {
@@ -3179,7 +3228,7 @@ describe("AnnotateTab engine prompt", () => {
     expect(useStore.getState().gui.dataset.current_image_index).toBe(1);
     expect(useStore.getState().gui.dataset.bucket).toBeNull();
     expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      `Proposals for img1.jpg were staged as ${BUCKET}, now the selected bucket.`,
+      `2 proposals for img1.jpg, staged under ${BUCKET}; now the selected predictions.`,
     );
   });
 
@@ -3187,6 +3236,7 @@ describe("AnnotateTab engine prompt", () => {
     const { propose, select } = await mountArmed("point");
     propose.mockRejectedValue(new Error("no checkpoint at the stated name"));
     fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
 
     expect(useStore.getState().toasts.at(-1)?.message).toMatch(/no checkpoint at the stated name/);
