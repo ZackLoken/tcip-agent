@@ -14,26 +14,35 @@ import {
   type ServedTraitRevision as TraitRevision,
   type TraitsListing,
 } from "@/api/inference";
-import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
-import { UNSET_GLYPH } from "@/lib/glyphs";
 import { useStore } from "@/store";
 
 function valueText(value: unknown): string {
-  if (value === null || value === undefined) return UNSET_GLYPH;
-  if (Array.isArray(value)) return value.length > 0 ? value.join(", ") : "none";
+  if (Array.isArray(value)) return value.join(", ");
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return String(value);
   }
   return JSON.stringify(value);
 }
 
+/** Whether an entry field holds a value worth a row: null, an empty string and an empty list do
+ *  not. */
+function holdsValue(value: unknown): boolean {
+  if (value === null || value === undefined || value === "") return false;
+  return !(Array.isArray(value) && value.length === 0);
+}
+
+const words = (field: string): string => field.replaceAll("_", " ");
+
+const dayOf = (timestamp: string): string => timestamp.slice(0, 10);
+
 function revisionStateText(revision: TraitRevision): string {
   if (revision.withdrawn_at) {
-    return `Confirmed by ${revision.confirmed_by} on ${revision.confirmed_at}, withdrawn by ${revision.withdrawn_by} on ${revision.withdrawn_at}`;
+    return `Confirmed by ${revision.confirmed_by}, withdrawn by ${revision.withdrawn_by} on ${dayOf(revision.withdrawn_at)}.`;
   }
-  if (revision.confirmed_at)
-    return `Confirmed by ${revision.confirmed_by} on ${revision.confirmed_at}`;
+  if (revision.confirmed_at) {
+    return `Confirmed by ${revision.confirmed_by} on ${dayOf(revision.confirmed_at)}.`;
+  }
   return "Not confirmed";
 }
 
@@ -52,36 +61,45 @@ function RevisionEntry({
   revision: TraitRevision;
   definitions: Record<string, string>;
 }) {
-  const { operationalizations, ...fields } = revision.entry;
+  const { operationalizations, name: _name, ...fields } = revision.entry;
+  const rows = Object.entries(fields).filter(([, value]) => holdsValue(value));
   return (
     <>
-      <dl className="mt-2 grid grid-cols-[190px_1fr] gap-x-3 gap-y-1 text-[13px]">
-        {Object.entries(fields).map(([field, value]) => (
-          <Fragment key={field}>
-            <dt className="text-tcip-muted">{field}</dt>
-            <dd>{valueText(value)}</dd>
-          </Fragment>
-        ))}
-      </dl>
+      {rows.length > 0 && (
+        <dl className="mt-3 grid grid-cols-[180px_1fr] gap-x-4 gap-y-1">
+          {rows.map(([field, value]) => (
+            <Fragment key={field}>
+              <dt className="text-tcip-muted">{words(field)}</dt>
+              <dd>{valueText(value)}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      )}
       {Object.entries(operationalizations).map(([kind, op]) => (
-        <div
+        <dl
           key={kind}
-          className="mt-2 rounded border border-tcip-border p-2 text-[13px]"
+          className="mt-3 grid grid-cols-[180px_1fr] gap-x-4 gap-y-1"
           data-testid={`operationalization-${kind}`}
         >
-          <div className="font-mono">{kind}</div>
-          <p className="mt-1">{op.statement}</p>
-          <p className="mt-1 text-tcip-muted">Decided by: {op.mechanism}</p>
-          <p className="text-tcip-muted">Measured subject: {op.measured_subject}</p>
+          <dt className="text-tcip-muted">{words(kind)}</dt>
+          <dd>{op.statement}</dd>
+          <dt className="text-tcip-muted">Decided by</dt>
+          <dd>{op.mechanism}</dd>
+          <dt className="text-tcip-muted">Subject</dt>
+          <dd>{op.measured_subject}</dd>
           {op.delivered_phenotypes.map((p) => (
-            <p key={p} className="text-tcip-muted">
-              {`${p}: ${definitions[p] ?? "not defined in this project's crop vocabulary"}`}
-            </p>
+            <Fragment key={p}>
+              <dt className="text-tcip-muted">Delivers</dt>
+              <dd>{definitions[p] ? `${p}: ${definitions[p]}` : p}</dd>
+            </Fragment>
           ))}
           {op.delivered_value_keys.length > 0 && (
-            <p className="text-tcip-muted">Value keys: {op.delivered_value_keys.join(", ")}</p>
+            <>
+              <dt className="text-tcip-muted">Value keys</dt>
+              <dd>{op.delivered_value_keys.join(", ")}</dd>
+            </>
           )}
-        </div>
+        </dl>
       ))}
     </>
   );
@@ -109,88 +127,77 @@ function TraitRow({
   const [correcting, setCorrecting] = useState(false);
 
   return (
-    <li className="rounded border border-tcip-border p-3" data-testid={`trait-${record.trait}`}>
-      <div className="flex items-baseline gap-2">
-        <span className="font-mono text-[13px]">{record.trait}</span>
-        <span
-          className={`ml-auto text-[13px] ${record.latest_confirmed === null ? "tcip-problem" : "text-tcip-muted"}`}
-        >
+    <li className="py-4 first:pt-0 last:pb-0" data-testid={`trait-${record.trait}`}>
+      <div className="flex items-baseline gap-3">
+        <span className="font-medium">{record.trait}</span>
+        <span className="text-[12px] text-tcip-muted">
           {record.latest_confirmed === null
-            ? "No revision is confirmed; nothing delivers under this trait"
-            : `Deliveries read revision ${record.latest_confirmed}`}
+            ? "Not confirmed"
+            : `Confirmed, revision ${record.latest_confirmed}`}
         </span>
       </div>
-      <ol
-        className="mt-2 flex flex-wrap gap-1 text-[13px]"
-        aria-label={`${record.trait} revisions`}
-      >
-        {record.revisions.map((r) => (
-          <li key={r.number}>
-            <button
-              className={
-                r.number === shown.number ? "tcip-btn-primary text-[13px]" : "tcip-btn text-[13px]"
-              }
-              aria-pressed={r.number === shown.number}
-              onClick={() => setShownNumber(r.number)}
-            >
-              {`Revision ${r.number}`}
-            </button>
-          </li>
-        ))}
-      </ol>
-      <div className="mt-2 text-[13px]">
-        <div className={shown.confirmed ? "text-tcip-muted" : "tcip-problem"}>
-          {revisionStateText(shown)}
-        </div>
-        <div className="mt-1 text-tcip-muted">
-          {`Proposed ${shown.proposed_at}. Why: ${shown.rationale}`}
-          {shown.relayed_note && ` Relayed from you: ${shown.relayed_note}`}
-        </div>
-      </div>
-      <RevisionEntry revision={shown} definitions={definitions} />
-      {auditWarning && (
-        <div className="mt-2 text-[13px] text-tcip-warn">Warning: {auditWarning}</div>
+      {record.revisions.length > 1 && (
+        <ol className="mt-2 flex flex-wrap gap-1" aria-label={`${record.trait} revisions`}>
+          {record.revisions.map((r) => (
+            <li key={r.number}>
+              <button
+                className={r.number === shown.number ? "tcip-btn-primary h-7" : "tcip-btn h-7"}
+                aria-pressed={r.number === shown.number}
+                onClick={() => setShownNumber(r.number)}
+              >
+                {`Revision ${r.number}`}
+              </button>
+            </li>
+          ))}
+        </ol>
       )}
-      {note && <div className="mt-2 text-[13px] tcip-problem">{note}</div>}
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2 text-tcip-muted">
+        {`Revision ${shown.number}, proposed ${dayOf(shown.proposed_at)}. `}
+        <span className={shown.confirmed ? undefined : "tcip-problem"}>
+          {revisionStateText(shown)}
+        </span>
+      </div>
+      <p className="mt-2 max-w-[70ch]">{shown.rationale}</p>
+      {shown.relayed_note && (
+        <p className="mt-1 max-w-[70ch] text-tcip-muted">{`From you: ${shown.relayed_note}`}</p>
+      )}
+      <RevisionEntry revision={shown} definitions={definitions} />
+      {auditWarning && <div className="mt-2 text-tcip-warn">{auditWarning}</div>}
+      {note && <div className="mt-2 tcip-problem">{note}</div>}
+      <div className="mt-3 flex items-center gap-2">
         {!shown.confirmed_at && (
           <button
-            className="tcip-btn-primary text-[13px]"
+            className="tcip-btn-primary"
             onClick={() => onDecide(shown, true)}
             disabled={pending}
           >
-            {pending ? "Confirming…" : `Confirm revision ${shown.number}`}
+            {pending ? "Confirming…" : "Confirm"}
           </button>
         )}
         {shown.confirmed && (
-          <button
-            className="tcip-btn text-[13px]"
-            onClick={() => onDecide(shown, false)}
-            disabled={pending}
-          >
-            {pending ? "Withdrawing…" : "Withdraw this confirmation"}
+          <button className="tcip-btn" onClick={() => onDecide(shown, false)} disabled={pending}>
+            {pending ? "Withdrawing…" : "Withdraw"}
           </button>
         )}
         <button
-          className="tcip-btn text-[13px]"
+          className="tcip-btn"
           aria-expanded={correcting}
           onClick={() => setCorrecting((open) => !open)}
         >
-          <DisclosureChevron open={correcting} />
-          Send a correction to the agent
+          Correct
         </button>
       </div>
       {correcting && (
-        <div className="mt-2 flex flex-col gap-1">
+        <div className="mt-2 flex max-w-[70ch] flex-col gap-2">
           <textarea
-            className="tcip-input h-20 w-full resize-none text-[13px] leading-4"
+            className="tcip-input h-24 w-full resize-none py-2 leading-5"
             value={request}
             onChange={(e) => setRequest(e.target.value)}
             spellCheck={true}
             aria-label={`Correction for ${record.trait}`}
           />
           <button
-            className="tcip-btn self-start text-[13px]"
+            className="tcip-btn self-start"
             onClick={() => useStore.getState().sendToAgentTerminal(request)}
             disabled={!request.trim()}
           >
@@ -217,9 +224,7 @@ export function TraitRevisionPanel() {
       setLoadError(null);
     } catch (e) {
       setListing(null);
-      setLoadError(
-        `Could not load this project's traits: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      setLoadError(`Could not load traits: ${e instanceof Error ? e.message : String(e)}`);
     }
   }, []);
 
@@ -257,18 +262,12 @@ export function TraitRevisionPanel() {
   }
 
   return (
-    <div className="tcip-panel p-4">
-      <div className="tcip-heading mb-1">What each trait&apos;s delivered numbers mean</div>
-      <p className="mb-3 text-[13px] text-tcip-muted">
-        The agent proposes each trait&apos;s entry, from what it measures to what each delivered
-        number means, as a numbered revision. A delivery reads the latest revision you confirmed.
-        Read the revision shown, then confirm it or send the agent a correction. A confirmation you
-        gave stands until you withdraw it.
-      </p>
-      {loadError && <div className="mb-3 text-[13px] tcip-problem">{loadError}</div>}
+    <div className="tcip-panel p-5">
+      <div className="tcip-heading mb-3">Traits</div>
+      {loadError && <div className="mb-3 tcip-problem">{loadError}</div>}
       {listing && listing.unreadable.length > 0 && (
-        <div className="mb-3 text-[13px] tcip-problem">
-          <div>These traits&apos; records will not read:</div>
+        <div className="mb-3 tcip-problem">
+          <div>These trait records will not read:</div>
           <ul className="mt-1 list-disc pl-4">
             {listing.unreadable.map((u) => (
               <li key={u.trait}>
@@ -279,12 +278,9 @@ export function TraitRevisionPanel() {
         </div>
       )}
       {listing && listing.traits.length === 0 ? (
-        <div className="text-[13px] text-tcip-muted">
-          No trait is proposed for this project yet. The agent proposes one before anything can
-          deliver under it.
-        </div>
+        <div className="text-tcip-muted">No trait proposed.</div>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className="flex flex-col divide-y divide-tcip-border">
           {(listing?.traits ?? []).map((record) => (
             <TraitRow
               key={`${record.trait}:${record.revisions.length}`}
