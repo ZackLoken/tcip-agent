@@ -32,8 +32,9 @@ Use the `frontend-design` skill for IA/visual work.
 
 `terminal.py` holds the provider table (`PROVIDERS`); each row's definition there is its launch: its
 executable, its arguments, the output sequence one installed version of its harness was recorded
-writing when its composer appeared (`composer_ready`; no harness promises it), what the harness's own enforcement restricts and
-leaves open (`confinement`, recorded on every launch), and the preparation the launch runs first
+writing when its composer appeared (`composer_ready`; no harness promises it), what the harness's
+own enforcement restricts and leaves open (`confinement`, recorded on every launch), and the
+preparation the launch runs first
 when the harness takes its MCP server or its tool approvals only through its own configuration (the
 Antigravity row registers the server through `agy mcp add` and allows every tcip tool and, when the
 launch spelled it, the ritual's own doctor line for the open project, as a command and as an

@@ -308,9 +308,9 @@ The detection training pipeline mirrors a production drone-phenotyping workflow:
   config validation, and the model contract a built model passes before its run spawns.
 - Review → retrain: accepting a model proposal on the canvas writes it into the image's label
   document, signed off by the reviewer, in the commit that records the verdict, so a later run
-  whose drawn selection places the image on its training side reads it; a rejection is recorded as a verdict and changes no label. A relaunch records the
-  run it relaunched from, and `prioritize_review_queue` ranks the next review batch by
-  active-learning score.
+  whose drawn selection places the image on its training side reads it; a rejection is recorded
+  as a verdict and changes no label. A relaunch records the run it relaunched from, and
+  `prioritize_review_queue` ranks the next review batch by active-learning score.
 
 Not built yet (contributions/experiments welcome):
 
