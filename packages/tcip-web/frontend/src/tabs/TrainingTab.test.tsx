@@ -145,6 +145,19 @@ describe("TrainingTab run list", () => {
     );
   });
 
+  it("shows a run's recorded error in its row", async () => {
+    listing([
+      run({
+        experiment_id: "train-crashed",
+        state: "failed",
+        status_error: "CUDA out of memory at epoch 3",
+      }),
+    ]);
+
+    render(<TrainingTab />);
+    expect(await screen.findByText("CUDA out of memory at epoch 3")).toBeInTheDocument();
+  });
+
   it("offers no stop control for a run in a terminal state", async () => {
     listing([
       run({ experiment_id: "train-done", state: "completed" }),
@@ -188,7 +201,7 @@ describe("TrainingTab run list", () => {
     expect(screen.queryByText(/best.*0\.500/)).not.toBeInTheDocument();
   });
 
-  it("says No runs. for an empty listing and no ordering sentence for a filled one", async () => {
+  it("says No runs. for an empty listing", async () => {
     const listRuns = listing([]);
 
     render(<TrainingTab />);
@@ -397,7 +410,7 @@ describe("TrainingTab run launcher mark", () => {
     );
   });
 
-  it("describes a launch with no agent identity in one sentence", async () => {
+  it("describes a launch with no agent named", async () => {
     listing([run({ experiment_id: "train-undeclared-desc", launch: {} })]);
 
     render(<TrainingTab />);
@@ -598,7 +611,7 @@ describe("TrainingTab epoch table", () => {
     expect(within(rows[2]).getByText(UNSET_GLYPH)).toBeInTheDocument();
   });
 
-  it("gives a bookkeeping field or a non-finite state companion no column, and spells a key's underscores as spaces", async () => {
+  it("spells a metric key's underscores as spaces and gives bookkeeping no column", async () => {
     listing([run({ experiment_id: "train-bookkeeping" })]);
     streamFrames(
       metricFrame({
