@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -40,21 +40,6 @@ import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 interface DateRow {
   date: string;
   [plantId: string]: number | string | null;
-}
-
-/** A note whose remedy is on the Setup tab, with the one action that opens it. */
-function SetupTabNote({ children }: { children: ReactNode }) {
-  return (
-    <div className="tcip-panel p-3 text-[13px] tcip-problem flex items-center gap-2">
-      <div>{children}</div>
-      <button
-        className="tcip-btn text-[13px]"
-        onClick={() => useStore.getState().setActiveTab("setup")}
-      >
-        Open the Setup tab
-      </button>
-    </div>
-  );
 }
 
 /** The message for a delivery written to `savedPath` whose audit line was not recorded. */
@@ -248,11 +233,11 @@ export function ResultsTab() {
   async function compute(showUnvalidated = false) {
     if (!projectRoot || !datasetRoot) return;
     if (!trait) {
-      setError(traitError ?? "Pick a trait before computing.");
+      setError(traitError ?? "Choose a trait.");
       return;
     }
     if (plants.length === 0) {
-      setError("Name the plants to measure (one plant id per line) before computing.");
+      setError("Name the plants.");
       return;
     }
     setLoading(true);
@@ -474,29 +459,6 @@ export function ResultsTab() {
     return Array.from(set);
   }, [curves]);
 
-  // The backend refuses to deliver phenology until an assessment answers for every delivered
-  // bucket; hand that off to the agent rather than leave tool names on screen.
-  function assessmentRequest(detail: string | null): string {
-    const subject = trait ? `the "${trait}" trait` : "this trait";
-    return (
-      `Phenology delivery for ${subject} is blocked: no passing assessment answers for its ` +
-      "predictions. Please assess the checkpoint against a held-out reference selection " +
-      "(assess_checkpoint) and publish its predictions under that assessment, then let me know " +
-      "when it's ready so I can recompute here." +
-      (detail ? ` Details from the app: ${detail}` : "")
-    );
-  }
-
-  // The breeder can't propose a trait revision from the GUI, so a trait with no milestone
-  // fractions needs a way forward rather than an empty tab.
-  function milestoneAbsenceRequest(): string {
-    return (
-      `The Results tab has nothing to compute for the "${trait}" trait: its confirmed revision ` +
-      "declares no milestone fractions. Please tell me what this trait's measurement delivers " +
-      "and how I get it, and propose a revision if milestones are part of it."
-    );
-  }
-
   // The entry a delivery reads for the selected trait: its latest confirmed revision's, or null.
   const selectedRecord = traitRecords.find((r) => r.trait === trait);
   const confirmedEntry =
@@ -509,12 +471,12 @@ export function ResultsTab() {
   return (
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
       <TabHeading tab="results" />
-      {traitError && <div className="tcip-panel p-3 text-[13px] tcip-problem">{traitError}</div>}
+      {traitError && <div className="tcip-problem">{traitError}</div>}
       {unreadableTraits.length > 0 && (
-        <SetupTabNote>
+        <div className="tcip-problem">
           These traits&apos; records will not read:{" "}
           {unreadableTraits.map((u) => u.trait).join(", ")}.
-        </SetupTabNote>
+        </div>
       )}
       {availableTraits.length > 1 && (
         <div className="tcip-panel p-3 flex items-center gap-2">
@@ -539,22 +501,13 @@ export function ResultsTab() {
         </div>
       )}
       {trait && selectedRecord && !confirmedEntry && (
-        <SetupTabNote>
-          No revision of {trait} is confirmed, so nothing delivers under it.
-        </SetupTabNote>
+        <div className="tcip-problem">No revision of {trait} is confirmed.</div>
       )}
 
       <DeliveryEventsPanel records={deliveryEvents} loadError={deliveryEventsError} />
 
       <div className="tcip-panel p-4">
-        <div className="tcip-heading mb-3">Count export</div>
-        <p className="text-[12px] text-tcip-muted mb-2">
-          A per-image count (a bucket, no plant identity) or a per-plant count through the
-          orthomosaic composition (a bucket plus a registered plant registry). The ordinal and
-          regression aggregates and the per-plant walked-capture count, each aggregated under the
-          statistic the confirmed revision of its trait states, have no route here; deliver those
-          through the agent.
-        </p>
+        <h2 className="tcip-heading mb-3">Export</h2>
         <div className="grid grid-cols-[1fr_1fr] gap-3">
           <div className="flex flex-col gap-2">
             <label className="tcip-label" htmlFor="count-kind">
@@ -572,11 +525,11 @@ export function ResultsTab() {
               }}
             >
               <option value="per_image_count">Per-image count</option>
-              <option value="orthomosaic_plant_counts">Per-plant count (orthomosaic)</option>
+              <option value="orthomosaic_plant_counts">Per-plant count</option>
             </select>
 
             <label className="tcip-label" htmlFor="count-bucket">
-              Prediction bucket
+              Predictions
             </label>
             <select
               id="count-bucket"
@@ -584,7 +537,7 @@ export function ResultsTab() {
               value={countBucket}
               onChange={(e) => setCountBucket(e.target.value)}
             >
-              <option value="">Choose a bucket…</option>
+              <option value="">Choose predictions</option>
               {dates.flatMap((d) =>
                 bucketsFor(d).map((name) => (
                   <option key={name} value={name}>
@@ -605,7 +558,7 @@ export function ResultsTab() {
                   value={countTrait}
                   onChange={(e) => setCountTrait(e.target.value)}
                 >
-                  <option value="">Choose a trait…</option>
+                  <option value="">Choose a trait</option>
                   {availableTraits.map((t) => (
                     <option key={t} value={t}>
                       {t}
@@ -616,17 +569,16 @@ export function ResultsTab() {
             ) : (
               <>
                 <label className="tcip-label" htmlFor="count-plants">
-                  Plants to deliver (one id per line)
+                  Plants
                 </label>
                 <textarea
                   id="count-plants"
-                  className="tcip-input text-[13px] font-mono h-20"
+                  className="tcip-input font-mono h-20"
                   value={plantsText}
                   onChange={(e) => setPlantsText(e.target.value)}
-                  placeholder={"PLOT-01\nPLOT-02"}
                 />
                 <label className="tcip-label" htmlFor="count-plant-registry">
-                  Plant registry (registered by name)
+                  Plant registry
                 </label>
                 <input
                   id="count-plant-registry"
@@ -635,7 +587,7 @@ export function ResultsTab() {
                   onChange={(e) => setCountPlantRegistry(e.target.value)}
                 />
                 <label className="tcip-label" htmlFor="count-delivered-phenotype">
-                  Delivered phenotype
+                  Phenotype
                 </label>
                 <input
                   id="count-delivered-phenotype"
@@ -643,64 +595,74 @@ export function ResultsTab() {
                   value={countDeliveredPhenotype}
                   onChange={(e) => setCountDeliveredPhenotype(e.target.value)}
                 />
-                <div className="grid grid-cols-3 gap-2">
-                  <input
-                    className="tcip-input"
-                    value={countCrop}
-                    onChange={(e) => setCountCrop(e.target.value)}
-                    placeholder="crop"
-                  />
-                  <input
-                    className="tcip-input"
-                    value={countPipelineVersion}
-                    onChange={(e) => setCountPipelineVersion(e.target.value)}
-                    placeholder="pipeline_version"
-                  />
-                  <input
-                    className="tcip-input"
-                    value={countCanopySubject}
-                    onChange={(e) => setCountCanopySubject(e.target.value)}
-                    placeholder="canopy_subject (optional)"
-                  />
-                </div>
+                <label className="tcip-label" htmlFor="count-crop">
+                  Crop
+                </label>
+                <input
+                  id="count-crop"
+                  className="tcip-input"
+                  value={countCrop}
+                  onChange={(e) => setCountCrop(e.target.value)}
+                />
+                <label className="tcip-label" htmlFor="count-pipeline-version">
+                  Pipeline version
+                </label>
+                <input
+                  id="count-pipeline-version"
+                  className="tcip-input"
+                  value={countPipelineVersion}
+                  onChange={(e) => setCountPipelineVersion(e.target.value)}
+                />
+                <label className="tcip-label" htmlFor="count-canopy-subject">
+                  Canopy subject
+                </label>
+                <input
+                  id="count-canopy-subject"
+                  className="tcip-input"
+                  value={countCanopySubject}
+                  onChange={(e) => setCountCanopySubject(e.target.value)}
+                />
                 {countCanopySubject && (
-                  <input
-                    className="tcip-input"
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={countPositionErrorM}
-                    onChange={(e) => setCountPositionErrorM(e.target.value)}
-                    placeholder="position_error_m: the registry positions' error bound, in meters"
-                    aria-label="position_error_m"
-                  />
+                  <>
+                    <label className="tcip-label" htmlFor="count-position-error">
+                      Position error (m)
+                    </label>
+                    <input
+                      id="count-position-error"
+                      className="tcip-input"
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={countPositionErrorM}
+                      onChange={(e) => setCountPositionErrorM(e.target.value)}
+                    />
+                  </>
                 )}
               </>
             )}
 
             <label className="tcip-label" htmlFor="count-filename">
-              Filename
+              File name
             </label>
             <input
               id="count-filename"
               className="tcip-input"
               value={countFilename}
               onChange={(e) => setCountFilename(e.target.value)}
-              placeholder="stem_count.csv"
             />
           </div>
 
           <div className="flex flex-col gap-2">
-            {countError && <div className="text-[13px] tcip-problem">{countError}</div>}
+            {countError && <div className="tcip-problem">{countError}</div>}
             {countOperationalizationRefusal && (
-              <SetupTabNote>{countOperationalizationRefusal.message}</SetupTabNote>
+              <div className="tcip-problem">{countOperationalizationRefusal.message}</div>
             )}
             {countGateRefusal && (
-              <div className="text-[13px] tcip-problem border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
+              <div className="tcip-problem flex flex-col gap-2">
                 <div>{countGateRefusal.message}</div>
                 {countShowAck && (
                   <input
-                    className="tcip-input text-[13px]"
+                    className="tcip-input"
                     placeholder="Reason for delivering unvalidated"
                     value={countAckReason}
                     onChange={(e) => setCountAckReason(e.target.value)}
@@ -709,7 +671,7 @@ export function ResultsTab() {
               </div>
             )}
             {countResultHeaders && (
-              <div className="text-[13px] text-tcip-muted">
+              <div className="text-tcip-muted">
                 Saved to {countResultHeaders.savedTo}.
                 {countResultHeaders.validated ? "" : " Not validated."}
                 {countResultHeaders.acknowledgedBy
@@ -728,50 +690,32 @@ export function ResultsTab() {
                 (countShowAck && !countAckReason.trim())
               }
             >
-              {countExporting ? "Exporting…" : countShowAck ? "Acknowledge and export" : "Export"}
+              {countShowAck ? "Acknowledge and export" : "Export"}
             </button>
           </div>
         </div>
       </div>
 
-      {trait && confirmedEntry && !hasMilestones && (
-        <div className="tcip-panel p-4 flex flex-col gap-2">
-          <div className="tcip-heading">Nothing to compute here for {trait}</div>
-          <p className="text-[13px] text-tcip-muted">
-            This trait&apos;s confirmed revision declares no milestone fractions, so there are no
-            curves or milestones to compute for it.
-          </p>
-          <button
-            className="tcip-btn-primary text-[13px] self-start"
-            onClick={() => useStore.getState().sendToAgentTerminal(milestoneAbsenceRequest())}
-          >
-            Ask the agent what this trait delivers
-          </button>
-        </div>
-      )}
-
       {hasMilestones && (
         <>
           <div className="tcip-panel p-4">
-            <div className="tcip-heading mb-3">Per-plant phenology curves</div>
+            <h2 className="tcip-heading mb-3">Phenology</h2>
             <div className="grid grid-cols-[1fr_180px] gap-3">
               <div className="flex flex-col gap-1">
                 <div className="tcip-label">Predictions by date</div>
                 {datesError && (
-                  <div className="text-[13px] tcip-problem mb-1">
+                  <div className="tcip-problem mb-1">
                     {datesError}{" "}
-                    <button className="tcip-btn text-[13px] ml-1" onClick={refreshDatasetTree}>
+                    <button className="tcip-btn ml-1" onClick={refreshDatasetTree}>
                       Retry
                     </button>
                   </div>
                 )}
                 {!datesError && labelProblem && (
-                  <div className="text-[13px] tcip-problem mb-1">{labelProblem}</div>
+                  <div className="tcip-problem mb-1">{labelProblem}</div>
                 )}
                 {dates.length === 0 ? (
-                  !datesError && (
-                    <div className="text-[13px] text-tcip-muted">No dates in this dataset yet.</div>
-                  )
+                  !datesError && <div className="text-tcip-muted">No dates with images.</div>
                 ) : (
                   <div className="max-h-40 overflow-auto rounded border border-tcip-border">
                     <table className="w-full text-[13px]">
@@ -815,15 +759,15 @@ export function ResultsTab() {
               </div>
               <div className="flex flex-col gap-2">
                 <label className="tcip-label" htmlFor="phenology-mapping">
-                  Plant mapping (built on the Setup tab)
+                  Plant mapping
                 </label>
                 <select
                   id="phenology-mapping"
-                  className="tcip-select text-[13px]"
+                  className="tcip-select"
                   value={mappingName}
                   onChange={(e) => setMappingName(e.target.value)}
                 >
-                  <option value="">Choose a mapping…</option>
+                  <option value="">Choose a mapping</option>
                   {mappingNames.map((name) => (
                     <option key={name} value={name}>
                       {name}
@@ -831,83 +775,42 @@ export function ResultsTab() {
                   ))}
                 </select>
                 <label className="tcip-label" htmlFor="phenology-plants">
-                  Plants to measure (one id per line)
+                  Plants
                 </label>
                 <textarea
                   id="phenology-plants"
-                  className="tcip-input text-[13px] font-mono h-20"
+                  className="tcip-input font-mono h-20"
                   value={plantsText}
                   onChange={(e) => setPlantsText(e.target.value)}
-                  placeholder={"PLOT-01\nPLOT-02"}
-                  title="The plant ids this measurement delivers, one row each; the mapping's own plot list is not the population"
                 />
-                <p className="text-[13px] text-tcip-muted">
-                  The positive-state fraction is the share of a plant&apos;s detected objects that
-                  are in the trait&apos;s positive state. That state is a value of one attribute the
-                  assessed model calls on every detection, not a bbox measurement; the
-                  predictions&apos; scope must declare that attribute.
-                </p>
                 {positiveClassUnassessed && (
-                  <div className="text-[13px] tcip-problem border border-tcip-fp/40 rounded p-2">
-                    These predictions carry no value of the positive state&apos;s attribute, so the
-                    curves below are not a valid phenology measurement and CSV export is disabled.
-                    Publish predictions from a model whose scope declares that attribute first.
+                  <div className="tcip-problem">
+                    These predictions carry no positive state, so the curves are not a measurement
+                    and export is off.
                   </div>
                 )}
                 {unvalidatedRefusal && (
-                  <div className="text-[13px] tcip-problem border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
-                    <div>
-                      No passing assessment answers for these predictions (see detail below), so
-                      this is not yet a deliverable phenology measurement. Assess first, or look at
-                      the numbers marked unvalidated and acknowledge and export them anyway.
-                    </div>
-                    <div className="text-tcip-muted">{unvalidatedRefusal}</div>
-                    <div className="flex gap-2">
-                      <button
-                        className="tcip-btn text-[13px] self-start"
-                        onClick={() => void compute(true)}
-                        disabled={loading}
-                      >
-                        Show unvalidated numbers
-                      </button>
-                      <button
-                        className="tcip-btn-primary text-[13px] self-start"
-                        onClick={() =>
-                          useStore
-                            .getState()
-                            .sendToAgentTerminal(assessmentRequest(unvalidatedRefusal))
-                        }
-                      >
-                        Ask the agent to assess this
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {unvalidated && (
-                  <div className="text-[13px] tcip-problem border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
-                    <div>
-                      Not validated: {unvalidatedReason}. Assess to deliver a validated phenotype,
-                      or acknowledge and export it unvalidated below.
-                    </div>
+                  <div className="tcip-problem flex flex-col gap-2">
+                    <div>No assessment answers for these predictions.</div>
                     <button
-                      className="tcip-btn-primary text-[13px] self-start"
-                      onClick={() =>
-                        useStore
-                          .getState()
-                          .sendToAgentTerminal(assessmentRequest(unvalidatedReason))
-                      }
+                      className="tcip-btn self-start"
+                      onClick={() => void compute(true)}
+                      disabled={loading}
                     >
-                      Ask the agent to assess this
+                      Show unvalidated numbers
                     </button>
                   </div>
                 )}
+                {unvalidated && unvalidatedReason && (
+                  <div className="tcip-problem">Not validated: {unvalidatedReason}</div>
+                )}
                 {datesDelivered.length > 0 && (
-                  <div className="text-[13px] text-tcip-muted">
+                  <div className="text-tcip-muted">
                     {`Delivered dates ${datesDelivered.join(", ")}: ${imagesUnattributed} attributed to no plant`}
                   </div>
                 )}
                 {(capturesUnverified.length > 0 || plantCsvsUnverified.length > 0) && (
-                  <div className="text-[13px] text-tcip-muted border border-tcip-border rounded p-2">
+                  <div className="text-tcip-muted">
                     Not verified at delivery time:
                     {capturesUnverified.length > 0 && ` ${capturesUnverified.join(", ")}`}
                     {capturesUnverified.length > 0 && plantCsvsUnverified.length > 0 && ";"}
@@ -920,26 +823,13 @@ export function ResultsTab() {
                   onClick={() => void compute()}
                   disabled={loading}
                 >
-                  {loading
-                    ? "Verifying the mapping's captures…"
-                    : "Compute curves + milestone dates"}
+                  Compute
                 </button>
-                <p className="text-[12px] text-tcip-muted">
-                  One computed measurement in two shapes: every (plant, date) point, or the
-                  milestone dates read off it.
-                </p>
-                <p className="text-[12px] text-tcip-muted">
-                  A phenology milestone delivery here, and a per-image or per-plant-orthomosaic
-                  count in the section below, can each be acknowledged and exported unvalidated.
-                  Every other count kind (ordinal, regression, a per-plant walked-capture count) has
-                  no acknowledged route yet and needs a passing assessment before it can be
-                  delivered at all.
-                </p>
                 {!unvalidated || !showAckExport ? (
                   <div className="flex gap-1">
                     {unvalidated ? (
                       <button
-                        className="tcip-btn flex-1 text-[13px]"
+                        className="tcip-btn flex-1"
                         onClick={() => setShowAckExport(true)}
                         disabled={exportBlocked}
                       >
@@ -948,14 +838,14 @@ export function ResultsTab() {
                     ) : (
                       <>
                         <button
-                          className="tcip-btn flex-1 text-[13px]"
+                          className="tcip-btn flex-1"
                           onClick={downloadCurvesCsv}
                           disabled={curves.length === 0 || exportBlocked}
                         >
                           Curves CSV
                         </button>
                         <button
-                          className="tcip-btn flex-1 text-[13px]"
+                          className="tcip-btn flex-1"
                           onClick={downloadOnsetCsv}
                           disabled={onset.length === 0 || exportBlocked}
                         >
@@ -967,21 +857,21 @@ export function ResultsTab() {
                 ) : (
                   <div className="flex flex-col gap-1">
                     <input
-                      className="tcip-input text-[13px]"
+                      className="tcip-input"
                       placeholder="Reason for delivering unvalidated"
                       value={ackReason}
                       onChange={(e) => setAckReason(e.target.value)}
                     />
                     <div className="flex gap-1">
                       <button
-                        className="tcip-btn flex-1 text-[13px]"
+                        className="tcip-btn flex-1"
                         onClick={downloadCurvesCsv}
                         disabled={curves.length === 0 || !ackReason.trim()}
                       >
                         Curves CSV
                       </button>
                       <button
-                        className="tcip-btn flex-1 text-[13px]"
+                        className="tcip-btn flex-1"
                         onClick={downloadOnsetCsv}
                         disabled={onset.length === 0 || !ackReason.trim()}
                       >
@@ -992,21 +882,17 @@ export function ResultsTab() {
                 )}
               </div>
             </div>
-            {error && <div className="mt-2 text-[13px] tcip-problem">{error}</div>}
+            {error && <div className="mt-2 tcip-problem">{error}</div>}
             {operationalizationRefusal && (
-              <div className="mt-2">
-                <SetupTabNote>{operationalizationRefusal.message}</SetupTabNote>
-              </div>
+              <div className="mt-2 tcip-problem">{operationalizationRefusal.message}</div>
             )}
           </div>
 
           <div className="tcip-panel p-4 h-80">
-            <div className="tcip-heading mb-3">
-              Positive-state fraction over time, per plant
-              {plantKeys.length > 30
-                ? ` (showing 30 of ${plantKeys.length} plants, the milestones table below has all)`
-                : ` (${plantKeys.length} plants)`}
-            </div>
+            <h2 className="tcip-heading mb-3">Positive fraction by date</h2>
+            {plantKeys.length > 30 && (
+              <div className="text-tcip-muted mb-1">30 of {plantKeys.length} plants shown</div>
+            )}
             {chartData.length > 0 ? (
               <ResponsiveContainer width="100%" height="90%">
                 <LineChart data={chartData}>
@@ -1037,17 +923,21 @@ export function ResultsTab() {
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-full text-tcip-muted text-[13px]">
-                No data. Configure mapping + predictions above, then compute.
+              <div className="flex items-center justify-center h-full text-tcip-muted">
+                No data.
               </div>
             )}
           </div>
 
           <div className="tcip-panel p-4">
-            <div className="tcip-heading mb-3">
-              Phenology milestones for {trait || "the selected trait"} (the date each declared
-              fraction is crossed, per plant): {onset.length} rows
-            </div>
+            <h2 className="tcip-heading mb-3">
+              Milestones
+              {lastRequest && (
+                <span className="text-tcip-muted font-normal">
+                  {` ${onset.length} ${onset.length === 1 ? "row" : "rows"}`}
+                </span>
+              )}
+            </h2>
             {onset.length > 0 ? (
               <div className="overflow-auto max-h-96">
                 <table className="w-full text-[13px]">
@@ -1080,21 +970,11 @@ export function ResultsTab() {
                           <td className="pr-3 tabular-nums">{r.n_dates}</td>
                           <td className="pr-3">
                             {neverObserved ? (
-                              <span
-                                className="text-tcip-muted"
-                                title="Every date assessed for the positive state's attribute and fully observed, but no detections on any date, so there is nothing to derive milestones from."
-                              >
+                              <span className="text-tcip-muted" title="No detections on any date">
                                 no observations
                               </span>
                             ) : rowValid && unvalidated ? (
-                              // Coverage is complete, but the measurement behind these dates has no
-                              // validated operating point. The banner announcing that sits two panels
-                              // up and scrolls out of view, so the row must say so where it is read:
-                              // a phenology date beside a plain "valid" would be an unearned precision claim.
-                              <span
-                                className="tcip-problem"
-                                title="Coverage is complete, but the operating point behind these dates is not validated on disk: unvalidated, not a deliverable phenotype."
-                              >
+                              <span className="tcip-problem" title="No assessment answers">
                                 unvalidated
                               </span>
                             ) : rowValid ? (
@@ -1111,31 +991,25 @@ export function ResultsTab() {
                           {milestoneColumns.map((c) => {
                             const date = r[c.date] as string | null;
                             const bound = r[c.bound] as string | null;
-                            // A left-censored crossing means the first observation already met the
-                            // target, so the true date is only an upper bound; a right-censored one
-                            // means the last observation still hadn't, so the true date (if any) is
-                            // after this one, a lower bound. Rendering either as a plain date is a
-                            // precision claim the data does not support.
+                            // A censored crossing is a bound on the true date, never the date.
                             const marker =
                               bound === "left_censored"
                                 ? {
                                     symbol: "≤",
                                     className: "tcip-problem",
-                                    title:
-                                      "Left-censored: the first observation already met this target, so the true date is at or before this one.",
+                                    title: "Before first observation",
                                   }
                                 : bound === "right_censored"
                                   ? {
                                       symbol: ">",
                                       className: "tcip-problem",
-                                      title:
-                                        "Right-censored: the last observation still hadn't met this target, so the true date, if any, is after this one.",
+                                      title: "After last observation",
                                     }
                                   : bound === "interpolated"
                                     ? {
                                         symbol: "~",
                                         className: "text-tcip-muted",
-                                        title: "Interpolated between two observed dates.",
+                                        title: "Interpolated",
                                       }
                                     : null;
                             return (
@@ -1156,7 +1030,7 @@ export function ResultsTab() {
                 </table>
               </div>
             ) : (
-              <div className="text-[13px] text-tcip-muted">Run the compute step to populate.</div>
+              <div className="text-tcip-muted">No rows.</div>
             )}
           </div>
         </>
