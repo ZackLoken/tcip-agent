@@ -8,10 +8,10 @@ import type { ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
 import { TOOL_ARRAY } from "@/store/types";
 
-/** The column beside the canvas: the selected shape's attributes, the active subject's declared
- *  attributes with the control that declares a new one, and the image-level ratings that ride in
- *  the label document with no shape. Absent while there is no subject, no selection and no
- *  rating to show. */
+/** The lower part of the subject menu: the focused shape's attributes, the active subject's
+ *  declared attributes with the control that declares a new one, and the image-level ratings
+ *  that ride in the label document with no shape. Absent while there is no subject, no focused
+ *  shape and no rating to show. */
 export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
   const activeSubject = useStore((s) => s.gui.active_subject);
   const registry = useStore((s) => s.registry.subjects);
@@ -124,8 +124,8 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
 
   return (
     <div
-      className="w-64 shrink-0 overflow-auto border-l border-tcip-border bg-tcip-panel p-4"
-      data-testid="attribute-column"
+      className="mt-1 border-t border-tcip-border px-2 pt-3 pb-1 text-[13px]"
+      data-testid="subject-attributes"
     >
       {selected && (
         <div className="mb-5">

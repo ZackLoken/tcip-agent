@@ -5,6 +5,7 @@ import { StructuredRefusalError } from "@/api/http";
 import { subjectsApi } from "@/api/subjects";
 import { ATTR_TYPES } from "@/api/types.generated";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
+import type { ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
 import { openTestProject } from "@/test/store";
 
@@ -31,12 +32,98 @@ function fillAttributeDraft(name: string, values: string) {
   });
 }
 
+/** A box of the active subject on the canvas, focused. */
+function focusedBox(): ReviewItem {
+  act(() =>
+    useStore
+      .getState()
+      .add("boxes", { x1: 10, y1: 10, x2: 50, y2: 50, subject: "bud", attributes: {} }),
+  );
+  return {
+    kind: "annotation",
+    shape: "box",
+    ref: 0,
+    subject: "bud",
+    bbox: [10, 10, 50, 50],
+    match: null,
+    reviewed: false,
+    score: null,
+    at: [30, 30],
+    flags: [],
+  };
+}
+
+const landed = {
+  status: "ok" as const,
+  n_subjects: 1,
+  subjects_path: "C:/data/subjects.json",
+  version: "v2",
+};
+
 describe("AttributePanel attribute kinds", () => {
   it("offers exactly the kinds the backend's registry declares", () => {
     render(<AttributePanel focused={null} />);
     fireEvent.click(screen.getByText("Add attribute"));
     const options = screen.getByLabelText("attribute type").querySelectorAll("option");
     expect(Array.from(options, (o) => o.value)).toEqual([...ATTR_TYPES]);
+    expect(screen.getByRole("combobox", { name: "attribute type" })).toBeInTheDocument();
+  });
+});
+
+describe("AttributePanel presence", () => {
+  it("is absent with no active subject, no focused shape and no image-level rating", () => {
+    act(() => useStore.getState().setActiveSubject(null));
+    render(<AttributePanel focused={null} />);
+    expect(screen.queryByTestId("subject-attributes")).toBeNull();
+  });
+
+  it("shows the active subject's attribute block and the focused shape's subject", () => {
+    act(() =>
+      useStore.getState().setRegistry({
+        bud: { attributes: { ripeness: { type: "ordinal", values: ["green", "ripe"] } } },
+      }),
+    );
+    render(<AttributePanel focused={focusedBox()} />);
+    expect(screen.getByText("bud attributes")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add attribute" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "ripeness" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add a ripeness value" })).toBeInTheDocument();
+  });
+});
+
+describe("AttributePanel authoring", () => {
+  it("posts the grown registry with the loaded version, installs it and counts the unset shapes", async () => {
+    act(() => useStore.getState().setRegistry({ bud: {} }));
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(landed);
+    render(<AttributePanel focused={focusedBox()} />);
+    fillAttributeDraft("size", "small\nlarge");
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
+
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy.mock.calls[0][0]).toEqual({
+      bud: { attributes: { size: { type: "categorical", values: ["small", "large"] } } },
+    });
+    expect(saveSpy.mock.calls[0][2]).toBeNull();
+    expect(useStore.getState().registry.version).toBe("v2");
+    expect(screen.getByText("size: 1 of 1 bud shapes unset")).toBeInTheDocument();
+  });
+
+  it("refuses a name the subject already declares, inline, and posts nothing", async () => {
+    act(() =>
+      useStore
+        .getState()
+        .setRegistry(
+          { bud: { attributes: { size: { type: "categorical", values: ["small"] } } } },
+          "v1",
+        ),
+    );
+    const saveSpy = vi.spyOn(subjectsApi, "save");
+    render(<AttributePanel focused={null} />);
+    fillAttributeDraft("size", "large");
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
+
+    expect(screen.getByText("size is already declared.")).toBeInTheDocument();
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 });
 

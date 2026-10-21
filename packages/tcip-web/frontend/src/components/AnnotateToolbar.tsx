@@ -9,6 +9,7 @@ import { useMemo, useState, type ReactNode } from "react";
 
 import type { ImageBandsResponse } from "@/api/client";
 import { subjectColor } from "@/api/subjects";
+import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { EnginePrompt } from "@/components/annotate/EnginePrompt";
 import { BandPicker } from "@/components/BandPicker";
 import { Stepper } from "@/components/Stepper";
@@ -16,6 +17,7 @@ import { useImageNav } from "@/hooks/useImageNav";
 import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 import { showsBandPicker, type BandSelection } from "@/lib/bandSelection";
 import { saveRegistry } from "@/lib/registrySave";
+import type { ReviewItem } from "@/lib/reviewItems";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { useStore } from "@/store";
 import { selectProjectRoot } from "@/store/slices/gui";
@@ -152,6 +154,7 @@ export function AnnotateToolbar({
   view,
   onView,
   predictionsAvailable,
+  focused,
 }: {
   onSave: () => void;
   /** Abandon the save in flight, which the Save button offers while one is. */
@@ -175,6 +178,8 @@ export function AnnotateToolbar({
   onView: (next: AnnotateView) => void;
   // Whether a predictions bucket is selected, so the Predictions entry has something to show.
   predictionsAvailable: boolean;
+  // The focused item, whose attributes the subject menu edits when it is an annotation.
+  focused: ReviewItem | null;
 }) {
   const dataset = useStore((s) => s.gui.dataset);
   const projectRoot = useStore(selectProjectRoot);
@@ -301,7 +306,7 @@ export function AnnotateToolbar({
                 className="fixed inset-0 z-10"
                 onClick={() => setSubjectMenuOpen(false)}
               />
-              <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-md border border-tcip-border bg-tcip-panel py-1 shadow-lg">
+              <div className="absolute left-0 top-full z-20 mt-1 max-h-[75vh] w-72 overflow-auto rounded-md border border-tcip-border bg-tcip-panel py-1 shadow-lg">
                 {subjectNames.map((name) => (
                   <div key={name} className="flex items-center gap-2 px-2 hover:bg-tcip-hover">
                     <span
@@ -336,6 +341,7 @@ export function AnnotateToolbar({
                     New subject
                   </button>
                 </div>
+                <AttributePanel focused={focused} />
               </div>
             </>
           )}

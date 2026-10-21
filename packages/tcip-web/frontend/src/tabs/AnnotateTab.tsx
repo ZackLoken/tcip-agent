@@ -7,7 +7,6 @@ import { subjectColor } from "@/api/subjects";
 import type { ProposePayload } from "@/api/types.generated";
 import { AnnotateLegend } from "@/components/annotate/AnnotateLegend";
 import { AnnotationShapes } from "@/components/annotate/AnnotationShapes";
-import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { FlagMarks } from "@/components/annotate/FlagMarks";
 import { InProgressPolygon } from "@/components/annotate/InProgressPolygon";
 import { PointOverlay } from "@/components/annotate/PointOverlay";
@@ -1655,6 +1654,7 @@ export function AnnotateTab() {
           view={shown}
           onView={setShown}
           predictionsAvailable={!!bucket}
+          focused={null}
         />
         <div className="flex-1 flex items-center justify-center bg-tcip-canvas px-4">
           <p className="text-tcip-muted">No image. Choose a date with images.</p>
@@ -1689,6 +1689,7 @@ export function AnnotateTab() {
         view={shown}
         onView={setShown}
         predictionsAvailable={!!bucket}
+        focused={focused}
       />
       <ReviewStrip
         reviewing={reviewing}
@@ -1850,8 +1851,6 @@ export function AnnotateTab() {
 
           <AnnotateLegend reviewing={reviewing} />
         </div>
-
-        <AttributePanel focused={focused} />
       </div>
     </div>
   );
