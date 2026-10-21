@@ -10,11 +10,11 @@ import { useStore } from "@/store";
 
 // A date's match radius as the breeder reads it, from the record's own source.
 function radiusPhrase(radius: MatchRadius): string {
-  const where =
+  const source =
     radius.source === "h_pos_err"
-      ? "the largest positioning error its photographs report"
+      ? "from the photographs' positioning error"
       : `stated: ${radius.rationale}`;
-  return `matched within ${radius.value.toFixed(2)} m (${where})`;
+  return `radius ${radius.value.toFixed(2)} m ${source}`;
 }
 
 function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
@@ -53,18 +53,18 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
     } catch (e) {
       useStore
         .getState()
-        .pushToast(`Load mapping failed: ${e instanceof Error ? e.message : String(e)}`);
+        .pushToast(`Could not load the mapping: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   async function buildMapping() {
     if (!datasetRoot) return;
     if (!mappingName) {
-      setBuildMsg("Name the mapping before building.");
+      setBuildMsg("Name the mapping.");
       return;
     }
     if (!plantRegistry) {
-      setBuildMsg("Name a registered plant registry before building.");
+      setBuildMsg("Name the plant registry.");
       return;
     }
     setBuilding(true);
@@ -84,7 +84,7 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
       });
       setBuildSummary(res.summary);
       setBuildRadius(res.match_radius);
-      setBuildMsg(`Mapping built + saved as ${mappingName}`);
+      setBuildMsg(`Built ${mappingName}.`);
       refreshMappingNames();
     } catch (e) {
       if (e instanceof StructuredRefusalError && e.status === 409) {
@@ -93,7 +93,7 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
       } else {
         useStore
           .getState()
-          .pushToast(`Build mapping failed: ${e instanceof Error ? e.message : String(e)}`);
+          .pushToast(`Could not build the mapping: ${e instanceof Error ? e.message : String(e)}`);
         setBuildMsg(null);
       }
     } finally {
@@ -101,13 +101,15 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
     }
   }
 
+  const unmatched = buildSummary?.totals.n_unattributed ?? 0;
+
   return (
-    <div className="tcip-panel p-4">
+    <div className="tcip-panel p-5">
       <div className="tcip-heading mb-3">Plant mapping</div>
-      <div className="grid grid-cols-[1fr_1fr] gap-3">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
         <div className="flex flex-col gap-1">
           <label className="tcip-label" htmlFor="plant-mapping-name">
-            Mapping name (pick one already built under this project, or type a new one)
+            Mapping
           </label>
           <input
             id="plant-mapping-name"
@@ -123,7 +125,6 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
                 setBuildRadius({});
               }
             }}
-            placeholder="valley-2026"
             list="plant-mapping-names"
           />
           <datalist id="plant-mapping-names">
@@ -131,26 +132,19 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
               <option key={name} value={name} />
             ))}
           </datalist>
-          <label className="tcip-label mt-1" htmlFor="plant-registry-name">
-            Plant registry name (registered via register_plant_registry)
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="tcip-label" htmlFor="plant-registry-name">
+            Plant registry
           </label>
           <input
             id="plant-registry-name"
             className="tcip-input"
             value={plantRegistry}
             onChange={(e) => setPlantRegistry(e.target.value)}
-            placeholder="valley-plants"
           />
-          <label className="tcip-label mt-1 flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={supersedeMapping}
-              onChange={(e) => setSupersedeMapping(e.target.checked)}
-            />
-            Supersede a mapping a delivery event still cites
-          </label>
         </div>
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1">
           <label className="tcip-label" htmlFor="plant-mapping-radius">
             Match radius (m)
           </label>
@@ -160,47 +154,53 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
             type="number"
             step="0.1"
             min="0"
-            placeholder="each photograph's own reported positioning error"
             value={statedRadius}
             onChange={(e) =>
               setStatedRadius(e.target.value === "" ? "" : parseFloat(e.target.value) || 0)
             }
           />
-          {statedRadius !== "" && (
-            <>
-              <label className="tcip-label" htmlFor="plant-mapping-radius-rationale">
-                How the radius is known
-              </label>
-              <input
-                id="plant-mapping-radius-rationale"
-                className="tcip-input"
-                value={radiusRationale}
-                onChange={(e) => setRadiusRationale(e.target.value)}
-                placeholder="the receiver's spec sheet"
-              />
-            </>
-          )}
-          <button
-            className="tcip-btn-primary"
-            onClick={() => void buildMapping()}
-            disabled={building || !datasetRoot}
-          >
-            {building ? "Building…" : "Build + save mapping"}
-          </button>
-          {buildMsg && <div className="text-[13px] text-tcip-muted">{buildMsg}</div>}
         </div>
+        {statedRadius !== "" && (
+          <div className="flex flex-col gap-1">
+            <label className="tcip-label" htmlFor="plant-mapping-radius-rationale">
+              Radius source
+            </label>
+            <input
+              id="plant-mapping-radius-rationale"
+              className="tcip-input"
+              value={radiusRationale}
+              onChange={(e) => setRadiusRationale(e.target.value)}
+            />
+          </div>
+        )}
+      </div>
+      <label className="mt-3 flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={supersedeMapping}
+          onChange={(e) => setSupersedeMapping(e.target.checked)}
+        />
+        Replace a mapping a delivery used
+      </label>
+      <div className="mt-4 flex items-center gap-3">
+        <button
+          className="tcip-btn-primary"
+          onClick={() => void buildMapping()}
+          disabled={building || !datasetRoot}
+        >
+          {building ? "Building…" : "Build"}
+        </button>
+        {buildMsg && <span className="text-tcip-muted">{buildMsg}</span>}
       </div>
       {buildSummary && (
-        <div className="mt-2 text-[13px] text-tcip-muted tabular-nums">
+        <div className="mt-3 text-tcip-muted tabular-nums">
           {Object.entries(buildSummary.per_date).map(([d, s]) => (
             <div key={d}>
-              {`${d}: mapped ${s.n_mapped} of ${s.n_images}, ${s.n_unattributed} attributed to no plant · avg ${s.avg_distance_m === null ? "no distances" : `${s.avg_distance_m.toFixed(1)} m`}${d in buildRadius ? ` · ${radiusPhrase(buildRadius[d])}` : ""}`}
+              {`${d}: ${s.n_mapped} of ${s.n_images} mapped, ${s.n_unattributed} unmatched, ${s.avg_distance_m === null ? "no distances" : `avg ${s.avg_distance_m.toFixed(1)} m`}${d in buildRadius ? `, ${radiusPhrase(buildRadius[d])}` : ""}`}
             </div>
           ))}
-          {buildSummary.totals.n_unattributed > 0 && (
-            <div className="mt-1">
-              {`${buildSummary.totals.n_unattributed} captures across this mapping's dates are attributed to no plant (no readable position, a raster capture, or beyond the date's match radius)`}
-            </div>
+          {unmatched > 0 && (
+            <div className="mt-1">{`${unmatched} ${unmatched === 1 ? "capture" : "captures"} matched no plant.`}</div>
           )}
         </div>
       )}
@@ -241,9 +241,7 @@ function InvariancesPanel({ projectId }: { projectId: string }) {
   }, [projectId]);
 
   if (!recorded || !draft) {
-    return problem ? (
-      <div className="tcip-panel p-4 text-[13px] tcip-problem">{problem}</div>
-    ) : null;
+    return problem ? <div className="tcip-panel p-5 tcip-problem">{problem}</div> : null;
   }
   const answers = Object.entries(draft) as Answer[];
   const unchanged = answers.every(([name, value]) => recorded[name] === value);
@@ -261,9 +259,7 @@ function InvariancesPanel({ projectId }: { projectId: string }) {
         );
       setRecorded(res.invariances);
       setDraft(res.invariances);
-      useStore
-        .getState()
-        .pushToast(`Capture invariances corrected: ${changed.join(", ")}.`, "success");
+      useStore.getState().pushToast(`Saved: ${changed.join(", ")}.`, "success");
     } catch (e) {
       setProblem(e instanceof Error ? e.message : String(e));
     } finally {
@@ -272,20 +268,16 @@ function InvariancesPanel({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div className="tcip-panel p-4">
-      <div className="tcip-heading mb-1">Capture invariances</div>
-      <p className="mb-3 text-[13px] text-tcip-muted">
-        Whether each transform of an image leaves the trait&apos;s measurement what it was; every
-        augmentation a training run states is judged against these answers.
-      </p>
-      <div className="grid grid-cols-3 gap-3">
+    <div className="tcip-panel p-5">
+      <div className="tcip-heading mb-3">Capture invariances</div>
+      <div className="grid grid-cols-3 gap-4">
         {answers.map(([name, value]) => {
           const id = `invariance-${name}`;
           const label = invarianceName(name);
           return (
             <div key={name} className="flex flex-col gap-1">
               <label className="tcip-label" htmlFor={id}>
-                {typeof value === "boolean" ? label : `${label} (largest angle, degrees)`}
+                {typeof value === "boolean" ? label : `${label} (degrees)`}
               </label>
               {typeof value === "boolean" ? (
                 <select
@@ -314,14 +306,14 @@ function InvariancesPanel({ projectId }: { projectId: string }) {
         })}
       </div>
       <button
-        className="tcip-btn-primary mt-3"
+        className="tcip-btn-primary mt-4"
         onClick={() => void correct(draft)}
         disabled={unchanged || submitting}
       >
-        {submitting ? "Correcting…" : "Correct invariances"}
+        {submitting ? "Saving…" : "Save"}
       </button>
       {problem && (
-        <div className="mt-2 text-[13px] tcip-problem" aria-live="polite">
+        <div className="mt-2 tcip-problem" aria-live="polite">
           {problem}
         </div>
       )}
@@ -337,11 +329,13 @@ export function SetupTab() {
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
   if (!projectId) return null;
   return (
-    <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
-      <TabHeading tab="setup" />
-      <TraitRevisionPanel key={projectId} />
-      <InvariancesPanel key={`invariances-${projectId}`} projectId={projectId} />
-      <PlantMappingPanel key={`mapping-${projectId}`} datasetRoot={datasetRoot} />
+    <div className="flex-1 overflow-auto p-5">
+      <div className="mx-auto flex max-w-4xl flex-col gap-5">
+        <TabHeading tab="setup" />
+        <TraitRevisionPanel key={projectId} />
+        <InvariancesPanel key={`invariances-${projectId}`} projectId={projectId} />
+        <PlantMappingPanel key={`mapping-${projectId}`} datasetRoot={datasetRoot} />
+      </div>
     </div>
   );
 }

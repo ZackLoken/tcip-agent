@@ -28,7 +28,7 @@ beforeEach(() => {
 });
 
 describe("SetupTab capture invariances", () => {
-  const ROTATION = "rotation (largest angle, degrees)";
+  const ROTATION = "rotation (degrees)";
 
   beforeEach(() => {
     useStore.setState({ openProject: { id: CORRECTION.id, path: CORRECTED.path } });
@@ -45,7 +45,7 @@ describe("SetupTab capture invariances", () => {
         expect(screen.getByLabelText(ROTATION)).toHaveValue(value);
       }
     }
-    expect(screen.getByRole("button", { name: "Correct invariances" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("posts the whole block with the person's name and names what changed", async () => {
@@ -60,7 +60,7 @@ describe("SetupTab capture invariances", () => {
         { target: { value: typeof value === "boolean" ? (value ? "yes" : "no") : String(value) } },
       );
     }
-    fireEvent.click(screen.getByRole("button", { name: "Correct invariances" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
       expect(correct).toHaveBeenCalledWith({
@@ -71,7 +71,7 @@ describe("SetupTab capture invariances", () => {
     );
     await waitFor(() =>
       expect(useStore.getState().toasts.map((t) => t.message)).toContain(
-        "Capture invariances corrected: vertical flip no to yes, rotation 5 degrees to 10 degrees.",
+        "Saved: vertical flip no to yes, rotation 5 degrees to 10 degrees.",
       ),
     );
   });
@@ -83,7 +83,7 @@ describe("SetupTab capture invariances", () => {
 
     render(<SetupTab />);
     fireEvent.change(await screen.findByLabelText(ROTATION), { target: { value: "400" } });
-    fireEvent.click(screen.getByRole("button", { name: "Correct invariances" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(
       await screen.findByText("invariances.rotation: Input should be less than or equal to 180"),
@@ -112,7 +112,7 @@ describe("SetupTab trait revisions", () => {
         .getAllByRole("button")
         .map((b) => b.textContent),
     ).toEqual(["Revision 1", "Revision 2"]);
-    expect(within(row).getByText("Deliveries read revision 1")).toBeInTheDocument();
+    expect(within(row).getByText("Confirmed, revision 1")).toBeInTheDocument();
     expect(within(row).getByText("Only stems above the graft union.")).toBeInTheDocument();
     expect(within(row).getByText("Not confirmed")).toBeInTheDocument();
 
@@ -130,7 +130,7 @@ describe("SetupTab trait revisions", () => {
     useStore.setState({ user: "breeder" });
     render(<SetupTab />);
     const row = await screen.findByTestId("trait-stem");
-    fireEvent.click(within(row).getByRole("button", { name: "Confirm revision 2" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Confirm" }));
 
     await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
     expect(confirmSpy.mock.calls[0][0]).toEqual({
@@ -152,8 +152,8 @@ describe("SetupTab trait revisions", () => {
     render(<SetupTab />);
     const row = await screen.findByTestId("trait-stem");
     fireEvent.click(within(row).getByRole("button", { name: "Revision 1" }));
-    expect(within(row).queryByRole("button", { name: /confirm revision/i })).toBeNull();
-    fireEvent.click(within(row).getByRole("button", { name: /withdraw this confirmation/i }));
+    expect(within(row).queryByRole("button", { name: "Confirm" })).toBeNull();
+    fireEvent.click(within(row).getByRole("button", { name: "Withdraw" }));
 
     await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
     expect(confirmSpy.mock.calls[0][0]).toMatchObject({
@@ -175,7 +175,7 @@ describe("SetupTab trait revisions", () => {
 
     render(<SetupTab />);
     const row = await screen.findByTestId("trait-stem");
-    fireEvent.click(within(row).getByRole("button", { name: "Confirm revision 2" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Confirm" }));
 
     expect(await within(row).findByText(/not the one shown/)).toBeInTheDocument();
   });
@@ -189,20 +189,21 @@ describe("SetupTab trait revisions", () => {
 
     render(<SetupTab />);
     const row = await screen.findByTestId("trait-stem");
-    fireEvent.click(within(row).getByRole("button", { name: "Confirm revision 2" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Confirm" }));
 
     expect(
       await screen.findByText(/committed and unrecorded, do not blind-retry/),
     ).toBeInTheDocument();
   });
 
-  it("says nothing delivers under a trait with no confirmed revision", async () => {
+  it("marks a trait with no confirmed revision as not confirmed", async () => {
     vi.spyOn(resultsApi, "traits").mockResolvedValue(TRAIT_LISTINGS.unconfirmed);
 
     render(<SetupTab />);
     const row = await screen.findByTestId("trait-subject_a");
 
-    expect(within(row).getByText(/nothing delivers under this trait/)).toBeInTheDocument();
+    expect(within(row).getAllByText("Not confirmed").length).toBeGreaterThan(0);
+    expect(within(row).queryByText(/Confirmed, revision/)).toBeNull();
   });
 
   it("names a trait whose record will not read", async () => {
@@ -220,13 +221,13 @@ describe("SetupTab trait revisions", () => {
 
 describe("SetupTab plant-mapping build: match radius", () => {
   function fillAndBuild() {
-    fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
+    fireEvent.change(screen.getByLabelText("Mapping"), {
       target: { value: "valley-2026" },
     });
-    fireEvent.change(screen.getByPlaceholderText("valley-plants"), {
+    fireEvent.change(screen.getByLabelText("Plant registry"), {
       target: { value: "valley-plants" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
   }
 
   async function buildWithRadius(radius: MatchRadius) {
@@ -251,16 +252,14 @@ describe("SetupTab plant-mapping build: match radius", () => {
   it("names the photographs' positioning error for source h_pos_err", async () => {
     await buildWithRadius({ value: 2.5, source: "h_pos_err", rationale: null });
     expect(
-      await screen.findByText(
-        /matched within 2\.50 m \(the largest positioning error its photographs report\)/,
-      ),
+      await screen.findByText(/radius 2\.50 m from the photographs' positioning error/),
     ).toBeInTheDocument();
   });
 
   it("names the stated radius with its reason for source stated", async () => {
     await buildWithRadius({ value: 4, source: "stated", rationale: "the receiver's spec sheet" });
     expect(
-      await screen.findByText(/matched within 4\.00 m \(stated: the receiver's spec sheet\)/),
+      await screen.findByText(/radius 4\.00 m stated: the receiver's spec sheet/),
     ).toBeInTheDocument();
   });
 
@@ -271,10 +270,10 @@ describe("SetupTab plant-mapping build: match radius", () => {
     );
 
     fireEvent.change(screen.getByLabelText("Match radius (m)"), { target: { value: "4" } });
-    fireEvent.change(screen.getByLabelText("How the radius is known"), {
+    fireEvent.change(screen.getByLabelText("Radius source"), {
       target: { value: "the receiver's spec sheet" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
     await waitFor(() =>
       expect(resultsApi.buildPlantMapping).toHaveBeenLastCalledWith(
         expect.objectContaining({
@@ -291,8 +290,8 @@ describe("SetupTab plant-mapping build: match radius", () => {
       expect.objectContaining({ supersede: false }),
     );
 
-    fireEvent.click(screen.getByLabelText(/supersede a mapping a delivery event still cites/i));
-    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
+    fireEvent.click(screen.getByLabelText(/replace a mapping a delivery used/i));
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
     await waitFor(() =>
       expect(resultsApi.buildPlantMapping).toHaveBeenLastCalledWith(
         expect.objectContaining({ supersede: true }),
@@ -377,9 +376,7 @@ describe("SetupTab plant-mapping build: match radius", () => {
     );
     await buildFromInputs();
 
-    expect(
-      await screen.findByText(/1 captures across this mapping's dates are attributed to no plant/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/1 capture matched no plant/)).toBeInTheDocument();
   });
 
   it("renders no mapping-wide line when the total is zero", async () => {
@@ -390,9 +387,7 @@ describe("SetupTab plant-mapping build: match radius", () => {
     await buildFromInputs();
 
     await waitFor(() => expect(resultsApi.buildPlantMapping).toHaveBeenCalled());
-    expect(
-      screen.queryByText(/attributed to no plant \(no readable position/),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/matched no plant/)).not.toBeInTheDocument();
   });
 
   it("renders 'no distances' for a date with no recorded mean", async () => {
@@ -402,7 +397,7 @@ describe("SetupTab plant-mapping build: match radius", () => {
     );
     await buildFromInputs();
 
-    expect(await screen.findByText(/avg no distances/)).toBeInTheDocument();
+    expect(await screen.findByText(/unmatched, no distances/)).toBeInTheDocument();
   });
 
   const LOADED: ServedPlantMapping = {
@@ -423,11 +418,11 @@ describe("SetupTab plant-mapping build: match radius", () => {
 
     render(<SetupTab />);
     await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
-    fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
+    fireEvent.change(screen.getByLabelText("Mapping"), {
       target: { value: "valley-2026" },
     });
 
-    expect(await screen.findByText(/mapped 4 of 4, 0 attributed to no plant/)).toBeInTheDocument();
+    expect(await screen.findByText(/4 of 4 mapped, 0 unmatched/)).toBeInTheDocument();
     expect(resultsApi.loadPlantMapping).toHaveBeenCalledWith("valley-2026");
   });
 
@@ -437,15 +432,15 @@ describe("SetupTab plant-mapping build: match radius", () => {
 
     render(<SetupTab />);
     await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
-    const nameInput = screen.getByPlaceholderText("valley-2026");
+    const nameInput = screen.getByLabelText("Mapping");
     fireEvent.change(nameInput, { target: { value: "valley-2026" } });
 
-    expect(await screen.findByText(/mapped 4 of 4, 0 attributed to no plant/)).toBeInTheDocument();
+    expect(await screen.findByText(/4 of 4 mapped, 0 unmatched/)).toBeInTheDocument();
 
     fireEvent.change(nameInput, { target: { value: "valley-2026-draft" } });
 
-    expect(screen.queryByText(/mapped 4 of 4, 0 attributed to no plant/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/matched within \d/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/4 of 4 mapped, 0 unmatched/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/radius \d/)).not.toBeInTheDocument();
   });
 });
 
