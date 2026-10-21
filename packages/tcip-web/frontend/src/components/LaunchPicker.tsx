@@ -1,12 +1,11 @@
 /**
  * The launch surface: a list of rows read from records (never typed by the breeder), each a
- * recorded run or sweep to start again, plus the agent request composer, always last. A run's
- * row also carries its own nested "Data" choice ("As recorded" or a listed partition), submitted
- * with Start as the selection directory the server itself offered, never a path this component
- * resolves.
+ * recorded run or sweep to start again. A run's row also carries its own nested "Data" choice
+ * ("As recorded" or a listed partition), submitted with Start as the selection directory the
+ * server itself offered, never a path this component resolves.
  */
 
-import { useId, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { StructuredRefusalError } from "@/api/http";
 
@@ -69,10 +68,6 @@ export interface LaunchPickerProps {
     error?: string;
     onRetry?: () => void;
   };
-  composerLabel: string;
-  request: string;
-  onRequestChange: (text: string) => void;
-  onSend: () => void;
   /** Called once a row transitions into the selected state (never on deselection), so a caller
    * can fetch that row's own Data choices lazily instead of prefetching every row's on open. */
   onSelect?: (key: string) => void;
@@ -86,19 +81,11 @@ function refusalIssues(e: unknown): string[] {
   return [e instanceof Error ? e.message : String(e)];
 }
 
-export function LaunchPicker({
-  list,
-  composerLabel,
-  request,
-  onRequestChange,
-  onSend,
-  onSelect,
-}: LaunchPickerProps) {
+export function LaunchPicker({ list, onSelect }: LaunchPickerProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [selectedDataDir, setSelectedDataDir] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
-  const composerLabelId = useId();
 
   async function start(row: LaunchPickerRow) {
     setStarting(true);
@@ -183,10 +170,6 @@ export function LaunchPicker({
                       {row.data && (
                         <div className="mb-2">
                           <div className="tcip-heading mb-1">Data</div>
-                          <div className="text-[12px] text-tcip-muted mb-1">
-                            Members are checked against the labels at launch; an unadmitted member
-                            refuses the run.
-                          </div>
                           <ul className="space-y-1">
                             <li>
                               <label className="flex items-start gap-1 text-[12px]">
@@ -215,11 +198,6 @@ export function LaunchPicker({
                               </li>
                             ) : (
                               <>
-                                <li className="text-[12px] text-tcip-muted pl-4">
-                                  Choosing a partition replaces any recorded explicit validation
-                                  source with its own val side; admission then reads confirmed
-                                  negatives under the labels&apos; date.
-                                </li>
                                 {row.data.choices.map((choice) => (
                                   <li key={choice.selectionDir}>
                                     <label className="flex items-start gap-1 text-[12px]">
@@ -235,7 +213,7 @@ export function LaunchPicker({
                                         {choice.replacedSplitKeys &&
                                           choice.replacedSplitKeys.length > 0 && (
                                             <span className="block text-tcip-muted">
-                                              replaces the recorded split policy:{" "}
+                                              replaces the recorded{" "}
                                               {choice.replacedSplitKeys.join(", ")}
                                             </span>
                                           )}
@@ -285,27 +263,6 @@ export function LaunchPicker({
             })}
           </ul>
         )}
-      </div>
-
-      <div>
-        <label htmlFor={composerLabelId} className="tcip-heading mb-1 block">
-          {composerLabel}
-        </label>
-        <textarea
-          id={composerLabelId}
-          className="tcip-input w-full h-28 text-[13px] leading-4 resize-none mb-2"
-          value={request}
-          onChange={(e) => onRequestChange(e.target.value)}
-          spellCheck={true}
-        />
-        <button
-          type="button"
-          className="tcip-btn-primary text-[13px]"
-          onClick={onSend}
-          disabled={!request.trim()}
-        >
-          Send to agent
-        </button>
       </div>
     </div>
   );

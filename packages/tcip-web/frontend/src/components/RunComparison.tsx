@@ -316,9 +316,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
       </div>
 
       <div className="overflow-x-auto tcip-panel">
-        <div className="tcip-heading px-2 pt-2">
-          Logged metrics (last logged, not a verified result)
-        </div>
+        <div className="tcip-heading px-2 pt-2">Last logged metrics</div>
         <table className="w-full text-[13px]">
           <thead>
             <tr className="border-b border-tcip-border">

@@ -14,14 +14,12 @@ import { EmbeddedTool } from "@/components/EmbeddedTool";
 import { LaunchPicker, type DataPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
 import { MAX_MARKED_RUNS, RunComparison, type MarkedRun } from "@/components/RunComparison";
 import { TabHeading } from "@/components/TabHeading";
-import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
 import { useEmbeddedToolRetry, type EmbeddedToolStepResult } from "@/hooks/useEmbeddedToolRetry";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { TERMINAL_STATES } from "@/lib/runStatus";
 import { useStore } from "@/store";
 import { declaredClient } from "@/store/slices/agentActivity";
 import { selectProjectRoot } from "@/store/slices/gui";
-import { defaultTrainingRequest } from "@/tabs/agentPrompts";
 import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
 import {
   inProgressBatch,
@@ -46,13 +44,9 @@ function launcherSentence(launch: RunRow["launch"]): string {
 /** The longer sentence behind a row's launcher mark, reachable by assistive technology through
  * aria-describedby: what the mark means, with the declared client named for an agent launch. */
 function launcherDescription(launch: RunRow["launch"]): string {
-  if (!launch) {
-    return "No launch event in this project's audit log names this run.";
-  }
+  if (!launch) return "No launch event names this run.";
   const client = declaredClient(launch);
-  return client
-    ? `This run was launched by an agent through the MCP door, declared as ${client}.`
-    : "This run's launch event carries no agent identity: no agent declared one to the process that launched it.";
+  return client ? `Launched by the agent ${client}.` : "Launched with no agent named.";
 }
 
 /** How long ago a status record's own heartbeat instant was stamped, in whole minutes; null
@@ -158,8 +152,8 @@ function sweepLaunchRow(sweep: SweepGroup, onStart: () => Promise<void>): Launch
       <>
         <span className="block font-mono text-[13px]">{sweep.sweep_id}</span>
         <span className="block text-[12px] text-tcip-muted">
-          sweep of {String(sweep.input.n_trials)} trials · {String(sweep.input.search_alg)} ·{" "}
-          {sweep.state}
+          {sweep.input.n_trials == null ? "sweep" : `sweep of ${sweep.input.n_trials} trials`} ·{" "}
+          {String(sweep.input.search_alg)} · {sweep.state}
         </span>
       </>
     ),
@@ -295,13 +289,6 @@ function CancelError({ id, cancelError }: { id: string; cancelError: string | un
 // to the agent; this tab tracks the runs and sweeps those launches produce and their metrics.
 export function TrainingTab() {
   const projectRoot = useStore(selectProjectRoot);
-  const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
-  const subject = useStore((s) => s.gui.dataset.subject);
-
-  const { request, setRequest } = useEditableAgentRequest(
-    defaultTrainingRequest(datasetRoot, subject),
-  );
-
   const [pickerOpen, setPickerOpen] = useState(false);
   const [splitChoicesById, setSplitChoicesById] = useState<Record<string, SplitChoices>>({});
   const [splitChoicesLoadingId, setSplitChoicesLoadingId] = useState<string | null>(null);
@@ -424,11 +411,6 @@ export function TrainingTab() {
     void refreshRuns();
     const started = result.experiment_id ?? result.sweep_id;
     if (typeof started === "string") setSelectedRun(started);
-  }
-
-  function sendToAgent() {
-    useStore.getState().sendToAgentTerminal(request);
-    setPickerOpen(false);
   }
 
   // The run list's own poll keeps a state per run independent of the metrics stream; a ref
@@ -631,7 +613,7 @@ export function TrainingTab() {
               <span className="font-mono text-[13px] text-tcip-fg">{selectedRun}</span>
             </>
           ) : (
-            <span className="tcip-heading">Select a run to view metrics</span>
+            <span className="tcip-heading">Metrics</span>
           )
         }
         detail={
@@ -649,7 +631,7 @@ export function TrainingTab() {
                           <th className="tcip-th">epoch</th>
                           {metricKeys.map((key) => (
                             <th key={key} className="tcip-th">
-                              {key}
+                              {key.replaceAll("_", " ")}
                             </th>
                           ))}
                         </tr>
@@ -719,15 +701,11 @@ export function TrainingTab() {
             <LaunchPicker
               list={{
                 title: "Runs and sweeps in this project",
-                emptyMessage: "No run or sweep exists in this project yet.",
+                emptyMessage: "No runs.",
                 error: runsError ?? undefined,
                 onRetry: () => void refreshRuns(),
                 rows: launchRows,
               }}
-              composerLabel="Describe a new one to the agent"
-              request={request}
-              onRequestChange={setRequest}
-              onSend={sendToAgent}
               onSelect={(key) => void loadSplitChoices(key)}
             />
           </div>
@@ -741,14 +719,7 @@ export function TrainingTab() {
             </button>
           </div>
         )}
-        {empty && !runsError && (
-          <RunMonitorEmpty>No runs yet. Use &quot;Start a run&quot; above.</RunMonitorEmpty>
-        )}
-        {!empty && (
-          <div className="text-[12px] text-tcip-muted mb-1">
-            Every recorded run, sorted by experiment id, then every sweep with its trials.
-          </div>
-        )}
+        {empty && !runsError && <RunMonitorEmpty>No runs.</RunMonitorEmpty>}
         <ul className="space-y-1">
           {listing.runs.map(runItem)}
           {listing.sweeps.map((sweep) => (

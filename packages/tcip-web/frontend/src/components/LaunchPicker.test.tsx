@@ -6,10 +6,8 @@ import { LaunchPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
 
 afterEach(cleanup);
 
-function noop() {}
-
 describe("LaunchPicker", () => {
-  it("shows the empty message and only the composer row when there are no configs", () => {
+  it("shows the empty message and no Start when there are no configs", () => {
     render(
       <LaunchPicker
         list={{
@@ -17,45 +15,11 @@ describe("LaunchPicker", () => {
           emptyMessage: "No config exists in this project yet.",
           rows: [],
         }}
-        composerLabel="Describe a new one to the agent"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     expect(screen.getByText("No config exists in this project yet.")).toBeInTheDocument();
-    expect(screen.getByText("Describe a new one to the agent")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
-  });
-
-  const NO_ROWS = { title: "Runs and sweeps in this project", emptyMessage: "none", rows: [] };
-
-  it("sends the composer's request to the agent", () => {
-    const onSend = vi.fn();
-    render(
-      <LaunchPicker
-        list={NO_ROWS}
-        composerLabel="Describe a new one to the agent"
-        request="train something"
-        onRequestChange={noop}
-        onSend={onSend}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: /send to agent/i }));
-    expect(onSend).toHaveBeenCalledTimes(1);
-  });
-
-  it("disables the send action until the composer holds text", () => {
-    render(
-      <LaunchPicker
-        list={NO_ROWS}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
-      />,
-    );
-    expect(screen.getByRole("button", { name: /send to agent/i })).toBeDisabled();
   });
 
   function row(overrides: Partial<LaunchPickerRow> = {}): LaunchPickerRow {
@@ -72,10 +36,6 @@ describe("LaunchPicker", () => {
     render(
       <LaunchPicker
         list={{ title: "Configs in this project", emptyMessage: "none", rows: [row()] }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
@@ -93,10 +53,6 @@ describe("LaunchPicker", () => {
     render(
       <LaunchPicker
         list={{ title: "Configs in this project", emptyMessage: "none", rows: [row({ onStart })] }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
@@ -111,10 +67,6 @@ describe("LaunchPicker", () => {
     render(
       <LaunchPicker
         list={{ title: "Configs in this project", emptyMessage: "none", rows: [row({ onStart })] }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
@@ -129,10 +81,6 @@ describe("LaunchPicker", () => {
     render(
       <LaunchPicker
         list={{ title: "Configs in this project", emptyMessage: "none", rows: [row()] }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
@@ -157,10 +105,6 @@ describe("LaunchPicker", () => {
             }),
           ],
         }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
@@ -191,10 +135,6 @@ describe("LaunchPicker", () => {
             }),
           ],
         }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
@@ -226,10 +166,6 @@ describe("LaunchPicker", () => {
             }),
           ],
         }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
@@ -256,10 +192,6 @@ describe("LaunchPicker", () => {
             }),
           ],
         }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
@@ -286,10 +218,6 @@ describe("LaunchPicker", () => {
             }),
           ],
         }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
@@ -315,10 +243,6 @@ describe("LaunchPicker", () => {
             }),
           ],
         }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
@@ -350,10 +274,6 @@ describe("LaunchPicker", () => {
             }),
           ],
         }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
@@ -386,10 +306,6 @@ describe("LaunchPicker", () => {
             }),
           ],
         }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
@@ -409,10 +325,6 @@ describe("LaunchPicker", () => {
           emptyMessage: "none",
           rows: [row({ data: undefined, dataLoading: true })],
         }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
@@ -431,10 +343,6 @@ describe("LaunchPicker", () => {
           error: "Could not load configs: network error",
           onRetry,
         }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     expect(screen.getByText("Could not load configs: network error")).toBeInTheDocument();
@@ -447,10 +355,6 @@ describe("LaunchPicker", () => {
     render(
       <LaunchPicker
         list={{ title: "Configs in this project", emptyMessage: "none", rows: [row()] }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     const toggle = screen.getByText("exp-1").closest("button") as HTMLElement;
@@ -476,10 +380,6 @@ describe("LaunchPicker", () => {
             }),
           ],
         }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
@@ -510,16 +410,10 @@ describe("LaunchPicker", () => {
             }),
           ],
         }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
-    expect(
-      screen.getByText(/replaces the recorded split policy:\s*grouping, seed/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/replaces the recorded\s*grouping, seed/)).toBeInTheDocument();
   });
 
   it("shows a per-row Data-choices fetch failure as text on the row", () => {
@@ -530,10 +424,6 @@ describe("LaunchPicker", () => {
           emptyMessage: "none",
           rows: [row({ dataError: "Could not load its data choices: network error" })],
         }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
       />,
     );
     fireEvent.click(screen.getByText("exp-1"));
@@ -549,10 +439,6 @@ describe("LaunchPicker", () => {
           emptyMessage: "none",
           rows: [row(), row({ key: "exp-2", content: <span>exp-2</span> })],
         }}
-        composerLabel="Describe a new one"
-        request=""
-        onRequestChange={noop}
-        onSend={noop}
         onSelect={onSelect}
       />,
     );
