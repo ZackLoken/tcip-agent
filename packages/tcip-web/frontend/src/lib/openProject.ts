@@ -34,30 +34,17 @@ export function heldOpen(requestId: number | null): OpenHold | null {
   return opening !== null && opening.requestId === requestId ? opening : null;
 }
 
-/** Take the one open hold for ``projectId`` (null while the project is not yet known), before
- *  any step of the open that waits; null when an open already holds it. */
-export function takeOpenHold(projectId: string | null): number | null {
+/** Take the one open hold for ``projectId`` before any step of the open that waits; null when
+ *  an open already holds it. */
+export function takeOpenHold(projectId: string): number | null {
   const state = useStore.getState();
   if (state.opening !== null) return null;
   const requestId = ++lastRequestId;
   state.patchOpenStatus({
-    opening: { requestId, projectId, accepted: null },
+    opening: { requestId, projectId },
     openError: null,
   });
   return requestId;
-}
-
-/** Whether the initial open held as ``requestId`` still stands for ``listedId``, the project the
- *  listing names as open: no snapshot was accepted since the hold was taken and none is open
- *  now, or the latest accepted state is that project. An accepted state of no project open
- *  cancels it. */
-export function initialOpenWanted(requestId: number, listedId: string): boolean {
-  const hold = heldOpen(requestId);
-  if (!hold) return false;
-  const seen = hold.accepted
-    ? hold.accepted.projectId
-    : (useStore.getState().openProject?.id ?? null);
-  return seen === listedId || (hold.accepted === null && seen === null);
 }
 
 /** Give up the hold ``requestId`` took, unless it was already released or superseded. */
@@ -109,23 +96,20 @@ async function performOpen(
  *  carries an id) on a capture, subject and bucket name (one ``bucketsForDate`` serves), as the
  *  committed person; the backend points the workspace's last-opened pointer at it. A project
  *  holding no capture (``date`` empty) opens with no dataset selected, and an open already in
- *  flight leaves this one unstarted. The open holds a request id in the store, taken by this call
- *  or, as ``held``, by a caller that took it before its own lookup; a second choice of project or
- *  a snapshot adopting another project releases it, and a result from a request no longer held,
- *  success or failure, is dropped. A held failure is recorded for ``p`` and toasted so a tab that
- *  replaced the picker does not hide it. An image visit the settlement stopped and no departure
- *  closed resumes counting when the open ends, whatever its outcome. */
+ *  flight leaves this one unstarted. The open holds a request id in the store; a second choice
+ *  of project or a snapshot adopting another project releases it, and a result from a request
+ *  no longer held, success or failure, is dropped. A held failure is recorded for ``p`` and
+ *  toasted so a tab that replaced the picker does not hide it. An image visit the settlement
+ *  stopped and no departure closed resumes counting when the open ends, whatever its outcome. */
 export async function startOpen(
   p: ProjectSummary & { id: string },
   date: string,
   subject: string,
   bucket: string,
-  held?: number,
 ): Promise<void> {
-  const hold = heldOpen(held ?? takeOpenHold(p.id));
+  const hold = heldOpen(takeOpenHold(p.id));
   if (!hold) return;
   const { requestId } = hold;
-  useStore.getState().patchOpenStatus({ opening: { ...hold, projectId: p.id } });
   try {
     await performOpen(requestId, p, date, subject, bucket);
   } catch (e) {

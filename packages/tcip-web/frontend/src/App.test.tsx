@@ -74,20 +74,6 @@ const VALLEY: ProjectSummary = {
 
 const VALLEY_OPENED = { id: "a1b2c3d4e5f6", display_name: "Valley farm", path: "/ws/valley" };
 
-const VALLEY_SELECTED = {
-  status: "ok",
-  label_problem: null,
-  selection: {
-    dataset_root: "/ws/valley",
-    subject: "subject_a",
-    date: "2026-03-01",
-    image_list: [],
-    current_image_index: 0,
-    images_dir: null,
-    bucket: null,
-  },
-};
-
 function listProjects(openId: string | null) {
   vi.mocked(api.projects.list).mockResolvedValue({
     workspace: "/ws",
@@ -149,7 +135,7 @@ describe("App annotator gate", () => {
     expect(stateSocket.subscribePanel).not.toHaveBeenCalled();
     expect(useActiveTabSync).not.toHaveBeenCalled();
 
-    const field = screen.getByLabelText("Annotator");
+    const field = screen.getByLabelText("Your name");
     fireEvent.change(field, { target: { value: "g" } });
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     expect(stateSocket.connect).not.toHaveBeenCalled();
@@ -173,39 +159,31 @@ describe("App admission through the picker", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByText("Valley farm"));
-    fireEvent.change(screen.getByLabelText("Annotator"), { target: { value: "jordan" } });
-    fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+    fireEvent.change(screen.getByLabelText("Your name"), { target: { value: "jordan" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
     expect(await screen.findByRole("tablist")).toBeInTheDocument();
     expect(await screen.findAllByText(/backend refused/)).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Open project" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Open" })).toBeEnabled();
     expect(useStore.getState().user).toBe("jordan");
     expect(useStore.getState().openChoice.projectId).toBe("a1b2c3d4e5f6");
     expect(api.projects.open).toHaveBeenCalledTimes(1);
   });
 
-  it("opens the backend's open project when a blank first screen is admitted with Enter", async () => {
+  it("admits a blank first screen with Enter and preselects the open project without opening it", async () => {
     listProjects("a1b2c3d4e5f6");
-    vi.mocked(api.projects.open).mockResolvedValue(VALLEY_OPENED);
-    vi.mocked(api.dataset.select).mockResolvedValue(VALLEY_SELECTED);
     act(() => useStore.getState().setUser(""));
     render(<App />);
 
-    const field = screen.getByLabelText("Annotator");
+    const field = screen.getByLabelText("Your name");
     await screen.findByText("Valley farm");
-    expect(api.projects.open).not.toHaveBeenCalled();
     fireEvent.change(field, { target: { value: "jordan" } });
     fireEvent.keyDown(field, { key: "Enter" });
 
-    await waitFor(() =>
-      expect(api.projects.open).toHaveBeenCalledWith({ id: "a1b2c3d4e5f6", user: "jordan" }),
-    );
     expect(await screen.findByRole("tablist")).toBeInTheDocument();
-    await waitFor(() =>
-      expect(useStore.getState().openProject).toEqual({ id: "a1b2c3d4e5f6", path: "/ws/valley" }),
-    );
-    expect(useStore.getState().gui.dataset.dataset_root).toBe("/ws/valley");
-    expect(useStore.getState().openError).toBeNull();
+    await waitFor(() => expect(useStore.getState().openChoice.projectId).toBe("a1b2c3d4e5f6"));
+    expect(api.projects.open).not.toHaveBeenCalled();
+    expect(useStore.getState().openProject).toBeNull();
     expect(useStore.getState().opening).toBeNull();
   });
 
@@ -216,8 +194,8 @@ describe("App admission through the picker", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByText("Valley farm"));
-    fireEvent.change(screen.getByLabelText("Annotator"), { target: { value: "jordan" } });
-    fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+    fireEvent.change(screen.getByLabelText("Your name"), { target: { value: "jordan" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
     expect(await screen.findByRole("tablist")).toBeInTheDocument();
     expect(screen.queryByText("Open a project")).not.toBeInTheDocument();
@@ -238,8 +216,8 @@ describe("App admission through the picker", () => {
     act(() => useStore.getState().setUser(""));
     render(<App />);
     fireEvent.click(await screen.findByText("Valley farm"));
-    fireEvent.change(screen.getByLabelText("Annotator"), { target: { value: "jordan" } });
-    fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+    fireEvent.change(screen.getByLabelText("Your name"), { target: { value: "jordan" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
     await waitFor(() => expect(useStore.getState().opening?.projectId).toBe("a1b2c3d4e5f6"));
     act(() =>
       useStore
@@ -320,8 +298,8 @@ describe("App visit attribution across a change of person", () => {
 
     async function admit(card: string, name: string) {
       fireEvent.click(await screen.findByText(card));
-      fireEvent.change(screen.getByLabelText("Annotator"), { target: { value: name } });
-      fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+      fireEvent.change(screen.getByLabelText("Your name"), { target: { value: name } });
+      fireEvent.click(screen.getByRole("button", { name: "Open" }));
       await screen.findByTestId("canvas-stage");
       await waitFor(() =>
         expect(useStore.getState().sessionTracking.currentImageName).toBe("img1.jpg"),

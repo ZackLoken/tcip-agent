@@ -133,9 +133,7 @@ describe("recent-projects menu", () => {
 
 describe("recent-projects menu through the one opening transition", () => {
   it("starts no open while another open is in flight, and disables the menu", async () => {
-    useStore
-      .getState()
-      .patchOpenStatus({ opening: { requestId: 99, projectId: "zz", accepted: null } });
+    useStore.getState().patchOpenStatus({ opening: { requestId: 99, projectId: "zz" } });
     render(<ProjectBreadcrumb />);
 
     expect(screen.getByTitle("Recent projects")).toBeDisabled();

@@ -153,7 +153,7 @@ describe("ProjectPicker", () => {
     render(<ProjectPicker />);
 
     fireEvent.click(await screen.findByText("Valley farm"));
-    fireEvent.click(screen.getByText("Open project"));
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
     await waitFor(() => expect(api.dataset.select).toHaveBeenCalledTimes(1));
     expect(api.projects.open).toHaveBeenCalledWith({ id: "a1b2c3d4e5f6", user: "grower" });
@@ -170,12 +170,12 @@ describe("ProjectPicker", () => {
     render(<ProjectPicker />);
 
     fireEvent.click(await screen.findByText("Valley farm"));
-    const field = screen.getByLabelText("Annotator");
+    const field = screen.getByLabelText("Your name");
     fireEvent.change(field, { target: { value: "   " } });
-    expect(screen.getByRole("button", { name: "Open project" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Open" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Rename…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Remove…" })).toBeDisabled();
-    expect(field).toHaveAccessibleDescription(/Enter your name and press Enter/);
+    expect(field).toHaveAccessibleDescription(/Enter your name/);
     fireEvent.keyDown(field, { key: "Enter" });
     expect(useStore.getState().user).toBe("");
   });
@@ -186,16 +186,16 @@ describe("ProjectPicker", () => {
     render(<ProjectPicker />);
 
     fireEvent.click(await screen.findByText("Valley farm"));
-    const field = screen.getByLabelText("Annotator");
+    const field = screen.getByLabelText("Your name");
     fireEvent.change(field, { target: { value: "j" } });
     expect(useStore.getState().user).toBe("");
     expect(screen.getByRole("button", { name: "Rename…" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Open project" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Open" })).toBeEnabled();
 
     fireEvent.keyDown(field, { key: "Enter" });
     expect(useStore.getState().user).toBe("j");
     expect(screen.getByRole("button", { name: "Rename…" })).toBeEnabled();
-    expect(screen.queryByText(/press Enter/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Enter your name/)).not.toBeInTheDocument();
   });
 
   it("commits the typed name as typed and opens the project from the open button", async () => {
@@ -210,8 +210,8 @@ describe("ProjectPicker", () => {
     render(<ProjectPicker />);
 
     fireEvent.click(await screen.findByText("Valley farm"));
-    fireEvent.change(screen.getByLabelText("Annotator"), { target: { value: " jordan " } });
-    fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+    fireEvent.change(screen.getByLabelText("Your name"), { target: { value: " jordan " } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
     await waitFor(() =>
       expect(api.projects.open).toHaveBeenCalledWith({ id: "a1b2c3d4e5f6", user: " jordan " }),
@@ -241,7 +241,7 @@ describe("ProjectPicker", () => {
     async function startOpeningValley() {
       render(<ProjectPicker />);
       fireEvent.click(await screen.findByText("Valley farm"));
-      fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+      fireEvent.click(screen.getByRole("button", { name: "Open" }));
       await waitFor(() => expect(useStore.getState().opening?.projectId).toBe("a1b2c3d4e5f6"));
     }
 
@@ -408,161 +408,17 @@ describe("ProjectPicker", () => {
       expect(useStore.getState().gui.dataset.dataset_root).toBe("/ws/valley");
     });
 
-    it("drops a first-load opening whose listing a snapshot of another project overtook", async () => {
-      let list!: () => void;
-      vi.mocked(api.projects.list).mockReturnValue(
-        new Promise((resolve) => {
-          list = () => resolve(listing({ open_id: "a1b2c3d4e5f6" }));
-        }),
-      );
-      vi.mocked(api.projects.open).mockResolvedValue(VALLEY_OPENED);
-      render(<ProjectPicker />);
-      const opening = useStore.getState().opening;
-      expect(typeof opening?.requestId).toBe("number");
-      expect(opening).toEqual({ requestId: opening?.requestId, projectId: null, accepted: null });
-      act(() =>
-        useStore
-          .getState()
-          .mergeSnapshot(GUI_STATE_DEFAULTS, 1, { id: "b1b2c3d4e5f6", path: "/ws/hill" }, "e1"),
-      );
-
-      await act(() => Promise.resolve(list()));
-
-      expect(api.projects.open).not.toHaveBeenCalled();
-      expect(useStore.getState().openChoice.projectId).toBeNull();
-      expect(useStore.getState().opening).toBeNull();
-    });
-
-    it("drops a first-load opening when an accepted snapshot closed the project the listing names", async () => {
-      let list!: () => void;
-      vi.mocked(api.projects.list).mockReturnValue(
-        new Promise((resolve) => {
-          list = () => resolve(listing({ open_id: "a1b2c3d4e5f6" }));
-        }),
-      );
-      vi.mocked(api.projects.open).mockResolvedValue(VALLEY_OPENED);
-      vi.mocked(api.dataset.select).mockResolvedValue(selection("/ws/valley"));
-      render(<ProjectPicker />);
-      act(() =>
-        useStore
-          .getState()
-          .mergeSnapshot(GUI_STATE_DEFAULTS, 1, { id: "a1b2c3d4e5f6", path: "/ws/valley" }, "e1"),
-      );
-      act(() => useStore.getState().mergeSnapshot(GUI_STATE_DEFAULTS, 2, null, "e1"));
-      expect(useStore.getState().openProject).toBeNull();
-
-      await act(() => Promise.resolve(list()));
-
-      expect(api.projects.open).not.toHaveBeenCalled();
-      expect(useStore.getState().openChoice.projectId).toBeNull();
-      expect(useStore.getState().opening).toBeNull();
-    });
-
-    it("drops a first-load opening when an accepted snapshot says no project while none was open", async () => {
-      let list!: () => void;
-      vi.mocked(api.projects.list).mockReturnValue(
-        new Promise((resolve) => {
-          list = () => resolve(listing({ open_id: "a1b2c3d4e5f6" }));
-        }),
-      );
-      vi.mocked(api.projects.open).mockResolvedValue(VALLEY_OPENED);
-      vi.mocked(api.dataset.select).mockResolvedValue(selection("/ws/valley"));
-      render(<ProjectPicker />);
-      expect(useStore.getState().openProject).toBeNull();
-      act(() => useStore.getState().mergeSnapshot(GUI_STATE_DEFAULTS, 1, null, "e1"));
-      expect(useStore.getState().wsVersion).toBe(1);
-
-      await act(() => Promise.resolve(list()));
-
-      expect(api.projects.open).not.toHaveBeenCalled();
-      expect(useStore.getState().openChoice.projectId).toBeNull();
-      expect(useStore.getState().opening).toBeNull();
-    });
-
-    it("continues a first-load opening when a snapshot adopted the project its listing names", async () => {
-      let list!: () => void;
-      vi.mocked(api.projects.list).mockReturnValue(
-        new Promise((resolve) => {
-          list = () => resolve(listing({ open_id: "a1b2c3d4e5f6" }));
-        }),
-      );
-      vi.mocked(api.projects.open).mockResolvedValue(VALLEY_OPENED);
-      vi.mocked(api.dataset.select).mockResolvedValue(selection("/ws/valley"));
-      render(<ProjectPicker />);
-      act(() =>
-        useStore
-          .getState()
-          .mergeSnapshot(GUI_STATE_DEFAULTS, 1, { id: "a1b2c3d4e5f6", path: "/ws/valley" }, "e1"),
-      );
-      expect(useStore.getState().opening?.projectId).toBeNull();
-
-      await act(() => Promise.resolve(list()));
-
-      await waitFor(() => expect(useStore.getState().gui.dataset.dataset_root).toBe("/ws/valley"));
-      expect(useStore.getState().openChoice.projectId).toBe("a1b2c3d4e5f6");
-      expect(api.projects.open).toHaveBeenCalledTimes(1);
-      expect(useStore.getState().opening).toBeNull();
-    });
-
-    it("releases a first-load hold when the picker goes before its listing answers", async () => {
-      let list!: () => void;
-      vi.mocked(api.projects.list).mockReturnValue(
-        new Promise((resolve) => {
-          list = () => resolve(listing({ open_id: "a1b2c3d4e5f6" }));
-        }),
-      );
-      render(<ProjectPicker />);
-      expect(useStore.getState().opening).not.toBeNull();
-
-      cleanup();
-      expect(useStore.getState().opening).toBeNull();
-      await act(() => Promise.resolve(list()));
-
-      expect(api.projects.open).not.toHaveBeenCalled();
-    });
-
-    it("opens the listed project once under the replayed mount effect of StrictMode", async () => {
-      let list!: () => void;
-      vi.mocked(api.projects.list).mockReturnValue(
-        new Promise((resolve) => {
-          list = () => resolve(listing({ open_id: "a1b2c3d4e5f6" }));
-        }),
-      );
-      vi.mocked(api.projects.open).mockResolvedValue(VALLEY_OPENED);
-      vi.mocked(api.dataset.select).mockResolvedValue(selection("/ws/valley"));
+    it("preselects the listed open project under the replayed mount effect of StrictMode", async () => {
+      backendHoldsValleyOpen();
       render(
         <StrictMode>
           <ProjectPicker />
         </StrictMode>,
       );
 
-      await act(() => Promise.resolve(list()));
-
-      await waitFor(() => expect(useStore.getState().gui.dataset.dataset_root).toBe("/ws/valley"));
-      expect(api.projects.open).toHaveBeenCalledTimes(1);
-      expect(useStore.getState().openChoice.projectId).toBe("a1b2c3d4e5f6");
-      expect(useStore.getState().opening).toBeNull();
-    });
-
-    it("keeps a first-load open running when the picker goes after handing it over", async () => {
-      let answer!: () => void;
-      backendHoldsValleyOpen();
-      vi.mocked(api.projects.open).mockReturnValue(
-        new Promise((resolve) => {
-          answer = () => resolve(VALLEY_OPENED);
-        }),
-      );
-      render(<ProjectPicker />);
-      await waitFor(() => expect(useStore.getState().opening?.projectId).toBe("a1b2c3d4e5f6"));
-
-      cleanup();
-      expect(useStore.getState().opening?.projectId).toBe("a1b2c3d4e5f6");
-      await act(() => Promise.resolve(answer()));
-
-      await waitFor(() =>
-        expect(useStore.getState().openProject).toEqual({ id: "a1b2c3d4e5f6", path: "/ws/valley" }),
-      );
-      expect(useStore.getState().gui.dataset.dataset_root).toBe("/ws/valley");
+      await screen.findByText("Valley farm");
+      await waitFor(() => expect(useStore.getState().openChoice.projectId).toBe("a1b2c3d4e5f6"));
+      expect(api.projects.open).not.toHaveBeenCalled();
       expect(useStore.getState().opening).toBeNull();
     });
 
@@ -580,7 +436,7 @@ describe("ProjectPicker", () => {
       const first = useStore.getState().opening?.requestId;
       fireEvent.click(screen.getByText("Hill farm"));
       fireEvent.click(screen.getByText("Valley farm"));
-      fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+      fireEvent.click(screen.getByRole("button", { name: "Open" }));
       await waitFor(() => expect(api.projects.open).toHaveBeenCalledTimes(2));
       const second = useStore.getState().opening?.requestId;
       expect(second).not.toBe(first);
@@ -590,7 +446,6 @@ describe("ProjectPicker", () => {
       expect(useStore.getState().opening).toEqual({
         requestId: second,
         projectId: "a1b2c3d4e5f6",
-        accepted: null,
       });
       expect(useStore.getState().openError).toBeNull();
     });
@@ -629,16 +484,6 @@ describe("ProjectPicker", () => {
       );
       expect(screen.getByText(/hill refused/)).toBeInTheDocument();
     });
-
-    it("holds the first-load opening in flight so a second open cannot start beside it", async () => {
-      backendHoldsValleyOpen();
-      vi.mocked(api.projects.open).mockReturnValue(new Promise(() => {}));
-      render(<ProjectPicker />);
-
-      await waitFor(() => expect(useStore.getState().opening?.projectId).toBe("a1b2c3d4e5f6"));
-      expect(await screen.findByRole("button", { name: "Opening…" })).toBeDisabled();
-      expect(api.projects.open).toHaveBeenCalledTimes(1);
-    });
   });
 
   it("marks the project the listing names as open", async () => {
@@ -658,49 +503,24 @@ describe("ProjectPicker", () => {
     expect(screen.getByText("open").closest(".tcip-panel")).toHaveTextContent("Valley farm");
   });
 
-  it("does not reopen the backend's open project on first load while no name is entered", async () => {
+  it("preselects the backend's open project and opens nothing until the person does", async () => {
     backendHoldsValleyOpen();
-    useStore.getState().setUser("");
     render(<ProjectPicker />);
 
     await screen.findByText("Valley farm");
+    await waitFor(() => expect(useStore.getState().openChoice.projectId).toBe("a1b2c3d4e5f6"));
     expect(api.projects.open).not.toHaveBeenCalled();
-    expect(useStore.getState().initialOpenAttempted).toBe(false);
-    expect(useStore.getState().openChoice.projectId).toBeNull();
+    expect(screen.getByRole("button", { name: "Open" })).toBeEnabled();
   });
 
-  it("opens the backend's open project once a name is committed after a blank first mount", async () => {
-    backendHoldsValleyOpen();
-    useStore.getState().setUser("");
-    render(<ProjectPicker />);
-    await screen.findByText("Valley farm");
-    cleanup();
-
-    useStore.getState().setUser("jordan");
-    render(<ProjectPicker />);
-
-    await waitFor(() =>
-      expect(api.projects.open).toHaveBeenCalledWith({ id: "a1b2c3d4e5f6", user: "jordan" }),
-    );
-    expect(useStore.getState().openChoice.projectId).toBe("a1b2c3d4e5f6");
-  });
-
-  it("opens the backend's open project on first load when a name is already committed", async () => {
-    backendHoldsValleyOpen();
-    render(<ProjectPicker />);
-
-    await waitFor(() =>
-      expect(api.projects.open).toHaveBeenCalledWith({ id: "a1b2c3d4e5f6", user: "grower" }),
-    );
-  });
-
-  it("keeps the project the person chose over the first-load opening", async () => {
+  it("keeps the project the person chose over the preselection", async () => {
     backendHoldsValleyOpen();
     useStore.getState().patchOpenChoice({ projectId: "other0000000" });
     render(<ProjectPicker />);
 
     await screen.findByText("Valley farm");
     expect(api.projects.open).not.toHaveBeenCalled();
+    expect(useStore.getState().openChoice.projectId).toBe("other0000000");
   });
 
   it("removes a project by its id once its display name is typed", async () => {
