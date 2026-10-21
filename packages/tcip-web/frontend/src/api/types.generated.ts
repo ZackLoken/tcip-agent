@@ -366,12 +366,25 @@ export interface PhenologyPayload {
 export interface RegisteredModel {
   name: string;
   checkpoint_path: string;
+  sha256: string;
   tags: string[];
   experiment_id: string | null;
 }
 
 export interface RegisteredModels {
   models: RegisteredModel[];
+}
+
+export interface AssessmentSummary {
+  assessment_id: string;
+  checkpoint_sha256: string | null;
+  experiment_id: string | null;
+  delivery_kind: string | null;
+  passed: boolean;
+}
+
+export interface Assessments {
+  assessments: AssessmentSummary[];
 }
 
 export interface AcknowledgmentPayload {

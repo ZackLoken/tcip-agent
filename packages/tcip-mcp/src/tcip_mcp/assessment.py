@@ -236,6 +236,21 @@ def read_assessment(project: Path | str, assessment_id: str) -> Assessment:
     )
 
 
+def list_assessments(project: Path | str) -> list[Assessment]:
+    """Return every finished assessment recorded under ``project``, in id order.
+
+    A record that does not validate raises as :func:`read_assessment` does.
+    """
+    root = Path(project) / ASSESSMENTS_DIR
+    if not root.is_dir():
+        return []
+    return [
+        read_assessment(project, run_dir.name)
+        for run_dir in sorted(root.iterdir())
+        if (run_dir / ASSESSMENT_FILE).is_file()
+    ]
+
+
 def _open_run(project: Path) -> Path:
     """Create a fresh assessment's directory, named for its id, once, and return it.
 

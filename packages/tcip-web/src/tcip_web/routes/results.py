@@ -749,6 +749,7 @@ class RegisteredModel(BaseModel):
 
     name: str
     checkpoint_path: str
+    sha256: str
     tags: list[str]
     experiment_id: str | None
 
@@ -757,6 +758,50 @@ class RegisteredModels(BaseModel):
     """The open project's registered models."""
 
     models: list[RegisteredModel]
+
+
+class AssessmentSummary(BaseModel):
+    """One recorded assessment: its id, the checkpoint it judged, its kind and whether it passed.
+
+    ``checkpoint_sha256`` and ``experiment_id`` are the producer's, ``None`` for a physical-scale
+    assessment, which judges no checkpoint.
+    """
+
+    assessment_id: str
+    checkpoint_sha256: str | None
+    experiment_id: str | None
+    delivery_kind: str | None
+    passed: bool
+
+
+class Assessments(BaseModel):
+    """The open project's recorded assessments."""
+
+    assessments: list[AssessmentSummary]
+
+
+@router.get("/assessments")
+def assessments() -> Assessments:
+    """List every assessment recorded under the open project.
+
+    The listing is :func:`~tcip_mcp.assessment.list_assessments`'s.
+    """
+    from tcip_mcp.assessment import list_assessments
+
+    return Assessments(
+        assessments=[
+            AssessmentSummary(
+                assessment_id=a.assessment_id,
+                checkpoint_sha256=(
+                    a.producer.checkpoint_sha256 if a.producer else None
+                ),
+                experiment_id=a.producer.experiment_id if a.producer else None,
+                delivery_kind=a.delivery_kind,
+                passed=a.passed,
+            )
+            for a in list_assessments(store.held().root)
+        ]
+    )
 
 
 @router.get("/models/registered")
