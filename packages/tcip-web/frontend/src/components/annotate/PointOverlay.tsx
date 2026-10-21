@@ -2,7 +2,7 @@ import { memo } from "react";
 import { Circle, Line } from "react-konva";
 
 import { HaloLabel } from "@/components/HaloLabel";
-import { dashFor, FOCUS_HALO, type LineStyle } from "@/lib/symbology";
+import { casingShadow, dashFor, FOCUS_HALO, type LineStyle } from "@/lib/symbology";
 import type { PointShape } from "@/store/types";
 
 /**
@@ -65,6 +65,7 @@ export const PointOverlay = memo(function PointOverlay({
           stroke={stroke}
           strokeWidth={lineW}
           dash={dash}
+          {...casingShadow(lineW)}
         />
       ))}
       <Circle x={x} y={y} radius={coreR} fill={stroke} stroke="#ffffff" strokeWidth={lineW * 0.6} />

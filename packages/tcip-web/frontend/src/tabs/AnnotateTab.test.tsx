@@ -10,7 +10,14 @@ import { subjectColor } from "@/api/subjects";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { CUT_MISSES_REFUSAL } from "@/lib/polygonGeometry";
-import { FLAG_MARK, FOCUS_HALO, MATCH_COLORS, MATCH_TYPES, MATCH_WORDS } from "@/lib/symbology";
+import {
+  CASING,
+  FLAG_MARK,
+  FOCUS_HALO,
+  MATCH_COLORS,
+  MATCH_TYPES,
+  MATCH_WORDS,
+} from "@/lib/symbology";
 import { useStore } from "@/store";
 import type { Flag, ServedProposals } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
@@ -22,21 +29,29 @@ import { openTestProject } from "@/test/store";
 vi.mock("konva", () => ({ default: {} }));
 vi.mock("react-konva", () => ({
   Group: (props: { children?: React.ReactNode }) => <>{props.children}</>,
-  Rect: (props: { stroke?: string; dash?: number[]; fill?: string; opacity?: number }) => (
+  Rect: (props: {
+    stroke?: string;
+    dash?: number[];
+    fill?: string;
+    opacity?: number;
+    shadowColor?: string;
+  }) => (
     <div
       data-testid="k-rect"
       data-stroke={props.stroke}
       data-dash={props.dash ? "true" : undefined}
       data-fill={props.fill}
       data-opacity={props.opacity}
+      data-shadow={props.shadowColor}
     />
   ),
-  Line: (props: { stroke?: string; points?: number[]; opacity?: number }) => (
+  Line: (props: { stroke?: string; points?: number[]; opacity?: number; shadowColor?: string }) => (
     <div
       data-testid="k-line"
       data-stroke={props.stroke}
       data-points={props.points?.join(",")}
       data-opacity={props.opacity}
+      data-shadow={props.shadowColor}
     />
   ),
   Circle: (props: { x?: number; y?: number; fill?: string; radius?: number }) => (
@@ -1092,6 +1107,20 @@ describe("AnnotateTab point tool", () => {
     expect(useStore.getState().gui.mode).toBe("polygon");
     fireEvent.keyDown(window, { key: "m" });
     expect(useStore.getState().gui.mode).toBe("point");
+  });
+});
+
+describe("AnnotateTab casing", () => {
+  it("draws every outline on the dark casing, the focus halo without one", async () => {
+    await mountTab();
+    act(addBox);
+    fireEvent.mouseDown(screen.getByTestId("canvas-stage"), { clientX: 30, clientY: 30 });
+    const rects = screen.getAllByTestId("k-rect");
+    const cased = rects.filter((r) => r.getAttribute("data-shadow") === CASING.color);
+    expect(cased.map((r) => r.getAttribute("data-stroke"))).toEqual([subjectColor("subject_a")]);
+    expect(
+      rects.find((r) => r.getAttribute("data-stroke") === FOCUS_HALO.color),
+    ).not.toHaveAttribute("data-shadow");
   });
 });
 

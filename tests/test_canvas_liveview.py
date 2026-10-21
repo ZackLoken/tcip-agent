@@ -543,6 +543,54 @@ def test_render_draws_the_focused_shape_with_a_halo_under_its_own_stroke(
     assert _red_over_green(haloed, (100, 20)) > 40
 
 
+def test_render_draws_the_casing_under_every_outline_dashed_as_the_outline_is(
+    tmp_path: Path,
+) -> None:
+    """A shape carrying a casing renders that darker stroke beside its own, inside the dashes.
+
+    One pixel outside a solid stroke is darker with the casing than without; inside a dotted
+    outline's gap the casing leaves the pixel alone, as the outline does.
+    """
+    from tcip_annotation.viz import render_canvas_state
+
+    img = _make_image(tmp_path)
+    casing = {"color": "#000000", "opacity": 0.6, "width_factor": 3}
+
+    def rendered(cased: bool, dashed: bool) -> Image.Image:
+        shapes = _SHAPES.validate_python(
+            [
+                {
+                    "kind": "box",
+                    "xyxy": [40, 20, 160, 80],
+                    "color": "#FF0000",
+                    "tag": "gt",
+                    **({"casing": casing} if cased else {}),
+                    **({"dash": [2, 2]} if dashed else {}),
+                }
+            ]
+        )
+        out = render_canvas_state(
+            _pixels(img),
+            shapes,
+            region=_WHOLE,
+            output_path=str(tmp_path / f"casing-{cased}-{dashed}.png"),
+        )
+        return Image.open(out).convert("RGB")
+
+    plain, cased = rendered(False, False), rendered(True, False)
+    beside = (100, 19)
+    assert max(cased.getpixel(beside)) < max(plain.getpixel(beside)) - 40
+    assert _red_over_green(cased, (100, 20)) > 40
+    dotted = rendered(True, True)
+    # Each stroke width is one pixel here, so from the corner at 40 the top edge is two on, two
+    # off: 45 sits in a dash, 43 in the gap before it.
+    assert max(dotted.getpixel((45, 19))) < max(plain.getpixel((45, 19))) - 40
+    assert (
+        abs(max(dotted.getpixel((43, 19))) - max(plain.getpixel((43, 19))))
+        < 10
+    )
+
+
 _MIRROR = json.loads(
     (
         Path(__file__).parent / "fixtures" / "canvas_mirror_shapes.json"

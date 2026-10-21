@@ -21,6 +21,11 @@
         2,
         2
       ],
+      "casing": {
+        "color": "#000000",
+        "opacity": 0.6,
+        "width_factor": 2
+      },
       "tag": "gt"
     }
   ],
@@ -38,6 +43,11 @@
         2,
         2
       ],
+      "casing": {
+        "color": "#000000",
+        "opacity": 0.6,
+        "width_factor": 2
+      },
       "tag": "gt"
     }
   ],

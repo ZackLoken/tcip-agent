@@ -2,7 +2,7 @@ import { memo } from "react";
 import { Rect } from "react-konva";
 
 import { HaloLabel } from "@/components/HaloLabel";
-import { dashFor, FOCUS_HALO, type LineStyle } from "@/lib/symbology";
+import { casingShadow, dashFor, FOCUS_HALO, type LineStyle } from "@/lib/symbology";
 import type { Box } from "@/store/types";
 
 /** Per-shape memo: a drag replaces the whole boxes array on each RAF tick while the unchanged
@@ -52,7 +52,13 @@ export const BoxOverlay = memo(function BoxOverlay({
           opacity={FOCUS_HALO.opacity}
         />
       )}
-      <Rect {...geometry} stroke={stroke} strokeWidth={width} dash={dashFor(style, width)} />
+      <Rect
+        {...geometry}
+        stroke={stroke}
+        strokeWidth={width}
+        dash={dashFor(style, width)}
+        {...casingShadow(width)}
+      />
       {focused &&
         handleR &&
         corners.map(([cx, cy], i) => (
