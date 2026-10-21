@@ -59,10 +59,12 @@ function fmtDuration(seconds: number): string {
 export function MetaTab() {
   const projectRoot = useStore(selectProjectRoot);
 
-  const [reports, setReports] = useState<FrictionReport[]>([]);
-  const [retros, setRetros] = useState<Retrospective[]>([]);
-  // null once a load has failed: the panel then says so instead of claiming no sessions exist.
-  const [sessions, setSessions] = useState<SessionSummary[] | null>([]);
+  // null until a load answers, so no section claims to be empty before it is known to be.
+  const [reports, setReports] = useState<FrictionReport[] | null>(null);
+  const [retros, setRetros] = useState<Retrospective[] | null>(null);
+  // undefined until a load answers, null once one has failed: the panel then says so instead of
+  // claiming no sessions exist.
+  const [sessions, setSessions] = useState<SessionSummary[] | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -111,11 +113,11 @@ export function MetaTab() {
       <CollapsibleSection
         className="tcip-panel p-4"
         title="Friction"
-        right={`${reports.length} shown`}
+        right={reports === null ? "" : `${reports.length} shown`}
         storageKey="tcip.meta.frictionOpen"
         defaultOpen
       >
-        {reports.length > 0 ? (
+        {reports === null ? null : reports.length > 0 ? (
           <div className="flex flex-col gap-2">
             {reports.map((r) => (
               <div
@@ -152,11 +154,11 @@ export function MetaTab() {
       <CollapsibleSection
         className="tcip-panel p-4"
         title="Retrospectives"
-        right={`${retros.length} shown`}
+        right={retros === null ? "" : `${retros.length} shown`}
         storageKey="tcip.meta.retrospectivesOpen"
         defaultOpen
       >
-        {retros.length > 0 ? (
+        {retros === null ? null : retros.length > 0 ? (
           <div className="flex flex-col gap-3">
             {retros.map((rt) => (
               <div
@@ -181,11 +183,17 @@ export function MetaTab() {
       <CollapsibleSection
         className="tcip-panel p-4"
         title="Sessions"
-        right={sessions === null ? "not loaded" : `${shownSessions.length} recorded`}
+        right={
+          sessions === undefined
+            ? ""
+            : sessions === null
+              ? "not loaded"
+              : `${shownSessions.length} recorded`
+        }
         storageKey="tcip.meta.sessionsOpen"
         defaultOpen
       >
-        {sessions === null ? (
+        {sessions === undefined ? null : sessions === null ? (
           <div className="tcip-problem">Sessions could not be loaded: {error}</div>
         ) : shownSessions.length > 0 ? (
           <table className="w-full">
