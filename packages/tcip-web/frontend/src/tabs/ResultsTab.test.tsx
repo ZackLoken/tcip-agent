@@ -82,8 +82,8 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     expect(selects[1]).toBeDisabled();
 
     fireEvent.change(selects[0], { target: { value: "v2/2026-01-01" } });
-    fireEvent.change(screen.getByLabelText(/plants to measure/i), { target: { value: "P1" } });
-    fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
+    fireEvent.change(screen.getByLabelText("Plants"), { target: { value: "P1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
     await waitFor(() => expect(measurementSpy).toHaveBeenCalled());
     // The name is the one the tree response supplied, never one the tab assembled.
     expect(measurementSpy.mock.calls[0][0].buckets).toEqual(["v2/2026-01-01"]);
@@ -125,15 +125,15 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     const select = screen.getByTitle("The bucket whose predictions to use for this date");
     fireEvent.change(select, { target: { value: "baseline/2026-01-01" } });
     fireEvent.change(select, { target: { value: "" } });
-    fireEvent.change(screen.getByLabelText(/plants to measure/i), { target: { value: "P1" } });
-    fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
+    fireEvent.change(screen.getByLabelText("Plants"), { target: { value: "P1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
     await waitFor(() => expect(measurementSpy).toHaveBeenCalled());
     expect(measurementSpy.mock.calls[0][0].buckets).toEqual([]);
   });
 });
 
 describe("ResultsTab unreadable trait visibility", () => {
-  it("names an unreadable trait and sends the breeder to the Setup tab", async () => {
+  it("names an unreadable trait in one line with no navigation control", async () => {
     vi.spyOn(resultsApi, "traits").mockResolvedValue({
       ...TRAIT_LISTINGS.results,
       unreadable: [{ trait: "leaf_area", reason: "delivers: off-vocab ['leaf_size']" }],
@@ -143,8 +143,7 @@ describe("ResultsTab unreadable trait visibility", () => {
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
 
     expect(await screen.findByText(/will not read: leaf_area/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /open the setup tab/i }));
-    expect(useStore.getState().gui.active_tab).toBe("setup");
+    expect(screen.queryByRole("button", { name: /setup/i })).not.toBeInTheDocument();
   });
 
   it("renders nothing extra when every trait record reads", async () => {
@@ -154,15 +153,14 @@ describe("ResultsTab unreadable trait visibility", () => {
     expect(screen.queryByText(/will not read/)).not.toBeInTheDocument();
   });
 
-  it("sends the breeder to the Setup tab when no revision of the trait is confirmed", async () => {
+  it("says no revision of the trait is confirmed and shows no phenology panel", async () => {
     vi.spyOn(resultsApi, "traits").mockResolvedValue(TRAIT_LISTINGS.unconfirmed);
 
     render(<ResultsTab />);
 
-    expect(await screen.findByText(/No revision of subject_a is confirmed/)).toBeInTheDocument();
-    expect(screen.queryByText(/Per-plant phenology curves/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /open the setup tab/i }));
-    expect(useStore.getState().gui.active_tab).toBe("setup");
+    expect(await screen.findByText("No revision of subject_a is confirmed.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Phenology" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /setup/i })).not.toBeInTheDocument();
   });
 });
 
@@ -212,11 +210,11 @@ describe("ResultsTab evidence gate", () => {
     fireEvent.change(screen.getByTitle("The bucket whose predictions to use for this date"), {
       target: { value: "baseline/2026-01-01" },
     });
-    fireEvent.change(screen.getByLabelText(/plants to measure/i), { target: { value: "P1" } });
-    fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
+    fireEvent.change(screen.getByLabelText("Plants"), { target: { value: "P1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
   }
 
-  it("hands a delivery refusal to the assessment flow, not the raw error line", async () => {
+  it("answers a delivery refusal with one sentence and the unvalidated-numbers action, not the raw error line", async () => {
     mockDatasetTree({ subjects: [] });
     const message = UNVALIDATED.unvalidated_reason;
     vi.spyOn(resultsApi, "phenologyMeasurement").mockRejectedValue(
@@ -226,9 +224,11 @@ describe("ResultsTab evidence gate", () => {
     await renderAndCompute();
 
     expect(
-      await screen.findByRole("button", { name: /ask the agent to assess this/i }),
+      await screen.findByText("No assessment answers for these predictions."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /show unvalidated numbers/i })).toBeInTheDocument();
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /ask the agent/i })).not.toBeInTheDocument();
   });
 
   it("replaces the disabled export with an acknowledge-and-export flow while unvalidated", async () => {
@@ -315,7 +315,7 @@ describe("ResultsTab evidence gate", () => {
     });
   });
 
-  it("states which delivery kinds the export controls actually cover", async () => {
+  it("renders no explanatory paragraph beside the measurement, and the row count only once computed", async () => {
     mockDatasetTree({ subjects: [] });
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
       curves: { rows: [CURVE_ROW], n_plants: 1 },
@@ -323,12 +323,19 @@ describe("ResultsTab evidence gate", () => {
       ...VALIDATED,
     });
 
-    await renderAndCompute();
+    render(<ResultsTab />);
+    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    expect(screen.getByRole("heading", { name: "Milestones" })).toBeInTheDocument();
+    expect(screen.queryByText(/\d+ rows?$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Not validated:/)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Plants"), { target: { value: "P1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
     await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
 
-    expect(
-      screen.getByText(/a phenology milestone delivery here, and a per-image or per-plant/i),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Milestones\s*1 row/ })).toBeInTheDocument();
+    expect(screen.queryByText(/positive-state fraction is the share/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/acknowledged and exported unvalidated/i)).not.toBeInTheDocument();
   });
 
   it("renders the delivery-scoped unattributed count beside the measurement", async () => {
@@ -386,8 +393,8 @@ describe("ResultsTab onset table validity marker", () => {
     // computing, or the compute click races the fetch and refuses (no trait resolved yet).
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText(/plants to measure/i), { target: { value: "P1" } });
-    fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
+    fireEvent.change(screen.getByLabelText("Plants"), { target: { value: "P1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
     await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
   }
 
@@ -460,11 +467,9 @@ describe("ResultsTab onset table validity marker", () => {
       },
     ]);
     expect(screen.getByText("2026-03-12")).toBeInTheDocument();
-    const marker = screen.getByTitle(
-      "Right-censored: the last observation still hadn't met this target, so the true date, if any, is after this one.",
-    );
+    const marker = screen.getByTitle("After last observation");
     expect(marker).toHaveTextContent(">");
-    expect(screen.queryByTitle("Interpolated between two observed dates.")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Interpolated")).not.toBeInTheDocument();
   });
 });
 
@@ -484,16 +489,13 @@ describe("ResultsTab meaning refusals", () => {
 
     render(<ResultsTab />);
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText(/plants to measure/i), { target: { value: "P1" } });
-    fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
+    fireEvent.change(screen.getByLabelText("Plants"), { target: { value: "P1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
 
     expect(
       await screen.findByText(/an unvalidated number is not what this refusal is about/),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open the setup tab/i })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /ask the agent to assess this/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("No assessment answers for these predictions.")).toBeNull();
     expect(
       screen.queryByRole("button", { name: /show unvalidated numbers/i }),
     ).not.toBeInTheDocument();
@@ -540,8 +542,8 @@ describe("ResultsTab meaning refusals", () => {
 
     render(<ResultsTab />);
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText(/plants to measure/i), { target: { value: "P1" } });
-    fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
+    fireEvent.change(screen.getByLabelText("Plants"), { target: { value: "P1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
     await waitFor(() => expect(screen.getByRole("button", { name: /curves csv/i })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));
 
@@ -603,7 +605,7 @@ describe("ResultsTab delivery events (read-only)", () => {
     render(<ResultsTab />);
     await waitFor(() => expect(resultsApi.deliveryEvents).toHaveBeenCalled());
 
-    expect(screen.getByText(/nothing has shipped from this project yet/i)).toBeInTheDocument();
+    expect(screen.getByText("No deliveries.")).toBeInTheDocument();
   });
 
   it("renders only the load error when the listing is refused, not the empty state", async () => {
@@ -618,9 +620,7 @@ describe("ResultsTab delivery events (read-only)", () => {
     await waitFor(() =>
       expect(screen.getByText(/could not load what this project has shipped/i)).toBeInTheDocument(),
     );
-    expect(
-      screen.queryByText(/nothing has shipped from this project yet/i),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("No deliveries.")).not.toBeInTheDocument();
   });
 
   it("renders the plant mapping's dates_delivered, images_unattributed and plant_attribution", async () => {
@@ -730,9 +730,9 @@ describe("ResultsTab count export", () => {
     render(<ResultsTab />);
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
     await waitFor(() => expect(api.dataset.tree).toHaveBeenCalled());
-    const heading = await screen.findByText("Count export");
+    const heading = await screen.findByRole("heading", { name: "Export" });
     const panel = heading.closest(".tcip-panel");
-    if (!panel) throw new Error("Count export panel not found");
+    if (!panel) throw new Error("Export panel not found");
     // The Trait and Prediction bucket selects only fill in once their own async loads resolve.
     await within(panel as HTMLElement).findByText("subject_a");
     await within(panel as HTMLElement).findByText("2026-01-01 (baseline/2026-01-01)");
@@ -740,7 +740,7 @@ describe("ResultsTab count export", () => {
   }
 
   function chooseBucket(panel: HTMLElement) {
-    fireEvent.change(controlFollowing(panel, "Prediction bucket"), {
+    fireEvent.change(controlFollowing(panel, "Predictions"), {
       target: { value: "baseline/2026-01-01" },
     });
   }
@@ -758,7 +758,7 @@ describe("ResultsTab count export", () => {
 
     chooseBucket(panel);
     fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
-    fireEvent.change(controlFollowing(panel, "Filename"), { target: { value: "counts.csv" } });
+    fireEvent.change(controlFollowing(panel, "File name"), { target: { value: "counts.csv" } });
     fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
 
     await waitFor(() => expect(downloadCountCsv).toHaveBeenCalled());
@@ -789,16 +789,16 @@ describe("ResultsTab count export", () => {
       target: { value: "orthomosaic_plant_counts" },
     });
     chooseBucket(panel);
-    fireEvent.change(within(panel).getByLabelText(/plants to deliver/i), {
+    fireEvent.change(within(panel).getByLabelText("Plants"), {
       target: { value: "PLOT-01\nPLOT-02" },
     });
-    fireEvent.change(controlFollowing(panel, "Plant registry (registered by name)"), {
+    fireEvent.change(controlFollowing(panel, "Plant registry"), {
       target: { value: "reg" },
     });
-    fireEvent.change(controlFollowing(panel, "Delivered phenotype"), {
+    fireEvent.change(controlFollowing(panel, "Phenotype"), {
       target: { value: "stem_count" },
     });
-    fireEvent.change(controlFollowing(panel, "Filename"), {
+    fireEvent.change(controlFollowing(panel, "File name"), {
       target: { value: "plant_counts.csv" },
     });
     fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
@@ -832,22 +832,22 @@ describe("ResultsTab count export", () => {
       target: { value: "orthomosaic_plant_counts" },
     });
     chooseBucket(panel);
-    fireEvent.change(within(panel).getByLabelText(/plants to deliver/i), {
+    fireEvent.change(within(panel).getByLabelText("Plants"), {
       target: { value: "PLOT-01" },
     });
-    fireEvent.change(controlFollowing(panel, "Plant registry (registered by name)"), {
+    fireEvent.change(controlFollowing(panel, "Plant registry"), {
       target: { value: "reg" },
     });
-    fireEvent.change(controlFollowing(panel, "Delivered phenotype"), {
+    fireEvent.change(controlFollowing(panel, "Phenotype"), {
       target: { value: "stem_count" },
     });
-    const canopy = within(panel).getByPlaceholderText("canopy_subject (optional)");
+    const canopy = within(panel).getByLabelText("Canopy subject");
     fireEvent.change(canopy, { target: { value: "canopy" } });
-    fireEvent.change(within(panel).getByLabelText("position_error_m"), {
+    fireEvent.change(within(panel).getByLabelText("Position error (m)"), {
       target: { value: "0.7" },
     });
     fireEvent.change(canopy, { target: { value: "" } });
-    fireEvent.change(controlFollowing(panel, "Filename"), {
+    fireEvent.change(controlFollowing(panel, "File name"), {
       target: { value: "plant_counts.csv" },
     });
     fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
@@ -877,7 +877,7 @@ describe("ResultsTab count export", () => {
 
     chooseBucket(panel);
     fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
-    fireEvent.change(controlFollowing(panel, "Filename"), { target: { value: "counts.csv" } });
+    fireEvent.change(controlFollowing(panel, "File name"), { target: { value: "counts.csv" } });
     fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
 
     const errorText = await within(panel).findByText(/C:\/proj\/results_export\/counts\.csv/);
@@ -901,7 +901,7 @@ describe("ResultsTab count export", () => {
 
     chooseBucket(panel);
     fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
-    fireEvent.change(controlFollowing(panel, "Filename"), { target: { value: "counts.csv" } });
+    fireEvent.change(controlFollowing(panel, "File name"), { target: { value: "counts.csv" } });
     fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
 
     expect(await within(panel).findByText(message)).toBeInTheDocument();
@@ -926,7 +926,7 @@ describe("ResultsTab count export", () => {
 
     chooseBucket(panel);
     fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
-    fireEvent.change(controlFollowing(panel, "Filename"), { target: { value: "counts.csv" } });
+    fireEvent.change(controlFollowing(panel, "File name"), { target: { value: "counts.csv" } });
     fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
 
     expect(
@@ -950,11 +950,11 @@ describe("ResultsTab count export", () => {
 
     chooseBucket(panel);
     fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
-    fireEvent.change(controlFollowing(panel, "Filename"), { target: { value: "counts.csv" } });
+    fireEvent.change(controlFollowing(panel, "File name"), { target: { value: "counts.csv" } });
     const button = within(panel).getByRole("button", { name: /^export$/i });
     fireEvent.click(button);
 
-    expect(await within(panel).findByRole("button", { name: /exporting/i })).toBeDisabled();
+    await waitFor(() => expect(button).toBeDisabled());
 
     resolveDownload({
       blob: new Blob(["x"]),

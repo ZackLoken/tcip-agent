@@ -122,18 +122,11 @@ export function DeliveryEventsPanel({
 }) {
   return (
     <div className="tcip-panel p-4">
-      <div className="tcip-heading mb-1">Delivery events</div>
-      <p className="mb-3 text-[13px] text-tcip-muted">
-        What has shipped from this project, and for each delivered bucket the assessment that
-        answered for it or why none did. A delivery event is a fact, not a statement: there is
-        nothing here to confirm.
-      </p>
+      <h2 className="tcip-heading mb-3">Deliveries</h2>
       {loadError ? (
-        <div className="text-[13px] tcip-problem">{loadError}</div>
+        <div className="tcip-problem">{loadError}</div>
       ) : records.length === 0 ? (
-        <div className="text-[13px] text-tcip-muted">
-          Nothing has shipped from this project yet.
-        </div>
+        <div className="text-tcip-muted">No deliveries.</div>
       ) : (
         <ul className="flex flex-col gap-2">
           {records.map((record) => (
