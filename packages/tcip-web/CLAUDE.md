@@ -32,8 +32,7 @@ Use the `frontend-design` skill for IA/visual work.
 
 `terminal.py` holds the provider table (`PROVIDERS`); each row's definition there is its launch: its
 executable, its arguments, the output sequence one installed version of its harness was recorded
-writing when its composer appeared (`composer_ready`, with that version's `--version` line as
-`composer_ready_version`; no harness promises it), what the harness's own enforcement restricts and
+writing when its composer appeared (`composer_ready`; no harness promises it), what the harness's own enforcement restricts and
 leaves open (`confinement`, recorded on every launch), and the preparation the launch runs first
 when the harness takes its MCP server or its tool approvals only through its own configuration (the
 Antigravity row registers the server through `agy mcp add` and allows every tcip tool and, when the
@@ -49,11 +48,9 @@ Codex's. The ritual is pasted together with every request staged by the time the
 input, as one message, so a harness that starts a turn on the ritual still reads them; the paste
 waits until the harness has bracketed paste on and has written its row's `composer_ready`, since a
 harness can turn bracketed paste on while a loading screen still discards input. Each launch probes
-the version its harness declares, so a harness updated in place is seen at its next launch; one
-declaring another version than `composer_ready_version` records why its delivery is unverified
-(`delivery_unverified`), and the rail shows it. A matching version proves nothing about delivery: no
-timer-free signal tells a launch whose sequence never arrives from one still starting, and a
-sequence that moved earlier still pastes early. Session create and restart name a row by its exact
+the version its harness declares and records it, so a harness updated in place is seen at its next
+launch. No timer-free signal tells a launch whose sequence never arrives from one still starting,
+and a sequence that moved earlier still pastes early. Session create and restart name a row by its exact
 id; the status route lists every row with the reason it cannot launch, if any, and the rail lets the
 breeder pick one. A row is added only after its harness's real flags are read from the installed CLI
 and one live smoke (`tools/smoke_terminal_e2e.py <id>`) passes: the smoke opens a scratch project,

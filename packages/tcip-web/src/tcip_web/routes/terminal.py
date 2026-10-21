@@ -61,21 +61,18 @@ def _offer(queue: asyncio.Queue, data: str) -> None:
 
 
 class LaunchedProgram(BaseModel):
-    """What a launch ran: its provider row, argv, version, confinement, delivery and preparation.
+    """What a launch ran: its provider row, argv, version, confinement and preparation.
 
     It carries the provider row's id, the rendered argv, the version its executable (the first
     element) declares, what the row states its harness's own enforcement restricts and leaves
-    open (``None`` for a ``TCIP_TERMINAL_CMD`` override, which runs no row's arguments), why
-    delivery to it rests on a composer sequence recorded on another version (``None`` when the
-    versions agree, and for an override), and the steps the row's preparation took before the
-    launch, empty when it has none.
+    open (``None`` for a ``TCIP_TERMINAL_CMD`` override, which runs no row's arguments), and
+    the steps the row's preparation took before the launch, empty when it has none.
     """
 
     provider: str
     argv: list[str]
     version: str | None
     confinement: str | None
-    delivery_unverified: str | None
     prepared: list[str]
 
 
@@ -213,11 +210,6 @@ class TerminalSession:
                 provider=provider.id,
                 prepared=prepared,
                 confinement=None if command[1] else provider.confinement,
-                delivery_unverified=(
-                    None
-                    if command[1]
-                    else provider.delivery_unverified(program["version"])
-                ),
                 **program,
             )
             self._launch.composer_ready = provider.composer_ready

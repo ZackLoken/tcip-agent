@@ -401,9 +401,6 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
         ]
     assert created["launched"]["prepared"] == expected_prepared
     assert created["launched"]["confinement"] == row.confinement
-    assert created["launched"][
-        "delivery_unverified"
-    ] == row.delivery_unverified(created["launched"]["version"])
     (started,) = audit_rows(opened_project, "agent_terminal_started")
     assert started["arguments"]["prepared"] == expected_prepared
     assert started["arguments"]["confinement"] == row.confinement
@@ -1136,25 +1133,6 @@ def test_the_ritual_is_pasted_at_the_read_where_the_harness_composer_goes_live(
         )
 
 
-@pytest.mark.parametrize("row", pty_host.PROVIDERS, ids=lambda row: row.id)
-def test_a_launch_names_the_versions_when_its_harness_is_not_the_recorded_one(
-    row: pty_host.Provider,
-) -> None:
-    """A launch names both versions when its harness is not the recorded one.
-
-    The recorded version draws no note, version ``9.9.9`` draws a note naming both versions,
-    and no version draws a note.
-    """
-    assert row.delivery_unverified(row.composer_ready_version) is None
-    note = row.delivery_unverified("9.9.9")
-    assert (
-        note is not None
-        and row.composer_ready_version in note
-        and "9.9.9" in note
-    )
-    assert row.delivery_unverified(None) is not None
-
-
 def test_bracketed_paste_follows_the_last_mode_change_the_agent_wrote() -> (
     None
 ):
@@ -1594,7 +1572,6 @@ def test_create_answers_the_launched_executable_and_no_version_for_an_override(
     assert launched["argv"] == pty_host._override_argv()
     assert launched["version"] is None
     assert launched["confinement"] is None
-    assert launched["delivery_unverified"] is None
 
 
 def test_the_resolved_cli_is_probed_for_the_version_it_declares(
@@ -1654,14 +1631,12 @@ def test_a_harness_updated_in_place_is_seen_at_its_next_launch_without_a_backend
 ) -> None:
     """A harness updated in place is seen at its next launch without a backend restart.
 
-    The second launch of the same executable reports the version it declares then, and the
-    launch and its audit line carry why delivery to that version is unverified.
+    The second launch of the same executable reports the version it declares then, on the
+    launch and on its audit line.
     """
     version_file = tmp_path / "version.txt"
     row = pty_host.PROVIDERS[0]
-    version_file.write_text(
-        row.composer_ready_version + "\n", encoding="utf-8"
-    )
+    version_file.write_text("1.0.0\n", encoding="utf-8")
     monkeypatch.setattr(
         pty_host,
         "PROVIDERS",
@@ -1677,8 +1652,7 @@ def test_a_harness_updated_in_place_is_seen_at_its_next_launch_without_a_backend
     monkeypatch.delenv("TCIP_TERMINAL_CMD")
 
     created = client.post("/api/terminal/sessions", json=LAUNCH).json()
-    assert created["launched"]["version"] == row.composer_ready_version
-    assert created["launched"]["delivery_unverified"] is None
+    assert created["launched"]["version"] == "1.0.0"
 
     version_file.write_text("9.9.9 (updated)\n", encoding="utf-8")
     restarted = client.post(
@@ -1686,12 +1660,9 @@ def test_a_harness_updated_in_place_is_seen_at_its_next_launch_without_a_backend
     ).json()
 
     assert restarted["launched"]["version"] == "9.9.9 (updated)"
-    note = row.delivery_unverified("9.9.9 (updated)")
-    assert note is not None
-    assert restarted["launched"]["delivery_unverified"] == note
     first, second = audit_rows(opened_project, "agent_terminal_started")
-    assert first["arguments"]["delivery_unverified"] is None
-    assert second["arguments"]["delivery_unverified"] == note
+    assert first["arguments"]["version"] == "1.0.0"
+    assert second["arguments"]["version"] == "9.9.9 (updated)"
 
 
 def test_the_spawned_process_inherits_the_terminal_session_id(
