@@ -38,9 +38,15 @@ import type {
   TabName,
 } from "@/store/types";
 
-/** Whether `e` is the backend answering 409, an outcome a caller resolves rather than an error. */
-function isConflict(e: unknown): e is StructuredRefusalError {
-  return e instanceof StructuredRefusalError && e.status === 409;
+/** The label save's own 409: the document changed since it was loaded. An audit-gap or
+ *  no-project 409 carries its own shape and is not this. */
+function isVersionConflict(e: unknown): e is StructuredRefusalError {
+  return e instanceof StructuredRefusalError && e.detail.kind === "version_conflict";
+}
+
+/** The canvas push's own 409: the backend holds another project open, which it names. */
+function isProjectMismatch(e: unknown): e is StructuredRefusalError {
+  return e instanceof StructuredRefusalError && typeof e.detail.open_project_id === "string";
 }
 
 function q(params: Record<string, string | number | boolean | null | undefined>) {
@@ -252,7 +258,7 @@ export const api = {
           body,
         );
       } catch (e) {
-        if (!isConflict(e)) throw e;
+        if (!isProjectMismatch(e)) throw e;
         stateSocket.resync();
         return { status: "conflict" };
       }
@@ -327,7 +333,7 @@ export const api = {
         );
         return { status: "ok", labels: loadedLabels(answer), accepted: answer.accepted };
       } catch (e) {
-        if (!isConflict(e)) throw e;
+        if (!isVersionConflict(e)) throw e;
         return { status: "conflict" };
       }
     },

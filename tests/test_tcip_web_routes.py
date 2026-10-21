@@ -917,6 +917,7 @@ def test_annotate_save_refuses_a_token_the_document_has_moved_past(
         },
     )
     assert resp.status_code == 409
+    assert resp.json()["detail"]["kind"] == "version_conflict"
 
 
 def test_annotate_save_with_the_current_token_is_accepted(
