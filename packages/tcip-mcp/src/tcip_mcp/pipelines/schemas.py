@@ -377,12 +377,13 @@ class PretrainedWeights(BaseModel):
     """Pretrained weights a model's builder loads.
 
     They are named by the ``library`` publishing them and their ``name`` there, a timm pretrained
-    tag (``resnet18.a1_in1k``) or a torchvision weights enum member
-    (``ResNet18_Weights.IMAGENET1K_V1``).
+    tag (``resnet18.a1_in1k``), a torchvision weights enum member
+    (``ResNet18_Weights.IMAGENET1K_V1``) or a ``transformers`` checkpoint, a Hugging Face hub id
+    (``facebook/mask2former-swin-small-coco-instance``) or a directory holding one.
     """
 
     model_config = ConfigDict(extra="forbid")
-    library: Literal["timm", "torchvision"]
+    library: Literal["timm", "torchvision", "transformers"]
     name: str = Field(min_length=1)
 
 
