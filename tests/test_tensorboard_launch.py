@@ -1,6 +1,7 @@
 """launch_tensorboard answers an error for a child dying in startup and a URL for a living one.
 
-The command is substituted by real child processes, a dying one and a living one. A ``Popen``
+The command is substituted by real child processes, a dying one and living ones accepting on the
+port the launch hands them. A ``Popen``
 stand-in whose ``wait`` always raises ``TimeoutExpired`` drives ``launch_tensorboard``'s failure
 path, ``stop_tensorboard`` and the exit sweep (``_stop_all_tracked``), and each reports or logs
 the unconfirmed kill.
@@ -12,6 +13,8 @@ import logging
 import subprocess
 import sys
 from typing import TYPE_CHECKING
+
+from tests._tensorboard_parent import listening_argv
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -47,15 +50,18 @@ class DyingChild(subprocess.Popen):
         self.wait(timeout=30)
 
 
+def _port_of(cmd: list[str]) -> int:
+    """Return the ``--port`` a TensorBoard command line names."""
+    return int(cmd[cmd.index("--port") + 1])
+
+
 class LivingChild(subprocess.Popen):
-    """A real child that sleeps for thirty seconds, in place of the command it was handed."""
+    """A real child accepting on the command's port for thirty seconds, in place of the command."""
 
     def __init__(
         self, cmd: list[str], **kwargs: Unpack[_PopenStreams]
     ) -> None:
-        super().__init__(
-            [sys.executable, "-c", "import time; time.sleep(30)"], **kwargs
-        )
+        super().__init__(listening_argv(_port_of(cmd), seconds=30), **kwargs)
 
 
 def test_launch_reports_the_failure_when_the_process_exits_immediately(
@@ -82,10 +88,8 @@ def _never_confirms_kill_popen_class(spawned: list[subprocess.Popen]) -> type:
     real_popen = subprocess.Popen
 
     class _NeverConfirmsKillPopen:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            self._real = real_popen(
-                [sys.executable, "-c", "import time; time.sleep(120)"]
-            )
+        def __init__(self, cmd: list[str], **kwargs: object) -> None:
+            self._real = real_popen(listening_argv(_port_of(cmd)))
             spawned.append(self._real)
             self.pid = self._real.pid
 
@@ -236,6 +240,30 @@ def test_launch_returns_a_url_for_a_process_that_stays_up(
     assert tb.running_url(str(tmp_path)) is None
 
 
+def test_launch_answers_its_url_only_once_the_board_accepts_a_connection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A board that takes two seconds to listen is reachable at the URL the launch answers."""
+    import socket
+
+    from tcip_mcp.pipelines.training import tensorboard_manager as tb
+    from tcip_mcp.web_client import LOOPBACK_HOST
+
+    monkeypatch.setattr(
+        tb,
+        "_tensorboard_argv",
+        lambda logdir, port: listening_argv(port, delay=2.0, seconds=30),
+    )
+
+    info = tb.launch_tensorboard(str(tmp_path))
+    try:
+        socket.create_connection(
+            (LOOPBACK_HOST, info["port"]), timeout=1
+        ).close()
+    finally:
+        tb.stop_tensorboard(str(tmp_path))
+
+
 def test_launch_reports_the_platform_lifetime_tie(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -248,11 +276,7 @@ def test_launch_reports_the_platform_lifetime_tie(
     monkeypatch.setattr(
         tb,
         "_tensorboard_argv",
-        lambda logdir, port: [
-            sys.executable,
-            "-c",
-            "import time; time.sleep(30)",
-        ],
+        lambda logdir, port: listening_argv(port, seconds=30),
     )
 
     info = tb.launch_tensorboard(str(tmp_path))
@@ -279,11 +303,7 @@ def test_a_board_is_tracked_under_the_one_spelling_the_store_keys_its_directory_
     monkeypatch.setattr(
         tb,
         "_tensorboard_argv",
-        lambda logdir, port: [
-            sys.executable,
-            "-c",
-            "import time; time.sleep(30)",
-        ],
+        lambda logdir, port: listening_argv(port, seconds=30),
     )
     launched, other = str(tmp_path / "Board"), str(tmp_path / "BOARD")
     one_directory = canonical_path(launched) == canonical_path(other)

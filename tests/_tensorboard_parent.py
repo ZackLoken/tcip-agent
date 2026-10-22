@@ -13,8 +13,35 @@ import threading
 import time
 
 
+def listening_argv(
+    port: int,
+    *,
+    delay: float = 0.0,
+    seconds: float = 120.0,
+    ignore_term: bool = False,
+) -> list[str]:
+    """Return a TensorBoard stand-in's argv: after ``delay`` it accepts on ``port``, then sleeps.
+
+    It sleeps ``seconds`` once listening, ignoring SIGTERM when ``ignore_term``.
+    """
+    script = (
+        "import signal, socket, time\n"
+        + (
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            if ignore_term
+            else ""
+        )
+        + f"time.sleep({delay})\n"
+        + "s = socket.socket()\n"
+        + f"s.bind(('127.0.0.1', {port}))\n"
+        + "s.listen()\n"
+        + f"time.sleep({seconds})\n"
+    )
+    return [sys.executable, "-c", script]
+
+
 def _sleep_argv(logdir: str, port: int) -> list[str]:
-    return [sys.executable, "-c", "import time; time.sleep(120)"]
+    return listening_argv(port)
 
 
 def _standin_pid(returned_pid: int, guardian_expected: bool) -> int:

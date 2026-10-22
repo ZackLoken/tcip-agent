@@ -188,15 +188,12 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(
 ) -> None:
     """A stand-in that ignores SIGTERM is ended before ``stop_tensorboard`` returns."""
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
+    from tests._tensorboard_parent import listening_argv
 
     monkeypatch.setattr(
         tb,
         "_tensorboard_argv",
-        lambda logdir, port: [
-            sys.executable,
-            "-c",
-            "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(120)",
-        ],
+        lambda logdir, port: listening_argv(port, ignore_term=True),
     )
 
     guardian_identity: tuple[int, float] | None = None
