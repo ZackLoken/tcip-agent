@@ -502,14 +502,23 @@ export function AnnotateTab() {
   const acceptTarget = decisionTarget("accept", focused, unreviewedKept);
   const rejectTarget = decisionTarget("reject", focused, unreviewedKept);
 
-  function decide(action: "accept" | "reject") {
+  /** Decide the action's target. A decision on the focused item steps to the next item of the
+   *  order once the save lands, as Next does, or focuses nothing when it was the last; one with
+   *  nothing focused leaves the focus and the view as they are. */
+  async function decide(action: "accept" | "reject") {
     const target = action === "accept" ? acceptTarget : rejectTarget;
     const own = target?.kind === "proposal" ? (target.bucket ?? bucket) : null;
+    const decided = focused;
+    const next = decided ? stepTarget(order, decided, 1) : null;
+    let answer: OkSave | null = null;
     if (target?.kind === "proposal" && own) {
-      void save({ gestures: { bucket: own, [action]: [target.index] } });
+      answer = await save({ gestures: { bucket: own, [action]: [target.index] } });
     } else if (target?.kind === "confirm") {
-      void save({ gestures: {}, confirm: [target.item] });
+      answer = await save({ gestures: {}, confirm: [target.item] });
     }
+    if (!answer || !decided || !mountedRef.current) return;
+    if (next && !sameItem(next, decided)) focusItem(next);
+    else setFocus(null);
   }
 
   /** Edit the focused proposal: it is accepted, and the annotation the answer says it resolved
@@ -1048,8 +1057,16 @@ export function AnnotateTab() {
     { keys: K.redoAlias.keys, action: () => redo() },
     { keys: K.save.keys, action: () => void save() },
     { keys: K.mode.keys, action: () => setMode(nextMode(mode)) },
-    { keys: K.accept.keys, action: () => decide("accept"), when: () => acceptTarget !== null },
-    { keys: K.reject.keys, action: () => decide("reject"), when: () => rejectTarget !== null },
+    {
+      keys: K.accept.keys,
+      action: () => void decide("accept"),
+      when: () => acceptTarget !== null,
+    },
+    {
+      keys: K.reject.keys,
+      action: () => void decide("reject"),
+      when: () => rejectTarget !== null,
+    },
     { keys: K.edit.keys, action: () => void edit(), when: () => focused?.kind === "proposal" },
     { keys: K.flag.keys, action: () => setFlagsOpen((open) => !open) },
     { keys: K.nextItem.keys, action: () => stepItem(1), when: () => order.length > 0 },
@@ -1758,9 +1775,9 @@ export function AnnotateTab() {
         total={order.length}
         onStep={stepItem}
         onJump={jumpToItem}
-        onAccept={() => decide("accept")}
+        onAccept={() => void decide("accept")}
         onEdit={() => void edit()}
-        onReject={() => decide("reject")}
+        onReject={() => void decide("reject")}
       />
       <div className="flex-1 flex min-h-0">
         <div className="relative flex-1 flex flex-col min-h-0 min-w-0">
