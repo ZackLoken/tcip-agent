@@ -14,6 +14,7 @@ from __future__ import annotations
 import atexit
 import logging
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -45,8 +46,9 @@ class _Launched:
 
 _TB_PROCESSES: dict[str, _Launched] = {}
 
-# How long to let the child prove it survived before reporting a URL.
-_STARTUP_GRACE_SECONDS = 0.5
+# How often a launch checks whether its child accepts connections: a small fraction of the
+# 3.5 s TensorBoard took to first accept one on the development machine.
+_ACCEPT_POLL_SECONDS = 0.1
 
 # The guardian's escalation grace, passed as --term-grace, must stay more than a second under
 # the wait below so its kill always lands before stop_tensorboard gives up.
@@ -251,11 +253,25 @@ def _release_output(entry: _Launched) -> None:
         pass
 
 
+def _accepts(port: int) -> bool:
+    """Return whether a connection to ``port`` on the loopback host is accepted."""
+    from tcip_mcp.web_client import LOOPBACK_HOST
+
+    try:
+        socket.create_connection(
+            (LOOPBACK_HOST, port), timeout=_ACCEPT_POLL_SECONDS
+        ).close()
+    except OSError:
+        return False
+    return True
+
+
 def launch_tensorboard(logdir: str) -> dict:
     """Launch a TensorBoard process for the given log directory.
 
     The process is tracked by the directory's one spelling (``tcip_store.canonical_path``), which
-    the child is handed and the answer carries.
+    the child is handed and the answer carries. The call returns once the child accepts a
+    connection at its URL, or once it has exited.
 
     Returns dict with 'url', 'port', 'pid', 'logdir', 'lifetime_tie', or ``{'error': ..., 'output':
     ...}`` when the process died during startup. If TensorBoard is already running for this logdir,
@@ -310,7 +326,8 @@ def launch_tensorboard(logdir: str) -> dict:
         logger.warning("Failed to launch TensorBoard: %s", error)
         return {"error": error, "logdir": logdir}
 
-    time.sleep(_STARTUP_GRACE_SECONDS)
+    while proc.poll() is None and not _accepts(port):
+        time.sleep(_ACCEPT_POLL_SECONDS)
     if proc.poll() is not None:
         detail = _collect_output(output)
         logger.warning(
