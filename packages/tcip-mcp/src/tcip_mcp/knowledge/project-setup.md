@@ -50,9 +50,12 @@ each transform a training run's augmentation states is judged against the record
 recorded answers do not hold under, as stated, is refused naming the invariance.
 
 This MCP server acts on the one project it was started for (`--project <path>`); every tool that
-acts on a project takes that one, never a path you pass. A project you create here is worked on
-by a server started for it: the GUI opens it from the picker, and the agent terminal it starts
-runs a server for the project the GUI has open.
+acts on a project takes that one, never a path you pass. A server started for no project acts on
+the project `initialize_project` creates from then on, so ingest follows creation in the same
+session; the answer's `session_project` names the project the tools act on. A server started for
+a project stays on it, and a project created there is worked on by a server started for it: the
+GUI opens it from the picker, and the agent terminal it starts runs a server for the project the
+GUI has open.
 
 A display name that turns out wrong is corrected from the project picker's own Rename control. A
 rename changes the display name alone: the folder, every run, mapping, registry and delivery stay

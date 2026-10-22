@@ -210,9 +210,10 @@ tcip dump-store <project> <out_dir>   # a project's records and logs written out
 Every process binds the store once at its entry point (`tcip_store.bind()`); a root's records and
 logs live in `<root>/.tcip/store.db`. The MCP server auto-launches from `.mcp.json`; a stale tool
 index means restart the client. A project is the only root: the web backend holds the project it has
-open, the MCP server takes `--project <path>` at start, and every other entry point obtains its
-project once and passes it. The repository's own `.mcp.json` names no project, so there the project
-tools refuse naming `--project` and the knowledge tools work.
+open, the MCP server takes `--project <path>` at start or, started without one, acts on the first
+project its `initialize_project` creates, and every other entry point obtains its project once and
+passes it. The repository's own `.mcp.json` names no project, so there the project tools refuse
+naming `--project` until a project is created, and the knowledge tools work.
 
 ## Conventions
 
