@@ -111,9 +111,11 @@ export function CanvasStage(props: CanvasStageProps) {
     return () => ac.abort(); // cancel the abandoned download; rapid flips otherwise queue every skip
   }, [props.imageUrl, overview.reloadToken]);
 
-  // Region bitmaps by key. A key dropped from the prop unmounts (and aborts an in-flight
-  // load); a key whose URL changed keeps the last-loaded bitmap until the replacement lands.
-  const [regionBitmaps, setRegionBitmaps] = useState<Map<string, HTMLImageElement>>(new Map());
+  // Region bitmaps by key, each with the rect it was read for. A dropped key unmounts (aborting its
+  // load); a key whose URL changed keeps its bitmap, drawn where it was read, until the next lands.
+  const [regionBitmaps, setRegionBitmaps] = useState<
+    Map<string, CanvasRegion & { image: HTMLImageElement }>
+  >(new Map());
   const regionLoadsRef = useRef<Map<string, { url: string; ac: AbortController }>>(new Map());
   const regionUrlsRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
@@ -126,7 +128,7 @@ export function CanvasStage(props: CanvasStageProps) {
       }
     }
     setRegionBitmaps((prev) => {
-      let next: Map<string, HTMLImageElement> | null = null;
+      let next: typeof prev | null = null;
       for (const key of prev.keys()) {
         if (!keys.has(key)) {
           next = next ?? new Map(prev);
@@ -149,7 +151,9 @@ export function CanvasStage(props: CanvasStageProps) {
         regionLoadsRef.current.delete(region.key);
         if (res.ok && res.image) {
           regionUrlsRef.current.set(region.key, region.url);
-          setRegionBitmaps((prev) => new Map(prev).set(region.key, res.image!));
+          setRegionBitmaps((prev) =>
+            new Map(prev).set(region.key, { ...region, image: res.image! }),
+          );
         }
       });
     }
@@ -427,15 +431,15 @@ export function CanvasStage(props: CanvasStageProps) {
           {/* Region serves ride the same transform above the base bitmap, so cold loads
               sharpen progressively while the base keeps rendering underneath. */}
           {(props.regions ?? []).map((region) => {
-            const bitmap = regionBitmaps.get(region.key);
-            return bitmap ? (
+            const read = regionBitmaps.get(region.key);
+            return read ? (
               <KonvaImage
                 key={region.key}
-                image={bitmap}
-                x={region.x}
-                y={region.y}
-                width={region.width}
-                height={region.height}
+                image={read.image}
+                x={read.x}
+                y={read.y}
+                width={read.width}
+                height={read.height}
               />
             ) : null;
           })}

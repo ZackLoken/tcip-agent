@@ -162,6 +162,22 @@ describe("CanvasStage regions", () => {
     expect(screen.queryAllByTestId("k-image")).toHaveLength(1);
   });
 
+  it("draws a kept bitmap at the rect it was read for while a moved read of the same name loads", async () => {
+    const { rerender } = render(<CanvasStage {...stageProps([REGION])} />);
+    await resolveLoad(REGION.url, makeLoaded());
+
+    const panned = {
+      ...REGION,
+      url: api.images.url("m.tif", DISPLAY, { x0: 300, y0: 200, x1: 350, y1: 240 }),
+      x: 300,
+    };
+    rerender(<CanvasStage {...stageProps([panned])} />);
+    expect(screen.getByTestId("k-image")).toHaveAttribute("data-x", "100");
+
+    await resolveLoad(panned.url, makeLoaded());
+    expect(screen.getByTestId("k-image")).toHaveAttribute("data-x", "300");
+  });
+
   it("ignores a failed region serve (no bitmap installed)", async () => {
     render(<CanvasStage {...stageProps([REGION])} />);
     await resolveLoad(REGION.url, makeLoaded({ ok: false, image: null }));
