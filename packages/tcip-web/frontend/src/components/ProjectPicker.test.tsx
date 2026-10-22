@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type ProjectSummary } from "@/api/client";
 import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
-import { ProjectPicker } from "@/components/ProjectPicker";
+import { LISTING_REFRESH_MS, ProjectPicker } from "@/components/ProjectPicker";
 import { startOpen } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { INVARIANCES } from "@/test/projectRecords";
@@ -150,6 +150,25 @@ describe("ProjectPicker", () => {
       date: "2026-03-01",
     });
     expect(useStore.getState().openProject).toEqual({ id: "a1b2c3d4e5f6", path: "/ws/valley" });
+  });
+
+  it("lists a project created while the picker is on screen without a reload", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.mocked(api.projects.list)
+        .mockResolvedValueOnce(listing({ projects: [] }))
+        .mockResolvedValue(listing());
+      render(<ProjectPicker />);
+      expect(await screen.findByText("No projects.")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(LISTING_REFRESH_MS);
+      });
+
+      expect(await screen.findByText("Valley farm")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("opens a project with no dated images and selects no dataset", async () => {
