@@ -2484,6 +2484,30 @@ describe("AnnotateTab review symbology", () => {
     expect(saveSpy.mock.calls[0][0]).toMatchObject({ bucket: BUCKET, accept: [3] });
   });
 
+  it("a on a focused item decides it and steps to the next item in the order", async () => {
+    await mountReviewing();
+    saveSpy.mockResolvedValueOnce(saved("101", { boxes: boxes(), polygons: [polygon()] }));
+    await down();
+    await down();
+    expect(position()).toHaveValue("2");
+
+    fireEvent.keyDown(window, { key: "a" });
+    await flush();
+    await flush();
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(position()).toHaveValue("3");
+  });
+
+  it("a with nothing focused decides the first unreviewed item and focuses nothing", async () => {
+    await mountReviewing();
+    expect(useStore.getState().canvas.focus).toBeNull();
+
+    fireEvent.keyDown(window, { key: "a" });
+    await flush();
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(useStore.getState().canvas.focus).toBeNull();
+  });
+
   it("e accepts the focused unpaired proposal so it can be corrected as an annotation", async () => {
     await mountReviewing();
     for (let i = 0; i < 4; i++) await down();
