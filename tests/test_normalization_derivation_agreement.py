@@ -1,6 +1,7 @@
 """Tests of the statistics a model normalizes by, each against the reference that publishes them.
 
-The references are the pretrained weights' own as timm and torchvision publish them, the data's
+The references are the pretrained weights' own as timm, torchvision and a transformers image
+processor publish them, the data's
 own as numpy computes them over the frames, and the weights statement a model source makes.
 """
 
@@ -74,6 +75,54 @@ def test_torchvision_weights_yield_the_statistics_their_preset_normalizes_by() -
     mean = -black * std
     assert record.image_mean == pytest.approx(mean.tolist(), abs=1e-5)
     assert record.image_std == pytest.approx(std.tolist(), abs=1e-5)
+
+
+def test_transformers_weights_yield_the_statistics_their_image_processor_normalizes_by(
+    tmp_path: Path,
+) -> None:
+    """The record's mean and std are those the checkpoint's own image processor applies.
+
+    They are read back from what the processor makes of a black and a white frame.
+    """
+    import numpy as np
+    from transformers import AutoImageProcessor, ViTImageProcessor
+
+    ViTImageProcessor(
+        image_mean=[0.6, 0.45, 0.3], image_std=[0.2, 0.25, 0.3]
+    ).save_pretrained(tmp_path)
+
+    record = pretrained_normalization(
+        PretrainedWeights(library="transformers", name=str(tmp_path))
+    )
+
+    processor = AutoImageProcessor.from_pretrained(tmp_path)
+    black, white = (
+        processor(
+            images=np.full((32, 32, 3), v, np.uint8), return_tensors="pt"
+        )["pixel_values"][0].mean(dim=(1, 2))
+        for v in (0, 255)
+    )
+    std = 1.0 / (white - black)
+    assert record.image_mean == pytest.approx(
+        (-black * std).tolist(), abs=1e-5
+    )
+    assert record.image_std == pytest.approx(std.tolist(), abs=1e-5)
+    assert record.source == PretrainedWeights(
+        library="transformers", name=str(tmp_path)
+    )
+
+
+def test_a_transformers_processor_that_does_not_normalize_records_no_statistics(
+    tmp_path: Path,
+) -> None:
+    from transformers import ViTImageProcessor
+
+    ViTImageProcessor(do_normalize=False).save_pretrained(tmp_path)
+
+    with pytest.raises(ValueError, match="does not normalize"):
+        pretrained_normalization(
+            PretrainedWeights(library="transformers", name=str(tmp_path))
+        )
 
 
 def test_the_data_route_yields_the_numpy_mean_and_std_of_the_frames(

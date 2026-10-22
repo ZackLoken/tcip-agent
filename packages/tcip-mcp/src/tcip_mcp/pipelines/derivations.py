@@ -481,9 +481,13 @@ def pretrained_normalization(weights: PretrainedWeights) -> Normalization:
 
     They are read as the weights' library publishes them: a timm tag's ``pretrained_cfg`` mean and
     std (``timm.models.get_pretrained_cfg``), a torchvision weights enum member's preset
-    transform's (``torchvision.models.get_weight(name).transforms()``), sourced by ``weights``
-    themselves. Refuses as the library does a name it does not publish, and a torchvision preset
-    carrying no statistics (a detection preset) by its missing ``mean``.
+    transform's (``torchvision.models.get_weight(name).transforms()``), a ``transformers``
+    checkpoint's image processor's ``image_mean`` and ``image_std``
+    (``transformers.AutoImageProcessor.from_pretrained``), sourced by ``weights`` themselves.
+    Refuses as the library does a name it does not publish, a torchvision preset carrying no
+    statistics (a detection preset) by its missing ``mean``, and (``ValueError``) a
+    ``transformers`` processor that does not normalize after rescaling by 1/255, whose statistics
+    are then no [0, 1] statistics the model normalizes by.
     """
     from tcip_mcp.pipelines.schemas import Normalization
 
@@ -492,13 +496,30 @@ def pretrained_normalization(weights: PretrainedWeights) -> Normalization:
         from timm.models import get_pretrained_cfg
 
         published = get_pretrained_cfg(weights.name, allow_unregistered=False)
-    else:
+        mean, std = published.mean, published.std
+    elif weights.library == "torchvision":
         from torchvision.models import get_weight
 
         published = get_weight(weights.name).transforms()
+        mean, std = published.mean, published.std
+    else:
+        from transformers import AutoImageProcessor
+
+        published = AutoImageProcessor.from_pretrained(weights.name)
+        if not (
+            published.do_normalize
+            and published.do_rescale
+            and published.rescale_factor == 1 / 255
+        ):
+            raise ValueError(
+                f"the image processor of {weights.name!r} does not normalize pixels rescaled to "
+                "[0, 1], so it publishes no [0, 1] statistics its model normalizes by and none "
+                "can be recorded as these weights' own"
+            )
+        mean, std = published.image_mean, published.image_std
     return Normalization(
-        image_mean=list(published.mean),
-        image_std=list(published.std),
+        image_mean=list(mean),
+        image_std=list(std),
         source=weights,
     )
 
