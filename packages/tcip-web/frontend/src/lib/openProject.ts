@@ -94,7 +94,7 @@ async function performOpen(
 
 /** The one transition owner for opening ``p`` (a listed project whose record reads, so it
  *  carries an id) on a capture, subject and bucket name (one ``bucketsForDate`` serves), as the
- *  committed person; the backend points the workspace's last-opened pointer at it. A project
+ *  committed person. A project
  *  holding no capture (``date`` empty) opens with no dataset selected, and an open already in
  *  flight leaves this one unstarted. The open holds a request id in the store; a second choice
  *  of project or a snapshot adopting another project releases it, and a result from a request

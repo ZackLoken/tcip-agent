@@ -1,8 +1,7 @@
 """The workspace: the folder whose child directories are the projects.
 
-A workspace root holds one directory per project, and beside them only the backend's port record
-and the last-opened pointer, the id of the project the backend opened last. A removed project
-moves into its ``.removed/``.
+A workspace root holds one directory per project, and beside them only the backend's port record.
+A removed project moves into its ``.removed/``.
 """
 
 from __future__ import annotations
@@ -14,10 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
 
-from pydantic import TypeAdapter
-
 import tcip_store
-from tcip_store import Key
 
 logger = logging.getLogger(__name__)
 
@@ -70,43 +66,6 @@ def is_valid_name(name: str) -> bool:
         and not any(c in seg for c in ("/", "\\", ":"))
         and seg not in (".", "..")
     )
-
-
-# ── the last-opened pointer ──────────────────────────────────────────────────
-
-LAST_OPENED_STORE = "workspace_last_opened"
-_POINTER_PARTS = ("last_opened",)
-
-
-def last_opened_key(workspace: Path) -> Key:
-    """Return the store key of the workspace's last-opened pointer.
-
-    The pointer is the id of the project the backend opened last, a JSON string.
-    """
-    return Key(LAST_OPENED_STORE, str(workspace), _POINTER_PARTS)
-
-
-_POINTER: TypeAdapter[str | None] = TypeAdapter(str | None)
-
-
-def read_last_opened(workspace: Path) -> str | None:
-    """Return the id the last-opened pointer holds, as stored, or ``None`` when it is unset.
-
-    ``None`` means the backend has opened nothing in this workspace yet. A pointer the store
-    cannot read raises the store's own error, and one that is not a string
-    ``pydantic.ValidationError``.
-    """
-    return _POINTER.validate_python(
-        tcip_store.read(last_opened_key(workspace), default=None)
-    )
-
-
-def write_last_opened(workspace: Path, project_id: str) -> None:
-    """Point the workspace's last-opened pointer at ``project_id``."""
-    tcip_store.replace(last_opened_key(workspace), project_id)
-
-
-# ── the projects ─────────────────────────────────────────────────────────────
 
 
 def project_dirs(workspace: Path) -> list[Path]:

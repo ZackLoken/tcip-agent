@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 import pytest
 from fastapi.testclient import TestClient
 
-from tcip_web.app import app
 from tests import REFUSED_NAMES
 from tests._web_fixtures import INVARIANCES
 
@@ -352,21 +351,6 @@ def test_the_listing_reads_a_stated_rotation_angle_back_as_degrees(
 
     rotation = listed["invariances"]["rotation"]
     assert isinstance(rotation, float) and rotation == 5.0, listed
-
-
-def test_a_last_opened_pointer_naming_a_missing_project_is_named_and_opens_nothing(
-    client: TestClient, workspace_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from tcip_mcp import workspace
-
-    _make_project(workspace_dir, "temp_project_site", dates=["2026-02-11"])
-    workspace.write_last_opened(workspace_dir, "000000000000")
-    monkeypatch.setenv("TCIP_WORKSPACE", str(workspace_dir))
-
-    with TestClient(app, base_url="http://127.0.0.1") as started:
-        body = started.get("/api/projects").json()
-    assert body["open_id"] is None
-    assert "000000000000" in body["last_opened_problem"]
 
 
 def _correction(project_id: str, user: str = "tester") -> dict:
