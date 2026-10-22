@@ -852,12 +852,14 @@ stated, load = {
         proposal_engines._detector,
     ),
 }[engine]
+checkpoint = stated.model_validate(params).checkpoint
 try:
-    load(stated.model_validate(params).checkpoint)
+    load(checkpoint)
 except Exception as error:
     answer["refused"] = f"{type(error).__name__}: {error}"
 else:
     proposal = resolve_proposer(engine).propose(image, **params)
+    answer["held_on"] = next(load(checkpoint)[0].parameters()).device.type
     answer["candidates"] = proposal.candidates
     answer["execution"] = (
         None
@@ -871,7 +873,8 @@ print(json.dumps(answer))
 The checkpoint is loaded first, through the engine's own cached loader: a load that fails is
 reported as the refusal, its exception named, and the engine is not run; a failure of the
 engine's call after a load that succeeded propagates. Otherwise it prints whether offline mode
-is in force, each ``slice_lattice`` call's arguments, the candidates and the execution record."""
+is in force, each ``slice_lattice`` call's arguments, the device the loaded model's weights sit
+on once the call has returned, the candidates and the execution record."""
 
 
 def _offline_proposal(
@@ -1046,6 +1049,38 @@ def test_the_detector_prompted_with_a_phrase_proposes_scored_boxes(
     assert candidates
     assert all(c["rings"] is None for c in candidates)
     assert all(math.isfinite(c["score"]) for c in candidates)
+
+
+@pytest.mark.parametrize(
+    ("engine", "params"),
+    [
+        (
+            "sam",
+            {
+                "points": [[48, 48]],
+                "multimask_output": False,
+                "checkpoint": SEGMENTER_CHECKPOINT,
+            },
+        ),
+        (
+            "grounding_dino",
+            {
+                **DETECTOR_PARAMS,
+                "phrase": "square",
+                "box_threshold": 0.25,
+                "text_threshold": 0.25,
+                "checkpoint": DETECTOR_CHECKPOINT,
+            },
+        ),
+    ],
+)
+def test_an_engine_holds_its_weights_on_the_cpu_once_its_call_returns(
+    engine: str, params: dict, bright_square: str
+) -> None:
+    """An idle engine holds no device memory: its cached weights sit on the CPU between calls."""
+    answer = _live(_offline_proposal(engine, bright_square, params))
+
+    assert answer["held_on"] == "cpu"
 
 
 SMALL_SQUARE = (2000, 300, 2024, 324)

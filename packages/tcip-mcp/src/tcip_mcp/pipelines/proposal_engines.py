@@ -10,13 +10,15 @@ downsampled by its ratio to the edge. The detector is run by the platform's tile
 on a lattice sized to its objects, which a whole-frame pass derives unless it is stated, never
 finer than the model's input edge. Each runs a Hugging Face checkpoint through ``transformers``:
 its files download into the user-profile cache on the checkpoint's first use, and its model and
-processor, once loaded, are held for the process. torch and transformers load inside ``propose``.
+processor, once loaded, are held for the process, the model on the CPU and on the device only for
+the call that runs it. torch and transformers load inside ``propose``.
 """
 
 from __future__ import annotations
 
 import functools
 import threading
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Annotated, Self, TypedDict
 
 from pydantic import (
@@ -36,7 +38,7 @@ from tcip_mcp.pipelines.execution import cross_tile_merge_of
 from tcip_mcp.pipelines.model_build import placement
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
     import numpy as np
     import torch
@@ -257,23 +259,31 @@ def box_candidate(
     }
 
 
-def _on_device[M: torch.nn.Module](model: M) -> M:
-    """Return ``model`` moved in place to ``placement(None)`` by ``torch.nn.Module.to``.
+@contextmanager
+def _placed(model: torch.nn.Module) -> Iterator[None]:
+    """Hold ``model`` on ``placement(None)`` for the block, then on the CPU, its device freed.
 
-    ``PreTrainedModel`` types its own ``to`` through ``functools.wraps``, dropping the bound self.
+    The move is ``torch.nn.Module.to`` in place both ways; on leaving, CUDA's cached blocks are
+    released (``torch.cuda.empty_cache``) when torch sees CUDA.
     """
-    module: torch.nn.Module = model
-    module.to(placement(None))
-    return model
+    import torch
+
+    model.to(placement(None))
+    try:
+        yield
+    finally:
+        model.to("cpu")
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
 @functools.cache
 def _segmenter(checkpoint: str) -> tuple[SamModel, SamProcessor]:
-    """Return ``checkpoint``'s SAM model, on the device, and its processor."""
+    """Return ``checkpoint``'s SAM model, on the CPU, and its processor."""
     from transformers import SamModel, SamProcessor
 
     return (
-        _on_device(SamModel.from_pretrained(checkpoint)),
+        SamModel.from_pretrained(checkpoint),
         SamProcessor.from_pretrained(checkpoint),
     )
 
@@ -282,16 +292,14 @@ def _segmenter(checkpoint: str) -> tuple[SamModel, SamProcessor]:
 def _detector(
     checkpoint: str,
 ) -> tuple[GroundingDinoForObjectDetection, GroundingDinoProcessor]:
-    """Return ``checkpoint``'s Grounding DINO model, on the device, and its processor."""
+    """Return ``checkpoint``'s Grounding DINO model, on the CPU, and its processor."""
     from transformers import (
         GroundingDinoForObjectDetection,
         GroundingDinoProcessor,
     )
 
     return (
-        _on_device(
-            GroundingDinoForObjectDetection.from_pretrained(checkpoint)
-        ),
+        GroundingDinoForObjectDetection.from_pretrained(checkpoint),
         GroundingDinoProcessor.from_pretrained(checkpoint),
     )
 
@@ -329,49 +337,53 @@ class PromptableSegmenter:
             windows = [
                 prompt_window(p, pixels.shape[:2], edge) for p in prompts
             ]
-            for window in dict.fromkeys(windows):
-                x0, y0, x1, y1 = window
-                local = {
-                    i: [
-                        v - o for v, o in zip(p, (x0, y0, x0, y0), strict=True)
-                    ]
-                    for i, p in enumerate(prompts)
-                    if windows[i] == window
-                }
-                points = [i for i in local if i < len(stated.points)]
-                boxes = [i for i in local if i >= len(stated.points)]
-                inputs = processor(
-                    images=pixels[y0:y1, x0:x1],
-                    input_points=[[[local[i][:2]] for i in points]]
-                    if points
-                    else None,
-                    input_boxes=[[local[i] for i in boxes]] if boxes else None,
-                    return_tensors="pt",
-                ).to(model.device)
-                with torch.inference_mode():
-                    embeddings = model.get_image_embeddings(
-                        inputs["pixel_values"]
-                    )
-                    for kind, group in (
-                        ("input_points", points),
-                        ("input_boxes", boxes),
-                    ):
-                        if not group:
-                            continue
-                        answer = model(
-                            image_embeddings=embeddings,
-                            multimask_output=stated.multimask_output,
-                            **{kind: inputs[kind]},
+            with _placed(model):
+                for window in dict.fromkeys(windows):
+                    x0, y0, x1, y1 = window
+                    local = {
+                        i: [
+                            v - o
+                            for v, o in zip(p, (x0, y0, x0, y0), strict=True)
+                        ]
+                        for i, p in enumerate(prompts)
+                        if windows[i] == window
+                    }
+                    points = [i for i in local if i < len(stated.points)]
+                    boxes = [i for i in local if i >= len(stated.points)]
+                    inputs = processor(
+                        images=pixels[y0:y1, x0:x1],
+                        input_points=[[[local[i][:2]] for i in points]]
+                        if points
+                        else None,
+                        input_boxes=[[local[i] for i in boxes]]
+                        if boxes
+                        else None,
+                        return_tensors="pt",
+                    ).to(model.device)
+                    with torch.inference_mode():
+                        embeddings = model.get_image_embeddings(
+                            inputs["pixel_values"]
                         )
-                        masks = processor.post_process_masks(
-                            answer.pred_masks.cpu(),
-                            inputs["original_sizes"].cpu(),
-                            inputs["reshaped_input_sizes"].cpu(),
-                        )[0].numpy()
-                        scores = answer.iou_scores[0].cpu().numpy()
-                        answers.update(
-                            zip(group, zip(masks, scores, strict=True))
-                        )
+                        for kind, group in (
+                            ("input_points", points),
+                            ("input_boxes", boxes),
+                        ):
+                            if not group:
+                                continue
+                            answer = model(
+                                image_embeddings=embeddings,
+                                multimask_output=stated.multimask_output,
+                                **{kind: inputs[kind]},
+                            )
+                            masks = processor.post_process_masks(
+                                answer.pred_masks.cpu(),
+                                inputs["original_sizes"].cpu(),
+                                inputs["reshaped_input_sizes"].cpu(),
+                            )[0].numpy()
+                            scores = answer.iou_scores[0].cpu().numpy()
+                            answers.update(
+                                zip(group, zip(masks, scores, strict=True))
+                            )
 
         candidates: list[dict] = []
         for prompt, window in enumerate(windows):
@@ -498,15 +510,16 @@ class TextPromptedDetector:
         pixels = upright_pixels(image_path)
         with _MODEL_CALLS:
             model, processor = _detector(stated.checkpoint)
-            return detected_proposal(
-                PhraseDetectionModel(model, processor, stated),
-                pixels,
-                processor.image_processor.size["shortest_edge"],
-                postprocess=stated.postprocess,
-                cross_tile_nms=stated.cross_tile_nms,
-                tile_size=stated.tile_size,
-                overlap=stated.overlap,
-            )
+            with _placed(model):
+                return detected_proposal(
+                    PhraseDetectionModel(model, processor, stated),
+                    pixels,
+                    processor.image_processor.size["shortest_edge"],
+                    postprocess=stated.postprocess,
+                    cross_tile_nms=stated.cross_tile_nms,
+                    tile_size=stated.tile_size,
+                    overlap=stated.overlap,
+                )
 
 
 def detected_proposal(
