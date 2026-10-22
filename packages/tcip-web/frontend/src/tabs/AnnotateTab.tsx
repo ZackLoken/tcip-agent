@@ -31,7 +31,7 @@ import {
   createCanvasPusher,
   measureCanvasHost,
   onCanvasStateRequest,
-  type CanvasStateBody,
+  type CanvasBodyBuilder,
 } from "@/lib/canvasSync";
 import { boxBounds, boxDraft, draftStrokes } from "@/lib/draftStrokes";
 import { applyEditDrag, hitTestEdit, type EditDrag } from "@/lib/editGeometry";
@@ -610,8 +610,8 @@ export function AnnotateTab() {
       cutStart: cutStart ? { point: cutStart.point, color: subjectColor(cutStart.subject) } : null,
       cursor,
     });
-  const buildCanvasBodyRef = useRef<() => CanvasStateBody | null>(() => null);
-  buildCanvasBodyRef.current = () => {
+  const buildCanvasBodyRef = useRef<CanvasBodyBuilder>(() => null);
+  buildCanvasBodyRef.current = (full) => {
     const project = useStore.getState().openProject;
     if (!imgPath || !project) return null;
     // Never push mid-transition: attaching the previous image's still-live shapes to the new
@@ -639,21 +639,24 @@ export function AnnotateTab() {
         image_ratings: canvas.imageAnnotations.length,
         drawing_points: canvas.currentPolygon.length,
       },
-      shapes: buildAnnotateShapes({
-        boxes: canvas.boxes,
-        polygons: canvas.polygons,
-        points: canvas.points,
-        draft: draft(),
-        drawingBox: drawing,
-        focused,
-        matches,
-        flagMarks,
-        mode,
-        activeSubject: activeSubject ?? "",
-        visible: annotateUi.visible,
-        colorFor: subjectColor,
-        proposals: drawnProposals,
-      }),
+      // A heartbeat sends no geometry; the backend keeps the last full push's for this image.
+      shapes: full
+        ? buildAnnotateShapes({
+            boxes: canvas.boxes,
+            polygons: canvas.polygons,
+            points: canvas.points,
+            draft: draft(),
+            drawingBox: drawing,
+            focused,
+            matches,
+            flagMarks,
+            mode,
+            activeSubject: activeSubject ?? "",
+            visible: annotateUi.visible,
+            colorFor: subjectColor,
+            proposals: drawnProposals,
+          })
+        : null,
     };
   };
   const canvasPusherRef = useRef(createCanvasPusher((b) => api.canvas.pushState(b)));
@@ -668,7 +671,7 @@ export function AnnotateTab() {
       !!drawing ||
       !!boxDragRef.current ||
       pointDragRef.current !== null;
-    canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), !interacting);
+    canvasPusherRef.current.schedule((full) => buildCanvasBodyRef.current(full), !interacting);
   }, [
     canvas.boxes,
     canvas.polygons,
@@ -688,12 +691,12 @@ export function AnnotateTab() {
     focused,
   ]);
   useEffect(() => {
-    canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), false);
+    canvasPusherRef.current.schedule((full) => buildCanvasBodyRef.current(full), false);
   }, [view, subjectSwatches, canvas.dirty]);
   useEffect(
     () =>
       onCanvasStateRequest(() => {
-        canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), true);
+        canvasPusherRef.current.schedule((full) => buildCanvasBodyRef.current(full), true);
         canvasPusherRef.current.flush();
       }),
     [],
@@ -1393,14 +1396,14 @@ export function AnnotateTab() {
       // didDragRef stays set: the trailing click of this release must not place a second point
       // on top of the one just moved (onClick consumes and clears the flag).
       useStore.getState().recomputeDirty(); // the drag flagged dirty per tick without comparing
-      canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), true);
+      canvasPusherRef.current.schedule((full) => buildCanvasBodyRef.current(full), true);
       return;
     }
     if (boxDragRef.current) {
       if (settleBoxResize()) {
         useStore.getState().recomputeDirty();
         // The drag suppressed full pushes; the settled geometry ships now.
-        canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), true);
+        canvasPusherRef.current.schedule((full) => buildCanvasBodyRef.current(full), true);
       }
       return;
     }

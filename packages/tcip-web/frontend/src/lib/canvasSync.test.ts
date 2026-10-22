@@ -748,17 +748,19 @@ describe("createCanvasPusher", () => {
     expect(posts[0].shapes).not.toBeNull(); // full won the burst
   });
 
-  it("a heartbeat-only burst sends shapes: null", () => {
-    const posts: CanvasStateBody[] = [];
-    const p = createCanvasPusher(
-      (b) => {
-        posts.push(b);
-      },
-      { debounceMs: 100, maxWaitMs: 1000 },
-    );
-    p.schedule(body, false);
+  it("asks the builder for geometry only when the burst carries a full push", () => {
+    const asked: boolean[] = [];
+    const build = (full: boolean) => {
+      asked.push(full);
+      return body();
+    };
+    const p = createCanvasPusher(() => undefined, { debounceMs: 100, maxWaitMs: 1000 });
+    p.schedule(build, false);
     vi.advanceTimersByTime(150);
-    expect(posts[0].shapes).toBeNull();
+    p.schedule(build, false);
+    p.schedule(build, true);
+    vi.advanceTimersByTime(150);
+    expect(asked).toEqual([false, true]);
   });
 
   it("continuous activity still surfaces at the maxWait cadence", () => {

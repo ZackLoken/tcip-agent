@@ -295,9 +295,13 @@ export function notifyCanvasStateRequest(): void {
 
 /* ── hybrid pusher: trailing debounce + maxWait, heartbeat vs full ────────── */
 
+/** A state builder: with `full` false it is a heartbeat, which carries `shapes: null` and builds
+ *  no geometry. */
+export type CanvasBodyBuilder = (full: boolean) => CanvasStateBody | null;
+
 export interface CanvasPusher {
   /** Register the freshest state builder; full=true marks geometry as changed. */
-  schedule(build: () => CanvasStateBody | null, full: boolean): void;
+  schedule(build: CanvasBodyBuilder, full: boolean): void;
   /** Send immediately (used for the agent's refresh ping). */
   flush(): void;
   dispose(): void;
@@ -312,7 +316,7 @@ export function createCanvasPusher(
   let timer: ReturnType<typeof setTimeout> | null = null;
   let firstAt: number | null = null;
   let fullPending = false;
-  let builder: (() => CanvasStateBody | null) | null = null;
+  let builder: CanvasBodyBuilder | null = null;
 
   const fire = () => {
     if (timer) clearTimeout(timer);
@@ -320,12 +324,11 @@ export function createCanvasPusher(
     firstAt = null;
     const full = fullPending;
     fullPending = false;
-    const body = builder ? builder() : null;
+    const body = builder ? builder(full) : null;
     if (!body) {
       fullPending = fullPending || full; // nothing sent, geometry is still owed
       return;
     }
-    if (!full) body.shapes = null; // heartbeat: backend keeps the last geometry for this image
     try {
       const res = post(body);
       if (res && typeof res.then === "function") {
