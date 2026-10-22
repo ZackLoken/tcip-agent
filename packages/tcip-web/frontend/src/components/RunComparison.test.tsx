@@ -354,7 +354,7 @@ describe("RunComparison per-column absence and loading", () => {
     expect(within(row).getByText("same source images")).toBeInTheDocument();
   });
 
-  it("uses one wording for an absent value and the runs list's three-decimal convention", async () => {
+  it("uses one wording for an absent value and four significant figures for a value", async () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(
       baseResult({
         experiments: [
@@ -368,8 +368,8 @@ describe("RunComparison per-column absence and loading", () => {
       }),
     );
     render(<RunComparison marked={MARKED} />);
-    expect(await screen.findByText("0.712")).toBeInTheDocument();
-    expect(screen.queryByText("0.7123")).not.toBeInTheDocument();
+    expect(await screen.findByText("0.7123")).toBeInTheDocument();
+    expect(screen.queryByText("0.712345")).not.toBeInTheDocument();
     expect((await screen.findAllByText("unrecorded")).length).toBeGreaterThan(0);
     expect(screen.queryByText("no metrics")).not.toBeInTheDocument();
   });

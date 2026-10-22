@@ -225,7 +225,7 @@ describe("TrainingTab run list", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the row's best value exactly as the record carries it, with no rounding or title", async () => {
+  it("shows the row's best value at four significant figures, with no title", async () => {
     listing([
       run({
         experiment_id: "train-exact",
@@ -236,7 +236,7 @@ describe("TrainingTab run list", () => {
     ]);
 
     render(<TrainingTab />);
-    const value = await screen.findByText("best loss 0.4130041");
+    const value = await screen.findByText("best loss 0.413");
     expect(value).not.toHaveAttribute("title");
   });
 
@@ -253,7 +253,7 @@ describe("TrainingTab run list", () => {
     render(<TrainingTab />);
     expect(
       await screen.findByRole("button", {
-        name: "train-named-value completed, no launch event recorded, best loss 0.4130041",
+        name: "train-named-value completed, no launch event recorded, best loss 0.413",
       }),
     ).toBeInTheDocument();
   });

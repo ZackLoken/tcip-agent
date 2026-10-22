@@ -5,6 +5,7 @@ import { StructuredRefusalError } from "@/api/http";
 import type { CompareExperiment, CompareResult, CompareSplit, MetricRow } from "@/api/training";
 import { trainingApi } from "@/api/training";
 import { NOT_FINITE_SUFFIX } from "@/api/types.generated";
+import { formatNumber } from "@/lib/numberFormat";
 import { bareMetricName, RUN_REFRESH_MS, unionMetricKeys } from "@/tabs/trainingMetrics";
 
 /** One marked run: the one id it is tracked by, compared, ranked and streamed under. */
@@ -27,7 +28,7 @@ const RANK_REASON_ID = "rank-disabled-reason";
 
 function cellText(value: number | string | null | undefined): string {
   if (value === null || value === undefined) return UNRECORDED;
-  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(3);
+  if (typeof value === "number") return formatNumber(value);
   return String(value);
 }
 
