@@ -484,6 +484,9 @@ class PhraseDetectionModel(DetectionModel):
                     strict=True,
                 )
             ]
+            # The processor answers a tile with no box with one empty label beside it.
+            if len(found["boxes"])
+            else []
             for found, shift, full in zip(
                 self._original_predictions,
                 shift_amount_list,
