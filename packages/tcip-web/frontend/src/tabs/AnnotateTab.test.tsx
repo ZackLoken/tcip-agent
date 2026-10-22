@@ -2498,6 +2498,16 @@ describe("AnnotateTab review symbology", () => {
     expect(position()).toHaveValue("3");
   });
 
+  it("Accept all accepts every undecided proposal the canvas shows in one save", async () => {
+    await mountReviewing();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Accept all/ }));
+    await flush();
+
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy.mock.calls[0][0]).toMatchObject({ bucket: BUCKET, accept: [1, 3] });
+  });
+
   it("a with nothing focused decides the first unreviewed item and focuses nothing", async () => {
     await mountReviewing();
     expect(useStore.getState().canvas.focus).toBeNull();

@@ -32,6 +32,8 @@ export function ReviewStrip({
   onStep,
   onJump,
   onAccept,
+  acceptAllCount,
+  onAcceptAll,
   onEdit,
   onReject,
   flags,
@@ -61,6 +63,9 @@ export function ReviewStrip({
   onStep: (delta: number) => void;
   onJump: (oneBased: number) => void;
   onAccept: () => void;
+  /** How many undecided proposals the canvas shows, which Accept all accepts. */
+  acceptAllCount: number;
+  onAcceptAll: () => void;
   onEdit: () => void;
   onReject: () => void;
   /** The open flags on the focused item, or on the image as a whole when nothing is focused. */
@@ -137,6 +142,16 @@ export function ReviewStrip({
         >
           Accept
         </button>
+        {reviewing && acceptAllCount > 0 && (
+          <button
+            type="button"
+            className="tcip-btn h-7 text-[13px]"
+            onClick={onAcceptAll}
+            title="Accept every proposal shown on this image"
+          >
+            {`Accept all (${acceptAllCount})`}
+          </button>
+        )}
         <button
           type="button"
           className="tcip-btn h-7 text-[13px]"
