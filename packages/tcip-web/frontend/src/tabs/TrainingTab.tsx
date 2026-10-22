@@ -16,6 +16,7 @@ import { MAX_MARKED_RUNS, RunComparison, type MarkedRun } from "@/components/Run
 import { TabHeading } from "@/components/TabHeading";
 import { useEmbeddedToolRetry, type EmbeddedToolStepResult } from "@/hooks/useEmbeddedToolRetry";
 import { UNSET_GLYPH } from "@/lib/glyphs";
+import { formatNumber } from "@/lib/numberFormat";
 import { TERMINAL_STATES } from "@/lib/runStatus";
 import { useStore } from "@/store";
 import { declaredClient } from "@/store/slices/agentActivity";
@@ -72,16 +73,17 @@ function stateLine(state: string, heartbeat: string): string {
 function runRowLabel(run: RunRow): string {
   const base = `${run.experiment_id} ${stateLine(run.state, run.heartbeat)}, ${launcherSentence(run.launch)}`;
   if (run.best_metric === null || !run.best_metric_name) return base;
-  return `${base}, best ${run.best_metric_name} ${run.best_metric}`;
+  return `${base}, best ${run.best_metric_name} ${formatNumber(run.best_metric)}`;
 }
 
 /** What a sweep's trials amount to so far, under the selection metric its recorded base config
  * states (`input.base_config.evaluation.selection_metric`). */
 function sweepOutcomeLine(sweep: SweepGroup): string {
   const base = sweep.input.base_config as { evaluation: { selection_metric: string } };
+  const best = sweep.outcome.best_value;
   return sweep.outcome.best_params == null
     ? "no completed trial yet"
-    : `best ${base.evaluation.selection_metric} ${String(sweep.outcome.best_value)}`;
+    : `best ${base.evaluation.selection_metric} ${typeof best === "number" ? formatNumber(best) : String(best)}`;
 }
 
 const NO_OTHER_PARTITION =
@@ -211,7 +213,7 @@ function RunItem({
           </span>
           {run.best_metric !== null && run.best_metric_name && (
             <span className="tabular-nums">
-              best {run.best_metric_name} {run.best_metric}
+              best {run.best_metric_name} {formatNumber(run.best_metric)}
             </span>
           )}
         </div>
@@ -645,7 +647,9 @@ export function TrainingTab() {
                             </td>
                             {metricKeys.map((key) => (
                               <td key={key} className="pr-3 tabular-nums">
-                                {typeof row[key] === "number" ? row[key] : UNSET_GLYPH}
+                                {typeof row[key] === "number"
+                                  ? formatNumber(row[key])
+                                  : UNSET_GLYPH}
                               </td>
                             ))}
                           </tr>
