@@ -284,6 +284,74 @@ def test_the_archive_restores_through_import_project_with_its_identity(
     assert read_record(restored).id == made.id
 
 
+def test_a_listing_waits_for_a_removal_whose_move_is_denied_at_first(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A listing asked for while the move is retried runs only once the removal has finished.
+
+    A listing in between would reopen the project's store and hold the folder the move needs.
+    """
+    import os
+    import threading
+
+    ws = tmp_path.parent
+    made = _project(ws, "valley_block", "Valley block")
+    real_rename = os.rename
+    listing: list[threading.Thread] = []
+
+    def _denied_once(src: Path, dst: Path) -> None:
+        if Path(src) == made.root and not listing:
+            listing.append(
+                threading.Thread(target=client.get, args=("/api/projects",))
+            )
+            listing[0].start()
+            listing[0].join(1.0)
+            raise PermissionError(13, "held for a moment", str(src))
+        return real_rename(src, dst)
+
+    monkeypatch.setattr(os, "rename", _denied_once)
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"id": made.id, "confirm_name": "Valley block", "user": "tester"},
+    )
+    waited = listing[0].is_alive()
+    listing[0].join()
+
+    assert resp.status_code == 200, resp.text
+    assert waited
+
+
+def test_a_move_denied_past_the_budget_answers_409_and_leaves_the_project(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+
+    made = _project(tmp_path.parent, "valley_block", "Valley block")
+    real_rename = os.rename
+
+    def _denied(src: Path, dst: Path) -> None:
+        if Path(src) == made.root:
+            raise PermissionError(13, "held open", str(src))
+        return real_rename(src, dst)
+
+    monkeypatch.setattr(workspace, "RENAME_BUDGET_S", 0.0)
+    monkeypatch.setattr(os, "rename", _denied)
+
+    resp = client.post(
+        "/api/projects/remove",
+        json={"id": made.id, "confirm_name": "Valley block", "user": "tester"},
+    )
+
+    assert resp.status_code == 409
+    assert "another process" in resp.json()["detail"]
+    assert made.root.is_dir()
+
+
 def test_a_move_the_filesystem_denies_removes_the_archive_and_leaves_the_project(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
