@@ -22,14 +22,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** Type `text` into the input labeled `label` and press Enter. */
+function enter(label: string, text: string) {
+  const input = screen.getByLabelText(label);
+  fireEvent.change(input, { target: { value: text } });
+  fireEvent.keyDown(input, { key: "Enter" });
+}
+
 // Runs outside any act() wrapper so each fireEvent's own act() flushes before the next query;
 // only the final submit (fillAttributeDraft's caller wraps that one) kicks off the async save.
-function fillAttributeDraft(name: string, values: string) {
+function fillAttributeDraft(name: string, values: string[]) {
   fireEvent.click(screen.getByText("Add attribute"));
   fireEvent.change(screen.getByLabelText("attribute name"), { target: { value: name } });
-  fireEvent.change(screen.getByLabelText("attribute values"), {
-    target: { value: values },
-  });
+  for (const value of values) enter("attribute value", value);
 }
 
 /** A box of the active subject on the canvas, focused. */
@@ -87,7 +92,8 @@ describe("AttributePanel presence", () => {
     expect(screen.getByText("bud attributes")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add attribute" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "ripeness" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add a ripeness value" })).toBeInTheDocument();
+    // One beside the focused shape's select, one in the subject's declared attributes.
+    expect(screen.getAllByRole("button", { name: "Add a ripeness value" })).toHaveLength(2);
   });
 });
 
@@ -96,7 +102,7 @@ describe("AttributePanel authoring", () => {
     act(() => useStore.getState().setRegistry({ bud: {} }));
     const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(landed);
     render(<AttributePanel focused={focusedBox()} />);
-    fillAttributeDraft("size", "small\nlarge");
+    fillAttributeDraft("size", ["small", "large"]);
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
@@ -106,6 +112,44 @@ describe("AttributePanel authoring", () => {
     expect(saveSpy.mock.calls[0][2]).toBeNull();
     expect(useStore.getState().registry.version).toBe("v2");
     expect(screen.getByText("size: 1 of 1 bud shapes unset")).toBeInTheDocument();
+  });
+
+  it("declares every value entered, the one still in the box included, as one attribute", async () => {
+    act(() => useStore.getState().setRegistry({ bud: {} }));
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(landed);
+    render(<AttributePanel focused={null} />);
+    fillAttributeDraft("opening", ["closed", "half"]);
+    fireEvent.change(screen.getByLabelText("attribute value"), { target: { value: "open" } });
+
+    expect(screen.getByText("closed")).toBeInTheDocument();
+    expect(screen.getByText("half")).toBeInTheDocument();
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
+
+    expect(saveSpy.mock.calls[0][0]).toEqual({
+      bud: {
+        attributes: { opening: { type: "categorical", values: ["closed", "half", "open"] } },
+      },
+    });
+  });
+
+  it("adds several values to a declared attribute with no shape focused", async () => {
+    act(() =>
+      useStore.getState().setRegistry({
+        bud: { attributes: { opening: { type: "categorical", values: ["closed"] } } },
+      }),
+    );
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(landed);
+    render(<AttributePanel focused={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add an opening value" }));
+    await act(() => Promise.resolve(enter("new opening value", "half")));
+    await act(() => Promise.resolve(enter("new opening value", "open")));
+
+    expect(saveSpy).toHaveBeenCalledTimes(2);
+    expect(saveSpy.mock.calls[1][0]).toEqual({
+      bud: {
+        attributes: { opening: { type: "categorical", values: ["closed", "half", "open"] } },
+      },
+    });
   });
 
   it("refuses a name the subject already declares, inline, and posts nothing", async () => {
@@ -119,7 +163,7 @@ describe("AttributePanel authoring", () => {
     );
     const saveSpy = vi.spyOn(subjectsApi, "save");
     render(<AttributePanel focused={null} />);
-    fillAttributeDraft("size", "large");
+    fillAttributeDraft("size", ["large"]);
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
 
     expect(screen.getByText("size is already declared.")).toBeInTheDocument();
@@ -145,7 +189,7 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
     );
 
     render(<AttributePanel focused={null} />);
-    fillAttributeDraft("opening", "closed\nopen");
+    fillAttributeDraft("opening", ["closed", "open"]);
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
 
     // The committed registry is adopted as though the save had answered 200, and the gap
@@ -164,7 +208,7 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
     });
 
     render(<AttributePanel focused={null} />);
-    fillAttributeDraft("opening", "closed\nopen");
+    fillAttributeDraft("opening", ["closed", "open"]);
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
 
     expect(useStore.getState().registry.subjects).toEqual({ bud: {} });
