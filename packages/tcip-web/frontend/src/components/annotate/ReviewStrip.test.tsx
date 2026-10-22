@@ -41,6 +41,7 @@ function renderStrip(over: Partial<Parameters<typeof ReviewStrip>[0]> = {}) {
     onStep: vi.fn(),
     onJump: vi.fn(),
     onAccept: vi.fn(),
+    onAcceptAll: vi.fn(),
     onEdit: vi.fn(),
     onReject: vi.fn(),
     onFlagsOpen: vi.fn(),
@@ -55,6 +56,7 @@ function renderStrip(over: Partial<Parameters<typeof ReviewStrip>[0]> = {}) {
       scope="all"
       canAccept
       canReject
+      acceptAllCount={0}
       scopeCounts={{ all: 7, unreviewed: 3, flagged: 0 }}
       flagCount={0}
       focused={focusedProposal}

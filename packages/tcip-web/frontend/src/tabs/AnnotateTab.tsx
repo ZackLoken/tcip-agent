@@ -521,6 +521,21 @@ export function AnnotateTab() {
     else setFocus(null);
   }
 
+  /** Accept every undecided proposal the canvas shows, one save per bucket they come from, and
+   *  focus nothing; a save the canvas did not adopt stops the rest. */
+  async function acceptAll() {
+    const byBucket = new Map<string, number[]>();
+    for (const p of drawnProposals) {
+      const own = p.bucket ?? bucket;
+      if (own) byBucket.set(own, [...(byBucket.get(own) ?? []), p.index]);
+    }
+    for (const [own, indices] of byBucket) {
+      const answer = await save({ gestures: { bucket: own, accept: indices } });
+      if (!answer || !mountedRef.current) return;
+    }
+    setFocus(null);
+  }
+
   /** Edit the focused proposal: it is accepted, and the annotation the answer says it resolved
    *  to, a new one or one already drawn, is focused in its place. A save the canvas did not adopt
    *  focuses nothing. */
@@ -1776,6 +1791,8 @@ export function AnnotateTab() {
         onStep={stepItem}
         onJump={jumpToItem}
         onAccept={() => void decide("accept")}
+        acceptAllCount={drawnProposals.length}
+        onAcceptAll={() => void acceptAll()}
         onEdit={() => void edit()}
         onReject={() => void decide("reject")}
       />
