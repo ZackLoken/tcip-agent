@@ -10,7 +10,7 @@ invariances' correction are :func:`tcip_mcp.workspace.remove_project`,
 
 from __future__ import annotations
 
-import functools
+import threading
 from pathlib import Path
 
 import anyio
@@ -29,6 +29,10 @@ from tcip_mcp.project_record import (
 from tcip_web.state import OpenProject, store
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
+
+_WORKSPACE_TURN = threading.Lock()
+"""Held by every read of the workspace's project records and by a removal, so no read reopens a
+project's store while its folder is being moved."""
 
 
 class ProjectSummary(BaseModel):
@@ -80,14 +84,14 @@ def _summarize(project_dir: Path, record: dict) -> ProjectSummary:
 @router.get("")
 def list_projects() -> dict:
     """List the workspace's projects, newest first, with the open project's id (``open_id``)."""
-    records = workspace.project_records(store.workspace)
     projects: list[ProjectSummary] = []
-    for child, record in records:
-        try:
-            projects.append(_summarize(child, record))
-        except OSError:
-            # A project deleted mid-listing must not 500 the whole list.
-            continue
+    with _WORKSPACE_TURN:
+        for child, record in workspace.project_records(store.workspace):
+            try:
+                projects.append(_summarize(child, record))
+            except OSError:
+                # A project deleted mid-listing must not 500 the whole list.
+                continue
     projects.sort(key=lambda p: p.modified, reverse=True)
     opened = store.opened
     return {
@@ -104,9 +108,9 @@ def workspace_project(project_id: str) -> tuple[Path, dict]:
     (:func:`tcip_mcp.workspace.project_by_id`); 404 naming why when none, or two, do.
     """
     try:
-        return workspace.project_by_id(
-            workspace.project_records(store.workspace), project_id
-        )
+        with _WORKSPACE_TURN:
+            records = workspace.project_records(store.workspace)
+        return workspace.project_by_id(records, project_id)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
 
@@ -179,8 +183,8 @@ async def remove_project(req: RemovalRequest) -> dict:
 
     The project, when it is the open one, is closed only once the removal is admitted. 404 for
     no such project, 400 for a confirm name that is not its display name, 409 while a job or run
-    of it is live or the archive refuses, 400 for a request naming no one. Returns
-    ``{archive_path, moved_to}``.
+    of it is live, the archive refuses or another process holds the folder past the move's retry
+    budget, 400 for a request naming no one. Returns ``{archive_path, moved_to}``.
     """
     person = actor(req.user)
     project, fields = workspace_project(req.id)
@@ -196,18 +200,23 @@ async def remove_project(req: RemovalRequest) -> dict:
     def release() -> None:
         anyio.from_thread.run(store.close_project, req.id)
 
-    try:
-        return await anyio.to_thread.run_sync(
-            functools.partial(
-                workspace.remove_project,
-                store.workspace,
-                project,
-                actor=person,
-                release=release,
+    def remove() -> dict:
+        with _WORKSPACE_TURN:
+            return workspace.remove_project(
+                store.workspace, project, actor=person, release=release
             )
-        )
+
+    try:
+        return await anyio.to_thread.run_sync(remove)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(
+            409,
+            f"another process holds the project's folder open, so it was left where it "
+            f"is: {exc}. Close whatever has it open (an agent terminal working on it, a "
+            "file browser) and remove it again",
+        ) from exc
 
 
 class RenameRequest(BaseModel):
