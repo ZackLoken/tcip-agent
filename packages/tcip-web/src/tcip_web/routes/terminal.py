@@ -215,7 +215,7 @@ class TerminalSession:
             self._launch.composer_ready = provider.composer_ready
             try:
                 pty = pty_host.spawn_pty(
-                    argv, pty_host.terminal_cwd(), rows, cols, env
+                    argv, str(store.workspace), rows, cols, env
                 )
             except OSError as exc:
                 self._pty = None

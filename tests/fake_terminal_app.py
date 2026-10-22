@@ -2,7 +2,8 @@
 
 Prints a banner naming the terminal session id it inherited, echoes each input line back as
 ``echo:<line>`` with any bracketed-paste markers removed, and exits on ``exit``. With
-``FAKE_TERMINAL_ARGV_FILE`` set it first writes its arguments there as JSON. With
+``FAKE_TERMINAL_ARGV_FILE`` set it first writes its arguments there as JSON, and with
+``FAKE_TERMINAL_CWD_FILE`` set its working directory there. With
 ``FAKE_TERMINAL_PASTE_AFTER_S`` set it waits that many seconds, prints ``EARLY_INPUT`` if input
 arrived meanwhile, then turns bracketed paste on and writes ``FAKE_TERMINAL_COMPOSER_READY``.
 Run with ``fail`` as its first argument it exits 3 immediately.
@@ -37,6 +38,9 @@ def main() -> None:
     argv_file = os.environ.get("FAKE_TERMINAL_ARGV_FILE")
     if argv_file:
         Path(argv_file).write_text(json.dumps(sys.argv[1:]), encoding="utf-8")
+    cwd_file = os.environ.get("FAKE_TERMINAL_CWD_FILE")
+    if cwd_file:
+        Path(cwd_file).write_text(os.getcwd(), encoding="utf-8")
     if sys.argv[1:2] == ["fail"]:
         print("FAKE_PREPARATION_FAILED", file=sys.stderr, flush=True)
         sys.exit(3)
