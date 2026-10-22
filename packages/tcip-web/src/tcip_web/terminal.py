@@ -631,9 +631,10 @@ def session_ritual(launch: ProjectLaunch | None) -> str:
     if launch is None:
         return (
             f"{_RITUAL_HEADER}This session has no project: the GUI had none open when the "
-            "terminal started, so every tool that acts on a project refuses. Create one with "
-            "initialize_project, or open one in the GUI, then restart the terminal to work on "
-            f"it. {_RITUAL_FRICTION}"
+            "terminal started, so every tool that acts on a project refuses until one is "
+            "created. A project initialize_project creates is this session's from then on; "
+            "an existing one is worked on by opening it in the GUI and restarting the "
+            f"terminal. {_RITUAL_FRICTION}"
         )
     _, record = existing_project(launch.project.root)
     if launch.doctor_line is None:

@@ -164,7 +164,7 @@ def register_dataset(project: Path, dataset_root: str, crop: Text) -> dict:
     return {"dataset_root": str(root), **identity}
 
 
-@tool()
+@tool(creates_project=True)
 def initialize_project(
     project_path: str,
     display_name: str,
@@ -180,6 +180,10 @@ def initialize_project(
     Creating a project that already records the same display name, site and invariances answers
     it as it stands; one recording a different site, display name or invariances refuses rather
     than overwriting it. A refused record leaves nothing on disk.
+
+    Called through an MCP server started for no project, every project tool of that server acts
+    on the project created from then on; a server started for a project stays on it. Through a
+    server the answer carries ``session_project``, the project its tools act on after the call.
 
     Args:
         project_path: Root directory of the project.

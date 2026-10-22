@@ -1,7 +1,8 @@
-"""One project per process, named where the process starts.
+"""One project per process, named where it starts or by the project a server for none creates.
 
-The MCP server acts on the project it was started for, the web backend on the project it has
-open, and neither ever reads the other's choice or leaves one behind in the environment.
+The MCP server acts on the project it was started for, or the first one it creates when started
+for none; the web backend acts on the project it has open; neither ever reads the other's choice
+or leaves one behind in the environment.
 
 The MCP cases run the real ``tcip-pipeline`` server in memory through a handshake
 (``tests.test_agent_identity_records.results_through_handshake``); the backend cases go through
@@ -109,6 +110,74 @@ def test_a_server_for_no_project_refuses_project_tools_naming_project_and_serves
     assert refused.is_error
     assert "--project" in refused.content[0].text
     assert not knowledge.is_error, knowledge
+
+
+def _creation(path: Path, display_name: str) -> tuple[str, dict]:
+    from tests._web_fixtures import INVARIANCES
+
+    return (
+        "initialize_project",
+        {
+            "project_path": str(path),
+            "display_name": display_name,
+            "site": "north orchard",
+            "invariances": INVARIANCES.model_dump(),
+        },
+    )
+
+
+def test_a_server_for_no_project_acts_on_the_project_it_creates(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    from PIL import Image
+
+    from tcip_mcp import dataset_layout
+
+    source = tmp_path / "raw"
+    source.mkdir()
+    Image.new("RGB", (8, 8)).save(source / "IMG_0001.jpg")
+    target = tmp_path.parent / "ridge_block"
+
+    created, ingested = results_through_handshake(
+        [
+            _creation(target, "Ridge block"),
+            ("ingest_images", {"source": str(source)}),
+        ],
+        bound=None,
+    )
+
+    assert not created.is_error, created
+    assert not ingested.is_error, ingested
+    answer = json.loads(created.content[0].text)
+    assert answer["session_project"] == str(target.resolve())
+    copied = dataset_layout.image_root(target).rglob("*.jpg")
+    assert [p.name for p in copied] == ["IMG_0001.jpg"]
+
+
+def test_a_server_for_a_project_stays_on_it_after_creating_another(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    ws = tmp_path.parent
+    started = named_project(ws / "valley_block", "Valley block")
+    other = ws / "hill_block"
+
+    created, reported = results_through_handshake(
+        [_creation(other, "Hill block"), _FRICTION], bound=bound_to(started)
+    )
+
+    assert not created.is_error, created
+    assert not reported.is_error, reported
+    assert json.loads(created.content[0].text)["session_project"] == str(
+        started.root
+    )
+    assert [
+        row["arguments"]["detail"] for row in _friction_rows(started.root)
+    ] == ["which root"]
+    assert _friction_rows(other) == []
 
 
 def test_the_server_refuses_to_start_for_a_directory_holding_no_project(
