@@ -1083,6 +1083,36 @@ def test_an_engine_holds_its_weights_on_the_cpu_once_its_call_returns(
     assert answer["held_on"] == "cpu"
 
 
+def test_a_tile_the_phrase_detector_answers_empty_predicts_nothing() -> None:
+    """A tile the processor answers with no box and a lone empty label predicts nothing."""
+    import torch
+
+    from tcip_mcp.pipelines.proposal_engines import PhraseDetectionModel
+
+    detector = object.__new__(PhraseDetectionModel)
+    detector._original_predictions = [
+        {
+            "boxes": torch.zeros((0, 4)),
+            "scores": torch.zeros(0),
+            "text_labels": [""],
+        },
+        {
+            "boxes": torch.tensor([[1.0, 2.0, 30.0, 40.0]]),
+            "scores": torch.tensor([0.7]),
+            "text_labels": ["square"],
+        },
+    ]
+
+    detector._create_object_prediction_list_from_original_predictions(
+        shift_amount_list=[[0, 0], [100, 0]],
+        full_shape_list=[[200, 200], [200, 200]],
+    )
+
+    empty, found = detector._object_prediction_list_per_image
+    assert empty == []
+    assert [p.category.name for p in found] == ["square"]
+
+
 SMALL_SQUARE = (2000, 300, 2024, 324)
 """A 24 pixel square far from the center of a 2400 by 1800 frame, as a half-open box."""
 
