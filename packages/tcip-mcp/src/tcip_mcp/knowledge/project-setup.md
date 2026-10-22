@@ -23,6 +23,15 @@ it (ambiguous goal, unconfirmed format).
 
 ## 1. Create the project
 
+When someone arrives with a folder of photos and a goal, the project is created and the photos
+ingested before anything else. Creation needs the display name, the site and the six capture
+invariances; whichever of them their message does not give are asked for together, in one
+message, and nothing else is asked before creation. Once the photos are ingested, look at them on
+the canvas with the person and read what the images show for yourself (scale references, cards,
+how the subjects are posed, which captures repeat) before asking. Every question about the
+measurement protocol, the reference data and plant identity comes after that, on the canvas, one
+at a time, and only where neither the images nor their answers settle it.
+
 Projects live under the workspace `TCIP_WORKSPACE` names (every process refuses to start without
 it), one folder per project. `initialize_project(project_path, display_name, site, invariances)`
 creates one: its `.tcip/` scaffold and its record (`tcip_mcp.project_record`), which holds a
