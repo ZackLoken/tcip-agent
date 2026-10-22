@@ -25,12 +25,11 @@ from pathlib import Path, PurePath
 
 from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
 from tcip_mcp.project_paths import repo_root_from_here
-from tcip_web.state import OpenProject, store
+from tcip_web.state import OpenProject
 
 logger = logging.getLogger(__name__)
 
 TERMINAL_CMD_ENV = "TCIP_TERMINAL_CMD"
-TERMINAL_CWD_ENV = "TCIP_TERMINAL_CWD"
 
 DEFAULT_ROWS = 30
 DEFAULT_COLS = 100
@@ -39,8 +38,6 @@ DEFAULT_COLS = 100
 # isalive() after taskkill returns; the POSIX path bounds its wait() calls with it.
 TERMINATE_WAIT_S = 5
 
-WORKSPACE_ARG = "{workspace}"
-"""A whole argument: the backend's workspace."""
 MCP_CONFIG_ARG = "{mcp_config}"
 """A whole argument: the path of the launch's JSON MCP configuration."""
 CODEX_MCP_ARG = "{codex_mcp}"
@@ -89,7 +86,7 @@ class Provider:
     """One agent harness the terminal launches, its launch and what that launch confines.
 
     It carries the id a session names it by, its display name, the executable looked up on
-    ``PATH``, the arguments after it, which may include the placeholders :data:`WORKSPACE_ARG`,
+    ``PATH``, the arguments after it, which may include the placeholders
     :data:`MCP_CONFIG_ARG`, :data:`CLAUDE_SETTINGS_ARG` and :data:`CODEX_MCP_ARG` as whole
     arguments, the output sequence one installed version of the harness was recorded writing
     when its composer appeared, what the harness's own enforcement restricts under those
@@ -413,8 +410,10 @@ PROVIDERS: tuple[Provider, ...] = (
         args=(
             "--settings",
             CLAUDE_SETTINGS_ARG,
+            "--setting-sources",
+            "project",
             "--add-dir",
-            WORKSPACE_ARG,
+            str(repo_root_from_here()),
             "--permission-mode",
             "default",
             "--mcp-config",
@@ -426,7 +425,8 @@ PROVIDERS: tuple[Provider, ...] = (
             "Claude Code enforces the deny and allow lists of "
             "agent_terminal.settings.json, with the read-only tcip console commands "
             "allowed and, when the launch spelled it, the ritual's own doctor line, "
-            "merged with the user's own Claude Code settings; a tool call neither list "
+            "merged with the workspace's own project settings only, the user's own "
+            "settings and instruction files not loaded; a tool call neither list "
             "decides asks first."
         ),
     ),
@@ -434,7 +434,7 @@ PROVIDERS: tuple[Provider, ...] = (
         id="antigravity",
         name="Antigravity",
         executable="agy",
-        args=("--add-dir", WORKSPACE_ARG, "--sandbox"),
+        args=("--sandbox",),
         composer_ready="\x1b[0 q\r\x1b[J",
         confinement=(
             "agy's --sandbox turns on its terminal restrictions, whose extent agy "
@@ -553,14 +553,12 @@ def render_argv(
 ) -> list[str]:
     """Return ``argv`` with each placeholder argument rendered for ``launch``.
 
-    Each :data:`WORKSPACE_ARG` is replaced by the backend's workspace, each
-    :data:`MCP_CONFIG_ARG` by a configuration :func:`write_mcp_config` writes, each
+    Each :data:`MCP_CONFIG_ARG` is replaced by a configuration :func:`write_mcp_config` writes, each
     :data:`CLAUDE_SETTINGS_ARG` by the settings :func:`write_claude_settings` writes, and each
     :data:`CODEX_MCP_ARG` by :func:`codex_mcp_overrides` forwarding every variable of ``env``,
     the environment the launch spawns with, each for ``launch``.
     """
     values = {
-        WORKSPACE_ARG: lambda: [str(store.workspace)],
         MCP_CONFIG_ARG: lambda: [str(write_mcp_config(launch))],
         CLAUDE_SETTINGS_ARG: lambda: [str(write_claude_settings(launch))],
         CODEX_MCP_ARG: lambda: codex_mcp_overrides(launch, env),
@@ -728,11 +726,6 @@ def launch_problem(provider: Provider) -> str | None:
         if resolve_terminal_command(provider) is None
         else None
     )
-
-
-def terminal_cwd() -> str:
-    """Return ``TCIP_TERMINAL_CWD``, or the repository root when unset."""
-    return os.environ.get(TERMINAL_CWD_ENV, str(repo_root_from_here()))
 
 
 # ── PTY backends ────────────────────────────────────────────────────────

@@ -33,7 +33,6 @@ FAKE = Path(__file__).parent / "fake_terminal_app.py"
 LAUNCH = {"provider": pty_host.PROVIDERS[0].id, "user": "tester"}
 ABSENT = "definitely-not-a-real-cli-xyz"
 _PLACEHOLDERS = (
-    pty_host.WORKSPACE_ARG,
     pty_host.MCP_CONFIG_ARG,
     pty_host.CLAUDE_SETTINGS_ARG,
     pty_host.CODEX_MCP_ARG,
@@ -195,15 +194,13 @@ def test_a_create_naming_an_unlisted_provider_refuses_by_name_and_a_listed_one_l
 def test_rendering_replaces_each_placeholder_and_leaves_every_other_argument(
     opened: OpenProject,
 ) -> None:
-    from tcip_web.state import store
-
-    literal, workspace, config = pty_host.render_argv(
-        ["--literal", pty_host.WORKSPACE_ARG, pty_host.MCP_CONFIG_ARG],
+    literal, config = pty_host.render_argv(
+        ["--literal", pty_host.MCP_CONFIG_ARG],
         pty_host.project_launch(opened),
         pty_host.spawn_env("term_test"),
     )
 
-    assert (literal, workspace) == ("--literal", str(store.workspace))
+    assert literal == "--literal"
     server = json.loads(Path(config).read_text(encoding="utf-8"))[
         "mcpServers"
     ]["tcip"]
@@ -228,19 +225,23 @@ def test_prewarm_runs_without_raising() -> None:
     assert "tcip_mcp.server" in sys.modules
 
 
-def test_the_agent_runs_at_the_repo_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_the_agent_runs_in_the_workspace(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``terminal_cwd()`` resolves the repository root, unmoved by a working-directory change.
+    """A launched agent's working directory is the backend's workspace, not the repository."""
+    from tcip_web.state import store
 
-    The directory it names holds ``.mcp.json`` and ``packages``.
-    """
-    monkeypatch.delenv(pty_host.TERMINAL_CWD_ENV, raising=False)
-    from_install_dir = Path(pty_host.terminal_cwd())
-    monkeypatch.chdir(tmp_path)
-    assert Path(pty_host.terminal_cwd()) == from_install_dir
-    assert (from_install_dir / ".mcp.json").is_file()
-    assert (from_install_dir / "packages").is_dir()
+    cwd_file = tmp_path / "cwd.txt"
+    monkeypatch.setenv("FAKE_TERMINAL_CWD_FILE", str(cwd_file))
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    with client.websocket_connect(
+        f"ws://127.0.0.1/api/terminal/ws/{sid}"
+    ) as ws:
+        _read_until(ws, "FAKE_TERMINAL_READY")
+
+    assert Path(cwd_file.read_text(encoding="utf-8")).samefile(store.workspace)
 
 
 def test_winpty_terminate_polls_isalive_rather_than_trusting_taskkills_return(

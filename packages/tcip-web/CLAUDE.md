@@ -67,12 +67,13 @@ Claude's row passes a settings file each launch writes from `CLAUDE_SETTINGS`,
 (`READ_ONLY_CONSOLE_COMMANDS`, under both invocations) and, when the launch spelled it, the ritual's
 own doctor line allowed under both shells; its `confinement` sentence states what that file
 enforces, and the shipped file's academic WebFetch grants are generated from the `cv-research`
-document by `tools/generate_harness_discovery.py`. Those permission lists merge (union) with the
-repo root's own, gitignored, developer-local `.claude/settings.json` and the user's own settings
-rather than replacing them: list-valued settings keys merge across sources
-(code.claude.com/docs/en/configuration). A broad allow entry in the developer's own user settings
-therefore widens the breeder lane too. Don't extend or edit that file without calling it out
-explicitly.
+document by `tools/generate_harness_discovery.py`. Don't extend or edit that file without calling
+it out explicitly. Every row's agent runs in the backend's workspace, so no harness reads the
+repository's instruction files as its own. Claude's row loads project settings only
+(`--setting-sources project`), so neither the user's own settings, hooks and `CLAUDE.md` nor the
+developer's auto-memory reach the breeder's agent, and adds the repository as a directory, from
+which it reads the generated knowledge skills; the other rows reach the knowledge through
+`serve_domain_knowledge`.
 
 Each launch records what it ran: create and restart answer a `TerminalLaunch` (the provider id, the
 rendered argv and the version its executable declares, never probed on a `TCIP_TERMINAL_CMD`
