@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import type { AttrType, AttributeDef, Registry } from "@/api/subjects";
 import { ATTR_TYPES } from "@/api/types.generated";
 import { AttributeEditors } from "@/components/annotate/AttributeEditors";
+import { AddValue, ValueChips } from "@/components/annotate/ValueChips";
 import { saveRegistry } from "@/lib/registrySave";
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
@@ -81,24 +82,33 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
   const [addingAttribute, setAddingAttribute] = useState(false);
   const [attrName, setAttrName] = useState("");
   const [attrType, setAttrType] = useState<AttrType>(ATTR_TYPES[0]);
-  const [attrValues, setAttrValues] = useState("");
+  const [attrValues, setAttrValues] = useState<string[]>([]);
+  const [valueDraft, setValueDraft] = useState("");
   const [attrNameError, setAttrNameError] = useState<string | null>(null);
+  // The values the draft declares: the entered ones, then the one still in the box.
+  const draftValues = [
+    ...attrValues,
+    ...(valueDraft.trim() && !attrValues.includes(valueDraft.trim()) ? [valueDraft.trim()] : []),
+  ];
 
   function resetAttrDraft() {
     setAddingAttribute(false);
     setAttrName("");
     setAttrType(ATTR_TYPES[0]);
-    setAttrValues("");
+    setAttrValues([]);
+    setValueDraft("");
     setAttrNameError(null);
+  }
+
+  function enterDraftValue() {
+    setAttrValues(draftValues);
+    setValueDraft("");
   }
 
   function submitAttrDraft() {
     if (!activeSubject) return;
     const name = attrName.trim();
-    const values = attrValues
-      .split("\n")
-      .map((v) => v.trim())
-      .filter((v) => v.length > 0);
+    const values = draftValues;
     if (!name || values.length === 0) return;
     if (activeAttributes[name]) {
       setAttrNameError(`${name} is already declared.`);
@@ -152,12 +162,21 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
               Add attribute
             </button>
           </div>
-          {Object.entries(activeAttributes).map(([name]) => {
+          {Object.entries(activeAttributes).map(([name, def]) => {
             const unassessed = activeSubjectShapes.filter((s) => !s.attributes[name]).length;
             return (
-              <p key={name} className="text-tcip-muted">
-                {`${name}: ${unassessed} of ${activeSubjectShapes.length} ${activeSubject} shapes unset`}
-              </p>
+              <div key={name} className="mb-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="w-20 shrink-0 truncate" title={name}>
+                    {name}
+                  </span>
+                  <ValueChips values={def.values} />
+                  <AddValue attr={name} onAdd={(value) => addValue(activeSubject, name, value)} />
+                </div>
+                <p className="text-tcip-muted">
+                  {`${name}: ${unassessed} of ${activeSubjectShapes.length} ${activeSubject} shapes unset`}
+                </p>
+              </div>
             );
           })}
           {addingAttribute && (
@@ -185,19 +204,27 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
                   </option>
                 ))}
               </select>
-              <textarea
-                className="tcip-input h-20 w-full py-1"
-                placeholder={attrType === "ordinal" ? "Values, lowest first" : "Values"}
-                aria-label="attribute values"
-                rows={3}
-                value={attrValues}
-                onChange={(e) => setAttrValues(e.target.value)}
+              {attrValues.length > 0 && (
+                <ValueChips
+                  values={attrValues}
+                  onRemove={(v) => setAttrValues(attrValues.filter((w) => w !== v))}
+                />
+              )}
+              <input
+                className="tcip-input w-full"
+                placeholder={attrType === "ordinal" ? "Value, lowest first" : "Value"}
+                aria-label="attribute value"
+                value={valueDraft}
+                onChange={(e) => setValueDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") enterDraftValue();
+                }}
               />
               <div className="flex gap-2">
                 <button
                   type="button"
                   className="tcip-btn-primary flex-1"
-                  disabled={!attrName.trim() || !attrValues.trim()}
+                  disabled={!attrName.trim() || draftValues.length === 0}
                   onClick={submitAttrDraft}
                 >
                   Add
