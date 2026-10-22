@@ -186,6 +186,10 @@ function RenameDialog({
   );
 }
 
+/** How often the listing is read again while the picker is shown, so a project the agent creates
+ *  appears without a reload; the owner's figure. */
+export const LISTING_REFRESH_MS = 2000;
+
 function relativeTime(epochSeconds: number): string {
   const deltaMs = Date.now() - epochSeconds * 1000;
   const mins = Math.round(deltaMs / 60000);
@@ -235,6 +239,7 @@ export function ProjectPicker() {
   function showListing(res: Awaited<ReturnType<typeof api.projects.list>>) {
     setProjects(res.projects);
     setOpenId(res.open_id);
+    setLoadError(null);
   }
 
   function refetch(): Promise<void> {
@@ -260,10 +265,13 @@ export function ProjectPicker() {
       .catch((e) => {
         if (!canceled) setLoadError(String(e));
       });
+    const refresh = window.setInterval(() => void refetch(), LISTING_REFRESH_MS);
     return () => {
       canceled = true;
+      window.clearInterval(refresh);
     };
     // Run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
