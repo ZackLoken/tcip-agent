@@ -186,8 +186,6 @@ export const api = {
         workspace: string;
         // The id of the project the backend has open, or null.
         open_id: string | null;
-        // Names a last-opened project no longer in the workspace while nothing is open.
-        last_opened_problem: string | null;
         projects: ProjectSummary[];
       }>(ROUTES.getProjects),
     open: (body: OpenRequest) =>

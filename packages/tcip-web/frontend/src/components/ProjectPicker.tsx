@@ -3,8 +3,8 @@
  * opens one: the human never browses the filesystem for two roots. Opening a project makes it the
  * backend's open project; a date/subject/model can be picked per project. The chosen project and
  * an open in flight live in the store, so they survive the picker being replaced when the
- * name field's draft is committed (Enter or Open). The project the backend already holds open
- * (the workspace's last-opened one) is preselected unless a project is already chosen. Project
+ * name field's draft is committed (Enter or Open). The project the backend already holds open is
+ * preselected unless a project is already chosen. Project
  * creation is agent-driven.
  */
 
@@ -208,7 +208,6 @@ export function ProjectPicker() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [lastOpenedProblem, setLastOpenedProblem] = useState<string | null>(null);
   const { projectId: selected, date, subject, bucket } = useStore((s) => s.openChoice);
   const opening = useStore((s) => s.opening !== null);
   const openError = useStore((s) => s.openError);
@@ -236,7 +235,6 @@ export function ProjectPicker() {
   function showListing(res: Awaited<ReturnType<typeof api.projects.list>>) {
     setProjects(res.projects);
     setOpenId(res.open_id);
-    setLastOpenedProblem(res.last_opened_problem);
   }
 
   function refetch(): Promise<void> {
@@ -301,12 +299,6 @@ export function ProjectPicker() {
         {loadError && (
           <div className="tcip-panel p-4 text-[13px] tcip-problem">
             Could not load projects. {loadError}
-          </div>
-        )}
-
-        {lastOpenedProblem && (
-          <div className="tcip-panel p-4 text-[13px] text-tcip-warn">
-            The project opened last could not be opened again: {lastOpenedProblem}
           </div>
         )}
 

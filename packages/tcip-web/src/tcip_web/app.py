@@ -34,15 +34,10 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Open the last-opened project, size GDAL's block cache and warm the agent terminal.
+    """Size GDAL's block cache and warm the agent terminal before the app serves.
 
-    All three run before the app serves; the project opened is the one the last-opened pointer
-    of the workspace the backend was configured with names. Refuses a backend configured with no
-    workspace (``StateStore.workspace``).
+    The backend starts with no project open.
     """
-    from tcip_web.routes.projects import open_last_opened
-
-    await open_last_opened()
     # Size GDAL's block cache once per process, at the entry point, never at source construction.
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 

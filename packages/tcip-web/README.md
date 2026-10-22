@@ -49,8 +49,8 @@ On startup, the backend:
 - Records the port it bound in the workspace root's store so MCP tools can discover it, the one
   location every process on the machine resolves the same way regardless of which project each has
   open.
-- Opens the project the workspace's last-opened pointer names (by the id in its project record), if
-  that project is still in the workspace, and replays that project's GUI snapshot if present.
+- Opens no project: the GUI starts at the project picker, and opening a project there replays its
+  GUI snapshot if present.
 
 Open `http://127.0.0.1:8765/` once the backend is up.
 

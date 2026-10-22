@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import tcip_store as ts
-from tcip_mcp import audit, workspace
+from tcip_mcp import audit
 from tcip_web.state import store
 from tests._web_fixtures import bound_to, named_project
 from tests.test_agent_identity_records import results_through_handshake
@@ -180,12 +180,10 @@ def test_opening_two_projects_leaves_the_environment_as_it_was(
     assert store.opened == second
 
 
-def test_the_last_opened_pointer_holds_the_id_and_the_list_names_each_project_by_display_name(
+def test_the_list_names_the_open_project_and_each_project_by_display_name(
     tmp_path: Path,
     client: TestClient,
 ) -> None:
-    from tcip_web.routes.projects import open_last_opened
-
     ws = tmp_path.parent
     valley = named_project(ws / "valley_block", "Valley block")
     hill = named_project(ws / "hill_block", "Hill block")
@@ -195,14 +193,9 @@ def test_the_last_opened_pointer_holds_the_id_and_the_list_names_each_project_by
     )
     assert opened.status_code == 200
 
-    assert workspace.read_last_opened(ws) == valley.id
     listing = client.get("/api/projects").json()
     assert listing["open_id"] == valley.id
     assert {(p["id"], p["display_name"]) for p in listing["projects"]} == {
         (valley.id, "Valley block"),
         (hill.id, "Hill block"),
     }
-
-    asyncio.run(store.close_project(valley.id))
-    asyncio.run(open_last_opened())
-    assert store.opened == valley

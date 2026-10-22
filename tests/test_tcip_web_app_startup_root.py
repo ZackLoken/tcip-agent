@@ -1,12 +1,13 @@
 """The web backend's start.
 
 ``python -m tcip_web``'s ``main`` publishes the port under the workspace and configures the
-backend with it, refusing an unset ``TCIP_WORKSPACE``; the lifespan opens the project the
-last-opened pointer names; in the suite the backend runs on a scratch workspace of each test's own.
+backend with it, refusing an unset ``TCIP_WORKSPACE``; a started backend holds no project open;
+in the suite the backend runs on a scratch workspace of each test's own.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -20,7 +21,6 @@ from urllib.parse import urlencode
 import pytest
 from fastapi.testclient import TestClient
 
-from tcip_mcp import workspace
 from tcip_web.app import app
 from tcip_web.state import store
 
@@ -122,11 +122,15 @@ def test_main_publishes_the_port_and_configures_the_backend_on_one_workspace(
     assert refused[0] != 200, refused
 
 
-def test_the_lifespan_opens_the_project_the_last_opened_pointer_names(
-    made: OpenProject,
+def test_a_started_backend_holds_no_project_open_whichever_was_opened_before(
+    made: OpenProject, client: TestClient
 ) -> None:
-    workspace.write_last_opened(made.root.parent, made.id)
+    opened = client.post(
+        "/api/projects/open", json={"id": made.id, "user": "grower"}
+    )
+    assert opened.status_code == 200
+    asyncio.run(store.close_project(made.id))
 
-    with TestClient(app, base_url="http://127.0.0.1") as client:
-        assert client.get("/api/projects").json()["open_id"] == made.id
-        assert store.opened == made
+    with TestClient(app, base_url="http://127.0.0.1") as started:
+        assert started.get("/api/projects").json()["open_id"] is None
+        assert store.opened is None

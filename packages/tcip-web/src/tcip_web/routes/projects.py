@@ -2,7 +2,7 @@
 
 Lists the projects under the backend's workspace by each one's own record
 (:mod:`tcip_mcp.project_record`). Opening a project makes it the backend's open
-project and points the workspace's last-opened pointer at its id; removal, rename and the
+project; removal, rename and the
 invariances' correction are :func:`tcip_mcp.workspace.remove_project`,
 :func:`tcip_mcp.project_record.rename_project` and
 :func:`tcip_mcp.project_record.replace_invariances`.
@@ -11,7 +11,6 @@ invariances' correction are :func:`tcip_mcp.workspace.remove_project`,
 from __future__ import annotations
 
 import functools
-import logging
 from pathlib import Path
 
 import anyio
@@ -28,8 +27,6 @@ from tcip_mcp.project_record import (
     replace_invariances,
 )
 from tcip_web.state import OpenProject, store
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -82,11 +79,7 @@ def _summarize(project_dir: Path, record: dict) -> ProjectSummary:
 
 @router.get("")
 def list_projects() -> dict:
-    """List the workspace's projects, newest first, with the open project's id (``open_id``).
-
-    ``last_opened_problem`` names a last-opened pointer whose project is no longer in the
-    workspace while nothing is open, and is null otherwise.
-    """
+    """List the workspace's projects, newest first, with the open project's id (``open_id``)."""
     records = workspace.project_records(store.workspace)
     projects: list[ProjectSummary] = []
     for child, record in records:
@@ -96,18 +89,10 @@ def list_projects() -> dict:
             # A project deleted mid-listing must not 500 the whole list.
             continue
     projects.sort(key=lambda p: p.modified, reverse=True)
-    problem = None
-    pointer = workspace.read_last_opened(store.workspace)
     opened = store.opened
-    if opened is None and pointer is not None:
-        try:
-            workspace.project_by_id(records, pointer)
-        except LookupError as exc:
-            problem = str(exc)
     return {
         "workspace": str(store.workspace),
         "open_id": None if opened is None else opened.id,
-        "last_opened_problem": problem,
         "projects": [p.model_dump() for p in projects],
     }
 
@@ -124,30 +109,6 @@ def workspace_project(project_id: str) -> tuple[Path, dict]:
         )
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
-
-
-async def _open(project: OpenProject) -> None:
-    """Open ``project`` and point the workspace's last-opened pointer at it."""
-    await store.open_project(project)
-    workspace.write_last_opened(store.workspace, project.id)
-
-
-async def open_last_opened() -> None:
-    """Open the project the workspace's last-opened pointer names; with no pointer, open nothing.
-
-    A pointer naming no project in the workspace leaves nothing open and is logged.
-    """
-    project_id = workspace.read_last_opened(store.workspace)
-    if project_id is None:
-        return
-    try:
-        root, _ = workspace.project_by_id(
-            workspace.project_records(store.workspace), project_id
-        )
-    except LookupError as exc:
-        logger.warning("Opening no project at start: %s", exc)
-        return
-    await _open(OpenProject(root, project_id))
 
 
 class OpenRequest(BaseModel):
@@ -170,7 +131,7 @@ async def open_project(req: OpenRequest) -> dict:
     actor(req.user)
     root, record = workspace_project(req.id)
     try:
-        await _open(OpenProject(root, record["id"]))
+        await store.open_project(OpenProject(root, record["id"]))
     except (ValueError, StoreError) as exc:
         raise HTTPException(409, str(exc)) from exc
     return {

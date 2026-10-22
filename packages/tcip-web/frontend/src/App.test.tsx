@@ -78,7 +78,6 @@ function listProjects(openId: string | null) {
   vi.mocked(api.projects.list).mockResolvedValue({
     workspace: "/ws",
     open_id: openId,
-    last_opened_problem: null,
     projects: [VALLEY],
   });
 }
@@ -284,7 +283,6 @@ describe("App visit attribution across a change of person", () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       open_id: null,
-      last_opened_problem: null,
       projects: [VALLEY, RIDGE],
     });
     vi.mocked(api.projects.open)

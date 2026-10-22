@@ -65,7 +65,6 @@ function listing(overrides: Partial<Awaited<ReturnType<typeof api.projects.list>
   return {
     workspace: "/ws",
     open_id: null,
-    last_opened_problem: null,
     projects: PROJECTS,
     ...overrides,
   };
@@ -86,7 +85,7 @@ function selection(root: string) {
   };
 }
 
-// The backend already holds the project open, as it does when the app loads on a last-opened one.
+// The backend already holds the project open, as it does when the person switches projects.
 function backendHoldsValleyOpen() {
   vi.mocked(api.projects.list).mockResolvedValue(listing({ open_id: "a1b2c3d4e5f6" }));
   vi.mocked(api.projects.open).mockResolvedValue({
@@ -129,17 +128,6 @@ describe("ProjectPicker", () => {
       await screen.findByText("/ws/stray is not a project yet: create it with initialize_project"),
     ).toBeInTheDocument();
     expect(screen.getByText("/ws/stray")).toBeInTheDocument();
-  });
-
-  it("names a last-opened project the workspace no longer holds", async () => {
-    vi.mocked(api.projects.list).mockResolvedValue(
-      listing({ last_opened_problem: "no project in the workspace /ws has id 'gone'" }),
-    );
-    render(<ProjectPicker />);
-
-    expect(
-      await screen.findByText(/no project in the workspace \/ws has id 'gone'/),
-    ).toBeInTheDocument();
   });
 
   it("opens a project by its id, then selects a dataset inside its own directory", async () => {

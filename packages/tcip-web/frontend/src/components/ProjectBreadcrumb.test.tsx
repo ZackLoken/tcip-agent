@@ -89,7 +89,6 @@ beforeEach(() => {
   vi.mocked(api.projects.list).mockResolvedValue({
     workspace: "/w",
     open_id: "a1",
-    last_opened_problem: null,
     projects: [summary("a1", "Alpha block"), summary("b2", "Beta block")],
   });
   openOn("a1");
@@ -184,7 +183,6 @@ describe("recent-projects menu through the one opening transition", () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/w",
       open_id: "a1",
-      last_opened_problem: null,
       projects: [{ ...summary("a1", "Alpha block"), dates: ["2026-01-01", "2026-02-02"] }],
     });
     render(<ProjectBreadcrumb />);
@@ -238,7 +236,6 @@ describe("switching date", () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/w",
       open_id: "a1",
-      last_opened_problem: null,
       projects: [{ ...summary("a1", "Alpha block"), dates: ["2026-01-01", "2026-02-02"] }],
     });
     render(<ProjectBreadcrumb />);

@@ -1,7 +1,7 @@
 """``tools/smoke_terminal_e2e.py`` runs against the workspace it is given.
 
-It sets ``TCIP_WORKSPACE`` to the workspace it is given, and a run beside a live project opens
-nothing and adds nothing to that project's log.
+It sets ``TCIP_WORKSPACE`` to the workspace it is given and opens nothing for a row that cannot
+launch.
 """
 
 from __future__ import annotations
@@ -34,26 +34,12 @@ def _load() -> ModuleType:
     return mod
 
 
-def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
+def test_runs_under_the_given_workspace_and_opens_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The smoke run uses the workspace it is given, not the last-opened project.
-
-    Beside a workspace whose last-opened pointer names a project, the run binds the workspace
-    it was given, opens nothing for a row that cannot launch, and leaves that project's audit
-    record count unchanged.
-    """
-    import tcip_store
-    from tcip_mcp import workspace
-    from tcip_mcp.audit import audit_log_key
+    """The smoke run binds the workspace it is given and opens nothing for a row that fails."""
     from tcip_web.state import store
-    from tests._web_fixtures import new_project
 
-    live_project = new_project(tmp_path)
-    workspace.write_last_opened(tmp_path.parent, live_project.id)
-    live_lines = len(
-        tcip_store.read_log(audit_log_key(live_project.root)).records
-    )
     monkeypatch.delenv(pty_host.TERMINAL_CMD_ENV, raising=False)
     row = dataclasses.replace(
         pty_host.PROVIDERS[0], executable="tcip-smoke-test-nonexistent-cli"
@@ -68,10 +54,6 @@ def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
     assert os.environ["TCIP_WORKSPACE"] == str(scratch_ws)
     assert store.workspace == scratch_ws.resolve()
     assert store.opened is None
-    assert (
-        len(tcip_store.read_log(audit_log_key(live_project.root)).records)
-        == live_lines
-    )
 
 
 def test_the_signal_is_a_friction_report_of_the_open_project_carrying_the_token(

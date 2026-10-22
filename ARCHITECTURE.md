@@ -375,10 +375,8 @@ workspace once (`tcip_mcp.workspace.workspace_from_environment`, `workspace.py`,
 tools reach too), writes the bound port under that workspace
 (`replace(backend_port_key(workspace), str(port))`), configures the app's `StateStore` with the same
 workspace (`store.configure(workspace, image_roots_from_environment())`), and serves the app via
-`uvicorn.run(app, host=LOOPBACK_HOST, port=port)`. The app's lifespan (`app.py`) opens the project
-the workspace's last-opened pointer names (`open_last_opened`,
-`packages/tcip-web/src/tcip_web/routes/projects.py`); with no pointer the backend starts with no
-project open and every project-scoped route answers 409 until one is opened from the picker. Every
+`uvicorn.run(app, host=LOOPBACK_HOST, port=port)`. The backend starts with no project open, and
+every project-scoped route answers 409 until one is opened from the picker. Every
 process reads the workspace once at its entry and hands it on as a value; a test configures its own
 `StateStore`. Locality is a property of the accepted connection rather than the bind host: every
 request is checked by `tcip_web.trust_boundary.TrustBoundaryMiddleware` (`trust_boundary.py`), which
@@ -810,20 +808,6 @@ filesystem identity (`registry_path_for`, `project_tools.py`), the project's own
 `"."`; absolute for a dataset outside it. Resolved on read through the one accessor,
 `dataset_entry_path`, `project_tools.py`, which every consumer of an entry's path calls rather than
 reading `path` off the entry directly.
-
-## 23. Workspace last-opened pointer
-
-Key: `last_opened_key`, `packages/tcip-mcp/src/tcip_mcp/workspace.py`, store
-`workspace_last_opened`, in the workspace root's database: one project id as a JSON string.
-
-Writer: `write_last_opened`, `workspace.py`, called by the web backend's `open_project_by_id`
-(`packages/tcip-web/src/tcip_web/routes/projects.py`) on every open.
-
-Readers: `read_last_opened`, `workspace.py`, read by the backend's lifespan through
-`open_last_opened` (`routes/projects.py`), which opens the project whose record holds that id
-(`project_by_id`, `workspace.py`); when none does it opens nothing, and the project list names the
-missing id (`last_opened_problem`). The pointer is a preference, never the MCP server's project:
-each server is started for one project by `--project`.
 
 ## 24. Formats named but not enumerated here
 
