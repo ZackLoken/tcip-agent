@@ -450,13 +450,13 @@ export function ProjectPicker() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <button
                           className="tcip-btn-primary flex-1"
-                          disabled={opening || !date || !draftNamed}
+                          disabled={opening || !draftNamed}
                           onClick={() => {
                             commitName();
                             void startOpen(p, date, subject, bucket);
                           }}
                         >
-                          {opening ? "Opening…" : !date ? "No dated images" : "Open"}
+                          {opening ? "Opening…" : "Open"}
                         </button>
                         <fieldset disabled={!annotatorNamed} className="contents">
                           <button

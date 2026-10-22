@@ -152,6 +152,36 @@ describe("ProjectPicker", () => {
     expect(useStore.getState().openProject).toEqual({ id: "a1b2c3d4e5f6", path: "/ws/valley" });
   });
 
+  it("opens a project with no dated images and selects no dataset", async () => {
+    const empty: ProjectSummary = {
+      ...PROJECTS[0],
+      id: "0f0e0d0c0b0a",
+      display_name: "Empty block",
+      path: "/ws/empty",
+      dates: [],
+      subjects: [],
+      subjects_by_date: {},
+      buckets_by_date: {},
+      image_count: 0,
+    };
+    vi.mocked(api.projects.list).mockResolvedValue(listing({ projects: [empty] }));
+    vi.mocked(api.projects.open).mockResolvedValue({
+      id: "0f0e0d0c0b0a",
+      display_name: "Empty block",
+      path: "/ws/empty",
+    });
+    render(<ProjectPicker />);
+
+    fireEvent.click(await screen.findByText("Empty block"));
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+
+    await waitFor(() =>
+      expect(useStore.getState().openProject).toEqual({ id: "0f0e0d0c0b0a", path: "/ws/empty" }),
+    );
+    expect(api.projects.open).toHaveBeenCalledWith({ id: "0f0e0d0c0b0a", user: "grower" });
+    expect(api.dataset.select).not.toHaveBeenCalled();
+  });
+
   it("refuses to open a project while the Annotator field holds no name, and says why at the field", async () => {
     vi.mocked(api.projects.list).mockResolvedValue(listing());
     useStore.getState().setUser("");
