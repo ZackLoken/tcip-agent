@@ -272,6 +272,11 @@ that metric's direction are its config's own), `metrics.jsonl`, a heartbeat, and
 and the path and sha256 of the checkpoint its completion registers). Every checkpoint is written
 once under its own name. A relaunch is a new directory naming its parent.
 
+A long wait is a session boundary. Before you wait on a run expected to outlast your harness's
+prompt cache, write a hand-off through `write_retrospective` (what it holds is the
+`self-improvement` skill's); the session that resumes the work orients as the `project-setup`
+skill's Orient step states.
+
 ## TensorBoard
 
 - `launch_training` automatically starts a TensorBoard process and returns the URL

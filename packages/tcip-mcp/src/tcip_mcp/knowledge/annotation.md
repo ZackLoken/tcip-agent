@@ -81,8 +81,9 @@ reader, `format_io.parse_coco_annotations`, names each record's subject from the
 fact as no document.
 
 A collaborator's delivery in a schema other than COCO is yours to convert: read a sample, write a
-one-off converter script that emits a COCO document, and import it. COCO is the one built-in
-import.
+one-off converter script that emits a COCO document, where
+`packages/tcip-mcp/src/tcip_mcp/knowledge/project-setup.md` places your own work for a project,
+and import it. COCO is the one built-in import.
 
 ## Coordinate frame: the reading and its count, a photograph's EXIF applied once
 
@@ -162,18 +163,17 @@ occlusion-split object stays split from proposal through accept, or `null` for a
 which stages as its box). A bespoke proposer may be classical-analysis-based (an OpenCV pipeline
 the agent writes); its proposals are soft and prove out only by surviving review.
 
-Trial and compare by review: pick the engine the data justifies. Don't assume one engine; wire
-two or three, propose on the same images, and let the breeder's review decide: the useful engine is
-the one whose high-confidence proposals *survive review* (high accept rate, few edits). That accept
-rate, read from the verdict shards the editor writes, is the measured comparison. Do not promise
-an engine that isn't wired.
+Trial and compare by review: pick the engine the data justifies, and let the breeder's review
+decide: the useful engine is the one whose high-confidence proposals *survive review* (high
+accept rate, few edits). That accept rate, read from the verdict shards the editor writes, is the
+measured comparison. Do not promise an engine that isn't wired.
 
 ### Vision-guided auto-labeling (the engine is the "hands", the agent's vision the "eyes")
 
-The agent labels images by using a proposal engine for geometry and its multimodal vision for
-classification and QA.
+The agent labels images by using a proposal engine for geometry, its multimodal vision where
+candidates need sorting, and the person's canvas for review.
 
-Full workflow:
+Full workflow, one image per call:
 
 1. `propose_annotations(image_path, engine=<name>)` → the engine proposes candidates, renders a
    numbered overlay. `grid_cells=[...]` (with `tile_size`, `overlap` echoed by
@@ -186,21 +186,22 @@ Full workflow:
    outside any dataset's `images/` tree the render and candidates still come back
    (`staged: false`, `staging_id: null`, naming why), but there is nothing for
    `stage_proposals`'s `assignments` regime to read back later
-2. Agent reads the overlay with its own image-capable read tool → identifies and classifies each
-   candidate
+2. Assign each kept candidate its subject, since `stage_proposals` takes every one as
+   `{candidate_id, subject}`. Where the run's subject is already known, every candidate is kept
+   under it, with no overlay read. Read the numbered overlay with your own image-capable read tool
+   only to assign candidates among several subjects or to drop ones that are plainly not the
+   object
 3. `stage_proposals(image_path, assignments={staging_id: <the run's>, candidates: [{candidate_id:
    0, subject: "leaf"}, ...]})`
    → reads that run's candidates, refusing if the image has changed since the run, then stages
-   the accepted ones as predictions (`created_by=<engine>`) in a bucket named for the run's id,
-   for a person to accept or reject on the Annotate canvas; it never writes GT directly
-4. Agent reads the staged result with its own image-capable read tool → visual QA pass
+   the kept ones as predictions (`created_by=<engine>`) in a bucket named for the run's id; it
+   never writes GT directly
+4. Review the bucket on the person's canvas with `focus_human_attention` and
+   `capture_live_canvas` (the review channel below) → visual QA pass
 
-Visual QA is not optional: read what each tool actually leaves. `stage_proposals` stages
-predictions and returns a box render (each accepted polygon's bounding box, not its mask outline)
-to read before moving to the next image, catching a wrong class or a badly placed box.
-`capture_live_canvas` renders the human's live GUI canvas the same way (their own image,
-viewport, and unsaved or in-progress shapes), so the agent can comment on work in progress
-before they save.
+Visual QA is not optional: read what the person's canvas shows. A rendered image
+(`vision_tools.visualize`, a library call, or `tcip visualize`) is for what the canvas cannot
+draw.
 
 Corrective loop (for missed objects):
 
@@ -305,15 +306,23 @@ bucket and drive the human to review them:
   `user`, as the label save records it), and `None` for a call the MCP server makes on an agent's
   behalf. No delivery ships a proposal.
 - `focus_human_attention(dataset_root, subject, date, image_index, mode, bucket, proposal)` drives
-  the live Annotate tab to a frame, showing the proposals of the bucket named `bucket` under
-  `dataset_root` (a published bucket, a proposal's included) with `proposal` selected, so the
-  person sees exactly what you flagged without hunting. The event names this
-  server's project by its id, and the backend delivers it only while the GUI has that project
-  open: otherwise the answer is `delivered: false` with the id of the project the GUI does have
-  open, and a backend that is not running answers `delivered: false` too.
+  the live Annotate tab to a frame of `subject` on `date` under `dataset_root`; `bucket` and
+  `proposal` are optional, and with them named it shows the proposals of that bucket (a published
+  bucket, a proposal's included) with `proposal` selected, so the person sees exactly what you
+  flagged without hunting. The answer's `delivered` says whether the backend accepted the event,
+  never that a browser showed it: the backend accepts it only while it has this server's project
+  open, otherwise answering `delivered: false` with the id of the project it does have open, and
+  with no backend running the answer is `delivered: false` too.
+- `capture_live_canvas(refresh, crop_to_viewport, max_edge)` renders the canvas state the GUI last
+  pushed for this project (its image, viewport, and shapes, unsaved or in-progress ones included)
+  and returns an `image_path` you read with your own image-capable read tool. With `refresh` it
+  first pings the GUI to push fresh state and waits briefly for it. The answer's `refreshed`,
+  `refresh_ping_delivered` and `state_age_seconds` describe the canvas state's metadata, which a
+  heartbeat updates without shapes; whether the shapes were pushed and how old they are is
+  `shapes_missing` and `shapes_age_seconds`. With no state pushed at all it refuses.
 
-Flow: run inference (or `stage_proposals`) → `focus_human_attention(bucket=...)` the
-person to the weakest/flagged frames → they accept on the canvas → only then does it become GT. See
+Flow, in the order of the bullets above: a bucket from `run_inference` or `stage_proposals` →
+`focus_human_attention` → the person's review on the canvas. See
 `packages/tcip-mcp/src/tcip_mcp/knowledge/delivery.md` for what ships after sign-off.
 
 ## Quality Metrics

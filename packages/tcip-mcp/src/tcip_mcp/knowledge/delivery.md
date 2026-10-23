@@ -67,6 +67,10 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | `register_plant_registry` | Names a plant-locations CSV set once (per-file `sha256`/`n_plants`, `crop`, `site`, a content digest over the parsed rows), so `deliver_orthomosaic_plant_counts` and `build_plant_mapping` read the same registered version by name (`plant_registry`) instead of re-asserting file paths; a shapefile is converted first by `tcip shp-to-plant-csv` |
 | `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a published whole-raster bucket plus a `plant_registry` name. Nearest-neighbor by default; `canopy_subject` switches to containment in an accepted canopy boundary instead (refused alongside a stated `nn_tolerance_m`). Fewer rows than the registry names can ship under either regime, the absent plants named on the delivery event |
 
+A table or script you write yourself before a delivery door (the per-image records
+`deliver_per_plant_csv` takes, for one) lives where the `project-setup` skill places your own work
+for a project.
+
 An unvalidated delivery ships only under a breeder's recorded acknowledgment of exactly the rows
 and disclosure it writes. A breeder records one in the Results tab, never through these tools; each
 delivery tool takes the recorded act by its `acknowledgment_id` and executes it.

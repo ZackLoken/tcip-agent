@@ -1,6 +1,6 @@
 ---
 name: self-improvement
-description: "How the agent turns friction and findings into a durable record that the next session picks up. Load this whenever the user pushes back, corrects you, repeats an annoyance, when you discover machinery you didn't know existed, nearly reinvent something, or hit a missing tool/skill, and at the end of substantial work. Everything lands with the project, via report_friction and write_retrospective, and load_project_memory reads it back."
+description: "How the agent turns friction and findings into a durable record that the next session picks up. Load this whenever the user pushes back, corrects you, repeats an annoyance, when you discover machinery you didn't know existed, nearly reinvent something, or hit a missing tool/skill, at the end of substantial work, and before a long wait on a run. Everything lands with the project, via report_friction and write_retrospective, and load_project_memory reads it back."
 ---
 
 # Self-improvement: learning that stays with the project
@@ -22,7 +22,8 @@ The loop is three live tools, no separate journal file; the two that write are a
 |---|---|---|
 | The moment friction happens | `report_friction` | the project's friction reports |
 | End of substantial work, even if incomplete | `write_retrospective` | the project's retrospectives |
-| Start of the next session | `load_project_memory` (`kind='reports'`, then `'retrospectives'`) | read back into context |
+| Before a long wait on a run, as the `training` skill states it | `write_retrospective`, as a hand-off | the project's retrospectives |
+| Start of the next session | `load_project_memory`, as the `project-setup` skill's Orient step reads it | read back into context |
 
 ## Capture: the moment friction happens
 
@@ -60,10 +61,18 @@ this project would need, and be honest about what failed.
   never invent the answer.
 - Tools that were missing or unusable.
 
+### The hand-off before a long wait
+
+The retrospective written before a long wait is a hand-off. It names the run's id, the doors you
+used, the decisions taken and what is pending, `task` carrying the run's id and what the run is
+for.
+
 ### What must not go in a retrospective
 
 - A reusable pipeline shape. Record what you *measured* that led you to a shape, not the shape.
 - An inventory of existing machinery. Read the source, or run `tools/list_tools.py`.
+- A workaround as technique: a tool's module imported and called in place of the tool, or a label
+  saved under another person's name. Report it with `report_friction` as the friction it was.
 
 ## Distill: closing the loop toward a platform change
 

@@ -198,5 +198,4 @@ a label document blind. It can also back a bring-your-own proposer (see the anno
 If no existing piece fits, write the primitive: a new head, a bespoke `train(ctx)`, a second
 proposal engine, a novel acquisition scorer, and register or import it. When the plain blocks and
 your own primitives both plateau on a trait, research the literature (see `cv-research`) and prove
-the new method beats the baseline on the measured phenotype before trusting it. Capture what you
-built in a `write_retrospective`.
+the new method beats the baseline on the measured phenotype before trusting it.

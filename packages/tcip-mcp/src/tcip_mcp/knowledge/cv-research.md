@@ -11,10 +11,8 @@ established, port the piece that fits, and prove it earns its place. This skill 
 It has three parts, and the third is not optional.
 
 ```
-RESEARCH (academic sources)  →  IMPLEMENT (platform toolkit)  →  VALIDATE (beats baseline on the measured phenotype)
+research (academic sources)  →  implement (platform toolkit)  →  validate (beats baseline on the measured phenotype)
 ```
-
-Neither RESEARCH nor VALIDATE is optional.
 
 ## 1. Research: academic sources only
 
@@ -48,7 +46,7 @@ Search discipline:
   reference implementation is a lower-risk port than last month's state-of-the-art. Progressive
   disclosure applies to methods too.
 - Capture provenance. When you adopt a technique, record the source (title, venue, arXiv id) in
-  the experiment lineage / retrospective.
+  the experiment lineage.
 
 If a technique lives only behind a paywalled journal the allowed hosts can't reach, do not guess its
 internals from a blog summary; file a `report_friction` note describing the gap rather than
@@ -87,8 +85,9 @@ The discipline:
    (review-confirmation), not dense GT for every trait, the same bar every measurement faces (either
    reference passes the identical disjoint-split + count-bias gate); a new technique gets no
    exemption from it.
-4. Keep it only if it wins. If it ties or loses, discard it and record why in a retrospective.
-   If it wins, it becomes the new baseline; log the source and the delta in the experiment lineage.
+4. Keep it only if it wins. If it ties or loses, discard it; what the retrospective records of it
+   is the `self-improvement` skill's. If it wins, it becomes the new baseline; log the source and
+   the delta in the experiment lineage.
 5. Until a researched technique clears step 3 it stays labeled not-yet-validated and must not
    become the default the next session reuses without seeing the evidence.
 
