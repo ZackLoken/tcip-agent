@@ -897,19 +897,25 @@ def capture_live_canvas(
     crop_to_viewport: bool = True,
     max_edge: int = 1600,
 ) -> dict:
-    """Render exactly what the human's GUI canvas showed for this project: image, shapes, viewport.
+    """Render this project's GUI canvas from its last pushed state: image, viewport and shapes.
 
     Reads the canvas state pushed into the project's store: the meta record (image, viewport,
     classes, counts, tab, mode, active_subject, cut_armed, dirty and user) and the geometry record
     (the full display-resolved geometry, including unsaved edits and an in-progress drawing).
+    A heartbeat push updates the meta record alone, and geometry pushed for another image or tab
+    is not drawn, so the render carries no shapes whenever ``shapes_missing`` is true.
     Renders the region being shown at up to ``max_edge`` and returns the artifact path, plus the
     classes schema, per-tag counts, and the state's age. A canvas document that will
     not read raises the store's own error.
 
     Args:
         refresh: Ping the GUI (via the panel-event hub) to push fresh state first, waiting briefly
-            for it to land. The backend delivers the ping only while it has this project open;
-            otherwise the last pushed state renders, labeled not live, with the backend's answer.
+            for it to land. The backend accepts the ping only while it has this project open.
+            Either way the last pushed state renders: ``refreshed``, ``refresh_ping_delivered``
+            and ``state_age_seconds`` describe the meta record, and the summary calls it live
+            only when a fresh meta push landed or the meta record is under five seconds old;
+            whether shapes were pushed and how old they are is ``shapes_missing`` and
+            ``shapes_age_seconds``.
         crop_to_viewport: Render only the region the human currently sees (their zoom/pan). Pass
             False for the full frame with the same overlays.
         max_edge: Downscale the rendered output to at most this edge (px).
@@ -961,16 +967,13 @@ def capture_live_canvas(
             "error": f"Canvas state references a missing image: {src_image}"
         }
 
-    # Geometry is valid only when its identity matches the meta document: a heartbeat for a
-    # different image/tab means the stored shapes are stale and must not render.
     geometry = read_canvas_geometry(str(project))
     if geometry is not None and (
         geometry.image_path != state.image_path or geometry.tab != state.tab
     ):
         geometry = None
     shapes = [] if geometry is None else geometry.shapes
-    # Read exactly the region being rendered: the human's viewport is a rectangle in the
-    # image's own grid, so a raster far too large to decode whole is still capturable.
+    # Only the rendered region is read, so a raster too large to decode whole is still capturable.
     viewport = state.viewport
     region = (
         (viewport.x, viewport.y, viewport.w, viewport.h)
@@ -1011,8 +1014,8 @@ def capture_live_canvas(
     else:
         summary = (
             f"Rendered the last known {state.tab} canvas for {state.image} "
-            f"({len(shapes)} shapes, {age}s old; not live: the GUI did not answer the refresh "
-            "ping, see refresh_answer)."
+            f"({len(shapes)} shapes, {age}s old; not live: no fresh push landed for this call, "
+            "see refresh_ping_delivered and refresh_answer)."
         )
     summary += (
         " Read image_path with your own image-capable read tool to see it."
@@ -1042,9 +1045,7 @@ def capture_live_canvas(
                 1,
             )
         ),
-        # True when no valid geometry exists for this image/tab yet (heartbeat-only or stale).
         "shapes_missing": geometry is None,
-        # Did a fresh push land after our ping? False + delivered ping = GUI not listening here.
         "refreshed": refreshed,
         "refresh_ping_delivered": ping_delivered,
         "refresh_answer": ping,
