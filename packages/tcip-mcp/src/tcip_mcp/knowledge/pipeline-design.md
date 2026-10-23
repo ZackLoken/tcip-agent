@@ -252,8 +252,8 @@ boundary was produced; what it requires is that a person positively stands behin
 ## Multi-phase pipelines
 
 When a trait's decomposition needs more than one training phase, write a one-off script that
-chains the canonical primitives, in the project's own directory, never in this repository: one
-build path, every step audited.
+chains the canonical primitives, where the `project-setup` skill places your own work for a
+project: one build path, every step audited.
 Each training phase calls `launch_training` (full audited envelope, leakage-free split,
 tiling persistence) against a `model_source` builder; run each stage's model with
 `run_inference`; then hand the per-image records to a delivery door (`deliver_per_plant_csv`,
@@ -300,7 +300,7 @@ records = [
 # and clears the one gate over the buckets; an unvalidated bucket needs a recorded acknowledgment.
 deliver_per_plant_csv(
     records,
-    "phenotype.csv",
+    "outputs/phenotype.csv",
     delivered_phenotype="<phenotype>",
     delivery_kind="per_plant_count_aggregate",
     plants=[...],
@@ -318,7 +318,5 @@ mechanics are identical for one stage or four, and there is no fixed phase vocab
 
 - Start with the simplest thing that could measure the trait, and add complexity only when the
   data or the metrics justify it.
-- Write a retrospective (`write_retrospective`) when you finish. Record what you measured
-  about *this* dataset and what it implied: object scale, capture cadence, class imbalance, where
-  the operating point resolved and why. Not a reusable pipeline shape: the next dataset re-derives
-  its own decomposition.
+- Write a retrospective (`write_retrospective`) when you finish; what it holds, and what it never
+  holds, is the `self-improvement` skill's.

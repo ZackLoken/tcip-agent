@@ -18,8 +18,15 @@ follow this arc. Each step links out to the domain skill that owns its detail.
 ## 0. Orient
 
 Start the session with `load_project_memory` (kind='reports' and kind='retrospectives'), then `inspect_project`
-on any project you're handed. Surface friction with `report_friction` the moment you hit
-it (ambiguous goal, unconfirmed format).
+on any project you're handed. A session resuming a project after a long wait reads the hand-off
+written before it (the newest retrospective), the record of the run it names (`monitor_training`
+or `get_experiment`) and the knowledge documents for the stage it resumes. Surface friction with
+`report_friction` the moment you hit it (ambiguous goal, unconfirmed format).
+
+Everything you write for a project lives in that project's own directory, never in your harness's
+session scratchpad, a temporary directory or the platform's repository: its scripts and model
+sources, a scoring pass among them, under `code/`, and the tables, masks, images and notes they
+write under `outputs/` beside it, never under `code/`.
 
 ## 1. Create the project
 
@@ -113,8 +120,10 @@ it. `crop` is required and is never inferred from the path or a slug.
 
 ## 3. Translate the goal into a trait, task, and `subjects.json`
 
-Turn the breeder's sentence into a trait and the subjects they distinguish. The CV task is yours to
-derive from the data, not from the phrasing (see
+Turn the breeder's sentence into a trait and the subjects they distinguish. Propose the trait with
+`propose_trait` and have the breeder confirm it in the Setup tab before any annotation or training;
+what its entry holds is the meaning door in `packages/tcip-mcp/src/tcip_mcp/knowledge/delivery.md`.
+The CV task is yours to derive from the data, not from the phrasing (see
 `packages/tcip-mcp/src/tcip_mcp/knowledge/pipeline-design.md`):
 
 - Task: the task string is an input to `build_dataset`, which routes a known set; a bespoke
@@ -141,20 +150,12 @@ derive from the data, not from the phrasing (see
 There must be something to train on. Three paths (see
 `packages/tcip-mcp/src/tcip_mcp/knowledge/annotation.md`):
 
-- Agent/MCP path: `propose_annotations` a starter batch with an `engine` you name (`sam` or
-  `grounding_dino`, which ship registered and take their prompts in `engine_params`, the
-  detector also its merge's `postprocess` and `cross_tile_nms`, run by the platform's tiled
-  inference pass on a lattice its own whole-frame pass derives unless stated, another
-  registered one, or a dotted `module:factory` you bring) → review the candidates visually
-  (`vision_tools.visualize`, a library call, or `tcip visualize`, then your client's
-  image-capable read tool on the returned `image_path`) → `stage_proposals`
-  with `assignments={staging_id, candidates: [...]}` for the good ones, `staging_id` the one the
-  run answered. `grid_cells=[...]` restricts a pass to a region of a large or crowded image
-  instead of the whole frame. Trial engines and keep the one whose high-conf
-  proposals survive review. An empty label document is not a negative on its own; it trains as
-  one only once the breeder marks that image complete for the subject (a completion mark in the
-  label document itself), so an empty document you write reads as unannotated until then. Never
-  delete or skip them.
+- Agent/MCP path, one image per call: `propose_annotations` → `stage_proposals` →
+  `focus_human_attention` → `capture_live_canvas`, a rendered image (`vision_tools.visualize`)
+  only for what the canvas cannot draw. The engines and their parameters, grid passes, the run's
+  identity, choosing an engine by what survives review and the review on the breeder's canvas
+  are `packages/tcip-mcp/src/tcip_mcp/knowledge/annotation.md`'s, and so is when an empty label
+  document is a negative.
 - Human path: hand off to the GUI Annotate tab for the breeder to label a seed set.
 - Existing labels in an external dataset-level COCO: `import_coco(document, dataset_root, date, vertex_spacing, rationale)`
   converts them into per-image documents over the images `ingest_images` placed under that date.

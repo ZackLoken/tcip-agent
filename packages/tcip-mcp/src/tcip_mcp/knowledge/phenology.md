@@ -27,17 +27,15 @@ Milestones, per plant, from that plant's elongated-fraction time series:
 | `catkin_95per_date` | date the elongated fraction crosses 95% |
 
 How a crossing's day is read between the two neighboring capture dates is the trait entry's
-`crossing_rule`, confirmed by the breeder and pinned by the trait revision the delivered CSV
-names; a plant with any incomplete date gets no milestone. Pistillate
+`crossing_rule`; a plant with any incomplete date gets no milestone. Pistillate
 milestones (`pistillate_05/50/95per_date`) are the identical pattern on the pistillate-
 flower elongation/receptivity call.
 
 > Which crossing the majority date means. `crops.yml` is the immutable authority ("Date when
 > most catkins have elongated"). The crossing `catkin_elongation_date` is computed at is the
-> trait entry's `majority_milestone`, and it answers for a delivery only once the breeder has
-> confirmed the revision stating it in the Setup tab. A disagreement over which crossing the
-> majority date means is corrected in the entry itself, as a new revision proposed with
-> `propose_trait`, not in this file. `positive_onset_date` (first date any elongation appears)
+> trait entry's `majority_milestone`, and a disagreement over which crossing the majority date
+> means is corrected in the entry itself, not in this file; how an entry is revised, confirmed and
+> bound to a delivery is the `delivery` skill's meaning door. `positive_onset_date` (first date any elongation appears)
 > remains a separate helper, not the delivered trait.
 
 Not a count-of-peak. Do not normalize catkin *count* to the season peak and call the
@@ -86,7 +84,7 @@ across dates: plant mapping (image → plant_id) ─► per (plant, date) elonga
 | `register_plant_registry` (MCP tool) | `tools/phenology_tools.py` | names a plant-locations CSV set once (`{path, sha256, n_plants}` per file, `crop`, `site`, a content digest), so `build_plant_mapping` and `deliver_orthomosaic_plant_counts` read the same registered version instead of re-asserting file paths; a shapefile is converted first by `tcip shp-to-plant-csv` |
 | `build_plant_mapping` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 1): geolocated images (a registered dataset's own `images/` root) + a `plant_registry` name → a named mapping persisted under the project. A same-name rebuild a delivery event still cites refuses by name unless `supersede=True`, which archives the cited record first (readable by digest, never enumerated) |
 | `deliver_phenology_milestones` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 2): a named mapping + one bucket per date (each at the date its own record states) → delivered `catkin_phenology.csv`; the gate refuses buckets whose scope classifies no positive state |
-| `phenology` module | `tcip-mcp .../pipelines/postprocessing/phenology.py` | the one canonical milestone implementation: `count_by_class`, `per_plant_phenology`, `crossing_date` (dispatching on the entry's `crossing_rule`), `positive_onset_date`, `plant_milestones`, `measure_phenology` and the gated delivery door `deliver_phenology` (it writes under the trait's confirmed revision and names it on the delivery event). Every population plant has a point on every mapped date; a date the mapping assigns it no capture on counts against its completeness |
+| `phenology` module | `tcip-mcp .../pipelines/postprocessing/phenology.py` | the one canonical milestone implementation: `count_by_class`, `per_plant_phenology`, `crossing_date` (dispatching on the entry's `crossing_rule`), `positive_onset_date`, `plant_milestones`, `measure_phenology` and the gated delivery door `deliver_phenology` (its revision binding is the `delivery` skill's meaning door). Every population plant has a point on every mapped date; a date the mapping assigns it no capture on counts against its completeness |
 | `plant_mapping` module | `tcip-mcp .../pipelines/postprocessing/plant_mapping.py` | image → `plant_id` via sequence-anchored GPS matching; `build_mapping`, `persist_mapping`, `load_mapping`, `verify_mapping_inputs`, `plant_mapping_names`, `register_plant_registry_record`, `load_registry`. A mapping is project state, named and bound to the dataset it was built over and to its own build receipt: `load_mapping` refuses a record no receipt names, and `verify_mapping_inputs` re-checks the record's dates and plant CSVs (read through the named registry) at delivery time |
 | Web Results routes (phenology-specific) | `tcip-web .../routes/results.py` | `/plant_mapping/build`, `/plant_mapping/load`, `/plant_mapping/list`, `/phenology_measurement` (both projections, curve and milestone, from one measurement), `/export_csv` (the door that writes): the human UI; delegates to the same shared modules. Lists only this router's phenology routes; it also carries trait-general routes (the traits and their revision confirmation, delivery events, registered models) not enumerated here |
 
@@ -97,14 +95,10 @@ definition, change it there; never fork a second copy. So the agent composes too
 `deliver_phenology_milestones`.
 
 Once a real localization-kind derivation (from actual GT box geometry) or a real breeder-answered
-count objective exists for this trait, record it with `propose_trait(entry,
-rationale)`, the one write path for a trait: it takes the complete entry (the spec fields, such as
-`count_objective`, `localization` and `positive_state`, and the operationalization per delivery
-kind) and appends it as a new, unconfirmed revision. The positive state names one attribute of
-the measured subject and one of its values, each declared in the delivered dataset's own subject
-registry, checked when the revision is proposed and again at every delivery. The breeder confirms the whole
-revision, spec fields and operationalizations together, in the Setup tab; a delivery ships under
-the latest confirmed revision and names it on its event. Never hand-write the trait's record.
+count objective exists for this trait, record it with `propose_trait`, the one write path for a
+trait (never hand-write its record), in the entry's `count_objective`, `localization` or
+`positive_state`. The revision that appends, the breeder's confirmation of it and the positive
+state's check against the subject registry are the `delivery` skill's meaning door.
 
 Don't confuse `annotation_tools.score_predictions` (IoU GT-vs-prediction *eval* matching, a
 library call) with plant-GPS mapping; they are unrelated.

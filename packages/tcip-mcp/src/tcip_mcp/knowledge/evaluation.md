@@ -51,6 +51,10 @@ measurement-agreement/method-comparison contexts specifically because of that de
 | `list_experiments` | List every run of the project, and every sweep with its trial runs under it |
 | `rank_registered_models` | Rank registered models by a stated metric, direction and verification status |
 
+Where you score a checkpoint or its predictions by code of your own rather than these doors, the
+script and the tables and images it writes live where the `project-setup` skill places your own
+work for a project.
+
 `evaluate_model`, `score_predictions` and a comparison render take `iou_threshold` stated, the IoU
 a match must reach (the comparability convention is `schemas.COMPARABILITY_IOU`, which a run's
 unstated `evaluation.iou_threshold` reads). `evaluate_model` accepts an optional `trait=`: when set, the trait's own governing
