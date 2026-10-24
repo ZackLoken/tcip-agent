@@ -68,8 +68,12 @@ export const ROUTES = {
   postStateTab: "/api/state/tab",
   postSubjectsSave: "/api/subjects/save",
   postTerminalSessions: "/api/terminal/sessions",
+  postTerminalSessionsBySessionIdConversation: (sessionId: string) =>
+    `/api/terminal/sessions/${encodeURIComponent(sessionId)}/conversation`,
   postTerminalSessionsBySessionIdEnd: (sessionId: string) =>
     `/api/terminal/sessions/${encodeURIComponent(sessionId)}/end`,
+  postTerminalSessionsBySessionIdHandOff: (sessionId: string) =>
+    `/api/terminal/sessions/${encodeURIComponent(sessionId)}/hand-off`,
   postTerminalSessionsBySessionIdSubmit: (sessionId: string) =>
     `/api/terminal/sessions/${encodeURIComponent(sessionId)}/submit`,
   postTrainingCompare: "/api/training/compare",

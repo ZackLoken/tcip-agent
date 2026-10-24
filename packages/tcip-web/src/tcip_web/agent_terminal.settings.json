@@ -53,5 +53,9 @@
       "WebFetch(domain:aclanthology.org)",
       "WebFetch(domain:biorxiv.org)"
     ]
+  },
+  "promptCacheTtl": "1h",
+  "env": {
+    "CLAUDE_CODE_NO_FLICKER": "1"
   }
 }

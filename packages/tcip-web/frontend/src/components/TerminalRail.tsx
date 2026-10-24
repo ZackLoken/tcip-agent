@@ -3,8 +3,10 @@
  * xterm.js terminal attached over WebSocket to a server-side PTY running the harness in the
  * workspace, so the breeder talks to the agent the platform is designed around with no
  * translation layer. The terminal is recolored to the field-station palette via the ANSI
- * theme; the harness's own layout is untouched. Each launch's session-start ritual is shown
- * above the terminal, and staged requests are submitted to the session for its agent.
+ * theme; the harness's own layout is untouched. A launch's session-start ritual is shown above
+ * the terminal (a launch resuming a conversation has none), staged requests are submitted to the
+ * session for its agent, and choosing another harness while an agent runs waits for that agent's
+ * hand-off before the chosen one starts.
  */
 
 import { FitAddon } from "@xterm/addon-fit";
@@ -42,10 +44,17 @@ function chooseRow(rows: ProviderStatus[], remembered: string | null): ProviderS
 
 /** What the harness picker says it does in each phase of the rail's agent. */
 const PICKER_TITLE: Record<TerminalPhase, string> = {
-  live: "The agent harness this terminal runs; changing it ends the agent and starts the chosen one",
+  live: "The agent harness this terminal runs; choosing another asks the agent for its hand-off, then starts the chosen one",
+  "handing-off":
+    "The agent is writing its hand-off; the chosen harness starts once it is recorded, or at once on End",
   ending: "The agent is ending; the harness can be chosen once it has ended",
   ended: "The agent harness Start launches",
 };
+
+/** Whether the rail's agent is running in `phase`: live, or handing off before a switch. */
+function running(phase: TerminalPhase): boolean {
+  return phase === "live" || phase === "handing-off";
+}
 
 function clampWidth(px: number): number {
   const max = Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.7));
@@ -149,7 +158,7 @@ export function TerminalRail() {
     });
   }, []);
 
-  // The launch's session-start ritual, shown until the breeder types.
+  // The launch's session-start ritual, shown until the breeder types; a resumed launch has none.
   const [ritual, setRitual] = useState<string | null>(null);
 
   /** Stop the socket and forget the session id, so the socket's next start launches an agent. */
@@ -164,6 +173,31 @@ export function TerminalRail() {
     setRitual(null);
     setPhase("ended");
   }, [detach, setPhase]);
+
+  /** Run again in `phase`: the socket runs on the session it holds, or through its own create
+   *  when none, and the staged requests are submitted to that session. */
+  const resume = useCallback(
+    (phase: TerminalPhase) => {
+      setPhase(phase);
+      socketRef.current?.start();
+      submitStaged();
+    },
+    [setPhase, submitStaged],
+  );
+
+  /** Launch the chosen row through the socket's own create, the ended agent's screen cleared
+   *  while the launch is made. */
+  const start = useCallback(() => {
+    termRef.current?.reset();
+    resume("live");
+  }, [resume]);
+
+  /** Start the row a switch chose, the agent it switched from having ended. */
+  const switchToChosen = useCallback(() => {
+    detach();
+    setRitual(null);
+    start();
+  }, [detach, start]);
 
   const [width, setWidth] = useState<number>(() => {
     try {
@@ -218,7 +252,7 @@ export function TerminalRail() {
       );
   }, [open, table]);
 
-  // Terminal lifecycle: build xterm, attach the PTY WebSocket while the agent is live, wire input
+  // Terminal lifecycle: build xterm, attach the PTY WebSocket while the agent runs, wire input
   // and resize. Closing the rail drops the socket; the session survives and reopening replays it.
   useEffect(() => {
     if (!open || !available || !table.rows || !hostRef.current) return;
@@ -341,17 +375,18 @@ export function TerminalRail() {
         send({ type: "resize", rows: term.rows, cols: term.cols });
       },
       onMessage: (data) => term.write(data),
-      // The backend closes a session's sockets with its ended code once the agent ended, and a
-      // reconnect to a session it no longer holds the same way; any other close retries.
+      // The ended code closes a session whose agent ended, starting a switch's chosen row; any
+      // other close retries.
       onClose: (ev) => {
-        if (ev.code === TERMINAL_ENDED_CLOSE_CODE) showEnded();
-        else setConn("reconnecting");
+        if (ev.code !== TERMINAL_ENDED_CLOSE_CODE) setConn("reconnecting");
+        else if (useStore.getState().terminalPhase === "handing-off") switchToChosen();
+        else showEnded();
       },
     });
 
     const send = (payload: TerminalFrame) => socket.send(JSON.stringify(payload));
     socketRef.current = socket;
-    if (useStore.getState().terminalPhase === "live") socket.start();
+    if (running(useStore.getState().terminalPhase)) socket.start();
 
     const dataSub = term.onData((data) => {
       setRitual(null);
@@ -379,19 +414,21 @@ export function TerminalRail() {
       term.dispose();
       termRef.current = null;
     };
-  }, [open, available, table, submitStaged, showEnded]);
+  }, [open, available, table, submitStaged, showEnded, switchToChosen]);
 
   useEffect(() => {
     if (pendingMessages.length) submitStaged();
   }, [pendingMessages, submitStaged]);
 
-  /** End the live session's agent by the person: the socket stops and the submit loop settles
-   *  before the end is asked; once it answers, the requests the agent was never given are staged
-   *  ahead of the others and the rail shows that it ended. Resolves whether the backend ended
-   *  it, and reattaches the socket to the session when it did not. */
-  async function endAgent(): Promise<boolean> {
+  /** End the running session's agent by the person at once: the socket stops and the submit loop
+   *  settles before the end is asked; once it answers, the requests the agent was never given are
+   *  staged ahead of the others and the rail shows that it ended, or, during a switch, starts the
+   *  chosen row. The socket reattaches to the session in the phase it had when the backend did
+   *  not end it. */
+  async function endAgent() {
     const id = sessionRef.current;
-    if (!id || useStore.getState().terminalPhase !== "live") return false;
+    const was = useStore.getState().terminalPhase;
+    if (!id || !running(was)) return;
     setPhase("ending");
     socketRef.current?.stop();
     await submissionRef.current;
@@ -406,39 +443,37 @@ export function TerminalRail() {
       }
     }
     if (answer === null) {
-      resume();
-      return false;
+      resume(was);
+      return;
     }
     useStore.getState().restageTerminalMessages(answer.undelivered);
-    showEnded();
-    return true;
+    if (was === "handing-off") switchToChosen();
+    else showEnded();
   }
 
-  /** Go live again: the socket runs on the session it holds, or through its own create when none,
-   *  and the staged requests are submitted to that session. */
-  function resume() {
-    setPhase("live");
-    socketRef.current?.start();
-    submitStaged();
-  }
-
-  /** Launch the chosen row through the socket's own create, the ended agent's screen cleared
-   *  while the launch is made. */
-  function start() {
-    termRef.current?.reset();
-    resume();
-  }
-
-  /** Remember the chosen row: at once when the rail holds no agent, and while one runs only once
-   *  its End has answered, then start the chosen one; an End that fails leaves the row it ran. */
+  /** Remember the chosen row at once when the rail holds no agent; while one is live, also ask
+   *  it for its hand-off, the session's end then starting the chosen row. A session the backend
+   *  ended at once starts it now; a refused hand-off chooses the row it ran again. */
   async function choose(provider: string) {
-    const { setTerminalProvider } = useStore.getState();
-    if (!sessionRef.current) {
-      setTerminalProvider(provider);
-    } else if (await endAgent()) {
-      setTerminalProvider(provider);
-      start();
+    const id = sessionRef.current;
+    const ran = row?.id;
+    const { setTerminalProvider, terminalPhase, user } = useStore.getState();
+    if (!id) setTerminalProvider(provider);
+    if (!id || !ran || terminalPhase !== "live") return;
+    setTerminalProvider(provider);
+    setPhase("handing-off");
+    let ended: TerminalEnd | null;
+    try {
+      ended = await terminalApi.handOff(id, { user });
+    } catch (e) {
+      setError(String(e));
+      setTerminalProvider(ran);
+      setPhase("live");
+      return;
     }
+    if (ended === null) return;
+    useStore.getState().restageTerminalMessages(ended.undelivered);
+    if (useStore.getState().terminalPhase === "handing-off") switchToChosen();
   }
 
   if (!open) return null;
@@ -477,7 +512,7 @@ export function TerminalRail() {
             <select
               aria-label="Agent harness"
               title={PICKER_TITLE[phase]}
-              disabled={phase === "ending"}
+              disabled={phase === "ending" || phase === "handing-off"}
               value={row?.id ?? ""}
               onChange={(e) => void choose(e.target.value)}
               className="h-6 max-w-[11rem] rounded border border-tcip-border bg-tcip-panel px-1 text-[13px] text-tcip-fg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70 disabled:opacity-40"
@@ -494,7 +529,7 @@ export function TerminalRail() {
               ))}
             </select>
           )}
-          {available && phase === "live" && (
+          {available && running(phase) && (
             <span
               className={`inline-block h-1.5 w-1.5 rounded-full ${
                 conn === "open" ? "bg-tcip-accent" : "bg-tcip-warn animate-pulse"
@@ -541,11 +576,15 @@ export function TerminalRail() {
               </button>
             </>
           ) : (
-            phase === "live" && (
+            running(phase) && (
               <button
                 onClick={() => setConfirmingExit(true)}
                 aria-label="End the agent"
-                title="End the agent and its conversation; Start then launches a fresh one"
+                title={
+                  phase === "handing-off"
+                    ? "End the agent now, without waiting for its hand-off; the chosen harness then starts"
+                    : "End the agent and its conversation; Start then launches a fresh one"
+                }
                 className="grid h-6 w-6 place-items-center rounded text-tcip-muted transition-colors hover:bg-tcip-hover hover:text-tcip-fg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
               >
                 <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
@@ -584,7 +623,7 @@ export function TerminalRail() {
             {phase === "ended" && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-tcip-panel/90 p-4">
                 <p className="text-[13px] text-tcip-muted">
-                  The agent ended. Start launches a fresh agent on the chosen harness.
+                  The agent ended. Start launches an agent on the chosen harness.
                 </p>
                 <button className="tcip-btn-primary" onClick={start}>
                   Start

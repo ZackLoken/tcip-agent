@@ -302,12 +302,13 @@ export interface LaunchedProgram {
   version: string | null;
   confinement: string | null;
   prepared: string[];
+  resumed: string | null;
 }
 
 export interface TerminalLaunch {
   session_id: string;
   launched: LaunchedProgram;
-  ritual: string;
+  ritual: string | null;
 }
 
 export interface ProviderStatus {

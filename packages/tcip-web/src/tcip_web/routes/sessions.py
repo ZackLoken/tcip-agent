@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, JsonValue
 
 import tcip_store
 from tcip_mcp import audit
-from tcip_mcp.audit import now_iso
+from tcip_mcp.audit import now, now_iso
 from tcip_mcp.identity import actor
 from tcip_mcp.web_client import annotation_stats_key
 
@@ -70,11 +70,11 @@ def _session_start(sessions: list[Session]) -> str:
     not exceed it, so no two sessions of a project share a stamp and the stamp identifies the
     session.
     """
-    now = datetime.fromisoformat(now_iso())
+    stamp = now()
     latest = datetime.fromisoformat(sessions[0].started) if sessions else None
-    if latest is not None and now <= latest:
-        now = latest + timedelta(microseconds=1)
-    return now.isoformat()
+    if latest is not None and stamp <= latest:
+        stamp = latest + timedelta(microseconds=1)
+    return stamp.isoformat()
 
 
 class ImageEventPayload(ImageEntry):

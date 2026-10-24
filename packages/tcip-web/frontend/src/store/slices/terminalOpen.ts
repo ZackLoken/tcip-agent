@@ -5,8 +5,9 @@ import type { AppState } from "@/store/appState";
 const PROVIDER_KEY = "tcip.terminal_provider";
 
 /** Where the rail's agent is in its life: live (the socket runs, and launches an agent when it
- *  holds no session), ending (an End is under way) or ended (only Start launches another). */
-export type TerminalPhase = "live" | "ending" | "ended";
+ *  holds no session), handing-off (a switch of harness waits for the agent's hand-off, the socket
+ *  still running), ending (an End is under way) or ended (only Start launches another). */
+export type TerminalPhase = "live" | "handing-off" | "ending" | "ended";
 
 export interface TerminalOpenSlice {
   /** Agent terminal rail visibility (the server session survives closing). */

@@ -31,6 +31,8 @@ dependencies = [
     # The sam and grounding_dino proposal engines: their models, processors and checkpoints.
     "transformers>=5",
     "pydantic>=2",
+    # web_client's pushes to the tcip-web backend: httpx sends them.
+    "httpx",
     "tcip-store",
     "tcip-annotation",
     # torch.utils.tensorboard.SummaryWriter and tensorboard_manager both need this installed.

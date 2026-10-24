@@ -517,10 +517,14 @@ def test_two_sessions_of_one_project_never_share_a_start_stamp(
 
     The second stamp is one microsecond past the first, and each stamp ends its own session.
     """
+    from datetime import datetime
+
     from tcip_web.routes import sessions
 
     frozen = "2026-10-07T14:00:00+00:00"
-    monkeypatch.setattr(sessions, "now_iso", lambda: frozen)
+    monkeypatch.setattr(
+        sessions, "now", lambda: datetime.fromisoformat(frozen)
+    )
     alice = _stamp(
         _event(client, opened.id, "IMG_A", 5.0, 2, "new_annotation")
     )
