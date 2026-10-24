@@ -593,6 +593,7 @@ describe("TrainingTab epoch table", () => {
     const table = await screen.findByRole("table", { name: "train-table metrics by epoch" });
     expect(within(table).getAllByRole("row")).toHaveLength(3);
     expect(within(table).getByRole("columnheader", { name: "epoch" })).toBeInTheDocument();
+    expect(table.querySelector("thead")).toHaveClass("sticky", "top-0");
     expect(within(table).getByText("0.5")).toBeInTheDocument();
     expect(within(table).getByText("0.3")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "as table" })).not.toBeInTheDocument();
