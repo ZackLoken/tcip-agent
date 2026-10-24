@@ -1,6 +1,7 @@
 """HTTP client pushing state to the tcip-web backend, and the web package's shared declarations.
 
-The push is ``post_panel_event``; the declarations are the stores, the GUI state shape and the tab
+A push is an ``httpx.post`` to a ``backend_url``, the panel event's through ``post_panel_event``;
+the declarations are the stores, the port the backend records, the GUI state shape and the tab
 vocabulary (``ActiveTab``) the web package owns.
 """
 
@@ -47,6 +48,11 @@ _PORT_PARTS = ("web_port",)
 def backend_port_key(workspace: Path) -> Key:
     """Return the key of the port the backend serving ``workspace`` bound, as a JSON string."""
     return Key(BACKEND_PORT_STORE, str(workspace), _PORT_PARTS)
+
+
+def record_backend_port(workspace: Path, port: int) -> None:
+    """Record ``port`` as the one the backend serving ``workspace`` listens on."""
+    tcip_store.replace(backend_port_key(workspace), str(port))
 
 
 GUI_SNAPSHOT_STORE = "gui_snapshot"
@@ -418,13 +424,12 @@ def post_panel_event(
 
     The event is delivered only when that project is the one the backend has open. Every answer
     carries ``delivered``: on a 2xx, ``status`` ``"ok"`` and ``response`` (the JSON body,
-    ``None`` when it does not decode); with the backend down, ``status`` ``"no_subscribers"``;
+    ``None`` when it does not decode); with no port recorded, the connection refused or the
+    request timed out, ``status`` ``"no_subscribers"``;
     otherwise ``error`` naming why: with ``open_project_id`` when another project is open, the
     backend's none-open message when none is.
     """
-    import json
-    import urllib.error
-    import urllib.request
+    import httpx
 
     # Hermetic under pytest: focus/web tests must never steer a live GUI session to ephemeral
     # fixture paths (the browser then 404s on deleted tmp dirs). Tests that exercise real
@@ -449,75 +454,50 @@ def post_panel_event(
             "url": "",
             "error": str(exc),
         }
-    payload = json.dumps(
-        {
-            "panel": panel,
-            "event_type": event_type,
-            "data": data,
-            "project_id": bound.id,
-        }
-    ).encode("utf-8")
-
-    # The pushing harness and session, as headers, so the backend can say who steered the GUI.
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            **agent_identity.http_headers(),
-        },
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            code = getattr(resp, "status", 200)
-            body = resp.read()
-            if 200 <= code < 300:
-                try:
-                    parsed = json.loads(body)
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    parsed = None
-                return {
-                    "status": "ok",
-                    "delivered": True,
-                    "url": url,
-                    "response": parsed,
-                }
-            return {
-                "error": f"backend returned HTTP {code}",
-                "delivered": False,
-                "url": url,
-            }
-    except urllib.error.HTTPError as exc:
-        # The backend's own answer, e.g. the project it has open when that is not this one.
-        try:
-            detail = json.loads(exc.read()).get("detail")
-        except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
-            detail = None
-        if isinstance(detail, dict):
-            fields = {k: v for k, v in detail.items() if k != "message"}
-            return {
-                **fields,
-                "error": detail.get("message"),
-                "delivered": False,
-                "url": url,
-            }
-        error = (
-            detail
-            if isinstance(detail, str)
-            else f"backend returned HTTP {exc.code}"
+        # The pushing harness and session, as headers, so the backend can say who steered the GUI.
+        answer = httpx.post(
+            url,
+            json={
+                "panel": panel,
+                "event_type": event_type,
+                "data": data,
+                "project_id": bound.id,
+            },
+            headers=agent_identity.http_headers(),
+            timeout=timeout,
         )
-        return {"error": error, "delivered": False, "url": url}
-    except urllib.error.URLError as exc:
-        # ConnectionRefusedError or similar -> backend not running
-        reason = getattr(exc, "reason", exc)
-        if isinstance(reason, (ConnectionRefusedError, OSError)):
-            return {"status": "no_subscribers", "delivered": False, "url": url}
+    except (httpx.ConnectError, httpx.TimeoutException):
+        # Refused: nothing listens on the recorded port. Timed out: nothing answered in time,
+        # which does not show that no backend serves. Any other failure is an error below.
+        return {"status": "no_subscribers", "delivered": False, "url": url}
+    except Exception as exc:
+        logger.exception("post_panel_event failed")
+        return {"error": str(exc), "delivered": False, "url": url}
+    try:
+        body = answer.json()
+    except ValueError:
+        body = None
+    if answer.is_success:
         return {
-            "error": f"URL error: {reason}",
+            "status": "ok",
+            "delivered": True,
+            "url": url,
+            "response": body,
+        }
+    # The backend's own answer, e.g. the project it has open when that is not this one.
+    detail = body.get("detail") if isinstance(body, dict) else None
+    if isinstance(detail, dict):
+        fields = {k: v for k, v in detail.items() if k != "message"}
+        return {
+            **fields,
+            "error": detail.get("message"),
             "delivered": False,
             "url": url,
         }
-    except Exception as exc:  # pragma: no cover
-        logger.exception("post_panel_event failed")
-        return {"error": str(exc), "delivered": False, "url": url}
+    error = (
+        detail
+        if isinstance(detail, str)
+        else f"backend returned HTTP {answer.status_code}"
+    )
+    return {"error": error, "delivered": False, "url": url}

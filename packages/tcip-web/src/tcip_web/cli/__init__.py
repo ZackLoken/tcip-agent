@@ -1,6 +1,7 @@
 """``tcip``: the operator console command, dispatching to one subcommand per operator command.
 
-Each subcommand's module (``tcip_mcp.cli.<name>``, or ``distill-learnings`` in this package)
+Each subcommand's module (``tcip_mcp.cli.<name>``, or ``distill-learnings`` and
+``report-conversation`` in this package)
 exposes ``main(argv)``, returning the exit code; the dispatcher only routes.
 
 Run as ``python -m tcip_web.cli <command> [args...]`` or, once installed, as ``tcip <command>
@@ -20,6 +21,7 @@ COMMANDS: dict[str, str] = {
     "check-dataset-identity": "tcip_mcp.cli.check_dataset_identity",
     "write-project-record": "tcip_mcp.cli.write_project_record",
     "distill-learnings": "tcip_web.cli.distill_learnings",
+    "report-conversation": "tcip_web.cli.report_conversation",
     "scan-dataset": "tcip_mcp.cli.scan_dataset",
     "score-predictions": "tcip_mcp.cli.score_predictions",
     "triage-predictions": "tcip_mcp.cli.triage_predictions",

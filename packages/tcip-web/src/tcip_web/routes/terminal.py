@@ -1,25 +1,43 @@
-"""Agent terminal routes: provider status, session launch and end, requests and a PTY WebSocket.
+"""Agent terminal routes: provider status, session launch, hand-off and end, requests and a socket.
 
-Status, launch, end and submitted requests go over HTTP; per session a WebSocket carries
-raw PTY output as text frames out and ``TerminalInputFrame``/``TerminalResizeFrame`` JSON
-messages in. A reconnecting socket receives the scrollback first, then live output, with nothing
-lost or repeated between them.
+Status, launch, the conversation a session's harness reports, a hand-off before a switch of
+harness, the end and submitted requests go over HTTP; per session a WebSocket carries raw PTY
+output as text frames out and ``TerminalInputFrame``/``TerminalResizeFrame`` JSON messages in. A
+reconnecting socket receives the scrollback first, then live output, with nothing lost or
+repeated between them. A launch resumes its row's last conversation in the open project when
+that conversation's end left it resumable within the row's prompt-cache lifetime, and starts
+fresh otherwise.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import itertools
 import logging
 import os
 import threading
+from collections.abc import Callable
+from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    Field,
+    TypeAdapter,
+    ValidationError,
+)
 
-from tcip_mcp.audit import AuditEntryNotWrittenError, record_event_or_raise
+from tcip_mcp.audit import (
+    AuditEntryNotWrittenError,
+    acts_of,
+    audit_entries,
+    now,
+    record_event_or_raise,
+)
 from tcip_mcp.identity import actor
 from tcip_web import terminal as pty_host
 from tcip_web.routes.audit_gap import audit_gap_409
@@ -66,12 +84,13 @@ def _offer(queue: asyncio.Queue, item: str | tuple[int, str]) -> None:
 
 
 class LaunchedProgram(BaseModel):
-    """What a launch ran: its provider row, argv, version, confinement and preparation.
+    """What a launch ran: its provider row, argv, version, confinement, preparation and resume.
 
     It carries the provider row's id, the rendered argv, the version its executable (the first
     element) declares, what the row states its harness's own enforcement restricts and leaves
-    open (``None`` for a ``TCIP_TERMINAL_CMD`` override, which runs no row's arguments), and
-    the steps the row's preparation took before the launch, empty when it has none.
+    open (``None`` for a ``TCIP_TERMINAL_CMD`` override, which runs no row's arguments), the
+    steps the row's preparation took before the launch, empty when it has none, and the
+    conversation it resumed, ``None`` for a fresh one.
     """
 
     provider: str
@@ -79,14 +98,18 @@ class LaunchedProgram(BaseModel):
     version: str | None
     confinement: str | None
     prepared: list[str]
+    resumed: str | None
 
 
 class TerminalLaunch(BaseModel):
-    """A started session: its id, what it launched and the session-start ritual it was given."""
+    """A started session: its id, what it launched and the session-start ritual it was given.
+
+    A launch resuming a conversation is given no ritual.
+    """
 
     session_id: str
     launched: LaunchedProgram
-    ritual: str
+    ritual: str | None
 
 
 class ProviderStatus(BaseModel):
@@ -104,9 +127,52 @@ class TerminalStatus(BaseModel):
 
 
 class TerminalEnd(BaseModel):
-    """An ended session: the requests it took and its agent was never given, oldest first."""
+    """An ended session's answer: the requests its agent was never given, oldest first."""
 
     undelivered: list[str]
+
+
+_STARTED = "agent_terminal_started"
+_ENDED = "agent_terminal_ended"
+
+
+class TerminalEnded(TerminalEnd):
+    """What an ``agent_terminal_ended`` line records about the session it ends.
+
+    Beside the :class:`TerminalEnd` an end answers, it holds the session, its provider row, why
+    it ended in words for the person, whether its conversation may be resumed (not after the
+    person ended it with no switch under way), the conversation its harness last reported,
+    ``None`` when none reported one, the time of the last output the session saw from its agent,
+    and, for an end during a switch of harness, whether the agent's hand-off had landed,
+    ``None`` for any other end.
+    """
+
+    session_id: str
+    provider: str
+    cause: str
+    resumable: bool
+    conversation: str | None
+    last_output_at: AwareDatetime | None
+    handed_off: bool | None
+
+
+class ConversationReport(BaseModel):
+    """The conversation a session's harness declared it is in, as its session hook reported it."""
+
+    conversation: str = Field(min_length=1)
+
+
+HAND_OFF_REQUEST = (
+    "[TCIP hand-off] The breeder is switching this terminal to another agent harness. Write "
+    "your hand-off now with write_retrospective, as the self-improvement skill's hand-off "
+    "describes; this session ends once it is recorded."
+)
+"""The request a switch of harness delivers to the agent it ends."""
+
+
+UNRECORDED_END = (AuditEntryNotWrittenError, ValueError)
+"""What leaves an end with no end line: the line failing to append, or the session's log failing
+to read for its hand-off."""
 
 
 def _record(
@@ -129,25 +195,40 @@ def _record(
 _TAIL_CHARS = 32
 
 
+@dataclasses.dataclass(frozen=True)
+class _HandOff:
+    """A switch of harness under way: who asked for it, and the log's cursor when they did."""
+
+    by: str
+    after: str
+
+
 class TerminalSession:
     """One PTY-attached agent process, its delivery state and its subscriber queues.
 
-    The delivery state is the agent's session-start ritual and whether it was delivered, whether
-    the agent has bracketed paste on, whether it has written its row's ``composer_ready``, the
-    requests waiting behind the ritual, and the output tail an escape sequence split across reads
-    continues from.
+    The delivery state is the session's own text still to paste ahead of the queued requests
+    (the session-start ritual until it is pasted, then a hand-off request once a switch asks
+    for one), whether the agent has bracketed paste on, whether it has written its row's
+    ``composer_ready``, the requests a person submitted that are still queued, and the output
+    tail an escape sequence split across reads continues from.
     """
 
     launched: LaunchedProgram
     """What :meth:`start` launched."""
-    ritual: str
-    """The session-start ritual :meth:`start` built for the agent."""
+    ritual: str | None
+    """The session-start ritual :meth:`start` built for the agent, ``None`` for a resumed one."""
+    conversation: str | None
+    """The conversation the agent's harness last reported it is in, ``None`` until one does."""
+    ended: TerminalEnded
+    """The session's one end, set by :meth:`end` once it has stopped the process and read the
+    hand-off."""
     _pty: pty_host.Pty | None
 
     def __init__(self, session_id: str) -> None:
         """Take the session's id; no process runs until :meth:`start`."""
         self.id = session_id
         self._pty = None
+        self.conversation = None
         # The project whose log records the session's lines, set once its start line is written.
         self._project: OpenProject | None = None
         self._lock = threading.Lock()
@@ -158,11 +239,13 @@ class TerminalSession:
             int, tuple[asyncio.Queue, asyncio.AbstractEventLoop]
         ] = {}
         self._sub_ids = itertools.count()
-        self._ritual_sent = False
+        self._ahead: str | None = None
         self._ready = False
         self._composer_live = False
         self._queued: list[str] = []
         self._tail = ""
+        self._last_output_at: datetime | None = None
+        self._hand_off: _HandOff | None = None
         # Held by the one delivery writing to the PTY, so writes keep their order; taken after the
         # sessions lock and before the session lock, which is never held across a write.
         self._writing = threading.Lock()
@@ -174,32 +257,41 @@ class TerminalSession:
     ) -> str | None:
         """Spawn ``provider``'s harness in a PTY for the open project, by ``actor``.
 
-        The ritual is built before the spawn from the project's record as it reads now. Returns
-        an error reason (a record that will not read names why), or None on success.
+        The launch resumes :func:`_conversation_to_resume`'s conversation, given no ritual, or
+        is fresh, given the ritual built before the spawn from the project's record as it reads
+        now; an override resumes none. Returns an error reason (a record or log that will not
+        read names why), or None on success.
         """
         project = store.opened
         launch = pty_host.project_launch(project)
-        try:
-            ritual = pty_host.session_ritual(launch)
-        except ValueError as exc:
-            return str(exc)
         command = pty_host.resolve_terminal_command(provider)
         if command is None:
             return provider.unavailable_reason
+        unrendered, override = command
+        try:
+            resumed = (
+                None
+                if override
+                else _conversation_to_resume(provider, project)
+            )
+            ritual = None if resumed else pty_host.session_ritual(launch)
+        except ValueError as exc:
+            return str(exc)
+        env = pty_host.spawn_env(self.id)
+        argv = pty_host.render_argv(unrendered, launch, env, resumed)
         prepared = (
             []
-            if command[1]
-            else pty_host.prepare_launch(command[0][0], provider, launch)
+            if override
+            else pty_host.prepare_launch(argv[0], provider, launch)
         )
         if isinstance(prepared, str):
             return prepared
-        env = pty_host.spawn_env(self.id)
-        argv = pty_host.render_argv(command[0], launch, env)
-        program = pty_host.launched_program(argv, command[1])
+        program = pty_host.launched_program(argv, override)
         launched = LaunchedProgram(
             provider=provider.id,
             prepared=prepared,
-            confinement=None if command[1] else provider.confinement,
+            confinement=None if override else provider.confinement,
+            resumed=resumed,
             **program,
         )
         try:
@@ -210,10 +302,10 @@ class TerminalSession:
             return f"could not start the agent terminal: {exc}"
         self._pty = pty
         self.launched = launched
-        self.ritual = ritual
+        self.ritual = self._ahead = ritual
         try:
             _record(
-                "agent_terminal_started",
+                _STARTED,
                 {"session_id": self.id, **launched.model_dump()},
                 project,
                 actor,
@@ -233,43 +325,58 @@ class TerminalSession:
         )
         return None
 
-    def end(self, cause: str, actor: str | None) -> bool:
+    def end(
+        self,
+        cause: str,
+        actor: str | None,
+        hand_off: Callable[[], bool | None],
+    ) -> bool:
         """End the session's agent for ``cause``, by ``actor`` (``None`` when no person did).
 
+        ``hand_off`` answers :meth:`hand_off_landed` for the end, read once the process stopped.
         Under the sessions lock, so no create runs and no submit is admitted meanwhile, and in
         this order: terminates the process; waits for a delivery under way to settle, so each
         request is either written and gone from the queue or still queued, the queue it leaves
-        being what its agent was never given, which nothing changes after; writes one
-        ``agent_terminal_ended`` line naming the session, its provider row, ``cause`` and how many
-        requests that is in the log its start line was written to, or writes the failure to the
-        terminal stream and the error log; then, under the session's own lock, closes every socket
-        of it with :data:`ENDED_CLOSE_CODE`, drops them, so no later output reaches one, and
-        forgets the session, which is what marks it ended. Returns False when the process
-        survives termination, the session still held, and True once the session ended, by this
-        call or an earlier one. A failed append is raised as ``AuditEntryNotWrittenError``.
+        being what its agent was never given, which nothing changes after; holds the session's
+        :class:`TerminalEnded` as :attr:`ended` and writes it as one line in the log its start
+        line was written to, its conversation resumable unless a person ended it with no switch
+        under way, or, when the hand-off cannot be read or the line fails to append (an
+        :data:`UNRECORDED_END`), writes that the agent ended and no end line was recorded, and
+        why, to the terminal stream and the error log; then, under the session's own lock, closes
+        every socket of it with :data:`ENDED_CLOSE_CODE`, drops them, so no later output reaches
+        one, and forgets the session, which is what marks it ended. Returns False when the
+        process survives termination, the session still held, and True once the session ended,
+        by this call or an earlier one. An unrecorded end is raised as its own failure.
         """
         with _SESSIONS_LOCK:
             if self.id not in _SESSIONS:
                 return True
             if not self.terminate():
                 return False
-            with self._writing, self._lock:
-                undelivered_count = len(self._queued)
             try:
+                handed_off = hand_off()
+                with self._writing, self._lock:
+                    self.ended = TerminalEnded(
+                        session_id=self.id,
+                        provider=self.launched.provider,
+                        cause=cause,
+                        undelivered=list(self._queued),
+                        resumable=actor is None or self._hand_off is not None,
+                        conversation=self.conversation,
+                        last_output_at=self._last_output_at,
+                        handed_off=handed_off,
+                    )
                 _record(
-                    "agent_terminal_ended",
-                    {
-                        "session_id": self.id,
-                        "provider": self.launched.provider,
-                        "cause": cause,
-                        "undelivered_count": undelivered_count,
-                    },
+                    _ENDED,
+                    self.ended.model_dump(mode="json"),
                     self._project,
                     actor,
                 )
-            except AuditEntryNotWrittenError as exc:
+            except UNRECORDED_END as exc:
                 with self._lock:
-                    self._show(f"\r\n{exc}\r\n")
+                    self._show(
+                        f"\r\nThe agent ended and no end line was recorded: {exc}\r\n"
+                    )
                 logger.exception(
                     "terminal session %s ended unrecorded", self.id
                 )
@@ -292,21 +399,41 @@ class TerminalSession:
         with self._lock:
             self._queued.append(text)
 
-    def deliver(self) -> None:
-        """Paste the agent's ritual with its queued requests, then each later request.
+    def hand_off(self, by: str) -> bool:
+        """Ask the agent for its hand-off before a switch of harness asked for ``by`` a person.
 
-        The ritual goes together with every request queued by then as one message, then each
-        later request on its own, once its agent has bracketed paste on and has written its row's
-        ``composer_ready``; each leaves the queue only once written. One delivery writes at a
-        time; the session lock is held to read and update the queue, never across a write.
+        :data:`HAND_OFF_REQUEST` goes ahead of the queued requests, after any ritual still
+        unpasted, and the session ends by ``by`` once the agent's hand-off lands
+        (:meth:`_follow_hand_off`). Asked again, it changes nothing. Returns False for a session
+        for no project, which has no log to see a hand-off land in, and asks for nothing.
+        """
+        with self._writing, self._lock:
+            if self._project is None:
+                return False
+            if self._hand_off is None:
+                _, cursor = audit_entries(self._project.root)
+                self._hand_off = _HandOff(by, cursor)
+                self._ahead = "\n\n".join(
+                    text for text in (self._ahead, HAND_OFF_REQUEST) if text
+                )
+            return True
+
+    def deliver(self) -> None:
+        """Paste the session's own text with its queued requests, then each later request.
+
+        The session's own text (:attr:`_ahead`) goes together with every request queued by then
+        as one message, otherwise each request on its own, once the agent has bracketed paste on
+        and has written its row's ``composer_ready``; each leaves the queue only once written. One
+        delivery writes at a time; the session lock is held to read and update the queue, never
+        across a write.
         """
         with self._writing:
             while True:
                 with self._lock:
                     if not (self._ready and self._composer_live):
                         return
-                    if not self._ritual_sent:
-                        text = "\n\n".join([self.ritual, *self._queued])
+                    if self._ahead is not None:
+                        text = "\n\n".join([self._ahead, *self._queued])
                         taken = len(self._queued)
                     elif self._queued:
                         text, taken = self._queued[0], 1
@@ -315,7 +442,7 @@ class TerminalSession:
                 if not self.write(pty_host.paste(text)):
                     return
                 with self._lock:
-                    self._ritual_sent = True
+                    self._ahead = None
                     del self._queued[:taken]
 
     def terminate(self) -> bool:
@@ -376,8 +503,12 @@ class TerminalSession:
     # ── output pump (called from the reader thread) ─────────────────────
 
     def _on_output(self, data: str) -> None:
-        """Take the agent's output: note its paste readiness, show it, then :meth:`deliver`."""
+        """Take the agent's output: note when and its paste readiness, show it, then deliver.
+
+        After :meth:`deliver`, :meth:`_follow_hand_off` looks for a hand-off asked for.
+        """
         with self._lock:
+            self._last_output_at = now()
             seen = self._tail + data
             self._ready = pty_host.bracketed_paste(seen, self._ready)
             self._composer_live = (
@@ -387,6 +518,38 @@ class TerminalSession:
             self._tail = seen[-_TAIL_CHARS:]
             self._show(data)
         self.deliver()
+        self._follow_hand_off()
+
+    def hand_off_landed(self) -> bool | None:
+        """Return whether the hand-off asked for has landed, ``None`` when none was asked for.
+
+        It has once a ``write_retrospective`` line the agent's MCP server stamped with this
+        session's id is in the session's log past the cursor the hand-off was asked at.
+        """
+        from tcip_mcp.tools.meta_tools import write_retrospective
+
+        hand_off = self._hand_off
+        if hand_off is None or self._project is None:
+            return None
+        lines, _ = acts_of(
+            self._project.root,
+            (write_retrospective.__name__,),
+            after=hand_off.after,
+        )
+        return any(line.get("terminal_session") == self.id for line in lines)
+
+    def _follow_hand_off(self) -> None:
+        """End the session by the person who asked for its hand-off, once that hand-off landed.
+
+        A termination that fails leaves the session held, and the next output or End tries again.
+        """
+        hand_off = self._hand_off
+        if hand_off is not None and self.hand_off_landed():
+            self.end(
+                "the agent handed off for a switch of harness",
+                hand_off.by,
+                lambda: True,
+            )
 
     def _show(self, data: str) -> None:
         """Keep ``data`` in the scrollback and offer it to every subscriber; under the lock."""
@@ -418,11 +581,12 @@ class TerminalSession:
     def end_unattended(self, cause: str) -> bool:
         """:meth:`end` the session for ``cause``, an act no person performed, where no caller waits.
 
-        A failed append, which :meth:`end` has logged, is not raised. Returns what :meth:`end`
-        returns.
+        Its hand-off is read by :meth:`end` once the process stopped, so a log that will not read
+        still leaves the session stopped and forgotten. An :data:`UNRECORDED_END`, which
+        :meth:`end` has disclosed, is not raised. Returns what :meth:`end` returns.
         """
-        with contextlib.suppress(AuditEntryNotWrittenError):
-            return self.end(cause, None)
+        with contextlib.suppress(*UNRECORDED_END):
+            return self.end(cause, None, self.hand_off_landed)
         return True
 
     # ── subscriber registration (called from each websocket's loop) ─────
@@ -466,7 +630,8 @@ _SESSIONS_LOCK = threading.Lock()
 def shutdown_all() -> None:
     """End every agent terminal for the backend's shutdown.
 
-    A survivor of termination and an end whose line fails to append are each logged.
+    A survivor of termination, and an end whose line fails to append or whose hand-off cannot be
+    read, are each logged, and every other session's end is still attempted.
     """
     for s in list(_SESSIONS.values()):
         if not s.end_unattended("the backend shut down"):
@@ -532,6 +697,35 @@ def _clamp(v: int) -> int:
     return max(2, min(MAX_DIM, v))
 
 
+def _conversation_to_resume(
+    provider: pty_host.Provider, project: OpenProject | None
+) -> str | None:
+    """Return the conversation a launch of ``provider`` in ``project`` resumes, ``None`` for none.
+
+    It is the conversation the newest ``agent_terminal_ended`` line of the row in the project's
+    log names, when that end left it resumable and the line's last output is within the row's
+    :attr:`~tcip_web.terminal.Resume.cache_lifetime` of now. A row with no
+    :class:`~tcip_web.terminal.Resume` and a launch for no project resume none. Raises
+    ``ValueError`` for a log or an end line that will not read.
+    """
+    resume = provider.resume
+    if resume is None or project is None:
+        return None
+    lines, _ = acts_of(project.root, (_ENDED,))
+    ends = [TerminalEnded.model_validate(line["arguments"]) for line in lines]
+    newest = next(
+        (e for e in reversed(ends) if e.provider == provider.id), None
+    )
+    if (
+        newest is None
+        or not newest.resumable
+        or newest.last_output_at is None
+        or now() - newest.last_output_at > resume.cache_lifetime
+    ):
+        return None
+    return newest.conversation
+
+
 def _provider(provider_id: str) -> pty_host.Provider:
     """Return the table row whose id is exactly ``provider_id``.
 
@@ -549,9 +743,10 @@ def _provider(provider_id: str) -> pty_host.Provider:
 
 @router.post("/sessions")
 def create_session(req: CreateSessionRequest) -> TerminalLaunch:
-    """Return the live session (attach semantics, like tmux) or spawn a fresh one.
+    """Return the live session (attach semantics, like tmux) or start a new one.
 
-    A fresh one runs the requested provider by the person ``req.user`` names.
+    A new one runs the requested provider by the person ``req.user`` names
+    (:meth:`TerminalSession.start`).
     """
     person = actor(req.user)
     provider = _provider(req.provider)
@@ -582,32 +777,76 @@ def _require(session_id: str) -> TerminalSession:
 
 
 class EndSessionRequest(BaseModel):
-    """An end of a session's agent and its conversation, by the person ``user`` names."""
+    """An end of a session's agent, at once or after its hand-off, by the person ``user`` names."""
 
     user: str
 
 
-@router.post("/sessions/{session_id}/end")
-def end_session(session_id: str, req: EndSessionRequest) -> TerminalEnd:
-    """End the session's agent by the person ``req.user`` names (:meth:`TerminalSession.end`).
+def _end_by(session: TerminalSession, person: str) -> TerminalEnd:
+    """End ``session``'s agent by ``person`` at once (:meth:`TerminalSession.end`).
 
-    Answers the requests its agent was never given. 404 for an unknown session; 503 when the
-    process survives termination, the session kept reachable; the audit-gap 409 carrying that
-    answer when the end's line fails to append.
+    Its hand-off is read first (:meth:`TerminalSession.hand_off_landed`), so a log that will not
+    read raises with the agent still running. Answers the requests its agent was never given.
+    503 when the process survives termination, the session kept reachable; the audit-gap 409
+    carrying that answer when the end's line fails to append.
     """
-    person = actor(req.user)
-    session = _require(session_id)
+    handed_off = session.hand_off_landed()
     unrecorded: AuditEntryNotWrittenError | None = None
     try:
-        stopped = session.end("the person ended it", person)
+        stopped = session.end(
+            "the person ended it", person, lambda: handed_off
+        )
     except AuditEntryNotWrittenError as exc:
         stopped, unrecorded = True, exc
     if not stopped:
         raise HTTPException(503, _SURVIVED)
-    answer = TerminalEnd(undelivered=list(session._queued))
+    answer = TerminalEnd(undelivered=session.ended.undelivered)
     if unrecorded is not None:
         raise audit_gap_409(unrecorded, answer) from unrecorded
     return answer
+
+
+@router.post("/sessions/{session_id}/end")
+def end_session(session_id: str, req: EndSessionRequest) -> TerminalEnd:
+    """End the session's agent at once by the person ``req.user`` names (:func:`_end_by`).
+
+    404 for an unknown session.
+    """
+    person = actor(req.user)
+    return _end_by(_require(session_id), person)
+
+
+@router.post("/sessions/{session_id}/hand-off")
+def hand_off_session(
+    session_id: str, req: EndSessionRequest
+) -> TerminalEnd | None:
+    """Ask the session's agent for its hand-off before a switch of harness, by ``req.user``.
+
+    The hand-off request is delivered ahead of the queued requests and the session ends once
+    the hand-off lands (:meth:`TerminalSession.hand_off`), answering ``None``; a session for no
+    project ends at once instead, answered as :func:`_end_by` answers. 404 for an unknown
+    session.
+    """
+    person = actor(req.user)
+    with _SESSIONS_LOCK:
+        session = _require(session_id)
+        handing_off = session.hand_off(person)
+    if not handing_off:
+        return _end_by(session, person)
+    session.deliver()
+    return None
+
+
+@router.post("/sessions/{session_id}/conversation")
+def report_conversation(session_id: str, req: ConversationReport) -> dict:
+    """Hold ``req.conversation`` as the conversation the session's agent is in, as declared.
+
+    A later report replaces it; the session's end line records the last. 404 for a session the
+    backend does not hold.
+    """
+    with _SESSIONS_LOCK:
+        _require(session_id).conversation = req.conversation
+    return {}
 
 
 class SubmitRequest(BaseModel):

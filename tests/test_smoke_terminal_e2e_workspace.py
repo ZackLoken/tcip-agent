@@ -88,6 +88,68 @@ def test_the_signal_is_a_friction_report_of_the_open_project_carrying_the_token(
     assert not mod.reported(opened_client, other)
 
 
+def test_the_resume_smoke_passes_against_a_harness_whose_hook_reaches_the_served_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The smoke's resume case passes against the fake harness standing in for Claude's row.
+
+    The fake runs its launch's ``SessionStart`` hook, whose command reaches the backend the smoke
+    serves, reports the token, then, resumed after the backend's shutdown, the token continued
+    from its own memory of the conversation; the second launch resumed the conversation the hook
+    reported.
+    """
+    from tests._terminal_fixtures import fake_executable
+
+    monkeypatch.delenv(pty_host.TERMINAL_CMD_ENV, raising=False)
+    (claude,) = [row for row in pty_host.PROVIDERS if row.id == "claude"]
+    row = dataclasses.replace(
+        claude, executable=str(fake_executable(tmp_path / "bin"))
+    )
+    monkeypatch.setattr(pty_host, "PROVIDERS", (row,))
+    memory = tmp_path / "memory"
+    memory.mkdir()
+    monkeypatch.setenv("FAKE_TERMINAL_MEMORY_DIR", str(memory))
+    monkeypatch.setenv("FAKE_TERMINAL_PASTE_AFTER_S", "1")
+    monkeypatch.setenv("FAKE_TERMINAL_COMPOSER_READY", row.composer_ready)
+
+    mod = _load()
+    result = mod.main(
+        row.id,
+        workspace=str(tmp_path.parent.parent / "smoke-workspace"),
+        answer_timeout_s=90,
+    )
+
+    assert result == 0
+    (conversation,) = [path.name for path in memory.iterdir()]
+    assert conversation
+
+
+def test_the_resumed_signal_is_the_token_continued_no_request_names(
+    opened_project: Path, opened_client: TestClient
+) -> None:
+    """The resumed launch's signal is the first token continued, named by no request after it.
+
+    The continuation request carries no token; ``reported`` answers for the continued token only
+    once a report carries it, and the first token, then carried by two reports, no longer reads
+    as the first launch's signal.
+    """
+    from tcip_mcp.tools.meta_tools import report_friction
+
+    mod = _load()
+    token = "ack-0123456789ab"
+    continued = token + mod.CONTINUED_SUFFIX
+    assert "ack-" not in mod.continuation_request()
+    assert mod.CONTINUED_SUFFIX in mod.continuation_request()
+
+    report_friction(opened_project, mod.REQUESTED_CATEGORY, f"smoke {token}")
+    assert mod.reported(opened_client, token)
+    assert not mod.reported(opened_client, continued)
+
+    report_friction(opened_project, mod.REQUESTED_CATEGORY, continued)
+    assert mod.reported(opened_client, continued)
+    assert not mod.reported(opened_client, token)
+
+
 def test_the_websocket_url_is_absolute_and_carries_the_served_host(
     tmp_path: Path, client: TestClient
 ) -> None:

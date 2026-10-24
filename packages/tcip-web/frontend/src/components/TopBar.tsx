@@ -27,6 +27,9 @@ export function TopBar() {
   const wsStatus = useStore((s) => s.wsStatus);
   const terminalOpen = useStore((s) => s.terminalOpen);
   const setTerminalOpen = useStore((s) => s.setTerminalOpen);
+  // A minimized rail's switch of harness waits for the agent's hand-off; the rail starts the
+  // chosen harness once it is open again.
+  const handingOff = useStore((s) => s.terminalPhase === "handing-off") && !terminalOpen;
 
   // Grace window so the initial handshake doesn't flash "reconnecting…" on every load;
   // hard failures (error/disconnected) surface immediately.
@@ -110,6 +113,11 @@ export function TopBar() {
           onClick={() => setTerminalOpen(!terminalOpen)}
           aria-pressed={terminalOpen}
           aria-label="Toggle agent terminal"
+          title={
+            handingOff
+              ? "The agent is writing its hand-off; open the rail to start the chosen harness once it is recorded"
+              : undefined
+          }
           className={`px-2.5 h-7 rounded text-[13px] font-medium transition-colors ${
             terminalOpen
               ? "bg-tcip-accent text-white"
@@ -117,6 +125,12 @@ export function TopBar() {
           }`}
         >
           TCIP Agent
+          {handingOff && (
+            <span
+              aria-hidden="true"
+              className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-tcip-warn animate-pulse"
+            />
+          )}
         </button>
       </div>
     </div>

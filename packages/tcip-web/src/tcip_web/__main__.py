@@ -11,8 +11,8 @@ import os
 
 import uvicorn
 
-from tcip_mcp.web_client import LOOPBACK_HOST, backend_port_key, free_port
-from tcip_store import bind, replace
+from tcip_mcp.web_client import LOOPBACK_HOST, free_port, record_backend_port
+from tcip_store import bind
 
 DEFAULT_PORT = 8765
 """The port asked for when ``TCIP_WEB_PORT`` is unset."""
@@ -30,7 +30,7 @@ def main() -> None:
     instance = bind()
     requested = int(os.environ.get("TCIP_WEB_PORT", str(DEFAULT_PORT)))
     port = free_port(requested)
-    replace(backend_port_key(workspace), str(port))
+    record_backend_port(workspace, port)
     # The app's import below binds its own instance; this one holds only the port write's
     # connection and is closed so the process ends up holding one backend's connections.
     instance.close()

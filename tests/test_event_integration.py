@@ -372,11 +372,10 @@ class TestPortDiscovery:
     def test_the_recorded_port_is_read_whatever_the_environment_requests(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import tcip_store as ts
-        from tcip_mcp.web_client import backend_port_key, resolve_web_port
+        from tcip_mcp.web_client import record_backend_port, resolve_web_port
 
         monkeypatch.setenv("TCIP_WEB_PORT", "12345")
-        ts.replace(backend_port_key(tmp_path.parent), "34567")
+        record_backend_port(tmp_path.parent, 34567)
         assert resolve_web_port(tmp_path.parent) == 34567
 
     def test_no_recorded_port_refuses_naming_what_records_one(
@@ -404,11 +403,11 @@ class TestPortDiscovery:
     def test_the_port_handoff_is_one_declaration_that_both_packages_reach(
         self,
     ) -> None:
-        """The port's key builder lives in ``web_client`` and the backend addresses it there."""
+        """The port's record is written by ``web_client``'s one writer, which the backend calls."""
         from tcip_mcp import web_client
         from tcip_web import __main__ as web_main
 
-        assert web_main.backend_port_key is web_client.backend_port_key
+        assert web_main.record_backend_port is web_client.record_backend_port
 
     def test_the_backend_binds_and_the_tools_reach_one_loopback_host(
         self,
@@ -662,13 +661,10 @@ def test_post_panel_event_suppressed_under_pytest(
 def test_post_panel_event_opt_in_bypasses_suppression(
     bound: BoundProject, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import tcip_store as ts
-    from tcip_mcp.web_client import backend_port_key, post_panel_event
+    from tcip_mcp.web_client import post_panel_event, record_backend_port
 
     monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
-    ts.replace(
-        backend_port_key(bound.workspace), "1"
-    )  # nothing listens on port 1
+    record_backend_port(bound.workspace, 1)  # nothing listens on port 1
     res = post_panel_event(bound, "annotate", "annotate_focus", {})
     assert res["delivered"] is False
     assert (
@@ -676,47 +672,56 @@ def test_post_panel_event_opt_in_bypasses_suppression(
     )  # it really attempted the send
 
 
+def test_post_panel_event_answers_a_malformed_answer_as_an_error(
+    bound: BoundProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A listener answering with no HTTP status line is an error, never "no subscribers"."""
+    import socketserver
+    import threading
+
+    from tcip_mcp.web_client import post_panel_event, record_backend_port
+
+    class _NotHttp(socketserver.BaseRequestHandler):
+        def handle(self) -> None:
+            self.request.recv(65536)
+            self.request.sendall(b"NOT AN HTTP STATUS LINE\r\n\r\n")
+
+    monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
+    with socketserver.TCPServer(("127.0.0.1", 0), _NotHttp) as server:
+        record_backend_port(bound.workspace, server.server_address[1])
+        thread = threading.Thread(target=server.handle_request, daemon=True)
+        thread.start()
+        res = post_panel_event(bound, "annotate", "annotate_focus", {})
+        thread.join(timeout=10)
+
+    assert res["delivered"] is False
+    assert res.get("status") != "no_subscribers"
+    assert res["error"]
+
+
 def test_post_panel_event_returns_the_backends_response_body(
     opened: OpenProject, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``post_panel_event`` answers a served backend's response body.
 
-    Against a served backend it answers with the backend's response body, and after the
+    Against a served backend it answers with the backend's response body; for another project
+    than the open one, with the backend's structured refusal naming the open one; and after the
     project is closed, with the backend's own none-open refusal.
     """
     import asyncio
-    import socket
-    import threading
-    import time
 
-    import uvicorn
-
-    import tcip_store as ts
-    from tcip_mcp.web_client import backend_port_key, post_panel_event
+    from tcip_mcp.web_client import post_panel_event
     from tcip_web.app import app
     from tcip_web.state import store
-    from tests._web_fixtures import bound_to
+    from tests._web_fixtures import bound_to, named_project
+    from tools.smoke_terminal_e2e import served
 
     bound = bound_to(opened)
-    monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-    ts.replace(backend_port_key(bound.workspace), str(port))
-
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app, host="127.0.0.1", port=port, log_level="error", lifespan="off"
-        )
+    other = bound_to(
+        named_project(opened.root.parent / "hill_block", "Hill block")
     )
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    try:
-        deadline = time.monotonic() + 10
-        while not server.started and time.monotonic() < deadline:
-            time.sleep(0.02)
-        assert server.started, "the test backend never came up"
-
+    monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
+    with served(app, bound.workspace):
         res = post_panel_event(bound, "app", "status_note", {"text": "a note"})
         assert res["delivered"] is True
         assert res["response"] == {
@@ -725,10 +730,12 @@ def test_post_panel_event_returns_the_backends_response_body(
             "event_type": "status_note",
         }
 
+        elsewhere = post_panel_event(other, "app", "status_note", {})
+        assert elsewhere["delivered"] is False
+        assert elsewhere["open_project_id"] == opened.id
+        assert elsewhere["error"]
+
         asyncio.run(store.close_project(opened.id))
         refused = post_panel_event(bound, "app", "status_note", {})
         assert refused["delivered"] is False
         assert "no project is open" in refused["error"]
-    finally:
-        server.should_exit = True
-        thread.join(timeout=10)

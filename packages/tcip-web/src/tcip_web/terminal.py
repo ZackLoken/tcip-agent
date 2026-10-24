@@ -19,8 +19,9 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path, PurePath
 
 from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
@@ -40,8 +41,8 @@ TERMINATE_WAIT_S = 5
 
 MCP_CONFIG_ARG = "{mcp_config}"
 """A whole argument: the path of the launch's JSON MCP configuration."""
-CODEX_MCP_ARG = "{codex_mcp}"
-"""A whole argument: the launch's Codex ``tcip`` server overrides, as several arguments."""
+CODEX_CONFIG_ARG = "{codex_config}"
+"""A whole argument: the launch's Codex configuration overrides, as several arguments."""
 CLAUDE_SETTINGS_ARG = "{claude_settings}"
 """A whole argument: the path of the launch's Claude settings file."""
 
@@ -65,14 +66,17 @@ class PreparationFailedError(Exception):
 
 @dataclass(frozen=True)
 class ProjectLaunch:
-    """A launch for an open project: the project and its ritual's doctor step.
+    """A launch for an open project: the project, its ritual's doctor step and its session hook.
 
     The doctor step is the line or the reason it cannot be spelled, exactly one of the two set.
+    The session hook is :func:`conversation_hook_command`'s line, ``None`` when the interpreter
+    cannot be spelled on one.
     """
 
     project: OpenProject
     doctor_line: str | None
     doctor_refused: str | None
+    conversation_hook: str | None
 
 
 PrepareFn = Callable[[str, ProjectLaunch | None], list[str]]
@@ -82,24 +86,45 @@ step it took, or raises :class:`PreparationFailedError`."""
 
 
 @dataclass(frozen=True)
+class Resume:
+    """How a harness continues one of its own conversations, and for how long a launch does.
+
+    ``argument`` is what goes before the conversation's id on its command line;
+    ``cache_lifetime`` is the window after the conversation's last output in which a launch
+    resumes it: the prompt-cache lifetime the row requests or its harness's provider documents,
+    not a promise that the cache still holds the conversation.
+    """
+
+    argument: str
+    cache_lifetime: timedelta
+
+
+@dataclass(frozen=True)
 class Provider:
     """One agent harness the terminal launches, its launch and what that launch confines.
 
     It carries the id a session names it by, its display name, the executable looked up on
     ``PATH``, the arguments after it, which may include the placeholders
-    :data:`MCP_CONFIG_ARG`, :data:`CLAUDE_SETTINGS_ARG` and :data:`CODEX_MCP_ARG` as whole
-    arguments, the output sequence one installed version of the harness was recorded writing
-    when its composer appeared, what the harness's own enforcement restricts under those
-    arguments and leaves open, and the preparation the launch runs first, ``None`` for none.
+    :data:`MCP_CONFIG_ARG`, :data:`CLAUDE_SETTINGS_ARG` and :data:`CODEX_CONFIG_ARG` as whole
+    arguments and, for a harness whose conversations are resumed, its :class:`Resume` where
+    the resumed conversation goes, the output sequence one installed version of the harness was
+    recorded writing when its composer appeared, what the harness's own enforcement restricts
+    under those arguments and leaves open, and the preparation the launch runs first, ``None``
+    for none.
     """
 
     id: str
     name: str
     executable: str
-    args: tuple[str, ...]
+    args: tuple[str | Resume, ...]
     composer_ready: str
     confinement: str
     prepare: PrepareFn | None = None
+
+    @property
+    def resume(self) -> Resume | None:
+        """The :class:`Resume` among the row's arguments, ``None`` for a row never resumed."""
+        return next((a for a in self.args if isinstance(a, Resume)), None)
 
     @property
     def unavailable_reason(self) -> str:
@@ -132,26 +157,67 @@ def mcp_server(launch: ProjectLaunch | None) -> McpServer:
     return McpServer(backend_interpreter(), ("-m", "tcip_mcp", *project))
 
 
-def codex_mcp_overrides(
+type TomlValue = str | Sequence[TomlValue] | Mapping[str, TomlValue]
+"""A value Codex's ``-c`` overrides carry: a string, or an array or table of them."""
+
+
+def session_start_hooks(line: str) -> Mapping[str, TomlValue]:
+    """Return the ``hooks`` configuration running the command ``line`` at every session start.
+
+    It is one ``SessionStart`` matcher group with no matcher and one command handler, the shape
+    Claude Code's settings and Codex's configuration share.
+    """
+    return {
+        "SessionStart": [{"hooks": [{"type": "command", "command": line}]}]
+    }
+
+
+_TOML_BASIC_ESCAPES = {
+    ord('"'): '\\"',
+    ord("\\"): "\\\\",
+    **{code: f"\\u{code:04X}" for code in (*range(0x20), 0x7F)},
+}
+"""What a TOML basic string must escape: the quotation mark, the backslash and every control
+character (U+0000 to U+001F and U+007F); every other character is written as itself."""
+
+
+def _toml_value(value: TomlValue) -> str:
+    """Return ``value`` as one TOML inline value: a string, an array or an inline table.
+
+    A string is a TOML basic string, escaped by :data:`_TOML_BASIC_ESCAPES`; a table's keys are
+    written bare, so each must be a bare TOML key.
+    """
+    if isinstance(value, str):
+        return f'"{value.translate(_TOML_BASIC_ESCAPES)}"'
+    if isinstance(value, Mapping):
+        pairs = ", ".join(f"{k} = {_toml_value(v)}" for k, v in value.items())
+        return f"{{{pairs}}}"
+    return f"[{', '.join(_toml_value(item) for item in value)}]"
+
+
+def codex_overrides(
     launch: ProjectLaunch | None, env_names: Iterable[str]
 ) -> list[str]:
-    """Render :func:`mcp_server` for ``launch`` as Codex's ``tcip`` server in ``-c`` overrides.
+    """Render ``launch``'s Codex configuration as ``-c key=value`` overrides, each value TOML.
 
-    The overrides are ``-c key=value``, each value TOML (a JSON string or array of strings is
-    valid TOML), forwarding the variables ``env_names`` names to the server and approving its
-    tools without asking.
+    They are :func:`mcp_server` for ``launch`` as Codex's ``tcip`` server, forwarding the
+    variables ``env_names`` names to it and approving its tools without asking, and, when the
+    launch spelled one, its :attr:`ProjectLaunch.conversation_hook` as
+    :func:`session_start_hooks`.
     """
     server = mcp_server(launch)
-    settings = {
-        "command": server.command,
-        "args": list(server.args),
-        "env_vars": sorted(env_names),
-        "default_tools_approval_mode": "approve",
+    settings: dict[str, TomlValue] = {
+        "mcp_servers.tcip.command": server.command,
+        "mcp_servers.tcip.args": list(server.args),
+        "mcp_servers.tcip.env_vars": sorted(env_names),
+        "mcp_servers.tcip.default_tools_approval_mode": "approve",
     }
+    if launch is not None and launch.conversation_hook is not None:
+        settings["hooks"] = session_start_hooks(launch.conversation_hook)
     return [
         arg
         for key, value in settings.items()
-        for arg in ("-c", f"mcp_servers.tcip.{key}={json.dumps(value)}")
+        for arg in ("-c", f"{key}={_toml_value(value)}")
     ]
 
 
@@ -202,6 +268,9 @@ typographic single and double quotes PowerShell reads as quotes. Every whitespac
 _DOCTOR_LINE = '{} -m tcip_web.cli doctor "{}"'
 """The doctor line with a ``{}`` for each of :data:`_DOCTOR_ARGUMENTS`."""
 
+_CONVERSATION_HOOK_LINE = "{} -m tcip_web.cli report-conversation"
+"""The session hook's line with a ``{}`` for the first of :data:`_DOCTOR_ARGUMENTS`."""
+
 _DOCTOR_ARGUMENTS = (
     ("interpreter", DOCTOR_TOKEN_REFUSES, True),
     ("project path", DOCTOR_QUOTED_REFUSES, False),
@@ -222,15 +291,12 @@ def _regex_literal(text: str) -> str:
     )
 
 
-def doctor_command(interpreter: str, project: PurePath) -> str:
-    """Return the one spelling of the ritual's doctor step for ``project``.
+def _console_line(line: str, values: tuple[str, ...]) -> str:
+    """Return ``line`` of ``values``, each checked against its :data:`_DOCTOR_ARGUMENTS` entry.
 
-    It is :data:`_DOCTOR_LINE` of ``interpreter``, unquoted, and the project's path,
-    forward-slashed, in double quotes. Raises
-    ``ValueError`` naming the argument when one is empty or holds a character
-    :data:`_DOCTOR_ARGUMENTS` refuses it, naming those characters.
+    Raises ``ValueError`` naming the argument when one is empty or holds a character its entry
+    refuses, naming those characters.
     """
-    values = (interpreter, project.as_posix())
     for (name, refused, blank), value in zip(_DOCTOR_ARGUMENTS, values):
         held = sorted(
             c for c in set(value) if c in refused or (blank and c.isspace())
@@ -240,22 +306,47 @@ def doctor_command(interpreter: str, project: PurePath) -> str:
                 f"the {name} {value!r} holds {held or 'nothing'!r}, which the "
                 "doctor line refuses"
             )
-    return _DOCTOR_LINE.format(*values)
+    return line.format(*values)
+
+
+def doctor_command(interpreter: str, project: PurePath) -> str:
+    """Return the one spelling of the ritual's doctor step for ``project``.
+
+    It is :data:`_DOCTOR_LINE` of ``interpreter``, unquoted, and the project's path,
+    forward-slashed, in double quotes, refused as :func:`_console_line` refuses.
+    """
+    return _console_line(_DOCTOR_LINE, (interpreter, project.as_posix()))
+
+
+def conversation_hook_command(interpreter: str) -> str:
+    """Return the one spelling of the session hook reporting a launch's conversation.
+
+    It is :data:`_CONVERSATION_HOOK_LINE` of ``interpreter``, unquoted, refused as
+    :func:`_console_line` refuses; it names nothing of any one launch.
+    """
+    return _console_line(_CONVERSATION_HOOK_LINE, (interpreter,))
 
 
 def project_launch(project: OpenProject | None) -> ProjectLaunch | None:
-    """Return the launch for ``project``, ``None`` for no project, its doctor step spelled once.
+    """Return the launch for ``project``, ``None`` for no project, its console lines spelled once.
 
-    The step is :func:`doctor_command` of :func:`backend_interpreter`, or the refusal it raises.
+    The session hook is :func:`conversation_hook_command` of :func:`backend_interpreter` and the
+    doctor step :func:`doctor_command` of it; an interpreter the hook refuses leaves no hook and
+    its refusal as the doctor step's, and a doctor step refused otherwise leaves its refusal.
     """
     if project is None:
         return None
+    interpreter = backend_interpreter()
+    try:
+        hook = conversation_hook_command(interpreter)
+    except ValueError as exc:
+        return ProjectLaunch(project, None, str(exc), None)
     try:
         return ProjectLaunch(
-            project, doctor_command(backend_interpreter(), project.root), None
+            project, doctor_command(interpreter, project.root), None, hook
         )
     except ValueError as exc:
-        return ProjectLaunch(project, None, str(exc))
+        return ProjectLaunch(project, None, str(exc), hook)
 
 
 def _command_entry(line: str) -> str:
@@ -402,6 +493,20 @@ def prepare_antigravity(
     ]
 
 
+_CLAUDE_CACHE_TTLS = {"5m": timedelta(minutes=5), "1h": timedelta(hours=1)}
+"""The two prompt-cache lifetimes Claude Code's ``promptCacheTtl`` setting takes, by its value
+(code.claude.com/docs/en/prompt-caching, "Choose the TTL yourself")."""
+
+CODEX_CACHE_LIFETIME = timedelta(minutes=30)
+"""Provisional: the default prompt-cache lifetime OpenAI's prompt-caching guide documents for its
+API, a read refreshing it (developers.openai.com/api/docs/guides/prompt-caching); Codex under a
+ChatGPT login documents none."""
+
+CLAUDE_CACHE_LIFETIME = _CLAUDE_CACHE_TTLS[
+    json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))["promptCacheTtl"]
+]
+"""The prompt-cache lifetime :data:`CLAUDE_SETTINGS` requests through ``promptCacheTtl``."""
+
 PROVIDERS: tuple[Provider, ...] = (
     Provider(
         id="claude",
@@ -419,6 +524,7 @@ PROVIDERS: tuple[Provider, ...] = (
             "--mcp-config",
             MCP_CONFIG_ARG,
             "--strict-mcp-config",
+            Resume("--resume", CLAUDE_CACHE_LIFETIME),
         ),
         composer_ready="\x1b[?1049h",
         confinement=(
@@ -448,13 +554,14 @@ PROVIDERS: tuple[Provider, ...] = (
         name="Codex",
         executable="codex",
         args=(
+            Resume("resume", CODEX_CACHE_LIFETIME),
             "--sandbox",
             "read-only",
             "--ask-for-approval",
             "never",
             "-c",
             "disable_paste_burst=true",
-            CODEX_MCP_ARG,
+            CODEX_CONFIG_ARG,
         ),
         composer_ready="\x1b]0;",
         confinement=(
@@ -478,7 +585,7 @@ def _override_argv() -> list[str] | None:
 
 def resolve_terminal_command(
     provider: Provider,
-) -> tuple[list[str], bool] | None:
+) -> tuple[list[str | Resume], bool] | None:
     """Return the command that launches ``provider`` and whether it is the override.
 
     The override is ``TCIP_TERMINAL_CMD``'s argv when one is set; else the command is the row's
@@ -487,7 +594,7 @@ def resolve_terminal_command(
     """
     override = _override_argv()
     if override is not None:
-        return override, True
+        return [*override], True
     executable = shutil.which(provider.executable)
     if executable is None:
         return None
@@ -530,7 +637,9 @@ def write_claude_settings(launch: ProjectLaunch | None) -> Path:
 
     A ``Bash(<line>)`` and a ``PowerShell(<line>)`` entry are added to its allow list for each
     of :data:`READ_ONLY_CONSOLE_COMMANDS` under each of :data:`_CONSOLE_INVOCATIONS`, with any
-    arguments, and for the launch's doctor line when it spelled one.
+    arguments, and for the launch's doctor line when it spelled one; the launch's
+    :attr:`ProjectLaunch.conversation_hook`, when it spelled one, is its
+    :func:`session_start_hooks`.
     """
     body = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))
     lines = [
@@ -545,29 +654,37 @@ def write_claude_settings(launch: ProjectLaunch | None) -> Path:
         for shell in ("Bash", "PowerShell")
         for line in lines
     ]
+    if launch is not None and launch.conversation_hook is not None:
+        body["hooks"] = session_start_hooks(launch.conversation_hook)
     return _write_launch_file("settings.json", body)
 
 
 def render_argv(
-    argv: list[str], launch: ProjectLaunch | None, env: dict[str, str]
+    argv: Sequence[str | Resume],
+    launch: ProjectLaunch | None,
+    env: dict[str, str],
+    conversation: str | None,
 ) -> list[str]:
     """Return ``argv`` with each placeholder argument rendered for ``launch``.
 
     Each :data:`MCP_CONFIG_ARG` is replaced by a configuration :func:`write_mcp_config` writes, each
     :data:`CLAUDE_SETTINGS_ARG` by the settings :func:`write_claude_settings` writes, and each
-    :data:`CODEX_MCP_ARG` by :func:`codex_mcp_overrides` forwarding every variable of ``env``,
-    the environment the launch spawns with, each for ``launch``.
+    :data:`CODEX_CONFIG_ARG` by :func:`codex_overrides` forwarding every variable of ``env``,
+    the environment the launch spawns with, each for ``launch``; a :class:`Resume` is replaced by
+    its argument and ``conversation``, or by nothing for a launch resuming none.
     """
     values = {
         MCP_CONFIG_ARG: lambda: [str(write_mcp_config(launch))],
         CLAUDE_SETTINGS_ARG: lambda: [str(write_claude_settings(launch))],
-        CODEX_MCP_ARG: lambda: codex_mcp_overrides(launch, env),
+        CODEX_CONFIG_ARG: lambda: codex_overrides(launch, env),
     }
-    return [
-        rendered
-        for arg in argv
-        for rendered in (values[arg]() if arg in values else [arg])
-    ]
+
+    def rendered(arg: str | Resume) -> list[str]:
+        if isinstance(arg, Resume):
+            return [] if conversation is None else [arg.argument, conversation]
+        return values[arg]() if arg in values else [arg]
+
+    return [part for arg in argv for part in rendered(arg)]
 
 
 def prepare_launch(
@@ -682,12 +799,29 @@ def launched_program(argv: list[str], override: bool) -> dict:
     return {"argv": argv, "version": version}
 
 
+WITHHELD_ENV_PREFIXES = (
+    "CLAUDE",
+    "FORCE_PROMPT_CACHING_5M",
+    "DISABLE_PROMPT_CACHING",
+)
+"""The prefixes of the variables no child inherits: every variable a Claude Code session sets,
+among them ``CLAUDE_CODE_PROMPT_CACHE_TTL``, and the controls Claude Code's prompt-caching page
+ranks above ``promptCacheTtl`` ("``FORCE_PROMPT_CACHING_5M=1``, which forces five minutes for
+both buckets") or that turn its caching off (``DISABLE_PROMPT_CACHING`` and its ``_HAIKU``,
+``_SONNET``, ``_OPUS`` and ``_FABLE`` variants), so the lifetime Claude's row requests is the one
+its harness runs with (code.claude.com/docs/en/prompt-caching)."""
+
+
 def spawn_env(session_id: str) -> dict[str, str]:
     """Return the child's environment: this process's own plus the terminal session id.
 
-    Every variable a Claude Code session set (the ``CLAUDE`` prefix) is left out.
+    Every variable named by one of :data:`WITHHELD_ENV_PREFIXES` is left out.
     """
-    kept = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
+    kept = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(WITHHELD_ENV_PREFIXES)
+    }
     return {**kept, TERMINAL_SESSION_ENV: session_id}
 
 

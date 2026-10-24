@@ -106,9 +106,14 @@ def acts_of(
     ], cursor
 
 
+def now() -> datetime:
+    """Return the current instant, in UTC."""
+    return datetime.now(timezone.utc)
+
+
 def now_iso() -> str:
-    """Return the current instant as an ISO-8601 UTC string."""
-    return datetime.now(timezone.utc).isoformat()
+    """Return :func:`now` as an ISO-8601 string."""
+    return now().isoformat()
 
 
 def _redact(args: dict[str, Any]) -> dict[str, Any]:

@@ -5,6 +5,12 @@ submits a staged one, asking for one ``report_friction`` call carrying a token g
 project is open, so only the request names it, and passes only when the open project's friction
 reports, read through the platform's own route, hold exactly one report carrying that token, of
 the requested category, at the first poll that sees one; a later second call is not watched for.
+The backend is also served on a loopback port recorded under the workspace, so the session hook
+the harness runs reports its conversation as it does under ``python -m tcip_web``. For a row whose
+conversations are resumed, the agent is then ended by the backend's shutdown once its harness has
+reported its conversation, the row is launched again, and the smoke passes only when that launch
+resumed the conversation and its agent reports the token, continued, though no request of the
+resumed launch names it.
 
 Usage (from the repo root, tcip-agent env):
     python tools/smoke_terminal_e2e.py <provider id>
@@ -18,12 +24,16 @@ import os
 import secrets
 import sys
 import tempfile
+import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
 
 if TYPE_CHECKING:
+    from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
 sys.path.insert(
@@ -55,6 +65,23 @@ def request_for(token: str) -> str:
     )
 
 
+CONTINUED_SUFFIX = "-continued"
+"""What the resumed agent adds to the token of its earlier report."""
+
+
+def continuation_request() -> str:
+    """Return the request asking a resumed harness to report its earlier token, continued.
+
+    It names no token.
+    """
+    return (
+        "This is a smoke test of a resumed conversation. Without calling any other tool, call "
+        f"the tcip report_friction tool exactly once, with category {REQUESTED_CATEGORY} and, "
+        "as detail, the detail of the report_friction call you made earlier in this "
+        f"conversation followed by {CONTINUED_SUFFIX}, then stop."
+    )
+
+
 def reported(client: TestClient, token: str) -> bool:
     """Return whether exactly one friction report of the open project carries ``token``.
 
@@ -70,6 +97,52 @@ def reported(client: TestClient, token: str) -> bool:
     return len(matching) == 1 and matching[0]["category"] == REQUESTED_CATEGORY
 
 
+SERVE_TIMEOUT_S = 10
+"""Provisional: seconds the served backend is given to start listening."""
+
+
+@contextmanager
+def served(app: FastAPI, workspace: Path) -> Iterator[None]:
+    """Serve ``app`` on a free loopback port recorded for ``workspace``, until the block ends.
+
+    The port is :func:`~tcip_mcp.web_client.free_port`'s, recorded as ``python -m tcip_web``
+    records it, so any process under the workspace (a harness's hook, an MCP server's push)
+    reaches this backend through ``backend_url``. Raises ``RuntimeError`` when the server does not
+    start listening within :data:`SERVE_TIMEOUT_S`.
+    """
+    import uvicorn
+
+    from tcip_mcp.web_client import (
+        LOOPBACK_HOST,
+        free_port,
+        record_backend_port,
+    )
+
+    port = free_port(0)
+    record_backend_port(workspace, port)
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host=LOOPBACK_HOST,
+            port=port,
+            log_level="error",
+            lifespan="off",
+        )
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + SERVE_TIMEOUT_S
+        while not server.started and time.monotonic() < deadline:
+            time.sleep(0.02)
+        if not server.started:
+            raise RuntimeError(f"the backend did not listen on port {port}")
+        yield
+    finally:
+        server.should_exit = True
+        thread.join(timeout=SERVE_TIMEOUT_S)
+
+
 def main(
     provider: str,
     workspace: str | None = None,
@@ -78,7 +151,8 @@ def main(
     """Drive the smoke for the ``provider`` row and return 0 on a pass.
 
     ``TCIP_WORKSPACE`` is set to ``workspace`` (a fresh temp directory when omitted) and the
-    backend started on it, waiting ``answer_timeout_s`` for the report.
+    backend started on it and :func:`served` for the harness's own processes, waiting
+    ``answer_timeout_s`` for each report.
     """
     os.environ["TCIP_WORKSPACE"] = workspace or tempfile.mkdtemp(
         prefix="terminal-smoke-ws-"
@@ -86,16 +160,25 @@ def main(
 
     from fastapi.testclient import TestClient
 
-    from tcip_mcp.audit import audit_entries
-    from tcip_mcp.project_record import CaptureInvariances
-    from tcip_mcp.tools.project_tools import initialize_project
     from tcip_mcp.workspace import workspace_from_environment
     from tcip_web.app import app
-    from tcip_web.routes import terminal as terminal_routes
     from tcip_web.state import store
 
     store.configure(workspace_from_environment(), ())
     client = TestClient(app, base_url="http://127.0.0.1")
+    with served(app, store.workspace):
+        return _smoke(client, provider, answer_timeout_s)
+
+
+def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
+    """Run the smoke for the ``provider`` row through ``client``; return 0 on a pass."""
+    from tcip_mcp.audit import acts_of
+    from tcip_mcp.project_record import CaptureInvariances
+    from tcip_mcp.tools.project_tools import initialize_project
+    from tcip_web.app import app
+    from tcip_web.routes import terminal as terminal_routes
+    from tcip_web.routes.terminal import TerminalSession
+    from tcip_web.state import store
 
     status = client.get("/api/terminal/status").json()
     print(f"[1] status: {status}")
@@ -141,24 +224,27 @@ def main(
     print(f"[2] project opened: {opened.json()}")
     token = f"ack-{secrets.token_hex(6)}"
 
-    resp = client.post(
-        "/api/terminal/sessions",
-        json={"provider": provider, "rows": 35, "cols": 120, "user": user},
-    )
-    if resp.status_code != 200:
-        print(
-            f"FAIL: the launch was refused ({resp.status_code}): {resp.text}"
+    def launched() -> TerminalSession | None:
+        """Launch the row by ``user``; return its session, or ``None`` printing the refusal."""
+        resp = client.post(
+            "/api/terminal/sessions",
+            json={"provider": provider, "rows": 35, "cols": 120, "user": user},
         )
-        return 1
-    created = resp.json()
-    sid = created["session_id"]
-    print(f"[3] session spawned: {sid} {created['launched']}")
-    session = terminal_routes._SESSIONS[sid]
+        if resp.status_code != 200:
+            print(
+                f"FAIL: the launch was refused ({resp.status_code}): {resp.text}"
+            )
+            return None
+        created = resp.json()
+        print(
+            f"    session spawned: {created['session_id']} {created['launched']}"
+        )
+        return terminal_routes._SESSIONS[created["session_id"]]
 
-    answered = False
-    started = time.time()
-    try:
-        socket_path = app.url_path_for("terminal_ws", session_id=sid)
+    def answered(session: TerminalSession, request: str, signal: str) -> bool:
+        """Submit ``request`` to ``session`` and return whether ``signal`` was reported in time."""
+        started = time.time()
+        socket_path = app.url_path_for("terminal_ws", session_id=session.id)
         with client.websocket_connect(
             terminal_ws_url(client, socket_path)
         ) as ws:
@@ -166,38 +252,68 @@ def main(
                 {"type": "input", "data": "\x1b[?1;2c"}
             )  # a terminal's DA reply
             client.post(
-                f"/api/terminal/sessions/{sid}/submit",
-                json={"text": request_for(token)},
+                f"/api/terminal/sessions/{session.id}/submit",
+                json={"text": request},
             )
             print(
-                f"[4] request submitted for {token}; waiting for its friction report..."
+                f"    request submitted; waiting for a report of {signal}..."
             )
-            while not answered and time.time() - started < answer_timeout_s:
+            while time.time() - started < answer_timeout_s:
                 time.sleep(1.0)
-                answered = reported(client, token)
-            if not answered:
-                print(
-                    f"    bracketed paste on: {session._ready}; ritual delivered: "
-                    f"{session._ritual_sent}; requests still queued: "
-                    f"{len(session._queued)}"
+                if reported(client, signal):
+                    return True
+            print(
+                f"    bracketed paste on: {session._ready}; own text delivered: "
+                f"{session._ahead is None}; requests still queued: "
+                f"{len(session._queued)}"
+            )
+            print(
+                f"    stream tail: {ascii(session.scrollback_snapshot()[-1500:])}"
+            )
+            return False
+
+    def end_lines() -> list:
+        """Return the scratch project's ``agent_terminal_ended`` lines, oldest first."""
+        return acts_of(project, ("agent_terminal_ended",))[0]
+
+    print("[3] the first launch")
+    first = launched()
+    if first is None:
+        return 1
+    try:
+        passed = answered(first, request_for(token), token)
+        if passed and terminal_routes._provider(provider).resume is not None:
+            started = time.time()
+            while (
+                first.conversation is None
+                and time.time() - started < answer_timeout_s
+            ):
+                time.sleep(1.0)
+            print(
+                f"[4] the harness reported conversation {first.conversation}"
+            )
+            terminal_routes.shutdown_all()
+            (ended,) = end_lines()
+            print(f"    the shutdown's end line: {ended['arguments']}")
+            print("[5] the launch after the shutdown")
+            second = launched()
+            passed = (
+                second is not None
+                and first.conversation is not None
+                and second.launched.resumed == first.conversation
+                and answered(
+                    second, continuation_request(), token + CONTINUED_SUFFIX
                 )
-                print(
-                    f"    stream tail: {ascii(session.scrollback_snapshot()[-1500:])}"
-                )
+            )
     finally:
         terminal_routes.shutdown_all()
-    end_lines = [
-        entry
-        for entry in audit_entries(project)[0]
-        if entry["tool"] == "agent_terminal_ended"
-    ]
     print(
-        f"[5] after shutdown_all: session still held {sid in terminal_routes._SESSIONS}, "
-        f"end lines recorded {len(end_lines)}"
+        f"[6] after shutdown_all: sessions still held {len(terminal_routes._SESSIONS)}, "
+        f"end lines recorded {len(end_lines())}"
     )
 
-    print("SMOKE PASS" if answered else "SMOKE FAIL")
-    return 0 if answered else 1
+    print("SMOKE PASS" if passed else "SMOKE FAIL")
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

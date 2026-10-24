@@ -20,7 +20,6 @@ import pytest
 from mcp.client.session import ClientSession
 from mcp.shared.memory import create_client_server_memory_streams
 
-import tcip_store as ts
 from tcip_mcp import traits
 from tcip_mcp.agent_identity import RECORD_FIELDS as IDENTITY_FIELDS
 from tcip_mcp.server import build_server
@@ -207,39 +206,31 @@ def test_a_trait_proposed_through_a_handshake_is_named_by_its_audit_line(
 # ── the HTTP push ────────────────────────────────────────────────────────────
 
 
-class _CapturingResponse:
-    status = 200
-
-    def __enter__(self) -> _CapturingResponse:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        return None
-
-    def read(self) -> bytes:
-        return b"{}"
-
-
 @pytest.fixture
 def captured_requests(monkeypatch: pytest.MonkeyPatch, project: Path) -> list:
-    """Return the list every ``urllib`` request the tools' push makes is captured into.
+    """Return the list every request the tools' push makes through ``httpx.post`` is captured into.
 
     A backend is recorded as serving the workspace, and every request is answered as up.
     """
-    import urllib.request
+    import httpx
 
-    from tcip_mcp.web_client import backend_port_key
+    from tcip_mcp.web_client import record_backend_port
 
-    ts.replace(backend_port_key(workspace_from_environment()), "8765")
-    seen: list = []
+    record_backend_port(workspace_from_environment(), 8765)
+    seen: list[httpx.Request] = []
 
-    def fake_urlopen(
-        req: urllib.request.Request, timeout: float | None = None
-    ) -> _CapturingResponse:
-        seen.append(req)
-        return _CapturingResponse()
+    def fake_post(
+        url: str,
+        *,
+        json: object,
+        headers: dict[str, str],
+        timeout: float,
+    ) -> httpx.Response:
+        request = httpx.Request("POST", url, json=json, headers=headers)
+        seen.append(request)
+        return httpx.Response(200, json={}, request=request)
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(httpx, "post", fake_post)
     monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
     return seen
 
@@ -263,20 +254,24 @@ def test_the_push_through_a_handshake_sends_the_identity_as_headers(
     )
 
     (req,) = captured_requests
-    assert json.loads(req.data)["project_id"] == bound.id
-    assert req.get_header("X-tcip-agent-client-name") == "reviewing-harness"
-    assert req.get_header("X-tcip-agent-client-version") == "1.2.3"
-    assert req.get_header("X-tcip-agent-session").startswith("mcp_")
-    assert req.get_header("X-tcip-terminal-session") is None
+    assert json.loads(req.content)["project_id"] == bound.id
+    assert req.headers.get("X-tcip-agent-client-name") == "reviewing-harness"
+    assert req.headers.get("X-tcip-agent-client-version") == "1.2.3"
+    assert req.headers.get("X-tcip-agent-session").startswith("mcp_")
+    assert req.headers.get("X-tcip-terminal-session") is None
 
 
-def test_the_push_with_no_handshake_sends_only_the_content_type(
+def test_the_push_with_no_handshake_sends_no_identity_header(
     captured_requests: list,
     bound: BoundProject,
 ) -> None:
+    from tcip_mcp.agent_identity import HEADERS
     from tcip_mcp.web_client import post_panel_event
 
     post_panel_event(bound, "meta", "identity_probe", {"n": 1})
 
     (req,) = captured_requests
-    assert {name.lower() for name in req.headers} == {"content-type"}
+    assert not {name.lower() for name in req.headers} & {
+        header.lower() for header in HEADERS.values()
+    }
+    assert req.headers["content-type"] == "application/json"
