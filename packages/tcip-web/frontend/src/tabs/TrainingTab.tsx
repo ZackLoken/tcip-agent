@@ -629,7 +629,7 @@ export function TrainingTab() {
                   <div className="overflow-auto max-h-64 shrink-0">
                     <table className="w-full text-[13px]">
                       <caption className="sr-only">{`${selectedRun} metrics by epoch`}</caption>
-                      <thead>
+                      <thead className="sticky top-0 bg-tcip-panel">
                         <tr className="border-b border-tcip-border">
                           <th className="tcip-th">epoch</th>
                           {metricKeys.map((key) => (
