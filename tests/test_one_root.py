@@ -68,11 +68,11 @@ def test_a_tool_input_spelled_like_the_bound_project_stays_the_callers(
     """A tool input spelled like the bound project stays the caller's.
 
     The server binds its project context, not a tool's own input that shares a name with it:
-    ``write_retrospective``'s ``project_id`` names the retrospective, is offered to the client,
-    and a call through the server writes under the caller's name.
+    ``write_retrospective``'s ``project_id`` names the retrospective's line of work, is offered to
+    the client, and a call through the server writes a record carrying the caller's name.
     """
     from tcip_mcp.server import build_server
-    from tcip_mcp.tools.meta_tools import read_retrospective
+    from tcip_mcp.tools.meta_tools import Retrospective, memory_entries
 
     tools = {t.name: t for t in build_server(bound)._tool_manager.list_tools()}
     assert (
@@ -95,9 +95,9 @@ def test_a_tool_input_spelled_like_the_bound_project_stays_the_callers(
     )
 
     assert not result.is_error, result
-    assert read_retrospective(
-        str(bound.root), "valley-bloom-trial"
-    ).startswith("# valley-bloom-trial")
+    (entry,) = memory_entries(Retrospective, str(bound.root))
+    assert isinstance(entry.record, Retrospective)
+    assert entry.record.project_id == "valley-bloom-trial"
 
 
 def test_a_server_for_no_project_refuses_project_tools_naming_project_and_serves_knowledge() -> (

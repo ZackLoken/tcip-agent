@@ -12,12 +12,8 @@ const initialStoreState = useStore.getState();
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
   openTestProject();
-  vi.spyOn(metaApi, "reports").mockResolvedValue({ reports: [], count: 0, total_available: 0 });
-  vi.spyOn(metaApi, "retrospectives").mockResolvedValue({
-    retrospectives: [],
-    count: 0,
-    total_available: 0,
-  });
+  vi.spyOn(metaApi, "reports").mockResolvedValue({ entries: [], total_available: 0 });
+  vi.spyOn(metaApi, "retrospectives").mockResolvedValue({ entries: [], total_available: 0 });
 });
 
 afterEach(() => {
@@ -64,16 +60,18 @@ describe("MetaTab annotation sessions", () => {
   it("lists a report's context as key and value pairs", async () => {
     vi.spyOn(sessionsApi, "load").mockResolvedValue({ sessions: [] });
     vi.mocked(metaApi.reports).mockResolvedValue({
-      reports: [
+      entries: [
         {
-          report_id: "r1",
-          category: "missing_tool",
-          detail: "no lister of assessments",
-          timestamp: "2026-10-20T10:00:00+00:00",
-          context: { route: "/api/results/assessments", attempts: 2 },
+          id: "r1",
+          record: {
+            category: "missing_tool",
+            detail: "no lister of assessments",
+            timestamp: "2026-10-20T10:00:00+00:00",
+            context: { route: "/api/results/assessments", attempts: 2 },
+            user_disagreement: false,
+          },
         },
       ],
-      count: 1,
       total_available: 1,
     });
 
@@ -85,6 +83,38 @@ describe("MetaTab annotation sessions", () => {
     expect(screen.getByText("attempts")).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();
     expect(document.querySelector("pre")).toBeNull();
+  });
+
+  it("lists a retrospective's stated sections under their field names", async () => {
+    vi.spyOn(sessionsApi, "load").mockResolvedValue({ sessions: [] });
+    vi.mocked(metaApi.retrospectives).mockResolvedValue({
+      entries: [
+        {
+          id: "20261020T100000Z_valley-bloom-trial_a1b2",
+          record: {
+            timestamp: "2026-10-20T10:00:00+00:00",
+            project_id: "valley-bloom-trial",
+            task: "train the bloom counter",
+            worked: "tiling held",
+            did_not_work: "dense clusters merged",
+            assumptions_wrong: "",
+            knowledge_for_future: "",
+            missing_or_hard_tools: "",
+            would_do_differently: "",
+          },
+        },
+        { id: "unreadable", record: { reason: "not a Retrospective" } },
+      ],
+      total_available: 2,
+    });
+
+    render(<MetaTab />);
+
+    expect(await screen.findByText("valley-bloom-trial")).toBeInTheDocument();
+    expect(screen.getByText("did not work")).toBeInTheDocument();
+    expect(screen.getByText("dense clusters merged")).toBeInTheDocument();
+    expect(screen.queryByText("assumptions wrong")).not.toBeInTheDocument();
+    expect(screen.getByText("not a Retrospective")).toBeInTheDocument();
   });
 
   it("lists the sessions a load returns", async () => {

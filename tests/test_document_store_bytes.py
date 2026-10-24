@@ -79,13 +79,17 @@ REPORT_BYTES = (
 ).encode()
 
 RETROSPECTIVE_BYTES = (
-    '"# project_under_test\\n\\n## Retrospective: 2026-03-04T12:00:00+00:00\\n\\n'
-    "### Task\\n\\nt\\n\\n### What worked\\n\\nwas gut lief für ü\\n\\n"
-    "### What did not work\\n\\nd\\n\\n"
-    "### Assumptions that turned out to be wrong\\n\\n_(none noted)_\\n\\n"
-    "### Knowledge for future sessions\\n\\n_(none noted)_\\n\\n"
-    "### Missing or hard-to-use tools\\n\\n_(none noted)_\\n\\n"
-    '### What I would do differently\\n\\n_(none noted)_\\n\\n---\\n"\n'
+    "{\n"
+    '  "timestamp": "2026-03-04T12:00:00+00:00",\n'
+    '  "project_id": "project_under_test",\n'
+    '  "task": "t",\n'
+    '  "worked": "was gut lief für ü",\n'
+    '  "did_not_work": "d",\n'
+    '  "assumptions_wrong": "",\n'
+    '  "knowledge_for_future": "",\n'
+    '  "missing_or_hard_tools": "",\n'
+    '  "would_do_differently": ""\n'
+    "}\n"
 ).encode()
 
 
@@ -199,20 +203,21 @@ def test_a_friction_report_dumps_as_the_json_document_every_reader_of_the_corpus
         context={"trait": "trait_under_test"},
     )
 
-    assert _dumped(tmp_path, meta_tools.FRICTION_REPORT_STORE) == REPORT_BYTES
+    assert _dumped(tmp_path, meta_tools.FrictionReport.store) == REPORT_BYTES
 
 
-def test_a_retrospective_dumps_as_its_markdown_text_spelled_as_one_json_string(
+def test_a_retrospective_dumps_as_the_json_document_every_reader_of_the_corpus_parses(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A retrospective dumps as its markdown text spelled as one JSON string.
+    """A retrospective dumps as the exact JSON bytes the fixture pins.
 
-    It is written through ``write_retrospective``, its clock held still.
+    It is written through ``write_retrospective``, its clock and id suffix held still.
     """
     from tcip_mcp.tools import meta_tools
 
     monkeypatch.setattr(meta_tools, "now_iso", lambda: NOW)
+    monkeypatch.setattr(meta_tools.secrets, "token_hex", lambda n: "a1b2")
 
     assert "error" not in meta_tools.write_retrospective(
         tmp_path,
@@ -223,6 +228,6 @@ def test_a_retrospective_dumps_as_its_markdown_text_spelled_as_one_json_string(
     )
 
     assert (
-        _dumped(tmp_path, meta_tools.RETROSPECTIVE_STORE)
+        _dumped(tmp_path, meta_tools.Retrospective.store)
         == RETROSPECTIVE_BYTES
     )
