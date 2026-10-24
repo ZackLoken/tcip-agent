@@ -6,15 +6,19 @@ standing as a provider row's executable.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 import re
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from tcip_web import terminal as pty_host
@@ -22,11 +26,12 @@ from tcip_web.app import app
 from tcip_web.routes import terminal as terminal_routes
 from tcip_web.state import OpenProject
 from tests._audit_fixtures import audit_rows
-from tests._web_fixtures import INVARIANCES
+from tests._web_fixtures import INVARIANCES, named_project
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from httpx import Response
     from starlette.testclient import WebSocketTestSession
 
 FAKE = Path(__file__).parent / "fake_terminal_app.py"
@@ -54,9 +59,11 @@ if pty_host.os.name == "nt":
 
 @pytest.fixture(autouse=True)
 def _fake_terminal(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Launch the fake agent; afterwards end every session and forget the survivors of it."""
     monkeypatch.setenv("TCIP_TERMINAL_CMD", f"{sys.executable} -u {FAKE}")
     yield
     terminal_routes.shutdown_all()
+    terminal_routes._SESSIONS.clear()
 
 
 def _read_until(
@@ -923,6 +930,21 @@ def _echoes(scrollback: str) -> list[str]:
     ]
 
 
+def _launched_session(
+    monkeypatch: pytest.MonkeyPatch, row: pty_host.Provider
+) -> tuple[terminal_routes.TerminalSession, _RecordingPty]:
+    """Start a session of ``row`` through :meth:`TerminalSession.start` on a recording PTY.
+
+    No reader runs, so the test feeds the session's output itself. Returns the session and its
+    PTY.
+    """
+    pty = _RecordingPty()
+    _wire_stub_spawn(monkeypatch, pty)
+    session = terminal_routes.TerminalSession("term_test")
+    assert session.start(24, 80, row, "user:tester") is None
+    return session, pty
+
+
 @pytest.fixture
 def pastes_after(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the fake agent turn bracketed paste on one second after it starts.
@@ -961,59 +983,29 @@ def test_the_ritual_then_a_submitted_request_reach_the_agent_once_it_turns_paste
     ]
 
 
-def test_the_ritual_and_the_requests_staged_before_paste_is_on_go_as_one_paste() -> (
-    None
-):
+def test_the_ritual_and_the_requests_staged_before_paste_is_on_go_as_one_paste(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The ritual and the requests staged before paste is on go as one paste.
 
     The ritual and every request queued by the time the agent turns bracketed paste on are
     written as one paste; a request submitted afterwards is its own paste.
     """
-    writes: list[str] = []
-
-    class _Pty:
-        def isalive(self) -> bool:
-            return True
-
-        def write(self, data: str) -> None:
-            writes.append(data)
-
-    session = terminal_routes.TerminalSession("term_test")
-    session._pty = _Pty()
-    session._launch.ritual = "the ritual"
-    session._launch.composer_ready = "\x1b[?1049h"
+    row = pty_host.PROVIDERS[0]
+    session, pty = _launched_session(monkeypatch, row)
     session.submit("first")
     session.submit("second")
-    assert writes == []
+    assert pty.writes == []
 
-    session._on_output("\x1b[?2004h\x1b[?1049h")
-    assert writes == [pty_host.paste("the ritual\n\nfirst\n\nsecond")]
+    session._on_output("\x1b[?2004h" + row.composer_ready)
+    assert pty.writes == [
+        pty_host.paste(f"{session.ritual}\n\nfirst\n\nsecond")
+    ]
 
     session.submit("later")
-    assert writes[1:] == [pty_host.paste("later")]
+    session.deliver()
+    assert pty.writes[1:] == [pty_host.paste("later")]
     assert pty_host.paste("a\nb\r\nc") == "\x1b[200~a\rb\rc\x1b[201~\r"
-
-
-def test_a_restart_delivers_its_own_ritual_then_the_request_submitted_during_it(
-    client: TestClient,
-    pastes_after: None,
-) -> None:
-    sid = client.post(
-        "/api/terminal/sessions", json={**LAUNCH, "cols": 500}
-    ).json()["session_id"]
-    session = terminal_routes._SESSIONS[sid]
-    _wait_for(session, _RITUAL_ECHO)
-
-    client.post(
-        f"/api/terminal/sessions/{sid}/restart", json={**LAUNCH, "cols": 500}
-    )
-    client.post(
-        f"/api/terminal/sessions/{sid}/submit", json={"text": "after restart"}
-    )
-
-    text = _wait_for(session, "echo:after restart")
-    assert _echoes(text) == [_RITUAL_ECHO, "echo:after restart"]
-    assert "EARLY_INPUT" not in text
 
 
 def test_overlapping_creates_deliver_one_ritual_before_the_request(
@@ -1030,8 +1022,8 @@ def test_overlapping_creates_deliver_one_ritual_before_the_request(
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         answers = list(pool.map(create, range(2)))
-    assert sorted(answer["existing"] for answer in answers) == [False, True]
     sid = answers[0]["session_id"]
+    assert answers[1]["session_id"] == sid
     client.post(
         f"/api/terminal/sessions/{sid}/submit", json={"text": "tab request"}
     )
@@ -1116,6 +1108,7 @@ composer without submitting it, since its session had not started."""
 @pytest.mark.parametrize("row", pty_host.PROVIDERS, ids=lambda row: row.id)
 def test_the_ritual_is_pasted_at_the_read_where_the_harness_composer_goes_live(
     row: pty_host.Provider,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The ritual is pasted at the read where the harness composer goes live.
 
@@ -1130,16 +1123,12 @@ def test_the_ritual_is_pasted_at_the_read_where_the_harness_composer_goes_live(
     )
     assert first_paste_on < live_at
 
-    pty = _RecordingPty()
-    session = terminal_routes.TerminalSession("term_test")
-    session._pty = pty
-    session._launch.ritual = "the ritual"
-    session._launch.composer_ready = row.composer_ready
+    session, pty = _launched_session(monkeypatch, row)
     session.submit("the request")
     for index, data in enumerate(reads):
         session._on_output(data)
         assert pty.writes == (
-            [pty_host.paste("the ritual\n\nthe request")]
+            [pty_host.paste(f"{session.ritual}\n\nthe request")]
             if index >= live_at
             else []
         )
@@ -1172,8 +1161,7 @@ def test_attach_semantics_second_create_returns_live_session(
 ) -> None:
     first = client.post("/api/terminal/sessions", json=LAUNCH).json()
     second = client.post("/api/terminal/sessions", json=LAUNCH).json()
-    assert second["session_id"] == first["session_id"]
-    assert second["existing"] is True
+    assert second == first
 
 
 def test_scrollback_replays_on_reconnect(client: TestClient) -> None:
@@ -1215,8 +1203,8 @@ def test_a_resize_that_raises_does_not_end_the_stream(
 ) -> None:
     """A resize that raises does not end the terminal stream.
 
-    A ``ValueError`` from the session's resize is swallowed at the session boundary, and input
-    sent after it still echoes.
+    A ``ValueError`` from the PTY's resize is swallowed by the session's, and input sent after
+    it still echoes.
     """
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
@@ -1226,7 +1214,7 @@ def test_a_resize_that_raises_does_not_end_the_stream(
     def _raise(rows: int, cols: int) -> None:
         raise ValueError("boom")
 
-    monkeypatch.setattr(session, "resize", _raise)
+    monkeypatch.setattr(session._pty, "resize", _raise)
     with client.websocket_connect(
         f"ws://127.0.0.1/api/terminal/ws/{sid}"
     ) as ws:
@@ -1236,7 +1224,37 @@ def test_a_resize_that_raises_does_not_end_the_stream(
         _read_until(ws, "echo:after raising resize")
 
 
-def test_process_exit_is_visible_in_stream(client: TestClient) -> None:
+def _read_until_closed(
+    ws: WebSocketTestSession, tries: int = 400
+) -> tuple[str, int]:
+    """Accumulate up to ``tries`` WS text frames until the backend closes the socket.
+
+    Returns the text and the close code. Raises AssertionError when ``tries`` frames pass open.
+    """
+    acc = ""
+    for _ in range(tries):
+        try:
+            acc += ws.receive_text()
+        except WebSocketDisconnect as closed:
+            return acc, closed.code
+    raise AssertionError(f"the socket stayed open; got: {acc[-500:]!r}")
+
+
+def _end(client: TestClient, sid: str) -> Response:
+    """Post the person "tester"'s end of session ``sid`` and return the answer."""
+    return client.post(
+        f"/api/terminal/sessions/{sid}/end", json={"user": "tester"}
+    )
+
+
+def test_a_process_exiting_on_its_own_ends_its_session_by_no_one(
+    client: TestClient, opened_project: Path
+) -> None:
+    """A process that exits on its own ends its session, recorded with no actor.
+
+    Its sockets are closed with the ended code after its last output, and the session is
+    forgotten.
+    """
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
@@ -1245,37 +1263,138 @@ def test_process_exit_is_visible_in_stream(client: TestClient) -> None:
     ) as ws:
         _read_until(ws, "FAKE_TERMINAL_READY")
         ws.send_json({"type": "input", "data": "exit\r"})
-        acc = _read_until(ws, "the agent exited")
-        assert "FAKE_TERMINAL_BYE" in acc
+        text, code = _read_until_closed(ws)
+
+    assert "FAKE_TERMINAL_BYE" in text
+    assert code == terminal_routes.ENDED_CLOSE_CODE
+    assert sid not in terminal_routes._SESSIONS
+    (line,) = audit_rows(opened_project, "agent_terminal_ended")
+    assert line["arguments"] == {
+        "session_id": sid,
+        "provider": LAUNCH["provider"],
+        "cause": "the agent's process exited",
+        "undelivered_count": 0,
+    }
+    assert "actor" not in line
 
 
-def test_restart_gives_fresh_process(client: TestClient) -> None:
+def test_a_harness_exiting_at_its_start_is_recorded_started_then_ended(
+    client: TestClient,
+    opened_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A harness that exits at once has its start line before its end line in the log.
+
+    A socket opened to its session afterwards is closed with the ended code.
+    """
+    monkeypatch.setenv("TCIP_TERMINAL_CMD", f"{sys.executable} -u {FAKE} fail")
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
+    ]
+    deadline = time.time() + 30
+    while (
+        not audit_rows(opened_project, "agent_terminal_ended")
+        and time.time() < deadline
+    ):
+        time.sleep(0.1)
+
+    events = [
+        (row["tool"], row["arguments"]["session_id"])
+        for row in audit_rows(opened_project)
+        if row["tool"].startswith("agent_terminal_")
+    ]
+    assert events == [
+        ("agent_terminal_started", sid),
+        ("agent_terminal_ended", sid),
     ]
     with client.websocket_connect(
         f"ws://127.0.0.1/api/terminal/ws/{sid}"
     ) as ws:
-        _read_until(ws, "FAKE_TERMINAL_READY")
-        ws.send_json({"type": "input", "data": "exit\r"})
-        _read_until(ws, "the agent exited")
+        assert _read_until_closed(ws)[1] == terminal_routes.ENDED_CLOSE_CODE
 
-    resp = client.post(f"/api/terminal/sessions/{sid}/restart", json=LAUNCH)
-    assert resp.status_code == 200
+
+def test_an_exit_ends_the_agent_by_the_person_and_a_create_after_it_is_a_fresh_launch(
+    client: TestClient, opened_project: Path
+) -> None:
+    """An end by the person stops the process, forgets the session and records the end.
+
+    The next create is a fresh session and launch, with its own start line.
+    """
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    session = terminal_routes._SESSIONS[sid]
+
+    ended = _end(client, sid)
+    # The process's own exit, seen by its reader after the end, ends nothing a second time.
+    for reader in threading.enumerate():
+        if reader.name == f"term-{sid}":
+            reader.join(timeout=30)
+
+    assert ended.status_code == 200, ended.text
+    assert not session.alive()
+    assert terminal_routes._SESSIONS == {}
+    (line,) = audit_rows(opened_project, "agent_terminal_ended")
+    assert line["actor"] == "user:tester"
+    assert line["arguments"] == {
+        "session_id": sid,
+        "provider": LAUNCH["provider"],
+        "cause": "the person ended it",
+        "undelivered_count": 0,
+    }
+    assert _end(client, sid).status_code == 404
+
+    fresh = client.post("/api/terminal/sessions", json=LAUNCH).json()
+    assert fresh["session_id"] != sid
+    starts = audit_rows(opened_project, "agent_terminal_started")
+    assert [row["arguments"]["session_id"] for row in starts] == [
+        sid,
+        fresh["session_id"],
+    ]
+
+
+def test_an_end_answers_the_requests_the_agent_was_never_given(
+    client: TestClient,
+) -> None:
+    """A request submitted before the harness took input is answered by the end."""
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    client.post(
+        f"/api/terminal/sessions/{sid}/submit", json={"text": "never given"}
+    )
+
+    ended = _end(client, sid)
+
+    assert ended.status_code == 200, ended.text
+    assert ended.json() == {"undelivered": ["never given"]}
+
+
+def test_the_end_line_lands_in_the_launchs_project_after_the_gui_opened_another(
+    client: TestClient, opened_project: Path, tmp_path: Path
+) -> None:
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    other = named_project(tmp_path.parent / "hill_block", "Hill block")
+    opened = client.post(
+        "/api/projects/open", json={"id": other.id, "user": "grower"}
+    )
+    assert opened.status_code == 200, opened.text
+
+    assert _end(client, sid).status_code == 200
+
+    assert len(audit_rows(opened_project, "agent_terminal_ended")) == 1
+    assert audit_rows(other.root, "agent_terminal_ended") == []
+
+
+def test_a_socket_to_a_session_the_backend_does_not_hold_is_closed_as_ended(
+    client: TestClient,
+) -> None:
     with client.websocket_connect(
-        f"ws://127.0.0.1/api/terminal/ws/{sid}"
-    ) as ws2:
-        acc = _read_until(ws2, "FAKE_TERMINAL_READY")
-        # Scrollback was cleared: the old session's exit note is gone.
-        assert "exited" not in acc
-
-
-def test_ws_rejects_unknown_session(client: TestClient) -> None:
-    with pytest.raises(Exception):
-        with client.websocket_connect(
-            "ws://127.0.0.1/api/terminal/ws/nonexistent"
-        ):
-            pass
+        "ws://127.0.0.1/api/terminal/ws/nonexistent"
+    ) as ws:
+        assert _read_until_closed(ws) == ("", terminal_routes.ENDED_CLOSE_CODE)
 
 
 def test_ws_rejects_cross_site_origin(client: TestClient) -> None:
@@ -1291,7 +1410,7 @@ def test_ws_rejects_cross_site_origin(client: TestClient) -> None:
             pass
 
 
-# ── the terminate/restart survivor branch (unit-level: no real process needed) ──
+# ── the terminate and end survivor branches (no real process needed) ──
 
 
 class _StubPty(pty_host._WinPty):
@@ -1331,51 +1450,6 @@ def test_terminate_reports_a_clean_stop() -> None:
     assert session.alive() is False
 
 
-def test_restart_on_a_survivor_answers_an_error_without_calling_start(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A restart on a survivor of ``terminate()`` answers an error without calling ``start()``.
-
-    The error says the process could not be stopped, and the session stays alive.
-    """
-    from tcip_web.routes.terminal import TerminalSession
-
-    session = TerminalSession("term_restart_survivor")
-    session._pty = _StubPty(survives=True)
-
-    def _fail_if_called(
-        rows: int, cols: int, provider: pty_host.Provider
-    ) -> None:
-        raise AssertionError("start() must not run on a survivor")
-
-    monkeypatch.setattr(session, "start", _fail_if_called)
-    err = session.restart(24, 80, pty_host.PROVIDERS[0], "user:tester")
-    assert err is not None
-    assert "could not be stopped" in err
-    assert session.alive() is True
-
-
-def test_restart_on_a_died_cleanly_process_calls_start(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from tcip_web.routes.terminal import TerminalSession
-
-    session = TerminalSession("term_restart_clean")
-    session._pty = _StubPty(survives=False)
-    calls = {"n": 0}
-
-    def _record(
-        rows: int, cols: int, provider: pty_host.Provider, actor: str
-    ) -> None:
-        calls["n"] += 1
-        return None
-
-    monkeypatch.setattr(session, "start", _record)
-    err = session.restart(24, 80, pty_host.PROVIDERS[0], "user:tester")
-    assert err is None
-    assert calls["n"] == 1
-
-
 def test_shutdown_all_logs_a_survivor(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -1406,18 +1480,18 @@ def _lenient_client() -> TestClient:
     )
 
 
-def _refuse_record_start(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make every launch's audit line fail to append."""
+def _refuse_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every session's audit line fail to append."""
     from tcip_mcp.audit import AuditEntryNotWrittenError
 
     def _refuse(
-        session_id: str, launched: object, project: Path | None, actor: str
+        event: str, arguments: dict, project: object, actor: str | None
     ) -> None:
         raise AuditEntryNotWrittenError(
-            "agent_terminal_started", RuntimeError("audit log unwritable")
+            event, RuntimeError("audit log unwritable")
         )
 
-    monkeypatch.setattr(terminal_routes, "_record_start", _refuse)
+    monkeypatch.setattr(terminal_routes, "_record", _refuse)
 
 
 def test_create_session_registers_a_survivor_and_answers_503(
@@ -1426,13 +1500,13 @@ def test_create_session_registers_a_survivor_and_answers_503(
 ) -> None:
     """A session whose start line fails and whose process survives is registered and answers 503.
 
-    ``_record_start``'s audit line fails after the process spawned; the spawned process
-    survives its own termination attempt, so the session stays registered and alive and the
-    answer says it stays attached.
+    The start's audit line fails after the process spawned; the spawned process survives its
+    own termination attempt, so the session stays registered and alive and the answer says it
+    stays attached.
     """
     stub = _StubPty(survives=True)
     _wire_stub_spawn(monkeypatch, stub)
-    _refuse_record_start(monkeypatch)
+    _refuse_record(monkeypatch)
 
     resp = _lenient_client().post("/api/terminal/sessions", json=LAUNCH)
     assert resp.status_code == 503
@@ -1442,58 +1516,527 @@ def test_create_session_registers_a_survivor_and_answers_503(
     assert session.alive() is True
 
 
-def test_restart_session_answers_503_on_a_survivor_with_no_new_spawn(
+def test_an_end_on_a_survivor_answers_503_and_keeps_the_session_reachable(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    opened_project: Path,
 ) -> None:
-    from tcip_web.routes import terminal as terminal_routes
+    """An end whose process survives termination answers 503 and records nothing.
 
-    healthy_stub = _StubPty(survives=False)
-    _wire_stub_spawn(monkeypatch, healthy_stub)
+    The session stays registered and alive, so a create attaches to it.
+    """
+    survivor = _StubPty(survives=True)
+    _wire_stub_spawn(monkeypatch, survivor)
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
-    session = terminal_routes._SESSIONS[sid]
 
-    survivor_stub = _StubPty(survives=True)
-    monkeypatch.setattr(session, "_pty", survivor_stub)
-    _refuse_record_start(monkeypatch)
+    resp = _end(client, sid)
 
-    resp = _lenient_client().post(
-        f"/api/terminal/sessions/{sid}/restart", json=LAUNCH
-    )
     assert resp.status_code == 503
     assert "stays attached" in resp.json()["detail"]
-    assert session._pty is survivor_stub  # no new process spawned over it
+    assert terminal_routes._SESSIONS[sid].alive() is True
+    assert audit_rows(opened_project, "agent_terminal_ended") == []
+    attached = client.post("/api/terminal/sessions", json=LAUNCH).json()
+    assert attached["session_id"] == sid
 
 
-def test_restart_session_answers_503_after_the_process_dies_cleanly(
+class _HeldStubPty(_StubPty):
+    """A survivor of ``terminate``, which sets ``entered`` and then waits for ``release``."""
+
+    def __init__(self) -> None:
+        super().__init__(survives=True)
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def terminate(self) -> None:
+        self.entered.set()
+        assert self.release.wait(timeout=30)
+        super().terminate()
+
+
+def _post(url: str, body: dict) -> Response:
+    """Post ``body`` to ``url`` from a client of its own, for a call made on another thread."""
+    return TestClient(app, base_url="http://127.0.0.1").post(url, json=body)
+
+
+class _WatchedLock:
+    """The sessions lock, setting ``contended`` once a caller finds it held and waits for it."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.contended = threading.Event()
+
+    def __enter__(self) -> None:
+        if not self._lock.acquire(blocking=False):
+            self.contended.set()
+            self._lock.acquire()
+
+    def __exit__(self, *exc: object) -> None:
+        self._lock.release()
+
+
+def _watch_sessions_lock(monkeypatch: pytest.MonkeyPatch) -> _WatchedLock:
+    """Install and return a watched sessions lock."""
+    lock = _WatchedLock()
+    monkeypatch.setattr(terminal_routes, "_SESSIONS_LOCK", lock)
+    return lock
+
+
+def test_a_create_during_an_end_waits_for_it_and_attaches_to_the_survivor(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A create made while an end terminates waits for the end, then attaches to its survivor.
+
+    The create is seen waiting on the sessions lock the end holds, never finished beside it.
+    """
+    lock = _watch_sessions_lock(monkeypatch)
+    held = _HeldStubPty()
+    _wire_stub_spawn(monkeypatch, held)
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        ending = pool.submit(
+            _post, f"/api/terminal/sessions/{sid}/end", {"user": "tester"}
+        )
+        assert held.entered.wait(timeout=30)
+        creating = pool.submit(_post, "/api/terminal/sessions", LAUNCH)
+        creating.add_done_callback(lambda _: lock.contended.set())
+        assert lock.contended.wait(timeout=30)
+        assert not creating.done()
+        held.release.set()
+        assert ending.result().status_code == 503
+        assert creating.result().json()["session_id"] == sid
+    assert list(terminal_routes._SESSIONS) == [sid]
+
+
+def test_a_submit_admitted_before_an_end_is_answered_by_that_end(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An end waits for a submit already admitted, and answers its request as undelivered.
+
+    The end is seen waiting on the sessions lock the admission holds. A submit after the end
+    answers as an unknown session does.
+    """
+    lock = _watch_sessions_lock(monkeypatch)
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    session = terminal_routes._SESSIONS[sid]
+    admitted, release = threading.Event(), threading.Event()
+    submit = session.submit
+
+    def held_submit(text: str) -> None:
+        admitted.set()
+        assert release.wait(timeout=30)
+        submit(text)
+
+    monkeypatch.setattr(session, "submit", held_submit)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        submitting = pool.submit(
+            _post, f"/api/terminal/sessions/{sid}/submit", {"text": "taken"}
+        )
+        assert admitted.wait(timeout=30)
+        ending = pool.submit(
+            _post, f"/api/terminal/sessions/{sid}/end", {"user": "tester"}
+        )
+        ending.add_done_callback(lambda _: lock.contended.set())
+        assert lock.contended.wait(timeout=30)
+        assert not ending.done()
+        release.set()
+        assert submitting.result().status_code == 200
+        assert ending.result().json() == {"undelivered": ["taken"]}
+
+    late = client.post(
+        f"/api/terminal/sessions/{sid}/submit", json={"text": "late"}
+    )
+    assert late.status_code == 404
+
+
+class _HeldWritePty(_StubPty):
+    """A process whose first write sets ``writing`` and waits for ``release``.
+
+    It stops on ``terminate``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(survives=False)
+        self.writing = threading.Event()
+        self.release = threading.Event()
+
+    def write(self, data: str) -> None:
+        if not self.writing.is_set():
+            self.writing.set()
+            assert self.release.wait(timeout=30)
+
+
+def test_a_submit_is_admitted_while_a_write_is_held(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """While a delivery's write is held, a submit is admitted.
+
+    The admission is seen taking the session lock without waiting on the write.
+    """
+    held = _HeldWritePty()
+    _wire_stub_spawn(monkeypatch, held)
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    session = terminal_routes._SESSIONS[sid]
+    lock = _WatchedLock()
+    monkeypatch.setattr(session, "_lock", lock)
+    admitted = threading.Event()
+    submit = session.submit
+
+    def noting_submit(text: str) -> None:
+        submit(text)
+        admitted.set()
+        lock.contended.set()
+
+    monkeypatch.setattr(session, "submit", noting_submit)
+    composer = pty_host.PROVIDERS[0].composer_ready
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        reading = pool.submit(session._on_output, "\x1b[?2004h" + composer)
+        assert held.writing.wait(timeout=30)
+        submitting = pool.submit(
+            _post, f"/api/terminal/sessions/{sid}/submit", {"text": "second"}
+        )
+        assert lock.contended.wait(timeout=30)
+        assert admitted.is_set()
+        held.release.set()
+        reading.result()
+        assert submitting.result().status_code == 200
+
+
+def _delivering_a_request(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> tuple[terminal_routes.TerminalSession, _HeldWritePty, _WatchedLock]:
+    """Return a session whose request "written" is in a paste held mid-write, its PTY and lock.
+
+    The session's delivery lock is watched. The request was queued first; the session's output
+    then turned its composer live on another thread, whose delivery is writing the ritual with
+    that request when this returns.
+    """
+    held = _HeldWritePty()
+    _wire_stub_spawn(monkeypatch, held)
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    session = terminal_routes._SESSIONS[sid]
+    writing = _WatchedLock()
+    monkeypatch.setattr(session, "_writing", writing)
+    session.submit("written")
+    composer = pty_host.PROVIDERS[0].composer_ready
+    threading.Thread(
+        target=session._on_output, args=("\x1b[?2004h" + composer,)
+    ).start()
+    assert held.writing.wait(timeout=30)
+    return session, held, writing
+
+
+def _end_line_and_answer_agree_without(
+    opened_project: Path, answer: dict, written: str
+) -> None:
+    """Assert the one end line counts what ``answer`` holds and neither holds ``written``."""
+    (line,) = audit_rows(opened_project, "agent_terminal_ended")
+    assert line["arguments"]["undelivered_count"] == len(answer["undelivered"])
+    assert written not in answer["undelivered"]
+
+
+def test_an_end_waits_for_a_write_under_way_then_answers_and_counts_alike(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    opened_project: Path,
 ) -> None:
-    """A relaunch whose audit line fails after a clean termination answers 503.
+    """An end during a write waits for it; the written request is in neither its answer nor line.
 
-    The answer carries none of the survivor wording.
+    The end is seen waiting on the delivery's lock while the write is held.
     """
-    healthy_stub = _StubPty(survives=False)
-    _wire_stub_spawn(monkeypatch, healthy_stub)
+    session, held, writing = _delivering_a_request(client, monkeypatch)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        ending = pool.submit(
+            _post,
+            f"/api/terminal/sessions/{session.id}/end",
+            {"user": "tester"},
+        )
+        ending.add_done_callback(lambda _: writing.contended.set())
+        assert writing.contended.wait(timeout=30)
+        assert not ending.done()
+        held.release.set()
+        answer = ending.result().json()
+
+    _end_line_and_answer_agree_without(opened_project, answer, "written")
+
+
+def test_a_write_resuming_while_an_end_records_leaves_its_answer_and_line_alike(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    opened_project: Path,
+) -> None:
+    """A write held when an end begins, released once the end waits or records, changes nothing.
+
+    Whichever the end reaches first, its delivery wait or its paused line, the write is released
+    then; the end's answer and line agree and neither holds the written request.
+    """
+    session, held, writing = _delivering_a_request(client, monkeypatch)
+    recording, recorded = threading.Event(), threading.Event()
+    record = terminal_routes._record
+
+    def held_record(
+        event: str, arguments: dict, project: object, actor: str | None
+    ) -> None:
+        if event == "agent_terminal_ended":
+            writing.contended.set()
+            recording.set()
+            assert recorded.wait(timeout=30)
+        record(event, arguments, project, actor)
+
+    monkeypatch.setattr(terminal_routes, "_record", held_record)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        ending = pool.submit(
+            _post,
+            f"/api/terminal/sessions/{session.id}/end",
+            {"user": "tester"},
+        )
+        assert writing.contended.wait(timeout=30)
+        held.release.set()
+        assert recording.wait(timeout=30)
+        recorded.set()
+        answer = ending.result().json()
+
+    _end_line_and_answer_agree_without(opened_project, answer, "written")
+
+
+def test_a_socket_opened_while_an_end_writes_its_line_closes_only_after_the_line(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    opened_project: Path,
+) -> None:
+    """While an end is writing its line, attaching and opening a socket close nothing.
+
+    A subscriber attaching then finds no close queued; a WebSocket opened then is replayed and its
+    handler next waits for input, not a close; no close is broadcast. Once released, the one
+    ended close is broadcast and the WebSocket closed, each with the line already written.
+    """
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    session = terminal_routes._SESSIONS[sid]
+    _wait_for(session, "FAKE_TERMINAL_READY")
+    recording, release, boundary = (threading.Event() for _ in range(3))
+    record = terminal_routes._record
+    broadcast = session._broadcast
+    close, receive_text = WebSocket.close, WebSocket.receive_text
+    broadcast_closes: list[bool] = []
+    socket_steps: list[tuple[str, bool]] = []
+
+    def written() -> bool:
+        return bool(audit_rows(opened_project, "agent_terminal_ended"))
+
+    def held_record(
+        event: str, arguments: dict, project: object, actor: str | None
+    ) -> None:
+        if event == "agent_terminal_ended":
+            recording.set()
+            assert release.wait(timeout=30)
+        record(event, arguments, project, actor)
+
+    def noting_broadcast(item: str | tuple[int, str]) -> None:
+        if isinstance(item, tuple):
+            broadcast_closes.append(written())
+        broadcast(item)
+
+    async def noting_close(
+        self: WebSocket, code: int = 1000, reason: str | None = None
+    ) -> None:
+        socket_steps.append(("close", written()))
+        boundary.set()
+        await close(self, code, reason)
+
+    async def noting_receive_text(self: WebSocket) -> str:
+        socket_steps.append(("receive", written()))
+        boundary.set()
+        return await receive_text(self)
+
+    async def attached_queue() -> asyncio.Queue:
+        return session.attach()[1]
+
+    monkeypatch.setattr(terminal_routes, "_record", held_record)
+    monkeypatch.setattr(session, "_broadcast", noting_broadcast)
+    monkeypatch.setattr(WebSocket, "close", noting_close)
+    monkeypatch.setattr(WebSocket, "receive_text", noting_receive_text)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        ending = pool.submit(
+            _post, f"/api/terminal/sessions/{sid}/end", {"user": "tester"}
+        )
+        assert recording.wait(timeout=30)
+        assert asyncio.run(attached_queue()).empty()
+        with client.websocket_connect(
+            f"ws://127.0.0.1/api/terminal/ws/{sid}"
+        ) as ws:
+            assert "FAKE_TERMINAL_READY" in ws.receive_text()
+            assert boundary.wait(timeout=30)
+            assert socket_steps[0] == ("receive", False)
+            assert broadcast_closes == []
+            release.set()
+            assert ending.result().status_code == 200
+            assert (
+                _read_until_closed(ws)[1] == terminal_routes.ENDED_CLOSE_CODE
+            )
+    assert broadcast_closes == [True]
+    assert [step for step in socket_steps if step[0] == "close"] == [
+        ("close", True)
+    ]
+
+
+def test_output_after_the_ended_close_reaches_no_socket(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ended close is the last item a subscriber is offered; later output reaches none."""
+    _wire_stub_spawn(monkeypatch, _StubPty(survives=False))
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
     session = terminal_routes._SESSIONS[sid]
 
-    died_stub = _StubPty(survives=False)
-    monkeypatch.setattr(session, "_pty", died_stub)
+    async def offered() -> list[object]:
+        _, queue, _ = session.attach()
+        await asyncio.to_thread(
+            session.end, "the person ended it", "user:tester"
+        )
+        session._on_output("late output")
+        await asyncio.sleep(0)
+        return [queue.get_nowait() for _ in range(queue.qsize())]
 
-    relaunch_stub = _StubPty(survives=False)
-    _wire_stub_spawn(monkeypatch, relaunch_stub)
-    _refuse_record_start(monkeypatch)
+    assert asyncio.run(offered()) == [terminal_routes._ENDED_CLOSE]
 
-    resp = _lenient_client().post(
-        f"/api/terminal/sessions/{sid}/restart", json=LAUNCH
+
+def test_a_survivor_of_an_unrecorded_start_ends_without_an_end_line(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    opened_project: Path,
+) -> None:
+    """A launch whose start line failed and whose process survived records no end of it."""
+    import tcip_mcp.audit as audit_module
+
+    survivor = _StubPty(survives=True)
+    _wire_stub_spawn(monkeypatch, survivor)
+    append = audit_module.append
+
+    def _refuse_append(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("audit log unwritable")
+
+    monkeypatch.setattr(audit_module, "append", _refuse_append)
+    assert (
+        client.post("/api/terminal/sessions", json=LAUNCH).status_code == 503
     )
-    assert resp.status_code == 503
-    assert "stays attached" not in resp.json()["detail"]
+    (sid,) = terminal_routes._SESSIONS
+    monkeypatch.setattr(audit_module, "append", append)
+    survivor._survives = False
+
+    assert _end(client, sid).status_code == 200
+    assert not [
+        row
+        for row in audit_rows(opened_project)
+        if row["tool"].startswith("agent_terminal_")
+    ]
+
+
+def test_an_ended_close_offered_to_a_full_queue_survives_the_dropped_backlog() -> (
+    None
+):
+    queue: asyncio.Queue = asyncio.Queue(maxsize=1)
+    queue.put_nowait("output")
+
+    terminal_routes._offer(queue, terminal_routes._ENDED_CLOSE)
+
+    assert queue.get_nowait() == terminal_routes._ENDED_CLOSE
+    assert queue.empty()
+
+
+def test_an_end_whose_line_fails_answers_the_audit_gap_with_the_undelivered_requests(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _wire_stub_spawn(monkeypatch, _StubPty(survives=False))
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    client.post(
+        f"/api/terminal/sessions/{sid}/submit", json={"text": "never given"}
+    )
+    _refuse_record(monkeypatch)
+
+    resp = _end(client, sid)
+
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["error"] == "audit_entry_not_written"
+    assert detail["committed"] == {"undelivered": ["never given"]}
+    assert terminal_routes._SESSIONS == {}
+
+
+def test_an_unattended_end_whose_line_fails_writes_it_to_the_stream_and_the_error_log(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The failure reaches the stream and the error log before the ended close is broadcast."""
+    _wire_stub_spawn(monkeypatch, _StubPty(survives=False))
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    session = terminal_routes._SESSIONS[sid]
+    broadcast = session._broadcast
+    seen: list[tuple[object, bool]] = []
+
+    def noting_broadcast(item: str | tuple[int, str]) -> None:
+        logged = any("ended unrecorded" in r.message for r in caplog.records)
+        seen.append((item, logged))
+        broadcast(item)
+
+    monkeypatch.setattr(session, "_broadcast", noting_broadcast)
+    _refuse_record(monkeypatch)
+    with caplog.at_level("ERROR"):
+        assert session.end_unattended("the agent's process exited") is True
+
+    (text, _), close = seen
+    assert "agent_terminal_ended completed and its audit entry" in str(text)
+    assert close == (terminal_routes._ENDED_CLOSE, True)
+
+
+def test_shutdown_all_ends_every_live_session_with_one_line_by_no_one(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    opened_project: Path,
+) -> None:
+    """``shutdown_all`` writes one end line, by no one, for each session the backend holds.
+
+    The create route answers its one live session to a second create, so the two sessions are
+    started through :meth:`TerminalSession.start` and held as that route holds them.
+    """
+    _wire_stub_spawn(monkeypatch, _StubPty(survives=False))
+    ids = [f"term_shutdown_{n}" for n in range(2)]
+    for sid in ids:
+        session = terminal_routes.TerminalSession(sid)
+        assert (
+            session.start(24, 80, pty_host.PROVIDERS[0], "user:tester") is None
+        )
+        terminal_routes._SESSIONS[sid] = session
+    terminal_routes._SESSIONS[ids[0]].submit("never given")
+
+    terminal_routes.shutdown_all()
+
+    lines = audit_rows(opened_project, "agent_terminal_ended")
+    assert [line["arguments"]["session_id"] for line in lines] == ids
+    assert [line["arguments"]["undelivered_count"] for line in lines] == [1, 0]
+    assert {line["arguments"]["cause"] for line in lines} == {
+        "the backend shut down"
+    }
+    assert not [line for line in lines if "actor" in line]
+    assert terminal_routes._SESSIONS == {}
 
 
 def _os_pid_alive(pid: int) -> bool:
@@ -1543,10 +2086,10 @@ def test_write_and_resize_after_process_death_do_not_raise(
     ) as ws:
         _read_until(ws, "FAKE_TERMINAL_READY")
         ws.send_json({"type": "input", "data": "exit\r"})
-        _read_until(ws, "the agent exited")
-        # The socket must survive post-exit control traffic.
+        # The socket must survive control traffic racing the exit until the end closes it.
         ws.send_json({"type": "resize", "rows": 40, "cols": 120})
         ws.send_json({"type": "input", "data": "into the void\r"})
+        assert _read_until_closed(ws)[1] == terminal_routes.ENDED_CLOSE_CODE
     assert session.write("x") is False
     session.resize(10, 10)  # no raise
 
@@ -1667,11 +2210,10 @@ def test_a_harness_updated_in_place_is_seen_at_its_next_launch_without_a_backend
     assert created["launched"]["version"] == "1.0.0"
 
     version_file.write_text("9.9.9 (updated)\n", encoding="utf-8")
-    restarted = client.post(
-        f"/api/terminal/sessions/{created['session_id']}/restart", json=LAUNCH
-    ).json()
+    assert _end(client, created["session_id"]).status_code == 200
+    relaunched = client.post("/api/terminal/sessions", json=LAUNCH).json()
 
-    assert restarted["launched"]["version"] == "9.9.9 (updated)"
+    assert relaunched["launched"]["version"] == "9.9.9 (updated)"
     first, second = audit_rows(opened_project, "agent_terminal_started")
     assert first["arguments"]["version"] == "1.0.0"
     assert second["arguments"]["version"] == "9.9.9 (updated)"
@@ -1716,16 +2258,13 @@ def test_each_launch_leaves_one_audit_line_in_the_open_projects_log(
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
-    with client.websocket_connect(
-        f"ws://127.0.0.1/api/terminal/ws/{sid}"
-    ) as ws:
-        _read_until(ws, "FAKE_TERMINAL_READY")
-        ws.send_json({"type": "input", "data": "exit\r"})
-        _read_until(ws, "the agent exited")
-    client.post(f"/api/terminal/sessions/{sid}/restart", json=LAUNCH)
+    _end(client, sid)
+    second = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
 
     rows = audit_rows(opened_project, "agent_terminal_started")
-    assert [row["arguments"]["session_id"] for row in rows] == [sid, sid]
+    assert [row["arguments"]["session_id"] for row in rows] == [sid, second]
     assert [row["arguments"]["provider"] for row in rows] == [
         LAUNCH["provider"]
     ] * 2
@@ -1758,28 +2297,23 @@ def test_create_session_answers_503_and_terminates_the_process_when_the_start_li
     assert all(not s.alive() for s in terminal_routes._SESSIONS.values())
 
 
-def test_the_create_and_restart_responses_answer_the_launched_provider_and_program(
+def test_a_create_and_one_after_an_end_answer_the_launched_provider_and_program(
     client: TestClient,
 ) -> None:
     created = client.post("/api/terminal/sessions", json=LAUNCH).json()
-    sid = created["session_id"]
-    assert created["launched"]["provider"] == LAUNCH["provider"]
-    assert (
-        Path(created["launched"]["argv"][0]).name == Path(sys.executable).name
-    )
+    _end(client, created["session_id"])
+    relaunched = client.post("/api/terminal/sessions", json=LAUNCH).json()
 
-    restarted = client.post(
-        f"/api/terminal/sessions/{sid}/restart", json=LAUNCH
-    ).json()
-    assert restarted["existing"] is False
-    assert restarted["launched"]["provider"] == LAUNCH["provider"]
-    assert (
-        Path(restarted["launched"]["argv"][0]).name
-        == Path(sys.executable).name
-    )
+    assert relaunched["session_id"] != created["session_id"]
+    for answer in (created, relaunched):
+        assert answer["launched"]["provider"] == LAUNCH["provider"]
+        assert (
+            Path(answer["launched"]["argv"][0]).name
+            == Path(sys.executable).name
+        )
 
 
-def test_create_and_restart_answer_the_ritual_the_library_builds_for_the_open_project(
+def test_a_create_and_one_after_an_end_answer_the_ritual_the_library_builds_for_the_open_project(
     client: TestClient,
     opened: OpenProject,
 ) -> None:
@@ -1794,13 +2328,11 @@ def test_create_and_restart_answer_the_ritual_the_library_builds_for_the_open_pr
     assert _ritual_doctor_line(created["ritual"]) == line
 
     attached = client.post("/api/terminal/sessions", json=LAUNCH).json()
-    assert attached["existing"] is True
-    assert attached["ritual"] == created["ritual"]
+    assert attached == created
 
-    restarted = client.post(
-        f"/api/terminal/sessions/{created['session_id']}/restart", json=LAUNCH
-    ).json()
-    assert restarted["ritual"] == created["ritual"]
+    _end(client, created["session_id"])
+    relaunched = client.post("/api/terminal/sessions", json=LAUNCH).json()
+    assert relaunched["ritual"] == created["ritual"]
 
 
 def test_a_launch_after_a_rename_of_the_open_project_names_its_new_name(

@@ -80,7 +80,7 @@ DOORS = [
         },
     ),
     ("/api/terminal/sessions", {"provider": "claude"}),
-    ("/api/terminal/sessions/term_1/restart", {"provider": "claude"}),
+    ("/api/terminal/sessions/term_1/end", {}),
     (
         "/api/sessions/image_event",
         {

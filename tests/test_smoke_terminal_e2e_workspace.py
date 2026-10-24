@@ -91,12 +91,18 @@ def test_the_signal_is_a_friction_report_of_the_open_project_carrying_the_token(
 def test_the_websocket_url_is_absolute_and_carries_the_served_host(
     tmp_path: Path, client: TestClient
 ) -> None:
-    """``terminal_ws_url`` is absolute and names the client's own host."""
-    mod = _load()
+    """``terminal_ws_url`` is absolute, names the client's own host and carries the socket path.
 
-    url = mod.terminal_ws_url(client, "abc123")
+    The path is the one the app reverses for a session's socket, as the smoke produces it.
+    """
+    from tcip_web.app import app
+
+    mod = _load()
+    path = app.url_path_for("terminal_ws", session_id="abc123")
+
+    url = mod.terminal_ws_url(client, path)
 
     parsed = urlsplit(url)
     assert parsed.scheme == "ws"
     assert parsed.netloc == "127.0.0.1"
-    assert parsed.path == "/api/terminal/ws/abc123"
+    assert parsed.path == path == "/api/terminal/ws/abc123"

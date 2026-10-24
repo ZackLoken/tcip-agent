@@ -9,7 +9,7 @@ engine prompt the canvas sends (the detector's own parameters,
 ``tcip_mcp.experiments`` declares a run's row, a sweep's group, the listing of both and the detail
 of one; ``routes/training.py`` and ``routes/terminal.py`` declare their WebSocket frame
 vocabularies, and ``routes/terminal.py`` the provider status, the session launch request and
-answer and the submitted request;
+answer, the submitted request, and the session end request and answer;
 ``routes/projects.py`` declares the project summary and the open, removal, rename and
 invariances request shapes, and ``tcip_mcp.project_record`` the capture invariances and their
 correction's answer; ``routes/results.py`` declares
@@ -29,10 +29,11 @@ mapping (``dict[str, T]``, ``additionalProperties`` a schema rather than a bare 
 ``Record<string, T>``, a model keeping undeclared keys (``extra="allow"``) gains a string index
 signature beside its declared fields, and any other shape (including an object with its own
 fixed, non-``$ref`` property set) refuses by name.
-Each of ``web_client``'s own named ``PANEL_EVENT_*`` constants, the strings
-:func:`string_constants` names, and the vocabularies :func:`tuple_constants` names are projected
-alongside the models as runtime constants, and those :func:`literal_aliases` names as bare union
-types, none of them schema-derived.
+Each of ``web_client``'s own named ``PANEL_EVENT_*`` constants, the numbers and strings
+:func:`scalar_constants` names, and the vocabularies
+:func:`tuple_constants` names are projected alongside the models as runtime constants, and those
+:func:`literal_aliases` names as bare union types and those :func:`model_unions` names as unions
+of the generated interfaces, none of them schema-derived.
 
 Run it after changing a declared model; it rewrites the module in place.
 """
@@ -163,9 +164,11 @@ def declared_models() -> list[type[BaseModel]]:
     )
     from tcip_web.routes.terminal import (
         CreateSessionRequest,
+        EndSessionRequest,
         LaunchedProgram,
         ProviderStatus,
         SubmitRequest,
+        TerminalEnd,
         TerminalInputFrame,
         TerminalLaunch,
         TerminalResizeFrame,
@@ -207,6 +210,8 @@ def declared_models() -> list[type[BaseModel]]:
         ProviderStatus,
         TerminalStatus,
         SubmitRequest,
+        EndSessionRequest,
+        TerminalEnd,
         CaptureInvariances,
         ProjectSummary,
         OpenRequest,
@@ -251,22 +256,22 @@ TRANSPORT_MODELS = ("GuiState", "DatasetSelection", "ViewState")
 """The broadcast GUI state and the models it nests, rendered as they serialize."""
 
 
-def render_cache_version() -> int:
-    """Return the backend's ``RENDER_CACHE_VERSION`` from ``tcip_web.routes.images``."""
-    from tcip_web.routes.images import RENDER_CACHE_VERSION
-
-    return RENDER_CACHE_VERSION
-
-
-def string_constants() -> dict[str, str]:
-    """Return the backend string constants this module emits, by each constant's name."""
+def scalar_constants() -> dict[str, int | str]:
+    """Return the backend number and string constants this module emits, by each one's name."""
     from tcip_annotation.json_io import PERSON_NAME_RULE
     from tcip_mcp.experiments import EPOCH_KEY, STEP_KEY, TIMESTAMP_KEY
     from tcip_mcp.pipelines.training.evaluation import VAL_METRIC_PREFIX
     from tcip_store.values import NOT_FINITE_SUFFIX
-    from tcip_web.routes.images import IMAGE_ERROR_HEADER, OVERVIEWS_REQUIRED
+    from tcip_web.routes.images import (
+        IMAGE_ERROR_HEADER,
+        OVERVIEWS_REQUIRED,
+        RENDER_CACHE_VERSION,
+    )
+    from tcip_web.routes.terminal import ENDED_CLOSE_CODE
 
     return {
+        "RENDER_CACHE_VERSION": RENDER_CACHE_VERSION,
+        "TERMINAL_ENDED_CLOSE_CODE": ENDED_CLOSE_CODE,
         "IMAGE_ERROR_HEADER": IMAGE_ERROR_HEADER,
         "OVERVIEWS_REQUIRED": OVERVIEWS_REQUIRED,
         "NOT_FINITE_SUFFIX": NOT_FINITE_SUFFIX,
@@ -337,6 +342,16 @@ def literal_aliases() -> dict[str, tuple[str, ...]]:
         "SubjectState": get_args(SubjectState),
         "VerdictAction": get_args(VerdictAction),
     }
+
+
+def model_unions() -> dict[str, tuple[str, ...]]:
+    """Return each backend union of declared models' member names, by its TypeScript alias name."""
+    from typing import get_args
+
+    from tcip_web.routes.terminal import TerminalFrame
+
+    (union, _) = get_args(TerminalFrame)
+    return {"TerminalFrame": tuple(m.__name__ for m in get_args(union))}
 
 
 def _ts_type(schema: dict, where: str) -> str:
@@ -439,12 +454,9 @@ def render() -> str:
     )
     defaults = json.dumps(GUI_STATE_DEFAULTS.model_dump(mode="json"), indent=2)
     body += f"\nexport const GUI_STATE_DEFAULTS: GuiState = {defaults};\n"
-    constant = (
-        f"export const RENDER_CACHE_VERSION = {render_cache_version()};\n\n"
-    )
-    strings = "".join(
+    scalars = "".join(
         f"export const {name} = {json.dumps(value)};\n\n"
-        for name, value in string_constants().items()
+        for name, value in scalar_constants().items()
     )
     panel_event_names = (
         "".join(
@@ -467,14 +479,18 @@ def render() -> str:
         f"export type {name} = {' | '.join(json.dumps(m) for m in members)};\n\n"
         for name, members in literal_aliases().items()
     )
+    unions = "".join(
+        f"export type {name} = {' | '.join(members)};\n\n"
+        for name, members in model_unions().items()
+    )
     return (
         HEADER
-        + constant
-        + strings
+        + scalars
         + panel_event_names
         + tuples
         + records
         + aliases
+        + unions
         + body
     )
 

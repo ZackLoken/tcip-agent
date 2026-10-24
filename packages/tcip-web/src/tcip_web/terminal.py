@@ -631,8 +631,8 @@ def session_ritual(launch: ProjectLaunch | None) -> str:
             f"{_RITUAL_HEADER}This session has no project: the GUI had none open when the "
             "terminal started, so every tool that acts on a project refuses until one is "
             "created. A project initialize_project creates is this session's from then on; "
-            "an existing one is worked on by opening it in the GUI and restarting the "
-            f"terminal. {_RITUAL_FRICTION}"
+            "an existing one is worked on by opening it in the GUI, then ending this agent "
+            f"from the rail and starting a new one. {_RITUAL_FRICTION}"
         )
     _, record = existing_project(launch.project.root)
     if launch.doctor_line is None:
@@ -811,8 +811,7 @@ class _PosixPty:
         cols: int,
         env: dict[str, str],
     ) -> None:
-        # _open_pty dispatches this class off os.name == "nt", so it never runs on Windows;
-        # the guard also tells mypy the POSIX-only stdlib members below are never checked there.
+        # The guard tells mypy the POSIX-only stdlib members below are never checked on Windows.
         if sys.platform == "win32":
             raise AssertionError("_PosixPty is POSIX-only")
         import pty
@@ -908,10 +907,10 @@ def spawn_pty(
 def start_reader(
     pty: Pty,
     on_output: Callable[[str], None],
-    on_exit: Callable[[], None],
+    on_exit: Callable[[], object],
     name: str,
 ) -> threading.Thread:
-    """Pump PTY output on a daemon thread until the process exits.
+    """Pump PTY output on a daemon thread until the process exits, then call ``on_exit``.
 
     Any read failure ends the pump. The reader owns closing the PTY's OS resources
     (``pty.close()``) so an fd can never be recycled while a read is still blocked on it.

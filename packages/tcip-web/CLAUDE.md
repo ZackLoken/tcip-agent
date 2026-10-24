@@ -54,7 +54,7 @@ the version its harness declares and records it, so a harness updated in place i
 launch. No timer-free signal tells a launch whose sequence never arrives from one still starting,
 and a sequence that moved earlier still pastes early. The child's environment is this process's
 own less every `CLAUDE`-prefixed variable, so a backend started from a Claude Code session does not
-launch its agent as a nested session. Session create and restart name a row by its exact
+launch its agent as a nested session. Session create names a row by its exact
 id; the status route lists every row with the reason it cannot launch, if any, and the rail lets the
 breeder pick one. A row is added only after its harness's real flags are read from the installed CLI
 and one live smoke (`tools/smoke_terminal_e2e.py <id>`) passes: the smoke opens a scratch project,
@@ -75,11 +75,12 @@ developer's auto-memory reach the breeder's agent, and adds the repository as a 
 which it reads the generated knowledge skills; the other rows reach the knowledge through
 `serve_domain_knowledge`.
 
-Each launch records what it ran: create and restart answer a `TerminalLaunch` (the provider id, the
+Each launch records what it ran: create answers a `TerminalLaunch` (the provider id, the
 rendered argv and the version its executable declares, never probed on a `TCIP_TERMINAL_CMD`
 override, the preparation run before the launch, and the session-start ritual `session_ritual`
 builds for the open project), with one `agent_terminal_started` line in the open project's audit log
-per launch (none when no project is open). The rail prints the ritual; the session delivers it, then
+per launch (none when no project is open). A session holds one launch for its life, and its one end
+is `TerminalSession.end` in `routes/terminal.py`. The rail prints the ritual; the session delivers it, then
 the requests the rail submits, to the agent under the condition `Provider` states. Which agent
 harness the program is comes from the harness's own MCP handshake, not from here. The child is
 spawned with `TCIP_TERMINAL_SESSION` set to the session id; the MCP server the agent launches reads
