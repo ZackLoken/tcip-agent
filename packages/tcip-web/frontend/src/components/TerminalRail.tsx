@@ -245,21 +245,8 @@ export function TerminalRail() {
     term.focus();
     termRef.current = term;
 
-    // Paste: Ctrl/Cmd+V fires a native paste event on xterm's hidden textarea, but the browser
-    // does not always route it there (focus, or the app swallowing the key). Intercept in the
-    // capture phase and hand the text to term.paste(), which wraps it in bracketed-paste mode,
-    // so a multi-line paste reaches the agent as one paste, not a line-per-Enter burst.
-    const onPaste = (e: ClipboardEvent) => {
-      const text = e.clipboardData?.getData("text");
-      if (text) {
-        term.paste(text);
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-
-    // Copy-on-select; right-click copies a selection or else pastes; Ctrl/Cmd+Shift+C and
-    // Ctrl+Insert copy, Ctrl+Shift+V and Shift+Insert paste; Ctrl+C copies a selection, else SIGINT.
+    // Copy-on-select; Ctrl/Cmd+Shift+C and Ctrl+Insert copy; Ctrl+C copies a selection, else
+    // SIGINT; a right click copies a selection, else pastes unless the program took the mouse.
     const copySelection = () => {
       const sel = term.getSelection();
       if (sel) void navigator.clipboard?.writeText(sel).catch(() => {});
@@ -282,10 +269,12 @@ export function TerminalRail() {
       if (term.hasSelection()) {
         copySelection();
         term.clearSelection();
-      } else {
+      } else if (term.modes.mouseTrackingMode === "none") {
         pasteClipboard();
       }
     };
+    // The platform's text-paste modifier; Ctrl+V on a Mac stays the program's own key.
+    const pasteModifier = /^mac/i.test(navigator.platform) ? "metaKey" : "ctrlKey";
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
       const mod = e.ctrlKey || e.metaKey;
@@ -309,18 +298,13 @@ export function TerminalRail() {
         term.clearSelection();
         return false;
       }
-      if (
-        (mod && e.shiftKey && (e.key === "V" || e.key === "v")) ||
-        (e.shiftKey && !mod && e.key === "Insert")
-      ) {
-        e.preventDefault();
-        pasteClipboard();
-        return false;
-      }
-      return true;
+      // xterm sends Ctrl+V as ^V and cancels it; false leaves a paste key to the browser's paste
+      // event, which xterm's own listener pastes.
+      const pasteV =
+        (e[pasteModifier] || (e.ctrlKey && e.shiftKey)) && (e.key === "V" || e.key === "v");
+      return !(pasteV || (e.shiftKey && e.key === "Insert"));
     });
 
-    host.addEventListener("paste", onPaste, true);
     host.addEventListener("contextmenu", onContextMenu);
     window.addEventListener("mouseup", onWindowMouseUp);
 
@@ -388,7 +372,6 @@ export function TerminalRail() {
       socket.stop();
       socketRef.current = null;
       observer.disconnect();
-      host.removeEventListener("paste", onPaste, true);
       host.removeEventListener("contextmenu", onContextMenu);
       window.removeEventListener("mouseup", onWindowMouseUp);
       dataSub.dispose();

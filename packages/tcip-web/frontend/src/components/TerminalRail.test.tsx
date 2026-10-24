@@ -1,9 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// jsdom lacks xterm's canvas and measurement APIs, so the emulator and its addons are mocked;
-// vi.hoisted makes the class exist when the hoisted vi.mock factories run.
-const { termInstances, MockTerminal, painted } = vi.hoisted(() => {
+// jsdom lacks xterm's canvas and measurement APIs, so the emulator and its addons are mocked unless
+// a test sets `emulator.real`; vi.hoisted makes these exist when the hoisted vi.mock factories run.
+const { termInstances, MockTerminal, painted, emulator } = vi.hoisted(() => {
   // The pixel width the mock paints its screen at: 8 px per column, or 0 for an unpainted one.
   const painted = { columnPx: 8 };
   class MockTerminal {
@@ -34,16 +34,47 @@ const { termInstances, MockTerminal, painted } = vi.hoisted(() => {
       MockTerminal.instances.push(this);
     }
   }
-  return { termInstances: MockTerminal.instances, MockTerminal, painted };
+  // Whether the rail builds a real xterm and its real addons, and the real terminal it built.
+  const emulator: { real: boolean; term: import("@xterm/xterm").Terminal | null } = {
+    real: false,
+    term: null,
+  };
+  return { termInstances: MockTerminal.instances, MockTerminal, painted, emulator };
 });
-vi.mock("@xterm/xterm", () => ({ Terminal: MockTerminal }));
-vi.mock("@xterm/addon-fit", () => ({
-  FitAddon: class {
-    fit = vi.fn();
-  },
-}));
-vi.mock("@xterm/addon-unicode11", () => ({ Unicode11Addon: class {} }));
-vi.mock("@xterm/addon-web-links", () => ({ WebLinksAddon: class {} }));
+vi.mock("@xterm/xterm", async (importOriginal) => {
+  const xterm = await importOriginal<typeof import("@xterm/xterm")>();
+  return {
+    Terminal: function (options: import("@xterm/xterm").ITerminalOptions) {
+      if (!emulator.real) return new MockTerminal();
+      emulator.term = new xterm.Terminal(options);
+      return emulator.term;
+    },
+  };
+});
+vi.mock("@xterm/addon-fit", async (importOriginal) => {
+  const { FitAddon } = await importOriginal<typeof import("@xterm/addon-fit")>();
+  return {
+    FitAddon: function () {
+      return emulator.real ? new FitAddon() : { fit: vi.fn() };
+    },
+  };
+});
+vi.mock("@xterm/addon-unicode11", async (importOriginal) => {
+  const { Unicode11Addon } = await importOriginal<typeof import("@xterm/addon-unicode11")>();
+  return {
+    Unicode11Addon: function () {
+      return emulator.real ? new Unicode11Addon() : {};
+    },
+  };
+});
+vi.mock("@xterm/addon-web-links", async (importOriginal) => {
+  const { WebLinksAddon } = await importOriginal<typeof import("@xterm/addon-web-links")>();
+  return {
+    WebLinksAddon: function () {
+      return emulator.real ? new WebLinksAddon() : {};
+    },
+  };
+});
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 
 vi.mock("@/api/terminal", () => ({
@@ -63,7 +94,15 @@ import { TerminalRail } from "@/components/TerminalRail";
 import { MAX_BACKOFF_MS } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
 
-// jsdom lacks WebSocket and ResizeObserver.
+// jsdom lacks WebSocket, ResizeObserver and the matchMedia a real xterm's open reads.
+vi.stubGlobal("matchMedia", (media: string) => ({
+  matches: false,
+  media,
+  addListener: vi.fn(),
+  removeListener: vi.fn(),
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+}));
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
   static OPEN = 1;
@@ -108,6 +147,8 @@ afterEach(cleanup);
 beforeEach(() => {
   localStorage.clear();
   termInstances.length = 0;
+  emulator.real = false;
+  emulator.term = null;
   MockWebSocket.instances.length = 0;
   useStore.setState({
     pendingTerminalMessages: [],
@@ -198,17 +239,92 @@ describe("TerminalRail", () => {
     expect(useStore.getState().terminalOpen).toBe(false);
   });
 
-  it("focuses the terminal and routes paste through term.paste (bracketed)", async () => {
-    render(<TerminalRail />);
-    const host = await screen.findByTestId("terminal-host");
-    await waitFor(() => expect(termInstances[0].focus).toHaveBeenCalled());
-    const evt = new Event("paste", {
-      bubbles: true,
-      cancelable: true,
-    }) as unknown as ClipboardEvent;
-    Object.defineProperty(evt, "clipboardData", { value: { getData: () => "pasted text" } });
-    host.dispatchEvent(evt);
-    expect(termInstances[0].paste).toHaveBeenCalledWith("pasted text");
+  describe("pasting into a real xterm", () => {
+    const KEYBOARD_PASTES: KeyboardEventInit[] = [
+      { key: "v", keyCode: 86, ctrlKey: true },
+      { key: "V", keyCode: 86, ctrlKey: true, shiftKey: true },
+      { key: "Insert", keyCode: 45, shiftKey: true },
+    ];
+
+    /** Have the browser report `platform` as the platform the rail runs on. */
+    function onPlatform(platform: string) {
+      Object.defineProperty(navigator, "platform", { value: platform, configurable: true });
+    }
+
+    beforeEach(() => {
+      emulator.real = true;
+      onPlatform("Win32");
+    });
+
+    /** Render the rail live, with xterm's input textarea and the input frames sent the program. */
+    async function mounted() {
+      render(<TerminalRail />);
+      const host = await screen.findByTestId("terminal-host");
+      const ws = await openSocket();
+      const input = () =>
+        ws.send.mock.calls
+          .map(([frame]) => JSON.parse(frame as string) as { type: string; data?: string })
+          .filter((frame) => frame.type === "input")
+          .map((frame) => frame.data);
+      return { host, ws, textarea: host.querySelector("textarea")!, input };
+    }
+
+    /** Have the program set a DEC private mode, and wait until xterm has applied it. */
+    async function programSets(ws: MockWebSocket, sequence: string, applied: () => boolean) {
+      act(() => ws.onmessage?.({ data: sequence }));
+      await waitFor(() => expect(applied()).toBe(true));
+    }
+
+    /** Press the key `init` describes in xterm's textarea; the keydown event is returned. */
+    function press(textarea: HTMLTextAreaElement, init: KeyboardEventInit): KeyboardEvent {
+      const key = new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true });
+      textarea.dispatchEvent(key);
+      return key;
+    }
+
+    it("hands the keyboard pastes to the browser, whose paste event xterm sends once", async () => {
+      const { ws, textarea, input } = await mounted();
+      for (const init of KEYBOARD_PASTES)
+        expect(press(textarea, init).defaultPrevented).toBe(false);
+      expect(input()).toEqual([]);
+      await programSets(ws, "\x1b[?2004h", () => emulator.term!.modes.bracketedPasteMode);
+      const paste = new Event("paste", { bubbles: true, cancelable: true }) as ClipboardEvent;
+      Object.defineProperty(paste, "clipboardData", { value: { getData: () => "docs/run.md" } });
+      textarea.dispatchEvent(paste);
+      expect(paste.defaultPrevented).toBe(false);
+      expect(input()).toEqual(["\x1b[200~docs/run.md\x1b[201~"]);
+    });
+
+    it("on a Mac hands Cmd+V to the browser and sends Ctrl+V to the program", async () => {
+      onPlatform("MacIntel");
+      const { textarea, input } = await mounted();
+      expect(press(textarea, { key: "v", keyCode: 86, metaKey: true }).defaultPrevented).toBe(
+        false,
+      );
+      expect(input()).toEqual([]);
+      press(textarea, { key: "v", keyCode: 86, ctrlKey: true });
+      expect(input()).toEqual(["\x16"]);
+    });
+
+    it("reads no clipboard for a keyboard paste", async () => {
+      const readText = vi.fn().mockResolvedValue("clipboard text");
+      Object.defineProperty(navigator, "clipboard", { value: { readText }, configurable: true });
+      const { textarea } = await mounted();
+      for (const init of KEYBOARD_PASTES) press(textarea, init);
+      expect(readText).not.toHaveBeenCalled();
+    });
+
+    it("a right click pastes the clipboard only while the program has not taken the mouse", async () => {
+      const readText = vi.fn().mockResolvedValue("clipboard text");
+      Object.defineProperty(navigator, "clipboard", { value: { readText }, configurable: true });
+      const { host, ws, input } = await mounted();
+      fireEvent.contextMenu(host);
+      await waitFor(() => expect(input()).toEqual(["clipboard text"]));
+      await programSets(ws, "\x1b[?1000h", () => emulator.term!.modes.mouseTrackingMode !== "none");
+      fireEvent.contextMenu(host);
+      expect(readText).toHaveBeenCalledTimes(1);
+      expect(input()).toEqual(["clipboard text"]);
+    });
   });
 
   it("copies the terminal selection to the clipboard when a drag-select ends", async () => {
