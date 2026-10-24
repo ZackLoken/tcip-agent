@@ -87,14 +87,19 @@ predecessor's rates with the schedule held, whatever the schedule.
 The stop rule and `model_best.pt` share the same selection criterion; there is no separate
 `metric`/`mode` key on `early_stopping`. Both are driven by `evaluation.selection_metric`, which
 the run states (no default; `objective` blends its terms by the `evaluation.score_weights` block
-the run states, `schemas.ScoreWeights`, one non-negative weight per term, and a run selecting on
-it without them is refused by name; a run with no validation side selects on `loss` alone),
-and both compare in whichever direction `schemas.HIGHER_IS_BETTER_BY_METRIC` declares for that metric,
+the run states, `schemas.ScoreWeights`, one non-negative weight per term). The default body reads
+the metric from the row the run's evaluator reports each epoch, and a run with no validation side
+reports an empty row, where `loss` answers with the training loss. `preflight_config(smoke=True)`
+and every launch read it the same way from the row the smoke validated, so a metric the evaluator
+does not report refuses the launch, naming the row's keys. A run whose body is its own
+`training_source` is not read at the smoke, and its warnings say so; a body delegating to
+`ctx.default_train()` is read at its first epoch. A sweep's base point is read at its smoke, and a
+point that changes what its evaluator reports is read at its trial's first epoch. Both compare in
+whichever direction `schemas.HIGHER_IS_BETTER_BY_METRIC` declares for that metric,
 not always "lower wins": selecting on `f1` keeps the highest-F1 checkpoint, selecting on `loss`
 keeps the lowest-loss one. A `selection_metric` with no declared direction is refused. For a
-count trait with a center-match criterion, an explicit `selection_metric` must be one of the
-trait's own governing metrics (`objective`/`f1`/`precision`/`recall`/`loss`); the map50-family
-comparability metrics are rejected:
+count trait with a center-match criterion, a `selection_metric` that criterion demotes to
+comparability-only (the map50 family) is rejected:
 
 ```yaml
 evaluation:
@@ -379,8 +384,8 @@ groups); a draw states every share, its `seed`, its `grouping` (a named policy o
 `stratify_foreground` and its `rationale`, none with a default, admitted as a run's drawn
 `data.split` is, and the selection records the shares, the stratification and the reason. A side
 the draw would leave empty refuses naming it. A run drawing its own split states the same keys in
-`data.split`: `val_ratio` zero trains on every admitted sample with no validation side, selecting
-on `loss`; a run drawing a within-image split (the spatial_strip route, one tiled source) reserves
+`data.split`: `val_ratio` zero trains on every admitted sample with no validation side (what it
+can select on is under the stop rule above); a run drawing a within-image split (the spatial_strip route, one tiled source) reserves
 a holdout or calibration region only where `holdout_ratio` or `calibration_ratio` states one, and
 a run over several sources stating either refuses, since its reference is a selection's to draw.
 The samples

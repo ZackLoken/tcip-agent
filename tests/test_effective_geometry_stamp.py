@@ -511,15 +511,15 @@ def test_an_hpo_trials_resolved_record_carries_the_effective_tile_geometry(
 ) -> None:
     """An HPO trial's resolved record carries the effective tile geometry.
 
-    A tiled trial records the 32 px edge its config stated and a float overlap where the config
+    A tiled trial records the 48 px edge its config stated and a float overlap where the config
     stated none.
     """
     trial_dir = _trial(
         tmp_path,
-        _base_config(tiling_block(tile_size=32, sliver_frac=0.5), tmp_path),
+        _base_config(tiling_block(tile_size=48, sliver_frac=0.5), tmp_path),
     )
 
     tiling = _resolved_data(trial_dir)["tiling"]
     assert isinstance(tiling, dict)
-    assert tiling["tile_size"] == 32
+    assert tiling["tile_size"] == 48
     assert isinstance(tiling["overlap"], float)

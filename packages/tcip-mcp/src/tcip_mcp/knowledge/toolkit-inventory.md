@@ -96,6 +96,7 @@ contract. For a run with a validation side the smoke then validates the model on
 the run's evaluation keywords and admits the result as the metrics log admits an epoch row, so a
 row the log would refuse blocks the launch naming the field; `smoke["evaluation_not_run"]` says
 why that leg did not run and `smoke["evaluation_row_keys"]` names the keys of the row it admitted.
+The `training` skill says how the smoke reads the run's selection metric.
 `launch_training(overfit_check=True)` runs the diagnostic at launch, the same way, before the
 subprocess spawns, and records the result on the run's `model_contract`.
 

@@ -1086,29 +1086,33 @@ def _detection_base(project: Path) -> dict:
     """Return a detection base config over :func:`_labeled`'s frames, selecting on the loss.
 
     Its model is :func:`~tests._verified_checkpoint_fixtures.unbuilt_source`'s detector,
-    normalized by its weights' statistics (``_chain_fixtures.weights_statistics``), and its
-    frames lie under ``project``.
+    normalized by its frames' own statistics, and its frames lie under ``project``.
     """
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
     return training_config(
         project,
-        weights_statistics(unbuilt_source("detection")),
+        unbuilt_source("detection"),
         _labeled(project),
         evaluation=evaluation_block(selection_metric="loss"),
     )
 
 
 def _classifier_base(project: Path, **overrides: object) -> dict:
-    """Return a classification base config over :func:`_labeled`'s frames, selecting on accuracy.
+    """Return a classification base config over four frames labeled 0, 1, 0, 1, on accuracy.
 
-    The model normalizes by its weights' statistics (``_chain_fixtures.weights_statistics``),
-    the frames lie under ``project``, and ``overrides`` stand in place of their keys.
+    The frames and their table lie under ``project``, the model normalizes by the frames' own
+    statistics, and ``overrides`` stand in place of their keys.
     """
+    from tests.tiny_trainer_fixtures import write_regression_dataset
+
+    images_dir, csv_path = write_regression_dataset(
+        project / "ds", [0.1, 0.3, 0.5, 0.7], [0, 1, 0, 1], height=32, width=32
+    )
     return training_config(
         project,
-        weights_statistics(CLASSIFIER_SOURCE),
-        _labeled(project),
+        CLASSIFIER_SOURCE,
+        {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         evaluation=evaluation_block(
             selection_metric="accuracy",
             conf_threshold=None,
@@ -1126,6 +1130,18 @@ def _the_sweep(project: Path) -> Path:
     return sweep
 
 
+def _sweep_of(project: Path, base: dict) -> Path:
+    """Return the one sweep of ``project``, opened over ``base`` by the sweep door when none is."""
+    from tcip_mcp import experiments
+    from tests._verified_checkpoint_fixtures import opened_sweep
+
+    return (
+        _the_sweep(project)
+        if experiments.sweep_dirs(project)
+        else opened_sweep(project, base)
+    )
+
+
 def _trial(
     point: dict,
     report: Callable[[float], None],
@@ -1135,18 +1151,12 @@ def _trial(
 ) -> Path:
     """Run one HPO trial ``name`` through ``_run_hpo_trial``.
 
-    The trial runs under the one sweep of ``project`` over ``base`` the sweep door opens
-    (``opened_sweep``) on its first trial. Returns the trial's run directory.
+    The trial runs under :func:`_sweep_of` ``project`` over ``base``. Returns the trial's run
+    directory.
     """
-    from tcip_mcp import experiments
     from tcip_mcp.tools.training_tools import _run_hpo_trial
-    from tests._verified_checkpoint_fixtures import opened_sweep
 
-    sweep = (
-        _the_sweep(project)
-        if experiments.sweep_dirs(project)
-        else opened_sweep(project, base)
-    )
+    sweep = _sweep_of(project, base)
     _run_hpo_trial(point, report, sweep, name)
     return sweep / f"{sweep.name}_{name}"
 
@@ -1194,19 +1204,23 @@ def _patch_hpo_trial_machinery(
         ],
         TrainRun,
     ],
+    base: dict,
+    project: Path,
     captured: dict | None = None,
 ) -> None:
     """Stub a trial's dataset building, and its training with ``fake_train``.
 
-    ``auto_train_val`` answers one stand-in dataset on both sides with an empty partition
-    record, recording its ``transforms`` and ``data`` into ``captured`` when one is given;
-    ``recorded_datasets`` answers the same stand-in, the data geometry is empty, and no sampler
-    is built.
+    The sweep of ``project`` over ``base`` is opened first (:func:`_sweep_of`), its base
+    preflight smoking the run's own data. Then ``auto_train_val`` answers one stand-in dataset on
+    both sides with an empty partition record, recording its ``transforms`` and ``data`` into
+    ``captured`` when one is given; ``recorded_datasets`` answers the same stand-in, the data
+    geometry is empty, and no sampler is built.
     """
     from tcip_mcp.pipelines.data import samplers, split_construction as sc
     from tcip_mcp.pipelines.schemas import TrainGeometry
     from tcip_mcp.pipelines.training import generic_trainer as gt
 
+    _sweep_of(project, base)
     ds = _FakeDataset()
 
     def fake_auto_train_val(
@@ -1300,14 +1314,10 @@ def test_run_hpo_trial_reports_each_epoch_and_its_result_is_the_best_of_them(
                 epoch_callback(epoch, _row(value))
         return _complete(run)
 
-    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    base = _detection_base(tmp_path)
+    _patch_hpo_trial_machinery(monkeypatch, fake_train, base, tmp_path)
     reported: list = []
-    _trial(
-        {"optimizer.head_lr": 3e-4},
-        reported.append,
-        _detection_base(tmp_path),
-        tmp_path,
-    )
+    _trial({"optimizer.head_lr": 3e-4}, reported.append, base, tmp_path)
     assert reported == [50.0, 40.0, 30.0]
     assert _sweep_outcome(tmp_path)["best_value"] == 30.0
 
@@ -1341,13 +1351,9 @@ def test_a_sweeps_best_at_an_end_of_its_stated_range_is_reported(
             epoch_callback(0, _row(30.0))
         return _complete(run)
 
-    _patch_hpo_trial_machinery(monkeypatch, fake_train)
-    _trial(
-        {"optimizer.head_lr": head_lr},
-        lambda _value: None,
-        _detection_base(tmp_path),
-        tmp_path,
-    )
+    base = _detection_base(tmp_path)
+    _patch_hpo_trial_machinery(monkeypatch, fake_train, base, tmp_path)
+    _trial({"optimizer.head_lr": head_lr}, lambda _value: None, base, tmp_path)
 
     assert _sweep_outcome(tmp_path)["best_at_range_end"] == at_end
 
@@ -1372,13 +1378,11 @@ def test_run_hpo_trial_that_fails_has_no_result(
     ) -> NoReturn:
         raise RuntimeError("CUDA out of memory")
 
-    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    base = _detection_base(tmp_path)
+    _patch_hpo_trial_machinery(monkeypatch, fake_train, base, tmp_path)
     reported: list = []
     trial_dir = _trial(
-        {"optimizer.head_lr": 3e-4},
-        reported.append,
-        _detection_base(tmp_path),
-        tmp_path,
+        {"optimizer.head_lr": 3e-4}, reported.append, base, tmp_path
     )
     assert reported == []
     assert observe(trial_dir).state == "failed"
@@ -1407,14 +1411,10 @@ def test_run_hpo_trial_result_is_the_highest_value_for_a_higher_is_better_metric
                 epoch_callback(epoch, _row(value, metric="accuracy"))
         return _complete(run)
 
-    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    base = _classifier_base(tmp_path)
+    _patch_hpo_trial_machinery(monkeypatch, fake_train, base, tmp_path)
     reported: list = []
-    _trial(
-        {"optimizer.head_lr": 3e-4},
-        reported.append,
-        _classifier_base(tmp_path),
-        tmp_path,
-    )
+    _trial({"optimizer.head_lr": 3e-4}, reported.append, base, tmp_path)
     assert reported == [0.5, 0.9, 0.6]
     assert _sweep_outcome(tmp_path)["best_value"] == 0.9
 
@@ -1440,7 +1440,7 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
             epoch_callback(0, _row(0.7, metric="accuracy"))
         return _complete(run)
 
-    _patch_hpo_trial_machinery(monkeypatch, fake_train_ok)
+    _patch_hpo_trial_machinery(monkeypatch, fake_train_ok, base, tmp_path)
     real: list = []
     _trial({"optimizer.head_lr": 3e-4}, real.append, base, tmp_path, "real")
 
@@ -1454,7 +1454,7 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
     ) -> NoReturn:
         raise RuntimeError("boom")
 
-    _patch_hpo_trial_machinery(monkeypatch, fake_train_fails)
+    _patch_hpo_trial_machinery(monkeypatch, fake_train_fails, base, tmp_path)
     failed: list = []
     _trial(
         {"optimizer.head_lr": 1e-2}, failed.append, base, tmp_path, "failed"
@@ -1492,10 +1492,12 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(
         run.status = "completed"
         return run
 
-    _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=captured)
     new_project(tmp_path)
     base = _classifier_base(
         tmp_path, augmentation=augmentation(horizontal_flip={"p": 0.5})
+    )
+    _patch_hpo_trial_machinery(
+        monkeypatch, fake_train, base, tmp_path, captured=captured
     )
     _trial({"optimizer.head_lr": 3e-4}, [].append, base, tmp_path)
     assert (
@@ -1515,12 +1517,11 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_trai
     pytest.importorskip("torch")
 
     captured: dict = {}
+    base = _detection_base(tmp_path)
     _patch_hpo_trial_machinery(
-        monkeypatch, _completed_train, captured=captured
+        monkeypatch, _completed_train, base, tmp_path, captured=captured
     )
-    _trial(
-        {"data.split.seed": 7}, [].append, _detection_base(tmp_path), tmp_path
-    )
+    _trial({"data.split.seed": 7}, [].append, base, tmp_path)
     assert captured["data"].split.seed == 7
 
 
@@ -1535,11 +1536,10 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(
     pytest.importorskip("torch")
     from tcip_mcp.experiments import read_run
 
-    _patch_hpo_trial_machinery(monkeypatch, _completed_train)
+    base = _detection_base(tmp_path)
+    _patch_hpo_trial_machinery(monkeypatch, _completed_train, base, tmp_path)
 
-    trial_dir = _trial(
-        {"data.split.seed": 7}, [].append, _detection_base(tmp_path), tmp_path
-    )
+    trial_dir = _trial({"data.split.seed": 7}, [].append, base, tmp_path)
 
     run = read_run(trial_dir)
     assert run.spec.data.split.seed == 7
@@ -1612,8 +1612,8 @@ def test_a_trials_launch_record_carries_the_seed_it_trained_under(
         run.status = "completed"
         return run
 
-    _patch_hpo_trial_machinery(monkeypatch, fake_train)
     base = {**_detection_base(tmp_path), "seed": 11}
+    _patch_hpo_trial_machinery(monkeypatch, fake_train, base, tmp_path)
     trial_dir = _trial({"optimizer.head_lr": 3e-4}, [].append, base, tmp_path)
 
     recorded = read_run(trial_dir).spec.seed
@@ -1877,8 +1877,8 @@ def test_a_sweep_opens_over_a_base_omitting_what_its_space_sweeps_and_refuses_an
         **arguments,
     )
 
-    assert isinstance(opened, Path), opened
-    assert experiments.sweep_dirs(tmp_path) == [opened]
+    assert isinstance(opened, training_tools.OpenedSweep), opened
+    assert experiments.sweep_dirs(tmp_path) == [opened.directory]
 
 
 def _project_answering(project: Path, **answers: bool | float) -> None:
@@ -2180,7 +2180,7 @@ def test_a_sweep_refuses_the_point_its_augmentation_axis_samples_against_the_rec
         admitting, base, space, actor=None, **arguments
     )
 
-    assert isinstance(opened, Path), opened
+    assert isinstance(opened, training_tools.OpenedSweep), opened
 
 
 def test_preflight_names_a_missing_task_where_the_config_is_validated(

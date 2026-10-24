@@ -1,7 +1,7 @@
 """Evaluation metrics + composite selection objective.
 
 Unit tests for the one matcher's detection metrics, the composite objective,
-the in-house scalar metrics, and ``_selection_value``; plus light integration
+the in-house scalar metrics, and ``selection_value``; plus light integration
 tests that exercise the detection/classification ``validate`` path end-to-end.
 """
 
@@ -60,8 +60,8 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     resolve_match_criterion,
 )
 from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
-    _selection_value,
     resolve_selection_metric,
+    selection_value,
 )
 from tests import _trait_fixtures as fx  # noqa: E402
 from tests._dense_op_fixtures import gt_only, toy_records  # noqa: E402
@@ -774,7 +774,7 @@ def test_concordance_correlation_coefficient_zero_variance_is_none() -> None:
 
 def test_selection_value_prefers_objective_for_detection() -> None:
     assert (
-        _selection_value(
+        selection_value(
             "detection",
             {"val_loss": 0.1, "val_objective": 5.0},
             0.2,
@@ -783,48 +783,19 @@ def test_selection_value_prefers_objective_for_detection() -> None:
         == 5.0
     )
     assert (
-        _selection_value("classification", {"val_loss": 0.1}, 0.2, "loss")
+        selection_value("classification", {"val_loss": 0.1}, 0.2, "loss")
         == 0.1
     )
     # No validation loader ran (val_metrics empty): selecting on loss falls back to the
     # training loss.
-    assert _selection_value("detection", {}, 0.2, "loss") == 0.2
+    assert selection_value("detection", {}, 0.2, "loss") == 0.2
 
 
-def test_selection_value_raises_when_the_metric_is_not_among_this_epochs_val_metrics() -> (
+def test_selection_value_raises_when_the_metric_is_not_in_the_validation_row() -> (
     None
 ):
-    with pytest.raises(
-        ValueError, match="not among this epoch's validation metrics"
-    ):
-        _selection_value("detection", {"val_loss": 0.1}, 0.2, "objective")
-
-
-def test_resolve_selection_metric_admits_a_weighted_objective_and_a_plain_metric() -> (
-    None
-):
-    resolve_selection_metric(
-        None, "objective", score_weights=WEIGHTS, has_val_loader=True
-    )
-    resolve_selection_metric(
-        None, "f1", score_weights=None, has_val_loader=True
-    )
-
-
-def test_resolve_selection_metric_with_no_val_loader_accepts_only_loss() -> (
-    None
-):
-    resolve_selection_metric(
-        None, "loss", score_weights=None, has_val_loader=False
-    )
-    for requested, weights in (("objective", WEIGHTS), ("accuracy", None)):
-        with pytest.raises(ValueError, match="needs a validation loader"):
-            resolve_selection_metric(
-                None,
-                requested,
-                score_weights=weights,
-                has_val_loader=False,
-            )
+    with pytest.raises(ValueError, match="is not in task 'detection'"):
+        selection_value("detection", {"val_loss": 0.1}, 0.2, "objective")
 
 
 @_with_bud_trait
@@ -833,9 +804,7 @@ def test_resolve_selection_metric_rejects_incoherent_explicit_choice(
 ) -> None:
     trait = fx.latest("bud_opening", tmp_path)
     with pytest.raises(ValueError, match="comparability-only"):
-        resolve_selection_metric(
-            trait, "map50", score_weights=None, has_val_loader=True
-        )
+        resolve_selection_metric(trait, "map50")
 
 
 @_with_bud_trait
@@ -846,12 +815,7 @@ def test_resolve_selection_metric_allows_coherent_explicit_choice(
     # only reject invalid work.
     trait = fx.latest("bud_opening", tmp_path)
     for metric in ("f1", "recall"):
-        resolve_selection_metric(
-            trait, metric, score_weights=None, has_val_loader=True
-        )
-    resolve_selection_metric(
-        None, "map50", score_weights=None, has_val_loader=True
-    )  # no trait -> no gate
+        resolve_selection_metric(trait, metric)
 
 
 def test_an_evaluation_block_selecting_on_a_metric_with_no_declared_direction_is_refused() -> (
@@ -871,55 +835,6 @@ def test_an_evaluation_block_selecting_on_a_metric_with_no_declared_direction_is
             **evaluation_block(selection_metric="not_a_real_metric")
         )
     EvaluationSpec(**evaluation_block(selection_metric="f1"))
-
-
-def test_a_detector_run_selecting_on_the_objective_refuses_unweighted_and_resolves_weighted(
-    tmp_path: Path,
-) -> None:
-    """A detector selecting on the objective refuses unweighted and resolves weighted.
-
-    A detector config selecting on ``objective`` with no ``score_weights`` refuses at its
-    resolution naming the key; the same config stating them resolves, its objective weighted
-    term by term by its recorded weights.
-    """
-    from tcip_mcp.pipelines.schemas import train_config
-    from tcip_mcp.pipelines.training.generic_trainer import (
-        resolve_trait_revision,
-    )
-    from tests._chain_fixtures import training_config, weights_statistics
-    from tests._verified_checkpoint_fixtures import unbuilt_source
-
-    source = weights_statistics(unbuilt_source("detection"))
-    spec = train_config(
-        training_config(
-            tmp_path,
-            source,
-            {},
-            evaluation=evaluation_block(score_weights=None),
-        )
-    )
-    with pytest.raises(ValueError, match="evaluation.score_weights"):
-        resolve_trait_revision(spec, project=tmp_path, has_val_loader=True)
-
-    weights = {"loss": 1.0, "f1": 0.0, "map50": 0.0}
-    spec = train_config(
-        training_config(
-            tmp_path,
-            source,
-            {},
-            evaluation=evaluation_block(score_weights=weights),
-        )
-    )
-    assert (
-        resolve_trait_revision(spec, project=tmp_path, has_val_loader=True)
-        is None
-    )
-    assert (
-        compute_composite_objective(
-            2.0, 0.5, 0.4, spec.evaluation.score_weights
-        )
-        == 2.0
-    )
 
 
 def test_score_weights_missing_a_term_or_stating_another_refuse_at_admission() -> (

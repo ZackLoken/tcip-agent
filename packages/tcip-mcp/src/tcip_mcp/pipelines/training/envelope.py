@@ -18,7 +18,7 @@ import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Unpack
+from typing import TYPE_CHECKING, Any, Unpack, cast
 
 from tcip_mcp.pipelines import measurement
 from tcip_mcp.pipelines.components import losses
@@ -539,20 +539,24 @@ class TrainContext:
 def dispatch_train_body(ctx: TrainContext) -> None:
     """Run the training body, then declare its deliverable when the body declared none.
 
-    The body is an agent's ``training_source`` if set, else ``ctx.default_train()``; the
-    deliverable it falls back to is the checkpoint the body saved under ``model_best``, else
-    ``model_final`` (``run.saved``). The run's TensorBoard writer (``ctx.tb``) is closed once the
-    body returns or raises.
+    The body is ``ctx.default_train()`` when the run reads the default trainer's regime
+    (``TrainerReads.regime``), else the agent's ``training_source``; the deliverable it falls
+    back to is the checkpoint the body saved under ``model_best``, else ``model_final``
+    (``run.saved``). The run's TensorBoard writer (``ctx.tb``) is closed once the body returns
+    or raises.
     """
     run = ctx.run
     from tcip_mcp.experiments import FINAL_STATES
 
-    training_source = run.spec.training_source
     try:
-        if training_source:
+        if run.reads.regime is not None:
+            ctx.default_train()
+        else:
             from tcip_mcp.pipelines.model_build import import_source_builder
 
-            agent_train = import_source_builder(training_source, run.layout)
+            agent_train = import_source_builder(
+                cast(str, run.spec.training_source), run.layout
+            )
             agent_train(
                 ctx
             )  # the agent's custom loop drives training through ctx
@@ -560,8 +564,6 @@ def dispatch_train_body(ctx: TrainContext) -> None:
                 # A custom loop that never set a final status returned without canceling or
                 # raising.
                 run.status = "canceled" if run.should_cancel() else "completed"
-        else:
-            ctx.default_train()  # the default trainer
     finally:
         if ctx._tb is not None:
             ctx._tb.close()

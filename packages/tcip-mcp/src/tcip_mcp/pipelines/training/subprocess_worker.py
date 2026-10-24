@@ -41,7 +41,6 @@ def prepare_run_context(
     ``origin`` and ``epoch_hook`` are the context's own.
     """
     from tcip_mcp.pipelines.data.split_construction import recorded_datasets
-    from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.generic_trainer import (
         run_loaders,
@@ -49,7 +48,6 @@ def prepare_run_context(
     )
     from tcip_mcp.pipelines.training.run_registry import observed_run
 
-    run_dir = observation.directory
     run_record = observation.record
     run_obj = observed_run(observation, origin=origin)
     if run_record.max_wall_clock_seconds is not None:
@@ -68,14 +66,6 @@ def prepare_run_context(
         run_obj.layout,
     )
     train_loader, val_loader = run_loaders(run_obj, train_ds, val_ds)
-    if val_loader is None and task in DETECTOR_TASKS:
-        logger.warning(
-            "No validation loader for %s run %s: best-model selection and the stop rule read the "
-            "training loss. Bind a selection through data.split.selection_dir, or state "
-            "data.split.val_ratio above zero.",
-            task,
-            run_dir.name,
-        )
     return TrainContext(
         run=run_obj,
         train_loader=train_loader,

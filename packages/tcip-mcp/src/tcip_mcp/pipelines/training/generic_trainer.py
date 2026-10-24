@@ -47,7 +47,6 @@ from tcip_mcp.pipelines.schemas import (
     OneCycleSchedule,
     PlateauSchedule,
     SchedulerSpec,
-    ScoreWeights,
     StageSpec,
     StatedDetectorGeometry,
     TrainConfigSchema,
@@ -635,52 +634,29 @@ def validate(
     return {f"{VAL_METRIC_PREFIX}{k}": v for k, v in metrics.items()}
 
 
-def resolve_selection_metric(
-    trait: TraitEntry | None,
-    requested: str,
-    *,
-    score_weights: ScoreWeights | None,
-    has_val_loader: bool,
-) -> None:
-    """Admit ``requested``, the stated ``evaluation.selection_metric``, over the run.
+def resolve_selection_metric(trait: TraitEntry, requested: str) -> None:
+    """Admit ``requested``, the stated ``evaluation.selection_metric``, over the trait ``trait``.
 
     ``requested`` is the bare metric key into ``val_metrics`` that drives both ``model_best.pt``
-    and early stopping.
+    and early stopping; ``trait`` is the trait's confirmed entry.
 
-    Refuses (``ValueError``) ``"objective"`` without the ``score_weights``
-    (``evaluation.score_weights``) that weight it, any metric but ``"loss"`` (the training loss)
-    for a run with no validation loader (``has_val_loader``), and, when ``trait``, the trait's
-    confirmed entry, is a center-match trait, a metric that trait's own localization criterion
-    demotes to comparability-only (``schemas.CENTER_MATCH_COMPARABILITY_KEYS``).
+    Refuses (``ValueError``), when ``trait`` is a center-match trait, a metric that trait's own
+    localization criterion demotes to comparability-only
+    (``schemas.CENTER_MATCH_COMPARABILITY_KEYS``).
     """
-    if requested == "objective" and score_weights is None:
+    if (
+        trait.localization == "center_match"
+        and requested in CENTER_MATCH_COMPARABILITY_KEYS
+    ):
         raise ValueError(
-            "evaluation.selection_metric is 'objective', which blends its terms by "
-            "weights this run states nowhere: state evaluation.score_weights "
-            f"(schemas.ScoreWeights: {', '.join(ScoreWeights.model_fields)}), or select on "
-            "another metric."
+            f"evaluation.selection_metric={requested!r} is a comparability-only metric for "
+            f"trait {trait.name!r} (localization=center_match): it does not govern this "
+            "trait's phenotype count."
         )
-    if not has_val_loader and requested != "loss":
-        raise ValueError(
-            f"evaluation.selection_metric={requested!r} needs a validation loader to compute, "
-            "and this run has none. Only 'loss' (the training loss) can be selected on without "
-            "one; configure a validation split, or set evaluation.selection_metric='loss'."
-        )
-    if trait is not None:
-        if (
-            trait.localization == "center_match"
-            and requested in CENTER_MATCH_COMPARABILITY_KEYS
-        ):
-            raise ValueError(
-                f"evaluation.selection_metric={requested!r} is a comparability-only metric for "
-                f"trait {trait.name!r} (localization=center_match), it does not govern this "
-                "trait's phenotype count. Select by 'objective', 'f1', 'precision', 'recall', or "
-                "'loss', which resolve through the trait's own center-match criterion."
-            )
 
 
 def resolve_trait_revision(
-    spec: TrainConfigSchema, *, project: Path, has_val_loader: bool
+    spec: TrainConfigSchema, *, project: Path
 ) -> TraitRevisionRef | None:
     """Return the latest confirmed revision of the trait ``spec``'s ``evaluation`` block names.
 
@@ -692,27 +668,24 @@ def resolve_trait_revision(
     from tcip_mcp.operationalization import latest_confirmed
 
     name = spec.evaluation.trait
-    revision = latest_confirmed(name, project) if name else None
-    resolve_selection_metric(
-        revision.entry if revision is not None else None,
-        spec.evaluation.selection_metric,
-        score_weights=spec.evaluation.score_weights,
-        has_val_loader=has_val_loader,
-    )
-    return revision.ref if revision is not None else None
+    if not name:
+        return None
+    revision = latest_confirmed(name, project)
+    resolve_selection_metric(revision.entry, spec.evaluation.selection_metric)
+    return revision.ref
 
 
-def _selection_value(
+def selection_value(
     task: str, val_metrics: dict, avg_loss: float, metric: str
 ) -> float:
-    """Return one epoch's selection value, ``val_metrics[f'{VAL_METRIC_PREFIX}{metric}']``.
+    """Return a ``task`` run's selection value, ``val_metrics[f'{VAL_METRIC_PREFIX}{metric}']``.
 
-    Raises when the resolved selection metric is not among this epoch's validation metrics. The one
-    exception is ``metric == "loss"`` with no validation pass at all (``val_metrics`` empty): the
-    training loss ``avg_loss`` answers.
-
+    ``val_metrics`` is the validation row :func:`validate` returned, empty for a run with no
+    validation side, for which ``metric == "loss"`` answers with the training loss ``avg_loss``.
     A present value of ``None`` (a diverged metric ``evaluation.stored_number`` normalized to
     ``null``) comes back as ``nan``.
+
+    Refuses (``ValueError``) a ``metric`` the row does not carry, naming the row's keys.
     """
     key = f"{VAL_METRIC_PREFIX}{metric}"
     if key in val_metrics:
@@ -721,8 +694,18 @@ def _selection_value(
     if metric == "loss" and not val_metrics:
         return avg_loss
     raise ValueError(
-        f"selection metric {metric!r} (key {key!r}) is not among this epoch's validation "
-        f"metrics for task {task!r}: {sorted(val_metrics)}."
+        f"evaluation.selection_metric={metric!r} (key {key!r}) is not in task {task!r}'s "
+        f"validation row {sorted(val_metrics)}: "
+        + (
+            "a run with no validation side selects on 'loss' (the training loss) alone; "
+            "configure a validation split, or select 'loss'."
+            if not val_metrics
+            else "'objective' is reported for a detector task "
+            f"({', '.join(sorted(DETECTOR_TASKS))}) stating evaluation.score_weights "
+            "(schemas.ScoreWeights); select a metric the row carries."
+            if metric == "objective"
+            else "select a metric the row carries."
+        )
     )
 
 
@@ -1225,7 +1208,7 @@ def train(
                     val_metrics = validate(
                         model, val_loader, device, task, **evaluated
                     )
-                sel = _selection_value(
+                sel = selection_value(
                     task, val_metrics, avg_loss, selection_metric
                 )
 

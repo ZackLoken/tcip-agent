@@ -144,11 +144,16 @@ def test_a_zero_validation_share_trains_on_every_admitted_sample_and_records_the
 
     With all shares at zero and selection on the training loss, the training loader holds the
     three admitted samples, no validation loader is built, and the partition records them on the
-    training side; that split selecting on a validation metric refuses, naming the validation
-    loader it lacks.
+    training side; that split selecting on a validation metric refuses at the smoke, naming the
+    validation side it lacks.
     """
-    from tests._chain_fixtures import training_config
-    from tests._verified_checkpoint_fixtures import opened_run, unbuilt_source
+    from tcip_mcp.tools.training_tools import preflight_config
+    from tests._chain_fixtures import (
+        BESPOKE_DETECTION,
+        BESPOKE_INSTANCE_SEG,
+        training_config,
+    )
+    from tests._verified_checkpoint_fixtures import unbuilt_source
 
     stems = ["a_0_0", "b_0_0", "c_0_0"]
     images_dir = _labeled(tmp_path / "ds", stems, task=task)
@@ -172,16 +177,15 @@ def test_a_zero_validation_share_trains_on_every_admitted_sample_and_records_the
     assert recorded_side(partition, "val") == []
     _one_target(train_ds, task)
     assert recorded_side(record, "train") == sorted(stems)
-    with pytest.raises(ValueError, match="needs a validation loader"):
-        opened_run(
-            tmp_path,
-            training_config(
-                tmp_path,
-                unbuilt_source(task),
-                data_cfg,
-                evaluation=evaluation_block(selection_metric="objective"),
-            ),
-        )
+    builder = (
+        BESPOKE_INSTANCE_SEG if task == "instance_seg" else BESPOKE_DETECTION
+    )
+    selecting_objective = training_config(
+        tmp_path, {**unbuilt_source(task), "builder": builder}, data_cfg
+    )
+    selecting_objective["evaluation"]["selection_metric"] = "objective"
+    refused = preflight_config(tmp_path, selecting_objective, smoke=True)
+    assert any("no validation side" in i for i in refused["issues"]), refused
 
 
 @pytest.mark.parametrize("task", sorted(DETECTOR_TASKS))

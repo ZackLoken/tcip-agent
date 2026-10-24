@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests._chain_fixtures import (
+    BESPOKE_INSTANCE_SEG,
     DETECTION_SOURCE,
     training_config,
     weights_statistics,
@@ -992,7 +993,11 @@ def test_run_hyperparameter_search_admits_split_draws_for_instance_seg(
     scope = real_hpo_base_config["data"]["scope"]
     cfg = training_config(
         tmp_path,
-        {**BUILT_DETECTOR, "task": "instance_seg"},
+        {
+            **BUILT_DETECTOR,
+            "builder": BESPOKE_INSTANCE_SEG,
+            "task": "instance_seg",
+        },
         {
             **detection_images(tmp_path / "polygons", scope, polygons=True),
             "scope": scope,
@@ -1890,14 +1895,18 @@ def _tiled_cfg(
 ) -> dict:
     """Return a tiled ``task`` config of ``project`` over the ``bud`` images of ``images_dir``.
 
-    The config uses the bespoke detector's builder, tiled at 128 px with 0.2 overlap and a
-    stated sliver fraction, its split drawing a fifth onto validation at seed 1 grouped by tile
-    prefix with ``split``'s shares beside it, at the statistics of the frames that split places
-    on its training side (``_chain_fixtures.training_config``).
+    The config uses the bespoke detector's builder, or the bespoke instance segmentation builder
+    for an ``instance_seg`` task, tiled at 128 px with 0.2 overlap and a stated sliver fraction,
+    its split drawing a fifth onto validation at seed 1 grouped by tile prefix with ``split``'s
+    shares beside it, at the statistics of the frames that split places on its training side
+    (``_chain_fixtures.training_config``).
     """
+    source = {**DETECTION_SOURCE, "task": task}
+    if task == "instance_seg":
+        source["builder"] = BESPOKE_INSTANCE_SEG
     return training_config(
         project,
-        {**DETECTION_SOURCE, "task": task},
+        source,
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
