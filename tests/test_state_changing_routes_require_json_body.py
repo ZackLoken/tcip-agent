@@ -1,7 +1,8 @@
-"""Every POST, PUT, PATCH and DELETE route declares a JSON body model.
+"""Every POST, PUT, PATCH and DELETE route declares a JSON body model, but one exempt by name.
 
 A missing body, a form-encoded body and a headerless JSON-shaped body each answer 422, and an
-empty JSON object reaches the handler.
+empty JSON object reaches the handler. The exempt route forwards TensorBoard's own
+form-encoded posts to it.
 """
 
 from __future__ import annotations
@@ -13,10 +14,13 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from tcip_web.app import app
+from tcip_web.routes.training import forward_to_board
 from tests._route_walk import state_changing_routes
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from fastapi import FastAPI
 
 
 class _ProbePayload(BaseModel):
@@ -25,6 +29,9 @@ class _ProbePayload(BaseModel):
 
 EMPTY_BODY_ROUTES = ("/api/training/runs/does-not-exist/tensorboard",)
 """The state-changing routes whose only body is ``EmptyBodyPayload``."""
+
+FORM_POSTED_ROUTES = frozenset({forward_to_board.__name__})
+"""The state-changing routes exempt by name, whose posts are another program's forms."""
 
 
 def declares_json_body(route: APIRoute) -> bool:
@@ -41,18 +48,46 @@ def declares_json_body(route: APIRoute) -> bool:
     )
 
 
+def undeclared_routes(target: FastAPI) -> list[str]:
+    """Return each state-changing route of ``target`` with no JSON body, but those exempt by name.
+
+    Each is named by its methods and its path.
+    """
+    return sorted(
+        f"{sorted(r.methods - {'HEAD', 'OPTIONS'})} {r.path}"
+        for r in state_changing_routes(target)
+        if r.name not in FORM_POSTED_ROUTES and not declares_json_body(r)
+    )
+
+
 def test_every_state_changing_route_declares_a_json_body_model() -> None:
-    """Every state-changing route declares a required JSON body."""
-    routes = state_changing_routes(app)
-    assert routes, (
+    """Every state-changing route declares a required JSON body, but those exempt by name."""
+    assert state_changing_routes(app), (
         "no state-changing routes found; the route walk itself is broken"
     )
-    undeclared = sorted(
-        f"{sorted(r.methods - {'HEAD', 'OPTIONS'})} {r.path}"
-        for r in routes
-        if not declares_json_body(r)
-    )
+    undeclared = undeclared_routes(app)
     assert not undeclared, f"routes with no JSON body model: {undeclared}"
+
+
+def test_the_exemption_admits_the_named_route_alone() -> None:
+    """A form route sharing the exempt route's path and the start of its name is still refused."""
+    from typing import Annotated
+
+    from fastapi import FastAPI, Form
+
+    from tcip_mcp.pipelines.training.tensorboard_manager import BOARD_PATH
+
+    probe = FastAPI()
+
+    @probe.post(BOARD_PATH + "/{path:path}", name=forward_to_board.__name__)
+    def exempt_route(name: Annotated[str, Form()]) -> dict:
+        return {}
+
+    @probe.post(BOARD_PATH + "/form", name=f"{forward_to_board.__name__}_form")
+    def form_route(name: Annotated[str, Form()]) -> dict:
+        return {}
+
+    assert undeclared_routes(probe) == [f"['POST'] {BOARD_PATH}/form"]
 
 
 def test_a_declared_body_model_admits_an_empty_json_object(

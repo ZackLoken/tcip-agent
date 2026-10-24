@@ -1,9 +1,12 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ROUTES } from "@/api/routes";
 import { EmbeddedTool } from "@/components/EmbeddedTool";
 
 afterEach(cleanup);
+
+const BOARD = ROUTES.getTrainingRunsByExperimentIdTensorboardByPath("train-1", "");
 
 describe("EmbeddedTool", () => {
   it("renders nothing until the caller has something to show", () => {
@@ -26,11 +29,11 @@ describe("EmbeddedTool", () => {
   });
 
   it("frames the tool and links out to it full-screen", () => {
-    render(<EmbeddedTool title="TensorBoard" url="http://127.0.0.1:6006" />);
+    render(<EmbeddedTool title="TensorBoard" url={BOARD} />);
     const frame = screen.getByTitle("TensorBoard");
-    expect(frame).toHaveAttribute("src", "http://127.0.0.1:6006");
+    expect(frame).toHaveAttribute("src", BOARD);
     const link = screen.getByRole("link", { name: /open in a new tab/i });
-    expect(link).toHaveAttribute("href", "http://127.0.0.1:6006");
+    expect(link).toHaveAttribute("href", BOARD);
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
@@ -50,14 +53,14 @@ describe("EmbeddedTool", () => {
     ).toBeInTheDocument();
     unmount();
 
-    render(<EmbeddedTool title="Sweep TensorBoard" url="http://127.0.0.1:6006" />);
+    render(<EmbeddedTool title="Sweep TensorBoard" url={BOARD} />);
     expect(
       screen.getByRole("link", { name: "Open in a new tab: Sweep TensorBoard" }),
     ).toBeInTheDocument();
   });
 
   it("carries its own title as a heading, not a plain span", () => {
-    render(<EmbeddedTool title="TensorBoard" url="http://127.0.0.1:6006" />);
+    render(<EmbeddedTool title="TensorBoard" url={BOARD} />);
     expect(screen.getByRole("heading", { level: 2, name: "TensorBoard" })).toBeInTheDocument();
   });
 

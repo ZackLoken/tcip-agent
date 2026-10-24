@@ -20,7 +20,10 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import IO, cast
+
+from pydantic import BaseModel
 
 from tcip_store import canonical_path
 
@@ -29,19 +32,49 @@ if sys.platform == "win32":
 
 logger = logging.getLogger(__name__)
 
+BOARD_PATH = "/api/training/runs/{experiment_id}/tensorboard"
+"""The path a run's, trial's or sweep's TensorBoard serves under, its id filled in.
+
+The TensorBoard serves it on the loopback host at its own port, and the web backend forwards the
+same path to the TensorBoard it launched.
+"""
+
+RELOAD_SELECTOR = "app-header-reload button.reload-button"
+"""The installed TensorBoard frontend's header reload button, an internal name no version keeps."""
+
+
+class TensorboardServing(BaseModel):
+    """A TensorBoard serving a board.
+
+    ``url`` is the path it serves under (:data:`BOARD_PATH`), ending in ``/``, which the
+    TensorBoard answers at ``port`` on the loopback host and the web backend forwards for the
+    TensorBoards it launched.
+    """
+
+    url: str
+    port: int
+
+
+class TensorboardFailure(BaseModel):
+    """A TensorBoard launch that did not start: why, and what its child wrote when it ran."""
+
+    error: str
+    output: str | None
+
+
+TensorboardLaunch = TensorboardServing | TensorboardFailure
+
 
 @dataclass
 class _Launched:
-    """A TensorBoard child this process tracks.
+    """A TensorBoard child this process tracks: its process, its output capture and its answer.
 
-    It carries the child's port, the URL it serves at, its output capture and its lifetime tie.
+    The process is the guardian where a guardian sits in front of the TensorBoard.
     """
 
     proc: subprocess.Popen
-    port: int
-    url: str
     output: IO[bytes]
-    lifetime_tie: str
+    serving: TensorboardServing
 
 
 _TB_PROCESSES: dict[str, _Launched] = {}
@@ -121,21 +154,23 @@ if sys.platform == "win32":
             _win_kernel32 = dll
         return _win_kernel32
 
-    def _ensure_win_job() -> tuple[int | None, str | None]:
+    def _ensure_win_job() -> int | None:
         """Create, once, the job object every child is assigned to.
 
-        Returns the handle and ``None`` on success, or ``None`` and the failure reason. The
-        kernel closes it, and every child still assigned, when this process's handles all close.
+        Returns the handle, or ``None`` with the failure reason logged. The kernel closes it, and
+        every child still assigned, when this process's handles all close.
         """
         global _win_job_handle
         if _win_job_handle is not None:
-            return _win_job_handle, None
+            return _win_job_handle
         kernel32 = _get_win_kernel32()
         handle = kernel32.CreateJobObjectW(None, None)
         if not handle:
-            reason = f"CreateJobObjectW failed: {ctypes.WinError(ctypes.get_last_error())}"
-            logger.warning(reason)
-            return None, reason
+            logger.warning(
+                "CreateJobObjectW failed: %s",
+                ctypes.WinError(ctypes.get_last_error()),
+            )
+            return None
         info = _JobObjectExtendedLimitInformation()
         info.BasicLimitInformation.LimitFlags = (
             _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
@@ -146,32 +181,29 @@ if sys.platform == "win32":
             ctypes.byref(info),
             ctypes.sizeof(info),
         ):
-            reason = f"SetInformationJobObject failed: {ctypes.WinError(ctypes.get_last_error())}"
-            logger.warning(reason)
+            logger.warning(
+                "SetInformationJobObject failed: %s",
+                ctypes.WinError(ctypes.get_last_error()),
+            )
             kernel32.CloseHandle(handle)
-            return None, reason
+            return None
         _win_job_handle = handle
-        return handle, None
+        return handle
 
-    def _assign_to_win_job(proc: subprocess.Popen) -> str | None:
-        """Tie ``proc`` to the job object so it dies with this process.
-
-        Returns ``None`` on success, or the failure reason, which is also logged.
-        """
-        job, reason = _ensure_win_job()
+    def _assign_to_win_job(proc: subprocess.Popen) -> None:
+        """Tie ``proc`` to the job object so it dies with this process; a failure is logged."""
+        job = _ensure_win_job()
         if job is None:
-            return reason
+            return
         kernel32 = _get_win_kernel32()
         # subprocess.Popen keeps the raw process handle here on Windows; nothing else exposes it.
         handle = cast(int, getattr(proc, "_handle"))
         if not kernel32.AssignProcessToJobObject(job, handle):
-            reason = (
-                f"AssignProcessToJobObject failed for pid {proc.pid}: "
-                f"{ctypes.WinError(ctypes.get_last_error())}"
+            logger.warning(
+                "AssignProcessToJobObject failed for pid %s: %s",
+                proc.pid,
+                ctypes.WinError(ctypes.get_last_error()),
             )
-            logger.warning(reason)
-            return reason
-        return None
 
 
 def _stop_all_tracked() -> None:
@@ -199,8 +231,8 @@ def _register_atexit_once() -> None:
     atexit.register(_stop_all_tracked)
 
 
-def _tensorboard_argv(logdir: str, port: int) -> list[str]:
-    """Return the TensorBoard child's command line over ``logdir`` at ``port``."""
+def _tensorboard_argv(logdir: str, port: int, prefix: str) -> list[str]:
+    """Return the TensorBoard child's command line over ``logdir`` at ``port`` under ``prefix``."""
     from tcip_mcp.web_client import LOOPBACK_HOST
 
     # tensorboard has no __main__.py; tensorboard.main runs under its own __main__ guard.
@@ -214,8 +246,8 @@ def _tensorboard_argv(logdir: str, port: int) -> list[str]:
         str(port),
         "--host",
         LOOPBACK_HOST,
-        "--reload_interval",
-        "5",
+        "--path_prefix",
+        prefix,
     ]
 
 
@@ -266,56 +298,50 @@ def _accepts(port: int) -> bool:
     return True
 
 
-def launch_tensorboard(logdir: str) -> dict:
-    """Launch a TensorBoard process for the given log directory.
+def launch_tensorboard(directory: Path) -> TensorboardLaunch:
+    """Launch, or reuse, the TensorBoard over the board of the run, trial or sweep ``directory``.
 
-    The process is tracked by the directory's one spelling (``tcip_store.canonical_path``), which
-    the child is handed and the answer carries. The call returns once the child accepts a
-    connection at its URL, or once it has exited.
+    The board is ``experiments.board_of``'s, and the process is tracked by its one spelling
+    (``tcip_store.canonical_path``), which the child is handed; the child serves under
+    :data:`BOARD_PATH` filled with the directory's name. The call returns once the child accepts
+    a connection at its port, or once it has exited.
 
-    Returns dict with 'url', 'port', 'pid', 'logdir', 'lifetime_tie', or ``{'error': ..., 'output':
-    ...}`` when the process died during startup. If TensorBoard is already running for this logdir,
-    returns existing info. ``lifetime_tie`` is ``"job"``, ``"guardian"``, or ``"none: <reason>"``.
-    An exception during the launch or the tie assignment is a failed launch, the child killed and
-    waited if one was started, reported back as ``error`` (a kill this cannot confirm within
-    ``_STOP_WAIT_SECONDS`` named by pid in that message); a platform tie call returning falsy for
-    failure still succeeds with ``lifetime_tie`` ``"none: <reason>"``.
+    Answers the :class:`TensorboardServing` already tracked for the board, or the new one's, or a
+    :class:`TensorboardFailure` when the child died during startup (with what it wrote). An
+    exception while taking a port, opening the output capture, starting the child or assigning
+    its lifetime tie is a failed launch, the child killed and waited if one was started,
+    answered as a failure with no ``output`` (a kill this cannot confirm within
+    ``_STOP_WAIT_SECONDS`` named by pid in its ``error``); a platform tie call returning falsy
+    for failure is logged and the child still serves.
     """
-    from tcip_mcp.web_client import LOOPBACK_HOST, free_port
+    from tcip_mcp.web_client import free_port
 
-    key = logdir = canonical_path(logdir)
+    key = logdir = _board_key(directory)
 
     entry = _running(key)
     if entry is not None:
-        return {
-            "url": entry.url,
-            "port": entry.port,
-            "pid": entry.proc.pid,
-            "logdir": logdir,
-            "lifetime_tie": entry.lifetime_tie,
-        }
+        return entry.serving
 
-    port = free_port(6006)
     _register_atexit_once()
-
-    # The child outlives this call and nothing reads its streams, so they go to a temp file:
-    # an undrained pipe blocks the writer as soon as the OS buffer fills.
-    output = tempfile.TemporaryFile()
-    argv = _tensorboard_argv(logdir, port)
-    launch_argv = argv if sys.platform == "win32" else _guardian_argv(argv)
-
+    prefix = BOARD_PATH.format(experiment_id=directory.name)
+    output: IO[bytes] | None = None
     proc: subprocess.Popen | None = None
     try:
+        port = free_port(6006)
+        # The child outlives this call and nothing reads its streams, so they go to a temp file:
+        # an undrained pipe blocks the writer as soon as the OS buffer fills.
+        output = tempfile.TemporaryFile()
+        argv = _tensorboard_argv(logdir, port, prefix)
         proc = subprocess.Popen(
-            launch_argv, stdout=output, stderr=subprocess.STDOUT
+            argv if sys.platform == "win32" else _guardian_argv(argv),
+            stdout=output,
+            stderr=subprocess.STDOUT,
         )
         if sys.platform == "win32":
-            failure = _assign_to_win_job(proc)
-            lifetime_tie = "job" if failure is None else f"none: {failure}"
-        else:
-            lifetime_tie = "guardian"
+            _assign_to_win_job(proc)
     except Exception as e:
-        output.close()
+        if output is not None:
+            output.close()
         error = str(e)
         if proc is not None and proc.poll() is None:
             proc.kill()
@@ -324,7 +350,7 @@ def launch_tensorboard(logdir: str) -> dict:
             except subprocess.TimeoutExpired:
                 error = f"{error}; kill unconfirmed for pid {proc.pid}"
         logger.warning("Failed to launch TensorBoard: %s", error)
-        return {"error": error, "logdir": logdir}
+        return TensorboardFailure(error=error, output=None)
 
     while proc.poll() is None and not _accepts(port):
         time.sleep(_ACCEPT_POLL_SECONDS)
@@ -335,26 +361,31 @@ def launch_tensorboard(logdir: str) -> dict:
             proc.returncode,
             detail,
         )
-        return {
-            "error": f"tensorboard exited during startup with code {proc.returncode}",
-            "output": detail,
-            "logdir": logdir,
-        }
+        return TensorboardFailure(
+            error=f"tensorboard exited during startup with code {proc.returncode}",
+            output=detail,
+        )
 
-    url = f"http://{LOOPBACK_HOST}:{port}"
-    _TB_PROCESSES[key] = _Launched(
-        proc=proc, port=port, url=url, output=output, lifetime_tie=lifetime_tie
-    )
+    serving = TensorboardServing(url=f"{prefix}/", port=port)
+    _TB_PROCESSES[key] = _Launched(proc=proc, output=output, serving=serving)
     logger.info(
-        "TensorBoard started: %s (pid=%d, logdir=%s)", url, proc.pid, logdir
+        "TensorBoard started on port %d under %s (pid=%d, logdir=%s)",
+        port,
+        prefix,
+        proc.pid,
+        logdir,
     )
-    return {
-        "url": url,
-        "port": port,
-        "pid": proc.pid,
-        "logdir": logdir,
-        "lifetime_tie": lifetime_tie,
-    }
+    return serving
+
+
+def _board_key(directory: Path) -> str:
+    """Return the one spelling of the run, trial or sweep ``directory``'s board, its tracking key.
+
+    The board is ``experiments.board_of``'s, spelled by ``tcip_store.canonical_path``.
+    """
+    from tcip_mcp.experiments import board_of
+
+    return canonical_path(board_of(directory))
 
 
 def _running(key: str) -> _Launched | None:
@@ -366,10 +397,14 @@ def _running(key: str) -> _Launched | None:
     return entry
 
 
-def running_url(logdir: str) -> str | None:
-    """Return the URL the TensorBoard tracked under ``logdir`` serves at, or ``None``."""
-    entry = _running(canonical_path(logdir))
-    return entry.url if entry is not None else None
+def running(directory: Path) -> TensorboardServing | None:
+    """Return the TensorBoard this process runs over ``directory``'s board, or ``None``.
+
+    ``directory`` is a run, trial or sweep directory, its board the one
+    :func:`launch_tensorboard` tracks.
+    """
+    entry = _running(_board_key(directory))
+    return entry.serving if entry is not None else None
 
 
 def stop_tensorboard(logdir: str) -> dict:
@@ -381,9 +416,9 @@ def stop_tensorboard(logdir: str) -> dict:
     ``{"status": "not_running"}``. A kill this cannot confirm reaped within that second wait is
     logged (the key and pid) and answered ``{"status": "kill_unconfirmed", "pid": ...}``.
 
-    On a ``"guardian"`` tie, ``entry.proc`` is the guardian, and a kill that reaches it can orphan
-    a TensorBoard the guardian had not yet stopped; the answer is then ``stopped`` or
-    ``kill_unconfirmed`` for the guardian itself.
+    Where a guardian sits in front of the TensorBoard, ``entry.proc`` is the guardian, and a
+    kill that reaches it can orphan a TensorBoard the guardian had not yet stopped; the answer is
+    then ``stopped`` or ``kill_unconfirmed`` for the guardian itself.
     """
     key = canonical_path(logdir)
     if key not in _TB_PROCESSES:

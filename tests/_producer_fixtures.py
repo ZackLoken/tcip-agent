@@ -580,7 +580,7 @@ def fake_popen(
     """Replace ``subprocess.Popen`` and ``launch_tensorboard`` with stand-ins starting nothing.
 
     The ``Popen`` stand-in records each argv into ``captured`` and starts no process, and the
-    ``launch_tensorboard`` one returns an empty mapping. Returns the ``Popen`` stand-in class,
+    ``launch_tensorboard`` one is :func:`no_tensorboard`'s. Returns the ``Popen`` stand-in class,
     whose instances share one ``pid``.
     """
     import subprocess
@@ -594,11 +594,25 @@ def fake_popen(
             captured.append(argv)
 
     monkeypatch.setattr(subprocess, "Popen", _RecordedChild)
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
-        lambda *a, **k: {},
-    )
+    no_tensorboard(monkeypatch)
     return _RecordedChild
+
+
+def no_tensorboard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace ``launch_tensorboard`` with a stand-in that starts nothing and answers so.
+
+    Its answer is the ``TensorboardFailure`` naming the directory it was handed.
+    """
+    from tcip_mcp.pipelines.training import tensorboard_manager as tb
+
+    monkeypatch.setattr(
+        tb,
+        "launch_tensorboard",
+        lambda directory: tb.TensorboardFailure(
+            error=f"no TensorBoard starts under this test: {directory}",
+            output=None,
+        ),
+    )
 
 
 def kept(proposed: dict, *assigned: tuple[int, str]) -> StagedAssignments:

@@ -1,6 +1,6 @@
 """A parent process that launches a TensorBoard stand-in through the manager.
 
-It prints, on one line, the pid ``launch_tensorboard`` returned and the stand-in's own pid; then
+It prints, on one line, the pid of the child the manager tracks and the stand-in's own pid; then
 sleeps until killed or exits, by its ``mode`` argument. ``--no-tie`` disables the platform
 lifetime tie before the launch; ``--thread`` launches from a background thread that has finished
 before the pids print.
@@ -11,6 +11,7 @@ from __future__ import annotations
 import sys
 import threading
 import time
+from pathlib import Path
 
 
 def listening_argv(
@@ -40,7 +41,7 @@ def listening_argv(
     return [sys.executable, "-c", script]
 
 
-def _sleep_argv(logdir: str, port: int) -> list[str]:
+def _sleep_argv(logdir: str, port: int, prefix: str) -> list[str]:
     return listening_argv(port)
 
 
@@ -72,7 +73,7 @@ def _standin_pid(returned_pid: int, guardian_expected: bool) -> int:
 
 
 def main() -> None:
-    logdir, mode = sys.argv[1], sys.argv[2]
+    directory, mode = Path(sys.argv[1]), sys.argv[2]
     flags = set(sys.argv[3:])
 
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
@@ -80,12 +81,12 @@ def main() -> None:
     tb._tensorboard_argv = _sleep_argv
     if "--no-tie" in flags:
         tb._guardian_argv = lambda argv: argv
-        tb._assign_to_win_job = lambda proc: "disabled for test"
+        tb._assign_to_win_job = lambda proc: None
 
-    launched: dict = {}
+    launched: dict[str, tb.TensorboardLaunch] = {}
 
     def _launch() -> None:
-        launched["info"] = tb.launch_tensorboard(logdir)
+        launched["info"] = tb.launch_tensorboard(directory)
 
     if "--thread" in flags:
         thread = threading.Thread(target=_launch)
@@ -94,7 +95,10 @@ def main() -> None:
     else:
         _launch()
 
-    returned_pid = launched["info"]["pid"]
+    info = launched["info"]
+    if not isinstance(info, tb.TensorboardServing):
+        sys.exit(f"launch_tensorboard did not serve: {info}")
+    returned_pid = tb._TB_PROCESSES[tb._board_key(directory)].proc.pid
     guardian_expected = sys.platform != "win32" and "--no-tie" not in flags
     print(
         returned_pid, _standin_pid(returned_pid, guardian_expected), flush=True

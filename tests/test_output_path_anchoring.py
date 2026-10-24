@@ -26,16 +26,14 @@ def test_launch_training_defaults_into_the_projects_experiment_store(
     from tcip_mcp.tools import training_tools
     from tests._chain_fixtures import BLOB_BUILDER
     from tests._producer_fixtures import (
+        no_tensorboard,
         seed_bud_images,
         small_detection_config,
     )
     from tests._verified_checkpoint_fixtures import run_to_end
 
     images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET, n=2)
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
-        lambda *a, **k: {},
-    )
+    no_tensorboard(monkeypatch)
 
     res = training_tools.launch_training(
         tmp_path,

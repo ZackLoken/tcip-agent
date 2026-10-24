@@ -243,13 +243,11 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(
     """
     pytest.importorskip("torchvision")
     from tcip_mcp.tools.training_tools import launch_training
+    from tests._producer_fixtures import no_tensorboard
     from tests._verified_checkpoint_fixtures import run_to_end
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
-        lambda *a, **k: {},
-    )
+    no_tensorboard(monkeypatch)
 
     images_dir, csv_path = write_regression_dataset(
         tmp_path, intensities=[0.1, 0.3, 0.5, 0.7], values=[0.1, 0.2, 0.3, 0.4]

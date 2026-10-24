@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,7 +12,15 @@ from fastapi.testclient import TestClient
 from tests._training_values import fifo_search, sweep_space
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import (
+        AsyncIterator,
+        Awaitable,
+        Callable,
+        Mapping,
+    )
+
+    import httpx
+    from starlette.types import Receive
 
     from tcip_mcp.pipelines.training.envelope import TrainContext
 
@@ -424,11 +433,15 @@ def test_tensorboard_route_404s_for_unknown_run(
 def test_tensorboard_route_launches_over_the_run_s_own_board(
     opened_client: TestClient,
     tmp_path: Path,
-    tb_launches: list[str],
+    tb_launches: list[Path],
 ) -> None:
-    # The GUI's link comes from a TensorBoard this process started, so the route must reach
-    # launch_tensorboard with the run's own log directory and hand back what it returned.
+    """The route launches over the run's own directory and answers what the launch serves.
+
+    The frame's URL comes from a TensorBoard this process started, so the route reaches
+    ``launch_tensorboard`` with the run's directory and answers the TensorBoard it tracks.
+    """
     from tcip_mcp.experiments import board_of
+    from tcip_mcp.pipelines.training.tensorboard_manager import running
 
     run_dir = _opened("run-42", tmp_path)
     board_of(run_dir).mkdir()
@@ -436,8 +449,387 @@ def test_tensorboard_route_launches_over_the_run_s_own_board(
 
     resp = opened_client.post("/api/training/runs/run-42/tensorboard", json={})
     assert resp.status_code == 200
-    assert resp.json()["url"] == "http://127.0.0.1:6006"
-    assert tb_launches == [str(board_of(run_dir))]
+    serving = running(run_dir)
+    assert serving is not None
+    assert resp.json() == serving.model_dump()
+    assert tb_launches == [run_dir]
+
+
+def test_a_board_path_reaches_the_tensorboard_serving_it_as_received(
+    opened_client: TestClient, tmp_path: Path
+) -> None:
+    """The board path answers what the TensorBoard serving it answers on its own port.
+
+    A real TensorBoard the launch route starts over a run's one-scalar event file answers its
+    index page and a pre-gzipped asset through the backend byte for byte, each with the
+    ``Content-Encoding`` it was served with and without the ``Connection`` header it sends, which
+    belongs to its own connection; a form-encoded data post passes whole, so one naming no tag is
+    refused by the TensorBoard and one naming the tag is answered.
+    """
+    import httpx
+    from torch.utils.tensorboard import SummaryWriter
+
+    from tcip_mcp.experiments import board_of
+    from tcip_mcp.pipelines.training.tensorboard_manager import (
+        stop_tensorboard,
+    )
+    from tcip_mcp.web_client import LOOPBACK_HOST
+
+    run_dir = _opened("run-board", tmp_path)
+    with SummaryWriter(str(board_of(run_dir))) as writer:
+        writer.add_scalar("loss", 0.5, 1)
+
+    launched = opened_client.post(
+        "/api/training/runs/run-board/tensorboard", json={}
+    ).json()
+    try:
+        url = launched["url"]
+        own_port = f"http://{LOOPBACK_HOST}:{launched['port']}"
+        for page, encoding in ((url, "identity"), (f"{url}index.js", "gzip")):
+            with (
+                opened_client.stream("GET", page) as forwarded,
+                httpx.stream("GET", own_port + page) as served,
+            ):
+                assert forwarded.status_code == served.status_code == 200
+                assert forwarded.headers["content-encoding"] == encoding
+                assert served.headers["content-encoding"] == encoding
+                assert served.headers["connection"] == "close"
+                assert "connection" not in forwarded.headers
+                assert b"".join(forwarded.iter_raw()) == b"".join(
+                    served.iter_raw()
+                )
+
+        scalars = f"{url}data/plugin/scalars/scalars_multirun"
+        answered = opened_client.post(
+            scalars, data={"tag": "loss", "runs": "."}
+        )
+        assert answered.status_code == 200, answered.text
+        assert (
+            opened_client.post(scalars, data={"runs": "."}).status_code == 400
+        )
+    finally:
+        stop_tensorboard(str(board_of(run_dir)))
+
+
+def test_a_forward_whose_connection_fails_closes_its_client(
+    opened_client: TestClient,
+    tmp_path: Path,
+    tb_launches: list[Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A forward whose send to the TensorBoard raises still closes the client it opened."""
+    import httpx
+
+    url = _served("run-refused", tmp_path, opened_client)
+    opened: list[httpx.AsyncClient] = []
+
+    class _RefusedClient(httpx.AsyncClient):
+        def __init__(self) -> None:
+            super().__init__()
+            opened.append(self)
+
+        async def send(
+            self, request: httpx.Request, **kwargs: object
+        ) -> httpx.Response:
+            raise httpx.ConnectError("refused", request=request)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _RefusedClient)
+
+    with pytest.raises(httpx.ConnectError):
+        opened_client.get(url)
+    assert [client.is_closed for client in opened] == [True]
+
+
+def _served(experiment_id: str, tmp_path: Path, client: TestClient) -> str:
+    """Open a run with an event file, launch its TensorBoard through the route; return its URL.
+
+    The TensorBoard is :func:`tb_launches`'s listening stand-in, which the caller requests.
+    """
+    from tcip_mcp.experiments import board_of
+
+    run_dir = _opened(experiment_id, tmp_path)
+    board_of(run_dir).mkdir()
+    (board_of(run_dir) / "events.out.tfevents.1.host").write_bytes(b"")
+    return client.post(
+        f"/api/training/runs/{experiment_id}/tensorboard", json={}
+    ).json()["url"]
+
+
+def _upstream(
+    monkeypatch: pytest.MonkeyPatch,
+    headers: list[tuple[str, str]],
+    chunks: Callable[[], AsyncIterator[bytes]],
+    close_error: Exception | None = None,
+) -> tuple[list[httpx.AsyncClient], list[httpx.AsyncByteStream]]:
+    """Make every forward's client answer through httpx's mock transport.
+
+    Each answer is a 200 with ``headers`` and a body of ``chunks()``, whose close raises
+    ``close_error`` when one is given. Returns the clients the forwards opened and the bodies
+    they were answered with, each recording whether it closed.
+    """
+    import httpx
+
+    opened: list[httpx.AsyncClient] = []
+    bodies: list[httpx.AsyncByteStream] = []
+
+    class _Body(httpx.AsyncByteStream):
+        closed = False
+
+        def __aiter__(self) -> AsyncIterator[bytes]:
+            return chunks()
+
+        async def aclose(self) -> None:
+            self.closed = True
+            if close_error is not None:
+                raise close_error
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        bodies.append(_Body())
+        return httpx.Response(200, headers=headers, stream=bodies[-1])
+
+    class _Upstream(httpx.AsyncClient):
+        def __init__(self) -> None:
+            super().__init__(transport=httpx.MockTransport(answer))
+            opened.append(self)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Upstream)
+    return opened, bodies
+
+
+_IDENTITY = ("content-encoding", "identity")
+"""An upstream answer's own encoding, which the app's compression passes on untouched."""
+
+
+async def _forward(
+    url: str,
+    spec_version: str,
+    receive: Callable[[], Awaitable[Mapping[str, object]]],
+    send: Callable[[Mapping[str, object]], Awaitable[None]],
+) -> None:
+    """Drive the app's GET of ``url`` as a server speaking ASGI ``spec_version`` drives it.
+
+    The request's one body message is answered first, then ``receive`` answers. A forward still
+    running after ten seconds is cancelled and fails the caller with an ``AssertionError`` naming
+    the deadline, whatever its cleanup raised while unwinding.
+    """
+    from tcip_web.app import app
+
+    async def arriving() -> Mapping[str, object]:
+        nonlocal requested
+        if not requested:
+            requested = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        return await receive()
+
+    requested = False
+    deadline = asyncio.timeout(10)
+    try:
+        async with deadline:
+            await app(
+                {
+                    "type": "http",
+                    "asgi": {"version": "3.0", "spec_version": spec_version},
+                    "http_version": "1.1",
+                    "method": "GET",
+                    "scheme": "http",
+                    "path": url,
+                    "raw_path": url.encode(),
+                    "root_path": "",
+                    "query_string": b"",
+                    "headers": [(b"host", b"127.0.0.1")],
+                    "server": ("127.0.0.1", 80),
+                    "client": ("127.0.0.1", 50000),
+                },
+                arriving,
+                send,
+            )
+    finally:
+        assert not deadline.expired(), (
+            "the forward was still running at its ten-second deadline"
+        )
+
+
+async def _never() -> Mapping[str, object]:
+    """Wait for an arrival that never comes, until cancelled."""
+    await asyncio.Event().wait()
+    raise AssertionError("an event no one sets was set")
+
+
+@pytest.mark.parametrize("spec_version", ["2.3", "2.4"])
+def test_a_forwarded_answer_sends_each_chunk_on_as_the_upstream_sends_it(
+    opened_client: TestClient,
+    tmp_path: Path,
+    tb_launches: list[Path],
+    monkeypatch: pytest.MonkeyPatch,
+    spec_version: str,
+) -> None:
+    """A forwarded answer sends each chunk on as it arrives, every repeated field kept.
+
+    The upstream withholds its second chunk until the first has been sent on, and the first is
+    seen sent while the second is still withheld; two ``Set-Cookie`` fields arrive as two; once
+    the answer ends, its upstream body and client are closed. ``spec_version`` is the ASGI
+    version the server speaks, which picks the branch Starlette streams under.
+    """
+    url = _served(
+        f"run-streamed-{spec_version.replace('.', '')}",
+        tmp_path,
+        opened_client,
+    )
+    first_sent = asyncio.Event()
+    produced: list[bytes] = []
+    sent: list[bytes] = []
+    fields: list[tuple[bytes, bytes]] = []
+    withheld_when_first_sent: list[bool] = []
+
+    async def chunks() -> AsyncIterator[bytes]:
+        produced.append(b"one")
+        yield b"one"
+        await first_sent.wait()
+        produced.append(b"two")
+        yield b"two"
+
+    async def send(message: Mapping[str, object]) -> None:
+        if message["type"] == "http.response.start":
+            fields.extend(
+                cast("list[tuple[bytes, bytes]]", message["headers"])
+            )
+        elif message["type"] == "http.response.body":
+            sent.append(cast(bytes, message["body"]))
+            if message["body"] == b"one":
+                withheld_when_first_sent.append(b"two" not in produced)
+                first_sent.set()
+
+    opened, bodies = _upstream(
+        monkeypatch,
+        [_IDENTITY, ("set-cookie", "a=1"), ("set-cookie", "b=2")],
+        chunks,
+    )
+
+    asyncio.run(_forward(url, spec_version, _never, send))
+
+    assert sent == [b"one", b"two", b""]
+    assert withheld_when_first_sent == [True]
+    assert [value for name, value in fields if name == b"set-cookie"] == [
+        b"a=1",
+        b"b=2",
+    ]
+    assert [client.is_closed for client in opened] == [True]
+    assert [getattr(body, "closed") for body in bodies] == [True]
+
+
+@pytest.mark.parametrize(
+    "close_error",
+    [None, RuntimeError("the upstream close failed")],
+    ids=["upstream-closes", "upstream-close-raises"],
+)
+def test_a_forward_closes_its_upstream_once_it_hears_the_browser_leave(
+    opened_client: TestClient,
+    tmp_path: Path,
+    tb_launches: list[Path],
+    monkeypatch: pytest.MonkeyPatch,
+    close_error: Exception | None,
+) -> None:
+    """Under ASGI 2.3, a disconnect heard after the first chunk was sent closes the upstream.
+
+    The upstream sends one chunk and then withholds the next; the server reports the browser
+    gone only once that chunk has been sent on, and that disconnect is consumed. Starlette's own
+    disconnect listener is seen returning normally, and the upstream is seen still awaiting its
+    withheld chunk when that await is cancelled, so the stream was still running when the heard
+    disconnect ended it. The upstream body and the client are then closed, the client also when
+    the body's close raises ``close_error``, which the forward then raises.
+    """
+    from tcip_web.routes.training import _Forwarded
+
+    url = _served("run-heard-leaving", tmp_path, opened_client)
+    first_sent = asyncio.Event()
+    sent: list[bytes] = []
+    disconnects: list[Mapping[str, object]] = []
+    withholding: list[str] = []
+    listened: list[str] = []
+    listen = _Forwarded.listen_for_disconnect
+
+    async def listening(answer: _Forwarded, receive: Receive) -> None:
+        await listen(answer, receive)
+        listened.append("returned")
+
+    monkeypatch.setattr(_Forwarded, "listen_for_disconnect", listening)
+
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b"one"
+        withholding.append("awaiting")
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            withholding.append("cancelled")
+            raise
+
+    async def receive() -> Mapping[str, object]:
+        await first_sent.wait()
+        disconnects.append({"type": "http.disconnect"})
+        return disconnects[-1]
+
+    async def send(message: Mapping[str, object]) -> None:
+        if message["type"] == "http.response.body":
+            sent.append(cast(bytes, message["body"]))
+            first_sent.set()
+
+    opened, bodies = _upstream(
+        monkeypatch, [_IDENTITY], chunks, close_error=close_error
+    )
+
+    if close_error is None:
+        asyncio.run(_forward(url, "2.3", receive, send))
+    else:
+        with pytest.raises(type(close_error), match=str(close_error)):
+            asyncio.run(_forward(url, "2.3", receive, send))
+
+    assert sent == [b"one"]
+    assert disconnects == [{"type": "http.disconnect"}]
+    assert listened == ["returned"]
+    assert withholding == ["awaiting", "cancelled"]
+    assert [getattr(body, "closed") for body in bodies] == [True]
+    assert [client.is_closed for client in opened] == [True]
+
+
+def test_a_forward_closes_its_upstream_once_a_send_to_the_browser_fails(
+    opened_client: TestClient,
+    tmp_path: Path,
+    tb_launches: list[Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Under ASGI 2.4, a send failing after the first chunk was sent closes the upstream.
+
+    The first chunk is sent on; the send of the second raises as a closed connection's does,
+    which Starlette raises as ``ClientDisconnect``, and the upstream body and client are then
+    closed.
+    """
+    from starlette.requests import ClientDisconnect
+
+    url = _served("run-send-fails", tmp_path, opened_client)
+    first_sent = asyncio.Event()
+    sent: list[bytes] = []
+
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b"one"
+        await first_sent.wait()
+        yield b"two"
+        await asyncio.Event().wait()
+
+    async def send(message: Mapping[str, object]) -> None:
+        if message["type"] == "http.response.body":
+            if sent:
+                raise OSError("the browser's connection is closed")
+            sent.append(cast(bytes, message["body"]))
+            first_sent.set()
+
+    opened, bodies = _upstream(monkeypatch, [_IDENTITY], chunks)
+
+    with pytest.raises(ClientDisconnect):
+        asyncio.run(_forward(url, "2.4", _never, send))
+
+    assert sent == [b"one"]
+    assert [client.is_closed for client in opened] == [True]
+    assert [getattr(body, "closed") for body in bodies] == [True]
 
 
 def test_tensorboard_route_404s_with_no_logs_for_a_run_with_no_event_file(
@@ -597,12 +989,11 @@ def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
     Relaunching starts a new run directory through the real launcher and a real child, its
     launch record replaying the picked run's config and naming it as parent.
     """
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
-        lambda *a, **k: {},
-    )
     from tcip_mcp.tools.training_tools import launch_training
+    from tests._producer_fixtures import no_tensorboard
     from tests._verified_checkpoint_fixtures import run_to_end
+
+    no_tensorboard(monkeypatch)
 
     first = launch_training(tmp_path, _regression_config(tmp_path), actor=None)
     assert "error" not in first, first
@@ -639,12 +1030,11 @@ def test_list_runs_route_names_the_run_s_selection_metric(
     import math
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
-        lambda *a, **k: {},
-    )
     from tcip_mcp.tools.training_tools import launch_training
+    from tests._producer_fixtures import no_tensorboard
     from tests._verified_checkpoint_fixtures import run_to_end
+
+    no_tensorboard(monkeypatch)
 
     result = launch_training(
         tmp_path, _regression_config(tmp_path), actor=None
@@ -723,12 +1113,12 @@ def test_a_sweep_and_its_trial_each_have_one_board_whichever_door_launches_it(
     opened_project: Path,
     real_hpo_base_config: dict,
     monkeypatch: pytest.MonkeyPatch,
-    tb_launches: list[str],
+    tb_launches: list[Path],
 ) -> None:
     """TensorBoard launches for a sweep and its trial name the sweep's and the trial's directories.
 
     The launches name the sweep's own directory twice, from its body and from the run route,
-    and the trial's own run board once.
+    and the trial's own directory once; the sweep's board is its own directory.
     """
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.experiments import board_of, find_sweep
@@ -770,10 +1160,10 @@ def test_a_sweep_and_its_trial_each_have_one_board_whichever_door_launches_it(
 
     sweep_dir = find_sweep(sweep_id, project=opened_project)
     assert sweep_dir is not None and board_of(sweep_dir) == sweep_dir
-    assert [canonical_path(logdir) for logdir in tb_launches] == [
+    assert [canonical_path(directory) for directory in tb_launches] == [
         canonical_path(sweep_dir),
         canonical_path(sweep_dir),
-        canonical_path(board_of(trials[0])),
+        canonical_path(trials[0]),
     ]
 
 

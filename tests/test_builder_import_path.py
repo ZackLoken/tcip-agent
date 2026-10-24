@@ -937,6 +937,7 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import launch_training
+    from tests._producer_fixtures import no_tensorboard
     from tests._verified_checkpoint_fixtures import run_to_end
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
@@ -944,10 +945,7 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
     monkeypatch.setattr(
         sys, "path", [p for p in sys.path if p != str(project)]
     )
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
-        lambda *a, **k: {},
-    )
+    no_tensorboard(monkeypatch)
     images_dir, csv_path = write_regression_dataset(
         tmp_path / "ds", intensities=[0.1, 0.9] * 4, values=[0, 1] * 4
     )

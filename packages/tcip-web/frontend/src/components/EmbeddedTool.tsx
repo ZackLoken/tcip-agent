@@ -1,8 +1,10 @@
+import type { Ref } from "react";
+
 /**
  * A titled chrome bar over an iframe, for a tool the platform runs beside the app
- * (TensorBoard). Presentation only: launching, polling and stopping whatever
+ * (TensorBoard). Presentation only: launching, polling, reloading and stopping whatever
  * is embedded belong to the caller, which mounts this once it has a url, a launch in flight,
- * or a failure to show.
+ * or a failure to show, and reaches into a same-origin frame through `frameRef`.
  *
  * The iframe fills its parent, so the parent must have a definite height.
  */
@@ -12,6 +14,7 @@ export function EmbeddedTool({
   loading = false,
   error = null,
   onRetry,
+  frameRef,
 }: {
   title: string;
   url: string | null;
@@ -19,6 +22,7 @@ export function EmbeddedTool({
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
+  frameRef?: Ref<HTMLIFrameElement>;
 }) {
   if (!url && !loading && !error) return null;
 
@@ -41,7 +45,7 @@ export function EmbeddedTool({
       </div>
       <div className="flex-1 overflow-hidden">
         {url ? (
-          <iframe src={url} className="w-full h-full border-0" title={title} />
+          <iframe ref={frameRef} src={url} className="w-full h-full border-0" title={title} />
         ) : loading ? (
           <div className="flex h-full items-center justify-center text-[13px] text-tcip-muted">
             Starting…

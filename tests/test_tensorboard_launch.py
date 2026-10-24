@@ -71,12 +71,32 @@ def test_launch_reports_the_failure_when_the_process_exits_immediately(
 
     monkeypatch.setattr(tb.subprocess, "Popen", DyingChild)
 
-    info = tb.launch_tensorboard(str(tmp_path))
+    info = tb.launch_tensorboard(tmp_path)
 
-    assert "url" not in info
-    assert "exited during startup" in info["error"]
-    assert "tensorboard is not installed" in info["output"]
-    assert tb.running_url(str(tmp_path)) is None
+    assert isinstance(info, tb.TensorboardFailure)
+    assert "exited during startup" in info.error
+    assert info.output is not None
+    assert "tensorboard is not installed" in info.output
+    assert tb.running(tmp_path) is None
+
+
+def test_a_launch_that_takes_no_port_answers_its_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A launch that cannot take a port answers a failure naming why and tracks nothing."""
+    from tcip_mcp import web_client
+    from tcip_mcp.pipelines.training import tensorboard_manager as tb
+
+    def no_port(requested: int) -> int:
+        raise OSError("no port could be bound")
+
+    monkeypatch.setattr(web_client, "free_port", no_port)
+
+    info = tb.launch_tensorboard(tmp_path)
+
+    assert isinstance(info, tb.TensorboardFailure)
+    assert "no port could be bound" in info.error
+    assert tb.running(tmp_path) is None
 
 
 def _never_confirms_kill_popen_class(spawned: list[subprocess.Popen]) -> type:
@@ -136,11 +156,11 @@ def test_launch_folds_an_unconfirmed_kill_into_the_error_after_a_raising_tie_ass
     )
 
     try:
-        info = tb.launch_tensorboard(str(tmp_path))
-        assert "error" in info
-        assert "tie assignment failed" in info["error"]
-        assert "kill unconfirmed" in info["error"]
-        assert str(spawned[0].pid) in info["error"]
+        info = tb.launch_tensorboard(tmp_path)
+        assert isinstance(info, tb.TensorboardFailure)
+        assert "tie assignment failed" in info.error
+        assert "kill unconfirmed" in info.error
+        assert str(spawned[0].pid) in info.error
     finally:
         for proc in spawned:
             if proc.poll() is None:
@@ -170,13 +190,15 @@ def test_stop_logs_a_kill_that_never_confirms(
     )
 
     try:
-        info = tb.launch_tensorboard(str(tmp_path / "unconfirmed-run"))
+        run = tmp_path / "unconfirmed-run"
+        info = tb.launch_tensorboard(run)
+        assert isinstance(info, tb.TensorboardServing)
         with caplog.at_level(logging.WARNING, logger=tb.logger.name):
-            result = tb.stop_tensorboard(str(tmp_path / "unconfirmed-run"))
+            result = tb.stop_tensorboard(tb._board_key(run))
         assert result["status"] == "kill_unconfirmed"
         assert any(
             "unconfirmed-run" in r.getMessage()
-            and str(info["pid"]) in r.getMessage()
+            and str(spawned[0].pid) in r.getMessage()
             for r in caplog.records
         )
     finally:
@@ -206,13 +228,14 @@ def test_exit_sweep_logs_a_kill_that_never_confirms(
     )
 
     try:
-        info = tb.launch_tensorboard(str(tmp_path / "sweep-unconfirmed-run"))
+        info = tb.launch_tensorboard(tmp_path / "sweep-unconfirmed-run")
+        assert isinstance(info, tb.TensorboardServing)
         with caplog.at_level(logging.WARNING, logger=tb.logger.name):
             tb._stop_all_tracked()
         assert any(
             "Exit sweep" in r.getMessage()
             and "sweep-unconfirmed-run" in r.getMessage()
-            and str(info["pid"]) in r.getMessage()
+            and str(spawned[0].pid) in r.getMessage()
             for r in caplog.records
         )
     finally:
@@ -222,22 +245,22 @@ def test_exit_sweep_logs_a_kill_that_never_confirms(
             proc.wait(timeout=30)
 
 
-def test_launch_returns_a_url_for_a_process_that_stays_up(
+def test_launch_serves_the_board_path_for_a_process_that_stays_up(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """A living child serves under its run's board path, which its URL names, until stopped."""
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     monkeypatch.setattr(tb.subprocess, "Popen", LivingChild)
 
-    from tcip_mcp.web_client import LOOPBACK_HOST
-
-    info = tb.launch_tensorboard(str(tmp_path))
+    info = tb.launch_tensorboard(tmp_path)
     try:
-        assert info["url"] == f"http://{LOOPBACK_HOST}:{info['port']}"
-        assert tb.running_url(str(tmp_path)) == info["url"]
+        assert isinstance(info, tb.TensorboardServing)
+        assert info.url == f"/api/training/runs/{tmp_path.name}/tensorboard/"
+        assert tb.running(tmp_path) == info
     finally:
-        tb.stop_tensorboard(str(tmp_path))
-    assert tb.running_url(str(tmp_path)) is None
+        tb.stop_tensorboard(tb._board_key(tmp_path))
+    assert tb.running(tmp_path) is None
 
 
 def test_launch_answers_its_url_only_once_the_board_accepts_a_connection(
@@ -252,40 +275,17 @@ def test_launch_answers_its_url_only_once_the_board_accepts_a_connection(
     monkeypatch.setattr(
         tb,
         "_tensorboard_argv",
-        lambda logdir, port: listening_argv(port, delay=2.0, seconds=30),
+        lambda logdir, port, prefix: listening_argv(
+            port, delay=2.0, seconds=30
+        ),
     )
 
-    info = tb.launch_tensorboard(str(tmp_path))
+    info = tb.launch_tensorboard(tmp_path)
     try:
-        socket.create_connection(
-            (LOOPBACK_HOST, info["port"]), timeout=1
-        ).close()
+        assert isinstance(info, tb.TensorboardServing)
+        socket.create_connection((LOOPBACK_HOST, info.port), timeout=1).close()
     finally:
-        tb.stop_tensorboard(str(tmp_path))
-
-
-def test_launch_reports_the_platform_lifetime_tie(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A launch's lifetime_tie is ``job`` on Windows and ``guardian`` elsewhere.
-
-    The board's argv is replaced by a sleeping Python process.
-    """
-    from tcip_mcp.pipelines.training import tensorboard_manager as tb
-
-    monkeypatch.setattr(
-        tb,
-        "_tensorboard_argv",
-        lambda logdir, port: listening_argv(port, seconds=30),
-    )
-
-    info = tb.launch_tensorboard(str(tmp_path))
-    try:
-        assert info["lifetime_tie"] == (
-            "job" if sys.platform == "win32" else "guardian"
-        )
-    finally:
-        tb.stop_tensorboard(str(tmp_path))
+        tb.stop_tensorboard(tb._board_key(tmp_path))
 
 
 def test_a_board_is_tracked_under_the_one_spelling_the_store_keys_its_directory_by(
@@ -293,31 +293,83 @@ def test_a_board_is_tracked_under_the_one_spelling_the_store_keys_its_directory_
 ) -> None:
     """A board is tracked under the one spelling the store keys its directory by.
 
-    A board launched at the not-yet-existing ``Board`` is found and stopped under ``BOARD``
+    A board launched for the not-yet-existing run ``Board`` is found and stopped under ``BOARD``
     exactly when ``canonical_path`` equates the two spellings; when it does not, the board is
     neither found nor stopped there.
     """
+    from tcip_mcp.experiments import board_of
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
     from tcip_store import canonical_path
 
     monkeypatch.setattr(
         tb,
         "_tensorboard_argv",
-        lambda logdir, port: listening_argv(port, seconds=30),
+        lambda logdir, port, prefix: listening_argv(port, seconds=30),
     )
-    launched, other = str(tmp_path / "Board"), str(tmp_path / "BOARD")
+    launched, other = tmp_path / "Board", tmp_path / "BOARD"
     one_directory = canonical_path(launched) == canonical_path(other)
 
     info = tb.launch_tensorboard(launched)
     try:
-        assert (tb.running_url(other) == info["url"]) is one_directory
+        assert (tb.running(other) == info) is one_directory
         assert (
-            tb.stop_tensorboard(other)["status"] == "stopped"
+            tb.stop_tensorboard(str(board_of(other)))["status"] == "stopped"
         ) is one_directory
-        assert (tb.running_url(launched) is None) is one_directory
+        assert (tb.running(launched) is None) is one_directory
     finally:
-        tb.stop_tensorboard(launched)
-        tb.stop_tensorboard(other)
+        tb.stop_tensorboard(str(board_of(launched)))
+        tb.stop_tensorboard(str(board_of(other)))
+
+
+def test_the_installed_tensorboard_declares_the_reload_selector() -> None:
+    """The reload selector names an element of the installed reload component's own template.
+
+    The installed bundle (``webfiles.zip``'s ``index.js``) compiles the component its first part
+    names into a definition whose template starts elements by tag and attribute-constant index;
+    one of them must be the selector's element, carrying its class among the classes its
+    constants declare (after Angular's class marker, ``1``). A TensorBoard renaming the
+    component, the element or the class fails here.
+    """
+    import json
+    import re
+    import zipfile
+    from importlib.resources import files
+    from itertools import takewhile
+
+    from tcip_mcp.pipelines.training.tensorboard_manager import RELOAD_SELECTOR
+
+    component, element = RELOAD_SELECTOR.split(" ")
+    tag, class_name = element.split(".")
+    with (
+        files("tensorboard").joinpath("webfiles.zip").open("rb") as bundle,
+        zipfile.ZipFile(bundle) as webfiles,
+    ):
+        script = webfiles.read("index.js").decode("utf-8")
+
+    definition = script[script.index(f'selectors:[["{component}"]]') :]
+    consts_at = definition.index("consts:") + len("consts:")
+    consts, _ = json.JSONDecoder().raw_decode(definition[consts_at:])
+    template_at = definition.index("template:function")
+    template = definition[
+        template_at : definition.index("dependencies:", template_at)
+    ]
+    started = [
+        (started_tag, consts[int(index)])
+        for started_tag, index in re.findall(
+            r'\w+\(\d+,"([\w-]+)",(\d+)\)', template
+        )
+    ]
+
+    def classes(attributes: list) -> list[str]:
+        if 1 not in attributes:
+            return []
+        after = attributes[attributes.index(1) + 1 :]
+        return list(takewhile(lambda value: isinstance(value, str), after))
+
+    assert any(
+        started_tag == tag and class_name in classes(attributes)
+        for started_tag, attributes in started
+    ), started
 
 
 def test_the_guardians_grace_leaves_a_second_under_the_stop_wait() -> None:
