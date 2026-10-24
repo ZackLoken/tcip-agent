@@ -8,7 +8,7 @@ broken builder, and ``TrainContext`` exposes the checks and craft primitives to 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, NoReturn, Unpack
 
 import pytest
 
@@ -32,18 +32,23 @@ from tests._training_values import (
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
+from torch import nn  # noqa: E402
+
 from tcip_mcp.pipelines.data.datasets import BaseDataset  # noqa: E402
 from tcip_mcp.pipelines.model_build import resolve_contract_dims  # noqa: E402
 from tcip_mcp.pipelines.schemas import TrainGeometry  # noqa: E402
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     from PIL import Image
-    from torch import Tensor, nn
+    from torch import Tensor, device
 
     from tcip_mcp.pipelines.data.selection import ClassScope, Sample
     from tcip_mcp.pipelines.schemas import TrainConfigSchema
+    from tcip_mcp.pipelines.training.collation import Batch
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+    from tcip_mcp.pipelines.training.evaluation import EvaluationKeywords
 
 
 def _broken_builder(**kwargs: object) -> nn.Module:
@@ -440,6 +445,7 @@ def test_preflight_smoke_passes_valid_builder(
     r = preflight_config(tmp_path, cfg, smoke=True, overfit=True)
     assert r["valid"] is True, r["issues"]
     assert r["smoke"]["ok"] is True
+    assert {"val_loss", "val_map50"} <= set(r["smoke"]["evaluation_row_keys"])
     assert "overfit_check" in r  # voluntary diagnostic reported, non-gating
 
 
@@ -482,6 +488,142 @@ def test_preflight_builds_and_smokes_at_the_count_the_run_resolved(
 
     assert r["smoke"]["dims"]["num_classes"] == 3, r["smoke"]
     assert r["smoke"]["dims"]["in_chans"] == 3
+
+
+def _semantic_seg_config(project: Path) -> dict:
+    """Return a three-class semantic segmentation run config of ``project``.
+
+    It has a validation side, fits its three training images in one batch and selects on the
+    loss.
+    """
+    from tests.test_mask_and_table_membership import _three_class_masks
+
+    images_dir, masks_dir = _three_class_masks(project / "ds")
+    return training_config(
+        project,
+        {
+            "builder": BESPOKE_SEMANTIC_SEG,
+            "source_files": [BESPOKE_MODELS],
+            "task": "semantic_seg",
+            "normalization": FRAME_STATISTICS,
+        },
+        {
+            "images_dir": str(images_dir),
+            "labels_dir": str(masks_dir),
+            "split": drawn_split(val_ratio=0.25, seed=3),
+        },
+        batch_size=3,
+        evaluation=evaluation_block(selection_metric="loss"),
+    )
+
+
+def test_the_smokes_admitted_row_carries_the_validation_keys_of_the_runs_first_epoch_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The row the smoke admits carries the validation keys of the run's own first epoch row.
+
+    For one semantic segmentation config, preflight's smoke and the default trainer's first epoch
+    row carry the same validation keys, the per-class mappings among them.
+    """
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import METRICS_FILE, epoch_rows, read_rows
+    from tcip_mcp.pipelines.training.evaluation import VAL_METRIC_PREFIX
+    from tcip_mcp.tools.training_tools import preflight_config
+    from tests._verified_checkpoint_fixtures import worker_run
+
+    cfg = _semantic_seg_config(tmp_path)
+    r = preflight_config(tmp_path, cfg, smoke=True)
+    assert r["valid"] is True, r["issues"]
+    admitted = r["smoke"]["evaluation_row_keys"]
+    assert admitted is not None, r["smoke"]
+
+    run_dir = worker_run(tmp_path, cfg)
+    first = epoch_rows(read_rows(run_dir / METRICS_FILE)[0])[0]
+
+    def validation(keys: Sequence[str]) -> set[str]:
+        return {k for k in keys if k.startswith(VAL_METRIC_PREFIX)}
+
+    assert validation(admitted) == validation(list(first))
+    assert {"val_per_class_iou", "val_per_class_dice"} <= validation(admitted)
+
+
+def test_the_smokes_validation_receives_the_evaluation_keywords_its_launched_run_resolves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The smoke's validation receives the evaluation keywords the run it would launch resolves.
+
+    The keywords the real ``generic_trainer.validate`` is handed in preflight's smoke equal the
+    opened run's own ``TrainRun.evaluation_arguments`` for the same config.
+    """
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.pipelines.training import generic_trainer
+    from tcip_mcp.pipelines.training.run_registry import observed_run
+    from tcip_mcp.tools.training_tools import preflight_config
+    from tests._verified_checkpoint_fixtures import opened_run
+
+    cfg = _semantic_seg_config(tmp_path)
+    handed: list[dict] = []
+    real = generic_trainer.validate
+
+    def recording(
+        model: nn.Module,
+        val_loader: Iterable[Batch],
+        placed_on: device,
+        task: str,
+        **keywords: Unpack[EvaluationKeywords],
+    ) -> dict:
+        handed.append(dict(keywords))
+        return real(model, val_loader, placed_on, task, **keywords)
+
+    monkeypatch.setattr(generic_trainer, "validate", recording)
+    r = preflight_config(tmp_path, cfg, smoke=True)
+    assert r["valid"] is True, r["issues"]
+    assert len(handed) == 1, handed
+    (smoked,) = handed
+
+    run = observed_run(observe(opened_run(tmp_path, cfg)))
+
+    assert smoked == dict(run.evaluation_arguments)
+
+
+def test_preflight_blocks_a_run_whose_validation_row_the_metrics_log_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Preflight blocks a run whose validation would write a row the metrics log refuses.
+
+    With the segmentation metric producer answering its per-class mappings keyed by the integer
+    class id, preflight's smoke is invalid with an epoch-row issue naming ``val_per_class_iou``.
+    """
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.pipelines.training import evaluation
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    real = evaluation.semantic_seg_metrics
+
+    def integer_keyed(
+        preds: Tensor,
+        targets: Tensor,
+        num_classes: int,
+        ignore_index: int | None = None,
+    ) -> dict:
+        m = real(preds, targets, num_classes, ignore_index)
+        return {
+            **m,
+            **{
+                key: {int(c): v for c, v in m[key].items()}
+                for key in ("per_class_iou", "per_class_dice")
+            },
+        }
+
+    monkeypatch.setattr(evaluation, "semantic_seg_metrics", integer_keyed)
+    r = preflight_config(tmp_path, _semantic_seg_config(tmp_path), smoke=True)
+
+    assert r["valid"] is False
+    assert any(
+        i.startswith("epoch row:") and "val_per_class_iou" in i
+        for i in r["issues"]
+    ), r["issues"]
 
 
 def test_preflight_smokes_a_single_class_run_within_its_own_count(
@@ -761,6 +903,91 @@ def test_ctx_check_contract_and_overfit_check(tmp_path: Path) -> None:
     # overfit is voluntary + non-gating; steps flow through as an override kwarg.
     over = ctx.overfit_check(steps=15)
     assert over["passed"], over["issue"]
+
+
+def _classification_context(tmp_path: Path) -> TrainContext:
+    """Return the run context of a bespoke classifier over :func:`_table_tree`'s 32 px frames."""
+    from tests.tiny_trainer_fixtures import run_context
+
+    imgs, table = _table_tree(tmp_path)
+    return run_context(
+        tmp_path,
+        training_config(
+            tmp_path,
+            {
+                "builder": BESPOKE_CLASSIFIER,
+                "source_files": [BESPOKE_MODELS],
+                "task": "classification",
+                "normalization": FRAME_STATISTICS,
+            },
+            {
+                "images_dir": str(imgs),
+                "labels_dir": str(table),
+                "split": drawn_split(val_ratio=0.0),
+            },
+            evaluation=evaluation_block(selection_metric="loss"),
+        ),
+    )
+
+
+class _FrameRecorder(nn.Module):
+    """Drive ``inner`` with every batch it is handed, recording each batch's frame size."""
+
+    def __init__(self, inner: nn.Module) -> None:
+        super().__init__()
+        self.inner = inner
+        self.frames: list[tuple[int, ...]] = []
+
+    def forward(
+        self, images: Tensor, targets: dict | None = None
+    ) -> dict[str, Tensor]:
+        self.frames.append(tuple(images.shape[-2:]))
+        return (
+            self.inner(images)
+            if targets is None
+            else self.inner(images, targets)
+        )
+
+
+def test_ctx_check_contract_drives_the_model_at_a_dims_override(
+    tmp_path: Path,
+) -> None:
+    """A ``dims`` override to ``ctx.check_contract`` shapes the batch the model is driven with.
+
+    Over a run resolving its 32 px frame, an override to 16 px drives every forward at 16 px.
+    """
+    from tcip_mcp.pipelines.model_build import recorded_model_dims
+
+    ctx = _classification_context(tmp_path)
+    resolved = resolve_contract_dims(
+        ctx.spec, recorded_model_dims(ctx.spec), ctx.run.geometry
+    )
+    assert resolved["img_size"] == (32, 32)
+    model = _FrameRecorder(ctx.build_model())
+
+    report = ctx.check_contract(model, dims={**resolved, "img_size": (16, 16)})
+
+    assert report["ok"], report["issues"]
+    assert model.frames and set(model.frames) == {(16, 16)}
+
+
+def test_ctx_overfit_check_repeats_its_losses_at_its_seed_whatever_the_ambient_state(
+    tmp_path: Path,
+) -> None:
+    """The overfit diagnostic gives one loss sequence for its run's seed, whatever came before.
+
+    The same built weights overfit under two different ambient random states give the same
+    losses, the synthetic batch drawn under the diagnostic's own seed.
+    """
+    ctx = _classification_context(tmp_path)
+
+    def losses(ambient: int) -> list[float]:
+        ctx.set_seed()
+        model = ctx.build_model()
+        torch.manual_seed(ambient)
+        return ctx.overfit_check(model, steps=2)["losses"]
+
+    assert losses(1) == losses(2)
 
 
 def test_ctx_overfit_check_seeds_at_the_runs_own_seed_and_determinism(

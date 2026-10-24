@@ -527,7 +527,7 @@ def test_validation_runs_every_frame_under_the_cap_its_density_gives_it(
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tcip_mcp.pipelines.model_build import model_dims
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
-    from tcip_mcp.pipelines.training.generic_trainer import _validate
+    from tcip_mcp.pipelines.training.generic_trainer import validate
     from tests._producer_fixtures import run_over, seed_bud_images
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
@@ -557,7 +557,7 @@ def test_validation_runs_every_frame_under_the_cap_its_density_gives_it(
         return real(target, output, **kwargs)
 
     monkeypatch.setattr(evaluation, "records_from_detector", counting)
-    _validate(
+    validate(
         model,
         [(list(images), list(targets))],
         torch.device("cpu"),
@@ -588,7 +588,7 @@ def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_flo
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tcip_mcp.pipelines.model_build import model_dims
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
-    from tcip_mcp.pipelines.training.generic_trainer import _validate
+    from tcip_mcp.pipelines.training.generic_trainer import validate
     from tests._producer_fixtures import run_over, seed_bud_images
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
@@ -626,7 +626,7 @@ def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_flo
         return rows[-1]
 
     monkeypatch.setattr(evaluation, "records_from_detector", recording)
-    _validate(
+    validate(
         model,
         [(list(images), list(targets))],
         torch.device("cpu"),
@@ -695,7 +695,7 @@ def test_the_density_the_trainer_validates_under_is_the_one_its_checkpoint_recor
     from tests._verified_checkpoint_fixtures import worker_run
 
     handed: list = []
-    real = trainer._validate
+    real = trainer.validate
 
     def recording(
         *args: TCIPModel | DataLoader | device | str,
@@ -709,7 +709,7 @@ def test_the_density_the_trainer_validates_under_is_the_one_its_checkpoint_recor
         handed.append(kwargs["density"])
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(trainer, "_validate", recording)
+    monkeypatch.setattr(trainer, "validate", recording)
     observation = observe(
         worker_run(tmp_path, _frames_config(tmp_path, "frames"))
     )
@@ -736,7 +736,7 @@ def test_a_bespoke_detection_dataset_exposing_regions_records_its_density_and_va
     from tests._verified_checkpoint_fixtures import opened_run, worker_run
 
     validated: list = []
-    real = trainer._validate
+    real = trainer.validate
 
     def recording(
         *args: TCIPModel | DataLoader | device | str,
@@ -750,7 +750,7 @@ def test_a_bespoke_detection_dataset_exposing_regions_records_its_density_and_va
         validated.append(kwargs["density"])
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(trainer, "_validate", recording)
+    monkeypatch.setattr(trainer, "validate", recording)
     observation = observe(
         worker_run(
             tmp_path,
@@ -947,14 +947,14 @@ def test_a_bespoke_detector_under_cap_one_keeps_one_through_validation_and_a_pas
     """A bespoke detector under a cap of one keeps one through validation and a pass.
 
     A producer-built bespoke detector over frames holding two objects each keeps one under a cap
-    of one, in a pass and in ``generic_trainer._validate`` alike, though ungoverned it finds two.
+    of one, in a pass and in ``generic_trainer.validate`` alike, though ungoverned it finds two.
     """
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.execution import prepare
     from tcip_mcp.pipelines.model_build import model_dims
-    from tcip_mcp.pipelines.training.generic_trainer import _validate
+    from tcip_mcp.pipelines.training.generic_trainer import validate
     from tests._chain_fixtures import BLOB_BUILDER
     from tests._producer_fixtures import run_over, seed_labeled_images
     from tests._verified_checkpoint_fixtures import registered_checkpoint
@@ -1011,7 +1011,7 @@ def test_a_bespoke_detector_under_cap_one_keeps_one_through_validation_and_a_pas
         return real(target, output, **kwargs)
 
     monkeypatch.setattr(evaluation, "records_from_detector", counting)
-    _validate(
+    validate(
         model,
         [(list(images), list(targets))],
         torch.device("cpu"),

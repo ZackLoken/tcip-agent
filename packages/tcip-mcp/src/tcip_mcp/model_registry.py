@@ -32,6 +32,7 @@ from tcip_mcp.audit import now_iso
 from tcip_mcp.pipelines.model_build import (
     CONFIG_KEY,
     GEOMETRY_KEY,
+    METRICS_KEY,
     SNAPSHOT_KEY,
 )
 from tcip_mcp.pipelines.schemas import TrainGeometry
@@ -42,9 +43,16 @@ from tcip_mcp.registry_paths import (
     resolved_registry_path,
     runtime_paths,
 )
-from tcip_store import Key, finite_number
+from tcip_store import (
+    FINITE_JSON_OBJECT,
+    FiniteJsonObject,
+    Key,
+    finite_number,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from tcip_mcp.experiments import RunObservation, RunRecord
     from tcip_mcp.pipelines.model_build import SourceLayout
     from tcip_mcp.pipelines.schemas import TrainConfigSchema
@@ -70,15 +78,13 @@ class RegistryEntry(BaseModel):
     ``None`` for a foreign checkpoint.
     """
 
-    model_config = ConfigDict(
-        frozen=True, extra="forbid", ser_json_inf_nan="constants"
-    )
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str
     checkpoint_path: str
     sha256: str
     registered_at: str
-    metrics: dict[str, JsonValue]
+    metrics: FiniteJsonObject
     tags: list[str]
     experiment_id: str | None
 
@@ -231,12 +237,21 @@ type MetricsSource = Literal["trainer", "training_source", "caller"]
 class CheckpointFacts(BaseModel):
     """What a registered checkpoint says of itself: its ``metrics`` and their ``metrics_source``."""
 
-    model_config = ConfigDict(
-        frozen=True, extra="forbid", ser_json_inf_nan="constants"
-    )
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
-    metrics: dict[str, JsonValue]
+    metrics: FiniteJsonObject
     metrics_source: MetricsSource | None
+
+
+def checkpoint_metrics(payload: Mapping[str, Any]) -> dict[str, JsonValue]:
+    """Return the metrics a checkpoint ``payload`` carries, an empty mapping when it carries none.
+
+    The metrics under ``model_build.METRICS_KEY`` are a ``tcip_store.FiniteJsonObject``; anything
+    else refuses (``pydantic.ValidationError``) naming the position.
+    """
+    if METRICS_KEY not in payload:
+        return {}
+    return FINITE_JSON_OBJECT.validate_python(payload[METRICS_KEY])
 
 
 def entry_facts(entry: RegistryEntry, project: Path) -> CheckpointFacts:
@@ -247,10 +262,9 @@ def entry_facts(entry: RegistryEntry, project: Path) -> CheckpointFacts:
     run's metrics are the ones its payload carries, sourced ``"trainer"``, or
     ``"training_source"`` when the payload's config (:attr:`VerifiedCheckpoint.spec`) names a
     bespoke loop; a foreign entry's are the ones its registration stated, sourced ``"caller"``.
-    No metrics carry no source.
+    No metrics carry no source. The metrics are admitted as :class:`CheckpointFacts` constructs
+    them, whatever the entry they came from now holds.
     """
-    from tcip_mcp.pipelines.model_build import METRICS_KEY
-
     checkpoint = VerifiedCheckpoint(
         path=entry.checkpoint_path,
         entry=entry,
@@ -261,7 +275,7 @@ def entry_facts(entry: RegistryEntry, project: Path) -> CheckpointFacts:
     if entry.experiment_id is None:
         metrics, source = entry.metrics, "caller"
     else:
-        metrics = checkpoint.payload.get(METRICS_KEY) or {}
+        metrics = checkpoint_metrics(checkpoint.payload)
         source = (
             "training_source" if checkpoint.spec.training_source else "trainer"
         )
@@ -657,14 +671,14 @@ class ModelRegistry:
             checkpoint_path: Path to the .pt checkpoint file
                 (:func:`~tcip_mcp.registry_paths.located` against the project); its config is the
                 one its payload carries (:attr:`VerifiedCheckpoint.spec`).
-            metrics: Evaluation metrics dict.
+            metrics: Evaluation metrics, a ``tcip_store.FiniteJsonObject``; omitted (``None``),
+                the entry carries none.
             tags: Optional tags for filtering.
 
         Raises:
             FileNotFoundError: ``checkpoint_path`` does not exist.
-            StoreError: ``metrics`` holds something JSON cannot carry, named
-                before anything is stored (``pydantic.ValidationError`` for a value that is no
-                JSON type at all).
+            pydantic.ValidationError: ``metrics`` is given and is not a
+                ``tcip_store.FiniteJsonObject``, named before anything is stored.
             ValueError: the checkpoint's payload is one the verified reader refuses.
             AuditEntryNotWrittenError: the write committed but its own audit line could not be
                 appended.
@@ -683,7 +697,7 @@ class ModelRegistry:
             ),
             sha256=admitted_digest(ckpt),
             registered_at=now_iso(),
-            metrics=metrics or {},
+            metrics={} if metrics is None else metrics,
             tags=tags or [],
             experiment_id=None,
         )

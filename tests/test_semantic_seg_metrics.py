@@ -36,7 +36,10 @@ def test_perfect_overlap_is_one() -> None:
     assert m["mIoU"] == pytest.approx(1.0)
     assert m["dice"] == pytest.approx(1.0)
     assert m["pixel_acc"] == pytest.approx(1.0)
-    assert m["per_class_iou"] == {0: pytest.approx(1.0), 1: pytest.approx(1.0)}
+    assert m["per_class_iou"] == {
+        "0": pytest.approx(1.0),
+        "1": pytest.approx(1.0),
+    }
 
 
 def test_disjoint_is_zero() -> None:
@@ -48,7 +51,10 @@ def test_disjoint_is_zero() -> None:
     assert m["mIoU"] == pytest.approx(0.0)
     assert m["dice"] == pytest.approx(0.0)
     assert m["pixel_acc"] == pytest.approx(0.0)
-    assert m["per_class_iou"] == {0: pytest.approx(0.0), 1: pytest.approx(0.0)}
+    assert m["per_class_iou"] == {
+        "0": pytest.approx(0.0),
+        "1": pytest.approx(0.0),
+    }
 
 
 def test_partial_overlap_hand_computed() -> None:
@@ -58,10 +64,10 @@ def test_partial_overlap_hand_computed() -> None:
     gt = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1])
     pred = torch.tensor([0, 0, 1, 1, 1, 1, 1, 1])
     m = semantic_seg_metrics(pred, gt, num_classes=2)
-    assert m["per_class_iou"][0] == pytest.approx(0.5)
-    assert m["per_class_iou"][1] == pytest.approx(4 / 6)
-    assert m["per_class_dice"][0] == pytest.approx(4 / 6)
-    assert m["per_class_dice"][1] == pytest.approx(0.8)
+    assert m["per_class_iou"]["0"] == pytest.approx(0.5)
+    assert m["per_class_iou"]["1"] == pytest.approx(4 / 6)
+    assert m["per_class_dice"]["0"] == pytest.approx(4 / 6)
+    assert m["per_class_dice"]["1"] == pytest.approx(0.8)
     assert m["mIoU"] == pytest.approx((0.5 + 4 / 6) / 2)
     assert m["dice"] == pytest.approx((4 / 6 + 0.8) / 2)
     assert m["pixel_acc"] == pytest.approx(6 / 8)  # idx 2,3 wrong
@@ -72,8 +78,8 @@ def test_absent_class_excluded_from_mean() -> None:
     gt = torch.tensor([0, 0, 1, 1])
     pred = torch.tensor([0, 0, 1, 1])
     m = semantic_seg_metrics(pred, gt, num_classes=3)
-    assert m["per_class_iou"][2] is None
-    assert m["per_class_dice"][2] is None
+    assert m["per_class_iou"]["2"] is None
+    assert m["per_class_dice"]["2"] is None
     assert m["mIoU"] == pytest.approx(1.0)  # only classes 0,1 counted
 
 
@@ -102,7 +108,8 @@ def test_batched_shapes_flatten() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path) -> None:
+def _evaluated(tmp_path: Path) -> dict:
+    """Return ``evaluate``'s metrics for a two-class bespoke model over four painted masks."""
     pytest.importorskip("torchvision")
     import numpy as np
     from PIL import Image
@@ -140,7 +147,7 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path) -> None:
         image_std=stats["image_std"],
     )
 
-    result = evaluate(
+    return evaluate(
         model,
         loader,
         torch.device("cpu"),
@@ -154,6 +161,10 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path) -> None:
         mask_cut=None,
     )
 
+
+def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path) -> None:
+    result = _evaluated(tmp_path)
+
     assert "loss" in result
     for key in (
         "mIoU",
@@ -166,4 +177,27 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path) -> None:
     assert 0.0 <= result["mIoU"] <= 1.0
     assert 0.0 <= result["dice"] <= 1.0
     assert 0.0 <= result["pixel_acc"] <= 1.0
-    assert set(result["per_class_iou"]) == {0, 1}
+    assert set(result["per_class_iou"]) == {"0", "1"}
+
+
+def test_evaluated_per_class_mappings_are_admitted_by_the_log_and_the_registry(
+    tmp_path: Path,
+) -> None:
+    """The per-class mappings ``evaluate`` returns pass both readers' JSON admission.
+
+    Each passes ``check_json_value``, the metrics log's admission, and validates as a registered
+    checkpoint's ``CheckpointFacts.metrics``.
+    """
+    from tcip_mcp.model_registry import CheckpointFacts
+    from tcip_store import check_json_value
+
+    result = _evaluated(tmp_path)
+    per_class = {
+        key: result[key] for key in ("per_class_iou", "per_class_dice")
+    }
+
+    check_json_value(per_class, path="metrics")
+    assert (
+        CheckpointFacts(metrics=per_class, metrics_source="trainer").metrics
+        == per_class
+    )

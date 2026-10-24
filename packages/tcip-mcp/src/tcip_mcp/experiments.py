@@ -38,7 +38,7 @@ from typing import (
     get_args,
 )
 
-from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
+from pydantic import BaseModel, ConfigDict, JsonValue
 
 from tcip_mcp.audit import now_iso
 from tcip_mcp.pipelines.data.selection import SAMPLE_PATHS
@@ -59,6 +59,7 @@ from tcip_mcp.registry_paths import (
     within,
 )
 from tcip_store import (
+    FINITE_JSON_OBJECT,
     BadKeyError,
     DecodeError,
     decode_value,
@@ -66,6 +67,7 @@ from tcip_store import (
     encode_record,
     finite_number,
     stored_number,
+    stored_numbers,
 )
 from tcip_store.file_backend import is_sharing_violation, retry_while_denied
 from tcip_store.values import NOT_FINITE_SUFFIX
@@ -515,6 +517,21 @@ def write_final_status(
     write_record(directory / FINAL_STATUS_FILE, status)
 
 
+def metrics_row(metrics: dict, stamps: dict) -> dict:
+    """Return ``metrics`` as a metrics log row, ``stamps`` and the instant laid over them.
+
+    The metrics are in their stored form (``stored_numbers``). Refuses (``ValueError``) metrics
+    carrying a key the log stamps (:data:`EPOCH_KEY`, :data:`STEP_KEY`, :data:`TIMESTAMP_KEY`).
+    """
+    stamped = sorted({EPOCH_KEY, STEP_KEY, TIMESTAMP_KEY} & metrics.keys())
+    if stamped:
+        raise ValueError(
+            f"the metrics carry {stamped}, which the metrics log stamps on each row itself; "
+            "pass the epoch and step as the sink's own arguments."
+        )
+    return {**stored_numbers(metrics), **stamps, TIMESTAMP_KEY: now_iso()}
+
+
 def append_row(path: Path, row: dict) -> None:
     """Append ``row`` as one line of the JSON log at ``path``.
 
@@ -549,10 +566,6 @@ def read_record(path: Path) -> JsonValue:
         raise DecodeError(f"{path} does not decode as JSON: {exc}") from exc
 
 
-_ROW = TypeAdapter(dict[str, JsonValue])
-"""One row of a metrics log, a JSON object as :func:`append_row` writes it."""
-
-
 def read_rows(
     path: Path, *, after: int = 0
 ) -> tuple[list[dict[str, JsonValue]], int]:
@@ -560,7 +573,7 @@ def read_rows(
 
     Beside them is the offset past the last complete one. A line still being appended is left for
     the next read. A log that does not exist raises ``FileNotFoundError``; a complete line that
-    does not decode as a JSON object raises ``DecodeError`` naming the file.
+    does not decode as a ``tcip_store.FiniteJsonObject`` raises ``DecodeError`` naming the file.
     """
     with open(path, "rb") as handle:
         handle.seek(after)
@@ -569,7 +582,7 @@ def read_rows(
     rows: list[dict[str, JsonValue]] = []
     for line in data[:end].splitlines():
         try:
-            rows.append(_ROW.validate_python(decode_value(line)))
+            rows.append(FINITE_JSON_OBJECT.validate_python(decode_value(line)))
         except ValueError as exc:
             raise DecodeError(
                 f"{path} holds a row that does not decode: {exc}"

@@ -151,7 +151,13 @@ def _preflight(
             contract failure is appended to ``issues`` and blocks the launch. For a run that
             resolved no frame, or a task the contract has no synthetic batch schema for, one real
             batch of the resolved train dataset is used instead; if it yields none, that also
-            blocks.
+            blocks. For a run with a validation side, the model the contract passed is then
+            validated on the batch the contract proved, at the run's evaluation keywords, and
+            the row is admitted as the metrics log admits one (``experiments.metrics_row``
+            encoded by the store's ``encode_log_line``); a refusal blocks, naming the field.
+            ``smoke.evaluation_not_run`` is why that leg did not run, ``None`` when it did, and
+            ``smoke.evaluation_row_keys`` the keys of the row it admitted, ``None`` when it
+            admitted none.
         overfit: When True (with ``smoke``), also run the voluntary ``overfit_check`` diagnostic
             and report it under ``overfit_check``, never gating. The stored report is already
             rendered (``model_contract.render_overfit_report``), with non-finite losses rendered.
@@ -236,9 +242,19 @@ def _preflight(
             )
             from tcip_mcp.pipelines.model_contract import (
                 check_model_contract,
+                contract_batch,
                 overfit_check,
                 render_overfit_report,
             )
+            from tcip_mcp.pipelines.training.generic_trainer import (
+                capture_rng_state,
+                restore_rng_state,
+                validate,
+            )
+            from tcip_mcp.pipelines.training.run_registry import (
+                evaluation_keywords,
+            )
+            from tcip_store import encode_log_line
 
             resolved_spec = resolution.spec.model_copy(
                 update={"data": resolution.data}
@@ -255,49 +271,70 @@ def _preflight(
                 built_at,
                 resolution.geometry,
             )
-            report = check_model_contract(
-                model, task, device=device, dims=dims
+            # One batch drives the contract and the evaluation; the overfit check draws its own
+            # synthetic batch under its seed, and shares only a dataset batch.
+            prepared = contract_batch(
+                task, dims, lambda: _one_real_batch(task, resolution.train_ds)
             )
-            batch: Batch | None = None
-            why_no_batch: str | None = None
-            if report.get("not_smokeable"):
-                # No synthetic batch for this task or this width: smoke against a real batch from
-                # the run's own dataset, the only reference the platform has not guessed at.
-                real = _one_real_batch(task, resolution.train_ds)
-                if isinstance(real, str):
-                    why_no_batch = real
-                else:
-                    batch = real
-                    report = check_model_contract(
-                        model, task, device=device, sample_batch=batch
-                    )
+            batch = prepared.drawn(task, device)
+            report = check_model_contract(
+                model,
+                task,
+                device=device,
+                dims=prepared.dims,
+                sample_batch=batch,
+            )
             # ``dims`` shape the synthetic batch only, so they describe nothing once a real batch
             # is used, record which reference actually proved the contract.
             result["smoke"] = {
                 **report,
                 "task": task,
-                "batch_source": "dataset"
-                if batch is not None
-                else "synthetic",
-                "dims": None if batch is not None else dims,
+                "batch_source": "synthetic"
+                if prepared.dims is not None
+                else "dataset",
+                "dims": prepared.dims,
             }
             if report.get("not_smokeable"):
                 issues.append(
                     f"model contract: {report['not_smokeable']} Building one from the run's data "
-                    f"config failed too ({why_no_batch}), so the measurement boundary is unproven."
+                    f"config failed too ({prepared.unavailable}), so the measurement boundary is "
+                    "unproven."
                 )
             elif not report["ok"]:
                 issues.extend(
                     f"model contract: {msg}" for msg in report["issues"]
                 )
+            not_run = (
+                "the model contract did not pass"
+                if not report["ok"]
+                else "the run has no validation side, so no epoch row carries an evaluation"
+                if resolution.val_ds is None
+                else None
+            )
+            result["smoke"]["evaluation_not_run"] = not_run
+            result["smoke"]["evaluation_row_keys"] = None
+            if not_run is None:
+                assert batch is not None, "a passed contract was driven"
+                try:
+                    validated = validate(
+                        model,
+                        [batch],
+                        device,
+                        task,
+                        **evaluation_keywords(
+                            resolved_spec,
+                            resolved_spec.trainer_reads(),
+                            trait_revision=resolution.trait_revision,
+                            geometry=resolution.geometry,
+                            project=project,
+                        ),
+                    )
+                    row = experiments.metrics_row(validated, {})
+                    encode_log_line(row)
+                    result["smoke"]["evaluation_row_keys"] = sorted(row)
+                except Exception as exc:  # noqa: BLE001, a refused epoch row blocks the launch
+                    issues.append(f"epoch row: {exc}")
             if overfit:
-                from tcip_mcp.pipelines.training.generic_trainer import (
-                    capture_rng_state,
-                    restore_rng_state,
-                )
-
-                # Same batch the contract used, otherwise this re-synthesizes and reports a false
-                # "does not learn" for exactly the bespoke tasks the real-batch path exists for.
                 with _OVERFIT_CHECK_LOCK:
                     rng_state = capture_rng_state(None)
                     try:
@@ -307,8 +344,7 @@ def _preflight(
                             seed=resolved_spec.seed,
                             deterministic=resolved_spec.deterministic,
                             device=device,
-                            sample_batch=batch,
-                            dims=dims,
+                            **prepared.keywords,
                         )
                     except Exception as exc:  # noqa: BLE001, becomes the report's issue only
                         raw_report = {
@@ -462,9 +498,10 @@ def launch_training(
             past it and ends failed naming it; a process still alive one heartbeat window after
             it is terminated and reads interrupted. Omit for no timeout (the default).
         overfit_check: When True, runs the voluntary ``overfit_check`` diagnostic (twenty optimizer
-            steps at the training tile edge, on the CPU, inside this synchronous call) on the same
-            batch the contract proved, before the subprocess spawns, and records the result on the
-            run's ``model_contract`` under ``overfit_check``. Never gates. Default False.
+            steps at the training tile edge, on the CPU, inside this synchronous call) on the
+            dataset batch the contract proved or one it synthesizes under the run's seed, before
+            the subprocess spawns, and records the result on the run's ``model_contract`` under
+            ``overfit_check``. Never gates. Default False.
         relaunched_from: The run this one relaunches, recorded as its lineage.
 
     Before the run's directory exists: preflight, normalization, the model contract, and the
@@ -492,7 +529,7 @@ def launch_training(
     )
 
     # The top-level key, never the smoke sub-report: overfit_check runs beside the contract's
-    # build, on the same batch; preflight_config already rendered it for storage.
+    # build; preflight_config already rendered it for storage.
     rendered_overfit_report = validation.get("overfit_check")
 
     smoke_report = validation.get("smoke") or {}

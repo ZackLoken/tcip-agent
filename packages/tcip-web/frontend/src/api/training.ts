@@ -20,10 +20,9 @@ export interface TensorboardLaunch {
   output?: string;
 }
 
-export interface MetricRow {
-  // The producer (tcip_store.values) writes null for a non-finite metric value.
-  [metric: string]: number | string | null | undefined;
-}
+/** A metrics mapping as the backend sends it, a metrics log row or a checkpoint's metrics: a JSON
+ * object whose values are any JSON, a per-class mapping among them. */
+export type MetricRow = TrainingRowFrame["row"];
 
 export interface AsRecordedChoice {
   case: "bound" | "drawn";
@@ -53,7 +52,7 @@ export interface SplitChoices {
 /** One entry a comparison's own experiment registered, reduced to what leaves the backend. */
 export interface CompareRegistryEntry {
   name: string;
-  metrics: Record<string, number | string | null> | null;
+  metrics: MetricRow | null;
   metrics_source: string | null;
   registered_at: string | null;
 }
@@ -108,7 +107,7 @@ export interface CompareBestExcluded {
 export interface CompareBestResult {
   name: string;
   experiment_id: string | null;
-  metrics: Record<string, number | string | null>;
+  metrics: MetricRow;
   metrics_source: string | null;
   /** The metric the answer was ranked by. */
   ranking_basis: string;

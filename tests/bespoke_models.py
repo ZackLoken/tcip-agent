@@ -252,8 +252,34 @@ def save_built_weights(ctx: TrainContext) -> None:
     ctx.set_seed()
     state = {STATE_DICT_KEY: ctx.build_model().state_dict()}
     if own.get("fixture_metrics"):
-        state[METRICS_KEY] = dict(own["fixture_metrics"])
+        state[METRICS_KEY] = own["fixture_metrics"]
     ctx.save_checkpoint(state, "model_final")
+
+
+UNENCODABLE_METRICS: dict[str, dict] = {
+    "integer_key": {"val_per_class_iou": {0: 0.5}},
+    "non_finite": {"val_loss": float("nan")},
+    "bytes_key": {b"val_loss": 0.5},
+}
+"""Checkpoint metrics no run config can state, each one JSON cannot hold, by the case it is."""
+
+
+def save_built_weights_with_unencodable_metrics(ctx: TrainContext) -> None:
+    """Save the built model as the run's final weights with metrics JSON cannot hold.
+
+    The metrics are the :data:`UNENCODABLE_METRICS` case the config's ``fixture_unencodable``
+    names.
+    """
+    ctx.set_seed()
+    ctx.save_checkpoint(
+        {
+            STATE_DICT_KEY: ctx.build_model().state_dict(),
+            METRICS_KEY: UNENCODABLE_METRICS[
+                ctx.spec.model_extra["fixture_unencodable"]
+            ],
+        },
+        "model_final",
+    )
 
 
 SECOND_CHECKPOINT_TAG = "second"

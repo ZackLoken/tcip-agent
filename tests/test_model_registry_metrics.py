@@ -346,6 +346,190 @@ def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epo
     assert facts.metrics["selection"] == row["selection"]
 
 
+def test_a_semantic_seg_runs_checkpoint_lists_with_its_per_class_metrics(
+    tmp_path: Path,
+) -> None:
+    """A semantic segmentation run's checkpoint lists with the per-class metrics it carries.
+
+    A run the default trainer completes over three classes with a validation side, its three
+    training images in one batch, registers its best checkpoint, and the listing answers its
+    ``val_per_class_iou`` keyed by each class.
+    """
+    pytest.importorskip("torch")
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.tools.model_tools import registered_listing
+    from tests._chain_fixtures import (
+        BESPOKE_MODELS,
+        BESPOKE_SEMANTIC_SEG,
+        FRAME_STATISTICS,
+        training_config,
+    )
+    from tests._training_values import drawn_split, evaluation_block
+    from tests._verified_checkpoint_fixtures import worker_run
+    from tests.test_mask_and_table_membership import _three_class_masks
+
+    images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
+    run_dir = worker_run(
+        tmp_path,
+        training_config(
+            tmp_path,
+            {
+                "builder": BESPOKE_SEMANTIC_SEG,
+                "source_files": [BESPOKE_MODELS],
+                "task": "semantic_seg",
+                "normalization": FRAME_STATISTICS,
+            },
+            {
+                "images_dir": str(images_dir),
+                "labels_dir": str(masks_dir),
+                "split": drawn_split(val_ratio=0.25, seed=3),
+            },
+            batch_size=3,
+            evaluation=evaluation_block(selection_metric="loss"),
+        ),
+        experiment_id="exp-seg",
+    )
+    observation = observe(run_dir)
+    assert observation.state == "completed", observation.final
+
+    (listed,) = [
+        m
+        for m in registered_listing(tmp_path)["models"]
+        if m["name"] == "exp-seg"
+    ]
+    assert set(listed["metrics"]["val_per_class_iou"]) == {"0", "1", "2"}
+
+
+UNENCODABLE = "bespoke_models:save_built_weights_with_unencodable_metrics"
+"""A ``training_source`` saving the ``bespoke_models.UNENCODABLE_METRICS`` case its config names."""
+
+
+@pytest.mark.parametrize(
+    ("body", "stated", "named"),
+    [
+        (
+            UNENCODABLE,
+            {"fixture_unencodable": "integer_key"},
+            "val_per_class_iou",
+        ),
+        (
+            UNENCODABLE,
+            {"fixture_unencodable": "non_finite"},
+            "val_loss",
+        ),
+        (
+            UNENCODABLE,
+            {"fixture_unencodable": "bytes_key"},
+            "b'val_loss'",
+        ),
+        (
+            "bespoke_models:save_built_weights",
+            {"fixture_metrics": [0.5]},
+            "dict",
+        ),
+        (
+            "bespoke_models:save_built_weights",
+            {"fixture_metrics": 0.5},
+            "dict",
+        ),
+    ],
+    ids=["integer_key", "non_finite", "bytes_key", "list", "scalar"],
+)
+def test_a_bespoke_checkpoint_whose_metrics_the_registry_cannot_read_is_refused_at_its_write(
+    tmp_path: Path, body: str, stated: dict, named: str
+) -> None:
+    """A bespoke loop's checkpoint whose metrics the registry cannot read is refused as written.
+
+    Metrics keyed by an integer or by bytes, carrying a ``nan``, or not a mapping at all fail the
+    run naming what refused, no checkpoint is written, and the listing answers.
+    """
+    pytest.importorskip("torch")
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.pipelines.training.generic_trainer import checkpoint_path
+    from tcip_mcp.tools.model_tools import registered_listing
+    from tests._verified_checkpoint_fixtures import finished_run
+
+    run_dir = finished_run(tmp_path, training_source=body, **stated)
+
+    final = observe(run_dir).final
+    assert final is not None and final.state == "failed", final
+    assert named in (final.status_error or "")
+    assert not checkpoint_path(run_dir, "model_final").exists()
+    assert registered_listing(tmp_path)["count"] == 0
+
+
+def test_a_bespoke_checkpoint_whose_metrics_json_holds_writes_and_lists(
+    tmp_path: Path,
+) -> None:
+    """A bespoke loop's checkpoint carrying JSON metrics writes, and lists with those metrics."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.model_tools import registered_listing
+    from tests._verified_checkpoint_fixtures import finished_run
+
+    finished_run(
+        tmp_path,
+        experiment_id="exp-bespoke",
+        metrics={"val_per_class_iou": {"0": 0.5}},
+    )
+
+    (listed,) = registered_listing(tmp_path)["models"]
+    assert (listed["name"], listed["metrics"]) == (
+        "exp-bespoke",
+        {"val_per_class_iou": {"0": 0.5}},
+    )
+
+
+@pytest.mark.parametrize(
+    "stated", [None, [], 0, False], ids=["none", "list", "zero", "false"]
+)
+def test_a_checkpoints_metrics_are_absent_or_a_mapping_never_read_as_empty(
+    stated: object,
+) -> None:
+    """A checkpoint carrying no metrics reads as none; one stating a non-mapping is refused.
+
+    ``checkpoint_metrics`` reads a payload without ``METRICS_KEY`` as an empty mapping and refuses
+    ``None``, a list, a zero or a boolean stated under it rather than reading it as empty.
+    """
+    from pydantic import ValidationError
+
+    from tcip_mcp.model_registry import checkpoint_metrics
+    from tcip_mcp.pipelines.model_build import METRICS_KEY
+
+    assert checkpoint_metrics({}) == {}
+    with pytest.raises(ValidationError):
+        checkpoint_metrics({METRICS_KEY: stated})
+
+
+def test_an_entrys_metrics_changed_after_admission_are_refused_where_they_are_read(
+    tmp_path: Path,
+) -> None:
+    """A registered entry's metrics changed in memory to ``nan`` are refused by ``entry_facts``.
+
+    The entry is a foreign registration read back from the registry index, its checkpoint path
+    resolved; its nested metrics are changed after it was admitted.
+    """
+    from pydantic import ValidationError
+
+    from tcip_mcp.model_registry import entry_facts, read_registry_index
+    from tcip_mcp.registry_paths import resolved_registry_path
+
+    _registered(tmp_path, ("a", {"val_loss": 0.5}))
+    (stored,) = read_registry_index(tmp_path)
+    entry = stored.model_copy(
+        update={
+            "checkpoint_path": str(
+                resolved_registry_path(str(tmp_path), stored.checkpoint_path)
+            )
+        }
+    )
+    assert entry_facts(entry, tmp_path).metrics == {"val_loss": 0.5}
+
+    entry.metrics["val_loss"] = float("nan")
+
+    with pytest.raises(ValidationError, match="val_loss"):
+        entry_facts(entry, tmp_path)
+
+
 def test_a_registry_payload_that_json_cannot_hold_is_refused_at_register_model(
     tmp_path: Path,
 ) -> None:
@@ -353,15 +537,16 @@ def test_a_registry_payload_that_json_cannot_hold_is_refused_at_register_model(
 
     An infinite metric refuses naming ``metrics.val_map50``, and the registry lists nothing.
     """
-    import tcip_store as ts
+    from pydantic import ValidationError
+
     from tcip_mcp.model_registry import ModelRegistry
 
     reg = ModelRegistry(str(tmp_path))
     ckpt = _checkpoint(tmp_path, "m")
 
-    with pytest.raises(ts.StoreError) as metrics_refused:
+    with pytest.raises(ValidationError) as metrics_refused:
         reg.register_model("a", str(ckpt), metrics={"val_map50": float("inf")})
-    assert "metrics.dict.val_map50" in str(metrics_refused.value)
+    assert "metrics.val_map50" in str(metrics_refused.value)
 
     assert reg.list_models() == []
 

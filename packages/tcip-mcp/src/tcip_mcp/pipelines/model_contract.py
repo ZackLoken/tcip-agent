@@ -11,7 +11,7 @@ fixed tiny batch, seeded, on ``device``, must drive the loss down.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, TypedDict, Unpack
+from typing import TYPE_CHECKING, NamedTuple, TypedDict, Unpack
 
 from pydantic import JsonValue
 
@@ -19,6 +19,8 @@ from tcip_mcp.pipelines.model_build import ContractDims
 from tcip_store.values import finite_or_none, stored_number
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import torch
 
     from tcip_mcp.pipelines.training.collation import Batch
@@ -28,7 +30,7 @@ DETECTOR_TASKS = frozenset({"detection", "instance_seg"})
 a confidence and an operating point govern."""
 TILING_TASKS = frozenset({"detection", "instance_seg"})
 """The tasks a run trains and predicts over tiles of, each tile's targets clipped to it."""
-# The tasks ``_synth_batch`` can shape a batch for. A task outside this set is not refused as
+# The tasks ``synth_batch`` can shape a batch for. A task outside this set is not refused as
 # unsupported (the platform has no fixed task taxonomy), but it cannot be smoked blind, so the
 # caller supplies ``sample_batch=`` instead of the contract inventing a shape for it.
 _SYNTHESIZABLE_TASKS = DETECTOR_TASKS | {
@@ -46,8 +48,9 @@ target is a value, so neither reads one."""
 class ContractKeywords(TypedDict, total=False):
     """The keywords :func:`check_model_contract` takes beside its model, task and device.
 
-    ``dims`` is the run's resolved dimensions and ``sample_batch`` an ``(images, targets)`` pair
-    from the run's own dataset.
+    ``dims`` is the run's resolved dimensions and ``sample_batch`` a supplied ``(images,
+    targets)`` pair, synthesized (:func:`synth_batch`) or the run's own; a batch from the run's
+    dataset is required where no batch can be synthesized (:func:`no_batch_reason`).
     """
 
     dims: ContractDims | None
@@ -143,7 +146,7 @@ def no_batch_reason(
     return None
 
 
-def _synth_batch(task: str, dims: ContractDims, device: torch.device) -> Batch:
+def synth_batch(task: str, dims: ContractDims, device: torch.device) -> Batch:
     """Synthesize a minimal batch for ``task`` at ``dims``.
 
     The batch is per-sample ``(image, target)`` items shaped like a dataset's ``__getitem__``,
@@ -231,6 +234,64 @@ def _synth_batch(task: str, dims: ContractDims, device: torch.device) -> Batch:
     return collate(items)
 
 
+class ContractBatch(NamedTuple):
+    """Which batch a contract smoke drives a model with (:func:`contract_batch`).
+
+    With ``batch`` ``None`` and ``unavailable`` ``None``, one is synthesized at ``dims`` by
+    whoever drives the model, after any seeding; otherwise ``batch`` is the run's own with
+    ``dims`` ``None``, or, with no batch at all, ``dims`` stays the run's and ``unavailable`` says
+    why its dataset gave none.
+    """
+
+    batch: Batch | None
+    dims: ContractDims | None
+    unavailable: str | None
+
+    @property
+    def keywords(self) -> ContractKeywords:
+        """The :class:`ContractKeywords` this choice drives a contract smoke at."""
+        return {"dims": self.dims, "sample_batch": self.batch}
+
+    def drawn(self, task: str, device: torch.device) -> Batch | None:
+        """Return the batch itself (:func:`drawn_batch`), ``None`` when there is none."""
+        if self.unavailable is not None:
+            return None
+        return drawn_batch(task, self.dims, self.batch, device)
+
+
+def drawn_batch(
+    task: str,
+    dims: ContractDims | None,
+    sample_batch: Batch | None,
+    device: torch.device,
+) -> Batch:
+    """Return ``sample_batch`` when given, else the one :func:`synth_batch` draws now at ``dims``.
+
+    ``dims`` are ones :func:`no_batch_reason` admitted.
+    """
+    if sample_batch is not None:
+        return sample_batch
+    assert dims is not None, "no_batch_reason admits no synthesis without dims"
+    return synth_batch(task, dims, device)
+
+
+def contract_batch(
+    task: str, dims: ContractDims, dataset_batch: Callable[[], Batch | str]
+) -> ContractBatch:
+    """Return which batch a contract smoke of a ``task`` model resolved to ``dims`` is driven with.
+
+    When :func:`no_batch_reason` admits ``dims`` the choice is a synthetic batch at them, left
+    undrawn for whoever drives the model; else it is ``dataset_batch()``, the run's own, whose text
+    answer names why it has none.
+    """
+    if no_batch_reason(task, dims, None) is None:
+        return ContractBatch(None, dims, None)
+    real = dataset_batch()
+    if isinstance(real, str):
+        return ContractBatch(None, dims, real)
+    return ContractBatch(real, None, None)
+
+
 def _driving_batch(
     task: str,
     dims: ContractDims | None,
@@ -239,17 +300,11 @@ def _driving_batch(
 ) -> Batch:
     """Return the ``(images, targets)`` a model is driven with.
 
-    That is ``sample_batch`` when given, else synthesized at ``dims``, which
-    :func:`no_batch_reason` then admitted; per-image targets through ``instance_targets``.
+    That is :func:`drawn_batch`'s, its per-image targets through ``instance_targets``.
     """
     from tcip_mcp.pipelines.data.datasets import instance_targets
 
-    batch = sample_batch
-    if batch is None:
-        assert dims is not None, (
-            "no_batch_reason admits no synthesis without dims"
-        )
-        batch = _synth_batch(task, dims, device)
+    batch = drawn_batch(task, dims, sample_batch, device)
     match batch:
         case (images, list() as targets):
             return images, instance_targets(targets)
@@ -306,12 +361,12 @@ def check_model_contract(
     Returns the :class:`ContractReport`; a failed train or eval pass is recorded in it, not
     raised. The ``keywords`` are :class:`ContractKeywords`.
 
-    ``dims`` is :func:`~tcip_mcp.pipelines.model_build.resolve_contract_dims`' output, stated only
-    when a batch is synthesized here; a caller handing over ``sample_batch`` states none. A
-    detector whose ``dims`` carry ``attributes`` must also return ``attributes`` per image.
+    ``dims`` is :func:`~tcip_mcp.pipelines.model_build.resolve_contract_dims`' output, the
+    dimensions a batch is synthesized at when no ``sample_batch`` is given; a detector whose
+    ``dims`` carry ``attributes`` must also return ``attributes`` per image.
 
-    ``sample_batch`` is an ``(images, targets)`` pair from this run's own dataset, required for a
-    task outside ``_SYNTHESIZABLE_TASKS``.
+    ``sample_batch`` is a supplied ``(images, targets)`` pair; one from the run's own dataset is
+    required where no batch can be synthesized (:func:`no_batch_reason`).
     """
     import torch
 
@@ -381,7 +436,7 @@ def check_model_contract(
             report["eval_output_type"] = "list[dict]"
             required = {"boxes", "scores", "labels"}
             if task == "instance_seg":
-                # instance_seg trains on real masks (_synth_batch above already supplies
+                # instance_seg trains on real masks (synth_batch above already supplies
                 # target["masks"]); a model whose eval output drops them passes as a detector
                 # while the platform's only sanctioned dimensional measurement can never reach it.
                 required = required | {"masks"}
@@ -434,9 +489,9 @@ def overfit_check(
     every step completes with no recorded ``issue``, every loss is finite and the final loss is
     strictly below the initial one.
 
-    ``sample_batch`` is an ``(images, targets)`` pair from your own dataset, required for a task
-    outside ``_SYNTHESIZABLE_TASKS``. Without it such a task returns ``passed: False`` with the
-    reason in ``issue``; it never raises.
+    ``sample_batch`` is a supplied ``(images, targets)`` pair; one from the run's own dataset is
+    required where no batch can be synthesized (:func:`no_batch_reason`), and without it such a
+    call returns ``passed: False`` with the reason in ``issue``; it never raises.
     """
     import torch
 

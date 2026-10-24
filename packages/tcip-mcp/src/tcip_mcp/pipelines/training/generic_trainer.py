@@ -75,12 +75,13 @@ from tcip_mcp.pipelines.training.run_registry import TrainRun
 from tcip_store import scalar_number, stored_numbers
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from pydantic import JsonValue
 
     from tcip_mcp.pipelines.data.augmentations import Transforms
     from tcip_mcp.pipelines.data.datasets import BaseDataset
+    from tcip_mcp.pipelines.training.collation import Batch
     from tcip_mcp.traits import TraitEntry
 
 logger = logging.getLogger(__name__)
@@ -412,11 +413,14 @@ def checkpoint_path(run_dir: Path | str, name: str) -> Path:
 def write_checkpoint(payload: dict, path: Path) -> Path:
     """Publish one checkpoint at ``path`` once it is whole and return the path.
 
-    The publication is ``experiments.publish_once``'s. A name already written refuses with
-    ``FileExistsError``.
+    The publication is ``experiments.publish_once``'s. Refuses, before anything is written, what
+    ``model_registry.checkpoint_metrics`` refuses of the payload; a name already written refuses
+    with ``FileExistsError``.
     """
     from tcip_mcp.experiments import publish_once
+    from tcip_mcp.model_registry import checkpoint_metrics
 
+    checkpoint_metrics(payload)
     publish_once(path, lambda handle: torch.save(payload, handle))
     return path
 
@@ -454,14 +458,6 @@ def checkpoint_stamp(run: TrainRun) -> dict[str, JsonValue]:
             GEOMETRY_KEY: run.geometry,
         }
     ).model_dump(mode="json", by_alias=True)
-
-
-def _checkpoint_metrics(metrics: dict) -> dict:
-    """Return one epoch's metrics in their stored form (:func:`stored_numbers`).
-
-    A diverged run's ``nan`` is stored as ``null`` plus a state companion.
-    """
-    return stored_numbers(metrics)
 
 
 @dataclass(frozen=True)
@@ -502,15 +498,15 @@ def _epoch_state(
 ) -> dict:
     """Return one epoch's training state with the selection, stage, epoch and metrics it had.
 
-    The state is :func:`capture_training_state`'s; the metrics are held in their stored form
-    (:func:`_checkpoint_metrics`).
+    The state is :func:`capture_training_state`'s; ``metrics`` are the epoch's metrics in their
+    stored form (:func:`stored_numbers`).
     """
     return {
         **capture_training_state(model, optimizer),
         "selection": selection,
         "stage": stage,
         "epoch": epoch,
-        METRICS_KEY: _checkpoint_metrics(metrics),
+        METRICS_KEY: metrics,
     }
 
 
@@ -537,8 +533,8 @@ def _save_checkpoint(
     """Write a resumable periodic checkpoint at ``path``.
 
     It carries the run's ``stamp`` (:func:`checkpoint_stamp`), its current training state
-    (:func:`capture_training_state`), the epoch's row (``METRICS_KEY``) and the resume state
-    (:class:`_ResumeState`).
+    (:func:`capture_training_state`), the epoch's row ``metrics`` in its stored form
+    (``METRICS_KEY``) and the resume state (:class:`_ResumeState`).
     """
     state = _ResumeState(
         scheduler_state_dict=scheduler.state_dict(),
@@ -559,7 +555,7 @@ def _save_checkpoint(
             **capture_training_state(model, optimizer),
             **vars(state),
             **stamp,
-            METRICS_KEY: _checkpoint_metrics(metrics),
+            METRICS_KEY: metrics,
         },
         path,
     )
@@ -623,9 +619,9 @@ def _build_scheduler(
 
 
 @torch.no_grad()
-def _validate(
+def validate(
     model: torch.nn.Module,
-    val_loader: DataLoader,
+    val_loader: Iterable[Batch],
     device: torch.device,
     task: str,
     **keywords: Unpack[EvaluationKeywords],
@@ -874,7 +870,7 @@ def train(
       ends completed with its last stage or with the first stage whose best does not improve by
       ``min_delta`` on its predecessor's, the stages after it never run.
     - ``evaluation`` (``schemas.EvaluationSpec``), passed through to
-      ``_validate``/``evaluate``.
+      ``validate``/``evaluate``.
 
     Best-model selection and early stopping read the config's ``evaluation.selection_metric`` and
     its direction (:func:`selection_of`). Each stage after the first starts from its
@@ -1226,7 +1222,7 @@ def train(
 
                 val_metrics = {}
                 if val_loader is not None:
-                    val_metrics = _validate(
+                    val_metrics = validate(
                         model, val_loader, device, task, **evaluated
                     )
                 sel = _selection_value(
@@ -1257,7 +1253,7 @@ def train(
                     **val_metrics,
                 }
                 run.metrics_history.append(epoch_metrics)
-                final_row = _checkpoint_metrics(epoch_metrics)
+                final_row = stored_numbers(epoch_metrics)
 
                 if epoch_callback is not None:
                     epoch_callback(run.current_epoch, epoch_metrics)
@@ -1293,7 +1289,7 @@ def train(
                         selection=sel,
                         stage=stage_idx,
                         epoch=run.current_epoch,
-                        metrics=epoch_metrics,
+                        metrics=final_row,
                     )
 
                 # The stage's plateau, on the same selection objective.
@@ -1327,7 +1323,7 @@ def train(
                         es_best=es_best,
                         es_counter=es_counter,
                         global_step=global_step,
-                        metrics=epoch_metrics,
+                        metrics=final_row,
                     )
 
             if diverged or (stage_best is None and canceled):

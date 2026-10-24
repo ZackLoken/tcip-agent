@@ -149,6 +149,30 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
     assert frames[-1]["status"]["state"] == "completed"
 
 
+def test_the_log_reader_refuses_the_non_finite_row_its_writer_refuses(
+    tmp_path: Path,
+) -> None:
+    """A row carrying a non-finite number is refused by the log's writer and by its reader alike.
+
+    The writer (``append_row``) refuses it naming the position; a line spelling it, which
+    ``json`` decodes, is refused by ``read_rows`` naming the position too.
+    """
+    import pytest
+
+    from tcip_mcp.experiments import append_row, read_rows
+    from tcip_store import DecodeError
+
+    row = {"epoch": 1, "val_per_class_iou": {"0": float("nan")}}
+    log = tmp_path / "metrics.jsonl"
+    log.write_bytes(b"")
+    with pytest.raises(ValueError, match=r"val_per_class_iou\.dict\.0"):
+        append_row(log, row)
+
+    log.write_bytes(b'{"epoch": 1, "val_per_class_iou": {"0": NaN}}\n')
+    with pytest.raises(DecodeError, match=r"val_per_class_iou\.dict\.0"):
+        read_rows(log)
+
+
 def test_training_stream_serves_no_metric_frames_for_a_run_no_directory_holds(
     opened_project: Path,
     client: TestClient,
