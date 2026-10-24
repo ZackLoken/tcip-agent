@@ -17,6 +17,7 @@ from tcip_mcp.experiments import (
     training_listing,
 )
 from tcip_mcp.identity import actor
+from tcip_store import FiniteJsonObject
 from tcip_store.errors import BadKeyError
 from tcip_web.routes._body_common import EmptyBodyPayload, PersonPayload
 from tcip_web.state import NoProjectOpenError, store
@@ -275,7 +276,7 @@ class TrainingRowFrame(BaseModel):
 
     type: Literal["metric", "batch"]
     experiment_id: str
-    row: dict
+    row: FiniteJsonObject
 
 
 class TrainingStatusFrame(BaseModel):

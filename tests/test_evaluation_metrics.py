@@ -2,7 +2,7 @@
 
 Unit tests for the one matcher's detection metrics, the composite objective,
 the in-house scalar metrics, and ``_selection_value``; plus light integration
-tests that exercise the detection/classification ``_validate`` path end-to-end.
+tests that exercise the detection/classification ``validate`` path end-to-end.
 """
 
 from __future__ import annotations
@@ -1428,7 +1428,7 @@ def test_an_evaluation_identity_stated_without_its_regime_refuses_naming_it(
 
 
 # --------------------------------------------------------------------------
-# Light integration: _validate via train()
+# Light integration: validate via train()
 # --------------------------------------------------------------------------
 
 torchvision = pytest.importorskip("torchvision")

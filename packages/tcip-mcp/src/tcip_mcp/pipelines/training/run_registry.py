@@ -66,32 +66,14 @@ class TrainRun:
 
     @cached_property
     def evaluation_arguments(self) -> EvaluationKeywords:
-        """The run's resolved evaluation keywords.
-
-        They are the dims its config records (``model_build.recorded_model_dims``), the
-        confidence and the mask cut it reads (:attr:`reads`), its stated
-        ``evaluation.iou_threshold`` and ``score_weights``, the trait entry at its
-        :attr:`trait_revision` (read from :attr:`project`, ``None`` for a run naming no trait; a
-        revision whose entry no longer carries the recorded hash refuses with
-        ``traits.RevisionMovedError``), and its :attr:`geometry`'s ``object_density``.
-        """
-        from tcip_mcp.pipelines.model_build import recorded_model_dims
-        from tcip_mcp.traits import read_trait
-
-        spec, ref = self.spec, self.trait_revision
-        return {
-            "dims": recorded_model_dims(spec),
-            "conf_threshold": self.reads.conf_threshold,
-            "mask_cut": self.reads.mask_cut,
-            "iou_threshold": spec.evaluation.iou_threshold,
-            "score_weights": spec.evaluation.score_weights,
-            "trait": None
-            if ref is None
-            else read_trait(ref.trait, self.project)
-            .revision(ref.trait_revision, ref.trait_revision_sha256)
-            .entry,
-            "density": self.geometry.object_density,
-        }
+        """The run's resolved evaluation keywords (:func:`evaluation_keywords`), read once."""
+        return evaluation_keywords(
+            self.spec,
+            self.reads,
+            trait_revision=self.trait_revision,
+            geometry=self.geometry,
+            project=self.project,
+        )
 
     @property
     def wall_clock_exceeded(self) -> bool:
@@ -118,6 +100,43 @@ class TrainRun:
             else (run_dir,)
         )
         return any(cancel_requested(d) for d in directories)
+
+
+def evaluation_keywords(
+    spec: TrainConfigSchema,
+    reads: TrainerReads,
+    *,
+    trait_revision: TraitRevisionRef | None,
+    geometry: TrainGeometry,
+    project: Path,
+) -> EvaluationKeywords:
+    """Return the evaluation keywords a run of ``spec`` resolved at launch scores at.
+
+    They are the dims ``spec`` records (``model_build.recorded_model_dims``), the confidence and
+    the mask cut ``reads`` admitted (``TrainConfigSchema.trainer_reads``), its stated
+    ``evaluation.iou_threshold`` and ``score_weights``, the trait entry at ``trait_revision``
+    (read from ``project``, ``None`` for a run naming no trait; a revision whose entry no longer
+    carries the recorded hash refuses with ``traits.RevisionMovedError``), and ``geometry``'s
+    ``object_density``.
+    """
+    from tcip_mcp.pipelines.model_build import recorded_model_dims
+    from tcip_mcp.traits import read_trait
+
+    return {
+        "dims": recorded_model_dims(spec),
+        "conf_threshold": reads.conf_threshold,
+        "mask_cut": reads.mask_cut,
+        "iou_threshold": spec.evaluation.iou_threshold,
+        "score_weights": spec.evaluation.score_weights,
+        "trait": None
+        if trait_revision is None
+        else read_trait(trait_revision.trait, project)
+        .revision(
+            trait_revision.trait_revision, trait_revision.trait_revision_sha256
+        )
+        .entry,
+        "density": geometry.object_density,
+    }
 
 
 def observed_run(

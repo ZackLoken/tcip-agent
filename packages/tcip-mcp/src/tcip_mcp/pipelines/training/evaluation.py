@@ -23,7 +23,6 @@ from tcip_store import stored_number, stored_numbers
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
-    from torch.utils.data import DataLoader
 
     from tcip_annotation.state import Annotation
     from tcip_mcp.buckets import Bucket
@@ -1282,15 +1281,16 @@ def semantic_seg_metrics(
     ``mIoU`` / ``dice`` average only over classes present in preds or targets, a class absent
     from both has an undefined ratio (reported ``None`` per-class, excluded from the mean), the
     standard convention. ``pixel_acc`` is the fraction of correctly labeled pixels. Pixels equal
-    to ``ignore_index`` in the GT are dropped before scoring.
+    to ``ignore_index`` in the GT are dropped before scoring. Each per-class mapping is keyed by
+    the class index as a string (a JSON object's key).
     """
     pred = preds.detach().cpu().reshape(-1).long()
     gt = targets.detach().cpu().reshape(-1).long()
     if ignore_index is not None:
         keep = gt != ignore_index
         pred, gt = pred[keep], gt[keep]
-    per_class_iou: dict[int, float | None] = {}
-    per_class_dice: dict[int, float | None] = {}
+    per_class_iou: dict[str, float | None] = {}
+    per_class_dice: dict[str, float | None] = {}
     ious, dices = [], []
     for c in range(num_classes):
         if c == ignore_index:
@@ -1303,13 +1303,13 @@ def semantic_seg_metrics(
         if (
             union == 0
         ):  # class absent from both, ratio undefined, exclude from the mean
-            per_class_iou[c] = None
-            per_class_dice[c] = None
+            per_class_iou[str(c)] = None
+            per_class_dice[str(c)] = None
             continue
         iou = inter / union
         dice = 2 * inter / denom if denom > 0 else 0.0
-        per_class_iou[c] = iou
-        per_class_dice[c] = dice
+        per_class_iou[str(c)] = iou
+        per_class_dice[str(c)] = dice
         ious.append(iou)
         dices.append(dice)
     pixel_acc = float((pred == gt).float().mean()) if gt.numel() else 0.0
@@ -1408,7 +1408,7 @@ class EvaluationKeywords(TypedDict):
 @torch.no_grad()
 def evaluate(
     model: torch.nn.Module,
-    loader: DataLoader,
+    loader: Iterable[Any],
     device: torch.device,
     task: str,
     **keywords: Unpack[EvaluationKeywords],

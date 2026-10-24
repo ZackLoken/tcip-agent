@@ -816,7 +816,7 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(
         mask_cut=None,
     )
 
-    assert sorted(result["per_class_iou"]) == [0, 1, 2]
+    assert sorted(result["per_class_iou"]) == ["0", "1", "2"]
 
 
 def test_the_place_and_the_record_read_one_ground_truth_shape(

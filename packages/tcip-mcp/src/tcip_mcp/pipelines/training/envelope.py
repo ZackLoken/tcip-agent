@@ -142,23 +142,25 @@ class TrainContext:
     def _contract_args(self) -> ContractKeywords:
         """Return the arguments the contract smoke runs against.
 
-        They are the dims this run resolved, or one batch off its own train loader when those dims
-        cannot shape a batch (``no_batch_reason``).
+        They are ``model_contract.contract_batch``'s keywords at the dims this run resolved, its
+        own batch the first its train loader yields.
         """
         from tcip_mcp.pipelines.model_build import (
             recorded_model_dims,
             resolve_contract_dims,
         )
-        from tcip_mcp.pipelines.model_contract import no_batch_reason
+        from tcip_mcp.pipelines.model_contract import contract_batch
 
-        dims = resolve_contract_dims(
-            self.spec, recorded_model_dims(self.spec), self.run.geometry
-        )
-        if no_batch_reason(self.task, dims, None) is not None:
-            batch = next(iter(self.train_loader or []), None)
-            if batch is not None:
-                return {"sample_batch": batch}
-        return {"dims": dims}
+        return contract_batch(
+            self.task,
+            resolve_contract_dims(
+                self.spec, recorded_model_dims(self.spec), self.run.geometry
+            ),
+            lambda: next(
+                iter(self.train_loader or []),
+                "this run's train loader yields no batch",
+            ),
+        ).keywords
 
     def check_contract(
         self,
@@ -375,32 +377,15 @@ class TrainContext:
 
     # ---- envelope-owned sinks ----
     def _metrics_row(self, metrics: dict, stamps: dict) -> dict:
-        """Return ``metrics`` in their stored form with ``stamps`` and the instant laid over them.
+        """Return ``experiments.metrics_row`` of ``metrics`` and ``stamps``, refusing as it does.
 
-        The run is checked open (``experiments.require_open``). Refuses (``ValueError``) metrics
-        carrying a key the log stamps (``experiments.EPOCH_KEY``, ``STEP_KEY``,
-        ``TIMESTAMP_KEY``).
+        The run is then checked open (``experiments.require_open``).
         """
-        from tcip_mcp.audit import now_iso
-        from tcip_mcp.experiments import (
-            EPOCH_KEY,
-            STEP_KEY,
-            TIMESTAMP_KEY,
-            require_open,
-        )
+        from tcip_mcp.experiments import metrics_row, require_open
 
-        stamped = sorted({EPOCH_KEY, STEP_KEY, TIMESTAMP_KEY} & metrics.keys())
-        if stamped:
-            raise ValueError(
-                f"the metrics carry {stamped}, which the metrics log stamps on each row itself; "
-                "pass the epoch and step as the sink's own arguments."
-            )
+        row = metrics_row(metrics, stamps)
         require_open(self.run_dir)
-        return {
-            **generic_trainer._checkpoint_metrics(metrics),
-            **stamps,
-            TIMESTAMP_KEY: now_iso(),
-        }
+        return row
 
     def _epoch_sink(self, epoch: int, metrics: dict) -> None:
         """Append one epoch's row (:meth:`_metrics_row`) to the run's ``metrics.jsonl``.

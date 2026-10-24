@@ -1,7 +1,7 @@
 """Auto train/val wiring: auto_train_val plus the detection val-loss pass.
 
 These exercise the helper that derives a group-aware val split and the generic_trainer
-``_validate`` detection path.
+``validate`` detection path.
 """
 
 from __future__ import annotations

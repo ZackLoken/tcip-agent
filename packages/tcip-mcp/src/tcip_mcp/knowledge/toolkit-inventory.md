@@ -88,11 +88,16 @@ output the library scorers consume. Both synthesize a batch for the task strings
 routes; for any other task they take `sample_batch=`, an `(images, targets)` pair from your own
 dataset. Given neither, `check_model_contract` returns a `not_smokeable` reason and `overfit_check`
 returns `passed: False` with the reason in `issue`. `preflight_config(smoke=True)` builds that
-batch from the run's `data` config and feeds it to `check_model_contract`; `overfit_check` runs on
-the same batch only when `overfit=True` is also passed, since it is a voluntary diagnostic, not
-part of the always-on smoke build. `smoke["batch_source"]` records which reference proved the
-contract. `launch_training(overfit_check=True)` runs the diagnostic at launch, on the contract's
-own batch, before the subprocess spawns, and records the result on the run's `model_contract`.
+batch from the run's `data` config and feeds it to `check_model_contract`; `overfit_check` runs
+only when `overfit=True` is also passed, since it is a voluntary diagnostic, not part of the
+always-on smoke build, on that dataset batch, or on a batch it synthesizes after seeding at the
+run's `seed`. `smoke["batch_source"]` records which reference proved the
+contract. For a run with a validation side the smoke then validates the model on that batch at
+the run's evaluation keywords and admits the result as the metrics log admits an epoch row, so a
+row the log would refuse blocks the launch naming the field; `smoke["evaluation_not_run"]` says
+why that leg did not run and `smoke["evaluation_row_keys"]` names the keys of the row it admitted.
+`launch_training(overfit_check=True)` runs the diagnostic at launch, the same way, before the
+subprocess spawns, and records the result on the run's `model_contract`.
 
 ## The `ctx` craft library (`TrainContext`, `pipelines.training.envelope`)
 
@@ -105,7 +110,7 @@ one convenience, not a requirement.
 | data | `ctx.train_loader`/`ctx.val_loader` (built from the partition the launch resolved), `ctx.build_dataset` (on a within-image split run, the one sample's train view, its tiles inside the recorded train region; `ctx.spatial` is that split), `ctx.tiled_dataset`, `ctx.task_collate`, `ctx.build_sampler`, `ctx.build_augmentation` |
 | optimize / schedule / freeze | `ctx.build_optimizer` (the run's own stated `optimizer` block over the model's `get_param_groups`, else its `backbone` at `backbone_lr` and the rest at `head_lr`), `ctx.build_scheduler` (the run's own stated `scheduler` block, every setting handed to the torch scheduler, a plateau one watching in the selection metric's direction; step it on the run's selection value), `ctx.apply_stage_freeze` (progressive-unfreeze through the model's own `freeze_backbone` + monotonic guard: the primitive the default trainer uses; a freeze the model cannot apply refuses by name), `ctx.capture_training_state` / `ctx.restore_training_state` (a model's weights, buffers and optimizer state taken at one moment and put back into a rebuilt optimizer, matched by parameter name: what the default trainer hands each stage from its predecessor's best epoch), `ctx.compute_lr_scale`, `ctx.set_seed` (the run's stated `seed` and `deterministic`), `ctx.evaluate`, `ctx.compute_class_weights` |
 | measurement | `ctx.mask_geometry`, `ctx.instance_geometries` (the operating point a delivery runs at is an assessment's, `assess_checkpoint`, never a training run's) |
-| audited sinks | `ctx.log_metrics`, `ctx.log_batch` (one per-batch row at a step within an epoch, the Training tab's in-progress line, never an epoch row; the loop chooses its cadence), `ctx.save_checkpoint` (stamps the run's `config`, its `model_source` and task included, which the one predictor builds the model from, its source snapshot and the geometry its launch resolved, each refused in the saved state; a checkpoint missing any of them refuses where it is read; a payload with no `model_state_dict` is saved but refused when the run's checkpoint is registered; a `metrics` key in the saved state registers as `metrics_source="training_source"`, unverified, ranked by `rank_registered_models` only with `include_unverified=True`), `ctx.record_artifact` (copies a file in under a name of its own), `ctx.should_cancel`, `ctx.set_final_weights` (declares which saved tag is the deliverable), `ctx.report_objective` (records a `selection` row under the run's `evaluation.selection_metric`, the value an HPO trial reports) |
+| audited sinks | `ctx.log_metrics`, `ctx.log_batch` (one per-batch row at a step within an epoch, the Training tab's in-progress line, never an epoch row; the loop chooses its cadence), `ctx.save_checkpoint` (stamps the run's `config`, its `model_source` and task included, which the one predictor builds the model from, its source snapshot and the geometry its launch resolved, each refused in the saved state; a checkpoint missing any of them refuses where it is read; a payload with no `model_state_dict` is saved but refused when the run's checkpoint is registered; a `metrics` key in the saved state must hold a JSON object keyed by strings, every number in it finite, refused at the save otherwise; a non-empty one registers as `metrics_source="training_source"`, unverified, ranked by `rank_registered_models` only with `include_unverified=True`, and an empty one or none registers with no metrics and no source), `ctx.record_artifact` (copies a file in under a name of its own), `ctx.should_cancel`, `ctx.set_final_weights` (declares which saved tag is the deliverable), `ctx.report_objective` (records a `selection` row under the run's `evaluation.selection_metric`, the value an HPO trial reports) |
 
 Route metrics and checkpoints through the sinks and the run stays audited, immutably versioned, and
 provenance-snapshotted no matter what the loop does; each tag and artifact name is written once, and

@@ -194,7 +194,8 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   of the run's own dataset when it resolved no frame, every attribute head included, before the
   training subprocess spawns, so a broken builder fails the launch, not a wasted run. `ctx.check_contract` / `ctx.overfit_check` are the same proofs on
   demand; `launch_training(overfit_check=True)` runs `ctx.overfit_check`'s own diagnostic at
-  launch, on the contract's batch, and records the result on the run's `model_contract`, never
+  launch, on the contract's dataset batch or one it synthesizes under the run's `seed`, and
+  records the result on the run's `model_contract`, never
   gating (a valid model can fail twenty steps on noise).
 - `training_source` points the envelope at your custom `train(ctx)`. The `TrainContext` (`ctx`,
   `pipelines.training.envelope`) hands you the craft library: prebuilt leakage-free loaders,

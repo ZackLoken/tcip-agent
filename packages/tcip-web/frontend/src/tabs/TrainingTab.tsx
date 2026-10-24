@@ -441,9 +441,9 @@ export function TrainingTab() {
     let errorToasted = false;
     streamRef.current = openTrainingStream(selectedRun, (msg) => {
       if (msg.type === "metric" && msg.row) {
-        setMetrics((prev) => mergeMetric(prev, msg.row as MetricRow));
+        setMetrics((prev) => mergeMetric(prev, msg.row));
       } else if (msg.type === "batch" && msg.row) {
-        setLatestBatch(msg.row as MetricRow);
+        setLatestBatch(msg.row);
       } else if (msg.type === "status") {
         // A known run carries its row and no error; an unknown run carries error and no row,
         // is not terminal, and the socket keeps reconnecting behind it.
