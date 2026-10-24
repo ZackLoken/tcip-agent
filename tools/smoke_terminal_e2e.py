@@ -36,13 +36,11 @@ sys.path.insert(
 ANSWER_TIMEOUT_S = 240
 
 
-def terminal_ws_url(client: TestClient, session_id: str) -> str:
-    """Return the absolute ``ws://`` URL of ``session_id``'s socket on ``client``'s host."""
+def terminal_ws_url(client: TestClient, path: str) -> str:
+    """Return the absolute ``ws://`` URL of the socket ``path`` on ``client``'s host."""
     parts = urlsplit(str(client.base_url))
     scheme = "wss" if parts.scheme == "https" else "ws"
-    return urlunsplit(
-        (scheme, parts.netloc, f"/api/terminal/ws/{session_id}", "", "")
-    )
+    return urlunsplit((scheme, parts.netloc, path, "", ""))
 
 
 REQUESTED_CATEGORY = "unexpected_behavior"
@@ -87,6 +85,7 @@ def main(
 
     from fastapi.testclient import TestClient
 
+    from tcip_mcp.audit import audit_entries
     from tcip_mcp.project_record import CaptureInvariances
     from tcip_mcp.tools.project_tools import initialize_project
     from tcip_mcp.workspace import workspace_from_environment
@@ -158,7 +157,10 @@ def main(
     answered = False
     started = time.time()
     try:
-        with client.websocket_connect(terminal_ws_url(client, sid)) as ws:
+        socket_path = app.url_path_for("terminal_ws", session_id=sid)
+        with client.websocket_connect(
+            terminal_ws_url(client, socket_path)
+        ) as ws:
             ws.send_json(
                 {"type": "input", "data": "\x1b[?1;2c"}
             )  # a terminal's DA reply
@@ -173,19 +175,25 @@ def main(
                 time.sleep(1.0)
                 answered = reported(client, token)
             if not answered:
-                launch = session._launch
                 print(
-                    f"    bracketed paste on: {launch.ready}; ritual delivered: "
-                    f"{launch.ritual_sent}; requests still queued: {len(launch.queued)}"
+                    f"    bracketed paste on: {session._ready}; ritual delivered: "
+                    f"{session._ritual_sent}; requests still queued: "
+                    f"{len(session._queued)}"
                 )
                 print(
                     f"    stream tail: {ascii(session.scrollback_snapshot()[-1500:])}"
                 )
     finally:
         terminal_routes.shutdown_all()
-        print(
-            f"[5] session terminated (shutdown_all) after {time.time() - started:.0f} s"
-        )
+    end_lines = [
+        entry
+        for entry in audit_entries(project)[0]
+        if entry["tool"] == "agent_terminal_ended"
+    ]
+    print(
+        f"[5] after shutdown_all: session still held {sid in terminal_routes._SESSIONS}, "
+        f"end lines recorded {len(end_lines)}"
+    )
 
     print("SMOKE PASS" if answered else "SMOKE FAIL")
     return 0 if answered else 1

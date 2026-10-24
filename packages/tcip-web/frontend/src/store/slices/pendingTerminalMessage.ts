@@ -9,6 +9,8 @@ export interface PendingTerminalMessageSlice {
   sendToAgentTerminal: (text: string) => void;
   /** Drop the `count` oldest staged requests. */
   dropDeliveredTerminalMessages: (count: number) => void;
+  /** Stage `texts`, requests an ended agent was never given, ahead of every staged request. */
+  restageTerminalMessages: (texts: string[]) => void;
 }
 
 export const createPendingTerminalMessageSlice: StateCreator<
@@ -24,4 +26,6 @@ export const createPendingTerminalMessageSlice: StateCreator<
   },
   dropDeliveredTerminalMessages: (count) =>
     set({ pendingTerminalMessages: get().pendingTerminalMessages.slice(count) }),
+  restageTerminalMessages: (texts) =>
+    set({ pendingTerminalMessages: [...texts, ...get().pendingTerminalMessages] }),
 });

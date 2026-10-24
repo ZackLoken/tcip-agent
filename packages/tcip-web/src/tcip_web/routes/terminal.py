@@ -1,6 +1,6 @@
-"""Agent terminal routes: provider status, session launch, restart, requests and a PTY WebSocket.
+"""Agent terminal routes: provider status, session launch and end, requests and a PTY WebSocket.
 
-Status, launch, restart and submitted requests go over HTTP; per session a WebSocket carries
+Status, launch, end and submitted requests go over HTTP; per session a WebSocket carries
 raw PTY output as text frames out and ``TerminalInputFrame``/``TerminalResizeFrame`` JSON
 messages in. A reconnecting socket receives the scrollback first, then live output, with nothing
 lost or repeated between them.
@@ -10,18 +10,19 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
+import itertools
 import logging
 import os
 import threading
-from dataclasses import dataclass, field
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
+from tcip_mcp.audit import AuditEntryNotWrittenError, record_event_or_raise
 from tcip_mcp.identity import actor
 from tcip_web import terminal as pty_host
+from tcip_web.routes.audit_gap import audit_gap_409
 from tcip_web.state import OpenProject, store
 
 logger = logging.getLogger(__name__)
@@ -39,25 +40,29 @@ MAX_DIM = 500  # sanity bound on client-supplied rows/cols
 # that socket: the client reconnects and repaints from the scrollback replay.
 QUEUE_MAX_CHUNKS = 2048
 
-_EXIT_NOTE = (
-    "\r\n\x1b[2m[the agent exited, use Restart in the rail header]\x1b[22m\r\n"
-)
+# RFC 6455 leaves the close codes 4000-4999 to the application.
+ENDED_CLOSE_CODE = 4000
+"""The close code of a socket whose session's agent ended; a reconnect cannot reach it again."""
+
+_ENDED_CLOSE = (ENDED_CLOSE_CODE, "the agent ended")
+_BACKLOG_CLOSE = (1013, "output backlog dropped; reconnect")
+_SURVIVED = "The agent process could not be stopped and stays attached to this session."
 
 
-def _offer(queue: asyncio.Queue, data: str) -> None:
-    """Enqueue output for one subscriber (runs on that subscriber's loop).
+def _offer(queue: asyncio.Queue, item: str | tuple[int, str]) -> None:
+    """Enqueue output, or a ``(code, reason)`` close, for one subscriber (on its loop).
 
-    On overflow, drop the backlog and leave a ``None`` sentinel.
+    On overflow, drop the backlog and leave the close ``item`` is, or else the backlog close.
     """
     try:
-        queue.put_nowait(data)
+        queue.put_nowait(item)
     except asyncio.QueueFull:
         try:
             while True:
                 queue.get_nowait()
         except asyncio.QueueEmpty:
             pass
-        queue.put_nowait(None)
+        queue.put_nowait(item if isinstance(item, tuple) else _BACKLOG_CLOSE)
 
 
 class LaunchedProgram(BaseModel):
@@ -77,14 +82,9 @@ class LaunchedProgram(BaseModel):
 
 
 class TerminalLaunch(BaseModel):
-    """A started session: its id, whether it already ran, what it launched and its ritual.
-
-    Whether it already ran is as of when it was asked for; the ritual is the session-start
-    ritual that launch was given.
-    """
+    """A started session: its id, what it launched and the session-start ritual it was given."""
 
     session_id: str
-    existing: bool
     launched: LaunchedProgram
     ritual: str
 
@@ -103,64 +103,53 @@ class TerminalStatus(BaseModel):
     providers: list[ProviderStatus]
 
 
-def _record_start(
-    session_id: str,
-    launched: LaunchedProgram,
+class TerminalEnd(BaseModel):
+    """An ended session: the requests it took and its agent was never given, oldest first."""
+
+    undelivered: list[str]
+
+
+def _record(
+    event: str,
+    arguments: dict,
     project: OpenProject | None,
-    actor: str,
+    actor: str | None,
 ) -> None:
-    """Write one audit line by ``actor`` in ``project``'s log for a launch for it.
+    """Write one ``event`` line with ``arguments`` by ``actor`` in ``project``'s log.
 
-    The line names the session id and the provider and program it launched; a launch for no
-    project has no log to land in and records nothing. A failed append raises
-    ``AuditEntryNotWrittenError``.
+    ``actor`` is ``None`` for an act no person performed. A session for no project has no log to
+    land in and records nothing. A failed append raises ``AuditEntryNotWrittenError``.
     """
-    from tcip_mcp.audit import record_event_or_raise
-
     if project is not None:
         record_event_or_raise(
-            "agent_terminal_started",
-            {"session_id": session_id, **launched.model_dump()},
-            actor=actor,
-            scope=project.root,
+            event, arguments, actor=actor, scope=project.root
         )
-
-
-@dataclass
-class _Launch:
-    """One launch of a session's agent and its delivery state.
-
-    It carries its generation, its session-start ritual once known, whether that ritual was
-    delivered, whether the agent has bracketed paste on, the sequence one version of its row's
-    harness was recorded writing when its composer appeared and whether the agent has written
-    it, the requests waiting behind the ritual, and the output tail an escape sequence split
-    across reads continues from.
-    """
-
-    gen: int
-    ritual: str | None = None
-    ritual_sent: bool = False
-    ready: bool = False
-    composer_ready: str | None = None
-    composer_live: bool = False
-    queued: list[str] = field(default_factory=list)
-    tail: str = ""
 
 
 _TAIL_CHARS = 32
 
 
 class TerminalSession:
-    """One PTY-attached agent process, its current launch and its subscriber queues."""
+    """One PTY-attached agent process, its delivery state and its subscriber queues.
 
-    launch: TerminalLaunch
-    """What the last start launched; set by :meth:`start`."""
+    The delivery state is the agent's session-start ritual and whether it was delivered, whether
+    the agent has bracketed paste on, whether it has written its row's ``composer_ready``, the
+    requests waiting behind the ritual, and the output tail an escape sequence split across reads
+    continues from.
+    """
+
+    launched: LaunchedProgram
+    """What :meth:`start` launched."""
+    ritual: str
+    """The session-start ritual :meth:`start` built for the agent."""
     _pty: pty_host.Pty | None
 
     def __init__(self, session_id: str) -> None:
         """Take the session's id; no process runs until :meth:`start`."""
         self.id = session_id
         self._pty = None
+        # The project whose log records the session's lines, set once its start line is written.
+        self._project: OpenProject | None = None
         self._lock = threading.Lock()
         self._scrollback: list[str] = []
         self._scrollback_len = 0
@@ -168,8 +157,15 @@ class TerminalSession:
         self._subs: dict[
             int, tuple[asyncio.Queue, asyncio.AbstractEventLoop]
         ] = {}
-        self._next_sub = 0
-        self._launch = _Launch(gen=0)
+        self._sub_ids = itertools.count()
+        self._ritual_sent = False
+        self._ready = False
+        self._composer_live = False
+        self._queued: list[str] = []
+        self._tail = ""
+        # Held by the one delivery writing to the PTY, so writes keep their order; taken after the
+        # sessions lock and before the session lock, which is never held across a write.
+        self._writing = threading.Lock()
 
     # ── lifecycle ───────────────────────────────────────────────────────
 
@@ -178,107 +174,149 @@ class TerminalSession:
     ) -> str | None:
         """Spawn ``provider``'s harness in a PTY for the open project, by ``actor``.
 
-        The spawn is the current launch, or a new one when the current launch already spawned,
-        its ritual built before the spawn from the project's record as it reads now. Returns an
-        error reason (a record that will not read names why), or None on success.
+        The ritual is built before the spawn from the project's record as it reads now. Returns
+        an error reason (a record that will not read names why), or None on success.
         """
-        with self._lock:
-            if self._pty is not None and self._pty.isalive():
-                return None
-            if self._launch.ritual is not None:
-                self._launch = _Launch(gen=self._launch.gen + 1)
-            project = store.opened
-            launch = pty_host.project_launch(project)
-            try:
-                ritual = pty_host.session_ritual(launch)
-            except ValueError as exc:
+        project = store.opened
+        launch = pty_host.project_launch(project)
+        try:
+            ritual = pty_host.session_ritual(launch)
+        except ValueError as exc:
+            return str(exc)
+        command = pty_host.resolve_terminal_command(provider)
+        if command is None:
+            return provider.unavailable_reason
+        prepared = (
+            []
+            if command[1]
+            else pty_host.prepare_launch(command[0][0], provider, launch)
+        )
+        if isinstance(prepared, str):
+            return prepared
+        env = pty_host.spawn_env(self.id)
+        argv = pty_host.render_argv(command[0], launch, env)
+        program = pty_host.launched_program(argv, command[1])
+        launched = LaunchedProgram(
+            provider=provider.id,
+            prepared=prepared,
+            confinement=None if command[1] else provider.confinement,
+            **program,
+        )
+        try:
+            pty = pty_host.spawn_pty(
+                argv, str(store.workspace), rows, cols, env
+            )
+        except OSError as exc:
+            return f"could not start the agent terminal: {exc}"
+        self._pty = pty
+        self.launched = launched
+        self.ritual = ritual
+        try:
+            _record(
+                "agent_terminal_started",
+                {"session_id": self.id, **launched.model_dump()},
+                project,
+                actor,
+            )
+        except AuditEntryNotWrittenError as exc:
+            if self.terminate():
+                pty.close()
                 return str(exc)
-            command = pty_host.resolve_terminal_command(provider)
-            if command is None:
-                return provider.unavailable_reason
-            prepared = (
-                []
-                if command[1]
-                else pty_host.prepare_launch(command[0][0], provider, launch)
-            )
-            if isinstance(prepared, str):
-                return prepared
-            env = pty_host.spawn_env(self.id)
-            argv = pty_host.render_argv(command[0], launch, env)
-            program = pty_host.launched_program(argv, command[1])
-            launched = LaunchedProgram(
-                provider=provider.id,
-                prepared=prepared,
-                confinement=None if command[1] else provider.confinement,
-                **program,
-            )
-            self._launch.composer_ready = provider.composer_ready
-            try:
-                pty = pty_host.spawn_pty(
-                    argv, str(store.workspace), rows, cols, env
-                )
-            except OSError as exc:
-                self._pty = None
-                return f"could not start the agent terminal: {exc}"
-            self._pty = pty
-            self._launch.ritual = ritual
-            self.launch = TerminalLaunch(
-                session_id=self.id,
-                existing=False,
-                launched=launched,
-                ritual=self._launch.ritual,
-            )
-            gen = self._launch.gen
+            return f"{exc} {_SURVIVED}"
+        self._project = project
+        # Started only once the start line is written, so the process's own end follows it.
         pty_host.start_reader(
             pty,
-            lambda data: self._on_output(data, gen),
-            lambda: self._on_exit(gen),
-            name=f"term-{self.id}-g{gen}",
+            self._on_output,
+            lambda: self.end_unattended("the agent's process exited"),
+            name=f"term-{self.id}",
         )
-        from tcip_mcp.audit import AuditEntryNotWrittenError
-
-        try:
-            _record_start(self.id, launched, project, actor)
-        except AuditEntryNotWrittenError as exc:
-            stopped = self.terminate()
-            reason = str(exc)
-            if not stopped:
-                reason += (
-                    " The spawned process could not be stopped and stays attached to this "
-                    "session."
-                )
-            return reason
         return None
 
-    def restart(
-        self, rows: int, cols: int, provider: pty_host.Provider, actor: str
-    ) -> str | None:
-        """Open the next launch, end the current process and start ``provider`` as it by ``actor``.
+    def end(self, cause: str, actor: str | None) -> bool:
+        """End the session's agent for ``cause``, by ``actor`` (``None`` when no person did).
 
-        The next launch holds the current launch's undelivered requests and every request
-        submitted from here on behind its ritual. Returns an error reason, or None on success.
+        Under the sessions lock, so no create runs and no submit is admitted meanwhile, and in
+        this order: terminates the process; waits for a delivery under way to settle, so each
+        request is either written and gone from the queue or still queued, the queue it leaves
+        being what its agent was never given, which nothing changes after; writes one
+        ``agent_terminal_ended`` line naming the session, its provider row, ``cause`` and how many
+        requests that is in the log its start line was written to, or writes the failure to the
+        terminal stream and the error log; then, under the session's own lock, closes every socket
+        of it with :data:`ENDED_CLOSE_CODE`, drops them, so no later output reaches one, and
+        forgets the session, which is what marks it ended. Returns False when the process
+        survives termination, the session still held, and True once the session ended, by this
+        call or an earlier one. A failed append is raised as ``AuditEntryNotWrittenError``.
         """
-        with self._lock:
-            self._launch = _Launch(
-                gen=self._launch.gen + 1, queued=self._launch.queued
-            )
-        # A survivor here stays attached: start() below would find self._pty alive and report
-        # success with no process spawned and no line written.
-        if not self.terminate():
-            return (
-                "the previous agent process could not be stopped and stays attached to this "
-                "session."
-            )
-        with self._lock:
-            self._scrollback = []
-            self._scrollback_len = 0
-        return self.start(rows, cols, provider, actor)
+        with _SESSIONS_LOCK:
+            if self.id not in _SESSIONS:
+                return True
+            if not self.terminate():
+                return False
+            with self._writing, self._lock:
+                undelivered_count = len(self._queued)
+            try:
+                _record(
+                    "agent_terminal_ended",
+                    {
+                        "session_id": self.id,
+                        "provider": self.launched.provider,
+                        "cause": cause,
+                        "undelivered_count": undelivered_count,
+                    },
+                    self._project,
+                    actor,
+                )
+            except AuditEntryNotWrittenError as exc:
+                with self._lock:
+                    self._show(f"\r\n{exc}\r\n")
+                logger.exception(
+                    "terminal session %s ended unrecorded", self.id
+                )
+                raise
+            finally:
+                with self._lock:
+                    self._broadcast(_ENDED_CLOSE)
+                    self._subs.clear()
+                    del _SESSIONS[self.id]
+        return True
+
+    def answer(self) -> TerminalLaunch:
+        """Return the session's id, what it launched and the ritual it was given."""
+        return TerminalLaunch(
+            session_id=self.id, launched=self.launched, ritual=self.ritual
+        )
 
     def submit(self, text: str) -> None:
-        """Queue ``text`` for the current launch's agent, delivered after its ritual."""
+        """Queue ``text`` for the session's agent, behind its ritual; :meth:`deliver` writes it."""
         with self._lock:
-            self._launch.queued.append(text)
-            self._deliver()
+            self._queued.append(text)
+
+    def deliver(self) -> None:
+        """Paste the agent's ritual with its queued requests, then each later request.
+
+        The ritual goes together with every request queued by then as one message, then each
+        later request on its own, once its agent has bracketed paste on and has written its row's
+        ``composer_ready``; each leaves the queue only once written. One delivery writes at a
+        time; the session lock is held to read and update the queue, never across a write.
+        """
+        with self._writing:
+            while True:
+                with self._lock:
+                    if not (self._ready and self._composer_live):
+                        return
+                    if not self._ritual_sent:
+                        text = "\n\n".join([self.ritual, *self._queued])
+                        taken = len(self._queued)
+                    elif self._queued:
+                        text, taken = self._queued[0], 1
+                    else:
+                        return
+                if not self.write(pty_host.paste(text)):
+                    return
+                with self._lock:
+                    self._ritual_sent = True
+                    del self._queued[:taken]
 
     def terminate(self) -> bool:
         """Kill the PTY and return True when no process remains afterward.
@@ -337,66 +375,55 @@ class TerminalSession:
 
     # ── output pump (called from the reader thread) ─────────────────────
 
-    def _deliver(self) -> None:
-        """Paste the current launch's ritual with its queued requests, then each later request.
-
-        The ritual goes together with every request queued by then as one message, then each
-        later request on its own, once its agent has bracketed paste on and has written its row's
-        ``composer_ready``; each leaves the launch only once written. Called under the lock.
-        """
-        launch = self._launch
-        if (
-            not (launch.ready and launch.composer_live)
-            or launch.ritual is None
-        ):
-            return
-        if not launch.ritual_sent:
-            if not self.write(
-                pty_host.paste("\n\n".join([launch.ritual, *launch.queued]))
-            ):
-                return
-            launch.ritual_sent = True
-            launch.queued.clear()
-        while launch.queued and self.write(pty_host.paste(launch.queued[0])):
-            launch.queued.pop(0)
-
-    def _on_output(self, data: str, gen: int | None = None) -> None:
+    def _on_output(self, data: str) -> None:
+        """Take the agent's output: note its paste readiness, show it, then :meth:`deliver`."""
         with self._lock:
-            launch = self._launch
-            if gen is not None and gen != launch.gen:
-                return  # stale reader from a restarted PTY: drop, don't pollute
-            seen = launch.tail + data
-            launch.ready = pty_host.bracketed_paste(seen, launch.ready)
-            launch.composer_live = launch.composer_live or (
-                launch.composer_ready is not None
-                and launch.composer_ready in seen
+            seen = self._tail + data
+            self._ready = pty_host.bracketed_paste(seen, self._ready)
+            self._composer_live = (
+                self._composer_live
+                or _provider(self.launched.provider).composer_ready in seen
             )
-            launch.tail = seen[-_TAIL_CHARS:]
-            self._deliver()
-            self._scrollback.append(data)
-            self._scrollback_len += len(data)
-            while (
-                self._scrollback_len > SCROLLBACK_MAX_CHARS
-                and len(self._scrollback) > 1
-            ):
-                dropped = self._scrollback.pop(0)
-                self._scrollback_len -= len(dropped)
-            dead: list[int] = []
-            for sub_id, (queue, loop) in self._subs.items():
-                if loop.is_closed():
-                    dead.append(sub_id)
-                    continue
-                try:
-                    # FIFO across calls → the pump drains in byte order.
-                    loop.call_soon_threadsafe(_offer, queue, data)
-                except RuntimeError:
-                    dead.append(sub_id)
-            for sub_id in dead:
-                self._subs.pop(sub_id, None)
+            self._tail = seen[-_TAIL_CHARS:]
+            self._show(data)
+        self.deliver()
 
-    def _on_exit(self, gen: int | None = None) -> None:
-        # Visible in the terminal itself: the surface must never just go quiet.
-        self._on_output(_EXIT_NOTE, gen)
+    def _show(self, data: str) -> None:
+        """Keep ``data`` in the scrollback and offer it to every subscriber; under the lock."""
+        self._scrollback.append(data)
+        self._scrollback_len += len(data)
+        while (
+            self._scrollback_len > SCROLLBACK_MAX_CHARS
+            and len(self._scrollback) > 1
+        ):
+            dropped = self._scrollback.pop(0)
+            self._scrollback_len -= len(dropped)
+        self._broadcast(data)
+
+    def _broadcast(self, item: str | tuple[int, str]) -> None:
+        """Offer ``item`` to every subscriber, dropping one whose loop is gone; under the lock."""
+        dead: list[int] = []
+        for sub_id, (queue, loop) in self._subs.items():
+            if loop.is_closed():
+                dead.append(sub_id)
+                continue
+            try:
+                # FIFO across calls → the pump drains in byte order.
+                loop.call_soon_threadsafe(_offer, queue, item)
+            except RuntimeError:
+                dead.append(sub_id)
+        for sub_id in dead:
+            self._subs.pop(sub_id, None)
+
+    def end_unattended(self, cause: str) -> bool:
+        """:meth:`end` the session for ``cause``, an act no person performed, where no caller waits.
+
+        A failed append, which :meth:`end` has logged, is not raised. Returns what :meth:`end`
+        returns.
+        """
+        with contextlib.suppress(AuditEntryNotWrittenError):
+            return self.end(cause, None)
+        return True
 
     # ── subscriber registration (called from each websocket's loop) ─────
 
@@ -404,15 +431,19 @@ class TerminalSession:
         """Register a subscriber; returns ``(sub_id, queue, replay_snapshot)``.
 
         Snapshot + registration are atomic w.r.t. the writer, so output can be neither
-        lost (arrived after snapshot, before registration) nor duplicated.
+        lost (arrived after snapshot, before registration) nor duplicated. Once the session
+        ended (the backend no longer holds it), the queue holds the ended close and nothing is
+        registered.
         """
         queue: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_MAX_CHUNKS)
         loop = asyncio.get_running_loop()
         with self._lock:
             replay = "".join(self._scrollback)
-            sub_id = self._next_sub
-            self._next_sub += 1
-            self._subs[sub_id] = (queue, loop)
+            sub_id = next(self._sub_ids)
+            if self.id not in _SESSIONS:
+                queue.put_nowait(_ENDED_CLOSE)
+            else:
+                self._subs[sub_id] = (queue, loop)
         return sub_id, queue, replay
 
     def detach(self, sub_id: int) -> None:
@@ -427,19 +458,21 @@ class TerminalSession:
 
 
 _SESSIONS: dict[str, TerminalSession] = {}
-# Serializes attach-or-spawn and restart across the request threadpool: without it,
-# two concurrent POSTs each spawn an agent process and one runs orphaned.
+# Serializes a create, a submit's admission and a whole end across the request threadpool and
+# the reader threads: without it, a create beside an end could run two agent processes.
 _SESSIONS_LOCK = threading.Lock()
 
 
 def shutdown_all() -> None:
-    """Kill every live agent terminal and forget the sessions."""
+    """End every agent terminal for the backend's shutdown.
+
+    A survivor of termination and an end whose line fails to append are each logged.
+    """
     for s in list(_SESSIONS.values()):
-        if not s.terminate():
+        if not s.end_unattended("the backend shut down"):
             logger.warning(
                 "terminal session %s survived shutdown termination", s.id
             )
-    _SESSIONS.clear()
 
 
 # ── HTTP surface ────────────────────────────────────────────────────────
@@ -473,6 +506,14 @@ class TerminalResizeFrame(BaseModel):
     type: Literal["resize"]
     rows: int
     cols: int
+
+
+TerminalFrame = Annotated[
+    TerminalInputFrame | TerminalResizeFrame, Field(discriminator="type")
+]
+"""A frame the rail sends over a session's socket, told apart by its ``type``."""
+
+_FRAME: TypeAdapter[TerminalFrame] = TypeAdapter(TerminalFrame)
 
 
 class CreateSessionRequest(BaseModel):
@@ -517,7 +558,7 @@ def create_session(req: CreateSessionRequest) -> TerminalLaunch:
     with _SESSIONS_LOCK:
         for s in _SESSIONS.values():
             if s.alive():
-                return s.launch.model_copy(update={"existing": True})
+                return s.answer()
         session_id = "term_" + os.urandom(6).hex()
         session = TerminalSession(session_id)
         err = session.start(
@@ -530,7 +571,7 @@ def create_session(req: CreateSessionRequest) -> TerminalLaunch:
                 _SESSIONS[session_id] = session
             raise HTTPException(503, err)
         _SESSIONS[session_id] = session
-        return session.launch
+        return session.answer()
 
 
 def _require(session_id: str) -> TerminalSession:
@@ -540,32 +581,33 @@ def _require(session_id: str) -> TerminalSession:
     return session
 
 
-@router.post("/sessions/{session_id}/restart")
-def restart_session(
-    session_id: str, req: CreateSessionRequest
-) -> TerminalLaunch:
-    """End the session's process and launch the requested provider in its place.
+class EndSessionRequest(BaseModel):
+    """An end of a session's agent and its conversation, by the person ``user`` names."""
 
-    The launch is by the person ``req.user`` names.
+    user: str
+
+
+@router.post("/sessions/{session_id}/end")
+def end_session(session_id: str, req: EndSessionRequest) -> TerminalEnd:
+    """End the session's agent by the person ``req.user`` names (:meth:`TerminalSession.end`).
+
+    Answers the requests its agent was never given. 404 for an unknown session; 503 when the
+    process survives termination, the session kept reachable; the audit-gap 409 carrying that
+    answer when the end's line fails to append.
     """
     person = actor(req.user)
     session = _require(session_id)
-    provider = _provider(req.provider)
-    with _SESSIONS_LOCK:
-        # One live agent at a time: restarting a stale session while a different one is
-        # live would silently run two agent processes.
-        for other in _SESSIONS.values():
-            if other.id != session_id and other.alive():
-                raise HTTPException(
-                    409,
-                    f"another agent session is live ({other.id}); attach to it instead",
-                )
-        err = session.restart(
-            _clamp(req.rows), _clamp(req.cols), provider, person
-        )
-    if err:
-        raise HTTPException(503, err)
-    return session.launch
+    unrecorded: AuditEntryNotWrittenError | None = None
+    try:
+        stopped = session.end("the person ended it", person)
+    except AuditEntryNotWrittenError as exc:
+        stopped, unrecorded = True, exc
+    if not stopped:
+        raise HTTPException(503, _SURVIVED)
+    answer = TerminalEnd(undelivered=list(session._queued))
+    if unrecorded is not None:
+        raise audit_gap_409(unrecorded, answer) from unrecorded
+    return answer
 
 
 class SubmitRequest(BaseModel):
@@ -576,35 +618,42 @@ class SubmitRequest(BaseModel):
 
 @router.post("/sessions/{session_id}/submit")
 def submit_to_session(session_id: str, req: SubmitRequest) -> dict:
-    """Queue ``req.text`` for the session's current launch, delivered after its ritual.
+    """Queue ``req.text`` for the session's agent, delivered after its ritual.
 
-    404 for an unknown session.
+    404 for a session the backend does not hold, ended or never started. The request is queued
+    under the sessions lock, so an end after it answers it among the undelivered, and written
+    once that lock is released.
     """
-    _require(session_id).submit(req.text)
+    with _SESSIONS_LOCK:
+        session = _require(session_id)
+        session.submit(req.text)
+    session.deliver()
     return {}
 
 
 async def _pump(queue: asyncio.Queue, websocket: WebSocket) -> None:
     """Drain the queue in order as the socket's single writer."""
     while True:
-        text = await queue.get()
-        if text is None:
-            # Overflow sentinel (stalled client): close; the reconnect replay repaints.
-            await websocket.close(
-                code=1013, reason="output backlog dropped; reconnect"
-            )
+        item = await queue.get()
+        if isinstance(item, tuple):
+            code, reason = item
+            await websocket.close(code=code, reason=reason)
             return
-        await websocket.send_text(text)
+        await websocket.send_text(item)
 
 
 @router.websocket("/ws/{session_id}")
 async def terminal_ws(websocket: WebSocket, session_id: str) -> None:
-    """Bridge PTY output to text frames and accept input and resize frames."""
+    """Bridge PTY output to text frames and accept input and resize frames.
+
+    A session the backend does not hold, ended or never started, is closed with
+    :data:`ENDED_CLOSE_CODE` once accepted, so a reconnecting client learns its agent ended.
+    """
+    await websocket.accept()
     session = _SESSIONS.get(session_id)
     if session is None:
-        await websocket.close(code=1008, reason="unknown session")
+        await websocket.close(*_ENDED_CLOSE)
         return
-    await websocket.accept()
 
     sub_id, queue, replay = session.attach()
     pump_task: asyncio.Task | None = None
@@ -613,30 +662,14 @@ async def terminal_ws(websocket: WebSocket, session_id: str) -> None:
             await websocket.send_text(replay)
         pump_task = asyncio.create_task(_pump(queue, websocket))
         while True:
-            raw = await websocket.receive_text()
             try:
-                msg = json.loads(raw)
-            except json.JSONDecodeError:
+                frame = _FRAME.validate_json(await websocket.receive_text())
+            except ValidationError:
                 continue
-            mtype = msg.get("type") if isinstance(msg, dict) else None
-            if mtype == "input":
-                try:
-                    input_frame = TerminalInputFrame.model_validate(msg)
-                except ValidationError:
-                    continue
-                if input_frame.data:
-                    session.write(input_frame.data)
-            elif mtype == "resize":
-                try:
-                    resize_frame = TerminalResizeFrame.model_validate(msg)
-                except ValidationError:
-                    continue
-                try:
-                    session.resize(
-                        _clamp(resize_frame.rows), _clamp(resize_frame.cols)
-                    )
-                except (TypeError, ValueError):
-                    pass
+            if isinstance(frame, TerminalResizeFrame):
+                session.resize(_clamp(frame.rows), _clamp(frame.cols))
+            elif frame.data:
+                session.write(frame.data)
     except WebSocketDisconnect:
         pass
     finally:

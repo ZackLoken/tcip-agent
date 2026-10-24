@@ -14,6 +14,8 @@
 
 export const RENDER_CACHE_VERSION = 6;
 
+export const TERMINAL_ENDED_CLOSE_CODE = 4000;
+
 export const IMAGE_ERROR_HEADER = "X-TCIP-Image-Error";
 
 export const OVERVIEWS_REQUIRED = "overviews_required";
@@ -59,6 +61,8 @@ export type StretchMode = "minmax" | "percent_clip" | "none";
 export type SubjectState = "complete" | "negative" | "partial" | "unannotated";
 
 export type VerdictAction = "accepted" | "rejected";
+
+export type TerminalFrame = TerminalInputFrame | TerminalResizeFrame;
 
 export interface LaunchPriorityQueuePayload {
   checkpoint_path: string;
@@ -288,7 +292,6 @@ export interface LaunchedProgram {
 
 export interface TerminalLaunch {
   session_id: string;
-  existing: boolean;
   launched: LaunchedProgram;
   ritual: string;
 }
@@ -305,6 +308,14 @@ export interface TerminalStatus {
 
 export interface SubmitRequest {
   text: string;
+}
+
+export interface EndSessionRequest {
+  user: string;
+}
+
+export interface TerminalEnd {
+  undelivered: string[];
 }
 
 export interface CaptureInvariances {

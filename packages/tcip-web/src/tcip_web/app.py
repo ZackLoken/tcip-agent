@@ -50,8 +50,8 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     except Exception:  # pragma: no cover - prewarm is best-effort
         logger.exception("agent terminal prewarm failed to start")
     yield
-    # Kill live agent terminals off the loop: terminate can block seconds, and stalling the loop
-    # would break in-flight WebSocket close handshakes.
+    # End each agent terminal, recording its end, off the loop: terminate can block seconds, and
+    # stalling the loop would break in-flight WebSocket close handshakes.
     try:
         from tcip_web.routes import terminal as terminal_routes
 
