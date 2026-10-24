@@ -60,11 +60,12 @@ def reported(client: TestClient, token: str) -> bool:
 
     The token is looked for in its detail, and that report must have the requested category.
     """
-    reports = client.get("/api/meta/reports").json()["reports"]
+    entries = client.get("/api/meta/reports").json()["entries"]
     matching = [
-        row
-        for row in reports
-        if "malformed" not in row and token in row["detail"]
+        entry["record"]
+        for entry in entries
+        if "reason" not in entry["record"]
+        and token in entry["record"]["detail"]
     ]
     return len(matching) == 1 and matching[0]["category"] == REQUESTED_CATEGORY
 

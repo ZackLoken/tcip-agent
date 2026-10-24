@@ -28,7 +28,7 @@ def test_a_friction_report_reads_back_as_the_report_its_door_was_handed(
 ) -> None:
     from tcip_mcp.tools.meta_tools import (
         FrictionReport,
-        read_report,
+        read_memory,
         report_friction,
     )
 
@@ -40,7 +40,9 @@ def test_a_friction_report_reads_back_as_the_report_its_door_was_handed(
         user_disagreement=True,
     )
 
-    assert read_report(str(tmp_path), result["report_id"]) == FrictionReport(
+    assert read_memory(
+        FrictionReport, str(tmp_path), result["id"]
+    ) == FrictionReport(
         timestamp=result["timestamp"],
         category="ambiguous_data",
         detail="two captures share one date",
@@ -53,44 +55,78 @@ def test_a_friction_report_missing_its_category_is_refused_naming_it(
     tmp_path: Path,
 ) -> None:
     from tcip_mcp.tools.meta_tools import (
-        friction_report_key,
-        read_report,
+        FrictionReport,
+        memory_key,
+        read_memory,
         report_friction,
     )
 
     result = report_friction(tmp_path, category="missing_tool", detail="x")
-    key = friction_report_key(str(tmp_path), result["report_id"])
+    key = memory_key(FrictionReport, str(tmp_path), result["id"])
     stored = dict(ts.read(key))
     del stored["category"]
     ts.replace(key, stored)
 
     with pytest.raises(ValidationError, match="category"):
-        read_report(str(tmp_path), result["report_id"])
+        read_memory(FrictionReport, str(tmp_path), result["id"])
 
 
-def test_a_retrospective_reads_back_as_the_text_its_door_wrote(
+def test_a_retrospective_reads_back_as_the_record_its_door_was_handed(
     tmp_path: Path,
 ) -> None:
     from tcip_mcp.tools.meta_tools import (
-        read_retrospective,
+        Retrospective,
+        read_memory,
         write_retrospective,
     )
 
-    write_retrospective(
-        tmp_path, project_id="p", task="t", worked="w", did_not_work="d"
+    result = write_retrospective(
+        tmp_path,
+        project_id="p",
+        task="t",
+        worked="w",
+        did_not_work="d",
+        assumptions_wrong="a",
+        knowledge_for_future="k",
+        missing_or_hard_tools="m",
+        would_do_differently="o",
     )
 
-    text = read_retrospective(str(tmp_path), "p")
-    assert text.startswith("# p\n\n## Retrospective: ")
+    assert read_memory(
+        Retrospective, str(tmp_path), result["id"]
+    ) == Retrospective(
+        timestamp=result["timestamp"],
+        project_id="p",
+        task="t",
+        worked="w",
+        did_not_work="d",
+        assumptions_wrong="a",
+        knowledge_for_future="k",
+        missing_or_hard_tools="m",
+        would_do_differently="o",
+    )
 
 
-def test_a_retrospective_that_is_not_text_is_refused(tmp_path: Path) -> None:
-    from tcip_mcp.tools.meta_tools import read_retrospective, retrospective_key
+def test_a_retrospective_missing_a_section_is_refused_naming_it(
+    tmp_path: Path,
+) -> None:
+    from tcip_mcp.tools.meta_tools import (
+        Retrospective,
+        memory_key,
+        read_memory,
+        write_retrospective,
+    )
 
-    ts.replace(retrospective_key(str(tmp_path), "p"), {"task": "t"})
+    result = write_retrospective(
+        tmp_path, project_id="p", task="t", worked="w", did_not_work="d"
+    )
+    key = memory_key(Retrospective, str(tmp_path), result["id"])
+    stored = dict(ts.read(key))
+    del stored["worked"]
+    ts.replace(key, stored)
 
-    with pytest.raises(ValidationError):
-        read_retrospective(str(tmp_path), "p")
+    with pytest.raises(ValidationError, match="worked"):
+        read_memory(Retrospective, str(tmp_path), result["id"])
 
 
 def test_a_registered_dataset_reads_back_as_the_entry_its_door_registered(

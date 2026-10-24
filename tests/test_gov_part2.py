@@ -93,13 +93,13 @@ def test_the_worksheet_lists_a_report_that_will_not_decode_as_malformed(
     and the worksheet still builds.
     """
     import tcip_store as ts
-    from tcip_mcp.tools.meta_tools import friction_report_key
+    from tcip_mcp.tools.meta_tools import FrictionReport, memory_key
 
     distill = _load_distill()
     _seed_report(tmp_path, "needs_human_judgment", "a decoded report")
     ts.replace(
-        friction_report_key(
-            str(tmp_path), "20260304T120000Z_missing_tool_a1b2"
+        memory_key(
+            FrictionReport, str(tmp_path), "20260304T120000Z_missing_tool_a1b2"
         ),
         ["not", "a", "report"],
     )
@@ -108,6 +108,46 @@ def test_the_worksheet_lists_a_report_that_will_not_decode_as_malformed(
     assert "Friction reports (2)" in ws
     assert "[malformed]" in ws
     assert "a decoded report" in ws
+
+
+def test_the_worksheet_lists_a_retrospective_that_will_not_read_as_malformed_with_its_reason(
+    tmp_path: Path,
+) -> None:
+    """A stored retrospective that will not decode is listed as malformed with its reason.
+
+    It is listed beside a retrospective written through ``write_retrospective``.
+    """
+    import tcip_store as ts
+    from tcip_mcp.tools.meta_tools import (
+        Retrospective,
+        memory_key,
+        write_retrospective,
+    )
+
+    distill = _load_distill()
+    write_retrospective(
+        tmp_path,
+        "valley-bloom-trial",
+        task="a written hand-off",
+        worked="w",
+        did_not_work="d",
+    )
+    ts.replace(
+        memory_key(
+            Retrospective, str(tmp_path), "20260304T120000Z_unreadable_a1b2"
+        ),
+        "# a markdown document\n",
+    )
+
+    ws = distill.build_worksheet(tmp_path)
+    retrospectives = ws.split("## Retrospectives (2)", 1)[1]
+    malformed = [
+        line
+        for line in retrospectives.splitlines()
+        if line.startswith("- [malformed]")
+    ]
+    assert len(malformed) == 1 and "Retrospective" in malformed[0], malformed
+    assert "- [valley-bloom-trial] a written hand-off" in retrospectives
 
 
 def test_themes_generic_frequency_and_recurrence_floor() -> None:

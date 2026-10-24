@@ -1,9 +1,14 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 
-import { metaApi, type FrictionReport, type Retrospective } from "@/api/meta";
+import { metaApi } from "@/api/meta";
 import { sessionsApi } from "@/api/sessions";
-import type { SessionSummary } from "@/api/types.generated";
+import type {
+  MemoryEntry_FrictionReport_,
+  MemoryEntry_Retrospective_,
+  Retrospective,
+  SessionSummary,
+} from "@/api/types.generated";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { TabHeading } from "@/components/TabHeading";
 import { UNSET_GLYPH } from "@/lib/glyphs";
@@ -43,6 +48,11 @@ const MARKDOWN_COMPONENTS: Components = {
   ),
 };
 
+/** A retrospective's line of work and time, and its sections apart from them. */
+function headedSections({ project_id, timestamp, ...sections }: Retrospective) {
+  return [project_id, timestamp, sections] as const;
+}
+
 function fmtDuration(seconds: number): string {
   const s = Math.round(seconds);
   if (s < 60) return `${s}s`;
@@ -60,8 +70,8 @@ export function MetaTab() {
   const projectRoot = useStore(selectProjectRoot);
 
   // null until a load answers, so no section claims to be empty before it is known to be.
-  const [reports, setReports] = useState<FrictionReport[] | null>(null);
-  const [retros, setRetros] = useState<Retrospective[] | null>(null);
+  const [reports, setReports] = useState<MemoryEntry_FrictionReport_[] | null>(null);
+  const [retros, setRetros] = useState<MemoryEntry_Retrospective_[] | null>(null);
   // undefined until a load answers, null once one has failed: the panel then says so instead of
   // claiming no sessions exist.
   const [sessions, setSessions] = useState<SessionSummary[] | null | undefined>(undefined);
@@ -78,8 +88,8 @@ export function MetaTab() {
         metaApi.retrospectives(),
         sessionsApi.load(),
       ]);
-      setReports(r.reports);
-      setRetros(rt.retrospectives);
+      setReports(r.entries);
+      setRetros(rt.entries);
       setSessions(sess.sessions);
     } catch (e) {
       setSessions(null);
@@ -119,32 +129,37 @@ export function MetaTab() {
       >
         {reports === null ? null : reports.length > 0 ? (
           <div className="flex flex-col gap-2">
-            {reports.map((r) => (
-              <div
-                key={r.report_id}
-                className="border-t border-tcip-border pt-2 first:border-t-0 first:pt-0"
-              >
-                <div className="flex items-center gap-2 text-tcip-muted">
-                  <span className="tcip-badge bg-tcip-border/60 text-tcip-fg">
-                    {r.category || UNSET_GLYPH}
-                  </span>
-                  <span className="font-mono">{r.timestamp ?? r.report_id}</span>
+            {reports.map(({ id, record }) => {
+              // A report that will not read shows its id and the reason in place of its fields.
+              const [category, stated, text, context] =
+                "reason" in record
+                  ? ([UNSET_GLYPH, id, record.reason, {}] as const)
+                  : ([record.category, record.timestamp, record.detail, record.context] as const);
+              return (
+                <div
+                  key={id}
+                  className="border-t border-tcip-border pt-2 first:border-t-0 first:pt-0"
+                >
+                  <div className="flex items-center gap-2 text-tcip-muted">
+                    <span className="tcip-badge bg-tcip-border/60 text-tcip-fg">{category}</span>
+                    <span className="font-mono">{stated}</span>
+                  </div>
+                  <div className="mt-1 whitespace-pre-wrap">{text}</div>
+                  {Object.keys(context).length > 0 && (
+                    <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5 text-tcip-muted">
+                      {Object.entries(context).map(([key, value]) => (
+                        <Fragment key={key}>
+                          <dt className="font-mono">{key}</dt>
+                          <dd className="font-mono whitespace-pre-wrap break-all">
+                            {typeof value === "string" ? value : JSON.stringify(value)}
+                          </dd>
+                        </Fragment>
+                      ))}
+                    </dl>
+                  )}
                 </div>
-                <div className="mt-1 whitespace-pre-wrap">{r.detail ?? r.malformed}</div>
-                {r.context && Object.keys(r.context).length > 0 && (
-                  <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5 text-tcip-muted">
-                    {Object.entries(r.context).map(([key, value]) => (
-                      <Fragment key={key}>
-                        <dt className="font-mono">{key}</dt>
-                        <dd className="font-mono whitespace-pre-wrap break-all">
-                          {typeof value === "string" ? value : JSON.stringify(value)}
-                        </dd>
-                      </Fragment>
-                    ))}
-                  </dl>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="text-tcip-muted">No reports.</div>
@@ -160,20 +175,34 @@ export function MetaTab() {
       >
         {retros === null ? null : retros.length > 0 ? (
           <div className="flex flex-col gap-3">
-            {retros.map((rt) => (
-              <div
-                key={rt.project_id}
-                className="border-t border-tcip-border pt-2 first:border-t-0 first:pt-0"
-              >
-                <div className="flex items-center gap-2 text-tcip-muted">
-                  <span className="font-semibold text-tcip-fg">{rt.project_id}</span>
-                  <span className="font-mono">{rt.timestamp}</span>
+            {retros.map(({ id, record }) => {
+              // Each section is headed by its field's own name; one that will not read shows why.
+              const [title, stated, sections] =
+                "reason" in record
+                  ? ([id, "", { reason: record.reason }] as const)
+                  : headedSections(record);
+              return (
+                <div
+                  key={id}
+                  className="border-t border-tcip-border pt-2 first:border-t-0 first:pt-0"
+                >
+                  <div className="flex items-center gap-2 text-tcip-muted">
+                    <span className="font-semibold text-tcip-fg">{title}</span>
+                    <span className="font-mono">{stated}</span>
+                  </div>
+                  {Object.entries(sections)
+                    .filter(([, text]) => text)
+                    .map(([field, text]) => (
+                      <div key={field} className="mt-1">
+                        <div className="text-[13px] font-semibold text-tcip-fg mt-2 mb-1">
+                          {field.replace(/_/g, " ")}
+                        </div>
+                        <ReactMarkdown components={MARKDOWN_COMPONENTS}>{text}</ReactMarkdown>
+                      </div>
+                    ))}
                 </div>
-                <div className="mt-1">
-                  <ReactMarkdown components={MARKDOWN_COMPONENTS}>{rt.content}</ReactMarkdown>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="text-tcip-muted">No retrospectives.</div>

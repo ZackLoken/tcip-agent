@@ -15,11 +15,14 @@ invariances request shapes, and ``tcip_mcp.project_record`` the capture invarian
 correction's answer; ``routes/results.py`` declares
 the phenology and count export request shapes, the revision confirmation and the registered
 models;
-``tcip_mcp.traits`` declares the trait record and its revisions; and
+``tcip_mcp.traits`` declares the trait record and its revisions; ``tcip_mcp.tools.meta_tools``
+the page of a project-memory corpus the meta routes answer; and
 ``tcip_mcp.web_client.GuiState`` declares the GUI state the backend broadcasts, rendered as the
 shape it serializes to, with ``tcip_mcp.web_client.GUI_STATE_DEFAULTS`` as
 ``GUI_STATE_DEFAULTS``. This script projects them into ``frontend/src/api/types.generated.ts``
-through each model's own JSON schema. The mapper covers only the schema shapes these models use
+through each model's own JSON schema, each interface named as the definition pydantic's schema
+refers to it by (a parametrized generic as ``MemoryPage_FrictionReport_``). The mapper covers
+only the schema shapes these models use
 (string/number/integer/boolean, a nullable union, a nested model by ``$ref``, pydantic's
 ``JsonValue`` by ``$ref`` rendered as ``unknown``, an array, a fixed-length tuple, a string-enum
 union, a single-member ``Literal`` discriminator rendered as its literal type, and a free-form
@@ -62,8 +65,8 @@ HEADER = """/**
  * them (routes/annotate.py, routes/sessions.py, routes/images.py, routes/training.py,
  * routes/terminal.py, routes/projects.py, routes/results.py, tcip_mcp.experiments,
  * tcip_mcp.pipelines.proposal_engines, tcip_mcp.pipelines.training.tensorboard_manager,
- * tcip_mcp.project_record, tcip_mcp.tools.training_tools, tcip_mcp.traits,
- * tcip_mcp.web_client.GuiState), plus a
+ * tcip_mcp.project_record, tcip_mcp.tools.meta_tools, tcip_mcp.tools.training_tools,
+ * tcip_mcp.traits, tcip_mcp.web_client.GuiState), plus a
  * handful of runtime constants and vocabularies (routes/images.py, tcip_mcp.web_client,
  * tcip_mcp.experiments, tcip_mcp.pipelines.execution, tcip_mcp.subject_registry,
  * tcip_mcp.agent_identity, tcip_mcp.pipelines.training.tensorboard_manager,
@@ -118,6 +121,11 @@ def declared_models() -> list[type[BaseModel]]:
     from tcip_mcp.project_record import (
         CaptureInvariances,
         InvariancesCorrection,
+    )
+    from tcip_mcp.tools.meta_tools import (
+        FrictionReport,
+        MemoryPage,
+        Retrospective,
     )
     from tcip_mcp.traits import (
         Operationalization,
@@ -255,6 +263,8 @@ def declared_models() -> list[type[BaseModel]]:
         ConfirmRevisionPayload,
         MaskCut,
         Stated,
+        MemoryPage[FrictionReport],
+        MemoryPage[Retrospective],
     ]
 
 
@@ -457,13 +467,16 @@ def render() -> str:
     from tcip_mcp.web_client import GUI_STATE_DEFAULTS, GuiState
 
     models = declared_models()
-    _, combined = models_json_schema(
+    refs, combined = models_json_schema(
         [(m, "validation") for m in models] + [(GuiState, "serialization")]
     )
     defs = combined["$defs"]
-    listed = [m.__name__ for m in models] + list(TRANSPORT_MODELS)
+    names = [
+        refs[(m, "validation")]["$ref"].rsplit("/", 1)[-1] for m in models
+    ]
+    listed = names + list(TRANSPORT_MODELS)
     nested = [n for n in defs if n not in listed and n != "JsonValue"]
-    body = "\n".join(_interface(m.__name__, defs[m.__name__]) for m in models)
+    body = "\n".join(_interface(name, defs[name]) for name in names)
     body += "\n" + "\n".join(_interface(name, defs[name]) for name in nested)
     body += "\n" + "\n".join(
         _interface(name, defs[name]) for name in TRANSPORT_MODELS

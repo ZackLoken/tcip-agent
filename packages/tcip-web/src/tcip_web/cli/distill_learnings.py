@@ -13,8 +13,14 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
-from tcip_mcp.tools.meta_tools import FrictionReport, MemoryDocument, Unread
+from tcip_mcp.tools.meta_tools import (
+    FrictionReport,
+    MemoryEntry,
+    Retrospective,
+    memory_entries,
+)
 
 # Generic English function words, filtered out so recurrence-counting surfaces whatever
 # actually recurs in a project's own reports/retrospectives, not a fixed, maintained,
@@ -133,48 +139,50 @@ def build_workspace_worksheet(workspace: Path) -> str:
 def _gather(
     project: Path,
 ) -> tuple[
-    list[MemoryDocument[FrictionReport | Unread]],
-    list[MemoryDocument[str]],
+    list[MemoryEntry[FrictionReport]],
+    list[MemoryEntry[Retrospective]],
     str,
 ]:
     """Gather ``project``'s friction reports, its retrospectives and their joined free text.
 
     The reports and the retrospectives are their newest stated first, and the text joins the
-    decoded reports' details and the retrospectives'.
+    decoded reports' details and every text field of the decoded retrospectives but their time.
     """
-    from tcip_mcp.tools.meta_tools import (
-        report_documents,
-        retrospective_documents,
-    )
-
-    reports = report_documents(str(project))
-    retros = retrospective_documents(str(project))
+    reports = memory_entries(FrictionReport, str(project))
+    retros = memory_entries(Retrospective, str(project))
     text = " ".join(
         [
             *(
-                document.value.detail
-                for document in reports
-                if isinstance(document.value, FrictionReport)
+                entry.record.detail
+                for entry in reports
+                if isinstance(entry.record, FrictionReport)
             ),
-            *(document.value for document in retros),
+            *(
+                section
+                for entry in retros
+                if isinstance(entry.record, Retrospective)
+                for section in entry.record.model_dump(
+                    exclude={"timestamp"}
+                ).values()
+            ),
         ]
     )
     return reports, retros, text
 
 
-def _report_line(
-    document: MemoryDocument[FrictionReport | Unread], width: int
-) -> str:
-    """Render one report as a bullet on one line cut to ``width``.
+def _entry_line(entry: MemoryEntry[Any], width: int) -> str:
+    """Render one entry of either corpus as a bullet on one line cut to ``width``.
 
-    The bullet carries its category and its detail, or ``malformed`` and the reason it will not
-    decode.
+    The bullet carries a report's category and detail, a retrospective's line of work and task,
+    or ``malformed`` and the reason a record will not read.
     """
-    report = document.value
-    if isinstance(report, FrictionReport):
-        label, text = report.category, report.detail
+    record = entry.record
+    if isinstance(record, FrictionReport):
+        label, text = record.category, record.detail
+    elif isinstance(record, Retrospective):
+        label, text = record.project_id, record.task
     else:
-        label, text = "malformed", str(report)
+        label, text = "malformed", record.reason
     return f"- [{label}] {text.replace(chr(10), ' ')[:width]}"
 
 
@@ -193,27 +201,26 @@ def build_worksheet(project: Path) -> str:
             lines.append(f"- {word} ×{n}")
 
     disagreements = [
-        document
-        for document in reports
-        if isinstance(document.value, FrictionReport)
-        and document.value.user_disagreement
+        entry
+        for entry in reports
+        if isinstance(entry.record, FrictionReport)
+        and entry.record.user_disagreement
     ]
     if disagreements:
         lines.append(
             f"\n## Disagreements ({len(disagreements)}): the owner pushed back or disagreed"
         )
-        lines.extend(_report_line(r, 200) for r in disagreements[:15])
+        lines.extend(_entry_line(r, 200) for r in disagreements[:15])
 
     if reports:
         lines.append(
             f"\n## Friction reports ({len(reports)}): machine-local, won't reach the repo alone"
         )
-        lines.extend(_report_line(r, 160) for r in reports[:15])
+        lines.extend(_entry_line(r, 160) for r in reports[:15])
 
     if retros:
         lines.append(f"\n## Retrospectives ({len(retros)})")
-        for document in retros:
-            lines.append(f"- {document.name}")
+        lines.extend(_entry_line(r, 160) for r in retros)
 
     lines.append(
         "\n---\nNow (per the self-improvement skill) draft the concrete artifacts, a new/updated "

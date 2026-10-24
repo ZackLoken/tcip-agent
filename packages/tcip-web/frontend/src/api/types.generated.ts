@@ -3,8 +3,8 @@
  * them (routes/annotate.py, routes/sessions.py, routes/images.py, routes/training.py,
  * routes/terminal.py, routes/projects.py, routes/results.py, tcip_mcp.experiments,
  * tcip_mcp.pipelines.proposal_engines, tcip_mcp.pipelines.training.tensorboard_manager,
- * tcip_mcp.project_record, tcip_mcp.tools.training_tools, tcip_mcp.traits,
- * tcip_mcp.web_client.GuiState), plus a
+ * tcip_mcp.project_record, tcip_mcp.tools.meta_tools, tcip_mcp.tools.training_tools,
+ * tcip_mcp.traits, tcip_mcp.web_client.GuiState), plus a
  * handful of runtime constants and vocabularies (routes/images.py, tcip_mcp.web_client,
  * tcip_mcp.experiments, tcip_mcp.pipelines.execution, tcip_mcp.subject_registry,
  * tcip_mcp.agent_identity, tcip_mcp.pipelines.training.tensorboard_manager,
@@ -663,6 +663,16 @@ export interface Stated {
   rationale?: string | null;
 }
 
+export interface MemoryPage_FrictionReport_ {
+  entries: MemoryEntry_FrictionReport_[];
+  total_available: number;
+}
+
+export interface MemoryPage_Retrospective_ {
+  entries: MemoryEntry_Retrospective_[];
+  total_available: number;
+}
+
 export interface CanvasBox {
   color: string;
   tag: string;
@@ -716,6 +726,24 @@ export interface CanvasUnderStroke {
   width_factor: number;
 }
 
+export interface FrictionReport {
+  timestamp: string;
+  category: string;
+  detail: string;
+  context: Record<string, unknown>;
+  user_disagreement: boolean;
+}
+
+export interface MemoryEntry_FrictionReport_ {
+  id: string;
+  record: FrictionReport | Unreadable;
+}
+
+export interface MemoryEntry_Retrospective_ {
+  id: string;
+  record: Retrospective | Unreadable;
+}
+
 export interface RasterIdentity {
   width: number;
   height: number;
@@ -728,6 +756,18 @@ export interface RasterIdentity {
   pixel_fraction: number;
   band_interpretations: string[] | null;
   geotransform: Record<string, unknown> | null;
+}
+
+export interface Retrospective {
+  timestamp: string;
+  project_id: string;
+  task: string;
+  worked: string;
+  did_not_work: string;
+  assumptions_wrong: string;
+  knowledge_for_future: string;
+  missing_or_hard_tools: string;
+  would_do_differently: string;
 }
 
 export interface SweepInput {
@@ -743,6 +783,10 @@ export interface SweepInput {
   split_draw_seeds: number[] | null;
   search_seed: number;
   trial_budget: number | null;
+}
+
+export interface Unreadable {
+  reason: string;
 }
 
 export interface Viewport {
