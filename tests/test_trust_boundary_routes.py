@@ -58,6 +58,28 @@ def test_a_routable_arrival_is_refused_whatever_the_environment_holds(
         assert ws.receive_json()["type"] == "state_snapshot"
 
 
+def test_the_board_path_is_refused_as_every_route_is() -> None:
+    """The TensorBoard forwarding refuses a routable arrival and a foreign-origin form post.
+
+    Both are refused before any route runs, as on any other route.
+    """
+    from tcip_mcp.pipelines.training.tensorboard_manager import BOARD_PATH
+
+    path = (
+        BOARD_PATH.format(experiment_id="run-1")
+        + "/data/plugin/scalars/scalars_multirun"
+    )
+    lan = TestClient(app, base_url=LAN).get(path)
+    assert lan.status_code == 403
+    assert TERMINAL_WORDS in lan.text
+
+    foreign = TestClient(app, base_url="http://127.0.0.1:8765").post(
+        path, data={"tag": "loss"}, headers={"origin": "http://evil.example"}
+    )
+    assert foreign.status_code == 403
+    assert "origin not allowed" in foreign.text
+
+
 def test_a_connection_from_this_machine_is_served() -> None:
     for base in ("http://127.0.0.1", "http://127.0.0.1:8765"):
         assert (

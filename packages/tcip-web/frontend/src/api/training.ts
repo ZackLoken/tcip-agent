@@ -3,22 +3,13 @@
 import { getJson, postJson, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import type {
+  TensorboardLaunch,
   TrainingDetail,
   TrainingListing,
   TrainingRowFrame,
   TrainingStatusFrame,
 } from "@/api/types.generated";
 import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
-
-export interface TensorboardLaunch {
-  url?: string;
-  port?: number;
-  pid?: number;
-  logdir?: string;
-  /** Present instead of a url when the process died during startup; `output` is what it wrote. */
-  error?: string;
-  output?: string;
-}
 
 /** A metrics mapping as the backend sends it, a metrics log row or a checkpoint's metrics: a JSON
  * object whose values are any JSON, a per-class mapping among them. */

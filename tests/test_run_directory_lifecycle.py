@@ -64,16 +64,14 @@ def launch(
     onto validation, at ``horizon`` (1 by default), with ``extra``'s keys passed to the config
     and ``resume_from`` to the launch; TensorBoard is not started.
     """
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
-        lambda *a, **k: {},
-    )
     from tcip_mcp.tools.training_tools import launch_training
+    from tests._producer_fixtures import no_tensorboard
     from tests.tiny_trainer_fixtures import (
         regressor_config,
         write_regression_dataset,
     )
 
+    no_tensorboard(monkeypatch)
     images_dir, csv_path = write_regression_dataset(
         tmp_path / "ds",
         intensities=[0.0, 0.25, 0.5, 1.0],

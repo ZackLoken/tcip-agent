@@ -176,26 +176,29 @@ def opened_client(opened_project: Path, client: TestClient) -> TestClient:
 
 
 @pytest.fixture
-def tb_launches(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Record every logdir handed to ``launch_tensorboard``, starting no TensorBoard."""
-    calls: list[str] = []
+def tb_launches(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[Path]]:
+    """Record every directory handed to ``launch_tensorboard``, its child a listening stand-in.
 
-    def fake_launch(logdir: str) -> dict:
-        calls.append(logdir)
-        from tcip_mcp.web_client import LOOPBACK_HOST
+    The launch itself is the manager's own; every child it tracks is stopped at teardown.
+    """
+    from tcip_mcp.pipelines.training import tensorboard_manager as tb
+    from tests._tensorboard_parent import listening_argv
 
-        return {
-            "url": f"http://{LOOPBACK_HOST}:6006",
-            "port": 6006,
-            "pid": 1,
-            "logdir": logdir,
-        }
+    calls: list[Path] = []
+    launch = tb.launch_tensorboard
+
+    def recording_launch(directory: Path) -> tb.TensorboardLaunch:
+        calls.append(directory)
+        return launch(directory)
 
     monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
-        fake_launch,
+        tb,
+        "_tensorboard_argv",
+        lambda logdir, port, prefix: listening_argv(port, seconds=30),
     )
-    return calls
+    monkeypatch.setattr(tb, "launch_tensorboard", recording_launch)
+    yield calls
+    tb._stop_all_tracked()
 
 
 @pytest.fixture

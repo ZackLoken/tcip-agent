@@ -73,7 +73,6 @@ dependencies:
       - pytest-asyncio>=0.21
       - pytest-timeout
       - pytest-xdist
-      - httpx
       - ruff
       - mypy==2.2.0  # pinned to the version CI's type gate installs
       # --- local packages (editable; run from repo root) ---

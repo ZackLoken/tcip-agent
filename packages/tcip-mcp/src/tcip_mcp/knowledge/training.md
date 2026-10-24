@@ -258,7 +258,7 @@ sampler there.
 | Tool | Purpose |
 |------|---------|
 | `launch_training` | Start async training run (smokes the builder first, auto-launches TensorBoard); runs `training_tools.preflight_config` (`smoke=True` also builds + contract-smokes the model), a library call, not a tool of its own |
-| `monitor_training` | Check a run's, a trial's or a sweep's progress by its id, with its TensorBoard URL |
+| `monitor_training` | Check a run's, a trial's or a sweep's progress by its id, with the TensorBoard serving its board |
 | `list_experiments` | List every run of the project, and every sweep with its trial runs under it |
 | `cancel_training` | Request graceful cancellation of a running run, trial or sweep by its id; a run stops at the next batch/epoch boundary and still saves `model_final.pt`; a sweep's running trials stop the same way and new trials start nothing, Ray's hard stop being only the fallback after the heartbeat window |
 | `run_hyperparameter_search` | HPO on Ray Tune, you pick the search algorithm + trial scheduler |
@@ -284,7 +284,9 @@ skill's Orient step states.
 
 ## TensorBoard
 
-- `launch_training` automatically starts a TensorBoard process and returns the URL
+- `launch_training` automatically starts a TensorBoard process and returns where it serves: its
+  `url` is the path it serves under on the loopback host at its `port`, the same path the web
+  backend forwards to the TensorBoard the Training tab starts for the run
 - Scalars logged: every numeric key of each epoch row (`train_loss`, `lr`, `val_loss` and the
   other `val_` metrics, `selection`, ...) at its epoch, tagged by the key, through the run's one
   writer (`ctx.log_metrics`, which the default trainer uses too); and `batch_loss` ten
@@ -293,9 +295,10 @@ skill's Orient step states.
   `log_every_n_batches` training batches counted across the run when the config states that override
 - The same per-batch emission (`ctx.log_batch`) writes a per-batch row to the run's
   `metrics.jsonl`, which the Training tab shows as the in-progress epoch's line
-- `monitor_training` includes `tensorboard_url` if TB is still running; a sweep's board is its
-  own directory, every trial's events beneath it
-- The Training tab shows a run's epoch rows as a table beside the TensorBoard it embeds
+- `monitor_training` includes that `tensorboard` answer while the TensorBoard runs; a sweep's
+  board is its own directory, every trial's events beneath it
+- The Training tab shows a run's epoch rows as a table beside the TensorBoard it embeds, which
+  reloads its data in place each time the table gains an epoch row
 
 ## HPO
 
@@ -361,7 +364,7 @@ run_hyperparameter_search(
   directory per trial, `<sweep_id>_<ray trial id>`, a run like any other with the sampled point
   as its `trial_params` and the sweep's trait revision as its own. Ray's own store sits in the same directory
   (also the TensorBoard logdir); auto-launches TensorBoard. Returns the ended sweep as
-  `monitor_training` reads it, `{"run", "sweep", "tensorboard_url"}`: the sweep's trial rows and
+  `monitor_training` reads it, `{"run", "sweep", "tensorboard"}`: the sweep's trial rows and
   their outcome (`best_params`/`best_value`) under `sweep`, with `best_at_range_end` naming each
   integer or grid axis whose best sits exactly at the `low` or `high` you stated: a range the
   search could not look past, a finding to report rather than a tuned value.

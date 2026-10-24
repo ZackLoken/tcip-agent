@@ -39,6 +39,8 @@ export const ROUTES = {
     `/api/training/runs/${encodeURIComponent(experimentId)}`,
   getTrainingRunsByExperimentIdSplits: (experimentId: string) =>
     `/api/training/runs/${encodeURIComponent(experimentId)}/splits`,
+  getTrainingRunsByExperimentIdTensorboardByPath: (experimentId: string, path: string) =>
+    `/api/training/runs/${encodeURIComponent(experimentId)}/tensorboard/${encodeURIComponent(path)}`,
   postAnnotateFind: "/api/annotate/find",
   postAnnotateLabels: "/api/annotate/labels",
   postAnnotatePropose: "/api/annotate/propose",
@@ -77,6 +79,8 @@ export const ROUTES = {
     `/api/training/runs/${encodeURIComponent(experimentId)}/cancel`,
   postTrainingRunsByExperimentIdTensorboard: (experimentId: string) =>
     `/api/training/runs/${encodeURIComponent(experimentId)}/tensorboard`,
+  postTrainingRunsByExperimentIdTensorboardByPath: (experimentId: string, path: string) =>
+    `/api/training/runs/${encodeURIComponent(experimentId)}/tensorboard/${encodeURIComponent(path)}`,
   socketInferenceJobsByJobIdStream: (jobId: string) =>
     `/api/inference/jobs/${encodeURIComponent(jobId)}/stream`,
   socketTerminalWsBySessionId: (sessionId: string) =>

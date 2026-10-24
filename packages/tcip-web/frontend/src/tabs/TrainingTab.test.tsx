@@ -2,11 +2,14 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StructuredRefusalError } from "@/api/http";
+import { ROUTES } from "@/api/routes";
 import { openTrainingStream, trainingApi, type SplitChoices } from "@/api/training";
 import {
   NOT_FINITE_SUFFIX,
+  TENSORBOARD_RELOAD_SELECTOR,
   type RunRow,
   type SweepGroup,
+  type TensorboardServing,
   type TrainingRowFrame,
   type TrainingStatusFrame,
 } from "@/api/types.generated";
@@ -82,8 +85,16 @@ function detailOf(row: RunRow) {
   vi.spyOn(trainingApi, "getRun").mockResolvedValue({
     run: row,
     sweep: null,
-    tensorboard_url: null,
+    tensorboard: null,
   });
+}
+
+/** A TensorBoard serving the board of ``experimentId``, at the backend's own board path. */
+function serving(experimentId: string): TensorboardServing {
+  return {
+    url: ROUTES.getTrainingRunsByExperimentIdTensorboardByPath(experimentId, ""),
+    port: 6006,
+  };
 }
 
 type Frame = Omit<TrainingRowFrame, "experiment_id"> | Omit<TrainingStatusFrame, "experiment_id">;
@@ -348,7 +359,7 @@ describe("TrainingTab sweeps", () => {
     listing([], [sweep({ sweep_id: "sweep-1", trials: [trialA] })]);
     const getRun = vi
       .spyOn(trainingApi, "getRun")
-      .mockResolvedValue({ run: trialA, sweep: null, tensorboard_url: "http://127.0.0.1:6006" });
+      .mockResolvedValue({ run: trialA, sweep: null, tensorboard: serving(trialA.experiment_id) });
 
     render(<TrainingTab />);
     fireEvent.click(await screen.findByText("sweep-1_aaaa"));
@@ -456,7 +467,7 @@ describe("TrainingTab heading", () => {
     vi.spyOn(trainingApi, "getRun").mockResolvedValue({
       run: row,
       sweep: null,
-      tensorboard_url: "http://127.0.0.1:6006",
+      tensorboard: serving(row.experiment_id),
     });
 
     render(<TrainingTab />);
@@ -536,14 +547,12 @@ describe("TrainingTab tensorboard panel", () => {
       Promise.resolve({
         run: run({ experiment_id: experimentId, state: "completed" }),
         sweep: null,
-        tensorboard_url: null,
+        tensorboard: null,
       }),
     );
     const launchSpy = vi
       .spyOn(trainingApi, "launchTensorboard")
-      .mockImplementation((experimentId: string) =>
-        Promise.resolve({ url: `http://127.0.0.1:6006/${experimentId}` }),
-      );
+      .mockImplementation((experimentId: string) => Promise.resolve(serving(experimentId)));
 
     render(<TrainingTab />);
     fireEvent.click(await screen.findByText("train-x"));
@@ -551,10 +560,52 @@ describe("TrainingTab tensorboard panel", () => {
 
     fireEvent.click(screen.getByText("train-y"));
     await waitFor(() => expect(launchSpy).toHaveBeenCalledWith("train-y"));
-    expect(screen.getByTitle("TensorBoard")).toHaveAttribute(
-      "src",
-      "http://127.0.0.1:6006/train-y",
-    );
+    expect(screen.getByTitle("TensorBoard")).toHaveAttribute("src", serving("train-y").url);
+  });
+
+  it("reloads TensorBoard in place once per new epoch row, never remounting its frame", async () => {
+    openTestProject();
+    const row = run({ experiment_id: "train-reload" });
+    listing([row]);
+    vi.spyOn(trainingApi, "getRun").mockResolvedValue({
+      run: row,
+      sweep: null,
+      tensorboard: serving(row.experiment_id),
+    });
+    let deliver: (frame: Frame) => void = () => {};
+    vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
+      deliver = (frame) => onMessage({ ...frame, experiment_id: experimentId });
+      return () => {};
+    });
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-reload"));
+    const frame = (await screen.findByTitle("TensorBoard")) as HTMLIFrameElement;
+    const page = frame.contentDocument as Document;
+    const header = page.createElement("app-header-reload");
+    header.innerHTML = '<button class="reload-button">reload</button>';
+    page.append(header);
+    const button = page.querySelector<HTMLButtonElement>(TENSORBOARD_RELOAD_SELECTOR)!;
+    const reloads = vi.fn();
+    button.addEventListener("click", reloads);
+    const srcWrites: MutationRecord[] = [];
+    new MutationObserver((records) => srcWrites.push(...records)).observe(frame, {
+      attributeFilter: ["src"],
+    });
+
+    act(() => deliver(metricFrame({ epoch: 1, loss: 0.5 })));
+    expect(reloads).toHaveBeenCalledTimes(1);
+    act(() => deliver(metricFrame({ epoch: 1, loss: 0.4 })));
+    expect(reloads).toHaveBeenCalledTimes(1);
+    act(() => deliver(metricFrame({ epoch: 2, loss: 0.3 })));
+    expect(reloads).toHaveBeenCalledTimes(2);
+    button.disabled = true;
+    act(() => deliver(metricFrame({ epoch: 3, loss: 0.2 })));
+    expect(reloads).toHaveBeenCalledTimes(2);
+
+    expect(screen.getByTitle("TensorBoard")).toBe(frame);
+    await Promise.resolve();
+    expect(srcWrites).toHaveLength(0);
   });
 });
 

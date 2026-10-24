@@ -2,8 +2,8 @@
 
 A real parent process (``_tensorboard_parent.py``) launches a real child through the manager,
 with the child's own command swapped for a sleep loop, and whether the child lives is checked
-after the parent is gone. The parent prints the pid
-``launch_tensorboard`` returned and the TensorBoard stand-in's own pid on one line; on POSIX
+after the parent is gone. The parent prints the pid of the child the manager tracks and the
+TensorBoard stand-in's own pid on one line; on POSIX
 these differ when the tie is in place, since a guardian process sits in front of the
 stand-in, and on Windows or under ``--no-tie`` they name one process. Under ``--no-tie`` the
 ``atexit`` hook alone ends the child on a normal exit; with the tie kept, a hard kill of the
@@ -84,10 +84,10 @@ def _kill_and_wait_parent(
 
 
 def _spawn_parent(tmp_path: Path, mode: str, *flags: str) -> subprocess.Popen:
-    logdir = tmp_path / "tb"
-    logdir.mkdir()
+    directory = tmp_path / "run"
+    directory.mkdir()
     return subprocess.Popen(
-        [sys.executable, str(_PARENT_SCRIPT), str(logdir), mode, *flags],
+        [sys.executable, str(_PARENT_SCRIPT), str(directory), mode, *flags],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -97,7 +97,7 @@ def _spawn_parent(tmp_path: Path, mode: str, *flags: str) -> subprocess.Popen:
 def _read_pids(
     parent: subprocess.Popen,
 ) -> tuple[tuple[int, float], tuple[int, float]]:
-    """Return the pid ``launch_tensorboard`` returned and the stand-in's own, each timed.
+    """Return the pid of the child the manager tracks and the stand-in's own, each timed.
 
     Each pid is paired with its creation time as soon as it is read.
 
@@ -193,18 +193,17 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(
     monkeypatch.setattr(
         tb,
         "_tensorboard_argv",
-        lambda logdir, port: listening_argv(port, ignore_term=True),
+        lambda logdir, port, prefix: listening_argv(port, ignore_term=True),
     )
 
     guardian_identity: tuple[int, float] | None = None
     standin_identity: tuple[int, float] | None = None
+    key = tb._board_key(tmp_path)
     try:
-        info = tb.launch_tensorboard(str(tmp_path))
-        guardian_pid = info.get("pid")
-        if guardian_pid is None:
-            raise RuntimeError(
-                f"launch_tensorboard did not return a pid: {info}"
-            )
+        info = tb.launch_tensorboard(tmp_path)
+        if not isinstance(info, tb.TensorboardServing):
+            raise RuntimeError(f"launch_tensorboard did not serve: {info}")
+        guardian_pid = tb._TB_PROCESSES[key].proc.pid
         guardian_identity = (
             guardian_pid,
             psutil.Process(guardian_pid).create_time(),
@@ -212,7 +211,7 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(
         standin_num = _standin_pid(guardian_pid, guardian_expected=True)
         standin = psutil.Process(standin_num)
         standin_identity = (standin.pid, standin.create_time())
-        result = tb.stop_tensorboard(str(tmp_path))
+        result = tb.stop_tensorboard(key)
         assert result["status"] == "stopped"
         assert not _child_alive(*standin_identity)
     finally:
@@ -232,7 +231,7 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(
                 ]
             except psutil.NoSuchProcess:
                 descendants = []
-        tb.stop_tensorboard(str(tmp_path))
+        tb.stop_tensorboard(key)
         live: list[psutil.Process] = []
         for pid, create_time in descendants:
             proc = _same_process(pid, create_time)

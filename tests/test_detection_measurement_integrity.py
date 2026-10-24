@@ -1032,7 +1032,10 @@ def test_launch_training_persists_effective_tile_geometry(
     from tcip_mcp.pipelines.slicing import overlap_ratio
     from tcip_mcp.tools import training_tools
     from tests._chain_fixtures import BLOB_BUILDER
-    from tests._producer_fixtures import small_detection_config
+    from tests._producer_fixtures import (
+        no_tensorboard,
+        small_detection_config,
+    )
     from tests._verified_checkpoint_fixtures import run_to_end
 
     def _poison_train(*a: object, **k: object) -> NoReturn:
@@ -1044,10 +1047,7 @@ def test_launch_training_persists_effective_tile_geometry(
 
     images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET, n=2)
 
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
-        lambda *a, **k: {},
-    )
+    no_tensorboard(monkeypatch)
 
     # no tile_size: the lattice the ground truth derives must be persisted
     cfg = small_detection_config(

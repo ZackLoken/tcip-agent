@@ -601,22 +601,15 @@ def launch_training(
     if max_wall_clock_seconds is not None:
         _watch_wall_clock(proc, max_wall_clock_seconds)
 
-    # Keyed by its own log directory (the manager's default), never by the run id.
-    tb_info = {}
-    try:
-        from tcip_mcp.pipelines.training.tensorboard_manager import (
-            launch_tensorboard,
-        )
-
-        tb_info = launch_tensorboard(str(experiments.board_of(run_dir)))
-    except Exception:
-        pass  # TensorBoard launch is best-effort
+    from tcip_mcp.pipelines.training.tensorboard_manager import (
+        launch_tensorboard,
+    )
 
     return {
         "experiment_id": experiment_id,
         "status": "launched",
         "output_dir": str(run_dir),
-        "tensorboard": tb_info,
+        "tensorboard": launch_tensorboard(run_dir).model_dump(),
         "pid": proc.pid,
         "overfit_check": rendered_overfit_report,
         "warnings": validation["warnings"],
@@ -686,24 +679,19 @@ def _watch_wall_clock(proc: subprocess.Popen, timeout_seconds: float) -> None:
     threading.Thread(target=_watch, daemon=True).start()
 
 
-def training_detail(
-    project: Path, experiment_id: str
-) -> TrainingDetail | None:
-    """Return the run, trial or sweep ``experiment_id`` names as its ``TrainingDetail``, or None.
+def training_detail(project: Path, directory: Path) -> TrainingDetail:
+    """Return the run, trial or sweep ``directory`` of ``project`` as its ``TrainingDetail``.
 
-    The directory is :func:`experiments.named_directory`'s in ``project``, its ``tensorboard_url``
-    the one a TensorBoard this process started serves its board at (``experiments.board_of``).
+    Its ``tensorboard`` is the TensorBoard this process runs over the directory's board
+    (``tensorboard_manager.running``).
     """
-    from tcip_mcp.pipelines.training.tensorboard_manager import running_url
+    from tcip_mcp.pipelines.training.tensorboard_manager import running
 
-    directory = experiments.named_directory(experiment_id, project=project)
-    if directory is None:
-        return None
-    url = running_url(str(experiments.board_of(directory)))
+    serving = running(directory)
     if (directory / SWEEP_FILE).is_file():
         return TrainingDetail(
             run=None,
-            tensorboard_url=url,
+            tensorboard=serving,
             sweep=experiments.read_sweep(
                 directory, experiments.run_rows(project)
             ),
@@ -711,7 +699,7 @@ def training_detail(
     run = experiments.observe_run(directory)
     return TrainingDetail(
         sweep=None,
-        tensorboard_url=url,
+        tensorboard=serving,
         run=experiments.run_summary(
             run,
             experiments.read_rows(run.metrics_log)[0],
@@ -724,20 +712,18 @@ def training_detail(
 def monitor_training(project: Path, experiment_id: str) -> dict:
     """Check a training run, a sweep's trial included, or a hyperparameter sweep, by its id.
 
-    Answers :func:`training_detail`'s ``{"run", "sweep", "tensorboard_url"}``. An id naming
-    neither answers ``{"error": ...}``.
+    Answers :func:`training_detail`'s ``{"run", "sweep", "tensorboard"}`` for the directory
+    :func:`experiments.named_directory` finds. An id naming neither answers ``{"error": ...}``.
 
     Args:
         experiment_id: The run's id from launch_training, a trial's id from its sweep, or a
             sweep's id from run_hyperparameter_search.
 
     """
-    detail = training_detail(project, experiment_id)
-    return (
-        {"error": f"Run not found: {experiment_id}"}
-        if detail is None
-        else detail.model_dump()
-    )
+    directory = experiments.named_directory(experiment_id, project=project)
+    if directory is None:
+        return {"error": f"Run not found: {experiment_id}"}
+    return training_detail(project, directory).model_dump()
 
 
 def list_split_choices(project: Path, experiment_id: str) -> dict:
@@ -1193,8 +1179,8 @@ def run_hyperparameter_search(
         resources_per_trial: Ray resource request per trial, omit to derive one from the host's
             real GPU count and ``max_concurrent`` (see ``hpo._default_trial_resources``); an
             explicit value always wins.
-        auto_tensorboard: Launch a TensorBoard over a completed sweep's directory, whose URL the
-            answer's ``tensorboard_url`` names.
+        auto_tensorboard: Launch a TensorBoard over a completed sweep's directory, which the
+            answer's ``tensorboard`` names once it serves.
         relaunched_from: The sweep this one replays, recorded in this sweep's input, ``None``
             when this sweep was not a relaunch. Refused when it names no sweep directory of this
             project. A stated ``trial_budget`` is checked on a relaunch exactly as on a launch.
@@ -1245,18 +1231,19 @@ def run_hyperparameter_search(
     if isinstance(opened, dict):
         return opened
     group = run_sweep(opened.directory)
-    url = None
+    serving = None
     if auto_tensorboard and group.state == "completed":
         from tcip_mcp.pipelines.training.tensorboard_manager import (
+            TensorboardServing,
             launch_tensorboard,
         )
 
-        url = launch_tensorboard(
-            str(experiments.board_of(opened.directory))
-        ).get("url")
+        launched = launch_tensorboard(opened.directory)
+        if isinstance(launched, TensorboardServing):
+            serving = launched
     return {
         **TrainingDetail(
-            run=None, sweep=group, tensorboard_url=url
+            run=None, sweep=group, tensorboard=serving
         ).model_dump(),
         "warnings": opened.warnings,
     }

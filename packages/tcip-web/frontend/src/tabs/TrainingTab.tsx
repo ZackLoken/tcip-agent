@@ -6,6 +6,7 @@ import type { MetricRow, SplitChoices } from "@/api/training";
 import {
   EPOCH_KEY,
   STEP_KEY,
+  TENSORBOARD_RELOAD_SELECTOR,
   type RunRow,
   type SweepGroup,
   type TrainingListing,
@@ -481,14 +482,15 @@ export function TrainingTab() {
       return { url: null, error: messageOf(e), done: true };
     }
 
-    let url = detail.tensorboard_url;
+    let url = detail.tensorboard?.url ?? null;
     let failure: string | null = null;
     let noLogs = false;
     if (!url) {
       try {
         const launched = await trainingApi.launchTensorboard(experimentId);
-        url = launched.url ?? null;
-        if (launched.error) {
+        if ("url" in launched) {
+          url = launched.url;
+        } else {
           failure = launched.output ? `${launched.error}: ${launched.output}` : launched.error;
         }
       } catch (e) {
@@ -520,6 +522,17 @@ export function TrainingTab() {
     tbAttempt,
     tbStep,
   );
+
+  // TensorBoard's own header button reloads its data in place, keeping the person's run and groups.
+  const tbFrame = useRef<HTMLIFrameElement>(null);
+  const epochRows = metrics.length;
+  useEffect(() => {
+    if (epochRows === 0) return;
+    const reload = tbFrame.current?.contentDocument?.querySelector<HTMLButtonElement>(
+      TENSORBOARD_RELOAD_SELECTOR,
+    );
+    if (reload && !reload.disabled) reload.click();
+  }, [epochRows]);
 
   async function onCancel(id: string) {
     setPendingCancel((prev) => new Set(prev).add(id));
@@ -691,6 +704,7 @@ export function TrainingTab() {
                   <EmbeddedTool
                     title="TensorBoard"
                     url={tbUrl}
+                    frameRef={tbFrame}
                     loading={!tbUrl && !tbError && !tbNoLogs}
                     error={noLogsMessage ?? tbError}
                     onRetry={tbNoLogs ? undefined : () => setTbAttempt((n) => n + 1)}

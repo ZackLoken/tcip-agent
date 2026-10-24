@@ -35,16 +35,14 @@ def test_a_classification_config_launches_with_images_and_csv_only(
     import os
 
     from tcip_mcp.tools.training_tools import launch_training
+    from tests._producer_fixtures import no_tensorboard
     from tests.tiny_trainer_fixtures import (
         MEAN_INTENSITY_CLASSIFIER,
         TINY_TRAINER_FILE,
         write_regression_dataset,
     )
 
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
-        lambda *a, **k: {},
-    )
+    no_tensorboard(monkeypatch)
     images_dir, csv_path = write_regression_dataset(
         tmp_path / "ds", intensities=[0.1, 0.9] * 4, values=[0, 1] * 4
     )

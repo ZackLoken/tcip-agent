@@ -18,12 +18,16 @@ dependencies = [
     # Same reasoning: the routes import the annotation package's label reader, geometry
     # (BBox/Point/Polygon, routes/annotate.py:17), state, and verdict types directly.
     "tcip-annotation",
+    # Forwards a run's board path to the TensorBoard serving it (routes/training.py): httpx sends,
+    # werkzeug names the hop-by-hop headers left behind.
+    "httpx",
+    "werkzeug",
     # ConPTY backend for the embedded agent terminal (POSIX uses the stdlib pty).
     "pywinpty>=2.0; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
-dev = ["httpx", "pytest", "pytest-asyncio", "pytest-cov"]
+dev = ["pytest", "pytest-asyncio", "pytest-cov"]
 
 [project.scripts]
 tcip = "tcip_web.cli:main"

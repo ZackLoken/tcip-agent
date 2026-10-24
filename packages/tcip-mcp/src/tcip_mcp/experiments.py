@@ -52,6 +52,7 @@ from tcip_mcp.pipelines.schemas import (
     TraitRevisionRef,
     selection_of,
 )
+from tcip_mcp.pipelines.training.tensorboard_manager import TensorboardServing
 from tcip_mcp.registry_paths import (
     PathFields,
     recorded_paths,
@@ -1202,15 +1203,15 @@ def read_sweep(directory: Path, rows: list[RunRow]) -> SweepGroup:
 
 
 class TrainingDetail(BaseModel):
-    """One run, trial or sweep, with the URL a TensorBoard serves its board at.
+    """One run, trial or sweep, with the TensorBoard serving its board.
 
-    It holds a run's row or a sweep's group, the other ``None``; the URL is ``None`` while no
-    TensorBoard serves it.
+    It holds a run's row or a sweep's group, the other ``None``; ``tensorboard`` is ``None``
+    while no TensorBoard of this process serves the board.
     """
 
     run: RunRow | None
     sweep: SweepGroup | None
-    tensorboard_url: str | None
+    tensorboard: TensorboardServing | None
 
 
 class TrainingListing(BaseModel):
