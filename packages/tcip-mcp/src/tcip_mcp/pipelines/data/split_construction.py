@@ -1087,8 +1087,8 @@ def resolve_run(
     ``layout`` lays out the run's declared files (``model_build.SourceLayout``). The resolution
     covers its data block through :func:`auto_train_val`, the geometry its train dataset serves
     (:func:`~tcip_mcp.pipelines.training.generic_trainer.effective_data_geometry`), and its
-    trait revision (:func:`~tcip_mcp.pipelines.training.generic_trainer.resolve_trait_revision`
-    for a run with or without a val side), or ``trait_revision`` as given. ``tallies_out`` is
+    trait revision (:func:`~tcip_mcp.pipelines.training.generic_trainer.resolve_trait_revision`),
+    or ``trait_revision`` as given. ``tallies_out`` is
     :func:`auto_train_val`'s. Every refusal of the resolution raises.
     """
     from tcip_mcp.pipelines.training.generic_trainer import (
@@ -1110,9 +1110,7 @@ def resolve_run(
         task, data, train_ds, spec.model_source.detector_geometry
     )
     if trait_revision is None:
-        trait_revision = resolve_trait_revision(
-            spec, project=project, has_val_loader=val_ds is not None
-        )
+        trait_revision = resolve_trait_revision(spec, project=project)
     return ResolvedRun(
         train_ds, val_ds, spec, data, geometry, partition, trait_revision
     )

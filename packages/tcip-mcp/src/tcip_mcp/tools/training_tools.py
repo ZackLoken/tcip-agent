@@ -77,7 +77,10 @@ def data_with_selection(
 def preflight_config(
     project: Path, config: dict, smoke: bool = False, overfit: bool = False
 ) -> dict:
-    """Validate a training configuration before launching (:func:`_preflight`'s report)."""
+    """Validate a training configuration before launching (:func:`_preflight`'s report).
+
+    What ``smoke`` adds, the selection metric's read included, is :func:`_preflight`'s to state.
+    """
     return _preflight(
         project, *_admitted(config, {}, project), smoke=smoke, overfit=overfit
     )[0]
@@ -155,9 +158,14 @@ def _preflight(
             validated on the batch the contract proved, at the run's evaluation keywords, and
             the row is admitted as the metrics log admits one (``experiments.metrics_row``
             encoded by the store's ``encode_log_line``); a refusal blocks, naming the field.
-            ``smoke.evaluation_not_run`` is why that leg did not run, ``None`` when it did, and
-            ``smoke.evaluation_row_keys`` the keys of the row it admitted, ``None`` when it
-            admitted none.
+            For a run the default trainer's regime trains (``TrainerReads.regime``), the run's
+            ``evaluation.selection_metric`` is then read from that row, or from the empty row of a
+            run with no validation side, by the trainer's own ``generic_trainer.selection_value``
+            at the contract's train loss; its refusal blocks. A run whose body is its own
+            ``training_source`` is not read, and a warning says so.
+            ``smoke.evaluation_not_run`` is why the validation leg did not run, ``None`` when it
+            did, and ``smoke.evaluation_row_keys`` the keys of the row it admitted, ``None`` when
+            it admitted none.
         overfit: When True (with ``smoke``), also run the voluntary ``overfit_check`` diagnostic
             and report it under ``overfit_check``, never gating. The stored report is already
             rendered (``model_contract.render_overfit_report``), with non-finite losses rendered.
@@ -249,6 +257,7 @@ def _preflight(
             from tcip_mcp.pipelines.training.generic_trainer import (
                 capture_rng_state,
                 restore_rng_state,
+                selection_value,
                 validate,
             )
             from tcip_mcp.pipelines.training.run_registry import (
@@ -294,44 +303,61 @@ def _preflight(
                 else "dataset",
                 "dims": prepared.dims,
             }
+            contract_passed = report["ok"]
             if report.get("not_smokeable"):
                 issues.append(
                     f"model contract: {report['not_smokeable']} Building one from the run's data "
                     f"config failed too ({prepared.unavailable}), so the measurement boundary is "
                     "unproven."
                 )
-            elif not report["ok"]:
+            elif not contract_passed:
                 issues.extend(
                     f"model contract: {msg}" for msg in report["issues"]
                 )
             not_run = (
                 "the model contract did not pass"
-                if not report["ok"]
+                if not contract_passed
                 else "the run has no validation side, so no epoch row carries an evaluation"
                 if resolution.val_ds is None
                 else None
             )
             result["smoke"]["evaluation_not_run"] = not_run
             result["smoke"]["evaluation_row_keys"] = None
-            if not_run is None:
-                assert batch is not None, "a passed contract was driven"
+            if contract_passed:
+                assert (
+                    batch is not None and report["train_loss"] is not None
+                ), "a passed contract was driven"
                 try:
-                    validated = validate(
-                        model,
-                        [batch],
-                        device,
-                        task,
-                        **evaluation_keywords(
-                            resolved_spec,
-                            resolved_spec.trainer_reads(),
-                            trait_revision=resolution.trait_revision,
-                            geometry=resolution.geometry,
-                            project=project,
-                        ),
-                    )
-                    row = experiments.metrics_row(validated, {})
-                    encode_log_line(row)
-                    result["smoke"]["evaluation_row_keys"] = sorted(row)
+                    reads = resolved_spec.trainer_reads()
+                    validated: dict = {}
+                    if resolution.val_ds is not None:
+                        validated = validate(
+                            model,
+                            [batch],
+                            device,
+                            task,
+                            **evaluation_keywords(
+                                resolved_spec,
+                                reads,
+                                trait_revision=resolution.trait_revision,
+                                geometry=resolution.geometry,
+                                project=project,
+                            ),
+                        )
+                        row = experiments.metrics_row(validated, {})
+                        encode_log_line(row)
+                        result["smoke"]["evaluation_row_keys"] = sorted(row)
+                    metric = resolved_spec.evaluation.selection_metric
+                    if reads.regime is not None:
+                        selection_value(
+                            task, validated, report["train_loss"], metric
+                        )
+                    else:
+                        warnings.append(
+                            f"evaluation.selection_metric={metric!r} was not read at the smoke: "
+                            "the run's body is its own training_source; a body delegating to "
+                            "ctx.default_train() reads it at its first epoch."
+                        )
                 except Exception as exc:  # noqa: BLE001, a refused epoch row blocks the launch
                     issues.append(f"epoch row: {exc}")
             if overfit:
@@ -482,11 +508,12 @@ def launch_training(
     loss) or when its stages end it: its
     last stage ended (on its ``early_stopping`` plateau, or at a horizon-bound schedule's
     horizon), or a stage whose best did not improve by ``min_delta`` on the stage before it, on
-    the run's selection value (the training loss for a run with no validation loader).
+    the run's selection value (how the smoke and the default trainer read it is
+    :func:`_preflight`'s to state).
 
     Writes the run's ``run.json`` once, then the act's one audit line naming the minted
     ``experiment_id`` (``AuditEntryNotWrittenError`` when it cannot be appended, and no subprocess
-    starts), then starts the subprocess.
+    starts), then starts the subprocess. The answer carries the preflight's ``warnings``.
 
     Args:
         config: Full training configuration dict: model_source and data, with every training
@@ -592,6 +619,7 @@ def launch_training(
         "tensorboard": tb_info,
         "pid": proc.pid,
         "overfit_check": rendered_overfit_report,
+        "warnings": validation["warnings"],
     }
 
 
@@ -1002,6 +1030,13 @@ def inspect_compute_resources(project: Path) -> dict:
     }
 
 
+class OpenedSweep(NamedTuple):
+    """A sweep :func:`open_sweep` opened: its directory and its base preflight's warnings."""
+
+    directory: Path
+    warnings: list[str]
+
+
 _CANCEL_BEFORE_START_REASON = "canceled before the sweep's first trial started"
 _CANCEL_DURING_RUN_REASON = (
     "the sweep was canceled by request before it could finish"
@@ -1121,7 +1156,7 @@ def run_hyperparameter_search(
     experiment store (also the TensorBoard logdir); and its final status, written once when the
     sweep ends. An existing directory refuses by name. The result, as ``monitor_training``'s at any
     time, is a ``TrainingDetail`` whose ``sweep`` is the sweep's group: its trial rows and what
-    they amount to (``experiments.sweep_outcome``).
+    they amount to (``experiments.sweep_outcome``), beside the ``warnings`` its base preflight gave.
 
     Refuses (``{"error": ..., "issues": [...]}``, nothing minted): a ``param_space`` that is
         not a search space (``hpo.space_axes``, a grid's int axis past its bound included); a
@@ -1209,17 +1244,22 @@ def run_hyperparameter_search(
     )
     if isinstance(opened, dict):
         return opened
-    group = run_sweep(opened)
+    group = run_sweep(opened.directory)
     url = None
     if auto_tensorboard and group.state == "completed":
         from tcip_mcp.pipelines.training.tensorboard_manager import (
             launch_tensorboard,
         )
 
-        url = launch_tensorboard(str(experiments.board_of(opened))).get("url")
-    return TrainingDetail(
-        run=None, sweep=group, tensorboard_url=url
-    ).model_dump()
+        url = launch_tensorboard(
+            str(experiments.board_of(opened.directory))
+        ).get("url")
+    return {
+        **TrainingDetail(
+            run=None, sweep=group, tensorboard_url=url
+        ).model_dump(),
+        "warnings": opened.warnings,
+    }
 
 
 def open_sweep(
@@ -1239,23 +1279,25 @@ def open_sweep(
     trial_budget: Count | None,
     relaunched_from: str | None,
     actor: str | None,
-) -> Path | dict:
+) -> OpenedSweep | dict:
     """Check a sweep's arguments and open its directory under ``project``.
 
     The checks: its scheduler block (``hpo.scheduler_settings``), the first point
     :func:`_preflight_points` lists applied to ``base_config`` and admitted once
     (:func:`_admitted`), its data block, which every split-draw check reads, a ``param_space``
     axis sampling an ``evaluation.selection_metric`` other than the base config's refused, then
-    resolved once (:func:`_preflight`), whose partition answers whether its draws can vary
-    (:func:`_spatial_draws_issue`), then each other point it lists admitted the same way.
+    resolved and smoked once (:func:`_preflight`), whose partition answers whether its draws can
+    vary (:func:`_spatial_draws_issue`), then each other point it lists admitted the same way. Only
+    the first point is smoked: a point that changes what its evaluator reports (its validation
+    side, its ``score_weights``) has its selection read at its trial's first epoch.
 
     Creates the sweep's directory under ``project``, named by
     ``experiments.mint_experiment_id("hpo")``, with its ``sweep.json`` written once, carrying the
     trait revision and, as its ``input``, every argument: ``base_config`` as the caller stated it,
     never a sampled point's values, its paths stored against ``project``
     (``experiments.RECORD_PATHS``); then the act's one audit line by ``actor`` naming the sweep
-    (``AuditEntryNotWrittenError`` when it cannot be appended). Returns the opened sweep's
-    directory, or the refusal ``{"error", "issues"}`` with nothing created.
+    (``AuditEntryNotWrittenError`` when it cannot be appended). Returns the :class:`OpenedSweep`,
+    or the refusal ``{"error", "issues"}`` with nothing created.
     """
     from tcip_mcp.pipelines.training.hpo import (
         resolved_draw_seeds,
@@ -1338,7 +1380,7 @@ def open_sweep(
         first_spec,
         first_sources,
         first_issues,
-        smoke=False,
+        smoke=True,
         overfit=False,
     )
     if resolution is None or not preflight["valid"]:
@@ -1407,7 +1449,7 @@ def open_sweep(
         actor=actor,
         scope=project,
     )
-    return directory
+    return OpenedSweep(directory, preflight["warnings"])
 
 
 def launch_sweep(project: Path, source: Path, *, actor: str | None) -> dict:
@@ -1415,8 +1457,8 @@ def launch_sweep(project: Path, source: Path, *, actor: str | None) -> dict:
 
     The new sweep is opened by :func:`open_sweep`, which mints its id, from the recorded input of
     ``source``, relaunched from it, and run (:func:`run_sweep`) in its own worker process.
-    Returns ``{"sweep_id", "status": "launched"}``, or the refusal dict when that input no longer
-    opens.
+    Returns ``{"sweep_id", "status": "launched", "warnings"}``, the warnings its base preflight
+    gave, or the refusal dict when that input no longer opens.
     """
     given = experiments.observe_sweep(source).record.input
     opened = open_sweep(
@@ -1438,8 +1480,12 @@ def launch_sweep(project: Path, source: Path, *, actor: str | None) -> dict:
     )
     if isinstance(opened, dict):
         return opened
-    _start_worker(opened, _worker_env())
-    return {"sweep_id": opened.name, "status": "launched"}
+    _start_worker(opened.directory, _worker_env())
+    return {
+        "sweep_id": opened.directory.name,
+        "status": "launched",
+        "warnings": opened.warnings,
+    }
 
 
 def run_sweep(directory: Path) -> SweepGroup:

@@ -226,7 +226,7 @@ def opened_sweep(
     ``training_tools.open_sweep`` opens it over ``base_config``, :data:`SWEEP_ARGUMENTS` with
     ``given`` laid over them. Returns the directory.
     """
-    from tcip_mcp.tools.training_tools import open_sweep
+    from tcip_mcp.tools.training_tools import OpenedSweep, open_sweep
 
     arguments = {**SWEEP_ARGUMENTS, **given}
     opened = open_sweep(
@@ -236,8 +236,8 @@ def opened_sweep(
         actor=None,
         **arguments,
     )
-    assert isinstance(opened, Path), opened
-    return opened
+    assert isinstance(opened, OpenedSweep), opened
+    return opened.directory
 
 
 def partition_side(partition: Partition, side: str) -> list[str]:

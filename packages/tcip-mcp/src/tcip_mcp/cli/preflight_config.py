@@ -3,8 +3,9 @@ r"""Validate a training configuration before launching, from the command line.
 Wraps ``training_tools.preflight_config``: structural checks and a builder import always run;
 ``--smoke`` also builds the model and runs ``check_model_contract`` (a train+eval forward at the
 run's resolved dims and frame, or on one real batch of its own dataset when it resolved no
-frame, every attribute head included); ``--overfit`` (with ``--smoke``) additionally runs the
-voluntary ``overfit_check`` diagnostic, reported but never gating.
+frame, every attribute head included) and, for a run the default trainer trains, reads its
+selection metric (``training_tools._preflight`` states how); ``--overfit`` (with ``--smoke``)
+additionally runs the voluntary ``overfit_check`` diagnostic, reported but never gating.
 
 Usage:
     tcip preflight-config --config <path.json> --project <project> \
@@ -22,7 +23,7 @@ from tcip_mcp.cli import bound_project
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     """Preflight the configuration named in ``argv`` and print the result as JSON.
 
-    Returns 2 when the result lists any issue, else 0.
+    Returns 0 when the result is valid, else 2.
     """
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument(
@@ -38,8 +39,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument(
         "--smoke",
         action="store_true",
-        help="Build the model and run check_model_contract; a contract failure "
-        "is a guaranteed real-run failure, so it blocks.",
+        help="Build the model, run check_model_contract and, for a run the default "
+        "trainer trains, read its selection metric; a failure of either blocks.",
     )
     parser.add_argument(
         "--overfit",
@@ -62,7 +63,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         project, config, smoke=args.smoke, overfit=args.overfit
     )
     print(json.dumps(result, indent=2))
-    return 0 if not result.get("issues") else 2
+    return 0 if result["valid"] else 2
 
 
 if __name__ == "__main__":

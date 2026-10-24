@@ -482,10 +482,12 @@ def test_preflight_builds_and_smokes_at_the_count_the_run_resolved(
         },
         batch_size=1,
         stages=[stage(0)],
+        evaluation=evaluation_block(selection_metric="loss"),
     )
 
     r = preflight_config(tmp_path, cfg, smoke=True)
 
+    assert r["valid"] is True, r["issues"]
     assert r["smoke"]["dims"]["num_classes"] == 3, r["smoke"]
     assert r["smoke"]["dims"]["in_chans"] == 3
 
@@ -669,6 +671,7 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(
         },
         batch_size=1,
         stages=[stage(0)],
+        evaluation=evaluation_block(selection_metric="loss"),
     )
 
     synthetic = preflight_config(tmp_path, cfg, smoke=True)
@@ -732,6 +735,7 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(
             },
         },
         stages=[stage(0)],
+        evaluation=evaluation_block(selection_metric="loss"),
     )
     r = preflight_config(tmp_path, cfg, smoke=True, overfit=True)
     assert r["valid"] is True, r["issues"]
