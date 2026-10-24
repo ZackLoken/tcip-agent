@@ -12,9 +12,15 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Mapping
-from typing import Any, TypeGuard
+from typing import Annotated, Any, TypeGuard
 
-from pydantic import ConfigDict, JsonValue, TypeAdapter, ValidationError
+from pydantic import (
+    ConfigDict,
+    JsonValue,
+    PlainValidator,
+    TypeAdapter,
+    ValidationError,
+)
 
 
 def encode_record(value: JsonValue) -> bytes:
@@ -24,9 +30,7 @@ def encode_record(value: JsonValue) -> bytes:
     anything is spelled.
     """
     check_json_value(value)
-    text = json.dumps(
-        value, indent=2, ensure_ascii=False, allow_nan=False, sort_keys=False
-    )
+    text = json.dumps(value, indent=2, ensure_ascii=False, sort_keys=False)
     return f"{text}\n".encode()
 
 
@@ -36,9 +40,9 @@ def encode_log_line(value: JsonValue) -> bytes:
     Refuses what :func:`check_json_value` refuses, before anything is spelled.
     """
     check_json_value(value)
-    return json.dumps(
-        value, ensure_ascii=False, allow_nan=False, sort_keys=False
-    ).encode("utf-8")
+    return json.dumps(value, ensure_ascii=False, sort_keys=False).encode(
+        "utf-8"
+    )
 
 
 def decode_value(data: bytes) -> JsonValue:
@@ -106,18 +110,38 @@ def finite_or_none[T](value: T) -> T | None:
     return value
 
 
+_FINITE_JSON_RULE = ConfigDict(allow_inf_nan=False, strict=True)
+"""Refuse a non-finite number, a ``bytes`` key (never decoded to text) and a type JSON has no form
+for; a ``str`` subclass or a string enum is admitted as the plain string it spells."""
+
 _FINITE_JSON: TypeAdapter[JsonValue] = TypeAdapter(
-    JsonValue, config=ConfigDict(allow_inf_nan=False)
+    JsonValue, config=_FINITE_JSON_RULE
 )
+
+FINITE_JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(
+    dict[str, JsonValue], config=_FINITE_JSON_RULE
+)
+"""The adapter admitting a :data:`FiniteJsonObject`, refusing (``pydantic.ValidationError``)
+anything else, naming the position."""
+
+FiniteJsonObject = Annotated[
+    dict[str, JsonValue],
+    PlainValidator(
+        FINITE_JSON_OBJECT.validate_python,
+        json_schema_input_type=dict[str, JsonValue],
+    ),
+]
+"""A JSON object a store carries: string keys, every value one :func:`check_json_value` admits."""
 
 
 def check_json_value(value: object, *, path: str = "value") -> None:
     """Refuse a payload that is not a finite JSON value, naming each position and its type.
 
     A JSON value is pydantic's ``JsonValue``: a ``dict`` keyed by strings, a list, a string,
-    number, boolean or None, every number finite. Anything else refuses (``ValueError``) under
-    ``path``, naming the position and the type it holds, and naming :func:`stored_number` as how
-    a non-finite number is stored.
+    number, boolean or None, every number finite (:data:`_FINITE_JSON_RULE`). A non-finite number,
+    a ``bytes`` key or a type JSON has no form for refuses (``ValueError``) under ``path``, naming
+    the position and the type it holds, and naming :func:`stored_number` as how a non-finite number
+    is stored.
     """
     try:
         _FINITE_JSON.validate_python(value)
