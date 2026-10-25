@@ -1,10 +1,10 @@
 """The store: a root's records and log entries in one WAL database, ``<root>/.tcip/store.db``.
 
-Creation builds the database under a unique temp name in rollback-journal mode, commits, closes,
-fsyncs and installs it with a no-clobber primitive, all under the root's transition lock, so the
-file's existence marks a complete database. Every open verifies the schema, WAL and full
-synchronous before a single row is read. One writer at a time per root;
-readers are never blocked.
+Creation builds the database under a unique temp name in rollback-journal mode, commits, puts it
+in WAL, closes, fsyncs and installs it with a no-clobber primitive, all under the root's transition
+lock, so the file's existence marks a complete WAL database. Every open verifies the schema and
+full synchronous before a single row is read, and changes nothing on disk. One writer at a time
+per root; readers are never blocked.
 """
 
 from __future__ import annotations
@@ -190,23 +190,16 @@ def _refuse_rollback_journal(db_path: Path, mode: str) -> None:
         )
 
 
-def open_verified(
-    db_path: Path, root: str, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S
-) -> sqlite3.Connection:
-    """Open a published database, verify it, and leave it in WAL at full synchronous.
+def open_verified(db_path: Path) -> sqlite3.Connection:
+    """Open a published database, verify its schema, and set the connection to full synchronous.
 
-    A database not already in WAL is converted under ``root``'s transition lock.
+    The database is opened in whatever journal mode it holds.
     """
     conn = sqlite3.connect(
         str(db_path), isolation_level=None, check_same_thread=False
     )
     try:
         verify_identity(conn, db_path)
-        mode = str(conn.execute("pragma journal_mode").fetchone()[0]).lower()
-        if mode != "wal":
-            with transition_lock(root, timeout_s=timeout_s):
-                mode = _set_wal(conn)
-        _refuse_rollback_journal(db_path, mode)
         conn.execute("pragma synchronous = FULL")
         level = conn.execute("pragma synchronous").fetchone()[0]
         if level != _FULL:
@@ -351,7 +344,7 @@ class SqliteBackend:
                     yield None
                     return
                 self._publish(db_path, root, keys, timeout_s)
-            conn = open_verified(db_path, root, self.lock_timeout_s)
+            conn = open_verified(db_path)
             with self._guard:
                 self._connections[slot] = conn
                 self._busy[slot] += 1
@@ -391,13 +384,13 @@ class SqliteBackend:
             )
             try:
                 self._build(temp)
-                _fsync_path(temp)
-                _install_without_clobbering(temp, db_path)
-                conn = sqlite3.connect(str(db_path), isolation_level=None)
+                conn = sqlite3.connect(str(temp), isolation_level=None)
                 try:
                     _refuse_rollback_journal(db_path, _set_wal(conn))
                 finally:
                     conn.close()
+                _fsync_path(temp)
+                _install_without_clobbering(temp, db_path)
             except BaseException:
                 _remove_quietly(str(temp))
                 raise

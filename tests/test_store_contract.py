@@ -232,6 +232,36 @@ def test_the_first_write_publishes_a_database_already_in_wal(
     assert _journal_mode(database_file(str(store.root))) == "wal"
 
 
+def test_a_creation_that_fails_before_wal_installs_no_database(
+    store: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A creation whose database will not take WAL installs nothing, and the next write publishes.
+
+    The first write raises what putting the built database in WAL raised and leaves no database
+    at the root; once WAL is taken again, the next write publishes a database in WAL and leaves
+    nothing of the file it was built under, its WAL sidecars included.
+    """
+    from tcip_store import sqlite_backend
+
+    def refused(conn: sqlite3.Connection) -> str:
+        raise RuntimeError("WAL refused")
+
+    taken = sqlite_backend._set_wal
+    monkeypatch.setattr(sqlite_backend, "_set_wal", refused)
+    with pytest.raises(RuntimeError, match="WAL refused"):
+        ts.replace(store.key(LWW, "first"), {"n": 1})
+    assert not database_file(str(store.root)).exists()
+
+    monkeypatch.setattr(sqlite_backend, "_set_wal", taken)
+    ts.replace(store.key(LWW, "first"), {"n": 1})
+    ts.release_root(store.root)
+    db = database_file(str(store.root))
+    assert not [
+        p for p in db.parent.iterdir() if p.name.startswith(f".{db.name}.")
+    ]
+    assert _journal_mode(db) == "wal"
+
+
 def test_an_opener_arriving_beside_another_connection_still_gets_a_usable_database(
     store: Harness,
 ) -> None:
@@ -245,7 +275,7 @@ def test_an_opener_arriving_beside_another_connection_still_gets_a_usable_databa
     bystander = sqlite3.connect(str(db_path), isolation_level=None)
     try:
         bystander.execute("select count(*) from records").fetchone()
-        conn = open_verified(db_path, str(store.root), 30.0)
+        conn = open_verified(db_path)
         try:
             assert (
                 str(conn.execute("pragma journal_mode").fetchone()[0]).lower()
