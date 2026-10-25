@@ -219,8 +219,10 @@ naming `--project` until a project is created, and the knowledge tools work.
 
 - Lazy-import torch and torchvision inside function bodies, so MCP startup stays fast.
 - A one-off script the agent writes for one project lives with that project, in the project's own
-  directory, never in this repository. A standing operator capability is a console command. Add an
-  MCP tool only for an audit seam, long-running infrastructure, or domain knowledge the agent lacks.
+  directory, never in this repository. A standing capability the agent uses is an MCP tool, which
+  every harness lists with its schema and runs outside the harness's own sandbox; when an operator
+  runs it too, its console command calls the same function. A capability only an operator uses is
+  a console command alone.
 - Crop traits are controlled vocabulary in `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`; verify
   there before asserting.
 - Every piece of shipped prose (comments, docstrings, log and UI strings, test names, file names,
