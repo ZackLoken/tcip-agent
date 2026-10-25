@@ -102,27 +102,27 @@ traits:
   format: ordinal
   crops: [persimmon]
 - name: catkin_05per_date
-  definition: Date when 5% of the bush's catkins have opened
+  definition: Date when 5% of the bush's catkins have elongated
   format: date
   crops: [hazelnut]
 - name: catkin_05per_julian
-  definition: Number of days from January 1st until 5% of the bush's catkins have opened
+  definition: Number of days from January 1st until 5% of the bush's catkins have elongated
   format: numeric
   crops: [hazelnut]
 - name: catkin_50per_date
-  definition: Date when 50% of the bush's catkins have opened
+  definition: Date when 50% of the bush's catkins have elongated
   format: date
   crops: [hazelnut]
 - name: catkin_50per_julian
-  definition: Number of days from January 1st until 50% of the bush's catkins have opened
+  definition: Number of days from January 1st until 50% of the bush's catkins have elongated
   format: numeric
   crops: [hazelnut]
 - name: catkin_95per_date
-  definition: Date when 95% of the bush's catkins have opened
+  definition: Date when 95% of the bush's catkins have elongated
   format: date
   crops: [hazelnut]
 - name: catkin_95per_julian
-  definition: Number of days from January 1st until 95% of the bush's catkins have opened
+  definition: Number of days from January 1st until 95% of the bush's catkins have elongated
   format: numeric
   crops: [hazelnut]
 - name: catkin_bloom_date
