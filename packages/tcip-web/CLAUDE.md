@@ -67,44 +67,44 @@ on a resume nothing; with where the knowledge documents are served beside each. 
 to `ORIENTATION_CAP`, Claude Code's documented cap: whole while all fit together, otherwise
 sharing the room so a part needing less than an equal share keeps all of it, each cut part stating
 how many it was cut from and a part that does not fit standing as a short fixed statement of it;
-Codex's hook passes its whole context (`additionalContextLimit = 0`). The hook prints it in the shape its harness reads from a hook's stdout, so it reaches the
-agent as context, never as a pasted message, and the doctor runs in the backend, outside every
-harness's sandbox. The session's own text (a switch's hand-off request) is pasted together with
-every request staged by the time the harness takes input, as one message, so a harness that starts
-a turn on it still reads them; the paste waits until the harness has bracketed paste on and has
-written its row's `composer_ready`, since a harness can turn bracketed paste on while a loading
-screen still discards input. Each launch probes
-the version its harness declares and records it, so a harness updated in place is seen at its next
-launch. No timer-free signal tells a launch whose sequence never arrives from one still starting,
-and a sequence that moved earlier still pastes early. The child's environment is this process's
-own less every variable `WITHHELD_ENV_PREFIXES` names: every `CLAUDE`-prefixed one, so a backend
-started from a Claude Code session does not launch its agent as a nested session, and every
-prompt-cache control Claude Code ranks above the row's `promptCacheTtl` or that turns its caching
-off, so the lifetime the row requests is the one its agent runs with. Session create names a row
-by its exact id; the status route lists every row with the reason it cannot launch, if any, and
-the rail lets the breeder pick one. A row is added only after its harness's real flags are read
-from the installed CLI and one live smoke (`tools/smoke_terminal_e2e.py <id>`) passes: the smoke
-serves the backend on a loopback port recorded as `python -m tcip_web` records it, opens a scratch
-project under a display name made for the run, then asks for one `report_friction` call, no other
-tool called, carrying a token only that request names followed by the project's display name, which
-only the agent's orientation states, and passes when the project's friction reports hold exactly
-one report carrying both, of the requested category, at the poll that first sees one; for a row whose conversations are resumed it then ends
-the agent by
-the backend's shutdown, launches the row again, and passes only when that launch resumed the
-conversation and its agent reports the token continued, which no request of the resumed launch
-names.
+Codex's hook passes its whole context (`additionalContextLimit = 0`). The hook prints it in the
+shape its harness reads from a hook's stdout, so it reaches the agent as context, never as a
+pasted message, and the doctor runs in the backend, outside every harness's sandbox. The
+session's own text (a switch's hand-off request) is pasted together with every request staged by
+the time the harness takes input, as one message, so a harness that starts a turn on it still
+reads them; the paste waits until the harness has bracketed paste on and has written its row's
+`composer_ready`, since a harness can turn bracketed paste on while a loading screen still
+discards input. Each launch probes the version its harness declares and records it, so a harness
+updated in place is seen at its next launch. No timer-free signal tells a launch whose sequence
+never arrives from one still starting, and a sequence that moved earlier still pastes early. The
+child's environment is this process's own less every variable `WITHHELD_ENV_PREFIXES` names:
+every `CLAUDE`-prefixed one, so a backend started from a Claude Code session does not launch its
+agent as a nested session, and every prompt-cache control Claude Code ranks above the row's
+`promptCacheTtl` or that turns its caching off, so the lifetime the row requests is the one its
+agent runs with. Session create names a row by its exact id; the status route lists every row
+with the reason it cannot launch, if any, and the rail lets the breeder pick one. A row is added
+only after its harness's real flags are read from the installed CLI and one live smoke
+(`tools/smoke_terminal_e2e.py <id>`) passes: the smoke serves the backend on a loopback port
+recorded as `python -m tcip_web` records it, opens a scratch project under a display name made for
+the run, then asks for one `report_friction` call, no other tool called, carrying a token only
+that request names followed by the project's display name, which only the agent's orientation
+states, and passes when the project's friction reports hold exactly one report carrying both, of
+the requested category, at the poll that first sees one; for a row whose conversations are
+resumed it then ends the agent by the backend's shutdown, launches the row again, and passes only
+when that launch resumed the conversation and its agent reports the token continued, which no
+request of the resumed launch names.
 
 Claude's row passes a settings file each launch writes from `CLAUDE_SETTINGS`,
 `agent_terminal.settings.json`, with the session hook added; its `confinement` sentence states what
-that file enforces, its `promptCacheTtl` is the one place the row's one-hour prompt cache is requested and
-read back as the row's cache lifetime, its `env` sets `CLAUDE_CODE_NO_FLICKER=1` so every
-launch, fresh or resumed, starts in the fullscreen renderer whose alternate screen is the row's
+that file enforces, its `promptCacheTtl` is the one place the row's one-hour prompt cache is
+requested and read back as the row's cache lifetime, its `env` sets `CLAUDE_CODE_NO_FLICKER=1`
+so every launch, fresh or resumed, starts in the fullscreen renderer whose alternate screen is the row's
 `composer_ready` (Claude Code documents that variable as overriding the `tui` setting and a
 failed fullscreen start, and a `--settings` file's `env` as applied at startup, but not that it
 is applied before the renderer is chosen; the live smoke is what shows the pin holds), and the
-shipped file's academic WebFetch grants are
-generated from the `cv-research` document by `tools/generate_harness_discovery.py`. Don't extend or edit that file without calling
-it out explicitly. Every row's agent runs in the backend's workspace, so no harness reads the
+shipped file's academic WebFetch grants are generated from the `cv-research` document by
+`tools/generate_harness_discovery.py`. Don't extend or edit that file without calling it out
+explicitly. Every row's agent runs in the backend's workspace, so no harness reads the
 repository's instruction files as its own. Claude's row loads project settings only
 (`--setting-sources project`), so neither the user's own settings, hooks and `CLAUDE.md` nor the
 developer's auto-memory reach the breeder's agent, and adds the repository as a directory, from
