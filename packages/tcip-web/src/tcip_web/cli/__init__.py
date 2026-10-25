@@ -27,7 +27,7 @@ _OPERATOR_MODULES = (
     "tcip_mcp.cli.import_project",
     "tcip_mcp.cli.write_project_record",
     "tcip_mcp.cli.distill_learnings",
-    "tcip_web.cli.report_conversation",
+    "tcip_web.cli.session_hook",
 )
 
 COMMANDS: dict[str, str] = {

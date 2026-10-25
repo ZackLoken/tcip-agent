@@ -11,7 +11,7 @@ src/tcip_web/
                     # projects, results, sessions, subjects, terminal, training
   app.py, state.py, jobstore.py, paths.py, __main__.py
   cli/             # the tcip dispatcher: each operator-only command's module (COMMANDS, one of
-                    # them report_conversation here) and every registered tool by its own name
+                    # them session_hook here) and every registered tool by its own name
                     # through tcip_mcp.cli.run_tool
   terminal.py + agent_terminal.settings.json
                     # the breeder-facing in-app agent terminal, its provider table and the
@@ -38,32 +38,42 @@ executable, its arguments, the output sequence one installed version of its harn
 writing when its composer appeared (`composer_ready`; no harness promises it), what the harness's
 own enforcement restricts and leaves open (`confinement`, recorded on every launch), and the
 preparation the launch runs first
-when the harness takes its MCP server or its tool approvals only through its own configuration (the
-Antigravity row registers the server through `agy mcp add` and allows every tcip tool and, when the
-launch spelled it, the ritual's own doctor line for the open project, as a command and as an
-unsandboxed run, in agy's settings file, keeping
-the file's other entries, both writes to the breeder's own agy configuration, recorded on the
-launch). The ritual's doctor line has one producer, `doctor_command`, running `tcip_web.cli doctor`
-under the backend's own interpreter, the one `mcp_server` runs, so the line is the same literal
-under any harness's `PATH`; each launch spells it once (`project_launch`), and the ritual, agy's
-allow entry and Claude's rendered settings each read that one outcome. The MCP server a launch hands
-its harness has one producer, `mcp_server`, written as the JSON configuration file Claude's row
-passes, registered through `agy mcp add` for Antigravity's and rendered as `-c` overrides for
-Codex's. The session hook a launch registers has one producer too, `conversation_hook_command`,
-running `tcip_web.cli report-conversation` under the same interpreter and naming nothing of any
-one launch, so its text, which Codex records its hook trust against, stays the same. Claude's
-rendered settings carry it as a `SessionStart` hook, and Claude Code documents both a settings
-file's hooks (held back until the workspace is trusted) and a hook inheriting its environment.
-Codex's `-c` overrides carry it as one, to run once the breeder trusts it through `/hooks`; Codex
-documents inline `[hooks]` tables in its configuration, `session_id` in a hook's input and trust
-through `/hooks`, but not that a `-c` override registers a hook nor that a hook inherits its
-environment (`TCIP_TERMINAL_SESSION`, `TCIP_WORKSPACE`), which only Codex's source supports, so
-the live smoke decides both. Antigravity's row registers none. The session's own
-text (the ritual, which a resumed launch has none of, and a switch's hand-off request) is pasted
-together with every request staged by the time the harness takes input, as one message, so a
-harness that starts a turn on it still reads them; the paste
-waits until the harness has bracketed paste on and has written its row's `composer_ready`, since a
-harness can turn bracketed paste on while a loading screen still discards input. Each launch probes
+when the harness takes its MCP server, its tool approvals or its hooks only through its own
+configuration (the Antigravity row registers the server through `agy mcp add`, allows every tcip
+tool in agy's settings file, keeping the file's other entries, and writes the session hook into the
+workspace's `.agents/hooks.json`, keeping that file's other entries, each write recorded on the
+launch). The MCP server a launch hands its harness has one producer, `mcp_server`, written as the
+JSON configuration file Claude's row passes, registered through `agy mcp add` for Antigravity's and
+rendered as `-c` overrides for Codex's, which also make the server `required`, so Codex's startup
+and resume wait for it before a turn's first tool catalog. The session hook every launch registers
+has one producer, `session_hook_argv`, running `tcip_web.cli session-hook` under the backend's own
+interpreter, the one `mcp_server` runs, and naming nothing of any one launch: Claude's rendered
+settings carry it in Claude Code's exec form (`command` and `args`, no shell), Codex's `-c`
+overrides as one shell line (`shell_line`, refusing a word a shell would not read as itself) whose
+text, which Codex records its hook trust against, stays the same across launches, and agy's hooks
+file as that line followed by the session's start route, since Antigravity documents neither a
+hook's environment nor its working directory. Claude Code documents a settings file's hooks and a
+hook inheriting its environment; Codex documents inline `[hooks]` tables, `session_id` and
+`source` in a hook's input and trust through `/hooks`, but not that a `-c` override registers a hook
+nor that a hook inherits its environment (`TCIP_TERMINAL_SESSION`, `TCIP_WORKSPACE`), which only
+Codex's source supports, so the live smoke decides both. The hook posts its harness's conversation
+and how its session started to the session start route, which answers what the session's agent is
+told (`orientation`) for the project the session was launched for, never the GUI's; a session
+launched for none stays one, whatever project its agent's MCP server creates and acts on. For a
+new conversation it is the project as `inspect_project` answers for it, the doctor's findings
+(beside how many there are and that an operator's `tcip doctor` reads them all) and each memory
+corpus's newest entries as `load_project_memory` pages them; after a compaction the memory alone;
+on a resume nothing; with where the knowledge documents are served beside each. The parts are fit
+to `ORIENTATION_CAP`, Claude Code's documented cap: whole while all fit together, otherwise
+sharing the room so a part needing less than an equal share keeps all of it, each cut part stating
+how many it was cut from and a part that does not fit standing as a short fixed statement of it;
+Codex's hook passes its whole context (`additionalContextLimit = 0`). The hook prints it in the shape its harness reads from a hook's stdout, so it reaches the
+agent as context, never as a pasted message, and the doctor runs in the backend, outside every
+harness's sandbox. The session's own text (a switch's hand-off request) is pasted together with
+every request staged by the time the harness takes input, as one message, so a harness that starts
+a turn on it still reads them; the paste waits until the harness has bracketed paste on and has
+written its row's `composer_ready`, since a harness can turn bracketed paste on while a loading
+screen still discards input. Each launch probes
 the version its harness declares and records it, so a harness updated in place is seen at its next
 launch. No timer-free signal tells a launch whose sequence never arrives from one still starting,
 and a sequence that moved earlier still pastes early. The child's environment is this process's
@@ -75,19 +85,18 @@ by its exact id; the status route lists every row with the reason it cannot laun
 the rail lets the breeder pick one. A row is added only after its harness's real flags are read
 from the installed CLI and one live smoke (`tools/smoke_terminal_e2e.py <id>`) passes: the smoke
 serves the backend on a loopback port recorded as `python -m tcip_web` records it, opens a scratch
-project, then asks for one `report_friction` call carrying a token only that request names, and
-passes when the project's friction reports hold exactly one report carrying it, of the requested
-category, at the poll that first sees one; for a row whose conversations are resumed it then ends
+project under a display name made for the run, then asks for one `report_friction` call, no other
+tool called, carrying a token only that request names followed by the project's display name, which
+only the agent's orientation states, and passes when the project's friction reports hold exactly
+one report carrying both, of the requested category, at the poll that first sees one; for a row whose conversations are resumed it then ends
 the agent by
 the backend's shutdown, launches the row again, and passes only when that launch resumed the
 conversation and its agent reports the token continued, which no request of the resumed launch
 names.
 
 Claude's row passes a settings file each launch writes from `CLAUDE_SETTINGS`,
-`agent_terminal.settings.json`, with the read-only tcip console commands
-(`READ_ONLY_CONSOLE_COMMANDS`, under both invocations) and, when the launch spelled it, the ritual's
-own doctor line allowed under both shells; its `confinement` sentence states what that file
-enforces, its `promptCacheTtl` is the one place the row's one-hour prompt cache is requested and
+`agent_terminal.settings.json`, with the session hook added; its `confinement` sentence states what
+that file enforces, its `promptCacheTtl` is the one place the row's one-hour prompt cache is requested and
 read back as the row's cache lifetime, its `env` sets `CLAUDE_CODE_NO_FLICKER=1` so every
 launch, fresh or resumed, starts in the fullscreen renderer whose alternate screen is the row's
 `composer_ready` (Claude Code documents that variable as overriding the `tui` setting and a
@@ -104,11 +113,11 @@ which it reads the generated knowledge skills; the other rows reach the knowledg
 
 Each launch records what it ran: create answers a `TerminalLaunch` (the provider id, the
 rendered argv and the version its executable declares, never probed on a `TCIP_TERMINAL_CMD`
-override, the preparation run before the launch, the conversation it resumed or none, and the
-session-start ritual `session_ritual` builds for the open project, none on a resumed launch), with
+override, the preparation run before the launch and the conversation it resumed or none), with
 one `agent_terminal_started` line in the open project's audit log per launch (none when no project
 is open). A session holds one launch for its life, and its one end is `TerminalSession.end` in
-`routes/terminal.py`, whose `agent_terminal_ended` line (`TerminalEnded`) records whether the
+`routes/terminal.py`, whose `agent_terminal_ended` line (`TerminalEnded`; none for a session
+launched with no project open) records whether the
 conversation may be resumed (not after the person's Exit, unless that Exit ends a switch of
 harness without waiting for its hand-off), the requests its agent was never given, which the end
 route answers from that one record, the conversation the session hook last
@@ -120,8 +129,8 @@ row, which documents no cache lifetime, are fresh. A switch of harness while an 
 `hand_off_session`: the hand-off request goes through the session's delivery, the session ends once
 the agent's `write_retrospective` line stamped with this session lands in the log, read when the
 agent's output arrives, and the person's End meanwhile ends it at once, no hand-off landed; a
-session for no project ends at once. The rail prints the ritual; the session delivers it, then
-the requests the rail submits, to the agent under the condition `Provider` states. Which agent
+session for no project ends at once. The session delivers the requests the rail submits to the
+agent under the condition `Provider` states. Which agent
 harness the program is comes from the harness's own MCP handshake, not from here. The child is
 spawned with `TCIP_TERMINAL_SESSION` set to the session id; the MCP server the agent launches reads
 it and stamps it on its own records as a declared correlation (`tcip_mcp.agent_identity`), beside

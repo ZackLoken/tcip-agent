@@ -1,9 +1,11 @@
 """Live smoke of one provider row's real harness through the embedded agent terminal.
 
-Creates and opens a scratch project, launches the row for it, submits a request the way the rail
-submits a staged one, asking for one ``report_friction`` call carrying a token generated once the
-project is open, so only the request names it, and passes only when the open project's friction
-reports, read through the platform's own route, hold exactly one report carrying that token, of
+Creates and opens a scratch project under a display name generated for the run, launches the row
+for it, submits a request the way the rail submits a staged one, asking for one
+``report_friction`` call carrying a token generated once the project is open, so only the request
+names it, followed by the project's display name, which with no other tool called only the
+agent's orientation states, and passes only when the open project's friction reports, read
+through the platform's own route, hold exactly one report carrying that token and that name, of
 the requested category, at the first poll that sees one; a later second call is not watched for.
 The backend is also served on a loopback port recorded under the workspace, so the session hook
 the harness runs reports its conversation as it does under ``python -m tcip_web``. For a row whose
@@ -58,10 +60,14 @@ REQUESTED_CATEGORY = "unexpected_behavior"
 
 
 def request_for(token: str) -> str:
-    """Return the request asking the harness for one ``report_friction`` call with ``token``."""
+    """Return the request asking for one ``report_friction`` call with ``token`` and a name.
+
+    The name is the open project's display name, which the request does not state.
+    """
     return (
-        f"This is a smoke test of the agent terminal. Call the tcip report_friction tool "
-        f"exactly once, with category {REQUESTED_CATEGORY} and detail {token}, then stop."
+        "This is a smoke test of the agent terminal. Without calling any other tool, call "
+        f"the tcip report_friction tool exactly once, with category {REQUESTED_CATEGORY} and, "
+        f"as detail, {token} followed by this session's project's display name, then stop."
     )
 
 
@@ -82,10 +88,11 @@ def continuation_request() -> str:
     )
 
 
-def reported(client: TestClient, token: str) -> bool:
+def reported(client: TestClient, token: str, *facts: str) -> bool:
     """Return whether exactly one friction report of the open project carries ``token``.
 
-    The token is looked for in its detail, and that report must have the requested category.
+    The token is looked for in its detail, and that report must have the requested category
+    and carry each of ``facts`` in its detail too.
     """
     entries = client.get("/api/meta/reports").json()["entries"]
     matching = [
@@ -94,7 +101,11 @@ def reported(client: TestClient, token: str) -> bool:
         if "reason" not in entry["record"]
         and token in entry["record"]["detail"]
     ]
-    return len(matching) == 1 and matching[0]["category"] == REQUESTED_CATEGORY
+    return (
+        len(matching) == 1
+        and matching[0]["category"] == REQUESTED_CATEGORY
+        and all(fact in matching[0]["detail"] for fact in facts)
+    )
 
 
 SERVE_TIMEOUT_S = 10
@@ -203,9 +214,10 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
         intensity=True,
         scale=True,
     )
+    name = f"Terminal smoke {secrets.token_hex(4)}"
     record = initialize_project(
         project,
-        "Terminal smoke",
+        name,
         "the terminal smoke's scratch workspace",
         invariances,
         actor=None,
@@ -242,8 +254,13 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
         )
         return terminal_routes._SESSIONS[created["session_id"]]
 
-    def answered(session: TerminalSession, request: str, signal: str) -> bool:
-        """Submit ``request`` to ``session`` and return whether ``signal`` was reported in time."""
+    def answered(
+        session: TerminalSession, request: str, signal: str, *facts: str
+    ) -> bool:
+        """Submit ``request`` to ``session``; return whether ``signal`` with ``facts`` came in time.
+
+        The signal and facts are what :func:`reported` looks for.
+        """
         started = time.time()
         socket_path = app.url_path_for("terminal_ws", session_id=session.id)
         with client.websocket_connect(
@@ -261,7 +278,7 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
             )
             while time.time() - started < answer_timeout_s:
                 time.sleep(1.0)
-                if reported(client, signal):
+                if reported(client, signal, *facts):
                     return True
             print(
                 f"    bracketed paste on: {session._ready}; own text delivered: "
@@ -282,7 +299,8 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
     if first is None:
         return 1
     try:
-        passed = answered(first, request_for(token), token)
+        passed = answered(first, request_for(token), token, name)
+        print(f"    reported naming {name!r} from its orientation: {passed}")
         if passed and terminal_routes._provider(provider).resume is not None:
             started = time.time()
             while (

@@ -150,7 +150,9 @@ with the reason on its delivery event.
 
 When metrics are poor, investigate systematically:
 
-1. Data issues: `tcip doctor <root>`'s `check_data_quality`, missing labels, format errors, class imbalance
+1. Data issues: the doctor's findings (a new conversation of a session launched for a project
+   holds the first of them and how many there are in its orientation; an operator reads them all
+   through `tcip doctor`), missing labels, format errors, class imbalance
 2. Worst cases: `render_failure_cases`, surface and visually inspect the worst
    N images under the ranking weights you state
 3. Per-image breakdown: `score_predictions` on a dataset dir; find images with the highest

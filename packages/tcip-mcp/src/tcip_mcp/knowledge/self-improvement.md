@@ -41,8 +41,9 @@ Call `report_friction` when you notice any of these. One line is enough in the m
 - Missing / hard tool: a capability that should exist but is buried in a web route, a script,
   or nowhere.
 - Environment / setup friction: a missing dependency, a stale path, a slow default.
-- A blocked or failed mandated action: a ritual call that errored, a permission rule that denied
-  a read-only command, `tcip doctor` refusing to run. Never skip one silently.
+- A blocked or failed mandated action: a mandated call that errored, a permission rule that denied
+  a read-only command, a new agent terminal conversation that started with no orientation in its
+  context (a resumed one is told nothing new by design). Never skip one silently.
 
 Over-report.
 

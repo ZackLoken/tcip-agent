@@ -17,11 +17,20 @@ follow this arc. Each step links out to the domain skill that owns its detail.
 
 ## 0. Orient
 
-Start the session with `load_project_memory` (kind='reports' and kind='retrospectives'), then `inspect_project`
-on any project you're handed. A session resuming a project after a long wait reads the hand-off
-written before it (the newest retrospective), the record of the run it names (`monitor_training`
-or `get_experiment`) and the knowledge documents for the stage it resumes. Surface friction with
-`report_friction` the moment you hit it (ambiguous goal, unconfirmed format).
+A conversation the agent terminal starts new (and one cleared or forked in Claude Code or Codex)
+begins with its orientation in context, put there by the terminal's session hook, which says what
+it holds and how many entries each part was cut from; `load_project_memory` reads past it. A
+resumed conversation is told nothing new, since it already holds what it was told. After a
+compaction, Claude Code's and Codex's sessions launched for a project are told its memory again,
+and those launched for none are told so again; Antigravity's are told nothing. A session launched
+for none holds no project in the terminal whatever project its tools go on to create, and reads
+that project's memory through `load_project_memory`. A session with no orientation reads the
+project's memory through `load_project_memory` (kind='reports' and kind='retrospectives') and its
+overview through `inspect_project`; an operator reads the doctor's findings through
+`tcip doctor`. A session resuming a project after a long wait reads
+the hand-off written before it (the newest retrospective), the record of the run it names
+(`monitor_training` or `get_experiment`) and the knowledge documents for the stage it resumes.
+Surface friction with `report_friction` the moment you hit it (ambiguous goal, unconfirmed format).
 
 Everything you write for a project lives in that project's own directory, never in your harness's
 session scratchpad, a temporary directory or the platform's repository: its scripts and model
@@ -151,7 +160,7 @@ There must be something to train on. Three paths (see
 `packages/tcip-mcp/src/tcip_mcp/knowledge/annotation.md`):
 
 - Agent/MCP path, one image per call: `propose_annotations` → `stage_proposals` →
-  `focus_human_attention` → `capture_live_canvas`, a rendered image (`vision_tools.visualize`)
+  `focus_human_attention` → `capture_live_canvas`, a rendered image (`visualize`)
   only for what the canvas cannot draw. The engines and their parameters, grid passes, the run's
   identity, choosing an engine by what survives review and the review on the breeder's canvas
   are `packages/tcip-mcp/src/tcip_mcp/knowledge/annotation.md`'s, and so is when an empty label

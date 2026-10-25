@@ -10,10 +10,11 @@ Run with ``fail`` as its first argument it exits 3 immediately.
 
 With ``FAKE_TERMINAL_MEMORY_DIR`` set it stands in for Claude Code's row and the tcip server it
 is handed: once its composer is ready it runs the ``SessionStart`` hook of its ``--settings``
-file for its conversation (the id after ``--resume``, else a new one), and a line naming a smoke
-token (``ack-<hex>``) files one friction report of it in the project of its ``--mcp-config``,
-remembered under the conversation in that directory, while a line naming ``-continued`` files
-the remembered token so continued.
+file for its conversation (the id after ``--resume``, a resume, else a new one, a startup),
+keeping the context the hook prints, and a line naming a smoke token (``ack-<hex>``) files one
+friction report of it followed by the display name that context states, in the project of its
+``--mcp-config``, remembered under the conversation in that directory, while a line naming
+``-continued`` files the remembered token so continued.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from pathlib import Path
 
 _TOKEN = re.compile(r"ack-[0-9a-f]+")
 _CONTINUED = "-continued"
+_DISPLAY_NAME = re.compile(r'"display_name": "([^"]*)"')
 
 
 def _input_arrives_within(seconds: float) -> bool:
@@ -58,7 +60,10 @@ class _Harness:
 
     def __init__(self, memory: Path) -> None:
         self.memory = memory
-        self.conversation = _argument_after("--resume") or str(uuid.uuid4())
+        resumed = _argument_after("--resume")
+        self.source = "startup" if resumed is None else "resume"
+        self.conversation = resumed or str(uuid.uuid4())
+        self.context = ""
         mcp_config = json.loads(
             Path(_argument_after("--mcp-config") or "").read_text(
                 encoding="utf-8"
@@ -68,7 +73,10 @@ class _Harness:
         self.project = Path(args[args.index("--project") + 1])
 
     def start(self) -> None:
-        """Run each ``SessionStart`` hook command of the ``--settings`` file, for the session."""
+        """Run each ``SessionStart`` hook of the ``--settings`` file, keeping what it prints.
+
+        A handler with ``args`` is spawned with no shell, one without through a shell.
+        """
         settings = json.loads(
             Path(_argument_after("--settings") or "").read_text(
                 encoding="utf-8"
@@ -76,18 +84,26 @@ class _Harness:
         )
         for group in settings.get("hooks", {}).get("SessionStart", []):
             for handler in group["hooks"]:
-                subprocess.run(
-                    handler["command"],
-                    shell=True,
+                ran = subprocess.run(
+                    [handler["command"], *handler["args"]]
+                    if "args" in handler
+                    else handler["command"],
+                    shell="args" not in handler,
                     input=json.dumps(
                         {
                             "session_id": self.conversation,
                             "hook_event_name": "SessionStart",
+                            "source": self.source,
                         }
                     ),
+                    capture_output=True,
                     text=True,
                     check=False,
                 )
+                if ran.stdout.strip():
+                    self.context += json.loads(ran.stdout)[
+                        "hookSpecificOutput"
+                    ]["additionalContext"]
 
     def take(self, line: str) -> None:
         """File the report ``line`` asks for, if it names a token or a continuation."""
@@ -95,7 +111,10 @@ class _Harness:
         token = _TOKEN.search(line)
         if token is not None:
             remembered.write_text(token.group(), encoding="utf-8")
-            self._report(f"smoke {token.group()}")
+            named = _DISPLAY_NAME.search(self.context)
+            self._report(
+                f"smoke {token.group()} {named.group(1) if named else ''}"
+            )
         elif _CONTINUED in line:
             self._report(remembered.read_text(encoding="utf-8") + _CONTINUED)
 

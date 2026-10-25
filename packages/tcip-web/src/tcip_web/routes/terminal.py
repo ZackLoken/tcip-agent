@@ -1,7 +1,8 @@
 """Agent terminal routes: provider status, session launch, hand-off and end, requests and a socket.
 
-Status, launch, the conversation a session's harness reports, a hand-off before a switch of
-harness, the end and submitted requests go over HTTP; per session a WebSocket carries raw PTY
+Status, launch, the session start a session's hook reports and the orientation answered for it,
+a hand-off before a switch of harness, the end and submitted requests go over HTTP; per session a
+WebSocket carries raw PTY
 output as text frames out and ``TerminalInputFrame``/``TerminalResizeFrame`` JSON messages in. A
 reconnecting socket receives the scrollback first, then live output, with nothing lost or
 repeated between them. A launch resumes its row's last conversation in the open project when
@@ -102,14 +103,10 @@ class LaunchedProgram(BaseModel):
 
 
 class TerminalLaunch(BaseModel):
-    """A started session: its id, what it launched and the session-start ritual it was given.
-
-    A launch resuming a conversation is given no ritual.
-    """
+    """A started session: its id and what it launched."""
 
     session_id: str
     launched: LaunchedProgram
-    ritual: str | None
 
 
 class ProviderStatus(BaseModel):
@@ -156,10 +153,20 @@ class TerminalEnded(TerminalEnd):
     handed_off: bool | None
 
 
-class ConversationReport(BaseModel):
-    """The conversation a session's harness declared it is in, as its session hook reported it."""
+class SessionStartReport(BaseModel):
+    """A session start as its hook reported it: the harness's conversation and how it started.
+
+    The conversation is the one the harness declared it is in.
+    """
 
     conversation: str = Field(min_length=1)
+    source: pty_host.SessionStartSource
+
+
+class SessionOrientation(BaseModel):
+    """What the agent of a session start is told, ``None`` for nothing."""
+
+    text: str | None
 
 
 HAND_OFF_REQUEST = (
@@ -207,16 +214,13 @@ class TerminalSession:
     """One PTY-attached agent process, its delivery state and its subscriber queues.
 
     The delivery state is the session's own text still to paste ahead of the queued requests
-    (the session-start ritual until it is pasted, then a hand-off request once a switch asks
-    for one), whether the agent has bracketed paste on, whether it has written its row's
-    ``composer_ready``, the requests a person submitted that are still queued, and the output
-    tail an escape sequence split across reads continues from.
+    (a hand-off request once a switch asks for one), whether the agent has bracketed paste on,
+    whether it has written its row's ``composer_ready``, the requests a person submitted that
+    are still queued, and the output tail an escape sequence split across reads continues from.
     """
 
     launched: LaunchedProgram
     """What :meth:`start` launched."""
-    ritual: str | None
-    """The session-start ritual :meth:`start` built for the agent, ``None`` for a resumed one."""
     conversation: str | None
     """The conversation the agent's harness last reported it is in, ``None`` until one does."""
     ended: TerminalEnded
@@ -257,32 +261,29 @@ class TerminalSession:
     ) -> str | None:
         """Spawn ``provider``'s harness in a PTY for the open project, by ``actor``.
 
-        The launch resumes :func:`_conversation_to_resume`'s conversation, given no ritual, or
-        is fresh, given the ritual built before the spawn from the project's record as it reads
-        now; an override resumes none. Returns an error reason (a record or log that will not
-        read names why), or None on success.
+        The launch resumes :func:`_conversation_to_resume`'s conversation or is fresh; an
+        override resumes none. Returns an error reason (a log that will not read, or a session
+        hook its arguments cannot spell, names why), or None on success.
         """
         project = store.opened
-        launch = pty_host.project_launch(project)
         command = pty_host.resolve_terminal_command(provider)
         if command is None:
             return provider.unavailable_reason
         unrendered, override = command
+        env = pty_host.spawn_env(self.id)
         try:
             resumed = (
                 None
                 if override
                 else _conversation_to_resume(provider, project)
             )
-            ritual = None if resumed else pty_host.session_ritual(launch)
+            argv = pty_host.render_argv(unrendered, project, env, resumed)
         except ValueError as exc:
             return str(exc)
-        env = pty_host.spawn_env(self.id)
-        argv = pty_host.render_argv(unrendered, launch, env, resumed)
         prepared = (
             []
             if override
-            else pty_host.prepare_launch(argv[0], provider, launch)
+            else pty_host.prepare_launch(argv[0], provider, project, self.id)
         )
         if isinstance(prepared, str):
             return prepared
@@ -302,7 +303,6 @@ class TerminalSession:
             return f"could not start the agent terminal: {exc}"
         self._pty = pty
         self.launched = launched
-        self.ritual = self._ahead = ritual
         try:
             _record(
                 _STARTED,
@@ -389,23 +389,21 @@ class TerminalSession:
         return True
 
     def answer(self) -> TerminalLaunch:
-        """Return the session's id, what it launched and the ritual it was given."""
-        return TerminalLaunch(
-            session_id=self.id, launched=self.launched, ritual=self.ritual
-        )
+        """Return the session's id and what it launched."""
+        return TerminalLaunch(session_id=self.id, launched=self.launched)
 
     def submit(self, text: str) -> None:
-        """Queue ``text`` for the session's agent, behind its ritual; :meth:`deliver` writes it."""
+        """Queue ``text`` for the session's agent; :meth:`deliver` writes it."""
         with self._lock:
             self._queued.append(text)
 
     def hand_off(self, by: str) -> bool:
         """Ask the agent for its hand-off before a switch of harness asked for ``by`` a person.
 
-        :data:`HAND_OFF_REQUEST` goes ahead of the queued requests, after any ritual still
-        unpasted, and the session ends by ``by`` once the agent's hand-off lands
-        (:meth:`_follow_hand_off`). Asked again, it changes nothing. Returns False for a session
-        for no project, which has no log to see a hand-off land in, and asks for nothing.
+        :data:`HAND_OFF_REQUEST` goes ahead of the queued requests, and the session ends by
+        ``by`` once the agent's hand-off lands (:meth:`_follow_hand_off`). Asked again, it
+        changes nothing. Returns False for a session for no project, which has no log to see a
+        hand-off land in, and asks for nothing.
         """
         with self._writing, self._lock:
             if self._project is None:
@@ -413,9 +411,7 @@ class TerminalSession:
             if self._hand_off is None:
                 _, cursor = audit_entries(self._project.root)
                 self._hand_off = _HandOff(by, cursor)
-                self._ahead = "\n\n".join(
-                    text for text in (self._ahead, HAND_OFF_REQUEST) if text
-                )
+                self._ahead = HAND_OFF_REQUEST
             return True
 
     def deliver(self) -> None:
@@ -837,16 +833,22 @@ def hand_off_session(
     return None
 
 
-@router.post("/sessions/{session_id}/conversation")
-def report_conversation(session_id: str, req: ConversationReport) -> dict:
-    """Hold ``req.conversation`` as the conversation the session's agent is in, as declared.
+@router.post("/sessions/{session_id}/session-start")
+def session_start(
+    session_id: str, req: SessionStartReport
+) -> SessionOrientation:
+    """Hold ``req.conversation`` as the session agent's conversation and answer its orientation.
 
-    A later report replaces it; the session's end line records the last. 404 for a session the
-    backend does not hold.
+    A later report replaces the conversation; the session's end line records the last. The
+    orientation is :func:`~tcip_web.terminal.orientation` for the project the session was
+    launched for and ``req.source``. 404 for a session the backend does not hold.
     """
     with _SESSIONS_LOCK:
-        _require(session_id).conversation = req.conversation
-    return {}
+        session = _require(session_id)
+        session.conversation = req.conversation
+    return SessionOrientation(
+        text=pty_host.orientation(session._project, req.source)
+    )
 
 
 class SubmitRequest(BaseModel):
@@ -857,7 +859,7 @@ class SubmitRequest(BaseModel):
 
 @router.post("/sessions/{session_id}/submit")
 def submit_to_session(session_id: str, req: SubmitRequest) -> dict:
-    """Queue ``req.text`` for the session's agent, delivered after its ritual.
+    """Queue ``req.text`` for the session's agent (:meth:`TerminalSession.deliver`).
 
     404 for a session the backend does not hold, ended or never started. The request is queued
     under the sessions lock, so an end after it answers it among the undelivered, and written
