@@ -69,7 +69,7 @@ def _dataset(tmp_path: Path, name: str = "ds") -> Path:
     root = tmp_path / name
     root.mkdir(parents=True, exist_ok=True)
     result = register_dataset(
-        tmp_path, str(root), crop=sorted(registered_crops())[0]
+        tmp_path, str(root), crop=sorted(registered_crops())[0], actor=None
     )
     assert "error" not in result, result
     registry_over(root, FLOWERS)
@@ -225,6 +225,7 @@ def test_build_plant_mapping_refuses_a_name_outside_name_segment(
         name="Not Legal!",
         images_root=str(tmp_path),
         plant_registry="unregistered",
+        actor=None,
     )
     assert "error" in res
     assert "lowercase" in res["error"]
@@ -242,6 +243,7 @@ def test_build_plant_mapping_over_an_unregistered_images_dir_names_register_data
         name="valley",
         images_root=str(images_root),
         plant_registry="unregistered",
+        actor=None,
     )
     assert "error" in res
     assert "register_dataset" in res["error"]
@@ -261,6 +263,7 @@ def test_build_plant_mapping_admits_the_dataset_images_root_spelled_variously(
         name="trailing-sep",
         images_root=trailing,
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in res, res
 
@@ -270,6 +273,7 @@ def test_build_plant_mapping_admits_the_dataset_images_root_spelled_variously(
         name="forward-slash",
         images_root=forward,
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in res, res
 
@@ -278,6 +282,7 @@ def test_build_plant_mapping_admits_the_dataset_images_root_spelled_variously(
         name="relative",
         images_root=str(images_root.relative_to(tmp_path)),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in res, res
 
@@ -294,6 +299,7 @@ def test_deliver_phenology_milestones_refuses_predictions_from_a_different_datas
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -331,6 +337,7 @@ def test_deliver_phenology_milestones_refuses_a_date_the_mapping_does_not_cover(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -448,6 +455,7 @@ def test_deliver_phenology_milestones_refuses_a_plant_csv_rewritten_in_place(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -492,6 +500,7 @@ def test_an_unread_captures_bytes_going_bad_is_disclosed_never_opened(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -538,6 +547,7 @@ def test_an_unread_captures_bytes_changing_in_place_does_not_refuse_delivery(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -586,6 +596,7 @@ def test_a_non_delivered_mapping_date_is_never_walked(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -628,6 +639,7 @@ def test_a_moved_read_capture_refuses_naming_the_file(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -680,6 +692,7 @@ def test_full_coverage_still_catches_an_in_place_exif_timestamp_change(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -731,6 +744,7 @@ def test_an_unmapped_raster_does_not_block_the_whole_date_digest_from_catching_a
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -781,6 +795,7 @@ def test_an_unmapped_raster_beside_a_full_mapped_read_delivers_with_nothing_disc
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -817,6 +832,7 @@ def test_a_partial_delivery_delivers_with_disclosures_naming_exactly_what_it_did
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -856,6 +872,7 @@ def test_a_capture_readable_at_build_and_unreadable_at_verify_refuses(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -906,6 +923,7 @@ def test_a_capture_unreadable_at_build_is_never_read_so_replacing_it_only_disclo
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     build = plant_mapping.load_mapping(tmp_path, "valley")
@@ -1121,6 +1139,7 @@ def test_a_delivery_made_from_another_directory_names_the_projects_dataset(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(project, [plant_csv]),
+        actor=None,
     )
     assert "error" not in built, built
     _seed_currant_bloom_trait(project)
@@ -1161,6 +1180,7 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     assert build_res["summary"]["totals"]["n_dates"] == len(DATES)
@@ -1204,6 +1224,7 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" in blocked
     build_res2 = build_plant_mapping(
@@ -1212,6 +1233,7 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         supersede=True,
+        actor=None,
     )
     assert "error" not in build_res2, build_res2
     out_csv2 = tmp_path / "out2" / "bloom_phenology.csv"
@@ -1244,6 +1266,7 @@ def test_the_delivery_events_plant_mapping_block_carries_the_match_radius(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     build = plant_mapping.load_mapping(tmp_path, "valley")
@@ -1285,6 +1308,7 @@ def test_a_moved_plant_csv_and_an_archived_date_deliver_with_disclosures(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -1337,6 +1361,7 @@ def test_a_read_capture_whose_plants_own_csv_is_missing_discloses_rather_than_re
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, per_plant_csvs),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -1400,6 +1425,7 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, per_plant_csvs),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -1448,6 +1474,7 @@ def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_ma
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -1458,7 +1485,10 @@ def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_ma
     ts.release_root(dataset_root)
     shutil.copytree(str(dataset_root), str(moved_root))
     reg = register_dataset(
-        tmp_path, str(moved_root), crop=sorted(registered_crops())[0]
+        tmp_path,
+        str(moved_root),
+        crop=sorted(registered_crops())[0],
+        actor=None,
     )
     assert "error" not in reg, reg
     original = plant_mapping.load_mapping(tmp_path, "valley")
@@ -1515,6 +1545,7 @@ def test_plant_mapping_names_lists_legal_names_and_omits_a_stray_file(
         name="valley-a",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in res_a, res_a
     res_b = build_plant_mapping(
@@ -1522,6 +1553,7 @@ def test_plant_mapping_names_lists_legal_names_and_omits_a_stray_file(
         name="valley-b",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in res_b, res_b
 
@@ -1564,7 +1596,10 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
     registry_over(dataset_root, FLOWERS)
     for proj in (proj_a, proj_b):
         reg = register_dataset(
-            proj, str(dataset_root), crop=sorted(registered_crops())[0]
+            proj,
+            str(dataset_root),
+            crop=sorted(registered_crops())[0],
+            actor=None,
         )
         assert "error" not in reg, reg
 
@@ -1576,6 +1611,7 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(proj_a, [plant_csv]),
         dates=[DATES[0]],
+        actor=None,
     )
     assert "error" not in build_a, build_a
     _seed_currant_bloom_trait(proj_a)
@@ -1586,6 +1622,7 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(proj_b, [plant_csv]),
         dates=list(DATES),
+        actor=None,
     )
     assert "error" not in build_b, build_b
     _seed_currant_bloom_trait(proj_b)
@@ -1661,6 +1698,7 @@ def test_an_image_ingested_under_a_mapped_date_refuses_the_delivery_naming_the_d
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -1673,7 +1711,7 @@ def test_an_image_ingested_under_a_mapped_date_refuses_the_delivery_naming_the_d
         datetime(2026, 2, 11, 9, 40),
         h_pos_err=PHOTO_POSITION_ERROR_M,
     )
-    res = ingest_images(dataset_root, source=str(extra_source))
+    res = ingest_images(dataset_root, source=str(extra_source), actor=None)
     assert "error" not in res, res
     assert [f["bucket"] for f in res["files"]] == [DATES[0]]
 
@@ -1733,6 +1771,7 @@ def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -1790,6 +1829,7 @@ def test_build_mapping_persists_and_reads_back_capture_digests(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -1880,6 +1920,7 @@ def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_th
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -1977,6 +2018,7 @@ def test_a_date_with_an_unreadable_image_a_raster_and_a_band_group_builds_and_de
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in build_res, build_res
     assert build_res["unreadable"][DATES[0]] == ["bad.jpg"]
@@ -2029,6 +2071,7 @@ def test_second_receipt_scan_in_one_process_reads_only_what_was_appended(
         name="valley-a",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in res_a, res_a
     build_a = plant_mapping.load_mapping(tmp_path, "valley-a")
@@ -2040,6 +2083,7 @@ def test_second_receipt_scan_in_one_process_reads_only_what_was_appended(
         name="valley-b",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in res_b, res_b
     build_b = plant_mapping.load_mapping(tmp_path, "valley-b")
@@ -2065,6 +2109,7 @@ def test_two_spellings_of_one_project_share_one_receipt_scan(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in built, built
 
@@ -2108,6 +2153,7 @@ def test_a_build_leaves_one_row_its_receipt(
         name="valley",
         images_root=str(images_root),
         plant_registry=registry,
+        actor=None,
     )
 
     assert "error" not in res, res

@@ -395,11 +395,13 @@ def deliver_orthomosaic_plant_counts(
     canopy_subject: str = "",
     position_error_m: float | None = None,
     acknowledgment_id: str | None = None,
+    *,
+    actor: str | None,
 ) -> dict:
     """Deliver per-plant detection counts from a whole-raster bucket and a plant registry.
 
     The bucket is a published whole-raster prediction bucket and the registry a registered plant
-    registry; the counts are for the plants ``plants`` names.
+    registry; the counts are for the plants ``plants`` names, delivered by ``actor``.
 
     The MCP door over :func:`orthomosaic_plant_counts`, which carries the full contract:
     ``canopy_subject`` attribution states ``position_error_m``, the registry positions' error
@@ -425,7 +427,7 @@ def deliver_orthomosaic_plant_counts(
             position_error_m=position_error_m,
             acknowledgment_id=acknowledgment_id,
             door="deliver_orthomosaic_plant_counts",
-            actor=None,
+            actor=actor,
         )
     except ValueError as exc:
         return {"error": str(exc)}

@@ -1,6 +1,7 @@
-"""tcip preflight-config: the preflight door's own command-line entry point.
+"""tcip preflight-config: the preflight tool's command, through the console's one adapter.
 
-Structural validation always runs, for the project --project names.
+The configuration is a file's contents (``--config @<path>``), and structural validation always
+runs, for the project --project names.
 """
 
 from __future__ import annotations
@@ -43,7 +44,9 @@ def test_refuses_a_run_naming_no_project(tmp_path: Path) -> None:
     cwd.mkdir()
 
     result = run_tcip(
-        "preflight-config", ["--config", str(config_path)], cwd=cwd
+        "preflight-config",
+        ["--config", f"@{config_path}", "--user", "tester"],
+        cwd=cwd,
     )
 
     assert result.returncode != 0, result.stdout
@@ -60,7 +63,10 @@ def test_validates_a_fixture_config_for_the_named_project(
 
     result = run_tcip(
         "preflight-config",
-        ["--config", str(config_path), "--project", str(project)],
+        [
+            *("--config", f"@{config_path}", "--project", str(project)),
+            *("--user", "tester"),
+        ],
         cwd=cwd,
     )
 

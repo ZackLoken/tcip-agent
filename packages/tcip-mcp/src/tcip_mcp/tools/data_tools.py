@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 
@@ -11,13 +12,20 @@ from tcip_mcp.pipelines.schemas import DrawnSplit
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
+
 
 @tool()
 @audited
 def freeze_selection(
-    project: Path, experiment_id: str, output_path: str | None = None
+    project: Path,
+    experiment_id: str,
+    output_path: str | None = None,
+    *,
+    actor: str | None,
 ) -> dict:
-    """Freeze a finished run's own drawn train/val partition into a selection.
+    """Freeze a finished run's own drawn train/val partition into a selection, by ``actor``.
 
     A run of any task freezes, whatever shape its ground truth is: the selection is the run's own
     train and val samples as its resolved partition records them, each carrying the digest its
@@ -185,7 +193,8 @@ def _scan_dataset(root: str) -> dict:
     }
 
 
-def scan_dataset(folder_path: str) -> dict:
+@tool()
+def scan_dataset(project: Path, folder_path: str) -> dict:
     """Count a dataset's images, label documents and prediction documents.
 
     The counts come from :func:`_scan_dataset`, beside how many images their own label document
@@ -193,15 +202,12 @@ def scan_dataset(folder_path: str) -> dict:
 
     Args:
         folder_path: Path to the dataset root directory
-            (:func:`~tcip_mcp.registry_paths.located` with no project, so absolute).
+            (:func:`~tcip_mcp.registry_paths.located` against the project).
 
     """
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
 
-    try:
-        root = located(folder_path, None)
-    except ValueError as exc:
-        return {"error": str(exc)}
+    root = located(folder_path, project)
     if not root.is_dir():
         return {"error": f"Directory not found: {folder_path}"}
     try:
@@ -236,13 +242,15 @@ def draw_splits(
     output_path: str | None = None,
     subject: str | None = None,
     ground_truth: str | None = None,
+    *,
+    actor: str | None,
 ) -> dict:
     """Compute a leakage-free, annotation-stratified train/val/calibration/holdout selection.
 
     Non-destructive: it copies nothing and moves nothing. With ``output_path`` it writes a
     selection record listing, per sample, the image source, the label document, the group key and
-    the side, and the project's audit log records the write; without one it answers the same
-    draw's statistics and writes nothing, the log included. Sibling tiles
+    the side, and the project's audit log records the write as ``actor``'s; without one it
+    answers the same draw's statistics and writes nothing, the log included. Sibling tiles
     of one source image are kept in the same split, and, when ``stratify_foreground`` is set,
     splits are balanced by annotation count. Groups whole source images.
 
@@ -319,6 +327,7 @@ def draw_splits(
         output_path=output_path and str(located(output_path, project)),
         subject=subject,
         ground_truth=ground_truth and str(located(ground_truth, project)),
+        actor=actor,
     )
 
 
@@ -330,11 +339,14 @@ def draw_splits_at(
     output_path: str | None,
     subject: str | None,
     ground_truth: str | None,
+    actor: str | None,
 ) -> dict:
-    """Draw the selection ``draw`` states over the dataset root ``folder_path``.
+    """Draw the selection ``draw`` states over the dataset root ``folder_path``, by ``actor``.
 
-    The draw is as :func:`draw_splits` states it, written at ``output_path`` and read against
-    ``ground_truth``, each a location already established (absolute).
+    The ground truth is the dataset's label documents of ``subject``, or the masks or table
+    ``ground_truth`` names; with ``output_path`` the selection is written there and one
+    ``draw_splits`` audit line by ``actor`` records it, and without one only the draw's
+    statistics are answered. Each location is already established (absolute).
     """
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
@@ -481,7 +493,168 @@ def draw_splits_at(
             "subject": subject,
             "ground_truth": ground_truth,
         },
-        actor=None,
+        actor=actor,
         scope=project,
     )
     return response
+
+
+@tool()
+def plant_aware_group_splits(
+    project: Path,
+    folder_path: str,
+    plant_csv_paths: list[str],
+    subject: str,
+    seed: int,
+    val_ratio: float,
+    calibration_ratio: float,
+    holdout_ratio: float,
+    stratify_foreground: bool,
+    rationale: str,
+    tolerance_m: float | None = None,
+    output_path: str | None = None,
+    *,
+    actor: str | None,
+) -> dict:
+    """Draw a selection grouped by the plant each of a dataset's georeferenced images shows.
+
+    A written draw is recorded as ``actor``'s.
+
+    Each image's group key is the ``plant_id`` of the plant nearest its own center
+    (:func:`derive_plant_group_key_map`) among the plants the CSVs hold, so every capture of one
+    physical plant, on every date, lands on one side. The draw is :func:`draw_splits`' over the
+    dataset's label documents of ``subject`` with that map as its grouping, and so is the answer.
+    Refuses (``{"error": ...}``) a dataset holding no image, a stem resolving to no plant, and
+    everything :func:`draw_splits` refuses.
+
+    Args:
+        folder_path: The dataset root, whose images are each a georeferenced raster.
+        plant_csv_paths: The plant-locations CSVs (``plant_mapping.read_plant_csvs``' schema).
+        subject: The object class the selection is drawn for.
+        seed, val_ratio, calibration_ratio, holdout_ratio, stratify_foreground, rationale: The
+            draw's statement, as :func:`draw_splits` takes it.
+        tolerance_m: The farthest a plant may lie from an image's center, in meters; unstated,
+            it derives from the plant grid (``plant_mapping.resolve_nn_tolerance_m``).
+        output_path: Where to write the selection. Omitted, nothing is written and the answer is
+            the draw's statistics only.
+
+    """
+    from tcip_mcp.dataset_layout import parse_image_path
+    from tcip_mcp.pipelines.data.splits import member_identity
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
+
+    root = located(folder_path, project)
+    try:
+        stem_to_raster: dict[str, Path] = {}
+        for image in _scan_dataset(str(root))["images"]:
+            _root, date, stem = parse_image_path(image)
+            stem_to_raster[member_identity(date, stem)] = Path(image)
+        if not stem_to_raster:
+            return {"error": f"no images found under {root}"}
+        # The statement's refusal is a pydantic ValidationError, a ValueError.
+        draw = DrawnSplit(
+            seed=seed,
+            val_ratio=val_ratio,
+            calibration_ratio=calibration_ratio,
+            holdout_ratio=holdout_ratio,
+            stratify_foreground=stratify_foreground,
+            rationale=rationale,
+            grouping=derive_plant_group_key_map(
+                stem_to_raster,
+                read_plant_csvs(located(p, project) for p in plant_csv_paths),
+                nn_tolerance_m=tolerance_m,
+            ),
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
+    return draw_splits_at(
+        project,
+        str(root),
+        draw,
+        output_path=output_path and str(located(output_path, project)),
+        subject=subject,
+        ground_truth=None,
+        actor=actor,
+    )
+
+
+def derive_plant_group_key_map(
+    stem_to_raster: dict[str, Path],
+    plants: list[PlantRecord],
+    *,
+    nn_tolerance_m: float | None = None,
+) -> dict[str, str]:
+    """Map every key in ``stem_to_raster`` to its nearest plant's ``plant_id`` by GPS.
+
+    Returns ``{identity: plant_id}``. Each raster's own center pixel is its representative
+    location, converted to WGS84 via that raster's own :class:`OrthomosaicGeoreference` (built per
+    file, since two stems can carry different tiepoints or even different CRSes), then matched to
+    the nearest plant in ``plants``.
+
+    ``nn_tolerance_m`` resolves through ``plant_mapping.resolve_nn_tolerance_m``.
+
+    Every stem must resolve: once all stems have been checked, raises ``ValueError`` counting the
+    stems whose raster can't be georeferenced, whose nearest plant falls outside tolerance, or
+    whose matched plant record has no ``plant_id``, naming the first twenty with their causes and
+    counting the rest. Raises ``ValueError`` when ``plants`` is empty.
+    """
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        OrthomosaicGeoreference,
+    )
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        assignment_is_attributed,
+        nearest_plant,
+        resolve_nn_tolerance_m,
+    )
+    from tcip_mcp.pipelines.raster_source import SourceHeader
+
+    if not plants:
+        raise ValueError(
+            "no plant records to match against (the plant CSV(s) parsed to zero rows)"
+        )
+
+    tolerance_m = resolve_nn_tolerance_m(plants, nn_tolerance_m).value
+
+    group_key_map: dict[str, str] = {}
+    failures: list[str] = []
+    for stem in sorted(stem_to_raster):
+        path = stem_to_raster[stem]
+        try:
+            header = SourceHeader(path)
+            georef = OrthomosaicGeoreference.of(header.georeference)
+            width, height = header.display_frame
+            lat, lon = georef.pixel_to_wgs84(width / 2.0, height / 2.0)
+        except (
+            ValueError
+        ) as exc:  # the header's read refusal or its georeference refusal
+            failures.append(f"{stem} ({path}): could not georeference - {exc}")
+            continue
+
+        index, distance_m = nearest_plant(
+            (lat, lon), plants, within_m=tolerance_m
+        )
+        if index is None:
+            failures.append(
+                f"{stem} ({path}): nearest plant is {distance_m:.1f}m away, outside tolerance "
+                f"{tolerance_m:.1f}m (lat={lat:.6f}, lon={lon:.6f})"
+            )
+            continue
+        plant = plants[index]
+        if not assignment_is_attributed(plant):
+            failures.append(
+                f"{stem} ({path}): the matched plant record has no plant_id"
+            )
+            continue
+
+        group_key_map[stem] = plant.plant_id
+
+    if failures:
+        preview = "\n  ".join(failures[:20])
+        more = (
+            f"\n  (+{len(failures) - 20} more)" if len(failures) > 20 else ""
+        )
+        raise ValueError(
+            f"{len(failures)} of {len(stem_to_raster)} stem(s) could not be resolved to a "
+            f"plant/plot group key:\n  {preview}{more}"
+        )
+    return group_key_map

@@ -1,6 +1,6 @@
-"""An operator command acts on the project its ``--project`` names and refuses naming none.
+"""A tool's command acts on the project its ``--project`` names and refuses naming none.
 
-The command runs a tool function outside the MCP server.
+The command calls the tool through the server for that project, without the server running.
 
 Exercised as the real process entry point (a subprocess, the way an operator runs it), through
 overlay-reference-grid, a render that leaves no audit line.
@@ -40,7 +40,10 @@ def test_a_render_command_leaves_no_audit_line_anywhere(
 
     result = run_tcip(
         "overlay-reference-grid",
-        ["--image", str(image), "--project", str(project), "--overlap", "0"],
+        [
+            *("--image-path", str(image), "--project", str(project)),
+            *("--overlap", "0", "--user", "tester"),
+        ],
         cwd=cwd,
     )
 
@@ -61,12 +64,14 @@ def test_a_command_naming_no_project_refuses_and_writes_nothing(
     result = run_tcip(
         "overlay-reference-grid",
         [
-            "--image",
+            "--image-path",
             str(image),
             "--project",
             str(not_a_project),
             "--overlap",
             "0",
+            "--user",
+            "tester",
         ],
         cwd=tmp_path,
     )

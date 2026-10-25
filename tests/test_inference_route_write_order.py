@@ -138,6 +138,7 @@ def test_the_gui_worker_and_the_mcp_door_publish_the_same_bucket_record(
         str(images_dir),
         bucket=f"mcp/{DATE}",
         stated=job.stated,
+        actor=None,
     )
     assert "error" not in mcp, mcp
 
@@ -192,6 +193,7 @@ def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_doo
             str(images_dir),
             bucket=f"mcp/{DATE}",
             stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS),
+            actor=None,
         )
 
     for bucket in (f"gui/{DATE}", f"mcp/{DATE}"):
@@ -231,6 +233,7 @@ def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_publishe
         str(images_dir),
         bucket=f"mcp/{DATE}",
         stated=Stated(tile=True, **SAMPLE_DETECTOR_PASS),
+        actor=None,
     )
 
     assert job.status == "failed"
@@ -398,6 +401,7 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(
                 str(images_dir),
                 bucket=bucket,
                 stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS),
+                actor=None,
             )
             assert "error" not in result, result
         rows[door] = audit_rows(dataset)[before:]

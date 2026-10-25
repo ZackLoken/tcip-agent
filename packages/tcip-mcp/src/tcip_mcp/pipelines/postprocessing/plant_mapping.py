@@ -19,6 +19,7 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, fields, replace
 from datetime import datetime
+from enum import StrEnum
 from itertools import pairwise
 from pathlib import Path
 from typing import (
@@ -700,6 +701,12 @@ SHAPEFILE_FIELD_DEFAULTS = {
 shapefile through :func:`read_plant_shapefile`'s own ``field_map``: an ESRI Shapefile DBF caps
 field names at 10 characters, so a source rarely matches these exactly."""
 
+# mypy reads only a literal member list; the members are SHAPEFILE_FIELD_DEFAULTS' own keys.
+ShapefileField = StrEnum(  # type: ignore[misc]
+    "ShapefileField", {field: field for field in SHAPEFILE_FIELD_DEFAULTS}
+)
+"""The pass-through fields a shapefile's ``field_map`` may name a source attribute for."""
+
 
 def _shapefile_field_value(properties: dict, field_name: str | None) -> str:
     if field_name is None:
@@ -711,7 +718,7 @@ def _shapefile_field_value(properties: dict, field_name: str | None) -> str:
 def read_plant_shapefile(
     path: Path | str,
     *,
-    field_map: dict[str, str] | None = None,
+    field_map: dict[ShapefileField, str] | None = None,
 ) -> ShapefileRows:
     """Read a plant-locations shapefile's own features into :data:`PLANT_CSV_COLUMNS`-shaped rows.
 
@@ -733,8 +740,7 @@ def read_plant_shapefile(
 
     shp_path = Path(path)
     source_fields = dict(SHAPEFILE_FIELD_DEFAULTS)
-    if field_map:
-        source_fields.update(field_map)
+    source_fields.update((field_map or {}).items())
 
     geom_kinds: set[str] = set()
     rows: list[dict[str, object]] = []
@@ -745,7 +751,7 @@ def read_plant_shapefile(
         raise ShapefileUnreadableError(
             f"{shp_path}: fiona could not open this shapefile ({type(exc).__name__}: {exc}); "
             "check that the .shp, .shx and .dbf parts are all present and readable beside each "
-            "other, then run tcip shp-to-plant-csv again"
+            "other, then run shp_to_plant_csv again"
         ) from exc
     with opened as layer:
         # fiona reports a missing or unparseable .prj as an empty CRS (probed directly, neither

@@ -81,7 +81,7 @@ across dates: plant mapping (image → plant_id) ─► per (plant, date) elonga
 
 | Piece | Where | Role |
 |-------|-------|------|
-| `register_plant_registry` (MCP tool) | `tools/phenology_tools.py` | names a plant-locations CSV set once (`{path, sha256, n_plants}` per file, `crop`, `site`, a content digest), so `build_plant_mapping` and `deliver_orthomosaic_plant_counts` read the same registered version instead of re-asserting file paths; a shapefile is converted first by `tcip shp-to-plant-csv` |
+| `register_plant_registry` (MCP tool) | `tools/phenology_tools.py` | names a plant-locations CSV set once (`{path, sha256, n_plants}` per file, `crop`, `site`, a content digest), so `build_plant_mapping` and `deliver_orthomosaic_plant_counts` read the same registered version instead of re-asserting file paths; a shapefile is converted first by `shp_to_plant_csv` |
 | `build_plant_mapping` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 1): geolocated images (a registered dataset's own `images/` root) + a `plant_registry` name → a named mapping persisted under the project. A same-name rebuild a delivery event still cites refuses by name unless `supersede=True`, which archives the cited record first (readable by digest, never enumerated) |
 | `deliver_phenology_milestones` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 2): a named mapping + one bucket per date (each at the date its own record states) → delivered `catkin_phenology.csv`; the gate refuses buckets whose scope classifies no positive state |
 | `phenology` module | `tcip-mcp .../pipelines/postprocessing/phenology.py` | the one canonical milestone implementation: `count_by_class`, `per_plant_phenology`, `crossing_date` (dispatching on the entry's `crossing_rule`), `positive_onset_date`, `plant_milestones`, `measure_phenology` and the gated delivery door `deliver_phenology` (its revision binding is the `delivery` skill's meaning door). Every population plant has a point on every mapped date; a date the mapping assigns it no capture on counts against its completeness |
@@ -100,8 +100,8 @@ trait (never hand-write its record), in the entry's `count_objective`, `localiza
 `positive_state`. The revision that appends, the breeder's confirmation of it and the positive
 state's check against the subject registry are the `delivery` skill's meaning door.
 
-Don't confuse `annotation_tools.score_predictions` (IoU GT-vs-prediction *eval* matching, a
-library call) with plant-GPS mapping; they are unrelated.
+Don't confuse `score_predictions` (IoU GT-vs-prediction *eval* matching) with plant-GPS mapping;
+they are unrelated.
 
 ## Plant mapping: why the sequence-anchored matcher
 

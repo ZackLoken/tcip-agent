@@ -9,7 +9,9 @@ import random
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Annotated, Literal, NamedTuple
+
+from pydantic import BaseModel, ConfigDict, Field
 
 import tcip_store as ts
 from tcip_annotation import Annotation, Point, bbox_of
@@ -233,17 +235,70 @@ def _poly_dict(
     }
 
 
-def visualize(
-    project: Path,
-    source: str,
-    path: str,
-    task: str = "detect",
-    class_names: str = "",
-    conf_threshold: float = REVIEW_CONF_FLOOR,
-    iou_threshold: float | None = None,
-    n: int = 16,
-    bucket: str = "",
-) -> dict:
+VizTask = Literal["detect", "segment"]
+"""Whether a render draws boxes or segmentation masks."""
+
+
+class AnnotationsRender(BaseModel):
+    """Ground-truth labels drawn on one image, ``path`` the image file."""
+
+    model_config = ConfigDict(extra="forbid")
+    source: Literal["annotations"]
+    path: str
+    task: VizTask = "detect"
+
+
+class PredictionsRender(BaseModel):
+    """A published bucket's predictions drawn on one image, ``path`` the image file.
+
+    ``bucket`` names the bucket, published under the image's dataset root, whose document for the
+    image is drawn; ``conf_threshold`` filters the predictions drawn, the viewing filter
+    ``matching.REVIEW_CONF_FLOOR`` unless stated.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    source: Literal["predictions"]
+    path: str
+    bucket: str
+    task: VizTask = "detect"
+    conf_threshold: float = REVIEW_CONF_FLOOR
+
+
+class ComparisonRender(BaseModel):
+    """Ground truth (green) beside a bucket's predictions (red) on one image, with TP/FP/FN.
+
+    ``path`` is the image file and ``bucket`` the published bucket compared; a match reaches
+    ``iou_threshold`` (the comparability convention is ``schemas.COMPARABILITY_IOU``) over the
+    predictions at or above ``conf_threshold``, the viewing filter unless stated.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    source: Literal["comparison"]
+    path: str
+    bucket: str
+    iou_threshold: float
+    conf_threshold: float = REVIEW_CONF_FLOOR
+
+
+class DatasetRender(BaseModel):
+    """A grid of ``n`` random annotated samples, ``path`` the dataset root holding ``images/``."""
+
+    model_config = ConfigDict(extra="forbid")
+    source: Literal["dataset"]
+    path: str
+    task: VizTask = "detect"
+    n: int = 16
+
+
+VizRender = Annotated[
+    AnnotationsRender | PredictionsRender | ComparisonRender | DatasetRender,
+    Field(discriminator="source"),
+]
+"""One render :func:`visualize` makes, its ``source`` naming which and what it requires."""
+
+
+@tool()
+def visualize(project: Path, render: VizRender) -> dict:
     """Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid.
 
     Saves under ``project``'s ``.tcip/artifacts/viz/`` and returns its path as ``image_path``.
@@ -259,69 +314,35 @@ def visualize(
     ``cols`` x 256 by ``rows`` x 256 pixels, growing with ``n``.
 
     Args:
-        source: What to render:
-            'annotations' = ground-truth labels on a single image (path = image file);
-            'predictions' = model predictions on a single image (path = image file);
-            'comparison'  = GT (green) vs predictions (red) with TP/FP/FN match stats
-            (path = image file);
-            'dataset'     = grid of n random annotated samples (path = dataset root folder
-            containing images/).
-        path: Image file (annotations/predictions/comparison) or dataset folder (dataset).
-        task: 'detect' or 'segment'.
-        class_names: Comma-separated class names (e.g. "fruit,shoot").
-        conf_threshold: Minimum confidence; filters displayed predictions (source='predictions')
-            and the predictions matched against GT (source='comparison'). Defaults to the viewing
-            filter ``matching.REVIEW_CONF_FLOOR``.
-        iou_threshold: IoU threshold for a positive match (source='comparison', where it is
-            required; the comparability convention is ``schemas.COMPARABILITY_IOU``).
-        n: Number of samples in the grid (source='dataset' only).
-        bucket: The name of the bucket, published under the image's dataset root, whose document
-            for the image is rendered (source='predictions' and 'comparison', where it is
-            required).
+        render: The render, by its ``source``: ``annotations``, ``predictions``, ``comparison``
+            or ``dataset``, each with the fields it requires (``path`` located against the
+            project).
 
     """
-    path = str(located(path, project))
-    if source == "annotations":
-        return _viz_annotations(
-            project, path, task=task, class_names=class_names
-        )
-    if source in ("predictions", "comparison") and not bucket:
-        return {
-            "error": f"source={source!r} requires bucket, the published bucket whose "
-            "predictions to render."
-        }
-    if source == "predictions":
-        return _viz_predictions(
-            project,
-            path,
-            bucket,
-            task=task,
-            class_names=class_names,
-            conf_threshold=conf_threshold,
-        )
-    if source == "comparison":
-        if iou_threshold is None:
-            return {
-                "error": "source='comparison' requires iou_threshold, the IoU a match must "
-                "reach under the comparability convention."
-            }
-        return _viz_comparison(
-            project,
-            path,
-            bucket,
-            task=task,
-            iou_threshold=iou_threshold,
-            class_names=class_names,
-            conf_threshold=conf_threshold,
-        )
-    if source == "dataset":
-        return _viz_dataset_sample(
-            project, path, n=n, task=task, class_names=class_names
-        )
-    return {
-        "error": f"Unknown source '{source}'. "
-        "Use 'annotations', 'predictions', 'comparison', or 'dataset'."
-    }
+    path = str(located(render.path, project))
+    match render:
+        case AnnotationsRender():
+            return _viz_annotations(project, path, task=render.task)
+        case DatasetRender():
+            return _viz_dataset_sample(
+                project, path, n=render.n, task=render.task
+            )
+        case PredictionsRender():
+            return _viz_predictions(
+                project,
+                path,
+                render.bucket,
+                task=render.task,
+                conf_threshold=render.conf_threshold,
+            )
+        case ComparisonRender():
+            return _viz_comparison(
+                project,
+                path,
+                render.bucket,
+                iou_threshold=render.iou_threshold,
+                conf_threshold=render.conf_threshold,
+            )
 
 
 def _labels_at(key: ts.Key) -> list[Annotation] | None:
@@ -330,12 +351,7 @@ def _labels_at(key: ts.Key) -> list[Annotation] | None:
     return None if version == ts.Version.ABSENT else document.annotations
 
 
-def _viz_annotations(
-    project: Path,
-    image_path: str,
-    task: str = "detect",
-    class_names: str = "",
-) -> dict:
+def _viz_annotations(project: Path, image_path: str, *, task: VizTask) -> dict:
     """Render ground-truth annotations on the logical image ``image_path`` names.
 
     The image is resolved by :func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`, whose
@@ -413,9 +429,9 @@ def _viz_predictions(
     project: Path,
     image_path: str,
     bucket: str,
-    task: str = "detect",
-    class_names: str = "",
-    conf_threshold: float = 0.0,
+    *,
+    task: VizTask,
+    conf_threshold: float,
 ) -> dict:
     """Render a bucket's predictions on the logical image ``image_path`` names.
 
@@ -498,10 +514,8 @@ def _viz_comparison(
     image_path: str,
     bucket: str,
     *,
-    task: str = "detect",
     iou_threshold: float,
-    class_names: str = "",
-    conf_threshold: float = REVIEW_CONF_FLOOR,
+    conf_threshold: float,
 ) -> dict:
     """Render GT vs prediction comparison with match indicators.
 
@@ -699,6 +713,7 @@ def _ranked(
     }, by_stem
 
 
+@tool()
 def render_failure_cases(
     project: Path,
     dataset_root: str,
@@ -707,8 +722,6 @@ def render_failure_cases(
     shortfall_weight: float,
     surplus_weight: float,
     confidence_weight: float,
-    task: str = "detect",
-    class_names: str = "",
 ) -> dict:
     """Find and render the worst predictions for failure analysis.
 
@@ -725,8 +738,6 @@ def render_failure_cases(
         top_k: Number of worst cases to render.
         shortfall_weight / surplus_weight / confidence_weight: The ranking's weights, as
             :func:`get_worst_predictions` takes them.
-        task: 'detect' or 'segment'.
-        class_names: Comma-separated class names.
 
     """
     from tcip_mcp.buckets import read_bucket
@@ -793,11 +804,7 @@ def render_failure_cases(
 
 
 def _viz_dataset_sample(
-    project: Path,
-    folder_path: str,
-    n: int = 16,
-    task: str = "detect",
-    class_names: str = "",
+    project: Path, folder_path: str, *, n: int, task: VizTask
 ) -> dict:
     """Render a grid of random annotated dataset samples."""
     from tcip_mcp.dataset_layout import (
@@ -1053,6 +1060,7 @@ def capture_live_canvas(
     }
 
 
+@tool()
 def overlay_reference_grid(
     project: Path,
     image_path: str,

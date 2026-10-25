@@ -72,7 +72,7 @@ def test_score_predictions_single_image_reports_an_unreadable_gt(
     damage_record(image_label_key(img), b"{not json")
     _published(tmp_path, "baseline", img)
 
-    res = score_predictions(str(img), "baseline", *SCORED_AT)
+    res = score_predictions(tmp_path, str(img), "baseline", *SCORED_AT)
 
     assert "error" in res
     assert "IMG_0000" in res["error"]
@@ -89,7 +89,7 @@ def test_score_predictions_folder_reports_an_unreadable_prediction(
     bucket = _published(tmp_path, "baseline", images / "IMG_0000.jpg")
     damage_record(bucket.document_key("IMG_0000"), b"{not json")
 
-    res = score_predictions(str(images), "baseline", *SCORED_AT)
+    res = score_predictions(tmp_path, str(images), "baseline", *SCORED_AT)
 
     assert "error" in res
     assert "IMG_0000" in res["error"]
@@ -127,7 +127,7 @@ def test_score_predictions_over_attributed_documents_scores_the_object_class(
         ),
     )
 
-    res = score_predictions(str(img), "classifier", *SCORED_AT)
+    res = score_predictions(tmp_path, str(img), "classifier", *SCORED_AT)
 
     assert "error" not in res
     assert res["tp"] == 1
@@ -148,7 +148,7 @@ def test_a_predicted_image_with_no_label_document_is_refused_as_a_reference(
     write_image(img)
     bucket = _published(tmp_path, "baseline", img)
 
-    res = score_predictions(str(img), "baseline", *SCORED_AT)
+    res = score_predictions(tmp_path, str(img), "baseline", *SCORED_AT)
 
     assert "IMG_0000" in res["error"] and "has no record" in res["error"], res
     with pytest.raises(
@@ -173,7 +173,7 @@ def test_an_image_the_bucket_names_no_document_for_is_unknown_never_a_miss(
         label_image(images / f"{stem}.jpg", ONE_BUD, 100, 80)
     bucket = _published(tmp_path, "baseline", images / "IMG_0000.jpg")
 
-    scored = score_predictions(str(images), "baseline", *SCORED_AT)
+    scored = score_predictions(tmp_path, str(images), "baseline", *SCORED_AT)
     triaged = get_worst_predictions(bucket, 8, **TRIAGE_WEIGHTS)
 
     assert "error" not in scored, scored
@@ -188,6 +188,6 @@ def test_an_image_the_bucket_names_no_document_for_is_unknown_never_a_miss(
     assert (
         "not predicted"
         in score_predictions(
-            str(images / "IMG_0001.jpg"), "baseline", *SCORED_AT
+            tmp_path, str(images / "IMG_0001.jpg"), "baseline", *SCORED_AT
         )["error"]
     )

@@ -54,7 +54,7 @@ def _make_dataset(root: Path) -> None:
 def _initialized(path: Path) -> dict:
     """Make ``path`` a project through the platform's own creation door; return its record."""
     result = initialize_project(
-        str(path), "Test project", "north orchard", INVARIANCES
+        str(path), "Test project", "north orchard", INVARIANCES, actor=None
     )
     assert "error" not in result, result
     return result
@@ -68,7 +68,7 @@ def test_register_dataset_writes_identity_and_registers(
     src = tmp_path / "proj"
     _make_dataset(src)
 
-    res = register_dataset(tmp_path, str(src), crop="currant")
+    res = register_dataset(tmp_path, str(src), crop="currant", actor=None)
     assert "error" not in res
     assert res["crop"] == "currant" and res["id"] and res["fingerprint"]
 
@@ -113,8 +113,8 @@ def test_register_dataset_keeps_id_stable(tmp_path: Path) -> None:
     src = tmp_path / "proj"
     _make_dataset(src)
 
-    first = register_dataset(tmp_path, str(src), crop="currant")
-    again = register_dataset(tmp_path, str(src), crop="currant")
+    first = register_dataset(tmp_path, str(src), crop="currant", actor=None)
+    again = register_dataset(tmp_path, str(src), crop="currant", actor=None)
     assert (
         again["id"] == first["id"]
     )  # id minted once, preserved across re-runs
@@ -126,12 +126,12 @@ def test_register_dataset_reconciles_a_move_by_id(tmp_path: Path) -> None:
 
     src = tmp_path / "orig"
     _make_dataset(src)
-    reg = register_dataset(tmp_path, str(src), crop="currant")
+    reg = register_dataset(tmp_path, str(src), crop="currant", actor=None)
 
     moved = tmp_path / "moved"
     tcip_store.release_root(src)
     shutil.copytree(src, moved)  # same content, new path
-    register_dataset(tmp_path, str(moved), crop="currant")
+    register_dataset(tmp_path, str(moved), crop="currant", actor=None)
 
     regs = read_datasets(tmp_path)
     same = [r for r in regs if r.id == reg["id"]]
@@ -178,7 +178,7 @@ def test_inspect_project_folds_in_recent_activity(tmp_path: Path) -> None:
         "retrospectives_since_last_distillation": 0,
     }
 
-    report_friction(tmp_path, category="missing_tool", detail="a")
+    report_friction(tmp_path, category="missing_tool", detail="a", actor=None)
     status = inspect_project(tmp_path)
     assert status["recent_activity"]["reports_since_last_retrospective"] == 1
 
@@ -195,6 +195,7 @@ def test_inspect_project_folds_in_last_retrospective_by_id_not_path(
         task="t",
         worked="w",
         did_not_work="d",
+        actor=None,
     )
 
     status = inspect_project(tmp_path)
@@ -212,7 +213,7 @@ def test_inspect_project_surfaces_an_undecodable_audit_log_honestly(
     from tcip_store.file_backend import database_file
 
     _initialized(tmp_path)
-    report_friction(tmp_path, category="missing_tool", detail="a")
+    report_friction(tmp_path, category="missing_tool", detail="a", actor=None)
     conn = sqlite3.connect(
         str(database_file(str(tmp_path))), isolation_level=None
     )
@@ -300,7 +301,7 @@ def test_export_import_roundtrip(tmp_path: Path) -> None:
         ),
     )
     reg = register_dataset(
-        src, str(src), crop="currant"
+        src, str(src), crop="currant", actor=None
     )  # identity travels with the data
 
     zip_path = tmp_path / "export.zip"
@@ -363,7 +364,7 @@ def test_external_dataset_paths_names_an_external_registry_entry(
     project.mkdir()
     dataset.mkdir()
     _make_dataset(dataset)
-    register_dataset(project, str(dataset), crop="currant")
+    register_dataset(project, str(dataset), crop="currant", actor=None)
     entry = read_datasets(project)[0]
     assert entry.path == str(
         dataset.resolve()
@@ -504,7 +505,9 @@ def _internal_foreign_checkpoint(src: Path) -> Path:
     weights = src / ".tcip" / "models" / "internal.pt"
     weights.parent.mkdir(parents=True, exist_ok=True)
     produced_checkpoint(weights, "weights registered from inside the project")
-    ModelRegistry(str(src)).register_model("internal", str(weights))
+    ModelRegistry(str(src)).register_model(
+        "internal", str(weights), actor=None
+    )
     return weights
 
 
@@ -610,8 +613,8 @@ def test_import_project_discloses_a_designed_external_checkpoint_separately_from
     )
 
     reg = ModelRegistry(str(src))
-    reg.register_model("m_internal", str(internal_ckpt))
-    reg.register_model("m_external", str(external_ckpt))
+    reg.register_model("m_internal", str(internal_ckpt), actor=None)
+    reg.register_model("m_external", str(external_ckpt), actor=None)
 
     zip_path = tmp_path / "export.zip"
     exported = archive_project(
@@ -643,7 +646,7 @@ def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(
     src = tmp_path / "src_project"
     _initialized(src)
     ckpt = produced_checkpoint(src / ".tcip" / "models" / "m.pt", "weights")
-    ModelRegistry(str(src)).register_model("m", str(ckpt))
+    ModelRegistry(str(src)).register_model("m", str(ckpt), actor=None)
 
     assert Path(ckpt).resolve() in checkpoint_files(src)
 
@@ -681,7 +684,7 @@ def test_a_checkpoint_registered_from_anywhere_in_the_project_travels_only_with_
     ckpt = produced_checkpoint(
         src / "weights" / "foreign.pt", "weights registered in the project"
     )
-    ModelRegistry(str(src)).register_model("foreign", str(ckpt))
+    ModelRegistry(str(src)).register_model("foreign", str(ckpt), actor=None)
 
     without = archive_project(
         src,
@@ -842,7 +845,7 @@ def test_an_identity_minted_while_this_registration_ran_is_adopted_not_overwritt
 
     monkeypatch.setattr(uuid_module, "uuid4", racing_uuid4)
 
-    result = register_dataset(tmp_path, str(src), crop="currant")
+    result = register_dataset(tmp_path, str(src), crop="currant", actor=None)
 
     assert raced == ["minted"]
     assert "error" not in result
@@ -866,7 +869,7 @@ def test_an_undecodable_identity_document_refuses_rather_than_minting_a_fresh_id
     truncated = b'{"id": "known_id"'
     (src / "dataset.json").write_bytes(truncated)
 
-    refused = register_dataset(tmp_path, str(src), crop="currant")
+    refused = register_dataset(tmp_path, str(src), crop="currant", actor=None)
 
     assert "error" in refused and "dataset.json" in refused["error"]
     assert (
@@ -1012,6 +1015,7 @@ def test_initialize_project_refuses_different_invariances_than_the_ones_already_
         "Test project",
         "north orchard",
         CaptureInvariances.model_validate(answers),
+        actor=None,
     )
 
     assert "error" in result and "invariances" in result["error"]
@@ -1026,7 +1030,7 @@ def test_initialize_project_refuses_a_different_site_than_the_one_already_record
     _initialized(tmp_path)
 
     result = initialize_project(
-        str(tmp_path), "Test project", "south orchard", INVARIANCES
+        str(tmp_path), "Test project", "south orchard", INVARIANCES, actor=None
     )
 
     assert "error" in result
@@ -1043,7 +1047,7 @@ def test_initialize_project_refuses_a_different_display_name_than_the_one_alread
     _initialized(tmp_path)
 
     result = initialize_project(
-        str(tmp_path), "Another name", "north orchard", INVARIANCES
+        str(tmp_path), "Another name", "north orchard", INVARIANCES, actor=None
     )
 
     assert "error" in result
@@ -1060,7 +1064,9 @@ def test_initialize_project_refuses_an_empty_site_leaving_nothing_on_disk(
     """
     dest = tmp_path / "fresh_project"
 
-    result = initialize_project(str(dest), "Test project", "   ", INVARIANCES)
+    result = initialize_project(
+        str(dest), "Test project", "   ", INVARIANCES, actor=None
+    )
 
     assert "error" in result
     assert not dest.exists()
@@ -1071,7 +1077,9 @@ def test_initialize_project_refuses_an_empty_display_name_leaving_nothing_on_dis
 ) -> None:
     dest = tmp_path / "fresh_project"
 
-    result = initialize_project(str(dest), "  ", "north orchard", INVARIANCES)
+    result = initialize_project(
+        str(dest), "  ", "north orchard", INVARIANCES, actor=None
+    )
 
     assert "display_name" in result["error"]
     assert not dest.exists()
@@ -1088,7 +1096,11 @@ def test_initialize_project_refuses_a_relative_path_and_scaffolds_nothing(
     monkeypatch.chdir(tmp_path)
 
     result = initialize_project(
-        "relative_proj", "Test project", "north orchard", INVARIANCES
+        "relative_proj",
+        "Test project",
+        "north orchard",
+        INVARIANCES,
+        actor=None,
     )
 
     assert "absolute path" in result["error"]
@@ -1107,7 +1119,7 @@ def test_initialize_project_refuses_a_present_but_invalid_record(
     )
 
     result = initialize_project(
-        str(tmp_path), "Test project", "north orchard", INVARIANCES
+        str(tmp_path), "Test project", "north orchard", INVARIANCES, actor=None
     )
 
     assert "error" in result
@@ -1124,7 +1136,11 @@ def test_initialize_project_refuses_an_undecodable_record(
     damage_record(project_record_key(tmp_path), b"{not valid json")
 
     result = initialize_project(
-        str(tmp_path), record["display_name"], record["site"], INVARIANCES
+        str(tmp_path),
+        record["display_name"],
+        record["site"],
+        INVARIANCES,
+        actor=None,
     )
 
     assert "error" in result
@@ -1141,7 +1157,7 @@ def test_initialize_project_records_on_a_directory_that_gained_tcip_with_no_crea
     """
     from tcip_mcp.tools.meta_tools import report_friction
 
-    report_friction(tmp_path, category="missing_tool", detail="a")
+    report_friction(tmp_path, category="missing_tool", detail="a", actor=None)
     assert (tmp_path / ".tcip").is_dir()
 
     result = _initialized(tmp_path)
@@ -1167,7 +1183,9 @@ def test_inspect_project_reports_the_record_fields_across_project_states(
 
     recordless = tmp_path / "recordless"
     recordless.mkdir()
-    report_friction(recordless, category="missing_tool", detail="a")
+    report_friction(
+        recordless, category="missing_tool", detail="a", actor=None
+    )
     status = inspect_project(recordless)
     assert status["site"] is None
     assert "initialize_project" in status["record_problem"]
@@ -1239,9 +1257,16 @@ def test_an_archive_of_an_open_database_carries_every_record_and_entry_it_holds(
     src = tmp_path / "src_project"
     _initialized(src)
     for i in range(3):
-        report_friction(src, category="missing_tool", detail=f"report {i}")
+        report_friction(
+            src, category="missing_tool", detail=f"report {i}", actor=None
+        )
     write_retrospective(
-        src, project_id="p", task="t", worked="w", did_not_work="d"
+        src,
+        project_id="p",
+        task="t",
+        worked="w",
+        did_not_work="d",
+        actor=None,
     )
     before_dir = tmp_path / "before"
     before = dump_store(src, before_dir)

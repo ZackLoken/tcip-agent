@@ -1,7 +1,7 @@
 """tcip score-predictions: the scoring door's command-line entry point.
 
-A plain score (no --trait) scores a single image with no project named, and --trait refuses
-without --project; neither writes a ``.tcip`` directory under the working directory.
+A score names its project, and scores a single image without writing a ``.tcip`` directory under
+the working directory.
 """
 
 from __future__ import annotations
@@ -50,9 +50,29 @@ def _fixture(tmp_path: Path) -> tuple[Path, str]:
     return img, "baseline"
 
 
-def test_refuses_a_trait_scoped_run_naming_no_project(tmp_path: Path) -> None:
-    img, bucket = _fixture(tmp_path)
+def test_refuses_a_run_naming_no_project(tmp_path: Path) -> None:
     cwd = tmp_path / "operator_cwd"
+    cwd.mkdir()
+
+    result = run_tcip(
+        "score-predictions",
+        [
+            *("--path", "a.jpg", "--bucket", "baseline", *SCORED_AT),
+            *("--user", "tester"),
+        ],
+        cwd=cwd,
+    )
+
+    assert result.returncode != 0, result.stdout
+    assert "--project" in result.stderr
+    assert not (cwd / ".tcip").exists()
+
+
+def test_scores_a_single_image_of_the_named_project(
+    project: Path, tmp_path: Path
+) -> None:
+    img, bucket = _fixture(project)
+    cwd = tmp_path.parent / "operator_cwd"
     cwd.mkdir()
 
     result = run_tcip(
@@ -62,26 +82,11 @@ def test_refuses_a_trait_scoped_run_naming_no_project(tmp_path: Path) -> None:
             str(img),
             "--bucket",
             bucket,
+            "--project",
+            str(project),
             *SCORED_AT,
-            "--trait",
-            "bud_count",
+            *("--user", "tester"),
         ],
-        cwd=cwd,
-    )
-
-    assert result.returncode != 0, result.stdout
-    assert "--trait requires --project" in result.stderr
-    assert not (cwd / ".tcip").exists()
-
-
-def test_scores_a_single_image_with_no_project_named(tmp_path: Path) -> None:
-    img, bucket = _fixture(tmp_path)
-    cwd = tmp_path / "operator_cwd"
-    cwd.mkdir()
-
-    result = run_tcip(
-        "score-predictions",
-        ["--path", str(img), "--bucket", bucket, *SCORED_AT],
         cwd=cwd,
     )
 

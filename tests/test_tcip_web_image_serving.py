@@ -295,7 +295,7 @@ def test_a_view_of_an_ingested_raster_reads_its_cells_or_one_display_read(
     source = tmp_path / "source"
     source.mkdir()
     _wide_raster(source / "strip_01.tif")
-    ingested = ingest_images(tmp_path / "proj", str(source))
+    ingested = ingest_images(tmp_path / "proj", str(source), actor=None)
     assert "error" not in ingested, ingested
     (image,) = (Path(f["dest"]) for f in ingested["files"])
 

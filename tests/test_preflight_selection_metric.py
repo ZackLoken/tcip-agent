@@ -192,6 +192,7 @@ def test_a_sweeps_answer_carries_its_base_preflights_warnings(
         **fifo_search(),
         search_seed=0,
         auto_tensorboard=False,
+        actor=None,
     )
 
     assert "error" not in answer, answer

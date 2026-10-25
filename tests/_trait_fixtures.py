@@ -169,6 +169,7 @@ def propose(
         rationale="fixture proposal",
         relayed_note="",
         dataset_root=dataset_root,
+        actor=None,
     )
 
 

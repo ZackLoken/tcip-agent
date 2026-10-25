@@ -43,6 +43,7 @@ def test_save_annotations_takes_no_producer_and_names_itself(
         bound,
         str(img),
         annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}],
+        actor=None,
     )
     obj = _records(img)[0]
     assert obj.created_by == "save_annotations"
@@ -67,6 +68,7 @@ def test_save_annotations_never_reads_provenance_off_a_shape(
             },
             {"subject": "bud", "bbox": [40, 40, 60, 60]},
         ],
+        actor=None,
     )
     assert [o.created_by for o in _records(img)] == [
         "save_annotations",

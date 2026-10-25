@@ -1779,6 +1779,7 @@ def test_a_space_not_in_the_search_space_shape_is_refused_before_any_trial(
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert "param_space is not a search space" in result["error"], result
@@ -1808,6 +1809,7 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert result["sweep"]["state"] == "completed", result
@@ -1896,6 +1898,7 @@ def _project_answering(project: Path, **answers: bool | float) -> None:
         "Test project",
         "north orchard",
         CaptureInvariances.model_validate(stated),
+        actor=None,
     )
     assert "error" not in result, result
 
@@ -2239,6 +2242,7 @@ def test_run_hyperparameter_search_admits_an_lr_sweep_beside_a_base_config_selec
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert result["sweep"]["state"] == "completed", result
@@ -2276,6 +2280,7 @@ def test_hpo_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_ever
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -2325,6 +2330,7 @@ def test_a_sweep_whose_space_samples_another_selection_metric_is_refused_naming_
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert refused["error"] == (

@@ -108,7 +108,7 @@ def test_a_dataset_registered_as_the_projects_own_tree_contributes_no_relative_r
     from tcip_web.paths import allowed_roots
 
     project = new_project(tmp_path).root
-    registered = register_dataset(project, str(project), "currant")
+    registered = register_dataset(project, str(project), "currant", actor=None)
     assert "error" not in registered
 
     roots = allowed_roots()

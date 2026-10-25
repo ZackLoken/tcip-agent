@@ -93,7 +93,9 @@ def _register_absent_checkpoint(
 
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     produced_checkpoint(checkpoint_path, f"{name} weights")
-    ModelRegistry(str(root)).register_model(name, str(checkpoint_path))
+    ModelRegistry(str(root)).register_model(
+        name, str(checkpoint_path), actor=None
+    )
     checkpoint_path.unlink()
 
 
@@ -279,7 +281,7 @@ def test_registry_findings_are_read_through_the_registrys_own_entry_shape(
     ):
         ckpt = produced_checkpoint(ckpt_dir / f"{name}.pt", payload)
         registry.register_model(
-            name=name, checkpoint_path=str(ckpt), metrics={}
+            name=name, checkpoint_path=str(ckpt), metrics={}, actor=None
         )
         paths[name] = ckpt
     for ckpt in paths.values():
@@ -339,7 +341,7 @@ def test_a_checkpoint_under_a_temp_rooted_project_is_not_pollution(
     ckpt_dir.mkdir(parents=True)
     produced_checkpoint(ckpt_dir / "m.pt", "weights")
     ModelRegistry(str(root)).register_model(
-        name="m", checkpoint_path=str(ckpt_dir / "m.pt")
+        name="m", checkpoint_path=str(ckpt_dir / "m.pt"), actor=None
     )
 
     res = run_tcip("doctor", [str(root)])
@@ -392,7 +394,7 @@ def test_one_stem_in_two_captures_is_two_images_each_paired_with_its_own_label(
         32,
     )
 
-    scan = scan_dataset(str(root))
+    scan = scan_dataset(root, str(root))
     findings: list[tuple[str, str]] = []
     doctor.check_data_quality(
         root, findings, census=doctor._census(root, findings)

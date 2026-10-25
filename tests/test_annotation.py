@@ -87,7 +87,11 @@ def test_score_predictions_single_image(data_dir: Path) -> None:
 
     img = data_dir / "images" / "2-11-26" / "img_001.jpg"
     result = score_predictions(
-        str(img), "live/2-11-26", iou_threshold=0.5, conf_threshold=0.25
+        data_dir,
+        str(img),
+        "live/2-11-26",
+        iou_threshold=0.5,
+        conf_threshold=0.25,
     )
     assert "tp" in result
     assert "fp" in result

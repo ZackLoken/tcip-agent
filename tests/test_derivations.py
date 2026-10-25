@@ -685,6 +685,7 @@ def test_write_subject_registry(tmp_path: Path) -> None:
                 },
             }
         },
+        actor=None,
     )
     assert "error" not in res
     assert res["subjects"] == ["bud"]
@@ -702,5 +703,7 @@ def test_write_subject_registry_no_labels(tmp_path: Path) -> None:
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     # An empty registry mapping is not authorable: the tool refuses rather than writing nothing.
-    res = write_subject_registry(tmp_path, str(tmp_path), subjects={})
+    res = write_subject_registry(
+        tmp_path, str(tmp_path), subjects={}, actor=None
+    )
     assert "error" in res

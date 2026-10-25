@@ -175,8 +175,12 @@ def report_friction(
     detail: str,
     context: dict | None = None,
     user_disagreement: bool = False,
+    *,
+    actor: str | None,
 ) -> dict:
     """Record one friction report in the project: a category, what happened, and its context.
+
+    The report's audit line is ``actor``'s.
 
     Args:
         category: What the report is about.
@@ -389,10 +393,13 @@ def write_retrospective(
     knowledge_for_future: str = "",
     missing_or_hard_tools: str = "",
     would_do_differently: str = "",
+    *,
+    actor: str | None,
 ) -> dict:
     """Write one retrospective, a new record of each call, under the line of work ``project_id``.
 
-    Answers the id the record was minted, the ``project_id`` and the time it was written.
+    The write's audit line is ``actor``'s. Answers the id the record was minted, the
+    ``project_id`` and the time it was written.
 
     Args:
         project_id: Short identifier for the line of work this retrospective belongs to (e.g.
@@ -433,9 +440,9 @@ def write_retrospective(
 
 @tool()
 @audited
-def record_distillation_pass(project: Path) -> dict:
+def record_distillation_pass(project: Path, *, actor: str | None) -> dict:
     """Record that this project's friction reports and retrospectives were reviewed.
 
-    The record is this door's audit line; it records nothing else.
+    The record is this door's audit line, by ``actor``; it records nothing else.
     """
     return {"status": "recorded"}

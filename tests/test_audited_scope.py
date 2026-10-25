@@ -63,7 +63,7 @@ def test_registry_write_records_in_the_dataset_named_by_its_root_argument(
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     assert "error" not in write_subject_registry(
-        project, str(dataset_root), subjects=_subjects()
+        project, str(dataset_root), subjects=_subjects(), actor=None
     )
 
     rows = _rows_for(dataset_root, "replace_registry")
@@ -85,6 +85,7 @@ def test_label_write_records_in_the_dataset_holding_the_image_it_names(
         bound,
         str(image),
         annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}],
+        actor=None,
     )
     assert "error" not in result
 
@@ -145,7 +146,9 @@ def test_unscoped_mutating_tool_records_in_the_project_log_with_the_entry_shape(
     """An unscoped mutating tool records in the project's log, its row growing no new field."""
     from tcip_mcp.tools.meta_tools import report_friction
 
-    report_friction(project, "unexpected_behavior", "a project event")
+    report_friction(
+        project, "unexpected_behavior", "a project event", actor=None
+    )
 
     rows = _rows_for(project, "report_friction")
     assert len(rows) == 1
@@ -179,6 +182,7 @@ def test_a_label_write_of_an_image_under_no_dataset_refuses_and_records_nothing(
         bound,
         str(image),
         annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}],
+        actor=None,
     )
     assert "is not a capture" in result["error"]
 

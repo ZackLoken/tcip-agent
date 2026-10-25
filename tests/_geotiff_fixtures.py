@@ -147,6 +147,8 @@ def write_canonical_dataset_raster(
         height=height,
         shape=(height, width, channels),
     )
-    result = register_dataset(dataset_root, str(dataset_root), crop=crop)
+    result = register_dataset(
+        dataset_root, str(dataset_root), crop=crop, actor=None
+    )
     assert "error" not in result, result
     return raster_path

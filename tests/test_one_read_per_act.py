@@ -167,6 +167,7 @@ def test_a_written_draw_reads_each_document_once_with_its_fingerprint(
         stratify_foreground=True,
         rationale=RATIONALE,
         output_path=str(tmp_path / "selection"),
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -323,7 +324,7 @@ def test_a_freeze_reads_each_document_once_with_its_fingerprint(
     _real_drawn_experiment(tmp_path, root, "exp-frozen")
     counts = _counting_reads(monkeypatch)
 
-    result = freeze_selection(tmp_path, "exp-frozen")
+    result = freeze_selection(tmp_path, "exp-frozen", actor=None)
 
     assert "error" not in result, result
     assert counts and set(counts.values()) == {1}, counts
@@ -503,7 +504,7 @@ def test_a_comparison_render_reads_its_documents_and_bucket_once(
 ) -> None:
     from PIL import Image
 
-    from tcip_mcp.tools.vision_tools import visualize
+    from tcip_mcp.tools.vision_tools import ComparisonRender, visualize
 
     frame, _other = _published_frames(tmp_path)
     counts = _counting_reads(monkeypatch)
@@ -524,11 +525,13 @@ def test_a_comparison_render_reads_its_documents_and_bucket_once(
 
     result = visualize(
         tmp_path,
-        "comparison",
-        str(frame),
-        bucket="published",
-        conf_threshold=0.0,
-        iou_threshold=IOU_THRESHOLD,
+        ComparisonRender(
+            source="comparison",
+            path=str(frame),
+            bucket="published",
+            conf_threshold=0.0,
+            iou_threshold=IOU_THRESHOLD,
+        ),
     )
 
     assert "error" not in result, result
@@ -548,7 +551,11 @@ def test_a_folder_scoring_resolves_its_images_once(
     scans = _counting_scans(monkeypatch)
 
     result = score_predictions(
-        str(frames[0].parent), "published", IOU_THRESHOLD, conf_threshold=0.0
+        tmp_path,
+        str(frames[0].parent),
+        "published",
+        IOU_THRESHOLD,
+        conf_threshold=0.0,
     )
 
     assert "error" not in result, result

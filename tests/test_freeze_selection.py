@@ -118,7 +118,7 @@ def test_freeze_selection_round_trips_through_a_real_bind(
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     _real_drawn_experiment(tmp_path, root, "exp-src")
 
-    result = freeze_selection(tmp_path, "exp-src")
+    result = freeze_selection(tmp_path, "exp-src", actor=None)
 
     assert "error" not in result, result
     selection_dir = result["selection_dir"]
@@ -184,7 +184,10 @@ def test_freeze_selection_names_the_sources_the_run_read_not_the_launch_input(
     (run_dir / RUN_FILE).write_bytes(encode_record(launch))
 
     result = freeze_selection(
-        tmp_path, "exp-elsewhere", output_path=str(tmp_path / "frozen")
+        tmp_path,
+        "exp-elsewhere",
+        output_path=str(tmp_path / "frozen"),
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -242,7 +245,10 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(
     )
 
     result = freeze_selection(
-        tmp_path, "exp-two-scope", output_path=str(tmp_path / "frozen")
+        tmp_path,
+        "exp-two-scope",
+        output_path=str(tmp_path / "frozen"),
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -286,7 +292,7 @@ def test_freeze_selection_carries_an_explicit_grouping_map_onto_its_samples(
         experiment_id="exp-explicit-map",
     )
 
-    result = freeze_selection(tmp_path, "exp-explicit-map")
+    result = freeze_selection(tmp_path, "exp-explicit-map", actor=None)
     assert "error" not in result, result
 
     frozen = read_selection(result["selection_dir"], project=tmp_path)
@@ -302,7 +308,7 @@ def test_freeze_selection_carries_an_explicit_grouping_map_onto_its_samples(
 def test_freeze_selection_refuses_an_id_naming_no_run(tmp_path: Path) -> None:
     from tcip_mcp.tools.data_tools import freeze_selection
 
-    result = freeze_selection(tmp_path, "exp-no-run")
+    result = freeze_selection(tmp_path, "exp-no-run", actor=None)
     assert "error" in result and "no run directory" in result["error"]
 
 
@@ -324,6 +330,7 @@ def _bound_run(
             holdout_ratio=0.125,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     assert "error" not in drawn, drawn
 
@@ -348,7 +355,10 @@ def test_a_bound_run_freezes_and_a_later_run_rebinds_to_its_membership(
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     _bound_run(root, tmp_path, "exp-bound", **split_extra)
     frozen = freeze_selection(
-        tmp_path, "exp-bound", output_path=str(tmp_path / "frozen")
+        tmp_path,
+        "exp-bound",
+        output_path=str(tmp_path / "frozen"),
+        actor=None,
     )
     assert "error" not in frozen, frozen
 
@@ -389,7 +399,7 @@ def test_freeze_selection_refuses_a_spatial_split(tmp_path: Path) -> None:
         experiment_id="exp-spatial",
     )
 
-    result = freeze_selection(tmp_path, "exp-spatial")
+    result = freeze_selection(tmp_path, "exp-spatial", actor=None)
     assert "error" in result and "spatial" in result["error"]
 
 
@@ -418,7 +428,7 @@ def test_freeze_selection_refuses_a_member_whose_ground_truth_moved(
         keep_empty=True,
     )
 
-    result = freeze_selection(tmp_path, "exp-moved")
+    result = freeze_selection(tmp_path, "exp-moved", actor=None)
     assert "error" in result and "changed since" in result["error"]
     assert "'a'" in result["error"]
 
@@ -434,7 +444,7 @@ def test_freeze_selection_reads_a_members_removed_document_as_moved(
 
     ts.delete(label_key(root, DATES[0], "a"))
 
-    result = freeze_selection(tmp_path, "exp-renamed")
+    result = freeze_selection(tmp_path, "exp-renamed", actor=None)
     assert "error" in result and "changed since" in result["error"]
     assert "'a'" in result["error"]
 
@@ -445,7 +455,7 @@ def test_freeze_selection_refuses_an_empty_val_side(tmp_path: Path) -> None:
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     _real_drawn_experiment(tmp_path, root, "exp-no-val", val_ratio=0.0)
 
-    result = freeze_selection(tmp_path, "exp-no-val")
+    result = freeze_selection(tmp_path, "exp-no-val", actor=None)
     assert "error" in result and "validation" in result["error"]
 
 
@@ -467,7 +477,7 @@ def test_freeze_selection_refuses_a_resolved_scope_missing_its_attributes(
         lambda resolved: resolved["data"]["scope"].update(attributes=None),
     )
 
-    result = freeze_selection(tmp_path, "exp-no-attributes")
+    result = freeze_selection(tmp_path, "exp-no-attributes", actor=None)
     assert "error" in result and "records no attributes" in result["error"]
 
 
@@ -489,7 +499,7 @@ def test_freeze_selection_refuses_labels_changed_since_the_run(
         keep_empty=True,
     )
 
-    result = freeze_selection(tmp_path, "exp-stale-labels")
+    result = freeze_selection(tmp_path, "exp-stale-labels", actor=None)
     assert "error" in result and "changed" in result["error"]
 
 
@@ -500,11 +510,11 @@ def test_freeze_selection_refuses_when_a_selection_already_exists_at_the_output(
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     _real_drawn_experiment(tmp_path, root, "exp-first")
-    first = freeze_selection(tmp_path, "exp-first")
+    first = freeze_selection(tmp_path, "exp-first", actor=None)
     assert "error" not in first, first
 
     _real_drawn_experiment(tmp_path, root, "exp-second")
     second = freeze_selection(
-        tmp_path, "exp-second", output_path=first["selection_dir"]
+        tmp_path, "exp-second", output_path=first["selection_dir"], actor=None
     )
     assert "error" in second and "already exists" in second["error"]

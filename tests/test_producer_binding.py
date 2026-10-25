@@ -28,7 +28,7 @@ def _deliver(project: Path, root: Path, bucket: str, out: Path) -> dict:
     from tests import _trait_fixtures as fx
 
     return deliver_per_image_counts(
-        project, str(root), bucket, str(out), trait=fx.COUNT_TRAIT
+        project, str(root), bucket, str(out), trait=fx.COUNT_TRAIT, actor=None
     )
 
 
@@ -118,6 +118,7 @@ def test_a_capture_outside_the_assessments_reference_answers_for_nothing(
         bucket=bucket,
         assessment_id=chain.assessment["assessment_id"],
         stated=Stated(),
+        actor=None,
     )
     assert "error" not in published, published
 

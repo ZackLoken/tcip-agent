@@ -138,7 +138,7 @@ def test_dataset_identity_helper_registered_vs_bespoke(tmp_path: Path) -> None:
     from tcip_mcp.tools.project_tools import register_dataset
 
     _make_dataset(tmp_path)
-    reg = register_dataset(tmp_path, str(tmp_path), crop="currant")
+    reg = register_dataset(tmp_path, str(tmp_path), crop="currant", actor=None)
     ds_id, fp = dataset_identity(
         DataSpec.model_validate(
             {
@@ -167,7 +167,7 @@ def test_dataset_identity_raises_a_fingerprint_read_failure(
     from tcip_mcp.tools.project_tools import register_dataset
 
     _make_dataset(tmp_path)
-    register_dataset(tmp_path, str(tmp_path), crop="currant")
+    register_dataset(tmp_path, str(tmp_path), crop="currant", actor=None)
 
     def _raise(_root: str | Path, _admitted: Iterable[Sample]) -> NoReturn:
         raise OSError("simulated I/O error mid-scan")
@@ -201,10 +201,12 @@ def test_a_trial_over_a_data_axis_records_the_dataset_its_own_input_names(
     from tests._verified_checkpoint_fixtures import opened_sweep
 
     base_images = _make_dataset(tmp_path / "base")
-    register_dataset(tmp_path / "base", str(tmp_path / "base"), crop="currant")
+    register_dataset(
+        tmp_path / "base", str(tmp_path / "base"), crop="currant", actor=None
+    )
     other_images = _make_dataset(tmp_path / "other", shade=200)
     other = register_dataset(
-        tmp_path / "other", str(tmp_path / "other"), crop="currant"
+        tmp_path / "other", str(tmp_path / "other"), crop="currant", actor=None
     )
 
     trial_dir = open_trial(
@@ -236,7 +238,9 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(
     fake_popen(monkeypatch, [])
 
     images_dir = _make_dataset(tmp_path)
-    registered = register_dataset(tmp_path, str(tmp_path), crop="currant")
+    registered = register_dataset(
+        tmp_path, str(tmp_path), crop="currant", actor=None
+    )
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     launched = launch_training(

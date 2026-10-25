@@ -397,6 +397,7 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(
             holdout_ratio=0.125,
             grouping="tile_prefix",
         ),
+        actor=None,
     ), "the draw is the fixture"
     drawn = read_selection(out, project=tmp_path)
     bound = [s for s in drawn.samples if s.side in ("train", "val")]

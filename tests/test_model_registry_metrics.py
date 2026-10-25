@@ -38,7 +38,11 @@ def _registered(
     reg = ModelRegistry(str(tmp_path))
     for name, metrics in entries:
         reg.register_model(
-            name, _checkpoint(tmp_path, name), metrics=metrics, tags=[]
+            name,
+            _checkpoint(tmp_path, name),
+            metrics=metrics,
+            tags=[],
+            actor=None,
         )
     return reg
 
@@ -205,7 +209,9 @@ def test_register_model_refuses_a_nonexistent_checkpoint(
 
     reg = ModelRegistry(str(tmp_path))
     with pytest.raises(FileNotFoundError):
-        reg.register_model("ghost", str(tmp_path / "nonexistent.pt"))
+        reg.register_model(
+            "ghost", str(tmp_path / "nonexistent.pt"), actor=None
+        )
     assert reg.list_models() == []
 
 
@@ -227,10 +233,10 @@ def test_register_model_refuses_bytes_the_verified_reader_refuses(
     garbage.write_bytes(b"not a checkpoint")
 
     with pytest.raises(UnregisteredCheckpointError):
-        reg.register_model("garbage", str(garbage))
+        reg.register_model("garbage", str(garbage), actor=None)
     assert reg.list_models() == []
 
-    reg.register_model("real", _checkpoint(tmp_path, "real"))
+    reg.register_model("real", _checkpoint(tmp_path, "real"), actor=None)
     assert [m.entry.name for m in reg.list_models()] == ["real"]
 
 
@@ -246,9 +252,13 @@ def test_a_foreign_registrations_source_is_read_off_whether_it_carries_metrics(
         checkpoint_path=_checkpoint(tmp_path, "a"),
         project=tmp_path,
         metrics={"val_map50": 0.5},
+        actor=None,
     )
     register_model(
-        name="b", checkpoint_path=_checkpoint(tmp_path, "b"), project=tmp_path
+        name="b",
+        checkpoint_path=_checkpoint(tmp_path, "b"),
+        project=tmp_path,
+        actor=None,
     )
 
     reg = ModelRegistry(str(tmp_path))
@@ -545,7 +555,9 @@ def test_a_registry_payload_that_json_cannot_hold_is_refused_at_register_model(
     ckpt = _checkpoint(tmp_path, "m")
 
     with pytest.raises(ValidationError) as metrics_refused:
-        reg.register_model("a", str(ckpt), metrics={"val_map50": float("inf")})
+        reg.register_model(
+            "a", str(ckpt), metrics={"val_map50": float("inf")}, actor=None
+        )
     assert "metrics.val_map50" in str(metrics_refused.value)
 
     assert reg.list_models() == []
@@ -559,7 +571,10 @@ def test_an_ordinary_registry_payload_is_still_registered(
 
     reg = ModelRegistry(str(tmp_path))
     listed = reg.register_model(
-        "a", _checkpoint(tmp_path, "a"), metrics={"val_map50": 0.70}
+        "a",
+        _checkpoint(tmp_path, "a"),
+        metrics={"val_map50": 0.70},
+        actor=None,
     )
 
     assert listed.entry.name == "a"

@@ -43,6 +43,7 @@ def test_the_raster_door_records_the_execution_its_prepared_pass_states(
         bucket="preds/2026-01-01",
         raster_path=str(exp["raster_path"]),
         stated=Stated(conf=0.0, tile_size=TILE, overlap=0.2, **stated),
+        actor=None,
     )
     assert "error" not in result, result
 
@@ -94,6 +95,7 @@ def test_a_raster_pass_records_the_frame_its_predictions_are_in(
             cross_tile_nms=SAMPLE_CROSS_TILE_NMS,
             rationale="a sample reason the test states",
         ),
+        actor=None,
     )
     assert "error" not in result, result
 

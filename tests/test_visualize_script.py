@@ -1,7 +1,7 @@
-"""tcip visualize: its own command-line entry point.
+"""tcip visualize: the render tool's command, through the console's one adapter.
 
---project is required unconditionally and must name a project: the command writes an artifact
-and carries an audit line, both under that project.
+The tool acts on a project, so a run naming no --project is refused naming it, a --project
+holding no project record is refused, and the artifact lands under the project named.
 """
 
 from __future__ import annotations
@@ -28,14 +28,18 @@ def _fixture(root: Path) -> Path:
     return img
 
 
+def _annotations(img: Path) -> list[str]:
+    """Return the command's statement of an annotations render of ``img``, by a person."""
+    render = {"source": "annotations", "path": str(img)}
+    return ["--render", json.dumps(render), "--user", "tester"]
+
+
 def test_refuses_without_a_project_and_plants_no_store(tmp_path: Path) -> None:
     img = _fixture(tmp_path)
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = run_tcip(
-        "visualize", ["--source", "annotations", "--path", str(img)], cwd=cwd
-    )
+    result = run_tcip("visualize", _annotations(img), cwd=cwd)
 
     assert result.returncode != 0, result.stdout
     assert "--project" in result.stderr
@@ -48,16 +52,7 @@ def test_refuses_a_directory_holding_no_project_record(tmp_path: Path) -> None:
     bare.mkdir()
 
     result = run_tcip(
-        "visualize",
-        [
-            "--source",
-            "annotations",
-            "--path",
-            str(img),
-            "--project",
-            str(bare),
-        ],
-        cwd=tmp_path,
+        "visualize", [*_annotations(img), "--project", str(bare)], cwd=tmp_path
     )
 
     assert result.returncode != 0, result.stdout
@@ -73,16 +68,7 @@ def test_renders_annotations_under_the_named_project(
     cwd.mkdir()
 
     result = run_tcip(
-        "visualize",
-        [
-            "--source",
-            "annotations",
-            "--path",
-            str(img),
-            "--project",
-            str(project),
-        ],
-        cwd=cwd,
+        "visualize", [*_annotations(img), "--project", str(project)], cwd=cwd
     )
 
     assert result.returncode == 0, result.stderr

@@ -105,7 +105,7 @@ def _run(
         "device": "cpu",
     }
     call_kwargs.update(kwargs)
-    return run_inference(project, ckpt, **call_kwargs)
+    return run_inference(project, ckpt, **call_kwargs, actor=None)
 
 
 def _progress(project: Path, raster_path: Path, bucket: str) -> list[str]:
@@ -198,6 +198,7 @@ def test_resume_refuses_with_images_dir(tmp_path: Path) -> None:
         images_dir=str(images_dir),
         bucket="out/2026-01-01",
         resume=True,
+        actor=None,
     )
 
     assert "resume applies only to a raster_path pass" in result["error"]
@@ -473,7 +474,11 @@ def test_an_interrupted_pass_under_an_assessment_resumes_under_that_assessment(
     _interrupt_after_one_batch(monkeypatch)
     with pytest.raises(RuntimeError, match="simulated crash"):
         run_inference(
-            tmp_path, exp["checkpoint_path"], bucket=interrupted, **call
+            tmp_path,
+            exp["checkpoint_path"],
+            bucket=interrupted,
+            **call,
+            actor=None,
         )
     monkeypatch.undo()
 
@@ -483,6 +488,7 @@ def test_an_interrupted_pass_under_an_assessment_resumes_under_that_assessment(
         bucket=interrupted,
         resume=True,
         **{**call, "assessment_id": "another"},
+        actor=None,
     )
     resumed = run_inference(
         tmp_path,
@@ -490,10 +496,15 @@ def test_an_interrupted_pass_under_an_assessment_resumes_under_that_assessment(
         bucket=interrupted,
         resume=True,
         **call,
+        actor=None,
     )
     uninterrupted = "uninterrupted/2026-01-01"
     baseline = run_inference(
-        tmp_path, exp["checkpoint_path"], bucket=uninterrupted, **call
+        tmp_path,
+        exp["checkpoint_path"],
+        bucket=uninterrupted,
+        **call,
+        actor=None,
     )
 
     assert "error" in other

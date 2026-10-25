@@ -76,6 +76,7 @@ def _published(
         str(images_dir),
         bucket="out/2026-01-01",
         stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS),
+        actor=None,
     )
     assert "error" not in result, result
     bucket = read_bucket(result["dataset_root"], result["bucket"])

@@ -44,9 +44,10 @@ measurement-agreement/method-comparison contexts specifically because of that de
 | `evaluate_model` | Evaluate a checkpoint on a held-out dataset; returns the result and writes nothing |
 | `assess_checkpoint` | Assess a checkpoint for one delivery kind of a confirmed trait against a drawn selection's calibration and holdout sides, recording the assessment a delivery rests on |
 | `assess_reserved_regions` | The same assessment over a mosaic's reserved, attested-complete regions, for a checkpoint trained on a within-image split |
-| `annotation_tools.score_predictions` (library call) / `tcip score-predictions` (command) | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN. It scores the object's localization, never an attribute head's call |
-| `tcip render-failure-cases` (command) | Surface + render the N images with highest triage error, N and the error's shortfall, surplus and confidence weights each stated |
-| `experiment_tools.compare_experiments` (library call) | Side-by-side metrics across experiments |
+| `score_predictions` | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN, under a named `trait`'s own localization criterion when one is stated. It scores the object's localization, never an attribute head's call |
+| `render_failure_cases` | Surface + render the N images with highest triage error, N and the error's shortfall, surplus and confidence weights each stated |
+| `check_dataset_identity` | Recompute a dataset's fingerprint against its recorded identity, and read each path the project's registry holds for it: whether its content changed or it moved since a number was measured from it |
+| `compare_experiments` | Side-by-side metrics across experiments |
 | `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
 | `list_experiments` | List every run of the project, and every sweep with its trial runs under it |
 | `rank_registered_models` | Rank registered models by a stated metric, direction and verification status |
@@ -150,14 +151,13 @@ with the reason on its delivery event.
 When metrics are poor, investigate systematically:
 
 1. Data issues: `tcip doctor <root>`'s `check_data_quality`, missing labels, format errors, class imbalance
-2. Worst cases: `tcip render-failure-cases`, surface and visually inspect the worst
+2. Worst cases: `render_failure_cases`, surface and visually inspect the worst
    N images under the ranking weights you state
-3. Per-image breakdown: `annotation_tools.score_predictions` (library call, or
-   `tcip score-predictions`) on a dataset dir; find images with the highest FP/FN counts
-   (no built-in per-class breakdown for detection; use
-   `annotation_tools.score_predictions(<image>, <bucket>, <iou>, <conf>, detail=True)` per
-   image and aggregate by
-   `class_id` if class-level numbers are needed). The breakdown is the object's localization,
+3. Per-image breakdown: `score_predictions` on a dataset dir; find images with the highest
+   FP/FN counts (no built-in per-class breakdown for detection; use
+   `score_predictions(<image>, <bucket>, <iou>, <conf>, detail=True)` per image and aggregate
+   its `detections` by `subject` if class-level numbers are needed). The breakdown is the
+   object's localization,
    never an attribute head's call: `evaluate`'s `attribute_agreement` (per attribute, over the
    matched pairs) and an assessment's classifier criterion triage the attribute axes instead
 4. Training dynamics: Check metrics.jsonl; is loss still decreasing? Overfitting?
@@ -177,5 +177,5 @@ When comparing models:
    failures; for ordinal, check quadratic weighted kappa alongside rank accuracy, since exact-rank
    accuracy alone can hide a model that's frequently off by one rank; for detection, check
    per-image FP/FN patterns instead (see Failure Triage above; there's no per-class AP today)
-5. Use `experiments.compare_experiments` (library call; the web comparison route calls it too)
-   for side-by-side analysis
+5. Use `compare_experiments` (the web comparison route calls the same function) for side-by-side
+   analysis

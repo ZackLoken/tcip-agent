@@ -140,7 +140,9 @@ def test_launched_run_records_the_datasets_identity_in_its_run_record(
 
     ds_root = tmp_path / "ds"
     images_dir = _canonical_dataset(ds_root)
-    registered = register_dataset(tmp_path, str(ds_root), crop="currant")
+    registered = register_dataset(
+        tmp_path, str(ds_root), crop="currant", actor=None
+    )
     assert registered["id"] and registered["fingerprint"]
 
     res = training_tools_launch(

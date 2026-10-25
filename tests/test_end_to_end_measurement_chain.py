@@ -268,6 +268,7 @@ def test_the_chain_delivers_a_csv_whose_validated_column_reads_true(
         chain.bucket,
         str(out_csv),
         trait=fx.COUNT_TRAIT,
+        actor=None,
     )
 
     assert "error" not in delivered, delivered
@@ -288,6 +289,7 @@ def test_the_chain_delivers_a_csv_whose_validated_column_reads_true(
         images_dir=str(chain.images_dir),
         bucket=unassessed,
         stated=Stated(**SAMPLE_DETECTOR_PASS),
+        actor=None,
     )
     assert "error" not in published, published
     refused_csv = tmp_path / "unassessed_counts.csv"
@@ -297,6 +299,7 @@ def test_the_chain_delivers_a_csv_whose_validated_column_reads_true(
         unassessed,
         str(refused_csv),
         trait=fx.COUNT_TRAIT,
+        actor=None,
     )
     assert "no assessment answers" in refused["error"], refused
     assert not refused_csv.exists()
@@ -351,6 +354,7 @@ def test_editing_the_reference_labels_after_the_assessment_refuses_the_delivery(
         chain.bucket,
         str(out_csv),
         trait=fx.COUNT_TRAIT,
+        actor=None,
     )
 
     assert "error" in delivered, delivered
@@ -401,6 +405,7 @@ def test_publishing_the_same_bucket_twice_refuses_the_second_publish(
         bucket=chain.bucket,
         assessment_id=chain.assessment["assessment_id"],
         stated=Stated(),
+        actor=None,
     )
 
     assert "error" in republished, republished

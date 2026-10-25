@@ -42,6 +42,7 @@ def test_registers_a_csv_and_persists_the_frozen_record(
         csv_paths=[str(csv_path)],
         crop="currant",
         site="north orchard",
+        actor=None,
     )
 
     assert "error" not in res, res
@@ -102,6 +103,7 @@ def test_refuses_a_name_outside_name_segment(tmp_path: Path) -> None:
         csv_paths=[str(csv_path)],
         crop="currant",
         site="orchard",
+        actor=None,
     )
 
     match res:
@@ -118,6 +120,7 @@ def test_refuses_a_missing_file(tmp_path: Path) -> None:
         csv_paths=[str(tmp_path / "missing.csv")],
         crop="currant",
         site="orchard",
+        actor=None,
     )
 
     match res:
@@ -140,6 +143,7 @@ def test_refuses_naming_a_file_that_parses_no_georeferenced_plant(
         csv_paths=[str(good), str(bad)],
         crop="currant",
         site="orchard",
+        actor=None,
     )
 
     match res:
@@ -162,6 +166,7 @@ def test_a_second_registration_under_the_same_name_and_content_is_a_no_op(
         csv_paths=[str(csv_path)],
         crop="currant",
         site="orchard",
+        actor=None,
     )
     assert "error" not in first, first
 
@@ -171,6 +176,7 @@ def test_a_second_registration_under_the_same_name_and_content_is_a_no_op(
         csv_paths=[str(csv_path)],
         crop="currant",
         site="orchard",
+        actor=None,
     )
 
     assert "error" not in second, second
@@ -192,6 +198,7 @@ def test_a_second_registration_under_the_same_name_and_different_plants_refuses(
         csv_paths=[str(csv_path)],
         crop="currant",
         site="orchard",
+        actor=None,
     )
     assert "error" not in first, first
 
@@ -201,6 +208,7 @@ def test_a_second_registration_under_the_same_name_and_different_plants_refuses(
         csv_paths=[str(other_csv)],
         crop="currant",
         site="orchard",
+        actor=None,
     )
 
     match conflict:
@@ -231,6 +239,7 @@ def test_build_plant_mapping_reads_a_registered_registry(
         csv_paths=[str(plant_csv)],
         crop="currant",
         site="orchard",
+        actor=None,
     )
     assert "error" not in reg, reg
 
@@ -239,6 +248,7 @@ def test_build_plant_mapping_reads_a_registered_registry(
         name="valley",
         images_root=str(images_root),
         plant_registry="valley-plants",
+        actor=None,
     )
 
     assert "error" not in res, res
@@ -262,6 +272,7 @@ def test_build_plant_mapping_refuses_naming_register_plant_registry_when_registr
         name="valley",
         images_root=str(images_root),
         plant_registry="nope",
+        actor=None,
     )
 
     assert "error" in res
@@ -289,6 +300,7 @@ def _deliver_scene(
         csv_paths=[str(plant_csv)],
         crop="currant",
         site="orchard",
+        actor=None,
     )
     assert "error" not in reg, reg
     build_res = build_plant_mapping(
@@ -296,6 +308,7 @@ def _deliver_scene(
         name="valley",
         images_root=str(images_root),
         plant_registry="valley-plants",
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -324,6 +337,7 @@ def test_the_happy_path_through_the_platforms_own_producers_refuses_at_the_class
         dataset_root=str(tmp_path / "ds"),
         buckets=list(preds_by_date.values()),
         output_csv_path=str(out_csv),
+        actor=None,
     )
 
     assert "error" in res, res
@@ -354,6 +368,7 @@ def test_a_deleted_registry_refuses_at_delivery_naming_the_registry_and_the_mapp
         dataset_root=str(tmp_path / "ds"),
         buckets=list(preds_by_date.values()),
         output_csv_path=str(out_csv),
+        actor=None,
     )
 
     assert "error" in res
@@ -389,6 +404,7 @@ def test_a_registry_digest_mismatch_refuses_at_delivery(
         dataset_root=str(tmp_path / "ds"),
         buckets=list(preds_by_date.values()),
         output_csv_path=str(out_csv),
+        actor=None,
     )
 
     assert "error" in res

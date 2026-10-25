@@ -139,6 +139,7 @@ def test_a_selection_record_carries_each_sample_s_own_source_label_group_and_sid
         subject="bud",
         output_path=str(tmp_path / "splits"),
         **drawn_split(seed=1, val_ratio=0.25),
+        actor=None,
     )
     assert "error" not in drawn, drawn
     fresh = ts.read(selection.selection_key(tmp_path / "splits"))
@@ -185,6 +186,7 @@ def test_the_delivery_events_golden_carries_every_key_a_delivery_records(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in built, built
     _seed_currant_bloom_trait(tmp_path)

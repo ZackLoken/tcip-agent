@@ -74,17 +74,22 @@ def test_the_signal_is_a_friction_report_of_the_open_project_carrying_the_token(
         mod.REQUESTED_CATEGORY,
         "an unrelated report",
         context={"note": token},
+        actor=None,
     )
     assert not mod.reported(opened_client, token)
 
-    report_friction(opened_project, mod.REQUESTED_CATEGORY, f"smoke {token}")
+    report_friction(
+        opened_project, mod.REQUESTED_CATEGORY, f"smoke {token}", actor=None
+    )
     assert mod.reported(opened_client, token)
 
-    report_friction(opened_project, mod.REQUESTED_CATEGORY, f"again {token}")
+    report_friction(
+        opened_project, mod.REQUESTED_CATEGORY, f"again {token}", actor=None
+    )
     assert not mod.reported(opened_client, token)
 
     other = "ack-ba9876543210"
-    report_friction(opened_project, "missing_tool", other)
+    report_friction(opened_project, "missing_tool", other, actor=None)
     assert not mod.reported(opened_client, other)
 
 
@@ -141,11 +146,15 @@ def test_the_resumed_signal_is_the_token_continued_no_request_names(
     assert "ack-" not in mod.continuation_request()
     assert mod.CONTINUED_SUFFIX in mod.continuation_request()
 
-    report_friction(opened_project, mod.REQUESTED_CATEGORY, f"smoke {token}")
+    report_friction(
+        opened_project, mod.REQUESTED_CATEGORY, f"smoke {token}", actor=None
+    )
     assert mod.reported(opened_client, token)
     assert not mod.reported(opened_client, continued)
 
-    report_friction(opened_project, mod.REQUESTED_CATEGORY, continued)
+    report_friction(
+        opened_project, mod.REQUESTED_CATEGORY, continued, actor=None
+    )
     assert mod.reported(opened_client, continued)
     assert not mod.reported(opened_client, token)
 

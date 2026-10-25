@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 
 def _load_distill() -> ModuleType:
-    from tcip_web.cli import distill_learnings
+    from tcip_mcp.cli import distill_learnings
 
     return distill_learnings
 
@@ -34,7 +34,11 @@ def _seed_report(
     from tcip_mcp.tools.meta_tools import report_friction
 
     report_friction(
-        project_root, category, detail, user_disagreement=user_disagreement
+        project_root,
+        category,
+        detail,
+        user_disagreement=user_disagreement,
+        actor=None,
     )
 
 
@@ -53,6 +57,7 @@ def test_distill_worksheet_gathers_reports_retrospectives_and_themes(
         task="fix the EXIF orientation",
         worked="nothing yet",
         did_not_work="the EXIF orientation came up again",
+        actor=None,
     )
 
     ws = distill.build_worksheet(tmp_path)
@@ -129,6 +134,7 @@ def test_the_worksheet_lists_a_retrospective_that_will_not_read_as_malformed_wit
         task="a written hand-off",
         worked="w",
         did_not_work="d",
+        actor=None,
     )
     ts.replace(
         memory_key(Retrospective, str(tmp_path), "unreadable"),

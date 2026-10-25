@@ -36,7 +36,7 @@ def test_mcp_save_annotations_empty_writes_the_empty_document_the_route_writes(
 
     img = blank_image(bound.root)
     label_image(img, [box_annotation(1, 1, 9, 9)], 100, 80)
-    res = save_annotations(bound, str(img), annotations=[])
+    res = save_annotations(bound, str(img), annotations=[], actor=None)
     assert res == {"capture": "undated", "written": [img.stem], "count": 0}
     assert ts.read(image_label_key(img), default=None) is not None
     assert json_io.read_label_document(image_label_key(img)).annotations == []
@@ -62,6 +62,7 @@ def test_mcp_save_annotations_refuses_by_index_through_the_decoders_checks(
         bound,
         str(img),
         annotations=[{"subject": "bur", "bbox": [1, 1, 5, 5]}, bad],
+        actor=None,
     )
     assert res["error"].startswith("annotation 1 ")
     assert ts.read(image_label_key(img), default=None) is None
@@ -120,6 +121,7 @@ def test_draw_splits_counts_json_objects_not_lines(tmp_path: Path) -> None:
         stratify_foreground=True,
         rationale=RATIONALE,
         subject="bud",
+        actor=None,
     )
     assert "error" not in res
     # foreground_annotations sums per split: true total is 3+1+0+0. Counting raw JSON text

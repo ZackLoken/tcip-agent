@@ -1,7 +1,7 @@
-"""tcip triage-predictions: its own command-line entry point.
+"""tcip triage-predictions: the tool's command, through the console's one adapter.
 
-A run naming no --project exits nonzero naming it and plants no store; a run naming one
-triages with a checkpoint registered in that project.
+A run naming no --project is refused naming it and plants no store; a run naming one triages
+with a checkpoint registered in that project.
 """
 
 from __future__ import annotations
@@ -28,12 +28,16 @@ def test_refuses_a_run_naming_no_project_and_plants_no_store(
 
     result = run_tcip(
         "triage-predictions",
-        ["--checkpoint", str(tmp_path / "x.pt"), "--images-dir", str(images)],
+        [
+            *("--checkpoint-path", str(tmp_path / "x.pt")),
+            *("--images-dir", str(images), "--low", "0.3", "--high", "0.8"),
+            *("--rationale", "the band under test", "--user", "tester"),
+        ],
         cwd=cwd,
     )
 
-    assert result.returncode != 0, result.stdout
-    assert "--project" in result.stderr
+    assert result.returncode == 2, result.stdout
+    assert "no project" in result.stderr and "--project" in result.stderr
     assert not (cwd / ".tcip").exists()
 
 
@@ -43,7 +47,7 @@ def test_triages_with_the_checkpoint_registered_in_the_named_project(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     import tcip_mcp.pipelines.inference.generic_predictor as predmod
-    from tcip_mcp.cli.triage_predictions import main
+    from tcip_web.cli import main
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(project)
@@ -62,7 +66,8 @@ def test_triages_with_the_checkpoint_registered_in_the_named_project(
 
     rc = main(
         [
-            "--checkpoint",
+            "triage-predictions",
+            "--checkpoint-path",
             str(ckpt),
             "--images-dir",
             str(images),
@@ -74,6 +79,8 @@ def test_triages_with_the_checkpoint_registered_in_the_named_project(
             "0.8",
             "--rationale",
             "the band under test",
+            "--user",
+            "tester",
         ]
     )
 
@@ -84,41 +91,42 @@ def test_triages_with_the_checkpoint_registered_in_the_named_project(
 
 
 def test_the_band_and_the_ranking_settings_are_required_on_every_command(
-    tmp_path: Path,
+    project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Three console commands each refuse a call leaving their stated settings out, naming them.
 
     The settings are triage's band and its reason, the failure-case ranking's top-k and
-    weights, and the reference grid's overlap.
+    weights, and the reference grid's overlap; the server's argument validation names each.
     """
-    cwd = tmp_path / "operator_cwd"
-    cwd.mkdir()
+    from tcip_web.cli import main
+
+    named = ["--project", str(project), "--user", "tester"]
     for command, args, required in (
         (
             "triage-predictions",
-            ["--checkpoint", "x.pt", "--images-dir", ".", "--project", "."],
-            ("--low", "--high", "--rationale"),
+            ["--checkpoint-path", "x.pt", "--images-dir", ".", *named],
+            ("low", "high", "rationale"),
         ),
         (
             "render-failure-cases",
-            ["--dataset-root", ".", "--bucket", "b", "--project", "."],
+            ["--dataset-root", ".", "--bucket", "b", *named],
             (
-                "--top-k",
-                "--shortfall-weight",
-                "--surplus-weight",
-                "--confidence-weight",
+                "top_k",
+                "shortfall_weight",
+                "surplus_weight",
+                "confidence_weight",
             ),
         ),
         (
             "overlay-reference-grid",
-            ["--image", "a.png", "--project", "."],
-            ("--overlap",),
+            ["--image-path", "a.png", *named],
+            ("overlap",),
         ),
     ):
-        result = run_tcip(command, args, cwd=cwd)
-        assert result.returncode != 0, (command, result.stdout)
-        refusal = result.stderr.rpartition(
-            "the following arguments are required:"
-        )[2]
-        for flag in required:
-            assert flag in refusal, (command, flag, result.stderr)
+        assert main([command, *args]) == 2, command
+        refusal = capsys.readouterr().err
+        for field in required:
+            assert f"\n{field}\n  Field required" in refusal, (
+                command,
+                refusal,
+            )

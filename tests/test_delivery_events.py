@@ -339,6 +339,7 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(
         name="valley",
         images_root=str(images_root),
         plant_registry=register_plant_registry_for(mapped, [plant_csv]),
+        actor=None,
     )
     assert "error" not in built, built
     buckets = {

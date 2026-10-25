@@ -1,4 +1,4 @@
-"""``tcip shp-to-plant-csv``: a shapefile converted to a ``read_plant_csvs`` CSV.
+"""``shp_to_plant_csv``: a shapefile converted to a ``read_plant_csvs`` CSV.
 
 The conversion keeps correct WGS84 axis order and handles point and polygon geometry.
 
@@ -14,12 +14,26 @@ from pathlib import Path
 
 import pytest
 
-from tcip_mcp.cli.shp_to_plant_csv import (
+from tcip_mcp.pipelines.postprocessing.plant_mapping import ShapefileField
+from tcip_mcp.tools.phenology_tools import (
     _validate_round_trip,
-    convert_shp_to_plant_csv,
-    main,
+    shp_to_plant_csv,
 )
 from tests import csv_rows
+
+
+def _convert(shp: Path, csv_path: Path, project: Path) -> int:
+    """Run the conversion command from ``shp`` to ``csv_path`` for ``project``; return its exit."""
+    from tcip_web.cli import main
+
+    return main(
+        [
+            *("shp-to-plant-csv", "--shp-path", str(shp)),
+            *("--csv-path", str(csv_path), "--project", str(project)),
+            *("--user", "tester"),
+        ]
+    )
+
 
 UTM_15N_EPSG = 32615
 
@@ -122,7 +136,7 @@ def test_point_geometry_reprojects_to_correct_unswapped_wgs84(
     shp = _point_shapefile(tmp_path)
     csv_path = tmp_path / "plants.csv"
 
-    result = convert_shp_to_plant_csv(shp, csv_path)
+    result = shp_to_plant_csv(tmp_path, str(shp), str(csv_path), actor=None)
 
     assert result["geometry_kinds"] == ["point"]
     rows = csv_rows(csv_path)
@@ -174,7 +188,7 @@ def test_polygon_geometry_uses_centroid(tmp_path: Path) -> None:
     shp = _polygon_shapefile(tmp_path)
     csv_path = tmp_path / "plants.csv"
 
-    result = convert_shp_to_plant_csv(shp, csv_path)
+    result = shp_to_plant_csv(tmp_path, str(shp), str(csv_path), actor=None)
 
     assert result["geometry_kinds"] == ["polygon"]
     rows = csv_rows(csv_path)
@@ -194,11 +208,9 @@ def test_refuses_a_shapefile_with_no_resolvable_crs(tmp_path: Path) -> None:
     shp = _point_shapefile(tmp_path, epsg=None)
     csv_path = tmp_path / "plants.csv"
 
-    with pytest.raises(
-        ValueError, match="resolvable coordinate reference system"
-    ):
-        convert_shp_to_plant_csv(shp, csv_path)
+    result = shp_to_plant_csv(tmp_path, str(shp), str(csv_path), actor=None)
 
+    assert "resolvable coordinate reference system" in result["error"]
     assert not csv_path.exists()
 
 
@@ -242,8 +254,12 @@ def test_missing_optional_field_is_reported_and_written_empty(
     shp = _point_shapefile(tmp_path)
     csv_path = tmp_path / "plants.csv"
 
-    result = convert_shp_to_plant_csv(
-        shp, csv_path, field_map={"accession_name": "no_such_field"}
+    result = shp_to_plant_csv(
+        tmp_path,
+        str(shp),
+        str(csv_path),
+        field_map={ShapefileField("accession_name"): "no_such_field"},
+        actor=None,
     )
 
     assert "accession_name" in result["missing_fields"]
@@ -281,8 +297,12 @@ def test_field_map_override_picks_up_a_renamed_source_field(
         )
 
     csv_path = tmp_path / "plants.csv"
-    result = convert_shp_to_plant_csv(
-        path, csv_path, field_map={"accession_name": "ACC_NAME"}
+    result = shp_to_plant_csv(
+        tmp_path,
+        str(path),
+        str(csv_path),
+        field_map={ShapefileField("accession_name"): "ACC_NAME"},
+        actor=None,
     )
 
     assert "accession_name" not in result["missing_fields"]
@@ -307,18 +327,20 @@ def test_refuses_a_shapefile_with_zero_features(tmp_path: Path) -> None:
     ):
         pass
 
-    with pytest.raises(ValueError, match="zero features"):
-        convert_shp_to_plant_csv(path, tmp_path / "plants.csv")
+    result = shp_to_plant_csv(tmp_path, str(path), "plants.csv", actor=None)
+
+    assert "zero features" in result["error"]
+    assert not (tmp_path / "plants.csv").exists()
 
 
 # ── CLI end to end ───────────────────────────────────────────────────────
 
 
-def test_main_cli_end_to_end(tmp_path: Path) -> None:
+def test_main_cli_end_to_end(tmp_path: Path, project: Path) -> None:
     shp = _point_shapefile(tmp_path)
     csv_path = tmp_path / "plants.csv"
 
-    rc = main([str(shp), str(csv_path)])
+    rc = _convert(shp, csv_path, project)
 
     assert rc == 0
     assert csv_path.is_file()
@@ -326,13 +348,19 @@ def test_main_cli_end_to_end(tmp_path: Path) -> None:
     assert len(rows) == 1
 
 
-def test_main_cli_refusal_returns_nonzero(tmp_path: Path) -> None:
+def test_main_cli_prints_the_refusal_and_writes_nothing(
+    tmp_path: Path, project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+
     shp = _point_shapefile(tmp_path, epsg=None)
     csv_path = tmp_path / "plants.csv"
 
-    rc = main([str(shp), str(csv_path)])
+    rc = _convert(shp, csv_path, project)
 
-    assert rc == 1
+    assert rc == 0
+    refusal = json.loads(capsys.readouterr().out)["error"]
+    assert "resolvable coordinate reference system" in refusal
     assert not csv_path.exists()
 
 
@@ -462,24 +490,17 @@ def _garbage_prj_shapefile(tmp_path: Path) -> Path:
     return shp
 
 
-def test_garbage_prj_refuses_through_convert_shp_to_plant_csv(
-    tmp_path: Path,
-) -> None:
+def test_garbage_prj_refuses_through_the_conversion(tmp_path: Path) -> None:
     """A .prj holding unparseable text is refused through the missing-CRS check.
 
-    The command raises ``ShapefileCrsUnknownError`` and writes no CSV.
+    The conversion answers the CRS refusal and writes no CSV.
     """
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        ShapefileCrsUnknownError,
-    )
-
     shp = _garbage_prj_shapefile(tmp_path)
     csv_path = tmp_path / "plants.csv"
-    with pytest.raises(
-        ShapefileCrsUnknownError,
-        match="resolvable coordinate reference system",
-    ):
-        convert_shp_to_plant_csv(shp, csv_path)
+
+    result = shp_to_plant_csv(tmp_path, str(shp), str(csv_path), actor=None)
+
+    assert "resolvable coordinate reference system" in result["error"]
     assert not csv_path.exists()
 
 
@@ -513,13 +534,15 @@ def _line_string_shapefile(tmp_path: Path) -> Path:
     return path
 
 
-def test_line_string_geometry_refuses_named_through_convert_shp_to_plant_csv(
+def test_line_string_geometry_refuses_named_through_the_conversion(
     tmp_path: Path,
 ) -> None:
     """A line string geometry is refused, naming its type."""
     shp = _line_string_shapefile(tmp_path)
-    with pytest.raises(ValueError, match="LineString"):
-        convert_shp_to_plant_csv(shp, tmp_path / "plants.csv")
+
+    result = shp_to_plant_csv(tmp_path, str(shp), "plants.csv", actor=None)
+
+    assert "LineString" in result["error"]
 
 
 # ── null-geometry features ───────────────────────────────────────────────
@@ -561,12 +584,10 @@ def test_null_geometry_feature_is_skipped_and_counted(tmp_path: Path) -> None:
     assert result.skipped_null_geometry == 1
 
 
-def test_convert_shp_to_plant_csv_reports_skipped_null_geometry(
-    tmp_path: Path,
-) -> None:
-    """The command reports the reader's skipped-null count beside its own row count."""
+def test_the_conversion_reports_skipped_null_geometry(tmp_path: Path) -> None:
+    """The conversion reports the reader's skipped-null count beside its own row count."""
     shp = _point_shapefile_with_null_feature(tmp_path)
-    result = convert_shp_to_plant_csv(shp, tmp_path / "plants.csv")
+    result = shp_to_plant_csv(tmp_path, str(shp), "plants.csv", actor=None)
     assert result["n_features"] == 1
     assert result["skipped_null_geometry"] == 1
 
@@ -582,7 +603,9 @@ def test_plant_csv_columns_matches_written_header(tmp_path: Path) -> None:
     )
 
     csv_path = tmp_path / "plants.csv"
-    convert_shp_to_plant_csv(_point_shapefile(tmp_path), csv_path)
+    shp_to_plant_csv(
+        tmp_path, str(_point_shapefile(tmp_path)), str(csv_path), actor=None
+    )
     with csv_path.open(newline="", encoding="utf-8") as f:
         header = next(csv.reader(f))
 
@@ -599,7 +622,12 @@ def test_every_written_column_survives_read_plant_csv_bytes(
     )
 
     csv_path = tmp_path / "plants.csv"
-    convert_shp_to_plant_csv(_alnum_point_shapefile(tmp_path), csv_path)
+    shp_to_plant_csv(
+        tmp_path,
+        str(_alnum_point_shapefile(tmp_path)),
+        str(csv_path),
+        actor=None,
+    )
 
     records = read_plant_csv_bytes(csv_path.read_bytes())
 
@@ -617,6 +645,11 @@ def test_converter_csv_carries_non_numeric_plot_number_verbatim(
 ) -> None:
     """The written CSV carries a non-numeric plot number through unchanged."""
     csv_path = tmp_path / "plants.csv"
-    convert_shp_to_plant_csv(_alnum_point_shapefile(tmp_path), csv_path)
+    shp_to_plant_csv(
+        tmp_path,
+        str(_alnum_point_shapefile(tmp_path)),
+        str(csv_path),
+        actor=None,
+    )
     rows = csv_rows(csv_path)
     assert rows[0]["plot_number"] == "A1"

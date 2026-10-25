@@ -15,8 +15,12 @@ def propose_trait(
     rationale: str,
     relayed_note: str = "",
     dataset_root: str = "",
+    *,
+    actor: str | None,
 ) -> dict:
     """Propose a trait's complete entry as a new unconfirmed revision of that trait in this project.
+
+    The proposal is ``actor``'s.
 
     The entry is its spec fields and what its delivered number means per delivery kind. The whole
     entry is proposed every time, carrying forward whatever is unchanged.
@@ -40,6 +44,7 @@ def propose_trait(
             rationale=rationale,
             relayed_note=relayed_note,
             dataset_root=dataset_root,
+            actor=actor,
         )
     except ValueError as e:
         return {"error": str(e)}

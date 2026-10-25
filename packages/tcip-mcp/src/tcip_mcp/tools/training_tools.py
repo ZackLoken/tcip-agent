@@ -30,10 +30,17 @@ from tcip_mcp.pipelines.schemas import (
     TilingSpec,
     checked_train_config,
 )
-from tcip_mcp.pipelines.training.hpo import Count
+from tcip_mcp.pipelines.training.hpo import (
+    Count,
+    available_schedulers,
+    available_search_algs,
+)
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_store import StoreError, canonical_path
+
+tool()(available_search_algs)
+tool()(available_schedulers)
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.datasets import BaseDataset
@@ -74,12 +81,51 @@ def data_with_selection(
 # Lazy imports of heavy dependencies inside tool functions to keep server startup fast.
 
 
+@tool()
 def preflight_config(
     project: Path, config: dict, smoke: bool = False, overfit: bool = False
 ) -> dict:
-    """Validate a training configuration before launching (:func:`_preflight`'s report).
+    """Validate a training configuration before launching it.
 
-    What ``smoke`` adds, the selection metric's read included, is :func:`_preflight`'s to state.
+    Answers ``{valid, issues, warnings}``: ``valid`` when no issue stands, every issue that
+    blocks a launch, and every warning that does not. The structural checks and a builder import
+    always run, and a configuration with no issue is resolved as its launch would resolve it.
+
+    Config structure, one placement for everything::
+
+        model_source: {builder, builder_kwargs, task, normalization,
+                       detector_geometry?}
+        data: {images_dir, labels_dir?, scope}  # known loaders, or a bespoke
+                                                # {dataset_source: {builder, ...}}
+        batch_size, stages, mixed_precision, device, seed, ...   # at the top level
+        evaluation: {trait, selection_metric, ...}
+        training_source: optional custom train(ctx) loop.
+
+    A nested ``training`` section is refused by name (``schemas.TrainConfigSchema``).
+
+    Args:
+        config: The full training configuration, as ``launch_training`` takes it.
+        smoke: When True, actually build the model and run ``check_model_contract`` (a train+eval
+            forward at the run's resolved dims and frame, every attribute head included). A
+            contract failure is appended to ``issues`` and blocks the launch. For a run that
+            resolved no frame, or a task the contract has no synthetic batch schema for, one real
+            batch of the resolved train dataset is used instead; if it yields none, that also
+            blocks. For a run with a validation side, the model the contract passed is then
+            validated on the batch the contract proved, at the run's evaluation keywords, and
+            the row is admitted as the metrics log admits one (``experiments.metrics_row``
+            encoded by the store's ``encode_log_line``); a refusal blocks, naming the field.
+            For a run the default trainer's regime trains (``TrainerReads.regime``), the run's
+            ``evaluation.selection_metric`` is then read from that row, or from the empty row of a
+            run with no validation side, by the trainer's own ``generic_trainer.selection_value``
+            at the contract's train loss; its refusal blocks. A run whose body is its own
+            ``training_source`` is not read, and a warning says so.
+            ``smoke.evaluation_not_run`` is why the validation leg did not run, ``None`` when it
+            did, and ``smoke.evaluation_row_keys`` the keys of the row it admitted, ``None`` when
+            it admitted none.
+        overfit: When True (with ``smoke``), also run the voluntary ``overfit_check`` diagnostic
+            and report it under ``overfit_check``, never gating. The stored report is already
+            rendered (``model_contract.render_overfit_report``), with non-finite losses rendered.
+
     """
     return _preflight(
         project, *_admitted(config, {}, project), smoke=smoke, overfit=overfit
@@ -133,43 +179,10 @@ def _preflight(
     The configuration is admitted once by :func:`_admitted`: ``spec``, ``None`` when the schema
     refused, its staged ``sources``, every import below reading their layout, and its ``issues``.
     It is checked before launching a run of ``project`` and resolved once
-    (:func:`~tcip_mcp.pipelines.data.split_construction.resolve_run`) when no issue stands.
-    Returns the report and the resolution, ``None`` when an issue stood first.
-
-    Config structure, one placement for everything::
-
-        model_source: {builder, builder_kwargs, task, normalization,
-                       detector_geometry?}
-        data: {images_dir, labels_dir?, scope}  # known loaders, or a bespoke
-                                                # {dataset_source: {builder, ...}}
-        batch_size, stages, mixed_precision, device, seed, ...   # at the top level
-        evaluation: {trait, selection_metric, ...}
-        training_source: optional custom train(ctx) loop.
-
-    A nested ``training`` section is refused by name (``schemas.TrainConfigSchema``).
-
-    Args:
-        smoke: When True, actually build the model and run ``check_model_contract`` (a train+eval
-            forward at the run's resolved dims and frame, every attribute head included). A
-            contract failure is appended to ``issues`` and blocks the launch. For a run that
-            resolved no frame, or a task the contract has no synthetic batch schema for, one real
-            batch of the resolved train dataset is used instead; if it yields none, that also
-            blocks. For a run with a validation side, the model the contract passed is then
-            validated on the batch the contract proved, at the run's evaluation keywords, and
-            the row is admitted as the metrics log admits one (``experiments.metrics_row``
-            encoded by the store's ``encode_log_line``); a refusal blocks, naming the field.
-            For a run the default trainer's regime trains (``TrainerReads.regime``), the run's
-            ``evaluation.selection_metric`` is then read from that row, or from the empty row of a
-            run with no validation side, by the trainer's own ``generic_trainer.selection_value``
-            at the contract's train loss; its refusal blocks. A run whose body is its own
-            ``training_source`` is not read, and a warning says so.
-            ``smoke.evaluation_not_run`` is why the validation leg did not run, ``None`` when it
-            did, and ``smoke.evaluation_row_keys`` the keys of the row it admitted, ``None`` when
-            it admitted none.
-        overfit: When True (with ``smoke``), also run the voluntary ``overfit_check`` diagnostic
-            and report it under ``overfit_check``, never gating. The stored report is already
-            rendered (``model_contract.render_overfit_report``), with non-finite losses rendered.
-
+    (:func:`~tcip_mcp.pipelines.data.split_construction.resolve_run`) when no issue stands;
+    ``smoke`` then builds the model and runs its contract, its validation row and its selection
+    metric's read, and ``overfit`` adds the voluntary diagnostic. Returns the report and the
+    resolution, ``None`` when an issue stood first.
     """
     from tcip_mcp.pipelines.data.label_queries import admits
 
@@ -951,6 +964,7 @@ def cancel_training(
     }
 
 
+@tool()
 def inspect_compute_resources(project: Path) -> dict:
     """Report the host's current compute headroom and ``project``'s active training runs.
 
@@ -1119,12 +1133,12 @@ def run_hyperparameter_search(
     search_seed: int,
     trial_budget: Count | None = None,
     relaunched_from: str | None = None,
+    actor: str | None,
 ) -> dict:
-    """Run hyperparameter optimization on Ray Tune, training each trial for real.
+    """Run hyperparameter optimization on Ray Tune, training each trial for real, by ``actor``.
 
     The search algorithm, constructed with ``search_seed``, and the trial scheduler are the
-    caller's choice; the ``hpo`` module's ``available_search_algs`` and ``available_schedulers``
-    list them.
+    caller's choice; the ``available_search_algs`` and ``available_schedulers`` tools list them.
 
     Trials optimize the ``evaluation.selection_metric`` ``base_config`` states, in the direction
     that metric's declaration says is better (``schemas.selection_of``), under the trait
@@ -1226,7 +1240,7 @@ def run_hyperparameter_search(
         search_seed=search_seed,
         trial_budget=trial_budget,
         relaunched_from=relaunched_from,
-        actor=None,
+        actor=actor,
     )
     if isinstance(opened, dict):
         return opened

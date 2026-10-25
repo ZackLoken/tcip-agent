@@ -102,7 +102,10 @@ point."""
 
 
 def available_search_algs() -> list[str]:
-    """Return native searches and backends whose module specifications are discoverable."""
+    """Return the search algorithms a sweep on this machine can name.
+
+    They are the native searches beside each backend whose module this environment carries.
+    """
     algs = sorted(_NATIVE_SEARCH)
     for name, (
         module,
@@ -116,7 +119,7 @@ def available_search_algs() -> list[str]:
 
 
 def available_schedulers() -> list[str]:
-    """Return the trial schedulers a sweep can name (:data:`_SCHEDULERS`), none a backend's."""
+    """Return the trial schedulers a sweep can name, each one of Ray Tune's own."""
     return list(_SCHEDULERS)
 
 

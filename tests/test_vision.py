@@ -476,126 +476,112 @@ class TestRenderGrid:
 # ── Vision MCP tool tests ──────────────────────────────────────────────────
 
 
+def _render(project: Path, **stated: object) -> dict:
+    """Return ``visualize``'s answer for the render ``stated``, admitted as its type admits one."""
+    from pydantic import TypeAdapter
+
+    from tcip_mcp.tools.vision_tools import VizRender, visualize
+
+    return visualize(project, TypeAdapter(VizRender).validate_python(stated))
+
+
 class TestVisualizeAnnotations:
     def test_detect(self, viz_dataset: Path) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
-
         img = str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg")
-        result = visualize(viz_dataset, "annotations", img, task="detect")
+        result = _render(
+            viz_dataset, source="annotations", path=img, task="detect"
+        )
         assert "error" not in result
         assert Path(result["image_path"]).is_file()
         assert result["count"] == 2
 
-    def test_with_class_names(self, viz_dataset: Path) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
-
-        img = str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg")
-        result = visualize(
-            viz_dataset,
-            "annotations",
-            img,
-            task="detect",
-            class_names="bud,nut",
-        )
-        assert "error" not in result
-        assert "bud" in result["summary"] or "nut" in result["summary"]
-
     def test_missing_image(self, tmp_path: Path) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
-
-        result = visualize(tmp_path, "annotations", "/nonexistent/image.jpg")
+        result = _render(
+            tmp_path, source="annotations", path="/nonexistent/image.jpg"
+        )
         assert "error" in result
 
     def test_no_labels(self, viz_dataset: Path) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
-
         # Create an image with no labels
         img = Image.new("RGB", (100, 100))
         no_label = viz_dataset / "images" / UNDATED_BUCKET / "no_label.jpg"
         img.save(no_label)
-        result = visualize(viz_dataset, "annotations", str(no_label))
-        assert "error" in result
-
-    def test_unknown_source(self, viz_dataset: Path) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
-
-        img = str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg")
-        result = visualize(viz_dataset, "bogus", img)
+        result = _render(viz_dataset, source="annotations", path=str(no_label))
         assert "error" in result
 
     def test_an_unreadable_label_returns_an_error_naming_the_document(
         self, viz_dataset: Path
     ) -> None:
         """An annotations render over an unreadable label returns an error naming the document."""
-        from tcip_mcp.tools.vision_tools import visualize
-
         img = viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"
         _damage(_label_key(img))
 
-        result = visualize(viz_dataset, "annotations", str(img))
+        result = _render(viz_dataset, source="annotations", path=str(img))
         assert "error" in result
         assert "img_001" in result["error"]
 
 
 class TestVisualizePredictions:
     def test_detect(self, viz_bucket: Path) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
-
         img = str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg")
-        result = visualize(
-            viz_bucket, "predictions", img, task="detect", bucket=PUBLISHED
+        result = _render(
+            viz_bucket,
+            source="predictions",
+            path=img,
+            task="detect",
+            bucket=PUBLISHED,
         )
         assert "error" not in result, result
         assert Path(result["image_path"]).is_file()
         assert result["count"] == 2
 
     def test_missing_predictions(self, viz_bucket: Path) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
-
         img = Image.new("RGB", (100, 100))
         no_pred = viz_bucket / "images" / UNDATED_BUCKET / "no_pred.jpg"
         img.save(no_pred)
-        result = visualize(
-            viz_bucket, "predictions", str(no_pred), bucket=PUBLISHED
+        result = _render(
+            viz_bucket,
+            source="predictions",
+            path=str(no_pred),
+            bucket=PUBLISHED,
         )
         assert "error" in result
 
-    def test_no_bucket_named_refuses_naming_the_parameter(
+    def test_a_predictions_render_names_its_bucket_by_its_type(
         self, viz_dataset: Path
     ) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
+        """A predictions render stating no bucket is refused by its type, naming the field."""
+        from pydantic import ValidationError
 
-        result = visualize(
-            viz_dataset,
-            "predictions",
-            str(viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"),
-        )
-        assert "requires bucket" in result["error"]
+        with pytest.raises(ValidationError, match="bucket"):
+            _render(
+                viz_dataset,
+                source="predictions",
+                path=str(
+                    viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"
+                ),
+            )
 
     def test_an_unreadable_prediction_returns_an_error_naming_the_document(
         self, viz_bucket: Path
     ) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
-
         img = viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg"
         _damage(_prediction_key(viz_bucket, img))
 
-        result = visualize(
-            viz_bucket, "predictions", str(img), bucket=PUBLISHED
+        result = _render(
+            viz_bucket, source="predictions", path=str(img), bucket=PUBLISHED
         )
         assert "img_001" in result["error"]
 
     def test_an_undecodable_bucket_record_refuses(
         self, viz_bucket: Path
     ) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
-
         _damage_record(viz_bucket)
 
-        result = visualize(
+        result = _render(
             viz_bucket,
-            "predictions",
-            str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg"),
+            source="predictions",
+            path=str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg"),
             bucket=PUBLISHED,
         )
         assert "error" in result
@@ -613,7 +599,6 @@ def test_scoring_and_the_comparison_render_state_one_count_for_one_image(
     pytest.importorskip("torch")
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.annotation_tools import score_predictions
-    from tcip_mcp.tools.vision_tools import visualize
     from tests._chain_fixtures import published
     from tests._producer_fixtures import label_image
 
@@ -649,12 +634,17 @@ def test_scoring_and_the_comparison_render_state_one_count_for_one_image(
     )
 
     scored = score_predictions(
-        str(image), PUBLISHED, IOU_THRESHOLD, REVIEW_CONF_FLOOR, detail=True
-    )
-    rendered = visualize(
         tmp_path,
-        "comparison",
         str(image),
+        PUBLISHED,
+        IOU_THRESHOLD,
+        REVIEW_CONF_FLOOR,
+        detail=True,
+    )
+    rendered = _render(
+        tmp_path,
+        source="comparison",
+        path=str(image),
         iou_threshold=IOU_THRESHOLD,
         bucket=PUBLISHED,
     )
@@ -679,13 +669,11 @@ def test_scoring_and_the_comparison_render_state_one_count_for_one_image(
 
 class TestVisualizeComparison:
     def test_basic(self, viz_bucket: Path) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
-
         img = str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg")
-        result = visualize(
+        result = _render(
             viz_bucket,
-            "comparison",
-            img,
+            source="comparison",
+            path=img,
             iou_threshold=IOU_THRESHOLD,
             bucket=PUBLISHED,
         )
@@ -699,20 +687,25 @@ class TestVisualizeComparison:
     ) -> None:
         """The scoring doors refuse an unstated IoU threshold by name.
 
-        A comparison render and ``score_predictions`` refuse naming ``iou_threshold`` when none
-        is stated, and ``score_predictions`` scores when one is.
+        A comparison render's type and ``score_predictions`` refuse naming ``iou_threshold``
+        when none is stated, and ``score_predictions`` scores when one is.
         """
+        from pydantic import ValidationError
+
         from tcip_mcp.tools.annotation_tools import score_predictions
-        from tcip_mcp.tools.vision_tools import visualize
 
         img = str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg")
-        unstated = visualize(viz_bucket, "comparison", img, bucket=PUBLISHED)
-        assert "iou_threshold" in unstated["error"]
+        with pytest.raises(ValidationError, match="iou_threshold"):
+            _render(
+                viz_bucket, source="comparison", path=img, bucket=PUBLISHED
+            )
         with pytest.raises(TypeError, match="iou_threshold"):
-            score_predictions(img, PUBLISHED, conf_threshold=REVIEW_CONF_FLOOR)  # type: ignore[call-arg]
+            score_predictions(  # type: ignore[call-arg]
+                viz_bucket, img, PUBLISHED, conf_threshold=REVIEW_CONF_FLOOR
+            )
 
         scored = score_predictions(
-            img, PUBLISHED, IOU_THRESHOLD, REVIEW_CONF_FLOOR
+            viz_bucket, img, PUBLISHED, IOU_THRESHOLD, REVIEW_CONF_FLOOR
         )
         assert "error" not in scored, scored
 
@@ -720,7 +713,6 @@ class TestVisualizeComparison:
         self, viz_bucket: Path
     ) -> None:
         from tcip_annotation.state import Annotation, BBox
-        from tcip_mcp.tools.vision_tools import visualize
         from tests._producer_fixtures import label_image
 
         img = viz_bucket / "images" / UNDATED_BUCKET / "img_005.jpg"
@@ -735,10 +727,10 @@ class TestVisualizeComparison:
             480,
         )
 
-        result = visualize(
+        result = _render(
             viz_bucket,
-            "comparison",
-            str(img),
+            source="comparison",
+            path=str(img),
             iou_threshold=IOU_THRESHOLD,
             bucket=PUBLISHED,
         )
@@ -751,15 +743,13 @@ class TestVisualizeComparison:
         self, viz_bucket: Path
     ) -> None:
         """A comparison render over an unreadable GT label returns an error naming the document."""
-        from tcip_mcp.tools.vision_tools import visualize
-
         img = viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg"
         _damage(_label_key(img))
 
-        result = visualize(
+        result = _render(
             viz_bucket,
-            "comparison",
-            str(img),
+            source="comparison",
+            path=str(img),
             iou_threshold=IOU_THRESHOLD,
             bucket=PUBLISHED,
         )
@@ -768,15 +758,13 @@ class TestVisualizeComparison:
     def test_an_unreadable_prediction_returns_an_error_naming_the_document(
         self, viz_bucket: Path
     ) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
-
         img = viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg"
         _damage(_prediction_key(viz_bucket, img))
 
-        result = visualize(
+        result = _render(
             viz_bucket,
-            "comparison",
-            str(img),
+            source="comparison",
+            path=str(img),
             iou_threshold=IOU_THRESHOLD,
             bucket=PUBLISHED,
         )
@@ -785,14 +773,12 @@ class TestVisualizeComparison:
     def test_an_undecodable_bucket_record_refuses(
         self, viz_bucket: Path
     ) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
-
         _damage_record(viz_bucket)
 
-        result = visualize(
+        result = _render(
             viz_bucket,
-            "comparison",
-            str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg"),
+            source="comparison",
+            path=str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg"),
             iou_threshold=IOU_THRESHOLD,
             bucket=PUBLISHED,
         )
@@ -960,9 +946,9 @@ class TestDisplayRead:
 
 class TestVisualizeDatasetSample:
     def test_sample(self, viz_dataset: Path) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
-
-        result = visualize(viz_dataset, "dataset", str(viz_dataset), n=4)
+        result = _render(
+            viz_dataset, source="dataset", path=str(viz_dataset), n=4
+        )
         assert "error" not in result
         assert Path(result["image_path"]).is_file()
         assert result["count"] == 4
@@ -971,24 +957,22 @@ class TestVisualizeDatasetSample:
     def test_only_the_images_of_a_capture_are_sampled(
         self, viz_dataset: Path
     ) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
-
         Image.new("RGB", (64, 48)).save(viz_dataset / "images" / "loose.jpg")
         (viz_dataset / "images" / UNDATED_BUCKET / "nested").mkdir()
         Image.new("RGB", (64, 48)).save(
             viz_dataset / "images" / UNDATED_BUCKET / "nested" / "deep.jpg"
         )
 
-        result = visualize(viz_dataset, "dataset", str(viz_dataset), n=16)
+        result = _render(
+            viz_dataset, source="dataset", path=str(viz_dataset), n=16
+        )
 
         assert "error" not in result, result
         assert result["total_images"] == 4
 
     def test_no_images(self, tmp_path: Path) -> None:
-        from tcip_mcp.tools.vision_tools import visualize
-
         (tmp_path / "images" / UNDATED_BUCKET).mkdir(parents=True)
-        result = visualize(tmp_path, "dataset", str(tmp_path), n=4)
+        result = _render(tmp_path, source="dataset", path=str(tmp_path), n=4)
         assert "error" in result
 
     def test_a_corrupt_label_returns_an_error_not_an_unlabeled_render(
@@ -996,7 +980,6 @@ class TestVisualizeDatasetSample:
     ) -> None:
         """A dataset render over a corrupt label returns an error naming the image."""
         from tcip_annotation.state import Annotation, BBox
-        from tcip_mcp.tools.vision_tools import visualize
         from tests._producer_fixtures import label_image
 
         bad = viz_dataset / "images" / UNDATED_BUCKET / "img_bad.jpg"
@@ -1011,7 +994,9 @@ class TestVisualizeDatasetSample:
 
         # n covers every image (5, with img_bad): sampling is otherwise random, and the corrupt
         # image must be reached deterministically for this assertion.
-        result = visualize(viz_dataset, "dataset", str(viz_dataset), n=5)
+        result = _render(
+            viz_dataset, source="dataset", path=str(viz_dataset), n=5
+        )
         assert "error" in result
         assert "img_bad" in result["error"]
 
@@ -1045,9 +1030,7 @@ class TestVisualizeDatasetSample:
             return real_grid(image_paths, **kwargs)
 
         monkeypatch.setattr(vision_tools, "render_grid", spy)
-        result = vision_tools.visualize(
-            tmp_path, "dataset", str(tmp_path), n=1
-        )
+        result = _render(tmp_path, source="dataset", path=str(tmp_path), n=1)
 
         assert "error" not in result
         viz_dir = (tmp_path / ".tcip" / "artifacts" / "viz").resolve()

@@ -27,10 +27,18 @@ def _project_with_records(tmp_path: Path) -> Path:
 
     project = new_project(tmp_path).root
     report_friction(
-        project, category="missing_tool", detail="a separator / in the detail"
+        project,
+        category="missing_tool",
+        detail="a separator / in the detail",
+        actor=None,
     )
     write_retrospective(
-        project, project_id="p", task="t", worked="w", did_not_work="d"
+        project,
+        project_id="p",
+        task="t",
+        worked="w",
+        did_not_work="d",
+        actor=None,
     )
     fx.seed_confirmed_count(project)
     return project

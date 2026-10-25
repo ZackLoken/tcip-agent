@@ -220,7 +220,7 @@ def test_save_annotations_refuses_missing_subject(
     image = _write_image(tmp_path / "images" / UNDATED_BUCKET, "img_001")
 
     res = save_annotations(
-        bound, str(image), annotations=[{"bbox": [10, 10, 40, 40]}]
+        bound, str(image), annotations=[{"bbox": [10, 10, 40, 40]}], actor=None
     )
     assert "error" in res and "subject" in res["error"]
     assert not tcip_store.exists(image_label_key(image))
@@ -230,6 +230,7 @@ def test_save_annotations_refuses_missing_subject(
         bound,
         str(image),
         annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}],
+        actor=None,
     )
     assert ok.get("count") == 1 and tcip_store.exists(image_label_key(image))
 
@@ -256,6 +257,7 @@ def test_save_annotations_prefers_points_over_bbox(
                 "bbox": [10, 20, 110, 220],
             }
         ],
+        actor=None,
     )
     assert res.get("count") == 1
 
@@ -293,7 +295,10 @@ def test_save_annotations_refuses_a_polygon_that_is_no_shape(
     image = _write_image(tmp_path / "images" / UNDATED_BUCKET, "img_001")
 
     res = save_annotations(
-        bound, str(image), annotations=[{"subject": "bud", **geometry}]
+        bound,
+        str(image),
+        annotations=[{"subject": "bud", **geometry}],
+        actor=None,
     )
 
     assert "polygon" in res.get("error", "")
@@ -332,6 +337,7 @@ def test_save_annotations_accepts_rings(
                 ],
             }
         ],
+        actor=None,
     )
     assert res.get("count") == 1
     (ann,) = saved_annotations(image)
@@ -355,6 +361,7 @@ def test_save_annotations_accepts_rings(
         bound,
         str(image),
         annotations=[{"subject": "bud", "rings": [[[1, 2], [3, 2], [3, 4]]]}],
+        actor=None,
     )
     assert res2.get("count") == 1
     (ann2,) = saved_annotations(image)
@@ -374,6 +381,7 @@ def test_save_annotations_accepts_rings(
                 "bbox": [10, 20, 110, 220],
             }
         ],
+        actor=None,
     )
     assert res3.get("count") == 1
     (ann3,) = saved_annotations(image)

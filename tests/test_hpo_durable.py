@@ -76,6 +76,7 @@ def test_run_hyperparameter_search_threads_the_sweeps_directory_and_records_its_
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert captured["sweep_dir"].name.startswith("hpo_")
@@ -112,6 +113,7 @@ def test_run_hyperparameter_search_resolves_direction_from_the_top_level_evaluat
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
     assert any(
         "'training' is not a config section" in issue
@@ -126,6 +128,7 @@ def test_run_hyperparameter_search_resolves_direction_from_the_top_level_evaluat
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert captured["metric"] == "objective"
@@ -174,6 +177,7 @@ def test_a_sweep_is_on_disk_while_it_runs_and_its_trials_are_its_own_run_directo
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
     sweep_id = result["sweep"]["sweep_id"]
 
@@ -224,6 +228,7 @@ def test_a_sweep_whose_search_raises_ends_failed_naming_the_error(
             n_trials=1,
             **fifo_search(),
             search_seed=0,
+            actor=None,
         )
 
     sweep = tt.monitor_training(tmp_path, captured["sweep_id"])["sweep"]
@@ -253,6 +258,7 @@ def test_run_hyperparameter_search_refuses_before_minting_when_the_base_config_f
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result
@@ -296,6 +302,7 @@ def test_run_hyperparameter_search_checks_a_swept_placeholder_axis_at_its_resolv
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -335,6 +342,7 @@ def test_run_hyperparameter_search_refuses_a_swept_axis_any_of_whose_choices_fai
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert "'still'" in " ".join([result["error"], *result["issues"]])
@@ -372,6 +380,7 @@ def test_run_hyperparameter_search_admits_a_swept_axis_whose_every_choice_resolv
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -395,6 +404,7 @@ def test_run_hyperparameter_search_passes_agent_search_and_scheduler_choices(
         scheduler=asha_scheduler(),
         max_concurrent=2,
         search_seed=0,
+        actor=None,
     )
 
     assert (
@@ -429,6 +439,7 @@ def test_run_hyperparameter_search_refuses_an_unstated_search_setting_by_name(
             param_space=sweep_space(),
             search_seed=0,
             **stated,
+            actor=None,
         )
     assert not captured
 
@@ -472,6 +483,7 @@ def test_run_hyperparameter_search_refuses_a_scheduler_setting_unstated_or_not_t
         search_alg="random",
         scheduler=scheduler,
         search_seed=0,
+        actor=None,
     )
 
     assert named in result["error"], result
@@ -527,6 +539,7 @@ def test_a_sweeps_recorded_scheduler_is_the_one_ray_tunes_under(
         search_alg="random",
         scheduler=scheduler,
         search_seed=0,
+        actor=None,
     )
 
     sweep = tt.monitor_training(tmp_path, result["sweep"]["sweep_id"])["sweep"]

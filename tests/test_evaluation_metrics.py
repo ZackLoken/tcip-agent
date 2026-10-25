@@ -1527,6 +1527,7 @@ def test_score_predictions_folder_counts_every_image_through_the_matcher(
     from tests.conftest import DATA_DIR_BUCKET
 
     r = score_predictions(
+        data_dir,
         str(data_dir / "images" / "2-11-26"),
         DATA_DIR_BUCKET,
         iou_threshold=0.5,

@@ -235,6 +235,7 @@ def test_an_mcp_door_executes_a_recorded_acknowledgment_and_never_originates_one
         "out/counts.csv",
         trait=fx.COUNT_TRAIT,
         acknowledgment_id="invented",
+        actor=None,
     )
 
     assert "no acknowledgment 'invented' is recorded" in refused["error"]
@@ -253,6 +254,7 @@ def test_an_mcp_door_executes_a_recorded_acknowledgment_and_never_originates_one
         "out/counts.csv",
         trait=fx.COUNT_TRAIT,
         acknowledgment_id=act.acknowledgment_id,
+        actor=None,
     )
     assert (
         shipped["validated"] is False

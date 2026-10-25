@@ -15,8 +15,10 @@ def register_model(
     checkpoint_path: str = "",
     metrics: dict | None = None,
     tags: list[str] | None = None,
+    *,
+    actor: str | None,
 ) -> dict:
-    """Register a foreign checkpoint in the project model registry.
+    """Register a foreign checkpoint in the project model registry, the registration ``actor``'s.
 
     A foreign checkpoint is one no run of this project produced, or a second checkpoint of a run
     under a name of its own. The entry's ``metrics_source`` is ``"caller"`` when ``metrics``
@@ -33,7 +35,7 @@ def register_model(
     """
     registry = ModelRegistry(str(project))
     return registry.register_model(
-        name, checkpoint_path, metrics=metrics, tags=tags
+        name, checkpoint_path, metrics=metrics, tags=tags, actor=actor
     ).model_dump()
 
 

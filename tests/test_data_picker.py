@@ -287,6 +287,7 @@ def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
         grouping="stem",
         stratify_foreground=True,
         rationale=RATIONALE,
+        actor=None,
     )
     assert "error" not in drawn, drawn
 
@@ -438,7 +439,7 @@ def test_list_split_choices_offers_a_frozen_manifest(tmp_path: Path) -> None:
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     _real_drawn_experiment(tmp_path, root, "exp-src")
-    frozen = freeze_selection(tmp_path, "exp-src")
+    frozen = freeze_selection(tmp_path, "exp-src", actor=None)
     assert "error" not in frozen, frozen
 
     picked_cfg = _bespoke_config(tmp_path, root / "images" / DATES[0])
@@ -466,8 +467,8 @@ def test_list_split_choices_offers_two_frozen_manifests_under_one_splits_directo
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     _real_drawn_experiment(tmp_path, root, "exp-first")
     _real_drawn_experiment(tmp_path, root, "exp-second")
-    first = freeze_selection(tmp_path, "exp-first")
-    second = freeze_selection(tmp_path, "exp-second")
+    first = freeze_selection(tmp_path, "exp-first", actor=None)
+    second = freeze_selection(tmp_path, "exp-second", actor=None)
     assert "error" not in first, first
     assert "error" not in second, second
     assert Path(first["selection_dir"]).parent == root / "splits"

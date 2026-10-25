@@ -49,7 +49,7 @@ def named_project(
     from tcip_web.state import OpenProject
 
     result = initialize_project(
-        str(path), display_name, "north orchard", invariances
+        str(path), display_name, "north orchard", invariances, actor=None
     )
     assert "error" not in result, result
     return OpenProject(path, result["id"])

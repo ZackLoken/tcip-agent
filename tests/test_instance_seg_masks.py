@@ -440,6 +440,7 @@ def test_a_masked_bucket_delivers_the_same_counts_on_every_read(
         bucket=bucket,
         device="cpu",
         stated=TILED_PASS,
+        actor=None,
     )
     assert "error" not in ran, ran
 
@@ -449,6 +450,7 @@ def test_a_masked_bucket_delivers_the_same_counts_on_every_read(
         bucket,
         str(tmp_path / "refused.csv"),
         trait=fx.COUNT_TRAIT,
+        actor=None,
     )
     rows = []
     for name in ("a", "b"):
@@ -497,6 +499,7 @@ def test_run_inference_never_stamps_a_mask_threshold_into_annotation_attributes(
         bucket="preds/2026-01-01",
         device="cpu",
         stated=TILED_PASS,
+        actor=None,
     )  # a masked detection
     assert "error" not in r
 
@@ -523,6 +526,7 @@ def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(
         bucket="preds/2026-01-01",
         device="cpu",
         stated=TILED_PASS,
+        actor=None,
     )
     assert "error" not in r
     assert r["execution"]["tile_size"] == TILE
@@ -535,6 +539,7 @@ def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(
         bucket="preds/2026-01-02",
         device="cpu",
         stated=UNSTATED_LATTICE_PASS,
+        actor=None,
     )
     assert "error" not in implicit, implicit
     assert (

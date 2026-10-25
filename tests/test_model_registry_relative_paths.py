@@ -48,7 +48,7 @@ def test_archive_project_carries_a_registered_checkpoint_outside_models(
     weights_dir.mkdir()
     ckpt = weights_dir / "m.pt"
     _checkpoint(ckpt, "weights")
-    ModelRegistry(str(project)).register_model("m", str(ckpt))
+    ModelRegistry(str(project)).register_model("m", str(ckpt), actor=None)
     out = tmp_path / "out.zip"
 
     result = archive_project(
@@ -113,10 +113,10 @@ def test_dataset_and_checkpoint_spellers_agree_on_the_same_geometry(
 
     reg = ModelRegistry(str(project))
     entry = reg.register_model(
-        "m", str(project / ".tcip" / "models" / "m.pt")
+        "m", str(project / ".tcip" / "models" / "m.pt"), actor=None
     ).entry
     assert "error" not in register_dataset(
-        project, str(nested_dataset), "chestnut"
+        project, str(nested_dataset), "chestnut", actor=None
     )
     stored_ckpt = read_registry_index(project)[0].checkpoint_path
     (dataset_entry,) = read_datasets(project)
@@ -127,8 +127,10 @@ def test_dataset_and_checkpoint_spellers_agree_on_the_same_geometry(
 
     outside = tmp_path / "elsewhere"
     _checkpoint(outside / "m2.pt", "other weights")
-    reg.register_model("m2", str(outside / "m2.pt"))
-    assert "error" not in register_dataset(project, str(outside), "chestnut")
+    reg.register_model("m2", str(outside / "m2.pt"), actor=None)
+    assert "error" not in register_dataset(
+        project, str(outside), "chestnut", actor=None
+    )
     stored_outside = read_registry_index(project)[1].checkpoint_path
     outside_entry = next(
         e for e in read_datasets(project) if e.id != dataset_entry.id
@@ -145,7 +147,7 @@ def _register_internal_checkpoint(project: Path) -> tuple[ModelRegistry, str]:
     ckpt = project / ".tcip" / "models" / "m.pt"
     _checkpoint(ckpt, "weights")
     reg = ModelRegistry(str(project))
-    reg.register_model("m", str(ckpt))
+    reg.register_model("m", str(ckpt), actor=None)
     return reg, str(ckpt)
 
 
@@ -182,7 +184,7 @@ def test_rank_registered_models_tool_answers_resolved_absolute(
     ckpt = project / ".tcip" / "models" / "m.pt"
     _checkpoint(ckpt, "weights")
     ModelRegistry(str(project)).register_model(
-        "m", str(ckpt), metrics={"val_map50": 0.9}
+        "m", str(ckpt), metrics={"val_map50": 0.9}, actor=None
     )
 
     result = rank_registered_models(
@@ -203,7 +205,11 @@ def test_explicit_register_model_return_is_resolved_absolute(
     ckpt = project / ".tcip" / "models" / "m.pt"
     _checkpoint(ckpt, "weights")
 
-    entry = ModelRegistry(str(project)).register_model("m", str(ckpt)).entry
+    entry = (
+        ModelRegistry(str(project))
+        .register_model("m", str(ckpt), actor=None)
+        .entry
+    )
 
     assert Path(entry.checkpoint_path) == ckpt.resolve()
 
@@ -419,7 +425,7 @@ def test_a_symlink_to_a_checkpoint_outside_root_stores_the_resolved_external_loc
         pytest.skip(f"this environment cannot create a symlink: {exc}")
 
     reg = ModelRegistry(str(project))
-    reg.register_model("m", str(link))
+    reg.register_model("m", str(link), actor=None)
 
     stored = read_registry_index(project)[0].checkpoint_path
     assert stored == str(real.resolve())
@@ -448,7 +454,7 @@ def test_a_symlink_to_a_checkpoint_under_root_stores_the_resolved_internal_locat
         pytest.skip(f"this environment cannot create a symlink: {exc}")
 
     reg = ModelRegistry(str(project))
-    reg.register_model("m", str(link))
+    reg.register_model("m", str(link), actor=None)
 
     stored = read_registry_index(project)[0].checkpoint_path
     assert stored == "weights_home/m.pt"

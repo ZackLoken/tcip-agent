@@ -92,6 +92,7 @@ def test_build_plant_mapping_refuses_when_every_capture_carries_no_position(
         name="valley",
         images_root=str(images_root),
         plant_registry=registry,
+        actor=None,
     )
     assert "error" in res
     assert "plant-tag mechanism" in res["error"]
@@ -116,6 +117,7 @@ def test_build_plant_mapping_names_the_unreadable_capture_before_the_position_cl
         name="valley",
         images_root=str(images_root),
         plant_registry=registry,
+        actor=None,
     )
     assert "error" in res
     assert "P1_corrupt.jpg could not be opened" in res["error"]
@@ -299,6 +301,7 @@ def _assert_all_doors_refuse(
         dataset_root=str(dataset_root),
         buckets=list(preds_by_date.values()),
         output_csv_path=str(out_csv),
+        actor=None,
     )
     assert "error" in res
     assert expected_fragment in res["error"]
@@ -559,6 +562,7 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
         name="valley",
         images_root=str(images_root),
         plant_registry=registry,
+        actor=None,
     )
     assert "error" not in build_res, build_res
     assert build_res["summary"]["per_date"][DATE]["n_unattributed"] == 1
@@ -602,6 +606,7 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
         name="valley",
         images_root=str(images_root),
         plant_registry=registry,
+        actor=None,
     )
     assert "error" not in build_res, build_res
     assert build_res["summary"]["totals"]["n_unattributed"] == 1
@@ -638,6 +643,7 @@ def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one
         images_root=str(images_root),
         plant_registry=registry,
         dates=[DATE, empty_date],
+        actor=None,
     )
     assert "error" not in build_res, build_res
     assert build_res["summary"]["per_date"][empty_date]["n_images"] == 0
@@ -662,6 +668,7 @@ def test_a_fully_positioned_scene_keeps_delivering_with_zero_unattributed(
         name="valley",
         images_root=str(images_root),
         plant_registry=registry,
+        actor=None,
     )
     assert "error" not in build_res, build_res
     assert build_res["summary"]["totals"]["n_unattributed"] == 0
@@ -692,6 +699,7 @@ def test_a_raster_beside_positioned_photographs_still_delivers(
         name="valley",
         images_root=str(images_root),
         plant_registry=registry,
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -731,6 +739,7 @@ def test_a_capture_at_the_origin_is_admitted_as_positioned(
         name="valley",
         images_root=str(images_root),
         plant_registry=registry,
+        actor=None,
     )
     assert "error" not in res, res
     assert res["summary"]["totals"]["n_mapped"] == 1

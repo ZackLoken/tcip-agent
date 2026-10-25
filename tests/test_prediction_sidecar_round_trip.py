@@ -49,6 +49,7 @@ def _publish(
         bucket="baseline/2026-03-01",
         device="cpu",
         stated=Stated(**stated),
+        actor=None,
     )
 
 

@@ -563,6 +563,7 @@ def test_the_count_tool_hands_back_no_counts_when_it_refuses(
         bucket.name,
         str(tmp_path / "o.csv"),
         trait=fx.COUNT_TRAIT,
+        actor=None,
     )
 
     assert "states no operationalization" in res["error"]
@@ -659,5 +660,5 @@ def test_deliver_per_image_counts_refuses_with_no_trait_argument(
 
     with pytest.raises(TypeError, match="'trait'"):
         deliver_per_image_counts(
-            tmp_path, str(tmp_path), "m/d", str(tmp_path / "o.csv")
+            tmp_path, str(tmp_path), "m/d", str(tmp_path / "o.csv"), actor=None
         )  # type: ignore[call-arg]  # the omission is the subject

@@ -346,7 +346,10 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(
     unstated = tmp_path / "unstated.pt"
     torch.save(payload, str(unstated))
     assert "error" not in register_model(
-        tmp_path, name="unstated-width", checkpoint_path=str(unstated)
+        tmp_path,
+        name="unstated-width",
+        checkpoint_path=str(unstated),
+        actor=None,
     )
 
     r = evaluate_model(
@@ -586,6 +589,7 @@ def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
             holdout_ratio=0.25,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     assert "error" not in drawn, drawn
     confirm_count_trait(tmp_path)

@@ -23,8 +23,12 @@ def deliver_per_plant_csv(
     plant_mapping: str = "",
     scale_assessment_id: str | None = None,
     acknowledgment_id: str | None = None,
+    *,
+    actor: str | None,
 ) -> dict:
     """Deliver per-image ``results`` aggregated per plant as a CSV for the plants ``plants`` names.
+
+    The delivery is ``actor``'s.
 
     The general per-plant CSV door: the results are aggregated under the trait's confirmed
     ``plant_aggregation`` and delivered over the published buckets they came from. The
@@ -93,7 +97,7 @@ def deliver_per_plant_csv(
             plant_mapping=disclosure,
             scale_assessment_id=scale_assessment_id,
             acknowledgment_id=acknowledgment_id,
-            actor=None,
+            actor=actor,
         )
     except (
         TraitUnknownError,

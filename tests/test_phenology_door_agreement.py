@@ -51,6 +51,7 @@ def test_the_web_and_mcp_deliveries_agree_on_the_majority_column_and_the_revisio
         dataset_root=body["dataset_root"],
         buckets=body["buckets"],
         output_csv_path=str(out_csv),
+        actor=None,
     )
     assert "error" not in result, result
     with out_csv.open(newline="", encoding="utf-8") as fh:

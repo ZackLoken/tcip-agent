@@ -36,7 +36,9 @@ def test_archive_then_import_lands_a_registry_naming_the_restored_files(
         src / ".tcip" / "models" / "foreign.pt",
         "a foreign checkpoint's own weights",
     )
-    register_model(src, name="foreign", checkpoint_path=str(foreign))
+    register_model(
+        src, name="foreign", checkpoint_path=str(foreign), actor=None
+    )
 
     zip_path = tmp_path / "export.zip"
     assert "error" not in archive_project(

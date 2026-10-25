@@ -109,6 +109,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
             chain.bucket,
             output_path=str(root / "counts.csv"),
             trait=fx.COUNT_TRAIT,
+            actor=None,
         )
     )
     out["validated"] = served(project)
@@ -124,6 +125,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
             name="valley",
             images_root=str(images_root),
             plant_registry=registry,
+            actor=None,
         )
     )
     _seed_currant_bloom_trait(root)
@@ -146,6 +148,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
             images_root=str(images_root),
             plant_registry=registry,
             supersede=True,
+            actor=None,
         )
     )
     out["archived_mapping"] = served(project)

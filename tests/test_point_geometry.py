@@ -380,7 +380,7 @@ def test_mcp_read_annotations_tool_returns_a_point(tmp_path: Path) -> None:
     label_image(
         img, [Annotation(subject="bud", geometry=Point(12.0, 34.0))], 100, 80
     )
-    res = read_annotations_tool(str(img))
+    res = read_annotations_tool(tmp_path, str(img))
     (ann,) = res["labels"]["annotations"]
     assert ann["point"] == [12.0, 34.0]
 
@@ -421,6 +421,7 @@ def test_save_annotations_tool_writes_an_incoming_point(
         bound,
         str(img),
         annotations=[{"subject": "bud", "point": [12.0, 34.0]}],
+        actor=None,
     )
     assert "error" not in res
     (stored,) = saved_annotations(img)
@@ -446,6 +447,7 @@ def test_save_annotations_tool_keeps_points_and_point_distinct(
             {"subject": "bud", "points": [[50, 50], [70, 50], [70, 70]]},
             {"subject": "bud", "point": [12.0, 34.0]},
         ],
+        actor=None,
     )
     kinds = [type(a.geometry) for a in saved_annotations(img)]
     assert kinds == [Polygon, Point]

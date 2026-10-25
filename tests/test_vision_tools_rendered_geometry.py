@@ -82,13 +82,20 @@ def test_every_region_of_a_split_annotation_is_drawn_on_the_mask_render(
     An occlusion-split object is one instance in two regions: the render counts one instance
     and paints inside each region, not outside them.
     """
-    from tcip_mcp.tools.vision_tools import visualize
+    from tcip_mcp.tools.vision_tools import AnnotationsRender, visualize
 
     result = visualize(
         split_instance_dataset,
-        "annotations",
-        str(split_instance_dataset / "images" / UNDATED_BUCKET / "split.png"),
-        task="segment",
+        AnnotationsRender(
+            source="annotations",
+            path=str(
+                split_instance_dataset
+                / "images"
+                / UNDATED_BUCKET
+                / "split.png"
+            ),
+            task="segment",
+        ),
     )
     assert "error" not in result, result
     assert result["count"] == 1  # one instance, drawn as its several regions
@@ -107,7 +114,7 @@ def test_every_region_of_a_split_prediction_is_drawn_on_the_mask_render(
 
     The render counts one instance and paints inside each region, not outside them.
     """
-    from tcip_mcp.tools.vision_tools import visualize
+    from tcip_mcp.tools.vision_tools import PredictionsRender, visualize
     from tests._chain_fixtures import published
 
     root = split_instance_dataset
@@ -138,7 +145,13 @@ def test_every_region_of_a_split_prediction_is_drawn_on_the_mask_render(
     )
 
     result = visualize(
-        root, "predictions", str(image), task="segment", bucket="split-masks"
+        root,
+        PredictionsRender(
+            source="predictions",
+            path=str(image),
+            task="segment",
+            bucket="split-masks",
+        ),
     )
     assert "error" not in result, result
     assert result["count"] == 1

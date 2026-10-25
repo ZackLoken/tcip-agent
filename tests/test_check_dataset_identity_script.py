@@ -1,11 +1,14 @@
 """Tests for the outcomes of ``tcip check-dataset-identity``.
 
-The outcomes are OK, CHANGED, NEVER-RECORDED, and the identity read at the path the project's
-registry holds: MOVED and GONE.
+The command prints the verdict ``check_dataset_identity`` answers, its state one of unchanged,
+unregistered, changed and never recorded, and exits 0 for each, the verdict being the answer;
+each path the project's registry holds for the id reads moved or gone where the dataset is no
+longer there.
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -34,21 +37,44 @@ def _registered(
     root.mkdir()
     if content:
         _real_dataset(root)
-    result = register_dataset(project, str(root), "chestnut")
+    result = register_dataset(project, str(root), "chestnut", actor=None)
     assert "error" not in result, result
     return project, root, result
 
 
-def test_a_matching_fingerprint_reports_ok(tmp_path: Path) -> None:
+def _check(root: Path, project: Path) -> dict:
+    """Run the command over ``root`` for ``project``; return the verdict it printed, exiting 0."""
+    completed = run_tcip(
+        "check-dataset-identity",
+        [
+            *("--dataset-root", str(root)),
+            *("--project", str(project), "--user", "tester"),
+        ],
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    return json.loads(completed.stdout)
+
+
+def test_a_matching_fingerprint_reports_unchanged(tmp_path: Path) -> None:
     project, root, _ = _registered(tmp_path)
 
-    completed = run_tcip(
-        "check-dataset-identity", [str(root), "--project", str(project)]
-    )
+    verdict = _check(root, project)
 
-    assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert "OK" in completed.stdout
-    assert "MOVED" not in completed.stdout and "GONE" not in completed.stdout
+    assert verdict["state"] == "unchanged"
+    assert [entry["state"] for entry in verdict["registered"]] == ["in_place"]
+
+
+def test_content_carrying_no_identity_reports_unregistered(
+    tmp_path: Path,
+) -> None:
+    project = new_project(tmp_path / "project").root
+    root = tmp_path / "dataset"
+    _real_dataset(root)
+
+    verdict = _check(root, project)
+
+    assert verdict["state"] == "unregistered"
+    assert verdict["reason"]
 
 
 def test_a_real_content_change_still_reports_changed(tmp_path: Path) -> None:
@@ -60,12 +86,10 @@ def test_a_real_content_change_still_reports_changed(tmp_path: Path) -> None:
         root / "images" / "2024-01-01" / "b.png", [], 10, 10, keep_empty=True
     )
 
-    completed = run_tcip(
-        "check-dataset-identity", [str(root), "--project", str(project)]
-    )
+    verdict = _check(root, project)
 
-    assert completed.returncode == 2, completed.stdout + completed.stderr
-    assert "CHANGED" in completed.stdout
+    assert verdict["state"] == "changed"
+    assert verdict["fingerprint"] != verdict["identity"]["fingerprint"]
 
 
 def test_a_never_recorded_fingerprint_is_its_own_outcome(
@@ -76,52 +100,44 @@ def test_a_never_recorded_fingerprint_is_its_own_outcome(
     # Real content shows up after the fingerprint-less registration.
     _real_dataset(root)
 
-    completed = run_tcip(
-        "check-dataset-identity", [str(root), "--project", str(project)]
-    )
+    verdict = _check(root, project)
 
-    assert completed.returncode == 4, completed.stdout + completed.stderr
-    assert "NEVER-RECORDED" in completed.stdout
+    assert verdict["state"] == "never_recorded"
 
 
 def test_the_same_identity_at_another_path_is_reported_moved(
     tmp_path: Path,
 ) -> None:
-    """A copy carrying the identity read at the registered path is reported MOVED.
+    """A copy carrying the identity read at the registered path is reported moved.
 
-    The report names the id and the path it is registered at.
+    The verdict names the path the id is registered at.
     """
     project, root, result = _registered(tmp_path)
     copy = tmp_path / "copied"
     ts.release_root(root)
     shutil.copytree(root, copy)
 
-    completed = run_tcip(
-        "check-dataset-identity", [str(copy), "--project", str(project)]
-    )
+    verdict = _check(copy, project)
 
-    assert (
-        f"MOVED: id {result['id']} is registered at {root}" in completed.stdout
-    ), completed.stdout + completed.stderr
+    (entry,) = verdict["registered"]
+    assert (entry["path"], entry["state"]) == (str(root), "moved")
+    assert verdict["identity"]["id"] == result["id"]
 
 
 def test_a_registered_path_holding_no_identity_is_reported_gone(
     tmp_path: Path,
 ) -> None:
-    """A registered path holding no identity is reported GONE.
+    """A registered path holding no identity is reported gone.
 
-    A dataset moved away from its registered path is reported GONE, naming the id and that
-    path.
+    A dataset moved away from its registered path is reported gone at that path, naming why.
     """
-    project, root, result = _registered(tmp_path)
+    project, root, _ = _registered(tmp_path)
     moved = tmp_path / "moved"
     ts.release_root(root)
     shutil.move(str(root), str(moved))
 
-    completed = run_tcip(
-        "check-dataset-identity", [str(moved), "--project", str(project)]
-    )
+    verdict = _check(moved, project)
 
-    assert (
-        f"GONE: id {result['id']} is registered at {root}" in completed.stdout
-    ), completed.stdout + completed.stderr
+    (entry,) = verdict["registered"]
+    assert (entry["path"], entry["state"]) == (str(root), "gone")
+    assert entry["unreadable"]

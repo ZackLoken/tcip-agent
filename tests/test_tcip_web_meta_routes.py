@@ -32,6 +32,7 @@ def test_reports_surfaces_written_report(
         category="ambiguous_data",
         detail="two plausible interpretations of the label dir",
         context={"crop": "currant"},
+        actor=None,
     )
     (entry,) = opened_client.get("/api/meta/reports").json()["entries"]
     rep = entry["record"]
@@ -57,6 +58,7 @@ def test_retrospectives_surfaces_written_retro(
         task="count fruit clusters",
         worked="instance seg held up",
         did_not_work="overlapping clusters merged",
+        actor=None,
     )
     (entry,) = opened_client.get("/api/meta/retrospectives").json()["entries"]
     assert entry["record"]["project_id"] == "elderberry-cluster"
@@ -81,7 +83,10 @@ def test_a_route_and_load_project_memory_answer_one_page_of_the_same_records(
     """The route's page and the tool's page over the same records agree entry for entry."""
     for i in range(3):
         report_friction(
-            opened_project, category="missing_tool", detail=f"report {i}"
+            opened_project,
+            category="missing_tool",
+            detail=f"report {i}",
+            actor=None,
         )
         write_retrospective(
             opened_project,
@@ -89,6 +94,7 @@ def test_a_route_and_load_project_memory_answer_one_page_of_the_same_records(
             task=f"task {i}",
             worked="w",
             did_not_work="d",
+            actor=None,
         )
     ts.replace(
         memory_key(Retrospective, str(opened_project), "unreadable"),

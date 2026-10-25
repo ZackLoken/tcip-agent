@@ -1,7 +1,7 @@
-"""tcip overlay-reference-grid: the overlay door's own command-line entry point.
+"""tcip overlay-reference-grid: the overlay tool's command, through the console's one adapter.
 
---project is required unconditionally and must name a project: the door writes an artifact and
-carries an audit line, both under that project.
+The tool acts on a project, so a run naming no --project is refused naming it; the render lands
+under the project named.
 """
 
 from __future__ import annotations
@@ -22,7 +22,11 @@ def test_refuses_without_a_project_and_plants_no_store(
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = run_tcip("overlay-reference-grid", ["--image", str(img)], cwd=cwd)
+    result = run_tcip(
+        "overlay-reference-grid",
+        ["--image-path", str(img), "--overlap", "0", "--user", "tester"],
+        cwd=cwd,
+    )
 
     assert result.returncode != 0, result.stdout
     assert "--project" in result.stderr
@@ -41,7 +45,7 @@ def test_renders_the_overlay_and_echoes_grid_geometry_under_the_named_project(
     result = run_tcip(
         "overlay-reference-grid",
         [
-            "--image",
+            "--image-path",
             str(img),
             "--project",
             str(project),
@@ -49,6 +53,8 @@ def test_renders_the_overlay_and_echoes_grid_geometry_under_the_named_project(
             "80",
             "--overlap",
             "0",
+            "--user",
+            "tester",
         ],
         cwd=cwd,
     )

@@ -144,6 +144,7 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(
         dispersion_quantile=DISPERSION_QUANTILE,
         rationale=RATIONALE,
         stated=UNFILTERED,
+        actor=None,
     )
     assert "error" not in assessed, assessed
     assert "failures" in assessed
@@ -242,6 +243,7 @@ def test_a_scope_with_no_attribute_builds_the_plain_detector_and_writes_no_attri
         str(images_dir),
         bucket="plain",
         stated=UNFILTERED,
+        actor=None,
     )
     assert "error" not in published, published
     assert len(_documents(tmp_path, "plain")) == 2

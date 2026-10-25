@@ -1151,6 +1151,7 @@ def test_a_sweep_and_its_trial_each_have_one_board_whichever_door_launches_it(
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )["sweep"]["sweep_id"]
     for name in (sweep_id, trials[0].name):
         resp = opened_client.post(

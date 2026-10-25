@@ -95,6 +95,7 @@ def test_evaluate_single_image_golden(data_dir: Path) -> None:
 
     img = data_dir / "images" / "2-11-26" / "img_001.jpg"
     result = score_predictions(
+        data_dir,
         str(img),
         DATA_DIR_BUCKET,
         iou_threshold=0.5,
@@ -120,7 +121,11 @@ def test_evaluate_folder_golden(data_dir: Path) -> None:
 
     images_dir = str(data_dir / "images" / "2-11-26")
     result = score_predictions(
-        images_dir, DATA_DIR_BUCKET, iou_threshold=0.5, conf_threshold=0.5
+        data_dir,
+        images_dir,
+        DATA_DIR_BUCKET,
+        iou_threshold=0.5,
+        conf_threshold=0.5,
     )
     assert result.pop("path") == images_dir
     assert result == GOLDEN_DATASET

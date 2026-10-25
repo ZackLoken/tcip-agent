@@ -42,6 +42,7 @@ def _produced_bucket(tmp_path: Path, raster_path: Path) -> str:
         bucket=BUCKET,
         raster_path=str(raster_path),
         stated=RASTER_PASS,
+        actor=None,
     )
     assert "error" not in result, result
     return result["bucket"]
@@ -63,6 +64,7 @@ def _delivered(tmp_path: Path, bucket: str, raster_path: Path) -> dict:
         str(tmp_path / "counts.csv"),
         "stem_count",
         _GRID,
+        actor=None,
     )
 
 

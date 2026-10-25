@@ -304,6 +304,7 @@ def test_run_inference_over_a_raster_publishes_one_document_and_the_raster_it_ra
         bucket="preds/2026-01-01",
         raster_path=str(raster_path),
         stated=RASTER_PASS,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -346,6 +347,7 @@ def test_a_second_raster_export_into_a_published_bucket_refuses_and_leaves_it_wh
         bucket="preds/2026-01-01",
         raster_path=str(raster_path),
         stated=RASTER_PASS,
+        actor=None,
     )
     assert "error" not in first, first
     document = prediction_key(tmp_path / "ds", "preds/2026-01-01", "mosaic")
@@ -357,6 +359,7 @@ def test_a_second_raster_export_into_a_published_bucket_refuses_and_leaves_it_wh
         bucket="preds/2026-01-01",
         raster_path=str(raster_path),
         stated=RASTER_PASS,
+        actor=None,
     )
 
     assert "already" in second["error"]
@@ -377,6 +380,7 @@ def test_a_missing_checkpoint_or_raster_refuses_cleanly_with_nothing_written(
         stated=RASTER_PASS,
         bucket="preds/2026-01-01",
         raster_path=str(raster_path),
+        actor=None,
     )
     no_raster = run_inference(
         tmp_path,
@@ -384,6 +388,7 @@ def test_a_missing_checkpoint_or_raster_refuses_cleanly_with_nothing_written(
         stated=RASTER_PASS,
         bucket="preds/2026-01-01",
         raster_path=str(raster_path.parent / "missing.tif"),
+        actor=None,
     )
 
     assert "error" in no_checkpoint
@@ -410,6 +415,7 @@ def test_a_raster_pass_with_no_basis_for_its_tile_edge_refuses_before_writing(
         bucket="preds/2026-01-01",
         raster_path=str(raster_path),
         stated=RASTER_PASS.model_copy(update={"tile_size": None}),
+        actor=None,
     )
 
     assert "has no tile_size" in refused["error"], refused
@@ -441,6 +447,7 @@ def test_an_unassessed_raster_bucket_refuses_at_the_door_that_takes_no_acknowled
         str(tmp_path / "counts.csv"),
         "stem_count",
         _GRID,
+        actor=None,
     )
 
     assert "no assessment answers" in refused["error"]

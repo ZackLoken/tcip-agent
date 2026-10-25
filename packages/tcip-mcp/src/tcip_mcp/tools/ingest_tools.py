@@ -240,8 +240,12 @@ def ingest_images(
     copy: bool = True,
     recursive: bool = True,
     raster_date_item: str | None = None,
+    *,
+    actor: str | None,
 ) -> dict:
     """Copy raw images into the project, bucketed by the capture date each file states.
+
+    The copy is ``actor``'s.
 
     Turns a raw folder (or glob) of photos into the canonical layout
     (``images/<YYYY-MM-DD>/<stem><ext>``) under the project. Copies by default; originals are left
@@ -390,9 +394,14 @@ def ingest_images(
 
 @tool()
 def state_capture_date(
-    project: Path, images: list[str], date: datetime.date, rationale: str
+    project: Path,
+    images: list[str],
+    date: datetime.date,
+    rationale: str,
+    *,
+    actor: str | None,
 ) -> dict:
-    """Move images into the bucket of a capture date stated for them.
+    """Move images into the bucket of a capture date stated for them, the move ``actor``'s.
 
     The date is one their files do not state, or one correcting the date they state.
 
@@ -521,7 +530,7 @@ def state_capture_date(
                 audit_entry(
                     "state_capture_date",
                     {"images": images, "date": bucket, "rationale": rationale},
-                    None,
+                    actor,
                     "ok",
                 ),
             )
@@ -555,10 +564,12 @@ def import_coco(
     date: str,
     vertex_spacing: float,
     rationale: str,
+    *,
+    actor: str | None,
 ) -> dict:
     """Convert an external COCO document into the dataset's per-image label documents.
 
-    The COCO document is a dataset-level one.
+    The COCO document is a dataset-level one, and the import is ``actor``'s.
 
     Every declared category must be a subject the dataset's registry declares, and each image is
     the capture's image of that exact file name (a ``.bandgroup`` capture by stem). Every fault
@@ -595,6 +606,7 @@ def import_coco(
             vertex_spacing=vertex_spacing,
             rationale=rationale,
             project=project,
+            actor=actor,
         )
     except (ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}

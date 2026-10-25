@@ -669,6 +669,7 @@ def _draw_flat(
             holdout_ratio=0.15,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     assert "error" not in result, result
     return read_selection(out, project=project)
@@ -821,8 +822,8 @@ def test_triage_predictions_signature_carries_the_triage_only_parameters() -> (
 
 
 def test_feedback_tools_register_in_manifest() -> None:
-    from tcip_mcp.server import list_registered_tools
+    from tcip_web.cli import tool_listing
 
-    names = list_registered_tools()
+    names = {t.name for t in tool_listing()}
     assert "materialize_review_dataset" not in names
     assert "prioritize_review_queue" in names

@@ -121,7 +121,7 @@ saved by the loop: under `"model_best"`/`"model_final"`, or any tag named with
 
 ## Hyperparameter search: Ray Tune (`pipelines.training.hpo`, `run_hyperparameter_search`)
 
-HPO is a capability, not a fixed algorithm; `available_search_algs()` / `available_schedulers()`
+HPO is a capability, not a fixed algorithm; `available_search_algs` / `available_schedulers`
 list the search algorithms and schedulers this machine has installed, and the
 `run_hyperparameter_search` tool's own docstring states the sweep's on-disk layout and its
 refusal shape.
@@ -137,15 +137,15 @@ sweep's trials are run directories like any run, listed, monitored, canceled and
 their own ids, and the GUI's Training tab relaunches a recorded sweep through the same door a
 run relaunches through.
 
-## Concurrent runs: `tcip inspect-compute-resources`
+## Concurrent runs: `inspect_compute_resources`
 
 Every `launch_training`/`run_hyperparameter_search` call already trains in its own OS process (crash/OOM isolation
 between concurrent runs), but nothing caps how many you launch at once or how much of the host each
 one claims; that's a judgment call, not a platform-enforced number (a pinned memory/CPU ceiling
 would be right on one host and wrong on the next). Before launching another concurrent candidate,
-`tcip inspect-compute-resources` gives you the actual facts to reason from: free VRAM
+`inspect_compute_resources` gives you the actual facts to reason from: free VRAM
 per GPU, host CPU/RAM headroom (`None` if `psutil` isn't installed; everything else still works),
-and how many runs this process's own registry currently reports running.
+and how many of the project's training runs are running now.
 
 ## Auto-labeling: the proposal-engine registry (`pipelines.proposal`)
 

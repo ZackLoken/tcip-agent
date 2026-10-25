@@ -302,7 +302,10 @@ def test_the_proposing_tool_takes_the_complete_entry_and_refuses_one_missing_a_f
     from tcip_mcp.tools.trait_tools import propose_trait
 
     written = propose_trait(
-        str(tmp_path), _count_entry(), rationale="the breeder's words"
+        str(tmp_path),
+        _count_entry(),
+        rationale="the breeder's words",
+        actor=None,
     )
     assert (
         written["number"] == 1 and written["entry"]["name"] == fx.COUNT_TRAIT

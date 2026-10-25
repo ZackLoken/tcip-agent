@@ -58,6 +58,7 @@ def test_a_scope_the_admission_produced_round_trips_through_the_selection_and_th
             holdout_ratio=0.125,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     assert "error" not in result, result
 

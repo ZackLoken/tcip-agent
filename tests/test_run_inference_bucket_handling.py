@@ -57,7 +57,12 @@ def test_run_inference_publishes_each_document_the_record_and_one_audit_line(
     _stubbed(monkeypatch)
 
     ran = run_inference(
-        tmp_path, str(ckpt), str(images_dir), bucket=BUCKET, stated=UNTILED
+        tmp_path,
+        str(ckpt),
+        str(images_dir),
+        bucket=BUCKET,
+        stated=UNTILED,
+        actor=None,
     )
 
     assert "error" not in ran, ran
@@ -105,7 +110,12 @@ def test_a_second_run_into_a_published_bucket_refuses_and_leaves_it(
     _stubbed(monkeypatch)
     ckpt = project_checkpoint(tmp_path)
     first = run_inference(
-        tmp_path, ckpt, str(images_dir), bucket=BUCKET, stated=UNTILED
+        tmp_path,
+        ckpt,
+        str(images_dir),
+        bucket=BUCKET,
+        stated=UNTILED,
+        actor=None,
     )
     assert "error" not in first, first
 
@@ -119,7 +129,12 @@ def test_a_second_run_into_a_published_bucket_refuses_and_leaves_it(
     before = published()
 
     again = run_inference(
-        tmp_path, ckpt, str(images_dir), bucket=BUCKET, stated=UNTILED
+        tmp_path,
+        ckpt,
+        str(images_dir),
+        bucket=BUCKET,
+        stated=UNTILED,
+        actor=None,
     )
     preview = run_inference(
         tmp_path,
@@ -128,6 +143,7 @@ def test_a_second_run_into_a_published_bucket_refuses_and_leaves_it(
         bucket=BUCKET,
         dry_run=True,
         stated=UNTILED,
+        actor=None,
     )
     fresh = run_inference(
         tmp_path,
@@ -135,6 +151,7 @@ def test_a_second_run_into_a_published_bucket_refuses_and_leaves_it(
         str(images_dir),
         bucket="baseline-2/2026-01-01",
         stated=UNTILED,
+        actor=None,
     )
 
     assert "already" in again["error"]
@@ -159,6 +176,7 @@ def test_a_run_over_an_empty_images_directory_refuses_and_publishes_nothing(
         str(empty),
         bucket=BUCKET,
         stated=UNTILED,
+        actor=None,
     )
 
     assert "no document" in ran["error"]
@@ -189,6 +207,7 @@ def test_an_images_dir_that_is_no_capture_refuses_naming_it(
         str(images_dir),
         bucket=BUCKET,
         stated=UNTILED,
+        actor=None,
     )
 
     assert f"{str(images_dir)!r} is not a capture" in ran["error"]
@@ -216,6 +235,7 @@ def test_a_raster_outside_a_capture_is_admitted(
         bucket=BUCKET,
         dry_run=True,
         stated=Stated(tile_size=32, overlap=0.0, **SAMPLE_DETECTOR_PASS),
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -239,6 +259,7 @@ def test_a_dry_run_previews_the_both_sources_refusal(tmp_path: Path) -> None:
         raster_path=str(raster_path),
         bucket=BUCKET,
         dry_run=True,
+        actor=None,
     )
 
     assert "exactly one of images_dir or raster_path" in result["error"]
@@ -259,6 +280,7 @@ def test_a_dry_run_names_the_bucket_and_the_execution_and_writes_nothing(
         bucket=BUCKET,
         stated=UNTILED,
         dry_run=True,
+        actor=None,
     )
 
     assert "error" not in result, result

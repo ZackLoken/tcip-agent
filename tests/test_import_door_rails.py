@@ -259,7 +259,7 @@ def test_dataset_registry_stores_the_relative_dot_after_import(
     from tcip_mcp.tools.project_tools import read_datasets, register_dataset
 
     root = one_labeled_capture(tmp_path / "source")
-    registered = register_dataset(root, str(root), crop="currant")
+    registered = register_dataset(root, str(root), crop="currant", actor=None)
     assert "error" not in registered
 
     zip_path = tmp_path / "bundle.zip"
@@ -286,7 +286,7 @@ def test_dataset_registry_travels_with_nothing_rewritten(
     )
 
     root = one_labeled_capture(tmp_path / "source")
-    registered = register_dataset(root, str(root), crop="currant")
+    registered = register_dataset(root, str(root), crop="currant", actor=None)
     assert "error" not in registered
 
     zip_path = tmp_path / "bundle.zip"
@@ -308,7 +308,9 @@ def test_an_external_dataset_entry_stays_absolute_and_is_disclosed(
 
     root = one_labeled_capture(tmp_path / "source")
     external = one_labeled_capture(tmp_path / "external_dataset")
-    registered = register_dataset(root, str(external), crop="currant")
+    registered = register_dataset(
+        root, str(external), crop="currant", actor=None
+    )
     assert "error" not in registered
 
     zip_path = tmp_path / "bundle.zip"
@@ -384,6 +386,7 @@ def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_tri
             holdout_ratio=0.125,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     assert "error" not in splits_result, splits_result
 
@@ -432,8 +435,11 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
         "North orchard",
         site="north orchard",
         invariances=INVARIANCES,
+        actor=None,
     )
-    assert "error" not in register_dataset(root, str(root), crop="currant")
+    assert "error" not in register_dataset(
+        root, str(root), crop="currant", actor=None
+    )
     confirmed = seed_confirmed_count(root)
     assert confirmed.confirmed
 
@@ -487,6 +493,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
     sweep_id = hpo_result["sweep"]["sweep_id"]
 
@@ -502,6 +509,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
             holdout_ratio=0.125,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     assert "error" not in splits_result, splits_result
 

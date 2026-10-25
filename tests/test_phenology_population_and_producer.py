@@ -40,6 +40,7 @@ def test_the_csv_row_count_equals_the_population(tmp_path: Path) -> None:
         buckets=body["buckets"],
         output_csv_path=str(out_csv),
         plants=["PLANT_A", "PLANT_UNMAPPED"],
+        actor=None,
     )
 
     assert "error" not in res, res
@@ -104,6 +105,7 @@ def test_an_empty_population_refuses_naming_the_argument(
         buckets=body["buckets"],
         output_csv_path=str(tmp_path / "out" / "bud.csv"),
         plants=[],
+        actor=None,
     )
 
     assert "plants=[...]" in res["error"]
@@ -156,6 +158,7 @@ def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
         buckets=body["buckets"],
         output_csv_path=str(one),
         plants=["PLANT_A"],
+        actor=None,
     )
     assert "error" not in res, res
 
@@ -171,6 +174,7 @@ def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
         images_dir=str(series.root / "images" / second),
         bucket=other_bucket,
         stated=chain_pass(),
+        actor=None,
     )
     assert "error" not in published, published
 
@@ -183,6 +187,7 @@ def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
         buckets=[series.buckets[first], other_bucket],
         output_csv_path=str(out_csv),
         plants=["PLANT_A"],
+        actor=None,
     )
 
     assert "more than one checkpoint or run" in res["error"], res

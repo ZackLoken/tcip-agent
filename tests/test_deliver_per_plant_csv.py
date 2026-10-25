@@ -38,7 +38,11 @@ def _scene(
     from tests._web_fixtures import INVARIANCES
 
     assert "error" not in initialize_project(
-        str(tmp_path), "Orchard", site="orchard block", invariances=INVARIANCES
+        str(tmp_path),
+        "Orchard",
+        site="orchard block",
+        invariances=INVARIANCES,
+        actor=None,
     )
     dataset_root, date = tmp_path / "ds", "2026-02-11"
     for i, (plant, (lat, lon)) in enumerate(plants.items()):
@@ -50,7 +54,10 @@ def _scene(
             h_pos_err=PHOTO_POSITION_ERROR_M,
         )
     result = register_dataset(
-        tmp_path, str(dataset_root), crop=sorted(registered_crops())[0]
+        tmp_path,
+        str(dataset_root),
+        crop=sorted(registered_crops())[0],
+        actor=None,
     )
     assert "error" not in result, result
     plant_csv = write_plant_csv(
@@ -85,6 +92,7 @@ def _mapped(
         name="valley",
         images_root=str(dataset_root / "images"),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
+        actor=None,
     )
     assert "error" not in mapped, mapped
     return dataset_root, date
@@ -152,6 +160,7 @@ def _deliver(
         buckets,
         value_key="count",
         **kwargs,
+        actor=None,
     )
 
 
@@ -249,7 +258,7 @@ def test_predictions_under_another_dataset_than_the_mappings_refuse(
         datetime(2026, 2, 11, 9, 30),
     )
     assert "error" not in register_dataset(
-        tmp_path, str(other), crop=sorted(registered_crops())[0]
+        tmp_path, str(other), crop=sorted(registered_crops())[0], actor=None
     )
 
     res = _deliver(

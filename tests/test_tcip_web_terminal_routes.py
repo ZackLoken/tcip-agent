@@ -54,6 +54,13 @@ def _doctor_entry(interpreter: str, project: Path) -> str:
     )
 
 
+def _tool_names() -> list[str]:
+    """Return the sorted name of every tool a server for no project lists."""
+    from tcip_web.cli import tool_listing
+
+    return sorted(t.name for t in tool_listing())
+
+
 if pty_host.os.name == "nt":
     pytest.importorskip("winpty")
 
@@ -318,8 +325,6 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     holds the shipped lists plus, under both shells, each read-only console command under both
     invocations and the ritual's doctor line; the shipped file names no console command.
     """
-    from tcip_mcp.server import list_registered_tools
-
     monkeypatch.setattr(
         pty_host,
         "PROVIDERS",
@@ -405,14 +410,14 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
                     *server.args,
                 ]
             ),
-            f"allowed {len(list_registered_tools()) + 2} tcip entries in {settings}, dropped 0 "
+            f"allowed {len(_tool_names()) + 2} tcip entries in {settings}, dropped 0 "
             "other doctor entries",
         ]
         allowed = json.loads(settings.read_text(encoding="utf-8"))[
             "permissions"
         ]["allow"]
         assert allowed == [
-            *(f"mcp(tcip/{name})" for name in list_registered_tools()),
+            *(f"mcp(tcip/{name})" for name in _tool_names()),
             _doctor_entry(INTERPRETER, opened.root),
             f"unsandboxed({pty_host.doctor_command(INTERPRETER, opened.root)})",
         ]
@@ -469,8 +474,6 @@ def test_a_launch_preparation_that_fails_refuses_the_launch_naming_it(
 def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempotent(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.server import list_registered_tools
-
     settings = tmp_path / "settings.json"
     project = tmp_path / "valley (north)"
     line = pty_host.doctor_command(INTERPRETER, project)
@@ -502,7 +505,7 @@ def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempoten
     first = pty_host.allow_tcip_tools(settings, line)
     second = pty_host.allow_tcip_tools(settings, line)
 
-    names = list_registered_tools()
+    names = _tool_names()
     assert first == (
         f"allowed {len(names) + 2} tcip entries in {settings}, dropped 3 other "
         "doctor entries"
@@ -2839,7 +2842,12 @@ def _retrospective_declared_by(
     agent_identity.begin("a-harness", "1.0")
     try:
         write_retrospective(
-            project, "hand-off", "a switch of harness", "the run", "nothing"
+            project,
+            "hand-off",
+            "a switch of harness",
+            "the run",
+            "nothing",
+            actor=None,
         )
     finally:
         agent_identity.end()

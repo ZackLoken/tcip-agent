@@ -305,6 +305,7 @@ def _assessed(project: Path, kind: str, experiment_id: str) -> Bucket:
         dispersion_quantile=DISPERSION_QUANTILE,
         rationale=RATIONALE,
         stated=collection_pass(),
+        actor=None,
     )
     assert read_assessment(project, assessment["assessment_id"]).passed, (
         assessment
@@ -317,6 +318,7 @@ def _assessed(project: Path, kind: str, experiment_id: str) -> Bucket:
         bucket=bucket,
         assessment_id=assessment["assessment_id"],
         stated=Stated(),
+        actor=None,
     )
     assert "error" not in published, published
     return read_bucket(root, bucket)

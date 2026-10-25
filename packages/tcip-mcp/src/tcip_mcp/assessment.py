@@ -279,10 +279,12 @@ def _finish(
     criterion: dict[str, Any],
     scale: dict[str, Any] | None,
     failures: list[str],
+    actor: str | None,
 ) -> Assessment:
     """Write the assessment judged under ``revision`` as the run's ``assessment.json`` once.
 
-    Then its one audit line, ``assessment_recorded``, is written; returns it as read back.
+    Then its one audit line, ``assessment_recorded`` by ``actor``, is written; returns it as read
+    back.
     """
     from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.experiments import write_once
@@ -316,7 +318,7 @@ def _finish(
             "delivery_kind": delivery_kind,
             "passed": assessment.passed,
         },
-        actor=None,
+        actor=actor,
         scope=project,
     )
     return read_assessment(project, run_dir.name)
@@ -590,8 +592,9 @@ def assess(
     rationale: str,
     device: str | None = None,
     tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
+    actor: str | None,
 ) -> Assessment:
-    """Assess ``checkpoint_path`` against a selection's sides and record a new assessment.
+    """Assess ``checkpoint_path`` against a selection's sides and record a new one by ``actor``.
 
     The sides are the calibration and holdout sides of the selection at ``selection_dir``; the
     assessment is for a ``delivery_kind`` delivery of ``trait``'s latest confirmed revision, and
@@ -679,6 +682,7 @@ def assess(
         criterion=criterion,
         scale=None,
         failures=[*failures, *criterion_failures],
+        actor=actor,
     )
 
 
@@ -990,8 +994,11 @@ def assess_reserved_regions(
     rationale: str,
     device: str | None = None,
     tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
+    actor: str | None,
 ) -> Assessment:
     """Assess a checkpoint trained on one mosaic against that mosaic's own reserved regions.
+
+    The assessment's audit line is ``actor``'s.
 
     The regions are its run's within-image calibration and holdout split with
     ``calibration_ratio``, cut into ``k_cal`` and ``k_test`` buffered bands, for a count delivery
@@ -1234,6 +1241,7 @@ def assess_reserved_regions(
         },
         scale=None,
         failures=[*disjoint_failures, *failures],
+        actor=actor,
     )
 
 
@@ -1381,8 +1389,11 @@ def assess_physical_scale(
     reference_csv: str,
     unit: str,
     reference_subject: str,
+    actor: str | None,
 ) -> Assessment:
     """Derive a per-pixel physical scale in ``unit`` and check it, recording a new assessment.
+
+    The assessment's audit line is ``actor``'s.
 
     The scale is derived on the calibration side of the selection at ``selection_dir`` and
     checked against the holdout side, for ``trait``'s latest confirmed revision; the result is
@@ -1515,4 +1526,5 @@ def assess_physical_scale(
             "reference_subject": reference_subject,
         },
         failures=failures,
+        actor=actor,
     )

@@ -577,9 +577,12 @@ def _write_registry_entry(
 
 
 def _audit_entry_write(
-    project_path: str, superseded: RegistryEntry | None, entry: RegistryEntry
+    project_path: str,
+    superseded: RegistryEntry | None,
+    entry: RegistryEntry,
+    actor: str | None,
 ) -> None:
-    """Emit ``model_registered`` in the project's log for a written ``entry``.
+    """Emit ``model_registered``, by ``actor``, in the project's log for a written ``entry``.
 
     The line names the entry of the same sha256 it superseded, if any. A failed append raises
     ``AuditEntryNotWrittenError``.
@@ -597,7 +600,7 @@ def _audit_entry_write(
     record_event_or_raise(
         "model_registered",
         {"name": entry.name, "new_sha256": entry.sha256, **replaced},
-        actor=None,
+        actor=actor,
         scope=project_path,
     )
 
@@ -656,15 +659,17 @@ class ModelRegistry:
         *,
         metrics: dict | None = None,
         tags: list[str] | None = None,
+        actor: str | None,
     ) -> Listed:
         """Register a checkpoint by its sha256 under ``name``, and return the owner of its bytes.
 
         The digest is :func:`admitted_digest`'s and ``name`` is the entry's presentation; the
-        write is recorded, and the owner is the one :func:`registered_entries` resolves those bytes
-        to: this entry, or the completed run whose final status names the same bytes. A second
-        registration of the same bytes replaces the first. Its ``metrics`` are asserted by the
-        caller, never verified. The stored ``checkpoint_path`` is spelled through
-        :func:`~tcip_mcp.registry_paths.checkpoint_registry_path_for` against the project root.
+        write is recorded as ``actor``'s, and the owner is the one :func:`registered_entries`
+        resolves those bytes to: this entry, or the completed run whose final status names the
+        same bytes. A second registration of the same bytes replaces the first. Its ``metrics``
+        are asserted by the caller, never verified. The stored ``checkpoint_path`` is spelled
+        through :func:`~tcip_mcp.registry_paths.checkpoint_registry_path_for` against the
+        project root.
 
         Args:
             name: Model name (e.g. '<crop>_<trait>_detector_v1').
@@ -705,7 +710,7 @@ class ModelRegistry:
         with tcip_store.transaction(key) as txn:
             superseded, stored = _write_registry_entry(txn, key, entry)
         if stored is entry:
-            _audit_entry_write(self._project_path, superseded, entry)
+            _audit_entry_write(self._project_path, superseded, entry, actor)
         owner = next(
             e
             for e in registered_entries(self._project_path)

@@ -55,10 +55,10 @@ def _empty_bucket(project: Path, *images: Path) -> str:
 
 
 class TestReadAnnotations:
-    def test_load_missing_image(self) -> None:
+    def test_load_missing_image(self, tmp_path: Path) -> None:
         from tcip_mcp.tools.annotation_tools import read_annotations
 
-        result = read_annotations("/nonexistent/image.jpg")
+        result = read_annotations(tmp_path, "/nonexistent/image.jpg")
         assert "error" in result
 
     def test_polygon_is_reported_as_rings_including_every_contour(
@@ -89,7 +89,7 @@ class TestReadAnnotations:
             100,
         )
 
-        result = read_annotations(str(images_dir / "a.jpg"))
+        result = read_annotations(tmp_path, str(images_dir / "a.jpg"))
         (ann,) = result["labels"]["annotations"]
         assert "points" not in ann
         assert ann["rings"] == [
@@ -109,7 +109,11 @@ class TestEvaluatePredictions:
 
         img = str(data_dir / "images" / DATE / "img_001.jpg")
         result = score_predictions(
-            img, DATA_DIR_BUCKET, iou_threshold=0.5, conf_threshold=0.25
+            data_dir,
+            img,
+            DATA_DIR_BUCKET,
+            iou_threshold=0.5,
+            conf_threshold=0.25,
         )
         assert "error" not in result
         assert result["tp"] >= 0
@@ -122,6 +126,7 @@ class TestEvaluatePredictions:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
         result = score_predictions(
+            data_dir,
             str(data_dir / "images" / DATE),
             DATA_DIR_BUCKET,
             iou_threshold=0.5,
@@ -143,6 +148,7 @@ class TestEvaluatePredictionsDetail:
 
         img = str(data_dir / "images" / DATE / "img_001.jpg")
         result = score_predictions(
+            data_dir,
             img,
             DATA_DIR_BUCKET,
             iou_threshold=0.5,
@@ -190,7 +196,11 @@ class TestEvaluateFolderEnumeration:
 
         bucket = _empty_bucket(tmp_path, images_dir / "cap.bandgroup")
         result = score_predictions(
-            str(images_dir), bucket, iou_threshold=0.5, conf_threshold=0.25
+            tmp_path,
+            str(images_dir),
+            bucket,
+            iou_threshold=0.5,
+            conf_threshold=0.25,
         )
         assert result["image_count"] == 1
         assert [row["image"] for row in result["per_image"]] == [
@@ -212,7 +222,11 @@ class TestEvaluateFolderEnumeration:
 
         bucket = _empty_bucket(tmp_path, images_dir / "cap.npz")
         result = score_predictions(
-            str(images_dir), bucket, iou_threshold=0.5, conf_threshold=0.25
+            tmp_path,
+            str(images_dir),
+            bucket,
+            iou_threshold=0.5,
+            conf_threshold=0.25,
         )
         assert result["image_count"] == 1
         assert [row["image"] for row in result["per_image"]] == ["cap.npz"]
@@ -231,6 +245,7 @@ class TestEvaluateFolderEnumeration:
         Image.new("RGB", (8, 8)).save(elsewhere)
 
         result = score_predictions(
+            tmp_path,
             str(images_dir),
             _empty_bucket(tmp_path, elsewhere),
             iou_threshold=0.5,
@@ -333,7 +348,7 @@ class TestReadAnnotationsUnknownFormat:
         )
 
         result = read_annotations(
-            str(tmp_path / "images" / UNDATED_BUCKET / "a.jpg")
+            tmp_path, str(tmp_path / "images" / UNDATED_BUCKET / "a.jpg")
         )
         assert "error" in result
         assert "not the list a label document holds" in result["error"]

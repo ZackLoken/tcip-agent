@@ -61,7 +61,7 @@ def _register(
     from tcip_mcp.tools.model_tools import register_model
 
     result = register_model(
-        tmp_path, name=name, checkpoint_path=ckpt_path, tags=tags
+        tmp_path, name=name, checkpoint_path=ckpt_path, tags=tags, actor=None
     )
     assert "error" not in result, result
     return result
@@ -83,6 +83,7 @@ def _infer(tmp_path: Path, ckpt: str, bucket: str = "preds") -> dict:
         bucket=bucket,
         device="cpu",
         stated=Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE),
+        actor=None,
     )
 
 
@@ -144,6 +145,7 @@ def test_assess_checkpoint_refuses_an_unregistered_checkpoint(
         dispersion_quantile=DISPERSION_QUANTILE,
         rationale=RATIONALE,
         stated=Stated(),
+        actor=None,
     )
 
     assert "register_model" in r["error"]
@@ -357,7 +359,7 @@ def test_a_foreign_registration_after_its_run_completed_leaves_the_run_its_one_o
     copy.write_bytes(Path(ckpt).read_bytes())
 
     owner = register_model(
-        tmp_path, name="entry-untagged", checkpoint_path=str(copy)
+        tmp_path, name="entry-untagged", checkpoint_path=str(copy), actor=None
     )
 
     assert owner["experiment_id"] == "expA"
@@ -391,7 +393,10 @@ def test_a_foreign_registration_before_its_run_completed_leaves_the_run_its_one_
     ).checkpoint
     assert elsewhere is not None
     registered = register_model(
-        tmp_path, name="foreign-first", checkpoint_path=elsewhere.path
+        tmp_path,
+        name="foreign-first",
+        checkpoint_path=elsewhere.path,
+        actor=None,
     )
     assert registered["experiment_id"] is None
 
@@ -424,7 +429,7 @@ def test_two_foreign_registrations_of_one_sha256_resolve_to_one_entry(
     copy = tmp_path / "copy.pt"
     copy.write_bytes(Path(ckpt).read_bytes())
     assert "error" not in register_model(
-        tmp_path, name="second-name", checkpoint_path=str(copy)
+        tmp_path, name="second-name", checkpoint_path=str(copy), actor=None
     )
 
     (entry,) = [

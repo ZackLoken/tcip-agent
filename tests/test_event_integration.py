@@ -564,6 +564,7 @@ class TestInferenceToolOutputSchema:
                 postprocess="nmm",
                 rationale="a sample reason the test states",
             ),
+            actor=None,
         )
 
         assert "error" not in res, res

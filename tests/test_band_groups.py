@@ -697,7 +697,7 @@ def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(
     )
 
     project = tmp_path / "proj_bandcollide_case"
-    manifest = ingest_images(project, source=str(src))
+    manifest = ingest_images(project, source=str(src), actor=None)
     assert "error" not in manifest
     bg = manifest["band_groups"]
     assert len(bg["refused"]) == 1
@@ -906,7 +906,7 @@ def test_ingest_images_groups_real_dji_bucket(
     from tcip_mcp.tools.ingest_tools import ingest_images
 
     proj = tmp_path / "ms_valley_farm"
-    manifest = ingest_images(proj, source=str(REAL_DJI_DIR))
+    manifest = ingest_images(proj, source=str(REAL_DJI_DIR), actor=None)
     assert "error" not in manifest
     assert manifest["copied"] == 64
     assert len(manifest["band_groups"]["formed"]) == 16
@@ -941,7 +941,7 @@ def test_an_ingest_of_per_band_captures_forms_their_groups(
                 lon=-90.058003633 if capture == "capA" else -90.057990000,
             )
 
-    manifest = ingest_images(tmp_path / "proj", source=str(src))
+    manifest = ingest_images(tmp_path / "proj", source=str(src), actor=None)
 
     assert sorted(g["stem"] for g in manifest["band_groups"]["formed"]) == [
         "capA",

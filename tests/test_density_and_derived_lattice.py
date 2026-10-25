@@ -1138,6 +1138,7 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
         bucket="capped",
         device="cpu",
         stated=Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE),
+        actor=None,
     )
     assert "error" not in published, published
     staged = stage_proposals(

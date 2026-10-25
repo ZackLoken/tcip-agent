@@ -71,6 +71,7 @@ def _draw(project: Path, root: Path, out: Path, *, seed: int = 2) -> Selection:
             holdout_ratio=0.15,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     assert "error" not in result, result
     return read_selection(out, project=project)

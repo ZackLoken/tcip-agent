@@ -56,7 +56,7 @@ def test_scan_reports_four_distinct_counts_over_a_lopsided_dataset(
     """
     root = _lopsided_dataset(tmp_path / "ds")
 
-    result = scan_dataset(str(root))
+    result = scan_dataset(tmp_path, str(root))
 
     assert result["image_count"] == 5
     assert result["labels_count"] == 3
@@ -111,7 +111,7 @@ def test_a_buckets_record_is_not_counted_as_a_prediction(
         64,
     )
 
-    result = scan_dataset(str(root))
+    result = scan_dataset(tmp_path, str(root))
 
     assert ts.exists(bucket_key(root, f"run_a/{DATE}"))
     assert result["predictions_count"] == 2
@@ -140,6 +140,6 @@ def test_scan_writes_nothing_into_the_dataset(tmp_path: Path) -> None:
     before = state()
     assert all(before)
 
-    scan_dataset(str(root))
+    scan_dataset(tmp_path, str(root))
 
     assert state() == before

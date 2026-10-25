@@ -20,9 +20,13 @@ import sys
 
 {_BLOCK_TORCH}
 sys.meta_path.insert(0, _BlockTorch())
+import anyio
+
 import tcip_mcp.server
 assert "torch" not in sys.modules, "importing the server pulled torch into sys.modules"
-print(len(tcip_mcp.server.list_registered_tools()))
+session = tcip_mcp.server.Session()
+print(len(anyio.run(tcip_mcp.server.build_server(session).list_tools)))
+assert "torch" not in sys.modules, "building the server pulled torch into sys.modules"
 """
 
 _BLOCK_TORCH_AND_TRY_IMPORT = f"""
