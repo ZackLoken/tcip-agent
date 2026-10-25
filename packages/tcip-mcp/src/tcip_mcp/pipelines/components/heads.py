@@ -182,15 +182,12 @@ class OrdinalHead(BaseHead):
         predicted_ranks = (cum_probs > 0.5).sum(dim=-1)
         # Confidence is the marginal P(Y=k) = P(Y>=k) - P(Y>=k+1) at the predicted rank.
         batch = cum_probs.shape[0]
-        p_ge = torch.cat(
-            [
-                cum_probs.new_ones((batch, 1)),
-                cum_probs,
-                cum_probs.new_zeros((batch, 1)),
-            ],
+        p_eq = -torch.diff(  # [B, num_ranks], marginal P(Y=k)
+            cum_probs,
             dim=-1,
+            prepend=cum_probs.new_ones((batch, 1)),
+            append=cum_probs.new_zeros((batch, 1)),
         )
-        p_eq = p_ge[:, :-1] - p_ge[:, 1:]  # [B, num_ranks], marginal P(Y=k)
         confidences = p_eq.gather(
             1, predicted_ranks.unsqueeze(-1).long()
         ).squeeze(-1)

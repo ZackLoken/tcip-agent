@@ -169,18 +169,35 @@ class TestHeads:
             (decoded["confidences"] >= 0) & (decoded["confidences"] <= 1)
         ).all()
 
-    def test_ordinal_head_confidence_hand_computed(self) -> None:
+    def test_ordinal_head_decodes_hand_computed_ranks_and_marginals(
+        self,
+    ) -> None:
+        """Ranks and the marginal mass at each one, from conditionals chosen to multiply exactly.
+
+        Conditionals [0.75, 0.75, 0.25] give P(Y>=k) = [0.75, 0.5625, 0.140625], so rank 2 and
+        P(Y=2) = 0.5625 - 0.140625; conditionals [0.25, 0.5, 0.5] give [0.25, 0.125, 0.0625],
+        so rank 0 and P(Y=0) = 1 - 0.25. ``decode`` reads only the logits.
+        """
         from tcip_mcp.pipelines.components.heads import OrdinalHead
 
-        head = OrdinalHead(in_channels=4, num_ranks=3)
-        # logit=0 -> sigmoid=0.5 for both conditional thresholds, deterministic regardless of the
-        # head's own randomly-initialized weights since decode() only consumes outputs["logits"].
-        outputs = {"logits": torch.zeros(1, 2)}
-        decoded = head.decode(outputs)
-        # cum_probs = [0.5, 0.25] -> predicted_rank = (cum_probs > 0.5).sum() = 0.
-        assert decoded["ranks"].item() == 0
-        # P(Y=0) = 1 - P(Y>=1) = 1 - 0.5 = 0.5, the marginal mass at the predicted rank.
-        assert decoded["confidences"].item() == pytest.approx(0.5)
+        head = OrdinalHead(in_channels=4, num_ranks=4)
+        conditionals = torch.tensor(
+            [[0.75, 0.75, 0.25], [0.25, 0.5, 0.5]], dtype=torch.float64
+        )
+        decoded = head.decode({"logits": torch.logit(conditionals)})
+
+        assert decoded["ranks"].tolist() == [2, 0]
+        torch.testing.assert_close(
+            decoded["cumulative_probs"],
+            torch.tensor(
+                [[0.75, 0.5625, 0.140625], [0.25, 0.125, 0.0625]],
+                dtype=torch.float64,
+            ),
+        )
+        torch.testing.assert_close(
+            decoded["confidences"],
+            torch.tensor([0.5625 - 0.140625, 1 - 0.25], dtype=torch.float64),
+        )
 
     def test_regression_head(self) -> None:
         from tcip_mcp.pipelines.components.heads import RegressionHead

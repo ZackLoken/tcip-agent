@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
+from itertools import pairwise
 from typing import TYPE_CHECKING, cast
 
 import torch
@@ -243,7 +244,7 @@ class TileLocalitySampler(Sampler):
         pitches: list[int] = []
         for rows in rows_by_stem.values():
             ys = sorted(rows)
-            pitches.extend(b - a for a, b in zip(ys, ys[1:]))
+            pitches.extend(b - a for a, b in pairwise(ys))
         row_pitch = min(pitches) if pitches else None
 
         if row_pitch is None:

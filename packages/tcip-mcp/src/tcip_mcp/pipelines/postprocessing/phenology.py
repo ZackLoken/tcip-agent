@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -220,7 +221,7 @@ def crossing_date(
         return None
     if points[0][1] >= target:
         return Crossing(iso(points[0][0]), "left_censored")
-    for (d1, r1), (d2, r2) in zip(points, points[1:]):
+    for (d1, r1), (d2, r2) in pairwise(points):
         if r2 >= target:
             if r2 == target:
                 return Crossing(iso(d2), "exact")

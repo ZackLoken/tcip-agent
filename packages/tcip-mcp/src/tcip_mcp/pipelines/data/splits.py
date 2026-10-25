@@ -12,6 +12,7 @@ import re
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -436,10 +437,10 @@ def _strip_regions(
 
     # A boundary is shrunk from one side only (the higher-index region's left edge, against
     # its neighbor's raw end): that alone already guarantees >= buffer separation.
-    shrunk: list[tuple[str, int, int]] = []
-    for i, (name, s, e) in enumerate(merged):
-        if i > 0 and merged[i - 1][0] != name:
-            neighbor_end_pixel = spans[merged[i - 1][2] - 1][1]
+    shrunk = merged[:1]
+    for (neighbor, _, neighbor_end), (name, s, e) in pairwise(merged):
+        if neighbor != name:
+            neighbor_end_pixel = spans[neighbor_end - 1][1]
             while s < e and spans[s][0] < neighbor_end_pixel + buffer:
                 s += 1
         if e > s:

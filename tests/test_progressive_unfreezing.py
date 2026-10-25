@@ -10,6 +10,7 @@ scaling, and a two-stage handoff smoke test, over tiny synthetic data on CPU wit
 from __future__ import annotations
 
 import math
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -439,7 +440,7 @@ def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone() -> None:
             self.stages = nn.ModuleList(
                 [
                     nn.Conv2d(c_in, c_out, 3, stride=2, padding=1)
-                    for c_in, c_out in zip([3, *chans[:-1]], chans)
+                    for c_in, c_out in pairwise([3, *chans])
                 ]
             )
 
@@ -460,7 +461,7 @@ def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone() -> None:
     assert counts[0] > 0  # freeze_to=0 leaves everything trainable
     assert counts[-1] == 0  # freeze_to=num_stages freezes everything
     # Strictly decreasing: each extra stage frozen removes trainable params.
-    assert all(b < a for a, b in zip(counts, counts[1:])), counts
+    assert all(b < a for a, b in pairwise(counts)), counts
 
 
 # --------------------------------------------------------------------------
@@ -569,6 +570,6 @@ def test_two_stage_handoff_smoke(tmp_path: Path) -> None:
     assert all(math.isfinite(m["train_loss"]) for m in run.metrics_history)
     tps = [m["trainable_params"] for m in run.metrics_history]
     assert all(
-        b >= a for a, b in zip(tps, tps[1:])
+        b >= a for a, b in pairwise(tps)
     )  # non-decreasing across stages
     assert (run_dir / "model_best.pt").is_file()
