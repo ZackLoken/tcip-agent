@@ -78,13 +78,13 @@ CONTINUED_SUFFIX = "-continued"
 def continuation_request() -> str:
     """Return the request asking a resumed harness to report its earlier token, continued.
 
-    It names no token.
+    It names no token; the token is the first word of the detail :func:`request_for` asks for.
     """
     return (
         "This is a smoke test of a resumed conversation. Without calling any other tool, call "
         f"the tcip report_friction tool exactly once, with category {REQUESTED_CATEGORY} and, "
-        "as detail, the detail of the report_friction call you made earlier in this "
-        f"conversation followed by {CONTINUED_SUFFIX}, then stop."
+        "as detail, the first word of the detail of the report_friction call you made earlier "
+        f"in this conversation followed at once by {CONTINUED_SUFFIX}, then stop."
     )
 
 
