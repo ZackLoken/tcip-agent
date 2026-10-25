@@ -80,9 +80,9 @@ comment.
   surface (`build_detector`/`build_loss` task strings, heads/necks/backbones, derivations, the `ctx`
   craft library, and the `model_source`/`training_source`/`dataset_source` seams).
 - A one-off script the agent writes for one project lives with that project, in the project's own
-  directory, never in this repository. A standing operator capability is a console-command door in
-  `cli/`. Add a tool only for an audit seam, long-running infrastructure, or domain knowledge the
-  agent lacks that a console command can't carry.
+  directory, never in this repository. A standing capability the agent uses is a tool in `tools/`;
+  when an operator runs it too, its console-command door in `cli/` calls the same function. A
+  capability only an operator uses is a console-command door alone.
 - State mutations route through audited doors only, each leaving one line: an `@audited` tool or
   console-command door, or a library function recording its own event through
   `record_event_or_raise`; the record is `audit_log`, one log addressed by `audit.audit_log_key`
