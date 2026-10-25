@@ -31,8 +31,8 @@ _AUDIT_PARTS = ("audit",)
 _REDACTED_FIELDS = {"api_key", "token", "password", "secret"}
 
 
-class MutationCommittedWithoutAuditLineError(RuntimeError):
-    """A tool body ran to completion and the audit entry that follows it did not land."""
+class _CommittedUnrecordedError(RuntimeError):
+    """A call's change committed and the audit entry recording it could not be appended."""
 
     def __init__(self, tool: str, cause: BaseException) -> None:
         """Take the tool whose entry did not land and the append's exception."""
@@ -44,7 +44,11 @@ class MutationCommittedWithoutAuditLineError(RuntimeError):
         self.tool = tool
 
 
-class AuditEntryNotWrittenError(RuntimeError):
+class MutationCommittedWithoutAuditLineError(_CommittedUnrecordedError):
+    """A tool body ran to completion and the audit entry that follows it did not land."""
+
+
+class AuditEntryNotWrittenError(_CommittedUnrecordedError):
     """A mutation recorded outside ``@audited`` committed, and the append for it failed.
 
     ``arguments`` are the facts the unwritten line would have carried.
@@ -58,12 +62,7 @@ class AuditEntryNotWrittenError(RuntimeError):
         arguments: dict[str, Any] | None = None,
     ) -> None:
         """Take the tool, the append's exception and the unwritten line's ``arguments``."""
-        super().__init__(
-            f"{tool} completed and its audit entry could not be written: {cause}. Whatever the "
-            "call changed is committed and unrecorded, so do not retry it blind: repair the "
-            "audit log's destination, then reconcile the trail against what the call did."
-        )
-        self.tool = tool
+        super().__init__(tool, cause)
         self.arguments = arguments or {}
 
 

@@ -138,6 +138,17 @@ def test_record_event_or_raise_raises_audit_entry_not_written_when_the_append_fa
     assert isinstance(caught.value.__cause__, _AppendRefusedError)
 
 
+def test_both_unrecorded_mutation_errors_explain_one_cause_alike() -> None:
+    """The decorator's error and the library's error say the same thing for one tool and cause."""
+    cause = _AppendRefusedError("the audit log could not be appended to")
+
+    assert str(
+        audit_module.MutationCommittedWithoutAuditLineError(
+            "stage_something", cause
+        )
+    ) == str(audit_module.AuditEntryNotWrittenError("stage_something", cause))
+
+
 def test_record_event_or_raise_against_a_healthy_log_writes_one_entry_and_returns_silently(
     tmp_path: Path,
 ) -> None:
