@@ -28,11 +28,9 @@ from tcip_web.routes import terminal as terminal_routes
 from tcip_web.state import OpenProject
 from tests._audit_fixtures import audit_rows
 from tests._terminal_fixtures import FAKE, fake_executable
-from tests._web_fixtures import INVARIANCES, named_project
+from tests._web_fixtures import named_project
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from httpx import Response
     from starlette.testclient import WebSocketTestSession
 
@@ -44,14 +42,10 @@ _PLACEHOLDERS = (
     pty_host.CODEX_CONFIG_ARG,
 )
 INTERPRETER = pty_host.backend_interpreter()
-"""The interpreter this backend runs, the one every launch's MCP server and doctor line name."""
+"""The interpreter this backend runs, the one every launch's MCP server and session hook name."""
 
-
-def _doctor_entry(interpreter: str, project: Path) -> str:
-    """Return Agy's allow entry for the doctor line of ``interpreter`` and ``project``."""
-    return pty_host._command_entry(
-        pty_host.doctor_command(interpreter, project)
-    )
+HOOK_ARGV = [INTERPRETER, "-m", "tcip_web.cli", "session-hook"]
+"""The session hook's argv, written out here rather than read off the renderer."""
 
 
 def _tool_names() -> list[str]:
@@ -65,13 +59,7 @@ if pty_host.os.name == "nt":
     pytest.importorskip("winpty")
 
 
-@pytest.fixture(autouse=True)
-def _fake_terminal(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Launch the fake agent; afterwards end every session and forget the survivors of it."""
-    monkeypatch.setenv("TCIP_TERMINAL_CMD", f"{sys.executable} -u {FAKE}")
-    yield
-    terminal_routes.shutdown_all()
-    terminal_routes._SESSIONS.clear()
+pytestmark = pytest.mark.usefixtures("fake_terminal")
 
 
 def _read_until(
@@ -106,8 +94,8 @@ def _rows_with(
     return rows
 
 
-def _registered_hook(argv: list[str]) -> str | None:
-    """Return the session hook's command the rendered ``argv`` registers, ``None`` for none.
+def _registered_hook(argv: list[str]) -> dict | None:
+    """Return the session hook handler the rendered ``argv`` registers, ``None`` for none.
 
     It is read from the hooks of the settings file a ``--settings`` names, or else of the ``-c``
     overrides (:func:`_codex_overrides`); more than one handler is asserted against.
@@ -119,24 +107,29 @@ def _registered_hook(argv: list[str]) -> str | None:
         )
     else:
         hooks = _codex_overrides(argv)[1]
-    commands = [
-        handler["command"]
+    handlers = [
+        handler
         for group in hooks.get("SessionStart", [])
         for handler in group["hooks"]
     ]
-    assert len(commands) <= 1, commands
-    return commands[0] if commands else None
+    assert len(handlers) <= 1, handlers
+    return handlers[0] if handlers else None
 
 
-def _ritual_doctor_line(ritual: str) -> str:
-    """Return the doctor step ``ritual`` names.
+def _agy_hooks() -> dict:
+    """Return the Antigravity hooks file of the backend's workspace."""
+    from tcip_web.state import store
 
-    The step is what follows the ritual's first ``, then``, with its closing friction sentence
-    removed.
-    """
-    return ritual.removesuffix(f". {pty_host._RITUAL_FRICTION}").split(
-        ", then ", 1
-    )[1]
+    hooks = store.workspace / ".agents" / "hooks.json"
+    return json.loads(hooks.read_text(encoding="utf-8"))
+
+
+def _port_recorded() -> None:
+    """Record a port for the backend serving this test's workspace, as a served backend does."""
+    from tcip_mcp.web_client import record_backend_port
+    from tcip_web.state import store
+
+    record_backend_port(store.workspace, 8765)
 
 
 # ── unit-ish: command resolution + preflight ────────────────────────────
@@ -211,7 +204,7 @@ def test_rendering_replaces_each_placeholder_and_leaves_every_other_argument(
 ) -> None:
     literal, config = pty_host.render_argv(
         ["--literal", pty_host.MCP_CONFIG_ARG],
-        pty_host.project_launch(opened),
+        opened,
         pty_host.spawn_env("term_test"),
         None,
     )
@@ -228,10 +221,14 @@ def test_rendering_replaces_each_placeholder_and_leaves_every_other_argument(
     ]
 
 
-def test_the_ritual_for_no_project_says_the_session_has_none() -> None:
-    ritual = pty_host.session_ritual(pty_host.project_launch(None))
-    assert "has no project" in ritual
-    assert "initialize_project" in ritual
+def test_the_orientation_for_no_project_says_the_session_was_launched_with_none() -> (
+    None
+):
+    told = pty_host.orientation(None, "startup")
+    assert told is not None
+    assert "launched with no project open" in told
+    assert "initialize_project" in told
+    assert "serve_domain_knowledge" in told
 
 
 def test_prewarm_runs_without_raising() -> None:
@@ -321,10 +318,16 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
 
     The fake program, standing as the row's executable, receives exactly the arguments the
     row renders, with no placeholder left in them, and the launch's record and audit line carry
-    that argv and the row's preparation. The settings file Claude's row is handed
-    holds the shipped lists plus, under both shells, each read-only console command under both
-    invocations and the ritual's doctor line; the shipped file names no console command.
+    that argv and the row's preparation. Each row registers the one session hook: Claude's in
+    exec form in its handed settings, whose permission lists are the shipped ones and name no
+    console command, Codex's as a shell line in its overrides, and Antigravity's as a shell line
+    naming the session's start route in the workspace's hooks file, beside allowing only the
+    tcip tools.
     """
+    from tcip_web.cli.session_hook import session_start_url
+    from tcip_web.state import store
+
+    _port_recorded()
     monkeypatch.setattr(
         pty_host,
         "PROVIDERS",
@@ -354,11 +357,20 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     assert not any(
         placeholder in arg for arg in launched for placeholder in _PLACEHOLDERS
     )
-    assert _registered_hook(launched) == (
-        None
-        if row.resume is None
-        else pty_host.conversation_hook_command(INTERPRETER)
-    )
+    hook = {
+        "claude": {
+            "type": "command",
+            "command": HOOK_ARGV[0],
+            "args": HOOK_ARGV[1:],
+        },
+        "codex": {
+            "type": "command",
+            "command": " ".join(HOOK_ARGV),
+            "additionalContextLimit": 0,
+        },
+        "antigravity": None,
+    }[row.id]
+    assert _registered_hook(launched) == hook
     assert created["launched"]["resumed"] is None
     if "--settings" in launched:
         shipped = json.loads(
@@ -369,35 +381,29 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
                 encoding="utf-8"
             )
         )
-        line = _ritual_doctor_line(created["ritual"])
-        commands = [
-            f"{invocation} {command}:*"
-            for invocation in ("python -m tcip_web.cli", "tcip")
-            for command in (
-                "scan-dataset",
-                "inspect-compute-resources",
-                "render-failure-cases",
-            )
-        ]
-        assert handed["permissions"]["deny"] == shipped["permissions"]["deny"]
-        assert handed["permissions"]["allow"] == [
-            *shipped["permissions"]["allow"],
-            *(
-                f"{shell}({entry})"
-                for shell in ("Bash", "PowerShell")
-                for entry in [*commands, line]
-            ),
-        ]
+        assert handed["permissions"] == shipped["permissions"]
         assert not any(
-            "tcip" in entry
-            for entries in shipped["permissions"].values()
+            "tcip" in entry or "doctor" in entry
+            for entries in handed["permissions"].values()
             for entry in entries
             if not entry.startswith("mcp__tcip__")
         )
     if row.prepare is None:
         expected_prepared: list[str] = []
     else:
-        server = pty_host.mcp_server(pty_host.project_launch(opened))
+        hooks = store.workspace / ".agents" / "hooks.json"
+        url = session_start_url(store.workspace, sid)
+        assert _agy_hooks() == {
+            "tcip-session-start": {
+                "SessionStart": [
+                    {
+                        "type": "command",
+                        "command": " ".join([*HOOK_ARGV, url]),
+                    }
+                ]
+            }
+        }
+        server = pty_host.mcp_server(opened)
         expected_prepared = [
             pty_host.subprocess.list2cmdline(
                 [
@@ -410,17 +416,13 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
                     *server.args,
                 ]
             ),
-            f"allowed {len(_tool_names()) + 2} tcip entries in {settings}, dropped 0 "
-            "other doctor entries",
+            f"allowed {len(_tool_names())} tcip entries in {settings}",
+            f"registered the session hook in {hooks}",
         ]
         allowed = json.loads(settings.read_text(encoding="utf-8"))[
             "permissions"
         ]["allow"]
-        assert allowed == [
-            *(f"mcp(tcip/{name})" for name in _tool_names()),
-            _doctor_entry(INTERPRETER, opened.root),
-            f"unsandboxed({pty_host.doctor_command(INTERPRETER, opened.root)})",
-        ]
+        assert allowed == [f"mcp(tcip/{name})" for name in _tool_names()]
     assert created["launched"]["prepared"] == expected_prepared
     assert created["launched"]["confinement"] == row.confinement
     (started,) = audit_rows(opened_project, "agent_terminal_started")
@@ -441,7 +443,7 @@ def test_a_launch_preparation_that_fails_refuses_the_launch_naming_it(
     """
 
     def prepare(
-        executable: str, launch: pty_host.ProjectLaunch | None
+        executable: str, project: OpenProject | None, session: str
     ) -> list[str]:
         return [
             pty_host.run_to_completion(
@@ -475,65 +477,32 @@ def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempoten
     tmp_path: Path,
 ) -> None:
     settings = tmp_path / "settings.json"
-    project = tmp_path / "valley (north)"
-    line = pty_host.doctor_command(INTERPRETER, project)
-    other_project = _doctor_entry(INTERPRETER, tmp_path / "other project")
-    other_interpreter = _doctor_entry("/old/env/bin/python", project)
-    other_line = pty_host.doctor_command(
-        INTERPRETER, tmp_path / "other project"
-    )
-    other_unsandboxed = f"unsandboxed({other_line})"
+    kept = [
+        "command(git log)",
+        'command(regex:^python -m tcip_web\\.cli doctor "/p"$)',
+        "unsandboxed(git log)",
+    ]
     settings.write_text(
         json.dumps(
             {
                 "model": "kept",
-                "permissions": {
-                    "allow": [
-                        "command(git log)",
-                        other_project,
-                        other_interpreter,
-                        other_unsandboxed,
-                        "unsandboxed(git log)",
-                    ],
-                    "deny": ["x"],
-                },
+                "permissions": {"allow": kept, "deny": ["x"]},
             }
         ),
         encoding="utf-8",
     )
 
-    first = pty_host.allow_tcip_tools(settings, line)
-    second = pty_host.allow_tcip_tools(settings, line)
+    first = pty_host.allow_tcip_tools(settings)
+    second = pty_host.allow_tcip_tools(settings)
 
     names = _tool_names()
-    assert first == (
-        f"allowed {len(names) + 2} tcip entries in {settings}, dropped 3 other "
-        "doctor entries"
-    )
-    assert (
-        second
-        == f"allowed 0 tcip entries in {settings}, dropped 0 other doctor entries"
-    )
+    assert first == f"allowed {len(names)} tcip entries in {settings}"
+    assert second == f"allowed 0 tcip entries in {settings}"
     body = json.loads(settings.read_text(encoding="utf-8"))
     assert body["model"] == "kept"
     assert body["permissions"]["deny"] == ["x"]
     assert body["permissions"]["allow"] == [
-        "command(git log)",
-        "unsandboxed(git log)",
-        *(f"mcp(tcip/{name})" for name in names),
-        pty_host._command_entry(line),
-        f"unsandboxed({line})",
-    ]
-
-    # A launch with no project runs no doctor: both entries of the last project go too.
-    assert pty_host.allow_tcip_tools(settings, None) == (
-        f"allowed 0 tcip entries in {settings}, dropped 2 other doctor entries"
-    )
-    assert json.loads(settings.read_text(encoding="utf-8"))["permissions"][
-        "allow"
-    ] == [
-        "command(git log)",
-        "unsandboxed(git log)",
+        *kept,
         *(f"mcp(tcip/{name})" for name in names),
     ]
 
@@ -541,17 +510,93 @@ def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempoten
     with pytest.raises(
         pty_host.PreparationFailedError, match="does not hold a JSON object"
     ):
-        pty_host.allow_tcip_tools(settings, line)
+        pty_host.allow_tcip_tools(settings)
 
 
-def test_the_doctor_line_runs_the_console_command_under_the_mcp_servers_interpreter(
+def test_agys_hook_registration_keeps_the_hooks_files_other_entries(
+    opened: OpenProject,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Registering agy's session hook keeps every other hook of the workspace's hooks file.
+
+    The tcip hook states no timeout, so agy's own default governs it, a launch after it replaces
+    it rather than adding a second, and a file that does not hold a JSON object fails the
+    preparation by name.
+    """
+    from tcip_web.state import store
+
+    monkeypatch.setattr(
+        pty_host, "ANTIGRAVITY_SETTINGS", tmp_path / "agy-settings.json"
+    )
+    monkeypatch.setattr(
+        pty_host, "run_to_completion", lambda argv, step: "added"
+    )
+    _port_recorded()
+    hooks = store.workspace / ".agents" / "hooks.json"
+    hooks.parent.mkdir()
+    linter = {
+        "PostToolUse": [
+            {
+                "matcher": "run_command",
+                "hooks": [{"type": "command", "command": "./lint.sh"}],
+            }
+        ]
+    }
+    hooks.write_text(json.dumps({"my-linter-hook": linter}), encoding="utf-8")
+
+    for session in ("term_first", "term_second"):
+        pty_host.prepare_antigravity("agy", opened, session)
+
+    written = _agy_hooks()
+    assert written.get("my-linter-hook") == linter
+    (tcip,) = written["tcip-session-start"]["SessionStart"]
+    assert set(tcip) == {"type", "command"}
+    assert tcip["command"].endswith("/term_second/session-start")
+    assert set(written) == {"my-linter-hook", "tcip-session-start"}
+
+    hooks.write_text("[]", encoding="utf-8")
+    with pytest.raises(
+        pty_host.PreparationFailedError, match="does not hold a JSON object"
+    ):
+        pty_host.prepare_antigravity("agy", opened, "term_third")
+
+
+def test_no_launch_writes_a_doctor_allowance_for_any_row(
+    opened: OpenProject,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Neither Claude's handed settings nor agy's settings file gains a doctor entry."""
+    settings = tmp_path / "agy-settings.json"
+    monkeypatch.setattr(pty_host, "ANTIGRAVITY_SETTINGS", settings)
+    monkeypatch.setattr(
+        pty_host, "run_to_completion", lambda argv, step: "added"
+    )
+    _port_recorded()
+    (claude_settings,) = pty_host.render_argv(
+        [pty_host.CLAUDE_SETTINGS_ARG],
+        opened,
+        pty_host.spawn_env("term_test"),
+        None,
+    )
+    pty_host.prepare_antigravity("agy", opened, "term_test")
+
+    handed = json.loads(Path(claude_settings).read_text(encoding="utf-8"))
+    allowed = json.loads(settings.read_text(encoding="utf-8"))["permissions"]
+    for entries in (*handed["permissions"].values(), *allowed.values()):
+        assert not [entry for entry in entries if "doctor" in entry], entries
+
+
+def test_the_session_hook_runs_the_console_command_under_the_mcp_servers_interpreter(
     opened: OpenProject,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The doctor line names the console command under the MCP server's interpreter.
+    """The session hook names the console command under the MCP server's interpreter.
 
-    The line starts with the launch's MCP server command and ``-m tcip_web.cli doctor``, and
-    running ``tcip_web.cli`` as a module reaches the ``main`` the ``tcip`` console script names.
+    Its argv is the launch's MCP server command, ``-m tcip_web.cli`` and the dispatcher's own
+    ``session-hook`` command, and running ``tcip_web.cli`` as a module reaches the ``main`` the
+    ``tcip`` console script names.
     """
     import runpy
 
@@ -559,11 +604,13 @@ def test_the_doctor_line_runs_the_console_command_under_the_mcp_servers_interpre
 
     import tcip_web.cli
 
-    launch = pty_host.project_launch(opened)
-    line = pty_host.doctor_command(INTERPRETER, opened.root)
-    assert line.startswith(
-        f"{pty_host.mcp_server(launch).command} -m tcip_web.cli doctor "
-    )
+    assert pty_host.session_hook_argv() == [
+        pty_host.mcp_server(opened).command,
+        "-m",
+        "tcip_web.cli",
+        "session-hook",
+    ]
+    assert tcip_web.cli.COMMANDS["session-hook"] == "tcip_web.cli.session_hook"
     pyproject = (
         Path(__file__).parents[1] / "packages" / "tcip-web" / "pyproject.toml"
     )
@@ -584,69 +631,14 @@ def test_the_doctor_line_runs_the_console_command_under_the_mcp_servers_interpre
     assert reached == [True] and exited.value.code == 0
 
 
-def test_the_doctor_allowance_is_the_rituals_own_line_and_nothing_else(
-    opened: OpenProject,
+def test_the_session_hook_line_refuses_an_interpreter_no_shell_reads_as_one_word(
+    opened: OpenProject, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The doctor allowance admits the ritual's own doctor line and nothing else.
+    """An interpreter a shell does not read as one word refuses the hook's shell line by name.
 
-    One renderer spells the ritual's doctor step, and agy's entry admits exactly that line
-    (its regex evaluated under Python's ``re``): not the line with anything after it, not
-    another project's, not an unquoted spelling. The stale-entry recognizer matches what the
-    renderer writes and nothing it refuses.
+    Codex's overrides and so a Codex launch refuse it, naming the argument; Claude's exec-form
+    hook passes it as its command unchanged.
     """
-    opened_project = opened.root
-    line = pty_host.doctor_command(INTERPRETER, opened_project)
-    head = f"{INTERPRETER} -m tcip_web.cli doctor"
-    assert line == f'{head} "{opened_project.as_posix()}"'
-    launch = pty_host.project_launch(opened)
-    assert launch == pty_host.ProjectLaunch(
-        opened, line, None, pty_host.conversation_hook_command(INTERPRETER)
-    )
-    assert _ritual_doctor_line(pty_host.session_ritual(launch)) == line
-
-    entry = pty_host._command_entry(line)
-    assert entry.startswith("command(regex:^") and entry.endswith("$)")
-    pattern = re.compile(entry[len("command(regex:") : -1])
-    assert pattern.fullmatch(line)
-    for tail in (
-        "; Write-Output x",
-        " | Write-Output x",
-        " && dir",
-        " > out.txt",
-        " `dir`",
-        " $(dir)",
-        "\nWrite-Output x",
-        " C:/second",
-        " --help",
-        '"',
-        ' "C:/second"',
-    ):
-        assert not pattern.fullmatch(f"{line}{tail}"), tail
-    assert not pattern.fullmatch(line[:-1])
-    assert not pattern.fullmatch(
-        f'{head} "{opened_project.parent.as_posix()}"'
-    )
-    assert not pattern.fullmatch(f"{head} {opened_project.as_posix()}")
-    assert not pattern.fullmatch(f'tcip doctor "{opened_project.as_posix()}"')
-    for position in range(len(line)):
-        changed = (
-            line[:position]
-            + ("y" if line[position] != "y" else "z")
-            + line[position + 1 :]
-        )
-        assert not pattern.fullmatch(changed), changed
-
-    spaced = _doctor_entry(
-        INTERPRETER, Path("S:/Savanna Institute (north)/o'neil & sons, b.1")
-    )
-    assert re.compile(spaced[len("command(regex:") : -1]).fullmatch(
-        f'{head} "S:/Savanna Institute (north)/o\'neil & sons, b.1"'
-    )
-    assert not re.compile(spaced[len("command(regex:") : -1]).fullmatch(
-        f'{head} "S:/Savanna Institute (north)/o\'neil & sons, bX1"'
-    )
-    assert pty_host._DOCTOR_ENTRY.fullmatch(spaced)
-    assert not pty_host._DOCTOR_ENTRY.fullmatch("command(regex:^git log$)")
     for interpreter in (
         "/two words/python",
         "/em space/python",
@@ -654,99 +646,89 @@ def test_the_doctor_allowance_is_the_rituals_own_line_and_nothing_else(
         "/conda(alt)/python",
         "/a&b/python",
     ):
-        with pytest.raises(ValueError, match="the interpreter"):
-            pty_host.doctor_command(interpreter, opened_project)
-        refused = pty_host._command_entry(
-            f'{interpreter} -m tcip_web.cli doctor "/p"'
+        monkeypatch.setattr(
+            pty_host, "backend_interpreter", lambda: interpreter
         )
-        assert not pty_host._DOCTOR_ENTRY.fullmatch(refused), refused
-
-    curly = _doctor_entry(
-        INTERPRETER, Path("S:/o\u2019neil \u2018north\u2019 block")
-    )
-    assert re.compile(curly[len("command(regex:") : -1]).fullmatch(
-        f'{head} "S:/o\u2019neil \u2018north\u2019 block"'
-    )
+        with pytest.raises(ValueError, match="shell line refuses") as refused:
+            pty_host.codex_overrides(opened, {})
+        assert repr(interpreter) in str(refused.value)
+        (settings,) = pty_host.render_argv(
+            [pty_host.CLAUDE_SETTINGS_ARG], opened, {}, None
+        )
+        assert _registered_hook(["--settings", settings]) == {
+            "type": "command",
+            "command": interpreter,
+            "args": HOOK_ARGV[1:],
+        }
 
 
 @pytest.mark.parametrize(
     "interpreter", [INTERPRETER, "/env bin/python"], ids=["spelled", "refused"]
 )
-def test_the_ritual_agys_entry_and_claudes_settings_name_one_doctor_line(
+def test_claudes_codexs_and_agys_hooks_run_one_session_hook_argv(
     interpreter: str,
     opened: OpenProject,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The ritual, agy's entry and Claude's settings name one doctor line.
+    """Claude's settings, Codex's overrides and agy's hooks file run one session hook argv.
 
-    The ritual's doctor step, the command agy's regex entry admits and the command Claude's
-    added doctor entries name are one string, read from the ritual text, agy's written settings
-    and Claude's handed settings over the launch's one :func:`project_launch`; when the step
-    cannot be spelled, the ritual says so naming why, agy's preparation fails naming it, and
-    Claude's settings add no doctor entry.
+    Claude's exec-form handler is the argv itself, Codex's command the argv as one shell line
+    and agy's that line naming the session's start route, each read from what the launch
+    writes; an interpreter no shell line spells leaves Claude's handler unchanged, refuses
+    Codex's overrides and fails agy's preparation naming it, writing nothing.
     """
+    from tcip_web.cli.session_hook import session_start_url
+    from tcip_web.state import store
+
     monkeypatch.setattr(pty_host, "backend_interpreter", lambda: interpreter)
-    launch = pty_host.project_launch(opened)
-    ritual = pty_host.session_ritual(launch)
-    settings = tmp_path / "agy-settings.json"
-    monkeypatch.setattr(pty_host, "ANTIGRAVITY_SETTINGS", settings)
+    monkeypatch.setattr(
+        pty_host, "ANTIGRAVITY_SETTINGS", tmp_path / "agy-settings.json"
+    )
     monkeypatch.setattr(
         pty_host, "run_to_completion", lambda argv, step: "added"
     )
+    _port_recorded()
+    argv = [interpreter, *HOOK_ARGV[1:]]
     (claude_settings,) = pty_host.render_argv(
-        [pty_host.CLAUDE_SETTINGS_ARG],
-        launch,
-        pty_host.spawn_env("term_test"),
-        None,
+        [pty_host.CLAUDE_SETTINGS_ARG], opened, {}, None
     )
-    handed = json.loads(Path(claude_settings).read_text(encoding="utf-8"))
-    doctor_entries = [
-        entry
-        for entry in handed["permissions"]["allow"]
-        if " doctor " in entry
-    ]
+    claude = _registered_hook(["--settings", claude_settings])
+    assert claude is not None
+    assert [claude["command"], *claude["args"]] == argv
 
     if interpreter != INTERPRETER:
-        assert "cannot be spelled on a shell line: the interpreter" in ritual
+        with pytest.raises(ValueError, match="shell line refuses"):
+            pty_host.codex_overrides(opened, {})
         with pytest.raises(
-            pty_host.PreparationFailedError, match="the interpreter"
+            pty_host.PreparationFailedError, match="shell line refuses"
         ):
-            pty_host.prepare_antigravity("agy", launch)
-        assert doctor_entries == []
+            pty_host.prepare_antigravity("agy", opened, "term_test")
+        assert not (store.workspace / ".agents").exists()
+        assert not (tmp_path / "agy-settings.json").exists()
         return
-    line = _ritual_doctor_line(ritual)
-    pty_host.prepare_antigravity("agy", launch)
-    allowed = json.loads(settings.read_text(encoding="utf-8"))["permissions"][
-        "allow"
+    codex = _registered_hook(pty_host.codex_overrides(opened, {}))
+    assert codex is not None
+    assert codex["command"].split(" ") == argv
+    pty_host.prepare_antigravity("agy", opened, "term_test")
+    (agy,) = _agy_hooks()["tcip-session-start"]["SessionStart"]
+    assert agy["command"].split(" ") == [
+        *argv,
+        session_start_url(store.workspace, "term_test"),
     ]
-    (agy_entry,) = [e for e in allowed if e.startswith("command(regex:")]
-    assert re.compile(agy_entry[len("command(regex:") : -1]).fullmatch(line)
-    assert f"unsandboxed({line})" in allowed
-    assert doctor_entries == [f"Bash({line})", f"PowerShell({line})"]
 
 
-SHELL_READS_INSIDE_DOUBLE_QUOTES = {
-    '"': "closes the double-quoted segment under Bash and PowerShell",
+SHELL_READS_IN_A_BARE_WORD = {
+    '"': "opens a double-quoted segment under Bash and PowerShell",
     "$": "Bash and PowerShell expand a variable",
     "`": "Bash substitutes a command and PowerShell escapes the next character",
     "\\": "Bash reads an escape before some of the characters that may follow it",
     "!": "Bash expands history in an interactive shell with history expansion on",
-    "\r": "breaks the ritual's one line",
-    "\n": "breaks the ritual's one line",
+    "\r": "ends the shell line",
+    "\n": "ends the shell line",
     "“": "PowerShell reads a left double quotation mark as a double quote",
     "”": "PowerShell reads a right double quotation mark as a double quote",
     "„": "PowerShell reads a double low-9 quotation mark as a double quote",
-}
-"""Each character the renderer refuses in a project path, by what Bash or PowerShell does with
-it inside double quotes or what the ritual's one-line contract excludes, written here from the
-shells' grammars rather than read off the renderer's set, so a character dropped from that set
-fails its case. A typographic single quote (U+2018 to U+201B) is literal inside double quotes
-under both shells and is not here."""
-
-
-SHELL_READS_IN_A_BARE_WORD = {
-    **SHELL_READS_INSIDE_DOUBLE_QUOTES,
     " ": "ends a word under Bash and PowerShell",
     "\t": "ends a word under Bash and PowerShell",
     "\v": "ends a word under PowerShell",
@@ -782,95 +764,37 @@ SHELL_READS_IN_A_BARE_WORD = {
     "‚": "PowerShell reads a single low-9 quotation mark as a quote",
     "‛": "PowerShell reads a single high-reversed-9 quotation mark as a quote",
 }
-"""Each character the renderer refuses in the unquoted interpreter, by what Bash or PowerShell
+"""Each character the session hook's shell line refuses in a word, by what Bash or PowerShell
 does with it outside quotes, written from the shells' grammars rather than read off the
-renderer's set."""
-
-_REFUSED = [
-    ("project path", c) for c in sorted(SHELL_READS_INSIDE_DOUBLE_QUOTES)
-] + [("interpreter", c) for c in sorted(SHELL_READS_IN_A_BARE_WORD)]
-"""Each argument of the doctor line with a character it refuses."""
+renderer's set, so a character dropped from that set fails its case."""
 
 
 @pytest.mark.parametrize(
-    "where, held",
-    _REFUSED,
-    ids=[f"{where.split()[-1]}-U+{ord(c):04X}" for where, c in _REFUSED],
+    "held",
+    sorted(SHELL_READS_IN_A_BARE_WORD),
+    ids=[f"U+{ord(c):04X}" for c in sorted(SHELL_READS_IN_A_BARE_WORD)],
 )
-def test_a_doctor_line_argument_holding_a_refused_character_is_refused_by_name(
-    where: str,
+def test_a_hook_word_holding_a_character_a_shell_reads_is_refused_by_name(
     held: str,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A doctor line argument holding a refused character is refused by name.
+    """A word of the session hook's shell line holding a character a shell reads is refused.
 
-    The renderer refuses a project path or an interpreter holding a character the doctor
-    line refuses, naming that argument and that character; the launch's doctor step is that
-    refusal, the ritual then says the step cannot be spelled, on one line, and the Antigravity
-    preparation fails naming it and writes no settings. The paths are POSIX ones, so a
-    backslash is a path character and not a separator.
+    The refusal names the word and the character, and a word without it is spelled as itself.
     """
-    from pathlib import PurePosixPath
-
-    project = PurePosixPath(
-        f"/projects/valley{held if where == 'project path' else ''}block"
+    word = f"/env/bin{held}/python"
+    with pytest.raises(ValueError, match="shell line refuses") as refused:
+        pty_host.shell_line([word, "-m"])
+    assert repr(word) in str(refused.value)
+    assert repr(held) in str(refused.value)
+    assert pty_host.shell_line(["/env/bin/python", "-m"]) == (
+        "/env/bin/python -m"
     )
-    interpreter = f"/env/bin{held if where == 'interpreter' else ''}/python"
-    with pytest.raises(ValueError, match="the doctor line refuses") as refused:
-        pty_host.doctor_command(interpreter, project)
-    assert str(refused.value).startswith(f"the {where} ")
-    assert repr(held) in str(refused.value) or held in str(refused.value)
-
-    # Resolving the path on Windows would read the POSIX backslash as a separator.
-    monkeypatch.setattr(
-        "tcip_mcp.project_record.existing_project",
-        lambda _p: (
-            project,
-            {
-                "id": "abc",
-                "display_name": "Valley",
-                "site": "s",
-                "invariances": INVARIANCES.model_dump(),
-            },
-        ),
-    )
-    monkeypatch.setattr(pty_host, "backend_interpreter", lambda: interpreter)
-    opened = OpenProject(project, "abc")  # type: ignore[arg-type]
-    launch = pty_host.project_launch(opened)
-    assert launch == pty_host.ProjectLaunch(
-        opened,
-        None,
-        str(refused.value),
-        None
-        if where == "interpreter"
-        else pty_host.conversation_hook_command(interpreter),
-    )
-    ritual = pty_host.session_ritual(launch)
-    assert (
-        "cannot be spelled on a shell line" in ritual
-        and "report_friction" in ritual
-    )
-    assert f'doctor "{project.as_posix()}"' not in ritual
-    assert "\n" not in ritual and "\r" not in ritual
-
-    settings = tmp_path / "settings.json"
-    monkeypatch.setattr(pty_host, "ANTIGRAVITY_SETTINGS", settings)
-    monkeypatch.setattr(
-        pty_host, "run_to_completion", lambda argv, step: "added"
-    )
-    with pytest.raises(
-        pty_host.PreparationFailedError, match="the doctor line refuses"
-    ):
-        pty_host.prepare_antigravity("agy", launch)
-    assert not settings.exists()
 
 
 def test_the_written_mcp_configuration_is_the_one_server_the_launch_states(
     opened: OpenProject,
 ) -> None:
-    launch = pty_host.project_launch(opened)
-    server = pty_host.mcp_server(launch)
+    server = pty_host.mcp_server(opened)
     assert server.args == (
         "-m",
         "tcip_mcp",
@@ -881,7 +805,7 @@ def test_the_written_mcp_configuration_is_the_one_server_the_launch_states(
 
     (config,) = pty_host.render_argv(
         [pty_host.MCP_CONFIG_ARG],
-        launch,
+        opened,
         pty_host.spawn_env("term_test"),
         None,
     )
@@ -918,19 +842,19 @@ def test_the_codex_overrides_name_the_one_server_and_hook_and_forward_the_spawn_
     """The Codex overrides name the one server and session hook and forward the environment.
 
     Each rendered ``-c`` override parses as TOML, and together they state the server
-    :func:`mcp_server` produces, every variable of the launch's environment forwarded to it, and
-    the launch's session hook as :func:`session_start_hooks`; a launch for no project has none.
+    :func:`mcp_server` produces, every variable of the launch's environment forwarded to it and
+    the server required, so Codex's startup and resume wait for it, and the session hook as one
+    shell line passing its whole context, alike for a launch for no project.
     """
     env = pty_host.spawn_env("term_test")
-    launch = pty_host.project_launch(opened)
     rendered = pty_host.render_argv(
-        ["--literal", pty_host.CODEX_CONFIG_ARG], launch, env, None
+        ["--literal", pty_host.CODEX_CONFIG_ARG], opened, env, None
     )
 
     assert rendered[0] == "--literal"
     assert set(rendered[1::2]) == {"-c"}
     parsed, hooks = _codex_overrides(rendered[1:])
-    server = pty_host.mcp_server(launch)
+    server = pty_host.mcp_server(opened)
     assert (parsed["command"], parsed["args"]) == (
         server.command,
         list(server.args),
@@ -938,10 +862,21 @@ def test_the_codex_overrides_name_the_one_server_and_hook_and_forward_the_spawn_
     assert set(parsed["env_vars"]) == set(env)
     assert pty_host.TERMINAL_SESSION_ENV in parsed["env_vars"]
     assert parsed["default_tools_approval_mode"] == "approve"
-    assert hooks == pty_host.session_start_hooks(
-        pty_host.conversation_hook_command(INTERPRETER)
-    )
-    assert _codex_overrides(pty_host.codex_overrides(None, env))[1] == {}
+    assert parsed.get("required") is True
+    assert hooks == {
+        "SessionStart": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": " ".join(HOOK_ARGV),
+                        "additionalContextLimit": 0,
+                    }
+                ]
+            }
+        ]
+    }
+    assert _codex_overrides(pty_host.codex_overrides(None, env))[1] == hooks
 
 
 def test_the_codex_overrides_carry_any_project_path_as_toml_reads_it_back() -> (
@@ -955,21 +890,13 @@ def test_the_codex_overrides_carry_any_project_path_as_toml_reads_it_back() -> (
     from pathlib import PurePosixPath
 
     root = PurePosixPath("/projects") / 'grove \U0001f333 "north"\\\tb\x7f'
-    launch = pty_host.ProjectLaunch(
-        OpenProject(root, "abc"),  # type: ignore[arg-type]
-        None,
-        "not spelled",
-        None,
-    )
+    project = OpenProject(root, "abc")  # type: ignore[arg-type]
 
     parsed, _ = _codex_overrides(
-        pty_host.codex_overrides(launch, pty_host.spawn_env("term_test"))
+        pty_host.codex_overrides(project, pty_host.spawn_env("term_test"))
     )
 
     assert parsed["args"] == ["-m", "tcip_mcp", "--project", root.as_posix()]
-
-
-_RITUAL_ECHO = "echo:[TCIP session-start ritual]"
 
 
 def _wait_for(
@@ -991,11 +918,8 @@ def _wait_for(
 
 
 def _echoes(scrollback: str) -> list[str]:
-    """Return every line the fake agent echoed, in order, the ritual's cut to its header."""
-    return [
-        _RITUAL_ECHO if line.startswith(_RITUAL_ECHO) else line
-        for line in re.findall(r"echo:[^\r\n]*", scrollback)
-    ]
+    """Return every line the fake agent echoed, in order."""
+    return re.findall(r"echo:[^\r\n]*", scrollback)
 
 
 def _launched_session(
@@ -1025,10 +949,14 @@ def pastes_after(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_the_ritual_then_a_submitted_request_reach_the_agent_once_it_turns_paste_on(
+def test_a_fresh_launch_pastes_nothing_before_the_first_request_given_alone(
     client: TestClient,
     pastes_after: None,
 ) -> None:
+    """A fresh launch's agent is given nothing before the first request a person submitted.
+
+    Each request reaches the agent alone, once it turned paste on, and never earlier.
+    """
     sid = client.post(
         "/api/terminal/sessions", json={**LAUNCH, "cols": 500}
     ).json()["session_id"]
@@ -1037,27 +965,23 @@ def test_the_ritual_then_a_submitted_request_reach_the_agent_once_it_turns_paste
     )
 
     text = _wait_for(terminal_routes._SESSIONS[sid], "echo:first request")
-    assert _echoes(text) == [_RITUAL_ECHO, "echo:first request"]
+    assert _echoes(text) == ["echo:first request"]
     assert "EARLY_INPUT" not in text
 
     client.post(
         f"/api/terminal/sessions/{sid}/submit", json={"text": "second request"}
     )
     text = _wait_for(terminal_routes._SESSIONS[sid], "echo:second request")
-    assert _echoes(text) == [
-        _RITUAL_ECHO,
-        "echo:first request",
-        "echo:second request",
-    ]
+    assert _echoes(text) == ["echo:first request", "echo:second request"]
 
 
-def test_the_ritual_and_the_requests_staged_before_paste_is_on_go_as_one_paste(
+def test_the_requests_staged_before_paste_is_on_each_go_as_their_own_paste(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The ritual and the requests staged before paste is on go as one paste.
+    """The requests staged before paste is on each go as their own paste, oldest first.
 
-    The ritual and every request queued by the time the agent turns bracketed paste on are
-    written as one paste; a request submitted afterwards is its own paste.
+    Nothing is written before the agent turns bracketed paste on and its composer is live; a
+    request submitted afterwards is its own paste too.
     """
     row = pty_host.PROVIDERS[0]
     session, pty = _launched_session(monkeypatch, row)
@@ -1066,17 +990,15 @@ def test_the_ritual_and_the_requests_staged_before_paste_is_on_go_as_one_paste(
     assert pty.writes == []
 
     session._on_output("\x1b[?2004h" + row.composer_ready)
-    assert pty.writes == [
-        pty_host.paste(f"{session.ritual}\n\nfirst\n\nsecond")
-    ]
+    assert pty.writes == [pty_host.paste("first"), pty_host.paste("second")]
 
     session.submit("later")
     session.deliver()
-    assert pty.writes[1:] == [pty_host.paste("later")]
+    assert pty.writes[2:] == [pty_host.paste("later")]
     assert pty_host.paste("a\nb\r\nc") == "\x1b[200~a\rb\rc\x1b[201~\r"
 
 
-def test_overlapping_creates_deliver_one_ritual_before_the_request(
+def test_overlapping_creates_deliver_the_request_once(
     client: TestClient, pastes_after: None
 ) -> None:
     from concurrent.futures import ThreadPoolExecutor
@@ -1097,7 +1019,7 @@ def test_overlapping_creates_deliver_one_ritual_before_the_request(
     )
 
     text = _wait_for(terminal_routes._SESSIONS[sid], "echo:tab request")
-    assert _echoes(text) == [_RITUAL_ECHO, "echo:tab request"]
+    assert _echoes(text) == ["echo:tab request"]
 
 
 _COMPOSER_LIVE_AT = {"claude": 15, "antigravity": 4, "codex": 10}
@@ -1161,14 +1083,14 @@ composer without submitting it, since its session had not started."""
 
 
 @pytest.mark.parametrize("row", pty_host.PROVIDERS, ids=lambda row: row.id)
-def test_the_ritual_is_pasted_at_the_read_where_the_harness_composer_goes_live(
+def test_a_request_is_pasted_at_the_read_where_the_harness_composer_goes_live(
     row: pty_host.Provider,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The ritual is pasted at the read where the harness composer goes live.
+    """A staged request is pasted at the read where the harness composer goes live.
 
     Fed the reads its harness wrote at startup, a launch of ``row`` pastes nothing before the
-    read at which that harness's composer was observed live and pastes the ritual at that read,
+    read at which that harness's composer was observed live and pastes the request at that read,
     even though bracketed paste turned on earlier.
     """
     reads = _STARTUP_READS[row.id]
@@ -1183,9 +1105,7 @@ def test_the_ritual_is_pasted_at_the_read_where_the_harness_composer_goes_live(
     for index, data in enumerate(reads):
         session._on_output(data)
         assert pty.writes == (
-            [pty_host.paste(f"{session.ritual}\n\nthe request")]
-            if index >= live_at
-            else []
+            [pty_host.paste("the request")] if index >= live_at else []
         )
 
 
@@ -1787,6 +1707,7 @@ def test_a_submit_is_admitted_while_a_write_is_held(
         admitted.set()
         lock.contended.set()
 
+    session.submit("first")
     monkeypatch.setattr(session, "submit", noting_submit)
     composer = pty_host.PROVIDERS[0].composer_ready
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -1808,8 +1729,8 @@ def _delivering_a_request(
     """Return a session whose request "written" is in a paste held mid-write, its PTY and lock.
 
     The session's delivery lock is watched. The request was queued first; the session's output
-    then turned its composer live on another thread, whose delivery is writing the ritual with
-    that request when this returns.
+    then turned its composer live on another thread, whose delivery is writing that request when
+    this returns.
     """
     held = _HeldWritePty()
     _wire_stub_spawn(monkeypatch, held)
@@ -2422,26 +2343,93 @@ def test_a_create_and_one_after_an_end_answer_the_launched_provider_and_program(
         )
 
 
-def test_a_create_and_one_after_an_end_answer_the_ritual_the_library_builds_for_the_open_project(
+def _started(
+    client: TestClient, sid: str, source: str = "startup"
+) -> str | None:
+    """Report a start of session ``sid`` by ``source`` as its hook does; return its orientation."""
+    resp = client.post(
+        f"/api/terminal/sessions/{sid}/session-start",
+        json={"conversation": "conv-start", "source": source},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["text"]
+
+
+def test_a_session_start_is_answered_the_orientation_of_the_sessions_own_project(
     client: TestClient,
     opened: OpenProject,
 ) -> None:
+    """A session's start is answered the orientation of the project it launched for.
+
+    After the GUI opened another project, the session's start is still told its own project,
+    as :func:`orientation` tells it; a launch's answer names no orientation.
+    """
     created = client.post("/api/terminal/sessions", json=LAUNCH).json()
-    assert created["ritual"] == pty_host.session_ritual(
-        pty_host.project_launch(opened)
+    assert set(created) == {"session_id", "launched"}
+    other = named_project(opened.root.parent / "hill_block", "Hill block")
+    resp = client.post(
+        "/api/projects/open", json={"id": other.id, "user": "grower"}
     )
-    assert "Test project" in created["ritual"]
-    for step in ("load_project_memory", "inspect_project"):
-        assert step in created["ritual"]
-    line = pty_host.doctor_command(INTERPRETER, opened.root)
-    assert _ritual_doctor_line(created["ritual"]) == line
+    assert resp.status_code == 200, resp.text
 
-    attached = client.post("/api/terminal/sessions", json=LAUNCH).json()
-    assert attached == created
+    told = _started(client, created["session_id"])
 
-    _end(client, created["session_id"])
-    relaunched = client.post("/api/terminal/sessions", json=LAUNCH).json()
-    assert relaunched["ritual"] == created["ritual"]
+    assert told == pty_host.orientation(opened, "startup")
+    assert told is not None and "Test project" in told
+    assert "Hill block" not in told
+
+
+def test_a_session_launched_for_no_project_stays_one_after_its_agent_creates_one(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A session launched for no project is told a fact that still holds once its agent made one.
+
+    The project is created and written to through the MCP server's own creation and project
+    adapters, the server's identity begun under the session's id as the launch declares it; the
+    session then holds no project, and its compaction is told it was launched with none, never
+    that it has none.
+    """
+    import anyio
+
+    from tcip_mcp import agent_identity
+    from tcip_mcp.server import Session, build_server
+    from tcip_web.state import store
+    from tests._web_fixtures import INVARIANCES
+
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    before = _started(client, sid, "compact")
+    assert before is not None
+    monkeypatch.setenv(agent_identity.TERMINAL_SESSION_ENV, sid)
+    server = build_server(Session())
+    agent_identity.begin("a-harness", "1.0")
+    try:
+        anyio.run(
+            server.call_tool,
+            "initialize_project",
+            {
+                "project_path": str(store.workspace / "created"),
+                "display_name": "Created block",
+                "site": "south orchard",
+                "invariances": INVARIANCES.model_dump(),
+            },
+        )
+        anyio.run(
+            server.call_tool,
+            "report_friction",
+            {"category": "missing_tool", "detail": "written after creation"},
+        )
+    finally:
+        agent_identity.end()
+
+    after = _started(client, sid, "compact")
+
+    assert after == before
+    assert after is not None
+    assert "launched with no project open" in after
+    assert "has no project" not in after
+    assert terminal_routes._SESSIONS[sid]._project is None
 
 
 def test_a_launch_after_a_rename_of_the_open_project_names_its_new_name(
@@ -2449,7 +2437,8 @@ def test_a_launch_after_a_rename_of_the_open_project_names_its_new_name(
 ) -> None:
     """A launch after a rename of the open project names its new name.
 
-    After a rename made while the project is open, the next launch's ritual states the new name.
+    After a rename made while the project is open, the next session's orientation states the
+    new name.
     """
     renamed = client.post(
         "/api/projects/rename",
@@ -2464,23 +2453,28 @@ def test_a_launch_after_a_rename_of_the_open_project_names_its_new_name(
     created = client.post("/api/terminal/sessions", json=LAUNCH)
 
     assert created.status_code == 200, created.text
-    assert "Project: Ridge block" in created.json()["ritual"]
+    told = _started(client, created.json()["session_id"])
+    assert told is not None and '"display_name": "Ridge block"' in told
 
 
-def test_a_launch_for_an_open_project_whose_record_will_not_read_refuses_naming_why(
+def test_the_orientation_of_a_project_whose_record_will_not_read_states_why(
     client: TestClient,
     opened: OpenProject,
 ) -> None:
-    from tcip_mcp.project_record import project_record_key
+    """A session for a project whose record will not read is told why, in the overview."""
+    from tcip_mcp.project_record import project_record_key, record_fields
     from tests._record_damage_fixtures import damage_record
 
     damage_record(project_record_key(str(opened.root)), b"{not valid json")
+    problem = record_fields(opened.root)["record_problem"]
+    assert problem is not None
 
     created = client.post("/api/terminal/sessions", json=LAUNCH)
 
-    assert created.status_code == 503
-    assert "names no readable project" in created.json()["detail"]
-    assert terminal_routes._SESSIONS == {}
+    assert created.status_code == 200, created.text
+    told = _started(client, created.json()["session_id"])
+    assert told is not None
+    assert f'"record_problem": {json.dumps(problem)}' in told
 
 
 # ── resuming a row's conversation ───────────────────────────────────────
@@ -2492,11 +2486,12 @@ def fake_rows(
 ) -> dict[str, pty_host.Provider]:
     """Install every provider row with the fake program as its executable; return them by id.
 
-    Antigravity's settings file is a scratch one.
+    Antigravity's settings file is a scratch one, and a port is recorded for its session hook.
     """
     monkeypatch.setattr(
         pty_host, "ANTIGRAVITY_SETTINGS", tmp_path / "agy-settings.json"
     )
+    _port_recorded()
     rows = _rows_with(
         monkeypatch, executable=str(fake_executable(tmp_path / "bin"))
     )
@@ -2516,8 +2511,8 @@ def _launch(client: TestClient, row: pty_host.Provider) -> dict:
 def _report(client: TestClient, sid: str, conversation: str) -> None:
     """Report ``conversation`` for session ``sid`` as its session hook does."""
     resp = client.post(
-        f"/api/terminal/sessions/{sid}/conversation",
-        json={"conversation": conversation},
+        f"/api/terminal/sessions/{sid}/session-start",
+        json={"conversation": conversation, "source": "startup"},
     )
     assert resp.status_code == 200, resp.text
 
@@ -2557,8 +2552,8 @@ def test_an_end_nobody_chose_then_a_launch_of_its_row_resumes_it_and_delivers_re
 
     Inside the row's cache lifetime the launch carries the row's resume argument and the id and
     settings pinning the fullscreen renderer, whose alternate screen is the row's composer
-    marker, is given no ritual, its start line names the conversation, and a request staged for
-    it is delivered alone.
+    marker, its start line names the conversation, and a request staged for it is delivered
+    alone.
     """
     row = fake_rows["claude"]
     _launch(client, row)
@@ -2567,7 +2562,6 @@ def test_an_end_nobody_chose_then_a_launch_of_its_row_resumes_it_and_delivers_re
     resumed = _launch(client, row)
 
     assert resumed["launched"]["resumed"] == "conv-1"
-    assert resumed["ritual"] is None
     argv = resumed["launched"]["argv"]
     assert _resumes(argv, row, "conv-1")
     handed = json.loads(
@@ -2603,7 +2597,6 @@ def test_a_launch_past_the_rows_cache_lifetime_is_fresh(
     fresh = _launch(client, row)
 
     assert fresh["launched"]["resumed"] is None
-    assert fresh["ritual"] is not None
     assert row.resume.argument not in fresh["launched"]["argv"]
 
 
@@ -2621,7 +2614,6 @@ def test_a_launch_after_the_persons_exit_is_fresh(
     fresh = _launch(client, row)
 
     assert fresh["launched"]["resumed"] is None
-    assert fresh["ritual"] is not None
 
 
 def test_a_launch_of_another_row_never_resumes_the_first_rows_conversation(
@@ -2635,7 +2627,6 @@ def test_a_launch_of_another_row_never_resumes_the_first_rows_conversation(
     other = _launch(client, fake_rows["codex"])
 
     assert other["launched"]["resumed"] is None
-    assert other["ritual"] is not None
 
 
 def test_a_launch_in_another_project_never_resumes_a_conversation_of_the_first(
@@ -2730,7 +2721,6 @@ def test_a_conversation_whose_hook_never_reported_is_not_resumed_and_its_end_say
     fresh = _launch(client, row)
 
     assert fresh["launched"]["resumed"] is None
-    assert fresh["ritual"] is not None
 
 
 def test_antigravitys_row_is_never_resumed(
@@ -2745,7 +2735,6 @@ def test_antigravitys_row_is_never_resumed(
     fresh = _launch(client, row)
 
     assert fresh["launched"]["resumed"] is None
-    assert fresh["ritual"] is not None
 
 
 def test_the_session_hook_is_one_command_across_launches_naming_no_launch(
@@ -2764,55 +2753,12 @@ def test_the_session_hook_is_one_command_across_launches_naming_no_launch(
         assert hooks[0] is not None and hooks[0] == hooks[1]
 
 
-def test_the_hook_command_reports_its_stdins_conversation_for_its_terminal_session(
-    client: TestClient, opened_project: Path
-) -> None:
-    """The session hook's own command line, run by a shell, reports the conversation it is given.
-
-    Its stdin is a ``SessionStart`` event and its environment names the terminal session; the
-    backend serving the workspace takes the report, the session's end line records it, and the
-    command prints nothing a harness would add to its agent's context.
-    """
-    import subprocess
-
-    from tcip_web.state import store
-    from tools.smoke_terminal_e2e import served
-
-    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
-        "session_id"
-    ]
-    with served(app, store.workspace):
-        ran = subprocess.run(
-            pty_host.conversation_hook_command(INTERPRETER),
-            shell=True,
-            input=json.dumps(
-                {
-                    "session_id": "conv-hook",
-                    "hook_event_name": "SessionStart",
-                    "source": "startup",
-                    "cwd": str(store.workspace),
-                }
-            ),
-            env={**pty_host.os.environ, pty_host.TERMINAL_SESSION_ENV: sid},
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-
-    assert ran.returncode == 0, ran.stderr
-    assert ran.stdout == ""
-    assert terminal_routes._SESSIONS[sid].conversation == "conv-hook"
-    assert _end(client, sid).status_code == 200
-    (line,) = audit_rows(opened_project, "agent_terminal_ended")
-    assert _ended(line).conversation == "conv-hook"
-
-
 def test_a_report_for_a_session_the_backend_does_not_hold_answers_404(
     client: TestClient,
 ) -> None:
     resp = client.post(
-        "/api/terminal/sessions/term_gone/conversation",
-        json={"conversation": "conv-1"},
+        "/api/terminal/sessions/term_gone/session-start",
+        json={"conversation": "conv-1", "source": "startup"},
     )
     assert resp.status_code == 404
 
@@ -2875,11 +2821,7 @@ def test_a_switch_delivers_the_hand_off_request_and_ends_after_its_own_retrospec
     assert switched.status_code == 200, switched.text
     assert switched.json() is None
     session._on_output("\x1b[?2004h" + pty_host.PROVIDERS[0].composer_ready)
-    assert pty.writes == [
-        pty_host.paste(
-            f"{session.ritual}\n\n{terminal_routes.HAND_OFF_REQUEST}"
-        )
-    ]
+    assert pty.writes == [pty_host.paste(terminal_routes.HAND_OFF_REQUEST)]
 
     _retrospective_declared_by(opened_project, "term_another", monkeypatch)
     session._on_output("the agent works")

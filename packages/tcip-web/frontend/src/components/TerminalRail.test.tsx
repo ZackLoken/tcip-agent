@@ -133,7 +133,6 @@ vi.stubGlobal(
   },
 );
 
-const RITUAL = "[TCIP session-start ritual] Project: Demo. Run the ritual first.";
 const PROVIDER = { id: "harness", name: "A harness", unavailable_reason: null };
 const LAUNCHED = {
   provider: "harness",
@@ -143,7 +142,7 @@ const LAUNCHED = {
   prepared: [],
   resumed: null,
 };
-const LAUNCH = { session_id: "t1", launched: LAUNCHED, ritual: RITUAL };
+const LAUNCH = { session_id: "t1", launched: LAUNCHED };
 
 afterEach(cleanup);
 beforeEach(() => {
@@ -605,10 +604,10 @@ describe("TerminalRail", () => {
       expect(MockWebSocket.instances).toHaveLength(1);
     });
 
-    it("Start launches one fresh session through the socket's create and prints its ritual", async () => {
+    it("Start launches one fresh session through the socket's create", async () => {
       vi.mocked(terminalApi.createSession)
         .mockResolvedValueOnce(LAUNCH)
-        .mockResolvedValueOnce({ ...LAUNCH, session_id: "t2", ritual: "fresh ritual" });
+        .mockResolvedValueOnce({ ...LAUNCH, session_id: "t2" });
       render(<TerminalRail />);
       await openSocket();
       exitAgent();
@@ -617,7 +616,6 @@ describe("TerminalRail", () => {
       await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
       expect(terminalApi.createSession).toHaveBeenCalledTimes(2);
       expect(MockWebSocket.instances[1].url).toContain("/api/terminal/ws/t2");
-      expect(screen.getByTestId("terminal-ritual")).toHaveTextContent("fresh ritual");
       expect(screen.queryByText("Start")).not.toBeInTheDocument();
     });
 
@@ -868,28 +866,6 @@ describe("TerminalRail", () => {
       expect(submitted()).toEqual([]);
       await act(() => Promise.resolve(second.resolve(LAUNCH)));
       await waitFor(() => expect(submitted()).toEqual([["t1", "tab request"]]));
-    });
-  });
-
-  describe("session-start ritual", () => {
-    it("prints the launch's ritual and hides it once the breeder types", async () => {
-      render(<TerminalRail />);
-      expect(await screen.findByTestId("terminal-ritual")).toHaveTextContent(RITUAL);
-      await waitFor(() => expect(termInstances[0].onData).toHaveBeenCalled());
-
-      act(() => termInstances[0].onData.mock.calls[0][0]("h"));
-      await waitFor(() => expect(screen.queryByTestId("terminal-ritual")).not.toBeInTheDocument());
-    });
-
-    it("prints no ritual for a launch that resumed a conversation", async () => {
-      vi.mocked(terminalApi.createSession).mockResolvedValue({
-        ...LAUNCH,
-        launched: { ...LAUNCHED, resumed: "conv-1" },
-        ritual: null,
-      });
-      render(<TerminalRail />);
-      await openSocket();
-      expect(screen.queryByTestId("terminal-ritual")).not.toBeInTheDocument();
     });
   });
 

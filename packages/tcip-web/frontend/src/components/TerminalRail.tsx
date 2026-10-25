@@ -3,10 +3,9 @@
  * xterm.js terminal attached over WebSocket to a server-side PTY running the harness in the
  * workspace, so the breeder talks to the agent the platform is designed around with no
  * translation layer. The terminal is recolored to the field-station palette via the ANSI
- * theme; the harness's own layout is untouched. A launch's session-start ritual is shown above
- * the terminal (a launch resuming a conversation has none), staged requests are submitted to the
- * session for its agent, and choosing another harness while an agent runs waits for that agent's
- * hand-off before the chosen one starts.
+ * theme; the harness's own layout is untouched. Staged requests are submitted to the session for
+ * its agent, and choosing another harness while an agent runs waits for that agent's hand-off
+ * before the chosen one starts.
  */
 
 import { FitAddon } from "@xterm/addon-fit";
@@ -137,7 +136,7 @@ export function TerminalRail() {
   const pendingMessages = useStore((s) => s.pendingTerminalMessages);
 
   // Submit staged requests, oldest first, to the live session, each leaving the queue once the
-  // backend took it; the backend delivers them after the agent's ritual.
+  // backend took it; the backend delivers them once the agent can take input.
   const submitStaged = useCallback(() => {
     const id = sessionRef.current;
     if (!id || submissionRef.current) return;
@@ -158,19 +157,15 @@ export function TerminalRail() {
     });
   }, []);
 
-  // The launch's session-start ritual, shown until the breeder types; a resumed launch has none.
-  const [ritual, setRitual] = useState<string | null>(null);
-
   /** Stop the socket and forget the session id, so the socket's next start launches an agent. */
   const detach = useCallback(() => {
     socketRef.current?.stop();
     sessionRef.current = null;
   }, []);
 
-  /** Show that the agent ended: detached, its ritual hidden, and only Start launches another. */
+  /** Show that the agent ended: detached, and only Start launches another. */
   const showEnded = useCallback(() => {
     detach();
-    setRitual(null);
     setPhase("ended");
   }, [detach, setPhase]);
 
@@ -195,7 +190,6 @@ export function TerminalRail() {
   /** Start the row a switch chose, the agent it switched from having ended. */
   const switchToChosen = useCallback(() => {
     detach();
-    setRitual(null);
     start();
   }, [detach, start]);
 
@@ -358,7 +352,6 @@ export function TerminalRail() {
             });
             if (closedByClient) throw new Error("terminal rail unmounted mid-connect");
             sessionRef.current = created.session_id;
-            setRitual(created.ritual);
             submitStaged();
           }
         } catch (e) {
@@ -388,10 +381,7 @@ export function TerminalRail() {
     socketRef.current = socket;
     if (running(useStore.getState().terminalPhase)) socket.start();
 
-    const dataSub = term.onData((data) => {
-      setRitual(null);
-      send({ type: "input", data });
-    });
+    const dataSub = term.onData((data) => send({ type: "input", data }));
     const resizeSub = term.onResize(({ rows, cols }) => send({ type: "resize", rows, cols }));
     const observer = new ResizeObserver(() => {
       try {
@@ -610,14 +600,6 @@ export function TerminalRail() {
         </div>
       ) : (
         <>
-          {ritual && (
-            <div
-              data-testid="terminal-ritual"
-              className="shrink-0 px-3 py-2 border-b border-tcip-border bg-tcip-panel text-[13px] text-tcip-muted"
-            >
-              {ritual}
-            </div>
-          )}
           <div className="flex-1 min-h-0 relative">
             <div ref={hostRef} data-testid="terminal-host" className="absolute inset-0 p-2" />
             {phase === "ended" && (

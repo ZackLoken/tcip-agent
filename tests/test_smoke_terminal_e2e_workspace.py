@@ -93,15 +93,46 @@ def test_the_signal_is_a_friction_report_of_the_open_project_carrying_the_token(
     assert not mod.reported(opened_client, other)
 
 
+def test_the_first_signal_carries_the_display_name_its_request_never_states(
+    opened_project: Path, opened_client: TestClient
+) -> None:
+    """The first launch's signal carries the project's display name, which its request omits.
+
+    A report of the token alone is not the signal once the name is asked for; a report of the
+    token followed by the name is.
+    """
+    from tcip_mcp.tools.meta_tools import report_friction
+
+    mod = _load()
+    name = "Terminal smoke 0a1b2c3d"
+    alone, named = "ack-0123456789ab", "ack-ba9876543210"
+    assert alone in mod.request_for(alone)
+    assert name not in mod.request_for(alone)
+
+    report_friction(
+        opened_project, mod.REQUESTED_CATEGORY, f"smoke {alone}", actor=None
+    )
+    assert mod.reported(opened_client, alone)
+    assert not mod.reported(opened_client, alone, name)
+
+    report_friction(
+        opened_project,
+        mod.REQUESTED_CATEGORY,
+        f"smoke {named} {name}",
+        actor=None,
+    )
+    assert mod.reported(opened_client, named, name)
+
+
 def test_the_resume_smoke_passes_against_a_harness_whose_hook_reaches_the_served_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The smoke's resume case passes against the fake harness standing in for Claude's row.
 
     The fake runs its launch's ``SessionStart`` hook, whose command reaches the backend the smoke
-    serves, reports the token, then, resumed after the backend's shutdown, the token continued
-    from its own memory of the conversation; the second launch resumed the conversation the hook
-    reported.
+    serves, reports the token with the display name the hook's orientation states, then,
+    resumed after the backend's shutdown, the token continued from its own memory of the
+    conversation; the second launch resumed the conversation the hook reported.
     """
     from tests._terminal_fixtures import fake_executable
 

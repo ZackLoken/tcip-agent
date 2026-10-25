@@ -176,6 +176,21 @@ def opened_client(opened_project: Path, client: TestClient) -> TestClient:
 
 
 @pytest.fixture
+def fake_terminal(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Launch the fake agent; afterwards end every session and forget the survivors of it.
+
+    The fake is ``tests/fake_terminal_app.py`` through ``TCIP_TERMINAL_CMD``.
+    """
+    from tcip_web.routes import terminal as terminal_routes
+    from tests._terminal_fixtures import FAKE
+
+    monkeypatch.setenv("TCIP_TERMINAL_CMD", f"{sys.executable} -u {FAKE}")
+    yield
+    terminal_routes.shutdown_all()
+    terminal_routes._SESSIONS.clear()
+
+
+@pytest.fixture
 def tb_launches(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[Path]]:
     """Record every directory handed to ``launch_tensorboard``, its child a listening stand-in.
 

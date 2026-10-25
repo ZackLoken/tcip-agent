@@ -308,7 +308,6 @@ export interface LaunchedProgram {
 export interface TerminalLaunch {
   session_id: string;
   launched: LaunchedProgram;
-  ritual: string | null;
 }
 
 export interface ProviderStatus {

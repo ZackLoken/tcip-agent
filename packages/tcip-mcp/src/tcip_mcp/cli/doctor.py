@@ -106,8 +106,8 @@ def check_data_quality(
             (
                 "info",
                 f"{len(unannotated)} of {len(scan['images'])} image(s) have no "
-                f"label record and are excluded from training ({shown}). Annotate them, "
-                "or mark the genuinely-empty ones Complete to train them as negatives.",
+                f"label record and are excluded from training ({shown}); an image marked "
+                "Complete with no annotation trains as a negative.",
             )
         )
 
@@ -207,9 +207,8 @@ def check_registry(root: Path, findings: list) -> None:
                 (
                     "warn",
                     f"bucket {name!r}: prediction bucket's record names checkpoint "
-                    f"{producer.checkpoint_sha256}, which no registry entry names; register the "
-                    "checkpoint to make this bucket's provenance verifiable going "
-                    "forward.",
+                    f"{producer.checkpoint_sha256}, which no registry entry names, so the "
+                    "bucket's provenance is not verifiable against the registry.",
                 )
             )
 
@@ -312,7 +311,7 @@ def check_traits(root: Path, findings: list) -> None:
                 (
                     "warn",
                     f"the latest revision ({record.latest.number}) of trait "
-                    f"{name!r} is not confirmed; ask the breeder to confirm it in the "
+                    f"{name!r} is not confirmed; the breeder confirms a revision in the "
                     "Setup tab",
                 )
             )
@@ -325,6 +324,32 @@ def check_project_record(root: Path, findings: list) -> None:
     problem = record_fields(root)["record_problem"]
     if problem is not None:
         findings.append(("error", problem))
+
+
+def findings(root: Path) -> list[tuple[str, str]]:
+    """Return every check's findings over the project at ``root``, errors first, then warnings.
+
+    Each finding is its level (``error``, ``warn`` or ``info``) and its message, read through the
+    store this process already bound.
+    """
+    found: list[tuple[str, str]] = []
+    census = _census(root, found)
+    checks_taking_census = (check_data_quality, check_provenance)
+    for check in (
+        check_data_quality,
+        check_registry,
+        check_provenance,
+        check_state,
+        check_traits,
+        check_project_record,
+    ):
+        run: Callable[..., None] = check
+        if check in checks_taking_census:
+            run(root, found, census=census)
+        else:
+            run(root, found)
+    rank = {"error": 0, "warn": 1, "info": 2}
+    return sorted(found, key=lambda f: rank[f[0]])
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
@@ -348,33 +373,14 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     from tcip_store import bind
 
     bind()
-
-    findings: list[tuple[str, str]] = []
-    census = _census(root, findings)
-    checks_taking_census = (check_data_quality, check_provenance)
-    for check in (
-        check_data_quality,
-        check_registry,
-        check_provenance,
-        check_state,
-        check_traits,
-        check_project_record,
-    ):
-        run: Callable[..., None] = check
-        if check in checks_taking_census:
-            run(root, findings, census=census)
-        else:
-            run(root, findings)
-
-    rank = {"error": 0, "warn": 1, "info": 2}
-    findings.sort(key=lambda f: rank[f[0]])
-    for level, msg in findings:
+    found = findings(root)
+    for level, msg in found:
         print(f"[{level.upper():5}] {msg}")
-    errors = sum(1 for level, _ in findings if level == "error")
-    warns = sum(1 for level, _ in findings if level == "warn")
+    errors = sum(1 for level, _ in found if level == "error")
+    warns = sum(1 for level, _ in found if level == "warn")
     print(
         f"\ndoctor: {errors} error(s), {warns} warning(s), "
-        f"{len(findings) - errors - warns} info"
+        f"{len(found) - errors - warns} info"
     )
     return 2 if errors else (1 if warns else 0)
 

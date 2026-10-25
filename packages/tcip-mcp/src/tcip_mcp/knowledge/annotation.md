@@ -332,7 +332,9 @@ Flow, in the order of the bullets above: a bucket from `run_inference` or `stage
   admission, the review queue and the editor's own listing all read it through
   `LabelDocument.state`. An empty document nobody marked is unannotated: you cannot manufacture
   negatives, since writing empty label documents does not create them; only the person's mark
-  does. `tcip doctor <root>` reports an empty document no mark finishes. Never delete empty label
+  does. The doctor names an empty document no mark finishes; the orientation a new conversation
+  of a session launched for a project starts with holds the doctor's first findings and how many
+  there are, and an operator reads them all through `tcip doctor`. Never delete empty label
   documents without asking.
 
 ## Active Learning
