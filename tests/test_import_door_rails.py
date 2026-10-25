@@ -189,6 +189,26 @@ def test_a_record_travels_inside_the_database_the_archive_copies(
     assert ts.read(gui_snapshot_key(dest)) == record
 
 
+def test_the_database_the_archive_copies_is_already_in_wal(
+    tmp_path: Path,
+) -> None:
+    """The store database a bundle carries reports WAL before anything opens it to read or write.
+
+    The member is extracted as it lies in the bundle and its mode read without changing it.
+    """
+    from tests.test_store_contract import _journal_mode
+
+    root = one_labeled_capture(tmp_path / "source")
+    zip_path = tmp_path / "bundle.zip"
+    assert "error" not in archive_project(
+        root, ZipBundle(output_path=str(zip_path))
+    )
+    with zipfile.ZipFile(str(zip_path)) as zf:
+        extracted = Path(zf.extract(".tcip/store.db", tmp_path / "member"))
+
+    assert _journal_mode(extracted) == "wal"
+
+
 # ── rail 13: concurrency ─────────────────────────────────────────────────────────────────────
 
 
