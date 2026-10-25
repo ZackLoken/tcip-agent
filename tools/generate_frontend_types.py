@@ -122,11 +122,7 @@ def declared_models() -> list[type[BaseModel]]:
         CaptureInvariances,
         InvariancesCorrection,
     )
-    from tcip_mcp.tools.meta_tools import (
-        FrictionReport,
-        MemoryPage,
-        Retrospective,
-    )
+    from tcip_mcp.tools.meta_tools import MemoryKind, MemoryPage
     from tcip_mcp.traits import (
         Operationalization,
         PositiveState,
@@ -263,8 +259,7 @@ def declared_models() -> list[type[BaseModel]]:
         ConfirmRevisionPayload,
         MaskCut,
         Stated,
-        MemoryPage[FrictionReport],
-        MemoryPage[Retrospective],
+        *(MemoryPage[kind.record] for kind in MemoryKind),  # type: ignore[name-defined]
     ]
 
 

@@ -729,7 +729,7 @@ export interface CanvasUnderStroke {
 
 export interface FrictionReport {
   timestamp: string;
-  category: string;
+  category: "missing_tool" | "ambiguous_data" | "cant_find_file" | "confused_about_domain" | "failed_repeatedly" | "needs_human_judgment" | "unexpected_behavior";
   detail: string;
   context: Record<string, unknown>;
   user_disagreement: boolean;

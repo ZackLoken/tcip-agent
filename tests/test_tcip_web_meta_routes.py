@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 import tcip_store as ts
 from tcip_mcp.tools.meta_tools import (
+    MemoryKind,
     Retrospective,
     load_project_memory,
     memory_key,
@@ -62,9 +63,9 @@ def test_retrospectives_surfaces_written_retro(
     assert entry["record"]["task"] == "count fruit clusters"
 
 
-@pytest.mark.parametrize("corpus", ["reports", "retrospectives"])
+@pytest.mark.parametrize("corpus", list(MemoryKind))
 def test_a_route_refuses_a_page_limit_below_one(
-    opened_client: TestClient, corpus: str
+    opened_client: TestClient, corpus: MemoryKind
 ) -> None:
     for limit in (0, -1):
         response = opened_client.get(
@@ -73,9 +74,9 @@ def test_a_route_refuses_a_page_limit_below_one(
         assert response.status_code == 422, (limit, response.text)
 
 
-@pytest.mark.parametrize("corpus", ["reports", "retrospectives"])
+@pytest.mark.parametrize("corpus", list(MemoryKind))
 def test_a_route_and_load_project_memory_answer_one_page_of_the_same_records(
-    opened_client: TestClient, opened_project: Path, corpus: str
+    opened_client: TestClient, opened_project: Path, corpus: MemoryKind
 ) -> None:
     """The route's page and the tool's page over the same records agree entry for entry."""
     for i in range(3):

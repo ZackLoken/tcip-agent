@@ -90,7 +90,7 @@ describe("MetaTab annotation sessions", () => {
     vi.mocked(metaApi.retrospectives).mockResolvedValue({
       entries: [
         {
-          id: "20261020T100000Z_valley-bloom-trial_a1b2",
+          id: "r1",
           record: {
             timestamp: "2026-10-20T10:00:00+00:00",
             project_id: "valley-bloom-trial",

@@ -12,6 +12,7 @@ import argparse
 import re
 import sys
 from collections import Counter
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +45,7 @@ def _terms(text: str) -> list[str]:
     raw = _WORD.findall(text.lower())
     return [w for w in raw if w not in _STOPWORDS] + [
         f"{a} {b}"
-        for a, b in zip(raw, raw[1:])
+        for a, b in pairwise(raw)
         if a not in _STOPWORDS and b not in _STOPWORDS
     ]
 
@@ -177,6 +178,7 @@ def _entry_line(entry: MemoryEntry[Any], width: int) -> str:
     or ``malformed`` and the reason a record will not read.
     """
     record = entry.record
+    label: str
     if isinstance(record, FrictionReport):
         label, text = record.category, record.detail
     elif isinstance(record, Retrospective):

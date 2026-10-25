@@ -98,9 +98,7 @@ def test_the_worksheet_lists_a_report_that_will_not_decode_as_malformed(
     distill = _load_distill()
     _seed_report(tmp_path, "needs_human_judgment", "a decoded report")
     ts.replace(
-        memory_key(
-            FrictionReport, str(tmp_path), "20260304T120000Z_missing_tool_a1b2"
-        ),
+        memory_key(FrictionReport, str(tmp_path), "unreadable"),
         ["not", "a", "report"],
     )
 
@@ -133,9 +131,7 @@ def test_the_worksheet_lists_a_retrospective_that_will_not_read_as_malformed_wit
         did_not_work="d",
     )
     ts.replace(
-        memory_key(
-            Retrospective, str(tmp_path), "20260304T120000Z_unreadable_a1b2"
-        ),
+        memory_key(Retrospective, str(tmp_path), "unreadable"),
         "# a markdown document\n",
     )
 
@@ -162,6 +158,25 @@ def test_themes_generic_frequency_and_recurrence_floor() -> None:
     assert themes.get("wobblesync") == 2
     assert themes.get("desyncing") == 2
     assert "zzyzx" not in themes  # single mention, below the recurrence floor
+
+
+def test_terms_are_the_words_then_their_adjacent_non_stopword_pairs() -> None:
+    terms = _load_distill()._terms
+    assert terms("") == []
+    assert terms("orchard") == ["orchard"]
+    assert terms("orchard orchard orchard") == [
+        *["orchard"] * 3,
+        *["orchard orchard"] * 2,
+    ]
+    assert terms("the canopy shading near rows") == [
+        "canopy",
+        "shading",
+        "near",
+        "rows",
+        "canopy shading",
+        "shading near",
+        "near rows",
+    ]
 
 
 def test_themes_picks_up_bigram_phrases() -> None:

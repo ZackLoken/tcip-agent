@@ -189,21 +189,20 @@ def test_a_friction_report_dumps_as_the_json_document_every_reader_of_the_corpus
 ) -> None:
     """A friction report dumps as the exact JSON bytes the fixture pins.
 
-    It is written through ``report_friction``, its clock and id suffix held still.
+    It is written through ``report_friction``, its clock held still.
     """
     from tcip_mcp.tools import meta_tools
 
     monkeypatch.setattr(meta_tools, "now_iso", lambda: NOW)
-    monkeypatch.setattr(meta_tools.secrets, "token_hex", lambda n: "a1b2")
 
-    assert "error" not in meta_tools.report_friction(
+    meta_tools.report_friction(
         tmp_path,
         "missing_tool",
         "ein Werkzeug für ü",
         context={"trait": "trait_under_test"},
     )
 
-    assert _dumped(tmp_path, meta_tools.FrictionReport.store) == REPORT_BYTES
+    assert _dumped(tmp_path, meta_tools.MemoryKind.reports) == REPORT_BYTES
 
 
 def test_a_retrospective_dumps_as_the_json_document_every_reader_of_the_corpus_parses(
@@ -212,14 +211,13 @@ def test_a_retrospective_dumps_as_the_json_document_every_reader_of_the_corpus_p
 ) -> None:
     """A retrospective dumps as the exact JSON bytes the fixture pins.
 
-    It is written through ``write_retrospective``, its clock and id suffix held still.
+    It is written through ``write_retrospective``, its clock held still.
     """
     from tcip_mcp.tools import meta_tools
 
     monkeypatch.setattr(meta_tools, "now_iso", lambda: NOW)
-    monkeypatch.setattr(meta_tools.secrets, "token_hex", lambda n: "a1b2")
 
-    assert "error" not in meta_tools.write_retrospective(
+    meta_tools.write_retrospective(
         tmp_path,
         "project_under_test",
         task="t",
@@ -228,6 +226,6 @@ def test_a_retrospective_dumps_as_the_json_document_every_reader_of_the_corpus_p
     )
 
     assert (
-        _dumped(tmp_path, meta_tools.Retrospective.store)
+        _dumped(tmp_path, meta_tools.MemoryKind.retrospectives)
         == RETROSPECTIVE_BYTES
     )
