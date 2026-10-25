@@ -11,20 +11,19 @@ field set or a bare union alias matching a generated vocabulary.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import pytest
 from pydantic import BaseModel
 
-from tests import FRONTEND_SRC, REPO_ROOT
+from tests import REPO_ROOT
+from tests._route_walk import route_generator
 
 if TYPE_CHECKING:
     from types import ModuleType
-
-GENERATED = FRONTEND_SRC / "api" / "types.generated.ts"
-GENERATOR = REPO_ROOT / "tools" / "generate_frontend_types.py"
 
 _TS_BLOCK_RE = re.compile(r"(?:interface|type)\s+\w+\s*=?\s*\{(.*?)\n\}", re.S)
 _TS_FIELD_RE = re.compile(r"^\s+(\w+)(\??):", re.M)
@@ -39,14 +38,24 @@ _QUOTED_RE = re.compile(r'"([^"]+)"')
 
 
 def _generator() -> ModuleType:
-    """Load and return the type-module generator, ``tools/generate_frontend_types.py``."""
-    spec = importlib.util.spec_from_file_location(
-        "tcip_frontend_type_generator", GENERATOR
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    """Import and return the type-module generator, ``tools.generate_frontend_types``."""
+    return importlib.import_module("tools.generate_frontend_types")
+
+
+GENERATED = _generator().GENERATED_PATH
+
+
+@pytest.fixture(scope="module")
+def sources() -> list[Path]:
+    """Return the frontend's non-test sources but the generated types module.
+
+    They are the route generator's own read of the frontend's sources.
+    """
+    return [
+        Path(p)
+        for p in route_generator().frontend_reads()["sources"]
+        if Path(p) != GENERATED
+    ]
 
 
 def test_the_generated_types_module_is_what_the_declared_models_produce() -> (
@@ -56,7 +65,7 @@ def test_the_generated_types_module_is_what_the_declared_models_produce() -> (
     generated = _generator().render()
     assert GENERATED.read_text(encoding="utf-8") == generated, (
         "packages/tcip-web/frontend/src/api/types.generated.ts is out of date; "
-        "run python tools/generate_frontend_types.py"
+        "run python -m tools.generate_frontend_types"
     )
 
 
@@ -146,23 +155,13 @@ def _generated_field_sets() -> list[set[str]]:
     ]
 
 
-def test_no_other_frontend_module_declares_an_interface_with_a_generated_field_set() -> (
-    None
-):
+def test_no_other_frontend_module_declares_an_interface_with_a_generated_field_set(
+    sources: list[Path],
+) -> None:
     """No other frontend module declares an interface with a generated field set."""
     generated_sets = [s for s in _generated_field_sets() if s]
     assert generated_sets, "no interfaces parsed out of the generated module"
 
-    sources = [
-        p
-        for p in sorted(
-            list(FRONTEND_SRC.rglob("*.ts"))
-            + list(FRONTEND_SRC.rglob("*.tsx"))
-        )
-        if ".test." not in p.name
-        and "test" not in p.parent.name
-        and p != GENERATED
-    ]
     assert sources, "no frontend sources found, so nothing was checked"
     offenders = []
     for source in sources:
@@ -196,7 +195,9 @@ def _generated_vocabularies() -> list[set[str]]:
     )
 
 
-def test_no_frontend_module_hand_declares_a_generated_vocabulary() -> None:
+def test_no_frontend_module_hand_declares_a_generated_vocabulary(
+    sources: list[Path],
+) -> None:
     """No frontend module hand-declares a union alias matching a generated vocabulary.
 
     A bare ``type X = "a" | "b" | ...;`` alias whose members exactly match a vocabulary the
@@ -205,16 +206,6 @@ def test_no_frontend_module_hand_declares_a_generated_vocabulary() -> None:
     generated_sets = [s for s in _generated_vocabularies() if len(s) > 1]
     assert generated_sets, "no vocabularies read from the generator"
 
-    sources = [
-        p
-        for p in sorted(
-            list(FRONTEND_SRC.rglob("*.ts"))
-            + list(FRONTEND_SRC.rglob("*.tsx"))
-        )
-        if ".test." not in p.name
-        and "test" not in p.parent.name
-        and p != GENERATED
-    ]
     offenders = []
     for source in sources:
         text = source.read_text(encoding="utf-8")

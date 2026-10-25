@@ -392,11 +392,12 @@ maintainers configure locally; it is not part of the platform and is not declare
 file, so its presence or configuration varies per machine.
 
 `tools/` (repo root): a non-API surface, not imported by `tcip_mcp`, `tcip_web`, or
-`tcip_annotation` package code; each file is a standalone CI/development script invoked directly
-(`python tools/<name>.py`), and `tools/README.md` says what each does. An operator command instead
-lives as a `cli/` module inside the package whose imports it needs, registered under a name in
-`tcip_web.cli.COMMANDS` and run as `tcip <name>` (or, without the console script installed,
-`python -m tcip_web.cli <name>`).
+`tcip_annotation` package code; each file is a CI/development script invoked directly
+(`python tools/<name>.py`), or as `python -m tools.<name>` from the repository root when it imports
+the test suite's helpers or another tool, and `tools/README.md` says what each does. An operator
+command instead lives as a `cli/` module inside the package whose imports it needs, registered
+under a name in `tcip_web.cli.COMMANDS` and run as `tcip <name>` (or, without the console script
+installed, `python -m tcip_web.cli <name>`).
 
 ## On-disk formats
 
@@ -1354,8 +1355,10 @@ Must agree: every URL the browser builds matches a registered FastAPI route path
 each named for its method). Side B: `packages/tcip-web/src/tcip_web/routes/__init__.py`
 (`register_all` mounts each route module's router under its fixed prefix). The api/ helpers keep
 their hand-written signatures and reference a generated name; `tools/generate_frontend_routes.py`
-projects the registered routes into that module, and `tests/test_frontend_route_paths.py` fails when
-the projection is stale or a call site writes a path of its own.
+projects the registered routes the frontend's sources read into that module, the reads
+`frontend/scripts/routeReads.mjs` finds through the TypeScript compiler.
+`tests/test_frontend_route_paths.py`, through the generator's own read, fails when the projection is
+stale or a call site writes a path of its own.
 
 ## S47. GuiState shape between state.py and store/types.ts
 

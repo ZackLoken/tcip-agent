@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from importlib import import_module
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,7 @@ from fastapi.testclient import TestClient
 
 from tcip_annotation.json_io import PERSON_IDENTITY_PREFIX, is_person
 from tcip_mcp.identity import NoActorError, actor
-from tests import ADMITTED_NAMES, FRONTEND_SRC, REFUSED_NAMES
+from tests import ADMITTED_NAMES, REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._web_fixtures import INVARIANCES
 
@@ -139,9 +140,9 @@ def _browser_admits(names: list[str]) -> list[bool]:
 
     The rule is read as the generated module exports it and run under Node's own ``RegExp``.
     """
-    generated = (FRONTEND_SRC / "api" / "types.generated.ts").read_text(
-        encoding="utf-8"
-    )
+    generated = import_module(
+        "tools.generate_frontend_types"
+    ).GENERATED_PATH.read_text(encoding="utf-8")
     exported = _RULE_EXPORT.search(generated)
     assert exported is not None, (
         "the generated module exports no PERSON_NAME_RULE"

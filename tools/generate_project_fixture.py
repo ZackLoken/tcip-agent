@@ -16,21 +16,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from tests import FRONTEND_SRC
 from tools.fixture_session import replaced, scratch_session, write_fixture
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-GENERATED_PATH = (
-    _REPO_ROOT
-    / "packages"
-    / "tcip-web"
-    / "frontend"
-    / "src"
-    / "test"
-    / "projectFixtures.json"
-)
+GENERATED_PATH = FRONTEND_SRC / "test" / "projectFixtures.json"
 
 
 def normalized(

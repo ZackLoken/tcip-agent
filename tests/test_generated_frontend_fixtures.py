@@ -4,8 +4,9 @@
 records ``GET /api/results/delivery-events`` serves for them to
 ``frontend/src/test/deliveryEvents.json``; this test regenerates them and holds the checked-in
 file to what a regeneration serves, each value compared but the ones a run mints. The trait
-listings ``tools/generate_trait_fixture.py`` writes and the project fixtures
-``tools/generate_project_fixture.py`` writes are held the same way, and the scratch session the
+listings ``tools/generate_trait_fixture.py`` writes, the project fixtures
+``tools/generate_project_fixture.py`` writes and the TensorBoard serving answers
+``tools/generate_tensorboard_fixture.py`` writes are held the same way, and the scratch session the
 generators make their scenes in (``tools/fixture_session.py``) is held to leaving nothing
 behind.
 """
@@ -19,7 +20,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests import FRONTEND_SRC
 from tests._web_fixtures import named_project
 from tools.fixture_session import opened, replaced, scratch_session
 
@@ -28,12 +28,13 @@ if TYPE_CHECKING:
 
     from pydantic import JsonValue
 
-GENERATED = FRONTEND_SRC / "test" / "deliveryEvents.json"
-
 
 def _generator(name: str) -> ModuleType:
     """Import and return the fixture generator module ``tools.<name>``."""
     return importlib.import_module(f"tools.{name}")
+
+
+GENERATED = _generator("generate_delivery_fixture").GENERATED_PATH
 
 
 PER_RUN = frozenset(
@@ -167,12 +168,17 @@ def test_the_comparison_keeps_every_value_a_run_does_not_mint() -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["generate_trait_fixture", "generate_project_fixture"]
+    "name",
+    [
+        "generate_trait_fixture",
+        "generate_project_fixture",
+        "generate_tensorboard_fixture",
+    ],
 )
 def test_the_fixture_is_what_a_regeneration_serves_value_for_value(
     name: str,
 ) -> None:
-    """A trait or project fixture is what a regeneration serves, value for value.
+    """A trait, project or TensorBoard fixture is what a regeneration serves, value for value.
 
     Each generator's checked-in file equals what its ``produce`` serves.
     """
@@ -183,6 +189,56 @@ def test_the_fixture_is_what_a_regeneration_serves_value_for_value(
     assert (
         json.loads(module.GENERATED_PATH.read_text(encoding="utf-8")) == served
     ), f"{module.GENERATED_PATH} is out of date; run python -m tools.{name}"
+
+
+def test_a_tensorboard_whose_stop_is_unconfirmed_fails_the_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The TensorBoard fixture's production raises when a stop answers its kill unconfirmed.
+
+    Each stop is the manager's own, its answer then reported unconfirmed.
+    """
+    from tcip_mcp.pipelines.training import tensorboard_manager as tb
+
+    stop = tb.stop_tensorboard
+    monkeypatch.setattr(
+        tb,
+        "stop_tensorboard",
+        lambda logdir: {**stop(logdir), "status": "kill_unconfirmed"},
+    )
+
+    with pytest.raises(SystemExit, match="kills unconfirmed"):
+        _generator("generate_tensorboard_fixture").produce()
+
+
+def test_an_unconfirmed_stop_after_a_failed_production_is_refused_over_the_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A production that fails after a launch still refuses its unconfirmed stop.
+
+    The failure is the first answer's normalization raising; the stop is the manager's own, its
+    answer reported unconfirmed; the refusal carries the failure as its context.
+    """
+    from tcip_mcp.pipelines.training import tensorboard_manager as tb
+
+    class NormalizationFailedError(Exception):
+        pass
+
+    def failing(_served: dict) -> dict:
+        raise NormalizationFailedError
+
+    module = _generator("generate_tensorboard_fixture")
+    stop = tb.stop_tensorboard
+    monkeypatch.setattr(
+        tb,
+        "stop_tensorboard",
+        lambda logdir: {**stop(logdir), "status": "kill_unconfirmed"},
+    )
+    monkeypatch.setattr(module, "normalized", failing)
+
+    with pytest.raises(SystemExit, match="kills unconfirmed") as refused:
+        module.produce()
+    assert isinstance(refused.value.__context__, NormalizationFailedError)
 
 
 def test_the_delivery_fixture_is_what_a_regeneration_serves() -> None:

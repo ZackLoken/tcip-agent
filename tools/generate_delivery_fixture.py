@@ -15,9 +15,9 @@ superseding rebuild archives the mapping it cites. The served records are writte
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
+from tests import FRONTEND_SRC
 from tools.fixture_session import (
     opened,
     replaced,
@@ -26,21 +26,14 @@ from tools.fixture_session import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from fastapi.testclient import TestClient
     from pydantic import JsonValue
 
     from tcip_web.state import OpenProject
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-GENERATED_PATH = (
-    _REPO_ROOT
-    / "packages"
-    / "tcip-web"
-    / "frontend"
-    / "src"
-    / "test"
-    / "deliveryEvents.json"
-)
+GENERATED_PATH = FRONTEND_SRC / "test" / "deliveryEvents.json"
 
 SCRATCH_ROOT = "/scratch"
 """What the scratch directory the deliveries were made under reads as in every served path."""

@@ -57,8 +57,8 @@ export default tseslint.config(
     },
   },
   {
-    // Node-side build/test config files: outside tsconfig's project, so untyped rules only.
-    files: ["*.config.{ts,js}", "eslint.config.js"],
+    // Node-side config files and scripts: the untyped rules only, with Node's globals.
+    files: ["*.config.{ts,js}", "eslint.config.js", "scripts/**/*.mjs"],
     ...tseslint.configs.disableTypeChecked,
     languageOptions: { globals: globals.node },
   },
