@@ -27,6 +27,7 @@ from tcip_mcp.pipelines.training.envelope import (
     TrainContext,
     run_training_envelope,
 )  # noqa: E402
+from tests._audit_fixtures import refuse_audit_appends  # noqa: E402
 from tests._producer_fixtures import dataset_over  # noqa: E402
 from tests._training_values import (  # noqa: E402
     adamw_optimizer,
@@ -49,7 +50,6 @@ if TYPE_CHECKING:
     from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.training.run_registry import TrainRun
-    from tcip_store import Key
 
     class _ContextKeywords(TypedDict, total=False):
         """The ``TrainContext`` fields a test states beside its run."""
@@ -159,17 +159,10 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(
 
 
 def _refuse_the_closing_audit_line(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make every ``audit.append`` but a ``running`` line raise a full-disk ``OSError``."""
-    import tcip_mcp.audit as audit
-
-    real_append = audit.append
-
-    def refuse_the_closing_line(key: Key, entry: dict[str, JsonValue]) -> None:
-        if entry["status"] != "running":
-            raise OSError("the log's disk is full")
-        real_append(key, entry)
-
-    monkeypatch.setattr(audit, "append", refuse_the_closing_line)
+    """Let the opening ``running`` line land and fail every later append, the disk full."""
+    refuse_audit_appends(
+        monkeypatch, error=OSError("the log's disk is full"), landing=1
+    )
 
 
 def test_a_run_whose_closing_audit_line_is_refused_ends_failed_naming_it(
