@@ -16,11 +16,12 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from itertools import pairwise
 from pathlib import Path
 from queue import Queue
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import psutil
 import pytest
@@ -50,7 +51,6 @@ INTERPRETER = pty_host.backend_interpreter()
 """The interpreter this backend runs, the one every launch's MCP server and session hook name."""
 
 HOOK_ARGV = [INTERPRETER, "-m", "tcip_web.cli", "session-hook"]
-"""The session hook's argv, written out here rather than read off the renderer."""
 
 
 def _tool_names() -> list[str]:
@@ -229,11 +229,14 @@ def test_rendering_replaces_each_placeholder_and_leaves_every_other_argument(
 def test_the_orientation_for_no_project_says_the_session_was_launched_with_none() -> (
     None
 ):
+    from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
+    from tcip_mcp.tools.project_tools import initialize_project
+
     told = pty_host.orientation(None, "startup")
     assert told is not None
     assert "launched with no project open" in told
-    assert "initialize_project" in told
-    assert "serve_domain_knowledge" in told
+    assert initialize_project.__name__ in told
+    assert serve_domain_knowledge.__name__ in told
 
 
 def test_prewarm_runs_without_raising() -> None:
@@ -262,39 +265,55 @@ def test_the_agent_runs_in_the_workspace(
     assert Path(cwd_file.read_text(encoding="utf-8")).samefile(store.workspace)
 
 
-def test_winpty_terminate_polls_isalive_rather_than_trusting_taskkills_return(
+def test_winpty_terminate_waits_for_the_process_up_to_its_bound(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``_WinPty.terminate`` polls ``isalive()`` after taskkill returns.
+    """``_WinPty.terminate`` tree-kills its process and waits for it through psutil's bound.
 
-    A process dead by the first poll ends the wait with no sleep.
+    A process the kill left running is waited for with ``TERMINATE_WAIT_S`` as the timeout and
+    left running once it passes, and a process already gone is not waited for, neither raising.
     """
+    import subprocess
 
-    class _StubProc:
-        pid = 4242
+    killed: list[list[str]] = []
+    monkeypatch.setattr(
+        pty_host.subprocess, "run", lambda argv, **kw: killed.append(argv)
+    )
+    monkeypatch.setattr(pty_host, "TERMINATE_WAIT_S", 0.5)
+    bounds: list[float | None] = []
+    wait = psutil.Process.wait
 
-        def __init__(self) -> None:
-            self.calls = 0
+    def recorded(
+        process: psutil.Process, timeout: float | None = None
+    ) -> object:
+        bounds.append(timeout)
+        return wait(process, timeout)
 
-        def isalive(self) -> bool:
-            self.calls += 1
-            return (
-                self.calls == 1
-            )  # alive at the liveness guard, dead by the first poll
-
-    stub = _StubProc()
-    win_pty = pty_host._WinPty.__new__(pty_host._WinPty)
-    win_pty._p = stub
-    win_pty.pid = stub.pid
-
-    monkeypatch.setattr(pty_host.subprocess, "run", lambda *a, **kw: None)
-    sleeps: list[float] = []
-    monkeypatch.setattr(pty_host.time, "sleep", sleeps.append)
-
-    win_pty.terminate()
-
-    assert stub.calls == 2
-    assert sleeps == []
+    monkeypatch.setattr(psutil.Process, "wait", recorded)
+    running = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"]
+    )
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    try:
+        for child, waited in ((running, [0.5]), (gone, [])):
+            win_pty = pty_host._WinPty.__new__(pty_host._WinPty)
+            win_pty._p = SimpleNamespace(isalive=lambda: True)
+            win_pty.pid = child.pid
+            win_pty.terminate()
+            assert bounds == waited
+            bounds.clear()
+            assert killed.pop() == [
+                "taskkill",
+                "/F",
+                "/T",
+                "/PID",
+                str(child.pid),
+            ]
+        assert running.poll() is None
+    finally:
+        running.kill()
+        running.wait()
 
 
 # ── session lifecycle over a real PTY ───────────────────────────────────
@@ -409,6 +428,11 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
             }
         }
         server = pty_host.mcp_server(opened)
+        (rule,) = [
+            path
+            for path in hooks.parent.rglob("*")
+            if path.is_file() and path != hooks
+        ]
         expected_prepared = [
             pty_host.subprocess.list2cmdline(
                 [
@@ -423,6 +447,7 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
             ),
             f"allowed {len(_tool_names())} tcip entries in {settings}",
             f"registered the session hook in {hooks}",
+            f"wrote the orientation rule {rule}",
         ]
         allowed = json.loads(settings.read_text(encoding="utf-8"))[
             "permissions"
@@ -565,6 +590,52 @@ def test_agys_hook_registration_keeps_the_hooks_files_other_entries(
         pty_host.PreparationFailedError, match="does not hold a JSON object"
     ):
         pty_host.prepare_antigravity("agy", opened, "term_third")
+
+
+def test_agys_preparation_writes_one_always_on_rule_naming_the_orientations_tools(
+    opened: OpenProject,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Antigravity's preparation writes one always-on rule into the workspace, its line naming it.
+
+    The rule's frontmatter triggers it always; its text names each tool the orientation is read
+    from, as the project's orientation does, and says to read it again once earlier turns are
+    summarized. A later preparation replaces it, and a neighboring rule is left as it was.
+    """
+    import yaml
+
+    from tcip_web.state import store
+
+    monkeypatch.setattr(
+        pty_host, "ANTIGRAVITY_SETTINGS", tmp_path / "agy-settings.json"
+    )
+    monkeypatch.setattr(
+        pty_host, "run_to_completion", lambda argv, step: "added"
+    )
+    _port_recorded()
+    rules = store.workspace / ".agents" / "rules"
+    rules.mkdir(parents=True)
+    neighbor, ours = rules / "team.md", "---\ntrigger: manual\n---\nours\n"
+    neighbor.write_text(ours, encoding="utf-8")
+
+    prepared = pty_host.prepare_antigravity("agy", opened, "term_first")
+    (rule,) = [path for path in rules.iterdir() if path != neighbor]
+    assert str(rule) in prepared[-1]
+    written = rule.read_text(encoding="utf-8")
+    rule.write_text("stale", encoding="utf-8")
+    pty_host.prepare_antigravity("agy", opened, "term_second")
+
+    assert rule.read_text(encoding="utf-8") == written
+    assert sorted(rules.iterdir()) == sorted([neighbor, rule])
+    assert neighbor.read_text(encoding="utf-8") == ours
+    _, frontmatter, text = written.split("---\n", 2)
+    assert yaml.safe_load(frontmatter)["trigger"] == "always_on"
+    assert "earlier turns have been summarized, read it again" in text
+    told = pty_host.orientation(opened, "startup")
+    assert told is not None
+    for tool in pty_host.orientation_tools():
+        assert tool.__name__ in text and tool.__name__ in told, tool.__name__
 
 
 def test_the_session_hook_runs_the_console_command_under_the_mcp_servers_interpreter(
@@ -1004,90 +1075,143 @@ def test_overlapping_creates_deliver_the_request_once(
     assert _echoes(text) == ["echo:tab request"]
 
 
-_COMPOSER_LIVE_AT = {"claude": 15, "antigravity": 4, "codex": 10}
-"""For each recorded harness, the index of the startup read at which its composer was observed
-live, from the PTY logs and never from a row's marker: Claude Code drew its input prompt in read 15,
-and a paste at read 5 was lost; agy 1.3.1 cleared its screen and drew its banner and prompt in
-read 4, right after turning bracketed paste on in read 3 (its 1.3.0 predecessor lost a paste
-written at that point, before its prompt); Codex wrote its first window title in read 10, its
-session footer followed, and an Enter before it was held as "Waiting for startup" while a paste
-at it was submitted."""
+class _Startup(NamedTuple):
+    """What one installed harness wrote while starting in the terminal's PTY.
 
-_STARTUP_READS = {
-    "claude": [
-        "\x1b[1t",
-        "\x1b[c\x1b[?1004h\x1b[?9001h",
-        "\x1b]0;claude\x1b\\",
-        "\x1b7\x1b[r\x1b8\x1b[?25h",
-        "\x1b[?25l",
-        "\x1b[?2004h\x1b[?2031h\x1b[?1004h",
-        "\x1b[?9001l\x1b[?9001h",
-        "\x1b[>0q",
-        "\x1b[?u",
-        "\x1b[c",
-        "\x1b[>4m\x1b[<u\x1b[?1004l\x1b[?1004h\x1b[?2031l\x1b[?2004l",
-        "\x1b[1;1H",
-        "\r\n\x1b[1;1H",
-        "\x1b[?2004h\x1b[?2031h\x1b[?1004h\x1b[?9001l\x1b[?9001h",
-        "\x1b]0;✳ Claude Code\x1b\\",
-        "\x1b[?1049h\x1b[2J\x1b[H\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?25l",
-    ],
-    "antigravity": [
-        "\x1b[1t",
-        "\x1b[c\x1b[?1004h\x1b[?9001h",
-        "\x1b[?2026$p\x1b[?2027$p\x1b]11;?\x07",
-        "\x1b[?5W\x1b[?2004h\x1b[>4;2m\x1b[>1u\x1b[?u",
-        "\x1b[0 q\r\x1b[J\n\x1b[6C\x1b[38;5;179m▄\x1b[m        "
-        "\x1b[38;5;111;1mAntigravity CLI 1.3.1\x1b[m\n\x1b[38;5;111m>\x1b[m\r\n"
-        "\x1b[38;5;109m? for shortcuts\x1b[m\x1b[?25h",
-    ],
-    "codex": [
-        "\x1b[1t",
-        "\x1b[c\x1b[?1004h\x1b[?9001h",
-        "\x1b[?2004h",
-        "\x1b[?1004l\x1b[?1004h",
-        "\x1b[?2026h\x1b[?25l",
-        "\x1b[?1049h",
-        "\x1b[?1007l",
-        "\x1b[?1003;1006h",
-        "\x1b[2;3H\x1b[38;5;75;49m>_ ",
-        "\x1b[?2026l",
-        "\x1b]0;tcip-agent\x07",
-        "\x1b]10;?\x1b\\\x1b]11;?\x1b\\",
-    ],
+    It is the id of the row that launches it, the index of the read in which the log shows its
+    composer frame drawn, read from the log and never from a row's marker (``None`` for a start
+    whose log draws no composer frame), and the reads.
+    """
+
+    row: str
+    live_at: int | None
+    reads: list[str]
+
+
+_AGY_QUERIES = [
+    "\x1b[1t",
+    "\x1b[c\x1b[?1004h\x1b[?9001h",
+    "\x1b[?2026$p\x1b[?2027$p\x1b]11;?\x07\x1b]7501;?\x07",
+]
+"""agy 1.4.7's first three reads in every start traced."""
+
+_AGY_SIGN_IN = (
+    "\x1b[?25l\x1b[?5W\x1b[?2004h\x1b[>4;2m\x1b[>1u\x1b[?u\r\x1b[J\n\x1b[5C▄▀▀▄ ... \n"
+    " Welcome to the Antigravity CLI. You are currently not signed in.\r\n\n ⣷  Signing in..."
+)
+"""agy 1.4.7's sign-in frame: bracketed paste on, then the sign-in screen."""
+
+_STARTUPS = {
+    "claude": _Startup(
+        "claude",
+        15,
+        [
+            "\x1b[1t",
+            "\x1b[c\x1b[?1004h\x1b[?9001h",
+            "\x1b]0;claude\x1b\\",
+            "\x1b7\x1b[r\x1b8\x1b[?25h",
+            "\x1b[?25l",
+            "\x1b[?2004h\x1b[?2031h\x1b[?1004h",
+            "\x1b[?9001l\x1b[?9001h",
+            "\x1b[>0q",
+            "\x1b[?u",
+            "\x1b[c",
+            "\x1b[>4m\x1b[<u\x1b[?1004l\x1b[?1004h\x1b[?2031l\x1b[?2004l",
+            "\x1b[1;1H",
+            "\r\n\x1b[1;1H",
+            "\x1b[?2004h\x1b[?2031h\x1b[?1004h\x1b[?9001l\x1b[?9001h",
+            "\x1b]0;✳ Claude Code\x1b\\",
+            "\x1b[?1049h\x1b[2J\x1b[H\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?25l",
+        ],
+    ),
+    "antigravity-trusted": _Startup(
+        "antigravity",
+        3,
+        [
+            *_AGY_QUERIES,
+            "\x1b[?5W\x1b[?2004h\x1b[>4;2m\x1b[>1u\x1b[?u\x1b[0 q\r\x1b[J\n\x1b[6C▄▀▀▄        "
+            "\x1b[1mAntigravity CLI 1.4.7\x1b[m\n ... \r\n>\r\n─ ... \r\n? for shortcuts"
+            "\x1b[2A\x1b[13D\x1b[?25h",
+            "\x1b[?25l\x1b[5A\t\t  Gemini 4 Argon (Medium)\x1b[K\n ... ",
+        ],
+    ),
+    "antigravity-trusted-after-sign-in": _Startup(
+        "antigravity",
+        4,
+        [
+            *_AGY_QUERIES,
+            _AGY_SIGN_IN,
+            "\x1b[?2026h\x1b[0 q\x1b[8A\x1b[12D ▄▀▀▄        \x1b[1mAntigravity CLI 1.4.7\x1b[m\n"
+            " ... \r\n>\r\n─ ... \r\n? for shortcuts\r\x1b[2A\x1b[2C\x1b[?25h\x1b[?2026l",
+        ],
+    ),
+    "antigravity-untrusted": _Startup(
+        "antigravity",
+        None,
+        [
+            *_AGY_QUERIES,
+            _AGY_SIGN_IN,
+            "\r ⣯ ",
+            "\r\x1b[9A\x1b[1mAccessing workspace:\x1b[m\r\n\x1b[K\n\x1b[1mC:\\Users\\...\\agy-ws"
+            "\x1b[m\r\n\x1b[K\nDo you trust the contents of this project?\r\n\nAntigravity CLI "
+            "requires permission to read, edit, and execute files here.\r\n\n> Yes, I trust this "
+            "folder\r\n  No, exit\r\n\n  \x1b[1m↑/↓\x1b[m Navigate \xb7 \x1b[1menter\x1b[m Confirm"
+            "\n\x1b[67CGemini 4 Argon \xb7 medium\r",
+        ],
+    ),
+    "codex": _Startup(
+        "codex",
+        10,
+        [
+            "\x1b[1t",
+            "\x1b[c\x1b[?1004h\x1b[?9001h",
+            "\x1b[?2004h",
+            "\x1b[?1004l\x1b[?1004h",
+            "\x1b[?2026h\x1b[?25l",
+            "\x1b[?1049h",
+            "\x1b[?1007l",
+            "\x1b[?1003;1006h",
+            "\x1b[2;3H\x1b[38;5;75;49m>_ ",
+            "\x1b[?2026l",
+            "\x1b]0;tcip-agent\x07",
+            "\x1b]10;?\x1b\\\x1b]11;?\x1b\\",
+        ],
+    ),
 }
-"""What each installed harness wrote while starting in the terminal's PTY (Claude Code 2.1.292
-under ``tools/smoke_terminal_e2e.py``, agy 1.3.1 as one scrollback snapshot cut at its own control
-sequences, Codex 0.160.1 launched with its row's arguments and sent no input), long screen draws
-cut after their opening sequences and spinner frames thinned. Claude Code dropped a paste written
-at its first bracketed-paste-on, as agy 1.3.0 did; Codex, under the smoke, held one in its
-composer without submitting it, since its session had not started."""
+"""Starts of the installed harnesses in the terminal's PTY, long screen draws cut after their
+opening sequences and spinner frames thinned. Claude Code 2.1.292 under
+``tools/smoke_terminal_e2e.py`` drew its input prompt in read 15, and a paste written at its first
+bracketed-paste-on, read 5, was lost. agy 1.4.7, spawned with ``--sandbox`` through pywinpty at 35
+by 120, turned bracketed paste on in every start: in a folder it trusts it drew its banner and
+composer in that read, or in the next when a sign-in frame came first; in a folder it does not
+trust it stopped on its trust screen with no composer. Codex 0.160.1, launched with its row's
+arguments and sent no input, wrote its first window title in read 10, its session footer followed,
+and an Enter before it was held as "Waiting for startup" while a paste at it was submitted."""
 
 
-@pytest.mark.parametrize("row", pty_host.PROVIDERS, ids=lambda row: row.id)
+@pytest.mark.parametrize("stream", sorted(_STARTUPS))
 def test_a_request_is_pasted_at_the_read_where_the_harness_composer_goes_live(
-    row: pty_host.Provider,
+    stream: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A staged request is pasted at the read where the harness composer goes live.
+    """A staged request is pasted at the read where the harness draws its composer frame.
 
-    Fed the reads its harness wrote at startup, a launch of ``row`` pastes nothing before the
-    read at which that harness's composer was observed live and pastes the request at that read,
-    even though bracketed paste turned on earlier.
+    Fed the reads its harness wrote at startup, a launch of its row pastes nothing before the
+    read in which the log shows the composer frame drawn and pastes the request at that read,
+    and pastes nothing through a start that draws no composer frame, bracketed paste on in each.
     """
-    reads = _STARTUP_READS[row.id]
-    live_at = _COMPOSER_LIVE_AT[row.id]
-    first_paste_on = next(
-        i for i, data in enumerate(reads) if "\x1b[?2004h" in data
-    )
-    assert first_paste_on < live_at
+    startup = _STARTUPS[stream]
+    (row,) = [row for row in pty_host.PROVIDERS if row.id == startup.row]
 
     session, pty = _launched_session(monkeypatch, row)
     session.submit("the request")
-    for index, data in enumerate(reads):
+    for index, data in enumerate(startup.reads):
         session._on_output(data)
-        expected = [pty_host.paste("the request")] if index >= live_at else []
-        assert pty.written(len(expected)) == expected
+        if startup.live_at is not None and index >= startup.live_at:
+            assert pty.written(1) == [pty_host.paste("the request")]
+        else:
+            assert (session._pasting, pty.writes) == (False, [])
+    assert session._ready
 
 
 def test_bracketed_paste_follows_the_last_mode_change_the_agent_wrote() -> (
@@ -2274,9 +2398,8 @@ def test_shutdown_all_terminates_process(client: TestClient) -> None:
     assert session.alive()
     pid = session._pty.pid  # capture before shutdown nulls the pty
     terminal_routes.shutdown_all()
-    deadline = time.time() + 15
-    while time.time() < deadline and psutil.pid_exists(pid):
-        time.sleep(0.1)
+    with suppress(psutil.NoSuchProcess):
+        psutil.Process(pid).wait(timeout=15)
     assert not psutil.pid_exists(pid)
     assert terminal_routes._SESSIONS == {}
 
@@ -2578,6 +2701,7 @@ def test_a_session_launched_for_no_project_stays_one_after_its_agent_creates_one
 
     from tcip_mcp import agent_identity
     from tcip_mcp.server import Session, build_server
+    from tcip_mcp.tools.project_tools import initialize_project
     from tcip_web.state import store
     from tests._web_fixtures import INVARIANCES
 
@@ -2592,7 +2716,7 @@ def test_a_session_launched_for_no_project_stays_one_after_its_agent_creates_one
     try:
         anyio.run(
             server.call_tool,
-            "initialize_project",
+            initialize_project.__name__,
             {
                 "project_path": str(store.workspace / "created"),
                 "display_name": "Created block",

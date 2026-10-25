@@ -20,7 +20,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 from collections.abc import Buffer, Callable, Iterable, Mapping, Sequence
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass
@@ -29,6 +28,7 @@ from pathlib import Path
 from queue import Queue, ShutDown
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
+import psutil
 from pydantic import TypeAdapter, ValidationError
 
 from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
@@ -45,8 +45,8 @@ TERMINAL_CMD_ENV = "TCIP_TERMINAL_CMD"
 DEFAULT_ROWS = 30
 DEFAULT_COLS = 100
 
-# Seconds terminate() waits for the spawned process to actually exit: the Windows path polls
-# isalive() after taskkill returns; the POSIX path bounds its wait() calls with it.
+# Seconds terminate() waits for the spawned process to exit: the Windows path bounds psutil's
+# process wait after taskkill with it; the POSIX path bounds its wait() calls with it.
 TERMINATE_WAIT_S = 5
 
 MCP_CONFIG_ARG = "{mcp_config}"
@@ -102,10 +102,10 @@ class Provider:
     ``PATH``, the arguments after it, which may include the placeholders
     :data:`MCP_CONFIG_ARG`, :data:`CLAUDE_SETTINGS_ARG` and :data:`CODEX_CONFIG_ARG` as whole
     arguments and, for a harness whose conversations are resumed, its :class:`Resume` where
-    the resumed conversation goes, the output sequence one installed version of the harness was
-    recorded writing when its composer appeared, what the harness's own enforcement restricts
-    under those arguments and leaves open, and the preparation the launch runs first, ``None``
-    for none.
+    the resumed conversation goes, the output sequence every composer frame the harness was
+    recorded writing carries and none of its screens recorded before a composer carries, what
+    the harness's own enforcement restricts under those arguments and leaves open, and the
+    preparation the launch runs first, ``None`` for none.
     """
 
     id: str
@@ -310,10 +310,15 @@ def _json_object(path: Path) -> dict[str, Any]:
         ) from exc
 
 
+def _write_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` as UTF-8 with LF line ends, making its directory."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def _write_json(path: Path, body: dict) -> None:
     """Write ``body`` as indented JSON to ``path``, making its directory."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
+    _write_text(path, json.dumps(body, indent=2) + "\n")
 
 
 def allow_tcip_tools(settings: Path) -> str:
@@ -341,16 +346,18 @@ def allow_tcip_tools(settings: Path) -> str:
 def prepare_antigravity(
     executable: str, project: OpenProject | None, session: str
 ) -> list[str]:
-    """Prepare an Antigravity launch: register the tcip server and the session hook, allow tools.
+    """Prepare an Antigravity launch of ``executable`` for ``project`` and ``session``.
 
-    The server is :func:`mcp_server` for ``project``, registered as ``tcip`` through ``agy mcp
-    add``, and every tcip tool is allowed in agy's settings file. The hook is
-    :func:`session_hook_argv` naming the session start route of ``session`` on the backend
-    serving the workspace, as :func:`shell_line`: the ``tcip-session-start`` entry of the
-    workspace's ``.agents/hooks.json``, one command handler under agy's own default timeout,
-    replacing any earlier one and keeping every other entry of the file. A hook that cannot be
-    spelled, a backend that recorded no port or a hooks file :func:`_json_object` refuses fails
-    the preparation naming why, before anything is written.
+    It registers :func:`mcp_server` as ``tcip`` through ``agy mcp add``, runs
+    :func:`allow_tcip_tools` on agy's settings file, sets the ``tcip-session-start`` entry of
+    the workspace's ``.agents/hooks.json`` to :func:`session_hook_argv` naming ``session``'s
+    start route, as :func:`shell_line`, and writes the always-on rule
+    ``.agents/rules/tcip-orientation.md`` naming :func:`orientation_tools`; the entry and the
+    rule replace an earlier launch's, leaving the rest of the hooks file and the rules directory.
+    Returns one line per step.
+    Raises :class:`PreparationFailedError` naming why, before anything is written, for a hook
+    that cannot be spelled, a backend that recorded no port or a hooks file
+    :func:`_json_object` refuses.
     """
     from tcip_web.cli.session_hook import session_start_url
 
@@ -365,7 +372,8 @@ def prepare_antigravity(
         raise PreparationFailedError(
             f"the session hook was not registered: {exc}"
         ) from exc
-    hooks = store.workspace / ".agents" / "hooks.json"
+    agents = store.workspace / ".agents"
+    hooks = agents / "hooks.json"
     body = _json_object(hooks)
     body["tcip-session-start"] = {
         "SessionStart": [{"type": "command", "command": hook}]
@@ -377,7 +385,20 @@ def prepare_antigravity(
     )
     allowed = allow_tcip_tools(ANTIGRAVITY_SETTINGS)
     _write_json(hooks, body)
-    return [add, allowed, f"registered the session hook in {hooks}"]
+    rule = agents / "rules" / "tcip-orientation.md"
+    _write_text(
+        rule,
+        "---\ntrigger: always_on\n---\n"
+        "This session's orientation is read from the tcip tools "
+        f"{', '.join(tool.__name__ for tool in orientation_tools())}; when this "
+        "conversation's earlier turns have been summarized, read it again through them.\n",
+    )
+    return [
+        add,
+        allowed,
+        f"registered the session hook in {hooks}",
+        f"wrote the orientation rule {rule}",
+    ]
 
 
 _CLAUDE_CACHE_TTLS = {"5m": timedelta(minutes=5), "1h": timedelta(hours=1)}
@@ -426,7 +447,7 @@ PROVIDERS: tuple[Provider, ...] = (
         name="Antigravity",
         executable="agy",
         args=("--sandbox",),
-        composer_ready="\x1b[0 q\r\x1b[J",
+        composer_ready="\x1b[0 q",
         confinement=(
             "agy's --sandbox turns on its terminal restrictions, whose extent agy "
             "defines; every tcip tool is allowed in agy's own settings file."
@@ -599,13 +620,6 @@ ORIENTATION_CAP = 10_000
 hook's plain stdout and its ``additionalContext``, which no setting raises
 (code.claude.com/docs/en/hooks, "JSON output")."""
 
-_NO_PROJECT = (
-    "This session was launched with no project open in the GUI. Its project tools refuse "
-    "until initialize_project creates a project, and act on that project from then on; that "
-    "project's memory is read through load_project_memory. An existing project is worked on "
-    "by opening it in the GUI, then ending this agent from the rail and starting another."
-)
-
 
 class _Part(NamedTuple):
     """One part of an orientation, cut to fit.
@@ -652,46 +666,69 @@ def _fitted(parts: Sequence[_Part]) -> str:
     return "\n\n".join(texts[i] for i in range(len(parts)))
 
 
+def orientation_tools() -> tuple[Callable[..., Any], ...]:
+    """Return the tools an orientation is read from.
+
+    They are the project's overview, its findings, its memory and the domain knowledge, in that
+    order.
+    """
+    from tcip_mcp.tools.doctor_tools import diagnose_project
+    from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
+    from tcip_mcp.tools.meta_tools import load_project_memory
+    from tcip_mcp.tools.project_tools import inspect_project
+
+    return (
+        inspect_project,
+        diagnose_project,
+        load_project_memory,
+        serve_domain_knowledge,
+    )
+
+
 def orientation(
     project: OpenProject | None, source: SessionStartSource
 ) -> str | None:
-    """Return what the agent of a session for ``project`` started by ``source`` is told, as facts.
+    """Return what the agent of a session for ``project`` started by ``source`` is told.
 
-    A ``resume`` is told nothing (``None``). Every other start is told where the domain
-    knowledge documents are served and, for no project, that the session was launched with
-    none; for ``project``, a ``compact`` is also told each memory corpus's newest entries as
-    ``load_project_memory`` pages them, and any other start also, before them, the project as
-    ``inspect_project`` answers for it and the findings ``diagnose_project`` answers, in its
-    order, beside how many there are. The parts are fit by :func:`_fitted`; each page states how
-    many entries it was cut from.
+    It is ``None`` for a ``resume``; otherwise the parts read from :func:`orientation_tools`
+    that the start calls for, fit by :func:`_fitted`.
     """
     from tcip_mcp.knowledge import list_documents
-    from tcip_mcp.tools.doctor_tools import diagnose_project
     from tcip_mcp.tools.meta_tools import MemoryKind
-    from tcip_mcp.tools.project_tools import inspect_project
+    from tcip_mcp.tools.project_tools import initialize_project
 
     if source == "resume":
         return None
+    overview, diagnose, memory, serve = orientation_tools()
+    served_by = serve.__name__
     knowledge = _whole(
         "The platform's domain knowledge is the documents "
         f"{', '.join(d.name for d in list_documents())}, each served whole by "
-        "serve_domain_knowledge(name) and, to a harness that reads skills, as the skill "
-        "of its name.",
-        "The platform's domain knowledge documents are served by serve_domain_knowledge, "
-        "whose index names them.",
+        f"{served_by}(name) and, to a harness that reads skills, as the skill of its name.",
+        f"The platform's domain knowledge documents are served by {served_by}, whose index "
+        "names them.",
     )
     if project is None:
-        return _fitted([_whole(_NO_PROJECT, _NO_PROJECT), knowledge])
-    parts = [_memory_part(kind, project.root) for kind in MemoryKind]
+        no_project = (
+            "This session was launched with no project open in the GUI. Its project tools "
+            f"refuse until {initialize_project.__name__} creates a project, and act on that "
+            "project from then on; that project's memory is read through "
+            f"{memory.__name__}. An existing project is worked on by opening it "
+            "in the GUI, then ending this agent from the rail and starting another."
+        )
+        return _fitted([_whole(no_project, no_project), knowledge])
+    parts = [_memory_part(kind, project.root, memory) for kind in MemoryKind]
     if source != "compact":
-        found = diagnose_project(project.root)["findings"]
-        counted = f"diagnose_project answers {len(found)} finding(s) over it"
+        found = diagnose(project.root)["findings"]
+        counted = (
+            f"{diagnose.__name__} answers {len(found)} finding(s) over it"
+        )
         parts[:0] = [
             _whole(
-                "This session's project, as inspect_project answers for it: "
-                f"{json.dumps(inspect_project(project.root))}",
+                f"This session's project, as {overview.__name__} answers for it: "
+                f"{json.dumps(overview(project.root))}",
                 "This session's project's overview is longer than this orientation holds; "
-                "inspect_project answers it.",
+                f"{overview.__name__} answers it.",
             ),
             _Part(
                 lambda k: (
@@ -705,27 +742,29 @@ def orientation(
     return _fitted([*parts, knowledge])
 
 
-def _memory_part(kind: MemoryKind, project: Path) -> _Part:
+def _memory_part(
+    kind: MemoryKind, project: Path, tool: Callable[..., Any]
+) -> _Part:
     """Return the part of the newest entries of ``kind`` under ``project``.
 
-    Its text holds them as ``load_project_memory`` pages them, ``total_available`` among them.
+    Its text holds them as the memory tool ``tool`` pages them, ``total_available`` among them.
     """
     from tcip_mcp.tools.meta_tools import memory_entries, memory_page
 
     entries = memory_entries(kind.record, str(project))
+    call = f"{tool.__name__}(kind='{kind.value}')"
 
     def page(k: int) -> str:
         paged = memory_page(entries, k).model_dump(mode="json")
         return (
-            f"Its newest {k} {kind.value}, paged as load_project_memory(kind="
-            f"'{kind.value}') pages them: {json.dumps(paged)}"
+            f"Its newest {k} {kind.value}, paged as {call} pages them: "
+            f"{json.dumps(paged)}"
         )
 
     return _Part(
         page,
         len(entries),
-        f"Its {len(entries)} {kind.value} are read through "
-        f"load_project_memory(kind='{kind.value}').",
+        f"Its {len(entries)} {kind.value} are read through {call}.",
     )
 
 
@@ -878,11 +917,8 @@ class _WinPty:
             capture_output=True,
             check=False,
         )
-        # taskkill returning is not the process exiting: bounded-poll isalive() (the POSIX
-        # path's own wait discipline), so a caller reading it right after sees the real state.
-        deadline = time.monotonic() + TERMINATE_WAIT_S
-        while self._p.isalive() and time.monotonic() < deadline:
-            time.sleep(0.1)
+        with suppress(psutil.NoSuchProcess, psutil.TimeoutExpired):
+            psutil.Process(self.pid).wait(timeout=TERMINATE_WAIT_S)
 
     def close(self) -> None:
         """Perform no explicit cleanup."""

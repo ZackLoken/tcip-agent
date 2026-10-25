@@ -34,15 +34,15 @@ Use the `frontend-design` skill for IA/visual work.
 ## The in-app agent terminal launches a provider row
 
 `terminal.py` holds the provider table (`PROVIDERS`); each row's definition there is its launch: its
-executable, its arguments, the output sequence one installed version of its harness was recorded
-writing when its composer appeared (`composer_ready`; no harness promises it), what the harness's
-own enforcement restricts and leaves open (`confinement`, recorded on every launch), and the
-preparation the launch runs first
+executable, its arguments, the output sequence every composer frame its harness was recorded
+writing carries and none of its screens recorded before a composer carries (`composer_ready`; no
+harness promises it), what the harness's own enforcement restricts and leaves open
+(`confinement`, recorded on every launch), and the preparation the launch runs first
 when the harness takes its MCP server, its tool approvals or its hooks only through its own
 configuration (the Antigravity row registers the server through `agy mcp add`, allows every tcip
-tool in agy's settings file, keeping the file's other entries, and writes the session hook into the
-workspace's `.agents/hooks.json`, keeping that file's other entries, each write recorded on the
-launch). The MCP server a launch hands its harness has one producer, `mcp_server`, written as the
+tool in agy's settings file, keeping the file's other entries, writes the session hook into the
+workspace's `.agents/hooks.json`, keeping that file's other entries, and writes one always-on rule
+into the workspace's `.agents/rules/`, each write recorded on the launch). The MCP server a launch hands its harness has one producer, `mcp_server`, written as the
 JSON configuration file Claude's row passes, registered through `agy mcp add` for Antigravity's and
 rendered as `-c` overrides for Codex's, which also make the server `required`, so Codex's startup
 and resume wait for it before a turn's first tool catalog. The session hook every launch registers
@@ -63,7 +63,9 @@ launched for none stays one, whatever project its agent's MCP server creates and
 new conversation it is the project as `inspect_project` answers for it, the findings
 `diagnose_project` answers (beside how many there are) and each memory corpus's newest entries as
 `load_project_memory` pages them; after a compaction the memory alone; on a resume nothing; with
-where the knowledge documents are served beside each. The parts are fit to `ORIENTATION_CAP`,
+where the knowledge documents are served beside each. Antigravity documents no hook after a
+compaction and injects an always-on rule into every turn, so its row's rule names the tools those
+parts come from, to read them again through once the conversation's earlier turns are summarized. The parts are fit to `ORIENTATION_CAP`,
 Claude Code's documented cap: whole while all fit together, otherwise sharing the room so a part
 needing less than an equal share keeps all of it, each cut part stating how many it was cut from
 and a part that does not fit standing as a short fixed statement of it; Codex's hook passes its
@@ -84,7 +86,8 @@ agent as a nested session, and every prompt-cache control Claude Code ranks abov
 agent runs with. Session create names a row by its exact id; the status route lists every row
 with the reason it cannot launch, if any, and the rail lets the breeder pick one. A row is added
 only after its harness's real flags are read from the installed CLI and one live smoke
-(`tools/smoke_terminal_e2e.py <id>`) passes: the smoke serves the backend on a loopback port
+(`tools/smoke_terminal_e2e.py <id>`, with `--workspace` naming one the person trusted by hand for a
+harness that asks to trust its workspace) passes: the smoke serves the backend on a loopback port
 recorded as `python -m tcip_web` records it, opens a scratch project under a display name made for
 the run, then asks for one `report_friction` call, no other tool called, carrying a token only
 that request names followed by the project's display name, which only the agent's orientation

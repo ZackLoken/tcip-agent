@@ -1,7 +1,7 @@
-"""``tools/smoke_terminal_e2e.py`` runs against the workspace it is given.
+"""``tools/smoke_terminal_e2e.py`` runs against the workspace its command line names.
 
-It sets ``TCIP_WORKSPACE`` to the workspace it is given and opens nothing for a row that cannot
-launch.
+It sets ``TCIP_WORKSPACE`` to the workspace ``--workspace`` names and opens nothing for a row that
+cannot launch.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def _load() -> ModuleType:
 def test_runs_under_the_given_workspace_and_opens_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The smoke run binds the workspace it is given and opens nothing for a row that fails."""
+    """The smoke binds the workspace ``--workspace`` names and opens nothing for a failed row."""
     from tcip_web.state import store
 
     monkeypatch.delenv(pty_host.TERMINAL_CMD_ENV, raising=False)
@@ -48,7 +48,7 @@ def test_runs_under_the_given_workspace_and_opens_nothing(
 
     scratch_ws = tmp_path.parent.parent / "scratch-workspace"
     mod = _load()
-    result = mod.main(row.id, workspace=str(scratch_ws))
+    result = mod.command([row.id, "--workspace", str(scratch_ws)])
 
     assert result == 1
     assert os.environ["TCIP_WORKSPACE"] == str(scratch_ws)
