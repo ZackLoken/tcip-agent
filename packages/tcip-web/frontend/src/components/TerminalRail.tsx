@@ -12,7 +12,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
 
 import { committedOf, StructuredRefusalError } from "@/api/http";
@@ -201,24 +201,34 @@ export function TerminalRail() {
       return DEFAULT_WIDTH;
     }
   });
-  const widthRef = useRef(width);
-  widthRef.current = width;
 
-  function startResize(e: React.MouseEvent) {
-    e.preventDefault();
+  const [dragging, setDragging] = useState(false);
+
+  // A drag's listeners are installed again in the commit of each width it sets, so its release
+  // persists the width on screen.
+  useLayoutEffect(() => {
+    if (!dragging) return;
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
     // Rail is docked right, so its width grows as the pointer moves left.
     const onMove = (ev: MouseEvent) => setWidth(clampWidth(window.innerWidth - ev.clientX));
     const onUp = () => {
+      setDragging(false);
+      persistWidth(width);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      persistWidth(widthRef.current);
     };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+  }, [dragging, width]);
+
+  function startResize(e: React.MouseEvent) {
+    e.preventDefault();
+    setDragging(true);
   }
 
   /** Arrow keys on the handle resize by one terminal column; left widens, since the rail is docked right. */
@@ -227,7 +237,7 @@ export function TerminalRail() {
     const step = columnWidth(hostRef.current, termRef.current?.cols ?? 0);
     if (step === null) return;
     e.preventDefault();
-    const next = clampWidth(widthRef.current + (e.key === "ArrowLeft" ? step : -step));
+    const next = clampWidth(width + (e.key === "ArrowLeft" ? step : -step));
     setWidth(next);
     persistWidth(next);
   }
