@@ -133,11 +133,6 @@ jobs:
         working-directory: packages/tcip-web/frontend
         run: npm ci --no-fund --no-audit
 
-      - name: Dependency audit (pip-audit over the installed set)
-        run: |
-          pip install pip-audit
-          pip-audit --skip-editable --progress-spinner off
-
       - name: Lint (ruff)
         run: ruff check .
 
@@ -154,6 +149,14 @@ jobs:
           TCIP_MIN_TESTS: "400"
           OMP_NUM_THREADS: "1"
         run: pytest tests/ -n auto --timeout=300 -q
+
+      # Last, and whatever the gates above answered, so an advisory fails the job without
+      # hiding their results.
+      - name: Dependency audit (pip-audit over the installed set)
+        if: ${{ !cancelled() }}
+        run: |
+          pip install pip-audit
+          pip-audit --skip-editable --progress-spinner off
 
   # test_hpo_ray_detached_exit.py's console-signal exit path is Windows-only (skipif everywhere
   # else), so it never runs in the ubuntu python job; this job is its only CI coverage.
@@ -261,11 +264,6 @@ jobs:
         working-directory: packages/tcip-web/frontend
         run: npm ci --no-fund --no-audit
 
-      # The shipped bundle's dependencies and the dev tooling that builds and tests it.
-      - name: Dependency audit (npm audit over the full set)
-        working-directory: packages/tcip-web/frontend
-        run: npm audit --audit-level=high
-
       - name: Format check
         working-directory: packages/tcip-web/frontend
         run: npm run format:check
@@ -285,6 +283,13 @@ jobs:
       - name: Build
         working-directory: packages/tcip-web/frontend
         run: npm run build
+
+      # The shipped bundle's dependencies and the dev tooling that builds and tests it; last, and
+      # whatever the gates above answered, so an advisory fails the job without hiding them.
+      - name: Dependency audit (npm audit over the full set)
+        if: ${{ !cancelled() }}
+        working-directory: packages/tcip-web/frontend
+        run: npm audit --audit-level=high
 
   # The files no other job reads: the workflow, the Dockerfile, every YAML file, the documents
   # an adopter reads, and the whole history for a leaked secret.
