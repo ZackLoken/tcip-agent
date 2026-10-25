@@ -9,6 +9,7 @@ its harness reports its conversation and its agent is given its :func:`orientati
 from __future__ import annotations
 
 import codecs
+import io
 import json
 import logging
 import os
@@ -20,10 +21,12 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Buffer, Callable, Iterable, Mapping, Sequence
+from contextlib import ExitStack, suppress
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
+from queue import Queue, ShutDown
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from pydantic import TypeAdapter, ValidationError
@@ -849,8 +852,17 @@ class _WinPty:
     def read(self) -> str:
         return self._p.read(4096)  # blocking; raises EOFError on process exit
 
-    def write(self, data: str) -> None:
-        self._p.write(data)
+    def write(self, data: bytes) -> int:
+        """Hand all of ``data`` to ConPTY's input pipe and return its length, or raise.
+
+        pywinpty 3.0.5's write is winpty-rs 1.0.6's (``src/pty/base.rs:688-791``): it issues an
+        overlapped ``WriteFile`` for every 8192-byte chunk, raising on any refused, waits for a
+        pending chunk before issuing the next, and leaves out of its count any chunk that
+        finished at once. Its last chunk may still be pending when it returns, and that chunk's
+        failure is raised by the next write.
+        """
+        self._p.write(data.decode("utf-8"))
+        return len(data)
 
     def resize(self, rows: int, cols: int) -> None:
         self._p.setwinsize(rows, cols)
@@ -878,6 +890,9 @@ class _WinPty:
     def close(self) -> None:
         """Perform no explicit cleanup."""
 
+    def close_input(self) -> None:
+        """Perform no explicit cleanup."""
+
 
 def _set_winsize(fd: int, rows: int, cols: int) -> None:
     """Set the POSIX terminal on ``fd`` to ``rows`` by ``cols``."""
@@ -896,6 +911,7 @@ class _PosixPty:
     # __init__'s body is unreachable to a Windows-targeted mypy run (its sys.platform guard),
     # so these are declared here rather than left to its own inference.
     _master: int
+    _input: int
     _proc: subprocess.Popen
     _decoder: codecs.IncrementalDecoder
     pid: int
@@ -913,19 +929,26 @@ class _PosixPty:
             raise AssertionError("_PosixPty is POSIX-only")
         import pty
 
-        self._master, slave = pty.openpty()
-        _set_winsize(slave, rows, cols)
-        self._proc = subprocess.Popen(
-            argv,
-            cwd=cwd,
-            env=env,
-            stdin=slave,
-            stdout=slave,
-            stderr=slave,
-            start_new_session=True,  # its own process group → killpg cleans the tree
-            close_fds=True,
-        )
-        os.close(slave)
+        # ``owned`` closes the master and the writer's descriptor unless the spawn succeeds.
+        with ExitStack() as owned, ExitStack() as spent:
+            self._master, slave = pty.openpty()
+            spent.callback(os.close, slave)
+            owned.callback(os.close, self._master)
+            # The writer's own descriptor, so the reader's close never frees a number it writes on.
+            self._input = os.dup(self._master)
+            owned.callback(os.close, self._input)
+            _set_winsize(slave, rows, cols)
+            self._proc = subprocess.Popen(
+                argv,
+                cwd=cwd,
+                env=env,
+                stdin=slave,
+                stdout=slave,
+                stderr=slave,
+                start_new_session=True,  # its own process group → killpg cleans the tree
+                close_fds=True,
+            )
+            owned.pop_all()
         self.pid = self._proc.pid
         self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
@@ -935,8 +958,8 @@ class _PosixPty:
             raise EOFError
         return self._decoder.decode(chunk)
 
-    def write(self, data: str) -> None:
-        os.write(self._master, data.encode("utf-8"))
+    def write(self, data: bytes) -> int:
+        return os.write(self._input, data)
 
     def resize(self, rows: int, cols: int) -> None:
         _set_winsize(self._master, rows, cols)
@@ -981,9 +1004,17 @@ class _PosixPty:
         except OSError:
             pass
 
+    def close_input(self) -> None:
+        """Close the descriptor ``write`` writes on."""
+        os.close(self._input)
+
 
 type Pty = _WinPty | _PosixPty
-"""A platform PTY: ConPTY through pywinpty on Windows, the stdlib ``pty`` elsewhere."""
+"""A platform PTY: ConPTY through pywinpty on Windows, the stdlib ``pty`` elsewhere.
+
+Its ``write`` takes UTF-8 bytes, writes a leading part of them and returns that part's length,
+raising when the PTY refuses them; ``close_input`` releases what ``write`` writes on.
+"""
 
 
 def spawn_pty(
@@ -998,7 +1029,7 @@ def spawn_pty(
     return _PosixPty(argv, cwd, rows, cols, env)
 
 
-# ── The reader pump ─────────────────────────────────────────────────────
+# ── The reader and writer pumps ─────────────────────────────────────────
 
 
 def start_reader(
@@ -1009,8 +1040,8 @@ def start_reader(
 ) -> threading.Thread:
     """Pump PTY output on a daemon thread until the process exits, then call ``on_exit``.
 
-    Any read failure ends the pump. The reader owns closing the PTY's OS resources
-    (``pty.close()``) so an fd can never be recycled while a read is still blocked on it.
+    Any read failure ends the pump. The reader closes what it reads from (``pty.close()``) as it
+    ends, so an fd can never be recycled while a read is still blocked on it.
     """
 
     def _loop() -> None:
@@ -1031,3 +1062,59 @@ def start_reader(
     t = threading.Thread(target=_loop, name=name, daemon=True)
     t.start()
     return t
+
+
+type Input = tuple[str, Callable[[], object]]
+"""Text for the agent's input and what to call once it is written whole."""
+
+
+class _PtyInput(io.RawIOBase):
+    """The PTY's input as a raw stream, refusing every write once ``inputs`` is shut down."""
+
+    def __init__(self, pty: Pty, inputs: Queue[Input]) -> None:
+        self._pty = pty
+        self._inputs = inputs
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, b: Buffer) -> int:
+        """Write a leading part of ``b`` to the PTY and return its length.
+
+        Raises ``queue.ShutDown``, writing nothing, once ``inputs`` is shut down.
+        """
+        if self._inputs.is_shutdown:
+            raise ShutDown
+        return self._pty.write(bytes(b))
+
+    def close(self) -> None:
+        self._pty.close_input()
+        super().close()
+
+
+def start_writer(pty: Pty, inputs: Queue[Input], name: str) -> None:
+    """Write each input taken from ``inputs`` to ``pty`` on a daemon thread, in order.
+
+    Each is written as UTF-8, and its callback is called once it is written whole. The writer
+    stops at the first PTY write it finds ``inputs`` shut down before, the rest of an input it
+    did not finish dropped and its callback never called, or once a write or callback fails,
+    shutting ``inputs`` down so no later input is accepted; then it closes the PTY's input.
+    """
+
+    def _loop() -> None:
+        stream = io.BufferedWriter(_PtyInput(pty, inputs))
+        try:
+            while True:
+                text, written = inputs.get()
+                stream.write(text.encode("utf-8"))
+                stream.flush()
+                written()
+        except Exception:
+            logger.debug("terminal writer ended", exc_info=True)
+        finally:
+            inputs.shutdown(immediate=True)
+            # Closed here, as the finalizer would report the refused flush of an unfinished input.
+            with suppress(ShutDown):
+                stream.close()
+
+    threading.Thread(target=_loop, name=name, daemon=True).start()
