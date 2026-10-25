@@ -118,9 +118,9 @@ jobs:
           # ruff pinned to the version environment.win.lock.yml resolves: ruff.toml runs
           # pycodestyle's preview rules, which move between releases.
           pip install pytest-timeout pytest-xdist ruff==0.16.8
-          # The runner's toolcache ships a setuptools pip-audit flags; the audit
-          # covers the installed set, so the set carries the fixed release.
-          pip install --upgrade setuptools
+          # The toolcache's setuptools and the PyTorch index's filelock are releases pip-audit
+          # flags; the audit covers the installed set, so the set carries the fixed releases.
+          pip install --upgrade setuptools filelock
           pip install -e packages/tcip-store
           pip install -e packages/tcip-annotation
           pip install -e "packages/tcip-mcp[dev,hpo]"
