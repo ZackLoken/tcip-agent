@@ -12,7 +12,11 @@ import pytest
 
 import tcip_store as ts
 from tcip_mcp.cli.dump_store import dump_store
-from tcip_mcp.tools.meta_tools import report_friction, write_retrospective
+from tcip_mcp.tools.meta_tools import (
+    MemoryKind,
+    report_friction,
+    write_retrospective,
+)
 from tests._cli_fixtures import run_tcip
 from tests._web_fixtures import new_project
 
@@ -161,4 +165,4 @@ def test_the_command_writes_the_dump_and_answers_how_many_files(
 
     assert done.returncode == 0, done.stderr
     assert "file(s) written" in done.stdout
-    assert (out / "%2E" / "friction_reports").is_dir()
+    assert (out / "%2E" / MemoryKind.reports).is_dir()

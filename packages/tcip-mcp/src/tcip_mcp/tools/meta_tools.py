@@ -6,11 +6,12 @@ first by the time each record states.
 
 from __future__ import annotations
 
-import secrets
+import uuid
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
+from enum import StrEnum, auto
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
@@ -20,7 +21,7 @@ from tcip_mcp.pipelines.training.hpo import Count
 from tcip_mcp.server import tool
 from tcip_store import DecodeError, Key, Version
 
-REPORT_CATEGORIES = {
+FrictionCategory = Literal[
     "missing_tool",
     "ambiguous_data",
     "cant_find_file",
@@ -28,26 +29,21 @@ REPORT_CATEGORIES = {
     "failed_repeatedly",
     "needs_human_judgment",
     "unexpected_behavior",
-}
+]
 
 
 class MemoryRecord(BaseModel):
-    """One write to a project-memory corpus, stamped with the time it was written.
-
-    ``store`` names the corpus a record of the subclass is stored in.
-    """
+    """One write to a project-memory corpus, stamped with the time it was written."""
 
     model_config = ConfigDict(extra="forbid")
 
-    store: ClassVar[str]
     timestamp: str
 
 
 class FrictionReport(MemoryRecord):
     """One friction report as :func:`report_friction` records it."""
 
-    store: ClassVar[str] = "friction_reports"
-    category: str
+    category: FrictionCategory
     detail: str
     context: dict[str, JsonValue]
     user_disagreement: bool
@@ -56,7 +52,6 @@ class FrictionReport(MemoryRecord):
 class Retrospective(MemoryRecord):
     """One retrospective as :func:`write_retrospective` records it, each section as written."""
 
-    store: ClassVar[str] = "retrospectives"
     project_id: str
     task: str
     worked: str
@@ -67,11 +62,32 @@ class Retrospective(MemoryRecord):
     would_do_differently: str
 
 
+class MemoryKind(StrEnum):
+    """A project-memory corpus: the name its records are stored under, and their record class."""
+
+    record: type[MemoryRecord]
+
+    def __new__(cls, name: str, record: type[MemoryRecord]) -> MemoryKind:
+        """Make the corpus stored as ``name`` whose records read as ``record``."""
+        kind = str.__new__(cls, name)
+        kind._value_ = name
+        kind.record = record
+        return kind
+
+    reports = auto(), FrictionReport
+    retrospectives = auto(), Retrospective
+
+
+def _store(record: type[MemoryRecord]) -> str:
+    """Return the name the corpus of ``record`` is stored under."""
+    return next(kind.value for kind in MemoryKind if kind.record is record)
+
+
 def memory_key(
     record: type[MemoryRecord], project_path: str, record_id: str
 ) -> Key:
     """Return the key of one record of ``record``'s corpus."""
-    return Key(record.store, str(project_path), (record_id,))
+    return Key(_store(record), str(project_path), (record_id,))
 
 
 def read_memory[M: MemoryRecord](
@@ -87,16 +103,9 @@ def read_memory[M: MemoryRecord](
     )
 
 
-def _write_memory(project: Path, name: str, record: MemoryRecord) -> str:
-    """Write ``record`` as a new record of its corpus and return the id minted for it.
-
-    The id is the record's own time to the second, ``name`` and four hex digits; a write whose id
-    is already held refuses (``VersionConflictError``) with nothing replaced.
-    """
-    record_id = (
-        f"{datetime.fromisoformat(record.timestamp):%Y%m%dT%H%M%SZ}_{name}_"
-        f"{secrets.token_hex(2)}"
-    )
+def _write_memory(project: Path, record: MemoryRecord) -> str:
+    """Write ``record`` as a new record of its corpus under a fresh UUID and return that id."""
+    record_id = uuid.uuid4().hex
     tcip_store.replace(
         memory_key(type(record), str(project), record_id),
         record.model_dump(mode="json"),
@@ -136,7 +145,7 @@ def memory_entries[M: MemoryRecord](
     stating no time, sorts after every one that does; entries stating one time keep id order.
     """
     stated: list[tuple[str, MemoryEntry[M]]] = []
-    for key in tcip_store.keys(record.store, str(project_path)):
+    for key in tcip_store.keys(_store(record), str(project_path)):
         name = key.parts[0]
         try:
             read = read_memory(record, project_path, name)
@@ -162,7 +171,7 @@ def memory_page[M: MemoryRecord](
 @audited
 def report_friction(
     project: Path,
-    category: str,
+    category: FrictionCategory,
     detail: str,
     context: dict | None = None,
     user_disagreement: bool = False,
@@ -170,8 +179,7 @@ def report_friction(
     """Record one friction report in the project: a category, what happened, and its context.
 
     Args:
-        category: One of: missing_tool, ambiguous_data, cant_find_file, confused_about_domain,
-            failed_repeatedly, needs_human_judgment, unexpected_behavior.
+        category: What the report is about.
         detail: Free-text description of what went wrong. Be specific: what you tried, what you
             expected, what happened, what you need.
         context: Optional structured context (file paths, tool names, trait, crop, session_id,
@@ -180,16 +188,9 @@ def report_friction(
             disagreeing with your approach, independent of category.
 
     """
-    if category not in REPORT_CATEGORIES:
-        return {
-            "error": f"unknown category '{category}'",
-            "valid_categories": sorted(REPORT_CATEGORIES),
-        }
-
     now = now_iso()
     report_id = _write_memory(
         project,
-        category,
         FrictionReport(
             timestamp=now,
             category=category,
@@ -210,44 +211,32 @@ def report_friction(
 @tool()
 def load_project_memory(
     project: Path,
-    kind: str,
+    kind: MemoryKind,
     limit: Count = 5,
-    category: str = "",
+    category: FrictionCategory | None = None,
     filter_substring: str = "",
 ) -> dict:
     """Read one project-memory corpus into context, one entry per write.
 
-    ``kind`` selects a single corpus: ``'reports'`` reads the friction reports (the counterpart to
-    ``report_friction``); ``'retrospectives'`` reads the retrospectives (the counterpart to
-    ``write_retrospective``), each the record of one call. Entries come back newest first, by the
-    timestamp each one states, each as its id and its record (or ``reason``, for a record that
-    will not read), with ``total_available``, how many entries match.
+    Entries come back newest first, by the timestamp each one states, each as its id and its
+    record (or ``reason``, for a record that will not read), with ``total_available``, how many
+    entries match.
 
     Args:
-        kind: Which corpus to read: 'reports' or 'retrospectives'.
+        kind: Which corpus to read.
         limit: Maximum number of entries to return, a whole number of at least one (default 5).
-        category: Reports only, optional exact category filter (e.g. 'missing_tool'), one of the
-            ``report_friction`` categories; empty means all. Ignored for retrospectives.
+        category: Only the friction reports of this category; a retrospective has none, so no
+            retrospective matches one. Absent, no entry is filtered by category.
         filter_substring: Optional case-insensitive substring matched against each entry's id or
             any of its text fields (a report's detail, a retrospective's sections).
 
     """
-    corpora: dict[str, type[MemoryRecord]] = {
-        "reports": FrictionReport,
-        "retrospectives": Retrospective,
-    }
-    if kind not in corpora:
-        return {
-            "error": f"unknown kind '{kind}'",
-            "valid_kinds": list(corpora),
-        }
-    cat = category.strip() if kind == "reports" else ""
     needle = filter_substring.lower().strip()
 
     def matches(entry: MemoryEntry[Any]) -> bool:
         record = entry.record
-        if cat and not (
-            isinstance(record, FrictionReport) and record.category == cat
+        if category is not None and not (
+            isinstance(record, FrictionReport) and record.category == category
         ):
             return False
         texts = [entry.id, *record.model_dump().values()]
@@ -255,7 +244,7 @@ def load_project_memory(
             isinstance(text, str) and needle in text.lower() for text in texts
         )
 
-    entries = memory_entries(corpora[kind], str(project))
+    entries = memory_entries(kind.record, str(project))
     return memory_page(
         [entry for entry in entries if matches(entry)], limit
     ).model_dump(mode="json")
@@ -266,7 +255,7 @@ def _parse_audit_bound(
 ) -> datetime:
     """Parse a caller-supplied ``since``/``until`` bound, or raise naming which bound and why.
 
-    The bound is ISO-8601, a trailing ``Z`` accepted, a naive value read as UTC.
+    The bound is what ``datetime.fromisoformat`` parses, a naive value read as UTC.
 
     A date-only bound (no ``T`` separator) names a whole day, not an instant: ``since`` already
     starts at that day's midnight once parsed, and ``until`` with ``end_of_day=True`` is pushed
@@ -274,7 +263,7 @@ def _parse_audit_bound(
     date rather than only one landing on midnight exactly.
     """
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         raise ValueError(
             f"{label} {value!r} is not a parseable ISO-8601 timestamp"
@@ -423,7 +412,6 @@ def write_retrospective(
     now = now_iso()
     retrospective_id = _write_memory(
         project,
-        project_id,
         Retrospective(
             timestamp=now,
             project_id=project_id,

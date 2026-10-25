@@ -230,6 +230,44 @@ def test_read_audit_log_accepts_a_z_suffixed_bound(
     assert result["count"] == 1
 
 
+def test_a_bound_reads_as_datetime_fromisoformat_reads_it() -> None:
+    """A trailing ``Z``, a naive value and a date-only ``until`` agree with the parser's own."""
+    from datetime import datetime, timedelta, timezone
+
+    from tcip_mcp.tools.meta_tools import _parse_audit_bound
+
+    assert _parse_audit_bound(
+        "since", "2026-03-02T10:00:00Z"
+    ) == datetime.fromisoformat("2026-03-02T10:00:00Z")
+    assert _parse_audit_bound(
+        "since", "2026-03-02T10:00:00"
+    ) == datetime.fromisoformat("2026-03-02T10:00:00").replace(
+        tzinfo=timezone.utc
+    )
+    midnight = datetime.fromisoformat("2026-03-02").replace(
+        tzinfo=timezone.utc
+    )
+    assert _parse_audit_bound(
+        "until", "2026-03-02", end_of_day=True
+    ) == midnight + timedelta(days=1, microseconds=-1)
+
+
+@pytest.mark.parametrize(
+    "value", ["2026-03-02Z", "2026-03-02T10Z:00:00", "not-a-timestamp"]
+)
+def test_a_bound_datetime_fromisoformat_refuses_is_refused_by_name(
+    value: str,
+) -> None:
+    from datetime import datetime
+
+    from tcip_mcp.tools.meta_tools import _parse_audit_bound
+
+    with pytest.raises(ValueError):
+        datetime.fromisoformat(value)
+    with pytest.raises(ValueError, match="since"):
+        _parse_audit_bound("since", value)
+
+
 def test_read_audit_log_refuses_an_unparseable_since_bound(
     project: Path,
     dataset_root: Path,
