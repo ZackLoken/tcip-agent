@@ -95,7 +95,7 @@ import { TerminalRail } from "@/components/TerminalRail";
 import { MAX_BACKOFF_MS } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
 
-// jsdom lacks WebSocket, ResizeObserver and the matchMedia a real xterm's open reads.
+// jsdom lacks WebSocket and the matchMedia a real xterm's open reads.
 vi.stubGlobal("matchMedia", (media: string) => ({
   matches: false,
   media,
@@ -125,13 +125,6 @@ class MockWebSocket {
   }
 }
 vi.stubGlobal("WebSocket", MockWebSocket);
-vi.stubGlobal(
-  "ResizeObserver",
-  class {
-    observe = vi.fn();
-    disconnect = vi.fn();
-  },
-);
 
 const PROVIDER = { id: "harness", name: "A harness", unavailable_reason: null };
 const LAUNCHED = {
@@ -363,6 +356,70 @@ describe("TerminalRail", () => {
     fireEvent.keyDown(handle, { key: "ArrowRight" });
     expect(rail.style.width).toBe("472px");
     expect(localStorage.getItem("tcip.terminal_width")).toBe("472");
+  });
+
+  it("a drag's release persists the width displayed then, a key resize during it included", async () => {
+    painted.columnPx = 8;
+    render(<TerminalRail />);
+    await screen.findByTestId("terminal-host");
+    await waitFor(() => expect(termInstances[0].open).toHaveBeenCalled());
+    const handle = screen.getByLabelText("Resize agent terminal");
+    const rail = screen.getByLabelText("Agent terminal");
+    fireEvent.mouseDown(handle);
+    fireEvent.mouseMove(window, { clientX: window.innerWidth - 560 });
+    fireEvent.mouseMove(window, { clientX: window.innerWidth - 600 });
+    expect(rail.style.width).toBe("600px");
+    expect(localStorage.getItem("tcip.terminal_width")).toBeNull();
+    fireEvent.mouseUp(window);
+    expect(localStorage.getItem("tcip.terminal_width")).toBe("600");
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(rail.style.width).toBe("608px");
+    expect(localStorage.getItem("tcip.terminal_width")).toBe("608");
+
+    fireEvent.mouseDown(handle);
+    fireEvent.mouseMove(window, { clientX: window.innerWidth - 640 });
+    expect(localStorage.getItem("tcip.terminal_width")).toBe("608");
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(rail.style.width).toBe("648px");
+    expect(localStorage.getItem("tcip.terminal_width")).toBe("648");
+    fireEvent.mouseUp(window);
+    expect(rail.style.width).toBe("648px");
+    expect(localStorage.getItem("tcip.terminal_width")).toBe("648");
+  });
+
+  it("a release delivered as soon as the dragged width is committed persists that width", async () => {
+    render(<TerminalRail />);
+    await screen.findByTestId("terminal-host");
+    const rail = screen.getByLabelText("Agent terminal");
+    fireEvent.mouseDown(screen.getByLabelText("Resize agent terminal"));
+    // A browser reports the move as the current event, which React schedules as continuous work;
+    // jsdom still reports the mousedown, which React would render and flush synchronously.
+    const move = new MouseEvent("mousemove", { clientX: window.innerWidth - 600 });
+    const currentEvent = vi.spyOn(window, "event", "get").mockReturnValue(move);
+    // Each clock read passes React's 5 ms frame, so the scheduler yields after the commit.
+    let now = performance.now();
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => (now += 6));
+    const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const actEnvironment = environment.IS_REACT_ACT_ENVIRONMENT;
+    environment.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      const released = new Promise<void>((resolve) => {
+        const observer = new MutationObserver(() => {
+          observer.disconnect();
+          window.dispatchEvent(new MouseEvent("mouseup"));
+          resolve();
+        });
+        observer.observe(rail, { attributeFilter: ["style"] });
+      });
+      window.dispatchEvent(move);
+      await released;
+      expect(rail.style.width).toBe("600px");
+      expect(localStorage.getItem("tcip.terminal_width")).toBe("600");
+    } finally {
+      environment.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+      clock.mockRestore();
+      currentEvent.mockRestore();
+    }
   });
 
   it("leaves the width alone when no column has been painted to measure", async () => {
