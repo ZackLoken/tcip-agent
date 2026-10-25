@@ -24,6 +24,8 @@ dependencies = [
     "werkzeug",
     # ConPTY backend for the embedded agent terminal (POSIX uses the stdlib pty).
     "pywinpty>=2.0; sys_platform == 'win32'",
+    # The Windows terminal backend waits for its terminated process through psutil.
+    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]

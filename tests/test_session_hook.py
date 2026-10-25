@@ -22,6 +22,8 @@ from PIL import Image
 from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.subject_registry import Subject, SubjectRegistry
+from tcip_mcp.tools.doctor_tools import diagnose_project
+from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
 from tcip_mcp.tools.meta_tools import report_friction, write_retrospective
 from tcip_web import terminal as pty_host
 from tcip_web.app import app
@@ -183,7 +185,7 @@ def test_each_harnesss_new_session_reports_and_is_told_the_whole_orientation(
         "2026-03-04/IMG_E: empty label document",
         "the newest report detail",
         "orientation-task",
-        "serve_domain_knowledge",
+        serve_domain_knowledge.__name__,
     ):
         assert fact in text, fact
 
@@ -206,7 +208,7 @@ def test_a_compaction_is_told_the_memory_and_the_knowledge_alone(
     assert started.conversation == "conv-c"
     assert "the newest report detail" in text
     assert "orientation-task" in text
-    assert "serve_domain_knowledge" in text
+    assert serve_domain_knowledge.__name__ in text
     assert "display_name" not in text
     assert "IMG_E" not in text
 
@@ -307,7 +309,7 @@ def _findings_part(text: str | None) -> tuple[str, list]:
     (part,) = [
         p
         for p in text.split("\n\n")
-        if p.startswith("diagnose_project answers")
+        if p.startswith(f"{diagnose_project.__name__} answers")
     ]
     counted, _, listed = part.partition("; the first ")
     shown = listed.partition(" of them, errors first: ")[2]
@@ -336,7 +338,7 @@ def test_more_findings_than_fit_name_the_tool_answering_all_of_them(
 
     assert (
         counted.rstrip(".")
-        == "diagnose_project answers 160 finding(s) over it"
+        == f"{diagnose_project.__name__} answers 160 finding(s) over it"
     )
     assert len(shown) < 160
 
@@ -367,15 +369,15 @@ def test_the_orientation_lists_the_first_findings_the_tool_answers(
     damage_record(traits.trait_key(root, "leaf"), b"{not valid json")
     fx.propose(root, fx.entry("burr_size", ("leaf_length",)))
     (answered,) = call_through_handshake(
-        [("diagnose_project", {})], bound=bound_to(opened)
+        [(diagnose_project.__name__, {})], bound=bound_to(opened)
     )
     tool = answered["findings"]
 
     counted, shown = _findings_part(pty_host.orientation(opened, "startup"))
 
     assert [level for level, _ in tool] == ["error", "warn", "info"]
-    assert (
-        counted == f"diagnose_project answers {len(tool)} finding(s) over it"
+    assert counted == (
+        f"{diagnose_project.__name__} answers {len(tool)} finding(s) over it"
     )
     assert shown == tool
 

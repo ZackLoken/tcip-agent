@@ -1,21 +1,10 @@
 """Live smoke of one provider row's real harness through the embedded agent terminal.
 
-Creates and opens a scratch project under a display name generated for the run, launches the row
-for it, submits a request the way the rail submits a staged one, asking for one
-``report_friction`` call carrying a token generated once the project is open, so only the request
-names it, followed by the project's display name, which with no other tool called only the
-agent's orientation states, and passes only when the open project's friction reports, read
-through the platform's own route, hold exactly one report carrying that token and that name, of
-the requested category, at the first poll that sees one; a later second call is not watched for.
-The backend is also served on a loopback port recorded under the workspace, so the session hook
-the harness runs reports its conversation as it does under ``python -m tcip_web``. For a row whose
-conversations are resumed, the agent is then ended by the backend's shutdown once its harness has
-reported its conversation, the row is launched again, and the smoke passes only when that launch
-resumed the conversation and its agent reports the token, continued, though no request of the
-resumed launch names it.
+Runs the smoke ``packages/tcip-web/CLAUDE.md`` states for the row, in the workspace
+``--workspace`` names or a fresh one, and exits 0 on a pass and 1 otherwise.
 
 Usage (from the repo root, tcip-agent env):
-    python tools/smoke_terminal_e2e.py <provider id>
+    python tools/smoke_terminal_e2e.py <provider id> [--workspace <trusted workspace>]
 """
 
 from __future__ import annotations
@@ -334,10 +323,16 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
     return 0 if passed else 1
 
 
-if __name__ == "__main__":
+def command(argv: list[str] | None = None) -> int:
+    """Parse the smoke's command line ``argv`` and return what :func:`main` returns for it."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "provider", help="the id of the provider row to launch"
+    )
+    parser.add_argument(
+        "--workspace",
+        help="the workspace to run in, one the person trusted by hand for a harness that "
+        "asks to trust its workspace (default: a fresh temporary directory)",
     )
     parser.add_argument(
         "--answer-timeout",
@@ -345,5 +340,13 @@ if __name__ == "__main__":
         default=ANSWER_TIMEOUT_S,
         help=f"seconds to wait for the report (default {ANSWER_TIMEOUT_S})",
     )
-    args = parser.parse_args()
-    raise SystemExit(main(args.provider, answer_timeout_s=args.answer_timeout))
+    args = parser.parse_args(argv)
+    return main(
+        args.provider,
+        workspace=args.workspace,
+        answer_timeout_s=args.answer_timeout,
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(command())
