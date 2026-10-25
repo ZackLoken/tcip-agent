@@ -115,7 +115,9 @@ def _capture_fixture(root: Path) -> dict:
 
     # The mapping doors build for the project the GUI has open, the one these captures belong to.
     open_new_project(root)
-    register_dataset(root, str(root), sorted(registered_crops())[0])
+    register_dataset(
+        root, str(root), sorted(registered_crops())[0], actor=None
+    )
     registry = register_plant_registry_for(root, [csv_path])
     return {
         "name": "valley",
@@ -253,6 +255,7 @@ def test_the_route_and_the_tool_build_one_mapping_with_one_audit_line_each(
         name="ridge",
         images_root=payload["images_root"],
         plant_registry=payload["plant_registry"],
+        actor=None,
     )
     assert "error" not in tool_answer, tool_answer
 
@@ -334,6 +337,7 @@ def test_a_mapping_or_registry_name_outside_the_segment_rule_refuses_at_its_key(
         name="Bad_Name",
         images_root=payload["images_root"],
         plant_registry=payload["plant_registry"],
+        actor=None,
     )
     assert "Bad_Name" in answer["error"]
     registered = register_plant_registry(
@@ -342,6 +346,7 @@ def test_a_mapping_or_registry_name_outside_the_segment_rule_refuses_at_its_key(
         csv_paths=[payload["csv_path"]],
         crop="c",
         site="s",
+        actor=None,
     )
     match registered:
         case {"error": str() as error}:
@@ -380,6 +385,7 @@ def test_every_phenology_door_refuses_a_mapping_name_that_names_no_mapping(
         images_root=str(series.root / "images"),
         plant_registry="reg",
         dates=sorted(series.buckets)[:1],
+        actor=None,
     )
     assert "error" not in built, built
     for mapping_name, expected_status, expected_detail in (

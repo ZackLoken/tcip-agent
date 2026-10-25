@@ -66,15 +66,16 @@ def import_coco_document(
     vertex_spacing: float,
     rationale: str,
     project: Path,
+    actor: str | None,
 ) -> dict:
     """Write one per-image label document for every image ``document`` lists, and audit it.
 
     The documents are keyed under the capture ``date`` of ``dataset_root`` (both
-    :func:`~tcip_mcp.registry_paths.located` against ``project``), and the import is recorded on
-    the dataset's audit log with the document's path, the digest of the one read of its bytes,
-    the ``vertex_spacing`` a run-length mask's rings are simplified at and the ``rationale`` for
-    it, in one commit with the documents: an import that writes nothing leaves no line. The
-    answer is the audited arguments.
+    :func:`~tcip_mcp.registry_paths.located` against ``project``), and the import is recorded, as
+    ``actor``'s, on the dataset's audit log with the document's path, the digest of the one read
+    of its bytes, the ``vertex_spacing`` a run-length mask's rings are simplified at and the
+    ``rationale`` for it, in one commit with the documents: an import that writes nothing
+    leaves no line. The answer is the audited arguments.
 
     ``date`` names the capture ``images/<date>/``; one :func:`~tcip_mcp.dataset_layout.list_dates`
     does not list refuses. Each declared category must be a
@@ -227,7 +228,7 @@ def import_coco_document(
                 audit_entry(
                     "coco_document_imported",
                     arguments,
-                    None,
+                    actor,
                     "ok",
                     {"document_digest": digest},
                 ),

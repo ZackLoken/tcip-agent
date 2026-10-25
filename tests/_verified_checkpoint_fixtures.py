@@ -496,7 +496,9 @@ def register_checkpoint(
     """
     from tcip_mcp.tools.model_tools import register_model
 
-    result = register_model(project_root, name=name, checkpoint_path=path)
+    result = register_model(
+        project_root, name=name, checkpoint_path=path, actor=None
+    )
     assert "error" not in result, result
 
 

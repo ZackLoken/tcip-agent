@@ -209,6 +209,7 @@ def test_save_annotations_refuses_an_inverted_box(
         bound,
         str(img),
         annotations=[{"subject": "leaf", "bbox": [10, 10, 5, 5]}],
+        actor=None,
     )
 
     assert "error" in result
@@ -227,6 +228,7 @@ def test_save_annotations_admits_an_ordered_box(
         bound,
         str(img),
         annotations=[{"subject": "leaf", "bbox": [5, 5, 10, 20]}],
+        actor=None,
     )
 
     assert "error" not in result

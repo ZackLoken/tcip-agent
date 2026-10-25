@@ -135,7 +135,7 @@ def test_ingest_exif_buckets_and_undated(
     _make_image(src / "c.jpg", exif_date="2026:03:01 09:00:00")
     _make_image(src / "no_exif.png")  # no EXIF → undated
 
-    manifest = ingest_images(project, source=str(src))
+    manifest = ingest_images(project, source=str(src), actor=None)
 
     assert "error" not in manifest
     assert _entries(manifest) == {
@@ -167,7 +167,7 @@ def test_ingested_bytes_read_back_through_the_image_path(
     src = tmp_path / "raw"
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
 
-    manifest = ingest_images(project, source=str(src))
+    manifest = ingest_images(project, source=str(src), actor=None)
     assert "error" not in manifest
 
     path = dataset_layout.image_path(project, "2026-02-11", "a", ".jpg")
@@ -188,14 +188,14 @@ def test_ingest_buckets_a_raster_by_the_capture_date_its_metadata_states(
     _make_raster(src / "mosaic.tif", capture_date="2025-09-16")
 
     manifest = ingest_images(
-        project, source=str(src), raster_date_item="capture_date"
+        project, source=str(src), raster_date_item="capture_date", actor=None
     )
 
     assert _entries(manifest) == {"mosaic.tif": ("2025-09-16", "capture_date")}
     assert _unreadable(manifest) == []
     assert (project / "images" / "2025-09-16" / "mosaic.tif").is_file()
 
-    unnamed = ingest_images(project, source=str(src))
+    unnamed = ingest_images(project, source=str(src), actor=None)
     assert _entries(unnamed) == {"mosaic.tif": ("undated", None)}
     assert _unreadable(unnamed) == []
 
@@ -206,7 +206,7 @@ def test_ingest_buckets_a_tiff_by_its_own_datetime_tag(
     src = tmp_path / "raw"
     _make_tagged_tiff(src / "plot.tif", "2026:04:05 08:00:00")
 
-    manifest = ingest_images(project, source=str(src))
+    manifest = ingest_images(project, source=str(src), actor=None)
 
     assert _entries(manifest) == {
         "plot.tif": ("2026-04-05", "TIFFTAG_DATETIME")
@@ -221,7 +221,7 @@ def test_ingest_leaves_a_raster_that_states_no_date_undated_and_unreported(
     src = tmp_path / "raw"
     _make_raster(src / "plain.tif")
 
-    manifest = ingest_images(project, source=str(src))
+    manifest = ingest_images(project, source=str(src), actor=None)
 
     assert _entries(manifest) == {"plain.tif": ("undated", None)}
     assert _unreadable(manifest) == []
@@ -233,7 +233,7 @@ def test_ingest_leaves_a_photo_without_an_exif_date_undated_and_unreported(
     src = tmp_path / "raw"
     _make_image(src / "no_exif.png")
 
-    manifest = ingest_images(project, source=str(src))
+    manifest = ingest_images(project, source=str(src), actor=None)
 
     assert _entries(manifest) == {"no_exif.png": ("undated", None)}
     assert _unreadable(manifest) == []
@@ -252,7 +252,7 @@ def test_ingest_still_ingests_a_file_whose_capture_date_cannot_be_read(
     src.mkdir(parents=True)
     (src / name).write_bytes(b"this is not an image at all")
 
-    manifest = ingest_images(project, source=str(src))
+    manifest = ingest_images(project, source=str(src), actor=None)
 
     assert manifest["copied"] == 1
     assert manifest["errors"] == []
@@ -268,7 +268,7 @@ def test_ingest_reports_an_exif_date_it_cannot_read_as_a_date(
     src = tmp_path / "raw"
     _make_image(src / "odd.jpg", exif_date="whenever")
 
-    manifest = ingest_images(project, source=str(src))
+    manifest = ingest_images(project, source=str(src), actor=None)
 
     assert _entries(manifest) == {"odd.jpg": ("undated", None)}
     (reason,) = _unreadable(manifest)
@@ -288,7 +288,7 @@ def test_ingest_takes_no_bucket_or_detection_choice(
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
 
     with pytest.raises(TypeError, match=stated):
-        ingest_images(project, source=str(src), **{stated: "none"})
+        ingest_images(project, source=str(src), **{stated: "none"}, actor=None)
     assert not (project / "images").exists()
 
 
@@ -299,7 +299,7 @@ def test_ingest_copies_leave_originals_byte_identical(
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
     before = (src / "a.jpg").read_bytes()
 
-    ingest_images(project, source=str(src))
+    ingest_images(project, source=str(src), actor=None)
 
     assert (src / "a.jpg").is_file()  # original still there
     assert (src / "a.jpg").read_bytes() == before  # byte-identical
@@ -311,7 +311,7 @@ def test_ingest_move_removes_originals(project: Path, tmp_path: Path) -> None:
     src = tmp_path / "raw"
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
 
-    manifest = ingest_images(project, source=str(src), copy=False)
+    manifest = ingest_images(project, source=str(src), copy=False, actor=None)
 
     assert manifest["moved"] == 1
     assert manifest["move"] is True
@@ -327,7 +327,7 @@ def test_ingest_two_sources_with_one_stem_refuse_the_whole_call(
     _make_image(src / "sub1" / "dup.png")
     _make_image(src / "sub2" / "dup.png")
 
-    manifest = ingest_images(project, source=str(src))
+    manifest = ingest_images(project, source=str(src), actor=None)
 
     assert "error" in manifest
     assert "dup.png" in manifest["error"]
@@ -347,7 +347,7 @@ def test_ingest_same_stem_in_two_different_buckets_is_admitted(
     _make_image(src / "foo.jpg", exif_date="2026:02:11 10:00:00")
     _make_image(src / "foo.png", exif_date="2026:03:01 10:00:00")
 
-    manifest = ingest_images(project, source=str(src))
+    manifest = ingest_images(project, source=str(src), actor=None)
 
     assert "error" not in manifest
     assert (project / "images" / "2026-02-11" / "foo.jpg").is_file()
@@ -363,7 +363,7 @@ def test_ingest_same_stem_different_ext_refuses_the_whole_call(
     _make_image(src / "IMG_1.jpg", exif_date="2026:02:11 10:00:00")
     _make_image(src / "IMG_1.png", exif_date="2026:02:11 10:05:00")
 
-    manifest = ingest_images(project, source=str(src))
+    manifest = ingest_images(project, source=str(src), actor=None)
 
     assert "error" in manifest
     assert "IMG_1" in manifest["error"]
@@ -380,7 +380,7 @@ def test_ingest_stem_collision_across_two_calls_refuses_naming_both_files(
     """
     src1 = tmp_path / "raw1"
     _make_image(src1 / "foo.jpg", exif_date="2026:02:11 10:00:00")
-    first = ingest_images(project, source=str(src1))
+    first = ingest_images(project, source=str(src1), actor=None)
     assert "error" not in first
 
     placed = project / "images" / "2026-02-11" / "foo.jpg"
@@ -388,7 +388,7 @@ def test_ingest_stem_collision_across_two_calls_refuses_naming_both_files(
 
     src2 = tmp_path / "raw2"
     _make_image(src2 / "foo.png", exif_date="2026:02:11 11:00:00")
-    second = ingest_images(project, source=str(src2))
+    second = ingest_images(project, source=str(src2), actor=None)
 
     assert "error" in second
     assert "foo.jpg" in second["error"] and "foo.png" in second["error"]
@@ -406,7 +406,7 @@ def test_ingest_case_variant_stem_collision_across_two_calls_refuses(
     """
     src1 = tmp_path / "raw1"
     _make_image(src1 / "Foo.jpg", exif_date="2026:02:11 10:00:00")
-    first = ingest_images(project, source=str(src1))
+    first = ingest_images(project, source=str(src1), actor=None)
     assert "error" not in first
 
     placed = project / "images" / "2026-02-11" / "Foo.jpg"
@@ -414,7 +414,7 @@ def test_ingest_case_variant_stem_collision_across_two_calls_refuses(
 
     src2 = tmp_path / "raw2"
     _make_image(src2 / "foo.png", exif_date="2026:02:11 11:00:00")
-    second = ingest_images(project, source=str(src2))
+    second = ingest_images(project, source=str(src2), actor=None)
 
     assert "error" in second
     assert "Foo.jpg" in second["error"] and "foo.png" in second["error"]
@@ -431,7 +431,7 @@ def test_ingest_admits_a_source_after_a_band_group_manifest_with_a_different_ste
 
     src = tmp_path / "raw"
     _make_image(src / "plain.png")
-    manifest = ingest_images(project, source=str(src))
+    manifest = ingest_images(project, source=str(src), actor=None)
     assert "error" not in manifest
 
     bucket_dir = project / "images" / "undated"
@@ -449,7 +449,7 @@ def test_ingest_admits_a_source_after_a_band_group_manifest_with_a_different_ste
 
     src2 = tmp_path / "raw2"
     _make_image(src2 / "other.png")
-    second = ingest_images(project, source=str(src2))
+    second = ingest_images(project, source=str(src2), actor=None)
     assert "error" not in second
     assert (bucket_dir / "other.png").is_file()
 
@@ -462,7 +462,7 @@ def test_ingest_after_a_band_group_manifest_refuses_naming_the_manifest(
 
     src = tmp_path / "raw"
     _make_image(src / "plain.png")
-    first = ingest_images(project, source=str(src))
+    first = ingest_images(project, source=str(src), actor=None)
     assert "error" not in first
 
     bucket_dir = project / "images" / "undated"
@@ -480,7 +480,7 @@ def test_ingest_after_a_band_group_manifest_refuses_naming_the_manifest(
 
     src2 = tmp_path / "raw2"
     _make_image(src2 / "cap.jpg")
-    second = ingest_images(project, source=str(src2))
+    second = ingest_images(project, source=str(src2), actor=None)
 
     assert "error" in second
     assert "cap.bandgroup" in second["error"]
@@ -508,7 +508,7 @@ def test_ingest_survives_a_bad_file_mid_batch(
 
     monkeypatch.setattr(tcip_store, "put_blob", flaky_put)
 
-    manifest = ingest_images(project, source=str(src))
+    manifest = ingest_images(project, source=str(src), actor=None)
 
     assert manifest["copied"] == 2  # the two good files still landed
     assert len(manifest["errors"]) == 1
@@ -520,9 +520,9 @@ def test_ingest_reingest_is_idempotent_via_collision_skip(
 ) -> None:
     src = tmp_path / "raw"
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
-    ingest_images(project, source=str(src))
+    ingest_images(project, source=str(src), actor=None)
     # Second run: dest already exists → skipped, nothing copied.
-    second = ingest_images(project, source=str(src))
+    second = ingest_images(project, source=str(src), actor=None)
     assert second["copied"] == 0
     assert len(second["skipped_collisions"]) == 1
 
@@ -535,7 +535,7 @@ def _undated_labeled(
 
     src = tmp_path / "raw"
     _make_image(src / name)
-    (entry,) = ingest_images(project, source=str(src))["files"]
+    (entry,) = ingest_images(project, source=str(src), actor=None)["files"]
     assert entry["bucket"] == dataset_layout.UNDATED_BUCKET
     label_image(entry["dest"], [box_annotation(2, 2, 10, 10)], 32, 24)
     return Path(entry["dest"])
@@ -630,6 +630,7 @@ def test_a_stated_date_moves_an_undated_image_with_every_record_keyed_by_it(
         images=[str(image)],
         date=STATED,
         rationale="the field book dates this walk",
+        actor=None,
     )
 
     dest = project / "images" / "2026-05-15" / "a.png"
@@ -675,7 +676,11 @@ def test_a_stated_date_whose_records_fail_to_commit_changes_nothing(
     monkeypatch.setattr(Txn, "write", refused)
     with pytest.raises(ts.StoreBusyError):
         state_capture_date(
-            project, images=[str(image)], date=STATED, rationale="known"
+            project,
+            images=[str(image)],
+            date=STATED,
+            rationale="known",
+            actor=None,
         )
     monkeypatch.undo()
 
@@ -710,7 +715,11 @@ def test_a_failed_stated_date_keeps_another_writers_file_in_the_bucket_it_made(
     monkeypatch.setattr(Txn, "write", refused)
     with pytest.raises(ts.StoreBusyError):
         state_capture_date(
-            project, images=[str(image)], date=STATED, rationale="known"
+            project,
+            images=[str(image)],
+            date=STATED,
+            rationale="known",
+            actor=None,
         )
     monkeypatch.undo()
 
@@ -740,7 +749,11 @@ def test_a_stated_date_makes_its_bucket_through_the_store_route(
 
     monkeypatch.setattr(ts, "ensure_parent", recorded)
     state_capture_date(
-        project, images=[str(image)], date=STATED, rationale="known"
+        project,
+        images=[str(image)],
+        date=STATED,
+        rationale="known",
+        actor=None,
     )
 
     assert answers == [[project / "images" / "2026-05-15"]]
@@ -778,7 +791,11 @@ def test_a_failed_stated_date_leaves_the_empty_bucket_a_racer_made(
     monkeypatch.setattr(Path, "mkdir", racer_first)
     with pytest.raises(ts.StoreBusyError):
         state_capture_date(
-            project, images=[str(image)], date=STATED, rationale="known"
+            project,
+            images=[str(image)],
+            date=STATED,
+            rationale="known",
+            actor=None,
         )
     monkeypatch.undo()
 
@@ -816,7 +833,11 @@ def test_a_failed_stated_date_raises_its_cause_when_its_bucket_fills_before_remo
     monkeypatch.setattr(Path, "rmdir", landed_first)
     with pytest.raises(ts.StoreBusyError) as raised:
         state_capture_date(
-            project, images=[str(image)], date=STATED, rationale="known"
+            project,
+            images=[str(image)],
+            date=STATED,
+            rationale="known",
+            actor=None,
         )
     monkeypatch.undo()
 
@@ -849,7 +870,11 @@ def test_a_failed_stated_date_raises_a_refused_bucket_removal(
     monkeypatch.setattr(Path, "rmdir", denied)
     with pytest.raises(PermissionError) as raised:
         state_capture_date(
-            project, images=[str(image)], date=STATED, rationale="known"
+            project,
+            images=[str(image)],
+            date=STATED,
+            rationale="known",
+            actor=None,
         )
     monkeypatch.undo()
 
@@ -871,7 +896,11 @@ def test_a_stated_date_whose_first_copy_fails_raises_that_cause(
     monkeypatch.setattr(ts, "put_blob", unavailable)
     with pytest.raises(OSError, match="disk unavailable"):
         state_capture_date(
-            project, images=[str(image)], date=STATED, rationale="known"
+            project,
+            images=[str(image)],
+            date=STATED,
+            rationale="known",
+            actor=None,
         )
     monkeypatch.undo()
 
@@ -902,7 +931,11 @@ def test_a_stated_date_refuses_an_image_a_published_bucket_names(
     )
 
     refused = state_capture_date(
-        project, images=[str(image)], date=STATED, rationale="known"
+        project,
+        images=[str(image)],
+        date=STATED,
+        rationale="known",
+        actor=None,
     )
 
     assert "proposals" in refused["error"]
@@ -933,7 +966,7 @@ def test_a_stated_date_is_refused_by_its_type_unless_it_is_a_date() -> None:
 def test_ingest_no_images_found(project: Path, tmp_path: Path) -> None:
     empty = tmp_path / "empty"
     empty.mkdir()
-    manifest = ingest_images(project, source=str(empty))
+    manifest = ingest_images(project, source=str(empty), actor=None)
     assert "error" in manifest
     assert not (project / "images").exists()
 
@@ -945,7 +978,9 @@ def test_ingest_non_recursive_skips_subfolders(
     _make_image(src / "top.png")
     _make_image(src / "sub" / "deep.png")
 
-    manifest = ingest_images(project, source=str(src), recursive=False)
+    manifest = ingest_images(
+        project, source=str(src), recursive=False, actor=None
+    )
 
     assert list(_entries(manifest)) == ["top.png"]
 
@@ -956,7 +991,7 @@ def test_ingest_writes_audit_entry(project: Path, tmp_path: Path) -> None:
 
     src = tmp_path / "raw"
     _make_image(src / "a.png")
-    ingest_images(project, source=str(src))
+    ingest_images(project, source=str(src), actor=None)
 
     entries = ts.read_log(audit_mod.audit_log_key(project)).records
     assert any(
@@ -972,7 +1007,7 @@ def test_inspect_project_counts_canonical_images(
     src = tmp_path / "raw"
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
     _make_image(src / "b.png")
-    ingest_images(project, source=str(src))
+    ingest_images(project, source=str(src), actor=None)
 
     status = inspect_project(project)
     assert status["record_problem"] is None
@@ -996,7 +1031,7 @@ def test_ingest_after_import_admits_a_second_date(tmp_path: Path) -> None:
     project = made.root
     src1 = tmp_path / "raw1"
     _make_image(src1 / "a.jpg", exif_date="2026:02:11 10:30:00")
-    first = ingest_images(project, source=str(src1))
+    first = ingest_images(project, source=str(src1), actor=None)
     assert "error" not in first
 
     zip_path = tmp_path.parent / "export.zip"
@@ -1008,7 +1043,7 @@ def test_ingest_after_import_admits_a_second_date(tmp_path: Path) -> None:
 
     src2 = tmp_path / "raw2"
     _make_image(src2 / "b.jpg", exif_date="2026:03:01 10:30:00")
-    second = ingest_images(dest, source=str(src2))
+    second = ingest_images(dest, source=str(src2), actor=None)
     assert "error" not in second
     assert read_record(dest).id == made.id
 

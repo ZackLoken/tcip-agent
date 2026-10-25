@@ -58,7 +58,7 @@ def _register_dataset(project: Path) -> Path:
         register_dataset,
     )
 
-    result = register_dataset(project, ".", crop="currant")
+    result = register_dataset(project, ".", crop="currant", actor=None)
     assert "error" not in result, result
     (entry,) = read_datasets(project)
     return dataset_entry_path(project, entry)
@@ -74,6 +74,7 @@ def _write_subject_registry(project: Path) -> Path:
             SUBJECT: {"description": "one fruit"},
             "leaf": {"description": "one leaf"},
         },
+        actor=None,
     )
     assert "error" not in result, result
     return Path(result["subjects_path"]).parent
@@ -92,6 +93,7 @@ def _register_plant_registry(project: Path) -> Path:
         csv_paths=["plants.csv"],
         crop="currant",
         site="north orchard",
+        actor=None,
     )
     assert "error" not in result, result
     record = plant_mapping.load_registry(project, "plants")
@@ -110,7 +112,13 @@ def _labeled(project: Path) -> None:
     ]
     document = _document(project / "labels.json", annotations=annotations)
     result = import_coco(
-        project, str(document), str(project), DATE, VERTEX_SPACING, RATIONALE
+        project,
+        str(document),
+        str(project),
+        DATE,
+        VERTEX_SPACING,
+        RATIONALE,
+        actor=None,
     )
     assert "error" not in result, result
 
@@ -126,6 +134,7 @@ def _draw_splits(project: Path) -> Path:
         output_path="splits/drawn",
         subject=SUBJECT,
         **drawn_split(val_ratio=0.34, grouping="tile_prefix"),
+        actor=None,
     )
     assert "error" not in result, result
     (row,) = [r for r in audit_rows(project) if r["tool"] == "draw_splits"]
@@ -138,7 +147,13 @@ def _import_coco(project: Path) -> Path:
 
     _document(project / "external.json")
     result = import_coco(
-        project, "external.json", ".", DATE, VERTEX_SPACING, RATIONALE
+        project,
+        "external.json",
+        ".",
+        DATE,
+        VERTEX_SPACING,
+        RATIONALE,
+        actor=None,
     )
     assert "error" not in result, result
     return Path(result["document"])
@@ -157,7 +172,7 @@ def _ingest_images(project: Path) -> Path:
     Image.new("RGB", (16, 16)).save(
         raw / "extra.png", exif=capture_exif(datetime.fromisoformat(DATE))
     )
-    result = ingest_images(project, source="more_raw")
+    result = ingest_images(project, source="more_raw", actor=None)
     assert "error" not in result and result["found"] == 1, result
     return raw
 
@@ -173,7 +188,7 @@ def _save_annotations(project: Path) -> Path:
         project, read_record(project).id, workspace_from_environment()
     )
     result = save_annotations(
-        bound, IMAGE, [{"subject": SUBJECT, "bbox": BOX}]
+        bound, IMAGE, [{"subject": SUBJECT, "bbox": BOX}], actor=None
     )
     assert "error" not in result, result
     assert ts.exists(label_key(project, DATE, STEMS[0]))
@@ -209,10 +224,12 @@ def _stage_proposals(project: Path) -> dict:
 
 
 def _visualize(project: Path) -> Path:
-    from tcip_mcp.tools.vision_tools import visualize
+    from tcip_mcp.tools.vision_tools import AnnotationsRender, visualize
 
     _labeled(project)
-    result = visualize(project, "annotations", IMAGE)
+    result = visualize(
+        project, AnnotationsRender(source="annotations", path=IMAGE)
+    )
     assert "error" not in result, result
     return {key: value for key, value in result.items() if key != "image_path"}
 
@@ -270,7 +287,9 @@ def _register_model(project: Path) -> str:
 
     elsewhere = project.parent / f"{project.name}-elsewhere"
     spelling = _relative(registered_checkpoint(elsewhere), project)
-    result = register_model(project, name="m", checkpoint_path=spelling)
+    result = register_model(
+        project, name="m", checkpoint_path=spelling, actor=None
+    )
     assert "error" not in result, result
     (entry,) = read_registry_index(project)
     assert Path(result["checkpoint_path"]) == (project / spelling).resolve()
@@ -315,6 +334,7 @@ def _published(project: Path) -> None:
         images_dir=str(project / "images" / DATE),
         bucket="preds",
         stated=_stated(),
+        actor=None,
     )
     assert "error" not in result, result
 
@@ -329,6 +349,7 @@ def _run_inference(project: Path) -> Path:
         bucket="preds",
         dry_run=True,
         stated=_stated(),
+        actor=None,
     )
     assert "error" not in result, result
     return Path(result["dataset_root"])
@@ -403,7 +424,52 @@ def _calibrate_physical_scale(project: Path) -> Path:
     return Path(cited)
 
 
+def _scan_dataset(project: Path) -> dict:
+    from tcip_mcp.tools.data_tools import scan_dataset
+
+    result = scan_dataset(project, ".")
+    assert "error" not in result and result["image_count"], result
+    return {k: v for k, v in result.items() if k != "images_sample"}
+
+
+def _score_predictions(project: Path) -> dict:
+    from tcip_mcp.tools.annotation_tools import score_predictions
+
+    _published(project)
+    result = score_predictions(
+        project, f"images/{DATE}", "preds", IOU_THRESHOLD, 0.0
+    )
+    assert "error" not in result, result
+    return {
+        k: v for k, v in result.items() if k not in ("path", "not_predicted")
+    }
+
+
+def _check_dataset_identity(project: Path) -> str:
+    from tcip_mcp.tools.project_tools import check_dataset_identity
+
+    _labeled(project)
+    _register_dataset(project)
+    verdict = check_dataset_identity(project, ".")
+    assert verdict.state == "unchanged", verdict
+    return verdict.state
+
+
+def _shp_to_plant_csv(project: Path) -> Path:
+    from tcip_mcp.tools.phenology_tools import shp_to_plant_csv
+    from tests.test_shp_to_plant_csv_script import _point_shapefile
+
+    _point_shapefile(project)
+    result = shp_to_plant_csv(project, "points.shp", "plants.csv", actor=None)
+    assert "error" not in result, result
+    return Path(result["csv_path"])
+
+
 DOORS: dict[str, Callable[[Path], object]] = {
+    "scan_dataset": _scan_dataset,
+    "score_predictions": _score_predictions,
+    "check_dataset_identity": _check_dataset_identity,
+    "shp_to_plant_csv": _shp_to_plant_csv,
     "calibrate_physical_scale": _calibrate_physical_scale,
     "evaluate_model": _evaluate_model,
     "focus_human_attention": _focus_human_attention,
@@ -507,7 +573,7 @@ def test_a_scoped_door_locates_its_callers_spelling_once(
     for module in (registry_paths, audit, project_tools):
         monkeypatch.setattr(module, "located", counted)
     assert "error" not in project_tools.register_dataset(
-        project, "ds", "chestnut"
+        project, "ds", "chestnut", actor=None
     )
 
     assert spellings.count("ds") == 1, spellings
@@ -1143,7 +1209,7 @@ def test_a_config_with_a_relative_path_and_no_project_is_refused_by_name() -> (
 def test_the_preflight_command_reads_a_relative_config_under_its_project(
     project: Path, tmp_path: Path
 ) -> None:
-    """The preflight command reads a relative ``--config`` under ``--project``.
+    """The preflight command reads a relative ``--config @<file>`` under ``--project``.
 
     Run from a directory holding a decoy of the same name, the project's own config is the one
     validated.
@@ -1160,7 +1226,10 @@ def test_the_preflight_command_reads_a_relative_config_under_its_project(
 
     result = run_tcip(
         "preflight-config",
-        ["--config", "config.json", "--project", str(project)],
+        [
+            *("--config", "@config.json", "--project", str(project)),
+            *("--user", "tester"),
+        ],
         cwd=cwd,
     )
 
@@ -1176,6 +1245,8 @@ def test_the_identity_command_reads_a_relative_dataset_root_under_its_project(
     The check run from a working directory outside the project reports the registered
     dataset's own outcome.
     """
+    import json
+
     from tcip_mcp.tools.project_tools import register_dataset
     from tests._cli_fixtures import run_tcip
     from tests._web_fixtures import new_project
@@ -1184,17 +1255,22 @@ def test_the_identity_command_reads_a_relative_dataset_root_under_its_project(
     project = new_project(tmp_path / "project").root
     _real_dataset(project / "ds")
     assert "error" not in register_dataset(
-        project, str(project / "ds"), "chestnut"
+        project, str(project / "ds"), "chestnut", actor=None
     )
     cwd = tmp_path / "cwd"
     cwd.mkdir()
 
     completed = run_tcip(
-        "check-dataset-identity", ["ds", "--project", str(project)], cwd=cwd
+        "check-dataset-identity",
+        [
+            *("--dataset-root", "ds", "--project", str(project)),
+            *("--user", "tester"),
+        ],
+        cwd=cwd,
     )
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert "OK" in completed.stdout
+    assert json.loads(completed.stdout)["state"] == "unchanged"
 
 
 def test_the_score_command_reads_a_relative_path_under_its_project(
@@ -1220,6 +1296,7 @@ def test_the_score_command_reads_a_relative_path_under_its_project(
             "--project",
             str(project),
             *SCORED_AT,
+            *("--user", "tester"),
         ],
         cwd=cwd,
     )
@@ -1240,42 +1317,6 @@ def test_the_doctor_reads_the_project_named_by_a_relative_root(
 
     assert "doctor:" in result.stdout, result.stdout + result.stderr
     assert "Traceback" not in result.stderr, result.stderr
-
-
-def test_the_shapefile_converter_refuses_relative_paths_by_name(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The shapefile converter refuses a relative input or output by name.
-
-    The converter holds no project, so a relative input or output refuses naming the absolute
-    spelling and nothing is written under the working directory.
-    """
-    from tcip_mcp.cli.shp_to_plant_csv import convert_shp_to_plant_csv
-    from tests.test_shp_to_plant_csv_script import _point_shapefile
-
-    shp = _point_shapefile(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    with pytest.raises(ValueError, match="absolute path"):
-        convert_shp_to_plant_csv(shp, "plants.csv")
-    with pytest.raises(ValueError, match="absolute path"):
-        convert_shp_to_plant_csv(shp.name, tmp_path / "plants.csv")
-    assert not (tmp_path / "plants.csv").exists()
-
-
-def test_the_census_command_refuses_a_relative_dataset_root(
-    tmp_path: Path,
-) -> None:
-    """``tcip scan-dataset`` refuses a relative dataset root by naming the absolute spelling.
-
-    The command holds no project, so a relative dataset root is refused, though the operator's
-    working directory holds a dataset of that name.
-    """
-    from tests._cli_fixtures import run_tcip
-
-    _dataset(tmp_path)
-    result = run_tcip("scan-dataset", ["fruit_count"], cwd=tmp_path)
-    assert result.returncode == 1
-    assert "absolute path" in result.stderr
 
 
 @pytest.mark.parametrize("door", sorted(DOORS))
@@ -1380,6 +1421,7 @@ def test_a_per_plant_delivery_reads_and_writes_under_the_project(
             value_key="count",
             crop="currant",
             acknowledgment_id=act.acknowledgment_id,
+            actor=None,
         )
 
         assert "error" not in delivered, delivered
@@ -1421,6 +1463,7 @@ def test_a_phenology_measurement_reads_the_buckets_under_the_project_rooted_data
             list(series.buckets.values()),
             "out.csv",
             list(PLANTS),
+            actor=None,
         )
         assert "no assessment answers for bucket" in refused.get(
             "error", ""

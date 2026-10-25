@@ -157,6 +157,7 @@ def test_run_hyperparameter_search_refuses_split_draws_above_one_with_no_trial_b
         **fifo_search(),
         split_draws=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result and "trial_budget=2" in result["error"]
@@ -198,6 +199,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
         **fifo_search(),
         split_draws=2,
         search_seed=0,
+        actor=None,
     )
 
     assert any(
@@ -231,6 +233,7 @@ def test_run_hyperparameter_search_refuses_split_draws_over_a_zero_validation_sh
         **fifo_search(),
         split_draws=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result and "val_ratio zero" in result["error"]
@@ -273,6 +276,7 @@ def test_run_hyperparameter_search_refuses_split_draws_with_a_non_native_search_
         scheduler=fifo_scheduler(),
         split_draws=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result and "search_alg" in result["error"]
@@ -300,6 +304,7 @@ def test_run_hyperparameter_search_refuses_split_draws_with_a_pruning_scheduler(
         scheduler=asha_scheduler(),
         split_draws=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result and "scheduler" in result["error"]
@@ -327,6 +332,7 @@ def test_run_hyperparameter_search_refuses_split_draw_seeds_of_the_wrong_length(
         split_draws=3,
         split_draw_seeds=[1, 2],
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result and "split_draw_seeds" in result["error"]
@@ -355,6 +361,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_param_space_already_
         **fifo_search(),
         split_draws=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result and "data.split.seed" in result["error"]
@@ -382,6 +389,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_the_baseline_names_t
         split_draws=2,
         baseline_params={"optimizer.head_lr": 0.01, "data.split.seed": 7},
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result and "baseline_params" in result["error"]
@@ -414,6 +422,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_param_space_sweeps_a
         **fifo_search(),
         split_draws=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result and "data.split.val_ratio" in result["error"]
@@ -512,6 +521,7 @@ def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_one_draw(
         scheduler=fifo_scheduler(),
         search_seed=0,
         **{"search_alg": "random", **case},
+        actor=None,
     )
 
     assert (
@@ -567,6 +577,7 @@ def test_run_hyperparameter_search_refuses_repeated_split_draw_seeds(
         split_draws=3,
         split_draw_seeds=[3, 7, 7],
         search_seed=0,
+        actor=None,
     )
 
     assert "split_draw_seeds repeats [7]:" in result["error"]
@@ -593,6 +604,7 @@ def test_run_hyperparameter_search_admits_distinct_split_draw_seeds_beside_the_r
         split_draw_seeds=[7, 8],
         trial_budget=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -622,6 +634,7 @@ def test_run_hyperparameter_search_admits_the_paired_path_with_a_param_space_bes
         split_draw_seeds=[7, 8],
         trial_budget=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -650,6 +663,7 @@ def test_run_hyperparameter_search_admits_a_space_naming_no_seed_axis_at_one_dra
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -688,6 +702,7 @@ def test_run_hyperparameter_search_reports_the_seed_axis_refusal_over_a_prefligh
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert (
@@ -725,6 +740,7 @@ def test_the_seed_axis_refusal_answers_before_a_later_points_schema_error(
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert (
@@ -777,6 +793,7 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection(
             holdout_ratio=0.125,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     assert "error" not in make_result, make_result
 
@@ -792,6 +809,7 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection(
         split_draws=2,
         trial_budget=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -837,6 +855,7 @@ def test_a_bound_sweep_reads_and_redraws_its_selection_once_on_opening(
             holdout_ratio=0.125,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     config = _bound_hpo_config(tmp_path, selection_dir)
     calls = {"read": 0, "redraw": 0}
@@ -902,6 +921,7 @@ def test_run_hyperparameter_search_admits_split_draws_and_derives_seeds_from_the
         split_draws=3,
         trial_budget=6,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -938,6 +958,7 @@ def test_run_hyperparameter_search_admits_split_draws_with_explicit_seeds(
         split_draw_seeds=[7, 99],
         trial_budget=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -971,6 +992,7 @@ def test_run_hyperparameter_search_admits_split_draws_with_a_native_search_alg(
         split_draws=2,
         trial_budget=budget,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -1016,6 +1038,7 @@ def test_run_hyperparameter_search_admits_split_draws_for_instance_seg(
         split_draws=2,
         trial_budget=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -1044,6 +1067,7 @@ def test_run_hyperparameter_search_admits_split_draws_with_a_baseline_not_naming
         baseline_params={"optimizer.head_lr": 0.01},
         trial_budget=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -1073,6 +1097,7 @@ def test_run_hyperparameter_search_admits_a_bare_seed_axis_beside_split_draws(
         split_draws=2,
         trial_budget=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -1111,6 +1136,7 @@ def test_run_hyperparameter_search_refuses_a_budget_that_admits_fewer_than_every
         split_draws=3,
         trial_budget=10,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result
@@ -1147,6 +1173,7 @@ def test_run_hyperparameter_search_refuses_a_budget_at_the_quotient_boundary(
         split_draws=3,
         trial_budget=6,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result
@@ -1184,6 +1211,7 @@ def test_run_hyperparameter_search_refuses_a_budget_a_single_draw_already_exceed
         split_draws=2,
         trial_budget=5,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result
@@ -1218,6 +1246,7 @@ def test_run_hyperparameter_search_admits_a_budget_the_count_fits_and_records_it
         split_draws=3,
         trial_budget=6,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -1251,6 +1280,7 @@ def test_run_hyperparameter_search_refuses_a_one_draw_launch_a_stated_budget_exc
         **fifo_search(),
         trial_budget=3,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result
@@ -1276,6 +1306,7 @@ def test_run_hyperparameter_search_admits_a_one_draw_launch_with_no_stated_budge
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -1305,6 +1336,7 @@ def test_run_hyperparameter_search_relaunch_with_no_budget_replays_as_recorded(
         split_draws=2,
         relaunched_from=source,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -1338,6 +1370,7 @@ def test_run_hyperparameter_search_relaunch_with_a_budget_is_still_checked(
         relaunched_from=source,
         trial_budget=1,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result and "2" in result["error"]
@@ -1373,6 +1406,7 @@ def test_run_hyperparameter_search_refuses_a_categorical_with_no_choices_before_
         split_draws=split_draws,
         trial_budget=trial_budget,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result and "not a search space" in result["error"]
@@ -1407,6 +1441,7 @@ def test_run_hyperparameter_search_refuses_an_inverted_int_bound_before_minting(
         split_draws=2,
         trial_budget=5,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result and "not a search space" in result["error"]
@@ -1475,6 +1510,7 @@ def test_run_hyperparameter_search_refuses_a_sampled_int_axis_the_sampler_cannot
         split_draws=2,
         trial_budget=5,
         search_seed=0,
+        actor=None,
     )
 
     assert "'x'" in result.get("error", "") and "int64" in result["error"], (
@@ -1513,6 +1549,7 @@ def test_run_hyperparameter_search_refuses_a_grid_axis_past_its_bound_by_name(
         split_draws=split_draws,
         trial_budget=trial_budget,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result, result
@@ -1548,6 +1585,7 @@ def test_run_hyperparameter_search_counts_an_empty_param_space_at_one_draw_as_it
         search_alg="grid",
         trial_budget=1,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result and "2 trials" in result["error"]
@@ -1582,6 +1620,7 @@ def test_run_hyperparameter_search_an_empty_param_space_above_one_draw_counts_th
         split_draws=2,
         trial_budget=1,
         search_seed=0,
+        actor=None,
     )
 
     assert (
@@ -1603,6 +1642,7 @@ def test_run_hyperparameter_search_an_empty_param_space_above_one_draw_counts_th
         split_draws=2,
         trial_budget=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -1957,6 +1997,7 @@ def test_run_hyperparameter_search_refuses_split_draws_over_a_single_source_spat
         **fifo_search(),
         split_draws=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "one admitted source" in result["error"]
@@ -1988,6 +2029,7 @@ def test_run_hyperparameter_search_admits_a_single_source_spatial_config_at_one_
         **fifo_search(),
         split_draws=1,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -2021,6 +2063,7 @@ def test_run_hyperparameter_search_admits_split_draws_over_a_two_source_tiled_co
         split_draws=2,
         trial_budget=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -2072,6 +2115,7 @@ def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_d
         split_draws=2,
         trial_budget=2,
         search_seed=0,
+        actor=None,
     )
 
     assert any("every share zero" in issue for issue in result["issues"]), (
@@ -2113,6 +2157,7 @@ def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
         **fifo_search(),
         split_draws=2,
         search_seed=0,
+        actor=None,
     )
 
     assert "error" in result and "val_ratio zero" in result["error"]

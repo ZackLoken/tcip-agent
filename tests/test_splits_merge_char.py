@@ -94,6 +94,7 @@ def test_draw_splits_stats_golden(tmp_path: Path) -> None:
         output_path=str(out),
         subject="bud",
         **_DRAW,
+        actor=None,
     )
     result.pop("selection_dir")
     assert result.pop("scope") == {"subject": "bud", "attributes": []}
@@ -124,6 +125,7 @@ def test_draw_splits_selection_document_golden(tmp_path: Path) -> None:
         output_path=str(out),
         subject="bud",
         **_DRAW,
+        actor=None,
     )
     assert result["splits"] == GOLDEN_DRAW_SPLITS["splits"]
     assert result["total_stems"] == 12

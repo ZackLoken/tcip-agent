@@ -6,6 +6,7 @@ for a genuinely external dataset, and resolved on read by ``dataset_entry_path``
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from PIL import Image
@@ -48,7 +49,7 @@ def test_register_dataset_stores_a_relative_path_for_the_projects_own_tree(
     src = tmp_path / "proj"
     _make_dataset(src)
 
-    registered = register_dataset(src, str(src), crop="currant")
+    registered = register_dataset(src, str(src), crop="currant", actor=None)
 
     assert "error" not in registered
     assert read_datasets(src) == [DatasetEntry(id=registered["id"], path=".")]
@@ -64,7 +65,7 @@ def test_dataset_entry_path_resolves_a_relative_entry_against_the_project_root(
 
     src = tmp_path / "proj"
     _make_dataset(src)
-    register_dataset(src, str(src), crop="currant")
+    register_dataset(src, str(src), crop="currant", actor=None)
 
     entry = read_datasets(src)[0]
 
@@ -81,7 +82,7 @@ def test_dataset_entry_path_leaves_an_external_absolute_entry_unchanged(
     external = tmp_path / "external"
     _make_dataset(external)
     assert "error" not in register_dataset(
-        project, str(external), crop="currant"
+        project, str(external), crop="currant", actor=None
     )
 
     (entry,) = read_datasets(project)
@@ -104,7 +105,9 @@ def test_register_dataset_stores_a_nested_relative_path_with_posix_separators(
     nested = project / "datasets" / "main"
     _make_dataset(nested)
 
-    registered = register_dataset(project, str(nested), crop="currant")
+    registered = register_dataset(
+        project, str(nested), crop="currant", actor=None
+    )
 
     assert "error" not in registered
     entries = read_datasets(project)
@@ -160,7 +163,7 @@ def test_stored_path_recognizes_containment_through_a_symlinked_project_root(
     assert stored_path(dataset, alias) == "datasets/main"
 
 
-# ── check_dataset_identity.py: identity-based MOVED, not a stored-string comparison ────────
+# ── check_dataset_identity: identity-based moved, not a stored-string comparison ────────
 
 
 def test_check_dataset_identity_stays_quiet_for_a_self_registered_project(
@@ -170,14 +173,24 @@ def test_check_dataset_identity_stays_quiet_for_a_self_registered_project(
 
     src = new_project(tmp_path / "proj").root
     _make_dataset(src)
-    register_dataset(src, str(src), crop="currant")
+    register_dataset(src, str(src), crop="currant", actor=None)
 
     result = run_tcip(
-        "check-dataset-identity", [str(src), "--project", str(src)]
+        "check-dataset-identity",
+        [
+            "--dataset-root",
+            str(src),
+            "--project",
+            str(src),
+            "--user",
+            "tester",
+        ],
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "MOVED" not in result.stdout
+    assert [
+        entry["state"] for entry in json.loads(result.stdout)["registered"]
+    ] == ["in_place"]
 
 
 def test_check_dataset_identity_still_fires_for_a_genuinely_moved_dataset(
@@ -190,18 +203,24 @@ def test_check_dataset_identity_still_fires_for_a_genuinely_moved_dataset(
 
     orig = new_project(tmp_path / "orig").root
     _make_dataset(orig)
-    register_dataset(orig, str(orig), crop="currant")
+    register_dataset(orig, str(orig), crop="currant", actor=None)
 
     moved = tmp_path / "moved"
     tcip_store.release_root(orig)
     shutil.copytree(orig, moved)
 
     result = run_tcip(
-        "check-dataset-identity", [str(moved), "--project", str(orig)]
+        "check-dataset-identity",
+        [
+            *("--dataset-root", str(moved)),
+            *("--project", str(orig), "--user", "tester"),
+        ],
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "MOVED" in result.stdout
+    assert [
+        entry["state"] for entry in json.loads(result.stdout)["registered"]
+    ] == ["moved"]
 
 
 # ── traits.py: refusal messages name the resolved root ──────────────────────────────────────
@@ -222,8 +241,8 @@ def test_resolve_statement_registry_names_the_resolved_root_not_the_stored_dot(
     second = project / "datasets" / "second"
     _make_dataset(first)
     _make_dataset(second)
-    register_dataset(project, str(first), crop="currant")
-    register_dataset(project, str(second), crop="currant")
+    register_dataset(project, str(first), crop="currant", actor=None)
+    register_dataset(project, str(second), crop="currant", actor=None)
 
     try:
         resolve_statement_registry(str(project), "")
@@ -254,7 +273,7 @@ def test_evidence_roots_resolves_a_relatively_registered_dataset(
     project = tmp_path / "proj"
     dataset = project / "datasets" / "main"
     _make_dataset(dataset)
-    register_dataset(project, str(dataset), crop="currant")
+    register_dataset(project, str(dataset), crop="currant", actor=None)
 
     roots = _evidence_roots(project)
 

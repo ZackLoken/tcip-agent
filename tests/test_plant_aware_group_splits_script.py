@@ -9,6 +9,7 @@ keeping every group's stems on one split side.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -16,10 +17,8 @@ import pytest
 import tifffile
 
 import tcip_store as ts
-from tcip_mcp.cli.plant_aware_group_splits import (
-    derive_plant_group_key_map,
-    main,
-)
+from tcip_mcp.cli import hyphenated
+from tcip_mcp.tools.data_tools import derive_plant_group_key_map
 from tests._mapping_fixtures import write_plant_csv
 from tests._training_values import RATIONALE, drawn_split
 
@@ -269,13 +268,34 @@ DRAW_ARGS = [
     *(
         arg
         for key, share in SHARES.items()
-        for arg in (f"--{key.replace('_', '-')}", str(share))
+        for arg in (f"--{hyphenated(key)}", str(share))
     ),
     "--stratify-foreground",
+    "true",
     "--rationale",
     RATIONALE,
 ]
 """The command's statement of :data:`SHARES`, stratified, with its reason."""
+
+
+def _draw(
+    dataset_root: Path, project: Path, plant_csv: Path, *stated: str
+) -> int:
+    """Run the plant-grouped draw command over ``dataset_root`` for ``project``; return its exit.
+
+    The draw reads the one CSV ``plant_csv`` for :data:`SUBJECT`, beside ``stated``.
+    """
+    from tcip_web.cli import main
+
+    return main(
+        [
+            *("plant-aware-group-splits", "--folder-path", str(dataset_root)),
+            *("--project", str(project), "--user", "tester"),
+            *("--subject", SUBJECT),
+            *("--plant-csv-paths", json.dumps([str(plant_csv)])),
+            *stated,
+        ]
+    )
 
 
 def _write_dataset_stem(
@@ -338,6 +358,7 @@ def test_draw_splits_keeps_every_plants_stems_on_one_split_side(
             seed=0,
             grouping=group_key_map,
         ),
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -378,21 +399,12 @@ def test_main_cli_end_to_end(
     dataset_root = _four_plant_dataset(tmp_path)
 
     out_dir = tmp_path / "cli_splits_out"
-    rc = main(
-        [
-            str(dataset_root),
-            "--project",
-            str(project),
-            "--plant-csv",
-            str(four_plant_csv),
-            "--subject",
-            SUBJECT,
-            *DRAW_ARGS,
-            "--seed",
-            "0",
-            "--output-path",
-            str(out_dir),
-        ]
+    rc = _draw(
+        dataset_root,
+        project,
+        four_plant_csv,
+        *DRAW_ARGS,
+        *("--seed", "0", "--output-path", str(out_dir)),
     )
 
     assert rc == 0
@@ -422,19 +434,8 @@ def test_the_command_locates_its_dataset_root_once(
 
     monkeypatch.setattr(registry_paths, "located", counted)
     monkeypatch.setattr(data_tools, "located", counted)
-    rc = main(
-        [
-            str(dataset_root),
-            "--project",
-            str(project),
-            "--plant-csv",
-            str(four_plant_csv),
-            "--subject",
-            SUBJECT,
-            *DRAW_ARGS,
-            "--seed",
-            "3",
-        ]
+    rc = _draw(
+        dataset_root, project, four_plant_csv, *DRAW_ARGS, "--seed", "3"
     )
 
     assert rc == 0
@@ -458,21 +459,12 @@ def test_the_cli_and_the_tool_draw_one_selection_at_the_stated_shares(
 
     dataset_root = _four_plant_dataset(tmp_path)
     cli_out, tool_out = tmp_path / "cli_out", tmp_path / "tool_out"
-    rc = main(
-        [
-            str(dataset_root),
-            "--project",
-            str(project),
-            "--plant-csv",
-            str(four_plant_csv),
-            "--subject",
-            SUBJECT,
-            *DRAW_ARGS,
-            "--seed",
-            "3",
-            "--output-path",
-            str(cli_out),
-        ]
+    rc = _draw(
+        dataset_root,
+        project,
+        four_plant_csv,
+        *DRAW_ARGS,
+        *("--seed", "3", "--output-path", str(cli_out)),
     )
     assert rc == 0
 
@@ -492,6 +484,7 @@ def test_the_cli_and_the_tool_draw_one_selection_at_the_stated_shares(
                 stem_to_raster, _plants(four_plant_csv)
             ),
         ),
+        actor=None,
     )
     assert "error" not in result, result
 
@@ -525,11 +518,15 @@ def test_the_cli_and_the_tool_draw_one_selection_at_the_stated_shares(
 
 
 def test_main_cli_without_a_seed_refuses(
-    tmp_path: Path, project: Path, four_plant_csv: Path
+    tmp_path: Path,
+    project: Path,
+    four_plant_csv: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Omitting the seed, a share, the stratification or the reason refuses via argparse.
+    """Omitting the seed, a share, the stratification or the reason is a refused call naming it.
 
-    None of them has a default, and no output is written.
+    None of them has a default, the server's argument validation names the one left out, and no
+    output is written.
     """
     dataset_root = _four_plant_dataset(tmp_path)
     out_dir = tmp_path / "cli_defaults_out"
@@ -538,70 +535,43 @@ def test_main_cli_without_a_seed_refuses(
 
     for flag in flags:
         at = stated.index(flag)
-        takes_value = flag != "--stratify-foreground"
-        unstated = stated[:at] + stated[at + 1 + takes_value :]
-        with pytest.raises(SystemExit):
-            main(
-                [
-                    str(dataset_root),
-                    "--project",
-                    str(project),
-                    "--plant-csv",
-                    str(four_plant_csv),
-                    "--subject",
-                    SUBJECT,
-                    *unstated,
-                    "--output-path",
-                    str(out_dir),
-                ]
-            )
+        unstated = stated[:at] + stated[at + 2 :]
+        code = _draw(
+            dataset_root,
+            project,
+            four_plant_csv,
+            *unstated,
+            *("--output-path", str(out_dir)),
+        )
+        field = flag.removeprefix("--").replace("-", "_")
+        assert code == 2, flag
+        assert f"\n{field}\n  Field required" in capsys.readouterr().err, flag
 
     assert not out_dir.exists()
 
 
-def test_main_cli_reports_refusal_and_nonzero_exit(
-    tmp_path: Path, project: Path, two_plant_csv: Path
+def test_main_cli_answers_a_stem_resolving_to_no_plant_as_its_refusal(
+    tmp_path: Path,
+    project: Path,
+    two_plant_csv: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     dataset_root = tmp_path / "dataset"
     _write_dataset_stem(dataset_root, "2026-02-01", "far_stem", FAR_TIEPOINT)
 
-    rc = main(
-        [
-            str(dataset_root),
-            "--project",
-            str(project),
-            "--plant-csv",
-            str(two_plant_csv),
-            "--subject",
-            SUBJECT,
-            "--seed",
-            "0",
-            *DRAW_ARGS,
-        ]
-    )
+    rc = _draw(dataset_root, project, two_plant_csv, "--seed", "0", *DRAW_ARGS)
 
-    assert rc == 1
+    assert rc == 0
+    assert "far_stem" in json.loads(capsys.readouterr().out)["error"]
 
 
-def test_main_cli_exits_one_naming_a_plant_csv_with_zero_rows(
+def test_main_cli_answers_a_plant_csv_with_zero_rows_as_its_refusal(
     tmp_path: Path, project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     dataset_root = _four_plant_dataset(tmp_path)
 
-    rc = main(
-        [
-            str(dataset_root),
-            "--project",
-            str(project),
-            "--plant-csv",
-            str(write_plant_csv(tmp_path / "empty.csv", [])),
-            "--subject",
-            SUBJECT,
-            "--seed",
-            "0",
-            *DRAW_ARGS,
-        ]
-    )
+    empty = write_plant_csv(tmp_path / "empty.csv", [])
+    rc = _draw(dataset_root, project, empty, "--seed", "0", *DRAW_ARGS)
 
-    assert rc == 1
-    assert "zero rows" in capsys.readouterr().err
+    assert rc == 0
+    assert "zero rows" in json.loads(capsys.readouterr().out)["error"]

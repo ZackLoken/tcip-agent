@@ -321,8 +321,11 @@ def run_inference(
     tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
     dry_run: bool = False,
     resume: bool = False,
+    actor: str | None,
 ) -> dict:
     """Run a trained model over images or a raster, and publish the predictions as a bucket.
+
+    The publication is ``actor``'s.
 
     Provide exactly one of ``images_dir`` (a capture directory under a dataset's ``images/``
     tree) or ``raster_path`` (a single raster there, potentially too large to decode whole, always
@@ -386,7 +389,7 @@ def run_inference(
         tile_batch_size=tile_batch_size,
         dry_run=dry_run,
         resume=resume,
-        actor=None,
+        actor=actor,
     )
 
 
@@ -496,8 +499,9 @@ def deliver_per_image_counts(
     *,
     trait: str,
     acknowledgment_id: str | None = None,
+    actor: str | None,
 ) -> dict:
-    """Deliver a published bucket's per-image detection counts as a CSV.
+    """Deliver a published bucket's per-image detection counts as a CSV, by ``actor``.
 
     Each row is one of the bucket's documents, in stem order: its source image's file name, its
     detection count and mean confidence, and the delivery's ``validated``, ``trait_revision`` and
@@ -531,7 +535,7 @@ def deliver_per_image_counts(
             trait=trait,
             acknowledgment_id=acknowledgment_id,
             door="deliver_per_image_counts",
-            actor=None,
+            actor=actor,
         )
     except (
         DeliveryRefusedError,

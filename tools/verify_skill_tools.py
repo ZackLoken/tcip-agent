@@ -7,7 +7,7 @@ Two independent checks:
   header's first column is literally "Tool") and extracts the name from the first backticked
   token of each row's first cell (the identifier up to the first `(`, space or backtick, so a
   documented call signature or a keyword note still yields the plain name). A name that is not
-  in `list_registered_tools()` is fabricated or retired. A first cell whose backticked token
+  in the server's tool listing is fabricated or retired. A first cell whose backticked token
   is not a plain identifier (`tools/`) is skipped rather than reported.
 - `orphan_tool_names` (rename/omission detection) searches every surface's whole text for each
   registered tool name as `` `name` `` or `` `name( `` (tools are documented with their call
@@ -26,6 +26,10 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mcp.types import Tool
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -74,30 +78,29 @@ def tool_table_first_cells(md_text: str) -> list[str]:
     return cells
 
 
-def extract_tool_name(cell: str) -> str | None:
+def extract_tool_name(cell: str, commands: set[str]) -> str | None:
     """Return the plain identifier a Tools-table cell's first backticked token names, or ``None``.
 
     ``None`` when that token is not a snake_case identifier (a call signature or a keyword note
     still yields the name; a path fragment like `tools/` yields nothing to check).
 
     A `` `tcip <command>` `` console invocation is never a claimed MCP tool name, so it is
-    validated against ``tcip_web.cli.COMMANDS`` instead of the tool registry: a real command
-    yields ``None`` (nothing left to check), and one that command table does not carry is
-    returned in full (``"tcip <command>"``).
+    validated against ``commands``, every command the console dispatcher runs
+    (``tcip_web.cli.command_names``), instead of the tool registry: a real command yields
+    ``None`` (nothing left to check), and one the dispatcher does not run is returned in full
+    (``"tcip <command>"``).
     """
     m = _BACKTICK_SPAN.search(cell)
     if not m:
         return None
     token = m.group(1)
     if token.startswith("tcip "):
-        from tcip_web.cli import COMMANDS
-
         command = (
             token[len("tcip ") :].split(None, 1)[0]
             if token[len("tcip ") :].strip()
             else ""
         )
-        return None if command in COMMANDS else f"tcip {command}"
+        return None if command in commands else f"tcip {command}"
     for sep in ("(", " "):
         idx = token.find(sep)
         if idx != -1:
@@ -106,16 +109,21 @@ def extract_tool_name(cell: str) -> str | None:
 
 
 def fabricated_tool_names(
-    surfaces: list[Path] | None = None,
+    listing: list[Tool], surfaces: list[Path] | None = None
 ) -> dict[str, list[str]]:
-    """Return every Tools-table cell naming a tool the registry does not hold, by surface."""
-    from tcip_mcp.server import list_registered_tools
+    """Return every Tools-table cell naming a tool ``listing`` does not hold, by surface.
 
-    registered = set(list_registered_tools())
+    ``listing`` is a server's tool listing; a console command is checked against the commands
+    the dispatcher runs over it.
+    """
+    from tcip_web.cli import command_names
+
+    registered = {t.name for t in listing}
+    commands = set(command_names(listing))
     result: dict[str, list[str]] = {}
     for surface in surfaces if surfaces is not None else prose_surfaces():
         cells = tool_table_first_cells(surface.read_text(encoding="utf-8"))
-        names = [extract_tool_name(c) for c in cells]
+        names = [extract_tool_name(c, commands) for c in cells]
         bad = sorted({n for n in names if n and n not in registered})
         if bad:
             try:
@@ -126,11 +134,11 @@ def fabricated_tool_names(
     return result
 
 
-def orphan_tool_names(surfaces: list[Path] | None = None) -> list[str]:
-    """Return every registered tool no surface names as `` `name` `` or `` `name( ``."""
-    from tcip_mcp.server import list_registered_tools
-
-    registered = set(list_registered_tools())
+def orphan_tool_names(
+    listing: list[Tool], surfaces: list[Path] | None = None
+) -> list[str]:
+    """Return every tool of ``listing`` no surface names as `` `name` `` or `` `name( ``."""
+    registered = {t.name for t in listing}
     text = "\n".join(
         s.read_text(encoding="utf-8")
         for s in (surfaces if surfaces is not None else prose_surfaces())
@@ -140,9 +148,15 @@ def orphan_tool_names(surfaces: list[Path] | None = None) -> list[str]:
 
 
 def main() -> int:
-    """Print fabricated and orphaned tool names; return 0 when there are none, else 1."""
-    fabricated = fabricated_tool_names()
-    orphans = orphan_tool_names()
+    """Print fabricated and orphaned tool names; return 0 when there are none, else 1.
+
+    Both checks read the one listing this invocation takes.
+    """
+    from tcip_web.cli import tool_listing
+
+    listing = tool_listing()
+    fabricated = fabricated_tool_names(listing)
+    orphans = orphan_tool_names(listing)
     ok = True
     if fabricated:
         ok = False

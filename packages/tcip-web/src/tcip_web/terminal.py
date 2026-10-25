@@ -425,7 +425,7 @@ def allow_tcip_tools(settings: Path, doctor_line: str | None) -> str:
     everything else in it, and returns one line saying how many were added and dropped; raises
     :class:`PreparationFailedError` when the file does not parse as a JSON object.
     """
-    from tcip_mcp.server import list_registered_tools
+    from tcip_web.cli import tool_listing
 
     try:
         body = (
@@ -440,7 +440,9 @@ def allow_tcip_tools(settings: Path, doctor_line: str | None) -> str:
     if not isinstance(body, dict):
         raise PreparationFailedError(f"{settings} does not hold a JSON object")
     allow = body.setdefault("permissions", {}).setdefault("allow", [])
-    wanted = [f"mcp(tcip/{name})" for name in list_registered_tools()]
+    wanted = [
+        f"mcp(tcip/{name})" for name in sorted(t.name for t in tool_listing())
+    ]
     if doctor_line is not None:
         wanted.append(_command_entry(doctor_line))
         wanted.append(_unsandboxed_entry(doctor_line))

@@ -542,6 +542,7 @@ def test_a_delivery_under_another_revision_than_the_assessments_refuses_naming_b
         chain.bucket,
         str(out_csv),
         trait=fx.COUNT_TRAIT,
+        actor=None,
     )
 
     assert "error" in delivered, delivered
@@ -578,6 +579,7 @@ def test_one_producer_clears_the_gate_and_a_series_of_two_refuses(
         images_dir=str(chain.images_dir),
         bucket=second,
         stated=Stated(**SAMPLE_DETECTOR_PASS),
+        actor=None,
     )
     assert "error" not in published, published
     revision = latest_confirmed(fx.COUNT_TRAIT, tmp_path)
@@ -933,6 +935,7 @@ def test_a_detector_assessment_collects_at_the_conf_it_states_and_records_it_as_
         dispersion_quantile=DISPERSION_QUANTILE,
         rationale=RATIONALE,
         stated=Stated(),
+        actor=None,
     )
     assert "states no conf" in unstated["error"], unstated
 

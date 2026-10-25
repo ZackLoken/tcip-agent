@@ -13,8 +13,8 @@ from the data in hand.
 
 Derive it by measuring the dataset, not by classifying the trait:
 
-- `tcip scan-dataset <folder_path>`: how many images, labels and predictions exist,
-  and the detected label format; capture dates come from `ingest_images`, below.
+- `scan_dataset(folder_path)`: how many images, labels and predictions exist, and how many
+  images their own label document pairs with; capture dates come from `ingest_images`, below.
 - `pipelines.derivations.derive_detector_geometry` over the frame and the GT boxes: the object
   sizes and elongation that actually occur here (`gt_aspect_ratios` inside it), rather than an
   assumed shape.

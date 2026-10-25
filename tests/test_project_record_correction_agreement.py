@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tcip_mcp.cli import hyphenated
 from tcip_mcp.project_record import CaptureInvariances
 from tests._audit_fixtures import audit_rows
 from tests._cli_fixtures import run_tcip
@@ -25,7 +26,7 @@ def _flags(block: CaptureInvariances) -> list[str]:
     """Return ``block`` as the console door's flags take it."""
     flags: list[str] = []
     for name, value in block.model_dump().items():
-        flag = name.replace("_", "-")
+        flag = hyphenated(name)
         if isinstance(value, bool):
             flags.append(f"--{flag}" if value else f"--no-{flag}")
         else:

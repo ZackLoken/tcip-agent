@@ -138,6 +138,7 @@ def _drawn(
             calibration_ratio=0.125,
             holdout_ratio=0.125,
         ),
+        actor=None,
     )
     assert "error" not in result, result
     return read_selection(out, project=out.parent)
@@ -542,7 +543,7 @@ def _frozen(
     from tcip_mcp.tools.data_tools import freeze_selection
 
     _resolved(project, experiment_id, task, data_cfg)
-    return freeze_selection(project, experiment_id)
+    return freeze_selection(project, experiment_id, actor=None)
 
 
 def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(
@@ -647,7 +648,7 @@ def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(
         masks_dir / f"{STEMS[0]}.png"
     )
 
-    result = freeze_selection(tmp_path, "exp-mask-moved")
+    result = freeze_selection(tmp_path, "exp-mask-moved", actor=None)
 
     assert "error" in result and "changed since" in result["error"]
     assert STEMS[0] in result["error"]

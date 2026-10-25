@@ -194,7 +194,10 @@ def test_no_door_takes_a_switch_computing_milestones_over_incomplete_dates(
     assert "require_all_dates_complete" in refused.text
     with pytest.raises(TypeError, match="require_all_dates_complete"):
         deliver_phenology_milestones(
-            tmp_path, **switched, output_csv_path=str(tmp_path / "out.csv")
+            tmp_path,
+            **switched,
+            output_csv_path=str(tmp_path / "out.csv"),
+            actor=None,
         )
     assert not (tmp_path / "out.csv").exists()
 
@@ -660,7 +663,10 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
     bucket = read_bucket(chain.root, chain.bucket)
     unregistered = _export_count(client, _per_image(bucket))
     registered = register_dataset(
-        tmp_path, str(chain.root), crop=sorted(registered_crops())[0]
+        tmp_path,
+        str(chain.root),
+        crop=sorted(registered_crops())[0],
+        actor=None,
     )
     assert "error" not in registered, registered
 
@@ -1040,7 +1046,9 @@ def test_registered_models_answers_a_resolved_absolute_checkpoint_path(
     ckpt_dir = opened_project / ".tcip" / "models"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     ckpt = produced_checkpoint(ckpt_dir / "m.pt", "route fixture weights")
-    ModelRegistry(str(opened_project)).register_model("m", str(ckpt))
+    ModelRegistry(str(opened_project)).register_model(
+        "m", str(ckpt), actor=None
+    )
 
     resp = client.get("/api/results/models/registered")
 
@@ -1114,11 +1122,15 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
     Image.new("RGB", (16, 16)).save(
         source / "tree_01.jpg", exif=capture_exif(datetime(2026, 2, 11, 9))
     )
-    assert "error" not in ingest_images(opened_project, str(source))
+    assert "error" not in ingest_images(
+        opened_project, str(source), actor=None
+    )
     ckpt = produced_checkpoint(
         opened_project / "m.pt", "cancel fixture weights"
     )
-    ModelRegistry(str(opened_project)).register_model("m", str(ckpt))
+    ModelRegistry(str(opened_project)).register_model(
+        "m", str(ckpt), actor=None
+    )
     launched = client.post(
         "/api/inference/launch",
         json={

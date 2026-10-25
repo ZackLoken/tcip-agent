@@ -814,6 +814,7 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
         search_seed=0,
         **fifo_search(),
         auto_tensorboard=False,
+        actor=None,
     )
     sweep_dir = find_sweep(result["sweep"]["sweep_id"], project=tmp_path)
     (trial_dir,) = run_dirs(tmp_path)

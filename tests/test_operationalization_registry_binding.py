@@ -56,7 +56,11 @@ def project(tmp_path: Path) -> Path:
 
 def _propose(project: Path, **kwargs: str) -> dict:
     return propose_trait(
-        project, _CROSSING, rationale="the breeder's words", **kwargs
+        project,
+        _CROSSING,
+        rationale="the breeder's words",
+        **kwargs,
+        actor=None,
     )
 
 
@@ -126,6 +130,7 @@ def test_a_count_entry_needs_no_registry(tmp_path: Path) -> None:
         tmp_path,
         fx.with_operationalization(fx.COUNT_SPEC, PER_IMAGE_COUNT),
         rationale="the breeder's words",
+        actor=None,
     )
 
     assert "error" not in result, result
@@ -140,8 +145,8 @@ def test_the_tool_refuses_a_project_registering_two_datasets_with_no_dataset_roo
     dataset_a, dataset_b = tmp_path / "dataset_a", tmp_path / "dataset_b"
     dataset_a.mkdir()
     dataset_b.mkdir()
-    register_dataset(project, str(dataset_a), "chestnut")
-    register_dataset(project, str(dataset_b), "currant")
+    register_dataset(project, str(dataset_a), "chestnut", actor=None)
+    register_dataset(project, str(dataset_b), "currant", actor=None)
 
     result = _propose(project)
 
@@ -265,6 +270,7 @@ def test_a_crossing_delivery_reads_the_registry_of_its_buckets_dataset_root(
             dataset_root=str(series.root),
             buckets=list(series.buckets.values()),
             output_csv_path=str(tmp_path / out),
+            actor=None,
         )
 
     res = deliver("out.csv")

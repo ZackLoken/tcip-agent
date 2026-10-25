@@ -1119,6 +1119,7 @@ def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
         bound_to(opened),
         str(img_path),
         annotations=[{"subject": "bud", "bbox": [1, 1, 5, 5]}],
+        actor=None,
     )
     assert "error" not in answer, answer
 
@@ -2326,7 +2327,7 @@ def test_the_mcp_read_and_the_web_load_project_an_annotation_alike(
     web = opened_client.get(
         "/api/annotate/labels", params={"image_path": str(img_path)}
     ).json()["annotations"]
-    mcp = mcp_read(str(img_path))["labels"]["annotations"]
+    mcp = mcp_read(tmp_path, str(img_path))["labels"]["annotations"]
 
     editor_only = {"authorship", "index"}
     assert [

@@ -260,6 +260,7 @@ def test_save_with_a_null_version_refuses_over_a_registry_written_meanwhile(
         tmp_path,
         str(tmp_path),
         {"leaf": {"description": "written by the agent"}},
+        actor=None,
     )
     assert "error" not in result
 
@@ -615,7 +616,7 @@ def test_a_registry_save_leaves_one_library_line_through_either_door(
     )
     assert resp.status_code == 200, resp.text
     assert "error" not in write_subject_registry(
-        opened_project, str(through_tool), subjects
+        opened_project, str(through_tool), subjects, actor=None
     )
 
     (route_line,), (tool_line,) = (
@@ -697,7 +698,7 @@ def test_a_registry_load_answers_content_and_version_from_one_read(
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     assert "error" not in write_subject_registry(
-        tmp_path, str(tmp_path), {"bud": {}}
+        tmp_path, str(tmp_path), {"bud": {}}, actor=None
     )
     real = tcip_store.read_blob_versioned
     interleaved: list[dict] = []
@@ -709,7 +710,7 @@ def test_a_registry_load_answers_content_and_version_from_one_read(
         if not interleaved:
             interleaved.append({})
             interleaved[0] = write_subject_registry(
-                tmp_path, str(tmp_path), {"bud": {}, "bush": {}}
+                tmp_path, str(tmp_path), {"bud": {}, "bush": {}}, actor=None
             )
         return answer
 

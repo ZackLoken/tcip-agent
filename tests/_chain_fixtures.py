@@ -281,7 +281,7 @@ def synthetic_capture(root: Path, *, date: str = DATE) -> Path:
             exif=capture_exif(datetime.fromisoformat(date).replace(hour=9)),
         )
 
-    ingested = ingest_images(root, source=str(raw))
+    ingested = ingest_images(root, source=str(raw), actor=None)
     assert "error" not in ingested, ingested
     assert ingested["copied"] == len(STEMS), ingested
 
@@ -324,6 +324,7 @@ def draw_reference_selection(
             holdout_ratio=0.2,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     assert "error" not in result, result
     return read_selection(out, project=project)
@@ -486,6 +487,7 @@ def assess(
         rationale=RATIONALE,
         stated=collection_pass(**stated),
         device=device,
+        actor=None,
     )
 
 
@@ -533,6 +535,7 @@ def unassessed_bucket(
         images_dir=str(images_dir),
         bucket=bucket,
         stated=chain_pass(),
+        actor=None,
     )
     assert "error" not in published, published
     return read_bucket(root, bucket)
@@ -858,6 +861,7 @@ def deliver_milestones(project: Path, body: dict, out_csv: Path) -> dict:
         dataset_root=body["dataset_root"],
         buckets=body["buckets"],
         output_csv_path=str(out_csv),
+        actor=None,
     )
 
 
@@ -947,7 +951,7 @@ def attributed_series(
                 blob_frame(frame_values, index),
                 h_pos_err=SERIES_POSITION_ERROR_M,
             )
-        ingested = ingest_images(root, source=str(capture))
+        ingested = ingest_images(root, source=str(capture), actor=None)
         assert "error" not in ingested, ingested
         for stem, (index, frame_values) in labeled.items():
             label_image(
@@ -971,7 +975,7 @@ def attributed_series(
                 IMG,
             )
     registered = register_dataset(
-        project, str(root), crop=sorted(registered_crops())[0]
+        project, str(root), crop=sorted(registered_crops())[0], actor=None
     )
     assert "error" not in registered, registered
 
@@ -988,6 +992,7 @@ def attributed_series(
             holdout_ratio=0.2,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     assert "error" not in drawn, drawn
     config = run_config(
@@ -1014,6 +1019,7 @@ def attributed_series(
             dispersion_quantile=DISPERSION_QUANTILE,
             rationale=RATIONALE,
             stated=collection_pass(),
+            actor=None,
         )
         assert "error" not in assessment, assessment
         assert read_assessment(project, assessment["assessment_id"]).passed, (
@@ -1031,6 +1037,7 @@ def attributed_series(
             bucket=f"series/{date}",
             stated=stated,
             assessment_id=assessment["assessment_id"] if assessment else None,
+            actor=None,
         )
         assert "error" not in published, published
         predictions[date] = f"series/{date}"
@@ -1054,6 +1061,7 @@ def attributed_series(
         images_root=str(root / "images"),
         plant_registry=registry,
         dates=list(dates),
+        actor=None,
     )
     assert "error" not in mapped, mapped
     return Series(
@@ -1093,6 +1101,7 @@ def run_the_chain(
         bucket=bucket,
         assessment_id=assessment["assessment_id"],
         stated=Stated(),
+        actor=None,
     )
     assert "error" not in published, published
     return Chain(

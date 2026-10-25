@@ -117,6 +117,7 @@ class TestE2EPipeline:
             "North orchard",
             site="north orchard",
             invariances=INVARIANCES,
+            actor=None,
         )
         assert (project_dir / ".tcip").is_dir()
         assert (project_dir / ".tcip" / "artifacts").is_dir()
@@ -126,7 +127,7 @@ class TestE2EPipeline:
         assert status["display_name"] == "North orchard"
 
         # ── Step 3: Load dataset ─────────────────────────────────────
-        ds = scan_dataset(root)
+        ds = scan_dataset(project_dir, root)
         assert ds["image_count"] == 5
         assert ds["labels_count"] == 5
         assert ds["predictions_count"] == 5
@@ -142,7 +143,7 @@ class TestE2EPipeline:
 
         # ── Step 5: Load annotations for one image ───────────────────
         img_path = str(project_dir / "images" / "2-11-26" / "img_000.jpg")
-        ann = read_annotations(img_path, BUCKET)
+        ann = read_annotations(project_dir, img_path, BUCKET)
         assert "error" not in ann
         assert ann["labels"]["count"] >= 2
         assert ann["predictions"]["count"] >= 2
@@ -159,6 +160,7 @@ class TestE2EPipeline:
             ),
             img_path,
             annotations=new_anns,
+            actor=None,
         )
         assert save_result["count"] == 3  # 3 annotations written
         assert len(save_result["written"]) == 1
@@ -171,7 +173,11 @@ class TestE2EPipeline:
 
         # ── Step 7: Evaluate single image detections ─────────────────
         eval_result = score_predictions(
-            img_path, BUCKET, iou_threshold=0.5, conf_threshold=0.25
+            project_dir,
+            img_path,
+            BUCKET,
+            iou_threshold=0.5,
+            conf_threshold=0.25,
         )
         assert "error" not in eval_result
         # Should have precision, recall, f1 keys
@@ -182,6 +188,7 @@ class TestE2EPipeline:
 
         # ── Step 8: Detailed per-detection breakdown (score_predictions detail=True) ─
         match_result = score_predictions(
+            project_dir,
             img_path,
             BUCKET,
             iou_threshold=0.5,
@@ -195,6 +202,7 @@ class TestE2EPipeline:
 
         # ── Step 9: Evaluate full dataset ────────────────────────────
         dataset_eval = score_predictions(
+            project_dir,
             str(project_dir / "images" / "2-11-26"),
             BUCKET,
             iou_threshold=0.5,
@@ -223,6 +231,7 @@ class TestE2EPipeline:
                 holdout_ratio=0.125,
                 grouping="tile_prefix",
             ),
+            actor=None,
         )
         assert split_result["total_stems"] == 5
         drawn = read_selection(split_dir, project=project_dir)
@@ -274,7 +283,7 @@ class TestE2EPipelineEdgeCases:
             64,
         )
 
-        ds = scan_dataset(str(tmp_path))
+        ds = scan_dataset(tmp_path, str(tmp_path))
         assert ds["image_count"] == 3
         assert ds["labels_count"] == 1
         assert ds["unlabeled_images"] == 2
@@ -299,6 +308,7 @@ class TestE2EPipelineEdgeCases:
 
         # A bucket name never published: evaluate should handle gracefully
         result = score_predictions(
+            tmp_path,
             str(img_path),
             "none/2026-01-01",
             iou_threshold=0.5,
@@ -326,6 +336,7 @@ class TestE2EPipelineEdgeCases:
             annotations=[
                 {"subject": "bud", "bbox": [10, 10, 50, 50]},
             ],
+            actor=None,
         )
         assert result["count"] == 1
         assert tcip_store.exists(image_label_key(img_path))

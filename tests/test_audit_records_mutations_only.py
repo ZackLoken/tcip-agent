@@ -1,9 +1,7 @@
-"""The audit log records mutations and nothing else.
+"""The audit lines a door's calls leave, counted through the server and the console.
 
-A read-only door (a status poll, a listing, a knowledge document served back) leaves no line; a
-mutating door leaves exactly one. A body that returned an answer
-reads ``ok``, a body that returned a refusal leaves no line, and a body that raised reads
-``exception``.
+Each case calls a read-only door, a mutating door, a refused call or a raising body and compares
+the project's log before and after.
 """
 
 from __future__ import annotations
@@ -19,6 +17,8 @@ from tests._training_values import COMBINED_SCORER, RATIONALE
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
+
+    from tcip_mcp.workspace import BoundProject
 
 
 def _rows(project: Path) -> list[dict]:
@@ -93,6 +93,105 @@ def test_read_only_doors_leave_no_line(tmp_path: Path) -> None:
     assert len(_rows(tmp_path)) == before
 
 
+def _answered(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    """Run one console command and assert it printed an answer, never a refusal."""
+    from tcip_web.cli import main
+    from tests.test_console_tools_through_the_server import read
+
+    assert main(argv) == 0, argv
+    answer = read(capsys.readouterr().out)
+    assert not (isinstance(answer, dict) and "error" in answer), (argv, answer)
+
+
+def test_the_console_tools_that_read_or_render_leave_no_line(
+    project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Every console tool but the shapefile conversion answers and leaves the log as it was.
+
+    A census, an identity check, a scoring, an annotation read, the renders (each written under
+    the project's ``.tcip/artifacts/viz/``), a headroom report, the sweep vocabularies, a run
+    comparison, a preflight, a triage and a plant-grouped draw stated without an output, each run
+    as its command, print an answer that is no refusal and add no line.
+    """
+    from tcip_mcp.cli import hyphenated
+    from tests.test_console_tools_through_the_server import console_cases
+
+    cases = [
+        case
+        for case in console_cases(project, monkeypatch)
+        if case.tool.__name__ != "shp_to_plant_csv"
+    ]
+    before = len(_rows(project))
+
+    for case in cases:
+        _answered([hyphenated(case.tool.__name__), *case.command], capsys)
+
+    assert len(_rows(project)) == before
+
+
+def test_the_shapefile_conversion_and_a_written_plant_draw_each_leave_one_line(
+    project: Path,
+    bound: BoundProject,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The conversion leaves its own line, and a plant-grouped draw written leaves the draw's.
+
+    Each runs as its command, by the person its ``--user`` states, who is each line's actor;
+    outside any MCP session neither line carries an agent's identity, and the draw records
+    through ``draw_splits``' own event, never a line beside it. The same two calls through an
+    MCP client's handshake leave the same two lines, by no person.
+    """
+    from tcip_mcp.agent_identity import RECORD_FIELDS
+    from tcip_mcp.identity import actor
+    from tests.test_agent_identity_records import results_through_handshake
+    from tests.test_console_tools_through_the_server import BY, console_cases
+
+    cases = {
+        case.tool.__name__: case
+        for case in console_cases(project, monkeypatch)
+    }
+    before = len(_rows(project))
+    results_through_handshake(
+        [
+            ("shp_to_plant_csv", cases["shp_to_plant_csv"].arguments),
+            (
+                "plant_aware_group_splits",
+                cases["plant_aware_group_splits"].arguments
+                | {"output_path": "splits/through-a-client"},
+            ),
+        ],
+        bound=bound,
+    )
+    by_client = _rows(project)[before:]
+    assert [(r["tool"], r["status"]) for r in by_client] == [
+        ("shp_to_plant_csv", "ok"),
+        ("draw_splits", "ok"),
+    ]
+    assert [r.get(audit_module.ACTOR_KEY) for r in by_client] == [None] * 2
+    before = len(_rows(project))
+
+    _answered(["shp-to-plant-csv", *cases["shp_to_plant_csv"].command], capsys)
+    _answered(
+        [
+            "plant-aware-group-splits",
+            *cases["plant_aware_group_splits"].command,
+            *("--output-path", "splits/plants"),
+        ],
+        capsys,
+    )
+
+    added = _rows(project)[before:]
+    assert [(r["tool"], r["status"]) for r in added] == [
+        ("shp_to_plant_csv", "ok"),
+        ("draw_splits", "ok"),
+    ]
+    assert [r.get(audit_module.ACTOR_KEY) for r in added] == [actor(BY[1])] * 2
+    assert not {key for row in added for key in row} & set(RECORD_FIELDS)
+
+
 def test_a_phenology_look_on_screen_leaves_no_line(
     tmp_path: Path, client: TestClient
 ) -> None:
@@ -159,7 +258,7 @@ def test_a_mutating_door_still_leaves_one_line(tmp_path: Path) -> None:
 
     before = len(_rows(tmp_path))
     result = report_friction(
-        tmp_path, "unexpected_behavior", "a real mutation"
+        tmp_path, "unexpected_behavior", "a real mutation", actor=None
     )
 
     assert "error" not in result

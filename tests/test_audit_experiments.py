@@ -242,13 +242,13 @@ def test_a_first_registration_and_a_replacement_each_leave_one_row(
 
     reg = ModelRegistry(str(tmp_path))
     first_sha = reg.register_model(
-        "exp1", _ckpt(tmp_path, "a.pt", b"first")
+        "exp1", _ckpt(tmp_path, "a.pt", b"first"), actor=None
     ).entry.sha256
     (first,) = _rows(tmp_path)
     assert first["tool"] == "model_registered"
     assert first["arguments"] == {"name": "exp1", "new_sha256": first_sha}
 
-    reg.register_model("exp2", _ckpt(tmp_path, "a.pt", b"first"))
+    reg.register_model("exp2", _ckpt(tmp_path, "a.pt", b"first"), actor=None)
     _, replaced = _rows(tmp_path)
     assert replaced["arguments"] == {
         "name": "exp2",
@@ -259,7 +259,7 @@ def test_a_first_registration_and_a_replacement_each_leave_one_row(
     assert _entry(tmp_path, first_sha).name == "exp2"
 
     second_sha = reg.register_model(
-        "exp1", _ckpt(tmp_path, "b.pt", b"second, different")
+        "exp1", _ckpt(tmp_path, "b.pt", b"second, different"), actor=None
     ).entry.sha256
     assert second_sha != first_sha
     assert "superseded_name" not in _rows(tmp_path)[-1]["arguments"]
@@ -283,7 +283,7 @@ def test_the_register_model_door_leaves_only_the_registrys_own_rows(
         _ckpt(tmp_path, "c.pt", b"first"),
     ):
         assert "error" not in register_model(
-            tmp_path, name="door", checkpoint_path=path
+            tmp_path, name="door", checkpoint_path=path, actor=None
         )
 
     rows = _rows(tmp_path)
@@ -298,7 +298,10 @@ def test_the_register_model_door_leaves_only_the_registrys_own_rows(
         True,
     ]
     assert "error" not in register_model(
-        tmp_path, name="door", checkpoint_path=str(tmp_path / "c.pt")
+        tmp_path,
+        name="door",
+        checkpoint_path=str(tmp_path / "c.pt"),
+        actor=None,
     )
     assert (
         len(_rows(tmp_path)) == 3
@@ -312,9 +315,9 @@ def test_reregistering_an_identical_entry_changes_nothing_and_leaves_no_row(
 
     reg = ModelRegistry(str(tmp_path))
     ckpt = _ckpt(tmp_path, "a.pt", b"same bytes")
-    reg.register_model("exp1", ckpt)
+    reg.register_model("exp1", ckpt, actor=None)
     before = ts.read_versioned(registry_index_key(tmp_path))
-    reg.register_model("exp1", ckpt)
+    reg.register_model("exp1", ckpt, actor=None)
 
     after = ts.read_versioned(registry_index_key(tmp_path))
     assert (after.value, after.version) == (before.value, before.version)
@@ -333,8 +336,8 @@ def test_the_same_weights_under_new_tags_change_the_entry_and_leave_one_row(
 
     reg = ModelRegistry(str(tmp_path))
     ckpt = _ckpt(tmp_path, "a.pt", b"same bytes")
-    sha = reg.register_model("exp1", ckpt).entry.sha256
-    reg.register_model("exp1", ckpt, tags=["chestnut"])
+    sha = reg.register_model("exp1", ckpt, actor=None).entry.sha256
+    reg.register_model("exp1", ckpt, tags=["chestnut"], actor=None)
 
     assert _entry(tmp_path, sha).tags == ["chestnut"]
     assert [e["tool"] for e in _rows(tmp_path)] == [
@@ -356,7 +359,7 @@ def test_replace_raises_and_stays_committed_when_its_audit_line_fails(
 
     reg = ModelRegistry(str(tmp_path))
     sha = reg.register_model(
-        "exp1", _ckpt(tmp_path, "a.pt", b"first")
+        "exp1", _ckpt(tmp_path, "a.pt", b"first"), actor=None
     ).entry.sha256
 
     def _refuse(*args: object, **kwargs: object) -> NoReturn:
@@ -365,7 +368,9 @@ def test_replace_raises_and_stays_committed_when_its_audit_line_fails(
     monkeypatch.setattr(audit_mod, "append", _refuse)
 
     with pytest.raises(audit_mod.AuditEntryNotWrittenError) as caught:
-        reg.register_model("exp2", _ckpt(tmp_path, "a.pt", b"first"))
+        reg.register_model(
+            "exp2", _ckpt(tmp_path, "a.pt", b"first"), actor=None
+        )
 
     assert caught.value.tool == "model_registered"
     assert _entry(tmp_path, sha).name == "exp2"

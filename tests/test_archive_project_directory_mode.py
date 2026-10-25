@@ -121,10 +121,10 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
 
     src = tmp_path / "src_project"
     initialize_project(
-        str(src), "Source project", "north orchard", INVARIANCES
+        str(src), "Source project", "north orchard", INVARIANCES, actor=None
     )
     manifest, npz_image = _populate_project(src)
-    reg = register_dataset(src, str(src), crop="currant")
+    reg = register_dataset(src, str(src), crop="currant", actor=None)
     assert "error" not in reg, reg
 
     bundle_dir = tmp_path / "bundle"

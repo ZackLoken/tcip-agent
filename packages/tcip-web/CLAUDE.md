@@ -10,6 +10,9 @@ src/tcip_web/
   routes/          # annotate, audit_gap, canvas, dataset, fs, images, inference, meta,
                     # projects, results, sessions, subjects, terminal, training
   app.py, state.py, jobstore.py, paths.py, __main__.py
+  cli/             # the tcip dispatcher: each operator-only command's module (COMMANDS, one of
+                    # them report_conversation here) and every registered tool by its own name
+                    # through tcip_mcp.cli.run_tool
   terminal.py + agent_terminal.settings.json
                     # the breeder-facing in-app agent terminal, its provider table and the
                     # Claude row's permission lists

@@ -75,6 +75,7 @@ def register_plant_registry_for(
         csv_paths=[str(p) for p in csv_paths],
         crop=crop,
         site=site,
+        actor=None,
     )
     assert "error" not in res, res
     return name
@@ -102,7 +103,10 @@ def map_captures(
 
     dataset_root.mkdir(parents=True, exist_ok=True)
     registered = register_dataset(
-        project, str(dataset_root), crop=sorted(registered_crops())[0]
+        project,
+        str(dataset_root),
+        crop=sorted(registered_crops())[0],
+        actor=None,
     )
     assert "error" not in registered, registered
     captures: dict[str, list[Path]] = {}
@@ -136,6 +140,7 @@ def map_captures(
         name=name,
         images_root=str(dataset_root / "images"),
         plant_registry=register_plant_registry_for(project, [plant_csv]),
+        actor=None,
     )
     assert "error" not in built, built
     return captures

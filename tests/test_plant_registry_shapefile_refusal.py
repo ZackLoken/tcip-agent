@@ -1,4 +1,4 @@
-"""register_plant_registry refuses a shapefile or binary file, naming the conversion command.
+"""register_plant_registry refuses a shapefile or binary file, naming the conversion tool.
 
 It refuses a shapefile's own parts by suffix, and a binary file under any other suffix (a
 ``.csv`` included), as a returned error. A shapefile converted first, then registered, registers
@@ -50,7 +50,7 @@ def _point_shapefile(tmp_path: Path) -> Path:
     return path
 
 
-def test_register_plant_registry_refuses_a_shp_naming_the_command(
+def test_register_plant_registry_refuses_a_shp_naming_the_conversion(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -62,11 +62,12 @@ def test_register_plant_registry_refuses_a_shp_naming_the_command(
         csv_paths=[str(shp)],
         crop="black locust",
         site="block",
+        actor=None,
     )
 
     match res:
         case {"error": str() as error}:
-            assert "tcip shp-to-plant-csv" in error
+            assert "shp_to_plant_csv" in error
         case _:
             raise AssertionError(res)
 
@@ -84,6 +85,7 @@ def test_register_plant_registry_refuses_a_binary_csv_as_not_utf8(
         csv_paths=[str(binary_path)],
         crop="black locust",
         site="block",
+        actor=None,
     )
 
     match res:
@@ -97,15 +99,15 @@ def test_register_plant_registry_admits_a_shapefile_converted_first(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A shapefile converted first through the platform's own command registers its plants.
+    """A shapefile converted first through the platform's own tool registers its plants.
 
     The CSV the conversion writes registers with one plant per converted feature.
     """
-    from tcip_mcp.cli.shp_to_plant_csv import convert_shp_to_plant_csv
+    from tcip_mcp.tools.phenology_tools import shp_to_plant_csv
 
     shp = _point_shapefile(tmp_path)
     csv_path = tmp_path / "plants.csv"
-    converted = convert_shp_to_plant_csv(shp, csv_path)
+    converted = shp_to_plant_csv(tmp_path, str(shp), str(csv_path), actor=None)
 
     res = register_plant_registry(
         tmp_path,
@@ -113,6 +115,7 @@ def test_register_plant_registry_admits_a_shapefile_converted_first(
         csv_paths=[str(csv_path)],
         crop="black locust",
         site="block",
+        actor=None,
     )
 
     assert "error" not in res, res

@@ -40,6 +40,7 @@ def test_report_friction_writes_one_json_document(tmp_path: Path) -> None:
         category="missing_tool",
         detail="I needed a way to fetch trait profiles but no such tool exists.",
         context={"trait": "efb_damage", "crop": "currant"},
+        actor=None,
     )
 
     assert result["category"] == "missing_tool"
@@ -54,7 +55,9 @@ def test_a_report_names_the_record_id_it_was_stored_under(
     tmp_path: Path,
 ) -> None:
     """The record lives in the store, so the tool answers its id, the one a listing names."""
-    stored = report_friction(tmp_path, category="missing_tool", detail="x")
+    stored = report_friction(
+        tmp_path, category="missing_tool", detail="x", actor=None
+    )
     assert "report_path" not in stored
     assert (
         read_memory(FrictionReport, str(tmp_path), stored["id"]).detail == "x"
@@ -91,8 +94,8 @@ def test_a_category_or_kind_outside_its_vocabulary_is_refused_at_the_mcp_door(
     """
     import anyio
 
-    from tcip_mcp.server import build_server
     from tests._audit_fixtures import audit_rows
+    from tests._server_calls import client_server
     from tests.test_agent_identity_records import results_through_handshake
 
     refusals = [
@@ -116,7 +119,7 @@ def test_a_category_or_kind_outside_its_vocabulary_is_refused_at_the_mcp_door(
     ]
     schemas = {
         listed.name: listed.input_schema
-        for listed in anyio.run(build_server(bound).list_tools)
+        for listed in anyio.run(client_server(bound).list_tools)
     }
     *refused, written, listed = results_through_handshake(
         [(name, arguments) for name, _, arguments in refusals] + admitted,
@@ -153,7 +156,9 @@ def test_a_stored_report_whose_category_is_outside_the_vocabulary_reads_as_unrea
     tmp_path: Path,
 ) -> None:
     """A written report whose stored category is then changed to an unknown one reads with why."""
-    written = report_friction(tmp_path, category="missing_tool", detail="x")
+    written = report_friction(
+        tmp_path, category="missing_tool", detail="x", actor=None
+    )
     key = memory_key(FrictionReport, str(tmp_path), written["id"])
     stored = read_memory(FrictionReport, str(tmp_path), written["id"])
     ts.replace(
@@ -176,7 +181,9 @@ def test_two_reports_in_one_instant_under_one_category_land_under_ids_naming_nei
         meta_tools, "now_iso", lambda: "2026-03-04T12:00:00+00:00"
     )
     first, second = (
-        report_friction(tmp_path, category="missing_tool", detail=detail)["id"]
+        report_friction(
+            tmp_path, category="missing_tool", detail=detail, actor=None
+        )["id"]
         for detail in ("first", "second")
     )
 
@@ -195,6 +202,7 @@ def test_report_friction_one_document_per_report(tmp_path: Path) -> None:
             tmp_path,
             category="unexpected_behavior",
             detail=f"report {i}",
+            actor=None,
         )
 
     assert len(memory_entries(FrictionReport, str(tmp_path))) == 3
@@ -210,6 +218,7 @@ def test_a_retrospective_names_the_record_id_a_listing_names(
         worked="SAM candidates were usable after filtering.",
         did_not_work="Active learning selection stagnated after 50 labels.",
         knowledge_for_future="Burs cluster near canopy edges, not centers.",
+        actor=None,
     )
 
     assert result["project_id"] == "chestnut-bur-phase0"
@@ -234,6 +243,7 @@ def test_hand_offs_under_one_name_are_each_their_own_entry_newest_first(
             task=task,
             worked="w",
             did_not_work="d",
+            actor=None,
         )
 
     (newest,) = load_project_memory(
@@ -267,6 +277,7 @@ def test_concurrent_retrospectives_under_one_name_both_survive(
             task=f"pass {index}",
             worked="a",
             did_not_work="b",
+            actor=None,
         )
 
     threads = [threading.Thread(target=_call, args=(i,)) for i in range(2)]
@@ -292,6 +303,7 @@ def test_a_retrospective_records_an_unstated_section_as_empty(
         task="t",
         worked="w",
         did_not_work="d",
+        actor=None,
     )
     record = read_memory(Retrospective, str(tmp_path), result["id"])
     assert record.assumptions_wrong == ""
@@ -315,6 +327,7 @@ def test_load_retrospectives_returns_recent_first(
             task="t",
             worked="w",
             did_not_work="d",
+            actor=None,
         )
 
     result = load_project_memory(tmp_path, MemoryKind.retrospectives, limit=10)
@@ -330,6 +343,7 @@ def test_load_retrospectives_respects_limit(tmp_path: Path) -> None:
             task="t",
             worked="w",
             did_not_work="d",
+            actor=None,
         )
 
     result = load_project_memory(tmp_path, MemoryKind.retrospectives, limit=2)
@@ -344,6 +358,7 @@ def test_load_retrospectives_filter_substring(tmp_path: Path) -> None:
         task="EFB severity",
         worked="w",
         did_not_work="d",
+        actor=None,
     )
     write_retrospective(
         tmp_path,
@@ -351,6 +366,7 @@ def test_load_retrospectives_filter_substring(tmp_path: Path) -> None:
         task="Bur detection",
         worked="w",
         did_not_work="d",
+        actor=None,
     )
 
     (entry,) = load_project_memory(
@@ -376,6 +392,7 @@ def test_load_reports_roundtrips_a_written_report(tmp_path: Path) -> None:
         category="missing_tool",
         detail="needed get_trait_profile",
         context={"crop": "currant"},
+        actor=None,
     )
     (entry,) = load_project_memory(tmp_path, MemoryKind.reports)["entries"]
     rep = entry["record"]
@@ -414,7 +431,10 @@ def test_load_reports_recent_first_and_respects_limit(tmp_path: Path) -> None:
     # are spaced far enough apart to state four different times rather than one.
     for i in range(4):
         report_friction(
-            tmp_path, category="unexpected_behavior", detail=f"r{i}"
+            tmp_path,
+            category="unexpected_behavior",
+            detail=f"r{i}",
+            actor=None,
         )
         time.sleep(0.05)
 
@@ -432,7 +452,12 @@ def test_a_retrospective_that_will_not_read_sorts_after_every_dated_one_by_id(
 ) -> None:
     """Retrospectives that will not read list after the dated one, ordered by id, with why."""
     dated = write_retrospective(
-        tmp_path, project_id="dated", task="t", worked="w", did_not_work="d"
+        tmp_path,
+        project_id="dated",
+        task="t",
+        worked="w",
+        did_not_work="d",
+        actor=None,
     )
     for record_id in ("zzz-unreadable", "aaa-unreadable"):
         ts.replace(
@@ -454,8 +479,10 @@ def test_a_retrospective_that_will_not_read_sorts_after_every_dated_one_by_id(
 
 
 def test_load_reports_filters_by_category(tmp_path: Path) -> None:
-    report_friction(tmp_path, category="missing_tool", detail="a")
-    report_friction(tmp_path, category="ambiguous_data", detail="b")
+    report_friction(tmp_path, category="missing_tool", detail="a", actor=None)
+    report_friction(
+        tmp_path, category="ambiguous_data", detail="b", actor=None
+    )
 
     (entry,) = load_project_memory(
         tmp_path, MemoryKind.reports, category="ambiguous_data"
@@ -468,7 +495,12 @@ def test_a_category_filter_over_retrospectives_matches_none(
 ) -> None:
     """A retrospective carries no category, so a category filter over them answers none."""
     write_retrospective(
-        tmp_path, project_id="p", task="t", worked="w", did_not_work="d"
+        tmp_path,
+        project_id="p",
+        task="t",
+        worked="w",
+        did_not_work="d",
+        actor=None,
     )
 
     assert load_project_memory(
@@ -484,10 +516,16 @@ def test_a_category_filter_over_retrospectives_matches_none(
 
 def test_load_reports_filter_substring(tmp_path: Path) -> None:
     report_friction(
-        tmp_path, category="missing_tool", detail="trait profile lookup"
+        tmp_path,
+        category="missing_tool",
+        detail="trait profile lookup",
+        actor=None,
     )
     report_friction(
-        tmp_path, category="missing_tool", detail="something else entirely"
+        tmp_path,
+        category="missing_tool",
+        detail="something else entirely",
+        actor=None,
     )
 
     (entry,) = load_project_memory(
@@ -515,7 +553,9 @@ def test_the_page_limit_is_refused_at_the_mcp_door_unless_a_whole_number_of_at_l
 def test_report_friction_defaults_user_disagreement_false(
     tmp_path: Path,
 ) -> None:
-    result = report_friction(tmp_path, category="missing_tool", detail="x")
+    result = report_friction(
+        tmp_path, category="missing_tool", detail="x", actor=None
+    )
     assert result["user_disagreement"] is False
 
     entry = read_memory(FrictionReport, str(tmp_path), result["id"])
@@ -528,6 +568,7 @@ def test_report_friction_records_user_disagreement(tmp_path: Path) -> None:
         category="needs_human_judgment",
         detail="Zack pushed back on the tiling default.",
         user_disagreement=True,
+        actor=None,
     )
     assert result["user_disagreement"] is True
 
@@ -537,13 +578,18 @@ def test_report_friction_records_user_disagreement(tmp_path: Path) -> None:
 
 def test_load_reports_roundtrips_user_disagreement(tmp_path: Path) -> None:
     report_friction(
-        tmp_path, category="missing_tool", detail="a", user_disagreement=False
+        tmp_path,
+        category="missing_tool",
+        detail="a",
+        user_disagreement=False,
+        actor=None,
     )
     report_friction(
         tmp_path,
         category="needs_human_judgment",
         detail="b",
         user_disagreement=True,
+        actor=None,
     )
 
     result = load_project_memory(tmp_path, MemoryKind.reports, limit=10)
@@ -558,7 +604,7 @@ def test_load_reports_roundtrips_user_disagreement(tmp_path: Path) -> None:
 def test_a_friction_report_counts_toward_the_recent_activity_its_audit_line_records(
     tmp_path: Path,
 ) -> None:
-    report_friction(tmp_path, category="missing_tool", detail="a")
+    report_friction(tmp_path, category="missing_tool", detail="a", actor=None)
     status = _recent_activity(tmp_path)
     assert status["reports_since_last_retrospective"] == 1
     assert status["reports_since_last_distillation"] == 1
@@ -567,9 +613,14 @@ def test_a_friction_report_counts_toward_the_recent_activity_its_audit_line_reco
 def test_a_retrospective_resets_the_report_count_and_is_pointed_at_by_id(
     tmp_path: Path,
 ) -> None:
-    report_friction(tmp_path, category="missing_tool", detail="a")
+    report_friction(tmp_path, category="missing_tool", detail="a", actor=None)
     write_retrospective(
-        tmp_path, project_id="p", task="t", worked="w", did_not_work="d"
+        tmp_path,
+        project_id="p",
+        task="t",
+        worked="w",
+        did_not_work="d",
+        actor=None,
     )
 
     status = _recent_activity(tmp_path)
@@ -583,10 +634,10 @@ def test_a_retrospective_resets_the_report_count_and_is_pointed_at_by_id(
 def test_record_distillation_pass_resets_distillation_counters(
     tmp_path: Path,
 ) -> None:
-    report_friction(tmp_path, category="missing_tool", detail="a")
-    report_friction(tmp_path, category="missing_tool", detail="b")
+    report_friction(tmp_path, category="missing_tool", detail="a", actor=None)
+    report_friction(tmp_path, category="missing_tool", detail="b", actor=None)
 
-    result = record_distillation_pass(str(tmp_path))
+    result = record_distillation_pass(str(tmp_path), actor=None)
     assert result["status"] == "recorded"
 
     status = _recent_activity(tmp_path)
@@ -598,10 +649,10 @@ def test_record_distillation_pass_never_touches_reports_or_retrospectives(
     tmp_path: Path,
 ) -> None:
     # Bookkeeping only: must never write/modify/delete the underlying records it's counting.
-    report_friction(tmp_path, category="missing_tool", detail="a")
+    report_friction(tmp_path, category="missing_tool", detail="a", actor=None)
     before = memory_entries(FrictionReport, str(tmp_path))
 
-    record_distillation_pass(str(tmp_path))
+    record_distillation_pass(str(tmp_path), actor=None)
 
     after = memory_entries(FrictionReport, str(tmp_path))
     assert after == before

@@ -264,6 +264,7 @@ def _assess(
             equivalence_z=EQUIVALENCE_Z,
             dispersion_quantile=DISPERSION_QUANTILE,
             rationale=RATIONALE,
+            actor=None,
         )
     )
 
@@ -824,6 +825,7 @@ def test_a_raster_pass_stamps_its_stated_conf_and_refuses_an_omitted_one(
             bucket=name,
             raster_path=str(exp["raster_path"]),
             stated=Stated(tile_size=TILE, overlap=0.2, **stated),
+            actor=None,
         )
         if name == "omitted":
             assert "conf" in result.get("error", ""), result

@@ -117,6 +117,7 @@ def produce() -> dict[str, JsonValue]:
             traits.TraitEntry.model_validate(entry),
             rationale="The breeder counts every stem.",
             relayed_note="",
+            actor=None,
         )
 
     with scratch_session() as (workspace, client):

@@ -257,12 +257,13 @@ sampler there.
 
 | Tool | Purpose |
 |------|---------|
-| `launch_training` | Start async training run (smokes the builder first, auto-launches TensorBoard); runs `training_tools.preflight_config` (`smoke=True` also builds + contract-smokes the model), a library call, not a tool of its own |
+| `preflight_config` | Validate a training configuration before launching it (`smoke=True` also builds + contract-smokes the model) |
+| `launch_training` | Start async training run, auto-launching TensorBoard, once the checks `preflight_config(smoke=True)` answers pass; refused naming their issues otherwise |
 | `monitor_training` | Check a run's, a trial's or a sweep's progress by its id, with the TensorBoard serving its board |
 | `list_experiments` | List every run of the project, and every sweep with its trial runs under it |
 | `cancel_training` | Request graceful cancellation of a running run, trial or sweep by its id; a run stops at the next batch/epoch boundary and still saves `model_final.pt`; a sweep's running trials stop the same way and new trials start nothing, Ray's hard stop being only the fallback after the heartbeat window |
 | `run_hyperparameter_search` | HPO on Ray Tune, you pick the search algorithm + trial scheduler |
-| `tcip render-failure-cases` (command) | Surface + render images ranked by count-mismatch (not IoU-matched, see evaluation skill) |
+| `render_failure_cases` | Surface + render images ranked by count-mismatch (not IoU-matched, see evaluation skill) |
 
 A run launched on its own is a run directory, `.tcip/experiments/<experiment_id>/`, beside the
 project's sweeps; a sweep's trial is one beneath its sweep (see HPO). Runs and sweeps share that one
@@ -349,7 +350,7 @@ run_hyperparameter_search(
   `hpo.GRID_AXIS_LIMIT` values refuses by name; every other search samples an `int` axis from
   its bounds. An uninstalled or unoffered pick errors clearly (never silently swapped),
   and so does `split_draws` above one with a backend pick.
-  Call `hpo.available_search_algs()` for the live list on this box.
+  Call `available_search_algs` for the live list on this box.
 - `scheduler`: a block naming `asha`, `hyperband`, `pbt`, `median`, or `fifo` to run every
   trial to completion, beside every setting that scheduler's Ray Tune class takes, the objective
   and `pbt`'s mutations (the search space) excepted; a setting left unstated or one the class
@@ -383,7 +384,8 @@ run_hyperparameter_search(
 
 Use `draw_splits` to draw a selection's train, val, calibration and holdout sides. Each side but
 `train` is stated as a share and `train` takes the remainder (the group draw rounds them to whole
-groups); a draw states every share, its `seed`, its `grouping` (a named policy or an explicit map),
+groups); a draw states every share, its `seed`, its `grouping` (a named policy or an explicit map;
+`plant_aware_group_splits` draws with the map of the plant nearest each georeferenced image),
 `stratify_foreground` and its `rationale`, none with a default, admitted as a run's drawn
 `data.split` is, and the selection records the shares, the stratification and the reason. A side
 the draw would leave empty refuses naming it. A run drawing its own split states the same keys in

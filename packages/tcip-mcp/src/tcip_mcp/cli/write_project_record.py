@@ -15,7 +15,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from tcip_mcp.cli import bound_project
+from tcip_mcp.cli import bound_project, hyphenated
 from tcip_mcp.identity import actor
 from tcip_mcp.project_record import (
     CaptureInvariances,
@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     )
     invariances = fields.add_parser("invariances", parents=[common])
     for name, info in CaptureInvariances.model_fields.items():
-        flag = f"--{name.replace('_', '-')}"
+        flag = f"--{hyphenated(name)}"
         if info.annotation is bool:
             invariances.add_argument(
                 flag,

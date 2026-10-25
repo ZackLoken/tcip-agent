@@ -12,6 +12,8 @@ src/tcip_mcp/
                   # crops/<crop>.md, crops/crops.yml), read through __init__.py; source
                   # for the generated Claude Code, Codex and Antigravity skills, AGENTS.md's
                   # generated block, and the serve_domain_knowledge tool
+  cli/            # the operator-only command modules, and run_tool, the one adapter running any
+                  # registered tool as the tcip command of its own name
   tools/          # domain tools, one module per area: annotation, calibration (the assessment
                   # doors), data, delivery, experiment, feedback, gui, inference, ingest, knowledge,
                   # meta, model, orthomosaic, phenology, project, proposal, trait, training, vision
@@ -52,20 +54,27 @@ src/tcip_mcp/
   audit.py, web_client.py
 ```
 
-Every MCP tool in `tools/` is decorated `@tool()` (`server.tool`); a tool that acts on a project
+Every MCP tool is declared by `server.tool` in its area's `tools/` module: decorated `@tool()`, or,
+for a function another module defines, `tool()(fn)` (`compare_experiments`,
+`available_search_algs`, `available_schedulers`); a tool that acts on a project
 takes the project the server was started for as its first parameter: `project`, its directory, or
 `bound`, the whole `workspace.BoundProject` (directory, record id, workspace) when it also names the
-project to the backend. The server supplies only those two and `actor` (`server._CONTEXT`), so any
-other parameter, whatever its name, stays the client's (the knowledge door and the project-creation
-door act on none), and every mutating door leaves exactly one audit line per act, the decorator's or
+project to the backend. The server supplies only those two and `actor` (`server._CONTEXT`), the
+person the server's calls are made by, each read from the server's `server.Session` at the call
+(`Session.bind` is the one way a session gains them; `None` is an MCP client's person), so any other
+parameter, whatever its name, stays the client's (the knowledge door acts on none, the
+project-creation door on `actor` alone), and every mutating door leaves exactly one audit line per
+act, by that `actor`, the decorator's or
 the library's: a tool that changes state is `@audited` unless the library function it calls records
 its own event with facts the decorator cannot carry (a digest, what was written), and then it is not
 decorated. The decorator writes no line for a call returning its error dict and an exception line
 for a call that raises. A read-only tool (a status poll, a listing, a document served back) leaves
-none, so the audit log records mutations and nothing else. `serve_domain_knowledge`'s
+none, so the audit log records mutations and nothing else; a render under `.tcip/artifacts/viz/`
+is a derived view that can be regenerated, not a state change, and leaves none. `serve_domain_knowledge`'s
 `@tool(description=...)` composes its client-visible description from the knowledge corpus at import
-time rather than leaving it as the bare docstring. A mutating door demoted from tool status (run
-only through its own `tcip` subcommand) keeps `@audited` without registering. Run
+time rather than leaving it as the bare docstring. A mutating door only an operator runs (an
+operator-only command module in `cli/` calls it, as `archive_project`) keeps `@audited` without
+registering. Run
 `python tools/list_tools.py` for the current tool list/count; never hardcode a count in a doc or
 comment.
 
@@ -80,11 +89,15 @@ comment.
   surface (`build_detector`/`build_loss` task strings, heads/necks/backbones, derivations, the `ctx`
   craft library, and the `model_source`/`training_source`/`dataset_source` seams).
 - A one-off script the agent writes for one project lives with that project, in the project's own
-  directory, never in this repository. A standing capability the agent uses is a tool in `tools/`;
-  when an operator runs it too, its console-command door in `cli/` calls the same function. A
-  capability only an operator uses is a console-command door alone.
+  directory, never in this repository. A standing capability the agent uses is a tool in `tools/`,
+  and every registered tool is also the `tcip` command of its own name (`cli.hyphenated`): the one
+  adapter `cli.run_tool` parses its arguments into the tool's advertised input schema and calls it
+  through the server `server.server_for` returns, its session bound to the parsed `--project` and
+  `--user`, so an operator runs the same tool the agent does.
+  A capability only an operator uses is an operator-only command module in `cli/` exposing
+  `main(argv)`, named in the `tcip_web.cli` dispatcher.
 - State mutations route through audited doors only, each leaving one line: an `@audited` tool or
-  console-command door, or a library function recording its own event through
+  operator-only door, or a library function recording its own event through
   `record_event_or_raise`; the record is `audit_log`, one log addressed by `audit.audit_log_key`
   under two kinds of root (a dataset's own, a project's own), held in that root's store database,
   that other code (including scripts) must not write around. `audit.py` decides where an entry goes

@@ -124,6 +124,7 @@ def test_a_cancel_landing_mid_search_ends_the_sweep_canceled(
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
 
     assert (result["sweep"]["state"], result["sweep"]["status_error"]) == (
@@ -162,6 +163,7 @@ def test_a_cancel_after_the_sweep_ended_refuses_and_leaves_its_final_status_as_w
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )["sweep"]["sweep_id"]
 
     result = cancel_training(project, sweep_id, actor=None)
@@ -317,6 +319,7 @@ def test_run_hyperparameter_search_refuses_a_relaunched_from_naming_no_sweep_und
         **fifo_search(),
         relaunched_from="hpo_does_not_exist",
         search_seed=0,
+        actor=None,
     )
     assert "hpo_does_not_exist" in result["error"]
     assert sweep_dirs(project) == []
@@ -328,5 +331,6 @@ def test_run_hyperparameter_search_refuses_a_relaunched_from_naming_no_sweep_und
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
     assert "error" not in admitted, admitted

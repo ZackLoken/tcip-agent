@@ -198,7 +198,9 @@ def test_a_registered_checkpoint_reads_back_as_the_entry_it_was_registered_as(
     ckpt = _foreign_checkpoint(tmp_path)
     returned = (
         ModelRegistry(str(tmp_path))
-        .register_model("m", str(ckpt), metrics={"map50": 0.5}, tags=["field"])
+        .register_model(
+            "m", str(ckpt), metrics={"map50": 0.5}, tags=["field"], actor=None
+        )
         .entry
     )
 
@@ -236,7 +238,7 @@ def test_a_registry_index_missing_a_field_refuses_naming_it(
     )
 
     ckpt = _foreign_checkpoint(tmp_path)
-    ModelRegistry(str(tmp_path)).register_model("m", str(ckpt))
+    ModelRegistry(str(tmp_path)).register_model("m", str(ckpt), actor=None)
     (entry,) = read_registry_index(tmp_path)
     ts.replace(
         registry_index_key(tmp_path),

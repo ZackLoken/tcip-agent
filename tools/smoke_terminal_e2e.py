@@ -208,6 +208,7 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
         "Terminal smoke",
         "the terminal smoke's scratch workspace",
         invariances,
+        actor=None,
     )
     if "error" in record:
         print(f"FAIL: the scratch project was refused: {record['error']}")

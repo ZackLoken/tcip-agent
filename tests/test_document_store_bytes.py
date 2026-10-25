@@ -149,7 +149,7 @@ def test_the_dataset_identity_document_lands_as_the_json_every_citing_record_rea
     dataset.mkdir()
 
     assert "error" not in register_dataset(
-        tmp_path, str(dataset), crop="crop_under_test"
+        tmp_path, str(dataset), crop="crop_under_test", actor=None
     )
 
     assert dataset_identity_path(dataset).read_bytes() == IDENTITY_BYTES
@@ -200,6 +200,7 @@ def test_a_friction_report_dumps_as_the_json_document_every_reader_of_the_corpus
         "missing_tool",
         "ein Werkzeug für ü",
         context={"trait": "trait_under_test"},
+        actor=None,
     )
 
     assert _dumped(tmp_path, meta_tools.MemoryKind.reports) == REPORT_BYTES
@@ -223,6 +224,7 @@ def test_a_retrospective_dumps_as_the_json_document_every_reader_of_the_corpus_p
         task="t",
         worked="was gut lief für ü",
         did_not_work="d",
+        actor=None,
     )
 
     assert (

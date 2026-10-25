@@ -104,7 +104,9 @@ class _Harness:
         from tcip_mcp.tools.meta_tools import report_friction
 
         tcip_store.bind()
-        report_friction(self.project, "unexpected_behavior", detail)
+        report_friction(
+            self.project, "unexpected_behavior", detail, actor=None
+        )
 
 
 def main() -> None:

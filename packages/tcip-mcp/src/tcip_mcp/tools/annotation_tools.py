@@ -34,7 +34,10 @@ def _summary(annotations: list[Annotation]) -> dict:
     }
 
 
-def read_annotations(image_path: str, bucket: str | None = None) -> dict:
+@tool()
+def read_annotations(
+    project: Path, image_path: str, bucket: str | None = None
+) -> dict:
     """Load the ground-truth labels for a single image and, given a bucket, its predictions.
 
     The bucket is one published under the image's dataset root. Both are the name-based
@@ -42,15 +45,13 @@ def read_annotations(image_path: str, bucket: str | None = None) -> dict:
     read returns an ``error``.
 
     Args:
-        image_path: Absolute path to the image file (:func:`~tcip_mcp.registry_paths.located`
-            with no project).
+        image_path: The image file (:func:`~tcip_mcp.registry_paths.located` against the
+            project).
         bucket: The name of the published bucket whose document for this image to read, if any.
 
     """
-    try:
-        img = located(image_path, None)
-    except ValueError as exc:
-        return {"error": str(exc)}
+    img = located(image_path, project)
+    image_path = str(img)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
@@ -80,12 +81,15 @@ def save_annotations(
     bound: BoundProject,
     image_path: str,
     annotations: list[dict],
+    *,
+    actor: str | None,
 ) -> dict:
     """Write an image's annotations as its single per-image label document, all subjects in one.
 
     The document is keyed by the image's dataset root, capture and stem
     (:func:`~tcip_mcp.dataset_layout.label_key`) and written through
-    :func:`~tcip_mcp.dataset_layout.save_label_document` as the author ``save_annotations``:
+    :func:`~tcip_mcp.dataset_layout.save_label_document` as the author ``save_annotations``, its
+    audit line by ``actor``:
     each annotation takes the provenance of one stored record of the same content not yet
     claimed by another (:func:`~tcip_annotation.json_io.stamped`), and every other one is this
     tool's own. Each annotation is a dict carrying a ``subject`` (required, refused when
@@ -129,7 +133,7 @@ def save_annotations(
             width=w,
             height=h,
             author="save_annotations",
-            actor=None,
+            actor=actor,
         )  # the answer is for the editor
     except ValueError as exc:
         return {"error": str(exc)}
@@ -301,15 +305,15 @@ def _evaluate_folder(
     }
 
 
+@tool()
 def score_predictions(
+    project: Path,
     path: str,
     bucket: str,
     iou_threshold: float,
     conf_threshold: float,
     detail: bool = False,
-    trait: TraitEntry | None = None,
-    *,
-    project: Path | None = None,
+    trait: str | None = None,
 ) -> dict:
     """Score a published bucket's predictions against the images' own label documents.
 
@@ -323,8 +327,7 @@ def score_predictions(
 
     Args:
         path: An image file (single-image match) or an images directory (aggregate)
-            (:func:`~tcip_mcp.registry_paths.located` against ``project``; with none held, a
-            relative path refuses).
+            (:func:`~tcip_mcp.registry_paths.located` against the project).
         bucket: The name of the bucket, published under ``path``'s dataset root, whose documents
             are scored.
         iou_threshold: IoU threshold for a positive match (the comparability convention is
@@ -334,27 +337,33 @@ def score_predictions(
             entry the annotation it names as ``client_annotation`` projects it (corner ``bbox``,
             ``rings`` or ``point``, ``subject``, ``attributes``, ``iscrowd``, ``score`` and the
             provenance it holds) beside its ``tag`` and indices.
-        trait: The trait's confirmed entry; when set, its own localization criterion governs the
-            reported TP/FP/FN count; map50 stays a labeled comparability metric. Absent -> the IoU
-            convention governs.
+        trait: A trait's name; when set, the localization criterion of its latest confirmed
+            revision (:func:`~tcip_mcp.operationalization.latest_confirmed`, whose refusals
+            answer as the error) governs the reported TP/FP/FN count; map50 stays a labeled
+            comparability metric. Absent -> the IoU convention governs.
 
     """
-    try:
-        p = located(path, project)
-    except ValueError as exc:
-        return {"error": str(exc)}
+    from tcip_mcp.operationalization import latest_confirmed
+    from tcip_mcp.traits import TraitUnknownError
+
+    p = located(path, project)
     if not p.exists():
         return {"error": f"Path not found: {path}"}
     try:
+        entry = latest_confirmed(trait, project).entry if trait else None
         found = read_bucket(source_root([p]), bucket)
         if p.is_file():
             return _evaluate_image(
-                p, found, iou_threshold, conf_threshold, detail, trait
+                p, found, iou_threshold, conf_threshold, detail, entry
             )
         return _evaluate_folder(
-            str(p), found, iou_threshold, conf_threshold, trait
+            str(p), found, iou_threshold, conf_threshold, entry
         )
-    except (UnreadableLabelDocumentError, ValueError) as exc:
+    except (
+        UnreadableLabelDocumentError,
+        TraitUnknownError,
+        ValueError,
+    ) as exc:
         return {"error": str(exc)}
 
 
@@ -365,8 +374,10 @@ def write_subject_registry(
     subjects: dict,
     allow_removals: bool = False,
     allow_type_changes: bool = False,
+    *,
+    actor: str | None,
 ) -> dict:
-    """Write the dataset's subject registry.
+    """Write the dataset's subject registry, the write ``actor``'s.
 
     The registry is ``subjects``, each subject's ``description`` and ``attributes`` (each
     ``categorical`` or ``ordinal`` with ordered ``values``), validated
@@ -400,7 +411,7 @@ def write_subject_registry(
             expect=None,
             allow_removals=allow_removals,
             allow_type_changes=allow_type_changes,
-            actor=None,
+            actor=actor,
         )
     except (
         subject_registry.RegistryError,

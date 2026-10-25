@@ -49,6 +49,7 @@ def _draw(
         project,
         folder_path,
         **drawn_split(**{**SHARES, "grouping": "tile_prefix", **stated}),
+        actor=None,
     )
 
 
@@ -61,15 +62,15 @@ def _quality_findings(root: Path) -> list[tuple[str, str]]:
 
 
 def test_scan_dataset(data_dir: Path) -> None:
-    result = scan_dataset(str(data_dir))
+    result = scan_dataset(data_dir, str(data_dir))
     assert result["image_count"] == 3
     assert result["labels_count"] == 3
     assert result["paired_images"] == 3
     assert result["unlabeled_images"] == 0
 
 
-def test_scan_dataset_not_found() -> None:
-    result = scan_dataset("/nonexistent/path")
+def test_scan_dataset_not_found(tmp_path: Path) -> None:
+    result = scan_dataset(tmp_path, "/nonexistent/path")
     assert "error" in result
 
 
@@ -112,7 +113,7 @@ def test_scan_dataset_counts_only_the_documents_a_published_bucket_names(
         32,
     )
 
-    scan_result = scan_dataset(str(root))
+    scan_result = scan_dataset(tmp_path, str(root))
 
     assert scan_result["predictions_count"] == 1
 
@@ -557,7 +558,7 @@ def test_scan_dataset_answers_an_ambiguous_image_stem_as_an_error(
     )
     (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
 
-    result = scan_dataset(str(root))
+    result = scan_dataset(tmp_path, str(root))
 
     assert "error" in result
     assert "plotA" in result["error"]
@@ -745,6 +746,7 @@ def test_a_draw_stating_no_share_grouping_stratification_or_reason_refuses_namin
             output_path=str(out),
             subject="bud",
             **{k: v for k, v in stated.items() if k != unstated},
+            actor=None,
         )["error"]
     except TypeError as exc:
         refusal = str(exc)
@@ -753,7 +755,12 @@ def test_a_draw_stating_no_share_grouping_stratification_or_reason_refuses_namin
 
     out = tmp_path / "stated"
     result = draw_splits(
-        tmp_path, str(root), output_path=str(out), subject="bud", **stated
+        tmp_path,
+        str(root),
+        output_path=str(out),
+        subject="bud",
+        **stated,
+        actor=None,
     )
     assert "error" not in result, result
     drawn = read_selection(out, project=tmp_path)

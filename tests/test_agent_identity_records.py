@@ -22,10 +22,10 @@ from mcp.shared.memory import create_client_server_memory_streams
 
 from tcip_mcp import traits
 from tcip_mcp.agent_identity import RECORD_FIELDS as IDENTITY_FIELDS
-from tcip_mcp.server import build_server
 from tcip_mcp.workspace import BoundProject, workspace_from_environment
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import audit_rows
+from tests._server_calls import client_server
 
 DECLARED = mcp_types.Implementation(name="reviewing-harness", version="1.2.3")
 
@@ -78,7 +78,7 @@ def results_through_handshake(
         ):
             async with anyio.create_task_group() as tg:
                 # The run loop; MCPServer.run is stdio-only.
-                server = build_server(bound)._lowlevel_server
+                server = client_server(bound)._lowlevel_server
 
                 async def serve() -> None:
                     await server.run(
@@ -153,7 +153,7 @@ def test_a_call_with_no_handshake_records_no_identity(project: Path) -> None:
     """A call with no handshake writes an audit line carrying no identity field."""
     from tcip_mcp.tools.meta_tools import report_friction
 
-    report_friction(project, "unexpected_behavior", "no handshake")
+    report_friction(project, "unexpected_behavior", "no handshake", actor=None)
 
     (row,) = audit_rows(project, "report_friction")
     assert not set(IDENTITY_FIELDS) & set(row)

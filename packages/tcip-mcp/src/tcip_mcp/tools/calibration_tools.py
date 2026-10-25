@@ -64,17 +64,20 @@ def assess_checkpoint(
     rationale: str,
     stated: Stated,
     device: str | None = None,
+    *,
+    actor: str | None,
 ) -> dict:
     """Assess a checkpoint on a selection's calibration and holdout sides and record it.
 
-    The assessment is for one delivered kind of a trait. The operating point is fitted on the
-    calibration side (the trait's count objective picks the conf; its ground truth derives the
-    object density each frame's detection cap scales by, and an unstated merge threshold) and the
-    criterion the kind rests on is measured over the holdout side: the held-out count bias, pooled
-    and per class, localization and dispersion for a count; that plus the classifier's agreement
-    over matched instances for ``state_crossing_dates``; the scalar skill for an ordinal or
-    regression aggregate, a regression scored by the revision's own ``regression_criterion``. The
-    reference must share no group or image with the producing run's training or selection side.
+    The assessment is ``actor``'s, for one delivered kind of a trait. The operating point is
+    fitted on the calibration side (the trait's count objective picks the conf; its ground truth
+    derives the object density each frame's detection cap scales by, and an unstated merge
+    threshold) and the criterion the kind rests on is measured over the holdout side: the
+    held-out count bias, pooled and per class, localization and dispersion for a count; that plus
+    the classifier's agreement over matched instances for ``state_crossing_dates``; the scalar
+    skill for an ordinal or regression aggregate, a regression scored by the revision's own
+    ``regression_criterion``. The reference must share no group or image with the producing run's
+    training or selection side.
 
     Args:
         checkpoint_path: A checkpoint registered in this project.
@@ -111,6 +114,7 @@ def assess_checkpoint(
                 dispersion_quantile=dispersion_quantile,
                 rationale=rationale,
                 device=device,
+                actor=actor,
             )
         )
     except _refusals() as exc:
@@ -130,8 +134,10 @@ def assess_reserved_regions(
     rationale: str,
     stated: Stated,
     device: str | None = None,
+    *,
+    actor: str | None,
 ) -> dict:
-    """Assess a checkpoint against its own mosaic's reserved regions and record it.
+    """Assess a checkpoint against its own mosaic's reserved regions and record it by ``actor``.
 
     The checkpoint is one trained on one mosaic, assessed against that mosaic's own reserved
     calibration and holdout regions for a count delivery of a trait. The checkpoint's run must
@@ -168,6 +174,7 @@ def assess_reserved_regions(
                 dispersion_quantile=dispersion_quantile,
                 rationale=rationale,
                 device=device,
+                actor=actor,
             )
         )
     except _refusals() as exc:
@@ -182,10 +189,12 @@ def calibrate_physical_scale(
     reference_csv: str,
     unit: str,
     reference_subject: str,
+    *,
+    actor: str | None,
 ) -> dict:
     """Derive a per-pixel physical scale on a selection's calibration side and check it on holdout.
 
-    The result is recorded as an assessment. Each reference image carries exactly one
+    The result is recorded as an assessment by ``actor``. Each reference image carries exactly one
     ``reference_subject`` polygon or mask; the breeder's ``reference_csv`` (``image_stem,
     physical_extent, unit``) states each one's physical extent in ``unit`` and is retained with
     the assessment. The scale passes when the holdout's relative
@@ -211,6 +220,7 @@ def calibrate_physical_scale(
                 reference_csv=reference_csv,
                 unit=unit,
                 reference_subject=reference_subject,
+                actor=actor,
             )
         )
     except _refusals() as exc:

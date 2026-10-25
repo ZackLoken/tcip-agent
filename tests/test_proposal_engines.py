@@ -760,7 +760,7 @@ def test_a_ringless_candidate_renders_and_stages_as_its_box(
     )
     assert "error" not in accepted, accepted
 
-    read = read_annotations(str(image), bucket=accepted["bucket"])
+    read = read_annotations(tmp_path, str(image), bucket=accepted["bucket"])
     [staged] = read["predictions"]["annotations"]
     assert staged["bbox"] == list(BOX)
     assert "rings" not in staged

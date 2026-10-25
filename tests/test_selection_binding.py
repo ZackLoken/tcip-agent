@@ -295,6 +295,7 @@ def _draw(
             holdout_ratio=0.125,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     assert "error" not in result, result
     return read_selection(out, project=project)
@@ -1242,6 +1243,7 @@ def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_mem
         output_path=str(out),
         subject=SUBJECT,
         **drawn_split(seed=2, val_ratio=0.25, grouping="tile_prefix"),
+        actor=None,
     )
     assert explicit["splits"]["val"] == 2, explicit
     selection = read_selection(out, project=tmp_path)

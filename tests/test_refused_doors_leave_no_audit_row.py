@@ -36,7 +36,10 @@ def _register_model(tmp_path: Path) -> dict:
     from tcip_mcp.tools.model_tools import register_model
 
     return register_model(
-        tmp_path, name="m", checkpoint_path=str(tmp_path / "absent.pt")
+        tmp_path,
+        name="m",
+        checkpoint_path=str(tmp_path / "absent.pt"),
+        actor=None,
     )
 
 
@@ -49,6 +52,7 @@ def _deliver_per_image_counts(tmp_path: Path) -> dict:
         "preds/2025-09-14",
         str(tmp_path / "o.csv"),
         trait="stem",
+        actor=None,
     )
 
 
@@ -66,6 +70,7 @@ def _import_coco(tmp_path: Path) -> dict:
         "2025-09-14",
         VERTEX_SPACING,
         RATIONALE,
+        actor=None,
     )
 
 
@@ -77,6 +82,7 @@ def _build_plant_mapping(tmp_path: Path) -> dict:
         name="../no",
         images_root=str(tmp_path),
         plant_registry=str(tmp_path / "plants.csv"),
+        actor=None,
     )
 
 
@@ -93,6 +99,7 @@ def _deliver_per_plant_csv(tmp_path: Path) -> dict:
         str(tmp_path),
         ["preds/2025-09-14"],
         "count",
+        actor=None,
     )
 
 
@@ -109,6 +116,7 @@ def _deliver_orthomosaic_plant_counts(tmp_path: Path) -> dict:
         str(tmp_path / "out.csv"),
         "cyme count",
         ["p1"],
+        actor=None,
     )
 
 
@@ -123,6 +131,7 @@ def _deliver_phenology_milestones(tmp_path: Path) -> dict:
         [],
         str(tmp_path / "o.csv"),
         ["p1"],
+        actor=None,
     )
 
 
@@ -139,6 +148,7 @@ def _assess_an_unregistered_checkpoint(tmp_path: Path) -> dict:
         DISPERSION_QUANTILE,
         RATIONALE,
         Stated(),
+        actor=None,
     )
 
 
@@ -158,6 +168,7 @@ def _assess_the_reserved_regions_of_an_unregistered_checkpoint(
         DISPERSION_QUANTILE,
         RATIONALE,
         Stated(),
+        actor=None,
     )
 
 
@@ -171,6 +182,7 @@ def _calibrate_scale_for_no_such_trait(tmp_path: Path) -> dict:
         str(tmp_path / "ref.csv"),
         "mm",
         "ruler",
+        actor=None,
     )
 
 
@@ -212,6 +224,7 @@ def test_a_save_on_a_missing_image_leaves_no_row(
         bound,
         str(bound.root / "images" / "absent.png"),
         annotations=[{"subject": "cyme", "bbox": [1, 1, 5, 5]}],
+        actor=None,
     )
 
     assert "error" in result, result

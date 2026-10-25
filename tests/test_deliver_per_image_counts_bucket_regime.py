@@ -48,6 +48,7 @@ def _deliver(project: Path, root: Path, bucket: str, **overrides: str) -> dict:
         bucket,
         str(project / "out" / "counts.csv"),
         trait=overrides.get("trait", fx.COUNT_TRAIT),
+        actor=None,
     )
 
 
@@ -173,7 +174,8 @@ tcip_store.bind()
 import tcip_mcp.tools.inference_tools as itools
 from pathlib import Path
 r = itools.deliver_per_image_counts(Path({str(tmp_path)!r}), {str(chain.root)!r},
-                                    {chain.bucket!r}, {str(out_csv)!r}, trait={fx.COUNT_TRAIT!r})
+                                    {chain.bucket!r}, {str(out_csv)!r}, trait={fx.COUNT_TRAIT!r},
+                                    actor=None)
 assert "error" not in r, r
 assert "torch" not in sys.modules, "the delivery pulled torch into sys.modules"
 print("ok")

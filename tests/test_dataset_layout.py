@@ -49,7 +49,7 @@ def test_a_flat_image_beside_an_undated_one_of_its_stem_is_no_second_image(
     for place in (tmp_path / "images", tmp_path / "images" / UNDATED_BUCKET):
         (place / "same.png").write_bytes(b"\x89PNG")
 
-    scan = scan_dataset(str(tmp_path))
+    scan = scan_dataset(tmp_path, str(tmp_path))
 
     assert scan["image_count"] == 1, scan
     assert label_key_of(
@@ -154,7 +154,9 @@ def test_every_reader_of_a_dataset_root_answers_the_root_the_layout_wrote(
         image = image_path(root, capture, "a", ".png")
         image.parent.mkdir(parents=True)
         image.write_bytes(b"\x89PNG")
-        assert "error" not in register_dataset(tmp_path, str(root), crop=crop)
+        assert "error" not in register_dataset(
+            tmp_path, str(root), crop=crop, actor=None
+        )
         assert image_capture(image) == (root, capture)
         assert parse_capture_dir(image_dir(root, capture)) == (root, capture)
         assert source_root([image]) == root
@@ -167,7 +169,9 @@ def test_every_reader_of_a_dataset_root_answers_the_root_the_layout_wrote(
     raster = image_root(named) / "raster.tif"
     raster.parent.mkdir(parents=True)
     raster.write_bytes(b"II*\x00")
-    assert "error" not in register_dataset(tmp_path, str(named), crop=crop)
+    assert "error" not in register_dataset(
+        tmp_path, str(named), crop=crop, actor=None
+    )
     assert source_root([raster]) == named
     assert image_capture(raster) == (None, None)
     assert dataset_scope_of(raster) == named

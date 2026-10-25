@@ -848,7 +848,9 @@ def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
     )
     assert "error" not in accepted
 
-    read_back = read_annotations(accept_image_path, accepted["bucket"])
+    read_back = read_annotations(
+        tmp_path, accept_image_path, accepted["bucket"]
+    )
     accepted_preds = read_back["predictions"]["annotations"]
     assert sorted(
         len(ring) for pred in accepted_preds for ring in pred["rings"]

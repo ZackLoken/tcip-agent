@@ -136,6 +136,7 @@ def test_draw_splits_selection_embeds_digests_and_seed(
             holdout_ratio=0.125,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     assert result["seed"] == 7
     drawn = read_selection(out, project=tmp_path)

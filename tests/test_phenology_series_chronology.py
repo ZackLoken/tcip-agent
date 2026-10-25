@@ -291,6 +291,7 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(
         dataset_root=body["dataset_root"],
         buckets=body["buckets"],
         output_csv_path=str(out_csv),
+        actor=None,
     )
 
     assert "error" not in res, res

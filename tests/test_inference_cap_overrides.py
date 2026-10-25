@@ -311,6 +311,7 @@ def test_the_dry_run_reports_the_stated_values_and_refuses_an_unstated_conf(
         bucket="out/2026-01-01",
         dry_run=True,
         stated=Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE),
+        actor=None,
     )
     over_raster = run_inference(
         tmp_path,
@@ -321,6 +322,7 @@ def test_the_dry_run_reports_the_stated_values_and_refuses_an_unstated_conf(
         stated=Stated(
             tile_size=32, overlap=SAMPLE_OVERLAP, **SAMPLE_DETECTOR_PASS
         ),
+        actor=None,
     )
     unstated = run_inference(
         tmp_path,
@@ -329,6 +331,7 @@ def test_the_dry_run_reports_the_stated_values_and_refuses_an_unstated_conf(
         bucket="out/2026-01-01",
         dry_run=True,
         stated=Stated(tile=False, rationale=RATIONALE),
+        actor=None,
     )
 
     import tcip_store

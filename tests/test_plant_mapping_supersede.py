@@ -64,6 +64,7 @@ def _cited_mapping(tmp_path: Path) -> tuple[OpenProject, str, dict[str, str]]:
         name="valley",
         images_root=str(images_root),
         plant_registry=registry,
+        actor=None,
     )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
@@ -98,6 +99,7 @@ def test_a_cited_rebuild_refuses_naming_the_citing_events(
         name="valley",
         images_root=images_root,
         plant_registry=(before.plant_registry.name),
+        actor=None,
     )
 
     assert "error" in res
@@ -144,6 +146,7 @@ def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_rea
         images_root=images_root,
         plant_registry=before.plant_registry.name,
         supersede=True,
+        actor=None,
     )
 
     assert "error" not in res, res
@@ -195,6 +198,7 @@ def test_resolved_mapping_key_for_citation_names_the_archive_once_superseded(
         images_root=images_root,
         plant_registry=before.plant_registry.name,
         supersede=True,
+        actor=None,
     )
     assert "error" not in res, res
 
@@ -236,6 +240,7 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
         images_root=images_root,
         plant_registry=before.plant_registry.name,
         supersede=True,
+        actor=None,
     )
     assert "error" not in res, res
 
@@ -265,6 +270,7 @@ def _built(tmp_path: Path) -> tuple[Path, str]:
         name="valley",
         images_root=str(images_root),
         plant_registry=registry,
+        actor=None,
     )
     assert "error" not in built, built
     return images_root, registry
@@ -307,6 +313,7 @@ def test_a_rebuild_over_a_record_that_will_not_decode_proceeds_on_its_raw_digest
         name="valley",
         images_root=str(images_root),
         plant_registry=registry,
+        actor=None,
     )
     assert "error" not in rebuilt, rebuilt
     assert asked == [plant_mapping.record_digest(malformed)]
@@ -326,6 +333,7 @@ def test_an_uncited_rebuild_replaces_as_today_recording_nothing_extra(
         name="valley",
         images_root=str(images_root),
         plant_registry=registry,
+        actor=None,
     )
     assert "error" not in first, first
     before = plant_mapping.load_mapping(tmp_path, "valley")
@@ -336,6 +344,7 @@ def test_an_uncited_rebuild_replaces_as_today_recording_nothing_extra(
         name="valley",
         images_root=str(images_root),
         plant_registry=registry,
+        actor=None,
     )
     assert "error" not in second, second
 

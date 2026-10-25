@@ -41,7 +41,9 @@ def test_registered_models_are_recorded_in_the_index_not_copied_into_the_registr
         run_dir = root / ".tcip" / "experiments" / name / "artifacts"
         run_dir.mkdir(parents=True)
         ckpt = produced_checkpoint(run_dir / "model_best.pt", content)
-        reg.register_model(name, str(ckpt), metrics={"val_map50": 0.42})
+        reg.register_model(
+            name, str(ckpt), metrics={"val_map50": 0.42}, actor=None
+        )
 
     models_dir = root / ".tcip" / "models"
     assert ts.exists(registry_index_key(root))
@@ -80,20 +82,28 @@ def test_registering_a_checkpoint_again_supersedes_its_earlier_entry(
     )
 
     reg.register_model(
-        "currant_bud_detector_v1", str(ckpt_v1), metrics={"val_map50": 0.61}
+        "currant_bud_detector_v1",
+        str(ckpt_v1),
+        metrics={"val_map50": 0.61},
+        actor=None,
     )
     reg.register_model(
         "chestnut_leaf_area_seg_v2",
         str(companion),
         metrics={"val_map50": 0.55},
+        actor=None,
     )
     reg.register_model(
         "currant_bud_detector_v1_final",
         str(ckpt_v1),
         metrics={"val_map50": 0.74},
+        actor=None,
     )
     reg.register_model(
-        "currant_bud_detector_v1", str(ckpt_v2), metrics={"val_map50": 0.80}
+        "currant_bud_detector_v1",
+        str(ckpt_v2),
+        metrics={"val_map50": 0.80},
+        actor=None,
     )
 
     inventory = ModelRegistry(str(root)).list_models()

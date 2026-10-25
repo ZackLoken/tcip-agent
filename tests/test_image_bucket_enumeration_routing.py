@@ -29,7 +29,7 @@ def _ingested_bucket(tmp_path: Path) -> Path:
     source.mkdir()
     Image.new("RGB", (16, 16)).save(source / "shoot_001.jpg")
 
-    result = ingest_images(tmp_path / "proj", str(source))
+    result = ingest_images(tmp_path / "proj", str(source), actor=None)
     assert "error" not in result, result
     return Path(result["image_root"]) / "undated"
 
@@ -52,7 +52,7 @@ def _ingested_bucket_of(tmp_path: Path, stems: list[str]) -> Path:
             source / f"{stem}.jpg"
         )
 
-    result = ingest_images(tmp_path / "proj", str(source))
+    result = ingest_images(tmp_path / "proj", str(source), actor=None)
     assert "error" not in result, result
     return Path(result["image_root"]) / "undated"
 

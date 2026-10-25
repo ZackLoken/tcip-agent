@@ -64,6 +64,7 @@ def polluted_project(tmp_path: Path) -> tuple[Path, ModelRegistry]:
             str(ckpt),
             metrics={"val_map50": 0.5 + 0.1 * i},
             tags=["detector", f"experiment:run{i}"],
+            actor=None,
         )
     return root, reg
 
@@ -147,7 +148,7 @@ def test_doctor_reports_an_index_that_will_not_decode_rather_than_reading_it_as_
     root.mkdir()
     reg = ModelRegistry(str(root))
     ckpt = _checkpoint(tmp_path / "model_best.pt", "weights-a")
-    reg.register_model("currant_bud_detector_v1", str(ckpt))
+    reg.register_model("currant_bud_detector_v1", str(ckpt), actor=None)
 
     damage_record(registry_index_key(root), b'{"entries": [{"name": "currant')
 

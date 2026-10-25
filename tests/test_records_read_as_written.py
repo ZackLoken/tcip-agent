@@ -27,7 +27,9 @@ def test_a_registered_entry_ranks_through_best_model(tmp_path: Path) -> None:
 
     ckpt = produced_checkpoint(tmp_path / "m.pt", "weights")
     registry = ModelRegistry(str(tmp_path))
-    registry.register_model("m", str(ckpt), metrics={"val_map50": 0.7})
+    registry.register_model(
+        "m", str(ckpt), metrics={"val_map50": 0.7}, actor=None
+    )
 
     models = ModelRegistry(str(tmp_path)).list_models()
     best = best_model(
@@ -62,7 +64,10 @@ def test_a_checkpoint_stating_no_task_refuses_naming_where_to_state_it(
     del payload[CONFIG_KEY]["model_source"]["task"]
     torch.save(payload, str(unstated))
     assert "error" not in register_model(
-        name="unstated", checkpoint_path=str(unstated), project=tmp_path
+        name="unstated",
+        checkpoint_path=str(unstated),
+        project=tmp_path,
+        actor=None,
     )
     with pytest.raises(ValueError, match="model_source.task"):
         load_registered_checkpoint(str(unstated), project=tmp_path).task
@@ -131,6 +136,7 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
         n_trials=1,
         **fifo_search(),
         search_seed=0,
+        actor=None,
     )
     sweep_id = result["sweep"]["sweep_id"]
     assert (

@@ -783,9 +783,15 @@ def test_the_dry_run_reports_the_record_the_bucket_keeps(
         bucket="sliced",
         dry_run=True,
         stated=stated,
+        actor=None,
     )
     real = run_inference(
-        tmp_path, ckpt, images_dir=str(images), bucket="sliced", stated=stated
+        tmp_path,
+        ckpt,
+        images_dir=str(images),
+        bucket="sliced",
+        stated=stated,
+        actor=None,
     )
 
     assert "error" not in dry and "error" not in real, (dry, real)
@@ -825,13 +831,14 @@ def _blob_capture(project: Path) -> Path:
         labels[f"img{i:02d}.png"] = [
             Annotation(subject="bud", geometry=b) for b in boxes
         ]
-    ingested = ingest_images(root, source=str(raw))
+    ingested = ingest_images(root, source=str(raw), actor=None)
     assert "error" not in ingested, ingested
     dated = state_capture_date(
         root,
         images=[f["dest"] for f in ingested["files"]],
         date=datetime.date.fromisoformat(date),
         rationale="the frames stand for one capture of that day",
+        actor=None,
     )
     assert "error" not in dated, dated
     images = root / "images" / date
@@ -871,6 +878,7 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(
             holdout_ratio=0.2,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     assert "error" not in drawn, drawn
     ckpt, _record = _checkpoint(tmp_path)
@@ -909,6 +917,7 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(
             postprocess="nmm",
             cross_tile_nms=0.8,
         ),
+        actor=None,
     )
     assert "error" not in assessment, assessment
     reference_passes = len(merged_at)
@@ -920,6 +929,7 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(
         bucket="blob/2026-01-01",
         assessment_id=assessment["assessment_id"],
         device="cpu",
+        actor=None,
     )
     assert "error" not in published, published
 
@@ -981,6 +991,7 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(
             stated=Stated(
                 conf=0.0, postprocess=merge, rationale=RATIONALE, **cut
             ),
+            actor=None,
         )
         assert "cross_tile_nms" in unstated.get("error", ""), (merge, unstated)
 
@@ -996,6 +1007,7 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(
             rationale=RATIONALE,
             **cut,
         ),
+        actor=None,
     )
 
     assert "error" not in response, response

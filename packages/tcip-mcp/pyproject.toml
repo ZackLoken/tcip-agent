@@ -23,7 +23,7 @@ dependencies = [
     "pyproj>=3.5",
     "shapely>=2.0",
     # Same GDAL-wheel bundling as rasterio, for plant_mapping.read_plant_shapefile and the
-    # tcip shp-to-plant-csv command built over it.
+    # shp_to_plant_csv tool built over it.
     "fiona>=1.9",
     "pycocotools>=2.0.7",
     # Tiled inference: the slice lattice, the detection-model wrapper and the cross-tile merge.

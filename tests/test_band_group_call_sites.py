@@ -305,12 +305,14 @@ def test_visualize_annotations_on_a_grouped_capture(
     tmp_path: Path, grouped_dataset: Path
 ) -> None:
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.tools.vision_tools import visualize
+    from tcip_mcp.tools.vision_tools import AnnotationsRender, visualize
 
     manifest = (
         image_dir(grouped_dataset, "2026-04-01") / "capture_001.bandgroup"
     )
-    result = visualize(tmp_path, source="annotations", path=str(manifest))
+    result = visualize(
+        tmp_path, AnnotationsRender(source="annotations", path=str(manifest))
+    )
     assert "error" not in result
     assert result["count"] == 1
     assert Path(result["image_path"]).is_file()
@@ -320,28 +322,39 @@ def test_visualize_annotations_on_a_band_member_answers_the_resolvers_refusal(
     tmp_path: Path, grouped_dataset: Path
 ) -> None:
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.tools.vision_tools import visualize
+    from tcip_mcp.tools.vision_tools import (
+        AnnotationsRender,
+        ComparisonRender,
+        PredictionsRender,
+        visualize,
+    )
 
-    member = image_dir(grouped_dataset, "2026-04-01") / "capture_001_G.tif"
-    for source in ("annotations", "predictions", "comparison"):
-        result = visualize(
-            tmp_path,
-            source=source,
-            path=str(member),
+    member = str(
+        image_dir(grouped_dataset, "2026-04-01") / "capture_001_G.tif"
+    )
+    for render in (
+        AnnotationsRender(source="annotations", path=member),
+        PredictionsRender(source="predictions", path=member, bucket="preds"),
+        ComparisonRender(
+            source="comparison",
+            path=member,
             bucket="preds",
             iou_threshold=IOU_THRESHOLD,
-        )
-        assert "capture_001.bandgroup" in result["error"], (source, result)
+        ),
+    ):
+        result = visualize(tmp_path, render)
+        assert "capture_001.bandgroup" in result["error"], (render, result)
         assert "name the manifest" in result["error"]
 
 
 def test_viz_dataset_sample_folds_a_grouped_capture_into_one_entry(
     tmp_path: Path, grouped_dataset: Path
 ) -> None:
-    from tcip_mcp.tools.vision_tools import visualize
+    from tcip_mcp.tools.vision_tools import DatasetRender, visualize
 
     result = visualize(
-        tmp_path, source="dataset", path=str(grouped_dataset), n=16
+        tmp_path,
+        DatasetRender(source="dataset", path=str(grouped_dataset), n=16),
     )
     assert "error" not in result
     assert (
@@ -393,6 +406,7 @@ def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(
             holdout_ratio=0.125,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     assert "error" not in result, result
 

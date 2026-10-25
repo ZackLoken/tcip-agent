@@ -211,7 +211,9 @@ def test_a_coco_import_writes_every_document_or_none(
 
     stated = {"vertex_spacing": VERTEX_SPACING, "rationale": RATIONALE}
     with pytest.raises(ts.StoreError):
-        import_coco_document(document, root, date=DATE, project=root, **stated)
+        import_coco_document(
+            document, root, date=DATE, project=root, **stated, actor=None
+        )
 
     assert [ts.exists(image_label_key(p)) for p in images] == [False] * len(
         images
@@ -220,7 +222,7 @@ def test_a_coco_import_writes_every_document_or_none(
 
     monkeypatch.setattr(audit, "audit_entry", real_entry)
     imported = import_coco_document(
-        document, root, date=DATE, project=root, **stated
+        document, root, date=DATE, project=root, **stated, actor=None
     )
 
     assert imported["written"] == list(STEMS)
@@ -255,6 +257,7 @@ def test_an_import_refuses_over_a_present_record_whatever_it_holds(
             vertex_spacing=VERTEX_SPACING,
             rationale=RATIONALE,
             project=root,
+            actor=None,
         )
 
     assert ts.read(image_label_key(images[-1])) is None

@@ -174,15 +174,17 @@ def test_the_vocabulary_still_loads_through_the_relocated_path() -> None:
 def test_import_tcip_mcp_server_succeeds_and_registers_serve_domain_knowledge() -> (
     None
 ):
-    import tcip_mcp.server as server
+    from tcip_web.cli import tool_listing
 
-    assert "serve_domain_knowledge" in server.list_registered_tools()
+    assert "serve_domain_knowledge" in {t.name for t in tool_listing()}
 
 
 def test_the_registered_tool_description_names_every_document() -> None:
-    from tcip_mcp.server import build_server
+    from tcip_mcp.server import Session, build_server
 
-    tools = {t.name: t for t in build_server(None)._tool_manager.list_tools()}
+    tools = {
+        t.name: t for t in build_server(Session())._tool_manager.list_tools()
+    }
     tool = tools["serve_domain_knowledge"]
     assert (
         "Without a name it returns the index of names and descriptions below; with a name "

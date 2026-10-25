@@ -33,13 +33,19 @@ def test_read_audit_log_filters_by_tool_and_status_newest_first(
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     ok = write_subject_registry(
-        project, str(dataset_root), subjects=_subjects()
+        project, str(dataset_root), subjects=_subjects(), actor=None
     )
     assert "error" not in ok, ok
-    failed = write_subject_registry(project, str(dataset_root), subjects={})
+    failed = write_subject_registry(
+        project, str(dataset_root), subjects={}, actor=None
+    )
     assert "error" in failed, failed
     ok2 = write_subject_registry(
-        project, str(dataset_root), subjects=_subjects(), allow_removals=True
+        project,
+        str(dataset_root),
+        subjects=_subjects(),
+        allow_removals=True,
+        actor=None,
     )
     assert "error" not in ok2, ok2
 
@@ -79,6 +85,7 @@ def test_read_audit_log_limit_states_what_it_truncated(
             str(dataset_root),
             subjects=_subjects(),
             allow_removals=True,
+            actor=None,
         )
         assert "error" not in res, res
 
@@ -96,9 +103,11 @@ def test_read_audit_log_project_default_scope_excludes_dataset_scoped_entries(
     from tcip_mcp.tools.annotation_tools import write_subject_registry
     from tcip_mcp.tools.meta_tools import report_friction
 
-    write_subject_registry(project, str(dataset_root), subjects=_subjects())
+    write_subject_registry(
+        project, str(dataset_root), subjects=_subjects(), actor=None
+    )
     report_friction(
-        project, "unexpected_behavior", "a project-scoped mutation"
+        project, "unexpected_behavior", "a project-scoped mutation", actor=None
     )
 
     project_result = read_audit_log(project, tool="report_friction")
@@ -123,7 +132,7 @@ def test_read_audit_log_refuses_on_a_page_carrying_an_undecodable_entry(
     from tcip_store.file_backend import database_file
 
     assert "error" not in write_subject_registry(
-        project, str(dataset_root), subjects=_subjects()
+        project, str(dataset_root), subjects=_subjects(), actor=None
     )
     conn = sqlite3.connect(
         str(database_file(str(dataset_root.resolve()))), isolation_level=None
@@ -165,7 +174,7 @@ def test_read_audit_log_resolves_an_inner_path_to_its_dataset_root(
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     assert "error" not in write_subject_registry(
-        project, str(dataset_root), subjects=_subjects()
+        project, str(dataset_root), subjects=_subjects(), actor=None
     )
 
     inner = str(dataset_root / "images" / "2026-03-02")

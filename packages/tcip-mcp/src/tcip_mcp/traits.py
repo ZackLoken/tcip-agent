@@ -634,11 +634,12 @@ def propose_trait(
     rationale: str,
     relayed_note: str,
     dataset_root: str = "",
+    actor: str | None,
 ) -> TraitRevision:
-    """Append ``entry`` to its trait's record as a new, unconfirmed revision.
+    """Append ``entry`` to its trait's record as a new, unconfirmed revision, proposed by ``actor``.
 
-    The record is created for a trait the project does not have yet; the proposal's audit line is
-    written after it.
+    The record is created for a trait the project does not have yet; the proposal's audit line,
+    by ``actor`` (``None`` for none), is written after it.
 
     Refuses an entry :func:`check_proposed_entry` refuses, and a ``state_crossing_dates``
     operationalization whose positive state names an attribute the registry
@@ -698,7 +699,7 @@ def propose_trait(
             "revision": revision.number,
             "entry_sha256": revision.entry_sha256,
         },
-        actor=None,
+        actor=actor,
         scope=project,
     )
     return revision

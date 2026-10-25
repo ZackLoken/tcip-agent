@@ -236,6 +236,7 @@ def _assessed(tmp_path: Path, builder: str) -> dict:
             holdout_ratio=0.25,
             grouping="tile_prefix",
         ),
+        actor=None,
     )
     assert "error" not in drawn, drawn
     confirm_count_trait(tmp_path)

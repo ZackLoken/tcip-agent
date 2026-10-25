@@ -51,12 +51,19 @@ def tool(
     return decorate
 
 
-class _Session:
-    """The project a running server acts on, ``None`` until it has one."""
+class Session:
+    """The project a server's calls act on and the person they are made by, until bound none."""
 
-    def __init__(self, binding: BoundProject | None) -> None:
-        """Hold ``binding``, the project the server was started for, or ``None``."""
-        self.binding = binding
+    binding: BoundProject | None = None
+    actor: str | None = None
+
+    def bind(self, binding: BoundProject | None, actor: str | None) -> None:
+        """Make ``binding`` the project and ``actor`` the person of every call from now on.
+
+        ``actor`` is :func:`~tcip_mcp.identity.actor`'s spelling, ``None`` for calls no person
+        makes, an MCP client's.
+        """
+        self.binding, self.actor = binding, actor
 
 
 def binding_for(project: str | Path) -> BoundProject:
@@ -96,17 +103,17 @@ import tcip_mcp.tools.vision_tools  # noqa: F401, E402
 
 _CONTEXT = ("project", "bound", "actor")
 """The parameters the server supplies and no client states: ``project``, the bound project's
-directory; ``bound``, the :class:`~tcip_mcp.workspace.BoundProject` whole; ``actor``, ``None``."""
+directory; ``bound``, the :class:`~tcip_mcp.workspace.BoundProject` whole; ``actor``, the
+person the server's calls are made by, ``None`` for an MCP client's."""
 
 
-def _bound(fn: Callable[..., Any], session: _Session) -> Callable[..., Any]:
+def _bound(fn: Callable[..., Any], session: Session) -> Callable[..., Any]:
     """Return ``fn`` as the server registers it.
 
     Each :data:`_CONTEXT` parameter it takes is registered without it, every call passing the
-    server's own value as ``session`` holds it at the call, since no person makes an act an MCP
-    client calls and the project is the server's. While the session has no project, a call to a
-    function taking one raises :class:`NoProjectError` naming ``initialize_project`` and
-    ``--project``.
+    server's own value as ``session`` holds it at the call. While the session has no project, a
+    call to a function taking ``project`` or ``bound`` raises :class:`NoProjectError` naming
+    ``initialize_project`` and ``--project``.
     """
     sig = inspect.signature(fn, eval_str=True)
     bound = set(_CONTEXT) & sig.parameters.keys()
@@ -116,13 +123,15 @@ def _bound(fn: Callable[..., Any], session: _Session) -> Callable[..., Any]:
     @functools.wraps(fn)
     def entry(*args: object, **kwargs: object) -> object:
         binding = session.binding
-        if binding is None:
+        values: dict[str, object] = {"actor": session.actor}
+        if binding is not None:
+            values |= {"project": binding.root, "bound": binding}
+        elif bound - values.keys():
             raise NoProjectError(
                 "this MCP server has no project, so no tool that acts on one can run; "
                 "create one with initialize_project, which this server then acts on, or "
                 "restart it with --project <path> naming an existing one"
             )
-        values = {"project": binding.root, "bound": binding, "actor": None}
         return fn(*args, **{name: values[name] for name in bound}, **kwargs)
 
     entry.__signature__ = sig.replace(  # type: ignore[attr-defined]
@@ -134,7 +143,7 @@ def _bound(fn: Callable[..., Any], session: _Session) -> Callable[..., Any]:
 
 
 def _creating(
-    fn: Callable[..., dict], session: _Session
+    fn: Callable[..., dict], session: Session
 ) -> Callable[..., dict]:
     """Return the project-creation door ``fn`` as the server registers it.
 
@@ -149,47 +158,66 @@ def _creating(
         result = fn(*args, **kwargs)
         if "error" in result:
             return result
-        if session.binding is None:
-            session.binding = binding_for(result["project_path"])
-        return {**result, "session_project": str(session.binding.root)}
+        binding = session.binding
+        if binding is None:
+            binding = binding_for(result["project_path"])
+            session.bind(binding, session.actor)
+        return {**result, "session_project": str(binding.root)}
 
     return entry
 
 
-def build_server(binding: BoundProject | None) -> MCPServer:
-    """Return a server registering every declared tool.
+def build_server(session: Session) -> MCPServer:
+    """Return a server registering every declared tool, each call acting in ``session``.
 
-    Each tool acts on the project of ``binding``; with ``None``, the server is started for no
-    project, only the tools taking no :data:`_CONTEXT` parameter can run, and from the first
-    project its creation door creates, every tool acts on that one.
+    Each call acts on the project ``session`` is bound to at that call and is made by its person
+    (:class:`Session`). With no project bound, only the tools taking neither ``project`` nor
+    ``bound`` can run, and from the first project the creation door creates, every tool acts on
+    that one.
     """
     server = MCPServer(
         "tcip-pipeline", lifespan=agent_identity.session_lifespan
     )
     # Records which harness connected, from the handshake, before any tool call is served.
     server.middleware.append(agent_identity.record_connecting_client)
-    session = _Session(binding)
     for fn, description, creates_project in _TOOLS:
-        registered = (
-            _creating(fn, session) if creates_project else _bound(fn, session)
-        )
+        registered = _bound(fn, session)
+        if creates_project:
+            registered = _creating(registered, session)
         server.add_tool(registered, description=description)
     return server
 
 
-def list_registered_tools() -> list[str]:
-    """Return the sorted names of all tools a server registers."""
-    return sorted(fn.__name__ for fn, _description, _creates in _TOOLS)
+def server_for(session: Session) -> MCPServer:
+    """Bind this process's store and return the server acting in ``session``, not yet running.
+
+    The process's GDAL cache is sized here, once, at the entry point.
+    """
+    from tcip_mcp.pipelines.raster_source import configure_gdal_cache
+    from tcip_store import bind
+
+    bind()
+    configure_gdal_cache()
+    return build_server(session)
+
+
+def project_binding(project: str | None) -> BoundProject | None:
+    """Return the binding of the project an entry point's ``--project`` names, ``None`` for none.
+
+    The binding is :func:`binding_for`'s, with the workspace ``TCIP_WORKSPACE`` names. Exits
+    naming the path when ``project`` names a directory holding no project record; refuses what
+    :func:`~tcip_mcp.workspace.workspace_from_environment` refuses.
+    """
+    if project is None:
+        return None
+    try:
+        return binding_for(project)
+    except ValueError as exc:
+        raise SystemExit(f"--project: {exc}") from exc
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Start the MCP server on stdio.
-
-    The server is for ``--project`` and the workspace ``TCIP_WORKSPACE`` names
-    (:func:`binding_for`), or for no project and no workspace when ``--project`` is omitted.
-    Exits naming the path when ``--project`` names a directory holding no project record; refuses
-    what :func:`~tcip_mcp.workspace.workspace_from_environment` refuses when a project is named.
-    """
+    """Start the server :func:`server_for` returns on stdio, bound to ``--project``, no person."""
     parser = argparse.ArgumentParser(prog="python -m tcip_mcp")
     parser.add_argument(
         "--project",
@@ -197,19 +225,8 @@ def main(argv: list[str] | None = None) -> None:
         help="the project every project tool acts on; omitted, only the tools "
         "that need no project run",
     )
-    args = parser.parse_args(argv)
-
-    from tcip_store import bind
-
-    bind()
-    binding = None
-    if args.project is not None:
-        try:
-            binding = binding_for(args.project)
-        except ValueError as exc:
-            raise SystemExit(f"--project: {exc}") from exc
-    # Size GDAL's block cache once per process, at the entry point, never at source construction.
-    from tcip_mcp.pipelines.raster_source import configure_gdal_cache
-
-    configure_gdal_cache()
-    build_server(binding).run(transport="stdio")
+    project = parser.parse_args(argv).project
+    session = Session()
+    server = server_for(session)
+    session.bind(project_binding(project), None)
+    server.run(transport="stdio")

@@ -344,6 +344,7 @@ def test_the_listing_reads_a_stated_rotation_angle_back_as_degrees(
         "currant_bud_rotation",
         "north orchard",
         CaptureInvariances.model_validate(answers),
+        actor=None,
     )
     assert "error" not in created, created
 

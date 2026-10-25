@@ -7,6 +7,7 @@ import shutil
 import uuid
 import zipfile
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
 
@@ -97,8 +98,12 @@ def upsert_dataset(project: str | Path, entry: DatasetEntry) -> None:
 
 @tool()
 @audited(scope_arg="dataset_root")
-def register_dataset(project: Path, dataset_root: str, crop: Text) -> dict:
+def register_dataset(
+    project: Path, dataset_root: str, crop: Text, *, actor: str | None
+) -> dict:
     """Record a dataset's identity with the dataset, and its id and path in the project's registry.
+
+    The registration is ``actor``'s.
 
     The identity is ``{crop, id, fingerprint}``, and the path the registry holds is
     :func:`~tcip_mcp.registry_paths.stored_path`'s. ``id`` is minted once and kept across re-runs
@@ -164,18 +169,131 @@ def register_dataset(project: Path, dataset_root: str, crop: Text) -> dict:
     return {"dataset_root": str(root), **identity}
 
 
+class RegisteredPath(BaseModel):
+    """One path the project's dataset registry holds for a checked dataset's id, and its state.
+
+    ``in_place`` is the checked root itself, ``moved`` another path holding the same identity,
+    ``diverged`` one holding another identity (``identity``), and ``gone`` one holding no
+    readable identity (``unreadable`` says why).
+    """
+
+    path: str
+    state: Literal["in_place", "moved", "diverged", "gone"]
+    identity: dict[str, JsonValue] | None = None
+    unreadable: str | None = None
+
+
+class DatasetIdentityCheck(BaseModel):
+    """A dataset root's content checked against its recorded identity.
+
+    ``state`` is ``unchanged`` when the fingerprint recomputed now (``fingerprint``) equals the
+    one its identity records, ``changed`` when it differs (a number reproduced from the dataset is
+    no longer valid), ``never_recorded`` when the identity records none (``register_dataset``
+    stamps one), ``unregistered`` when the root carries no identity (``reason`` says why), and
+    ``no_fingerprint`` when the root yields none (no images or labels, bespoke or empty).
+    ``registered`` is every path the project's registry holds for the identity's id.
+    """
+
+    dataset_root: str
+    state: Literal[
+        "unchanged",
+        "changed",
+        "never_recorded",
+        "unregistered",
+        "no_fingerprint",
+    ]
+    fingerprint: str | None = None
+    identity: dict[str, JsonValue] | None = None
+    reason: str | None = None
+    registered: list[RegisteredPath] = []
+
+
+@tool()
+def check_dataset_identity(
+    project: Path, dataset_root: str
+) -> DatasetIdentityCheck:
+    """Check a dataset's content against its recorded identity, to detect changed or moved data.
+
+    Recomputes the dataset's fingerprint (the authority, touching every image on disk) and
+    compares it to the one its ``dataset.json`` records, then reads the identity at each path
+    the project's dataset registry holds for the same id and compares it record to record.
+
+    Args:
+        dataset_root: The dataset root (:func:`~tcip_mcp.registry_paths.located` against the
+            project).
+
+    """
+    from tcip_mcp.dataset_layout import require_dataset_identity
+    from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
+
+    root = located(dataset_root, project)
+    current = dataset_fingerprint(root)
+    if current is None:
+        return DatasetIdentityCheck(
+            dataset_root=str(root), state="no_fingerprint"
+        )
+    try:
+        identity = require_dataset_identity(root)
+    except ValueError as exc:
+        return DatasetIdentityCheck(
+            dataset_root=str(root),
+            state="unregistered",
+            fingerprint=current,
+            reason=str(exc),
+        )
+    recorded = identity["fingerprint"]
+    registered: list[RegisteredPath] = []
+    for entry in read_datasets(project):
+        if entry.id != identity["id"]:
+            continue
+        entry_path = dataset_entry_path(project, entry)
+        try:
+            there = require_dataset_identity(entry_path)
+        except (ValueError, OSError) as exc:
+            registered.append(
+                RegisteredPath(
+                    path=str(entry_path), state="gone", unreadable=str(exc)
+                )
+            )
+            continue
+        registered.append(
+            RegisteredPath(
+                path=str(entry_path),
+                state="diverged"
+                if there != identity
+                else "in_place"
+                if entry_path.resolve() == root
+                else "moved",
+                identity=there,
+            )
+        )
+    return DatasetIdentityCheck(
+        dataset_root=str(root),
+        state="never_recorded"
+        if recorded is None
+        else "unchanged"
+        if recorded == current
+        else "changed",
+        fingerprint=current,
+        identity=identity,
+        registered=registered,
+    )
+
+
 @tool(creates_project=True)
 def initialize_project(
     project_path: str,
     display_name: str,
     site: str,
     invariances: CaptureInvariances,
+    *,
+    actor: str | None,
 ) -> dict:
     """Create a TCIP project: its ``.tcip/`` directories, its record and one creation log line.
 
     The project gets ``.tcip/`` with its artifacts and models directories, and its record holding
     a freshly minted id, ``display_name``, ``site`` and ``invariances``, then one
-    ``project_created`` line in its own log.
+    ``project_created`` line by ``actor`` in its own log.
 
     Creating a project that already records the same display name, site and invariances answers
     it as it stands; one recording a different site, display name or invariances refuses rather
@@ -208,7 +326,9 @@ def initialize_project(
     tcip = _project_dir(str(project))
     (tcip / "artifacts").mkdir(exist_ok=True)
     (tcip / "models").mkdir(exist_ok=True)
-    record_event_or_raise("project_created", record, actor=None, scope=project)
+    record_event_or_raise(
+        "project_created", record, actor=actor, scope=project
+    )
     return {"project_path": str(project), **record}
 
 

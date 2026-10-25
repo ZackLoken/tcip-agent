@@ -63,8 +63,7 @@ or an object is paired, the classifier calibration's pairing included. Every loa
 it under `iscrowd`, so a `train(ctx)` of your own can act on it.
 
 The per-image document is read by `json_io.read_label_document`, wrapped for the agent by
-`annotation_tools.read_annotations`, a library call, not a tool of its own, and written by
-`save_annotations`. A missing label document reads as no annotations; a present one the reader
+`read_annotations`, and written by `save_annotations`. A missing label document reads as no annotations; a present one the reader
 cannot make sense of raises `json_io.UnreadableLabelDocumentError` naming the document or the
 malformed record's index, rather than reading short: a stored value that does not decode, a
 non-dict document, a completion mark missing any of its fields, an `annotations` value that is
@@ -118,6 +117,7 @@ bearing (denormalizing, cropping, drawing); read the frame and the pixels throug
 | `propose_annotations` | Run a named proposal engine over an image, whole-frame or over named grid cells |
 | `push_panel_event` | Push an arbitrary event to a GUI panel over the tcip-web backend for this server's project, not restricted to images/annotations; delivered only while the GUI has that project open |
 | `prioritize_review_queue` | Rank images by active-learning uncertainty/diversity for the next review batch, skipping those marked finished for a subject |
+| `triage_predictions` | Sort a registered checkpoint's own predictions into a needs-review queue by a stated confidence band and its rationale, beside the images whose predictions carry no confidence at all; writes nothing |
 
 ## Engine-assisted auto-labeling (the engine is a capability, not a fixed method)
 
@@ -200,13 +200,12 @@ Full workflow, one image per call:
    `capture_live_canvas` (the review channel below) → visual QA pass
 
 Visual QA is not optional: read what the person's canvas shows. A rendered image
-(`vision_tools.visualize`, a library call, or `tcip visualize`) is for what the canvas cannot
-draw.
+(`visualize`) is for what the canvas cannot draw.
 
 Corrective loop (for missed objects):
 
-1. `vision_tools.overlay_reference_grid(image_path, overlap=)` (library call, or
-   `tcip overlay-reference-grid`) → labeled reference grid ('A1' top-left) for spatial reference
+1. `overlay_reference_grid(image_path, overlap=)` → labeled reference grid ('A1' top-left) for
+   spatial reference
 2. Agent reads the grid overlay with its own image-capable read tool → identifies missed regions
    by grid cell
 3. `propose_annotations(image_path, engine=<name>, grid_cells=["B3", "D5"], tile_size=<echoed>,
@@ -216,7 +215,7 @@ Corrective loop (for missed objects):
 
 Grid cell system:
 
-- `vision_tools.overlay_reference_grid(image_path, overlap=, tile_size=)` renders square cells of
+- `overlay_reference_grid(image_path, overlap=, tile_size=)` renders square cells of
   `tile_size` native pixels (omitted, it derives a legible default from the image dims) stepping
   by the stated `overlap`, and echoes the full grid geometry back in every response:
   `tile_size`, `overlap`, `cols`, `rows`, `width`, `height`
@@ -231,14 +230,14 @@ Grid cell system:
 |------|------|-------|
 | `propose_annotations` | Propose candidate masks with a named engine, whole-frame or `grid_cells`-scoped | Discovery and correction |
 | `stage_proposals(assignments=...)` | Stage classified candidates as predictions | Classification |
-| `vision_tools.overlay_reference_grid` (library call) | Spatial reference for corrections | Correction |
+| `overlay_reference_grid` | Spatial reference for corrections | Correction |
 | Agent's own image-capable read tool | Agent visual review | All phases |
 
 ## Review Protocol
 
-1. Load ground truth with `annotation_tools.read_annotations` (library call, no MCP tool for it)
+1. Load ground truth with `read_annotations`
 2. Load predictions (from inference or prior annotation)
-3. `annotation_tools.score_predictions` (library call, or `tcip score-predictions`) pairs
+3. `score_predictions` pairs
    predictions to GT through the platform's one matcher, by IoU (over regions when any
    annotation is a polygon) at the `iou_threshold` and `conf_threshold` you state, and returns
    aggregate TP/FP/FN and average

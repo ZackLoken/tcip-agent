@@ -1,10 +1,13 @@
-"""Experiment MCP tools: read one run's directory, and list the project's runs."""
+"""Experiment MCP tools: read one run's directory, list the project's runs, and compare runs."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from tcip_mcp.experiments import compare_experiments
 from tcip_mcp.server import tool
+
+tool()(compare_experiments)
 
 
 @tool()

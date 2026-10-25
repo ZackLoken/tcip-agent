@@ -267,6 +267,7 @@ def ranked_review_queue(
     }
 
 
+@tool()
 def triage_predictions(
     project: Path,
     checkpoint_path: str,

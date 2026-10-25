@@ -38,6 +38,7 @@ def test_a_friction_report_reads_back_as_the_report_its_door_was_handed(
         detail="two captures share one date",
         context={"capture": "2026-05-01"},
         user_disagreement=True,
+        actor=None,
     )
 
     assert read_memory(
@@ -61,7 +62,9 @@ def test_a_friction_report_missing_its_category_is_refused_naming_it(
         report_friction,
     )
 
-    result = report_friction(tmp_path, category="missing_tool", detail="x")
+    result = report_friction(
+        tmp_path, category="missing_tool", detail="x", actor=None
+    )
     key = memory_key(FrictionReport, str(tmp_path), result["id"])
     stored = dict(ts.read(key))
     del stored["category"]
@@ -90,6 +93,7 @@ def test_a_retrospective_reads_back_as_the_record_its_door_was_handed(
         knowledge_for_future="k",
         missing_or_hard_tools="m",
         would_do_differently="o",
+        actor=None,
     )
 
     assert read_memory(
@@ -118,7 +122,12 @@ def test_a_retrospective_missing_a_section_is_refused_naming_it(
     )
 
     result = write_retrospective(
-        tmp_path, project_id="p", task="t", worked="w", did_not_work="d"
+        tmp_path,
+        project_id="p",
+        task="t",
+        worked="w",
+        did_not_work="d",
+        actor=None,
     )
     key = memory_key(Retrospective, str(tmp_path), result["id"])
     stored = dict(ts.read(key))
@@ -143,7 +152,7 @@ def test_a_registered_dataset_reads_back_as_the_entry_its_door_registered(
     root = tmp_path / "ds"
     _make_dataset(root)
 
-    result = register_dataset(tmp_path, str(root), crop="currant")
+    result = register_dataset(tmp_path, str(root), crop="currant", actor=None)
 
     assert read_datasets(tmp_path) == [
         DatasetEntry(id=result["id"], path=stored_path(root, tmp_path))
@@ -162,7 +171,7 @@ def test_a_dataset_entry_missing_its_path_is_refused_naming_it(
 
     root = tmp_path / "ds"
     _make_dataset(root)
-    register_dataset(tmp_path, str(root), crop="currant")
+    register_dataset(tmp_path, str(root), crop="currant", actor=None)
     ts.replace(
         dataset_registry_key(tmp_path),
         [{"id": entry.id} for entry in read_datasets(tmp_path)],

@@ -68,7 +68,7 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     finished_run(project, experiment_id="exp-before")
     (project / "ds").mkdir()
     assert "error" not in register_dataset(
-        project, str(project / "ds"), "currant"
+        project, str(project / "ds"), "currant", actor=None
     )
     from tcip_mcp.audit import AUDIT_LOG_STORE
     from tcip_mcp.project_record import PROJECT_RECORD_STORE
@@ -224,6 +224,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
         images_dir=str(project / "data" / "images" / UNDATED_BUCKET),
         bucket=bucket,
         stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS),
+        actor=None,
     )
     assert "error" not in published, published
     other_images = str(project / "data" / "other")

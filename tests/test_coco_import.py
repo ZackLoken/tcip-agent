@@ -63,7 +63,7 @@ def _dataset(tmp_path: Path, stems: tuple[str, ...] = STEMS) -> OpenProject:
             exif=capture_exif(datetime.fromisoformat(DATE)),
         )
     made = named_project(tmp_path / "fruit_count", "Fruit count")
-    ingested = ingest_images(made.root, source=str(raw))
+    ingested = ingest_images(made.root, source=str(raw), actor=None)
     assert "error" not in ingested, ingested
     registered = write_subject_registry(
         made.root,
@@ -72,6 +72,7 @@ def _dataset(tmp_path: Path, stems: tuple[str, ...] = STEMS) -> OpenProject:
             SUBJECT: {"description": "one fruit"},
             "leaf": {"description": "one leaf"},
         },
+        actor=None,
     )
     assert "error" not in registered, registered
     return made
@@ -145,7 +146,13 @@ def _import(document: Path, root: Path) -> dict:
     from tcip_mcp.tools.ingest_tools import import_coco
 
     return import_coco(
-        root, str(document), str(root), DATE, VERTEX_SPACING, RATIONALE
+        root,
+        str(document),
+        str(root),
+        DATE,
+        VERTEX_SPACING,
+        RATIONALE,
+        actor=None,
     )
 
 
@@ -245,6 +252,7 @@ def test_images_sitting_flat_under_images_are_no_capture_to_import_into(
             SUBJECT: {"description": "one fruit"},
             "leaf": {"description": "one leaf"},
         },
+        actor=None,
     )
     assert "error" not in registered, registered
 
@@ -489,6 +497,7 @@ def test_an_existing_per_image_document_refuses_the_whole_import(
         bound_to(made),
         str(image),
         annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}],
+        actor=None,
     )
     before = ts.read_versioned(_label(root, "tree_02")).version
 
@@ -519,6 +528,7 @@ def test_an_unannotated_images_faults_still_refuse_the_import(
         bound_to(made),
         str(image),
         annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}],
+        actor=None,
     )
     images = [
         {
@@ -557,6 +567,7 @@ def test_an_unannotated_images_existing_document_is_kept_and_admits_the_import(
         bound_to(made),
         str(image),
         annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}],
+        actor=None,
     )
     before = ts.read_versioned(_label(root, "tree_03")).version
 
@@ -726,6 +737,7 @@ def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
             vertex_spacing=VERTEX_SPACING,
             rationale=RATIONALE,
             project=root,
+            actor=None,
         )
 
     (kept,) = json_io.read_label_document(_label(root, "tree_02")).annotations
@@ -783,6 +795,7 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(
                 conf=SAMPLE_CONF,
                 rationale="a sample reason the test states",
             ),
+            actor=None,
         )
 
     assert len(calls) == 2
@@ -829,6 +842,7 @@ def test_an_import_that_committed_no_document_leaves_no_event(
             vertex_spacing=VERTEX_SPACING,
             rationale=RATIONALE,
             project=root,
+            actor=None,
         )
     assert _written(root) == ["tree_01"]
     assert not [
@@ -876,6 +890,7 @@ def test_a_date_that_names_no_capture_refuses(
         date,
         VERTEX_SPACING,
         RATIONALE,
+        actor=None,
     )
     assert "error" in result and "names no capture" in result["error"]
 
@@ -1183,6 +1198,7 @@ def test_a_missing_image_is_reported_whatever_document_its_stem_holds(
         bound_to(made),
         str(root / "images" / DATE / "tree_02.png"),
         annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}],
+        actor=None,
     )
     images = [
         {"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},

@@ -44,7 +44,7 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
         datetime(2026, 2, 11, 9, 30),
     )
     register_dataset(
-        tmp_path, str(tmp_path), crop=sorted(registered_crops())[0]
+        tmp_path, str(tmp_path), crop=sorted(registered_crops())[0], actor=None
     )
     csv_path = write_plant_csv(
         tmp_path / "plants.csv",
@@ -59,6 +59,7 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
         images_root=str(images_root),
         plant_registry=registry,
         match_radius=StatedRadius(value=10.0, rationale="the receiver's spec"),
+        actor=None,
     )
 
     assert "error" not in res, res
@@ -95,6 +96,7 @@ def test_build_plant_mapping_missing_images_root(tmp_path: Path) -> None:
         images_root=str(tmp_path / "nope"),
         plant_registry="unregistered",
         name="m",
+        actor=None,
     )
     assert "error" in res
     assert "is not a dataset's own images/ root" in res["error"]
@@ -109,13 +111,14 @@ def test_build_plant_mapping_missing_registry(tmp_path: Path) -> None:
     images_root = tmp_path / "images"
     (images_root / "2026-02-11").mkdir(parents=True)
     register_dataset(
-        tmp_path, str(tmp_path), crop=sorted(registered_crops())[0]
+        tmp_path, str(tmp_path), crop=sorted(registered_crops())[0], actor=None
     )
     res = build_plant_mapping(
         tmp_path,
         images_root=str(images_root),
         plant_registry="does-not-exist",
         name="m",
+        actor=None,
     )
     assert "error" in res
     assert "plant registry not found" in res["error"]
@@ -283,6 +286,7 @@ def test_each_bucket_stands_for_the_date_its_record_states_and_two_on_one_date_r
         bucket=misnamed,
         assessment_id=series.assessment["assessment_id"],
         stated=Stated(),
+        actor=None,
     )
     assert "error" not in published, published
     assert published["date"] == second

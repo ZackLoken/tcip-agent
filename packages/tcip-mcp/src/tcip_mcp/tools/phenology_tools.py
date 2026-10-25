@@ -1,7 +1,8 @@
 """Phenology MCP tools for per-plant phenology delivery.
 
-Three tools over the canonical ``pipelines.postprocessing`` modules:
+The tools over the canonical ``pipelines.postprocessing`` modules:
 
+    shp_to_plant_csv               a plant-locations shapefile → a plant-locations CSV
     register_plant_registry        plant-locations CSVs → a named, registered registry
     build_plant_mapping            geolocated images + a plant registry → a named mapping under
                                    the project
@@ -18,18 +19,115 @@ from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.postprocessing import phenology
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     PlantRegistry,
+    ShapefileField,
     StatedRadius,
 )
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 
 
+def _validate_round_trip(csv_path: Path, n_written: int) -> int:
+    """Read ``csv_path`` back through ``read_plant_csvs`` and fail loudly, naming the cause."""
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        PLANT_CSV_COLUMNS,
+        read_plant_csvs,
+    )
+
+    parsed = read_plant_csvs([csv_path])
+    if len(parsed) == 0:
+        raise ValueError(
+            f"{csv_path}: wrote {n_written} row(s) but read_plant_csvs parsed 0 plant records back "
+            f"from it. The likely cause is a WGS84_centroid_x/WGS84_centroid_y value that failed "
+            f"float() parsing, or a header not matching the expected columns {PLANT_CSV_COLUMNS}."
+        )
+    if len(parsed) != n_written:
+        raise ValueError(
+            f"{csv_path}: wrote {n_written} row(s) but read_plant_csvs parsed only {len(parsed)} "
+            "back; one or more rows' WGS84_centroid_x/WGS84_centroid_y failed float() parsing."
+        )
+    return len(parsed)
+
+
+@tool()
+@audited
+def shp_to_plant_csv(
+    project: Path,
+    shp_path: str,
+    csv_path: str,
+    field_map: dict[ShapefileField, str] | None = None,
+    *,
+    actor: str | None,
+) -> dict:
+    """Convert a plant-locations shapefile to a CSV in ``read_plant_csvs``' schema, by ``actor``.
+
+    Reads through ``plant_mapping.read_plant_shapefile`` (the CRS refusal, the
+    point/polygon/multipolygon geometry rule, the DBF field resolution and truncation): a point's
+    own coordinate, or a polygon's centroid, reprojected to WGS84. Writes its rows under
+    ``PLANT_CSV_COLUMNS``, the header ``read_plant_csv_bytes`` reads, and reads the written CSV
+    back through ``read_plant_csvs`` before answering.
+
+    Args:
+        shp_path: The point or polygon shapefile (:func:`~tcip_mcp.registry_paths.located`
+            against the project).
+        csv_path: Where the CSV is written (located against the project).
+        field_map: Each pass-through record field (``plant_mapping.ShapefileField``) to the
+            source attribute it is read from, where the shapefile names it otherwise.
+
+    Returns ``{csv_path, n_features, n_parsed, geometry_kinds, missing_fields,
+    skipped_null_geometry}``: ``n_features`` the rows written, which excludes the null-geometry
+    features ``skipped_null_geometry`` counts, and ``missing_fields`` every column with no source
+    attribute, written empty. Refuses (``{"error": ...}``) a source with no resolvable CRS, a
+    feature whose geometry is neither point, polygon nor multipolygon, and zero features with
+    readable geometry, each before writing, and a written CSV that fails to round-trip.
+
+    """
+    import csv
+
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        PLANT_CSV_COLUMNS,
+        read_plant_shapefile,
+    )
+
+    source, target = located(shp_path, project), located(csv_path, project)
+    try:
+        result = read_plant_shapefile(source, field_map=field_map)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    if not result.rows:
+        return {
+            "error": f"{source}: zero features with readable geometry; nothing to convert."
+        }
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=PLANT_CSV_COLUMNS)
+        writer.writeheader()
+        writer.writerows(result.rows)
+    try:
+        n_parsed = _validate_round_trip(target, len(result.rows))
+    except ValueError as exc:
+        return {"error": str(exc)}
+    return {
+        "csv_path": str(target),
+        "n_features": len(result.rows),
+        "n_parsed": n_parsed,
+        "geometry_kinds": result.geometry_kinds,
+        "missing_fields": result.missing_fields,
+        "skipped_null_geometry": result.skipped_null_geometry,
+    }
+
+
 @tool()
 @audited
 def register_plant_registry(
-    project: Path, name: str, csv_paths: list[str], *, crop: str, site: str
+    project: Path,
+    name: str,
+    csv_paths: list[str],
+    *,
+    crop: str,
+    site: str,
+    actor: str | None,
 ) -> PlantRegistry | dict[str, str]:
-    """Register a plant-locations CSV set under a name in this project.
+    """Register a plant-locations CSV set under a name in this project, by ``actor``.
 
     Reads every path in ``csv_paths`` through ``read_plant_csvs``, one file at a time, and refuses
     naming any file that parses to no georeferenced, named plant. The stored, frozen,
@@ -50,7 +148,7 @@ def register_plant_registry(
         site: The site or block these plants are of. The expert's fact, never inferred.
 
     Refuses (``{"error": ...}``) naming any missing file, naming any shapefile part by suffix
-    (``.shp``/``.shx``/``.dbf``/``.prj``; convert it first with ``tcip shp-to-plant-csv``), naming
+    (``.shp``/``.shx``/``.dbf``/``.prj``; convert it first with :func:`shp_to_plant_csv`), naming
     any file that parsed no georeferenced, named plant or is not UTF-8 text, and naming a name
     conflict's two digests or a name outside ``NAME_SEGMENT``. This does not require a project
     record.
@@ -72,8 +170,8 @@ def register_plant_registry(
             "error": (
                 f"{shapefile_paths} look like shapefile parts, not plant-locations CSVs (this "
                 "registry re-verifies and re-parses each file from its own one-snapshot bytes at "
-                "delivery, which a multi-file shapefile has no single-file form for); run "
-                "tcip shp-to-plant-csv <plants.shp> <plants.csv> and register the CSV instead"
+                "delivery, which a multi-file shapefile has no single-file form for); convert "
+                "it with shp_to_plant_csv and register the CSV instead"
             )
         }
 
@@ -98,8 +196,12 @@ def build_plant_mapping(
     dates: list[str] | None = None,
     match_radius: StatedRadius | None = None,
     supersede: bool = False,
+    *,
+    actor: str | None,
 ) -> dict:
     """Assign each geolocated image to a plant, then persist the mapping under this project.
+
+    The build is ``actor``'s.
 
     Orders each date's images by EXIF capture time (the walker's sequence), splits into row runs on
     large GPS jumps, and assigns along the row, falling back to nearest-neighbor when the sequence
@@ -149,7 +251,7 @@ def build_plant_mapping(
             dates=dates,
             match_radius=match_radius,
             supersede=supersede,
-            actor=None,
+            actor=actor,
         ).served()
     except plant_mapping.MappingRebuildError as exc:
         return {"error": str(exc), "citing_events": exc.event_ids}
@@ -171,10 +273,13 @@ def deliver_phenology_milestones(
     output_csv_path: str,
     plants: list[str],
     acknowledgment_id: str | None = None,
+    *,
+    actor: str | None,
 ) -> dict:
     """Deliver per-plant phenology milestones from prediction buckets and a plant mapping.
 
-    The buckets are ones whose scope declares the positive state's attribute.
+    The buckets are ones whose scope declares the positive state's attribute; the delivery is
+    ``actor``'s.
 
     A phenology milestone is a crossing of the fraction of a plant's detected objects a classifier
     calls the trait's positive class, read under the crossing rule the trait's latest confirmed
@@ -222,7 +327,7 @@ def deliver_phenology_milestones(
             output_path=located(output_csv_path, project),
             acknowledgment_id=acknowledgment_id,
             door="deliver_phenology_milestones",
-            actor=None,
+            actor=actor,
         )
     except phenology.measurement_refusals() as exc:
         return {"error": str(exc)}

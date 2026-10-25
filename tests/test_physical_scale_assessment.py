@@ -92,7 +92,7 @@ def _reference(
         ),
     )
     assert "error" not in register_dataset(
-        project, str(root), crop=sorted(registered_crops())[0]
+        project, str(root), crop=sorted(registered_crops())[0], actor=None
     )
     rows = []
     for i in range(n):
@@ -131,6 +131,7 @@ def _reference(
             calibration_ratio=0.25,
             holdout_ratio=0.25,
         ),
+        actor=None,
     )
     assert "error" not in drawn, drawn
     return selection, csv_path
@@ -169,6 +170,7 @@ def _calibrate(
         reference_csv=str(csv_path),
         unit=unit,
         reference_subject=SUBJECT,
+        actor=None,
     )
 
 

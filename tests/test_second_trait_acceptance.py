@@ -90,6 +90,7 @@ def _currant_bloom_body(tmp_path: Path) -> dict:
         name="valley",
         images_root=str(images_root),
         plant_registry=registry,
+        actor=None,
     )
     assert "error" not in built, built
     _seed_currant_bloom_trait(tmp_path)
