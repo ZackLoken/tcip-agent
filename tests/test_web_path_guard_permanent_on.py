@@ -18,10 +18,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 import tcip_store
-from tcip_mcp.audit import audit_log_key
 from tcip_mcp.tools.project_tools import DatasetEntry, upsert_dataset
 from tcip_web.paths import assert_path_allowed
 from tcip_web.state import store
+from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import write_image
 from tests._trait_fixtures import BUD_OPENING, propose, seed_confirmed_crossing
 from tests._web_fixtures import new_project, open_new_project
@@ -360,8 +360,8 @@ def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
     assert resp.status_code == 403
     assert not (b / "results_export").exists()
     assert not any(
-        r["tool"] in ("results.export_csv", "delivery_event")
-        for r in tcip_store.read_log(audit_log_key(b)).records
+        audit_rows(b, tool)
+        for tool in ("results.export_csv", "delivery_event")
     )
 
 
@@ -435,11 +435,7 @@ def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
         json={**payload, "plant_registry": moved_registry},
     )
     assert ok.status_code == 200, ok.text
-    built = [
-        r
-        for r in tcip_store.read_log(audit_log_key(tmp_path)).records
-        if r["tool"] == "plant_mapping_built"
-    ]
+    built = audit_rows(tmp_path, "plant_mapping_built")
     assert len(built) == 2
     arguments = built[-1]["arguments"]
     assert isinstance(arguments, dict)

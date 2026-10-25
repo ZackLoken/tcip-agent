@@ -12,11 +12,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-import tcip_store as ts
-
 torch = pytest.importorskip("torch")
 
-from tcip_mcp.audit import audit_log_key  # noqa: E402
 from tcip_mcp.experiments import observe_run  # noqa: E402
 from tcip_mcp.pipelines.model_build import (
     CONFIG_KEY,
@@ -27,7 +24,7 @@ from tcip_mcp.pipelines.training.envelope import (
     TrainContext,
     run_training_envelope,
 )  # noqa: E402
-from tests._audit_fixtures import refuse_audit_appends  # noqa: E402
+from tests._audit_fixtures import audit_rows, refuse_audit_appends  # noqa: E402
 from tests._producer_fixtures import dataset_over  # noqa: E402
 from tests._training_values import (  # noqa: E402
     adamw_optimizer,
@@ -43,10 +40,9 @@ from tests._verified_checkpoint_fixtures import (  # noqa: E402
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable
     from typing import NoReturn, TypedDict, Unpack
 
-    from pydantic import JsonValue
     from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.training.run_registry import TrainRun
@@ -57,13 +53,6 @@ if TYPE_CHECKING:
         val_loader: DataLoader | None
         resume_from: str
         epoch_hook: Callable[[int, dict], None] | None
-
-
-def _audit_events(
-    root: Path, tool: str = "training_run"
-) -> list[Mapping[str, JsonValue]]:
-    events = ts.read_log(audit_log_key(root)).records
-    return [e for e in events if e.get("tool") == tool]
 
 
 def _context(
@@ -143,7 +132,7 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(
     assert "model_source" not in best
 
     # Body is bracketed on the append-only audit log (open running + close completed).
-    events = _audit_events(tmp_path)
+    events = audit_rows(tmp_path, "training_run")
     assert [e["status"] for e in events] == ["running", "completed"]
     arguments = events[-1]["arguments"]
     assert isinstance(arguments, dict)
@@ -183,7 +172,9 @@ def test_a_run_whose_closing_audit_line_is_refused_ends_failed_naming_it(
     assert final.state == "failed"
     assert "audit entry could not be written" in final.status_error
     assert completed_checkpoint(run_dir) is None
-    assert [e["status"] for e in _audit_events(tmp_path)] == ["running"]
+    assert [e["status"] for e in audit_rows(tmp_path, "training_run")] == [
+        "running"
+    ]
 
 
 def _agent_train_raises(ctx: TrainContext) -> NoReturn:
@@ -230,7 +221,7 @@ def test_envelope_default_tag_with_no_override_fails_run_and_completes_nothing(
     status_error = observe_run(run_dir).status_error
     assert status_error is not None and "final weights" in status_error
     assert completed_checkpoint(run_dir) is None
-    events = _audit_events(tmp_path)
+    events = audit_rows(tmp_path, "training_run")
     assert [e["status"] for e in events] == ["running", "failed"]
 
 
@@ -254,7 +245,7 @@ def test_envelope_declared_deliverable_never_written_fails_run_and_completes_not
     status_error = observe_run(run_dir).status_error
     assert status_error is not None and "'never_written'" in status_error
     assert completed_checkpoint(run_dir) is None
-    events = _audit_events(tmp_path)
+    events = audit_rows(tmp_path, "training_run")
     assert [e["status"] for e in events] == ["running", "failed"]
 
 
@@ -452,5 +443,5 @@ def test_envelope_default_path_runs_default_train_and_audits(
     # custom loop uses.
     assert captured["epoch_callback"] == ctx.log_metrics
     assert captured["batch_callback"] == ctx.log_batch
-    events = _audit_events(tmp_path)
+    events = audit_rows(tmp_path, "training_run")
     assert [e["status"] for e in events] == ["running", "completed"]

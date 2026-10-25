@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from tests._audit_fixtures import AUDIT_ENTRY_KEYS
+from tests._audit_fixtures import AUDIT_ENTRY_KEYS, audit_rows
 from tests._mapping_fixtures import write_plant_csv
 
 PLANTS = [
@@ -242,12 +242,11 @@ def test_the_route_and_the_tool_build_one_mapping_with_one_audit_line_each(
     import json
 
     import tcip_store
-    from tcip_mcp.audit import audit_log_key
     from tcip_mcp.pipelines.postprocessing import plant_mapping
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
 
     payload = _capture_fixture(tmp_path)
-    before = len(tcip_store.read_log(audit_log_key(tmp_path)).records)
+    before = len(audit_rows(tmp_path))
     resp = client.post("/api/results/plant_mapping/build", json=payload)
     assert resp.status_code == 200, resp.text
     tool_answer = build_plant_mapping(
@@ -275,7 +274,7 @@ def test_the_route_and_the_tool_build_one_mapping_with_one_audit_line_each(
     )
     assert own(route_record) == own(tool_record)
 
-    lines = tcip_store.read_log(audit_log_key(tmp_path)).records[before:]
+    lines = audit_rows(tmp_path)[before:]
     assert [line["tool"] for line in lines] == ["plant_mapping_built"] * 2
     route_arguments, tool_arguments = (line["arguments"] for line in lines)
     assert isinstance(route_arguments, dict)

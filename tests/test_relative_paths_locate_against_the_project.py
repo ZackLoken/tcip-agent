@@ -137,7 +137,7 @@ def _draw_splits(project: Path) -> Path:
         actor=None,
     )
     assert "error" not in result, result
-    (row,) = [r for r in audit_rows(project) if r["tool"] == "draw_splits"]
+    (row,) = audit_rows(project, "draw_splits")
     assert row["arguments"]["folder_path"] == str(project.resolve())
     return Path(row["arguments"]["output_path"])
 
@@ -557,7 +557,7 @@ def test_a_scoped_door_locates_its_callers_spelling_once(
     import tcip_mcp.audit as audit
     import tcip_mcp.registry_paths as registry_paths
     import tcip_mcp.tools.project_tools as project_tools
-    import tcip_store as ts
+    from tests._audit_fixtures import audit_rows
     from tests._web_fixtures import new_project
     from tests.test_check_dataset_identity_script import _real_dataset
 
@@ -577,8 +577,7 @@ def test_a_scoped_door_locates_its_callers_spelling_once(
     )
 
     assert spellings.count("ds") == 1, spellings
-    rows = ts.read_log(audit.audit_log_key((project / "ds").resolve())).records
-    (row,) = [r for r in rows if r["tool"] == "register_dataset"]
+    (row,) = audit_rows((project / "ds").resolve(), "register_dataset")
     arguments = row["arguments"]
     assert isinstance(arguments, dict) and arguments["dataset_root"] == "ds"
 
@@ -1176,7 +1175,7 @@ def test_a_resumed_run_records_the_project_rooted_checkpoint(
 
     assert "error" not in result, result
     assert read_run(Path(result["output_dir"])).resume_from == expected
-    (row,) = [r for r in audit_rows(project) if r["tool"] == "launch_training"]
+    (row,) = audit_rows(project, "launch_training")
     assert row["arguments"]["resume_from"] == expected
 
 

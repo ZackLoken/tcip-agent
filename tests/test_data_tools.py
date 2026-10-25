@@ -22,6 +22,7 @@ from tcip_mcp.pipelines.data.selection import (
 )
 from tcip_mcp.tools import doctor_tools as doctor
 from tcip_mcp.tools.data_tools import draw_splits, scan_dataset
+from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import label_image, registry_over
 from tests._training_values import RATIONALE, drawn_split
 
@@ -666,24 +667,18 @@ def test_shares_leaving_train_nothing_refuse_naming_every_share(
 def test_a_dry_draw_leaves_no_audit_line_and_a_written_selection_leaves_one(
     tmp_path: Path,
 ) -> None:
-    import tcip_mcp.audit as audit
-
     root = _multi_source_dataset(tmp_path / "ds")
 
-    def lines() -> list[dict]:
-        return [
-            row
-            for row in ts.read_log(audit.audit_log_key(tmp_path)).records
-            if row["tool"] == "draw_splits"
-        ]
-
     assert "error" not in _draw(tmp_path, str(root), seed=1, subject="bud")
-    assert lines() == []
+    assert audit_rows(tmp_path, "draw_splits") == []
     out = tmp_path / "m"
     assert "error" not in _draw(
         tmp_path, str(root), seed=1, subject="bud", output_path=str(out)
     )
-    assert [row["arguments"]["output_path"] for row in lines()] == [str(out)]
+    assert [
+        row["arguments"]["output_path"]
+        for row in audit_rows(tmp_path, "draw_splits")
+    ] == [str(out)]
 
 
 def test_draw_splits_selection_carries_all_four_sides(tmp_path: Path) -> None:
@@ -727,8 +722,6 @@ def test_a_draw_stating_no_share_grouping_stratification_or_reason_refuses_namin
     naming it and writes no selection, and the same draw stating each writes a selection, and an
     audit line, recording the shares, the stratification and the reason.
     """
-    import tcip_mcp.audit as audit
-
     root = _multi_source_dataset(tmp_path / "ds")
     stated = drawn_split(
         seed=1,
@@ -774,11 +767,7 @@ def test_a_draw_stating_no_share_grouping_stratification_or_reason_refuses_namin
         True,
         RATIONALE,
     )
-    (line,) = [
-        row["arguments"]
-        for row in ts.read_log(audit.audit_log_key(tmp_path)).records
-        if row["tool"] == "draw_splits"
-    ]
+    (line,) = [row["arguments"] for row in audit_rows(tmp_path, "draw_splits")]
     assert isinstance(line, dict)
     assert (
         line["ratios"],

@@ -18,7 +18,6 @@ import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_annotation.verdicts import read_verdicts
-from tcip_mcp.audit import audit_log_key
 from tcip_mcp.dataset_layout import (
     Gestures,
     image_dir,
@@ -27,6 +26,7 @@ from tcip_mcp.dataset_layout import (
     verdict_key_of,
 )
 from tcip_mcp.subject_registry import Subject, SubjectRegistry
+from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import (
     image_label_key,
     label_image,
@@ -59,12 +59,6 @@ def _capture(root: Path) -> list[Path]:
         Image.new("RGB", (SIZE, SIZE), (40 + 30 * i, 60, 60)).save(path)
         images.append(path)
     return images
-
-
-def _audit_tools(root: Path) -> list[str]:
-    return [
-        entry["tool"] for entry in ts.read_log(audit_log_key(root)).records
-    ]
 
 
 def _save(
@@ -119,7 +113,7 @@ def test_a_save_commits_its_verdicts_and_its_document_together_or_neither(
         tmp_path, image, [{"subject": BUD, "bbox": [1.0, 1.0, 9.0, 9.0]}]
     )
     _save(tmp_path, image, [], expect=first)
-    saves = _audit_tools(tmp_path).count("save_label_document")
+    saves = len(audit_rows(tmp_path, "save_label_document"))
 
     with pytest.raises(ts.VersionConflictError):
         _save(
@@ -134,7 +128,7 @@ def test_a_save_commits_its_verdicts_and_its_document_together_or_neither(
     assert (
         json_io.read_label_document(image_label_key(image)).annotations == []
     )
-    assert _audit_tools(tmp_path).count("save_label_document") == saves
+    assert len(audit_rows(tmp_path, "save_label_document")) == saves
 
     current = ts.read_versioned(image_label_key(image)).version
     _save(
@@ -150,7 +144,7 @@ def test_a_save_commits_its_verdicts_and_its_document_together_or_neither(
         len(json_io.read_label_document(image_label_key(image)).annotations)
         == 1
     )
-    assert _audit_tools(tmp_path).count("save_label_document") == saves + 1
+    assert len(audit_rows(tmp_path, "save_label_document")) == saves + 1
 
 
 # ── the COCO import door ───────────────────────────────────────────────────
@@ -218,7 +212,7 @@ def test_a_coco_import_writes_every_document_or_none(
     assert [ts.exists(image_label_key(p)) for p in images] == [False] * len(
         images
     )
-    assert "coco_document_imported" not in _audit_tools(root)
+    assert audit_rows(root, "coco_document_imported") == []
 
     monkeypatch.setattr(audit, "audit_entry", real_entry)
     imported = import_coco_document(
@@ -230,7 +224,7 @@ def test_a_coco_import_writes_every_document_or_none(
         len(json_io.read_label_document(image_label_key(p)).annotations)
         for p in images
     ] == [1, 1, 1]
-    assert _audit_tools(root).count("coco_document_imported") == 1
+    assert len(audit_rows(root, "coco_document_imported")) == 1
 
 
 def test_an_import_refuses_over_a_present_record_whatever_it_holds(
@@ -380,12 +374,12 @@ def test_a_publication_commits_whole_and_a_second_of_one_name_writes_nothing(
         for p in images[1:]
     ] == [None] * 4
     assert read_bucket(root, first.name) == first
-    assert _audit_tools(root).count("prediction_bucket_published") == 1
+    assert len(audit_rows(root, "prediction_bucket_published")) == 1
 
     again(f"n/{DATE}", None)
 
     assert sorted(read_bucket(root, f"n/{DATE}").documents) == ["b", "c"]
-    assert _audit_tools(root).count("prediction_bucket_published") == 2
+    assert len(audit_rows(root, "prediction_bucket_published")) == 2
 
 
 # ── the reader that trains ─────────────────────────────────────────────────

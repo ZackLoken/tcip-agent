@@ -660,13 +660,12 @@ def test_a_staging_is_one_publication_with_one_audit_line(
     """
     import inspect
 
-    import tcip_store
-    from tcip_mcp.audit import audit_log_key
     from tcip_mcp.buckets import Document, publish
     from tcip_mcp.tools.proposal_tools import (
         propose_annotations,
         stage_proposals,
     )
+    from tests._audit_fixtures import audit_rows
 
     assert Document._fields == ("source", "data", "dropped")
     assert "Callable" not in str(inspect.signature(publish))
@@ -686,9 +685,5 @@ def test_a_staging_is_one_publication_with_one_audit_line(
     )
 
     assert "error" not in accepted, accepted
-    lines = [
-        e["tool"]
-        for e in tcip_store.read_log(audit_log_key(tmp_path)).records
-        if e["tool"] in ("stage_proposals", "prediction_bucket_published")
-    ]
-    assert lines == ["prediction_bucket_published"]
+    assert len(audit_rows(tmp_path, "prediction_bucket_published")) == 1
+    assert audit_rows(tmp_path, "stage_proposals") == []

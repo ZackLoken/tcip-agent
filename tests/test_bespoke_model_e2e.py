@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tests._audit_fixtures import audit_rows
 from tests._chain_fixtures import (
     FRAME_STATISTICS,
     GT_ANCHOR_DETECTOR,
@@ -49,14 +50,6 @@ from tests._training_values import (  # noqa: E402
 IMG = 64
 
 _save_png = partial(write_noise_image, size=IMG, span=1.0)
-
-
-def _audit_events(root: Path, tool: str = "training_run") -> list[dict]:
-    import tcip_store as ts
-    from tcip_mcp.audit import audit_log_key
-
-    page = ts.read_log(audit_log_key(root))
-    return [record for record in page.records if record.get("tool") == tool]
 
 
 def test_bespoke_detector_end_to_end(tmp_path: Path) -> None:
@@ -176,7 +169,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path) -> None:
     # ---- (b) the custom loop's metrics + the audit bracket were recorded via ctx/envelope ----
     metric_rows = read_rows(out / METRICS_FILE)[0]
     assert metric_rows and all("train_loss" in r for r in metric_rows)
-    events = _audit_events(tmp_path)
+    events = audit_rows(tmp_path, "training_run")
     # opened + closed around the body
     assert [e["status"] for e in events] == ["running", "completed"]
     assert events[-1]["arguments"]["experiment_id"] == "expBespoke"

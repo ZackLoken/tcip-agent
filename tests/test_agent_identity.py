@@ -173,7 +173,7 @@ def test_a_caller_cannot_hand_an_audit_line_another_identity(
     name, not the caller's.
     """
     import tcip_mcp.audit as audit_module
-    import tcip_store as ts
+    from tests._audit_fixtures import audit_rows
 
     monkeypatch.delenv("TCIP_TERMINAL_SESSION", raising=False)
     identity = agent_identity.begin("claude-code", "2.1.238")
@@ -187,10 +187,7 @@ def test_a_caller_cannot_hand_an_audit_line_another_identity(
         agent_client_name="x",
     )
 
-    key = audit_module.audit_log_key(tmp_path)
-    (row,) = [
-        r for r in ts.read_log(key).records if r["tool"] == "identity_probe"
-    ]
+    (row,) = audit_rows(tmp_path, "identity_probe")
     assert row["agent_session"] == identity.agent_session
     assert row["agent_client_name"] == "claude-code"
 

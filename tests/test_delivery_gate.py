@@ -170,10 +170,9 @@ def test_an_acknowledgment_binds_the_rows_and_refuses_once_a_document_changes(
     An act recorded for six detections does not ship twelve: the delivery refuses as another
     result, writes no CSV, and the log holds the one acknowledgment line.
     """
-    import tcip_store
     from tcip_annotation import json_io
-    from tcip_mcp.audit import audit_log_key
     from tcip_mcp.buckets import read_bucket
+    from tests._audit_fixtures import audit_rows
     from tests._chain_fixtures import predicted
 
     bucket = _bucket(
@@ -200,9 +199,7 @@ def test_an_acknowledgment_binds_the_rows_and_refuses_once_a_document_changes(
 
     assert not (tmp_path / "out" / "counts.csv").exists()
     (line,) = [
-        e["arguments"]
-        for e in tcip_store.read_log(audit_log_key(tmp_path)).records
-        if e["tool"] == "delivery_acknowledged"
+        e["arguments"] for e in audit_rows(tmp_path, "delivery_acknowledged")
     ]
     assert isinstance(line, dict)
     assert line["acknowledgment_id"] == act.acknowledgment_id

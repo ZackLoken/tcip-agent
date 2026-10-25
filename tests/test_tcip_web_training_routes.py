@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from fastapi.testclient import TestClient
 
+from tests._audit_fixtures import audit_rows
 from tests._training_values import fifo_search, sweep_space
 
 if TYPE_CHECKING:
@@ -397,8 +398,6 @@ def test_cancel_unknown_run_returns_404(opened_client: TestClient) -> None:
 def test_a_cancel_naming_its_person_is_admitted_and_its_line_names_them(
     tmp_path: Path, opened_client: TestClient
 ) -> None:
-    from tcip_mcp.audit import audit_log_key
-    from tcip_store import read_log
     from tests._verified_checkpoint_fixtures import (
         detection_config,
         opened_run,
@@ -409,14 +408,14 @@ def test_a_cancel_naming_its_person_is_admitted_and_its_line_names_them(
         detection_config(tmp_path / "gui-data", project=tmp_path),
         experiment_id="exp-gui-cancel",
     )
-    before = len(read_log(audit_log_key(tmp_path)).records)
+    before = len(audit_rows(tmp_path))
 
     resp = opened_client.post(
         "/api/training/runs/exp-gui-cancel/cancel", json={"user": "tester"}
     )
 
     assert resp.status_code == 200, resp.text
-    (line,) = read_log(audit_log_key(tmp_path)).records[before:]
+    (line,) = audit_rows(tmp_path)[before:]
     assert (line["tool"], line["actor"]) == ("cancel_training", "user:tester")
 
 
@@ -940,10 +939,7 @@ def test_a_route_launch_shows_its_declaration_from_its_launch_event(
         experiment_id="exp-gui-relaunch",
     )
 
-    from tcip_mcp.audit import audit_log_key
-    from tcip_store import read_log
-
-    before = len(read_log(audit_log_key(tmp_path)).records)
+    before = len(audit_rows(tmp_path))
     resp = opened_client.post(
         "/api/training/runs",
         json={"relaunched_from": "exp-gui-relaunch", "user": "tester"},
@@ -951,7 +947,7 @@ def test_a_route_launch_shows_its_declaration_from_its_launch_event(
     assert resp.status_code == 200, resp.json()
 
     minted = resp.json()["experiment_id"]
-    (line,) = read_log(audit_log_key(tmp_path)).records[before:]
+    (line,) = audit_rows(tmp_path)[before:]
     assert (line["tool"], line["actor"]) == ("launch_training", "user:tester")
     relaunched = read_run(experiment_dir(minted, project=tmp_path))
     assert "launched_by" not in relaunched.model_dump()
@@ -1181,8 +1177,6 @@ def test_a_recorded_sweep_relaunches_through_the_run_launch_door(
     request ends in ``--run-dir`` and the new sweep's directory. A relaunch also naming a
     selection directory is refused 422.
     """
-    import tcip_store as ts
-    from tcip_mcp.audit import audit_log_key
     from tcip_mcp.experiments import find_sweep, observe_sweep
     from tests._producer_fixtures import fake_popen
     from tests._verified_checkpoint_fixtures import opened_sweep
@@ -1190,7 +1184,7 @@ def test_a_recorded_sweep_relaunches_through_the_run_launch_door(
     started: list[list[str]] = []
     fake_popen(monkeypatch, started)
     source = opened_sweep(opened_project, real_hpo_base_config).name
-    before = len(ts.read_log(audit_log_key(opened_project)).records)
+    before = len(audit_rows(opened_project))
 
     resp = opened_client.post(
         "/api/training/runs",
@@ -1201,7 +1195,7 @@ def test_a_recorded_sweep_relaunches_through_the_run_launch_door(
     minted = find_sweep(resp.json()["sweep_id"], project=opened_project)
     assert minted is not None
     assert observe_sweep(minted).record.input.relaunched_from == source
-    (line,) = ts.read_log(audit_log_key(opened_project)).records[before:]
+    (line,) = audit_rows(opened_project)[before:]
     assert (line["tool"], line["actor"]) == ("open_sweep", "user:tester")
     assert [argv[-2:] for argv in started] == [["--run-dir", str(minted)]]
 

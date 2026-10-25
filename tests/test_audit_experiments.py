@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import tcip_store as ts
-from tests._audit_fixtures import refuse_audit_appends
+from tests._audit_fixtures import audit_rows, refuse_audit_appends
 from tests._verified_checkpoint_fixtures import (
     BUILT_DETECTOR,
     detection_config,
@@ -22,12 +22,6 @@ if TYPE_CHECKING:
 # ── Audit logging ──
 
 
-def _rows(project: Path) -> list[dict]:
-    import tcip_mcp.audit as audit_mod
-
-    return list(ts.read_log(audit_mod.audit_log_key(project)).records)
-
-
 def test_audited_logs_success(tmp_path: Path) -> None:
     from tcip_mcp.audit import audited
 
@@ -37,7 +31,7 @@ def test_audited_logs_success(tmp_path: Path) -> None:
 
     assert my_tool(tmp_path, x=5) == {"result": 6}
 
-    (entry,) = _rows(tmp_path)
+    (entry,) = audit_rows(tmp_path)
     assert entry["tool"] == "my_tool"
     assert entry["status"] == "ok"
     assert entry["arguments"] == {"x": 5}
@@ -55,7 +49,7 @@ def test_audited_logs_exception(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="test error"):
         failing_tool(tmp_path)
 
-    (entry,) = _rows(tmp_path)
+    (entry,) = audit_rows(tmp_path)
     assert entry["status"] == "exception"
     assert "test error" in entry["error"]
 
@@ -84,7 +78,7 @@ def test_audited_binds_positional_args_to_names(tmp_path: Path) -> None:
         tmp_path, 5, "explicit"
     )  # positional, the way the web routes call audited tools
 
-    assert _rows(tmp_path)[0]["arguments"] == {"x": 5, "y": "explicit"}
+    assert audit_rows(tmp_path)[0]["arguments"] == {"x": 5, "y": "explicit"}
 
 
 def test_audited_positional_binding_fills_unstated_defaults(
@@ -98,7 +92,7 @@ def test_audited_positional_binding_fills_unstated_defaults(
 
     my_tool(tmp_path, 5)  # positional, y left at its default
 
-    assert _rows(tmp_path)[0]["arguments"] == {"x": 5, "y": "default"}
+    assert audit_rows(tmp_path)[0]["arguments"] == {"x": 5, "y": "default"}
 
 
 def test_audited_call_that_does_not_bind_raises_before_the_body_runs(
@@ -122,7 +116,7 @@ def test_audited_call_that_does_not_bind_raises_before_the_body_runs(
         my_tool(tmp_path, 1, 2, 3)  # type: ignore[call-arg]
 
     assert ran == []
-    assert _rows(tmp_path) == []
+    assert audit_rows(tmp_path) == []
 
 
 # ── Experiment tracking ──
@@ -245,12 +239,12 @@ def test_a_first_registration_and_a_replacement_each_leave_one_row(
     first_sha = reg.register_model(
         "exp1", _ckpt(tmp_path, "a.pt", b"first"), actor=None
     ).entry.sha256
-    (first,) = _rows(tmp_path)
+    (first,) = audit_rows(tmp_path)
     assert first["tool"] == "model_registered"
     assert first["arguments"] == {"name": "exp1", "new_sha256": first_sha}
 
     reg.register_model("exp2", _ckpt(tmp_path, "a.pt", b"first"), actor=None)
-    _, replaced = _rows(tmp_path)
+    _, replaced = audit_rows(tmp_path)
     assert replaced["arguments"] == {
         "name": "exp2",
         "new_sha256": first_sha,
@@ -263,7 +257,7 @@ def test_a_first_registration_and_a_replacement_each_leave_one_row(
         "exp1", _ckpt(tmp_path, "b.pt", b"second, different"), actor=None
     ).entry.sha256
     assert second_sha != first_sha
-    assert "superseded_name" not in _rows(tmp_path)[-1]["arguments"]
+    assert "superseded_name" not in audit_rows(tmp_path)[-1]["arguments"]
     assert _entry(tmp_path, first_sha).name == "exp2"
 
 
@@ -287,7 +281,7 @@ def test_the_register_model_door_leaves_only_the_registrys_own_rows(
             tmp_path, name="door", checkpoint_path=path, actor=None
         )
 
-    rows = _rows(tmp_path)
+    rows = audit_rows(tmp_path)
     assert [r["tool"] for r in rows] == [
         "model_registered",
         "model_registered",
@@ -305,7 +299,7 @@ def test_the_register_model_door_leaves_only_the_registrys_own_rows(
         actor=None,
     )
     assert (
-        len(_rows(tmp_path)) == 3
+        len(audit_rows(tmp_path)) == 3
     )  # the same entry re-registered: nothing changed, no row
 
 
@@ -322,7 +316,7 @@ def test_reregistering_an_identical_entry_changes_nothing_and_leaves_no_row(
 
     after = ts.read_versioned(registry_index_key(tmp_path))
     assert (after.value, after.version) == (before.value, before.version)
-    assert [e["tool"] for e in _rows(tmp_path)] == ["model_registered"]
+    assert [e["tool"] for e in audit_rows(tmp_path)] == ["model_registered"]
 
 
 def test_the_same_weights_under_new_tags_change_the_entry_and_leave_one_row(
@@ -341,7 +335,7 @@ def test_the_same_weights_under_new_tags_change_the_entry_and_leave_one_row(
     reg.register_model("exp1", ckpt, tags=["chestnut"], actor=None)
 
     assert _entry(tmp_path, sha).tags == ["chestnut"]
-    assert [e["tool"] for e in _rows(tmp_path)] == [
+    assert [e["tool"] for e in audit_rows(tmp_path)] == [
         "model_registered",
         "model_registered",
     ]

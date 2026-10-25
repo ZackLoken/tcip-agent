@@ -385,11 +385,7 @@ def test_the_digest_names_the_bytes_the_labels_came_from(
     monkeypatch.setattr(ts, "transaction", replacing)
     assert "error" not in _import(document, root)
 
-    (event,) = [
-        row
-        for row in audit_rows(root)
-        if row["tool"] == "coco_document_imported"
-    ]
+    (event,) = audit_rows(root, "coco_document_imported")
     assert event["document_digest"] == hashlib.sha256(read_bytes).hexdigest()
     assert document.read_bytes() != read_bytes
 
@@ -743,11 +739,7 @@ def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
     (kept,) = json_io.read_label_document(_label(root, "tree_02")).annotations
     assert (kept.subject, kept.created_by) == ("leaf", "user:breeder")
     assert _written(root) == ["tree_02"]
-    assert not [
-        row
-        for row in audit_rows(root)
-        if row["tool"] == "coco_document_imported"
-    ]
+    assert audit_rows(root, "coco_document_imported") == []
 
 
 def test_a_pass_whose_document_fails_to_encode_publishes_nothing(
@@ -801,11 +793,7 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(
     assert len(calls) == 2
     assert not ts.exists(bucket_key(root, f"detector/{DATE}"))
     assert ts.keys(PREDICTION_DOCUMENTS, str(root)) == []
-    assert not [
-        row
-        for row in audit_rows(root)
-        if row["tool"] == "prediction_bucket_published"
-    ]
+    assert audit_rows(root, "prediction_bucket_published") == []
 
 
 def test_an_import_that_committed_no_document_leaves_no_event(
@@ -825,11 +813,7 @@ def test_an_import_that_committed_no_document_leaves_no_event(
         ]
         == []
     )
-    assert not [
-        row
-        for row in audit_rows(root)
-        if row["tool"] == "coco_document_imported"
-    ]
+    assert audit_rows(root, "coco_document_imported") == []
 
     _label_placed_before_the_writes(
         monkeypatch, _label(root, "tree_01"), _person_label()
@@ -845,11 +829,7 @@ def test_an_import_that_committed_no_document_leaves_no_event(
             actor=None,
         )
     assert _written(root) == ["tree_01"]
-    assert not [
-        row
-        for row in audit_rows(root)
-        if row["tool"] == "coco_document_imported"
-    ]
+    assert audit_rows(root, "coco_document_imported") == []
 
 
 def test_an_annotation_naming_no_listed_image_refuses_the_whole_import(

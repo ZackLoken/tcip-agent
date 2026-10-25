@@ -14,6 +14,7 @@ from tcip_mcp.delivery import read_delivery_events
 from tcip_mcp.pipelines.delivery_events_schema import PlantMappingDisclosure
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.tools.phenology_tools import build_plant_mapping
+from tests._audit_fixtures import audit_rows
 from tests._mapping_fixtures import register_plant_registry_for
 from tests.test_plant_mapping_binding import (
     DATES,
@@ -124,21 +125,12 @@ def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_rea
     supersedes names the archived digest, the archived record stays readable on its own build's
     receipt, the supersede writing one receipt alone, and plant_mapping_names does not list it.
     """
-    from tcip_mcp.audit import audit_log_key
-
-    def receipts() -> list[dict]:
-        return [
-            entry["arguments"]
-            for entry in ts.read_log(audit_log_key(tmp_path)).records
-            if entry.get("tool") == "plant_mapping_built"
-        ]
-
     _, images_root, preds_by_date = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
     archived_digest = before.record_sha256
     archived_name = f"valley@{archived_digest[:12]}"
-    receipts_before = receipts()
+    receipts_before = len(audit_rows(tmp_path, "plant_mapping_built"))
 
     res = build_plant_mapping(
         tmp_path,
@@ -150,7 +142,8 @@ def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_rea
     )
 
     assert "error" not in res, res
-    [receipt] = receipts()[len(receipts_before) :]
+    [built] = audit_rows(tmp_path, "plant_mapping_built")[receipts_before:]
+    receipt = built["arguments"]
     assert (receipt["name"], receipt["supersedes"]) == (
         "valley",
         archived_digest,

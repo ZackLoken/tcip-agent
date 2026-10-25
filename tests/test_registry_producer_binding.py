@@ -81,9 +81,8 @@ def test_a_tag_naming_a_run_never_makes_that_run_a_producer(
 def test_a_replacements_registry_event_names_the_superseded_entry(
     tmp_path: Path,
 ) -> None:
-    import tcip_store as ts
-    from tcip_mcp.audit import audit_log_key
     from tcip_mcp.model_registry import ModelRegistry
+    from tests._audit_fixtures import audit_rows
     from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     reg = ModelRegistry(str(tmp_path))
@@ -91,7 +90,7 @@ def test_a_replacements_registry_event_names_the_superseded_entry(
     reg.register_model("m", str(ckpt), tags=["first"], actor=None)
     reg.register_model("m-renamed", str(ckpt), actor=None)
 
-    events = ts.read_log(audit_log_key(tmp_path)).records
+    events = audit_rows(tmp_path)
     replace = [
         e for e in events if "superseded_name" in e.get("arguments", {})
     ]

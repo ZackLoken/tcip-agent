@@ -1,21 +1,22 @@
 """Audit fixtures shared by the tests.
 
-Audit lines read back through the store seam, the shape a line may take, a fault injected into
-the log's append, and a record's lock held by another writer.
+Audit lines read back through the platform's audit reader, the shape a line may take, a fault
+injected into the log's append, and a record's lock held by another writer.
 """
 
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 import tcip_store as ts
 from tcip_mcp import agent_identity
-from tcip_mcp.audit import audit_log_key
+from tcip_mcp.audit import audit_entries
 
 AUDIT_ENTRY_KEYS = frozenset(
     {"timestamp", "tool", "arguments", "status", *agent_identity.RECORD_FIELDS}
@@ -23,13 +24,16 @@ AUDIT_ENTRY_KEYS = frozenset(
 """Every key an audit line may carry besides ``actor``."""
 
 
-def audit_rows(scope: Path, tool: str | None = None) -> list[dict]:
-    """Return every line in the log ``scope`` names, or ``tool``'s lines when one is named."""
-    return [
-        row
-        for row in ts.read_log(audit_log_key(scope)).records
-        if tool is None or row["tool"] == tool
-    ]
+def audit_rows(
+    scope: Path, tool: str | None = None
+) -> list[Mapping[str, Any]]:
+    """Return the entries of ``scope``'s audit log, or ``tool``'s entries when one is named.
+
+    The entries are :func:`tcip_mcp.audit.audit_entries`'s, in the order they landed; a log
+    carrying undecodable entries raises its ``ValueError``.
+    """
+    entries, _cursor = audit_entries(scope)
+    return [row for row in entries if tool is None or row["tool"] == tool]
 
 
 def refuse_audit_appends(

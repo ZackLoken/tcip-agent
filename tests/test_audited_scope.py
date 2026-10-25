@@ -15,6 +15,7 @@ from PIL import Image
 
 import tcip_mcp.audit as audit_module
 import tcip_store as ts
+from tests._audit_fixtures import audit_rows
 
 if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
@@ -22,15 +23,6 @@ if TYPE_CHECKING:
 CAPTURE_DATE = "2024-05-01"
 STUB_ENGINE = "tests.proposal_stub:factory"
 """The dotted proposal engine ``tests/proposal_stub.py`` defines."""
-
-
-def _entries(root: Path) -> list[dict]:
-    """Return every audit row scoped to ``root``, or none when that scope's log holds nothing."""
-    return list(ts.read_log(audit_module.audit_log_key(root)).records)
-
-
-def _rows_for(root: Path, tool: str) -> list[dict]:
-    return [row for row in _entries(root) if row["tool"] == tool]
 
 
 @pytest.fixture
@@ -66,9 +58,9 @@ def test_registry_write_records_in_the_dataset_named_by_its_root_argument(
         project, str(dataset_root), subjects=_subjects(), actor=None
     )
 
-    rows = _rows_for(dataset_root, "replace_registry")
-    assert len(rows) == 1, _entries(dataset_root)
-    assert _rows_for(project, "replace_registry") == []
+    rows = audit_rows(dataset_root, "replace_registry")
+    assert len(rows) == 1, audit_rows(dataset_root)
+    assert audit_rows(project, "replace_registry") == []
 
 
 def test_label_write_records_in_the_dataset_holding_the_image_it_names(
@@ -89,9 +81,9 @@ def test_label_write_records_in_the_dataset_holding_the_image_it_names(
     )
     assert "error" not in result
 
-    rows = _rows_for(dataset_root, "save_label_document")
-    assert len(rows) == 1, _entries(dataset_root)
-    assert _rows_for(project, "save_label_document") == []
+    rows = audit_rows(dataset_root, "save_label_document")
+    assert len(rows) == 1, audit_rows(dataset_root)
+    assert audit_rows(project, "save_label_document") == []
 
 
 def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_against(
@@ -110,9 +102,9 @@ def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_ag
     )
     assert "error" not in result, result
 
-    rows = _rows_for(dataset_root, "propose_annotations")
-    assert len(rows) == 1, _entries(dataset_root)
-    assert _rows_for(project, "propose_annotations") == []
+    rows = audit_rows(dataset_root, "propose_annotations")
+    assert len(rows) == 1, audit_rows(dataset_root)
+    assert audit_rows(project, "propose_annotations") == []
 
 
 def test_propose_annotations_staging_nothing_leaves_no_audit_line(
@@ -136,8 +128,8 @@ def test_propose_annotations_staging_nothing_leaves_no_audit_line(
     assert "error" not in result, result
     assert result["staged"] is False
 
-    assert _rows_for(project, "propose_annotations") == []
-    assert _entries(loose) == []
+    assert audit_rows(project, "propose_annotations") == []
+    assert audit_rows(loose) == []
 
 
 def test_unscoped_mutating_tool_records_in_the_project_log_with_the_entry_shape(
@@ -150,7 +142,7 @@ def test_unscoped_mutating_tool_records_in_the_project_log_with_the_entry_shape(
         project, "unexpected_behavior", "a project event", actor=None
     )
 
-    rows = _rows_for(project, "report_friction")
+    rows = audit_rows(project, "report_friction")
     assert len(rows) == 1
     assert set(rows[0]) == {
         "timestamp",
@@ -160,7 +152,7 @@ def test_unscoped_mutating_tool_records_in_the_project_log_with_the_entry_shape(
         "duration_ms",
     }
     assert "project" not in rows[0]["arguments"]
-    assert _rows_for(dataset_root, "report_friction") == []
+    assert audit_rows(dataset_root, "report_friction") == []
 
 
 def test_a_label_write_of_an_image_under_no_dataset_refuses_and_records_nothing(
@@ -186,8 +178,8 @@ def test_a_label_write_of_an_image_under_no_dataset_refuses_and_records_nothing(
     )
     assert "is not a capture" in result["error"]
 
-    assert _rows_for(project, "save_label_document") == []
-    assert _entries(loose) == []
+    assert audit_rows(project, "save_label_document") == []
+    assert audit_rows(loose) == []
 
 
 def test_scope_argument_left_unset_leaves_the_call_in_the_project(
@@ -203,7 +195,7 @@ def test_scope_argument_left_unset_leaves_the_call_in_the_project(
 
     stage_something(tmp_path)
 
-    assert len(_rows_for(tmp_path, "stage_something")) == 1
+    assert len(audit_rows(tmp_path, "stage_something")) == 1
 
 
 def test_relative_scope_argument_resolves_against_the_project_not_the_process_cwd(
@@ -233,8 +225,10 @@ def test_relative_scope_argument_resolves_against_the_project_not_the_process_cw
     monkeypatch.chdir(process_cwd)
     write_curated(project, "curated_dataset")
 
-    assert len(_rows_for(anchored, "write_curated")) == 1, _entries(anchored)
-    assert _rows_for(project, "write_curated") == []
+    assert len(audit_rows(anchored, "write_curated")) == 1, audit_rows(
+        anchored
+    )
+    assert audit_rows(project, "write_curated") == []
     assert not (decoy / ".tcip").exists()
 
 
@@ -265,7 +259,7 @@ def test_a_scope_resolution_that_raises_refuses_rather_than_filing_the_event_in_
         is audit_module.MutationCommittedWithoutAuditLineError
     )
     assert isinstance(caught.value.__cause__, RuntimeError)
-    assert _rows_for(tmp_path, "curate_something") == []
+    assert audit_rows(tmp_path, "curate_something") == []
 
 
 def test_two_spellings_of_a_root_reach_one_log_and_a_relative_spelling_refuses(
