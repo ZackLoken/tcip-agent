@@ -1,9 +1,10 @@
 """The browser and the backend meet on one declaration of the API's paths.
 
-The FastAPI app registers the paths; ``tools/generate_frontend_routes.py`` projects them into
-``frontend/src/api/routes.ts``. These tests hold that projection to the app's registered routes,
-check that the frontend writes no path of its own beside it, and check that each path the
-browser asks for is one the dev server forwards.
+The FastAPI app registers the paths; ``tools/generate_frontend_routes.py`` projects the ones the
+frontend's sources read into ``frontend/src/api/routes.ts``. These tests hold that projection to
+the app's registered routes and the sources' reads, check that the frontend writes no backend
+path of its own beside it, and check that each path the browser asks for is one the dev server
+forwards.
 """
 
 from __future__ import annotations
@@ -15,17 +16,13 @@ import pytest
 from fastapi import FastAPI
 
 from tcip_web.app import app
-from tests import FRONTEND_SRC, REPO_ROOT
+from tests import FRONTEND_SRC
 from tests._route_walk import route_generator as _generator
 
-GENERATED = FRONTEND_SRC / "api" / "routes.ts"
-PROXY_GENERATED = FRONTEND_SRC / "api" / "devProxy.generated.ts"
-VITE_CONFIG = (
-    REPO_ROOT / "packages" / "tcip-web" / "frontend" / "vite.config.ts"
-)
+GENERATED = _generator().GENERATED_PATH
+PROXY_GENERATED = _generator().PROXY_GENERATED_PATH
+VITE_CONFIG = FRONTEND_SRC.parent / "vite.config.ts"
 
-_LITERAL_RE = re.compile(r"""["'`](/(?:api|ws)/[^"'`]*)["'`]""")
-_ROUTES_USE_RE = re.compile(r"\bROUTES\.([A-Za-z0-9_]+)")
 _PROXY_ENTRY_RE = re.compile(
     r'\{\s*path:\s*"([^"]+)",\s*ws:\s*(true|false)\s*\}'
 )
@@ -36,56 +33,34 @@ _PROXY_BUILD_RE = re.compile(
 )
 
 
-def _frontend_sources(include_tests: bool) -> list[Path]:
-    files = [p for p in FRONTEND_SRC.rglob("*.ts")] + [
-        p for p in FRONTEND_SRC.rglob("*.tsx")
-    ]
-    if include_tests:
-        return sorted(files)
-    return sorted(
-        p
-        for p in files
-        if ".test." not in p.name and "test" not in p.parent.name
-    )
+@pytest.fixture(scope="module")
+def frontend() -> dict:
+    """Return the generator's own read of the frontend's sources, run once for the module."""
+    return _generator().frontend_reads()
 
 
-def test_the_generated_path_module_is_what_the_registered_routes_produce() -> (
-    None
-):
-    """The checked-in path module equals what the generator renders from the app's routes."""
-    generated = _generator().render(app)
+def test_the_generated_path_module_is_what_the_registered_routes_produce(
+    frontend: dict,
+) -> None:
+    """The checked-in path module equals what the generator renders over the sources' reads."""
+    generated = _generator().render(app, frontend["reads"])
     assert GENERATED.read_text(encoding="utf-8") == generated, (
         "packages/tcip-web/frontend/src/api/routes.ts is out of date; "
-        "run python tools/generate_frontend_routes.py"
+        "run python -m tools.generate_frontend_routes"
     )
 
 
-def test_no_frontend_module_writes_a_backend_path_of_its_own() -> None:
-    """Outside the generated module, the frontend holds no path string of its own.
-
-    Frontend test files are left out of the scan.
-    """
-    registered_shapes = {
-        re.sub(r"\{[^}]*\}", "{}", path)
-        for _, path, _ in _generator().collect_routes(app)
-    }
-
-    offenders: list[str] = []
-    for source in _frontend_sources(include_tests=False):
-        if source == GENERATED:
-            continue
-        for line_no, line in enumerate(
-            source.read_text(encoding="utf-8").splitlines(), 1
-        ):
-            for literal in _LITERAL_RE.findall(line):
-                shape = re.sub(r"\$\{[^}]*\}", "{}", literal.split("?")[0])
-                if literal.startswith("/api/") or shape in registered_shapes:
-                    offenders.append(
-                        f"{source.relative_to(REPO_ROOT).as_posix()}:{line_no} {literal}"
-                    )
+def test_no_frontend_source_writes_a_backend_path_of_its_own(
+    frontend: dict,
+) -> None:
+    """Outside the generated module, no non-test frontend source holds a backend path literal."""
+    offenders = [
+        literal
+        for literal in frontend["literals"]
+        if Path(literal["file"]) != GENERATED
+    ]
     assert not offenders, (
-        "these write a backend path instead of using ROUTES:\n"
-        + "\n".join(offenders)
+        f"these write a backend path instead of using ROUTES: {offenders}"
     )
 
 
@@ -96,7 +71,7 @@ def test_the_generated_proxy_module_is_what_the_registered_routes_produce() -> (
     generated = _generator().render_proxy(app)
     assert PROXY_GENERATED.read_text(encoding="utf-8") == generated, (
         "packages/tcip-web/frontend/src/api/devProxy.generated.ts is out of date; "
-        "run python tools/generate_frontend_routes.py"
+        "run python -m tools.generate_frontend_routes"
     )
 
 
@@ -165,13 +140,13 @@ def test_the_frontend_serving_paths_are_never_proxy_entries() -> None:
     assert not (prefixes & FRONTEND_SERVING_PATHS)
 
 
-def test_every_path_the_browser_asks_for_is_forwarded_by_the_dev_server() -> (
-    None
-):
-    """The paths the frontend references all fall under a prefix the generated dev proxy forwards.
+def test_every_path_the_browser_asks_for_is_forwarded_by_the_dev_server(
+    frontend: dict,
+) -> None:
+    """The paths the frontend reads all fall under a prefix the generated dev proxy forwards.
 
-    The prefixes are parsed from the checked-in proxy module, and each referenced route name is
-    one the backend registers.
+    The prefixes are parsed from the checked-in proxy module, and the routes read are the
+    generator's own read of the frontend's sources.
     """
     prefixes = tuple(
         path for path, _ws in _proxy_entries_from_generated_module()
@@ -180,39 +155,20 @@ def test_every_path_the_browser_asks_for_is_forwarded_by_the_dev_server() -> (
         "no proxied prefixes parsed out of the generated proxy module"
     )
 
-    by_name = {
-        name: path for name, path, _ in _generator().collect_routes(app)
-    }
-    referenced = {
-        name
-        for source in _frontend_sources(include_tests=False)
-        if source != GENERATED
-        for name in _ROUTES_USE_RE.findall(source.read_text(encoding="utf-8"))
-    }
-    assert referenced, (
+    read = _generator().read_routes(app, frontend["reads"])
+    assert read, (
         "no ROUTES reference found in the frontend, so nothing was checked"
     )
-    unknown = sorted(name for name in referenced if name not in by_name)
-    assert not unknown, (
-        f"the frontend asks for routes the backend does not register: {unknown}"
-    )
     unproxied = sorted(
-        f"{name} ({by_name[name]})"
-        for name in referenced
-        if not by_name[name].startswith(prefixes)
+        f"{name} ({path})"
+        for name, path, _ in read
+        if not path.startswith(prefixes)
     )
     assert not unproxied, f"the dev server forwards none of these: {unproxied}"
 
 
-def test_a_route_the_generator_has_not_seen_before_still_reaches_the_browser() -> (
-    None
-):
-    """A newly registered route is projected without anything being taught about it.
-
-    The names carry the method and the path parameters, and the rendered module passes a
-    parameter through ``encodeURIComponent`` where it is substituted.
-    """
-    generator = _generator()
+def _orchard_app() -> FastAPI:
+    """Return a fresh app registering two HTTP routes and one socket."""
     fresh = FastAPI()
 
     @fresh.get("/api/orchard/blocks")
@@ -227,6 +183,21 @@ def test_a_route_the_generator_has_not_seen_before_still_reaches_the_browser() -
     async def _block_socket(block_id: str) -> None:
         return None
 
+    return fresh
+
+
+def test_a_route_the_generator_has_not_seen_before_still_reaches_the_browser() -> (
+    None
+):
+    """A newly registered route is projected without anything being taught about it.
+
+    The names carry the method and the path parameters, the rendered module carries exactly
+    the routes named to it, and it passes a parameter through ``encodeURIComponent`` where it
+    is substituted.
+    """
+    generator = _generator()
+    fresh = _orchard_app()
+
     names = {name: path for name, path, _ in generator.collect_routes(fresh)}
     assert names["getOrchardBlocks"] == "/api/orchard/blocks"
     assert (
@@ -235,12 +206,21 @@ def test_a_route_the_generator_has_not_seen_before_still_reaches_the_browser() -
     )
     assert names["socketWsOrchardByBlockId"] == "/ws/orchard/{block_id}"
 
-    module = generator.render(fresh)
-    assert '  getOrchardBlocks: "/api/orchard/blocks",\n' in module
-    assert (
+    read = {"getOrchardBlocks", "postOrchardBlocksByBlockIdClose"}
+    assert generator.render(fresh, read) == (
+        generator.HEADER + '  getOrchardBlocks: "/api/orchard/blocks",\n'
         "  postOrchardBlocksByBlockIdClose: (blockId: string) =>\n"
         "    `/api/orchard/blocks/${encodeURIComponent(blockId)}/close`,\n"
-    ) in module
+        + generator.FOOTER
+    )
+
+
+def test_a_read_naming_no_registered_route_is_refused_naming_it() -> None:
+    """A read of a name no registered route generates is refused, naming the read."""
+    with pytest.raises(SystemExit, match="getOrchardTrees"):
+        _generator().render(
+            _orchard_app(), {"getOrchardBlocks", "getOrchardTrees"}
+        )
 
 
 def test_two_routes_that_would_share_a_name_are_refused_rather_than_collapsed() -> (

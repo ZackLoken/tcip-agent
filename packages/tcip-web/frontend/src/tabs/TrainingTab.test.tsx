@@ -2,14 +2,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StructuredRefusalError } from "@/api/http";
-import { ROUTES } from "@/api/routes";
 import { openTrainingStream, trainingApi, type SplitChoices } from "@/api/training";
 import {
   NOT_FINITE_SUFFIX,
   TENSORBOARD_RELOAD_SELECTOR,
   type RunRow,
   type SweepGroup,
-  type TensorboardServing,
   type TrainingRowFrame,
   type TrainingStatusFrame,
 } from "@/api/types.generated";
@@ -18,6 +16,7 @@ import { useStore } from "@/store";
 import { RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 import { TrainingTab, dataPickerFor } from "@/tabs/TrainingTab";
 import { openTestProject } from "@/test/store";
+import SERVINGS from "@/test/tensorboardServings.json";
 
 // The live metrics stream owns a real WebSocket; only the run list and its controls are under
 // test here, so the transport is replaced while the rest of the module stays real.
@@ -87,14 +86,6 @@ function detailOf(row: RunRow) {
     sweep: null,
     tensorboard: null,
   });
-}
-
-/** A TensorBoard serving the board of ``experimentId``, at the backend's own board path. */
-function serving(experimentId: string): TensorboardServing {
-  return {
-    url: ROUTES.getTrainingRunsByExperimentIdTensorboardByPath(experimentId, ""),
-    port: 6006,
-  };
 }
 
 type Frame = Omit<TrainingRowFrame, "experiment_id"> | Omit<TrainingStatusFrame, "experiment_id">;
@@ -312,7 +303,7 @@ describe("TrainingTab run list", () => {
 
 describe("TrainingTab sweeps", () => {
   const trialA = run({
-    experiment_id: "sweep-1_aaaa",
+    experiment_id: "train-x",
     sweep: "sweep-1",
     state: "completed",
     trial_params: { lr: 0.01 },
@@ -333,7 +324,7 @@ describe("TrainingTab sweeps", () => {
 
     render(<TrainingTab />);
     const group = await screen.findByRole("group", { name: "Sweep sweep-1" });
-    expect(within(group).getByText("sweep-1_aaaa")).toBeInTheDocument();
+    expect(within(group).getByText("train-x")).toBeInTheDocument();
     expect(within(group).getByText("sweep-1_bbbb")).toBeInTheDocument();
     expect(within(group).getByText(/sweep · running · best map50 0.7/)).toBeInTheDocument();
     expect(within(group).queryByText("train-solo")).not.toBeInTheDocument();
@@ -359,12 +350,12 @@ describe("TrainingTab sweeps", () => {
     listing([], [sweep({ sweep_id: "sweep-1", trials: [trialA] })]);
     const getRun = vi
       .spyOn(trainingApi, "getRun")
-      .mockResolvedValue({ run: trialA, sweep: null, tensorboard: serving(trialA.experiment_id) });
+      .mockResolvedValue({ run: trialA, sweep: null, tensorboard: SERVINGS["train-x"] });
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("sweep-1_aaaa"));
+    fireEvent.click(await screen.findByText("train-x"));
     await waitFor(() =>
-      expect(openTrainingStream).toHaveBeenCalledWith("sweep-1_aaaa", expect.any(Function)),
+      expect(openTrainingStream).toHaveBeenCalledWith("train-x", expect.any(Function)),
     );
 
     vi.mocked(openTrainingStream).mockClear();
@@ -462,17 +453,17 @@ describe("TrainingTab heading", () => {
   });
 
   it("carries the section titles as level-2 headings under that h1", async () => {
-    const row = run({ experiment_id: "train-heading", state: "completed" });
+    const row = run({ experiment_id: "train-x", state: "completed" });
     listing([row]);
     vi.spyOn(trainingApi, "getRun").mockResolvedValue({
       run: row,
       sweep: null,
-      tensorboard: serving(row.experiment_id),
+      tensorboard: SERVINGS["train-x"],
     });
 
     render(<TrainingTab />);
     expect(await screen.findByRole("heading", { level: 2, name: "Runs" })).toBeInTheDocument();
-    fireEvent.click(screen.getByText("train-heading"));
+    fireEvent.click(screen.getByText("train-x"));
     expect(
       await screen.findByRole("heading", { level: 2, name: "TensorBoard" }),
     ).toBeInTheDocument();
@@ -552,7 +543,9 @@ describe("TrainingTab tensorboard panel", () => {
     );
     const launchSpy = vi
       .spyOn(trainingApi, "launchTensorboard")
-      .mockImplementation((experimentId: string) => Promise.resolve(serving(experimentId)));
+      .mockImplementation((experimentId: string) =>
+        Promise.resolve(SERVINGS[experimentId as keyof typeof SERVINGS]),
+      );
 
     render(<TrainingTab />);
     fireEvent.click(await screen.findByText("train-x"));
@@ -560,17 +553,17 @@ describe("TrainingTab tensorboard panel", () => {
 
     fireEvent.click(screen.getByText("train-y"));
     await waitFor(() => expect(launchSpy).toHaveBeenCalledWith("train-y"));
-    expect(screen.getByTitle("TensorBoard")).toHaveAttribute("src", serving("train-y").url);
+    expect(screen.getByTitle("TensorBoard")).toHaveAttribute("src", SERVINGS["train-y"].url);
   });
 
   it("reloads TensorBoard in place once per new epoch row, never remounting its frame", async () => {
     openTestProject();
-    const row = run({ experiment_id: "train-reload" });
+    const row = run({ experiment_id: "train-x" });
     listing([row]);
     vi.spyOn(trainingApi, "getRun").mockResolvedValue({
       run: row,
       sweep: null,
-      tensorboard: serving(row.experiment_id),
+      tensorboard: SERVINGS["train-x"],
     });
     let deliver: (frame: Frame) => void = () => {};
     vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
@@ -579,7 +572,7 @@ describe("TrainingTab tensorboard panel", () => {
     });
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-reload"));
+    fireEvent.click(await screen.findByText("train-x"));
     const frame = (await screen.findByTitle("TensorBoard")) as HTMLIFrameElement;
     const page = frame.contentDocument as Document;
     const header = page.createElement("app-header-reload");

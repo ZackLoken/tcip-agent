@@ -12,9 +12,9 @@ route in a scratch session (``tools/fixture_session.py``), each trait entry is p
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING
 
+from tests import FRONTEND_SRC
 from tools.fixture_session import (
     opened,
     replaced,
@@ -23,18 +23,11 @@ from tools.fixture_session import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from pydantic import JsonValue
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-GENERATED_PATH = (
-    _REPO_ROOT
-    / "packages"
-    / "tcip-web"
-    / "frontend"
-    / "src"
-    / "test"
-    / "traitListings.json"
-)
+GENERATED_PATH = FRONTEND_SRC / "test" / "traitListings.json"
 
 _STEM_ENTRY = {
     "name": "stem",

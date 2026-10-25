@@ -1,12 +1,12 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ROUTES } from "@/api/routes";
 import { EmbeddedTool } from "@/components/EmbeddedTool";
+import SERVINGS from "@/test/tensorboardServings.json";
 
 afterEach(cleanup);
 
-const BOARD = ROUTES.getTrainingRunsByExperimentIdTensorboardByPath("train-1", "");
+const BOARD = SERVINGS["train-x"].url;
 
 describe("EmbeddedTool", () => {
   it("renders nothing until the caller has something to show", () => {

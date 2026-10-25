@@ -1,9 +1,11 @@
 # tools/
 
-Not a Python package (no `__init__.py`); each file is a standalone entry point run with
-`python tools/<name>.py`. Read a script's own module docstring and `--help` for exact usage; this
-index only says what each does. CI and development tooling only; the operator commands a breeder or
-an operator runs against a project are documented in `README.md` and `CONTRIBUTING.md` instead.
+Not a Python package (no `__init__.py`); each file is an entry point run with
+`python tools/<name>.py`, or from the repository root as `python -m tools.<name>` when it imports
+the test suite's helpers or another tool. Read a script's own module docstring and `--help` for
+exact usage; this index only says what each does. CI and development tooling only; the operator
+commands a breeder or an operator runs against a project are documented in `README.md` and
+`CONTRIBUTING.md` instead.
 
 - `gate_baseline.py` - runs the quality gate CI actually declares, parsed from
   `.github/workflows/ci.yml` rather than restated by hand, so a local pass predicts a CI pass.
@@ -30,9 +32,12 @@ an operator runs against a project are documented in `README.md` and `CONTRIBUTI
   resolution proved first (the editable installs point at the main checkout, so a worktree needs its
   own `PYTHONPATH`) and refused before any gate runs if `tcip_mcp` resolves outside it; each
   requested gate runs in the foreground, stopping at the first failure with its exit code.
-- `generate_frontend_routes.py` - generates the browser's route-path module and the dev server's
-  proxy config from the backend's registered FastAPI routes, so the frontend references a path by
-  name instead of restating the string a second time.
+- `generate_frontend_routes.py` - generates the browser's route-path module, over the registered
+  FastAPI routes whose names the frontend's non-test sources read as `ROUTES.<name>` (the reads
+  `frontend/scripts/routeReads.mjs` finds through the TypeScript compiler, run under `node` over the
+  frontend's installed packages; a read naming no registered route is refused), and the dev
+  server's proxy config over every registered route, so the frontend references a path by name
+  instead of restating the string a second time.
 - `generate_frontend_types.py` - renders `frontend/src/api/types.generated.ts` from the pydantic
   models that declare the backend's response shapes and the GUI's tab/mode vocabulary
   (`tcip_web.state.GuiVocabulary`), so the browser's types are a projection of the backend's rather
@@ -45,6 +50,9 @@ an operator runs against a project are documented in `README.md` and `CONTRIBUTI
   events the frontend tests read, by making real deliveries in scratch projects and serving them
   through the delivery-events route; `tests/test_generated_frontend_fixtures.py` holds the file to
   what a regeneration serves. Run after changing a delivery's record or that route.
+- `generate_tensorboard_fixture.py` - writes `frontend/src/test/tensorboardServings.json`, the
+  answers the TensorBoard launch route gives for two runs in a scratch project, each served by a
+  real TensorBoard, its port written as 0. Run after changing that answer or that route.
 - `generate_harness_discovery.py` - renders the thin `.claude/skills/<name>/SKILL.md` and
   `.agents/skills/<name>/SKILL.md` files, plus the generated block in `AGENTS.md`, from the
   canonical knowledge documents under `packages/tcip-mcp/src/tcip_mcp/knowledge/`. Run after adding,
