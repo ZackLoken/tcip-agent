@@ -48,7 +48,6 @@ dependencies:
       - timm>=1.0
       - transformers>=5  # the sam and grounding_dino proposal engines
       - opencv-python>=4.12.0.88  # sahi's own OpenCV; on Linux it imports libGL (libgl1)
-      - scikit-image>=0.22
       - pycocotools>=2.0.7
       - sahi>=0.12.6  # tiled inference: slice lattice, detection-model wrapper, cross-tile merge
       - psutil>=5.9  # read-only host CPU/RAM visibility for scripts/inspect_compute_resources.py
