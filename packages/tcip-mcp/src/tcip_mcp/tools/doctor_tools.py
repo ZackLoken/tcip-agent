@@ -1,21 +1,12 @@
-"""Data-state doctor: scan a live project for state inconsistencies code audits can't see.
-
-Checks empty label documents nobody marked complete, registry entries pointing at
-missing/test-fixture checkpoints, provenance smells, orphaned labels, and verdict shards that will
-not read. Read-only:
-
-    tcip doctor <project_root>
-
-Exit codes: 0 clean, 1 warnings only, 2 errors.
-"""
+"""Data-state doctor: scan a live project for state inconsistencies code audits can't see."""
 
 from __future__ import annotations
 
-import argparse
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from tcip_mcp.server import tool
 
 if TYPE_CHECKING:
     from tcip_store import Key
@@ -326,14 +317,21 @@ def check_project_record(root: Path, findings: list) -> None:
         findings.append(("error", problem))
 
 
-def findings(root: Path) -> list[tuple[str, str]]:
-    """Return every check's findings over the project at ``root``, errors first, then warnings.
+@tool()
+def diagnose_project(project: Path) -> dict[str, list[tuple[str, str]]]:
+    """Check the project's data state and answer every finding, errors first, then warnings.
 
-    Each finding is its level (``error``, ``warn`` or ``info``) and its message, read through the
-    store this process already bound.
+    The checks: label documents with no image, that will not read, or empty with no completion
+    mark for any subject; images with no label record; registry entries whose checkpoint is
+    missing or under a test or temp tree; prediction buckets naming a checkpoint no registry
+    entry names; annotations accepted without an origin; flags records and verdict shards that
+    will not read or name no document; trait records that will not read or whose latest revision
+    is unconfirmed; and a project record that will not read. ``findings`` holds each finding as
+    its level (``error``, ``warn`` or ``info``) and its message. Reads only, through the store
+    this process already bound.
     """
     found: list[tuple[str, str]] = []
-    census = _census(root, found)
+    census = _census(project, found)
     checks_taking_census = (check_data_quality, check_provenance)
     for check in (
         check_data_quality,
@@ -345,45 +343,8 @@ def findings(root: Path) -> list[tuple[str, str]]:
     ):
         run: Callable[..., None] = check
         if check in checks_taking_census:
-            run(root, found, census=census)
+            run(project, found, census=census)
         else:
-            run(root, found)
+            run(project, found)
     rank = {"error": 0, "warn": 1, "info": 2}
-    return sorted(found, key=lambda f: rank[f[0]])
-
-
-def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
-    """Run every check over the project named in ``argv`` and print the findings, errors first.
-
-    Returns 2 when any finding is an error or the root is not a directory, 1 when the worst is a
-    warning, and 0 otherwise.
-    """
-    ap = argparse.ArgumentParser(
-        description=__doc__.splitlines()[0], prog=prog
-    )
-    ap.add_argument(
-        "project_root", help="project directory holding images/ and .tcip/"
-    )
-    args = ap.parse_args(argv)
-    root = Path(args.project_root).resolve()
-    if not root.is_dir():
-        print(f"error: not a directory: {root}")
-        return 2
-
-    from tcip_store import bind
-
-    bind()
-    found = findings(root)
-    for level, msg in found:
-        print(f"[{level.upper():5}] {msg}")
-    errors = sum(1 for level, _ in found if level == "error")
-    warns = sum(1 for level, _ in found if level == "warn")
-    print(
-        f"\ndoctor: {errors} error(s), {warns} warning(s), "
-        f"{len(found) - errors - warns} info"
-    )
-    return 2 if errors else (1 if warns else 0)
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    return {"findings": sorted(found, key=lambda f: rank[f[0]])}

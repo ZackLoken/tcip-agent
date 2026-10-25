@@ -26,8 +26,8 @@ and those launched for none are told so again; Antigravity's are told nothing. A
 for none holds no project in the terminal whatever project its tools go on to create, and reads
 that project's memory through `load_project_memory`. A session with no orientation reads the
 project's memory through `load_project_memory` (kind='reports' and kind='retrospectives') and its
-overview through `inspect_project`; an operator reads the doctor's findings through
-`tcip doctor`. A session resuming a project after a long wait reads
+overview through `inspect_project` and its data-state findings through `diagnose_project`. A
+session resuming a project after a long wait reads
 the hand-off written before it (the newest retrospective), the record of the run it names
 (`monitor_training` or `get_experiment`) and the knowledge documents for the stage it resumes.
 Surface friction with `report_friction` the moment you hit it (ambiguous goal, unconfirmed format).

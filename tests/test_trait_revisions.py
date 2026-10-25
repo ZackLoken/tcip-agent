@@ -668,7 +668,7 @@ def test_both_trait_routes_refuse_while_no_project_is_open(
 def test_the_doctor_warns_on_an_unconfirmed_latest_revision_and_errors_on_an_unreadable_one(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.cli.doctor import check_traits
+    from tcip_mcp.tools.doctor_tools import check_traits
 
     fx.propose_and_confirm(tmp_path, _count_entry())
     clean: list = []

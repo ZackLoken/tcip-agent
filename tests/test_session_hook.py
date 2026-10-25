@@ -94,7 +94,7 @@ def _injected(printed: str) -> str:
 
 @pytest.fixture
 def remembered(opened: OpenProject) -> OpenProject:
-    """Give the open project a report, a retrospective and one doctor finding.
+    """Give the open project a report, a retrospective and one data-state finding.
 
     The finding is an empty label document no mark finishes, under capture ``2026-03-04``.
     """
@@ -161,7 +161,7 @@ def test_each_harnesss_new_session_reports_and_is_told_the_whole_orientation(
 ) -> None:
     """A new session of each harness reports its conversation and is told the whole orientation.
 
-    It is told the project's overview, the doctor's finding, its newest report and
+    It is told the project's overview, its data-state finding, its newest report and
     retrospective and where the knowledge documents are served, in its harness's own output
     shape. Antigravity's hook reaches the backend through the route its argument names alone.
     """
@@ -301,10 +301,23 @@ def test_an_orientation_whose_overview_and_entries_do_not_fit_stays_under_its_ca
     assert '{"entries": [], "total_available": 1}' in text
 
 
-def test_more_doctor_findings_than_fit_name_the_operators_door_to_all_of_them(
+def _findings_part(text: str | None) -> tuple[str, list]:
+    """Return the orientation's findings part: its statement of the count and what it lists."""
+    assert text is not None
+    (part,) = [
+        p
+        for p in text.split("\n\n")
+        if p.startswith("diagnose_project answers")
+    ]
+    counted, _, listed = part.partition("; the first ")
+    shown = listed.partition(" of them, errors first: ")[2]
+    return counted, json.loads(shown) if shown else []
+
+
+def test_more_findings_than_fit_name_the_tool_answering_all_of_them(
     opened: OpenProject,
 ) -> None:
-    """With more doctor findings than fit, the orientation names ``tcip doctor`` beside the cut.
+    """With more findings than fit, the orientation names ``diagnose_project`` beside the count.
 
     Each finding is an empty label document no mark finishes, written by the label producer.
     """
@@ -319,13 +332,52 @@ def test_more_doctor_findings_than_fit_name_the_operators_door_to_all_of_them(
         Image.new("RGB", (8, 8)).save(image)
         label_image(image, [], 8, 8, keep_empty=True)
 
-    text = pty_host.orientation(opened, "startup")
+    counted, shown = _findings_part(pty_host.orientation(opened, "startup"))
 
-    assert text is not None
-    (part,) = [p for p in text.split("\n\n") if p.startswith("The doctor's")]
-    assert "found 160 finding(s)" in part
-    assert "the first 160 of them" not in part
-    assert "an operator reads whole through `tcip doctor`" in part
+    assert (
+        counted.rstrip(".")
+        == "diagnose_project answers 160 finding(s) over it"
+    )
+    assert len(shown) < 160
+
+
+def test_the_orientation_lists_the_first_findings_the_tool_answers(
+    opened: OpenProject,
+) -> None:
+    """The orientation states the count ``diagnose_project`` answers and lists its first findings.
+
+    Over a project whose checks find an image with no label record before an unreadable trait
+    record and an unconfirmed one, the findings the part lists are the tool's own through a
+    client's handshake, errors first, in the tool's order.
+    """
+    from tcip_mcp import traits
+    from tests import _trait_fixtures as fx
+    from tests._record_damage_fixtures import damage_record
+    from tests._web_fixtures import bound_to
+    from tests.test_agent_identity_records import call_through_handshake
+
+    root = opened.root
+    registry_over(
+        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
+    )
+    images = image_dir(root, "2026-03-04")
+    images.mkdir(parents=True)
+    Image.new("RGB", (8, 8)).save(images / "IMG_U.JPG")
+    fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
+    damage_record(traits.trait_key(root, "leaf"), b"{not valid json")
+    fx.propose(root, fx.entry("burr_size", ("leaf_length",)))
+    (answered,) = call_through_handshake(
+        [("diagnose_project", {})], bound=bound_to(opened)
+    )
+    tool = answered["findings"]
+
+    counted, shown = _findings_part(pty_host.orientation(opened, "startup"))
+
+    assert [level for level, _ in tool] == ["error", "warn", "info"]
+    assert (
+        counted == f"diagnose_project answers {len(tool)} finding(s) over it"
+    )
+    assert shown == tool
 
 
 def _parts(*lengths: int) -> list[pty_host._Part]:

@@ -627,8 +627,8 @@ def test_doctor_lists_a_bucket_naming_an_unregistered_digest_and_stays_silent_on
     tmp_path: Path,
 ) -> None:
     import tcip_store
-    from tcip_mcp.cli import doctor as doctor_module
     from tcip_mcp.dataset_layout import bucket_key
+    from tcip_mcp.tools import doctor_tools as doctor_module
 
     ckpt = secondary_checkpoint(tmp_path)
     reg = _register(tmp_path, ckpt, name="good-model")

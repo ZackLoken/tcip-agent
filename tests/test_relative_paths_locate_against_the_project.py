@@ -1308,15 +1308,27 @@ def test_the_score_command_reads_a_relative_path_under_its_project(
 def test_the_doctor_reads_the_project_named_by_a_relative_root(
     tmp_path: Path,
 ) -> None:
-    """``tcip doctor .`` run from inside a project prints its report without a traceback."""
+    """``tcip diagnose-project --project .`` run inside a project answers what the tool answers.
+
+    The command's printed findings are those ``diagnose_project`` returns over the project.
+    """
+    import json
+
+    from tcip_mcp.tools.doctor_tools import diagnose_project
     from tests._cli_fixtures import run_tcip
 
     project = _dataset(tmp_path).root
 
-    result = run_tcip("doctor", ["."], cwd=project)
+    result = run_tcip(
+        "diagnose-project",
+        ["--project", ".", "--user", "tester"],
+        cwd=project,
+    )
 
-    assert "doctor:" in result.stdout, result.stdout + result.stderr
-    assert "Traceback" not in result.stderr, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == json.loads(
+        json.dumps(diagnose_project(project))
+    )
 
 
 @pytest.mark.parametrize("door", sorted(DOORS))

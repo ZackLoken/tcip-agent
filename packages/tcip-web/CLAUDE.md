@@ -60,22 +60,22 @@ Codex's source supports, so the live smoke decides both. The hook posts its harn
 and how its session started to the session start route, which answers what the session's agent is
 told (`orientation`) for the project the session was launched for, never the GUI's; a session
 launched for none stays one, whatever project its agent's MCP server creates and acts on. For a
-new conversation it is the project as `inspect_project` answers for it, the doctor's findings
-(beside how many there are and that an operator's `tcip doctor` reads them all) and each memory
-corpus's newest entries as `load_project_memory` pages them; after a compaction the memory alone;
-on a resume nothing; with where the knowledge documents are served beside each. The parts are fit
-to `ORIENTATION_CAP`, Claude Code's documented cap: whole while all fit together, otherwise
-sharing the room so a part needing less than an equal share keeps all of it, each cut part stating
-how many it was cut from and a part that does not fit standing as a short fixed statement of it;
-Codex's hook passes its whole context (`additionalContextLimit = 0`). The hook prints it in the
-shape its harness reads from a hook's stdout, so it reaches the agent as context, never as a
-pasted message, and the doctor runs in the backend, outside every harness's sandbox. The
-session's own text (a switch's hand-off request) is pasted together with every request staged by
-the time the harness takes input, as one message, so a harness that starts a turn on it still
-reads them; the paste waits until the harness has bracketed paste on and has written its row's
-`composer_ready`, since a harness can turn bracketed paste on while a loading screen still
-discards input. Each launch probes the version its harness declares and records it, so a harness
-updated in place is seen at its next launch. No timer-free signal tells a launch whose sequence
+new conversation it is the project as `inspect_project` answers for it, the findings
+`diagnose_project` answers (beside how many there are) and each memory corpus's newest entries as
+`load_project_memory` pages them; after a compaction the memory alone; on a resume nothing; with
+where the knowledge documents are served beside each. The parts are fit to `ORIENTATION_CAP`,
+Claude Code's documented cap: whole while all fit together, otherwise sharing the room so a part
+needing less than an equal share keeps all of it, each cut part stating how many it was cut from
+and a part that does not fit standing as a short fixed statement of it; Codex's hook passes its
+whole context (`additionalContextLimit = 0`). The hook prints it in the shape its harness reads
+from a hook's stdout, so it reaches the agent as context, never as a pasted message, and
+`diagnose_project` runs in the backend, outside every harness's sandbox. The session's own text (a
+switch's hand-off request) is pasted together with every request staged by the time the harness
+takes input, as one message, so a harness that starts a turn on it still reads them; the paste
+waits until the harness has bracketed paste on and has written its row's `composer_ready`, since a
+harness can turn bracketed paste on while a loading screen still discards input. Each launch
+probes the version its harness declares and records it, so a harness updated in place is seen at
+its next launch. No timer-free signal tells a launch whose sequence
 never arrives from one still starting, and a sequence that moved earlier still pastes early. The
 child's environment is this process's own less every variable `WITHHELD_ENV_PREFIXES` names:
 every `CLAUDE`-prefixed one, so a backend started from a Claude Code session does not launch its

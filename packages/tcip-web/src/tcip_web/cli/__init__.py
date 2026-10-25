@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 
 _OPERATOR_MODULES = (
     "tcip_mcp.cli.dump_store",
-    "tcip_mcp.cli.doctor",
     "tcip_mcp.cli.archive_project",
     "tcip_mcp.cli.import_project",
     "tcip_mcp.cli.write_project_record",

@@ -507,8 +507,8 @@ Reader: `tcip_annotation.json_io.completion_marks`, decoded by `label_document`,
 `LabelDocument.state(subject)`, the one reading of `complete`, `negative`, `partial` and
 `unannotated`, which the training admission (`label_queries.admitted_records`), the review queue
 (`feedback_tools._prepare_queue_sources`), the editor's listing (`routes/annotate.py`'s
-`_completion`), the session telemetry (`routes/sessions.py`'s `_marked_negative`) and the doctor
-read; block calibration reads each mark's rect through `json_io.covers`
+`_completion`), the session telemetry (`routes/sessions.py`'s `_marked_negative`) and
+`diagnose_project` read; block calibration reads each mark's rect through `json_io.covers`
 (`pipelines/block_calibration.py`'s `check_completeness`). A selection's sample names the document
 its marks live in through its own `ground_truth` key.
 
@@ -678,8 +678,8 @@ when the checkpoint resolves under it, absolute when it does not (the dataset re
 for a moved checkpoint by suffix, basename or digest.
 
 Readers: `read_registry_index`, `model_registry.py`, the read path for anything outside the module
-(`packages/tcip-mcp/src/tcip_mcp/cli/doctor.py`, `"metrics_source"`), and the accessors built on it:
-`ModelRegistry.list_models`, `model_registry.py`, and the module's `best_model`,
+(`packages/tcip-mcp/src/tcip_mcp/tools/doctor_tools.py`, `"metrics_source"`), and the accessors
+built on it: `ModelRegistry.list_models`, `model_registry.py`, and the module's `best_model`,
 `model_registry.py`, over its entries. `best_model` takes `metric_key` and `higher_is_better` as
 required keywords, no default and no name heuristic, and by default ranks only entries whose
 `metrics_source` is `"trainer"` (`include_unverified=True` also ranks the rest). The
@@ -691,7 +691,7 @@ reads for the trainer's own checkpoint selection. Every one of these accessors, 
 `register_model`'s own return, answers `checkpoint_path` resolved to an absolute path
 (`registry_paths.resolved_registry_path`) on a copy, never the registry's own internal
 relative-or-absolute storage spelling; `checkpoint_files` (the checkpoints an archive leaves out)
-and `doctor.py`'s registry check resolve through the same function.
+and `doctor_tools.py`'s registry check resolve through the same function.
 `unresolved_registered_checkpoints` and `import_project`'s own disclosure split on
 `is_external_form`: a designed-external entry is `external_checkpoints` (its own existence stated
 per entry), never counted toward `checkpoint_paths_unresolved` (an entry expected to resolve under
@@ -788,7 +788,7 @@ the time. Writer: `verdicts.record_verdicts`, called only by `dataset_layout.sav
 when a save accepts or rejects a proposal, each entry through `verdicts.encode_verdict`, all of one
 save's entries in one commit. Reader: `verdicts.read_verdicts`, every entry through
 `verdicts.decode_verdict`, which refuses a malformed entry by name; the editor's proposals route
-reads each proposal's last decision through it, and `tcip doctor`'s `check_state` reports a shard
+reads each proposal's last decision through it, and `diagnose_project`'s `check_state` reports a shard
 that will not read.
 
 Guard: `tests/test_label_document_gestures.py` (each decision recorded once, a malformed entry
@@ -829,7 +829,8 @@ present record with the same display name and site is left as is, and one differ
 `project_record.py`, behind `tcip write-project-site --replace`, the site alone. Each keeps the id.
 
 Readers: `read_record`, `project_record.py`; `record_fields`, `project_record.py`, is the one reader
-every surface (the picker, `inspect_project`, the doctor, `project_by_id`) calls, and never raises.
+every surface (the picker, `inspect_project`, `diagnose_project`, `project_by_id`) calls, and
+never raises.
 
 ## 26. `selection.json`, a partition `draw_splits` drew
 
@@ -1068,7 +1069,7 @@ Must agree: agent writes and GUI reads resolve to the same records. Side A:
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py` (`def label_key(`, with `prediction_key` and
 `bucket_key` beside it and `parse_image_path` deriving an image's root, capture and stem). Side B:
 `packages/tcip-web/src/tcip_web/routes/dataset.py` (`select_dataset` resolves the image directory
-through the resolver; `tcip_mcp.cli.doctor`, `data_tools`, `project_tools` and `annotation_tools` no
+through the resolver; `doctor_tools`, `data_tools`, `project_tools` and `annotation_tools` no
 longer re-spell the tree).
 
 ## S15. Per-image label document key
@@ -1114,7 +1115,7 @@ sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_fro
 Must agree: a label document's shape is decided by its one reader, never guessed beside it. Side A:
 `packages/tcip-annotation/src/tcip_annotation/json_io.py` (`def label_document(`), the one decoder
 of a stored document; a dataset-level COCO enters only through `coco_import.import_coco_document`,
-never at a document's key. Side B: none; admission, the doctor and the read tool take that reader's
+never at a document's key. Side B: none; admission, `diagnose_project` and the read tool take that reader's
 answer.
 
 ## S20. subjects.json subject registry
@@ -1285,7 +1286,7 @@ read one record per trait and agree on which revision a delivery ships under. Si
 `packages/tcip-mcp/src/tcip_mcp/operationalization.py` (`def confirmed_revision(`, the one read of
 the latest confirmed revision every delivery door makes).
 `packages/tcip-web/src/tcip_web/routes/results.py` (`def list_traits(`) and
-`packages/tcip-mcp/src/tcip_mcp/cli/doctor.py` (`def check_traits(`) read the same record through
+`packages/tcip-mcp/src/tcip_mcp/tools/doctor_tools.py` (`def check_traits(`) read the same record through
 `read_trait`.
 
 ## S39. Phenology CSV column vocabulary
@@ -1346,7 +1347,7 @@ Must agree: the decision the label save records is the decision every reader dec
 (`def encode_verdict(verdict: Verdict) -> dict:`, the one encoder, called by `record_verdicts`
 inside the label save). Side B: `packages/tcip-annotation/src/tcip_annotation/verdicts.py`
 (`def decode_verdict(entry: Mapping) -> Verdict:`, the one decoder, refusing a malformed entry by
-name), read by the editor's proposals route and the doctor.
+name), read by the editor's proposals route and `diagnose_project`.
 
 ## S46. Frontend api/ layer against backend route paths
 
