@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from fastapi import WebSocket
 from fastapi.testclient import TestClient
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
@@ -109,6 +110,108 @@ class TestPostPanelEventRoute:
             second = ws.receive_json()
         assert first["data"] == {"trial": 1}
         assert second["data"] == {"trial": 2}
+
+    def test_each_broadcast_drops_its_dead_socket_and_raises_any_other_send_fault(
+        self, opened_client: TestClient, project_id: str
+    ) -> None:
+        """Each broadcast reaches its open socket and prunes a dead one; another fault raises.
+
+        A state mutation and a panel event each reach their open socket and remove a socket whose
+        transport is gone; a send failing for another reason raises and its socket stays.
+        """
+        import threading
+
+        import anyio
+        import anyio.from_thread
+        from starlette.types import Message
+
+        from tcip_web import app as web_app
+        from tcip_web.state import store
+
+        class _Peer:
+            """A client whose sends raise ``fault`` once set; it hangs up when ``closed`` is set."""
+
+            def __init__(self, closed: anyio.Event) -> None:
+                self.closed = closed
+                self.connected = False
+                self.waiting = threading.Event()
+                self.fault: Exception | None = None
+
+            async def receive(self) -> Message:
+                if not self.connected:
+                    self.connected = True
+                    return {"type": "websocket.connect"}
+                self.waiting.set()
+                await self.closed.wait()
+                return {"type": "websocket.disconnect", "code": 1006}
+
+            async def send(self, _message: Message) -> None:
+                if self.fault is not None:
+                    raise self.fault
+
+        with anyio.from_thread.start_blocking_portal() as portal:
+            closed = portal.call(anyio.Event)
+            peers = [_Peer(closed), _Peer(closed), _Peer(closed)]
+            watcher, subscriber, faulty = (
+                WebSocket({"type": "websocket"}, peer.receive, peer.send)
+                for peer in peers
+            )
+            handlers = [
+                portal.start_task_soon(web_app.state_ws, watcher),
+                portal.start_task_soon(
+                    web_app.panel_ws, subscriber, "training"
+                ),
+                portal.start_task_soon(web_app.panel_ws, faulty, "meta"),
+            ]
+            try:
+                assert all(peer.waiting.wait(10) for peer in peers)
+                peers[0].fault = peers[1].fault = OSError("the peer is gone")
+                peers[2].fault = RuntimeError(
+                    "bound to a different event loop"
+                )
+                with (
+                    opened_client.websocket_connect(
+                        "ws://127.0.0.1/ws/state"
+                    ) as state,
+                    opened_client.websocket_connect(
+                        "ws://127.0.0.1/ws/panel/training"
+                    ) as panel,
+                ):
+                    state.receive_json()
+                    for _ in store.retained_events("training"):
+                        panel.receive_json()
+                    opened_client.post(
+                        "/api/state/tab", json={"active_tab": "training"}
+                    )
+                    opened_client.post(
+                        "/api/events/training",
+                        json={
+                            "project_id": project_id,
+                            "event_type": "trial_update",
+                            "data": {"trial": 7},
+                        },
+                    )
+                    pushed, event = state.receive_json(), panel.receive_json()
+                    registered = (
+                        watcher in web_app._state_watchers,
+                        subscriber in web_app._panel_subscribers["training"],
+                    )
+                with pytest.raises(RuntimeError, match="different event loop"):
+                    opened_client.post(
+                        "/api/events/meta",
+                        json={"project_id": project_id, "event_type": "note"},
+                    )
+                assert faulty in web_app._panel_subscribers["meta"]
+            finally:
+                portal.call(closed.set)
+                for handler in handlers:
+                    handler.result(10)
+                opened_client.post(
+                    "/api/state/tab", json={"active_tab": "annotate"}
+                )
+        assert registered == (False, False)
+        assert pushed["state"]["active_tab"] == "training"
+        assert event["data"] == {"trial": 7}
 
     def test_events_posted_before_connecting_are_replayed_on_connect(
         self, opened_client: TestClient, project_id: str
