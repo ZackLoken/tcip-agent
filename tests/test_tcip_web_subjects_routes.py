@@ -10,7 +10,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tcip_annotation.state import Annotation
-from tests._audit_fixtures import AUDIT_ENTRY_KEYS, audit_rows
+from tests._audit_fixtures import (
+    AUDIT_ENTRY_KEYS,
+    audit_rows,
+    refuse_audit_appends,
+)
 from tests._producer_fixtures import (
     box_annotation,
     image_label_key,
@@ -738,14 +742,6 @@ def test_a_registry_load_answers_content_and_version_from_one_read(
 # ── A committed write whose audit line could not be appended answers 409, not 200 ─────────
 
 
-class _AppendRefusedError(RuntimeError):
-    """A RuntimeError refusing an audit append."""
-
-
-def _refuse_append(*args: object, **kwargs: object) -> None:
-    raise _AppendRefusedError("the audit log could not be appended to")
-
-
 def test_save_subjects_answers_409_with_the_committed_body_on_a_lost_audit_line(
     client: TestClient,
     tmp_path: Path,
@@ -757,8 +753,6 @@ def test_save_subjects_answers_409_with_the_committed_body_on_a_lost_audit_line(
     whose ``committed`` body equals the first save's 200 body but for the version, and the
     stored registry holds ``bud``.
     """
-    import tcip_mcp.audit as audit_module
-
     healthy = client.post(
         "/api/subjects/save",
         json={
@@ -771,7 +765,7 @@ def test_save_subjects_answers_409_with_the_committed_body_on_a_lost_audit_line(
     assert healthy.status_code == 200, healthy.text
     healthy_body = healthy.json()
 
-    monkeypatch.setattr(audit_module, "append", _refuse_append)
+    refuse_audit_appends(monkeypatch)
     resp = client.post(
         "/api/subjects/save",
         json={

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING
 
 import pytest
 
 import tcip_store as ts
+from tests._audit_fixtures import refuse_audit_appends
 from tests._verified_checkpoint_fixtures import (
     BUILT_DETECTOR,
     detection_config,
@@ -362,10 +363,7 @@ def test_replace_raises_and_stays_committed_when_its_audit_line_fails(
         "exp1", _ckpt(tmp_path, "a.pt", b"first"), actor=None
     ).entry.sha256
 
-    def _refuse(*args: object, **kwargs: object) -> NoReturn:
-        raise RuntimeError("the audit log could not be appended to")
-
-    monkeypatch.setattr(audit_mod, "append", _refuse)
+    refuse_audit_appends(monkeypatch)
 
     with pytest.raises(audit_mod.AuditEntryNotWrittenError) as caught:
         reg.register_model(

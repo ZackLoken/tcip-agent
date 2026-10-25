@@ -16,14 +16,11 @@ from tcip_mcp import experiments as exp
 from tcip_mcp.audit import audit_log_key
 from tcip_mcp.pipelines.data import split_construction as sc
 from tcip_mcp.pipelines.training import subprocess_worker as worker
+from tests._audit_fixtures import refuse_audit_appends
 from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
 if TYPE_CHECKING:
     from typing import NoReturn
-
-    from pydantic import JsonValue
-
-    from tcip_store import Key
 
 
 def _training_run_events(root: Path) -> list[dict]:
@@ -70,8 +67,6 @@ def test_a_pre_envelope_crash_whose_audit_line_is_refused_names_both_causes(
 
     The setup error propagates, and the final status names it and the unwritten line.
     """
-    import tcip_mcp.audit as audit
-
     run_dir = opened_run(
         tmp_path,
         detection_config(tmp_path / "data", project=tmp_path, batch_size=1),
@@ -81,11 +76,8 @@ def test_a_pre_envelope_crash_whose_audit_line_is_refused_names_both_causes(
     def _boom(*args: object, **kwargs: object) -> NoReturn:
         raise RuntimeError("dataset build exploded")
 
-    def _refuse(key: Key, entry: dict[str, JsonValue]) -> NoReturn:
-        raise OSError("the log's disk is full")
-
     monkeypatch.setattr(sc, "recorded_datasets", _boom)
-    monkeypatch.setattr(audit, "append", _refuse)
+    refuse_audit_appends(monkeypatch, error=OSError("the log's disk is full"))
     with pytest.raises(RuntimeError, match="dataset build exploded"):
         worker.run_directory(run_dir)
 
