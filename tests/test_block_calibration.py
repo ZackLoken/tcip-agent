@@ -9,6 +9,7 @@ records, the geometric disjointness check, and the band geometry helpers.
 
 from __future__ import annotations
 
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -1066,9 +1067,7 @@ def test_band_rects_are_reported_in_full_mosaic_coordinates() -> None:
         assert rx0 <= bx0 < bx1 <= rx1, name
         assert ry0 <= by0 < by1 <= ry1, name
     ordered = sorted(bands.values())
-    for (_x0, _y0, x1, _y1), (nx0, _ny0, _nx1, _ny1) in zip(
-        ordered, ordered[1:]
-    ):
+    for (_x0, _y0, x1, _y1), (nx0, _ny0, _nx1, _ny1) in pairwise(ordered):
         assert x1 <= nx0
 
 

@@ -114,6 +114,16 @@ def test_a_plants_distance_is_the_wgs84_geodesic() -> None:
     assert distance == pytest.approx(6_378_137.0 * math.pi / 180, abs=1e-3)
 
 
+def test_the_row_break_is_the_midpoint_of_the_one_outstanding_jump() -> None:
+    """Gaps [1, 1, 1, 20] break between 1 and 20, at 10.5; uniform gaps hold no break."""
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        _derive_row_break_threshold,
+    )
+
+    assert _derive_row_break_threshold([20.0, 1.0, 1.0, 1.0]) == 10.5
+    assert _derive_row_break_threshold([2.0, 2.0, 2.0, 2.0]) is None
+
+
 def test_segment_runs_splits_on_large_jumps(
     stamp: Callable[[str, float, float, int], ImageStamp],
 ) -> None:

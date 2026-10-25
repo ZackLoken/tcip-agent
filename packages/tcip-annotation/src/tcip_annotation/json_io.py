@@ -54,6 +54,7 @@ import math
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
+from itertools import pairwise
 from typing import TYPE_CHECKING, Annotated, Literal, cast
 
 from pydantic import AfterValidator
@@ -522,8 +523,8 @@ def covers(
             b[0] <= (ax + bx) / 2 <= b[2] and b[1] <= (ay + by) / 2 <= b[3]
             for b in boxes
         )
-        for ax, bx in zip(xs, xs[1:])
-        for ay, by in zip(ys, ys[1:])
+        for ax, bx in pairwise(xs)
+        for ay, by in pairwise(ys)
     )
 
 

@@ -6,6 +6,7 @@ log takes one for an epoch row.
 
 from __future__ import annotations
 
+from itertools import pairwise
 from typing import TYPE_CHECKING
 
 import pytest
@@ -285,9 +286,7 @@ def test_a_config_stating_no_cadence_logs_ten_batch_rows_every_epoch(
             for step in steps
         )
         assert steps[-1] == epoch * n_batches
-        gaps = [
-            b - a for a, b in zip([(epoch - 1) * n_batches, *steps], steps)
-        ]
+        gaps = [b - a for a, b in pairwise([(epoch - 1) * n_batches, *steps])]
         assert max(gaps) - min(gaps) <= 1, gaps
 
 

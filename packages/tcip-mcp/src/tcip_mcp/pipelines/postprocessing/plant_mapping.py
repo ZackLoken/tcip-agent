@@ -19,6 +19,7 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, fields, replace
 from datetime import datetime
+from itertools import pairwise
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -1189,15 +1190,16 @@ def _derive_row_break_threshold(gaps: list[float]) -> float | None:
     # A near-zero gap carries no walking-pace information (its log/ratio would read as infinite);
     # excluded as a candidate split rather than treated as an automatic winner.
     candidates = [
-        (i, math.log(hi / lo))
-        for i, (lo, hi) in enumerate(zip(sorted_gaps, sorted_gaps[1:]))
+        (math.log(hi / lo), lo, hi)
+        for lo, hi in pairwise(sorted_gaps)
         if lo > 1e-9
     ]
     if not candidates:
         return None
-    best_i, best_log_ratio = max(candidates, key=lambda pair: pair[1])
+    best = max(candidates, key=lambda candidate: candidate[0])
+    best_log_ratio, best_lo, best_hi = best
 
-    other_log_ratios = [r for i, r in candidates if i != best_i]
+    other_log_ratios = [c[0] for c in candidates if c is not best]
     if not other_log_ratios:
         # Only one candidate split to compare against: no basis to call it a genuine transition.
         return None
@@ -1212,10 +1214,7 @@ def _derive_row_break_threshold(gaps: list[float]) -> float | None:
         # counts, MAD's own limiting behavior as it -> 0, not an unconditional pass.
         return None
 
-    return (
-        sorted_gaps[best_i]
-        + (sorted_gaps[best_i + 1] - sorted_gaps[best_i]) / 2
-    )
+    return best_lo + (best_hi - best_lo) / 2
 
 
 def _segment_runs(stamps: list[ImageStamp]) -> list[list[ImageStamp]]:
@@ -1227,7 +1226,7 @@ def _segment_runs(stamps: list[ImageStamp]) -> list[list[ImageStamp]]:
     if not stamps:
         return []
     pairs: list[tuple[ImageStamp, float | None]] = []
-    for prev, cur in zip(stamps, stamps[1:]):
+    for prev, cur in pairwise(stamps):
         d = None
         if prev.position is not None and cur.position is not None:
             (lat1, lon1), (lat2, lon2) = prev.position, cur.position

@@ -9,6 +9,7 @@ coordinates are in. ``render_grid`` tiles already-rendered artifacts and so take
 from __future__ import annotations
 
 from collections.abc import Sequence
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, NamedTuple
 
@@ -693,7 +694,7 @@ def _draw_path(
     """Draw ``pts`` as one path, solid or as ``dash`` (on, off) lengths in pixels."""
     seg_pts = pts + ([pts[0]] if closed and len(pts) > 2 else [])
     if dash is not None:
-        for a, b in zip(seg_pts, seg_pts[1:]):
+        for a, b in pairwise(seg_pts):
             _dashed_segment(
                 draw, a, b, color, width, dash=dash[0], gap=dash[1]
             )
