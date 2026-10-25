@@ -12,7 +12,7 @@ import logging
 import uuid
 from collections import defaultdict
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, Literal
 
@@ -20,6 +20,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from fastapi.websockets import WebSocketState
 from pydantic import BaseModel, JsonValue
 
 from tcip_mcp.audit import now_iso
@@ -174,17 +175,23 @@ def state_snapshot_message(
     )
 
 
+async def _send_to_each(message: BaseModel, sockets: set[WebSocket]) -> None:
+    """Send ``message`` as JSON to every connected socket in ``sockets``.
+
+    A socket that is disconnected, already or by this send, is removed; any other fault raises.
+    """
+    text = message.model_dump_json()
+    for ws in list(sockets):
+        if ws.application_state is WebSocketState.CONNECTED:
+            with suppress(WebSocketDisconnect):
+                await ws.send_text(text)
+        if ws.application_state is WebSocketState.DISCONNECTED:
+            sockets.discard(ws)
+
+
 async def _broadcast_state_snapshot(notification: StateNotification) -> None:
-    """Push the new state, version and open project to every state socket, dropping dead ones."""
-    msg = state_snapshot_message(notification).model_dump(mode="json")
-    dead: list[WebSocket] = []
-    for ws in list(_state_watchers):
-        try:
-            await ws.send_json(msg)
-        except Exception:
-            dead.append(ws)
-    for ws in dead:
-        _state_watchers.discard(ws)
+    """Push the new state, version and open project to every state socket."""
+    await _send_to_each(state_snapshot_message(notification), _state_watchers)
 
 
 _gui_store.subscribe(_broadcast_state_snapshot)
@@ -220,10 +227,8 @@ async def state_ws(websocket: WebSocket) -> None:
     await websocket.accept()
     _state_watchers.add(websocket)
     try:
-        await websocket.send_json(
-            state_snapshot_message(_gui_store.notification()).model_dump(
-                mode="json"
-            )
+        await websocket.send_text(
+            state_snapshot_message(_gui_store.notification()).model_dump_json()
         )
         while True:
             await websocket.receive_text()
@@ -250,19 +255,6 @@ class PanelEvent(BaseModel):
     data: dict[str, JsonValue] = {}
     # The id of the project the sender acts on.
     project_id: str
-
-
-async def _broadcast_to_panel(event: PanelEnvelope) -> None:
-    """Fan out ``event`` to every WebSocket currently subscribed to its panel."""
-    message = event.model_dump(mode="json")
-    dead: list[WebSocket] = []
-    for ws in list(_panel_subscribers.get(event.panel, ())):
-        try:
-            await ws.send_json(message)
-        except Exception:
-            dead.append(ws)
-    for ws in dead:
-        _panel_subscribers[event.panel].discard(ws)
 
 
 def _static_dir_candidates() -> list[Path]:
@@ -383,7 +375,7 @@ async def post_panel_event(
         if "active_subject" in event.data:
             mutation["active_subject"] = event.data["active_subject"]
         await _gui_store.mutate(mutation, project=project)
-    await _broadcast_to_panel(envelope)
+    await _send_to_each(envelope, _panel_subscribers[panel])
     return {"status": "ok", "panel": panel, "event_type": event.event_type}
 
 
@@ -398,13 +390,10 @@ async def panel_ws(websocket: WebSocket, panel: str) -> None:
         return
     await websocket.accept()
     _panel_subscribers[panel].add(websocket)
-    # Replay the open project's retained events so a late-joining browser sees the current state.
-    for event in _gui_store.retained_events(panel):
-        try:
-            await websocket.send_json(event.model_dump(mode="json"))
-        except Exception:
-            break
     try:
+        # Replay the open project's retained events so a late-joining browser sees its state.
+        for event in _gui_store.retained_events(panel):
+            await websocket.send_text(event.model_dump_json())
         while True:
             # Keep the socket open; clients are read-only subscribers here.
             await websocket.receive_text()
