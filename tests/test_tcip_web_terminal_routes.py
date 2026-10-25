@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import gc
+import itertools
 import json
 import re
 import sys
@@ -16,8 +18,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from itertools import pairwise
 from pathlib import Path
+from queue import Queue
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
+import psutil
 import pytest
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.testclient import TestClient
@@ -26,7 +31,7 @@ from tcip_web import terminal as pty_host
 from tcip_web.app import app
 from tcip_web.routes import terminal as terminal_routes
 from tcip_web.state import OpenProject
-from tests._audit_fixtures import audit_rows
+from tests._audit_fixtures import audit_rows, refuse_audit_appends
 from tests._terminal_fixtures import FAKE, fake_executable
 from tests._web_fixtures import named_project
 
@@ -990,11 +995,14 @@ def test_the_requests_staged_before_paste_is_on_each_go_as_their_own_paste(
     assert pty.writes == []
 
     session._on_output("\x1b[?2004h" + row.composer_ready)
-    assert pty.writes == [pty_host.paste("first"), pty_host.paste("second")]
+    assert pty.written(2) == [
+        pty_host.paste("first"),
+        pty_host.paste("second"),
+    ]
 
     session.submit("later")
     session.deliver()
-    assert pty.writes[2:] == [pty_host.paste("later")]
+    assert pty.written(3)[2:] == [pty_host.paste("later")]
     assert pty_host.paste("a\nb\r\nc") == "\x1b[200~a\rb\rc\x1b[201~\r"
 
 
@@ -1104,9 +1112,8 @@ def test_a_request_is_pasted_at_the_read_where_the_harness_composer_goes_live(
     session.submit("the request")
     for index, data in enumerate(reads):
         session._on_output(data)
-        assert pty.writes == (
-            [pty_host.paste("the request")] if index >= live_at else []
-        )
+        expected = [pty_host.paste("the request")] if index >= live_at else []
+        assert pty.written(len(expected)) == expected
 
 
 def test_bracketed_paste_follows_the_last_mode_change_the_agent_wrote() -> (
@@ -1421,7 +1428,7 @@ def test_ws_rejects_cross_site_origin(client: TestClient) -> None:
 class _StubPty(pty_host._WinPty):
     """A process that, on ``terminate``, survives or stops as ``survives`` says, counting calls.
 
-    Its ``write`` appends to ``writes``.
+    Its ``write`` takes the whole of what it is given and appends it, decoded, to ``writes``.
     """
 
     def __init__(self, *, survives: bool) -> None:
@@ -1429,12 +1436,24 @@ class _StubPty(pty_host._WinPty):
         self._survives = survives
         self.terminate_calls = 0
         self.writes: list[str] = []
+        self._written = threading.Condition()
 
     def isalive(self) -> bool:
         return self._alive
 
-    def write(self, data: str) -> None:
-        self.writes.append(data)
+    def write(self, data: bytes) -> int:
+        with self._written:
+            self.writes.append(data.decode("utf-8"))
+            self._written.notify_all()
+        return len(data)
+
+    def written(self, count: int) -> list[str]:
+        """Return ``writes`` once it holds ``count`` entries, waiting up to thirty seconds."""
+        with self._written:
+            assert self._written.wait_for(
+                lambda: len(self.writes) >= count, timeout=30
+            ), self.writes
+            return list(self.writes)
 
     def terminate(self) -> None:
         self.terminate_calls += 1
@@ -1492,23 +1511,10 @@ def _lenient_client() -> TestClient:
     )
 
 
-def _refuse_record(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make every session's audit line fail to append."""
-    from tcip_mcp.audit import AuditEntryNotWrittenError
-
-    def _refuse(
-        event: str, arguments: dict, project: object, actor: str | None
-    ) -> None:
-        raise AuditEntryNotWrittenError(
-            event, RuntimeError("audit log unwritable")
-        )
-
-    monkeypatch.setattr(terminal_routes, "_record", _refuse)
-
-
 def test_create_session_registers_a_survivor_and_answers_503(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    opened_project: Path,
 ) -> None:
     """A session whose start line fails and whose process survives is registered and answers 503.
 
@@ -1518,7 +1524,7 @@ def test_create_session_registers_a_survivor_and_answers_503(
     """
     stub = _StubPty(survives=True)
     _wire_stub_spawn(monkeypatch, stub)
-    _refuse_record(monkeypatch)
+    refuse_audit_appends(monkeypatch)
 
     resp = _lenient_client().post("/api/terminal/sessions", json=LAUNCH)
     assert resp.status_code == 503
@@ -1668,20 +1674,25 @@ def test_a_submit_admitted_before_an_end_is_answered_by_that_end(
 
 
 class _HeldWritePty(_StubPty):
-    """A process whose first write sets ``writing`` and waits for ``release``.
+    """A process whose first write sets ``writing`` and waits for ``release`` before it is taken.
 
-    It stops on ``terminate``.
+    It stops on ``terminate``, and a resize sets ``resized``.
     """
 
     def __init__(self) -> None:
         super().__init__(survives=False)
         self.writing = threading.Event()
         self.release = threading.Event()
+        self.resized = threading.Event()
 
-    def write(self, data: str) -> None:
+    def write(self, data: bytes) -> int:
         if not self.writing.is_set():
             self.writing.set()
             assert self.release.wait(timeout=30)
+        return super().write(data)
+
+    def resize(self, rows: int, cols: int) -> None:
+        self.resized.set()
 
 
 def test_a_submit_is_admitted_while_a_write_is_held(
@@ -1723,103 +1734,332 @@ def test_a_submit_is_admitted_while_a_write_is_held(
         assert submitting.result().status_code == 200
 
 
-def _delivering_a_request(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> tuple[terminal_routes.TerminalSession, _HeldWritePty, _WatchedLock]:
-    """Return a session whose request "written" is in a paste held mid-write, its PTY and lock.
+def _pasting(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    held: _HeldWritePty,
+    *requests: str,
+) -> terminal_routes.TerminalSession:
+    """Return a session on ``held`` whose first of ``requests`` is in a paste held mid-write.
 
-    The session's delivery lock is watched. The request was queued first; the session's output
-    then turned its composer live on another thread, whose delivery is writing that request when
-    this returns.
+    The requests were queued, then the session's output turned its composer live, so its writer
+    is writing the first one's paste when this returns.
     """
-    held = _HeldWritePty()
     _wire_stub_spawn(monkeypatch, held)
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
     session = terminal_routes._SESSIONS[sid]
-    writing = _WatchedLock()
-    monkeypatch.setattr(session, "_writing", writing)
-    session.submit("written")
-    composer = pty_host.PROVIDERS[0].composer_ready
-    threading.Thread(
-        target=session._on_output, args=("\x1b[?2004h" + composer,)
-    ).start()
+    for text in requests:
+        session.submit(text)
+    session._on_output("\x1b[?2004h" + pty_host.PROVIDERS[0].composer_ready)
     assert held.writing.wait(timeout=30)
-    return session, held, writing
+    return session
 
 
-def _end_line_and_answer_agree_without(
-    opened_project: Path, answer: dict, written: str
+class _MidPasteWritePty(_HeldWritePty):
+    """A process whose ``write`` takes one byte per call, its second call held for ``release``.
+
+    ``calls`` counts every write begun.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def write(self, data: bytes) -> int:
+        self.calls += 1
+        if self.calls == 2:
+            self.writing.set()
+            assert self.release.wait(timeout=30)
+        return _StubPty.write(self, data[:1])
+
+
+def _writer_of(session: terminal_routes.TerminalSession) -> threading.Thread:
+    """Return the thread writing ``session``'s input."""
+    (writer,) = [
+        t
+        for t in threading.enumerate()
+        if t.name == f"term-{session.id}-input"
+    ]
+    return writer
+
+
+def test_an_end_during_a_paste_answers_at_once_and_its_writer_writes_nothing_more(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    opened_project: Path,
 ) -> None:
-    """Assert the one end line holds what ``answer`` holds and neither holds ``written``."""
+    """An End while a paste is held mid-payload answers within ten seconds, the paste undelivered.
+
+    The process is terminated, and the answer and the end line both hold the held request and
+    the one queued behind it. Once the held write is released the writer stops, beginning no
+    further write, and the rest of the paste it held is dropped with no report from a
+    finalizer, its objects collected. Ten seconds is far above the end's own work and below the
+    stub's thirty-second hold.
+    """
+    reports: list[object] = []
+    monkeypatch.setattr(sys, "unraisablehook", reports.append)
+    pty = _MidPasteWritePty()
+    session = _pasting(client, monkeypatch, pty, "held", "behind")
+    writer = _writer_of(session)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        ending = pool.submit(
+            _post,
+            f"/api/terminal/sessions/{session.id}/end",
+            {"user": "tester"},
+        )
+        try:
+            answer = ending.result(timeout=10).json()
+        finally:
+            pty.release.set()
+    writer.join(timeout=30)
+    gc.collect()
+
+    assert reports == []
+    assert answer == {"undelivered": ["held", "behind"]}
+    assert pty.terminate_calls == 1 and not pty.isalive()
     (line,) = audit_rows(opened_project, "agent_terminal_ended")
     assert line["arguments"]["undelivered"] == answer["undelivered"]
-    assert written not in answer["undelivered"]
+    assert not writer.is_alive()
+    assert pty.calls == 2
 
 
-def test_an_end_waits_for_a_write_under_way_then_answers_and_counts_alike(
+@pytest.mark.parametrize(
+    ("stub", "taken"),
+    [
+        (_MidPasteWritePty, ["\x1b", "["]),
+        (_HeldWritePty, [pty_host.paste("held")]),
+    ],
+    ids=["mid-paste", "last-write"],
+)
+def test_a_paste_released_before_an_end_records_stays_among_its_undelivered(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
-    opened_project: Path,
+    stub: type[_HeldWritePty],
+    taken: list[str],
 ) -> None:
-    """An end during a write waits for it; the written request is in neither its answer nor line.
+    """A held paste released while an End reads its hand-off stays among its undelivered.
 
-    The end is seen waiting on the delivery's lock while the write is held.
+    Held mid-payload, the writer begins no write after the held one; held at its last write,
+    the paste is written whole and still not taken off the queue. Either way the writer has
+    stopped by the time the End holds what its agent was never given.
     """
-    session, held, writing = _delivering_a_request(client, monkeypatch)
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        ending = pool.submit(
-            _post,
-            f"/api/terminal/sessions/{session.id}/end",
-            {"user": "tester"},
-        )
-        ending.add_done_callback(lambda _: writing.contended.set())
-        assert writing.contended.wait(timeout=30)
-        assert not ending.done()
+    held = stub()
+    session = _pasting(client, monkeypatch, held, "held")
+    writer = _writer_of(session)
+
+    def released() -> None:
         held.release.set()
-        answer = ending.result().json()
+        writer.join(timeout=30)
 
-    _end_line_and_answer_agree_without(opened_project, answer, "written")
+    assert session.end("the person ended it", "user:tester", released)
+
+    assert session.ended.undelivered == ["held"]
+    assert not writer.is_alive()
+    assert held.writes == taken
 
 
-def test_a_write_resuming_while_an_end_records_leaves_its_answer_and_line_alike(
-    client: TestClient,
+class _OneBytePty(_StubPty):
+    """A process whose ``write`` takes one byte per call, noting ``queued`` at each call."""
+
+    def __init__(self) -> None:
+        super().__init__(survives=False)
+        self.queued: list[str] = []
+        self.queued_at: list[list[str]] = []
+
+    def write(self, data: bytes) -> int:
+        self.queued_at.append(list(self.queued))
+        return super().write(data[:1])
+
+
+def test_a_paste_leaves_the_queue_only_once_all_of_it_reached_the_pty(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A PTY taking one byte per write is given each paste whole, in order.
+
+    The first request is still queued at every write its paste takes, and has left the queue by
+    the first write of the next request's paste.
+    """
+    pty = _OneBytePty()
+    _wire_stub_spawn(monkeypatch, pty)
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    session = terminal_routes._SESSIONS[sid]
+    pty.queued = session._queued
+    session.submit("the request")
+    session.submit("next")
+
+    session._on_output("\x1b[?2004h" + pty_host.PROVIDERS[0].composer_ready)
+
+    first, second = pty_host.paste("the request"), pty_host.paste("next")
+    assert "".join(pty.written(len(first) + len(second))) == first + second
+    assert pty.queued_at == [["the request", "next"]] * len(first) + [
+        ["next"]
+    ] * len(second)
+
+
+class _Descriptors:
+    """Stands in for ``os`` and ``pty`` in the PTY module, its descriptors numbers open or closed.
+
+    Each write is noted with its number and whether that number was open. The first write sets
+    ``writing``, waits for ``release`` and takes one byte; every later one takes all it is given.
+    ``openpty`` and ``dup`` open numbers none of ``descriptors`` holds.
+    """
+
+    def __init__(self, *descriptors: int) -> None:
+        self.open = set(descriptors)
+        self.writes: list[tuple[int, bool]] = []
+        self.writing = threading.Event()
+        self.release = threading.Event()
+        self._numbers = itertools.count(max(descriptors, default=2) + 1)
+
+    def openpty(self) -> tuple[int, int]:
+        return self.dup(0), self.dup(0)
+
+    def dup(self, fd: int) -> int:
+        number = next(self._numbers)
+        self.open.add(number)
+        return number
+
+    def write(self, fd: int, data: bytes) -> int:
+        self.writes.append((fd, fd in self.open))
+        if self.writing.is_set():
+            return len(data)
+        self.writing.set()
+        assert self.release.wait(timeout=30)
+        return 1
+
+    def close(self, fd: int) -> None:
+        self.open.discard(fd)
+
+
+def test_a_partial_write_outstanding_at_the_readers_close_never_lands_on_the_closed_master(
     monkeypatch: pytest.MonkeyPatch,
-    opened_project: Path,
 ) -> None:
-    """A write held when an end begins, released once the end waits or records, changes nothing.
+    """A write still under way when the reader closes the master ends on the writer's own number.
 
-    Whichever the end reaches first, its delivery wait or its paused line, the write is released
-    then; the end's answer and line agree and neither holds the written request.
+    The POSIX adapter, which cannot spawn here, is given the two descriptors its ``__init__``
+    holds: the master and the writer's duplicate of it. The reader's close lands while the first
+    write, which takes one byte, is held; every write, the rest of the payload included, lands
+    on a number still open, and the writer closes its own once it stops.
     """
-    session, held, writing = _delivering_a_request(client, monkeypatch)
-    recording, recorded = threading.Event(), threading.Event()
-    record = terminal_routes._record
+    fds = _Descriptors(3, 4)
+    monkeypatch.setattr(pty_host, "os", fds)
+    adapter = pty_host._PosixPty.__new__(pty_host._PosixPty)
+    adapter._master, adapter._input = 3, 4
+    inputs: Queue[pty_host.Input] = Queue()
+    written = threading.Event()
+    pty_host.start_writer(adapter, inputs, name="term-descriptors-input")
+    (writer,) = [
+        t for t in threading.enumerate() if t.name == "term-descriptors-input"
+    ]
+    inputs.put(("ab", written.set))
+    assert fds.writing.wait(timeout=30)
 
-    def held_record(
-        event: str, arguments: dict, project: object, actor: str | None
-    ) -> None:
-        if event == "agent_terminal_ended":
-            writing.contended.set()
-            recording.set()
-            assert recorded.wait(timeout=30)
-        record(event, arguments, project, actor)
+    adapter.close()
+    fds.release.set()
+    assert written.wait(timeout=30)
+    inputs.shutdown(immediate=True)
+    writer.join(timeout=30)
 
-    monkeypatch.setattr(terminal_routes, "_record", held_record)
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        ending = pool.submit(
-            _post,
-            f"/api/terminal/sessions/{session.id}/end",
-            {"user": "tester"},
-        )
-        assert writing.contended.wait(timeout=30)
-        held.release.set()
-        assert recording.wait(timeout=30)
-        recorded.set()
-        answer = ending.result().json()
+    assert fds.writes == [(4, True), (4, True)]
+    assert fds.open == set()
 
-    _end_line_and_answer_agree_without(opened_project, answer, "written")
+
+def test_a_posix_spawn_that_fails_leaves_none_of_its_descriptors_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A POSIX launch whose spawn raises closes its master, its slave and the writer's duplicate.
+
+    The platform guard, the pseudo-terminal and the window size are stood in for, since the
+    adapter cannot spawn here.
+    """
+
+    def refused(*args: object, **kwargs: object) -> None:
+        raise OSError("the spawn was refused")
+
+    fds = _Descriptors()
+    monkeypatch.setattr(pty_host, "os", fds)
+    monkeypatch.setitem(sys.modules, "pty", fds)
+    monkeypatch.setattr(pty_host, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(pty_host, "_set_winsize", lambda *args: None)
+    monkeypatch.setattr(pty_host, "subprocess", SimpleNamespace(Popen=refused))
+
+    with pytest.raises(OSError, match="the spawn was refused"):
+        pty_host._PosixPty(["agent"], "/", 24, 80, {})
+
+    assert fds.open == set()
+
+
+def test_keystrokes_the_socket_takes_during_a_paste_reach_the_pty_after_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keystrokes sent while a paste is being written reach the PTY after the whole paste.
+
+    The writer writes its inputs in the order it took them: the paste, then the keystrokes the
+    socket took while the paste's write was held, which the resize served after them shows.
+    """
+    held = _HeldWritePty()
+    session = _pasting(client, monkeypatch, held, "pasted")
+    with client.websocket_connect(
+        f"ws://127.0.0.1/api/terminal/ws/{session.id}"
+    ) as ws:
+        try:
+            ws.send_json({"type": "input", "data": "typed"})
+            ws.send_json({"type": "resize", "rows": 40, "cols": 120})
+            assert held.resized.wait(timeout=30)
+        finally:
+            held.release.set()
+
+    assert held.written(2) == [pty_host.paste("pasted"), "typed"]
+
+
+def test_a_keystroke_whose_write_is_held_leaves_the_socket_serving_its_frames(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """While a keystroke's write is held, a resize sent after it is served within ten seconds."""
+    held = _HeldWritePty()
+    _wire_stub_spawn(monkeypatch, held)
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    with client.websocket_connect(
+        f"ws://127.0.0.1/api/terminal/ws/{sid}"
+    ) as ws:
+        try:
+            ws.send_json({"type": "input", "data": "typed"})
+            assert held.writing.wait(timeout=30)
+            ws.send_json({"type": "resize", "rows": 40, "cols": 120})
+            assert held.resized.wait(timeout=10)
+        finally:
+            held.release.set()
+
+
+def test_output_past_the_scrollback_cap_keeps_its_newest_characters_for_a_reconnect(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Output past ``SCROLLBACK_MAX_CHARS`` keeps exactly its newest that many characters.
+
+    A socket opened afterwards is replayed them first.
+    """
+    _wire_stub_spawn(monkeypatch, _StubPty(survives=False))
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    session = terminal_routes._SESSIONS[sid]
+    cap = terminal_routes.SCROLLBACK_MAX_CHARS
+
+    session._on_output("a" * cap)
+    session._on_output("tail")
+
+    kept = "a" * (cap - len("tail")) + "tail"
+    assert session.scrollback_snapshot() == kept
+    with client.websocket_connect(
+        f"ws://127.0.0.1/api/terminal/ws/{sid}"
+    ) as ws:
+        assert ws.receive_text() == kept
 
 
 def test_a_socket_opened_while_an_end_writes_its_line_closes_only_after_the_line(
@@ -1932,21 +2172,13 @@ def test_a_survivor_of_an_unrecorded_start_ends_without_an_end_line(
     opened_project: Path,
 ) -> None:
     """A launch whose start line failed and whose process survived records no end of it."""
-    import tcip_mcp.audit as audit_module
-
     survivor = _StubPty(survives=True)
     _wire_stub_spawn(monkeypatch, survivor)
-    append = audit_module.append
-
-    def _refuse_append(*args: object, **kwargs: object) -> None:
-        raise RuntimeError("audit log unwritable")
-
-    monkeypatch.setattr(audit_module, "append", _refuse_append)
-    assert (
-        client.post("/api/terminal/sessions", json=LAUNCH).status_code == 503
-    )
+    with monkeypatch.context() as refusing:
+        refuse_audit_appends(refusing)
+        created = client.post("/api/terminal/sessions", json=LAUNCH)
+    assert created.status_code == 503
     (sid,) = terminal_routes._SESSIONS
-    monkeypatch.setattr(audit_module, "append", append)
     survivor._survives = False
 
     assert _end(client, sid).status_code == 200
@@ -1972,6 +2204,7 @@ def test_an_ended_close_offered_to_a_full_queue_survives_the_dropped_backlog() -
 def test_an_end_whose_line_fails_answers_the_audit_gap_with_the_undelivered_requests(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    opened_project: Path,
 ) -> None:
     _wire_stub_spawn(monkeypatch, _StubPty(survives=False))
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
@@ -1980,7 +2213,7 @@ def test_an_end_whose_line_fails_answers_the_audit_gap_with_the_undelivered_requ
     client.post(
         f"/api/terminal/sessions/{sid}/submit", json={"text": "never given"}
     )
-    _refuse_record(monkeypatch)
+    refuse_audit_appends(monkeypatch)
 
     resp = _end(client, sid)
 
@@ -1995,6 +2228,7 @@ def test_an_unattended_end_whose_line_fails_writes_it_to_the_stream_and_the_erro
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    opened_project: Path,
 ) -> None:
     """The failure reaches the stream and the error log before the ended close is broadcast."""
     _wire_stub_spawn(monkeypatch, _StubPty(survives=False))
@@ -2011,7 +2245,7 @@ def test_an_unattended_end_whose_line_fails_writes_it_to_the_stream_and_the_erro
         broadcast(item)
 
     monkeypatch.setattr(session, "_broadcast", noting_broadcast)
-    _refuse_record(monkeypatch)
+    refuse_audit_appends(monkeypatch)
     with caplog.at_level("ERROR"):
         assert session.end_unattended("the agent's process exited") is True
 
@@ -2058,24 +2292,6 @@ def test_shutdown_all_ends_every_live_session_with_one_line_by_no_one(
     assert terminal_routes._SESSIONS == {}
 
 
-def _os_pid_alive(pid: int) -> bool:
-    """Answer whether ``pid`` is alive, by ``tasklist`` on Windows and a zero signal elsewhere."""
-    if pty_host.os.name == "nt":
-        out = __import__("subprocess").run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-            capture_output=True,
-            text=True,
-        )
-        return str(pid) in out.stdout
-    try:
-        pty_host.os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:  # pragma: no cover - exists but owned elsewhere
-        return True
-
-
 def test_shutdown_all_terminates_process(client: TestClient) -> None:
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
@@ -2085,9 +2301,9 @@ def test_shutdown_all_terminates_process(client: TestClient) -> None:
     pid = session._pty.pid  # capture before shutdown nulls the pty
     terminal_routes.shutdown_all()
     deadline = time.time() + 15
-    while time.time() < deadline and _os_pid_alive(pid):
+    while time.time() < deadline and psutil.pid_exists(pid):
         time.sleep(0.1)
-    assert not _os_pid_alive(pid)
+    assert not psutil.pid_exists(pid)
     assert terminal_routes._SESSIONS == {}
 
 
@@ -2314,12 +2530,7 @@ def test_create_session_answers_503_and_terminates_the_process_when_the_start_li
     The refusal says the line could not be written, no start line is recorded, and no session
     is live.
     """
-    import tcip_mcp.audit as audit_module
-
-    def _refuse_append(*args: object, **kwargs: object) -> None:
-        raise RuntimeError("audit log unwritable")
-
-    monkeypatch.setattr(audit_module, "append", _refuse_append)
+    refuse_audit_appends(monkeypatch)
     resp = client.post("/api/terminal/sessions", json=LAUNCH)
     assert resp.status_code == 503
     assert "could not be written" in resp.json()["detail"]
@@ -2821,7 +3032,7 @@ def test_a_switch_delivers_the_hand_off_request_and_ends_after_its_own_retrospec
     assert switched.status_code == 200, switched.text
     assert switched.json() is None
     session._on_output("\x1b[?2004h" + pty_host.PROVIDERS[0].composer_ready)
-    assert pty.writes == [pty_host.paste(terminal_routes.HAND_OFF_REQUEST)]
+    assert pty.written(1) == [pty_host.paste(terminal_routes.HAND_OFF_REQUEST)]
 
     _retrospective_declared_by(opened_project, "term_another", monkeypatch)
     session._on_output("the agent works")

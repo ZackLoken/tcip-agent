@@ -281,9 +281,8 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
                 if reported(client, signal, *facts):
                     return True
             print(
-                f"    bracketed paste on: {session._ready}; own text delivered: "
-                f"{session._ahead is None}; requests still queued: "
-                f"{len(session._queued)}"
+                f"    bracketed paste on: {session._ready}; requests still "
+                f"queued: {len(session._queued)}"
             )
             print(
                 f"    stream tail: {ascii(session.scrollback_snapshot()[-1500:])}"

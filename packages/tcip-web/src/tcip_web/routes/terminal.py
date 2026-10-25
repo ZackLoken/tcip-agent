@@ -21,6 +21,7 @@ import os
 import threading
 from collections.abc import Callable
 from datetime import datetime
+from queue import Queue, ShutDown
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -48,8 +49,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/terminal", tags=["terminal"])
 
-# Scrollback cap (chars). Enough to re-render a long session's tail without unbounded
-# memory; the TUI repaints itself on the next output anyway.
+# The scrollback keeps the newest this many characters: enough to re-render a long session's
+# tail without unbounded memory; the TUI repaints itself on the next output anyway.
 SCROLLBACK_MAX_CHARS = 400_000
 
 MAX_DIM = 500  # sanity bound on client-supplied rows/cols
@@ -211,12 +212,14 @@ class _HandOff:
 
 
 class TerminalSession:
-    """One PTY-attached agent process, its delivery state and its subscriber queues.
+    """One PTY-attached agent process, its delivery state, its input writer and its subscribers.
 
     The delivery state is the session's own text still to paste ahead of the queued requests
     (a hand-off request once a switch asks for one), whether the agent has bracketed paste on,
     whether it has written its row's ``composer_ready``, the requests a person submitted that
-    are still queued, and the output tail an escape sequence split across reads continues from.
+    are still queued, whether a paste of them is with the writer, and the output tail an escape
+    sequence split across reads continues from. Every input reaches the PTY through the one
+    writer (:meth:`write`).
     """
 
     launched: LaunchedProgram
@@ -236,8 +239,8 @@ class TerminalSession:
         # The project whose log records the session's lines, set once its start line is written.
         self._project: OpenProject | None = None
         self._lock = threading.Lock()
-        self._scrollback: list[str] = []
-        self._scrollback_len = 0
+        self._scrollback = ""
+        self._inputs: Queue[pty_host.Input] = Queue()
         # ws-id → (queue, that websocket's event loop)
         self._subs: dict[
             int, tuple[asyncio.Queue, asyncio.AbstractEventLoop]
@@ -247,12 +250,10 @@ class TerminalSession:
         self._ready = False
         self._composer_live = False
         self._queued: list[str] = []
+        self._pasting = False
         self._tail = ""
         self._last_output_at: datetime | None = None
         self._hand_off: _HandOff | None = None
-        # Held by the one delivery writing to the PTY, so writes keep their order; taken after the
-        # sessions lock and before the session lock, which is never held across a write.
-        self._writing = threading.Lock()
 
     # ── lifecycle ───────────────────────────────────────────────────────
 
@@ -303,6 +304,7 @@ class TerminalSession:
             return f"could not start the agent terminal: {exc}"
         self._pty = pty
         self.launched = launched
+        pty_host.start_writer(pty, self._inputs, name=f"term-{self.id}-input")
         try:
             _record(
                 _STARTED,
@@ -335,10 +337,12 @@ class TerminalSession:
 
         ``hand_off`` answers :meth:`hand_off_landed` for the end, read once the process stopped.
         Under the sessions lock, so no create runs and no submit is admitted meanwhile, and in
-        this order: terminates the process; waits for a delivery under way to settle, so each
-        request is either written and gone from the queue or still queued, the queue it leaves
-        being what its agent was never given, which nothing changes after; holds the session's
-        :class:`TerminalEnded` as :attr:`ended` and writes it as one line in the log its start
+        this order: terminates the process, which shuts the session's writer down without waiting
+        for a write under way, the writer starting no write once it reads the shutdown and
+        nothing it finishes taking a request off the queue; holds the session's
+        :class:`TerminalEnded` as :attr:`ended`, the requests still queued, one in a paste written
+        in part among them, being what its agent was never given, and writes it as one line in
+        the log its start
         line was written to, its conversation resumable unless a person ended it with no switch
         under way, or, when the hand-off cannot be read or the line fails to append (an
         :data:`UNRECORDED_END`), writes that the agent ended and no end line was recorded, and
@@ -355,7 +359,7 @@ class TerminalSession:
                 return False
             try:
                 handed_off = hand_off()
-                with self._writing, self._lock:
+                with self._lock:
                     self.ended = TerminalEnded(
                         session_id=self.id,
                         provider=self.launched.provider,
@@ -393,7 +397,7 @@ class TerminalSession:
         return TerminalLaunch(session_id=self.id, launched=self.launched)
 
     def submit(self, text: str) -> None:
-        """Queue ``text`` for the session's agent; :meth:`deliver` writes it."""
+        """Queue ``text`` for the session's agent; :meth:`deliver` pastes it."""
         with self._lock:
             self._queued.append(text)
 
@@ -405,7 +409,7 @@ class TerminalSession:
         changes nothing. Returns False for a session for no project, which has no log to see a
         hand-off land in, and asks for nothing.
         """
-        with self._writing, self._lock:
+        with self._lock:
             if self._project is None:
                 return False
             if self._hand_off is None:
@@ -415,36 +419,44 @@ class TerminalSession:
             return True
 
     def deliver(self) -> None:
-        """Paste the session's own text with its queued requests, then each later request.
+        """Hand the writer the next paste, unless one is with it already.
 
         The session's own text (:attr:`_ahead`) goes together with every request queued by then
-        as one message, otherwise each request on its own, once the agent has bracketed paste on
-        and has written its row's ``composer_ready``; each leaves the queue only once written. One
-        delivery writes at a time; the session lock is held to read and update the queue, never
-        across a write.
+        as one message, otherwise the oldest request on its own, once the agent has bracketed
+        paste on and has written its row's ``composer_ready``. The requests a paste carried leave
+        the queue only once it is written whole, and the next paste is handed over then.
         """
-        with self._writing:
-            while True:
-                with self._lock:
-                    if not (self._ready and self._composer_live):
-                        return
-                    if self._ahead is not None:
-                        text = "\n\n".join([self._ahead, *self._queued])
-                        taken = len(self._queued)
-                    elif self._queued:
-                        text, taken = self._queued[0], 1
-                    else:
-                        return
-                if not self.write(pty_host.paste(text)):
-                    return
-                with self._lock:
-                    self._ahead = None
-                    del self._queued[:taken]
+        with self._lock:
+            if self._pasting or not (self._ready and self._composer_live):
+                return
+            if self._ahead is not None:
+                text = "\n\n".join([self._ahead, *self._queued])
+                taken, self._ahead = len(self._queued), None
+            elif self._queued:
+                text, taken = self._queued[0], 1
+            else:
+                return
+            self._pasting = self.write(
+                pty_host.paste(text), lambda: self._pasted(taken)
+            )
+
+    def _pasted(self, taken: int) -> None:
+        """Take the ``taken`` requests a written paste carried off the queue, then deliver on.
+
+        Once the writer is shut down the queue is left as the session's end found it.
+        """
+        with self._lock:
+            if self._inputs.is_shutdown:
+                return
+            del self._queued[:taken]
+            self._pasting = False
+        self.deliver()
 
     def terminate(self) -> bool:
         """Kill the PTY and return True when no process remains afterward.
 
-        Returns False when it survives: ``self._pty`` is then restored.
+        A process it stops has its writer stopped too, never waited for. Returns False when it
+        survives: ``self._pty`` is then restored.
         """
         with self._lock:
             pty, self._pty = self._pty, None
@@ -462,6 +474,8 @@ class TerminalSession:
             with self._lock:
                 self._pty = pty
             return False
+        with self._lock:
+            self._inputs.shutdown(immediate=True)
         return True
 
     def alive(self) -> bool:
@@ -471,18 +485,19 @@ class TerminalSession:
 
     # ── I/O ─────────────────────────────────────────────────────────────
 
-    def write(self, data: str) -> bool:
-        """Write ``data`` to the PTY and return whether it was sent."""
-        pty = self._pty
-        if pty is None or not pty.isalive():
-            return False
+    def write(
+        self, data: str, written: Callable[[], object] = lambda: None
+    ) -> bool:
+        """Queue ``data`` for the agent's input behind every input accepted before it.
+
+        The session's writer writes it whole, then calls ``written``. Returns False, ``data``
+        never written, once the writer has stopped.
+        """
         try:
-            pty.write(data)
-            return True
-        except Exception:
-            # pywinpty raises EOFError / WinptyError (not OSError) when the process
-            # dies under the write; any failure here means the same thing: not sent.
+            self._inputs.put((data, written))
+        except ShutDown:
             return False
+        return True
 
     def resize(self, rows: int, cols: int) -> None:
         """Set the PTY's window size; a failed resize or no PTY is a no-op."""
@@ -492,8 +507,8 @@ class TerminalSession:
         try:
             pty.resize(rows, cols)
         except Exception:
-            # Same non-OSError zoo as write(); a failed resize on a dead/dying PTY must
-            # never crash the WebSocket handler (the rail resizes on every reconnect).
+            # pywinpty raises EOFError or WinptyError, not OSError, on a dying PTY; a failed
+            # resize must never crash the WebSocket handler (the rail resizes on every reconnect).
             pass
 
     # ── output pump (called from the reader thread) ─────────────────────
@@ -549,14 +564,7 @@ class TerminalSession:
 
     def _show(self, data: str) -> None:
         """Keep ``data`` in the scrollback and offer it to every subscriber; under the lock."""
-        self._scrollback.append(data)
-        self._scrollback_len += len(data)
-        while (
-            self._scrollback_len > SCROLLBACK_MAX_CHARS
-            and len(self._scrollback) > 1
-        ):
-            dropped = self._scrollback.pop(0)
-            self._scrollback_len -= len(dropped)
+        self._scrollback = (self._scrollback + data)[-SCROLLBACK_MAX_CHARS:]
         self._broadcast(data)
 
     def _broadcast(self, item: str | tuple[int, str]) -> None:
@@ -598,7 +606,7 @@ class TerminalSession:
         queue: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_MAX_CHUNKS)
         loop = asyncio.get_running_loop()
         with self._lock:
-            replay = "".join(self._scrollback)
+            replay = self._scrollback
             sub_id = next(self._sub_ids)
             if self.id not in _SESSIONS:
                 queue.put_nowait(_ENDED_CLOSE)
@@ -614,7 +622,7 @@ class TerminalSession:
     def scrollback_snapshot(self) -> str:
         """Return the current scrollback text."""
         with self._lock:
-            return "".join(self._scrollback)
+            return self._scrollback
 
 
 _SESSIONS: dict[str, TerminalSession] = {}
@@ -862,8 +870,8 @@ def submit_to_session(session_id: str, req: SubmitRequest) -> dict:
     """Queue ``req.text`` for the session's agent (:meth:`TerminalSession.deliver`).
 
     404 for a session the backend does not hold, ended or never started. The request is queued
-    under the sessions lock, so an end after it answers it among the undelivered, and written
-    once that lock is released.
+    under the sessions lock, so an end after it answers it among the undelivered, and handed to
+    the writer once that lock is released.
     """
     with _SESSIONS_LOCK:
         session = _require(session_id)
