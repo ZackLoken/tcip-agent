@@ -10,10 +10,9 @@ from pathlib import Path
 
 import pytest
 
-import tcip_store as ts
 from tcip_mcp import delivery
-from tcip_mcp.audit import AuditEntryNotWrittenError, audit_log_key
-from tests._audit_fixtures import refuse_audit_appends
+from tcip_mcp.audit import AuditEntryNotWrittenError
+from tests._audit_fixtures import audit_rows, refuse_audit_appends
 from tests._trait_fixtures import seed_confirmed_count
 from tests.test_delivery_events import _bucket, _record
 
@@ -60,16 +59,14 @@ def test_the_audit_line_names_the_records_event_id_and_nothing_else(
 
     revision = seed_confirmed_count(tmp_path / "trait_project")
     bucket = _bucket(tmp_path)
-    log = audit_log_key(
-        tmp_path / "ds"
-    )  # the dataset the delivered bucket sits in
-    before = len(ts.read_log(log).records)
+    dataset = tmp_path / "ds"  # the dataset the delivered bucket sits in
+    before = len(audit_rows(dataset))
 
     _record(tmp_path, revision, bucket)
 
     records = delivery.read_delivery_events(tmp_path.resolve())
     assert len(records) == 1 and records[0].door == "test_door"
-    lines = ts.read_log(log).records[before:]
+    lines = audit_rows(dataset)[before:]
     assert len(lines) == 1
     stated = {
         k: v

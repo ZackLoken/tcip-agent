@@ -13,25 +13,18 @@ from pathlib import Path
 
 import pytest
 
-import tcip_store as ts
-
 torch = pytest.importorskip("torch")
 
-from tcip_mcp.audit import audit_log_key  # noqa: E402
 from tcip_mcp.experiments import observe  # noqa: E402
 from tcip_mcp.pipelines.model_build import METRICS_KEY, STATE_DICT_KEY  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import (
     TrainContext,
     run_training_envelope,
 )  # noqa: E402
+from tests._audit_fixtures import audit_rows  # noqa: E402
 from tests._verified_checkpoint_fixtures import (
     completed_checkpoint as _completed,
 )  # noqa: E402
-
-
-def _audit_statuses(root: Path, tool: str = "training_run") -> list[str]:
-    events = ts.read_log(audit_log_key(root)).records
-    return [e["status"] for e in events if e.get("tool") == tool]
 
 
 def _start(
@@ -157,7 +150,10 @@ def test_a_deliverable_the_verified_reader_refuses_ends_the_run_failed(
     assert final.state == "failed" and final.status_error
     assert final.checkpoint is None
     assert _completed(run_dir) is None
-    assert _audit_statuses(tmp_path) == ["running", "failed"]
+    assert [r["status"] for r in audit_rows(tmp_path, "training_run")] == [
+        "running",
+        "failed",
+    ]
 
 
 def _train_stops_on_cancel(ctx: TrainContext) -> None:
@@ -179,7 +175,10 @@ def test_a_canceled_run_completes_no_checkpoint_despite_its_weights(
     assert (run_dir / "model_final.pt").is_file()
     assert observe(run_dir).final.state == "canceled"
     assert _completed(run_dir) is None
-    assert _audit_statuses(tmp_path) == ["running", "canceled"]
+    assert [r["status"] for r in audit_rows(tmp_path, "training_run")] == [
+        "running",
+        "canceled",
+    ]
 
 
 def _train_records_its_own_failure(ctx: TrainContext) -> None:
@@ -204,7 +203,10 @@ def test_a_body_that_marks_itself_failed_is_not_promoted_to_completed(
     )
     assert (run_dir / "model_best.pt").is_file()
     assert _completed(run_dir) is None
-    assert _audit_statuses(tmp_path) == ["running", "failed"]
+    assert [r["status"] for r in audit_rows(tmp_path, "training_run")] == [
+        "running",
+        "failed",
+    ]
 
 
 def _train_raises_after_checkpointing(ctx: TrainContext) -> None:
@@ -225,7 +227,10 @@ def test_a_raised_failure_closes_the_run_failed_and_completes_nothing(
     assert "out of memory" in observe(run_dir).final.status_error
     assert (run_dir / "model_best.pt").is_file()
     assert _completed(run_dir) is None
-    assert _audit_statuses(tmp_path) == ["running", "failed"]
+    assert [r["status"] for r in audit_rows(tmp_path, "training_run")] == [
+        "running",
+        "failed",
+    ]
 
 
 def _train_finishes_past_the_wall_clock(ctx: TrainContext) -> None:
@@ -253,4 +258,7 @@ def test_a_run_past_its_wall_clock_ends_failed_naming_it_with_no_checkpoint(
     )
     assert (run_dir / "model_best.pt").is_file()
     assert _completed(run_dir) is None
-    assert _audit_statuses(tmp_path) == ["running", "failed"]
+    assert [r["status"] for r in audit_rows(tmp_path, "training_run")] == [
+        "running",
+        "failed",
+    ]

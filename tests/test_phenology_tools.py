@@ -20,6 +20,7 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
 )
 from tcip_mcp.tools.phenology_tools import build_plant_mapping
 from tests import csv_rows
+from tests._audit_fixtures import audit_rows
 from tests._chain_fixtures import deliver_milestones
 
 
@@ -169,7 +170,6 @@ def test_the_delivery_line_lands_in_the_log_of_the_dataset_its_buckets_sit_in(
 ) -> None:
     """The delivery's one audit line, in the log that travels with the data, names the event."""
     pytest.importorskip("torch")
-    from tcip_mcp.audit import audit_log_key
     from tcip_mcp.delivery import read_delivery_events
     from tests._chain_fixtures import attributed_series
 
@@ -180,17 +180,9 @@ def test_the_delivery_line_lands_in_the_log_of_the_dataset_its_buckets_sit_in(
     assert "error" not in res, res
 
     (event,) = read_delivery_events(tmp_path)
-    lines = [
-        e
-        for e in ts.read_log(audit_log_key(series.root)).records
-        if e["tool"] == "delivery_event"
-    ]
+    lines = audit_rows(series.root, "delivery_event")
     assert [e["arguments"] for e in lines] == [{"event_id": event.event_id}]
-    assert not [
-        e
-        for e in ts.read_log(audit_log_key(tmp_path)).records
-        if e["tool"] == "delivery_event"
-    ]
+    assert audit_rows(tmp_path, "delivery_event") == []
 
 
 def test_an_unassessed_series_refuses_at_the_door_that_takes_no_acknowledgment(

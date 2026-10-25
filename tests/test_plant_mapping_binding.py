@@ -23,7 +23,7 @@ from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.tools.phenology_tools import build_plant_mapping
 from tcip_mcp.tools.project_tools import register_dataset
 from tcip_mcp.traits import registered_crops
-from tests._audit_fixtures import held_by_another_writer
+from tests._audit_fixtures import audit_rows, held_by_another_writer
 from tests._image_fixtures import write_geo_image
 from tests._mapping_fixtures import (
     PHOTO_POSITION_ERROR_M,
@@ -1846,16 +1846,12 @@ def test_build_mapping_persists_and_reads_back_capture_digests(
 
     # Not build.record_sha256: that came from load_mapping's own read of this same raw document,
     # so comparing it back to record_digest(raw) would prove nothing.
-    from tcip_mcp.audit import audit_log_key
-
     raw = ts.read(plant_mapping.plant_mapping_key(tmp_path, "valley"))
     recomputed = record_digest(raw)
-    page = ts.read_log(audit_log_key(tmp_path))
     receipts = [
         arguments["record_sha256"]
-        for entry in page.records
-        if entry.get("tool") == "plant_mapping_built"
-        and isinstance(arguments := entry.get("arguments"), dict)
+        for entry in audit_rows(tmp_path, "plant_mapping_built")
+        if isinstance(arguments := entry.get("arguments"), dict)
         and arguments.get("name") == "valley"
     ]
     assert receipts, "no plant_mapping_built receipt found for 'valley'"
@@ -2140,13 +2136,11 @@ def test_a_build_leaves_one_row_its_receipt(
     The call adds one row to the log, the library's ``plant_mapping_built`` receipt naming the
     mapping.
     """
-    from tcip_mcp.audit import audit_log_key
-
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
-    before = len(ts.read_log(audit_log_key(tmp_path)).records)
+    before = len(audit_rows(tmp_path))
 
     res = build_plant_mapping(
         tmp_path,
@@ -2157,7 +2151,7 @@ def test_a_build_leaves_one_row_its_receipt(
     )
 
     assert "error" not in res, res
-    rows = ts.read_log(audit_log_key(tmp_path)).records[before:]
+    rows = audit_rows(tmp_path)[before:]
     assert [row["tool"] for row in rows] == ["plant_mapping_built"], rows
     arguments = rows[0]["arguments"]
     assert isinstance(arguments, dict) and arguments["name"] == "valley"

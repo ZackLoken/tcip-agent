@@ -28,8 +28,7 @@ def test_a_render_command_leaves_no_audit_line_anywhere(
     A render is a read: the named project's log gains no line, and the operator's cwd and the
     image's directory get no state.
     """
-    import tcip_store as ts
-    from tcip_mcp.audit import audit_log_key
+    from tests._audit_fixtures import audit_rows
     from tests._web_fixtures import named_project
 
     project = tmp_path / "project"
@@ -48,7 +47,7 @@ def test_a_render_command_leaves_no_audit_line_anywhere(
     )
 
     assert result.returncode == 0, result.stderr
-    rows = ts.read_log(audit_log_key(project)).records
+    rows = audit_rows(project)
     assert [r["tool"] for r in rows] == ["project_created"], rows
     assert not (cwd / ".tcip").exists()
     assert not (image.parent / ".tcip").exists()

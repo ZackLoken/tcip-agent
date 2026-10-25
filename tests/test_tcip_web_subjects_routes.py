@@ -646,11 +646,7 @@ def test_a_registry_save_leaves_one_library_line_through_either_door(
     assert "tester" not in json.dumps(
         {k: v for k, v in route_line.items() if k != "actor"}
     )
-    assert not [
-        e
-        for e in audit_rows(opened_project)
-        if e["tool"] == "replace_registry"
-    ]
+    assert audit_rows(opened_project, "replace_registry") == []
 
 
 def test_a_registry_save_answers_and_audits_the_location_it_wrote(

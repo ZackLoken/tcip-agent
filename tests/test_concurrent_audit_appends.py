@@ -17,6 +17,7 @@ import pytest
 import tcip_store as ts
 from tcip_mcp.audit import audit_log_key, record_event_or_raise
 from tcip_store.sqlite_backend import SqliteBackend
+from tests._audit_fixtures import audit_rows
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -149,7 +150,7 @@ def test_an_ordinary_event_lands_in_the_log_its_scope_names(
         scope=str(tmp_path),
     )
 
-    page = ts.read_log(audit_log_key(tmp_path))
-    assert [r["tool"] for r in page.records] == ["save_label_document"]
-    assert page.records[0]["arguments"] == {"n_annotations": 3}
-    assert page.records[0]["actor"] == "user:breeder"
+    rows = audit_rows(tmp_path)
+    assert [r["tool"] for r in rows] == ["save_label_document"]
+    assert rows[0]["arguments"] == {"n_annotations": 3}
+    assert rows[0]["actor"] == "user:breeder"

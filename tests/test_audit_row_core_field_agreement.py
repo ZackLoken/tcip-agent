@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 import tcip_mcp.audit as audit_module
-import tcip_store as ts
+from tests._audit_fixtures import audit_rows
 
 
 def test_gui_route_rows_and_platform_rows_agree_on_their_core_fields(
@@ -38,7 +38,7 @@ def test_gui_route_rows_and_platform_rows_agree_on_their_core_fields(
         scope=dataset_root,
     )
 
-    rows = ts.read_log(audit_module.audit_log_key(dataset_root)).records
+    rows = audit_rows(dataset_root)
     assert len(rows) == 2
     gui_row, platform_row = rows
     assert gui_row["tool"] == "replace_registry"

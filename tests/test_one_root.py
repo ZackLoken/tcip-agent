@@ -19,9 +19,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-import tcip_store as ts
-from tcip_mcp import audit
 from tcip_web.state import store
+from tests._audit_fixtures import audit_rows
 from tests._web_fixtures import bound_to, named_project
 from tests.test_agent_identity_records import results_through_handshake
 
@@ -29,14 +28,6 @@ if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
     from tcip_mcp.workspace import BoundProject
-
-
-def _friction_rows(project: Path) -> list[dict]:
-    return [
-        row
-        for row in ts.read_log(audit.audit_log_key(project)).records
-        if row["tool"] == "report_friction"
-    ]
 
 
 _FRICTION = (
@@ -57,9 +48,10 @@ def test_the_server_acts_on_the_project_it_was_started_for_while_the_backend_ope
 
     assert not result.is_error, result
     assert [
-        row["arguments"]["detail"] for row in _friction_rows(started.root)
+        row["arguments"]["detail"]
+        for row in audit_rows(started.root, "report_friction")
     ] == ["which root"]
-    assert _friction_rows(opened.root) == []
+    assert audit_rows(opened.root, "report_friction") == []
 
 
 def test_a_tool_input_spelled_like_the_bound_project_stays_the_callers(
@@ -177,9 +169,10 @@ def test_a_server_for_a_project_stays_on_it_after_creating_another(
         started.root
     )
     assert [
-        row["arguments"]["detail"] for row in _friction_rows(started.root)
+        row["arguments"]["detail"]
+        for row in audit_rows(started.root, "report_friction")
     ] == ["which root"]
-    assert _friction_rows(other) == []
+    assert audit_rows(other, "report_friction") == []
 
 
 def test_the_server_refuses_to_start_for_a_directory_holding_no_project(

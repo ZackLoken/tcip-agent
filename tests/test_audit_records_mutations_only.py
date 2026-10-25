@@ -12,17 +12,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 import tcip_mcp.audit as audit_module
-import tcip_store as ts
+from tests._audit_fixtures import audit_rows
 from tests._training_values import COMBINED_SCORER, RATIONALE
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
     from tcip_mcp.workspace import BoundProject
-
-
-def _rows(project: Path) -> list[dict]:
-    return list(ts.read_log(audit_module.audit_log_key(project)).records)
 
 
 def test_a_successful_monitor_result_audits_nothing_and_carries_no_refusal_key(
@@ -45,7 +41,7 @@ def test_a_successful_monitor_result_audits_nothing_and_carries_no_refusal_key(
         detection_config(tmp_path / "ds", project=tmp_path),
         experiment_id="exp-polled",
     )
-    before = len(_rows(tmp_path))
+    before = len(audit_rows(tmp_path))
 
     result = monitor_training(tmp_path, "exp-polled")
     status = result["run"]
@@ -53,7 +49,7 @@ def test_a_successful_monitor_result_audits_nothing_and_carries_no_refusal_key(
     assert status["state"] == "running"
     assert status["status_error"] is None
     assert "error" not in result and "error" not in status
-    assert len(_rows(tmp_path)) == before
+    assert len(audit_rows(tmp_path)) == before
 
 
 def test_read_only_doors_leave_no_line(tmp_path: Path) -> None:
@@ -78,7 +74,7 @@ def test_read_only_doors_leave_no_line(tmp_path: Path) -> None:
         detection_config(tmp_path / "ds", project=tmp_path),
         experiment_id="exp-read",
     )
-    before = len(_rows(tmp_path))
+    before = len(audit_rows(tmp_path))
 
     get_experiment(tmp_path, "exp-read")
     list_experiments(tmp_path)
@@ -90,7 +86,7 @@ def test_read_only_doors_leave_no_line(tmp_path: Path) -> None:
     serve_domain_knowledge("no such document")
     read_audit_log(tmp_path)
 
-    assert len(_rows(tmp_path)) == before
+    assert len(audit_rows(tmp_path)) == before
 
 
 def _answered(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
@@ -123,12 +119,12 @@ def test_the_console_tools_that_read_or_render_leave_no_line(
         for case in console_cases(project, monkeypatch)
         if case.tool.__name__ != "shp_to_plant_csv"
     ]
-    before = len(_rows(project))
+    before = len(audit_rows(project))
 
     for case in cases:
         _answered([hyphenated(case.tool.__name__), *case.command], capsys)
 
-    assert len(_rows(project)) == before
+    assert len(audit_rows(project)) == before
 
 
 def test_the_shapefile_conversion_and_a_written_plant_draw_each_leave_one_line(
@@ -153,7 +149,7 @@ def test_the_shapefile_conversion_and_a_written_plant_draw_each_leave_one_line(
         case.tool.__name__: case
         for case in console_cases(project, monkeypatch)
     }
-    before = len(_rows(project))
+    before = len(audit_rows(project))
     results_through_handshake(
         [
             ("shp_to_plant_csv", cases["shp_to_plant_csv"].arguments),
@@ -165,13 +161,13 @@ def test_the_shapefile_conversion_and_a_written_plant_draw_each_leave_one_line(
         ],
         bound=bound,
     )
-    by_client = _rows(project)[before:]
+    by_client = audit_rows(project)[before:]
     assert [(r["tool"], r["status"]) for r in by_client] == [
         ("shp_to_plant_csv", "ok"),
         ("draw_splits", "ok"),
     ]
     assert [r.get(audit_module.ACTOR_KEY) for r in by_client] == [None] * 2
-    before = len(_rows(project))
+    before = len(audit_rows(project))
 
     _answered(["shp-to-plant-csv", *cases["shp_to_plant_csv"].command], capsys)
     _answered(
@@ -183,7 +179,7 @@ def test_the_shapefile_conversion_and_a_written_plant_draw_each_leave_one_line(
         capsys,
     )
 
-    added = _rows(project)[before:]
+    added = audit_rows(project)[before:]
     assert [(r["tool"], r["status"]) for r in added] == [
         ("shp_to_plant_csv", "ok"),
         ("draw_splits", "ok"),
@@ -204,13 +200,13 @@ def test_a_phenology_look_on_screen_leaves_no_line(
     from tests._chain_fixtures import attributed_series
 
     body = attributed_series(tmp_path).body()
-    before = _rows(tmp_path)
+    before = audit_rows(tmp_path)
 
     resp = client.post("/api/results/phenology_measurement", json=body)
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["milestones"]["rows"]
-    assert _rows(tmp_path) == before
+    assert audit_rows(tmp_path) == before
 
 
 def test_ranking_a_review_queue_leaves_no_line(
@@ -236,7 +232,7 @@ def test_ranking_a_review_queue_leaves_no_line(
         tmp_path, manifest_dir, "exp-ranked"
     )
     _stub_scorer(monkeypatch)
-    before = _rows(tmp_path)
+    before = audit_rows(tmp_path)
 
     result = prioritize_review_queue(
         tmp_path,
@@ -249,20 +245,20 @@ def test_ranking_a_review_queue_leaves_no_line(
 
     assert "error" not in result, result
     assert result["queue"]
-    assert _rows(tmp_path) == before
+    assert audit_rows(tmp_path) == before
 
 
 def test_a_mutating_door_still_leaves_one_line(tmp_path: Path) -> None:
     """A mutation through the platform's own door leaves exactly one audit line, status ok."""
     from tcip_mcp.tools.meta_tools import report_friction
 
-    before = len(_rows(tmp_path))
+    before = len(audit_rows(tmp_path))
     result = report_friction(
         tmp_path, "unexpected_behavior", "a real mutation", actor=None
     )
 
     assert "error" not in result
-    rows = _rows(tmp_path)
+    rows = audit_rows(tmp_path)
     assert len(rows) == before + 1
     assert rows[-1]["tool"] == "report_friction"
     assert rows[-1]["status"] == "ok"
@@ -295,5 +291,5 @@ def test_a_return_is_ok_a_raise_is_an_exception_and_a_refusal_is_no_line(
     with pytest.raises(RuntimeError):
         explode(tmp_path)
 
-    statuses = [(r["tool"], r["status"]) for r in _rows(tmp_path)]
+    statuses = [(r["tool"], r["status"]) for r in audit_rows(tmp_path)]
     assert statuses == [("answer", "ok"), ("explode", "exception")]

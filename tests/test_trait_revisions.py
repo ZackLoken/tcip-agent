@@ -19,10 +19,10 @@ from fastapi.testclient import TestClient
 
 import tcip_store as ts
 from tcip_mcp import traits
-from tcip_mcp.audit import audit_log_key
 from tcip_mcp.delivery import read_delivery_events
 from tcip_mcp.operationalization import OperationalizationRefusedError
 from tests import REFUSED_NAMES, _trait_fixtures as fx
+from tests._audit_fixtures import audit_rows
 
 if TYPE_CHECKING:
     from httpx import Response
@@ -276,11 +276,7 @@ def test_the_proposal_writes_one_audit_line_naming_the_agent(
     finally:
         agent_identity.end()
 
-    lines = [
-        e
-        for e in ts.read_log(audit_log_key(tmp_path)).records
-        if e["tool"] == "propose_trait"
-    ]
+    lines = audit_rows(tmp_path, "propose_trait")
     assert [line["arguments"] for line in lines] == [
         {
             "trait": fx.COUNT_TRAIT,
@@ -569,11 +565,7 @@ def test_confirming_and_withdrawing_land_in_the_project_log_with_the_actor(
         == 200
     )
 
-    entries = [
-        e
-        for e in ts.read_log(audit_log_key(tmp_path)).records
-        if e["tool"] == "confirm_trait_revision"
-    ]
+    entries = audit_rows(tmp_path, "confirm_trait_revision")
 
     arguments = [a for e in entries if isinstance(a := e["arguments"], dict)]
     assert len(arguments) == len(entries)

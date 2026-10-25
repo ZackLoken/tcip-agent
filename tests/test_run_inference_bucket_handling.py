@@ -15,6 +15,7 @@ import tcip_store  # noqa: E402
 from tcip_mcp.dataset_layout import bucket_key  # noqa: E402
 from tcip_mcp.model_registry import Producer  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
+from tests._audit_fixtures import audit_rows  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
 from tests._producer_fixtures import gray_frame  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
@@ -48,7 +49,6 @@ def test_run_inference_publishes_each_document_the_record_and_one_audit_line(
 
     from tcip_annotation.json_io import read_predictions
     from tcip_annotation.state import BBox
-    from tcip_mcp.audit import audit_log_key
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -84,11 +84,7 @@ def test_run_inference_publishes_each_document_the_record_and_one_audit_line(
     assert isinstance(bucket.producer, Producer)
     assert bucket.producer.checkpoint_sha256 == digest
     assert bucket.assessment_id is None
-    rows = [
-        r
-        for r in tcip_store.read_log(audit_log_key(tmp_path)).records
-        if r["tool"] == "prediction_bucket_published"
-    ]
+    rows = audit_rows(tmp_path, "prediction_bucket_published")
     assert [r["arguments"] for r in rows] == [
         {"dataset_root": str(tmp_path), "bucket": BUCKET, "dropped_boxes": 0}
     ]

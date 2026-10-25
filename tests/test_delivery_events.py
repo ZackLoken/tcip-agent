@@ -16,6 +16,7 @@ import tcip_store as ts
 from tcip_mcp import delivery
 from tcip_mcp.delivery import read_delivery_events
 from tcip_mcp.traits import PER_IMAGE_COUNT, STATE_CROSSING_DATES, read_trait
+from tests._audit_fixtures import audit_rows
 from tests._chain_fixtures import deliver_milestones
 from tests._mapping_fixtures import POSITION_ERROR_M
 from tests._trait_fixtures import COUNT_SUBJECT, seed_confirmed_count
@@ -200,12 +201,11 @@ def test_a_look_on_screen_records_no_delivery_event_and_no_audit_line(
 ) -> None:
     """``phenology_measurement`` answers a number with no delivery event and no new log line."""
     pytest.importorskip("torch")
-    from tcip_mcp.audit import audit_log_key
     from tests._chain_fixtures import attributed_series
 
     series = attributed_series(tmp_path, fractions=(0.0, 1.0))
-    logs = (audit_log_key(tmp_path), audit_log_key(series.root))
-    before = [list(ts.read_log(k).records) for k in logs]
+    scopes = (tmp_path, series.root)
+    before = [audit_rows(scope) for scope in scopes]
 
     resp = client.post(
         "/api/results/phenology_measurement", json=series.body()
@@ -214,7 +214,7 @@ def test_a_look_on_screen_records_no_delivery_event_and_no_audit_line(
     assert resp.status_code == 200, resp.text
     assert resp.json()["positive_class_assessed"] is True
     assert read_delivery_events(tmp_path) == []
-    assert [list(ts.read_log(k).records) for k in logs] == before
+    assert [audit_rows(scope) for scope in scopes] == before
 
 
 def test_a_record_that_cannot_be_written_raises_before_any_audit_line(
@@ -225,8 +225,6 @@ def test_a_record_that_cannot_be_written_raises_before_any_audit_line(
 
     No event is recorded.
     """
-    from tcip_mcp.audit import audit_log_key
-
     revision = seed_confirmed_count(tmp_path)
     result = delivery.Result(delivery.DELIVERY_COLUMNS, [], population=[])
     clearance = _cleared(tmp_path, revision, _bucket(tmp_path), result)
@@ -255,8 +253,7 @@ def test_a_record_that_cannot_be_written_raises_before_any_audit_line(
 
     monkeypatch.undo()
     assert read_delivery_events(tmp_path.resolve()) == []
-    events = ts.read_log(audit_log_key(tmp_path)).records
-    assert not any(e["tool"] == "delivery_event" for e in events)
+    assert audit_rows(tmp_path, "delivery_event") == []
 
 
 def test_a_plant_mapping_missing_a_disclosure_key_raises_and_writes_nothing(

@@ -14,6 +14,7 @@ import pytest
 
 from tcip_mcp import dataset_layout, workspace
 from tcip_mcp.tools.ingest_tools import ingest_images
+from tests._audit_fixtures import audit_rows
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -569,7 +570,6 @@ def test_a_stated_date_moves_an_undated_image_with_every_record_keyed_by_it(
     The label document, the flags record and the staged proposals of the moved image all
     answer at its new capture, unchanged, and none is left at the old one.
     """
-    import tcip_mcp.audit as audit_mod
     import tcip_store as ts
     from tcip_annotation.flags import FlagRequest
     from tcip_mcp.pipelines import proposal
@@ -642,11 +642,7 @@ def test_a_stated_date_moves_an_undated_image_with_every_record_keyed_by_it(
     assert saved_annotations(dest) == before
     assert [ts.read(key) for key in _image_records(dest, runs)] == records
     assert not any(ts.exists(key) for key in _image_records(image, runs))
-    (line,) = [
-        e
-        for e in ts.read_log(audit_mod.audit_log_key(project)).records
-        if e["tool"] == "state_capture_date"
-    ]
+    (line,) = audit_rows(project, "state_capture_date")
     assert line["status"] == "ok"
     assert line["arguments"] == {
         "images": [str(image)],
@@ -663,7 +659,6 @@ def test_a_stated_date_whose_records_fail_to_commit_changes_nothing(
     A records transaction that raises after the files were copied leaves no copy in the new
     bucket, the image and its label document where they were, and no audit line.
     """
-    import tcip_mcp.audit as audit_mod
     import tcip_store as ts
     from tcip_mcp.tools.ingest_tools import state_capture_date
     from tcip_store.sqlite_backend import Txn
@@ -687,10 +682,7 @@ def test_a_stated_date_whose_records_fail_to_commit_changes_nothing(
     assert image.is_file()
     assert not (project / "images" / "2026-05-15").exists()
     assert ts.exists(dataset_layout.label_key_of(image))
-    assert not any(
-        e["tool"] == "state_capture_date"
-        for e in ts.read_log(audit_mod.audit_log_key(project)).records
-    )
+    assert audit_rows(project, "state_capture_date") == []
 
 
 def test_a_failed_stated_date_keeps_another_writers_file_in_the_bucket_it_made(
@@ -986,16 +978,12 @@ def test_ingest_non_recursive_skips_subfolders(
 
 
 def test_ingest_writes_audit_entry(project: Path, tmp_path: Path) -> None:
-    import tcip_mcp.audit as audit_mod
-    import tcip_store as ts
-
     src = tmp_path / "raw"
     _make_image(src / "a.png")
     ingest_images(project, source=str(src), actor=None)
 
-    entries = ts.read_log(audit_mod.audit_log_key(project)).records
     assert any(
-        e["tool"] == "ingest_images" and e["status"] == "ok" for e in entries
+        e["status"] == "ok" for e in audit_rows(project, "ingest_images")
     )
 
 

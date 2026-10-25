@@ -16,10 +16,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 import tcip_store
-from tcip_mcp.audit import audit_log_key
 from tcip_mcp.pipelines.execution import Stated
 from tests import _trait_fixtures as fx
-from tests._audit_fixtures import refuse_audit_appends
+from tests._audit_fixtures import audit_rows, refuse_audit_appends
 from tests._web_fixtures import BROWSER, acknowledged_post, open_new_project
 
 if TYPE_CHECKING:
@@ -280,8 +279,8 @@ def test_an_acknowledged_export_ships_unvalidated_and_its_event_names_the_act(
     lines = [
         e
         for root in {tmp_path, Path(event["buckets"][0]["dataset_root"])}
-        for e in tcip_store.read_log(audit_log_key(root)).records
-        if e["tool"] in ("delivery_acknowledged", "delivery_event")
+        for tool in ("delivery_acknowledged", "delivery_event")
+        for e in audit_rows(root, tool)
     ]
     assert sorted(
         tool for e in lines if isinstance(tool := e["tool"], str)
@@ -375,11 +374,7 @@ def test_an_export_saves_the_delivery_under_the_project_and_logs_it_with_its_dat
         record.event_id
     }
     assert {row["validated"] for row in _rows(resp.text)} == {"True"}
-    logged = [
-        e
-        for e in tcip_store.read_log(audit_log_key(series.root)).records
-        if e["tool"] == "delivery_event"
-    ]
+    logged = audit_rows(series.root, "delivery_event")
     assert [e["arguments"] for e in logged] == [{"event_id": record.event_id}]
 
 
@@ -695,8 +690,7 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
     lines = [
         e
         for root in {tmp_path, Path(chain.root)}
-        for e in tcip_store.read_log(audit_log_key(root)).records
-        if e["tool"] == "delivery_event"
+        for e in audit_rows(root, "delivery_event")
     ]
     assert [e["actor"] for e in lines] == ["user:breeder"] * 2
 
@@ -1109,10 +1103,8 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
 
     from PIL import Image
 
-    from tcip_mcp.audit import audit_log_key
     from tcip_mcp.model_registry import ModelRegistry
     from tcip_mcp.tools.ingest_tools import ingest_images
-    from tcip_store import read_log
     from tcip_web.routes import inference as inference_routes
     from tests._image_fixtures import capture_exif
     from tests._verified_checkpoint_fixtures import produced_checkpoint
@@ -1145,7 +1137,7 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
     assert launched.status_code == 200, launched.text
     job_id = launched.json()["job_id"]
     try:
-        before = len(read_log(audit_log_key(opened_project)).records)
+        before = len(audit_rows(opened_project, "inference_canceled"))
         canceled = client.post(
             f"/api/inference/jobs/{job_id}/cancel", json={"user": "tester"}
         )
@@ -1154,11 +1146,7 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
             canceled.json()["job_id"],
             canceled.json()["cancel_requested"],
         ) == (job_id, True)
-        lines = [
-            r
-            for r in read_log(audit_log_key(opened_project)).records[before:]
-            if r["tool"] == "inference_canceled"
-        ]
+        lines = audit_rows(opened_project, "inference_canceled")[before:]
         assert [
             (arguments["job_id"], r["actor"])
             for r in lines

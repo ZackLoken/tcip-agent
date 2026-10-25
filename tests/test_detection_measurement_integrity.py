@@ -248,9 +248,8 @@ def test_evaluating_a_run_leaves_its_directory_byte_identical(
     The run's files before and after are the same names holding the same bytes, the project's
     audit log gains no row, and the result carries no error.
     """
-    import tcip_store as ts
-    from tcip_mcp.audit import audit_log_key
     from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._audit_fixtures import audit_rows
     from tests._verified_checkpoint_fixtures import finished_run
 
     images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
@@ -264,7 +263,7 @@ def test_evaluating_a_run_leaves_its_directory_byte_identical(
         }
 
     before = snapshot()
-    audit_before = list(ts.read_log(audit_log_key(tmp_path)).records)
+    audit_before = audit_rows(tmp_path)
     result = evaluate_model(
         tmp_path,
         run_dir.name,
@@ -275,7 +274,7 @@ def test_evaluating_a_run_leaves_its_directory_byte_identical(
 
     assert "error" not in result, result
     assert snapshot() == before
-    assert list(ts.read_log(audit_log_key(tmp_path)).records) == audit_before
+    assert audit_rows(tmp_path) == audit_before
 
 
 def test_explicit_checkpoint_stays_untiled(

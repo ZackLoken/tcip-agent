@@ -11,21 +11,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-import tcip_store as ts
 from tcip_mcp import experiments as exp
-from tcip_mcp.audit import audit_log_key
 from tcip_mcp.pipelines.data import split_construction as sc
 from tcip_mcp.pipelines.training import subprocess_worker as worker
-from tests._audit_fixtures import refuse_audit_appends
+from tests._audit_fixtures import audit_rows, refuse_audit_appends
 from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
 if TYPE_CHECKING:
     from typing import NoReturn
-
-
-def _training_run_events(root: Path) -> list[dict]:
-    events = ts.read_log(audit_log_key(root)).records
-    return [e for e in events if e.get("tool") == "training_run"]
 
 
 def test_a_pre_envelope_crash_marks_the_run_failed_and_opens_a_training_run_event(
@@ -54,7 +47,7 @@ def test_a_pre_envelope_crash_marks_the_run_failed_and_opens_a_training_run_even
     assert final.checkpoint is None
     assert observation.state == "failed"
 
-    events = _training_run_events(tmp_path)
+    events = audit_rows(tmp_path, "training_run")
     assert len(events) == 1
     assert events[0]["status"] == "failed"
     assert events[0]["arguments"]["experiment_id"] == "exp-worker-crash"

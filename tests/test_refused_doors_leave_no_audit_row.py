@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-import tcip_store as ts
 from tcip_mcp.pipelines.execution import Stated
+from tests._audit_fixtures import audit_rows
 from tests._training_values import (
     DISPERSION_QUANTILE,
     EQUIVALENCE_Z,
@@ -24,12 +24,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from tcip_mcp.workspace import BoundProject
-
-
-def _rows(tmp_path: Path) -> list[dict]:
-    from tcip_mcp.audit import audit_log_key
-
-    return list(ts.read_log(audit_log_key(tmp_path)).records)
 
 
 def _register_model(tmp_path: Path) -> dict:
@@ -211,7 +205,7 @@ def test_a_door_refused_before_it_acts_leaves_no_row(
     except (ValueError, FileNotFoundError):
         result = {"error": "raised"}
     assert "error" in result, result
-    assert _rows(tmp_path) == []
+    assert audit_rows(tmp_path) == []
 
 
 def test_a_save_on_a_missing_image_leaves_no_row(
@@ -219,7 +213,7 @@ def test_a_save_on_a_missing_image_leaves_no_row(
 ) -> None:
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    before = _rows(bound.root)
+    before = audit_rows(bound.root)
     result = save_annotations(
         bound,
         str(bound.root / "images" / "absent.png"),
@@ -228,4 +222,4 @@ def test_a_save_on_a_missing_image_leaves_no_row(
     )
 
     assert "error" in result, result
-    assert _rows(bound.root) == before
+    assert audit_rows(bound.root) == before
