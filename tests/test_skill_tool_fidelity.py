@@ -187,7 +187,7 @@ def test_fabricated_tool_names_admits_a_real_console_command(
         "## Tools\n\n"
         "| Tool | Purpose |\n"
         "|------|---------|\n"
-        "| `tcip doctor` | a real operator command |\n"
+        "| `tcip dump-store` | a real operator command |\n"
         "| `tcip scan-dataset` | a registered tool's command |\n",
         encoding="utf-8",
     )

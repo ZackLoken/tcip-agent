@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from tcip_mcp.cli import doctor
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.tools import doctor_tools as doctor
 from tcip_mcp.tools.annotation_tools import (
     read_annotations,
     save_annotations,

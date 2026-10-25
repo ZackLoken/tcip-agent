@@ -108,38 +108,57 @@ def test_scan_dataset_image_census_refuses_a_stem_collision(
         _scan_dataset(str(project_root))
 
 
-def test_doctor_script_reports_a_stem_collision_with_no_label_file_instead_of_crashing(
-    tmp_path: Path,
-) -> None:
-    """The doctor reports a stem collision with no label file as a finding, not a crash.
+def _diagnosed_collision(tmp_path: Path) -> list[list[str]]:
+    """Return the findings ``tcip diagnose-project`` prints over a project holding a collision.
 
-    The command exits 2 with no traceback and names both colliding files.
+    The project is made through the platform's creation door over an ingested bucket holding a
+    stem-collided pair and no label file; the command is asserted to answer with no traceback.
     """
+    import json
+
+    from tests._web_fixtures import new_project
+
     bucket = _ingested_bucket(tmp_path)
     _collide(bucket)
     project_root = bucket.parent.parent
+    new_project(project_root)
 
-    res = run_tcip("doctor", [str(project_root)])
+    res = run_tcip(
+        "diagnose-project",
+        ["--project", str(project_root), "--user", "tester"],
+    )
 
     assert "Traceback" not in res.stderr, res.stderr
-    assert res.returncode == 2
-    assert "shoot_001.jpg" in res.stdout and "Shoot_001.png" in res.stdout
+    assert res.returncode == 0, res.stderr
+    return json.loads(res.stdout)["findings"]
 
 
-def test_doctor_script_reports_a_stem_collision_once_not_once_per_check(
+def test_doctor_command_reports_a_stem_collision_with_no_label_file_instead_of_crashing(
     tmp_path: Path,
 ) -> None:
-    """The doctor reports a stem collision once, with no traceback."""
-    bucket = _ingested_bucket(tmp_path)
-    _collide(bucket)
-    project_root = bucket.parent.parent
+    """The doctor's command reports a stem collision with no label file as an error finding.
 
-    res = run_tcip("doctor", [str(project_root)])
+    The finding names both colliding files.
+    """
+    found = _diagnosed_collision(tmp_path)
 
-    assert "Traceback" not in res.stderr, res.stderr
-    assert res.stdout.count("name more than one logical image") == 1, (
-        res.stdout
-    )
+    assert [
+        level
+        for level, msg in found
+        if "shoot_001.jpg" in msg and "Shoot_001.png" in msg
+    ] == ["error"], found
+
+
+def test_doctor_command_reports_a_stem_collision_once_not_once_per_check(
+    tmp_path: Path,
+) -> None:
+    """The doctor's command reports a stem collision once."""
+    found = _diagnosed_collision(tmp_path)
+
+    collisions = [
+        msg for _, msg in found if "name more than one logical image" in msg
+    ]
+    assert len(collisions) == 1, found
 
 
 # ── The admitting case: a clean, uncollided bucket lists every image through each routed site ──

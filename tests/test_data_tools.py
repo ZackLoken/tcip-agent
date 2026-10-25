@@ -10,7 +10,6 @@ import pytest
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.cli import doctor
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
 from tcip_mcp.pipelines.data.label_queries import registry_scope
 from tcip_mcp.pipelines.data.selection import (
@@ -21,6 +20,7 @@ from tcip_mcp.pipelines.data.selection import (
     selection_key,
     write_selection,
 )
+from tcip_mcp.tools import doctor_tools as doctor
 from tcip_mcp.tools.data_tools import draw_splits, scan_dataset
 from tests._producer_fixtures import label_image, registry_over
 from tests._training_values import RATIONALE, drawn_split
@@ -80,8 +80,7 @@ def test_doctor_check_data_quality(data_dir: Path) -> None:
 
 
 def test_doctor_check_data_quality_missing_dir(tmp_path: Path) -> None:
-    # _scan_dataset's own rglob over a nonexistent path yields nothing rather than raising; a
-    # missing project root is doctor.main()'s own upfront refusal, not this check's job.
+    # _scan_dataset's own rglob over a nonexistent path yields nothing rather than raising.
     missing = tmp_path / "nonexistent" / "xyz123"
     findings = _quality_findings(missing)
     assert not [f for f in findings if f[0] == "error"]

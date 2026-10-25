@@ -3,10 +3,10 @@
 ## Setup
 
 Follow README.md's Setup section for the conda environment and the frontend install; this document
-does not restate it. The `tcip` console script (`tcip doctor`, `tcip dump-store`, and every other
-operator command) is declared in `packages/tcip-web/pyproject.toml`; an existing editable checkout
-gains it only on the next `pip install -e packages/tcip-web`. Every test spawns a command as
-`python -m tcip_web.cli <command>` instead, so the test suite holds without that reinstall.
+does not restate it. The `tcip` console script (`tcip dump-store`, `tcip diagnose-project` and
+every other command) is declared in `packages/tcip-web/pyproject.toml`; an existing editable
+checkout gains it only on the next `pip install -e packages/tcip-web`. Every test spawns a command
+as `python -m tcip_web.cli <command>` instead, so the test suite holds without that reinstall.
 
 ## Gates a change must pass
 

@@ -1,4 +1,4 @@
-"""tcip doctor's check_data_quality: the findings it reports and the level of each.
+"""The doctor's check_data_quality: the findings it reports and the level of each.
 
 A label document the per-image reader refuses is a named finding for that document, and the
 check goes on to the remaining documents. A warning and an error are distinct levels.
@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.cli import doctor
 from tcip_mcp.dataset_layout import label_key
+from tcip_mcp.tools import doctor_tools as doctor
 from tests._producer_fixtures import write_image
 
 if TYPE_CHECKING:

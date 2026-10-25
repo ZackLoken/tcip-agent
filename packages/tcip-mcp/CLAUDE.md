@@ -15,7 +15,7 @@ src/tcip_mcp/
   cli/            # the operator-only command modules, and run_tool, the one adapter running any
                   # registered tool as the tcip command of its own name
   tools/          # domain tools, one module per area: annotation, calibration (the assessment
-                  # doors), data, delivery, experiment, feedback, gui, inference, ingest, knowledge,
+                  # doors), data, delivery, doctor, experiment, feedback, gui, inference, ingest, knowledge,
                   # meta, model, orthomosaic, phenology, project, proposal, trait, training, vision
   pipelines/      # composable ML: active_learning, components, data, inference, measurement,
                   # postprocessing, training (submodules), plus:

@@ -388,7 +388,7 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
         )
         assert handed["permissions"] == shipped["permissions"]
         assert not any(
-            "tcip" in entry or "doctor" in entry
+            "tcip" in entry
             for entries in handed["permissions"].values()
             for entry in entries
             if not entry.startswith("mcp__tcip__")
@@ -484,7 +484,7 @@ def test_allowing_the_tcip_tools_keeps_the_rest_of_the_settings_and_is_idempoten
     settings = tmp_path / "settings.json"
     kept = [
         "command(git log)",
-        'command(regex:^python -m tcip_web\\.cli doctor "/p"$)',
+        'command(regex:^python -m tcip_web\\.cli dump-store "/p"$)',
         "unsandboxed(git log)",
     ]
     settings.write_text(
@@ -565,32 +565,6 @@ def test_agys_hook_registration_keeps_the_hooks_files_other_entries(
         pty_host.PreparationFailedError, match="does not hold a JSON object"
     ):
         pty_host.prepare_antigravity("agy", opened, "term_third")
-
-
-def test_no_launch_writes_a_doctor_allowance_for_any_row(
-    opened: OpenProject,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Neither Claude's handed settings nor agy's settings file gains a doctor entry."""
-    settings = tmp_path / "agy-settings.json"
-    monkeypatch.setattr(pty_host, "ANTIGRAVITY_SETTINGS", settings)
-    monkeypatch.setattr(
-        pty_host, "run_to_completion", lambda argv, step: "added"
-    )
-    _port_recorded()
-    (claude_settings,) = pty_host.render_argv(
-        [pty_host.CLAUDE_SETTINGS_ARG],
-        opened,
-        pty_host.spawn_env("term_test"),
-        None,
-    )
-    pty_host.prepare_antigravity("agy", opened, "term_test")
-
-    handed = json.loads(Path(claude_settings).read_text(encoding="utf-8"))
-    allowed = json.loads(settings.read_text(encoding="utf-8"))["permissions"]
-    for entries in (*handed["permissions"].values(), *allowed.values()):
-        assert not [entry for entry in entries if "doctor" in entry], entries
 
 
 def test_the_session_hook_runs_the_console_command_under_the_mcp_servers_interpreter(

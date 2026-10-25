@@ -1,4 +1,4 @@
-"""tcip doctor: the data-state findings it reports over a project and its exit codes."""
+"""The data-state findings ``diagnose_project`` answers over a project, each at its level."""
 
 from __future__ import annotations
 
@@ -13,9 +13,11 @@ from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import traits
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.model_registry import ModelRegistry
+from tcip_mcp.server import binding_for
 from tcip_mcp.subject_registry import Subject, SubjectRegistry
+from tcip_mcp.tools import doctor_tools as doctor
 from tests import _trait_fixtures as fx
-from tests._cli_fixtures import run_tcip
+from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import (
     image_label_key,
     label_image,
@@ -26,7 +28,37 @@ from tests._web_fixtures import new_project
 
 if TYPE_CHECKING:
     from tcip_annotation.json_io import LabelDocument
+    from tcip_mcp.workspace import BoundProject
     from tcip_store import Key
+
+
+def _answered(bound: BoundProject) -> list[tuple[str, str]]:
+    """Return the findings ``diagnose_project`` answers for ``bound`` through a client's handshake.
+
+    The call is asserted to be answered, never refused.
+    """
+    from tests.test_agent_identity_records import (
+        _body,
+        results_through_handshake,
+    )
+
+    (result,) = results_through_handshake(
+        [("diagnose_project", {})], bound=bound
+    )
+    assert not result.is_error, result
+    return [(level, message) for level, message in _body(result)["findings"]]
+
+
+def _diagnosed(root: Path) -> list[tuple[str, str]]:
+    """Return the findings ``diagnose_project`` answers for a server started for ``root``."""
+    return _answered(binding_for(root))
+
+
+def _messages(
+    found: list[tuple[str, str]], needle: str
+) -> list[tuple[str, str]]:
+    """Return the findings of ``found`` whose message holds ``needle``."""
+    return [(level, msg) for level, msg in found if needle in msg]
 
 
 def _record_localizing(tmp_path: Path, name: str, localization: str) -> dict:
@@ -46,7 +78,8 @@ def _project(tmp_path: Path) -> Path:
     root = tmp_path / "proj"
     images = root / "images" / "2026-02-11"
     images.mkdir(parents=True)
-    (root / ".tcip" / "state").mkdir(parents=True)
+    new_project(root)
+    (root / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
     registry_over(
         root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
     )
@@ -63,23 +96,6 @@ def _project(tmp_path: Path) -> Path:
     )
     mark_complete(images / "IMG_A.JPG", "bud", project=root)
     return root
-
-
-def test_doctor_help_prints_the_dispatchers_prog_argument(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """The doctor's help prints the ``prog`` it is given.
-
-    Called with ``prog="tcip doctor"``, ``doctor.main`` given ``--help`` exits 0 printing that
-    usage line.
-    """
-    from tcip_mcp.cli import doctor
-
-    with pytest.raises(SystemExit) as exc:
-        doctor.main(["--help"], prog="tcip doctor")
-
-    assert exc.value.code == 0
-    assert "usage: tcip doctor " in capsys.readouterr().out
 
 
 def _register_absent_checkpoint(
@@ -112,26 +128,30 @@ def test_doctor_flags_registry_checkpoint_path_under_a_temp_directory(
         root, "junk", tmp_path / "elsewhere" / "model.pt"
     )
 
-    res = run_tcip("doctor", [str(root)])
-    assert res.returncode == 2  # errors present
-    out = res.stdout
-    assert (
-        "IMG_B" in out and "not marked complete" in out
-    )  # unconfirmed empty -> error
-    assert "junk" in out and "test/temp" in out  # registry pollution -> error
-    assert "IMG_A" not in out  # confirmed negative is clean
-    assert "IMG_C" not in out  # an annotated image is clean
+    found = _diagnosed(root)
+
+    assert [
+        level
+        for level, msg in _messages(found, "not marked complete")
+        if "IMG_B" in msg
+    ] == ["error"], found
+    assert [
+        level for level, msg in _messages(found, "test/temp") if "junk" in msg
+    ] == ["error"], found
+    assert not _messages(found, "IMG_A"), found  # confirmed negative is clean
+    assert not _messages(found, "IMG_C"), found  # an annotated image is clean
 
 
 def test_doctor_reports_a_stem_collision_and_completes(tmp_path: Path) -> None:
-    """The doctor reports a stem collision as a finding and completes.
+    """The doctor reports a stem collision as an error finding and completes.
 
-    A capture holding two identities for one stem is named as a finding, and the doctor exits 2
-    with no traceback.
+    A capture holding two identities for one stem is named as an error finding, and the call is
+    answered rather than refused.
     """
     root = tmp_path / "proj"
     images = root / "images" / "2026-02-11"
     images.mkdir(parents=True)
+    new_project(root)
     registry_over(
         root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
     )
@@ -139,11 +159,11 @@ def test_doctor_reports_a_stem_collision_and_completes(tmp_path: Path) -> None:
     Image.new("RGB", (32, 32)).save(images / "foo.png")
     label_image(images / "foo.jpg", [], 32, 32, keep_empty=True)
 
-    res = run_tcip("doctor", [str(root)])
+    found = _diagnosed(root)
 
-    assert res.returncode == 2
-    assert "foo.jpg" in res.stdout and "foo.png" in res.stdout
-    assert "Traceback" not in res.stderr
+    assert [
+        level for level, msg in _messages(found, "foo.jpg") if "foo.png" in msg
+    ] == ["error"], found
 
 
 def test_doctor_flags_a_trait_record_that_will_not_read(
@@ -152,7 +172,7 @@ def test_doctor_flags_a_trait_record_that_will_not_read(
     """The doctor flags a trait record that will not read.
 
     For a trait record the schema refuses, the doctor names the record and its refused
-    localization and exits 2.
+    localization in an error finding.
     """
     import tcip_store as ts
 
@@ -162,18 +182,19 @@ def test_doctor_flags_a_trait_record_that_will_not_read(
         traits.trait_key(root, "unicorn"), record, expect=ts.Version.ABSENT
     )
 
-    res = run_tcip("doctor", [str(root)])
-    assert res.returncode == 2  # errors present
-    assert "'unicorn' will not read" in res.stdout
-    assert "unicorn_match" in res.stdout
+    found = _diagnosed(root)
+
+    ((level, msg),) = _messages(found, "'unicorn' will not read")
+    assert level == "error"
+    assert "unicorn_match" in msg
 
 
 def _clean_project(tmp_path: Path) -> Path:
-    """Write a project of one image under capture ``d`` labeled with one breeder-drawn ``bud``."""
+    """Make a project of one image under capture ``d`` labeled with one breeder-drawn ``bud``."""
     root = tmp_path / "clean"
     images = root / "images" / "d"
     images.mkdir(parents=True)
-    (root / ".tcip" / "state").mkdir(parents=True)
+    new_project(root)
     registry_over(
         root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
     )
@@ -193,20 +214,18 @@ def _clean_project(tmp_path: Path) -> Path:
     return root
 
 
-def test_doctor_clean_project_exits_zero(tmp_path: Path) -> None:
-    root = _clean_project(tmp_path)
-    new_project(root)
-    res = run_tcip("doctor", [str(root)])
-    assert res.returncode == 0, res.stdout
+def test_doctor_finds_nothing_on_a_clean_project(tmp_path: Path) -> None:
+    assert _diagnosed(_clean_project(tmp_path)) == []
 
 
 def _layout_project(
     tmp_path: Path, date: str | None, name: str = "resolved"
 ) -> Path:
-    """Return a project whose image tree for capture ``date`` is placed by the layout resolver."""
+    """Make a project whose image tree for capture ``date`` is placed by the layout resolver."""
     root = tmp_path / name
     image_dir(root, date).mkdir(parents=True)
-    (root / ".tcip" / "state").mkdir(parents=True)
+    new_project(root)
+    (root / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
     registry_over(
         root,
         SubjectRegistry(
@@ -219,8 +238,87 @@ def _layout_project(
     return root
 
 
-def _lines(stdout: str, needle: str) -> list[str]:
-    return [ln for ln in stdout.splitlines() if needle in ln]
+def test_the_tool_through_a_handshake_answers_the_functions_findings_and_leaves_no_line(
+    tmp_path: Path,
+) -> None:
+    """Through a client's handshake ``diagnose_project`` answers what the function returns.
+
+    Over a project holding an error, a warning and an info finding, whose messages sort in
+    another order, the answer holds them errors first, then the warning, then the info, as the
+    function returns them, and the project's audit log is left as it was.
+    """
+    date = "2026-03-04"
+    root = _layout_project(tmp_path, date)
+    for name in ("IMG_E", "IMG_U"):
+        Image.new("RGB", (32, 32)).save(image_dir(root, date) / f"{name}.JPG")
+    label_image(
+        image_dir(root, date) / "IMG_E.JPG", [], 32, 32, keep_empty=True
+    )
+    fx.propose(root, fx.entry("leaf", ("leaf_length",)))
+    before = audit_rows(root)
+
+    answered = _diagnosed(root)
+
+    assert [level for level, _ in answered] == ["error", "warn", "info"]
+    assert answered == doctor.diagnose_project(root)["findings"]
+    assert audit_rows(root) == before
+
+
+def test_diagnosing_a_rollback_journal_database_changes_and_locks_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``diagnose_project`` reads a database in rollback-journal mode as it is.
+
+    The project's database, its connections released, is put in rollback-journal mode, as a
+    writer other than this store would leave it. Diagnosing it through a client's handshake
+    takes no transition lock, leaves the file's bytes and its journal mode as they were, and
+    leaves no ``-wal`` or ``-shm`` beside it.
+    """
+    import sqlite3
+
+    import tcip_store as ts
+    from tcip_store import sqlite_backend
+    from tcip_store.file_backend import database_file
+    from tests.test_store_contract import _journal_mode
+
+    date = "2026-03-04"
+    root = _layout_project(tmp_path, date)
+    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_E.JPG")
+    label_image(
+        image_dir(root, date) / "IMG_E.JPG", [], 32, 32, keep_empty=True
+    )
+    bound = binding_for(root)
+    ts.release_root(root)
+    db = database_file(str(root))
+    conn = sqlite3.connect(str(db), isolation_level=None)
+    try:
+        conn.execute("pragma journal_mode = delete")
+    finally:
+        conn.close()
+    held: list[str] = []
+    real_lock = sqlite_backend.transition_lock
+
+    def counted(root: str, **kwargs: float) -> object:
+        held.append(root)
+        return real_lock(root, **kwargs)
+
+    monkeypatch.setattr(sqlite_backend, "transition_lock", counted)
+    before = db.read_bytes()
+
+    assert _messages(_answered(bound), "IMG_E")
+    ts.release_root(root)
+
+    assert held == []
+    assert db.read_bytes() == before
+    assert _journal_mode(db) == "delete"
+    assert not [
+        sibling
+        for sibling in (
+            db.with_name(f"{db.name}-wal"),
+            db.with_name(f"{db.name}-shm"),
+        )
+        if sibling.exists()
+    ]
 
 
 def test_an_unmarked_empty_label_is_named_by_its_capture_and_stem(
@@ -232,11 +330,11 @@ def test_an_unmarked_empty_label_is_named_by_its_capture_and_stem(
     Image.new("RGB", (48, 32)).save(image)
     label_image(image, [], 48, 32, keep_empty=True)
 
-    res = run_tcip("doctor", [str(root)])
-    assert res.returncode == 2, res.stdout
-    unmarked = _lines(res.stdout, "not marked complete")
-    assert len(unmarked) == 1, res.stdout
-    assert f"{date}/IMG_R" in unmarked[0]
+    found = _diagnosed(root)
+
+    ((level, msg),) = _messages(found, "not marked complete")
+    assert level == "error"
+    assert f"{date}/IMG_R" in msg
 
 
 def test_a_mark_for_any_subject_finishes_an_empty_label_on_a_dateless_dataset(
@@ -247,7 +345,7 @@ def test_a_mark_for_any_subject_finishes_an_empty_label_on_a_dateless_dataset(
 
     root = tmp_path / "dateless"
     image_dir(root, UNDATED_BUCKET).mkdir(parents=True)
-    (root / ".tcip" / "state").mkdir(parents=True)
+    new_project(root)
     registry_over(
         root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
     )
@@ -256,8 +354,9 @@ def test_a_mark_for_any_subject_finishes_an_empty_label_on_a_dateless_dataset(
     label_image(image, [], 40, 24, keep_empty=True)
     mark_complete(image, "bud", project=root)
 
-    res = run_tcip("doctor", [str(root)])
-    assert "not marked complete" not in res.stdout, res.stdout
+    found = _diagnosed(root)
+
+    assert not _messages(found, "not marked complete"), found
 
 
 def test_registry_findings_are_read_through_the_registrys_own_entry_shape(
@@ -265,8 +364,8 @@ def test_registry_findings_are_read_through_the_registrys_own_entry_shape(
 ) -> None:
     """Registry findings are read through the registry's own entry shape.
 
-    Two entries written by ModelRegistry whose checkpoints are gone are each named with their
-    own name and path.
+    Two entries written by ModelRegistry whose checkpoints are gone are each named, as an error,
+    with their own name and path.
     """
     root = _layout_project(tmp_path, "2026-03-04")
     ckpt_dir = tmp_path / "checkpoints"
@@ -287,13 +386,13 @@ def test_registry_findings_are_read_through_the_registrys_own_entry_shape(
     for ckpt in paths.values():
         ckpt.unlink()
 
-    res = run_tcip("doctor", [str(root)])
-    assert res.returncode == 2, res.stdout
-    entry_lines = _lines(res.stdout, "registry entry")
-    assert len(entry_lines) == 2, res.stdout
+    found = _diagnosed(root)
+
+    entries = _messages(found, "registry entry")
+    assert [level for level, _ in entries] == ["error", "error"], found
     for name, ckpt in paths.items():
-        assert any(name in ln and str(ckpt) in ln for ln in entry_lines), (
-            res.stdout
+        assert any(name in msg and str(ckpt) in msg for _, msg in entries), (
+            found
         )
 
 
@@ -304,7 +403,7 @@ def test_a_missing_checkpoint_and_a_test_checkpoint_are_distinct_registry_findin
 
     An entry pointing at a checkpoint under pytest's temp tree is reported as pollution and not
     as missing, and an entry whose checkpoint is absent inside the project is reported as
-    missing and not as pollution.
+    missing and not as pollution, each as an error.
     """
     root = _layout_project(tmp_path, "2026-03-04")
     # Inside the project, so never pollution; outside it under pytest's own temp tree, pollution.
@@ -313,12 +412,12 @@ def test_a_missing_checkpoint_and_a_test_checkpoint_are_distinct_registry_findin
     _register_absent_checkpoint(root, "orchard_detector_v2", ghost)
     _register_absent_checkpoint(root, "scratch_detector", scratch)
 
-    res = run_tcip("doctor", [str(root)])
-    assert res.returncode == 2, res.stdout
-    entry_lines = _lines(res.stdout, "registry entry")
-    assert len(entry_lines) == 2, res.stdout
-    ghost_line = next(ln for ln in entry_lines if "orchard_detector_v2" in ln)
-    scratch_line = next(ln for ln in entry_lines if "scratch_detector" in ln)
+    found = _diagnosed(root)
+
+    entries = _messages(found, "registry entry")
+    assert [level for level, _ in entries] == ["error", "error"], found
+    ghost_line = next(m for _, m in entries if "orchard_detector_v2" in m)
+    scratch_line = next(m for _, m in entries if "scratch_detector" in m)
     assert "checkpoint missing" in ghost_line and "test/temp" not in ghost_line
     assert (
         "test/temp" in scratch_line
@@ -338,16 +437,16 @@ def test_a_checkpoint_under_a_temp_rooted_project_is_not_pollution(
     from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     ckpt_dir = root / ".tcip" / "models"
-    ckpt_dir.mkdir(parents=True)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
     produced_checkpoint(ckpt_dir / "m.pt", "weights")
     ModelRegistry(str(root)).register_model(
         name="m", checkpoint_path=str(ckpt_dir / "m.pt"), actor=None
     )
 
-    res = run_tcip("doctor", [str(root)])
+    found = _diagnosed(root)
 
-    assert "test/temp" not in res.stdout
-    assert "checkpoint missing" not in res.stdout
+    assert not _messages(found, "test/temp"), found
+    assert not _messages(found, "checkpoint missing"), found
 
 
 def test_image_census_counts_every_capture_the_loaders_admit(
@@ -357,8 +456,6 @@ def test_image_census_counts_every_capture_the_loaders_admit(
 
     Each capture is keyed to its own capture and stem.
     """
-    from tcip_mcp.cli import doctor
-
     images = tmp_path / "images" / "2026-03-04"
     images.mkdir(parents=True)
     (images / "plotA_0_0.npz").write_bytes(b"\x00")
@@ -380,7 +477,6 @@ def test_one_stem_in_two_captures_is_two_images_each_paired_with_its_own_label(
     With two captures each holding ``same.png``, only one labeled, one image has no label record
     and no label lacks its image, at the census and at the doctor alike.
     """
-    from tcip_mcp.cli import doctor
     from tcip_mcp.tools.data_tools import scan_dataset
 
     root = _layout_project(tmp_path, "2026-03-04")
@@ -413,8 +509,8 @@ def test_one_stem_in_two_captures_is_two_images_each_paired_with_its_own_label(
 def test_only_the_unreadable_trait_record_is_reported(tmp_path: Path) -> None:
     """Only the unreadable trait record is reported, by name and reason.
 
-    A record the schema refuses is reported by name and reason; a confirmed trait beside it
-    stays silent.
+    A record the schema refuses is reported as an error by name and reason; a confirmed trait
+    beside it stays silent.
     """
     import tcip_store as ts
 
@@ -426,52 +522,46 @@ def test_only_the_unreadable_trait_record_is_reported(tmp_path: Path) -> None:
         expect=ts.Version.ABSENT,
     )
 
-    res = run_tcip("doctor", [str(root)])
-    assert res.returncode == 2, res.stdout
-    trait_lines = _lines(res.stdout, "trait '")
-    assert len(trait_lines) == 1, res.stdout
-    assert "'burr_size' will not read" in trait_lines[0]
-    assert "not_a_localization" in res.stdout
+    found = _diagnosed(root)
 
-
-def _leaf_project(tmp_path: Path) -> Path:
-    return new_project(_layout_project(tmp_path, "2026-03-04")).root
+    ((level, msg),) = _messages(found, "trait '")
+    assert level == "error"
+    assert "'burr_size' will not read" in msg
+    assert "not_a_localization" in msg
 
 
 def test_doctor_is_silent_on_a_confirmed_latest_revision(
     tmp_path: Path,
 ) -> None:
-    root = _leaf_project(tmp_path)
+    root = _layout_project(tmp_path, "2026-03-04")
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
 
-    res = run_tcip("doctor", [str(root)])
+    found = _diagnosed(root)
 
-    assert "trait '" not in res.stdout, res.stdout
+    assert not _messages(found, "trait '"), found
 
 
 def test_doctor_warns_on_an_unconfirmed_latest_revision(
     tmp_path: Path,
 ) -> None:
-    """The doctor warns, in one line and exit 1, on an unconfirmed latest trait revision.
+    """The doctor warns, in one finding and with no error, on an unconfirmed latest revision.
 
     The warning holds for a trait whose latest revision the breeder has not confirmed, a
     confirmed earlier one notwithstanding.
     """
-    root = _leaf_project(tmp_path)
+    root = _layout_project(tmp_path, "2026-03-04")
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
     fx.propose(
         root, fx.entry("leaf", ("leaf_length",), notes="a second reading")
     )
 
-    res = run_tcip("doctor", [str(root)])
+    found = _diagnosed(root)
 
-    assert res.returncode == 1, res.stdout
-    lines = _lines(res.stdout, "trait '")
-    assert len(lines) == 1
-    assert (
-        "the latest revision (2) of trait 'leaf' is not confirmed" in lines[0]
-    )
-    assert "Setup tab" in lines[0]
+    assert not [msg for level, msg in found if level == "error"], found
+    ((level, msg),) = _messages(found, "trait '")
+    assert level == "warn"
+    assert "the latest revision (2) of trait 'leaf' is not confirmed" in msg
+    assert "Setup tab" in msg
 
 
 def test_doctor_reports_an_undecodable_trait_record_without_aborting(
@@ -479,34 +569,35 @@ def test_doctor_reports_an_undecodable_trait_record_without_aborting(
 ) -> None:
     from tests._record_damage_fixtures import damage_record
 
-    root = _leaf_project(tmp_path)
+    root = _layout_project(tmp_path, "2026-03-04")
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
     damage_record(traits.trait_key(root, "leaf"), b"{not valid json")
 
-    res = run_tcip("doctor", [str(root)])
+    found = _diagnosed(root)
 
-    assert res.returncode == 2, res.stdout
-    lines = _lines(res.stdout, "trait '")
-    assert len(lines) == 1 and "will not read" in lines[0]
+    ((level, msg),) = _messages(found, "trait '")
+    assert level == "error"
+    assert "will not read" in msg
 
 
 def test_doctor_errors_on_a_project_whose_record_does_not_decode(
     tmp_path: Path,
 ) -> None:
-    """A project record that does not decode is an error finding with exit 2."""
+    """A project record that stops decoding after the server started is an error finding."""
     from tcip_mcp.project_record import project_record_key
     from tests._record_damage_fixtures import damage_record
 
-    root = new_project(_layout_project(tmp_path, "2026-03-04")).root
-    key = project_record_key(str(root))
+    root = _layout_project(tmp_path, "2026-03-04")
+    bound = binding_for(root)
     # A genuinely undecodable byte string, written under the record's own key, so the finding
     # is the store's own decode error rather than "not a site record".
-    damage_record(key, b"{not valid json")
+    damage_record(project_record_key(str(root)), b"{not valid json")
 
-    res = run_tcip("doctor", [str(root)])
+    found = _answered(bound)
 
-    assert res.returncode == 2, res.stdout
-    assert "does not decode" in res.stdout
+    assert [level for level, _ in _messages(found, "does not decode")] == [
+        "error"
+    ], found
 
 
 def _unreadable_label(image: Path) -> None:
@@ -520,7 +611,7 @@ def _unreadable_label(image: Path) -> None:
 def test_doctor_flags_an_unreadable_label(tmp_path: Path) -> None:
     """The doctor flags an unreadable label as an error-level finding, not a pass.
 
-    A corrupt label document is named as not reading, and the doctor exits 2.
+    A corrupt label document is named, as an error, as not reading.
     """
     date = "2026-03-04"
     root = _layout_project(tmp_path, date)
@@ -528,11 +619,13 @@ def test_doctor_flags_an_unreadable_label(tmp_path: Path) -> None:
     Image.new("RGB", (32, 32)).save(image)
     _unreadable_label(image)
 
-    res = run_tcip("doctor", [str(root)])
-    assert res.returncode == 2, res.stdout
-    unreadable = _lines(res.stdout, "will not read")
-    assert len(unreadable) >= 1, res.stdout
-    assert any("IMG_S" in ln for ln in unreadable), res.stdout
+    found = _diagnosed(root)
+
+    assert [
+        level
+        for level, msg in _messages(found, "will not read")
+        if "IMG_S" in msg
+    ] == ["error"], found
 
 
 def test_a_marked_empty_label_is_clean_to_the_data_quality_check(
@@ -543,8 +636,6 @@ def test_a_marked_empty_label_is_clean_to_the_data_quality_check(
     An empty label marked complete leaves the data-quality check over the census with no
     finding.
     """
-    from tcip_mcp.cli import doctor
-
     date = "2026-03-04"
     root = _layout_project(tmp_path, date)
     image = image_dir(root, date) / "IMG_S.JPG"
@@ -568,8 +659,6 @@ def test_a_doctor_run_reads_each_label_once_and_reports_an_unreadable_one_once(
     Over a census and its data-quality and provenance checks, each label document is read once
     and the unreadable one is reported once.
     """
-    from tcip_mcp.cli import doctor
-
     date = "2026-03-04"
     root = _layout_project(tmp_path, date)
     Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_U.JPG")

@@ -40,8 +40,8 @@ def _checkpoint(path: Path, content: str) -> Path:
 
 
 def _doctor() -> ModuleType:
-    """Return the ``tcip_mcp.cli.doctor`` module."""
-    from tcip_mcp.cli import doctor
+    """Return the ``tcip_mcp.tools.doctor_tools`` module."""
+    from tcip_mcp.tools import doctor_tools as doctor
 
     return doctor
 

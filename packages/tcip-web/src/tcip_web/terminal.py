@@ -661,12 +661,12 @@ def orientation(
     knowledge documents are served and, for no project, that the session was launched with
     none; for ``project``, a ``compact`` is also told each memory corpus's newest entries as
     ``load_project_memory`` pages them, and any other start also, before them, the project as
-    ``inspect_project`` answers for it and the doctor's findings in its order, errors first,
-    with how many there are and that an operator reads them all through ``tcip doctor``. The
-    parts are fit by :func:`_fitted`; each page states how many entries it was cut from.
+    ``inspect_project`` answers for it and the findings ``diagnose_project`` answers, in its
+    order, beside how many there are. The parts are fit by :func:`_fitted`; each page states how
+    many entries it was cut from.
     """
-    from tcip_mcp.cli import doctor
     from tcip_mcp.knowledge import list_documents
+    from tcip_mcp.tools.doctor_tools import diagnose_project
     from tcip_mcp.tools.meta_tools import MemoryKind
     from tcip_mcp.tools.project_tools import inspect_project
 
@@ -684,11 +684,8 @@ def orientation(
         return _fitted([_whole(_NO_PROJECT, _NO_PROJECT), knowledge])
     parts = [_memory_part(kind, project.root) for kind in MemoryKind]
     if source != "compact":
-        found = doctor.findings(project.root)
-        counted = (
-            f"The doctor's checks over it found {len(found)} finding(s), which an "
-            "operator reads whole through `tcip doctor`"
-        )
+        found = diagnose_project(project.root)["findings"]
+        counted = f"diagnose_project answers {len(found)} finding(s) over it"
         parts[:0] = [
             _whole(
                 "This session's project, as inspect_project answers for it: "

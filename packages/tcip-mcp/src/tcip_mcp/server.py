@@ -85,6 +85,7 @@ import tcip_mcp.tools.annotation_tools  # noqa: F401, E402
 import tcip_mcp.tools.calibration_tools  # noqa: F401, E402
 import tcip_mcp.tools.data_tools  # noqa: F401, E402
 import tcip_mcp.tools.delivery_tools  # noqa: F401, E402
+import tcip_mcp.tools.doctor_tools  # noqa: F401, E402
 import tcip_mcp.tools.experiment_tools  # noqa: F401, E402
 import tcip_mcp.tools.feedback_tools  # noqa: F401, E402
 import tcip_mcp.tools.gui_tools  # noqa: F401, E402

@@ -127,7 +127,7 @@ tcip dump-store <project> <out_dir>
 `TCIP_WEB_PORT` overrides the backend's port, and a taken port falls back to one the OS assigns.
 Every MCP tool is a `tcip` command of its name with hyphens, called with `--project` and the
 `--user` it acts for; a few commands are for the operator alone (`archive-project`,
-`import-project`, `write-project-record`, `dump-store`, `distill-learnings`, `doctor`).
+`import-project`, `write-project-record`, `dump-store`, `distill-learnings`).
 
 An MCP client starts the server itself (see `.mcp.json`). A server acts on the project it was
 started for (`python -m tcip_mcp --project <path>`), or, started for none, on the first project its
