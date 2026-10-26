@@ -3,17 +3,12 @@
 #   conda env create -f environment.yml
 #   conda activate tcip-agent
 #
-# This installs conda-managed Python + Node, then the project's third-party
-# dependencies and the four local packages (editable) via pip. Run it from the
+# This installs conda-managed Python + Node, then via pip the four local packages, editable,
+# with the dependencies and extras each declares. Run it from the
 # repository root so the editable paths resolve.
 #
 # GPU note: the CUDA build (cu130) via --extra-index-url below; it runs without a GPU too, since
 # every device placement branches on torch.cuda.is_available(). CI installs its own CPU wheel.
-#
-# environment.win.lock.yml is a frozen export from one Windows machine, taken before this
-# file's Node and OpenCV corrections; it is kept only for the mypy pin its CI comment cites,
-# never as a path to create an environment. environment.linux.lock.yml is the same kind of
-# export from a fresh Linux container, a record of what resolved there.
 name: tcip-agent
 channels:
   - conda-forge
@@ -27,55 +22,7 @@ dependencies:
   - pip
   - pip:
       - --extra-index-url https://download.pytorch.org/whl/cu130
-      # --- core runtime ---
-      - mcp>=2
-      - numpy
-      - pillow>=13.0
-      - tifffile>=2023.1
-      # LZW/JPEG decode for compressed multi-band GeoTIFF (e.g. a drone orthomosaic).
-      - imagecodecs>=2023.1
-      # rasterio bundles its own GDAL and ships wheels for every platform this runs on, so no
-      # separate osgeo binding, no system libgdal, and no pinned third-party wheel.
-      - rasterio>=1.4
-      # Vector side of the same stack, for plant_mapping.read_plant_shapefile and
-      # tcip shp-to-plant-csv.
-      - fiona>=1.9
-      - pyproj>=3.5
-      - shapely>=2.0
-      - pyyaml>=6.0
-      - torch>=2.2
-      - torchvision>=0.17
-      - timm>=1.0
-      - transformers>=5  # the sam and grounding_dino proposal engines
-      - opencv-python>=4.12.0.88  # sahi's own OpenCV; on Linux it imports libGL (libgl1)
-      - pycocotools>=2.0.7
-      - sahi>=0.12.6  # tiled inference: slice lattice, detection-model wrapper, cross-tile merge
-      - psutil>=5.9  # read-only host CPU/RAM visibility for scripts/inspect_compute_resources.py
-      # --- web backend ---
-      - fastapi>=0.115.0
-      - uvicorn[standard]>=0.30.0
-      # --- training telemetry ---
-      # torch.utils.tensorboard's SummaryWriter needs this, and it is the server the
-      # tensorboard_manager launches for a run's or a sweep's logdir.
-      - tensorboard>=2.14
-      # --- hyperparameter optimization (Ray Tune, lazy-imported) ---
-      # Ray drives the sweep; search-algorithm backends are agent-selectable and each
-      # degrades gracefully if absent. Installed via pip (Ray on Windows is pip-only).
-      # [default] pulls in the dashboard's own dependencies (aiohttp, grpcio, ...), which
-      # tune_search enables so the Tuning tab can embed it for a running sweep.
-      - ray[default,tune]>=2.9
-      - optuna>=3.0
-      - hyperopt
-      - bayesian-optimization
-      # --- dev / test ---
-      - pytest>=7.0
-      - pytest-asyncio>=0.21
-      - pytest-timeout
-      - pytest-xdist
-      - ruff
-      - mypy==2.2.0  # pinned to the version CI's type gate installs
-      # --- local packages (editable; run from repo root) ---
       - -e ./packages/tcip-store
       - -e ./packages/tcip-annotation
-      - -e ./packages/tcip-mcp
+      - -e ./packages/tcip-mcp[dev,hpo]
       - -e ./packages/tcip-web
