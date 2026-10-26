@@ -8,6 +8,8 @@ Projects are made through the platform's own creation door under the workspace
 
 from __future__ import annotations
 
+import os
+import threading
 import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -33,6 +35,46 @@ def _project(ws: Path, directory: str, display_name: str) -> OpenProject:
     images.mkdir(parents=True)
     Image.new("RGB", (8, 8), (0, 0, 0)).save(images / "img.jpg")
     return made
+
+
+def _deny_moves(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every rename of ``project`` raise ``PermissionError``, with no retry budget."""
+    real_rename = os.rename
+
+    def _denied(src: Path, dst: Path) -> None:
+        if Path(src) == project:
+            raise PermissionError(13, "held open", str(src))
+        return real_rename(src, dst)
+
+    monkeypatch.setattr(workspace, "RENAME_BUDGET_S", 0.0)
+    monkeypatch.setattr(os, "rename", _denied)
+
+
+class _ObservedTurn:
+    """A lock that delegates to ``lock``, recording each thread's attempt, acquisition and release.
+
+    ``events`` holds ``(event, thread id)`` pairs in the order they happened, and ``changed`` is
+    notified at each one.
+    """
+
+    def __init__(self, lock: threading.Lock) -> None:
+        self.lock = lock
+        self.events: list[tuple[str, int]] = []
+        self.changed = threading.Condition()
+
+    def _record(self, event: str) -> None:
+        with self.changed:
+            self.events.append((event, threading.get_ident()))
+            self.changed.notify_all()
+
+    def __enter__(self) -> None:
+        self._record("attempted")
+        self.lock.acquire()
+        self._record("acquired")
+
+    def __exit__(self, *exc: object) -> None:
+        self._record("released")
+        self.lock.release()
 
 
 def test_removal_archives_moves_and_records_one_line(
@@ -289,39 +331,64 @@ def test_a_listing_waits_for_a_removal_whose_move_is_denied_at_first(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A listing asked for while the move is retried runs only once the removal has finished.
+    """A listing asked for while the move is retried waits on the turn the removal holds.
 
-    A listing in between would reopen the project's store and hold the folder the move needs.
+    A listing in between would reopen the project's store and hold the folder the move needs. The
+    first denied move waits, within the move's retry budget, for the listing to attempt the routes'
+    workspace turn; at the move the removal still holds the turn and the listing has attempted it
+    without acquiring it, and the listing then answers without the project.
     """
-    import os
-    import threading
+    from concurrent.futures import Future, ThreadPoolExecutor
 
-    ws = tmp_path.parent
-    made = _project(ws, "valley_block", "Valley block")
+    from tcip_web.routes import projects
+
+    made = _project(tmp_path.parent, "valley_block", "Valley block")
+    turn = _ObservedTurn(projects._WORKSPACE_TURN)
+    monkeypatch.setattr(projects, "_WORKSPACE_TURN", turn)
     real_rename = os.rename
-    listing: list[threading.Thread] = []
+    listing: list[tuple[int, Future[dict], bool]] = []
+    at_move: list[tuple[int, list[tuple[str, int]]]] = []
 
-    def _denied_once(src: Path, dst: Path) -> None:
-        if Path(src) == made.root and not listing:
-            listing.append(
-                threading.Thread(target=client.get, args=("/api/projects",))
-            )
-            listing[0].start()
-            listing[0].join(1.0)
-            raise PermissionError(13, "held for a moment", str(src))
-        return real_rename(src, dst)
+    with ThreadPoolExecutor(max_workers=1) as pool:
 
-    monkeypatch.setattr(os, "rename", _denied_once)
+        def _denied_once(src: Path, dst: Path) -> None:
+            if Path(src) == made.root and not listing:
+                since = len(turn.events)
+                answer = pool.submit(
+                    lambda: client.get("/api/projects").json()
+                )
+                with turn.changed:
+                    attempted = turn.changed.wait_for(
+                        lambda: len(turn.events) > since,
+                        workspace.RENAME_BUDGET_S,
+                    )
+                listing.append((since, answer, attempted))
+                raise PermissionError(13, "held for a moment", str(src))
+            if Path(src) == made.root:
+                with turn.changed:
+                    at_move.append((threading.get_ident(), list(turn.events)))
+            real_rename(src, dst)
 
-    resp = client.post(
-        "/api/projects/remove",
-        json={"id": made.id, "confirm_name": "Valley block", "user": "tester"},
-    )
-    waited = listing[0].is_alive()
-    listing[0].join()
+        monkeypatch.setattr(os, "rename", _denied_once)
+        resp = client.post(
+            "/api/projects/remove",
+            json={
+                "id": made.id,
+                "confirm_name": "Valley block",
+                "user": "tester",
+            },
+        )
+        ((since, answer, attempted),) = listing
+        assert attempted, "the listing never attempted the workspace turn"
+        assert resp.status_code == 200, resp.text
+        mover, events = at_move[0]
+        assert [event for event, thread in events if thread == mover][-1] == (
+            "acquired"
+        ), "the removal let go of the workspace turn before its move"
+        assert [event for event, _ in events[since:]] == ["attempted"]
+        listed = answer.result(timeout=workspace.RENAME_BUDGET_S)
 
-    assert resp.status_code == 200, resp.text
-    assert waited
+    assert made.id not in {p["id"] for p in listed["projects"]}
 
 
 def test_a_move_denied_past_the_budget_answers_409_and_leaves_the_project(
@@ -329,18 +396,8 @@ def test_a_move_denied_past_the_budget_answers_409_and_leaves_the_project(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import os
-
     made = _project(tmp_path.parent, "valley_block", "Valley block")
-    real_rename = os.rename
-
-    def _denied(src: Path, dst: Path) -> None:
-        if Path(src) == made.root:
-            raise PermissionError(13, "held open", str(src))
-        return real_rename(src, dst)
-
-    monkeypatch.setattr(workspace, "RENAME_BUDGET_S", 0.0)
-    monkeypatch.setattr(os, "rename", _denied)
+    _deny_moves(made.root, monkeypatch)
 
     resp = client.post(
         "/api/projects/remove",
@@ -356,19 +413,9 @@ def test_a_move_the_filesystem_denies_removes_the_archive_and_leaves_the_project
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import os
-
     ws = tmp_path.parent
     project = _project(ws, "valley_block", "Valley block").root
-    real_rename = os.rename
-
-    def _denied(src: Path, dst: Path) -> None:
-        if Path(src) == project:
-            raise PermissionError(13, "held open", str(src))
-        return real_rename(src, dst)
-
-    monkeypatch.setattr(workspace, "RENAME_BUDGET_S", 0.0)
-    monkeypatch.setattr(os, "rename", _denied)
+    _deny_moves(project, monkeypatch)
 
     with pytest.raises(OSError):
         workspace.remove_project(
