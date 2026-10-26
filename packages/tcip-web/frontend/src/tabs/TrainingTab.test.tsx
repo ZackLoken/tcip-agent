@@ -1,7 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { StructuredRefusalError } from "@/api/http";
 import { openTrainingStream, trainingApi, type SplitChoices } from "@/api/training";
 import {
   NOT_FINITE_SUFFIX,
@@ -17,6 +16,28 @@ import { RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 import { TrainingTab, dataPickerFor } from "@/tabs/TrainingTab";
 import { openTestProject } from "@/test/store";
 import SERVINGS from "@/test/tensorboardServings.json";
+import {
+  RUN_RELAUNCH,
+  SWEEP_RELAUNCH,
+  SWEEP_SELECTION_METRIC,
+  UNKNOWN_RUN_FRAME,
+  asRecordedChoice,
+  batchFrame,
+  cancelAnswer,
+  compareEntry,
+  compareResult,
+  metricFrame,
+  producedRefusal,
+  refusalDetail,
+  runRow,
+  selectionChoice,
+  splitChoices,
+  statusFrame,
+  sweepGroup,
+  trainingDetail,
+  trainingListing,
+  trialRow,
+} from "@/test/training";
 
 // The live metrics stream owns a real WebSocket; only the run list and its controls are under
 // test here, so the transport is replaced while the rest of the module stays real.
@@ -27,68 +48,17 @@ vi.mock("@/api/training", async (importOriginal) => {
 
 const initialStoreState = useStore.getState();
 
-function run(overrides: Partial<RunRow> & { experiment_id: string }): RunRow {
-  return {
-    state: "running",
-    created: "2026-08-01T00:00:00Z",
-    relaunched_from: null,
-    sweep: null,
-    trial_params: null,
-    builder: "m:build_detector",
-    task: "detection",
-    images_dir: "/data/images",
-    current_epoch: null,
-    best_metric: null,
-    best_metric_name: null,
-    output_dir: `/proj/.tcip/experiments/${overrides.experiment_id}`,
-    status_error: null,
-    heartbeat: "",
-    launch: null,
-    ...overrides,
-  };
-}
-
-function sweep(overrides: Partial<SweepGroup> & { sweep_id: string }): SweepGroup {
-  return {
-    state: "running",
-    status_error: null,
-    input: {
-      n_trials: 2,
-      search_alg: "random",
-      scheduler: {},
-      max_concurrent: 1,
-      baseline_params: null,
-      resources_per_trial: null,
-      param_space: {},
-      base_config: { evaluation: { selection_metric: "map50" } },
-      relaunched_from: null,
-      split_draw_seeds: null,
-      search_seed: 0,
-      trial_budget: null,
-    },
-    cancel_requested: false,
-    heartbeat: "",
-    trials: [],
-    outcome: { best_params: null, best_value: null },
-    ...overrides,
-  };
-}
-
-/** The run list answers ``runs`` and ``sweeps`` on every poll. */
+/** The run list answers the produced listing holding ``runs`` and ``sweeps`` on every poll. */
 function listing(runs: RunRow[], sweeps: SweepGroup[] = []) {
-  return vi.spyOn(trainingApi, "listRuns").mockResolvedValue({ runs, sweeps });
+  return vi.spyOn(trainingApi, "listRuns").mockResolvedValue(trainingListing({ runs, sweeps }));
 }
 
-/** One run's own detail, with no TensorBoard serving it. */
+/** One run's produced detail, holding ``row``, with no TensorBoard serving it. */
 function detailOf(row: RunRow) {
-  vi.spyOn(trainingApi, "getRun").mockResolvedValue({
-    run: row,
-    sweep: null,
-    tensorboard: null,
-  });
+  vi.spyOn(trainingApi, "getRun").mockResolvedValue(trainingDetail({ run: row }));
 }
 
-type Frame = Omit<TrainingRowFrame, "experiment_id"> | Omit<TrainingStatusFrame, "experiment_id">;
+type Frame = TrainingRowFrame | TrainingStatusFrame;
 
 /** Every stream the tab opens delivers ``frames`` at once, each under the id it was opened for. */
 function streamFrames(...frames: Frame[]) {
@@ -96,10 +66,6 @@ function streamFrames(...frames: Frame[]) {
     frames.forEach((frame) => onMessage({ ...frame, experiment_id: experimentId }));
     return () => {};
   });
-}
-
-function metricFrame(row: Record<string, unknown>): Frame {
-  return { type: "metric", row };
 }
 
 beforeEach(() => {
@@ -111,12 +77,10 @@ afterEach(cleanup);
 
 describe("TrainingTab run list", () => {
   it("offers a stop control for a running run, and cancels it by id", async () => {
-    listing([run({ experiment_id: "train-agent-1" })]);
-    const cancelSpy = vi.spyOn(trainingApi, "cancel").mockResolvedValue({
-      experiment_id: "train-agent-1",
-      state: "running",
-      cancel_requested: true,
-    });
+    listing([runRow({ experiment_id: "train-agent-1" })]);
+    const cancelSpy = vi
+      .spyOn(trainingApi, "cancel")
+      .mockResolvedValue(cancelAnswer({ experiment_id: "train-agent-1" }));
 
     render(<TrainingTab />);
     expect(await screen.findByText("train-agent-1")).toBeInTheDocument();
@@ -127,7 +91,7 @@ describe("TrainingTab run list", () => {
 
   it("shows a running row's own heartbeat age, the one liveness signal a record with no process id can offer", async () => {
     listing([
-      run({
+      runRow({
         experiment_id: "train-stale",
         heartbeat: new Date(Date.now() - 3 * 60_000).toISOString(),
       }),
@@ -146,7 +110,7 @@ describe("TrainingTab run list", () => {
 
   it("shows a run's recorded error in its row", async () => {
     listing([
-      run({
+      runRow({
         experiment_id: "train-crashed",
         state: "failed",
         status_error: "CUDA out of memory at epoch 3",
@@ -159,8 +123,8 @@ describe("TrainingTab run list", () => {
 
   it("offers no stop control for a run in a terminal state", async () => {
     listing([
-      run({ experiment_id: "train-done", state: "completed" }),
-      run({ experiment_id: "train-done-agent", state: "failed" }),
+      runRow({ experiment_id: "train-done", state: "completed" }),
+      runRow({ experiment_id: "train-done-agent", state: "failed" }),
     ]);
 
     render(<TrainingTab />);
@@ -171,19 +135,19 @@ describe("TrainingTab run list", () => {
 
   it("names the best value's own metric exactly as the record carries it, and shows nothing when the row carries no name", async () => {
     listing([
-      run({
+      runRow({
         experiment_id: "train-named",
         state: "completed",
         best_metric: 0.812,
         best_metric_name: "map50",
       }),
-      run({
+      runRow({
         experiment_id: "train-loss-only",
         state: "completed",
         best_metric: 0.907,
         best_metric_name: "loss",
       }),
-      run({
+      runRow({
         experiment_id: "train-unnamed",
         state: "completed",
         best_metric: 0.5,
@@ -192,8 +156,8 @@ describe("TrainingTab run list", () => {
     ]);
 
     render(<TrainingTab />);
-    // The record names the metric bare; the row never adds a val_ qualifier the record
-    // itself never stated (a no-validation run's best can be the training loss).
+    // The row names the metric as bare as the record does (a no-validation run's best can be the
+    // training loss).
     expect(await screen.findByText("best map50 0.812")).toBeInTheDocument();
     expect(await screen.findByText("best loss 0.907")).toBeInTheDocument();
     expect(screen.queryByText(/val_/)).not.toBeInTheDocument();
@@ -207,14 +171,16 @@ describe("TrainingTab run list", () => {
     expect(await screen.findByText("No runs.")).toBeInTheDocument();
 
     cleanup();
-    listRuns.mockResolvedValue({ runs: [run({ experiment_id: "train-a" })], sweeps: [] });
+    listRuns.mockResolvedValue(
+      trainingListing({ runs: [runRow({ experiment_id: "train-a" })], sweeps: [] }),
+    );
     render(<TrainingTab />);
     expect(await screen.findByText("train-a")).toBeInTheDocument();
     expect(screen.queryByText(/sorted by experiment id/)).not.toBeInTheDocument();
   });
 
   it("names the row's own select control with the id and state", async () => {
-    listing([run({ experiment_id: "train-named-row" })]);
+    listing([runRow({ experiment_id: "train-named-row" })]);
 
     render(<TrainingTab />);
     expect(
@@ -226,7 +192,7 @@ describe("TrainingTab run list", () => {
 
   it("shows the row's best value at four significant figures, with no title", async () => {
     listing([
-      run({
+      runRow({
         experiment_id: "train-exact",
         state: "completed",
         best_metric: 0.4130041,
@@ -241,7 +207,7 @@ describe("TrainingTab run list", () => {
 
   it("names the row's accessible name with its best value and metric when the record carries one", async () => {
     listing([
-      run({
+      runRow({
         experiment_id: "train-named-value",
         state: "completed",
         best_metric: 0.4130041,
@@ -258,7 +224,7 @@ describe("TrainingTab run list", () => {
   });
 
   it("shows an in-flight Cancel as a disabled, pending row control, and a failure in the row", async () => {
-    listing([run({ experiment_id: "train-cancel-flight" })]);
+    listing([runRow({ experiment_id: "train-cancel-flight" })]);
     const cancel = Promise.withResolvers<Awaited<ReturnType<typeof trainingApi.cancel>>>();
     vi.spyOn(trainingApi, "cancel").mockReturnValue(cancel.promise);
 
@@ -269,18 +235,14 @@ describe("TrainingTab run list", () => {
     expect(await screen.findByText("Canceling…")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel train-cancel-flight" })).toBeDisabled();
 
-    cancel.resolve({
-      experiment_id: "train-cancel-flight",
-      state: "running",
-      cancel_requested: true,
-    });
+    cancel.resolve(cancelAnswer({ experiment_id: "train-cancel-flight" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Cancel train-cancel-flight" })).not.toBeDisabled(),
     );
   });
 
   it("shows a failed Cancel in the row, not only as a toast", async () => {
-    listing([run({ experiment_id: "train-cancel-fail" })]);
+    listing([runRow({ experiment_id: "train-cancel-fail" })]);
     vi.spyOn(trainingApi, "cancel").mockRejectedValue(new Error("network error"));
 
     render(<TrainingTab />);
@@ -291,22 +253,23 @@ describe("TrainingTab run list", () => {
 });
 
 describe("TrainingTab sweeps", () => {
-  const trialA = run({
+  const trialA = trialRow({
     experiment_id: "train-x",
     sweep: "sweep-1",
     state: "completed",
     trial_params: { lr: 0.01 },
   });
-  const trialB = run({ experiment_id: "sweep-1_bbbb", sweep: "sweep-1" });
+  const trialB = trialRow({ experiment_id: "sweep-1_bbbb", sweep: "sweep-1" });
 
   it("groups a sweep's trial rows under the sweep, with its state and outcome", async () => {
+    const produced = sweepGroup({});
     listing(
-      [run({ experiment_id: "train-solo" })],
+      [runRow({ experiment_id: "train-solo" })],
       [
-        sweep({
+        sweepGroup({
           sweep_id: "sweep-1",
           trials: [trialA, trialB],
-          outcome: { best_params: { lr: 0.01 }, best_value: 0.7 },
+          outcome: { ...produced.outcome, best_params: { lr: 0.01 }, best_value: 0.7 },
         }),
       ],
     );
@@ -315,17 +278,17 @@ describe("TrainingTab sweeps", () => {
     const group = await screen.findByRole("group", { name: "Sweep sweep-1" });
     expect(within(group).getByText("train-x")).toBeInTheDocument();
     expect(within(group).getByText("sweep-1_bbbb")).toBeInTheDocument();
-    expect(within(group).getByText(/sweep · running · best map50 0.7/)).toBeInTheDocument();
+    expect(
+      within(group).getByText(
+        new RegExp(`sweep · ${produced.state} · best ${SWEEP_SELECTION_METRIC} 0.7`),
+      ),
+    ).toBeInTheDocument();
     expect(within(group).queryByText("train-solo")).not.toBeInTheDocument();
   });
 
   it("cancels a trial by its own id and the whole sweep by the sweep's", async () => {
-    listing([], [sweep({ sweep_id: "sweep-1", trials: [trialB] })]);
-    const cancelSpy = vi.spyOn(trainingApi, "cancel").mockResolvedValue({
-      experiment_id: "x",
-      state: "running",
-      cancel_requested: true,
-    });
+    listing([], [sweepGroup({ sweep_id: "sweep-1", trials: [trialB] })]);
+    const cancelSpy = vi.spyOn(trainingApi, "cancel").mockResolvedValue(cancelAnswer({}));
 
     render(<TrainingTab />);
     fireEvent.click(await screen.findByRole("button", { name: "Cancel sweep-1_bbbb" }));
@@ -336,10 +299,10 @@ describe("TrainingTab sweeps", () => {
 
   it("streams a selected trial's metrics, and shows a selected sweep's board without a stream", async () => {
     openTestProject();
-    listing([], [sweep({ sweep_id: "sweep-1", trials: [trialA] })]);
+    listing([], [sweepGroup({ sweep_id: "sweep-1", trials: [trialA] })]);
     const getRun = vi
       .spyOn(trainingApi, "getRun")
-      .mockResolvedValue({ run: trialA, sweep: null, tensorboard: SERVINGS["train-x"] });
+      .mockResolvedValue(trainingDetail({ run: trialA, tensorboard: SERVINGS["train-x"] }));
 
     render(<TrainingTab />);
     fireEvent.click(await screen.findByText("train-x"));
@@ -357,12 +320,12 @@ describe("TrainingTab sweeps", () => {
 describe("TrainingTab run launcher mark", () => {
   it("states who launched the run from its launch event alone", async () => {
     listing([
-      run({
+      runRow({
         experiment_id: "train-agent",
         launch: { agent_client_name: "claude-code", agent_client_version: "2.1.238" },
       }),
-      run({ experiment_id: "train-undeclared", launch: {} }),
-      run({ experiment_id: "train-no-event", state: "completed", launch: null }),
+      runRow({ experiment_id: "train-undeclared", launch: {} }),
+      runRow({ experiment_id: "train-no-event", state: "completed", launch: null }),
     ]);
 
     render(<TrainingTab />);
@@ -383,7 +346,7 @@ describe("TrainingTab run launcher mark", () => {
 
   it("names the declared client in the agent row's accessible description", async () => {
     listing([
-      run({
+      runRow({
         experiment_id: "train-agent-desc",
         launch: { agent_client_name: "claude-code", agent_client_version: "2.1.238" },
       }),
@@ -402,7 +365,7 @@ describe("TrainingTab run launcher mark", () => {
   });
 
   it("describes a launch with no agent named", async () => {
-    listing([run({ experiment_id: "train-undeclared-desc", launch: {} })]);
+    listing([runRow({ experiment_id: "train-undeclared-desc", launch: {} })]);
 
     render(<TrainingTab />);
     const button = await screen.findByRole("button", {
@@ -416,7 +379,7 @@ describe("TrainingTab run launcher mark", () => {
   });
 
   it("makes a missing launch event's explanation reachable by assistive technology", async () => {
-    listing([run({ experiment_id: "train-no-launcher" })]);
+    listing([runRow({ experiment_id: "train-no-launcher" })]);
 
     render(<TrainingTab />);
     const button = await screen.findByRole("button", {
@@ -442,13 +405,11 @@ describe("TrainingTab heading", () => {
   });
 
   it("carries the section titles as level-2 headings under that h1", async () => {
-    const row = run({ experiment_id: "train-x", state: "completed" });
+    const row = runRow({ experiment_id: "train-x", state: "completed" });
     listing([row]);
-    vi.spyOn(trainingApi, "getRun").mockResolvedValue({
-      run: row,
-      sweep: null,
-      tensorboard: SERVINGS["train-x"],
-    });
+    vi.spyOn(trainingApi, "getRun").mockResolvedValue(
+      trainingDetail({ run: row, tensorboard: SERVINGS["train-x"] }),
+    );
 
     render(<TrainingTab />);
     expect(await screen.findByRole("heading", { level: 2, name: "Runs" })).toBeInTheDocument();
@@ -462,15 +423,11 @@ describe("TrainingTab heading", () => {
 
 describe("TrainingTab tensorboard panel", () => {
   it("says a run produced no logs and offers no Try again, rather than a raw refusal", async () => {
-    const row = run({ experiment_id: "train-nologs", state: "failed" });
+    const row = runRow({ experiment_id: "train-nologs", state: "failed" });
     listing([row]);
     detailOf(row);
     vi.spyOn(trainingApi, "launchTensorboard").mockRejectedValue(
-      new StructuredRefusalError(
-        { message: "run produced no logs: train-nologs", no_logs: true },
-        404,
-        "run produced no logs: train-nologs",
-      ),
+      await producedRefusal("no_logs_refusal"),
     );
 
     render(<TrainingTab />);
@@ -481,7 +438,7 @@ describe("TrainingTab tensorboard panel", () => {
   });
 
   it("keeps Try again for an ordinary failed launch", async () => {
-    const row = run({ experiment_id: "train-broken", state: "failed" });
+    const row = runRow({ experiment_id: "train-broken", state: "failed" });
     listing([row]);
     detailOf(row);
     vi.spyOn(trainingApi, "launchTensorboard").mockRejectedValue(new Error("connection refused"));
@@ -494,9 +451,8 @@ describe("TrainingTab tensorboard panel", () => {
   });
 
   it("keeps the run's own recorded crash reason for a no-logs run that failed with one", async () => {
-    const crash =
-      "[WinError 183] Cannot create a file when that file already exists: 'tensorboard'";
-    const row = run({
+    const crash = refusalDetail("crashed_no_logs_refusal").message;
+    const row = runRow({
       experiment_id: "train-nologs-crashed",
       state: "failed",
       status_error: crash,
@@ -504,7 +460,7 @@ describe("TrainingTab tensorboard panel", () => {
     listing([row]);
     detailOf(row);
     vi.spyOn(trainingApi, "launchTensorboard").mockRejectedValue(
-      new StructuredRefusalError({ message: crash, no_logs: true }, 404, crash),
+      await producedRefusal("crashed_no_logs_refusal"),
     );
 
     render(<TrainingTab />);
@@ -520,15 +476,13 @@ describe("TrainingTab tensorboard panel", () => {
 
   it("launches a fresh TensorBoard for the newly selected run, not the previous one's", async () => {
     listing([
-      run({ experiment_id: "train-x", state: "completed" }),
-      run({ experiment_id: "train-y", state: "completed" }),
+      runRow({ experiment_id: "train-x", state: "completed" }),
+      runRow({ experiment_id: "train-y", state: "completed" }),
     ]);
     vi.spyOn(trainingApi, "getRun").mockImplementation((experimentId: string) =>
-      Promise.resolve({
-        run: run({ experiment_id: experimentId, state: "completed" }),
-        sweep: null,
-        tensorboard: null,
-      }),
+      Promise.resolve(
+        trainingDetail({ run: runRow({ experiment_id: experimentId, state: "completed" }) }),
+      ),
     );
     const launchSpy = vi
       .spyOn(trainingApi, "launchTensorboard")
@@ -547,13 +501,11 @@ describe("TrainingTab tensorboard panel", () => {
 
   it("reloads TensorBoard in place once per new epoch row, never remounting its frame", async () => {
     openTestProject();
-    const row = run({ experiment_id: "train-x" });
+    const row = runRow({ experiment_id: "train-x" });
     listing([row]);
-    vi.spyOn(trainingApi, "getRun").mockResolvedValue({
-      run: row,
-      sweep: null,
-      tensorboard: SERVINGS["train-x"],
-    });
+    vi.spyOn(trainingApi, "getRun").mockResolvedValue(
+      trainingDetail({ run: row, tensorboard: SERVINGS["train-x"] }),
+    );
     let deliver: (frame: Frame) => void = () => {};
     vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
       deliver = (frame) => onMessage({ ...frame, experiment_id: experimentId });
@@ -598,7 +550,7 @@ describe("TrainingTab epoch table", () => {
   });
 
   it("says a terminal run recorded no metrics, rather than waiting on one that will never arrive", async () => {
-    listing([run({ experiment_id: "train-terminal-empty", state: "interrupted" })]);
+    listing([runRow({ experiment_id: "train-terminal-empty", state: "interrupted" })]);
 
     render(<TrainingTab />);
     fireEvent.click(await screen.findByText("train-terminal-empty"));
@@ -608,7 +560,7 @@ describe("TrainingTab epoch table", () => {
   });
 
   it("marks the waiting placeholder as a live region on a run with no metrics yet", async () => {
-    listing([run({ experiment_id: "train-waiting-live" })]);
+    listing([runRow({ experiment_id: "train-waiting-live" })]);
 
     render(<TrainingTab />);
     fireEvent.click(await screen.findByText("train-waiting-live"));
@@ -617,7 +569,7 @@ describe("TrainingTab epoch table", () => {
   });
 
   it("shows every streamed epoch as a table row, outright", async () => {
-    listing([run({ experiment_id: "train-table" })]);
+    listing([runRow({ experiment_id: "train-table" })]);
     streamFrames(metricFrame({ epoch: 1, loss: 0.5 }), metricFrame({ epoch: 2, loss: 0.3 }));
 
     render(<TrainingTab />);
@@ -633,7 +585,7 @@ describe("TrainingTab epoch table", () => {
   });
 
   it("renders the unset glyph for a row carrying no epoch, and for a non-finite value", async () => {
-    listing([run({ experiment_id: "train-unset" })]);
+    listing([runRow({ experiment_id: "train-unset" })]);
     streamFrames(metricFrame({ loss: 0.5 }), metricFrame({ epoch: 2, loss: null }));
 
     render(<TrainingTab />);
@@ -646,7 +598,7 @@ describe("TrainingTab epoch table", () => {
   });
 
   it("spells a metric key's underscores as spaces and gives bookkeeping no column", async () => {
-    listing([run({ experiment_id: "train-bookkeeping" })]);
+    listing([runRow({ experiment_id: "train-bookkeeping" })]);
     streamFrames(
       metricFrame({
         epoch: 1,
@@ -667,11 +619,11 @@ describe("TrainingTab epoch table", () => {
   });
 
   it("shows the latest batch row as the in-progress epoch's line, with no column of its own", async () => {
-    listing([run({ experiment_id: "train-batches" })]);
-    streamFrames(metricFrame({ epoch: 1, loss: 0.5 }), {
-      type: "batch",
-      row: { epoch: 2, step: 7, batch_loss: 0.25 },
-    });
+    listing([runRow({ experiment_id: "train-batches" })]);
+    streamFrames(
+      metricFrame({ epoch: 1, loss: 0.5 }),
+      batchFrame({ epoch: 2, step: 7, batch_loss: 0.25 }),
+    );
 
     render(<TrainingTab />);
     fireEvent.click(await screen.findByText("train-batches"));
@@ -688,9 +640,9 @@ describe("TrainingTab epoch table", () => {
   });
 
   it("drops the in-progress line once its epoch's own row arrives", async () => {
-    listing([run({ experiment_id: "train-batch-done" })]);
+    listing([runRow({ experiment_id: "train-batch-done" })]);
     streamFrames(
-      { type: "batch", row: { epoch: 1, step: 3, batch_loss: 0.25 } },
+      batchFrame({ epoch: 1, step: 3, batch_loss: 0.25 }),
       metricFrame({ epoch: 1, loss: 0.5 }),
     );
 
@@ -703,8 +655,8 @@ describe("TrainingTab epoch table", () => {
   });
 
   it("names the last batch line of a run that ended mid-epoch as where it stopped", async () => {
-    listing([run({ experiment_id: "train-batch-failed", state: "failed" })]);
-    streamFrames({ type: "batch", row: { epoch: 2, step: 5, batch_loss: 0.25 } });
+    listing([runRow({ experiment_id: "train-batch-failed", state: "failed" })]);
+    streamFrames(batchFrame({ epoch: 2, step: 5, batch_loss: 0.25 }));
 
     render(<TrainingTab />);
     fireEvent.click(await screen.findByText("train-batch-failed"));
@@ -722,15 +674,11 @@ describe("TrainingTab status toast", () => {
   });
 
   function completedFrame(experimentId: string): Frame {
-    return {
-      type: "status",
-      status: run({ experiment_id: experimentId, state: "completed" }),
-      error: null,
-    };
+    return statusFrame({ experiment_id: experimentId, state: "completed" });
   }
 
   it("does not toast on selecting a run already known to be terminal, only rediscovering its state", async () => {
-    listing([run({ experiment_id: "train-old-done", state: "completed" })]);
+    listing([runRow({ experiment_id: "train-old-done", state: "completed" })]);
     streamFrames(completedFrame("train-old-done"));
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
 
@@ -742,7 +690,7 @@ describe("TrainingTab status toast", () => {
   });
 
   it("toasts a transition to terminal observed while watching a live run", async () => {
-    listing([run({ experiment_id: "train-live-done" })]);
+    listing([runRow({ experiment_id: "train-live-done" })]);
     streamFrames(completedFrame("train-live-done"));
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
 
@@ -755,22 +703,15 @@ describe("TrainingTab status toast", () => {
   });
 
   it("toasts a stream error once, then still shows a metric the reconnect delivers", async () => {
-    listing([run({ experiment_id: "train-just-launched" })]);
-    const unknown = {
-      type: "status" as const,
-      status: null,
-      error: "unknown run: train-just-launched",
-    };
-    streamFrames(unknown, unknown, metricFrame({ epoch: 1, loss: 0.5 }));
+    listing([runRow({ experiment_id: "train-just-launched" })]);
+    streamFrames(UNKNOWN_RUN_FRAME, UNKNOWN_RUN_FRAME, metricFrame({ epoch: 1, loss: 0.5 }));
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
 
     render(<TrainingTab />);
     fireEvent.click(await screen.findByText("train-just-launched"));
 
     expect(within(await screen.findByRole("table")).getByText("0.5")).toBeInTheDocument();
-    expect(pushToast).toHaveBeenCalledWith(
-      "Training stream error: unknown run: train-just-launched",
-    );
+    expect(pushToast).toHaveBeenCalledWith(`Training stream error: ${UNKNOWN_RUN_FRAME.error}`);
     expect(pushToast).toHaveBeenCalledTimes(1);
   });
 });
@@ -779,10 +720,9 @@ describe("TrainingTab stream lifecycle", () => {
   it("closes the stream and clears the detail panel when the selected run leaves the next poll", async () => {
     openTestProject();
     const listRuns = vi.spyOn(trainingApi, "listRuns");
-    listRuns.mockResolvedValueOnce({
-      runs: [run({ experiment_id: "train-vanishing" })],
-      sweeps: [],
-    });
+    listRuns.mockResolvedValueOnce(
+      trainingListing({ runs: [runRow({ experiment_id: "train-vanishing" })], sweeps: [] }),
+    );
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     const stop = vi.fn();
     vi.mocked(openTrainingStream).mockImplementation(() => stop);
@@ -794,7 +734,7 @@ describe("TrainingTab stream lifecycle", () => {
       fireEvent.click(screen.getByText("train-vanishing"));
       await vi.waitFor(() => expect(openTrainingStream).toHaveBeenCalledTimes(1));
 
-      listRuns.mockResolvedValueOnce({ runs: [], sweeps: [] });
+      listRuns.mockResolvedValueOnce(trainingListing({ runs: [], sweeps: [] }));
       await act(async () => {
         await vi.advanceTimersByTimeAsync(RUN_REFRESH_MS);
       });
@@ -808,22 +748,10 @@ describe("TrainingTab stream lifecycle", () => {
 });
 
 describe("TrainingTab launch picker", () => {
-  const recordedChoices: SplitChoices = {
-    as_recorded: {
-      case: "bound",
-      line: "on the partition it bound",
-      compatible: true,
-      reason: null,
-    },
-    selections: [],
-  };
-
   it("opens the picker, selects a recorded run, and starts it through the relaunch door", async () => {
-    listing([run({ experiment_id: "exp-pristine-1", state: "completed" })]);
-    vi.spyOn(trainingApi, "listSplitChoices").mockResolvedValue(recordedChoices);
-    const relaunchSpy = vi
-      .spyOn(trainingApi, "relaunch")
-      .mockResolvedValue({ experiment_id: "exp-pristine-2" });
+    listing([runRow({ experiment_id: "exp-pristine-1", state: "completed" })]);
+    vi.spyOn(trainingApi, "listSplitChoices").mockResolvedValue(splitChoices({}));
+    const relaunchSpy = vi.spyOn(trainingApi, "relaunch").mockResolvedValue(RUN_RELAUNCH);
 
     render(<TrainingTab />);
     await screen.findByText("exp-pristine-1");
@@ -842,12 +770,9 @@ describe("TrainingTab launch picker", () => {
   });
 
   it("starts a recorded sweep again by its id, with no data choice to fetch", async () => {
-    listing([], [sweep({ sweep_id: "sweep-1", state: "completed" })]);
+    listing([], [sweepGroup({ sweep_id: "sweep-1", state: "completed" })]);
     const choicesSpy = vi.spyOn(trainingApi, "listSplitChoices");
-    const relaunchSpy = vi.spyOn(trainingApi, "relaunch").mockResolvedValue({
-      sweep_id: "sweep-2",
-      status: "launched",
-    });
+    const relaunchSpy = vi.spyOn(trainingApi, "relaunch").mockResolvedValue(SWEEP_RELAUNCH);
 
     render(<TrainingTab />);
     await screen.findByRole("group", { name: "Sweep sweep-1" });
@@ -864,11 +789,9 @@ describe("TrainingTab launch picker", () => {
   });
 
   it("shows a refused start's issues under the picked row", async () => {
-    listing([run({ experiment_id: "exp-refused-1", state: "completed" })]);
-    vi.spyOn(trainingApi, "listSplitChoices").mockResolvedValue(recordedChoices);
-    vi.spyOn(trainingApi, "relaunch").mockRejectedValue(
-      new StructuredRefusalError({ issues: ["batch_size must be positive"] }, 422, ""),
-    );
+    listing([runRow({ experiment_id: "exp-refused-1", state: "completed" })]);
+    vi.spyOn(trainingApi, "listSplitChoices").mockResolvedValue(splitChoices({}));
+    vi.spyOn(trainingApi, "relaunch").mockRejectedValue(await producedRefusal("refused_relaunch"));
 
     render(<TrainingTab />);
     await screen.findByText("exp-refused-1");
@@ -878,37 +801,18 @@ describe("TrainingTab launch picker", () => {
     fireEvent.click(within(picker).getByText("exp-refused-1"));
     await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    await waitFor(() =>
-      expect(screen.getByText("batch_size must be positive")).toBeInTheDocument(),
-    );
+    const [issue] = refusalDetail("refused_relaunch").issues;
+    await waitFor(() => expect(screen.getByText(issue)).toBeInTheDocument());
   });
 
   it("opens a row's Data choices only once selected, and starts with the chosen manifest", async () => {
-    listing([run({ experiment_id: "exp-1", state: "completed" })]);
-    const listSplitChoicesSpy = vi.spyOn(trainingApi, "listSplitChoices").mockResolvedValue({
-      as_recorded: {
-        case: "drawn",
-        line: "draws its split again with seed 42 over the labels as they are now",
-        compatible: true,
-        reason: null,
-      },
-      selections: [
-        {
-          selection_dir: "/data/splits",
-          enabled: true,
-          reason: null,
-          seed: 7,
-          group_by: "tile_prefix",
-          train: 4,
-          val: 2,
-          calibration: 1,
-          replaced_split_keys: [],
-        },
-      ],
-    });
-    const relaunchSpy = vi
-      .spyOn(trainingApi, "relaunch")
-      .mockResolvedValue({ experiment_id: "exp-2" });
+    listing([runRow({ experiment_id: "exp-1", state: "completed" })]);
+    const choices = splitChoices({});
+    const [selection] = choices.selections;
+    const listSplitChoicesSpy = vi
+      .spyOn(trainingApi, "listSplitChoices")
+      .mockResolvedValue(choices);
+    const relaunchSpy = vi.spyOn(trainingApi, "relaunch").mockResolvedValue(RUN_RELAUNCH);
 
     render(<TrainingTab />);
     await screen.findByText("exp-1");
@@ -918,19 +822,23 @@ describe("TrainingTab launch picker", () => {
 
     fireEvent.click(within(picker).getByText("exp-1"));
     expect(
-      await screen.findByText(/draws its split again with seed 42 over the labels as they are now/),
+      await screen.findByText((text) => text.includes(choices.as_recorded.line)),
     ).toBeInTheDocument();
     expect(listSplitChoicesSpy).toHaveBeenCalledWith("exp-1");
 
-    fireEvent.click(await screen.findByRole("radio", { name: /\/data\/splits/ }));
+    fireEvent.click(
+      await screen.findByRole("radio", {
+        name: (name) => name.includes(selection.selection_dir),
+      }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() =>
-      expect(relaunchSpy).toHaveBeenCalledWith("exp-1", "jordan", "/data/splits"),
+      expect(relaunchSpy).toHaveBeenCalledWith("exp-1", "jordan", selection.selection_dir),
     );
   });
 
   it("disables Start while a selected row's data choices are still loading", async () => {
-    listing([run({ experiment_id: "exp-1", state: "completed" })]);
+    listing([runRow({ experiment_id: "exp-1", state: "completed" })]);
     const choices = Promise.withResolvers<SplitChoices>();
     vi.spyOn(trainingApi, "listSplitChoices").mockReturnValue(choices.promise);
 
@@ -942,15 +850,12 @@ describe("TrainingTab launch picker", () => {
 
     expect(await screen.findByRole("button", { name: "Start" })).toBeDisabled();
 
-    choices.resolve({
-      as_recorded: { case: "drawn", line: "draws its split again", compatible: true, reason: null },
-      selections: [],
-    });
+    choices.resolve(splitChoices({}));
     await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled());
   });
 
   it("shows a per-row split-choices fetch failure as text on the row", async () => {
-    listing([run({ experiment_id: "exp-1", state: "completed" })]);
+    listing([runRow({ experiment_id: "exp-1", state: "completed" })]);
     vi.spyOn(trainingApi, "listSplitChoices").mockRejectedValue(new Error("network error"));
 
     render(<TrainingTab />);
@@ -968,7 +873,7 @@ describe("TrainingTab launch picker", () => {
     const listRuns = vi
       .spyOn(trainingApi, "listRuns")
       .mockRejectedValueOnce(new Error("network error"))
-      .mockResolvedValue({ runs: [], sweeps: [] });
+      .mockResolvedValue(trainingListing({ runs: [], sweeps: [] }));
 
     render(<TrainingTab />);
     fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
@@ -986,26 +891,15 @@ describe("TrainingTab launch picker", () => {
 });
 
 describe("dataPickerFor", () => {
-  const choices: SplitChoices = {
-    as_recorded: {
-      case: "bound",
-      line: "on the partition it bound",
+  const recorded = selectionChoice({});
+  const choices = splitChoices({
+    as_recorded: asRecordedChoice({
       compatible: false,
       reason: "Not found: data.images_dir = '/moved'",
-    },
+    }),
     selections: [
-      {
-        selection_dir: "/data/splits",
-        enabled: true,
-        reason: null,
-        seed: 7,
-        group_by: "tile_prefix",
-        train: 4,
-        val: 2,
-        calibration: 1,
-        replaced_split_keys: ["seed"],
-      },
-      {
+      recorded,
+      selectionChoice({
         selection_dir: "/data/other",
         enabled: false,
         reason: "the selection at /data/other records no subject",
@@ -1014,14 +908,13 @@ describe("dataPickerFor", () => {
         train: 0,
         val: 0,
         calibration: 0,
-        replaced_split_keys: [],
-      },
+      }),
     ],
-  };
+  });
 
   it("maps the snapshot's own compatibility into the disabled/reason pair the picker renders", () => {
     const picker = dataPickerFor(choices);
-    expect(picker?.asRecordedLine).toBe("on the partition it bound");
+    expect(picker?.asRecordedLine).toBe(choices.as_recorded.line);
     expect(picker?.asRecordedDisabled).toBe(true);
     expect(picker?.asRecordedReason).toBe("Not found: data.images_dir = '/moved'");
     expect(picker?.absenceMessage).toMatch(/this listing found no other recorded partition/);
@@ -1030,9 +923,9 @@ describe("dataPickerFor", () => {
   it("maps each selection's own enabled flag and reason onto the choice the picker renders", () => {
     const picker = dataPickerFor(choices);
     expect(picker?.choices[0]).toMatchObject({
-      selectionDir: "/data/splits",
+      selectionDir: recorded.selection_dir,
       disabled: false,
-      replacedSplitKeys: ["seed"],
+      replacedSplitKeys: recorded.replaced_split_keys,
     });
     expect(picker?.choices[1]).toMatchObject({
       selectionDir: "/data/other",
@@ -1045,7 +938,9 @@ describe("dataPickerFor", () => {
     const picker = dataPickerFor(choices);
     render(<div>{picker?.choices[0].label}</div>);
     expect(
-      screen.getByText(/seed 7 · tile_prefix · train 4 · val 2 · calibration 1/),
+      screen.getByText(
+        `seed ${recorded.seed} · ${recorded.group_by} · train ${recorded.train} · val ${recorded.val} · calibration ${recorded.calibration}`,
+      ),
     ).toBeInTheDocument();
   });
 
@@ -1061,17 +956,16 @@ describe("TrainingTab compare", () => {
     return screen.getAllByText(id)[0].closest("li") as HTMLElement;
   }
 
+  /** The comparison answers the produced comparison with one produced column per id. */
   function compareAnswers(ids: string[]) {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue({
-      experiments: ids.map((experiment_id) => ({ experiment_id })),
-      count: ids.length,
-      same_dataset_fingerprint: null,
-    });
+    vi.spyOn(trainingApi, "compare").mockResolvedValue(
+      compareResult({ experiments: ids.map((experiment_id) => compareEntry({ experiment_id })) }),
+    );
   }
 
   it("marking two runs switches the detail region and closes the single-run stream", async () => {
     openTestProject();
-    listing([run({ experiment_id: "run-a" }), run({ experiment_id: "run-b" })]);
+    listing([runRow({ experiment_id: "run-a" }), runRow({ experiment_id: "run-b" })]);
     const stopSingle = vi.fn();
     vi.mocked(openTrainingStream).mockReturnValueOnce(stopSingle);
     compareAnswers(["run-a", "run-b"]);
@@ -1091,7 +985,7 @@ describe("TrainingTab compare", () => {
   });
 
   it("every row's Compare toggle stays live: one id, no resolution to wait on", async () => {
-    listing([run({ experiment_id: "run-fresh" })]);
+    listing([runRow({ experiment_id: "run-fresh" })]);
 
     render(<TrainingTab />);
     await screen.findByText("run-fresh");
@@ -1104,7 +998,7 @@ describe("TrainingTab compare", () => {
   it("caps the marked set and names the reason on a fifth toggle", async () => {
     openTestProject();
     const ids = ["run-1", "run-2", "run-3", "run-4", "run-5"];
-    listing(ids.map((id) => run({ experiment_id: id })));
+    listing(ids.map((id) => runRow({ experiment_id: id })));
     compareAnswers([]);
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
 
@@ -1128,7 +1022,7 @@ describe("TrainingTab compare", () => {
   });
 
   it("groups Compare and Cancel as one action group", async () => {
-    listing([run({ experiment_id: "run-grouped" })]);
+    listing([runRow({ experiment_id: "run-grouped" })]);
 
     render(<TrainingTab />);
     await screen.findByText("run-grouped");
@@ -1140,7 +1034,7 @@ describe("TrainingTab compare", () => {
 
   it("selects the sole remaining run when unmarking drops the marked set to one, instead of stranding it unselected", async () => {
     openTestProject();
-    listing([run({ experiment_id: "run-a" }), run({ experiment_id: "run-b" })]);
+    listing([runRow({ experiment_id: "run-a" }), runRow({ experiment_id: "run-b" })]);
     compareAnswers(["run-a", "run-b"]);
 
     render(<TrainingTab />);

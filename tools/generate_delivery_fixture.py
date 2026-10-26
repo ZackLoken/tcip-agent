@@ -7,8 +7,11 @@ over a bucket its assessment validates, a phenology delivery through a plant map
 under a breeder's acknowledgment, and the orthomosaic door's nearest-plant and canopy-segment
 deliveries. Each project is opened through ``POST /api/projects/open`` and its records served by
 ``GET /api/results/delivery-events``; the phenology project's record is served again after a
-superseding rebuild archives the mapping it cites. The served records are written,
-:func:`rebased`, to ``frontend/src/test/deliveryEvents.json``, keyed by fixture name.
+superseding rebuild archives the mapping it cites. The count project's bucket is also exported
+through ``POST /api/results/export_count_csv``. The served records, keyed by fixture name under
+``records``, and that answer's three delivery headers, under ``count_export_headers``, are
+written, the scratch directory read as ``fixture_session.SCRATCH_ROOT``
+(``fixture_session.normalized``), to ``frontend/src/test/deliveryEvents.json``.
 
     python -m tools.generate_delivery_fixture
 """
@@ -19,8 +22,9 @@ from typing import TYPE_CHECKING
 
 from tests import FRONTEND_SRC
 from tools.fixture_session import (
+    SCRATCH_ROOT,
+    normalized,
     opened,
-    replaced,
     scratch_session,
     write_fixture,
 )
@@ -35,35 +39,24 @@ if TYPE_CHECKING:
 
 GENERATED_PATH = FRONTEND_SRC / "test" / "deliveryEvents.json"
 
-SCRATCH_ROOT = "/scratch"
-"""What the scratch directory the deliveries were made under reads as in every served path."""
-
-
-def rebased(
-    value: dict[str, JsonValue], scratch: Path
-) -> dict[str, JsonValue]:
-    """Return ``value`` with every spelling of ``scratch`` in its strings made :data:`SCRATCH_ROOT`.
-
-    The scratch directory differs with where a run was made.
-    """
-
-    def leaf(_key: str | None, text: JsonValue) -> JsonValue:
-        if not isinstance(text, str):
-            return text
-        for spelling in (str(scratch), scratch.as_posix()):
-            text = text.replace(spelling, SCRATCH_ROOT)
-        return text.replace("\\", "/") if SCRATCH_ROOT in text else text
-
-    return replaced(value, leaf)
-
 
 def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
-    """Return the served delivery events of the scenes this module names, by fixture name.
+    """Return the scenes' served delivery events by fixture name, and the count export's headers.
 
     The scenes are made in projects created under ``workspace`` and served through ``client``.
     """
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
+    from tcip_mcp.tools.project_tools import register_dataset
+    from tcip_mcp.traits import registered_crops
+    from tcip_web.app import app
+    from tcip_web.routes.results import (
+        ACKNOWLEDGED_BY_HEADER,
+        SAVED_TO_HEADER,
+        VALIDATED_HEADER,
+        ExportCountCsvPayload,
+        PerImageCountDelivery,
+    )
     from tests import (
         _trait_fixtures as fx,
         test_orthomosaic_tools as ortho,
@@ -106,6 +99,28 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         )
     )
     out["validated"] = served(project)
+    registered = register_dataset(
+        root, str(chain.root), crop=sorted(registered_crops())[0], actor=None
+    )
+    delivered(registered)
+    export = client.post(
+        app.url_path_for("export_count_csv"),
+        json=ExportCountCsvPayload(
+            delivery=PerImageCountDelivery(
+                kind="per_image_count",
+                dataset_root=str(chain.root),
+                bucket=chain.bucket,
+                trait=fx.COUNT_TRAIT,
+            ),
+            filename="counts.csv",
+            user="breeder",
+        ).model_dump(mode="json"),
+    )
+    export.raise_for_status()
+    headers: dict[str, JsonValue] = {
+        name: export.headers[name]
+        for name in (SAVED_TO_HEADER, VALIDATED_HEADER, ACKNOWLEDGED_BY_HEADER)
+    }
 
     root = workspace / "phenology"
     project = binding._init(root)
@@ -219,17 +234,17 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         )
     )
     out["canopy"] = served(project)
-    return out
+    return {"records": out, "count_export_headers": headers}
 
 
 def produce() -> dict[str, JsonValue]:
     """Return the fixture's content, made in a scratch session.
 
-    The content is :func:`rebased` against the scratch directory holding its workspace.
+    The scratch directory holding its workspace reads as :data:`SCRATCH_ROOT`.
     """
     with scratch_session() as (workspace, client):
         served = deliveries(workspace, client)
-    return rebased(served, workspace.parent)
+    return normalized(served, places={workspace.parent: SCRATCH_ROOT})
 
 
 if __name__ == "__main__":

@@ -3,7 +3,8 @@
 In projects created through ``tests._web_fixtures.named_project`` and opened through the picker's
 route in a scratch session (``tools/fixture_session.py``), each trait entry is proposed through
 ``traits.propose_trait``, confirmed through ``POST /api/results/traits/confirm`` and served by
-``GET /api/results/traits``; the served listings are written, :func:`normalized`, to
+``GET /api/results/traits``; the served listings are written, normalized by :data:`STAMPED`
+(``fixture_session.normalized``), to
 ``frontend/src/test/traitListings.json``, keyed by fixture name.
 
     python -m tools.generate_trait_fixture
@@ -11,13 +12,13 @@ route in a scratch session (``tools/fixture_session.py``), each trait entry is p
 
 from __future__ import annotations
 
-import json
-from typing import TYPE_CHECKING
+import copy
+from typing import TYPE_CHECKING, Any
 
 from tests import FRONTEND_SRC
 from tools.fixture_session import (
+    normalized,
     opened,
-    replaced,
     scratch_session,
     write_fixture,
 )
@@ -27,9 +28,11 @@ if TYPE_CHECKING:
 
     from pydantic import JsonValue
 
+    from tools.fixture_session import Stamp
+
 GENERATED_PATH = FRONTEND_SRC / "test" / "traitListings.json"
 
-_STEM_ENTRY = {
+_STEM_ENTRY: dict[str, Any] = {
     "name": "stem",
     "delivers": ["stem_count"],
     "positive_state": None,
@@ -78,28 +81,18 @@ _FIXED_TIME = "1970-01-01T00:00:00+00:00"
 """What every set revision timestamp reads as in the fixture, so a regeneration compares equal."""
 
 
-_SET_TIMES = ("proposed_at", "confirmed_at", "withdrawn_at")
+STAMPED: dict[str, Stamp] = {
+    key: (str, _FIXED_TIME)
+    for key in ("proposed_at", "confirmed_at", "withdrawn_at")
+}
 """The revision timestamps a run sets, each read as :data:`_FIXED_TIME` once set."""
-
-
-def normalized(served: dict[str, dict]) -> dict[str, JsonValue]:
-    """Return ``served`` with each set revision timestamp replaced by ``_FIXED_TIME``.
-
-    Those timestamps are the facts that differ between two otherwise identical runs.
-    """
-    return replaced(
-        served,
-        lambda key, value: (
-            _FIXED_TIME if key in _SET_TIMES and value is not None else value
-        ),
-    )
 
 
 def produce() -> dict[str, JsonValue]:
     """Propose and confirm the fixture traits in a scratch session; return the served listings.
 
     The projects are created and opened in the session, the listing served at each stage, and
-    the result :func:`normalized`.
+    the result normalized by :data:`STAMPED`.
     """
     from tcip_mcp import traits
     from tests._web_fixtures import named_project
@@ -141,7 +134,7 @@ def produce() -> dict[str, JsonValue]:
         served: dict[str, dict] = {}
         setup = created("setup")
         confirm(propose(setup, _STEM_ENTRY))
-        second = json.loads(json.dumps(_STEM_ENTRY))
+        second = copy.deepcopy(_STEM_ENTRY)
         second["operationalizations"]["per_image_count"]["statement"] = (
             "Only stems above the graft union."
         )
@@ -153,7 +146,7 @@ def produce() -> dict[str, JsonValue]:
         served["unconfirmed"] = listing()
         confirm(revision)
         served["results"] = listing()
-        return normalized(served)
+        return normalized(served, stamped=STAMPED)
 
 
 if __name__ == "__main__":

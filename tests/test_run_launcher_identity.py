@@ -78,11 +78,9 @@ def test_a_launch_no_agent_declared_itself_to_shows_an_empty_declaration(
         small_detection_config(images_dir, project=tmp_path),
         actor=None,
     )
-    assert "error" not in result, result
-    assert _row(tmp_path, result["experiment_id"])["launch"] == {}
-    assert "launched_by" not in _launch_record(
-        tmp_path, result["experiment_id"]
-    )
+    assert isinstance(result, training_tools.RunLaunched), result
+    assert _row(tmp_path, result.experiment_id)["launch"] == {}
+    assert "launched_by" not in _launch_record(tmp_path, result.experiment_id)
 
 
 def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_event(
@@ -109,15 +107,13 @@ def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_
         actor=None,
     )
     agent_identity.end()
-    assert "error" not in result, result
-    assert _row(tmp_path, result["experiment_id"])["launch"] == {
+    assert isinstance(result, training_tools.RunLaunched), result
+    assert _row(tmp_path, result.experiment_id)["launch"] == {
         "agent_client_name": "claude-code",
         "agent_client_version": "2.1.238",
         "agent_session": identity.agent_session,
     }
-    assert "launched_by" not in _launch_record(
-        tmp_path, result["experiment_id"]
-    )
+    assert "launched_by" not in _launch_record(tmp_path, result.experiment_id)
 
 
 def test_launch_refuses_when_the_launch_record_cannot_be_written(
@@ -148,7 +144,7 @@ def test_launch_refuses_when_the_launch_record_cannot_be_written(
         actor=None,
     )
 
-    assert result["error"] == "launch_training: disk full"
+    assert result == {"error": "launch_training: disk full"}
     assert not any(
         "tcip_mcp.pipelines.training.subprocess_worker" in argv
         for argv in captured
@@ -171,8 +167,8 @@ def test_a_launch_records_the_seed_its_config_states(
         "seed": 1234,
     }
     result = training_tools.launch_training(tmp_path, cfg, actor=None)
-    assert "error" not in result, result
-    recorded = _launch_record(tmp_path, result["experiment_id"])["config"]
+    assert isinstance(result, training_tools.RunLaunched), result
+    recorded = _launch_record(tmp_path, result.experiment_id)["config"]
     assert recorded["seed"] == 1234
 
 

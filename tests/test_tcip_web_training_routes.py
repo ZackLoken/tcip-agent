@@ -985,15 +985,15 @@ def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
     Relaunching starts a new run directory through the real launcher and a real child, its
     launch record replaying the picked run's config and naming it as parent.
     """
-    from tcip_mcp.tools.training_tools import launch_training
+    from tcip_mcp.tools.training_tools import RunLaunched, launch_training
     from tests._producer_fixtures import no_tensorboard
     from tests._verified_checkpoint_fixtures import run_to_end
 
     no_tensorboard(monkeypatch)
 
     first = launch_training(tmp_path, _regression_config(tmp_path), actor=None)
-    assert "error" not in first, first
-    parent_id = first["experiment_id"]
+    assert isinstance(first, RunLaunched), first
+    parent_id = first.experiment_id
     assert run_to_end(tmp_path, parent_id)["state"] == "completed"
 
     resp = opened_client.post(
@@ -1026,7 +1026,7 @@ def test_list_runs_route_names_the_run_s_selection_metric(
     import math
 
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.tools.training_tools import launch_training
+    from tcip_mcp.tools.training_tools import RunLaunched, launch_training
     from tests._producer_fixtures import no_tensorboard
     from tests._verified_checkpoint_fixtures import run_to_end
 
@@ -1035,15 +1035,15 @@ def test_list_runs_route_names_the_run_s_selection_metric(
     result = launch_training(
         tmp_path, _regression_config(tmp_path), actor=None
     )
-    assert "error" not in result, result
-    run_to_end(tmp_path, result["experiment_id"])
+    assert isinstance(result, RunLaunched), result
+    run_to_end(tmp_path, result.experiment_id)
 
     from tcip_web.routes.training import list_runs_route
 
     by_id = {
         r["experiment_id"]: r for r in list_runs_route().model_dump()["runs"]
     }
-    row = by_id[result["experiment_id"]]
+    row = by_id[result.experiment_id]
     # Regression selects on its loss by default; there is no evaluation.selection_metric override
     # in this config.
     assert row["best_metric_name"] == "loss"
@@ -1162,6 +1162,47 @@ def test_a_sweep_and_its_trial_each_have_one_board_whichever_door_launches_it(
         canonical_path(sweep_dir),
         canonical_path(trials[0]),
     ]
+
+
+def test_the_relaunch_route_answers_the_launch_s_own_typed_answer(
+    opened_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The relaunch route answers the very ``RunLaunched`` the launch door returned.
+
+    The launch is the real ``launch_training``, its spawn recorded by ``fake_popen``; the route
+    hands its answer on as it is.
+    """
+    import tcip_mcp.tools.training_tools as tt
+    from tcip_web.routes.training import RelaunchPayload, relaunch_route
+    from tests._producer_fixtures import fake_popen
+    from tests._verified_checkpoint_fixtures import (
+        detection_config,
+        opened_run,
+    )
+
+    fake_popen(monkeypatch, [])
+    opened_run(
+        opened_project,
+        detection_config(
+            opened_project / "source-data", project=opened_project
+        ),
+        experiment_id="exp-source",
+    )
+    returned: list[object] = []
+    launch = tt.launch_training
+
+    def recorded(*args: object, **kwargs: object) -> tt.RunLaunched | dict:
+        returned.append(launch(*args, **kwargs))  # type: ignore[arg-type]
+        return returned[-1]  # type: ignore[return-value]
+
+    monkeypatch.setattr(tt, "launch_training", recorded)
+
+    answer = relaunch_route(
+        RelaunchPayload(relaunched_from="exp-source", user="tester")
+    )
+
+    assert isinstance(answer, tt.RunLaunched)
+    assert returned == [answer] and returned[0] is answer
 
 
 def test_a_recorded_sweep_relaunches_through_the_run_launch_door(

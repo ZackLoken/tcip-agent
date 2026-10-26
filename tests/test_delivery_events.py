@@ -435,9 +435,13 @@ def test_delivery_events_route_serves_a_delivered_plant_mapping_disclosure_uncha
 ) -> None:
     """The delivery-events route serves a phenology delivery's mapping disclosure unchanged.
 
-    The disclosure is the one the delivery records over a built mapping.
+    The disclosure is the one the delivery records over a built mapping, served beside the key
+    its cited record loads under, the mapping's own name while no rebuild has moved past it.
     """
     pytest.importorskip("torch")
+    from tcip_mcp.pipelines.delivery_events_schema import (
+        PlantMappingDisclosure,
+    )
     from tests._chain_fixtures import attributed_series
 
     series = attributed_series(tmp_path, fractions=(0.0, 1.0))
@@ -450,8 +454,36 @@ def test_delivery_events_route_serves_a_delivered_plant_mapping_disclosure_uncha
 
     assert resp.status_code == 200
     (record,) = resp.json()["records"]
-    assert recorded.plant_mapping is not None
-    assert record["plant_mapping"] == recorded.plant_mapping.model_dump(
-        mode="json"
-    )
+    assert isinstance(recorded.plant_mapping, PlantMappingDisclosure)
+    assert record["plant_mapping"] == {
+        **recorded.plant_mapping.model_dump(mode="json"),
+        "resolved_key": recorded.plant_mapping.name,
+    }
     assert record["plant_mapping"]["dates_delivered"] == sorted(series.buckets)
+
+
+def test_a_served_disclosure_is_a_stored_one_its_walked_member_served() -> (
+    None
+):
+    """The served disclosure union is the stored one with the walked mapping's member served.
+
+    Every stored disclosure but the walked mapping's is served as it is stored, so a disclosure
+    the schema adds is served too.
+    """
+    from typing import get_args
+
+    from tcip_mcp.pipelines.delivery_events_schema import (
+        PlantMapping,
+        PlantMappingDisclosure,
+    )
+    from tcip_web.routes.results import (
+        ServedDisclosure,
+        ServedPlantMappingDisclosure,
+    )
+
+    assert get_args(ServedDisclosure) == tuple(
+        ServedPlantMappingDisclosure
+        if member is PlantMappingDisclosure
+        else member
+        for member in get_args(PlantMapping)
+    )

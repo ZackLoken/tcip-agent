@@ -37,7 +37,7 @@ function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** What a run's launch event says about who started it: never a guess. */
+/** What a run's launch event says about who started it. */
 function launcherSentence(launch: RunRow["launch"]): string {
   if (!launch) return "no launch event recorded";
   return declaredClient(launch) ? "started by the agent" : "started with no agent declared";
@@ -52,10 +52,9 @@ function launcherDescription(launch: RunRow["launch"]): string {
 }
 
 /** How long ago a status record's own heartbeat instant was stamped, in whole minutes; null
- * for a missing or unparseable instant so a caller shows nothing rather than a wrong age. No
- * process id is persisted anywhere, so this is the one liveness signal a "running" row has. */
-function heartbeatAge(heartbeat: string | null | undefined): string | null {
-  if (typeof heartbeat !== "string") return null;
+ * for an unparseable instant. No process id is persisted anywhere, so this is the one liveness
+ * signal a "running" row has. */
+function heartbeatAge(heartbeat: string): string | null {
   const then = Date.parse(heartbeat);
   if (Number.isNaN(then)) return null;
   const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
@@ -155,8 +154,7 @@ function sweepLaunchRow(sweep: SweepGroup, onStart: () => Promise<void>): Launch
       <>
         <span className="block font-mono text-[13px]">{sweep.sweep_id}</span>
         <span className="block text-[12px] text-tcip-muted">
-          {sweep.input.n_trials == null ? "sweep" : `sweep of ${sweep.input.n_trials} trials`} ·{" "}
-          {String(sweep.input.search_alg)} · {sweep.state}
+          sweep of {sweep.input.n_trials} trials · {String(sweep.input.search_alg)} · {sweep.state}
         </span>
       </>
     ),
@@ -308,7 +306,7 @@ export function TrainingTab() {
   const [tbAttempt, setTbAttempt] = useState(0);
   const [markedExperimentIds, setMarkedExperimentIds] = useState<Set<string>>(new Set());
   // Cancel in flight, by run or sweep id: disables that row's own Cancel button with a pending
-  // label, and a failure lands in cancelErrors rather than only a toast.
+  // label, and a failure lands in cancelErrors.
   const [pendingCancel, setPendingCancel] = useState<ReadonlySet<string>>(new Set());
   const [cancelErrors, setCancelErrors] = useState<Record<string, string>>({});
   const streamRef = useRef<(() => void) | null>(null);
@@ -342,8 +340,8 @@ export function TrainingTab() {
     });
   }
 
-  // A run's own marked state, never "No run selected" left over: once the marked set settles
-  // at exactly one, that run becomes the one the detail region shows.
+  // Once the marked set settles at exactly one run, that run becomes the one the detail region
+  // shows.
   const soleMarkedExperimentId = marked.length === 1 ? marked[0].experimentId : null;
   useEffect(() => {
     if (soleMarkedExperimentId) setSelectedRun(soleMarkedExperimentId);
@@ -372,8 +370,7 @@ export function TrainingTab() {
     }
   }, []);
 
-  // Fetched only for the row the breeder actually opens: list_split_choices re-enumerates
-  // every experiment in the project, so fetching it for every row on open would cost O(n^2).
+  // Fetched only for the row the breeder opens.
   const loadSplitChoices = useCallback(
     async (key: string) => {
       if (listing.sweeps.some((s) => s.sweep_id === key)) return;
@@ -413,12 +410,10 @@ export function TrainingTab() {
     const result = await trainingApi.relaunch(source, useStore.getState().user, selectionDir);
     setPickerOpen(false);
     void refreshRuns();
-    const started = result.experiment_id ?? result.sweep_id;
-    if (typeof started === "string") setSelectedRun(started);
+    setSelectedRun("sweep_id" in result ? result.sweep_id : result.experiment_id);
   }
 
-  // The run list's own poll keeps a state per run independent of the metrics stream; a ref
-  // (not a dependency) so reading it doesn't reopen the stream on every poll.
+  // The run list's own poll keeps a state per run, which the metrics stream reads without reopening.
   const rowsRef = useRef<RunRow[]>(rows);
   useEffect(() => {
     rowsRef.current = rows;
@@ -428,8 +423,7 @@ export function TrainingTab() {
   useEffect(() => {
     // Comparing owns the detail region; a sweep has no metrics log of its own.
     if (!selectedRun || !streaming || !projectRoot || comparing) return;
-    // The stream replays this run from the start, so a seed GET would just double-load the
-    // same rows. The WS is the single source.
+    // The stream replays this run from the start; it is the rows' one source.
     setMetrics([]);
     setLatestBatch(null);
     streamRef.current?.();
@@ -438,12 +432,12 @@ export function TrainingTab() {
     const knownAtOpen = rowsRef.current.find((r) => r.experiment_id === selectedRun)?.state;
     const alreadyTerminal = TERMINAL_STATES.has(knownAtOpen ?? "");
     // A run selected at its launch moment can be unknown to the backend for a few reconnects;
-    // the toast names that once per selection, not once per silent retry.
+    // the toast names that once per selection.
     let errorToasted = false;
     streamRef.current = openTrainingStream(selectedRun, (msg) => {
-      if (msg.type === "metric" && msg.row) {
+      if (msg.type === "metric") {
         setMetrics((prev) => mergeMetric(prev, msg.row));
-      } else if (msg.type === "batch" && msg.row) {
+      } else if (msg.type === "batch") {
         setLatestBatch(msg.row);
       } else if (msg.type === "status") {
         // A known run carries its row and no error; an unknown run carries error and no row,
@@ -506,7 +500,7 @@ export function TrainingTab() {
       setTbNoLogs(null);
       return { url, error: null, done: true };
     }
-    // The route answers a detail carrying the run or the sweep its id names, never neither.
+    // The route answers a detail carrying the run or the sweep its id names.
     const status = (detail.run ?? detail.sweep)!;
     if (!TERMINAL_STATES.has(status.state)) return { url: null, error: null, done: false };
     if (noLogs) {

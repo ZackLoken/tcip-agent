@@ -31,6 +31,7 @@ from tcip_mcp.pipelines.training.tensorboard_manager import (
     BOARD_PATH,
     TensorboardLaunch,
 )
+from tcip_mcp.tools.training_tools import Launched
 from tcip_store import FiniteJsonObject
 from tcip_store.errors import BadKeyError
 from tcip_web.routes._body_common import EmptyBodyPayload, PersonPayload
@@ -76,7 +77,7 @@ class RelaunchPayload(BaseModel):
 
 
 @router.post("/runs")
-def relaunch_route(payload: RelaunchPayload) -> dict:
+def relaunch_route(payload: RelaunchPayload) -> Launched:
     """Start a new run or sweep from what the run or sweep ``relaunched_from`` names recorded.
 
     The source is one of this project's, and the launch is by the person ``user`` names. A run
@@ -86,9 +87,10 @@ def relaunch_route(payload: RelaunchPayload) -> dict:
 
     An optional ``selection_dir`` names a partition to use instead of a run's own "As recorded"
     data section: the launch config then carries ``data.split`` replaced wholesale by
-    ``{"selection_dir": chosen}``. A source naming nothing answers 404 (:func:`_named`), a sweep
-    source with a ``selection_dir`` 422, a refusal 422, and a launch whose audit line could not
-    be written 409.
+    ``{"selection_dir": chosen}``. Answers the launch's ``training_tools.RunLaunched`` or
+    ``SweepLaunched``. A source naming nothing answers 404 (:func:`_named`), a sweep source with
+    a ``selection_dir`` 422, a refusal 422, and a launch whose audit line could not be written
+    409.
     """
     from tcip_mcp.audit import AuditEntryNotWrittenError
     from tcip_mcp.experiments import SWEEP_FILE, observe_run
@@ -102,6 +104,7 @@ def relaunch_route(payload: RelaunchPayload) -> dict:
     person = actor(payload.user)
     project = store.held().root
     source = _named(payload.relaunched_from)
+    result: Launched | dict
     try:
         if (source / SWEEP_FILE).is_file():
             if payload.selection_dir:
@@ -124,7 +127,7 @@ def relaunch_route(payload: RelaunchPayload) -> dict:
             )
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, exc.arguments) from exc
-    if result.get("error"):
+    if isinstance(result, dict):
         raise _refused(result)
     return result
 

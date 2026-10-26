@@ -28,6 +28,11 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from tcip_mcp.pipelines.delivery_events_schema import (
+    DeliveryEventRecord,
+    PlantMappingDisclosure,
+    RasterDisclosure,
+)
 from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
 from tcip_web.paths import resolved_path, within
 from tcip_web.state import store
@@ -177,7 +182,7 @@ def list_plant_mappings() -> dict:
 
 
 class PhenologyInputs(BaseModel):
-    """The inputs a phenology measurement is computed from, never the measurement itself."""
+    """The inputs a phenology measurement is computed from."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -188,14 +193,14 @@ class PhenologyInputs(BaseModel):
     # The name of the published bucket of each delivered date; each stands for its record's date.
     buckets: list[str]
     trait: str
-    # The population: the plant ids this measurement is for, one row each, never every mapped plot.
+    # The population: the plant ids this measurement is for, one row each.
     plants: list[str]
 
 
 class PhenologyPayload(PhenologyInputs):
     """The screen route's payload: the measurement inputs plus a display choice."""
 
-    # Show unvalidated numbers on screen rather than refusing outright. Never an acknowledgment.
+    # Show unvalidated numbers on screen, which acknowledges nothing.
     show_unvalidated: bool = False
 
 
@@ -294,6 +299,10 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
 
 # ── CSV export ───────────────────────────────────────────────────────────
 
+SAVED_TO_HEADER = "X-TCIP-Saved-To"
+VALIDATED_HEADER = "X-TCIP-Validated"
+ACKNOWLEDGED_BY_HEADER = "X-TCIP-Acknowledged-By"
+
 
 class AcknowledgmentPayload(BaseModel):
     """Why the exporting person ships the unvalidated result shown, and that result's digest.
@@ -358,8 +367,7 @@ class ExportCsvPayload(PhenologyInputs):
     fields.
     """
 
-    # Which server computation to export: a choice of producer, never a claim about what the rows
-    # mean or whether they are valid. Picking the "wrong" one yields a correctly-gated CSV.
+    # Which server computation to export, a choice of producer; either answers a gated CSV.
     payload: Literal["curves", "milestones"]
     filename: str | None = None
     user: str
@@ -409,7 +417,7 @@ def export_csv(payload: ExportCsvPayload, request: Request) -> Response:
         raise HTTPException(400, str(exc)) from exc
     headers = {
         "Content-Disposition": f'attachment; filename="{filename}"',
-        "X-TCIP-Saved-To": str(saved_path),
+        SAVED_TO_HEADER: str(saved_path),
     }
     return Response(
         content=saved_path.read_bytes(), media_type="text/csv", headers=headers
@@ -556,9 +564,9 @@ def export_count_csv(
         ) from exc
     headers = {
         "Content-Disposition": f'attachment; filename="{Path(payload.filename).name}"',
-        "X-TCIP-Saved-To": str(saved_path),
-        "X-TCIP-Validated": "true" if result["validated"] else "false",
-        "X-TCIP-Acknowledged-By": quote(result["acknowledged_by"] or ""),
+        SAVED_TO_HEADER: str(saved_path),
+        VALIDATED_HEADER: "true" if result["validated"] else "false",
+        ACKNOWLEDGED_BY_HEADER: quote(result["acknowledged_by"] or ""),
     }
     return Response(
         content=saved_path.read_bytes(), media_type="text/csv", headers=headers
@@ -568,27 +576,47 @@ def export_count_csv(
 # ── What has shipped: the delivery-event record, read-only ─────────────
 
 
+class ServedPlantMappingDisclosure(PlantMappingDisclosure):
+    """A walked mapping's disclosure as served, with the key its cited record loads under.
+
+    ``resolved_key`` is the name to load to see exactly the record the disclosure cites: the
+    mapping's own name while no rebuild has moved past it, the archived key a superseding rebuild
+    gave it (``plant_mapping.resolved_mapping_key_for_citation``), or ``None`` once neither name
+    holds a stored record.
+    """
+
+    resolved_key: str | None
+
+
+ServedDisclosure = ServedPlantMappingDisclosure | RasterDisclosure
+"""The disclosure a served delivery record's ``plant_mapping`` is: a walked mapping's as served or
+a raster one."""
+
+
+class ServedDeliveryEvent(DeliveryEventRecord):
+    """A stored delivery event as served, a walked mapping's disclosure with its resolved key."""
+
+    plant_mapping: ServedDisclosure | None
+
+
+class DeliveryEvents(BaseModel):
+    """Every delivery event a project holds, as served."""
+
+    records: list[ServedDeliveryEvent]
+
+
 @router.get("/delivery-events")
-def list_delivery_events() -> dict:
+def list_delivery_events() -> DeliveryEvents:
     """List every delivery event the open project holds.
 
     The events are :func:`~tcip_mcp.delivery.read_delivery_events`'s: what shipped, under which
-    trait revision and kind, over which buckets and with what each bucket's gate finding was. A
-    record that will not decode refuses the whole listing (400).
-
-    A record naming a walked-mapping ``plant_mapping`` (a dict carrying ``name`` and
-    ``record_sha256``) also carries ``plant_mapping_resolved_key``: the name to load to see exactly
-    the record this event cites, its own name when a rebuild has not moved past it, the archived
-    key (``resolved_mapping_key_for_citation``) when a superseding rebuild has, or ``None`` when
-    neither name holds a stored record any more. A record naming a whole-raster ``plant_mapping``
-    carries no ``plant_mapping_resolved_key`` at all.
+    trait revision and kind, over which buckets and with what each bucket's gate finding was,
+    each a :class:`ServedDeliveryEvent`. A record that will not decode refuses the whole listing
+    (400).
     """
     from pydantic import ValidationError
 
     from tcip_mcp.delivery import read_delivery_events
-    from tcip_mcp.pipelines.delivery_events_schema import (
-        PlantMappingDisclosure,
-    )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         resolved_mapping_key_for_citation,
     )
@@ -601,16 +629,21 @@ def list_delivery_events() -> dict:
         raise HTTPException(400, str(exc)) from exc
     records = []
     for event in events:
-        record = event.model_dump(mode="json")
         pm = event.plant_mapping
-        if isinstance(pm, PlantMappingDisclosure):
-            record["plant_mapping_resolved_key"] = (
-                resolved_mapping_key_for_citation(
+        served: ServedDisclosure | None = (
+            ServedPlantMappingDisclosure(
+                **dict(pm),
+                resolved_key=resolved_mapping_key_for_citation(
                     root, pm.name, pm.record_sha256
-                )
+                ),
             )
-        records.append(record)
-    return {"records": records}
+            if isinstance(pm, PlantMappingDisclosure)
+            else pm
+        )
+        records.append(
+            ServedDeliveryEvent(**{**dict(event), "plant_mapping": served})
+        )
+    return DeliveryEvents(records=records)
 
 
 # ── Traits and the breeder's confirmation of a revision ────────────────

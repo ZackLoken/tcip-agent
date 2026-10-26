@@ -40,13 +40,12 @@ def test_launch_training_defaults_into_the_projects_experiment_store(
         small_detection_config(images_dir, BLOB_BUILDER, project=tmp_path),
         actor=None,
     )
-    assert "error" not in res, res
-    run_dir = Path(res["output_dir"])
-    assert run_dir == tmp_path / ".tcip" / "experiments" / res["experiment_id"]
+    assert isinstance(res, training_tools.RunLaunched), res
+    run_dir = Path(res.output_dir)
+    assert run_dir == tmp_path / ".tcip" / "experiments" / res.experiment_id
 
-    # Wait for the subprocess to finish rather than leaking a child that keeps writing into
-    # this test's tmp root after the test moves on.
-    assert run_to_end(tmp_path, res["experiment_id"])["state"] == "completed"
+    # The subprocess writes into this test's tmp root until it ends.
+    assert run_to_end(tmp_path, res.experiment_id)["state"] == "completed"
     assert (run_dir / "model_best.pt").is_file() or (
         run_dir / "model_final.pt"
     ).is_file()

@@ -1,0 +1,491 @@
+{
+  "listing": {
+    "runs": [
+      {
+        "experiment_id": "train-x",
+        "state": "running",
+        "created": "<created>",
+        "relaunched_from": null,
+        "sweep": null,
+        "trial_params": null,
+        "builder": "bespoke_models:build_bespoke_detection",
+        "task": "detection",
+        "images_dir": "/scratch/workspace/training/dataset/images/undated",
+        "current_epoch": null,
+        "best_metric": null,
+        "best_metric_name": "objective",
+        "output_dir": "/scratch/workspace/training/.tcip/experiments/train-x",
+        "status_error": null,
+        "heartbeat": "<heartbeat>",
+        "launch": null
+      },
+      {
+        "experiment_id": "train-y",
+        "state": "running",
+        "created": "<created>",
+        "relaunched_from": null,
+        "sweep": null,
+        "trial_params": null,
+        "builder": "bespoke_models:build_bespoke_detection",
+        "task": "detection",
+        "images_dir": "/scratch/workspace/training/dataset/images/undated",
+        "current_epoch": null,
+        "best_metric": null,
+        "best_metric_name": "objective",
+        "output_dir": "/scratch/workspace/training/.tcip/experiments/train-y",
+        "status_error": null,
+        "heartbeat": "<heartbeat>",
+        "launch": null
+      }
+    ],
+    "sweeps": [
+      {
+        "sweep_id": "<sweep id>",
+        "state": "running",
+        "status_error": null,
+        "input": {
+          "n_trials": 1,
+          "search_alg": "random",
+          "scheduler": {
+            "name": "fifo"
+          },
+          "max_concurrent": 1,
+          "baseline_params": null,
+          "resources_per_trial": null,
+          "param_space": {
+            "optimizer.head_lr": {
+              "type": "loguniform",
+              "low": 0.0001,
+              "high": 0.01
+            }
+          },
+          "base_config": {
+            "model_source": {
+              "builder": "bespoke_models:build_bespoke_detection",
+              "source_files": [
+                "<tests>/bespoke_models.py"
+              ],
+              "task": "detection",
+              "normalization": {
+                "image_mean": [
+                  0.213819,
+                  0.075163,
+                  0.075163
+                ],
+                "image_std": [
+                  0.223761,
+                  0.249289,
+                  0.249289
+                ],
+                "source": {
+                  "windows": [
+                    [
+                      "/scratch/workspace/training/dataset/images/undated/img3.png",
+                      null
+                    ],
+                    [
+                      "/scratch/workspace/training/dataset/images/undated/img5.png",
+                      null
+                    ],
+                    [
+                      "/scratch/workspace/training/dataset/images/undated/img4.png",
+                      null
+                    ],
+                    [
+                      "/scratch/workspace/training/dataset/images/undated/img7.png",
+                      null
+                    ],
+                    [
+                      "/scratch/workspace/training/dataset/images/undated/img6.png",
+                      null
+                    ],
+                    [
+                      "/scratch/workspace/training/dataset/images/undated/img0.png",
+                      null
+                    ],
+                    [
+                      "/scratch/workspace/training/dataset/images/undated/img2.png",
+                      null
+                    ]
+                  ],
+                  "seed": 0,
+                  "max_images": 7,
+                  "pixel_fraction": 1.0,
+                  "window_size": null,
+                  "max_windows_per_image": null
+                }
+              }
+            },
+            "data": {
+              "split": {
+                "seed": 0,
+                "val_ratio": 0.15,
+                "calibration_ratio": 0.0,
+                "holdout_ratio": 0.0,
+                "grouping": "tile_prefix",
+                "stratify_foreground": true,
+                "rationale": "a sample reason the test states for this block"
+              },
+              "images_dir": "/scratch/workspace/training/dataset/images/undated",
+              "num_channels": 3,
+              "scope": {
+                "subject": "bud"
+              }
+            },
+            "rationale": "a sample reason the test states for this block",
+            "batch_size": 2,
+            "seed": 0,
+            "deterministic": false,
+            "stages": [
+              {
+                "freeze_to": 0,
+                "rationale": "a sample reason the test states for this block"
+              }
+            ],
+            "mixed_precision": false,
+            "device": "cpu",
+            "checkpoint_every_n_epochs": 1,
+            "early_stopping": {
+              "patience": 50,
+              "min_delta": 0.0,
+              "nonfinite_passes": 2,
+              "rationale": "a sample reason the test states for this block"
+            },
+            "evaluation": {
+              "selection_metric": "objective",
+              "conf_threshold": 0.35,
+              "score_weights": {
+                "loss": 0.5,
+                "f1": 0.3,
+                "map50": 0.2
+              },
+              "rationale": "a sample reason the test states for this block"
+            },
+            "optimizer": {
+              "name": "sgd",
+              "backbone_lr": 0.01,
+              "head_lr": 0.01,
+              "weight_decay": 0.0,
+              "momentum": 0.9,
+              "rationale": "a sample reason the test states for this block"
+            },
+            "scheduler": {
+              "type": "cosine",
+              "eta_min": 1e-06,
+              "horizon_epochs": 1,
+              "rationale": "a sample reason the test states for this block"
+            },
+            "gradient_accumulation_steps": 1
+          },
+          "relaunched_from": null,
+          "split_draw_seeds": null,
+          "search_seed": 0,
+          "trial_budget": null
+        },
+        "cancel_requested": false,
+        "heartbeat": "<heartbeat>",
+        "trials": [
+          {
+            "experiment_id": "<sweep id>_t0",
+            "state": "running",
+            "created": "<created>",
+            "relaunched_from": null,
+            "sweep": "<sweep id>",
+            "trial_params": {
+              "optimizer.head_lr": 0.001
+            },
+            "builder": "bespoke_models:build_bespoke_detection",
+            "task": "detection",
+            "images_dir": "/scratch/workspace/training/dataset/images/undated",
+            "current_epoch": null,
+            "best_metric": null,
+            "best_metric_name": "objective",
+            "output_dir": "/scratch/workspace/training/.tcip/experiments/<sweep id>/<sweep id>_t0",
+            "status_error": null,
+            "heartbeat": "<heartbeat>",
+            "launch": null
+          }
+        ],
+        "outcome": {
+          "best_params": null,
+          "best_value": null,
+          "best_at_range_end": {}
+        }
+      }
+    ]
+  },
+  "detail": {
+    "run": {
+      "experiment_id": "train-x",
+      "state": "running",
+      "created": "<created>",
+      "relaunched_from": null,
+      "sweep": null,
+      "trial_params": null,
+      "builder": "bespoke_models:build_bespoke_detection",
+      "task": "detection",
+      "images_dir": "/scratch/workspace/training/dataset/images/undated",
+      "current_epoch": null,
+      "best_metric": null,
+      "best_metric_name": "objective",
+      "output_dir": "/scratch/workspace/training/.tcip/experiments/train-x",
+      "status_error": null,
+      "heartbeat": "<heartbeat>",
+      "launch": null
+    },
+    "sweep": null,
+    "tensorboard": null
+  },
+  "split_choices": {
+    "as_recorded": {
+      "case": "drawn",
+      "line": "draws its split again with seed 0 over the labels as they are now",
+      "compatible": true,
+      "reason": null
+    },
+    "selections": [
+      {
+        "selection_dir": "/scratch/workspace/training/dataset/splits",
+        "seed": 2,
+        "group_by": "tile_prefix",
+        "train": 4,
+        "val": 2,
+        "calibration": 1,
+        "replaced_split_keys": [
+          "calibration_ratio",
+          "grouping",
+          "holdout_ratio",
+          "rationale",
+          "seed",
+          "stratify_foreground",
+          "val_ratio"
+        ],
+        "enabled": true,
+        "reason": null
+      }
+    ]
+  },
+  "cancel": {
+    "experiment_id": "train-x",
+    "cancel_requested": true,
+    "state": "running"
+  },
+  "compare": {
+    "experiments": [
+      {
+        "experiment_id": "train-x",
+        "state": "running",
+        "n_epochs": 0,
+        "rows_after_end": null,
+        "status_error": null,
+        "registry": [],
+        "split": {
+          "case": "drawn",
+          "seed": 0
+        },
+        "model": "bespoke_models:build_bespoke_detection",
+        "task": "detection",
+        "subject": "bud",
+        "dataset_id": null,
+        "dataset_fingerprint": "<dataset_fingerprint>"
+      },
+      {
+        "experiment_id": "train-done",
+        "state": "completed",
+        "n_epochs": 1,
+        "last_logged_metrics": {
+          "loss": 0.5,
+          "epoch": 1,
+          "timestamp": "<timestamp>"
+        },
+        "rows_after_end": 0,
+        "status_error": null,
+        "registry": [
+          {
+            "name": "train-done",
+            "registered_at": "<registered_at>",
+            "metrics": {
+              "val_map50": 0.5
+            },
+            "metrics_source": "training_source"
+          }
+        ],
+        "split": {
+          "case": "drawn",
+          "seed": 0
+        },
+        "model": "bespoke_models:build_bespoke_detection",
+        "task": "detection",
+        "subject": "bud",
+        "dataset_id": null,
+        "dataset_fingerprint": "<dataset_fingerprint>"
+      }
+    ],
+    "count": 2,
+    "same_dataset_fingerprint": false
+  },
+  "compare_best": {
+    "name": "train-done",
+    "experiment_id": "train-done",
+    "metrics": {
+      "val_map50": 0.5
+    },
+    "metrics_source": "training_source",
+    "ranking_basis": "val_map50",
+    "higher_is_better": true,
+    "direction_source": "declared",
+    "excluded_unverified": []
+  },
+  "unverified_refusal": {
+    "status": 422,
+    "body": {
+      "detail": {
+        "message": "every registered model carrying 'val_map50' is unverified (metrics_source is not 'trainer'); include unverified models to rank them, or register a verified run.",
+        "all_unverified": true,
+        "excluded_unverified": [
+          {
+            "name": "train-done",
+            "metrics_source": "training_source"
+          }
+        ],
+        "n_models": 1
+      }
+    }
+  },
+  "absent_metric_refusal": {
+    "status": 422,
+    "body": {
+      "detail": {
+        "message": "No registered model has metric 'val_map99'.",
+        "available_metrics": [
+          {
+            "metric": "val_map50",
+            "role": "comparability_only",
+            "direction": "higher",
+            "sources": [
+              "training_source"
+            ]
+          }
+        ],
+        "n_models": 1
+      }
+    }
+  },
+  "metric_directions": {
+    "higher_is_better": {
+      "loss": false,
+      "objective": false,
+      "mae": false,
+      "rmse": false,
+      "precision": true,
+      "recall": true,
+      "f1": true,
+      "map": true,
+      "map50": true,
+      "iou_precision": true,
+      "iou_recall": true,
+      "iou_f1": true,
+      "accuracy": true,
+      "rank_acc": true,
+      "quadratic_weighted_kappa": true,
+      "r_squared": true,
+      "mIoU": true,
+      "dice": true,
+      "pixel_acc": true
+    }
+  },
+  "no_logs_refusal": {
+    "status": 404,
+    "body": {
+      "detail": {
+        "message": "run produced no logs: train-x",
+        "no_logs": true
+      }
+    }
+  },
+  "refused_relaunch": {
+    "status": 422,
+    "body": {
+      "detail": {
+        "message": "Invalid config",
+        "issues": [
+          "model_source.builder not importable: Builder 'module' not found in module 'not.a'."
+        ]
+      }
+    }
+  },
+  "run_relaunch": {
+    "experiment_id": "<relaunched run id>",
+    "status": "launched",
+    "output_dir": "/scratch/workspace/training/.tcip/experiments/<relaunched run id>",
+    "tensorboard": {
+      "error": "no TensorBoard starts under this test: /scratch/workspace/training/.tcip/experiments/<relaunched run id>",
+      "output": null
+    },
+    "pid": 0,
+    "overfit_check": null,
+    "warnings": []
+  },
+  "sweep_relaunch": {
+    "sweep_id": "<relaunched sweep id>",
+    "status": "launched",
+    "warnings": []
+  },
+  "crashed_no_logs_refusal": {
+    "status": 404,
+    "body": {
+      "detail": {
+        "message": "a sample failure the scene records for this run",
+        "no_logs": true
+      }
+    }
+  },
+  "metric_frame": {
+    "type": "metric",
+    "experiment_id": "train-y",
+    "row": {
+      "loss": 0.5,
+      "epoch": 1,
+      "timestamp": "<timestamp>"
+    }
+  },
+  "batch_frame": {
+    "type": "batch",
+    "experiment_id": "train-y",
+    "row": {
+      "batch_loss": 0.25,
+      "epoch": 2,
+      "step": 2,
+      "timestamp": "<timestamp>"
+    }
+  },
+  "status_frame": {
+    "type": "status",
+    "experiment_id": "train-y",
+    "status": {
+      "experiment_id": "train-y",
+      "state": "failed",
+      "created": "<created>",
+      "relaunched_from": null,
+      "sweep": null,
+      "trial_params": null,
+      "builder": "bespoke_models:build_bespoke_detection",
+      "task": "detection",
+      "images_dir": "/scratch/workspace/training/dataset/images/undated",
+      "current_epoch": 1.0,
+      "best_metric": null,
+      "best_metric_name": "objective",
+      "output_dir": "/scratch/workspace/training/.tcip/experiments/train-y",
+      "status_error": "a sample failure the scene records for this run",
+      "heartbeat": "<heartbeat>",
+      "launch": null
+    },
+    "error": null
+  },
+  "unknown_frame": {
+    "type": "status",
+    "experiment_id": "train-unknown",
+    "status": null,
+    "error": "Run not found: train-unknown"
+  }
+}

@@ -16,7 +16,6 @@ import {
   deliveryRefusalOf,
   operationalizationRefusalOf,
   resultsApi,
-  type DeliveryEventRecord,
   type DeliveryRefusal,
   type ExportCountCsvHeaders,
   type MilestoneColumn,
@@ -29,6 +28,7 @@ import type {
   ExportCountCsvPayload,
   ExportCsvPayload,
   PhenologyPayload,
+  ServedDeliveryEvent,
 } from "@/api/types.generated";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 import { TabHeading } from "@/components/TabHeading";
@@ -72,7 +72,7 @@ export function ResultsTab() {
   const [positiveClassUnassessed, setPositiveClassUnassessed] = useState(false);
 
   // Dataset tree (dates + the buckets published over each) drives the structured per-date picker
-  // below, never a hand-edited JSON blob.
+  // below.
   const [dates, setDates] = useState<string[]>([]);
   const [bucketsByDate, setBucketsByDate] = useState<Record<string, string[]>>({});
   // The name of each bucket published over ``date`` under the dataset root.
@@ -81,8 +81,7 @@ export function ResultsTab() {
   const [labelProblem, setLabelProblem] = useState<string | null>(null);
   // The bucket name the breeder picked per date; a date with none picked is not delivered.
   const [dateBucket, setDateBucket] = useState<Record<string, string>>({});
-  // The population, typed by the breeder: one plant id per line or comma. The mapping names
-  // every plot its plant CSVs carry, which is never the same list, so nothing fills this in.
+  // The population, typed by the breeder: one plant id per line or comma.
   const [plantsText, setPlantsText] = useState("");
   const plants = plantsText
     .split(/[\n,]/)
@@ -95,11 +94,10 @@ export function ResultsTab() {
   const [milestoneColumns, setMilestoneColumns] = useState<MilestoneColumn[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
-  // The exact request the displayed numbers came from: the CSV door recomputes from these inputs
-  // rather than being handed the rows, so export and screen share one producer.
+  // The exact request the displayed numbers came from, which the CSV door recomputes from.
   const [lastRequest, setLastRequest] = useState<PhenologyPayload | null>(null);
   // Whether an assessment answers for what is currently displayed, and the gate's sentence when
-  // not, so the tables can say so instead of rendering a phenology date as "valid".
+  // not.
   const [unvalidated, setUnvalidated] = useState(false);
   const [unvalidatedReason, setUnvalidatedReason] = useState<string | null>(null);
   // Each projection's digest of the unvalidated result shown, which the breeder's acknowledgment
@@ -107,8 +105,7 @@ export function ResultsTab() {
   const [resultSha256, setResultSha256] = useState<Record<"curves" | "milestones", string> | null>(
     null,
   );
-  // What the mapping's own delivery-time check could not verify, shown beside the numbers rather
-  // than only in the exported CSV.
+  // What the mapping's own delivery-time check could not verify, shown beside the numbers.
   const [capturesUnverified, setCapturesUnverified] = useState<string[]>([]);
   const [plantCsvsUnverified, setPlantCsvsUnverified] = useState<string[]>([]);
   const [datesDelivered, setDatesDelivered] = useState<string[]>([]);
@@ -123,11 +120,11 @@ export function ResultsTab() {
     useState<OperationalizationRefusal | null>(null);
 
   // What has shipped from this project: read-only, no confirm/withdraw state to carry.
-  const [deliveryEvents, setDeliveryEvents] = useState<DeliveryEventRecord[]>([]);
+  const [deliveryEvents, setDeliveryEvents] = useState<ServedDeliveryEvent[]>([]);
   const [deliveryEventsError, setDeliveryEventsError] = useState<string | null>(null);
 
   // Count export: per_image_count and orthomosaic_plant_counts, the two delivery kinds this
-  // route serves; an acknowledgment of either is recorded here, never by an MCP tool call.
+  // route serves; an acknowledgment of either is recorded here.
   const [countKind, setCountKind] = useState<"per_image_count" | "orthomosaic_plant_counts">(
     "per_image_count",
   );
@@ -149,15 +146,13 @@ export function ResultsTab() {
   const [countShowAck, setCountShowAck] = useState(false);
   const [countResultHeaders, setCountResultHeaders] = useState<ExportCountCsvHeaders | null>(null);
 
-  // The trait a delivery is computed for, resolved from this project's own registered traits
-  // (never assumed): auto-selected when there is exactly one, left blank (with an explicit
-  // error, not a silent guess) when there are zero, offered as a choice when there are several.
+  // The trait a delivery is computed for, from this project's registered traits: the one when
+  // there is one, none with an error when there are none, and the breeder's choice of several.
   const [traitRecords, setTraitRecords] = useState<ServedTraitRecord[]>([]);
   const availableTraits = traitRecords.map((r) => r.trait);
   const [trait, setTrait] = useState("");
   const [traitError, setTraitError] = useState<string | null>(null);
-  // Trait records that failed to load, so a breeder can tell "nothing registered" from
-  // "something is registered but broken" instead of the two looking identical.
+  // Trait records that failed to load, each with the reason.
   const [unreadableTraits, setUnreadableTraits] = useState<{ trait: string; reason: string }[]>([]);
 
   useEffect(() => {
@@ -255,25 +250,20 @@ export function ResultsTab() {
         show_unvalidated: showUnvalidated,
       };
       setLastRequest(request);
-      // One request computes both projections from one server-side measurement: a milestone
-      // date and the curve it was read off cannot disagree.
       const res = await resultsApi.phenologyMeasurement(request);
-      // The numbers and the evidence that qualifies them arrive together, so the tables below can
-      // never render an unvalidated phenology measurement as though it were a delivery.
       setUnvalidated(!res.validated);
       setUnvalidatedReason(res.unvalidated_reason);
       setResultSha256(res.result_sha256);
-      setCapturesUnverified(res.captures_unverified ?? []);
-      setPlantCsvsUnverified(res.plant_csvs_unverified ?? []);
-      setDatesDelivered(res.dates_delivered ?? []);
-      setImagesUnattributed(res.images_unattributed ?? 0);
+      setCapturesUnverified(res.captures_unverified);
+      setPlantCsvsUnverified(res.plant_csvs_unverified);
+      setDatesDelivered(res.dates_delivered);
+      setImagesUnattributed(res.images_unattributed);
       setUnvalidatedRefusal(null);
       const unclassified = res.positive_class_assessed === false;
       setPositiveClassUnassessed(unclassified);
-      setCurves(res.curves.rows ?? []);
-      // No positive-state class: not a phenology measurement, so the milestones projection is
-      // dropped rather than shown (belt-and-braces with the disabled export buttons).
-      setOnset(unclassified ? [] : (res.milestones.rows ?? []));
+      setCurves(res.curves.rows);
+      // No positive-state class: not a phenology measurement, so it carries no milestones.
+      setOnset(unclassified ? [] : res.milestones.rows);
       setMilestoneColumns(res.milestones.columns);
     } catch (e) {
       // A refusal naming its own kind is routed by that kind, before any prose is read.
@@ -430,8 +420,8 @@ export function ResultsTab() {
     }
   }
 
-  // Never export a CSV built on predictions with no positive-state class, mirroring
-  // deliver_phenology_milestones. An unvalidated measurement exports once acknowledged (below).
+  // Predictions with no positive-state class export nothing; an unvalidated measurement exports
+  // once acknowledged (below).
   const exportBlocked = positiveClassUnassessed;
   const downloadOnsetCsv = () => {
     if (exportBlocked) return;
@@ -439,8 +429,7 @@ export function ResultsTab() {
   };
   const downloadCurvesCsv = () => {
     if (exportBlocked) return;
-    // A curve export is the same delivered phenology measurement as the milestone one, just
-    // un-summarized: same producer, same gate.
+    // A curve export is the same delivered phenology measurement as the milestone one, unsummarized.
     void downloadCsv("curves", `${trait}_curves.csv`);
   };
 
@@ -956,7 +945,7 @@ export function ResultsTab() {
                   </thead>
                   <tbody>
                     {onset.map((r) => {
-                      // A plant with any unassessed or missing date shows as such, never as blank cells.
+                      // A plant with any unassessed or missing date shows as such.
                       const rowValid = r.complete;
                       // Every date assessed and observed with no detection reads as no observations.
                       const neverObserved = rowValid && r.n_observed_dates === 0;
@@ -991,7 +980,7 @@ export function ResultsTab() {
                           {milestoneColumns.map((c) => {
                             const date = r[c.date] as string | null;
                             const bound = r[c.bound] as string | null;
-                            // A censored crossing is a bound on the true date, never the date.
+                            // A censored crossing is a bound on the true date.
                             const marker =
                               bound === "left_censored"
                                 ? {

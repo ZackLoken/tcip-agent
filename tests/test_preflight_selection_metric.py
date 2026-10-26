@@ -3,7 +3,7 @@
 For a run trained by the default body, the smoke calls the trainer's own
 ``generic_trainer.selection_value`` over the validation row it admitted, or the empty row of a run
 with no validation side, so a metric the run's evaluator does not report blocks the launch and the
-sweep instead of failing the run at its first epoch.
+sweep.
 """
 
 from __future__ import annotations
@@ -130,7 +130,11 @@ def test_a_body_reporting_its_own_selection_is_admitted_and_completes(
     """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp import experiments
-    from tcip_mcp.tools.training_tools import launch_training, preflight_config
+    from tcip_mcp.tools.training_tools import (
+        RunLaunched,
+        launch_training,
+        preflight_config,
+    )
     from tests._verified_checkpoint_fixtures import run_to_end
 
     config = _with_body(
@@ -146,12 +150,13 @@ def test_a_body_reporting_its_own_selection_is_admitted_and_completes(
     assert "'objective'" in warning, warning
 
     launched = launch_training(tmp_path, config, actor=None)
-    assert warning in launched["warnings"], launched
-    assert run_to_end(tmp_path, launched["experiment_id"])["state"] == (
+    assert isinstance(launched, RunLaunched), launched
+    assert warning in launched.warnings, launched
+    assert run_to_end(tmp_path, launched.experiment_id)["state"] == (
         "completed"
     )
     run_dir = experiments.experiment_dir(
-        launched["experiment_id"], project=tmp_path
+        launched.experiment_id, project=tmp_path
     )
     rows = experiments.epoch_rows(
         experiments.read_rows(run_dir / experiments.METRICS_FILE)[0]

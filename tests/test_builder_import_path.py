@@ -936,7 +936,7 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
     and completes.
     """
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import launch_training
+    from tcip_mcp.tools.training_tools import RunLaunched, launch_training
     from tests._producer_fixtures import no_tensorboard
     from tests._verified_checkpoint_fixtures import run_to_end
     from tests.tiny_trainer_fixtures import write_regression_dataset
@@ -969,9 +969,9 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
 
     res = launch_training(tmp_path, cfg, actor=None)
 
-    assert "error" not in res, res
-    assert res["pid"] != os.getpid()
-    status = run_to_end(tmp_path, res["experiment_id"])
+    assert isinstance(res, RunLaunched), res
+    assert res.pid != os.getpid()
+    status = run_to_end(tmp_path, res.experiment_id)
     assert status["state"] == "completed", status
 
 

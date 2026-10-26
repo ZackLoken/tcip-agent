@@ -1,438 +1,445 @@
 {
-  "validated": {
-    "trait": "stem",
-    "trait_revision": 1,
-    "trait_revision_sha256": "01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77",
-    "event_id": "76c54b1cc61d4be0b751b6c90d56435b",
-    "door": "deliver_per_image_counts",
-    "delivery_kind": "per_image_count",
-    "output_path": "/scratch/workspace/counts/counts.csv",
-    "output_sha256": "c7c8a2c9c43b56302191b08da4202dc6b50d4ea8d66ee76fcecfda0643ec4512",
-    "producer": {
-      "checkpoint_sha256": "911d2584dacdc8bb8ebf2fda145af1cf021c91d7f8b7f24f73db2b0500cf6b2c",
-      "experiment_id": "exp-fixture"
-    },
-    "buckets": [
-      {
-        "dataset_root": "/scratch/workspace/counts/ds",
-        "bucket": "chain/2026-02-11",
-        "date": "2026-02-11",
-        "assessment_id": "assessment_1791860037_f7093c",
-        "validated": true,
-        "reason": null
-      }
-    ],
-    "scale_assessment_id": null,
-    "validated": true,
-    "acknowledgment": null,
-    "population": [
-      "s00",
-      "s01",
-      "s02",
-      "s03",
-      "s04",
-      "s05",
-      "s06",
-      "s07",
-      "s08",
-      "s09",
-      "s10",
-      "s11",
-      "s12",
-      "s13",
-      "s14",
-      "s15",
-      "s16",
-      "s17",
-      "s18",
-      "s19",
-      "s20",
-      "s21",
-      "s22",
-      "s23",
-      "s24",
-      "s25",
-      "s26",
-      "s27",
-      "s28",
-      "s29",
-      "s30",
-      "s31",
-      "s32",
-      "s33",
-      "s34",
-      "s35",
-      "s36",
-      "s37",
-      "s38",
-      "s39"
-    ],
-    "plant_mapping": null,
-    "produced_at": "2026-10-13T02:53:57.368172+00:00"
-  },
-  "acknowledged_mapping": {
-    "trait": "currant_bloom",
-    "trait_revision": 2,
-    "trait_revision_sha256": "2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08",
-    "event_id": "afc1791545be4240836ab56323831402",
-    "door": "test_mapping_delivery",
-    "delivery_kind": "state_crossing_dates",
-    "output_path": "/scratch/workspace/phenology/phenology.csv",
-    "output_sha256": "00090a4e05f8249e401b312ef98dd80f2f9767c4fd9fa75575521eb8970cbf1a",
-    "producer": {
-      "checkpoint_sha256": "7f7feaf6ddeb12cca87a29b37f3c15d1b6c7ba11dd5224cd278d15b9e29aaf32",
-      "experiment_id": "run_1791860037_48955c"
-    },
-    "buckets": [
-      {
-        "dataset_root": "/scratch/workspace/phenology/ds",
-        "bucket": "live/2026-02-11",
-        "date": "2026-02-11",
-        "assessment_id": null,
-        "validated": false,
-        "reason": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
+  "records": {
+    "validated": {
+      "trait": "stem",
+      "trait_revision": 1,
+      "trait_revision_sha256": "01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77",
+      "event_id": "d26699bf82dc43c88a371b918e7fae51",
+      "door": "deliver_per_image_counts",
+      "delivery_kind": "per_image_count",
+      "output_path": "/scratch/workspace/counts/counts.csv",
+      "output_sha256": "0996e1f40a2a1db2edd76fcb003e829ac6f66a85e3492f48aa0d0cafc4ccac43",
+      "producer": {
+        "checkpoint_sha256": "3cc1a4ca22f25103af57ee7b4fe97e8751622635a0afebef238cf3c381c93ef9",
+        "experiment_id": "exp-fixture"
       },
-      {
-        "dataset_root": "/scratch/workspace/phenology/ds",
-        "bucket": "live/2026-02-25",
-        "date": "2026-02-25",
-        "assessment_id": null,
-        "validated": false,
-        "reason": "no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
-      }
-    ],
-    "scale_assessment_id": null,
-    "validated": false,
-    "acknowledgment": {
-      "acknowledgment_id": "61033af5549e441cbdd758fa57327481",
-      "acknowledged_by": "user:breeder",
-      "reason": "mapping rails, not the assessment",
-      "result_sha256": "04a80d71eb9fa3a3509fbd6d5c08ee18547948a59b5c19d1fd0714c5e03b8684",
-      "recorded_at": "2026-10-13T02:53:59.669508+00:00"
-    },
-    "population": [
-      "P1",
-      "P2"
-    ],
-    "plant_mapping": {
-      "name": "valley",
-      "dataset_id": "8f2ceef4df3d",
-      "dataset_root": "/scratch/workspace/phenology/ds",
-      "built_at": "2026-10-13T02:53:59.511314+00:00",
-      "record_sha256": "a19c3c33c5bdf5249c6a194049a494688e2efd4c225e20b207e30db3946378a0",
-      "match_radius": {
-        "2026-02-11": {
-          "value": 1.0,
-          "source": "h_pos_err",
-          "rationale": null
-        },
-        "2026-02-25": {
-          "value": 1.0,
-          "source": "h_pos_err",
-          "rationale": null
+      "buckets": [
+        {
+          "dataset_root": "/scratch/workspace/counts/ds",
+          "bucket": "chain/2026-02-11",
+          "date": "2026-02-11",
+          "assessment_id": "assessment_1792991280_363c4b",
+          "validated": true,
+          "reason": null
         }
-      },
-      "capture_digests": {
-        "2026-02-11": {
-          "P1_20260211": "fc1c64aab30a4fe4",
-          "P2_20260211": "b235adba7e424a65"
-        },
-        "2026-02-25": {
-          "P1_20260225": "efb5efc2a3abc515",
-          "P2_20260225": "79d169ef0d7897cf"
-        }
-      },
-      "captures_unverified": [],
-      "plant_csvs_unverified": [],
-      "dates_delivered": [
-        "2026-02-11",
-        "2026-02-25"
       ],
-      "images_unattributed": 0,
-      "images_unattributed_scope": "delivered_dates",
-      "plant_attribution": "image"
-    },
-    "produced_at": "2026-10-13T02:53:59.671884+00:00",
-    "plant_mapping_resolved_key": "valley"
-  },
-  "archived_mapping": {
-    "trait": "currant_bloom",
-    "trait_revision": 2,
-    "trait_revision_sha256": "2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08",
-    "event_id": "afc1791545be4240836ab56323831402",
-    "door": "test_mapping_delivery",
-    "delivery_kind": "state_crossing_dates",
-    "output_path": "/scratch/workspace/phenology/phenology.csv",
-    "output_sha256": "00090a4e05f8249e401b312ef98dd80f2f9767c4fd9fa75575521eb8970cbf1a",
-    "producer": {
-      "checkpoint_sha256": "7f7feaf6ddeb12cca87a29b37f3c15d1b6c7ba11dd5224cd278d15b9e29aaf32",
-      "experiment_id": "run_1791860037_48955c"
-    },
-    "buckets": [
-      {
-        "dataset_root": "/scratch/workspace/phenology/ds",
-        "bucket": "live/2026-02-11",
-        "date": "2026-02-11",
-        "assessment_id": null,
-        "validated": false,
-        "reason": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
-      },
-      {
-        "dataset_root": "/scratch/workspace/phenology/ds",
-        "bucket": "live/2026-02-25",
-        "date": "2026-02-25",
-        "assessment_id": null,
-        "validated": false,
-        "reason": "no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
-      }
-    ],
-    "scale_assessment_id": null,
-    "validated": false,
-    "acknowledgment": {
-      "acknowledgment_id": "61033af5549e441cbdd758fa57327481",
-      "acknowledged_by": "user:breeder",
-      "reason": "mapping rails, not the assessment",
-      "result_sha256": "04a80d71eb9fa3a3509fbd6d5c08ee18547948a59b5c19d1fd0714c5e03b8684",
-      "recorded_at": "2026-10-13T02:53:59.669508+00:00"
-    },
-    "population": [
-      "P1",
-      "P2"
-    ],
-    "plant_mapping": {
-      "name": "valley",
-      "dataset_id": "8f2ceef4df3d",
-      "dataset_root": "/scratch/workspace/phenology/ds",
-      "built_at": "2026-10-13T02:53:59.511314+00:00",
-      "record_sha256": "a19c3c33c5bdf5249c6a194049a494688e2efd4c225e20b207e30db3946378a0",
-      "match_radius": {
-        "2026-02-11": {
-          "value": 1.0,
-          "source": "h_pos_err",
-          "rationale": null
-        },
-        "2026-02-25": {
-          "value": 1.0,
-          "source": "h_pos_err",
-          "rationale": null
-        }
-      },
-      "capture_digests": {
-        "2026-02-11": {
-          "P1_20260211": "fc1c64aab30a4fe4",
-          "P2_20260211": "b235adba7e424a65"
-        },
-        "2026-02-25": {
-          "P1_20260225": "efb5efc2a3abc515",
-          "P2_20260225": "79d169ef0d7897cf"
-        }
-      },
-      "captures_unverified": [],
-      "plant_csvs_unverified": [],
-      "dates_delivered": [
-        "2026-02-11",
-        "2026-02-25"
+      "scale_assessment_id": null,
+      "validated": true,
+      "acknowledgment": null,
+      "population": [
+        "s00",
+        "s01",
+        "s02",
+        "s03",
+        "s04",
+        "s05",
+        "s06",
+        "s07",
+        "s08",
+        "s09",
+        "s10",
+        "s11",
+        "s12",
+        "s13",
+        "s14",
+        "s15",
+        "s16",
+        "s17",
+        "s18",
+        "s19",
+        "s20",
+        "s21",
+        "s22",
+        "s23",
+        "s24",
+        "s25",
+        "s26",
+        "s27",
+        "s28",
+        "s29",
+        "s30",
+        "s31",
+        "s32",
+        "s33",
+        "s34",
+        "s35",
+        "s36",
+        "s37",
+        "s38",
+        "s39"
       ],
-      "images_unattributed": 0,
-      "images_unattributed_scope": "delivered_dates",
-      "plant_attribution": "image"
+      "plant_mapping": null,
+      "produced_at": "2026-10-26T05:08:00.935121+00:00"
     },
-    "produced_at": "2026-10-13T02:53:59.671884+00:00",
-    "plant_mapping_resolved_key": "valley@a19c3c33c5bd"
-  },
-  "registry": {
-    "trait": "stem",
-    "trait_revision": 2,
-    "trait_revision_sha256": "8fc7e93c57cbc12a4ab047d9dd1d42e56100b6b438924f016b74c71aa13e4f77",
-    "event_id": "83c49a01c2324ea4889e82f176887fbc",
-    "door": "test_orthomosaic",
-    "delivery_kind": "per_plant_count_aggregate",
-    "output_path": "/scratch/workspace/nearest/counts.csv",
-    "output_sha256": "a9a9cffc0a071d41077f0defe0eb6d5de8aa18608aceb1203f030672f7abbf1e",
-    "producer": {
-      "checkpoint_sha256": "e5bb76a41251092a4ae215ceebf1aaae7224dde3574f784a4174ab87b644a81b",
-      "experiment_id": "run_1791860040_95a315"
-    },
-    "buckets": [
-      {
-        "dataset_root": "/scratch/workspace/nearest/ds",
-        "bucket": "preds/2026-01-01",
-        "date": "undated",
-        "assessment_id": null,
-        "validated": false,
-        "reason": "no assessment answers for bucket 'preds/2026-01-01': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
-      }
-    ],
-    "scale_assessment_id": null,
-    "validated": false,
-    "acknowledgment": {
-      "acknowledgment_id": "ca65057254f942c8b64d3b44271c13be",
-      "acknowledged_by": "user:breeder",
-      "reason": "an unassessed bucket",
-      "result_sha256": "0ea2f562567276b35e65ec1ffad0e6fd8342becdd6d6cfcc5e450969b0488b32",
-      "recorded_at": "2026-10-13T02:54:01.765642+00:00"
-    },
-    "population": [
-      "plot0",
-      "plot2"
-    ],
-    "plant_mapping": {
-      "plant_registry": {
-        "name": "reg",
-        "digest": "a19a854f6308736764772149c5d8fab79d156aeb75a7a2cc941f139de4f6c16a"
+    "acknowledged_mapping": {
+      "trait": "currant_bloom",
+      "trait_revision": 2,
+      "trait_revision_sha256": "2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08",
+      "event_id": "d8e81f8716074382b22b7c55e2189230",
+      "door": "test_mapping_delivery",
+      "delivery_kind": "state_crossing_dates",
+      "output_path": "/scratch/workspace/phenology/phenology.csv",
+      "output_sha256": "82590dce5bf6b08055f6690b1021b8925d332a51207c3dd8de364dd12dd2e2b5",
+      "producer": {
+        "checkpoint_sha256": "60723e02953d252f7e7b1a244757260b2f70bf0064edcf4bc247cb4f880f9fa6",
+        "experiment_id": "run_1792991281_a1b83f"
       },
-      "raster_identity": {
-        "width": 64,
-        "height": 64,
-        "num_channels": 3,
-        "dtype": "uint8",
-        "pixel_checksum": "c0683d06cbf9de6b2aaf30a6ba672f9df9bb24e6dbe6044fd95f145dfdcd6b79",
-        "seed": 0,
-        "window_size": 1024,
-        "max_windows": 8,
-        "pixel_fraction": 1.0,
-        "band_interpretations": [
-          "red",
-          "green",
-          "blue"
+      "buckets": [
+        {
+          "dataset_root": "/scratch/workspace/phenology/ds",
+          "bucket": "live/2026-02-11",
+          "date": "2026-02-11",
+          "assessment_id": null,
+          "validated": false,
+          "reason": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
+        },
+        {
+          "dataset_root": "/scratch/workspace/phenology/ds",
+          "bucket": "live/2026-02-25",
+          "date": "2026-02-25",
+          "assessment_id": null,
+          "validated": false,
+          "reason": "no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
+        }
+      ],
+      "scale_assessment_id": null,
+      "validated": false,
+      "acknowledgment": {
+        "acknowledgment_id": "eece4b7d475945d7a02dba2a61aabad0",
+        "acknowledged_by": "user:breeder",
+        "reason": "mapping rails, not the assessment",
+        "result_sha256": "27b73a49e816b1537a86810215b2349aaee444f56d1600e0bc3173440c2548a9",
+        "recorded_at": "2026-10-26T05:08:03.188315+00:00"
+      },
+      "population": [
+        "P1",
+        "P2"
+      ],
+      "plant_mapping": {
+        "name": "valley",
+        "dataset_id": "eddbc5af80a0",
+        "dataset_root": "/scratch/workspace/phenology/ds",
+        "built_at": "2026-10-26T05:08:03.049432+00:00",
+        "record_sha256": "ef6ba41c9dcfb4ff85178dd4e26efa7e3d389fb3169d77a93db22a4d8a4f903b",
+        "match_radius": {
+          "2026-02-11": {
+            "value": 1.0,
+            "source": "h_pos_err",
+            "rationale": null
+          },
+          "2026-02-25": {
+            "value": 1.0,
+            "source": "h_pos_err",
+            "rationale": null
+          }
+        },
+        "capture_digests": {
+          "2026-02-11": {
+            "P1_20260211": "fc1c64aab30a4fe4",
+            "P2_20260211": "b235adba7e424a65"
+          },
+          "2026-02-25": {
+            "P1_20260225": "efb5efc2a3abc515",
+            "P2_20260225": "79d169ef0d7897cf"
+          }
+        },
+        "captures_unverified": [],
+        "plant_csvs_unverified": [],
+        "dates_delivered": [
+          "2026-02-11",
+          "2026-02-25"
         ],
-        "geotransform": {
-          "tiepoint_pixel_x": 0.0,
-          "tiepoint_pixel_y": 0.0,
-          "tiepoint_native_x": 500000.0,
-          "tiepoint_native_y": 4800000.0,
-          "pixel_scale_x": 0.5,
-          "pixel_scale_y": 0.5,
-          "epsg": 32615
+        "images_unattributed": 0,
+        "images_unattributed_scope": "delivered_dates",
+        "plant_attribution": "image",
+        "resolved_key": "valley"
+      },
+      "produced_at": "2026-10-26T05:08:03.192142+00:00"
+    },
+    "archived_mapping": {
+      "trait": "currant_bloom",
+      "trait_revision": 2,
+      "trait_revision_sha256": "2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08",
+      "event_id": "d8e81f8716074382b22b7c55e2189230",
+      "door": "test_mapping_delivery",
+      "delivery_kind": "state_crossing_dates",
+      "output_path": "/scratch/workspace/phenology/phenology.csv",
+      "output_sha256": "82590dce5bf6b08055f6690b1021b8925d332a51207c3dd8de364dd12dd2e2b5",
+      "producer": {
+        "checkpoint_sha256": "60723e02953d252f7e7b1a244757260b2f70bf0064edcf4bc247cb4f880f9fa6",
+        "experiment_id": "run_1792991281_a1b83f"
+      },
+      "buckets": [
+        {
+          "dataset_root": "/scratch/workspace/phenology/ds",
+          "bucket": "live/2026-02-11",
+          "date": "2026-02-11",
+          "assessment_id": null,
+          "validated": false,
+          "reason": "no assessment answers for bucket 'live/2026-02-11': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
+        },
+        {
+          "dataset_root": "/scratch/workspace/phenology/ds",
+          "bucket": "live/2026-02-25",
+          "date": "2026-02-25",
+          "assessment_id": null,
+          "validated": false,
+          "reason": "no assessment answers for bucket 'live/2026-02-25': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
         }
+      ],
+      "scale_assessment_id": null,
+      "validated": false,
+      "acknowledgment": {
+        "acknowledgment_id": "eece4b7d475945d7a02dba2a61aabad0",
+        "acknowledged_by": "user:breeder",
+        "reason": "mapping rails, not the assessment",
+        "result_sha256": "27b73a49e816b1537a86810215b2349aaee444f56d1600e0bc3173440c2548a9",
+        "recorded_at": "2026-10-26T05:08:03.188315+00:00"
       },
-      "nn_tolerance_m": {
-        "value": 10.004001600833691,
-        "source": "grid_pitch"
-      },
-      "detections_unattributed": 0,
-      "detections_unattributed_scope": "delivered_raster",
-      "plant_attribution": "detection",
-      "plants_outside_raster": [
-        "plot9"
-      ]
-    },
-    "produced_at": "2026-10-13T02:54:01.832494+00:00"
-  },
-  "canopy": {
-    "trait": "stem",
-    "trait_revision": 2,
-    "trait_revision_sha256": "8fc7e93c57cbc12a4ab047d9dd1d42e56100b6b438924f016b74c71aa13e4f77",
-    "event_id": "bac9e734a9504e65bf76bb013ee6a8f0",
-    "door": "test_orthomosaic",
-    "delivery_kind": "per_plant_count_aggregate",
-    "output_path": "/scratch/workspace/segmented/counts.csv",
-    "output_sha256": "c0240ed83543933013c25adc9c81e45f83f09d35ad823a8079cc81ca2e2e43ae",
-    "producer": {
-      "checkpoint_sha256": "e13bd0ee0251f47e50cb0ffa45b28935fb9e32f2215b81152e2e8c7c72badca6",
-      "experiment_id": "run_1791860042_bbd0f4"
-    },
-    "buckets": [
-      {
-        "dataset_root": "/scratch/workspace/segmented/ds",
-        "bucket": "preds/2026-01-01",
-        "date": "2024-06-01",
-        "assessment_id": null,
-        "validated": false,
-        "reason": "no assessment answers for bucket 'preds/2026-01-01': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
-      }
-    ],
-    "scale_assessment_id": null,
-    "validated": false,
-    "acknowledgment": {
-      "acknowledgment_id": "6f938523a4af47f78040c31f9d5f1262",
-      "acknowledged_by": "user:breeder",
-      "reason": "an unassessed bucket",
-      "result_sha256": "cc22e5f94c4d1919e1d7508c023e9e917620690613704fbb0ebe9dd1332f22fc",
-      "recorded_at": "2026-10-13T02:54:03.852373+00:00"
-    },
-    "population": [
-      "plot0",
-      "plot2"
-    ],
-    "plant_mapping": {
-      "plant_registry": {
-        "name": "reg",
-        "digest": "7cb6ffb70f769b0a7d4ac4dfc0801f1ca0dca713ad633a524aa0fb9a7d0a4b85"
-      },
-      "raster_identity": {
-        "width": 64,
-        "height": 64,
-        "num_channels": 3,
-        "dtype": "uint8",
-        "pixel_checksum": "2eeee58e0af4b7ee14974cfdfcb93eceeda769211ecc91e88f415e85297fda42",
-        "seed": 0,
-        "window_size": 1024,
-        "max_windows": 8,
-        "pixel_fraction": 1.0,
-        "band_interpretations": [
-          "red",
-          "green",
-          "blue"
+      "population": [
+        "P1",
+        "P2"
+      ],
+      "plant_mapping": {
+        "name": "valley",
+        "dataset_id": "eddbc5af80a0",
+        "dataset_root": "/scratch/workspace/phenology/ds",
+        "built_at": "2026-10-26T05:08:03.049432+00:00",
+        "record_sha256": "ef6ba41c9dcfb4ff85178dd4e26efa7e3d389fb3169d77a93db22a4d8a4f903b",
+        "match_radius": {
+          "2026-02-11": {
+            "value": 1.0,
+            "source": "h_pos_err",
+            "rationale": null
+          },
+          "2026-02-25": {
+            "value": 1.0,
+            "source": "h_pos_err",
+            "rationale": null
+          }
+        },
+        "capture_digests": {
+          "2026-02-11": {
+            "P1_20260211": "fc1c64aab30a4fe4",
+            "P2_20260211": "b235adba7e424a65"
+          },
+          "2026-02-25": {
+            "P1_20260225": "efb5efc2a3abc515",
+            "P2_20260225": "79d169ef0d7897cf"
+          }
+        },
+        "captures_unverified": [],
+        "plant_csvs_unverified": [],
+        "dates_delivered": [
+          "2026-02-11",
+          "2026-02-25"
         ],
-        "geotransform": {
-          "tiepoint_pixel_x": 0.0,
-          "tiepoint_pixel_y": 0.0,
-          "tiepoint_native_x": 500000.0,
-          "tiepoint_native_y": 4800000.0,
-          "pixel_scale_x": 0.5,
-          "pixel_scale_y": 0.5,
-          "epsg": 32615
-        }
+        "images_unattributed": 0,
+        "images_unattributed_scope": "delivered_dates",
+        "plant_attribution": "image",
+        "resolved_key": "valley@ef6ba41c9dcf"
       },
-      "canopy_segments": {
-        "capture": "2024-06-01",
-        "stem": "mosaic",
-        "sha256": "04985ecb5ea17c839762624a5e3f4437f074860d0fca45eb7ec6fa8ccfe7225f",
-        "subject": "canopy",
-        "n_segments": 5
-      },
-      "segment_ties": [
-        {
-          "segment_index": 0,
-          "plant_id": "plot0",
-          "clearance_m": 2.499999999650754
-        },
-        {
-          "segment_index": 1,
-          "plant_id": "plot2",
-          "clearance_m": 2.4999999990686774
-        },
-        {
-          "segment_index": 3,
-          "plant_id": "plot4",
-          "clearance_m": 1.999999999650754
-        }
-      ],
-      "position_error_m": 0.5,
-      "segments_without_plant": 1,
-      "plants_outside_raster": [
-        "plot9"
-      ],
-      "plants_without_segment": [
-        "plot1"
-      ],
-      "plants_within_position_error": [
-        "plot3"
-      ],
-      "plants_with_ambiguous_detections": [
-        "plot4"
-      ],
-      "detections_unattributed": 2,
-      "detections_unattributed_by_source": {
-        "outside_segments": 1,
-        "overlapping_segments": 1,
-        "segment_without_plant": 0,
-        "segment_plant_within_position_error": 0
-      },
-      "detections_unattributed_scope": "delivered_raster",
-      "plant_attribution": "segment"
+      "produced_at": "2026-10-26T05:08:03.192142+00:00"
     },
-    "produced_at": "2026-10-13T02:54:03.924674+00:00"
+    "registry": {
+      "trait": "stem",
+      "trait_revision": 2,
+      "trait_revision_sha256": "8fc7e93c57cbc12a4ab047d9dd1d42e56100b6b438924f016b74c71aa13e4f77",
+      "event_id": "7963feaa900e40698d6220bbb11fdeed",
+      "door": "test_orthomosaic",
+      "delivery_kind": "per_plant_count_aggregate",
+      "output_path": "/scratch/workspace/nearest/counts.csv",
+      "output_sha256": "49b03d0426255720c9aa820e5752a4af2880cff6b6334b37e56b662b065611db",
+      "producer": {
+        "checkpoint_sha256": "ec41d26f1fdff58ea7984f1af678678024c0370577f6bea96c165ac3e1575df3",
+        "experiment_id": "run_1792991283_47416f"
+      },
+      "buckets": [
+        {
+          "dataset_root": "/scratch/workspace/nearest/ds",
+          "bucket": "preds/2026-01-01",
+          "date": "undated",
+          "assessment_id": null,
+          "validated": false,
+          "reason": "no assessment answers for bucket 'preds/2026-01-01': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
+        }
+      ],
+      "scale_assessment_id": null,
+      "validated": false,
+      "acknowledgment": {
+        "acknowledgment_id": "88cc17431550490f93328a3cc779fc5e",
+        "acknowledged_by": "user:breeder",
+        "reason": "an unassessed bucket",
+        "result_sha256": "afc3c7124dbed54844f60674597695329af9dd31057355055c52a801a8d3ffd4",
+        "recorded_at": "2026-10-26T05:08:05.108891+00:00"
+      },
+      "population": [
+        "plot0",
+        "plot2"
+      ],
+      "plant_mapping": {
+        "plant_registry": {
+          "name": "reg",
+          "digest": "9357e25ce4fe23da968b0da3b0cffc06187edbca74b6f13ddbf32a469efa085d"
+        },
+        "raster_identity": {
+          "width": 64,
+          "height": 64,
+          "num_channels": 3,
+          "dtype": "uint8",
+          "pixel_checksum": "c0683d06cbf9de6b2aaf30a6ba672f9df9bb24e6dbe6044fd95f145dfdcd6b79",
+          "seed": 0,
+          "window_size": 1024,
+          "max_windows": 8,
+          "pixel_fraction": 1.0,
+          "band_interpretations": [
+            "red",
+            "green",
+            "blue"
+          ],
+          "geotransform": {
+            "tiepoint_pixel_x": 0.0,
+            "tiepoint_pixel_y": 0.0,
+            "tiepoint_native_x": 500000.0,
+            "tiepoint_native_y": 4800000.0,
+            "pixel_scale_x": 0.5,
+            "pixel_scale_y": 0.5,
+            "epsg": 32615
+          }
+        },
+        "nn_tolerance_m": {
+          "value": 10.004001600833691,
+          "source": "grid_pitch"
+        },
+        "detections_unattributed": 0,
+        "detections_unattributed_scope": "delivered_raster",
+        "plant_attribution": "detection",
+        "plants_outside_raster": [
+          "plot9"
+        ]
+      },
+      "produced_at": "2026-10-26T05:08:05.181651+00:00"
+    },
+    "canopy": {
+      "trait": "stem",
+      "trait_revision": 2,
+      "trait_revision_sha256": "8fc7e93c57cbc12a4ab047d9dd1d42e56100b6b438924f016b74c71aa13e4f77",
+      "event_id": "f66515de1f0842388581081118687871",
+      "door": "test_orthomosaic",
+      "delivery_kind": "per_plant_count_aggregate",
+      "output_path": "/scratch/workspace/segmented/counts.csv",
+      "output_sha256": "41ba4dac906a13891a9abd5a1c2163a8a6745481c8c2c01c0d13413f572e7213",
+      "producer": {
+        "checkpoint_sha256": "55ef7454b8f796253a448ce9a748d048d5288b776f1c00781f800c301176523f",
+        "experiment_id": "run_1792991285_076be3"
+      },
+      "buckets": [
+        {
+          "dataset_root": "/scratch/workspace/segmented/ds",
+          "bucket": "preds/2026-01-01",
+          "date": "2024-06-01",
+          "assessment_id": null,
+          "validated": false,
+          "reason": "no assessment answers for bucket 'preds/2026-01-01': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
+        }
+      ],
+      "scale_assessment_id": null,
+      "validated": false,
+      "acknowledgment": {
+        "acknowledgment_id": "43f6d578771241b0831e5bc4d9593b49",
+        "acknowledged_by": "user:breeder",
+        "reason": "an unassessed bucket",
+        "result_sha256": "dc22d05c5fd017feeb0bd621a2c75cca8c29db4754346c87c523a038b9f17044",
+        "recorded_at": "2026-10-26T05:08:07.001790+00:00"
+      },
+      "population": [
+        "plot0",
+        "plot2"
+      ],
+      "plant_mapping": {
+        "plant_registry": {
+          "name": "reg",
+          "digest": "b9847c2242b013ab9ccc2e5a9c92f90ed50383c66e0dd5c9c891a0af80406159"
+        },
+        "raster_identity": {
+          "width": 64,
+          "height": 64,
+          "num_channels": 3,
+          "dtype": "uint8",
+          "pixel_checksum": "2eeee58e0af4b7ee14974cfdfcb93eceeda769211ecc91e88f415e85297fda42",
+          "seed": 0,
+          "window_size": 1024,
+          "max_windows": 8,
+          "pixel_fraction": 1.0,
+          "band_interpretations": [
+            "red",
+            "green",
+            "blue"
+          ],
+          "geotransform": {
+            "tiepoint_pixel_x": 0.0,
+            "tiepoint_pixel_y": 0.0,
+            "tiepoint_native_x": 500000.0,
+            "tiepoint_native_y": 4800000.0,
+            "pixel_scale_x": 0.5,
+            "pixel_scale_y": 0.5,
+            "epsg": 32615
+          }
+        },
+        "canopy_segments": {
+          "capture": "2024-06-01",
+          "stem": "mosaic",
+          "sha256": "04985ecb5ea17c839762624a5e3f4437f074860d0fca45eb7ec6fa8ccfe7225f",
+          "subject": "canopy",
+          "n_segments": 5
+        },
+        "segment_ties": [
+          {
+            "segment_index": 0,
+            "plant_id": "plot0",
+            "clearance_m": 2.499999999650754
+          },
+          {
+            "segment_index": 1,
+            "plant_id": "plot2",
+            "clearance_m": 2.4999999990686774
+          },
+          {
+            "segment_index": 3,
+            "plant_id": "plot4",
+            "clearance_m": 1.999999999650754
+          }
+        ],
+        "position_error_m": 0.5,
+        "segments_without_plant": 1,
+        "plants_outside_raster": [
+          "plot9"
+        ],
+        "plants_without_segment": [
+          "plot1"
+        ],
+        "plants_within_position_error": [
+          "plot3"
+        ],
+        "plants_with_ambiguous_detections": [
+          "plot4"
+        ],
+        "detections_unattributed": 2,
+        "detections_unattributed_by_source": {
+          "outside_segments": 1,
+          "overlapping_segments": 1,
+          "segment_without_plant": 0,
+          "segment_plant_within_position_error": 0
+        },
+        "detections_unattributed_scope": "delivered_raster",
+        "plant_attribution": "segment"
+      },
+      "produced_at": "2026-10-26T05:08:07.076311+00:00"
+    }
+  },
+  "count_export_headers": {
+    "X-TCIP-Saved-To": "/scratch/workspace/counts/results_export/counts.csv",
+    "X-TCIP-Validated": "true",
+    "X-TCIP-Acknowledged-By": ""
   }
 }

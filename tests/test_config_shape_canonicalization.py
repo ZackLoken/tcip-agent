@@ -216,6 +216,7 @@ def _refused_naming(config: dict, path: str, project: Path) -> None:
     issues = _issues_of(unstated)
     assert _names(issues, path), issues
     refused = launch_training(project, unstated, actor=None)
+    assert isinstance(refused, dict), refused
     assert _names(refused["issues"], path), refused
     assert _issues_of(config) == []
 

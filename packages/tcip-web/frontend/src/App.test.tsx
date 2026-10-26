@@ -10,8 +10,7 @@ import { useStore } from "@/store";
 import { INVARIANCES } from "@/test/projectRecords";
 import { openAnswer, stateEnvelope } from "@/test/store";
 
-// App's own socket/tab-sync effects reach the network; only the tab/panel wiring is under
-// test here, so both are stubbed rather than left to hit a backend that isn't running.
+// The state socket and the active-tab sync stand in for App's network effects.
 const stateSocket = vi.hoisted(() => ({
   connect: vi.fn(),
   close: vi.fn(),
@@ -19,8 +18,7 @@ const stateSocket = vi.hoisted(() => ({
 }));
 vi.mock("@/api/ws", () => ({ stateSocket }));
 vi.mock("@/hooks/useActiveTabSync", () => ({ useActiveTabSync: vi.fn() }));
-// App statically imports the Annotate tab (not code-split), which pulls in Konva; jsdom has no
-// canvas backend, so the Konva module itself is stubbed the same way AnnotateTab's own tests do.
+// App statically imports the Annotate tab, which pulls in Konva, and jsdom has no canvas backend.
 vi.mock("konva", () => ({ default: {} }));
 vi.mock("react-konva", () => ({
   Group: (props: { children?: React.ReactNode }) => <>{props.children}</>,
@@ -34,13 +32,17 @@ vi.mock("@/components/Canvas/CanvasStage", () => ({
     <div data-testid="canvas-stage">{props.children}</div>
   ),
 }));
-// The Training tab fires its own run listing on mount regardless of any project being open;
-// stubbed so switching to it here exercises only the tab/panel wiring, not a real fetch.
+// The Training tab lists its runs on mount, whether or not a project is open; the listing answers
+// the produced one holding no run.
 vi.mock("@/api/training", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/training")>();
+  const { trainingListing } = await import("@/test/training");
   return {
     ...actual,
-    trainingApi: { ...actual.trainingApi, listRuns: vi.fn().mockResolvedValue({ runs: [] }) },
+    trainingApi: {
+      ...actual.trainingApi,
+      listRuns: vi.fn().mockResolvedValue(trainingListing({ runs: [], sweeps: [] })),
+    },
   };
 });
 

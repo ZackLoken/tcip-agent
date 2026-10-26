@@ -3,6 +3,7 @@
 import { getJson, postJson, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import type {
+  Launched,
   TensorboardLaunch,
   TrainingDetail,
   TrainingListing,
@@ -45,11 +46,11 @@ export interface CompareRegistryEntry {
   name: string;
   metrics: MetricRow | null;
   metrics_source: string | null;
-  registered_at: string | null;
+  registered_at: string;
 }
 
-/** The run's own partition, from its resolved record (never the launch config's own pre-launch
- * intent), reduced to the four states a comparison names. */
+/** The run's own partition, from its resolved record, reduced to the four states a comparison
+ * names. */
 export interface CompareSplit {
   case: "bound" | "drawn" | "spatial" | "none";
   selection_dir?: string;
@@ -68,7 +69,7 @@ export interface CompareExperiment {
   rows_after_end?: number | null;
   /** The status record's own failure reason; null for a run that never failed. */
   status_error?: string | null;
-  /** The config's builder; null when the config names none (never a fabricated "unknown"). */
+  /** The config's builder; null when the config names none. */
   model?: string | null;
   task?: string | null;
   subject?: string | null;
@@ -93,8 +94,7 @@ export interface CompareBestExcluded {
   metrics_source: string | null;
 }
 
-/** The marked comparison's own best-model answer, projected: no checkpoint path, config or
- * file size ever leaves the backend. */
+/** The marked comparison's own best-model answer, as the ranking route projects it. */
 export interface CompareBestResult {
   name: string;
   experiment_id: string | null;
@@ -111,10 +111,9 @@ export const trainingApi = {
   listSplitChoices: (experiment_id: string) =>
     getJson<SplitChoices>(ROUTES.getTrainingRunsByExperimentIdSplits(experiment_id)),
 
-  /** Start a new run or sweep from the recorded one ``relaunched_from`` names; the answer names
-   * a run by ``experiment_id`` and a sweep by ``sweep_id``. */
+  /** Start a new run or sweep from the recorded one ``relaunched_from`` names. */
   relaunch: (relaunched_from: string, user: string, selection_dir?: string | null) =>
-    postJson<{ experiment_id?: string; sweep_id?: string; [k: string]: unknown }>(
+    postJson<Launched>(
       ROUTES.postTrainingRuns,
       selection_dir ? { relaunched_from, selection_dir, user } : { relaunched_from, user },
     ),
@@ -146,8 +145,7 @@ export const trainingApi = {
     include_unverified?: boolean;
   }) => postJson<CompareBestResult>(ROUTES.postTrainingCompareBest, params),
 
-  /** evaluation.py's own declared-direction table, unaudited: a plain read the comparison's
-   * metric chooser groups its stamped keys by, never a call through the rank tool. */
+  /** Every metric's declared ranking direction, unaudited. */
   metricDirections: () =>
     getJson<{ higher_is_better: Record<string, boolean> }>(ROUTES.getTrainingMetricDirections),
 };

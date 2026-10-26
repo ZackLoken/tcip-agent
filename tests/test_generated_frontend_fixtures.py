@@ -6,8 +6,9 @@ records ``GET /api/results/delivery-events`` serves for them to
 file to what a regeneration serves, each value compared but the ones a run mints. The trait
 listings ``tools/generate_trait_fixture.py`` writes, the project fixtures
 ``tools/generate_project_fixture.py`` writes, the TensorBoard serving answers
-``tools/generate_tensorboard_fixture.py`` writes and the open answer and state envelope
-``tools/generate_open_fixture.py`` writes are held the same way, and the scratch
+``tools/generate_tensorboard_fixture.py`` writes, the open answer and state envelope
+``tools/generate_open_fixture.py`` writes and the training routes' answers
+``tools/generate_training_fixture.py`` writes are held the same way, and the scratch
 session the generators make their scenes in (``tools/fixture_session.py``) is held to leaving
 nothing behind.
 """
@@ -17,12 +18,12 @@ from __future__ import annotations
 import copy
 import importlib
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from tests._web_fixtures import named_project
-from tools.fixture_session import opened, replaced, scratch_session
+from tools.fixture_session import normalized, opened, scratch_session
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -60,52 +61,38 @@ times things happened, and digests over what carries those or over a file the sc
 the platform's own line endings (a run's weights, a written output, a record holding a time, a
 plant registry)."""
 
-FLOAT_PLACES = 6
-"""The decimal places a served float is compared to: a geometric value's last bits differ
-between the platforms the scenes run on, and a delivered meter value carries no more."""
 
+def _normalized(fixture: dict[str, dict]) -> dict[str, JsonValue]:
+    """Return ``fixture`` with each value a run mints made what it stands for.
 
-def _normalized(fixture: dict[str, dict]) -> dict[str, dict]:
-    """Return ``fixture`` with each minted value replaced by a numbered placeholder.
-
-    Each :data:`PER_RUN` string is replaced by a placeholder numbered by its first appearance
-    across the fixture; each float is rounded to
-    :data:`FLOAT_PLACES`; and an archived mapping key equal to the name
-    :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.archived_mapping_name` gives the
-    cited record is replaced by that record's placeholder. Other values are kept as served.
+    A walked mapping's served disclosure (``ServedPlantMappingDisclosure``, each ``records``
+    entry's ``plant_mapping`` read through the route's ``ServedDisclosure``) whose resolved key is
+    the name :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.archived_mapping_name` gives
+    the record it cites has that key read as ``<archived NAME>``; then each :data:`PER_RUN` string
+    reads as a placeholder numbered by its first appearance across the fixture and each float is
+    rounded (``fixture_session.normalized``). Other values are kept as served.
     """
+    from pydantic import TypeAdapter
+
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         archived_mapping_name,
     )
+    from tcip_web.routes.results import (
+        ServedDisclosure,
+        ServedPlantMappingDisclosure,
+    )
 
-    seen: dict[str, str] = {}
-
-    def leaf(key: str | None, value: JsonValue) -> JsonValue:
-        if key in PER_RUN and isinstance(value, str):
-            return seen.setdefault(value, f"<{key} {len(seen)}>")
-        if isinstance(value, float):
-            return round(value, FLOAT_PLACES)
-        return value
-
-    out: dict[str, dict] = {}
-    for name, record in fixture.items():
-        normalized = replaced(record, leaf)
-        pm, resolved = (
-            record["plant_mapping"],
-            record.get("plant_mapping_resolved_key"),
-        )
-        if (
-            pm is not None
-            and resolved is not None
-            and "record_sha256" in pm
-            and resolved
-            == archived_mapping_name(pm["name"], pm["record_sha256"])
+    disclosure = TypeAdapter[ServedDisclosure | None](ServedDisclosure | None)
+    archived = copy.deepcopy(fixture)
+    for record in archived["records"].values():
+        pm = disclosure.validate_python(record["plant_mapping"])
+        if isinstance(
+            pm, ServedPlantMappingDisclosure
+        ) and pm.resolved_key == archived_mapping_name(
+            pm.name, pm.record_sha256
         ):
-            normalized["plant_mapping_resolved_key"] = (
-                f"<archived {pm['name']} at {seen[pm['record_sha256']]}>"
-            )
-        out[name] = normalized
-    return out
+            record["plant_mapping"]["resolved_key"] = f"<archived {pm.name}>"
+    return normalized(archived, numbered=PER_RUN, rounded=True)
 
 
 def _changed(fixture: dict, name: str, *path_and_value: JsonValue) -> dict:
@@ -115,7 +102,7 @@ def _changed(fixture: dict, name: str, *path_and_value: JsonValue) -> dict:
     """
     *path, value = path_and_value
     out = copy.deepcopy(fixture)
-    target = out[name]
+    target = out["records"][name]
     for step in path[:-1]:
         target = target[step]
     target[path[-1]] = value
@@ -131,8 +118,9 @@ def test_the_comparison_keeps_every_value_a_run_does_not_mint() -> None:
     comparison; a minted id changing its value does not.
     """
     checked = json.loads(GENERATED.read_text(encoding="utf-8"))
-    count = checked["canopy"]["plant_mapping"]["segments_without_plant"]
-    digest = checked["archived_mapping"]["plant_mapping"]["record_sha256"]
+    records = checked["records"]
+    count = records["canopy"]["plant_mapping"]["segments_without_plant"]
+    digest = records["archived_mapping"]["plant_mapping"]["record_sha256"]
     broken = [
         _changed(
             checked,
@@ -156,7 +144,11 @@ def test_the_comparison_keeps_every_value_a_run_does_not_mint() -> None:
         ),
         *(
             _changed(
-                checked, "archived_mapping", "plant_mapping_resolved_key", key
+                checked,
+                "archived_mapping",
+                "plant_mapping",
+                "resolved_key",
+                key,
             )
             for key in ("valley@", "valley@3", f"valley@{digest}")
         ),
@@ -168,6 +160,26 @@ def test_the_comparison_keeps_every_value_a_run_does_not_mint() -> None:
     assert _normalized(reminted) == _normalized(checked)
 
 
+def test_each_disclosure_normalizes_through_its_own_type() -> None:
+    """Each delivery record's disclosure normalizes as its schema type states.
+
+    A walked mapping's disclosure whose resolved key is its cited record's archive name reads as
+    archived, one still resolving to its own name keeps it, and a registry or canopy disclosure,
+    which carries no resolved key, gains none.
+    """
+    checked = json.loads(GENERATED.read_text(encoding="utf-8"))
+    normal = cast("dict[str, dict]", _normalized(checked)["records"])
+
+    assert normal["archived_mapping"]["plant_mapping"]["resolved_key"] == (
+        "<archived valley>"
+    )
+    assert normal["acknowledged_mapping"]["plant_mapping"]["resolved_key"] == (
+        "valley"
+    )
+    for name in ("registry", "canopy"):
+        assert "resolved_key" not in normal[name]["plant_mapping"]
+
+
 @pytest.mark.parametrize(
     "name",
     [
@@ -175,12 +187,13 @@ def test_the_comparison_keeps_every_value_a_run_does_not_mint() -> None:
         "generate_project_fixture",
         "generate_tensorboard_fixture",
         "generate_open_fixture",
+        "generate_training_fixture",
     ],
 )
 def test_the_fixture_is_what_a_regeneration_serves_value_for_value(
     name: str,
 ) -> None:
-    """A trait, project, TensorBoard or open fixture is what a regeneration serves.
+    """A trait, project, TensorBoard, open or training fixture is what a regeneration serves.
 
     Each generator's checked-in file equals what its ``produce`` serves, value for value.
     """
@@ -226,7 +239,7 @@ def test_an_unconfirmed_stop_after_a_failed_production_is_refused_over_the_failu
     class NormalizationFailedError(Exception):
         pass
 
-    def failing(_served: dict) -> dict:
+    def failing(*_served: object, **_policy: object) -> dict:
         raise NormalizationFailedError
 
     module = _generator("generate_tensorboard_fixture")
@@ -241,6 +254,50 @@ def test_an_unconfirmed_stop_after_a_failed_production_is_refused_over_the_failu
     with pytest.raises(SystemExit, match="kills unconfirmed") as refused:
         module.produce()
     assert isinstance(refused.value.__context__, NormalizationFailedError)
+
+
+def test_a_wrong_typed_stamped_value_is_kept_for_the_staleness_comparison() -> (
+    None
+):
+    """A value of another type than the producer writes under a stamped key is kept as served.
+
+    Under the training fixture's own stamps, a ``None`` where a timestamp belongs and a string
+    or a boolean where a pid belongs survive normalization, so a regeneration carrying them
+    differs from the checked-in fixture, while the producer's own types read as their
+    placeholders.
+    """
+    stamped = _generator("generate_training_fixture").STAMPED
+
+    assert normalized({"created": None, "pid": "1"}, stamped=stamped) == {
+        "created": None,
+        "pid": "1",
+    }
+    assert normalized({"pid": True}, stamped=stamped) == {"pid": True}
+    assert normalized(
+        {"created": "2026-01-01T00:00:00+00:00", "pid": 7}, stamped=stamped
+    ) == {"created": "<created>", "pid": 0}
+
+
+def test_a_request_validation_refusal_is_never_recorded_as_the_routes_own() -> (
+    None
+):
+    """The training fixture's refusal refuses a refusal the request model gave, not the route.
+
+    A body the ranking route's request model refuses answers 422 listing its issues; recorded as
+    the route's own refusal at that status, it raises instead.
+    """
+    from tcip_web.routes._body_common import EmptyBodyPayload
+
+    refusal = _generator("generate_training_fixture").refusal
+    with scratch_session() as (_workspace, client):
+        with pytest.raises(AssertionError, match="Field required"):
+            refusal(
+                client,
+                "/api/training/compare/best",
+                EmptyBodyPayload(),
+                422,
+                lambda _detail: True,
+            )
 
 
 def test_the_delivery_fixture_is_what_a_regeneration_serves() -> None:

@@ -371,6 +371,7 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
 
     from tcip_mcp.pipelines.data.selection import selection_key
     from tcip_mcp.tools.training_tools import (
+        RunLaunched,
         launch_training,
         list_split_choices,
     )
@@ -384,7 +385,7 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     launched = launch_training(
         tmp_path, _bound_config(root, elsewhere, tmp_path), actor=None
     )
-    assert "error" not in launched, launched
+    assert isinstance(launched, RunLaunched), launched
 
     other_subject_dir = tmp_path / "other_subject"
     _draw(tmp_path, root, other_subject_dir, subject=OTHER_SUBJECT, seed=3)
@@ -815,20 +816,8 @@ def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_
     bound or drawn: with no partition chosen the route does not rewrite data.split.
     """
     monkeypatch.chdir(tmp_path)
-    import tcip_mcp.tools.training_tools as training_tools_module
+    fake_popen(monkeypatch, [])
     from tcip_mcp.pipelines.schemas import train_config
-
-    captured: dict = {}
-
-    def fake_launch_training(
-        project: Path, config: dict, *a: object, **k: object
-    ) -> dict:
-        captured["data"] = config.get("data")
-        return {"experiment_id": "run_relaunched", "status": "launched"}
-
-    monkeypatch.setattr(
-        training_tools_module, "launch_training", fake_launch_training
-    )
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     drawn = _bespoke_config(tmp_path, root / "images" / DATES[0])
@@ -838,7 +827,10 @@ def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_
         json={"relaunched_from": "exp-drawn", "user": "tester"},
     )
     assert resp.status_code == 200, resp.json()
-    assert captured["data"] == train_config(drawn).data.record()
+    assert (
+        _relaunched_config(tmp_path, resp).config["data"]
+        == train_config(drawn).data.record()
+    )
 
     _draw(tmp_path, root, tmp_path / "manifest")
     bound = _bound_config(root, tmp_path / "manifest", tmp_path)
@@ -848,7 +840,10 @@ def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_
         json={"relaunched_from": "exp-bound", "user": "tester"},
     )
     assert resp.status_code == 200, resp.json()
-    assert captured["data"] == train_config(bound).data.record()
+    assert (
+        _relaunched_config(tmp_path, resp).config["data"]
+        == train_config(bound).data.record()
+    )
 
 
 def _relaunched_config(project: Path, response: Response) -> RunRecord:

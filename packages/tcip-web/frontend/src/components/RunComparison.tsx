@@ -17,8 +17,7 @@ export interface MarkedRun {
 export const MAX_MARKED_RUNS = 4;
 
 const UNRECORDED = "unrecorded";
-/** A column whose experiment id the returned answer never carried at all (never a still-loading
- * state: the component's own early return covers that case before any column renders). */
+/** A column whose experiment id the returned answer does not carry. */
 const NOT_IN_ANSWER = "not in the comparison answer";
 const NO_REGISTERED_CHECKPOINT = "no registered checkpoint";
 /** The tool's own wording for a marked set with nothing at all to rank. */
@@ -70,8 +69,8 @@ function loggedMetricCell(row: MetricRow | undefined, key: string): string {
   return cellText(row[key]);
 }
 
-/** The wording for a marked run whose registered checkpoint(s) exist but never stamped the
- * metric being ranked by, so it never just silently drops out of the answer. */
+/** The wording for a marked run whose registered checkpoint(s) exist but carry no stamp of the
+ * metric being ranked by. */
 function notRankedNoMetricStamped(metric: string): string {
   return `not ranked: no ${metric} stamped`;
 }
@@ -162,8 +161,8 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
   const columnsWithNoCheckpoint = columns.filter(
     (c) => c.hasEntry && (c.exp?.registry?.length ?? 0) === 0,
   );
-  // A column that registered a checkpoint but never stamped the ranked metric never just drops
-  // out of the answer silently; it is named the same way a column with no checkpoint at all is.
+  // A column that registered a checkpoint with no stamp of the ranked metric is named, as a
+  // column with no checkpoint at all is.
   const columnsMissingRankedMetric = columns.filter(
     (c) =>
       c.hasEntry &&
@@ -176,8 +175,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
   }
   const declaredMetricOptions = rankMetricOptions.filter(hasDeclaredDirection);
   const undeclaredMetricOptions = rankMetricOptions.filter((k) => !hasDeclaredDirection(k));
-  // Derived straight from the declared-direction table already fetched on mount, so the direction
-  // choice appears as soon as the breeder picks an undeclared metric, never only after a refusal.
+  // Read off the declared-direction table fetched on mount, as soon as the breeder picks a metric.
   const needsDirection = rankMetric !== "" && !hasDeclaredDirection(rankMetric);
   const rankDisabledReason = noMarkedCheckpoint
     ? NO_MARKED_CHECKPOINT
@@ -196,8 +194,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
     setRankError(null);
   }
 
-  // Choosing a direction answers whatever the pending refusal was asking for, so it clears that
-  // refusal rather than leaving it to read as still describing the choice just made.
+  // Choosing a direction answers the pending refusal, so it clears it.
   function onChooseDirection(higherIsBetter: boolean) {
     setRankDirection(higherIsBetter);
     setRankError(null);
@@ -215,7 +212,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
       setRankResult(res);
     } catch (e) {
       setRankResult(null);
-      // Branches on the ranking's own refusal fields, never on matching the reason's text.
+      // Branches on the ranking's own refusal fields.
       setRankError(e instanceof Error ? e.message : String(e));
       if (e instanceof StructuredRefusalError && e.detail.all_unverified === true) {
         setNeedsUnverifiedOption(true);
@@ -381,9 +378,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
                           <span className="block font-mono">{entry.name}</span>
                           <span className="block text-tcip-muted">
                             {entry.metrics_source ?? UNRECORDED}
-                            {entry.registered_at
-                              ? ` (${new Date(entry.registered_at).toLocaleString()})`
-                              : ""}
+                            {` (${new Date(entry.registered_at).toLocaleString()})`}
                           </span>
                         </li>
                       ))}

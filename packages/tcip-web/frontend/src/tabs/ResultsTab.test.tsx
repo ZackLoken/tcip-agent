@@ -3,13 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
 import { StructuredRefusalError } from "@/api/http";
-import {
-  isCanopySegmentDisclosure,
-  isPlantMappingDisclosure,
-  isPlantRegistryDisclosure,
-  resultsApi,
-  type DeliveryEventRecord,
-} from "@/api/inference";
+import { resultsApi } from "@/api/inference";
+import type { ServedDeliveryEvent } from "@/api/types.generated";
 import { useStore } from "@/store";
 import { ResultsTab } from "@/tabs/ResultsTab";
 import { mockDatasetTree } from "@/test/datasetTree";
@@ -69,7 +64,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     // computing, or the compute click races the fetch and refuses (no trait resolved yet).
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
 
-    // No date starts on a bucket: two published over one date are never chosen between silently.
+    // No date starts on a bucket: a date with two published waits for the breeder's choice.
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
     const selects = screen.getAllByTitle(
       /The bucket whose predictions to use for this date|No bucket is published over this date/,
@@ -82,7 +77,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     fireEvent.change(screen.getByLabelText("Plants"), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: "Compute" }));
     await waitFor(() => expect(measurementSpy).toHaveBeenCalled());
-    // The name is the one the tree response supplied, never one the tab assembled.
+    // The name is the one the tree response supplied.
     expect(measurementSpy.mock.calls[0][0].buckets).toEqual(["v2/2026-01-01"]);
     expect(measurementSpy.mock.calls[0][0].dataset_root).toBe("C:/data");
   });
@@ -538,7 +533,7 @@ describe("ResultsTab meaning refusals", () => {
       milestones: { rows: [], columns: [] },
       ...VALIDATED,
     });
-    // exportCsv is left unmocked: the refusal has to survive its own blob path, not a stub.
+    // exportCsv is left unmocked: the refusal has to survive its own blob path.
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -572,7 +567,7 @@ describe("ResultsTab meaning refusals", () => {
 });
 
 describe("ResultsTab delivery events (read-only)", () => {
-  async function servedRow(record: DeliveryEventRecord): Promise<HTMLElement> {
+  async function servedRow(record: ServedDeliveryEvent): Promise<HTMLElement> {
     vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [record] });
     render(<ResultsTab />);
     return screen.findByTestId(`delivery-${record.event_id}`);
@@ -603,7 +598,6 @@ describe("ResultsTab delivery events (read-only)", () => {
     const record = DELIVERY_RECORDS.acknowledged_mapping;
     const row = await servedRow(record);
 
-    if (!record.acknowledgment) throw new Error("the fixture delivery was not acknowledged");
     expect(within(row).getByText(record.acknowledgment.acknowledged_by)).toBeInTheDocument();
     expect(within(row).getByText(record.acknowledgment.reason)).toBeInTheDocument();
     for (const bucket of record.buckets) {
@@ -640,7 +634,6 @@ describe("ResultsTab delivery events (read-only)", () => {
   it("renders the plant mapping's dates_delivered, images_unattributed and plant_attribution", async () => {
     const record = DELIVERY_RECORDS.acknowledged_mapping;
     const pm = record.plant_mapping;
-    if (!pm || !isPlantMappingDisclosure(pm)) throw new Error("the fixture cites no mapping");
     const row = await servedRow(record);
 
     expect(
@@ -655,7 +648,6 @@ describe("ResultsTab delivery events (read-only)", () => {
   it("renders the orthomosaic door's own registry disclosure, not the walked-mapping form", async () => {
     const record = DELIVERY_RECORDS.registry;
     const pm = record.plant_mapping;
-    if (!pm || !isPlantRegistryDisclosure(pm)) throw new Error("the fixture names no registry");
     const row = await servedRow(record);
 
     expect(
@@ -674,7 +666,6 @@ describe("ResultsTab delivery events (read-only)", () => {
   it("renders the orthomosaic door's own canopy-segment disclosure, narrowed before the registry form", async () => {
     const record = DELIVERY_RECORDS.canopy;
     const pm = record.plant_mapping;
-    if (!pm || !isCanopySegmentDisclosure(pm)) throw new Error("the fixture names no segments");
     const row = await servedRow(record);
 
     expect(within(row).getByTestId("canopy-disclosure")).toBeInTheDocument();
@@ -709,7 +700,7 @@ describe("ResultsTab delivery events (read-only)", () => {
     const row = await servedRow(record);
 
     expect(
-      within(row).getByText(new RegExp(`archived as ${record.plant_mapping_resolved_key}`)),
+      within(row).getByText(new RegExp(`archived as ${record.plant_mapping.resolved_key}`)),
     ).toBeInTheDocument();
   });
 });
@@ -723,11 +714,10 @@ describe("ResultsTab count export", () => {
   });
 
   // Every field in the count-export panel sits immediately after its own <label>, the DOM
-  // relationship this reads rather than a positional guess at render order.
+  // relationship this reads.
   function controlFollowing(panel: HTMLElement, labelText: string): HTMLElement {
-    const label = within(panel).getByText(labelText);
-    const control = label.nextElementSibling;
-    if (!control) throw new Error(`no control follows the ${labelText} label`);
+    const control = within(panel).getByText(labelText).nextElementSibling;
+    expect(control).toBeInstanceOf(HTMLElement);
     return control as HTMLElement;
   }
 
@@ -738,7 +728,7 @@ describe("ResultsTab count export", () => {
     await waitFor(() => expect(api.dataset.tree).toHaveBeenCalled());
     const heading = await screen.findByRole("heading", { name: "Export" });
     const panel = heading.closest(".tcip-panel");
-    if (!panel) throw new Error("Export panel not found");
+    expect(panel).toBeInstanceOf(HTMLElement);
     // The Trait and Prediction bucket selects only fill in once their own async loads resolve.
     await within(panel as HTMLElement).findByText("subject_a");
     await within(panel as HTMLElement).findByText("2026-01-01 (baseline/2026-01-01)");

@@ -2,22 +2,26 @@
 
 import { getJson, postForBlob, postJson, StructuredRefusalError, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
-import type {
-  Assessments,
-  CanopySegmentDisclosure,
-  ConfirmRevisionPayload,
-  DeliveryEventRecord as StoredDeliveryEventRecord,
-  ExportCountCsvPayload,
-  ExportCsvPayload,
-  JobStatus,
-  MatchRadius,
-  PhenologyPayload,
-  PlantMappingDisclosure,
-  PlantRegistryDisclosure,
-  RegisteredModels,
-  Stated,
-  StatedRadius,
-  TraitRevision,
+import {
+  ACKNOWLEDGED_BY_HEADER,
+  type Assessments,
+  type CanopySegmentDisclosure,
+  type ConfirmRevisionPayload,
+  type DeliveryEvents,
+  type ExportCountCsvPayload,
+  type ExportCsvPayload,
+  type JobStatus,
+  type MatchRadius,
+  type PhenologyPayload,
+  type PlantRegistryDisclosure,
+  type RegisteredModels,
+  SAVED_TO_HEADER,
+  type ServedDeliveryEvent,
+  type ServedPlantMappingDisclosure,
+  type Stated,
+  type StatedRadius,
+  type TraitRevision,
+  VALIDATED_HEADER,
 } from "@/api/types.generated";
 import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
 
@@ -69,7 +73,7 @@ export const inferenceApi = {
 /**
  * Open a live progress stream for an inference job, auto-reconnecting with capped
  * backoff if the socket drops mid-run. The server sends a single ``final`` frame at a
- * terminal state and closes; once seen we stop reconnecting (the job is done, not lost).
+ * terminal state and closes; once seen we stop reconnecting.
  */
 export function openInferenceStream(
   jobId: string,
@@ -87,7 +91,7 @@ export interface PlantMappingDateSummary {
   n_images: number;
   n_mapped: number;
   n_unattributed: number;
-  // null on a date with no recorded distance, never a fabricated zero.
+  // null on a date with no recorded distance.
   avg_distance_m: number | null;
 }
 
@@ -114,8 +118,7 @@ export interface PerPlantRow {
   n_positive: number;
   n_unclassified: number;
   n_missing: number;
-  // null when a detection of this date lacks the state's attribute or an image is missing, never
-  // a fabricated ratio.
+  // null when a detection of this date lacks the state's attribute or an image is missing.
   ratio: number | null;
 }
 
@@ -142,15 +145,14 @@ export interface MilestoneColumn {
 }
 
 /** The count-export door's own response headers: present on every response, the acknowledging
- *  user an empty string (never a rendering of null/undefined) when the delivery is validated. */
+ *  user an empty string when the delivery is validated. */
 export interface ExportCountCsvHeaders {
   savedTo: string;
   validated: boolean;
   acknowledgedBy: string;
 }
 
-// One door returns both projections from one server-side measurement, so no surface can render
-// either projection bare, and a milestone date and the curve it was read off cannot disagree.
+// The measurement door's answer: both projections of one server-side measurement.
 export interface PhenologyMeasurementResponse {
   curves: { rows: PerPlantRow[]; n_plants: number };
   milestones: { rows: OnsetRow[]; columns: MilestoneColumn[] };
@@ -166,13 +168,12 @@ export interface PhenologyMeasurementResponse {
   // False when no bucket's scope declares the positive state's attribute: the ratios are then not
   // a valid phenology measurement.
   positive_class_assessed: boolean;
-  // What this delivery could not verify, not merely what it did not read: a bare date omitted,
-  // absent, or archived (predictions still counted), or "date/name" for one uncheckable capture.
+  // What this delivery could not verify: a bare date omitted, absent, or archived (predictions
+  // still counted), or "date/name" for one uncheckable capture.
   captures_unverified: string[];
   // A plant CSV the mapping was built from that moved since. Empty when nothing was unverified.
   plant_csvs_unverified: string[];
-  // This delivery's own delivered dates, and its unattributed-capture count scoped to them
-  // (never the mapping's own n_dates_missing_images span).
+  // This delivery's own delivered dates, and its unattributed-capture count scoped to them.
   dates_delivered: string[];
   images_unattributed: number;
 }
@@ -267,8 +268,7 @@ export function bucketRefusalOf(e: unknown): BucketExistsRefusal | null {
   };
 }
 
-export type PlantMappingUnion =
-  PlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure;
+export type PlantMappingUnion = NonNullable<ServedDeliveryEvent["plant_mapping"]>;
 
 /** Whether `pm` is the canopy-segment disclosure, narrowed first. */
 export function isCanopySegmentDisclosure(pm: PlantMappingUnion): pm is CanopySegmentDisclosure {
@@ -280,16 +280,12 @@ export function isPlantRegistryDisclosure(pm: PlantMappingUnion): pm is PlantReg
   return !isCanopySegmentDisclosure(pm) && "plant_registry" in pm;
 }
 
-/** Whether `pm` is a walked mapping's disclosure, narrowed last. */
-export function isPlantMappingDisclosure(pm: PlantMappingUnion): pm is PlantMappingDisclosure {
+/** Whether `pm` is a walked mapping's served disclosure, narrowed last. */
+export function isPlantMappingDisclosure(
+  pm: PlantMappingUnion,
+): pm is ServedPlantMappingDisclosure {
   return "name" in pm && "record_sha256" in pm;
 }
-
-/** One completed delivery as the backend serves it: the stored record, and the key its cited
- *  mapping loads under (set only alongside `plant_mapping`). */
-export type DeliveryEventRecord = StoredDeliveryEventRecord & {
-  plant_mapping_resolved_key?: string | null;
-};
 
 export const resultsApi = {
   registeredModels: () => getJson<RegisteredModels>(ROUTES.getResultsModelsRegistered),
@@ -297,8 +293,7 @@ export const resultsApi = {
   // Every assessment recorded under the open project, each naming the checkpoint it judged.
   assessments: () => getJson<Assessments>(ROUTES.getResultsAssessments),
 
-  // The open project's own trait records, so a tab resolves which trait it works on from the
-  // project instead of assuming one, and the Setup tab shows each revision for confirmation.
+  // The open project's own trait records, each revision with whether its confirmation stands.
   traits: () => getJson<TraitsListing>(ROUTES.getResultsTraits),
 
   // Refuses with 409 when the hash is not the revision's own: the revision shown was not the one
@@ -323,23 +318,20 @@ export const resultsApi = {
   loadPlantMapping: (name: string) =>
     postJson<ServedPlantMapping>(ROUTES.postResultsPlantMappingLoad, { name }),
 
-  // Every mapping name persisted under the open project, for the Results tab's name picker.
+  // Every mapping name persisted under the open project.
   listPlantMappings: () => getJson<{ names: string[] }>(ROUTES.getResultsPlantMappingList),
 
   phenologyMeasurement: (body: PhenologyPayload) =>
     postJson<PhenologyMeasurementResponse>(ROUTES.postResultsPhenologyMeasurement, body),
 
   /** Every delivery event the open project holds: what shipped, under which trait and kind. */
-  deliveryEvents: () =>
-    getJson<{ records: DeliveryEventRecord[] }>(ROUTES.getResultsDeliveryEvents),
+  deliveryEvents: () => getJson<DeliveryEvents>(ROUTES.getResultsDeliveryEvents),
 
-  // The server computes what it exports, never a caller-composed table of rows. Its own request
-  // shape is distinct from the measurement request's shape, never a spread of it.
+  /** The CSV the server computes for `body`'s phenology export. */
   downloadCsv: async (body: ExportCsvPayload): Promise<Blob> =>
     (await postForBlob(ROUTES.postResultsExportCsv, body)).blob,
 
-  // Unlike downloadCsv, this reports from the response headers: there is no prior screen
-  // measurement for a count, so the headers travel back beside the blob rather than discarded.
+  /** The count CSV the server computes for `body`, beside the response headers reporting it. */
   downloadCountCsv: async (
     body: ExportCountCsvPayload,
   ): Promise<{ blob: Blob; headers: ExportCountCsvHeaders }> => {
@@ -347,10 +339,18 @@ export const resultsApi = {
     return {
       blob,
       headers: {
-        savedTo: headers.get("X-TCIP-Saved-To") ?? "",
-        validated: headers.get("X-TCIP-Validated") === "true",
-        acknowledgedBy: decodeURIComponent(headers.get("X-TCIP-Acknowledged-By") ?? ""),
+        savedTo: sentHeader(headers, SAVED_TO_HEADER),
+        validated: sentHeader(headers, VALIDATED_HEADER) === "true",
+        acknowledgedBy: decodeURIComponent(sentHeader(headers, ACKNOWLEDGED_BY_HEADER)),
       },
     };
   },
 };
+
+/** The header `name` the count-export door sends on every answer; an answer without it refuses,
+ *  naming it. */
+function sentHeader(headers: Headers, name: string): string {
+  const value = headers.get(name);
+  if (value === null) throw new Error(`the count-export answer carries no ${name} header`);
+  return value;
+}

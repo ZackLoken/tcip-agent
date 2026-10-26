@@ -5,9 +5,9 @@ In a scratch session (``tools/fixture_session.py``), a project created through
 :data:`RUNS` names, each opened through the launcher's own producer and writer
 (``tests._verified_checkpoint_fixtures.opened_run``) with one scalar a ``SummaryWriter`` wrote on
 its board. ``POST /api/training/runs/<id>/tensorboard`` starts a TensorBoard over each board and
-answers it; the answers are written, :func:`normalized`, to
-``frontend/src/test/tensorboardServings.json``, keyed by run id. Each TensorBoard is stopped
-before the session ends.
+answers it; the answers are written, normalized by :data:`STAMPED`
+(``fixture_session.normalized``), to ``frontend/src/test/tensorboardServings.json``, keyed by run
+id. Each TensorBoard is stopped before the session ends.
 
     python -m tools.generate_tensorboard_fixture
 """
@@ -17,10 +17,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from tests import FRONTEND_SRC
-from tools.fixture_session import opened, scratch_session, write_fixture
+from tools.fixture_session import (
+    normalized,
+    opened,
+    scratch_session,
+    write_fixture,
+)
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
+
+    from tools.fixture_session import Stamp
 
 GENERATED_PATH = FRONTEND_SRC / "test" / "tensorboardServings.json"
 
@@ -28,16 +35,14 @@ RUNS = ("train-x", "train-y")
 """The ids of the runs whose TensorBoards are served, two so a reader can tell their answers
 apart."""
 
-
-def normalized(served: dict[str, JsonValue]) -> dict[str, JsonValue]:
-    """Return a serving answer with the port its TensorBoard took, which varies by run, as ``0``."""
-    return {**served, "port": 0}
+STAMPED: dict[str, Stamp] = {"port": (int, 0)}
+"""The port a TensorBoard took, which varies by run, read as ``0``."""
 
 
 def produce() -> dict[str, JsonValue]:
     """Open the runs, launch a TensorBoard over each through the route; return the answers.
 
-    The answers are :func:`normalized` and keyed by run id. A launch the route refuses raises,
+    The answers are normalized and keyed by run id. A launch the route refuses raises,
     and so does a TensorBoard whose stop ``stop_tensorboard`` answers unconfirmed, naming its
     board and pid, whether or not the production raised first; a production's own exception is
     then the refusal's context.
@@ -74,7 +79,9 @@ def produce() -> dict[str, JsonValue]:
                     f"/api/training/runs/{experiment_id}/tensorboard", json={}
                 )
                 answer.raise_for_status()
-                served[experiment_id] = normalized(answer.json())
+                served[experiment_id] = normalized(
+                    answer.json(), stamped=STAMPED
+                )
         finally:
             stops = {board: stop_tensorboard(str(board)) for board in boards}
             unconfirmed = {
