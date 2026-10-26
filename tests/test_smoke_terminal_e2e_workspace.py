@@ -7,31 +7,18 @@ cannot launch.
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 import os
-import sys
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from tcip_web import terminal as pty_host
-from tests import REPO_ROOT
+from tools import smoke_terminal_e2e
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from types import ModuleType
 
     import pytest
     from fastapi.testclient import TestClient
-
-SCRIPT = REPO_ROOT / "tools" / "smoke_terminal_e2e.py"
-
-
-def _load() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("smoke_terminal_e2e", SCRIPT)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["smoke_terminal_e2e"] = mod
-    spec.loader.exec_module(mod)
-    return mod
 
 
 def test_runs_under_the_given_workspace_and_opens_nothing(
@@ -47,8 +34,9 @@ def test_runs_under_the_given_workspace_and_opens_nothing(
     monkeypatch.setattr(pty_host, "PROVIDERS", (row,))
 
     scratch_ws = tmp_path.parent.parent / "scratch-workspace"
-    mod = _load()
-    result = mod.command([row.id, "--workspace", str(scratch_ws)])
+    result = smoke_terminal_e2e.command(
+        [row.id, "--workspace", str(scratch_ws)]
+    )
 
     assert result == 1
     assert os.environ["TCIP_WORKSPACE"] == str(scratch_ws)
@@ -67,30 +55,35 @@ def test_the_signal_is_a_friction_report_of_the_open_project_carrying_the_token(
     """
     from tcip_mcp.tools.meta_tools import report_friction
 
-    mod = _load()
     token = "ack-0123456789ab"
     report_friction(
         opened_project,
-        mod.REQUESTED_CATEGORY,
+        smoke_terminal_e2e.REQUESTED_CATEGORY,
         "an unrelated report",
         context={"note": token},
         actor=None,
     )
-    assert not mod.reported(opened_client, token)
+    assert not smoke_terminal_e2e.reported(opened_client, token)
 
     report_friction(
-        opened_project, mod.REQUESTED_CATEGORY, f"smoke {token}", actor=None
+        opened_project,
+        smoke_terminal_e2e.REQUESTED_CATEGORY,
+        f"smoke {token}",
+        actor=None,
     )
-    assert mod.reported(opened_client, token)
+    assert smoke_terminal_e2e.reported(opened_client, token)
 
     report_friction(
-        opened_project, mod.REQUESTED_CATEGORY, f"again {token}", actor=None
+        opened_project,
+        smoke_terminal_e2e.REQUESTED_CATEGORY,
+        f"again {token}",
+        actor=None,
     )
-    assert not mod.reported(opened_client, token)
+    assert not smoke_terminal_e2e.reported(opened_client, token)
 
     other = "ack-ba9876543210"
     report_friction(opened_project, "missing_tool", other, actor=None)
-    assert not mod.reported(opened_client, other)
+    assert not smoke_terminal_e2e.reported(opened_client, other)
 
 
 def test_the_first_signal_carries_the_display_name_its_request_never_states(
@@ -103,25 +96,27 @@ def test_the_first_signal_carries_the_display_name_its_request_never_states(
     """
     from tcip_mcp.tools.meta_tools import report_friction
 
-    mod = _load()
     name = "Terminal smoke 0a1b2c3d"
     alone, named = "ack-0123456789ab", "ack-ba9876543210"
-    assert alone in mod.request_for(alone)
-    assert name not in mod.request_for(alone)
-
-    report_friction(
-        opened_project, mod.REQUESTED_CATEGORY, f"smoke {alone}", actor=None
-    )
-    assert mod.reported(opened_client, alone)
-    assert not mod.reported(opened_client, alone, name)
+    assert alone in smoke_terminal_e2e.request_for(alone)
+    assert name not in smoke_terminal_e2e.request_for(alone)
 
     report_friction(
         opened_project,
-        mod.REQUESTED_CATEGORY,
+        smoke_terminal_e2e.REQUESTED_CATEGORY,
+        f"smoke {alone}",
+        actor=None,
+    )
+    assert smoke_terminal_e2e.reported(opened_client, alone)
+    assert not smoke_terminal_e2e.reported(opened_client, alone, name)
+
+    report_friction(
+        opened_project,
+        smoke_terminal_e2e.REQUESTED_CATEGORY,
         f"smoke {named} {name}",
         actor=None,
     )
-    assert mod.reported(opened_client, named, name)
+    assert smoke_terminal_e2e.reported(opened_client, named, name)
 
 
 def test_the_resume_smoke_passes_against_a_harness_whose_hook_reaches_the_served_backend(
@@ -148,8 +143,7 @@ def test_the_resume_smoke_passes_against_a_harness_whose_hook_reaches_the_served
     monkeypatch.setenv("FAKE_TERMINAL_PASTE_AFTER_S", "1")
     monkeypatch.setenv("FAKE_TERMINAL_COMPOSER_READY", row.composer_ready)
 
-    mod = _load()
-    result = mod.main(
+    result = smoke_terminal_e2e.main(
         row.id,
         workspace=str(tmp_path.parent.parent / "smoke-workspace"),
         answer_timeout_s=90,
@@ -171,23 +165,31 @@ def test_the_resumed_signal_is_the_token_continued_no_request_names(
     """
     from tcip_mcp.tools.meta_tools import report_friction
 
-    mod = _load()
     token = "ack-0123456789ab"
-    continued = token + mod.CONTINUED_SUFFIX
-    assert "ack-" not in mod.continuation_request()
-    assert mod.CONTINUED_SUFFIX in mod.continuation_request()
+    continued = token + smoke_terminal_e2e.CONTINUED_SUFFIX
+    assert "ack-" not in smoke_terminal_e2e.continuation_request()
+    assert (
+        smoke_terminal_e2e.CONTINUED_SUFFIX
+        in smoke_terminal_e2e.continuation_request()
+    )
 
     report_friction(
-        opened_project, mod.REQUESTED_CATEGORY, f"smoke {token}", actor=None
+        opened_project,
+        smoke_terminal_e2e.REQUESTED_CATEGORY,
+        f"smoke {token}",
+        actor=None,
     )
-    assert mod.reported(opened_client, token)
-    assert not mod.reported(opened_client, continued)
+    assert smoke_terminal_e2e.reported(opened_client, token)
+    assert not smoke_terminal_e2e.reported(opened_client, continued)
 
     report_friction(
-        opened_project, mod.REQUESTED_CATEGORY, continued, actor=None
+        opened_project,
+        smoke_terminal_e2e.REQUESTED_CATEGORY,
+        continued,
+        actor=None,
     )
-    assert mod.reported(opened_client, continued)
-    assert not mod.reported(opened_client, token)
+    assert smoke_terminal_e2e.reported(opened_client, continued)
+    assert not smoke_terminal_e2e.reported(opened_client, token)
 
 
 def test_the_websocket_url_is_absolute_and_carries_the_served_host(
@@ -199,10 +201,9 @@ def test_the_websocket_url_is_absolute_and_carries_the_served_host(
     """
     from tcip_web.app import app
 
-    mod = _load()
     path = app.url_path_for("terminal_ws", session_id="abc123")
 
-    url = mod.terminal_ws_url(client, path)
+    url = smoke_terminal_e2e.terminal_ws_url(client, path)
 
     parsed = urlsplit(url)
     assert parsed.scheme == "ws"
