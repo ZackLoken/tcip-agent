@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -45,29 +44,24 @@ def _census(root: Path, findings: list) -> dict | None:
     return {**scan, "label_reads": label_reads}
 
 
-def check_data_quality(
-    root: Path, findings: list, *, census: dict | None
-) -> None:
+def check_data_quality(root: Path, findings: list, *, census: dict) -> None:
     """Append the annotation quality findings, one document at a time.
 
     Each document is read on its own so one bad document never hides the findings about the
     rest, each named by its capture and stem: a label with no matching image, a label the
     per-image reader refuses (undecodable, an unrecognized shape, a malformed mark), an empty
     label no live mark finishes for any subject, and one line counting the images with no label
-    record. Reads the dataset census ``census`` (``None`` when it could not be taken).
+    record. Reads the dataset census ``census`` (:func:`_census`).
     """
     from tcip_annotation.json_io import LabelDocument
     from tcip_mcp.pipelines.data.label_queries import admits
 
-    if census is None:
-        return
-    scan = census
-    imaged = set(scan["images"].values())
-    for key in scan["labels"]:
+    imaged = set(census["images"].values())
+    for key in census["labels"]:
         named = _named(key)
         if key not in imaged:
             findings.append(("error", f"{named}: no matching image"))
-        doc = scan["label_reads"][key]
+        doc = census["label_reads"][key]
         if not isinstance(doc, LabelDocument):
             findings.append(
                 ("error", f"{named}: label document will not read: {doc}")
@@ -85,9 +79,9 @@ def check_data_quality(
 
     # Images with no label record at all: excluded from training, so a breeder who labeled 30 of
     # 400 trains on 30. Reported as one line, not one per image (the dominant case at small scale).
-    labeled = set(scan["labels"])
+    labeled = set(census["labels"])
     unannotated = sorted(
-        _named(key) for key in scan["images"].values() if key not in labeled
+        _named(key) for key in census["images"].values() if key not in labeled
     )
     if unannotated:
         shown = ", ".join(unannotated[:5]) + (
@@ -96,7 +90,7 @@ def check_data_quality(
         findings.append(
             (
                 "info",
-                f"{len(unannotated)} of {len(scan['images'])} image(s) have no "
+                f"{len(unannotated)} of {len(census['images'])} image(s) have no "
                 f"label record and are excluded from training ({shown}); an image marked "
                 "Complete with no annotation trains as a negative.",
             )
@@ -204,21 +198,16 @@ def check_registry(root: Path, findings: list) -> None:
             )
 
 
-def check_provenance(
-    root: Path, findings: list, *, census: dict | None
-) -> None:
+def check_provenance(root: Path, findings: list, *, census: dict) -> None:
     """Append the provenance findings over the census's readable label documents.
 
     Warns of every annotation carrying ``accepted_by`` without ``created_by``, and, when any
-    annotation carries no ``created_by``, adds one info finding counting them. Appends nothing
-    when ``census`` is ``None``.
+    annotation carries no ``created_by``, adds one info finding counting them.
     """
     from tcip_annotation.json_io import LabelDocument
 
     unstamped = 0
-    for key, doc in (
-        census["label_reads"] if census is not None else {}
-    ).items():
+    for key, doc in census["label_reads"].items():
         for a in doc.annotations if isinstance(doc, LabelDocument) else []:
             if a.accepted_by and not a.created_by:
                 findings.append(
@@ -332,19 +321,12 @@ def diagnose_project(project: Path) -> dict[str, list[tuple[str, str]]]:
     """
     found: list[tuple[str, str]] = []
     census = _census(project, found)
-    checks_taking_census = (check_data_quality, check_provenance)
-    for check in (
-        check_data_quality,
-        check_registry,
-        check_provenance,
-        check_state,
-        check_traits,
-        check_project_record,
-    ):
-        run: Callable[..., None] = check
-        if check in checks_taking_census:
-            run(project, found, census=census)
-        else:
-            run(project, found)
+    if census is not None:
+        check_data_quality(project, found, census=census)
+        check_provenance(project, found, census=census)
+    check_registry(project, found)
+    check_state(project, found)
+    check_traits(project, found)
+    check_project_record(project, found)
     rank = {"error": 0, "warn": 1, "info": 2}
     return {"findings": sorted(found, key=lambda f: rank[f[0]])}

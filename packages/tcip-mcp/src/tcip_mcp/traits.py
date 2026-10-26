@@ -508,7 +508,7 @@ class TraitRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    revisions: tuple[TraitRevision, ...]
+    revisions: tuple[TraitRevision, ...] = Field(min_length=1)
 
     @property
     def latest(self) -> TraitRevision:

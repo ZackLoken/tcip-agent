@@ -56,9 +56,9 @@ def _draw(
 
 def _quality_findings(root: Path) -> list[tuple[str, str]]:
     findings: list[tuple[str, str]] = []
-    doctor.check_data_quality(
-        Path(root), findings, census=doctor._census(Path(root), findings)
-    )
+    census = doctor._census(Path(root), findings)
+    assert census is not None, findings
+    doctor.check_data_quality(Path(root), findings, census=census)
     return findings
 
 
