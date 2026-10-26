@@ -28,6 +28,17 @@ from tcip_mcp.buckets import NotABucketError
 from tcip_mcp.identity import NoActorError
 from tcip_mcp.web_client import PANEL_EVENT_ANNOTATE_FOCUS, Panel
 from tcip_store import bind
+from tcip_web.routes import register_all as _register_routes
+from tcip_web.state import (
+    GuiMutationInvalidError,
+    NoProjectOpenError,
+    PanelEnvelope,
+    ProjectNotOpenError,
+    SnapshotProject,
+    StateNotification,
+    StateSnapshotMessage,
+    store as _gui_store,
+)
 from tcip_web.trust_boundary import TrustBoundaryMiddleware
 
 logger = logging.getLogger(__name__)
@@ -39,11 +50,10 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     The backend starts with no project open.
     """
-    # Size GDAL's block cache once per process, at the entry point, never at source construction.
+    # GDAL's block cache is sized once per process, at its entry point.
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 
     configure_gdal_cache()
-    # Warm the cold first-spawn cost (tcip_mcp import + PowerShell/.NET) off the request path.
     try:
         from tcip_web import terminal
 
@@ -51,8 +61,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     except Exception:  # pragma: no cover - prewarm is best-effort
         logger.exception("agent terminal prewarm failed to start")
     yield
-    # End each agent terminal, recording its end, off the loop: terminate can block seconds, and
-    # stalling the loop would break in-flight WebSocket close handshakes.
+    # Off the loop: terminate can block for seconds, breaking in-flight WebSocket close handshakes.
     try:
         from tcip_web.routes import terminal as terminal_routes
 
@@ -61,40 +70,18 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.exception("agent terminal shutdown failed")
 
 
-# At import, not in the lifespan: a route may be exercised against this app without one running,
-# and a route that reaches a store with no backend bound would refuse rather than write.
+# Bound at import, so a route exercised without the app's lifespan running still has a store.
 bind()
 
 
 app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
 
-# CORS is not enabled by default: the browser hits the same origin via the Vite dev proxy.
-# Serving the frontend elsewhere would add fastapi.middleware.cors.CORSMiddleware here.
-
-# A connection must arrive through this machine and name a loopback Host; the middleware also
-# applies the Origin policy before a route runs (trust_boundary).
 app.add_middleware(TrustBoundaryMiddleware)
 
-# Compress JSON/text responses above ~1KB. A label document's payload scales with polygon count
-# (dense images ship high-hundreds-of-KB to multi-MB uncompressed JSON).
+# A label document's JSON grows with its polygon count, to megabytes on a dense image.
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# ── Tab routes ──
-from tcip_web.routes import register_all as _register_routes  # noqa: E402  (needs `app`)
-
 _register_routes(app)
-
-# ── State snapshot + WS ──
-from tcip_web.state import (  # noqa: E402  (needs `app`)
-    GuiMutationInvalidError,
-    NoProjectOpenError,
-    PanelEnvelope,
-    ProjectNotOpenError,
-    SnapshotProject,
-    StateNotification,
-    StateSnapshotMessage,
-    store as _gui_store,
-)
 
 _state_watchers: set[WebSocket] = set()
 
@@ -139,8 +126,7 @@ async def _project_not_open_handler(
     )
 
 
-# This process's launch identity, minted once at import: rides every snapshot envelope so a
-# restarted backend's lower-numbered first snapshot is accepted across a client's wsVersion guard.
+# Minted per process, so a client's wsVersion guard admits a restarted backend's first snapshot.
 SERVER_EPOCH = uuid.uuid4().hex
 
 
@@ -221,12 +207,8 @@ async def state_ws(websocket: WebSocket) -> None:
         _state_watchers.discard(websocket)
 
 
-# ── Panel event hub ──
-
-# Per-event identity; the timestamp keeps ids distinct across a restart, where the counter resets
-# while browsers keep their dismissals.
+# An event id's timestamp keeps it distinct across a restart, which resets this counter.
 _event_counter = itertools.count(1)
-# Open WebSocket subscribers per panel.
 _panel_subscribers: dict[Panel, set[WebSocket]] = defaultdict(set)
 
 
@@ -235,7 +217,6 @@ class PanelEvent(BaseModel):
 
     event_type: str
     data: dict[str, JsonValue] = {}
-    # The id of the project the sender acts on.
     project_id: str
 
 
@@ -264,11 +245,9 @@ def _find_static_dir() -> Path:
     return candidates[-1]
 
 
-# Serve static files (web frontend)
 STATIC_DIR = _find_static_dir()
 if STATIC_DIR.exists():
-    # The built frontend references absolute /assets/... paths (Vite's default base="/"), so
-    # mount that subdirectory at /assets; /static stays for ad-hoc static resources.
+    # The built frontend references /assets/... absolutely, under Vite's default base "/".
     assets_dir = STATIC_DIR / "assets"
     if assets_dir.exists():
         app.mount(
@@ -277,12 +256,8 @@ if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-# The paths this app serves the built frontend and its health probe through, so the generated
-# dev proxy never claims them and Vite keeps serving its own root, modules and HMR.
+# Served by this app, so the generated dev proxy never claims them and Vite keeps its own root.
 FRONTEND_SERVING_PATHS = frozenset({"/", "/health"})
-
-
-# ── Health ──
 
 
 @app.get("/health")
@@ -291,17 +266,12 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-# ── Frontend ──
-
-
 @app.get("/")
 def index() -> Response:
     """Serve the built frontend's ``index.html``, or a 503 naming how to build it when absent."""
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
         return FileResponse(str(index_path))
-    # Fail loudly instead of silently serving a stub: the API works, but the GUI bundle
-    # hasn't been built. Tell the operator exactly how to build it.
     return JSONResponse(
         status_code=503,
         content={
@@ -313,9 +283,6 @@ def index() -> Response:
             "api_docs": "/docs",
         },
     )
-
-
-# ── Panel events: POST endpoint (MCP tools) + WS subscription (browsers) ──
 
 
 @app.post("/api/events/{panel}")
@@ -343,8 +310,7 @@ async def post_panel_event(
         **agent_identity.fields_from_headers(request.headers),
     )
     _gui_store.retain_event(envelope)
-    # Agent focus events also update the advisory GuiState slice, so the snapshot shows where the
-    # agent pointed the human: the browser applies the event locally and never syncs these back.
+    # The browser applies a focus event locally and never syncs it back, so the snapshot moves here.
     if event.event_type == PANEL_EVENT_ANNOTATE_FOCUS:
         mutation: dict[str, Any] = {"active_tab": "annotate"}
         if "mode" in event.data:
@@ -366,7 +332,6 @@ async def panel_ws(websocket: WebSocket, panel: Panel) -> None:
     await websocket.accept()
     _panel_subscribers[panel].add(websocket)
     try:
-        # Replay the open project's retained events so a late-joining browser sees its state.
         for event in _gui_store.retained_events(panel):
             await websocket.send_text(event.model_dump_json())
         async for _ in websocket.iter_text():
