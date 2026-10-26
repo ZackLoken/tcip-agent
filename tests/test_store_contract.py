@@ -12,6 +12,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,7 +42,7 @@ from tests._store_worker import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 _WORKER = Path(__file__).with_name("_store_worker.py")
 
@@ -168,46 +169,76 @@ def test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_ot
     assert ts.read(other) == {"n": 2}
 
 
+class _ObservedIdle:
+    """A condition that delegates to ``condition`` and sets ``blocked`` once a waiter must wait.
+
+    ``blocked`` is set when a predicate given to :meth:`wait_for` first answers false.
+    """
+
+    def __init__(self, condition: threading.Condition) -> None:
+        self.condition = condition
+        self.blocked = threading.Event()
+
+    def __enter__(self) -> bool:
+        return self.condition.__enter__()
+
+    def __exit__(self, *exc: object) -> None:
+        self.condition.__exit__(*exc)
+
+    def notify_all(self) -> None:
+        self.condition.notify_all()
+
+    def wait_for(
+        self, predicate: Callable[[], bool], timeout: float | None = None
+    ) -> bool:
+        def observed() -> bool:
+            ready = predicate()
+            if not ready:
+                self.blocked.set()
+            return ready
+
+        return self.condition.wait_for(observed, timeout)
+
+
 def test_release_root_waits_for_an_operation_in_flight_on_that_root(
-    store: Harness,
+    store: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``release_root`` waits for a transaction in flight on that root.
 
-    A release issued while another thread is inside a transaction on the root returns only
-    once that transaction has committed, and the commit lands.
+    A release issued while another thread is inside a transaction on the root is observed
+    waiting on the backend's idle condition before the transaction finishes, and once it
+    returns the transaction's commit is what the root holds.
     """
-    import threading
-
     key = store.key(LWW, "in-flight")
     ts.replace(key, {"n": 1})
+    idle = _ObservedIdle(store.backend._idle)  # noqa: SLF001 - the wait is the subject
+    monkeypatch.setattr(store.backend, "_idle", idle)
     inside, finish = threading.Event(), threading.Event()
-    order: list[str] = []
+    seen: list[object] = []
 
     def hold() -> None:
         with ts.transaction(key) as txn:
             inside.set()
             finish.wait(30)
             txn.write(key, {"n": 2})
-        order.append("committed")
 
     def release() -> None:
         ts.release_root(store.root)
-        order.append("released")
+        seen.append(ts.read(key))
 
     worker = threading.Thread(target=hold)
     worker.start()
     assert inside.wait(30)
     releaser = threading.Thread(target=release)
     releaser.start()
-    releaser.join(0.5)
-    assert releaser.is_alive(), (
-        "the release returned while a transaction on the root was open"
-    )
+    blocked = idle.blocked.wait(30)
     finish.set()
     worker.join(30)
     releaser.join(30)
-    assert order == ["committed", "released"]
-    assert ts.read(key) == {"n": 2}
+    assert blocked, (
+        "the release did not wait while a transaction on the root was open"
+    )
+    assert seen == [{"n": 2}]
 
 
 # ── the database's own creation ─────────────────────────────────────────────────
