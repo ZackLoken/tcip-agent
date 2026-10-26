@@ -2,22 +2,25 @@
 
 from __future__ import annotations
 
-import re
+from typing import TYPE_CHECKING
 
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from tcip_web.app import ActiveTabPayload, app
 from tcip_web.trust_boundary import EXPOSURE_REFUSAL, STATE_CHANGING_METHODS
 from tests._route_walk import state_changing_routes
 
+if TYPE_CHECKING:
+    from fastapi.routing import RouteContext
+
 FOREIGN_ORIGIN = "http://evil.example"
-_PARAM_RE = re.compile(r"\{[^}]*\}")
 
 
-def _filled_path(route: APIRoute) -> str:
-    """Return ``route.path`` with each ``{param}`` replaced by ``does-not-exist``."""
-    return _PARAM_RE.sub("does-not-exist", route.path)
+def _filled_path(route: RouteContext) -> str:
+    """Return the route's path with each path parameter filled by ``does-not-exist``."""
+    return route.path_format.format_map(
+        dict.fromkeys(route.param_convertors, "does-not-exist")
+    )
 
 
 def _state_changing_calls() -> list[tuple[str, str]]:
@@ -53,7 +56,6 @@ def test_every_state_changing_route_refuses_a_foreign_origin(
             resp.status_code,
             resp.text,
         )
-        assert resp.status_code != 422
         assert "origin not allowed" in resp.text
         assert EXPOSURE_REFUSAL not in resp.text
 

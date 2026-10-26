@@ -4,39 +4,43 @@ The FastAPI app registers the paths; ``tools/generate_frontend_routes.py`` proje
 frontend's sources read into ``frontend/src/api/routes.ts``. These tests hold that projection to
 the app's registered routes and the sources' reads, check that the frontend writes no backend
 path of its own beside it, and check that each path the browser asks for is one the dev server
-forwards.
+forwards, as Vite loads its proxy from ``vite.config.ts``.
 """
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 
+from tcip_mcp.web_client import LOOPBACK_HOST, Panel
+from tcip_web.__main__ import DEFAULT_PORT
 from tcip_web.app import app
 from tests import FRONTEND_SRC
 from tests._route_walk import route_generator as _generator
 
 GENERATED = _generator().GENERATED_PATH
 PROXY_GENERATED = _generator().PROXY_GENERATED_PATH
-VITE_CONFIG = FRONTEND_SRC.parent / "vite.config.ts"
-
-_PROXY_ENTRY_RE = re.compile(
-    r'\{\s*path:\s*"([^"]+)",\s*ws:\s*(true|false)\s*\}'
-)
-_PROXY_BUILD_RE = re.compile(
-    r"Object\.fromEntries\(\s*DEV_PROXY\.map\(\(\s*\{\s*path,\s*ws\s*\}\s*\)\s*=>\s*"
-    r"\[\s*path\s*,\s*\{\s*target:\s*BACKEND\s*,\s*changeOrigin:\s*true\s*,\s*ws\s*\}\s*\]\s*\)\s*,?\s*\)",
-    re.S,
-)
+PROXY_SCRIPT = _generator().READS_SCRIPT.with_name("devServerProxy.mjs")
 
 
 @pytest.fixture(scope="module")
 def frontend() -> dict:
     """Return the generator's own read of the frontend's sources, run once for the module."""
     return _generator().frontend_reads()
+
+
+@pytest.fixture(scope="module")
+def dev_server_proxy() -> dict:
+    """Return the dev server's proxy rules, as Vite loads them from the real ``vite.config.ts``.
+
+    They are what :data:`PROXY_SCRIPT` prints over the frontend directory, loaded with no
+    ``TCIP_WEB_BACKEND`` override in its environment, so they forward to the default backend.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        patch.delenv("TCIP_WEB_BACKEND", raising=False)
+        return _generator().printed_json(PROXY_SCRIPT, FRONTEND_SRC.parent)
 
 
 def test_the_generated_path_module_is_what_the_registered_routes_produce(
@@ -75,32 +79,19 @@ def test_the_generated_proxy_module_is_what_the_registered_routes_produce() -> (
     )
 
 
-def _proxy_entries_from_generated_module() -> tuple[tuple[str, bool], ...]:
-    """Return the ``DEV_PROXY`` entries as the checked-in generated module declares them."""
-    text = PROXY_GENERATED.read_text(encoding="utf-8")
-    return tuple(
-        (path, ws == "true") for path, ws in _PROXY_ENTRY_RE.findall(text)
-    )
+def test_vite_config_proxies_each_generated_entry_to_the_backend(
+    dev_server_proxy: dict,
+) -> None:
+    """The real dev server proxies exactly the generated entries, each to the backend.
 
-
-def test_vite_config_builds_its_real_proxy_from_the_generated_module() -> None:
-    """The real ``vite.config.ts`` builds its proxy from each generated ``DEV_PROXY`` entry.
-
-    The config imports the generated module, and its ``server.proxy`` maps each ``DEV_PROXY``
-    entry's ``path`` and ``ws`` fields into a proxy rule.
+    Each entry's prefix is a proxy rule carrying its ``ws``, the origin changed, and the backend's
+    loopback host at the port it asks for by default as the target.
     """
-    vite_text = VITE_CONFIG.read_text(encoding="utf-8")
-    assert "./src/api/devProxy.generated" in vite_text, (
-        "vite.config.ts no longer imports the generated proxy module"
-    )
-    proxy_block = re.search(r"proxy:\s*(.*?),\n\s*\},", vite_text, re.S)
-    assert proxy_block is not None, (
-        "the Vite server.proxy assignment is no longer where this test reads it"
-    )
-    assert _PROXY_BUILD_RE.search(proxy_block.group(1)), (
-        "vite.config.ts's real server.proxy is not built from each DEV_PROXY entry's own "
-        "path/ws fields: " + proxy_block.group(1)
-    )
+    target = f"http://{LOOPBACK_HOST}:{DEFAULT_PORT}"
+    assert dev_server_proxy == {
+        path: {"target": target, "changeOrigin": True, "ws": ws}
+        for path, ws in _generator().collect_proxy_entries(app)
+    }
 
 
 def test_the_real_apis_websocket_routes_make_the_api_prefix_proxy_websockets() -> (
@@ -141,19 +132,15 @@ def test_the_frontend_serving_paths_are_never_proxy_entries() -> None:
 
 
 def test_every_path_the_browser_asks_for_is_forwarded_by_the_dev_server(
-    frontend: dict,
+    frontend: dict, dev_server_proxy: dict
 ) -> None:
-    """The paths the frontend reads all fall under a prefix the generated dev proxy forwards.
+    """The paths the frontend reads all fall under a prefix the dev server forwards.
 
-    The prefixes are parsed from the checked-in proxy module, and the routes read are the
-    generator's own read of the frontend's sources.
+    The prefixes are the dev server's proxy rules as Vite loads them, and the routes read are
+    the generator's own read of the frontend's sources.
     """
-    prefixes = tuple(
-        path for path, _ws in _proxy_entries_from_generated_module()
-    )
-    assert prefixes, (
-        "no proxied prefixes parsed out of the generated proxy module"
-    )
+    prefixes = tuple(dev_server_proxy)
+    assert prefixes, "Vite loads no proxy rule from vite.config.ts"
 
     read = _generator().read_routes(app, frontend["reads"])
     assert read, (
@@ -161,14 +148,14 @@ def test_every_path_the_browser_asks_for_is_forwarded_by_the_dev_server(
     )
     unproxied = sorted(
         f"{name} ({path})"
-        for name, path, _ in read
+        for name, path, _, _ in read
         if not path.startswith(prefixes)
     )
     assert not unproxied, f"the dev server forwards none of these: {unproxied}"
 
 
 def _orchard_app() -> FastAPI:
-    """Return a fresh app registering two HTTP routes and one socket."""
+    """Return a fresh app registering two HTTP routes and two sockets."""
     fresh = FastAPI()
 
     @fresh.get("/api/orchard/blocks")
@@ -183,6 +170,10 @@ def _orchard_app() -> FastAPI:
     async def _block_socket(block_id: str) -> None:
         return None
 
+    @fresh.websocket("/ws/panel/{panel}")
+    async def _panel_socket(panel: Panel) -> None:
+        return None
+
     return fresh
 
 
@@ -192,13 +183,16 @@ def test_a_route_the_generator_has_not_seen_before_still_reaches_the_browser() -
     """A newly registered route is projected without anything being taught about it.
 
     The names carry the method and the path parameters, the rendered module carries exactly
-    the routes named to it, and it passes a parameter through ``encodeURIComponent`` where it
-    is substituted.
+    the routes named to it, formatted, and it passes a parameter through
+    ``encodeURIComponent`` where it is substituted. A parameter declared as a generated
+    vocabulary is typed by its generated alias, imported from the generated types module.
     """
     generator = _generator()
     fresh = _orchard_app()
 
-    names = {name: path for name, path, _ in generator.collect_routes(fresh)}
+    names = {
+        name: path for name, path, _, _ in generator.collect_routes(fresh)
+    }
     assert names["getOrchardBlocks"] == "/api/orchard/blocks"
     assert (
         names["postOrchardBlocksByBlockIdClose"]
@@ -206,13 +200,52 @@ def test_a_route_the_generator_has_not_seen_before_still_reaches_the_browser() -
     )
     assert names["socketWsOrchardByBlockId"] == "/ws/orchard/{block_id}"
 
-    read = {"getOrchardBlocks", "postOrchardBlocksByBlockIdClose"}
+    read = {
+        "getOrchardBlocks",
+        "postOrchardBlocksByBlockIdClose",
+        "socketWsPanelByPanel",
+    }
     assert generator.render(fresh, read) == (
-        generator.HEADER + '  getOrchardBlocks: "/api/orchard/blocks",\n'
+        generator.HEADER
+        + 'import type { Panel } from "./types.generated";\n\n'
+        "export const ROUTES = {\n"
+        '  getOrchardBlocks: "/api/orchard/blocks",\n'
         "  postOrchardBlocksByBlockIdClose: (blockId: string) =>\n"
         "    `/api/orchard/blocks/${encodeURIComponent(blockId)}/close`,\n"
-        + generator.FOOTER
+        "  socketWsPanelByPanel: (panel: Panel) =>"
+        " `/ws/panel/${encodeURIComponent(panel)}`,\n" + generator.FOOTER
     )
+
+
+def test_a_route_under_an_included_routers_prefix_is_named_at_its_path() -> (
+    None
+):
+    """A route and a socket a router includes under its own prefix keep that prefix.
+
+    Each is named and projected at the path the app serves it on, the include prefix with the
+    route's own path.
+    """
+    router = APIRouter()
+
+    @router.get("/items")
+    def _list_items() -> dict:
+        return {}
+
+    @router.websocket("/ws/{item_id}")
+    async def _item_socket(item_id: str) -> None:
+        return None
+
+    fresh = FastAPI()
+    fresh.include_router(router, prefix="/api/farm")
+
+    routes = {
+        name: (path, method)
+        for name, path, method, _ in _generator().collect_routes(fresh)
+    }
+    assert routes == {
+        "getFarmItems": ("/api/farm/items", "GET"),
+        "socketFarmWsByItemId": ("/api/farm/ws/{item_id}", "WEBSOCKET"),
+    }
 
 
 def test_a_read_naming_no_registered_route_is_refused_naming_it() -> None:

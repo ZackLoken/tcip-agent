@@ -9,7 +9,6 @@ rule admits exactly the names ``actor`` admits.
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 from importlib import import_module
 from pathlib import Path
@@ -21,6 +20,7 @@ from tcip_annotation.json_io import PERSON_IDENTITY_PREFIX, is_person
 from tcip_mcp.identity import NoActorError, actor
 from tests import ADMITTED_NAMES, REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
+from tests._route_walk import route_generator
 from tests._web_fixtures import INVARIANCES
 
 NO_PROJECT = "0" * 12
@@ -124,8 +124,6 @@ DOORS = [
     ),
 ]
 
-_RULE_EXPORT = re.compile(r"^export const PERSON_NAME_RULE = (\".*\");$", re.M)
-
 
 def _actor_admits(name: str) -> bool:
     try:
@@ -138,15 +136,16 @@ def _actor_admits(name: str) -> bool:
 def _browser_admits(names: list[str]) -> list[bool]:
     """Return whether the browser's rule admits each of ``names``.
 
-    The rule is read as the generated module exports it and run under Node's own ``RegExp``.
+    The rule is read as the generated module exports it, through the route generator's
+    TypeScript read of the frontend's sources, and run under Node's own ``RegExp``.
     """
-    generated = import_module(
-        "tools.generate_frontend_types"
-    ).GENERATED_PATH.read_text(encoding="utf-8")
-    exported = _RULE_EXPORT.search(generated)
-    assert exported is not None, (
-        "the generated module exports no PERSON_NAME_RULE"
-    )
+    generated = import_module("tools.generate_frontend_types").GENERATED_PATH
+    (rule,) = [
+        constant["value"]
+        for constant in route_generator().frontend_reads()["constants"]
+        if Path(constant["file"]) == generated
+        and constant["name"] == "PERSON_NAME_RULE"
+    ]
     script = (
         "const {rule, names} = JSON.parse(require('fs').readFileSync(0, 'utf8'));"
         "process.stdout.write(JSON.stringify(names.map((n) => new RegExp(rule).test(n))));"
@@ -156,9 +155,7 @@ def _browser_admits(names: list[str]) -> list[bool]:
         capture_output=True,
         encoding="utf-8",
         check=True,
-        input=json.dumps(
-            {"rule": json.loads(exported.group(1)), "names": names}
-        ),
+        input=json.dumps({"rule": rule, "names": names}),
     )
     return json.loads(ran.stdout)
 

@@ -25,19 +25,18 @@ commands a breeder or an operator runs against a project are documented in `READ
 - `list_tools.py` - prints the live MCP tool registry (count + names); the single source of truth
   for "how many domain tools exist," since the count drifts as tools are added/renamed.
 - `line_delta.py` - sums a change's insertions and deletions by area (`packages/`, `tests/`, other)
-  for a commit, a `rev1..rev2` range or `--cached`; the one measurement a contraction change reports
-  before landing (CLAUDE.md, "Working a change"), so package growth beside a replacement is seen
-  rather than assumed away.
+  for a commit, a `rev1..rev2` range or `--cached`.
 - `worktree_gate.py` - runs ruff, mypy and a pytest file list inside a worktree, its own `tcip_mcp`
   resolution proved first (the editable installs point at the main checkout, so a worktree needs its
   own `PYTHONPATH`) and refused before any gate runs if `tcip_mcp` resolves outside it; each
   requested gate runs in the foreground, stopping at the first failure with its exit code.
-- `generate_frontend_routes.py` - generates the browser's route-path module, over the registered
-  FastAPI routes whose names the frontend's non-test sources read as `ROUTES.<name>` (the reads
-  `frontend/scripts/routeReads.mjs` finds through the TypeScript compiler, run under `node` over the
-  frontend's installed packages; a read naming no registered route is refused), and the dev
-  server's proxy config over every registered route, so the frontend references a path by name
-  instead of restating the string a second time.
+- `generate_frontend_routes.py` - generates the browser's route-path module, over FastAPI's
+  effective route contexts whose names the frontend's non-test sources read as `ROUTES.<name>` (the
+  reads `frontend/scripts/routeReads.mjs` finds through the TypeScript compiler, run under `node`
+  over the frontend's installed packages; a read naming no registered route is refused), and the
+  dev server's proxy config over every registered route, both formatted by the frontend's
+  installed Prettier, so the frontend references a path by name instead of restating the string a
+  second time.
 - `generate_frontend_types.py` - renders `frontend/src/api/types.generated.ts` from the pydantic
   models that declare the backend's response shapes and the GUI's tab/mode vocabulary
   (`tcip_web.state.GuiVocabulary`), so the browser's types are a projection of the backend's rather

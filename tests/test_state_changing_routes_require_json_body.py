@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
@@ -21,6 +20,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from fastapi import FastAPI
+    from fastapi.routing import RouteContext
 
 
 class _ProbePayload(BaseModel):
@@ -34,7 +34,7 @@ FORM_POSTED_ROUTES = frozenset({forward_to_board.__name__})
 """The state-changing routes exempt by name, whose posts are another program's forms."""
 
 
-def declares_json_body(route: APIRoute) -> bool:
+def declares_json_body(route: RouteContext) -> bool:
     """Return whether a route's declared body is JSON and required.
 
     It answers whether ``route.body_field`` exists, its media type is ``application/json``, and
