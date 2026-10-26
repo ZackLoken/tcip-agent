@@ -6,7 +6,6 @@ transcript. A harness that produces no stdout does not raise inside the worker.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import subprocess
 import sys
@@ -14,51 +13,41 @@ from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
-from tests import REPO_ROOT
+from tools import cross_family_ask
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
-    from types import ModuleType
-
-SCRIPT = REPO_ROOT / "tools" / "cross_family_ask.py"
 
 
-def _load() -> ModuleType:
-    """Import the runner by path: it is a script, not an installed module."""
-    spec = importlib.util.spec_from_file_location("cross_family_ask", SCRIPT)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["cross_family_ask"] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-@pytest.fixture
-def runner() -> ModuleType:
-    return _load()
-
-
-def test_a_model_id_that_states_its_effort_is_the_effort_whatever_the_flag_said(
-    runner: ModuleType,
-) -> None:
+def test_a_model_id_that_states_its_effort_is_the_effort_whatever_the_flag_said() -> (
+    None
+):
     """A model id that states its effort takes it, with the --effort flag medium or unset."""
     assert (
-        runner.effective_effort("antigravity", "gemini-3.1-pro-high", "medium")
+        cross_family_ask.effective_effort(
+            "antigravity", "gemini-3.1-pro-high", "medium"
+        )
         == "high"
     )
     assert (
-        runner.effective_effort("antigravity", "gemini-3.1-pro-high", None)
+        cross_family_ask.effective_effort(
+            "antigravity", "gemini-3.1-pro-high", None
+        )
         == "high"
     )
 
 
-def test_an_effort_claude_would_ignore_is_refused_by_name(
-    runner: ModuleType,
-) -> None:
+def test_an_effort_claude_would_ignore_is_refused_by_name() -> None:
     with pytest.raises(SystemExit, match="claude effort 'turbo'"):
-        runner.effective_effort("claude", "opus", "turbo")
-    assert runner.effective_effort("claude", "opus", "high") == "high"
-    assert runner.effective_effort("codex", "gpt-5.6-sol", "high") == "high"
+        cross_family_ask.effective_effort("claude", "opus", "turbo")
+    assert (
+        cross_family_ask.effective_effort("claude", "opus", "high") == "high"
+    )
+    assert (
+        cross_family_ask.effective_effort("codex", "gpt-5.6-sol", "high")
+        == "high"
+    )
 
 
 def _stub_run(
@@ -78,22 +67,23 @@ def _stub_run(
 
 @pytest.mark.parametrize("stdout", [None, b"bytes not str"])
 def test_a_harness_returning_no_usable_stdout_still_records_its_run(
-    runner: ModuleType,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     stdout: bytes | None,
 ) -> None:
     """A harness returning None or bytes stdout gets its stdout and meta files written."""
-    monkeypatch.setattr(runner.subprocess, "run", _stub_run(stdout))
+    monkeypatch.setattr(cross_family_ask.subprocess, "run", _stub_run(stdout))
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
     monkeypatch.setitem(
-        runner.BUILDERS, "codex", lambda *a, **k: (["stub", "argv"], None)
+        cross_family_ask.BUILDERS,
+        "codex",
+        lambda *a, **k: (["stub", "argv"], None),
     )
     (tmp_path / "q.txt").write_text("question", encoding="utf-8")
 
-    meta = runner.run_one(
+    meta = cross_family_ask.run_one(
         "codex",
         "qid",
         "as-shipped",
@@ -112,7 +102,7 @@ def test_a_harness_returning_no_usable_stdout_still_records_its_run(
 
 
 def test_one_familys_failure_leaves_the_others_results_intact(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A raising harness is recorded as a runner error while the surviving family's answer is kept.
 
@@ -123,7 +113,7 @@ def test_one_familys_failure_leaves_the_others_results_intact(
     def _explode(*_args: object, **_kwargs: object) -> NoReturn:
         raise RuntimeError("harness blew up")
 
-    real_run_one = runner.run_one
+    real_run_one = cross_family_ask.run_one
 
     def _dispatch(
         family: str,
@@ -134,20 +124,24 @@ def test_one_familys_failure_leaves_the_others_results_intact(
             _explode()
         return real_run_one(family, *args, **kwargs)
 
-    monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
+    )
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
     # Keep the test hermetic: without this, main()'s harness-on-PATH check exits before the
     # collection loop whenever the real codex/agy CLIs are absent (the CI environment).
     monkeypatch.setattr(
-        runner.shutil, "which", lambda *a, **k: "/stub/harness"
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
     for fam in ("codex", "antigravity"):
         monkeypatch.setitem(
-            runner.BUILDERS, fam, lambda *a, **k: (["stub", "argv"], None)
+            cross_family_ask.BUILDERS,
+            fam,
+            lambda *a, **k: (["stub", "argv"], None),
         )
-    monkeypatch.setattr(runner, "run_one", _dispatch)
+    monkeypatch.setattr(cross_family_ask, "run_one", _dispatch)
     (tmp_path / "q.txt").write_text("question", encoding="utf-8")
 
     monkeypatch.setattr(
@@ -173,7 +167,7 @@ def test_one_familys_failure_leaves_the_others_results_intact(
     )
 
     # Non-zero, because a family that failed is a failed invocation and must not read as clean.
-    assert runner.main() != 0
+    assert cross_family_ask.main() != 0
 
     surviving = (
         tmp_path / "out" / "qid" / "as-shipped" / "antigravity" / "response.md"
@@ -198,12 +192,12 @@ def test_one_familys_failure_leaves_the_others_results_intact(
 
 
 def test_a_prompt_file_with_a_byte_order_mark_reaches_the_harness_without_it(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A prompt file's byte order mark is absent from the question ``run_one`` receives."""
     seen: list[str] = []
 
-    real_run_one = runner.run_one
+    real_run_one = cross_family_ask.run_one
 
     def _capture(
         family: str,
@@ -216,17 +210,21 @@ def test_a_prompt_file_with_a_byte_order_mark_reaches_the_harness_without_it(
         seen.append(prompt)
         return real_run_one(family, qid, condition, prompt, *args, **kwargs)
 
-    monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
     )
     monkeypatch.setattr(
-        runner.shutil, "which", lambda *a, **k: "/stub/harness"
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+    monkeypatch.setattr(
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
     monkeypatch.setitem(
-        runner.BUILDERS, "codex", lambda *a, **k: (["stub", "argv"], None)
+        cross_family_ask.BUILDERS,
+        "codex",
+        lambda *a, **k: (["stub", "argv"], None),
     )
-    monkeypatch.setattr(runner, "run_one", _capture)
+    monkeypatch.setattr(cross_family_ask, "run_one", _capture)
     (tmp_path / "q.txt").write_text("question", encoding="utf-8-sig")
 
     monkeypatch.setattr(
@@ -251,14 +249,12 @@ def test_a_prompt_file_with_a_byte_order_mark_reaches_the_harness_without_it(
         ],
     )
 
-    assert runner.main() == 0
+    assert cross_family_ask.main() == 0
     assert len(seen) == 1
     assert seen[0] == "question"
 
 
-def test_a_codex_agent_message_stream_yields_the_last_message(
-    runner: ModuleType,
-) -> None:
+def test_a_codex_agent_message_stream_yields_the_last_message() -> None:
     """A codex agent-message stream yields its last agent message as the answer.
 
     The stream carries its answers inside item.completed/agent_message events.
@@ -298,41 +294,45 @@ def test_a_codex_agent_message_stream_yields_the_last_message(
         ),
         json.dumps({"type": "turn.completed"}),
     ]
-    text, source = runner.extract_response("codex", "\n".join(lines), None)
+    text, source = cross_family_ask.extract_response(
+        "codex", "\n".join(lines), None
+    )
     assert text == "second and final pass"
     assert source == "stream_agent_message"
 
 
-def test_an_oversized_raw_stream_is_a_failed_extraction_not_an_answer(
-    runner: ModuleType,
-) -> None:
+def test_an_oversized_raw_stream_is_a_failed_extraction_not_an_answer() -> (
+    None
+):
     """An oversized raw stream reads as a failed extraction, not an answer.
 
     A stream past the size bound yields no text and the ``extraction_failed`` source.
     """
     huge = "not json, just noise " * 6000
-    assert len(huge.strip()) > runner.MAX_RAW_STREAM_CHARS
-    text, source = runner.extract_response("codex", huge, None)
+    assert len(huge.strip()) > cross_family_ask.MAX_RAW_STREAM_CHARS
+    text, source = cross_family_ask.extract_response("codex", huge, None)
     assert (text, source) == ("", "extraction_failed")
 
 
 def test_an_oversized_raw_stream_through_main_fails_the_run(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A run whose oversized stream could not be extracted fails through main.
 
     Its meta records the ``extraction_failed`` response source.
     """
     huge = "not json, just noise " * 6000
-    monkeypatch.setattr(runner.subprocess, "run", _stub_run(huge))
+    monkeypatch.setattr(cross_family_ask.subprocess, "run", _stub_run(huge))
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
     monkeypatch.setattr(
-        runner.shutil, "which", lambda *a, **k: "/stub/harness"
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
     monkeypatch.setitem(
-        runner.BUILDERS, "codex", lambda *a, **k: (["stub", "argv"], None)
+        cross_family_ask.BUILDERS,
+        "codex",
+        lambda *a, **k: (["stub", "argv"], None),
     )
     (tmp_path / "q.txt").write_text("question", encoding="utf-8")
 
@@ -358,7 +358,7 @@ def test_an_oversized_raw_stream_through_main_fails_the_run(
         ],
     )
 
-    assert runner.main() != 0
+    assert cross_family_ask.main() != 0
 
     meta = json.loads(
         (
@@ -368,9 +368,9 @@ def test_an_oversized_raw_stream_through_main_fails_the_run(
     assert meta["response_source"] == "extraction_failed"
 
 
-def test_a_payload_with_only_empty_recognized_keys_reads_as_an_empty_response(
-    runner: ModuleType,
-) -> None:
+def test_a_payload_with_only_empty_recognized_keys_reads_as_an_empty_response() -> (
+    None
+):
     """A payload whose only recognized keys are empty reads as an empty response.
 
     An antigravity SUCCESS payload whose ``response`` is blank yields no text and the
@@ -392,24 +392,26 @@ def test_a_payload_with_only_empty_recognized_keys_reads_as_an_empty_response(
             },
         }
     )
-    text, source = runner.extract_response("antigravity", stdout, None)
+    text, source = cross_family_ask.extract_response(
+        "antigravity", stdout, None
+    )
     assert (text, source) == ("", "empty_response")
 
 
 def test_an_empty_response_through_main_fails_the_run(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A run whose recognized answer is empty fails through main."""
     stdout = json.dumps({"status": "SUCCESS", "response": "  "})
-    monkeypatch.setattr(runner.subprocess, "run", _stub_run(stdout))
+    monkeypatch.setattr(cross_family_ask.subprocess, "run", _stub_run(stdout))
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
     monkeypatch.setattr(
-        runner.shutil, "which", lambda *a, **k: "/stub/harness"
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
     monkeypatch.setitem(
-        runner.BUILDERS,
+        cross_family_ask.BUILDERS,
         "antigravity",
         lambda *a, **k: (["stub", "argv"], None),
     )
@@ -437,26 +439,26 @@ def test_an_empty_response_through_main_fails_the_run(
         ],
     )
 
-    assert runner.main() != 0
+    assert cross_family_ask.main() != 0
 
 
 def test_completely_empty_stdout_does_not_read_as_a_clean_run(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Completely empty stdout does not read as a clean run.
 
     A harness whose stdout is the empty string fails the run, and its meta records a fault under
     the ``raw_stdout`` response source.
     """
-    monkeypatch.setattr(runner.subprocess, "run", _stub_run(""))
+    monkeypatch.setattr(cross_family_ask.subprocess, "run", _stub_run(""))
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
     monkeypatch.setattr(
-        runner.shutil, "which", lambda *a, **k: "/stub/harness"
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
     monkeypatch.setitem(
-        runner.BUILDERS,
+        cross_family_ask.BUILDERS,
         "antigravity",
         lambda *a, **k: (["stub", "argv"], None),
     )
@@ -484,7 +486,7 @@ def test_completely_empty_stdout_does_not_read_as_a_clean_run(
         ],
     )
 
-    assert runner.main() != 0
+    assert cross_family_ask.main() != 0
 
     meta = json.loads(
         (
@@ -501,7 +503,7 @@ def test_completely_empty_stdout_does_not_read_as_a_clean_run(
 
 
 def test_a_whitespace_only_agent_message_stream_is_a_failed_run_not_a_clean_one(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A codex stream whose only agent message is whitespace fails the run.
 
@@ -520,15 +522,19 @@ def test_a_whitespace_only_agent_message_stream_is_a_failed_run_not_a_clean_one(
         ),
         json.dumps({"type": "turn.completed"}),
     ]
-    monkeypatch.setattr(runner.subprocess, "run", _stub_run("\n".join(lines)))
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask.subprocess, "run", _stub_run("\n".join(lines))
     )
     monkeypatch.setattr(
-        runner.shutil, "which", lambda *a, **k: "/stub/harness"
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+    monkeypatch.setattr(
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
     monkeypatch.setitem(
-        runner.BUILDERS, "codex", lambda *a, **k: (["stub", "argv"], None)
+        cross_family_ask.BUILDERS,
+        "codex",
+        lambda *a, **k: (["stub", "argv"], None),
     )
     (tmp_path / "q.txt").write_text("question", encoding="utf-8")
 
@@ -554,7 +560,7 @@ def test_a_whitespace_only_agent_message_stream_is_a_failed_run_not_a_clean_one(
         ],
     )
 
-    assert runner.main() != 0
+    assert cross_family_ask.main() != 0
 
     meta = json.loads(
         (
@@ -567,7 +573,7 @@ def test_a_whitespace_only_agent_message_stream_is_a_failed_run_not_a_clean_one(
 
 
 def test_a_runs_own_fault_verdict_is_recorded_in_its_meta_json(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A run's own fault verdict is recorded in its meta.json.
 
@@ -575,17 +581,21 @@ def test_a_runs_own_fault_verdict_is_recorded_in_its_meta_json(
     disk.
     """
     monkeypatch.setattr(
-        runner.subprocess, "run", _stub_run("a real answer from the harness")
+        cross_family_ask.subprocess,
+        "run",
+        _stub_run("a real answer from the harness"),
     )
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
     monkeypatch.setitem(
-        runner.BUILDERS, "codex", lambda *a, **k: (["stub", "argv"], None)
+        cross_family_ask.BUILDERS,
+        "codex",
+        lambda *a, **k: (["stub", "argv"], None),
     )
     (tmp_path / "q.txt").write_text("question", encoding="utf-8")
 
-    meta = runner.run_one(
+    meta = cross_family_ask.run_one(
         "codex",
         "qid",
         "as-shipped",
@@ -607,20 +617,24 @@ def test_a_runs_own_fault_verdict_is_recorded_in_its_meta_json(
 
 
 def test_a_small_plain_text_stdout_still_returns_as_a_raw_stdout_answer_through_main(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A short plain-text stdout returns as a full-length ``raw_stdout`` answer through main."""
     monkeypatch.setattr(
-        runner.subprocess, "run", _stub_run("a short plain-text answer")
+        cross_family_ask.subprocess,
+        "run",
+        _stub_run("a short plain-text answer"),
     )
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
     monkeypatch.setattr(
-        runner.shutil, "which", lambda *a, **k: "/stub/harness"
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
     monkeypatch.setitem(
-        runner.BUILDERS, "codex", lambda *a, **k: (["stub", "argv"], None)
+        cross_family_ask.BUILDERS,
+        "codex",
+        lambda *a, **k: (["stub", "argv"], None),
     )
     (tmp_path / "q.txt").write_text("question", encoding="utf-8")
 
@@ -646,7 +660,7 @@ def test_a_small_plain_text_stdout_still_returns_as_a_raw_stdout_answer_through_
         ],
     )
 
-    assert runner.main() == 0
+    assert cross_family_ask.main() == 0
 
     meta = json.loads(
         (
@@ -657,9 +671,9 @@ def test_a_small_plain_text_stdout_still_returns_as_a_raw_stdout_answer_through_
     assert meta["response_chars"] == len("a short plain-text answer")
 
 
-def test_a_dict_payload_with_no_recognized_keys_still_returns_whole_payload(
-    runner: ModuleType,
-) -> None:
+def test_a_dict_payload_with_no_recognized_keys_still_returns_whole_payload() -> (
+    None
+):
     """A dict with unrecognized keys yields the ``whole_payload`` source.
 
     Its text names ``unexpected_field``.
@@ -667,14 +681,14 @@ def test_a_dict_payload_with_no_recognized_keys_still_returns_whole_payload(
     stdout = json.dumps(
         {"unexpected_field": "some value", "another_field": 42}
     )
-    text, source = runner.extract_response("antigravity", stdout, None)
+    text, source = cross_family_ask.extract_response(
+        "antigravity", stdout, None
+    )
     assert source == "whole_payload"
     assert "unexpected_field" in text
 
 
-def test_a_non_string_answer_value_still_dumps_the_whole_payload(
-    runner: ModuleType,
-) -> None:
+def test_a_non_string_answer_value_still_dumps_the_whole_payload() -> None:
     """A non-string value under a recognized key yields the ``whole_payload`` source.
 
     A content-block list and a null under a recognized key each yield that source.
@@ -682,18 +696,20 @@ def test_a_non_string_answer_value_still_dumps_the_whole_payload(
     stdout = json.dumps(
         {"content": [{"type": "text", "text": "the real answer"}]}
     )
-    text, source = runner.extract_response("antigravity", stdout, None)
+    text, source = cross_family_ask.extract_response(
+        "antigravity", stdout, None
+    )
     assert source == "whole_payload"
     assert "the real answer" in text
 
-    text, source = runner.extract_response(
+    text, source = cross_family_ask.extract_response(
         "antigravity", json.dumps({"result": None}), None
     )
     assert source == "whole_payload"
 
 
 def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_child(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A box-drawing character reaches a stdin child as utf-8 and its stdout decodes intact."""
     echo_child = [
@@ -704,14 +720,14 @@ def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_c
         "sys.stdout.write(sys.stdin.read())",
     ]
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
     monkeypatch.setitem(
-        runner.BUILDERS, "codex", lambda *a, **k: (echo_child, None)
+        cross_family_ask.BUILDERS, "codex", lambda *a, **k: (echo_child, None)
     )
 
     prompt = "a box-drawing rule: ───"
-    meta = runner.run_one(
+    meta = cross_family_ask.run_one(
         "codex",
         "qid",
         "as-shipped",
@@ -734,33 +750,35 @@ def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_c
 
 
 def test_an_unnamed_codex_model_with_no_config_is_refused_before_launch(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An unnamed codex model with no config is refused by name."""
     monkeypatch.setattr(
-        runner, "CODEX_CONFIG", tmp_path / "absent" / "config.toml"
+        cross_family_ask, "CODEX_CONFIG", tmp_path / "absent" / "config.toml"
     )
 
     with pytest.raises(SystemExit, match="codex model is unnamed"):
-        runner.resolve_codex_model(None)
+        cross_family_ask.resolve_codex_model(None)
 
 
 def test_the_codex_model_is_read_from_the_config_and_its_source_recorded(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = tmp_path / "config.toml"
     config.write_text('model = "gpt-from-config"' + chr(10), encoding="utf-8")
-    monkeypatch.setattr(runner, "CODEX_CONFIG", config)
+    monkeypatch.setattr(cross_family_ask, "CODEX_CONFIG", config)
 
-    assert runner.resolve_codex_model(None) == ("gpt-from-config", str(config))
-    assert runner.resolve_codex_model("gpt-from-flag") == (
+    assert cross_family_ask.resolve_codex_model(None) == (
+        "gpt-from-config",
+        str(config),
+    )
+    assert cross_family_ask.resolve_codex_model("gpt-from-flag") == (
         "gpt-from-flag",
         "flag",
     )
 
 
 def test_a_run_with_no_usable_answer_says_so_in_words_at_the_end_of_its_output(
-    runner: ModuleType,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -771,18 +789,18 @@ def test_a_run_with_no_usable_answer_says_so_in_words_at_the_end_of_its_output(
     says nothing is reviewable.
     """
     monkeypatch.setattr(
-        runner.subprocess,
+        cross_family_ask.subprocess,
         "run",
         _stub_run(json.dumps({"status": "SUCCESS", "response": "  "})),
     )
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
     monkeypatch.setattr(
-        runner.shutil, "which", lambda *a, **k: "/stub/harness"
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
     monkeypatch.setitem(
-        runner.BUILDERS,
+        cross_family_ask.BUILDERS,
         "antigravity",
         lambda *a, **k: (["stub", "argv"], None),
     )
@@ -809,7 +827,7 @@ def test_a_run_with_no_usable_answer_says_so_in_words_at_the_end_of_its_output(
         ],
     )
 
-    assert runner.main() != 0
+    assert cross_family_ask.main() != 0
     captured = capsys.readouterr()
     assert "RUN FAILED" in captured.out
     assert "antigravity" in captured.out.split("RUN FAILED")[1]
@@ -828,44 +846,45 @@ def test_a_run_with_no_usable_answer_says_so_in_words_at_the_end_of_its_output(
 
 
 def test_load_tcip_mcp_config_refuses_when_mcp_json_is_missing(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(cross_family_ask, "REPO_ROOT", tmp_path)
     with pytest.raises(
         SystemExit, match="cannot read the tcip MCP server block"
     ):
-        runner.load_tcip_mcp_config()
+        cross_family_ask.load_tcip_mcp_config()
 
 
 def test_load_tcip_mcp_config_refuses_when_the_tcip_block_is_missing(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / ".mcp.json").write_text(
         json.dumps({"mcpServers": {"claude-context": {}}}), encoding="utf-8"
     )
-    monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(cross_family_ask, "REPO_ROOT", tmp_path)
     with pytest.raises(SystemExit, match="no mcpServers.tcip block"):
-        runner.load_tcip_mcp_config()
+        cross_family_ask.load_tcip_mcp_config()
 
 
 def test_a_run_whose_families_all_answered_says_so_rather_than_staying_silent(
-    runner: ModuleType,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A run whose families all answered prints a RUN OK verdict and no RUN FAILED."""
     monkeypatch.setattr(
-        runner.subprocess, "run", _stub_run("a real answer from the harness")
+        cross_family_ask.subprocess,
+        "run",
+        _stub_run("a real answer from the harness"),
     )
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
     monkeypatch.setattr(
-        runner.shutil, "which", lambda *a, **k: "/stub/harness"
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
     monkeypatch.setitem(
-        runner.BUILDERS,
+        cross_family_ask.BUILDERS,
         "antigravity",
         lambda *a, **k: (["stub", "argv"], None),
     )
@@ -892,7 +911,7 @@ def test_a_run_whose_families_all_answered_says_so_rather_than_staying_silent(
         ],
     )
 
-    assert runner.main() == 0
+    assert cross_family_ask.main() == 0
     captured = capsys.readouterr()
     assert "RUN OK: 1 of 1 families answered." in captured.out
     assert "RUN FAILED" not in captured.out
@@ -900,7 +919,7 @@ def test_a_run_whose_families_all_answered_says_so_rather_than_staying_silent(
 
 
 def test_an_attached_image_reaches_codex_as_a_flag_and_the_other_families_in_the_prompt(
-    runner: ModuleType, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     """An attached image reaches codex as a flag and antigravity and Claude Code in the prompt.
 
@@ -910,10 +929,10 @@ def test_an_attached_image_reaches_codex_as_a_flag_and_the_other_families_in_the
     """
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
-    condition = runner.CONDITIONS["no-tools"]
+    condition = cross_family_ask.CONDITIONS["no-tools"]
     prompt_file = tmp_path / "p.txt"
 
-    argv, _ = runner.build_codex(
+    argv, _ = cross_family_ask.build_codex(
         prompt_file,
         tmp_path,
         tmp_path,
@@ -927,28 +946,32 @@ def test_an_attached_image_reaches_codex_as_a_flag_and_the_other_families_in_the
     assert argv[at + 1] == str(image)
     assert argv[at + 2].startswith("--")
     assert argv[-1] == "-"
-    bare, _ = runner.build_codex(
+    bare, _ = cross_family_ask.build_codex(
         prompt_file, tmp_path, tmp_path, condition, "gpt-5", "high", 5
     )
     assert "-i" not in bare
 
-    assert f"@{image}" in runner.image_preface("antigravity", (image,))
-    assert str(image) in runner.image_preface("claude", (image,))
-    assert str(image) in runner.image_preface("codex", (image,))
-    assert runner.image_preface("claude", ()) == ""
+    assert f"@{image}" in cross_family_ask.image_preface(
+        "antigravity", (image,)
+    )
+    assert str(image) in cross_family_ask.image_preface("claude", (image,))
+    assert str(image) in cross_family_ask.image_preface("codex", (image,))
+    assert cross_family_ask.image_preface("claude", ()) == ""
 
 
 def test_an_attached_image_prefaces_the_prompt_and_is_recorded_in_the_runs_meta(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An attached image prefaces the prompt and is recorded in the run's meta.json.
 
     The preface sits ahead of the question, the builder receives the resolved paths, and
     meta.json names the images.
     """
-    monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
+    )
+    monkeypatch.setattr(
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
     seen = {}
 
@@ -965,11 +988,11 @@ def test_an_attached_image_prefaces_the_prompt_and_is_recorded_in_the_runs_meta(
         seen["images"] = images
         return ["stub", "argv"], None
 
-    monkeypatch.setitem(runner.BUILDERS, "codex", builder)
+    monkeypatch.setitem(cross_family_ask.BUILDERS, "codex", builder)
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
 
-    meta = runner.run_one(
+    meta = cross_family_ask.run_one(
         "codex",
         "qid",
         "as-shipped",
@@ -995,23 +1018,27 @@ def test_an_attached_image_prefaces_the_prompt_and_is_recorded_in_the_runs_meta(
 
 
 def test_a_family_prompt_override_replaces_the_shared_prompt_for_that_family_alone(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A family prompt override replaces the shared prompt for that family alone.
 
     --family-prompt swaps the prompt text for one family and records which file it came from; a
     family with no override gets the shared --prompt-file.
     """
-    monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
     )
     monkeypatch.setattr(
-        runner.shutil, "which", lambda *a, **k: "/stub/harness"
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+    monkeypatch.setattr(
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
     for family in ("codex", "antigravity"):
         monkeypatch.setitem(
-            runner.BUILDERS, family, lambda *a, **k: (["stub", "argv"], None)
+            cross_family_ask.BUILDERS,
+            family,
+            lambda *a, **k: (["stub", "argv"], None),
         )
 
     (tmp_path / "shared.txt").write_text("shared question", encoding="utf-8")
@@ -1042,7 +1069,7 @@ def test_a_family_prompt_override_replaces_the_shared_prompt_for_that_family_alo
         ],
     )
 
-    assert runner.main() == 0
+    assert cross_family_ask.main() == 0
 
     codex_meta = json.loads(
         (
@@ -1076,16 +1103,17 @@ def test_a_family_prompt_override_replaces_the_shared_prompt_for_that_family_alo
     "bad_flag", ["codex-no-separator", "nobody=missing.txt"]
 )
 def test_a_malformed_family_prompt_flag_is_refused_before_any_family_launches(
-    runner: ModuleType,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     bad_flag: str,
 ) -> None:
     """A flag with no '=' and a flag naming an unknown family refuse, and no family launches."""
     launched = []
-    monkeypatch.setattr(runner, "run_one", lambda *a, **k: launched.append(a))
     monkeypatch.setattr(
-        runner.shutil, "which", lambda *a, **k: "/stub/harness"
+        cross_family_ask, "run_one", lambda *a, **k: launched.append(a)
+    )
+    monkeypatch.setattr(
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
     (tmp_path / "q.txt").write_text("question", encoding="utf-8")
     monkeypatch.setattr(
@@ -1109,18 +1137,20 @@ def test_a_malformed_family_prompt_flag_is_refused_before_any_family_launches(
     )
 
     with pytest.raises(SystemExit) as refused:
-        runner.main()
+        cross_family_ask.main()
     assert refused.value.code != 0
     assert launched == []
 
 
 def test_a_family_prompt_flag_naming_a_missing_file_is_refused(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     launched = []
-    monkeypatch.setattr(runner, "run_one", lambda *a, **k: launched.append(a))
     monkeypatch.setattr(
-        runner.shutil, "which", lambda *a, **k: "/stub/harness"
+        cross_family_ask, "run_one", lambda *a, **k: launched.append(a)
+    )
+    monkeypatch.setattr(
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
     (tmp_path / "q.txt").write_text("question", encoding="utf-8")
     monkeypatch.setattr(
@@ -1144,13 +1174,13 @@ def test_a_family_prompt_flag_naming_a_missing_file_is_refused(
     )
 
     with pytest.raises(SystemExit) as refused:
-        runner.main()
+        cross_family_ask.main()
     assert refused.value.code != 0
     assert launched == []
 
 
 def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_intact(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A single-family rerun marks itself a rerun and keeps both families' summary rows.
 
@@ -1158,16 +1188,20 @@ def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_in
     meta.json unchanged when read as UTF-8 text and both families in the summary, and the rerun's
     meta says it is a rerun where the first run's did not.
     """
-    monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
     )
     monkeypatch.setattr(
-        runner.shutil, "which", lambda *a, **k: "/stub/harness"
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+    monkeypatch.setattr(
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
     for family in ("codex", "antigravity"):
         monkeypatch.setitem(
-            runner.BUILDERS, family, lambda *a, **k: (["stub", "argv"], None)
+            cross_family_ask.BUILDERS,
+            family,
+            lambda *a, **k: (["stub", "argv"], None),
         )
     (tmp_path / "q.txt").write_text("question", encoding="utf-8")
 
@@ -1189,7 +1223,7 @@ def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_in
         "5",
     ]
     monkeypatch.setattr(sys, "argv", first_argv)
-    assert runner.main() == 0
+    assert cross_family_ask.main() == 0
 
     antigravity_meta_path = (
         tmp_path / "out" / "qid" / "as-shipped" / "antigravity" / "meta.json"
@@ -1223,7 +1257,7 @@ def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_in
             "5",
         ],
     )
-    assert runner.main() == 0
+    assert cross_family_ask.main() == 0
 
     assert (
         antigravity_meta_path.read_text(encoding="utf-8")
@@ -1247,22 +1281,26 @@ def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_in
 
 
 def test_a_malformed_prior_summary_loses_only_itself_not_the_current_run(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A malformed prior summary loses itself, not the current run's rows.
 
     Over a summary.json that is not valid JSON, the run exits zero and the summary holds the
     current run's own rows.
     """
-    monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
     monkeypatch.setattr(
-        runner, "harness_version", lambda *a, **k: "stub-version"
+        cross_family_ask.subprocess, "run", _stub_run("an answer")
     )
     monkeypatch.setattr(
-        runner.shutil, "which", lambda *a, **k: "/stub/harness"
+        cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
+    )
+    monkeypatch.setattr(
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
     monkeypatch.setitem(
-        runner.BUILDERS, "codex", lambda *a, **k: (["stub", "argv"], None)
+        cross_family_ask.BUILDERS,
+        "codex",
+        lambda *a, **k: (["stub", "argv"], None),
     )
     (tmp_path / "q.txt").write_text("question", encoding="utf-8")
     summary_path = tmp_path / "out" / "qid" / "as-shipped" / "summary.json"
@@ -1291,20 +1329,22 @@ def test_a_malformed_prior_summary_loses_only_itself_not_the_current_run(
         ],
     )
 
-    assert runner.main() == 0
+    assert cross_family_ask.main() == 0
 
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert {row["family"] for row in summary} == {"codex"}
 
 
 def test_a_missing_image_is_refused_before_any_family_launches(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A missing image is refused, and no family launches."""
     launched = []
-    monkeypatch.setattr(runner, "run_one", lambda *a, **k: launched.append(a))
     monkeypatch.setattr(
-        runner.shutil, "which", lambda *a, **k: "/stub/harness"
+        cross_family_ask, "run_one", lambda *a, **k: launched.append(a)
+    )
+    monkeypatch.setattr(
+        cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
     (tmp_path / "q.txt").write_text("question", encoding="utf-8")
     monkeypatch.setattr(
@@ -1328,6 +1368,6 @@ def test_a_missing_image_is_refused_before_any_family_launches(
     )
 
     with pytest.raises(SystemExit) as refused:
-        runner.main()
+        cross_family_ask.main()
     assert refused.value.code != 0
     assert launched == []

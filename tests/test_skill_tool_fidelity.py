@@ -7,30 +7,15 @@ anywhere in its text, fails. Tool names outside a Tools table are not checked fo
 
 from __future__ import annotations
 
-import importlib.util
 from typing import TYPE_CHECKING
 
-from tests import REPO_ROOT
+from tools import verify_skill_tools
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from types import ModuleType
 
     import pytest
     from mcp.types import Tool
-
-
-def _load_guardrail() -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "verify_skill_tools", REPO_ROOT / "tools" / "verify_skill_tools.py"
-    )
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-guardrail = _load_guardrail()
 
 
 def _listed(*names: str) -> list[Tool]:
@@ -43,7 +28,7 @@ def _listed(*names: str) -> list[Tool]:
 def test_landed_prose_carries_no_fabricated_tool_name() -> None:
     from tcip_web.cli import tool_listing
 
-    fabricated = guardrail.fabricated_tool_names(tool_listing())
+    fabricated = verify_skill_tools.fabricated_tool_names(tool_listing())
     assert not fabricated, (
         f"Tools-table cell(s) name a tool the registry does not hold: {fabricated}. Either "
         "it's a fabricated or retired name (fix the surface) or a real tool missing from the "
@@ -54,7 +39,7 @@ def test_landed_prose_carries_no_fabricated_tool_name() -> None:
 def test_landed_prose_leaves_no_registered_tool_orphaned() -> None:
     from tcip_web.cli import tool_listing
 
-    orphans = guardrail.orphan_tool_names(tool_listing())
+    orphans = verify_skill_tools.orphan_tool_names(tool_listing())
     assert not orphans, (
         f"registered tool(s) named nowhere in any agent-facing surface: {orphans}. Name each "
         "in the skill that owns its domain."
@@ -63,7 +48,7 @@ def test_landed_prose_leaves_no_registered_tool_orphaned() -> None:
 
 def test_orphan_allow_list_is_empty() -> None:
     """The orphan allow-list is empty."""
-    assert guardrail.ORPHAN_ALLOW == frozenset()
+    assert verify_skill_tools.ORPHAN_ALLOW == frozenset()
 
 
 def test_fabricated_tool_names_catches_a_retired_name_in_a_fixture_table(
@@ -79,7 +64,7 @@ def test_fabricated_tool_names_catches_a_retired_name_in_a_fixture_table(
         "| `run_inference` | a real, registered tool |\n",
         encoding="utf-8",
     )
-    fabricated = guardrail.fabricated_tool_names(
+    fabricated = verify_skill_tools.fabricated_tool_names(
         _listed("run_inference"), [fixture]
     )
     assert fabricated == {str(fixture): ["sam_auto_label"]}
@@ -100,7 +85,7 @@ def test_fabricated_tool_names_skips_a_non_identifier_first_token(
         "| logged `tools/` script | not a tool name |\n",
         encoding="utf-8",
     )
-    assert guardrail.fabricated_tool_names(_listed(), [fixture]) == {}
+    assert verify_skill_tools.fabricated_tool_names(_listed(), [fixture]) == {}
 
 
 def test_fabricated_tool_names_extracts_the_name_from_a_call_signature(
@@ -119,7 +104,9 @@ def test_fabricated_tool_names_extracts_the_name_from_a_call_signature(
         encoding="utf-8",
     )
     assert (
-        guardrail.fabricated_tool_names(_listed("get_experiment"), [fixture])
+        verify_skill_tools.fabricated_tool_names(
+            _listed("get_experiment"), [fixture]
+        )
         == {}
     )
 
@@ -136,7 +123,7 @@ def test_fabrication_check_does_not_reach_a_retired_name_in_running_prose(
         "The agent calls `sam_auto_label` to do the labeling, a plain sentence, no table.\n",
         encoding="utf-8",
     )
-    assert guardrail.fabricated_tool_names(_listed(), [fixture]) == {}
+    assert verify_skill_tools.fabricated_tool_names(_listed(), [fixture]) == {}
 
 
 def test_fabrication_check_does_not_reach_a_differently_headed_tool_table(
@@ -156,7 +143,7 @@ def test_fabrication_check_does_not_reach_a_differently_headed_tool_table(
         "| `run_inference` | somewhere | a real, registered tool |\n",
         encoding="utf-8",
     )
-    assert guardrail.fabricated_tool_names(_listed(), [fixture]) == {}
+    assert verify_skill_tools.fabricated_tool_names(_listed(), [fixture]) == {}
 
 
 def test_fabricated_tool_names_catches_an_invented_console_command(
@@ -174,7 +161,7 @@ def test_fabricated_tool_names_catches_an_invented_console_command(
         "| `tcip frobnicate` | an invented command |\n",
         encoding="utf-8",
     )
-    assert guardrail.fabricated_tool_names(_listed(), [fixture]) == {
+    assert verify_skill_tools.fabricated_tool_names(_listed(), [fixture]) == {
         str(fixture): ["tcip frobnicate"]
     }
 
@@ -192,7 +179,9 @@ def test_fabricated_tool_names_admits_a_real_console_command(
         encoding="utf-8",
     )
     assert (
-        guardrail.fabricated_tool_names(_listed("scan_dataset"), [fixture])
+        verify_skill_tools.fabricated_tool_names(
+            _listed("scan_dataset"), [fixture]
+        )
         == {}
     )
 
@@ -205,7 +194,7 @@ def test_orphan_tool_names_catches_a_registered_name_missing_from_every_surface(
     fixture.write_text(
         "Only `run_inference` is named here.\n", encoding="utf-8"
     )
-    assert guardrail.orphan_tool_names(
+    assert verify_skill_tools.orphan_tool_names(
         _listed("run_inference", "orphaned_tool"), [fixture]
     ) == ["orphaned_tool"]
 
@@ -221,7 +210,10 @@ def test_orphan_tool_names_accepts_the_call_form_too(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert (
-        guardrail.orphan_tool_names(_listed("run_inference"), [fixture]) == []
+        verify_skill_tools.orphan_tool_names(
+            _listed("run_inference"), [fixture]
+        )
+        == []
     )
 
 
@@ -240,5 +232,5 @@ def test_one_checker_invocation_lists_the_tools_once(
 
     monkeypatch.setattr(server, "build_server", counted)
 
-    assert guardrail.main() == 0
+    assert verify_skill_tools.main() == 0
     assert len(built) == 1

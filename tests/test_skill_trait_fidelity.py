@@ -6,28 +6,9 @@ trait nor an allow-listed platform token fails.
 
 from __future__ import annotations
 
-import importlib.util
-from typing import TYPE_CHECKING
-
 import pytest
 
-from tests import REPO_ROOT
-
-if TYPE_CHECKING:
-    from types import ModuleType
-
-
-def _load_guardrail() -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "verify_skill_traits", REPO_ROOT / "tools" / "verify_skill_traits.py"
-    )
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-guardrail = _load_guardrail()
+from tools import verify_skill_traits
 
 
 def _document_text(name: str) -> str:
@@ -52,8 +33,10 @@ CROP_SKILLS = {
 
 @pytest.mark.parametrize("name", list(CROP_SKILLS))
 def test_skill_asserts_no_fabricated_traits(name: str) -> None:
-    allnames, _ = guardrail.load_vocab()
-    unknown = guardrail.unknown_trait_tokens(_document_text(name), allnames)
+    allnames, _ = verify_skill_traits.load_vocab()
+    unknown = verify_skill_traits.unknown_trait_tokens(
+        _document_text(name), allnames
+    )
     assert not unknown, (
         f"{name}: backticks trait-like tokens not in crops.yml and not allow-listed: "
         f"{unknown}. Either it's a fabricated trait (fix the document) or a real platform token "
@@ -66,8 +49,8 @@ def test_skill_asserts_no_fabricated_traits(name: str) -> None:
 )
 def test_skill_asserts_no_off_crop_traits(name: str, crop_key: str) -> None:
     """Every real trait a per-crop document backticks is assigned to that crop in crops.yml."""
-    allnames, by_crop = guardrail.load_vocab()
-    off_crop = guardrail.off_crop_tokens(
+    allnames, by_crop = verify_skill_traits.load_vocab()
+    off_crop = verify_skill_traits.off_crop_tokens(
         _document_text(name), allnames, by_crop[crop_key]
     )
     assert not off_crop, (
@@ -83,20 +66,21 @@ def test_backtick_regex_catches_no_underscore_and_mixed_case_names() -> None:
     single-word name does not.
     """
     text = "See `fruit_juice_TA` and `fruit_juice_pH` and `plant_height` here."
-    toks = guardrail.extract_backtick_snake(text)
+    toks = verify_skill_traits.extract_backtick_snake(text)
     assert "fruit_juice_TA" in toks
     assert "fruit_juice_pH" in toks
     assert "plant_height" in toks
     # single-word tokens still don't match the token-shaped regex: documented blind spot
     assert (
-        guardrail.extract_backtick_snake("See `dbh` and `sex` here.") == set()
+        verify_skill_traits.extract_backtick_snake("See `dbh` and `sex` here.")
+        == set()
     )
 
 
 def test_mentioned_trait_names_finds_single_word_traits() -> None:
     """`mentioned_trait_names` finds the single-word trait `dbh` in a sentence."""
-    allnames, _ = guardrail.load_vocab()
-    found = guardrail.mentioned_trait_names(
+    allnames, _ = verify_skill_traits.load_vocab()
+    found = verify_skill_traits.mentioned_trait_names(
         "Measure `dbh` on the standing tree.", allnames
     )
     assert "dbh" in found
@@ -118,10 +102,10 @@ def test_the_guardrail_checks_the_vocabulary_the_registry_itself_loads(
         lambda: [{"name": "measure_one", "crops": ["crop_one"]}],
     )
 
-    allnames, by_crop = guardrail.load_vocab()
+    allnames, by_crop = verify_skill_traits.load_vocab()
     assert allnames == {"measure_one"}
     assert by_crop["crop_one"] == {"measure_one"}
-    assert guardrail.unknown_trait_tokens(
+    assert verify_skill_traits.unknown_trait_tokens(
         "Records `plant_height` for the block.", allnames
     ) == ["plant_height"]
 
@@ -132,11 +116,11 @@ def test_a_readable_vocabulary_is_checked() -> None:
     The real controlled vocabulary loads, carries its crop assignments, and a clean skill comes
     back clean.
     """
-    allnames, by_crop = guardrail.load_vocab()
+    allnames, by_crop = verify_skill_traits.load_vocab()
     assert "dbh" in allnames
     assert by_crop["hazelnut"]
     assert (
-        guardrail.unknown_trait_tokens(
+        verify_skill_traits.unknown_trait_tokens(
             "Measure `dbh` on the standing tree.", allnames
         )
         == []
@@ -148,10 +132,10 @@ def test_off_crop_tokens_catches_single_word_mis_assignment() -> None:
 
     `dbh` is a real crops.yml trait not assigned to currant.
     """
-    allnames, by_crop = guardrail.load_vocab()
+    allnames, by_crop = verify_skill_traits.load_vocab()
     assert "dbh" in allnames
     assert "dbh" not in by_crop.get("currant", set())
-    off_crop = guardrail.off_crop_tokens(
+    off_crop = verify_skill_traits.off_crop_tokens(
         "This currant skill mentions `dbh` by mistake.",
         allnames,
         by_crop.get("currant", set()),

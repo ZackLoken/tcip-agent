@@ -5,37 +5,19 @@ Covers the scratch variables it sets and the roots it refuses. No server is star
 
 from __future__ import annotations
 
-import importlib.util
 import os
-import sys
 from typing import TYPE_CHECKING
 
 import pytest
 
-from tests import REPO_ROOT
+from tools import serve_capture_app
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from types import ModuleType
-
-SCRIPT = REPO_ROOT / "tools" / "serve_capture_app.py"
-
-
-def _load() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("serve_capture_app", SCRIPT)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["serve_capture_app"] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-@pytest.fixture
-def tool() -> ModuleType:
-    return _load()
 
 
 def test_the_workspace_and_port_point_under_the_given_root(
-    tool: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The built environment sets the workspace under the root, the requested port, unbuffered.
 
@@ -44,7 +26,7 @@ def test_the_workspace_and_port_point_under_the_given_root(
     """
     monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
     root = tmp_path / "harness"
-    env = tool.build_environ(root, 8799)
+    env = serve_capture_app.build_environ(root, 8799)
 
     assert env["TCIP_WORKSPACE"] == str(root / "workspace")
     assert env["TCIP_WEB_PORT"] == "8799"
@@ -52,55 +34,55 @@ def test_the_workspace_and_port_point_under_the_given_root(
 
 
 def test_pythonpath_carries_the_repository_root(
-    tool: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The built ``PYTHONPATH`` leads with the repository root and keeps its existing entries."""
     monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "existing"))
     root = tmp_path / "harness"
 
-    env = tool.build_environ(root, 8799)
+    env = serve_capture_app.build_environ(root, 8799)
 
     parts = env["PYTHONPATH"].split(os.pathsep)
-    assert str(tool.REPO_ROOT) == parts[0]
+    assert str(serve_capture_app.REPO_ROOT) == parts[0]
     assert str(tmp_path / "existing") in parts
 
 
-def test_a_root_under_the_repository_is_refused(tool: ModuleType) -> None:
-    root = tool.REPO_ROOT / "scratch_harness"
+def test_a_root_under_the_repository_is_refused() -> None:
+    root = serve_capture_app.REPO_ROOT / "scratch_harness"
     with pytest.raises(SystemExit, match="is under the repository"):
-        tool.build_environ(root, 8799)
+        serve_capture_app.build_environ(root, 8799)
 
 
-def test_the_repository_root_itself_is_refused(tool: ModuleType) -> None:
+def test_the_repository_root_itself_is_refused() -> None:
     with pytest.raises(SystemExit, match="is under the repository"):
-        tool.build_environ(tool.REPO_ROOT, 8799)
+        serve_capture_app.build_environ(serve_capture_app.REPO_ROOT, 8799)
 
 
 def test_a_root_under_the_callers_own_active_workspace_is_refused(
-    tool: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     active_workspace = tmp_path / "S" / "real-project"
     monkeypatch.setenv("TCIP_WORKSPACE", str(active_workspace))
     root = active_workspace / "harness"
 
     with pytest.raises(SystemExit, match="own TCIP_WORKSPACE"):
-        tool.build_environ(root, 8799)
+        serve_capture_app.build_environ(root, 8799)
 
 
 def test_a_root_outside_both_is_admitted(
-    tool: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "elsewhere"))
     root = tmp_path / "harness"
 
-    env = tool.build_environ(root, 8799)
+    env = serve_capture_app.build_environ(root, 8799)
 
     assert env["TCIP_WORKSPACE"] == str(root / "workspace")
 
 
 def test_a_root_containing_the_callers_own_active_workspace_is_refused(
-    tool: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A root containing the process's own active workspace is refused.
 
@@ -112,60 +94,60 @@ def test_a_root_containing_the_callers_own_active_workspace_is_refused(
     monkeypatch.setenv("TCIP_WORKSPACE", str(active_workspace))
 
     with pytest.raises(SystemExit, match="own TCIP_WORKSPACE"):
-        tool.build_environ(root, 8799)
+        serve_capture_app.build_environ(root, 8799)
 
 
 def test_a_root_that_already_carries_its_own_tcip_state_is_refused(
-    tool: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
     root = tmp_path / "harness"
     (root / ".tcip").mkdir(parents=True)
 
     with pytest.raises(SystemExit, match="already looks like a workspace"):
-        tool.build_environ(root, 8799)
+        serve_capture_app.build_environ(root, 8799)
 
 
 def test_a_root_whose_child_already_carries_tcip_state_is_refused(
-    tool: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
     root = tmp_path / "harness"
     (root / "existing_project" / ".tcip").mkdir(parents=True)
 
     with pytest.raises(SystemExit, match="already looks like a workspace"):
-        tool.build_environ(root, 8799)
+        serve_capture_app.build_environ(root, 8799)
 
 
 def test_a_fresh_root_with_no_tcip_workspace_bound_is_admitted(
-    tool: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A fresh root with no workspace bound and no ``.tcip`` under it is admitted."""
     monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
     root = tmp_path / "harness"
 
-    env = tool.build_environ(root, 8799)
+    env = serve_capture_app.build_environ(root, 8799)
 
     assert env["TCIP_WORKSPACE"] == str(root / "workspace")
 
 
 def test_stop_refuses_outright_on_a_non_windows_host(
-    tool: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(tool.sys, "platform", "linux")
+    monkeypatch.setattr(serve_capture_app.sys, "platform", "linux")
 
     with pytest.raises(SystemExit, match="Windows-only"):
-        tool.stop(tmp_path)
+        serve_capture_app.stop(tmp_path)
 
 
 def test_stop_is_not_refused_for_platform_on_windows(
-    tool: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """On a Windows host, stop passes the platform check and reaches its real work.
 
     It reaches the missing server_info.json refusal.
     """
-    monkeypatch.setattr(tool.sys, "platform", "win32")
+    monkeypatch.setattr(serve_capture_app.sys, "platform", "win32")
 
     with pytest.raises(SystemExit, match="no server_info.json"):
-        tool.stop(tmp_path)
+        serve_capture_app.stop(tmp_path)

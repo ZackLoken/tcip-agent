@@ -7,19 +7,15 @@ sits in, a second commit with the fix and the guard test) and runs the real scri
 
 from __future__ import annotations
 
-import importlib.util
 import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import REPO_ROOT
-
-if TYPE_CHECKING:
-    from types import ModuleType
+from tools.prove_test_fails_before import _failure_kind
 
 SCRIPT = REPO_ROOT / "tools" / "prove_test_fails_before.py"
 SCRIPT_SOURCE = SCRIPT.read_text(encoding="utf-8")
@@ -474,16 +470,6 @@ def test_a_file_not_found_error_at_the_tests_own_assertion_line_guards(
 # ── --per-test-timeout ───────────────────────────────────────────────────────
 
 
-def _load_tool() -> ModuleType:
-    """Import the real module under test by path and return it."""
-    spec = importlib.util.spec_from_file_location(
-        "prove_test_fails_before_under_test", SCRIPT
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 @pytest.mark.parametrize(
     "headline",
     [
@@ -499,9 +485,8 @@ def test_the_signal_method_timeout_message_is_a_timeout_not_a_behavioral_pass(
     Where SIGALRM exists, pytest-timeout raises pytest.fail(PYTEST_FAILURE_MESSAGE), a Failed
     exception; its headline, bare and prefixed with the exception class, classifies as a timeout.
     """
-    tool = _load_tool()
     entry = {"headline": headline, "phase": "call", "exc_typename": "Failed"}
-    assert tool._failure_kind(entry, Path(".")) == "timeout"
+    assert _failure_kind(entry, Path(".")) == "timeout"
 
 
 def test_a_hung_test_under_per_test_timeout_reports_indeterminate_naming_it(
