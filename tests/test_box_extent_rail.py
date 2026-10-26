@@ -19,7 +19,7 @@ from tcip_annotation.json_io import (
     write_label_document,
 )
 from tcip_annotation.state import Annotation, BBox, Polygon
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, label_key
 from tcip_mcp.pipelines.data.label_queries import registry_scope
 from tests._producer_fixtures import image_label_key, write_image
 
@@ -202,7 +202,7 @@ def test_save_annotations_refuses_an_inverted_box(
 ) -> None:
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
+    img = image_dir(tmp_path, UNDATED_BUCKET) / "img_001.jpg"
     write_image(img, (200, 150))
 
     result = save_annotations(
@@ -221,7 +221,7 @@ def test_save_annotations_admits_an_ordered_box(
 ) -> None:
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    img = tmp_path / "images" / UNDATED_BUCKET / "img_001.jpg"
+    img = image_dir(tmp_path, UNDATED_BUCKET) / "img_001.jpg"
     write_image(img, (200, 150))
 
     result = save_annotations(
@@ -241,7 +241,7 @@ def test_save_annotations_admits_an_ordered_box(
 def test_annotate_save_refuses_an_inverted_box(
     client: TestClient, opened_project: Path
 ) -> None:
-    img = opened_project / "images" / UNDATED_BUCKET / "img_001.jpg"
+    img = image_dir(opened_project, UNDATED_BUCKET) / "img_001.jpg"
     write_image(img, (200, 150))
 
     resp = client.post(
@@ -260,7 +260,7 @@ def test_annotate_save_refuses_an_inverted_box(
 def test_annotate_save_admits_an_ordered_box(
     client: TestClient, opened_project: Path
 ) -> None:
-    img = opened_project / "images" / UNDATED_BUCKET / "img_001.jpg"
+    img = image_dir(opened_project, UNDATED_BUCKET) / "img_001.jpg"
     write_image(img, (200, 150))
 
     resp = client.post(
@@ -294,7 +294,7 @@ def _seed_review_dataset(
     from tests._web_fixtures import open_new_project
 
     dataset_root = open_new_project(tmp_path).root
-    img = dataset_root / "images" / UNDATED_BUCKET / "img_001.jpg"
+    img = image_dir(dataset_root, UNDATED_BUCKET) / "img_001.jpg"
     write_image(img, (200, 150))
     registry_over(
         dataset_root,
@@ -352,7 +352,7 @@ def _save(
 ) -> dict:
     return {
         "image_path": str(
-            dataset_root / "images" / UNDATED_BUCKET / "img_001.jpg"
+            image_dir(dataset_root, UNDATED_BUCKET) / "img_001.jpg"
         ),
         "annotations": annotations,
         "user": "breeder",
@@ -520,7 +520,7 @@ def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(
 ) -> None:
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
-    images_dir = tmp_path / "images" / "2026-01-01"
+    images_dir = image_dir(tmp_path, "2026-01-01")
     image = images_dir / "img_001.jpg"
     write_image(image, (200, 150))
 
@@ -565,7 +565,7 @@ def test_stage_proposals_refuses_a_shape_stating_no_confidence(
     """
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
-    image = tmp_path / "images" / "2026-01-01" / "img_001.jpg"
+    image = image_dir(tmp_path, "2026-01-01") / "img_001.jpg"
     write_image(image, (200, 150))
     unscored = (
         {
@@ -602,7 +602,7 @@ def test_stage_proposals_refuses_a_shape_stating_no_subject_by_its_index(
     """
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
-    image = tmp_path / "images" / "2026-01-01" / "img_001.jpg"
+    image = image_dir(tmp_path, "2026-01-01") / "img_001.jpg"
     write_image(image, (200, 150))
     unstated = (
         {"boxes": [{"conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2}]}

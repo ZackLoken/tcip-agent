@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 import tcip_store
+from tcip_mcp.dataset_layout import image_root
 from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key
 
 if TYPE_CHECKING:
@@ -77,7 +78,7 @@ def test_the_records_a_full_push_writes_read_back_through_their_models_as_pushed
     pushed = _push(
         client,
         opened.id,
-        opened.root / "images" / "a.jpg",
+        image_root(opened.root) / "a.jpg",
         img_width=200,
         img_height=100,
         viewport={"x": 0, "y": 0, "w": 200, "h": 100, "scale": 1.5},
@@ -121,7 +122,7 @@ def test_a_push_omitting_its_counts_is_refused_and_writes_nothing(
     """A push that leaves out a field the GUI states answers 422 naming it, and stores nothing."""
     from tcip_mcp.web_client import read_canvas_meta
 
-    body = _body(opened.id, opened.root / "images" / "b.jpg")
+    body = _body(opened.id, image_root(opened.root) / "b.jpg")
     del body["counts"]
 
     resp = client.post("/api/canvas/state", json=body)
@@ -137,7 +138,7 @@ def test_a_heartbeat_is_stored_whole_and_leaves_the_geometry_absent(
     from tcip_mcp.web_client import read_canvas_geometry, read_canvas_meta
 
     root = str(opened.root)
-    _push(client, opened.id, opened.root / "images" / "b.jpg")
+    _push(client, opened.id, image_root(opened.root) / "b.jpg")
 
     meta = read_canvas_meta(root)
 
@@ -152,7 +153,7 @@ def test_a_stored_meta_record_missing_its_arrival_instant_is_refused_naming_it(
     from tcip_mcp.web_client import read_canvas_meta
 
     root = str(opened.root)
-    _push(client, opened.id, opened.root / "images" / "a.jpg")
+    _push(client, opened.id, image_root(opened.root) / "a.jpg")
     raw = tcip_store.read(canvas_meta_key(root))
     assert isinstance(raw, dict)
     del raw["received_at"]
@@ -171,7 +172,7 @@ def test_a_stored_meta_record_missing_its_dirty_flag_is_refused_naming_it(
     from tcip_mcp.web_client import read_canvas_meta
 
     root = str(opened.root)
-    _push(client, opened.id, opened.root / "images" / "a.jpg")
+    _push(client, opened.id, image_root(opened.root) / "a.jpg")
     raw = tcip_store.read(canvas_meta_key(root))
     assert isinstance(raw, dict)
     del raw["dirty"]
@@ -190,7 +191,7 @@ def test_a_stored_geometry_record_missing_its_shapes_is_refused_naming_them(
     from tcip_mcp.web_client import read_canvas_geometry
 
     root = str(opened.root)
-    _push(client, opened.id, opened.root / "images" / "a.jpg", shapes=SHAPES)
+    _push(client, opened.id, image_root(opened.root) / "a.jpg", shapes=SHAPES)
     raw = tcip_store.read(canvas_geometry_key(root))
     assert isinstance(raw, dict)
     del raw["shapes"]
@@ -209,7 +210,7 @@ def test_a_stored_geometry_record_whose_shape_states_no_kind_is_refused_naming_i
     from tcip_mcp.web_client import read_canvas_geometry
 
     root = str(opened.root)
-    _push(client, opened.id, opened.root / "images" / "a.jpg", shapes=SHAPES)
+    _push(client, opened.id, image_root(opened.root) / "a.jpg", shapes=SHAPES)
     raw = tcip_store.read(canvas_geometry_key(root))
     assert isinstance(raw, dict) and isinstance(raw["shapes"], list)
     first = raw["shapes"][0]

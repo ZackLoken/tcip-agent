@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 if TYPE_CHECKING:
     from torch.utils.data import DataLoader
@@ -38,7 +38,7 @@ def _two_subject_dataset(root: Path) -> Path:
         registry_over,
     )
 
-    images_dir = root / "images" / UNDATED_BUCKET
+    images_dir = image_dir(root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True, exist_ok=True)
     registry_over(
         root,

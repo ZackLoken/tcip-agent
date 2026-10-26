@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 if TYPE_CHECKING:
     from torch import Tensor
@@ -123,7 +123,7 @@ def test_detection_anchor_free_e2e(tmp_path: Path) -> None:
     from tests._verified_checkpoint_fixtures import built_detector
     from tests.tiny_trainer_fixtures import run_context
 
-    images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path / "ds", UNDATED_BUCKET)
     images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(4):
         save_image(torch.rand(3, 64, 64), str(images_dir / f"img{i}.png"))

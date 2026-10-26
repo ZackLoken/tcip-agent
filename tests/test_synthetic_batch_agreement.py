@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -93,18 +93,15 @@ def _real_detection_item(tmp_path: Path) -> tuple[torch.Tensor, dict]:
     It writes a 96 by 48 image labeled with one ``bud`` box ``(4, 6, 40, 19)`` under a registry
     listing ``bush`` then ``bud``, and returns the first item of the detection dataset over it.
     """
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, write_image
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     registry_over(
         tmp_path, SubjectRegistry((Subject("bush", ""), Subject("bud", "")))
     )
-    Image.new("RGB", (96, 48)).save(images_dir / "a.png")
+    write_image(images_dir / "a.png", (96, 48))
     label_image(
         images_dir / "a.png",
         [Annotation(subject="bud", geometry=BBox(4, 6, 40, 19))],
@@ -123,12 +120,11 @@ def _real_ordinal_items(tmp_path: Path) -> list[tuple[torch.Tensor, dict]]:
 
     The dataset is over two blank 96 by 48 frames ranked 0 and 3.
     """
-    from PIL import Image
+    from tests._producer_fixtures import write_image
 
-    images_dir = tmp_path / "ordinal" / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
+    images_dir = image_dir(tmp_path / "ordinal", UNDATED_BUCKET)
     for name in ("a", "b"):
-        Image.new("RGB", (96, 48)).save(images_dir / f"{name}.png")
+        write_image(images_dir / f"{name}.png", (96, 48))
     csv_path = tmp_path / "ranks.csv"
     csv_path.write_text("image_stem,rank\na,0\nb,3\n")
     dataset = dataset_over("ordinal", str(images_dir), str(csv_path))

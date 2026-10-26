@@ -547,13 +547,14 @@ def test_the_count_tool_hands_back_no_counts_when_it_refuses(
     A count delivery whose trait states no operationalization refuses, naming that.
     """
     pytest.importorskip("torch")
+    from tcip_mcp.dataset_layout import image_root
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
     from tests._chain_fixtures import predicted, published
 
     bucket = published(
         tmp_path,
         "m/d",
-        [predicted(tmp_path / "ds" / "images" / "a.png", [fx.COUNT_SUBJECT])],
+        [predicted(image_root(tmp_path / "ds") / "a.png", [fx.COUNT_SUBJECT])],
         scope={"subject": fx.COUNT_SUBJECT},
     )
 

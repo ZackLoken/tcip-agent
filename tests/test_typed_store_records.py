@@ -15,6 +15,7 @@ import pytest
 from pydantic import ValidationError
 
 import tcip_store as ts
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.model_registry import Producer
 
 if TYPE_CHECKING:
@@ -264,7 +265,7 @@ def _published(project: Path) -> tuple[Bucket, Pass, VerifiedCheckpoint, Path]:
     from tests._producer_fixtures import write_image
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
 
-    image = write_image(project / "ds" / "images" / DATE / "a.png", (64, 64))
+    image = write_image(image_dir(project / "ds", DATE) / "a.png", (64, 64))
     checkpoint = load_registered_checkpoint(
         _run_checkpoint(
             project, data={"num_channels": 3, "scope": {"subject": "bud"}}
@@ -324,7 +325,7 @@ def test_a_proposal_bucket_reads_back_naming_what_proposed_it(
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tests._producer_fixtures import write_image
 
-    image = write_image(tmp_path / "ds" / "images" / DATE / "a.png", (64, 64))
+    image = write_image(image_dir(tmp_path / "ds", DATE) / "a.png", (64, 64))
     root = source_root([str(image)])
     publish(
         tmp_path,
@@ -436,11 +437,7 @@ def test_a_raised_flag_reads_back_as_raised_and_one_missing_a_field_refuses(
         flag_key,
         read_flags,
     )
-    from tcip_mcp.dataset_layout import (
-        Gestures,
-        image_dir,
-        save_label_document,
-    )
+    from tcip_mcp.dataset_layout import Gestures, save_label_document
     from tests._producer_fixtures import image_label_key, write_image
 
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (100, 80))

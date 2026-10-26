@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -50,7 +50,7 @@ class TestDatasets:
         from tcip_annotation.state import Annotation, BBox
         from tests._producer_fixtures import label_image
 
-        imgs = tmp_path / "images" / UNDATED_BUCKET
+        imgs = image_dir(tmp_path, UNDATED_BUCKET)
         imgs.mkdir(parents=True)
         # Create one image + label
         img = torch.randint(0, 255, (3, 64, 64), dtype=torch.uint8)
@@ -202,7 +202,7 @@ class TestActiveLearningScoringLogic:
         )
         from tcip_mcp.pipelines.image_utils import list_logical_images, stem_of
 
-        images = tmp_path / "images"
+        images = image_root(tmp_path)
         images.mkdir()
         bands = {name: images / f"cap_{name}.tif" for name in ("G", "R")}
         for path in [*bands.values(), images / "plain.tif"]:

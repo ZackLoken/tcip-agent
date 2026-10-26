@@ -36,19 +36,17 @@ from tests._verified_checkpoint_fixtures import (  # noqa: E402
 )
 
 
-def _images(
-    tmp_path: Path, n: int = 1, size: int = 100
-) -> tuple[Path, list[str]]:
-    from PIL import Image
+def _images(tmp_path: Path) -> Path:
+    """Write one 100-pixel gray image into capture ``2026-01-01`` of ``tmp_path``; return it.
 
-    images_dir = tmp_path / "images" / "2026-01-01"
-    images_dir.mkdir(parents=True, exist_ok=True)
-    paths = []
-    for i in range(n):
-        p = images_dir / f"img{i}.png"
-        Image.new("RGB", (size, size), (100, 100, 100)).save(p)
-        paths.append(str(p))
-    return images_dir, paths
+    The return is the capture directory.
+    """
+    from tcip_mcp.dataset_layout import image_dir
+    from tests._producer_fixtures import write_image
+
+    images_dir = image_dir(tmp_path, "2026-01-01")
+    write_image(images_dir / "img0.png", (100, 100), (100, 100, 100))
+    return images_dir
 
 
 def _register(
@@ -75,7 +73,7 @@ def _infer(tmp_path: Path, ckpt: str, bucket: str = "preds") -> dict:
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
 
-    images_dir, _ = _images(tmp_path)
+    images_dir = _images(tmp_path)
     return run_inference(
         tmp_path,
         ckpt,
@@ -112,7 +110,7 @@ def test_evaluate_model_refuses_an_unregistered_checkpoint_by_bare_path(
     tmp_path: Path,
 ) -> None:
     ckpt = secondary_checkpoint(tmp_path)
-    images_dir, _ = _images(tmp_path)
+    images_dir = _images(tmp_path)
 
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._training_values import IOU_THRESHOLD
@@ -161,7 +159,7 @@ def test_web_inference_worker_refuses_an_unregistered_checkpoint(
     from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
 
     ckpt = secondary_checkpoint(tmp_path)
-    images_dir, _ = _images(tmp_path)
+    images_dir = _images(tmp_path)
 
     job = InferenceJob(
         job_id="rail1",
@@ -184,7 +182,7 @@ def test_triage_predictions_refuses_an_unregistered_checkpoint(
     tmp_path: Path,
 ) -> None:
     ckpt = secondary_checkpoint(tmp_path)
-    images_dir, _ = _images(tmp_path)
+    images_dir = _images(tmp_path)
 
     from tcip_mcp.tools.feedback_tools import triage_predictions
 
@@ -208,7 +206,7 @@ def test_triage_predictions_refuses_by_the_project_it_acts_on(
     other_root.mkdir()
     ckpt = secondary_checkpoint(tmp_path)
     _register(registered_root, ckpt)
-    images_dir, _ = _images(tmp_path)
+    images_dir = _images(tmp_path)
 
     from tcip_mcp.tools.feedback_tools import triage_predictions
 
@@ -228,7 +226,7 @@ def test_triage_predictions_admits_a_checkpoint_registered_under_the_project_it_
     registered_root.mkdir()
     ckpt = secondary_checkpoint(registered_root)
     _register(registered_root, ckpt)
-    images_dir, _ = _images(tmp_path)
+    images_dir = _images(tmp_path)
 
     from tcip_mcp.tools.feedback_tools import triage_predictions
 
@@ -250,7 +248,7 @@ def test_review_priority_route_worker_fails_the_job_on_an_unregistered_checkpoin
     from tcip_web.routes.annotate import PriorityQueueJob, _pq_worker
 
     ckpt = secondary_checkpoint(tmp_path)
-    images_dir, _ = _images(tmp_path)
+    images_dir = _images(tmp_path)
 
     job = PriorityQueueJob.launched(
         job_id="rail1-pq",
@@ -280,7 +278,7 @@ def test_review_priority_route_worker_completes_the_job_with_a_registered_checkp
     from tcip_web.routes.annotate import PriorityQueueJob, _pq_worker
 
     ckpt = registered_checkpoint(tmp_path)
-    images_dir, _ = _images(tmp_path)
+    images_dir = _images(tmp_path)
 
     monkeypatch.setattr(
         al_scorer,
@@ -659,7 +657,7 @@ def test_doctor_lists_a_bucket_naming_an_unregistered_digest_and_stays_silent_on
 
     findings: list = []
     doctor_module.check_registry(
-        tmp_path, findings, buckets=doctor_module._buckets(tmp_path)
+        tmp_path, findings, buckets=doctor_module._buckets(tmp_path, findings)
     )
 
     messages = [m for _, m in findings]

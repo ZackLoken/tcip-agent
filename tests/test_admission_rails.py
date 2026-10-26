@@ -27,7 +27,11 @@ from PIL import Image  # noqa: E402
 import tcip_store as ts  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key  # noqa: E402
+from tcip_mcp.dataset_layout import (  # noqa: E402
+    UNDATED_BUCKET,
+    image_dir,
+    label_key,
+)
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry  # noqa: E402
 from tests._producer_fixtures import (  # noqa: E402
@@ -130,7 +134,7 @@ def test_a_document_with_no_image_is_not_admitted(tmp_path: Path) -> None:
     Membership is the images the place holds ground truth for; a document whose image is gone
     names no member.
     """
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     _make_images(images, ["kept"])
     _label(images, "kept", [box_annotation(10, 10, 50, 50)])
     json_io.write_label_document(
@@ -148,7 +152,7 @@ def test_a_noncanonical_labelme_record_refuses_rather_than_reading_as_empty(
     tmp_path: Path,
 ) -> None:
     """A record in another tool's schema is refused as unreadable ground truth."""
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     _make_images(images, ["a"])
     ts.replace(
         image_label_key(images / "a.jpg"),
@@ -174,7 +178,7 @@ def test_a_noncanonical_labelme_record_refuses_rather_than_reading_as_empty(
 
 
 def test_detection_reads_its_samples_own_documents(tmp_path: Path) -> None:
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     _make_images(images, ["img0"])
     _label(images, "img0", [box_annotation(10, 10, 50, 50)])
 
@@ -199,7 +203,7 @@ def test_a_point_document_is_admitted_and_trains_through_the_builder_that_reads_
 
     from tcip_annotation.state import Point
 
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     _make_images(images, ["p0", "p1"])
     for index, stem in enumerate(("p0", "p1")):
         _label(
@@ -261,7 +265,7 @@ def test_class_distribution_counts_only_this_loaders_own_samples(
     """
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
 
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     stems = [f"img{i}" for i in range(4)]
     _make_images(images, stems)
     for i, stem in enumerate(stems):
@@ -291,7 +295,7 @@ def test_class_distribution_counts_only_this_loaders_own_samples(
 
 
 def test_instance_seg_reads_its_samples_own_documents(tmp_path: Path) -> None:
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     _make_images(images, ["img0"])
     _label(images, "img0", [_poly([(10, 10), (50, 10), (50, 50), (10, 50)])])
 
@@ -337,7 +341,7 @@ def test_instance_seg_rasterizes_a_two_ring_instance_into_one_mask(
     An occlusion-split instance (a bud behind a branch) is one object with two regions, and both
     rings rasterize into that instance's single mask.
     """
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     _make_images(images, ["img0"])
     _label(images, "img0", [_multi_poly([LOBE_A, LOBE_B])])
 
@@ -354,7 +358,7 @@ def test_instance_seg_two_single_ring_instances_stay_two_masks(
     Two lobes authored as separate annotations give two masks, their boxes the two lobes'
     extents.
     """
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     _make_images(images, ["img0"])
     _label(images, "img0", [_poly(LOBE_A), _poly(LOBE_B)])
 
@@ -370,7 +374,7 @@ def test_instance_seg_two_single_ring_instances_stay_two_masks(
 def test_count_label_lines_reads_a_documents_instances(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.splits import count_label_lines
 
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     _make_images(images, ["a", "neg"])
     _label(
         images,
@@ -402,7 +406,7 @@ def _rail_fixture(tmp_path: Path) -> Path:
 
     The unlabeled image has no label document. Returns their directory.
     """
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     _make_images(images, ["ann", "empty", "nolabel", "neg"])
     _label(images, "ann", [box_annotation(4, 4, 12, 12)], keep_empty=True)
     _label(images, "empty", [], keep_empty=True)
@@ -457,7 +461,7 @@ def test_caller_supplied_members_are_filtered_too(tmp_path: Path) -> None:
 def test_no_trainable_samples_raises_rather_than_training_on_nothing(
     tmp_path: Path,
 ) -> None:
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     _make_images(images, ["a", "b"])
     _label(images, "a", [], keep_empty=True)  # unconfirmed empty
 
@@ -466,7 +470,7 @@ def test_no_trainable_samples_raises_rather_than_training_on_nothing(
 
 
 def test_instance_seg_applies_the_same_rail(tmp_path: Path) -> None:
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     _make_images(images, ["ann", "nolabel"])
     _label(
         images,
@@ -488,7 +492,7 @@ def test_instance_seg_admits_a_partially_assessed_stem_on_its_subject_marks(
     registry's attribute is admitted, and the scope carries the registry's attributes.
     """
     root = tmp_path / "ds"
-    images_dir = root / "images" / UNDATED_BUCKET
+    images_dir = image_dir(root, UNDATED_BUCKET)
     _make_images(images_dir, ["complete", "partial"])
     _label(
         images_dir,
@@ -545,11 +549,11 @@ def test_semantic_seg_requires_a_mask_but_admits_an_all_background_one(
     import numpy as np
     from PIL import Image as _Image
 
-    images, masks = tmp_path / "images" / UNDATED_BUCKET, tmp_path / "masks"
+    images, masks = image_dir(tmp_path, UNDATED_BUCKET), tmp_path / "masks"
     images.mkdir(parents=True)
     masks.mkdir()
     for stem in ("has_mask", "all_background", "no_mask"):
-        _Image.new("RGB", (32, 32)).save(images / f"{stem}.jpg")
+        write_image(images / f"{stem}.jpg", (32, 32))
     _Image.fromarray(np.ones((32, 32), dtype=np.uint8)).save(
         masks / "has_mask.png"
     )
@@ -584,7 +588,7 @@ def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(
 
 def test_a_confirmation_does_not_leak_across_subjects(tmp_path: Path) -> None:
     """A completion mark for one subject does not admit the image as a negative of another."""
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     _make_images(images, ["ann", "shared"])
     # Every subject's annotation records share one per-image document; subject is a field in it.
     _label(
@@ -643,7 +647,7 @@ def test_json_det_targets_marks_an_unassessed_row_and_refuses_an_undeclared_valu
     )
 
     root = tmp_path / "ds"
-    images = root / "images" / UNDATED_BUCKET
+    images = image_dir(root, UNDATED_BUCKET)
     _make_images(images, ["IMG_A", "IMG_B"])
     _write_registry_for(root, attribute="opening", values=("open", "closed"))
     _label(
@@ -700,7 +704,7 @@ def test_detection_and_its_tiles_keep_a_partially_assessed_stem(
     one attribute row per box.
     """
     root = tmp_path / "ds"
-    images_dir = root / "images" / UNDATED_BUCKET
+    images_dir = image_dir(root, UNDATED_BUCKET)
     _make_images(images_dir, ["complete", "partial"])
     _write_registry_for(root, attribute="opening", values=("open", "closed"))
     _label(

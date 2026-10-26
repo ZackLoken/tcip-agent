@@ -397,11 +397,11 @@ def test_doctor_names_a_flags_record_that_will_not_read_and_passes_one_that_does
         ),
     )
     findings: list = []
-    check_state(tmp_path, findings, buckets=_buckets(tmp_path))
+    check_state(tmp_path, findings, buckets=_buckets(tmp_path, findings))
     assert findings == []
 
     ts.replace(flag_key(image_label_key(image)), {"flags": [{"id": "x"}]})
-    check_state(tmp_path, findings, buckets=_buckets(tmp_path))
+    check_state(tmp_path, findings, buckets=_buckets(tmp_path, findings))
     assert [level for level, _ in findings] == ["warn"]
     assert (
         "flags record" in findings[0][1] and "will not read" in findings[0][1]

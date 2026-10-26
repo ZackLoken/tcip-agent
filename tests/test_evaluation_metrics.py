@@ -32,7 +32,7 @@ torch = pytest.importorskip(
 )  # evaluation.py imports torch at module load
 
 from tcip_annotation.matching import match_pairs  # noqa: E402
-from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir  # noqa: E402
 from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
@@ -66,7 +66,10 @@ from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
 from tests._dense_op_fixtures import gt_only, toy_records  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
-from tests._producer_fixtures import checkpoint_admission  # noqa: E402
+from tests._producer_fixtures import (  # noqa: E402
+    checkpoint_admission,
+    write_image,
+)
 from tests._training_values import (  # noqa: E402
     DISPERSION_QUANTILE,
     IOU_THRESHOLD,
@@ -1058,8 +1061,6 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(
     common identity keys, and ``run_test_evaluation``'s result carries none of the full-frame
     regime's fields.
     """
-    from PIL import Image
-
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -1110,9 +1111,8 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(
         trait=None,
     )
 
-    images_dir = tmp_path / "ff" / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (32, 32)).save(images_dir / "a.png")
+    images_dir = image_dir(tmp_path / "ff", UNDATED_BUCKET)
+    write_image(images_dir / "a.png", (32, 32))
     label_image(
         images_dir / "a.png",
         [Annotation(subject="bud", geometry=BBox(4, 4, 12, 12))],
@@ -1169,8 +1169,6 @@ def test_a_full_frame_evaluation_merges_at_the_threshold_its_ground_truth_derive
     An unstated merge threshold is the one the evaluated reference's ground truth derives;
     where that ground truth derives none, the evaluation refuses naming ``cross_tile_nms``.
     """
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.derivations import (
@@ -1191,9 +1189,8 @@ def test_a_full_frame_evaluation_merges_at_the_threshold_its_ground_truth_derive
     checkpoint = load_registered_checkpoint(
         registered_checkpoint(tmp_path), project=tmp_path
     )
-    images_dir = tmp_path / "ff" / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (32, 32)).save(images_dir / "a.png")
+    images_dir = image_dir(tmp_path / "ff", UNDATED_BUCKET)
+    write_image(images_dir / "a.png", (32, 32))
     label_image(
         images_dir / "a.png",
         [Annotation(subject="bud", geometry=BBox(*b)) for b in boxes],
@@ -1365,7 +1362,7 @@ def _four_bud_images(tmp_path: Path) -> Path:
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
         label_image(
@@ -1528,7 +1525,7 @@ def test_score_predictions_folder_counts_every_image_through_the_matcher(
 
     r = score_predictions(
         data_dir,
-        str(data_dir / "images" / "2-11-26"),
+        str(image_dir(data_dir, "2-11-26")),
         DATA_DIR_BUCKET,
         iou_threshold=0.5,
         conf_threshold=0.25,

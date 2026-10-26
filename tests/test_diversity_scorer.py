@@ -13,8 +13,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 pytest.importorskip("torch")
-from PIL import Image  # noqa: E402
-
+from tests._producer_fixtures import write_image  # noqa: E402
 from tests.scorer_models import predictor_for  # noqa: E402
 
 
@@ -31,8 +30,7 @@ def test_diversity_scorer_no_labeled_warns_and_returns_uniform(
 ) -> None:
     from tcip_mcp.pipelines.active_learning.scorer import DiversityScorer
 
-    img = tmp_path / "a.png"
-    Image.new("RGB", (16, 16), (100, 100, 100)).save(img)
+    img = write_image(tmp_path / "a.png", (16, 16), (100, 100, 100))
     predictor = predictor_for(
         tmp_path, "build_conv_backbone", "classification"
     )

@@ -5,6 +5,8 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+from tcip_mcp.dataset_layout import image_dir
+
 PLOTS = {"P1": (43.19670, -90.058000), "P2": (43.19670, -90.058037)}
 """Two plots one row apart, the plant grid :func:`map_captures` places captures on."""
 
@@ -115,9 +117,7 @@ def map_captures(
         captures[date] = []
         for j, (plot, (lat, lon)) in enumerate(PLOTS.items()):
             image = (
-                dataset_root
-                / "images"
-                / date
+                image_dir(dataset_root, date)
                 / f"{plot}_{date.replace('-', '')}.jpg"
             )
             write_geo_image(
@@ -138,7 +138,7 @@ def map_captures(
     built = build_plant_mapping(
         project,
         name=name,
-        images_root=str(dataset_root / "images"),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(project, [plant_csv]),
         actor=None,
     )

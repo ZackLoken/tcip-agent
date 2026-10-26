@@ -202,20 +202,16 @@ def _assessed(tmp_path: Path, builder: str) -> dict:
 
     The images are each their own size, each labeled at its central box spanning half its edge.
     """
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.data_tools import draw_splits
     from tests._chain_fixtures import assess, confirm_count_trait
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, write_image
 
     root = tmp_path / "ds"
-    images_dir = root / "images" / "2-11-26"
-    images_dir.mkdir(parents=True)
+    images_dir = image_dir(root, "2-11-26")
     for i, size in enumerate(range(32, 96, 8)):
-        Image.new("RGB", (size, size), (100, 100, 100)).save(
-            images_dir / f"img{i}.png"
-        )
+        write_image(images_dir / f"img{i}.png", (size, size), (100, 100, 100))
         box = BBox(size * 0.25, size * 0.25, size * 0.75, size * 0.75)
         label_image(
             images_dir / f"img{i}.png",

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.data.selection import ClassScope, read_selection
 from tcip_mcp.subject_registry import Attribute
 from tcip_mcp.tools.data_tools import draw_splits
@@ -79,7 +80,7 @@ REVERSED = Attribute(
 
 
 def _images_dir(root: Path) -> str:
-    return str(root / "images" / DATES[0])
+    return str(image_dir(root, DATES[0]))
 
 
 def run_membership(block: dict) -> Membership:

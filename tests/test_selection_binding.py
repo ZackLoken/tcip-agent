@@ -23,6 +23,7 @@ pytest.importorskip("torchvision")
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.data.datasets import BaseDataset
 from tcip_mcp.pipelines.data.selection import ClassScope, read_selection
 from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
@@ -40,6 +41,7 @@ from tests._producer_fixtures import (
     labeled_frame,
     registry_over,
     train_val as _train_val,
+    write_image,
 )
 from tests._training_values import RATIONALE, drawn_split
 from tests._verified_checkpoint_fixtures import partition_side
@@ -78,7 +80,7 @@ def _two_subject_two_date_dataset(root: Path) -> Path:
         ),
     )
     for date in DATES:
-        images_dir = root / "images" / date
+        images_dir = image_dir(root, date)
         for stem in ("a", "b"):
             _write_stem(
                 images_dir,
@@ -111,7 +113,7 @@ def test_every_sample_groups_each_member_the_way_the_stem_policy_records_it(
     from tcip_mcp.pipelines.data.splits import recorded_group_key_fn
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    images = root / "images" / DATES[0]
+    images = image_dir(root, DATES[0])
     admitted = admit(images, scope=registry_scope(images, SUBJECT))
     key = recorded_group_key_fn("stem", date=admitted.date)
     samples = admitted.every_sample()
@@ -147,7 +149,7 @@ def _attribute_scoped_dataset(root: Path) -> Path:
             )
         ),
     )
-    images_dir = root / "images" / DATES[0]
+    images_dir = image_dir(root, DATES[0])
     for stem, condition in (
         ("assessed_a", "healthy"),
         ("assessed_b", "damaged"),
@@ -183,7 +185,7 @@ def _dataset_with_a_confirmed_negative(root: Path) -> Path:
         root,
         SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
     )
-    images_dir = root / "images" / DATES[0]
+    images_dir = image_dir(root, DATES[0])
     for stem in ("a", "b", "c", "d"):
         _write_stem(
             images_dir,
@@ -204,7 +206,7 @@ def _tiled_dataset(root: Path) -> Path:
         root,
         SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
     )
-    images_dir = root / "images" / DATES[0]
+    images_dir = image_dir(root, DATES[0])
     for parent in ("srcA", "srcB", "srcC", "srcD"):
         for x in range(3):
             _write_stem(
@@ -471,7 +473,7 @@ def test_a_bound_run_keeps_its_selections_attributes_when_the_registry_is_reorde
         tmp_path,
         BLOB_BUILDER,
         {
-            "images_dir": str(root / "images" / DATES[0]),
+            "images_dir": str(image_dir(root, DATES[0])),
             "split": {"selection_dir": str(out)},
         },
     )
@@ -596,17 +598,15 @@ def test_a_bound_run_admits_when_an_unselected_images_stem_turns_ambiguous(
     An image nobody selected picks up a second file under its stem after the draw, and the bound
     run's loaders hold as many samples as the selection recorded on each side.
     """
-    from PIL import Image
-
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    images_dir = root / "images" / DATES[0]
-    Image.new("RGB", (64, 64), (10, 10, 10)).save(images_dir / "spare.jpg")
+    images_dir = image_dir(root, DATES[0])
+    write_image(images_dir / "spare.jpg", (64, 64), (10, 10, 10))
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
     assert "spare" not in {Path(s.source).stem for s in drawn.samples}
 
     # The same logical image now resolves to two files: the directory can no longer be listed.
-    Image.new("RGB", (64, 64), (20, 20, 20)).save(images_dir / "spare.png")
+    write_image(images_dir / "spare.png", (64, 64), (20, 20, 20))
 
     train_ds, val_ds, _partition, _data = _train_val(
         tmp_path, "detection", _run_data_cfg(root, out)
@@ -626,8 +626,6 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
     not read, while the same image's own document builds. The selection comes back
     through ``read_selection``, the platform's own reader.
     """
-    from PIL import Image
-
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
     from tcip_mcp.pipelines.data.selection import (
         ClassScope,
@@ -639,9 +637,8 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
     from tests._producer_fixtures import image_label_key
 
     root = tmp_path / "ds"
-    images_dir = root / "images" / DATES[0]
-    images_dir.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (64, 64), (100, 120, 90)).save(images_dir / "a.jpg")
+    images_dir = image_dir(root, DATES[0])
+    write_image(images_dir / "a.jpg", (64, 64), (100, 120, 90))
     registry_over(
         root,
         SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
@@ -752,7 +749,7 @@ def test_auto_train_val_admits_a_confirmed_negative_the_draw_admitted(
     from tests._producer_fixtures import mark_complete
 
     root = _dataset_with_a_confirmed_negative(tmp_path / "ds")
-    mark_complete(root / "images" / DATES[0] / "n.jpg", SUBJECT, project=root)
+    mark_complete(image_dir(root, DATES[0]) / "n.jpg", SUBJECT, project=root)
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out, seed=1)
     assert "n" in {s.member for s in drawn.samples}
@@ -859,7 +856,7 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(
     )
 
     unbound_cfg = {
-        "images_dir": str(root / "images" / DATES[0]),
+        "images_dir": str(image_dir(root, DATES[0])),
         "scope": {"subject": SUBJECT},
         "dataset_source": source,
         "split": drawn_split(val_ratio=0.5, seed=3, grouping="tile_prefix"),
@@ -1225,7 +1222,7 @@ def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_mem
     from tcip_mcp.pipelines.data.split_construction import redrawn_selection
 
     root = tmp_path / "ds"
-    images_dir = root / "images" / DATES[0]
+    images_dir = image_dir(root, DATES[0])
     for stem in ("a", "a-", "b", "b-", "c", "c-", "d", "d-"):
         _write_stem(
             images_dir,
@@ -1287,7 +1284,7 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
         root,
         SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
     )
-    images_dir = root / "images" / DATES[0]
+    images_dir = image_dir(root, DATES[0])
     for stem in ("fg", "neg", "held_a", "held_b"):
         _write_stem(
             images_dir,
@@ -1497,7 +1494,7 @@ def test_a_run_that_draws_its_own_split_records_no_binding(
     run_dir = resolved_run(
         tmp_path,
         {
-            "images_dir": str(root / "images" / DATES[0]),
+            "images_dir": str(image_dir(root, DATES[0])),
             "scope": {"subject": SUBJECT},
             "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },

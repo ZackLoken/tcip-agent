@@ -18,7 +18,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir  # noqa: E402
 from tcip_mcp.pipelines.data.datasets import BaseDataset  # noqa: E402
 from tcip_mcp.pipelines.execution import ExecutionRefusedError, Stated  # noqa: E402
 from tests import REPO_ROOT  # noqa: E402
@@ -167,18 +167,17 @@ def test_a_pass_with_no_reference_caps_each_frame_at_the_checkpoints_density_tim
     carries, the cap its own pixels give the density the checkpoint recorded, so the caps stand
     in the ratio of the frames' areas and neither row keeps more than its own.
     """
-    from PIL import Image
-
     from tcip_mcp.pipelines.derivations import detection_cap
     from tcip_mcp.pipelines.execution import prepare
+    from tests._producer_fixtures import write_image
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     checkpoint = verified_checkpoint(tmp_path)
     frames = {"small": (64, 48), "large": (256, 192)}
-    paths = []
-    for name, size in frames.items():
-        Image.new("RGB", size, (120, 120, 120)).save(tmp_path / f"{name}.png")
-        paths.append(str(tmp_path / f"{name}.png"))
+    paths = [
+        str(write_image(tmp_path / f"{name}.png", size, (120, 120, 120)))
+        for name, size in frames.items()
+    ]
 
     p = prepare(
         checkpoint,
@@ -233,9 +232,8 @@ def test_a_checkpoint_recording_no_density_refuses_a_detector_pass_naming_the_pr
     regions: a pass with no reference refuses naming the door that records one, and the
     platform-built detector beside it predicts.
     """
-    from PIL import Image
-
     from tcip_mcp.pipelines.execution import prepare
+    from tests._producer_fixtures import write_image
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     foreign = _without_density(tmp_path)
@@ -247,13 +245,13 @@ def test_a_checkpoint_recording_no_density_refuses_a_detector_pass_naming_the_pr
             Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE),
             device="cpu",
         ).runnable()
-    Image.new("RGB", (64, 48), (120, 120, 120)).save(tmp_path / "frame.png")
+    frame = write_image(tmp_path / "frame.png", (64, 48), (120, 120, 120))
     admitted = prepare(
         verified_checkpoint(tmp_path),
         Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE),
         device="cpu",
     ).runnable()
-    (result,) = admitted.predict([str(tmp_path / "frame.png")])
+    (result,) = admitted.predict([str(frame)])
     assert result["cap"] >= 1 and result["count"] <= result["cap"]
 
 
@@ -267,7 +265,7 @@ def _mosaic(root: Path) -> Path:
 
     from tests._producer_fixtures import label_image
 
-    images_dir = root / "images" / UNDATED_BUCKET
+    images_dir = image_dir(root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     raster = images_dir / "mosaic.tif"
     rng = np.random.default_rng(0)
@@ -414,7 +412,7 @@ def test_a_drawn_tiled_run_resolves_its_lattice_once(
     from tests._producer_fixtures import seed_bud_images
 
     images_dir = seed_bud_images(
-        tmp_path / "ds" / "images" / UNDATED_BUCKET, n=4, size=128
+        image_dir(tmp_path / "ds", UNDATED_BUCKET), n=4, size=128
     )
     run, derivations = _resolved(
         tmp_path,
@@ -446,7 +444,7 @@ def test_an_object_as_long_as_the_derived_overlap_lies_whole_in_a_tile_at_a_stat
     from tests._producer_fixtures import label_image, run_over, write_image
 
     image = write_image(
-        tmp_path / "images" / UNDATED_BUCKET / "frame.png", (300, 100)
+        image_dir(tmp_path, UNDATED_BUCKET) / "frame.png", (300, 100)
     )
     label_image(
         image,
@@ -492,7 +490,8 @@ def test_a_tiled_pass_with_nothing_stated_recorded_or_referenced_refuses_naming_
     )
 
     checkpoint = project_checkpoint(tmp_path)
-    images_dir = str(Path(gray_frame(tmp_path)).parent)
+    gray_frame(tmp_path)
+    images_dir = str(tmp_path)
 
     with pytest.raises(ExecutionRefusedError) as refused:
         predicted_over(
@@ -532,7 +531,7 @@ def test_validation_runs_every_frame_under_the_cap_its_density_gives_it(
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     images_dir = seed_bud_images(
-        tmp_path / "val" / "images" / UNDATED_BUCKET, n=2, size=128
+        image_dir(tmp_path / "val", UNDATED_BUCKET), n=2, size=128
     )
     dataset, data = run_over(
         "detection", images_dir, subject="bud", stated={"num_channels": 3}
@@ -593,7 +592,7 @@ def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_flo
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     images_dir = seed_bud_images(
-        tmp_path / "val" / "images" / UNDATED_BUCKET, n=2, size=128
+        image_dir(tmp_path / "val", UNDATED_BUCKET), n=2, size=128
     )
     dataset, data = run_over(
         "detection", images_dir, subject="bud", stated={"num_channels": 3}
@@ -872,7 +871,7 @@ def test_an_enabled_tiling_without_its_lattice_refuses_naming_its_resolver(
     from tests._producer_fixtures import samples_over, seed_bud_images
 
     images_dir = seed_bud_images(
-        tmp_path / "images" / UNDATED_BUCKET, n=2, size=128
+        image_dir(tmp_path, UNDATED_BUCKET), n=2, size=128
     )
     samples, scope = (
         samples_over(images_dir, subject="bud"),
@@ -922,7 +921,7 @@ def test_a_stand_in_datasets_density_is_the_one_its_served_objects_give(
         build_recording_dataset(
             samples=samples_over(
                 seed_labeled_images(
-                    tmp_path / "images" / UNDATED_BUCKET,
+                    image_dir(tmp_path, UNDATED_BUCKET),
                     [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))],
                     n=2,
                     width=8,
@@ -960,7 +959,7 @@ def test_a_bespoke_detector_under_cap_one_keeps_one_through_validation_and_a_pas
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     images_dir = seed_labeled_images(
-        tmp_path / "pair" / "images" / UNDATED_BUCKET,
+        image_dir(tmp_path / "pair", UNDATED_BUCKET),
         [
             Annotation(subject="bud", geometry=BBox(4, 4, 20, 20)),
             Annotation(subject="bud", geometry=BBox(36, 30, 56, 44)),
@@ -1075,7 +1074,8 @@ def test_a_restored_record_missing_its_overlap_or_density_refuses_and_a_complete
     )
 
     checkpoint = verified_checkpoint(tmp_path)
-    images_dir = str(Path(gray_frame(tmp_path)).parent)
+    gray_frame(tmp_path)
+    images_dir = str(tmp_path)
     p, _results = predicted_over(
         tmp_path,
         project_checkpoint(tmp_path),
@@ -1124,7 +1124,7 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
         verified_checkpoint,
     )
 
-    image = Path(gray_frame(tmp_path / "images" / UNDATED_BUCKET, 96, "a.png"))
+    image = Path(gray_frame(image_dir(tmp_path, UNDATED_BUCKET), 96, "a.png"))
     label_image(
         image,
         [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))],

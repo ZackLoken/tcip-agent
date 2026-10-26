@@ -7,34 +7,27 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image
-
 import tcip_store as ts
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.dataset_layout import capture_label_keys
+from tcip_mcp.dataset_layout import capture_label_keys, image_dir
 from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
-from tests._producer_fixtures import label_image
+from tests._producer_fixtures import label_image, write_image
 
 _DATE = "2026-02-11"
 
 
 def _dataset(root: Path) -> None:
     """Write two images of different sizes and colors under one dated capture, each labeled."""
-    (root / "images" / _DATE).mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (48, 32), color=(120, 90, 40)).save(
-        root / "images" / _DATE / "IMG_1.png"
-    )
-    Image.new("RGB", (64, 40), color=(20, 160, 70)).save(
-        root / "images" / _DATE / "IMG_2.png"
-    )
+    write_image(image_dir(root, _DATE) / "IMG_1.png", (48, 32), (120, 90, 40))
+    write_image(image_dir(root, _DATE) / "IMG_2.png", (64, 40), (20, 160, 70))
     label_image(
-        root / "images" / _DATE / "IMG_1.png",
+        image_dir(root, _DATE) / "IMG_1.png",
         [Annotation(subject="bud", geometry=BBox(4, 6, 22, 31))],
         48,
         32,
     )
     label_image(
-        root / "images" / _DATE / "IMG_2.png",
+        image_dir(root, _DATE) / "IMG_2.png",
         [Annotation(subject="bud", geometry=BBox(9, 3, 60, 28))],
         64,
         40,
@@ -50,7 +43,7 @@ def test_a_dataset_whose_images_were_all_removed_reports_no_identity(
     assert before is not None
     assert len(before) == 16
 
-    for img in (tmp_path / "images" / _DATE).glob("*.png"):
+    for img in image_dir(tmp_path, _DATE).glob("*.png"):
         img.unlink()
     assert dataset_fingerprint(tmp_path) is None
 
@@ -72,7 +65,7 @@ def test_the_identity_comes_back_when_the_imagery_does(tmp_path: Path) -> None:
     """
     _dataset(tmp_path)
     before = dataset_fingerprint(tmp_path)
-    for img in (tmp_path / "images" / _DATE).glob("*.png"):
+    for img in image_dir(tmp_path, _DATE).glob("*.png"):
         img.unlink()
     assert dataset_fingerprint(tmp_path) is None
 

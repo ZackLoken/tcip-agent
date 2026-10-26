@@ -11,11 +11,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from PIL import Image
 
 import tcip_mcp.audit as audit_module
 import tcip_store as ts
+from tcip_mcp.dataset_layout import image_dir, image_root
 from tests._audit_fixtures import audit_rows
+from tests._producer_fixtures import write_image
 
 if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
@@ -29,9 +30,7 @@ STUB_ENGINE = "tests.proposal_stub:factory"
 def dataset_root(tmp_path: Path) -> Path:
     """Return a dataset carrying one capture, its own root distinct from the project's."""
     root = tmp_path / "orchard_dataset"
-    capture = root / "images" / CAPTURE_DATE
-    capture.mkdir(parents=True)
-    Image.new("RGB", (100, 80)).save(capture / "IMG_0001.JPG")
+    write_image(image_dir(root, CAPTURE_DATE) / "IMG_0001.JPG")
     return root
 
 
@@ -72,7 +71,7 @@ def test_label_write_records_in_the_dataset_holding_the_image_it_names(
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    image = dataset_root / "images" / CAPTURE_DATE / "IMG_0001.JPG"
+    image = image_dir(dataset_root, CAPTURE_DATE) / "IMG_0001.JPG"
     result = save_annotations(
         bound,
         str(image),
@@ -96,7 +95,7 @@ def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_ag
     """
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
-    image = dataset_root / "images" / CAPTURE_DATE / "IMG_0001.JPG"
+    image = image_dir(dataset_root, CAPTURE_DATE) / "IMG_0001.JPG"
     result = propose_annotations(
         project, image_path=str(image), engine=STUB_ENGINE, actor=None
     )
@@ -118,9 +117,7 @@ def test_propose_annotations_staging_nothing_leaves_no_audit_line(
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
     loose = tmp_path / "loose"
-    loose.mkdir()
-    image = loose / "IMG_0002.JPG"
-    Image.new("RGB", (100, 80)).save(image)
+    image = write_image(loose / "IMG_0002.JPG")
 
     result = propose_annotations(
         project, image_path=str(image), engine=STUB_ENGINE, actor=None
@@ -166,9 +163,7 @@ def test_a_label_write_of_an_image_under_no_dataset_refuses_and_records_nothing(
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     loose = tmp_path / "loose"
-    loose.mkdir()
-    image = loose / "IMG_0002.JPG"
-    Image.new("RGB", (100, 80)).save(image)
+    image = write_image(loose / "IMG_0002.JPG")
 
     result = save_annotations(
         bound,
@@ -280,7 +275,7 @@ def test_two_spellings_of_a_root_reach_one_log_and_a_relative_spelling_refuses(
         "curate_something",
         {"n": 1},
         actor=None,
-        scope=dataset_root / "images" / "..",
+        scope=image_root(dataset_root) / "..",
     )
     spellings = [dataset_root]
     if os.name == "nt":

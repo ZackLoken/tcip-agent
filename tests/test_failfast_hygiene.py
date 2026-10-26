@@ -32,15 +32,14 @@ def test_push_panel_event_reports_delivered_flag(bound: BoundProject) -> None:
 def test_uncertainty_scorer_averages_over_heads(tmp_path: Path) -> None:
     pytest.importorskip("torch")
     import torch
-    from PIL import Image
 
     from tcip_mcp.pipelines.active_learning.scorer import (
         UncertaintyScorer,
         _entropy,
     )
+    from tests._producer_fixtures import write_image
 
-    img = tmp_path / "a.png"
-    Image.new("RGB", (16, 16)).save(img)
+    img = write_image(tmp_path / "a.png", (16, 16))
 
     from tests.scorer_models import predictor_for
 

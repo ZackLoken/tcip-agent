@@ -754,8 +754,7 @@ def read_plant_shapefile(
             "other, then run shp_to_plant_csv again"
         ) from exc
     with opened as layer:
-        # fiona reports a missing or unparseable .prj as an empty CRS (probed directly, neither
-        # raises), so one falsy check catches both without a second except clause.
+        # fiona reports a missing or unparseable .prj as an empty CRS, raising for neither.
         if not layer.crs:
             raise ShapefileCrsUnknownError(
                 f"{shp_path}: no resolvable coordinate reference system (missing or unreadable "
@@ -1193,8 +1192,7 @@ def _derive_row_break_threshold(gaps: list[float]) -> float | None:
     if len(gaps) < 2:
         return None
     sorted_gaps = sorted(gaps)
-    # A near-zero gap carries no walking-pace information (its log/ratio would read as infinite);
-    # excluded as a candidate split rather than treated as an automatic winner.
+    # A near-zero gap carries no walking-pace information, so it is no candidate split.
     candidates = [
         (math.log(hi / lo), lo, hi)
         for lo, hi in pairwise(sorted_gaps)
@@ -1216,8 +1214,7 @@ def _derive_row_break_threshold(gaps: list[float]) -> float | None:
         if modified_z < _ROW_BREAK_MODIFIED_Z:
             return None
     elif best_log_ratio <= median_other:
-        # No measured spread in the rest of this date's steps: only a genuinely larger jump
-        # counts, MAD's own limiting behavior as it -> 0, not an unconditional pass.
+        # With no spread in the other steps, only a strictly larger jump splits (MAD's limit at 0).
         return None
 
     return best_lo + (best_hi - best_lo) / 2
@@ -1396,11 +1393,10 @@ def resolve_nn_tolerance_m(
 
 
 def build_mapping(
-    images_root: Path,
+    dataset_root: Path | str,
     plant_csv_paths: list[Path],
     *,
     name: str,
-    dataset_root: Path | str,
     dataset_id: str,
     project: Path | str,
     plant_registry: PlantRegistryReference,
@@ -1419,21 +1415,23 @@ def build_mapping(
     stated and derived from the date's own positioning errors when not, which the record carries
     per date; :class:`NoMatchRadiusError` propagates.
 
-    A date's captures are enumerated through ``image_utils.list_logical_images``, so a band raster
-    or a band group ingested under a mapped date is a capture the identity sees; its
+    The captures are ``dataset_root``'s :func:`~tcip_mcp.dataset_layout.list_dates`, each
+    enumerated through ``image_utils.list_logical_images``, so a band raster or a band group
+    ingested under a mapped date is a capture the identity sees; its
     :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStemError` propagates.
 
-    Raises :class:`UngeoreferencedCaptureError`: naming ``images_root`` when the requested dates
-    carry no capture at all, and with :func:`ungeoreferenced_capture_message` (naming any capture
-    PIL could not open before the position clause) when every capture that was read carries no
-    position this door reads.
+    Raises :class:`UngeoreferencedCaptureError` naming the dataset's image tree: when the requested
+    dates carry no capture at all, and with :func:`ungeoreferenced_capture_message` (naming any
+    capture PIL could not open before the position clause) when every capture that was read
+    carries no position this door reads.
     """
+    from tcip_mcp.dataset_layout import image_dir, image_root, list_dates
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
     plant_csv_paths = [Path(p) for p in plant_csv_paths]
     plants = read_plant_csvs(plant_csv_paths)
 
-    images_root = Path(images_root)
+    images = image_root(dataset_root)
     dates_walked: list[str] = []
     assignments: dict[str, list[Assignment]] = {}
     radii: dict[str, MatchRadius] = {}
@@ -1441,32 +1439,26 @@ def build_mapping(
     unreadable: dict[str, list[str]] = {}
     n_stamps = 0
     n_positioned = 0
-    if images_root.is_dir():
-        for date_dir in sorted(images_root.iterdir()):
-            if not date_dir.is_dir():
-                continue
-            if dates is not None and date_dir.name not in dates:
-                continue
-            date = date_dir.name
-            dates_walked.append(date)
-            logical = list_logical_images(date_dir)
-            stamps = _read_date_stamps(logical, date)
-            n_stamps += len(stamps)
-            n_positioned += sum(1 for s in stamps if s.position is not None)
-            capture_digests_by_date[date] = capture_digests(stamps)
-            unreadable[date] = sorted(
-                s.name
-                for s in stamps
-                if s.kind == "photo" and s.readable is False
-            )
-            radius = date_match_radius(stamps, match_radius)
-            if radius is not None:
-                radii[date] = radius
-            assignments[date] = assign_plants(stamps, plants, radius=radius)
+    for date in list_dates(dataset_root):
+        if dates is not None and date not in dates:
+            continue
+        dates_walked.append(date)
+        logical = list_logical_images(image_dir(dataset_root, date))
+        stamps = _read_date_stamps(logical, date)
+        n_stamps += len(stamps)
+        n_positioned += sum(1 for s in stamps if s.position is not None)
+        capture_digests_by_date[date] = capture_digests(stamps)
+        unreadable[date] = sorted(
+            s.name for s in stamps if s.kind == "photo" and s.readable is False
+        )
+        radius = date_match_radius(stamps, match_radius)
+        if radius is not None:
+            radii[date] = radius
+        assignments[date] = assign_plants(stamps, plants, radius=radius)
 
     if n_stamps == 0:
         raise UngeoreferencedCaptureError(
-            f"no capture under {images_root} on the requested dates"
+            f"no capture under {images} on the requested dates"
         )
     if n_positioned == 0:
         all_unreadable = sorted(
@@ -1477,7 +1469,7 @@ def build_mapping(
             }
         )
         raise UngeoreferencedCaptureError(
-            ungeoreferenced_capture_message(str(images_root), all_unreadable)
+            ungeoreferenced_capture_message(str(images), all_unreadable)
         )
 
     from tcip_mcp.registry_paths import stored_path
@@ -1646,7 +1638,7 @@ def persist_mapping(
 def build_plant_mapping(
     project: Path | str,
     name: str,
-    images_root: Path,
+    dataset_root: Path,
     plant_registry: str,
     *,
     dates: list[str] | None = None,
@@ -1654,36 +1646,26 @@ def build_plant_mapping(
     supersede: bool = False,
     actor: str | None,
 ) -> MappingBuild:
-    """Map the captures under ``images_root`` to a registry's plants and persist the mapping.
+    """Map the captures of ``dataset_root`` to a registry's plants and persist the mapping.
 
-    ``images_root`` is an established location and the registry is ``project``'s
+    ``dataset_root`` is an established location and the registry is ``project``'s
     ``plant_registry`` (:func:`build_mapping`); the mapping is persisted under ``name`` by
     ``actor`` (:func:`persist_mapping`, whose receipt is the act's one audit line), and the build
     is returned.
 
-    Raises ``ValueError`` for a name the key refuses, for an ``images_root`` that is not a
-    dataset's own ``images/`` directory (naming ``register_dataset``) and for a dataset with no
-    identity record; :class:`PlantRegistryNotFoundError`; and every refusal of the two steps.
+    Raises ``ValueError`` for a name the key refuses and for a root with no dataset identity
+    record (:func:`~tcip_mcp.dataset_layout.require_dataset_identity`, naming
+    ``register_dataset``); :class:`PlantRegistryNotFoundError`; and every refusal of the two steps.
     """
-    from tcip_mcp.dataset_layout import (
-        image_tree_root,
-        require_dataset_identity,
-    )
+    from tcip_mcp.dataset_layout import require_dataset_identity
 
     plant_mapping_key(project, name)
-    dataset = image_tree_root(images_root)
-    if dataset is None:
-        raise ValueError(
-            f"{images_root} is not a dataset's own images/ root; a mapping maps the "
-            "image tree of a dataset registered with register_dataset"
-        )
-    identity = require_dataset_identity(dataset)
+    identity = require_dataset_identity(dataset_root)
     registry = load_registry(project, plant_registry)
     build = build_mapping(
-        images_root,
+        dataset_root,
         [Path(e["path"]) for e in registry_csv_entries(registry, project)],
         name=name,
-        dataset_root=dataset,
         dataset_id=identity["id"],
         project=project,
         plant_registry=PlantRegistryReference(
@@ -1696,8 +1678,8 @@ def build_plant_mapping(
     return build
 
 
-# Process-local memo for load_mapping's receipt check: a project's log cursor plus every
-# plant_mapping_built (name, record_sha256) seen; a miss re-reads once before refusing.
+# Process-local memo of each project's log cursor and every plant_mapping_built
+# (name, record_sha256) read so far; a miss re-reads the log once before refusing.
 _receipt_cursor: dict[str, str] = {}
 _receipt_seen: dict[str, dict[str, set[str]]] = {}
 
@@ -1857,7 +1839,6 @@ def verify_mapping_inputs(
     remedy = "rebuild with build_plant_mapping"
 
     # Plant CSVs first: the per-capture moved-position check below trusts only verified bytes.
-    # A registry that no longer loads or whose digest moved refuses rather than verifying nothing.
     registry_entries, registry_refusal = registry_entries_or_refusal(
         build, project
     )
@@ -1968,8 +1949,8 @@ def verify_mapping_inputs(
                     if p.plant_id == row.plant_id
                 ]
                 if not distances:
-                    # The plant's own CSV is among plant_csvs_unverified: disclose this capture's
-                    # recorded position as unrechecked rather than comparing it against nothing.
+                    # The plant's own CSV is among plant_csvs_unverified, so this capture's
+                    # recorded position is disclosed as unrechecked.
                     unverified_names.add(s.name)
                     continue
                 if not any(abs(d - row.distance_m) <= 1e-6 for d in distances):
@@ -2126,8 +2107,7 @@ def resolve_delivery_mapping(
                 "date with no capture cannot be delivered; rebuild the mapping, or drop the "
                 "date(s)"
             )
-        # Re-reading captures for a delivery that can attribute nothing would disclose about
-        # nothing; refuse here, before verify_mapping_inputs, on the record's own evidence.
+        # Refused on the record's own evidence, before verify_mapping_inputs reads any capture.
         registry_entries, registry_refusal = registry_entries_or_refusal(
             mapping_build, project
         )

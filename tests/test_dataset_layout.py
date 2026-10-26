@@ -12,6 +12,8 @@ from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import (
     UNDATED_BUCKET,
     capture_subjects,
+    image_dir,
+    image_root,
     label_key,
     parse_image_path,
 )
@@ -45,18 +47,18 @@ def test_a_flat_image_beside_an_undated_one_of_its_stem_is_no_second_image(
     from tcip_mcp.dataset_layout import label_key_of
     from tcip_mcp.tools.data_tools import scan_dataset
 
-    (tmp_path / "images" / UNDATED_BUCKET).mkdir(parents=True)
-    for place in (tmp_path / "images", tmp_path / "images" / UNDATED_BUCKET):
+    image_dir(tmp_path, UNDATED_BUCKET).mkdir(parents=True)
+    for place in (image_root(tmp_path), image_dir(tmp_path, UNDATED_BUCKET)):
         (place / "same.png").write_bytes(b"\x89PNG")
 
     scan = scan_dataset(tmp_path, str(tmp_path))
 
     assert scan["image_count"] == 1, scan
     assert label_key_of(
-        tmp_path / "images" / UNDATED_BUCKET / "same.png"
+        image_dir(tmp_path, UNDATED_BUCKET) / "same.png"
     ).parts == (UNDATED_BUCKET, "same")
     with pytest.raises(ValueError, match="is not a capture"):
-        label_key_of(tmp_path / "images" / "same.png")
+        label_key_of(image_root(tmp_path) / "same.png")
 
 
 def test_an_images_label_key_is_its_capture_and_stem() -> None:
@@ -138,9 +140,7 @@ def test_every_reader_of_a_dataset_root_answers_the_root_the_layout_wrote(
     from tcip_mcp.dataset_layout import (
         dataset_root_of,
         image_capture,
-        image_dir,
         image_path,
-        image_root,
         parse_capture_dir,
     )
     from tcip_mcp.tools.project_tools import register_dataset
@@ -190,8 +190,6 @@ def test_every_reader_of_a_dataset_root_answers_the_root_the_layout_wrote(
 
 
 def test_a_capture_directory_sits_under_the_image_root() -> None:
-    from tcip_mcp.dataset_layout import image_dir, image_root
-
     assert image_dir("/ds", "2026-03-02") == image_root("/ds") / "2026-03-02"
     with pytest.raises(ValueError, match="single safe path segment"):
         image_dir("/ds", "../escape")
@@ -214,7 +212,7 @@ def test_buckets_under_lists_every_published_bucket_and_nothing_else(
         published(
             root,
             name,
-            [predicted(root / "images" / "IMG_1.png", ["bud"])],
+            [predicted(image_root(root) / "IMG_1.png", ["bud"])],
             scope={"subject": "bud"},
         )
     json_io.write_label_document(

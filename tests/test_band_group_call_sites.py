@@ -13,7 +13,12 @@ import numpy as np
 import pytest
 import tifffile
 
-from tests._producer_fixtures import dataset_over, label_image, registry_over  # noqa: E402
+from tests._producer_fixtures import (  # noqa: E402
+    dataset_over,
+    label_image,
+    registry_over,
+    write_image,
+)
 from tests._training_values import IOU_THRESHOLD, drawn_split  # noqa: E402
 
 if TYPE_CHECKING:
@@ -44,14 +49,13 @@ def grouped_dataset(tmp_path: Path) -> Path:
 
     Each has a detection GT label document, under ``images/2026-04-01/``.
     """
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
 
     root = tmp_path / "proj"
     date = "2026-04-01"
-    images_dir = root / "images" / date
+    images_dir = image_dir(root, date)
     images_dir.mkdir(parents=True)
 
     registry_over(
@@ -60,7 +64,7 @@ def grouped_dataset(tmp_path: Path) -> Path:
     )
 
     _write_group(images_dir, "capture_001")
-    Image.new("RGB", (16, 16), (5, 5, 5)).save(images_dir / "plain_002.jpg")
+    write_image(images_dir / "plain_002.jpg", (16, 16), (5, 5, 5))
 
     for source in ("capture_001.bandgroup", "plain_002.jpg"):
         label_image(
@@ -143,7 +147,7 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
     tmp_path: Path,
 ) -> None:
     """The channel probe raises ``BandGroupIncompleteError`` on a stale manifest, not a default."""
-    from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_root, label_key
     from tcip_mcp.pipelines.data.band_groups import (
         BandGroupIncompleteError,
         write_band_group_manifest,
@@ -151,7 +155,7 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
     from tcip_mcp.pipelines.data.datasets import _band_count
     from tcip_mcp.pipelines.data.selection import Sample
 
-    images_dir = tmp_path / "images"
+    images_dir = image_root(tmp_path)
     images_dir.mkdir()
     band_a = images_dir / "cap_G.tif"
     band_b = images_dir / "cap_R.tif"
@@ -256,10 +260,11 @@ def test_display_read_of_a_plain_3band_rgb_geotiff_keeps_its_true_colors(
     ``_display_of`` over a 3-band RGB .tif with two ramped channels returns the written array
     unchanged.
     """
+    from tcip_mcp.dataset_layout import image_root
     from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.tools.vision_tools import _display_of
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     # Real, non-constant RGB content (never a flat fill: a flat array's min==max would make a
     # stretch indistinguishable from the original by accident).
@@ -277,10 +282,11 @@ def test_display_read_still_stretches_a_genuinely_multiband_geotiff(
     tmp_path: Path,
 ) -> None:
     """A six-band GeoTIFF's display read is three uint8 bands spanning 0 to 255."""
+    from tcip_mcp.dataset_layout import image_root
     from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.tools.vision_tools import _display_of
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     # Per-band value levels plus a within-band gradient, so a min-max stretch has something to
     # span and its result is distinguishable from the raw values.
@@ -373,19 +379,17 @@ def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(
     The recorded source is the ``.bandgroup`` manifest in the capture's image directory, and it
     resolves to a ``BandGroupRef`` whose band files exist.
     """
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.tools.data_tools import draw_splits
 
-    # The fixture's own two groups (capture_001, plain_002) need two more to clear a draw's
-    # foreground floor, added here rather than in the shared fixture.
-    images_dir = grouped_dataset / "images" / "2026-04-01"
+    # The fixture's two groups (capture_001, plain_002) need two more to clear a draw's floor.
+    images_dir = image_dir(grouped_dataset, "2026-04-01")
     for stem in ("plain_003", "plain_004"):
-        Image.new("RGB", (16, 16), (5, 5, 5)).save(images_dir / f"{stem}.jpg")
+        write_image(images_dir / f"{stem}.jpg", (16, 16), (5, 5, 5))
         label_image(
             images_dir / f"{stem}.jpg",
             [Annotation(subject="bud", geometry=BBox(2, 2, 6, 6))],

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 def _scene(root: Path, date: str, images: list[str]) -> None:
-    idir = Path(image_dir(root, date))
+    idir = image_dir(root, date)
     idir.mkdir(parents=True, exist_ok=True)
     for name in images:
         (idir / name).write_bytes(
@@ -94,15 +94,15 @@ def test_a_named_bucket_sets_the_mode_from_its_own_document_not_the_label(
     named the focus resolves to box mode, and with the bucket named to polygon mode.
     """
     import pytest
-    from PIL import Image
 
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
+    from tests._producer_fixtures import write_image
 
     root, date = tmp_path, "2026-03-02"
-    frame = Path(image_dir(root, date)) / "IMG_0000.jpg"
-    frame.parent.mkdir(parents=True)
-    Image.new("RGB", (100, 100), (90, 110, 70)).save(frame)
+    frame = write_image(
+        image_dir(root, date) / "IMG_0000.jpg", (100, 100), (90, 110, 70)
+    )
     _label(root, "bud", date, "detect", "IMG_0000", 1)
     published(
         root,
@@ -185,7 +185,7 @@ def test_focus_annotate_index_matches_frontend_listing_ignoring_non_files(
     # is_file()); the tool must match that so it doesn't land one frame off.
     root = tmp_path / "proj"
     date = "2026-03-02"
-    idir = Path(image_dir(root, date))
+    idir = image_dir(root, date)
     idir.mkdir(parents=True)
     (idir / "IMG_0000.JPG").write_bytes(b"x")
     (
@@ -309,7 +309,7 @@ def test_focus_annotate_explicit_mode_and_index_override(
 
 def test_focus_annotate_no_images(tmp_path: Path, bound: BoundProject) -> None:
     root = tmp_path / "proj"
-    (Path(image_dir(root, "2026-03-02"))).mkdir(parents=True)
+    image_dir(root, "2026-03-02").mkdir(parents=True)
     res = focus_human_attention(bound, str(root), "bush", "2026-03-02")
     assert "error" in res
 

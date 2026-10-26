@@ -8,7 +8,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from tcip_mcp.dataset_layout import label_key_of as image_label_key
+from tcip_mcp.dataset_layout import (
+    UNDATED_BUCKET,
+    image_dir,
+    label_key_of as image_label_key,
+)
 from tests._training_values import drawn_split
 
 if TYPE_CHECKING:
@@ -115,9 +119,7 @@ def blank_image(
     root: Path, name: str = "IMG_0001.JPG", size: tuple[int, int] = (100, 80)
 ) -> Path:
     """Write ``name`` into ``root``'s undated capture with :func:`write_image`; return its path."""
-    from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
-    return write_image(root / "images" / UNDATED_BUCKET / name, size)
+    return write_image(image_dir(root, UNDATED_BUCKET) / name, size)
 
 
 def one_labeled_capture(root: Path) -> Path:
@@ -128,7 +130,7 @@ def one_labeled_capture(root: Path) -> Path:
     """
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
 
-    image = root / "images" / "2026-03-04" / "a_1.jpg"
+    image = image_dir(root, "2026-03-04") / "a_1.jpg"
     image.parent.mkdir(parents=True, exist_ok=True)
     image.write_bytes(b"\xff\xd8\xff")
     label_image(image, [], 8, 8, keep_empty=True)
@@ -249,9 +251,8 @@ def big_single_source(
     from torchvision.utils import save_image
 
     from tcip_annotation.state import Annotation, BBox, Polygon
-    from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
-    images_dir = root / "images" / UNDATED_BUCKET
+    images_dir = image_dir(root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
     save_image(

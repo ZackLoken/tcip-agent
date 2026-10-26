@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._chain_fixtures import (
     BESPOKE_INSTANCE_SEG,
     BESPOKE_MODELS,
@@ -22,6 +22,7 @@ from tests._chain_fixtures import (
 from tests._producer_fixtures import (
     checkpoint_admission,
     gray_frame,
+    write_image,
 )
 from tests._training_values import MASK_CUT, RATIONALE, tiling_block
 
@@ -209,7 +210,7 @@ def _stem_run(tmp_path: Path) -> Path:
 
     stem = Annotation(subject="stem", geometry=Polygon([STRADDLING]))
     images = seed_labeled_images(
-        fixture_data_dir(tmp_path, "stems") / "images" / UNDATED_BUCKET,
+        image_dir(fixture_data_dir(tmp_path, "stems"), UNDATED_BUCKET),
         [stem],
         n=2,
         width=2 * TILE,
@@ -342,7 +343,7 @@ def test_a_pass_stating_no_masks_returns_boxes_only(
     ).runnable()
     pred = tiled_pass.predictor
     assert pred.task == "instance_seg"
-    img = gray_frame(tmp_path / "images" / UNDATED_BUCKET)
+    img = gray_frame(image_dir(tmp_path, UNDATED_BUCKET))
 
     tiled = pred.predict_sliced(
         img,
@@ -381,10 +382,12 @@ def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(
     """
     from tests._verified_checkpoint_fixtures import predicted_over
 
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+    gray_frame(images_dir)
     p, results = predicted_over(
         tmp_path,
         instance_seg_ckpt,
-        str(Path(gray_frame(tmp_path / "images" / UNDATED_BUCKET)).parent),
+        str(images_dir),
         device="cpu",
         tile=True,
         tile_size=TILE,
@@ -429,7 +432,7 @@ def test_a_masked_bucket_delivers_the_same_counts_on_every_read(
     from tests import _trait_fixtures as fx
     from tests._chain_fixtures import acknowledged
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     gray_frame(images_dir)
     fx.seed_confirmed_count(tmp_path)
     bucket = "baseline/2026-01-01"
@@ -490,7 +493,7 @@ def test_run_inference_never_stamps_a_mask_threshold_into_annotation_attributes(
     from tcip_annotation.json_io import read_predictions
     from tcip_mcp.tools.inference_tools import run_inference
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     gray_frame(images_dir)
     r = run_inference(
         tmp_path,
@@ -517,7 +520,7 @@ def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(
     """
     from tcip_mcp.tools.inference_tools import run_inference
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     gray_frame(images_dir)
     r = run_inference(
         tmp_path,
@@ -566,7 +569,7 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(
     from tests._producer_fixtures import label_image
     from tests._training_values import IOU_THRESHOLD
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     gray_frame(images_dir, name="a.png")
     label_image(
         images_dir / "a.png",
@@ -642,8 +645,6 @@ def _predicted(
     With ``masks`` true the record collects the masks cut at the sample threshold; with it
     false, boxes alone.
     """
-    from PIL import Image
-
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import prepare
     from tests._verified_checkpoint_fixtures import registered_checkpoint
@@ -665,8 +666,7 @@ def _predicted(
         ),
         project=tmp_path,
     )
-    frame = tmp_path / "frame.png"
-    Image.new("RGB", (size, size)).save(frame)
+    frame = write_image(tmp_path / "frame.png", (size, size))
     stated = (
         Stated(tile=False, **SAMPLE_INSTANCE_SEG_PASS)
         if masks

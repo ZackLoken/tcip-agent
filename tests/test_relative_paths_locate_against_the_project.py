@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._training_values import (
     COMBINED_SCORER,
     IOU_THRESHOLD,
@@ -42,7 +43,9 @@ if TYPE_CHECKING:
 
     from tcip_mcp.pipelines.execution import Stated
 
-IMAGE = f"images/{DATE}/{STEMS[0]}.png"
+CAPTURE = image_dir("", DATE).as_posix()
+"""The project-relative spelling of the ingested images' capture."""
+IMAGE = f"{CAPTURE}/{STEMS[0]}.png"
 """The project-relative spelling of one ingested image."""
 
 
@@ -331,7 +334,7 @@ def _published(project: Path) -> None:
     result = run_inference(
         project,
         str((project / _registered(project)).resolve()),
-        images_dir=str(project / "images" / DATE),
+        images_dir=str(image_dir(project, DATE)),
         bucket="preds",
         stated=_stated(),
         actor=None,
@@ -345,7 +348,7 @@ def _run_inference(project: Path) -> Path:
     result = run_inference(
         project,
         _registered(project),
-        images_dir=f"images/{DATE}",
+        images_dir=CAPTURE,
         bucket="preds",
         dry_run=True,
         stated=_stated(),
@@ -362,7 +365,7 @@ def _evaluate_model(project: Path) -> dict:
     result = evaluate_model(
         project,
         _registered(project),
-        f"images/{DATE}",
+        CAPTURE,
         stated=_stated(),
         iou_threshold=IOU_THRESHOLD,
     )
@@ -378,7 +381,7 @@ def _prioritize_review_queue(project: Path) -> list[str]:
     result = prioritize_review_queue(
         project,
         _registered(project),
-        f"images/{DATE}",
+        CAPTURE,
         scorer=COMBINED_SCORER,
         budget=len(STEMS),
         rationale=RATIONALE,
@@ -391,7 +394,7 @@ def _triage_predictions(project: Path) -> int:
     from tcip_mcp.tools.feedback_tools import triage_predictions
 
     result = triage_predictions(
-        project, _registered(project), f"images/{DATE}", 0.3, 0.8, RATIONALE
+        project, _registered(project), CAPTURE, 0.3, 0.8, RATIONALE
     )
     assert "error" not in result, result
     return result["total_images"]
@@ -436,9 +439,7 @@ def _score_predictions(project: Path) -> dict:
     from tcip_mcp.tools.annotation_tools import score_predictions
 
     _published(project)
-    result = score_predictions(
-        project, f"images/{DATE}", "preds", IOU_THRESHOLD, 0.0
-    )
+    result = score_predictions(project, CAPTURE, "preds", IOU_THRESHOLD, 0.0)
     assert "error" not in result, result
     return {
         k: v for k, v in result.items() if k not in ("path", "not_predicted")
@@ -1085,12 +1086,12 @@ def test_a_run_missing_its_metrics_log_answers_its_own_error_at_the_checkpoint_d
     evaluated = evaluate_model(
         project,
         spelling,
-        f"images/{DATE}",
+        CAPTURE,
         stated=_stated(),
         iou_threshold=IOU_THRESHOLD,
     )
     triaged = triage_predictions(
-        project, spelling, f"images/{DATE}", 0.3, 0.8, RATIONALE
+        project, spelling, CAPTURE, 0.3, 0.8, RATIONALE
     )
 
     for answer in (evaluated, triaged):
@@ -1127,14 +1128,14 @@ def test_evaluation_takes_a_run_id_and_a_relative_checkpoint_path(
     by_id = evaluate_model(
         project,
         checkpoint.parent.name,
-        f"images/{DATE}",
+        CAPTURE,
         stated=_stated(),
         iou_threshold=IOU_THRESHOLD,
     )
     by_path = evaluate_model(
         project,
         _relative(checkpoint, project),
-        f"images/{DATE}",
+        CAPTURE,
         stated=_stated(),
         iou_threshold=IOU_THRESHOLD,
     )
@@ -1195,7 +1196,7 @@ def test_a_config_with_a_relative_path_and_no_project_is_refused_by_name() -> (
             "model_source": weights_statistics(
                 {"builder": "m:f", "task": "detection"}
             ),
-            "data": {"images_dir": "images/undated"},
+            "data": {"images_dir": image_dir("", UNDATED_BUCKET).as_posix()},
         }
     )
     assert spec is None

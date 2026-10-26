@@ -10,6 +10,7 @@ import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
+from tcip_mcp.dataset_layout import image_root
 from tests._cli_fixtures import run_tcip
 
 if TYPE_CHECKING:
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
 def test_refuses_a_run_naming_no_project_and_plants_no_store(
     tmp_path: Path,
 ) -> None:
-    images = tmp_path / "images"
+    images = image_root(tmp_path)
     images.mkdir()
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
@@ -51,7 +52,7 @@ def test_triages_with_the_checkpoint_registered_in_the_named_project(
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(project)
-    images = project / "images"
+    images = image_root(project)
     images.mkdir()
     (images / "a.jpg").write_bytes(b"x")
 

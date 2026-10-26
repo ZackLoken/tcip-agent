@@ -229,9 +229,7 @@ def test_build_plant_mapping_reads_a_registered_registry(
     """build_plant_mapping builds a mapping over a name register_plant_registry minted."""
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, _ = _write_scene(
-        dataset_root, dates=["2026-02-11"]
-    )
+    plant_csv, _ = _write_scene(dataset_root, dates=["2026-02-11"])
 
     reg = register_plant_registry(
         tmp_path,
@@ -246,7 +244,7 @@ def test_build_plant_mapping_reads_a_registered_registry(
     res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry="valley-plants",
         actor=None,
     )
@@ -265,12 +263,12 @@ def test_build_plant_mapping_refuses_naming_register_plant_registry_when_registr
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, _, _ = _write_scene(dataset_root, dates=["2026-02-11"])
+    _write_scene(dataset_root, dates=["2026-02-11"])
 
     res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry="nope",
         actor=None,
     )
@@ -291,9 +289,7 @@ def _deliver_scene(
 
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=["2026-02-11"]
-    )
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=["2026-02-11"])
     reg = register_plant_registry(
         tmp_path,
         name="valley-plants",
@@ -306,7 +302,7 @@ def _deliver_scene(
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry="valley-plants",
         actor=None,
     )

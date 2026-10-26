@@ -69,7 +69,7 @@ def image_tree_root(images_root: str | Path) -> Path | None:
     ``None`` for a directory that is no image tree.
     """
     tree = Path(images_root)
-    return tree.parent if tree.name == "images" else None
+    return tree.parent if tree.name == image_root(tree.parent).name else None
 
 
 def carries_root_state(directory: str | Path) -> bool:
@@ -95,13 +95,13 @@ def _capture(directory: str | Path) -> tuple[Path, str] | None:
     root = image_tree_root(path.parent)
     if root is None:
         return None
-    if path.name == "images":
+    if image_tree_root(path) is not None:
         as_capture, as_tree = (
             carries_root_state(r) for r in (root, path.parent)
         )
         if as_capture == as_tree:
             raise ValueError(
-                f"{path} is by position the capture 'images' of the dataset {root} or the "
+                f"{path} is by position the capture {path.name!r} of the dataset {root} or the "
                 f"image tree of the dataset {path.parent}, and "
                 f"{'both carry' if as_capture else 'neither carries'} state of its own; "
                 "register the one it belongs to with register_dataset."

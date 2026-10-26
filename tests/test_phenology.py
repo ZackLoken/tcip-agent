@@ -22,6 +22,7 @@ import pytest
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import subject_registry as cr
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing import phenology
 from tests._trait_fixtures import BUD_OPENING, entry
@@ -47,11 +48,12 @@ def _registry(*attributes: cr.Attribute) -> cr.SubjectRegistry:
 
 def _scope(root: Path, *attributes: cr.Attribute) -> ClassScope:
     """Return the registry scope of ``bud`` over a dataset at ``root`` declaring ``attributes``."""
+    from tcip_mcp.dataset_layout import image_root
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tests._producer_fixtures import registry_over
 
     registry_over(root, _registry(*attributes))
-    return registry_scope(root / "images", "bud")
+    return registry_scope(image_root(root), "bud")
 
 
 def _document(project: Path, annotations: list[Annotation]) -> Key:
@@ -77,10 +79,11 @@ def _bucket(
     no stem named it holds one image named ``unmapped``.
     """
     pytest.importorskip("torch")
+    from tcip_mcp.dataset_layout import image_dir
     from tests._chain_fixtures import predicted, published
 
     attributes = (OPENING,) if attributed else ()
-    images = project / "ds" / "images" / date
+    images = image_dir(project / "ds", date)
     name = f"m-{'attributed' if attributed else 'bare'}/{date}"
     return published(
         project,
@@ -103,7 +106,7 @@ def test_date_key_orders_chronologically() -> None:
 
 
 def test_date_key_malformed_sorts_first() -> None:
-    assert phenology.date_key("undated") == (0, 0, 0)
+    assert phenology.date_key(UNDATED_BUCKET) == (0, 0, 0)
     assert phenology.date_key("2024-13") == (0, 0, 0)
     assert phenology.date_key("not-a-date-x") == (0, 0, 0)
 
@@ -126,7 +129,7 @@ def test_crossing_date_does_not_crash_on_malformed_date() -> None:
 
 
 def test_real_points_drops_undated_and_sorts() -> None:
-    series = [("2024-05-15", 0.5), ("undated", 0.9), ("2024-05-01", 0.1)]
+    series = [("2024-05-15", 0.5), (UNDATED_BUCKET, 0.9), ("2024-05-01", 0.1)]
     pts = phenology._real_points(series)
     assert [d for d, _ in pts] == ["2024-05-01", "2024-05-15"]
 
@@ -219,7 +222,6 @@ def test_the_milestones_and_their_schema_restate_no_crossing_rule() -> None:
 
 
 def test_plant_milestones_requires_spec_no_bud_opening_fallback() -> None:
-    # No silent default: a caller that forgets to pass spec must fail loudly.
     with pytest.raises(TypeError, match="'spec'"):
         phenology.plant_milestones([("2024-05-01", 0.5)])  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to spec
 

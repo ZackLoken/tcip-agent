@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -256,7 +256,7 @@ def test_golden_per_plant_phenology_series_and_milestones(
     )
 
     def bucket(date: str, stem: str, values: list[str]) -> Bucket:
-        image = tmp_path / "ds" / "images" / date / f"{stem}.png"
+        image = image_dir(tmp_path / "ds", date) / f"{stem}.png"
         return published(
             tmp_path,
             f"run/{date}",
@@ -453,7 +453,7 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
     from tcip_mcp.pipelines import execution as execution_mod
     from tcip_mcp.pipelines.schemas import TilingSpec
     from tcip_mcp.tools import training_tools as training_tools_mod
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, write_image
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_CONF,
         SAMPLE_DETECTOR_PASS,
@@ -461,11 +461,8 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
     )
 
     def _dataset(root: Path) -> Path:
-        images_dir = root / "images" / UNDATED_BUCKET
-        images_dir.mkdir(parents=True)
-        Image.new("RGB", (64, 64), color=(120, 120, 120)).save(
-            images_dir / "a.png"
-        )
+        images_dir = image_dir(root, UNDATED_BUCKET)
+        write_image(images_dir / "a.png", (64, 64), (120, 120, 120))
         label_image(
             images_dir / "a.png",
             [Annotation(subject="bud", geometry=BBox(5, 5, 20, 20))],
@@ -473,8 +470,6 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
             64,
         )
         return images_dir
-
-    from PIL import Image
 
     class _StubPredictor:
         task = "detection"

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._chain_fixtures import (
     CLASSIFIER_SOURCE,
     detector_geometry,
@@ -457,14 +457,11 @@ def test_sampled_band_normalization_stats_admit_underivable(
 
 
 def test_build_dataset_sets_expected_channels(tmp_path: Path) -> None:
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, write_image
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (16, 16)).save(images_dir / "a.png")
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+    write_image(images_dir / "a.png", (16, 16))
     label_image(
         images_dir / "a.png",
         [Annotation(subject="bud", geometry=BBox(6.4, 6.4, 9.6, 9.6))],
@@ -598,14 +595,12 @@ def test_a_source_whose_band_count_cannot_be_read_refuses_rather_than_defaulting
     A run's input channels are derived from its own sources.
     """
     import pytest
-    from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, write_image
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (16, 16)).save(images_dir / "a.png")
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+    write_image(images_dir / "a.png", (16, 16))
     label_image(
         images_dir / "a.png",
         [Annotation(subject="bud", geometry=BBox(6.4, 6.4, 9.6, 9.6))],

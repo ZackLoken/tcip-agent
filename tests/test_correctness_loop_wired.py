@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, NoReturn, Unpack
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
 from tests._chain_fixtures import (
     BESPOKE_CLASSIFIER,
     BESPOKE_MODELS,
@@ -137,7 +137,7 @@ def _admitted_tree(tmp_path: Path) -> Path:
     from tests._producer_fixtures import labeled_frame, registry_over
 
     root = tmp_path / "ds"
-    imgs = root / "images" / UNDATED_BUCKET
+    imgs = image_dir(root, UNDATED_BUCKET)
     imgs.mkdir(parents=True)
     registry_over(
         root, SubjectRegistry(subjects=(Subject(name="leaf", description=""),))
@@ -286,7 +286,7 @@ def test_model_dims_hands_the_admitted_subject_and_every_attribute(
             )
         ),
     )
-    scope = registry_scope(tmp_path / "images", "bud")
+    scope = registry_scope(image_root(tmp_path), "bud")
 
     assert model_dims(scope, {"num_channels": 3}) == {
         "in_chans": 3,
@@ -351,7 +351,7 @@ def test_preflight_smokes_a_tiled_run_at_the_edge_its_resolution_derived(
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     imgs = seed_bud_images(
-        tmp_path / "ds" / "images" / UNDATED_BUCKET,
+        image_dir(tmp_path / "ds", UNDATED_BUCKET),
         n=4,
         size=160,
         box=(10, 10, 26, 26),
@@ -388,16 +388,14 @@ def test_preflight_smokes_an_untiled_run_of_mixed_frames_on_a_real_batch(
     synthesized dims.
     """
     monkeypatch.chdir(tmp_path)
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._chain_fixtures import stated_detector_geometry
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, write_image
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     imgs = _admitted_tree(tmp_path)
-    Image.new("RGB", (48, 40)).save(imgs / "e.png")
+    write_image(imgs / "e.png", (48, 40))
     label_image(
         imgs / "e.png",
         [Annotation(subject="leaf", geometry=BBox(2, 2, 10, 10))],
@@ -641,17 +639,17 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(
 
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
+    from tests._producer_fixtures import write_image
 
     images_dir, masks_dir = (
-        tmp_path / "ds" / "images" / UNDATED_BUCKET,
+        image_dir(tmp_path / "ds", UNDATED_BUCKET),
         tmp_path / "ds" / "masks",
     )
-    images_dir.mkdir(parents=True)
     masks_dir.mkdir(parents=True)
     for index, stem in enumerate(("a", "b", "c", "d")):
         shade = 80 + 10 * index
-        Image.new("RGB", (32, 32), (shade, shade, shade)).save(
-            images_dir / f"{stem}.png"
+        write_image(
+            images_dir / f"{stem}.png", (32, 32), (shade, shade, shade)
         )
         Image.fromarray(np.zeros((32, 32), dtype=np.uint8), mode="L").save(
             masks_dir / f"{stem}.png"

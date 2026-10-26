@@ -14,7 +14,7 @@ torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
 
 from tests._chain_fixtures import CLASSIFIER_SOURCE  # noqa: E402
-from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._producer_fixtures import dataset_over, write_image  # noqa: E402
 from tests.tiny_trainer_fixtures import write_regression_dataset  # noqa: E402
 
 
@@ -37,8 +37,7 @@ def test_pil_to_tensor_grayscale_and_multiband() -> None:
 def test_load_image_grayscale_pil_and_npy_multiband(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.image_utils import load_image
 
-    png = tmp_path / "x.png"
-    Image.new("RGB", (16, 16), (200, 100, 50)).save(png)
+    png = write_image(tmp_path / "x.png", (16, 16), (200, 100, 50))
     g = load_image(png, 1)
     assert (
         isinstance(g, Image.Image) and g.mode == "L"

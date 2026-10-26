@@ -308,6 +308,7 @@ def test_an_untiled_instance_segmentation_assessment_records_the_mask_threshold_
     execution record a published pass restores.
     """
     from tcip_mcp import assessment
+    from tcip_mcp.dataset_layout import image_root
     from tcip_mcp.pipelines.data.selection import source_digests
     from tcip_mcp.pipelines.derivations import (
         MASK_BINARIZE_DERIVATION,
@@ -321,7 +322,7 @@ def test_an_untiled_instance_segmentation_assessment_records_the_mask_threshold_
     from tests.test_sliced_inference import BLOBS, _checkpoint
 
     _path, checkpoint = _checkpoint(tmp_path, with_masks=True)
-    images = fixture_data_dir(tmp_path, "blobs") / "images"
+    images = image_root(fixture_data_dir(tmp_path, "blobs"))
     (bucket,) = images.iterdir()
     samples = samples_over(bucket, subject="bud")
 

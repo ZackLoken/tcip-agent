@@ -10,7 +10,12 @@ import pytest
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
+from tcip_mcp.dataset_layout import (
+    UNDATED_BUCKET,
+    image_dir,
+    image_root,
+    label_key,
+)
 from tcip_mcp.pipelines.data.label_queries import registry_scope
 from tcip_mcp.pipelines.data.selection import (
     ClassScope,
@@ -23,7 +28,7 @@ from tcip_mcp.pipelines.data.selection import (
 from tcip_mcp.tools import doctor_tools as doctor
 from tcip_mcp.tools.data_tools import draw_splits, scan_dataset
 from tests._audit_fixtures import audit_rows
-from tests._producer_fixtures import label_image, registry_over
+from tests._producer_fixtures import label_image, registry_over, write_image
 from tests._training_values import RATIONALE, drawn_split
 
 if TYPE_CHECKING:
@@ -103,7 +108,7 @@ def test_scan_dataset_counts_only_the_documents_a_published_bucket_names(
     published(
         tmp_path,
         "modelA/2-11-26",
-        [predicted(root / "images" / "2-11-26" / "imgA.png", ["bud"])],
+        [predicted(image_dir(root, "2-11-26") / "imgA.png", ["bud"])],
         scope={"subject": "bud"},
     )
     json_io.write_label_document(
@@ -123,14 +128,10 @@ def _add_extra_bud_groups(data_dir: Path, count: int) -> None:
 
     The groups carry the fixture's own subject.
     """
-    from PIL import Image
-
-    images_dir = data_dir / "images" / "2-11-26"
+    images_dir = image_dir(data_dir, "2-11-26")
     for i in range(count):
         stem = f"extra_{i:03d}"
-        Image.new("RGB", (640, 480), color=(128, 128, 128)).save(
-            images_dir / f"{stem}.jpg"
-        )
+        write_image(images_dir / f"{stem}.jpg", (640, 480), (128, 128, 128))
         label_image(
             images_dir / f"{stem}.jpg",
             [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))],
@@ -182,12 +183,10 @@ def _leaf_scene(root: Path, n: int = 6) -> Path:
 
     The ``i``-th label holds ``i + 1`` leaves and ``5 * (n - i)`` buds.
     """
-    from PIL import Image
-
-    images = root / "images" / LEAF_DATE
+    images = image_dir(root, LEAF_DATE)
     images.mkdir(parents=True)
     for i in range(n):
-        Image.new("RGB", (100, 80), (128, 128, 128)).save(images / f"s{i}.jpg")
+        write_image(images / f"s{i}.jpg", (100, 80), (128, 128, 128))
         label_image(
             images / f"s{i}.jpg",
             [
@@ -251,7 +250,7 @@ def test_draw_splits_and_a_runs_own_draw_side_the_same_members(
     )
     assert "error" not in drawn, drawn
     data_cfg = {
-        "images_dir": str(root / "images" / LEAF_DATE),
+        "images_dir": str(image_dir(root, LEAF_DATE)),
         "scope": {"subject": "leaf"},
         "split": drawn_split(val_ratio=0.5, seed=7),
     }
@@ -295,7 +294,7 @@ def test_every_draw_refuses_a_tree_short_of_its_floor_the_same_way(
     )
     assert floor in drawn["error"]
     data_cfg = {
-        "images_dir": str(root / "images" / LEAF_DATE),
+        "images_dir": str(image_dir(root, LEAF_DATE)),
         "scope": {"subject": "leaf"},
         "split": drawn_split(val_ratio=0.5, seed=1, grouping=one_group),
     }
@@ -393,7 +392,6 @@ def test_draw_splits_writes_nothing_when_a_marked_document_will_not_read(
     An unreadable label on an image a human marked complete refuses the draw naming it, and no
     selection is written.
     """
-    from tcip_mcp.dataset_layout import image_dir
     from tests._producer_fixtures import mark_complete
 
     mark_complete(
@@ -462,7 +460,7 @@ def test_draw_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
     root = tmp_path / "ds"
-    images_dir = root / "images" / "2-11-26"
+    images_dir = image_dir(root, "2-11-26")
     images_dir.mkdir(parents=True)
 
     band_a, band_b = images_dir / "plotA_B1.npy", images_dir / "plotA_B2.npy"
@@ -507,7 +505,7 @@ def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
     root = tmp_path / "ds"
-    images_dir = root / "images" / "2-11-26"
+    images_dir = image_dir(root, "2-11-26")
     images_dir.mkdir(parents=True)
 
     band_a, band_b = images_dir / "plotA_B1.npy", images_dir / "plotA_B2.npy"
@@ -543,7 +541,7 @@ def test_scan_dataset_answers_an_ambiguous_image_stem_as_an_error(
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
     root = tmp_path / "ds"
-    images_dir = root / "images" / "2-11-26"
+    images_dir = image_dir(root, "2-11-26")
     images_dir.mkdir(parents=True)
 
     band_a, band_b = images_dir / "plotA_B1.npy", images_dir / "plotA_B2.npy"
@@ -566,14 +564,10 @@ def test_scan_dataset_answers_an_ambiguous_image_stem_as_an_error(
 
 def _add_extra_leaf_groups(images_dir: Path, count: int) -> None:
     """Add ``count`` more plain single-tile foreground groups of subject ``leaf`` to a directory."""
-    from PIL import Image
-
     letters = "BCDEFGH"
     for i in range(count):
         stem = f"plot{letters[i]}"
-        Image.new("RGB", (100, 80), (128, 128, 128)).save(
-            images_dir / f"{stem}.jpg"
-        )
+        write_image(images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128))
         label_image(
             images_dir / f"{stem}.jpg",
             [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
@@ -594,7 +588,7 @@ def test_draw_splits_refuses_an_incomplete_band_group_before_writing(
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
     root = tmp_path / "ds"
-    images_dir = root / "images" / "2-11-26"
+    images_dir = image_dir(root, "2-11-26")
     images_dir.mkdir(parents=True)
 
     band_g, band_r = images_dir / "plotA_G.npy", images_dir / "plotA_R.npy"
@@ -859,14 +853,12 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
     Three ``leaf`` groups plus one group holding only a ``bud`` annotation, marked complete for
     ``leaf``, refuse below the floor of four, and no selection is written.
     """
-    from PIL import Image
-
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import mark_complete
 
     root = tmp_path / "ds"
     date = "2-11-26"
-    images_dir = root / "images" / date
+    images_dir = image_dir(root, date)
     images_dir.mkdir(parents=True)
     registry_over(
         root,
@@ -878,16 +870,14 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
         ),
     )
     for stem in ("p1", "p2", "p3"):
-        Image.new("RGB", (100, 80), (128, 128, 128)).save(
-            images_dir / f"{stem}.jpg"
-        )
+        write_image(images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128))
         label_image(
             images_dir / f"{stem}.jpg",
             [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
             100,
             80,
         )
-    Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / "p4.jpg")
+    write_image(images_dir / "p4.jpg", (100, 80), (128, 128, 128))
     label_image(
         images_dir / "p4.jpg",
         [Annotation(subject="bud", geometry=BBox(4, 4, 12, 12))],
@@ -921,17 +911,13 @@ def _leaf_dataset_with_negatives(
 
     All of them lie under one capture date.
     """
-    from PIL import Image
-
     from tests._producer_fixtures import mark_complete
 
-    images_dir = root / "images" / date
+    images_dir = image_dir(root, date)
     images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n_foreground):
         stem = f"{date}_fg{i}"
-        Image.new("RGB", (100, 80), (128, 128, 128)).save(
-            images_dir / f"{stem}.jpg"
-        )
+        write_image(images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128))
         label_image(
             images_dir / f"{stem}.jpg",
             [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
@@ -940,9 +926,7 @@ def _leaf_dataset_with_negatives(
         )
     for i in range(n_negative):
         stem = f"{date}_bg{i}"
-        Image.new("RGB", (100, 80), (128, 128, 128)).save(
-            images_dir / f"{stem}.jpg"
-        )
+        write_image(images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128))
         label_image(images_dir / f"{stem}.jpg", [], 100, 80, keep_empty=True)
         mark_complete(images_dir / f"{stem}.jpg", "leaf", project=root)
 
@@ -981,17 +965,13 @@ def _multi_source_dataset(
     prefixes: tuple[str, ...] = ("srcA", "srcB", "srcC", "srcD"),
     tiles: int = 3,
 ) -> Path:
-    from PIL import Image
-
     date = "2-11-26"
-    images_dir = root / "images" / date
+    images_dir = image_dir(root, date)
     images_dir.mkdir(parents=True)
     for pref in prefixes:
         for t in range(tiles):
             stem = f"{pref}_{t}_0"
-            Image.new("RGB", (64, 64), (128, 128, 128)).save(
-                images_dir / f"{stem}.jpg"
-            )
+            write_image(images_dir / f"{stem}.jpg", (64, 64), (128, 128, 128))
             label_image(
                 images_dir / f"{stem}.jpg",
                 [Annotation(subject="bud", geometry=BBox(19, 13, 45, 51))],
@@ -1006,7 +986,7 @@ def _bud_membership(root: Path) -> Membership:
 
     date = "2-11-26"
     return admitted_membership(
-        [(date, root / "images" / date, None)],
+        [(date, image_dir(root, date), None)],
         scope=ClassScope(subject="bud"),
         grouping="tile_prefix",
     )
@@ -1201,14 +1181,10 @@ def _two_date_collision_dataset(root: Path, subject: str) -> Path:
 
     Each date also holds one more labeled stem, ``extra_<date>``. Returns ``root``.
     """
-    from PIL import Image
-
     for date, box_x in (("2-11-26", 4), ("2-12-01", 40)):
-        images_dir = root / "images" / date
+        images_dir = image_dir(root, date)
         images_dir.mkdir(parents=True)
-        Image.new("RGB", (100, 80), (128, 128, 128)).save(
-            images_dir / "shared.jpg"
-        )
+        write_image(images_dir / "shared.jpg", (100, 80), (128, 128, 128))
         label_image(
             images_dir / "shared.jpg",
             [
@@ -1220,8 +1196,8 @@ def _two_date_collision_dataset(root: Path, subject: str) -> Path:
             80,
         )
         extra_stem = f"extra_{date}"
-        Image.new("RGB", (100, 80), (128, 128, 128)).save(
-            images_dir / f"{extra_stem}.jpg"
+        write_image(
+            images_dir / f"{extra_stem}.jpg", (100, 80), (128, 128, 128)
         )
         label_image(
             images_dir / f"{extra_stem}.jpg",
@@ -1277,12 +1253,10 @@ def _two_subject_dataset(root: Path) -> Path:
 
     No stem carries both, and the registry declares the two subjects. Returns ``root``.
     """
-    from PIL import Image
-
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
 
     date = "2-11-26"
-    images_dir = root / "images" / date
+    images_dir = image_dir(root, date)
     images_dir.mkdir(parents=True)
     registry_over(
         root,
@@ -1301,9 +1275,7 @@ def _two_subject_dataset(root: Path) -> Path:
         ("bud_a", "bud"),
         ("bud_b", "bud"),
     ):
-        Image.new("RGB", (100, 80), (128, 128, 128)).save(
-            images_dir / f"{stem}.jpg"
-        )
+        write_image(images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128))
         label_image(
             images_dir / f"{stem}.jpg",
             [Annotation(subject=subject, geometry=BBox(4, 4, 12, 12))],
@@ -1345,12 +1317,10 @@ def _attribute_scoped_dataset(root: Path) -> Path:
     Four have their instance assessed for it, one carries an instance never assessed for it.
     Returns ``root``.
     """
-    from PIL import Image
-
     from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
 
     date = "2-11-26"
-    images_dir = root / "images" / date
+    images_dir = image_dir(root, date)
     images_dir.mkdir(parents=True)
     registry_over(
         root,
@@ -1376,9 +1346,7 @@ def _attribute_scoped_dataset(root: Path) -> Path:
         ("assessed_c", "healthy"),
         ("assessed_d", "damaged"),
     ):
-        Image.new("RGB", (100, 80), (128, 128, 128)).save(
-            images_dir / f"{stem}.jpg"
-        )
+        write_image(images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128))
         label_image(
             images_dir / f"{stem}.jpg",
             [
@@ -1391,9 +1359,7 @@ def _attribute_scoped_dataset(root: Path) -> Path:
             100,
             80,
         )
-    Image.new("RGB", (100, 80), (128, 128, 128)).save(
-        images_dir / "unassessed.jpg"
-    )
+    write_image(images_dir / "unassessed.jpg", (100, 80), (128, 128, 128))
     label_image(
         images_dir / "unassessed.jpg",
         [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
@@ -1439,7 +1405,7 @@ def test_draw_splits_nothing_admitted_names_the_searched_images(
     A capture whose only label document names an image that is gone admits nothing.
     """
     root = tmp_path / "ds"
-    (root / "images" / "2-11-26").mkdir(parents=True)
+    image_dir(root, "2-11-26").mkdir(parents=True)
     json_io.write_label_document(
         label_key(root, "2-11-26", "a"),
         [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
@@ -1460,7 +1426,7 @@ def test_draw_splits_nothing_admitted_names_the_searched_images(
     )
 
     assert "error" in result
-    assert str(root / "images" / "2-11-26") in result["error"]
+    assert str(image_dir(root, "2-11-26")) in result["error"]
     assert not ts.exists(selection_key(out))
 
 
@@ -1468,19 +1434,15 @@ def test_draw_splits_draws_an_undated_capture_beside_a_dated_one(
     tmp_path: Path,
 ) -> None:
     """Both captures' label documents enter one draw, each sample naming its own."""
-    from PIL import Image
-
     root = tmp_path / "ds"
     for capture, stems in (
         ("2-11-26", ("a", "b", "c")),
         (UNDATED_BUCKET, ("loose1", "loose2")),
     ):
-        images = root / "images" / capture
+        images = image_dir(root, capture)
         images.mkdir(parents=True)
         for stem in stems:
-            Image.new("RGB", (100, 80), (128, 128, 128)).save(
-                images / f"{stem}.jpg"
-            )
+            write_image(images / f"{stem}.jpg", (100, 80), (128, 128, 128))
             label_image(
                 images / f"{stem}.jpg",
                 [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
@@ -1525,15 +1487,11 @@ def test_draw_splits_holds_no_sample_for_a_date_that_admits_nothing(
     A capture whose only label document names no image anywhere contributes no sample: every
     drawn sample comes from the capture holding images, and the orphan is not among them.
     """
-    from PIL import Image
-
     root = tmp_path / "ds"
-    images_dir = root / "images" / "2-11-26"
+    images_dir = image_dir(root, "2-11-26")
     images_dir.mkdir(parents=True)
     for stem in ("a", "b", "c", "d"):
-        Image.new("RGB", (100, 80), (128, 128, 128)).save(
-            images_dir / f"{stem}.jpg"
-        )
+        write_image(images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128))
         label_image(
             images_dir / f"{stem}.jpg",
             [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
@@ -1576,13 +1534,13 @@ def _write_one_sample_selection(root: Path, out: Path) -> None:
             samples=(
                 Sample(
                     member="a",
-                    source=str(root / "images" / UNDATED_BUCKET / "a.jpg"),
+                    source=str(image_dir(root, UNDATED_BUCKET) / "a.jpg"),
                     ground_truth=label_key(root, UNDATED_BUCKET, "a"),
                     group="a",
                     side="train",
                 ),
             ),
-            scope=registry_scope(root / "images", "leaf"),
+            scope=registry_scope(image_root(root), "leaf"),
             seed=1,
             group_by="stem",
             ratios={"train": 1.0},
@@ -1619,10 +1577,10 @@ def test_read_selection_admits_the_writers_own_record(tmp_path: Path) -> None:
     assert samples[0]["source"] == f"images/{UNDATED_BUCKET}/a.jpg"
     drawn = read_selection(out, project=tmp_path)
 
-    assert drawn.scope == registry_scope(tmp_path / "images", "leaf")
+    assert drawn.scope == registry_scope(image_root(tmp_path), "leaf")
     assert drawn.seed == 1
     assert [s.location for s in drawn.samples] == [
-        str(tmp_path.resolve() / "images" / UNDATED_BUCKET / "a.jpg")
+        str(image_dir(tmp_path.resolve(), UNDATED_BUCKET) / "a.jpg")
     ]
     assert [s.ground_truth for s in drawn.samples] == [
         label_key(tmp_path, UNDATED_BUCKET, "a")

@@ -7,12 +7,20 @@ root.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 torch = pytest.importorskip("torch")
 import tcip_store  # noqa: E402
-from tcip_mcp.dataset_layout import bucket_key  # noqa: E402
+from tcip_mcp.dataset_layout import (  # noqa: E402
+    bucket_key,
+    image_dir,
+    image_root,
+)
 from tcip_mcp.model_registry import Producer  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._audit_fixtures import audit_rows  # noqa: E402
@@ -53,7 +61,7 @@ def test_run_inference_publishes_each_document_the_record_and_one_audit_line(
     from tcip_mcp.tools.inference_tools import run_inference
 
     ckpt = Path(project_checkpoint(tmp_path))
-    images_dir = _images(tmp_path / "images" / "2026-01-01")
+    images_dir = _images(image_dir(tmp_path, "2026-01-01"))
     _stubbed(monkeypatch)
 
     ran = run_inference(
@@ -102,7 +110,7 @@ def test_a_second_run_into_a_published_bucket_refuses_and_leaves_it(
     from tcip_mcp.tools.inference_tools import run_inference
 
     root = tmp_path / "dataset"
-    images_dir = _images(root / "images" / "2026-01-01")
+    images_dir = _images(image_dir(root, "2026-01-01"))
     _stubbed(monkeypatch)
     ckpt = project_checkpoint(tmp_path)
     first = run_inference(
@@ -162,7 +170,7 @@ def test_a_run_over_an_empty_images_directory_refuses_and_publishes_nothing(
 ) -> None:
     from tcip_mcp.tools.inference_tools import run_inference
 
-    empty = tmp_path / "images" / "2026-01-01"
+    empty = image_dir(tmp_path, "2026-01-01")
     empty.mkdir(parents=True)
     _stubbed(monkeypatch)
 
@@ -181,11 +189,17 @@ def test_a_run_over_an_empty_images_directory_refuses_and_publishes_nothing(
 
 @pytest.mark.parametrize(
     "where",
-    [("captures",), ("images",), ("images", "2026-01-01", "sub")],
+    [
+        lambda root: root / "captures",
+        image_root,
+        lambda root: image_dir(root, "2026-01-01") / "sub",
+    ],
     ids=["no_image_tree", "the_image_tree", "inside_a_capture"],
 )
 def test_an_images_dir_that_is_no_capture_refuses_naming_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: tuple[str, ...]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    where: Callable[[Path], Path],
 ) -> None:
     """An images directory that is no capture is refused at the door naming it.
 
@@ -194,7 +208,7 @@ def test_an_images_dir_that_is_no_capture_refuses_naming_it(
     """
     from tcip_mcp.tools.inference_tools import run_inference
 
-    images_dir = _images(tmp_path.joinpath(*where))
+    images_dir = _images(where(tmp_path))
     _stubbed(monkeypatch)
 
     ran = run_inference(
@@ -219,7 +233,7 @@ def test_a_raster_outside_a_capture_is_admitted(
 
     from tcip_mcp.tools.inference_tools import run_inference
 
-    raster = tmp_path / "images" / "mosaic.tif"
+    raster = image_root(tmp_path) / "mosaic.tif"
     raster.parent.mkdir(parents=True)
     tifffile.imwrite(str(raster), np.zeros((64, 64, 3), dtype=np.uint8))
     _stubbed(monkeypatch)
@@ -242,7 +256,7 @@ def test_a_dry_run_previews_the_both_sources_refusal(tmp_path: Path) -> None:
     """A dry run naming both an images directory and a raster is refused, naming the rule."""
     from tcip_mcp.tools.inference_tools import run_inference
 
-    images_dir = tmp_path / "images"
+    images_dir = image_root(tmp_path)
     images_dir.mkdir()
     raster_path = tmp_path / "mosaic.tif"
     raster_path.write_bytes(b"stub")
@@ -266,7 +280,7 @@ def test_a_dry_run_names_the_bucket_and_the_execution_and_writes_nothing(
 ) -> None:
     from tcip_mcp.tools.inference_tools import run_inference
 
-    images_dir = _images(tmp_path / "images" / "2026-01-01")
+    images_dir = _images(image_dir(tmp_path, "2026-01-01"))
     _stubbed(monkeypatch)
 
     result = run_inference(

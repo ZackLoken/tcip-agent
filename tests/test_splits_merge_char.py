@@ -8,10 +8,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image
-
 from tcip_annotation.state import Annotation, BBox
-from tests._producer_fixtures import image_label_key, label_image
+from tcip_mcp.dataset_layout import image_dir
+from tests._producer_fixtures import image_label_key, label_image, write_image
 from tests._training_values import RATIONALE, drawn_split
 
 _DRAW = drawn_split(
@@ -68,12 +67,12 @@ GOLDEN_SIDE_BY_GROUP = {
 
 def _multi_source_dataset(root: Path) -> Path:
     date = "2-11-26"
-    images_dir = root / "images" / date
-    images_dir.mkdir(parents=True)
+    images_dir = image_dir(root, date)
     for pref in ("srcA", "srcB", "srcC", "srcD"):
         for t in range(3):
-            image = images_dir / f"{pref}_{t}_0.jpg"
-            Image.new("RGB", (64, 64), (128, 128, 128)).save(image)
+            image = write_image(
+                images_dir / f"{pref}_{t}_0.jpg", (64, 64), (128, 128, 128)
+            )
             label_image(
                 image,
                 [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))],
@@ -145,5 +144,5 @@ def test_draw_splits_selection_document_golden(tmp_path: Path) -> None:
     assert drawn.ratios == GOLDEN_REQUESTED_RATIOS
     assert (drawn.stratify_foreground, drawn.rationale) == (True, RATIONALE)
     for sample in drawn.samples:
-        assert Path(sample.source).parent == root / "images" / "2-11-26"
+        assert Path(sample.source).parent == image_dir(root, "2-11-26")
         assert sample.ground_truth == image_label_key(sample.source)

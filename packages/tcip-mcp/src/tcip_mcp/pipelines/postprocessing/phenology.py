@@ -24,7 +24,6 @@ from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from tcip_mcp.dataset_layout import prediction_key
 from tcip_store import Key
 
 if TYPE_CHECKING:
@@ -401,7 +400,7 @@ def per_plant_series(
                 acc[3] += 1
                 continue
             total, positive, unclassified = count_by_class(
-                prediction_key(bucket.root, bucket.name, a.stem),
+                bucket.stem_keys[a.stem],
                 state,
                 scope=bucket.scope,
             )

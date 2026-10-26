@@ -27,6 +27,7 @@ def test_an_attributed_bucket_delivers_its_object_count_not_its_value_count(
 ) -> None:
     pytest.importorskip("torch")
     from tcip_mcp import subject_registry as cr
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.postprocessing.export import (
         deliver_per_image_counts_csv,
     )
@@ -38,7 +39,7 @@ def test_an_attributed_bucket_delivers_its_object_count_not_its_value_count(
             cr.Subject(name=SUBJECT, description="", attributes=(posture,)),
         )
     )
-    image = tmp_path / "ds" / "images" / "2026-05-20" / "img1.jpg"
+    image = image_dir(tmp_path / "ds", "2026-05-20") / "img1.jpg"
     bucket = published(
         tmp_path,
         "classifier/2026-05-20",

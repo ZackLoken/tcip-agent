@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 from tests._producer_fixtures import dataset_over  # noqa: E402
 from tests._training_values import augmentation, drawn_split, tiling_block
@@ -299,7 +299,7 @@ def _detection_project(
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     kwargs = {"photometric": "rgb", "rowsperstrip": 8}
     if extrasamples:

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import Sample
@@ -21,18 +21,20 @@ pytest.importorskip("torch")
 
 from PIL import Image  # noqa: E402
 
-from tests._producer_fixtures import dataset_over, painted_frame, run_over  # noqa: E402
+from tests._producer_fixtures import (  # noqa: E402
+    dataset_over,
+    painted_frame,
+    run_over,
+    write_image,
+)
 
 
 def _dataset(tmp_path: Path) -> tuple[Path, Path]:
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     masks_dir = tmp_path / "masks"
-    images_dir.mkdir(parents=True)
     masks_dir.mkdir()
     for i in range(2):
-        Image.new("RGB", (8, 8), (i * 40, 0, 0)).save(
-            images_dir / f"img{i}.png"
-        )
+        write_image(images_dir / f"img{i}.png", (8, 8), (i * 40, 0, 0))
     painted_frame(8, 8, 0, [((2, 2, 6, 6), 1)], mode="L").save(
         masks_dir / "img0.png"
     )

@@ -43,8 +43,7 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
             positive_state={"attribute": BLOOM_STATE.name, "value": "open"},
             milestone_fractions=(0.05, 0.50, 0.95),
             milestone_on="positive_fraction",
-            # No majority alias: crops.yml names no single "most blooms open" date for currant,
-            # unlike the first trait's majority date; left empty rather than copied from it.
+            # No majority alias: crops.yml names no single "most blooms open" date for currant.
             phenology_prefix="bloom",
             count_bias_tolerance_frac=0.01,
             notes="Test-only, provisional: proves the delivery mechanism generalizes to a second "
@@ -81,14 +80,12 @@ def _currant_bloom_body(tmp_path: Path) -> dict:
 
     project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=DATES
-    )
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=DATES)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     built = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=registry,
         actor=None,
     )

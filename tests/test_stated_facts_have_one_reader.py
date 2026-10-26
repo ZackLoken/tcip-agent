@@ -13,7 +13,7 @@ import pytest
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Polygon
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._producer_fixtures import image_label_key, label_image
 
 if TYPE_CHECKING:
@@ -38,7 +38,7 @@ def test_a_prediction_document_stating_no_score_is_refused_where_it_is_read(
     tmp_path: Path,
 ) -> None:
     key = _stored(
-        tmp_path / "images" / UNDATED_BUCKET / "p.png",
+        image_dir(tmp_path, UNDATED_BUCKET) / "p.png",
         [
             Annotation(subject=SUBJECT, geometry=BOX, score=0.8),
             Annotation(subject=SUBJECT, geometry=BOX),
@@ -53,7 +53,7 @@ def test_a_prediction_document_stating_no_score_is_refused_where_it_is_read(
 
 def test_a_scored_prediction_document_reads_whole(tmp_path: Path) -> None:
     key = _stored(
-        tmp_path / "images" / UNDATED_BUCKET / "p.png",
+        image_dir(tmp_path, UNDATED_BUCKET) / "p.png",
         [Annotation(subject=SUBJECT, geometry=BOX, score=0.8)],
     )
 
@@ -70,11 +70,11 @@ def test_no_reader_stands_in_a_score_for_a_prediction_stating_none(
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
     gt = _read_back(
-        tmp_path / "images" / UNDATED_BUCKET / "g.png",
+        image_dir(tmp_path, UNDATED_BUCKET) / "g.png",
         [Annotation(subject=SUBJECT, geometry=BOX)],
     )
     preds = _read_back(
-        tmp_path / "images" / UNDATED_BUCKET / "p.png",
+        image_dir(tmp_path, UNDATED_BUCKET) / "p.png",
         [Annotation(subject=SUBJECT, geometry=BOX)],
     )
 
@@ -93,13 +93,10 @@ def test_the_instance_loader_builds_its_target_from_the_polygons_it_reads(
     Over the geometry the loader declares it reads, a box beside the polygon is no instance and
     no mask.
     """
-    from PIL import Image
+    from tests._producer_fixtures import dataset_over, write_image
 
-    from tests._producer_fixtures import dataset_over
-
-    images = tmp_path / "images" / UNDATED_BUCKET
-    images.mkdir(parents=True)
-    Image.new("RGB", (IMG, IMG), (40, 40, 40)).save(images / "p0.png")
+    images = image_dir(tmp_path, UNDATED_BUCKET)
+    write_image(images / "p0.png", (IMG, IMG), (40, 40, 40))
     _stored(
         images / "p0.png",
         [
@@ -130,6 +127,6 @@ def test_the_completion_digest_reads_a_box_on_the_writers_own_grid(
     ]
 
     assert json_io.subject_digest(anns, SUBJECT) == json_io.subject_digest(
-        _read_back(tmp_path / "images" / UNDATED_BUCKET / "c.png", anns),
+        _read_back(image_dir(tmp_path, UNDATED_BUCKET) / "c.png", anns),
         SUBJECT,
     )

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import tcip_store
+from tcip_mcp.dataset_layout import image_dir
 from tests._producer_fixtures import BRIGHT, label_image, painted_frame
 
 if TYPE_CHECKING:
@@ -40,7 +41,7 @@ def _dataset(root: Path, stems: tuple[str, ...] = _STEMS) -> Path:
     ``stems`` defaults to eight.
     """
     for date in DATES:
-        images_dir = root / "images" / date
+        images_dir = image_dir(root, date)
         images_dir.mkdir(parents=True, exist_ok=True)
         for stem in stems:
             painted_frame(
@@ -186,7 +187,7 @@ def test_a_document_emptied_after_its_admission_never_trains_as_empty(
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _dataset(tmp_path / "ds")
-    images_dir = root / "images" / DATES[0]
+    images_dir = image_dir(root, DATES[0])
     real_samples = label_queries.Admission.samples
 
     def emptied_first(

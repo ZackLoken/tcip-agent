@@ -15,6 +15,7 @@ import pytest
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import subject_registry as cr
+from tcip_mcp.dataset_layout import image_dir, image_root
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing import phenology
 from tcip_mcp.traits import PositiveState
@@ -46,7 +47,7 @@ def _scope(tmp_path: Path, *attributes: cr.Attribute) -> ClassScope:
             )
         ),
     )
-    return registry_scope(tmp_path / "images", SUBJECT)
+    return registry_scope(image_root(tmp_path), SUBJECT)
 
 
 def _document(tmp_path: Path) -> Key:
@@ -154,7 +155,7 @@ def test_an_undecodable_bucket_record_refuses_by_name_rather_than_reading_as_unc
     from tcip_store.file_backend import database_file
     from tests._chain_fixtures import predicted, published
 
-    image = tmp_path / "ds" / "images" / "2026-05-02" / "s1.png"
+    image = image_dir(tmp_path / "ds", "2026-05-02") / "s1.png"
     image.parent.mkdir(parents=True)
     image.write_bytes(b"")
     bucket = published(

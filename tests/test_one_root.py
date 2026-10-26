@@ -125,13 +125,11 @@ def test_a_server_for_no_project_acts_on_the_project_it_creates(
 ) -> None:
     import json
 
-    from PIL import Image
-
     from tcip_mcp import dataset_layout
+    from tests._producer_fixtures import write_image
 
     source = tmp_path / "raw"
-    source.mkdir()
-    Image.new("RGB", (8, 8)).save(source / "IMG_0001.jpg")
+    write_image(source / "IMG_0001.jpg", (8, 8))
     target = tmp_path.parent / "ridge_block"
 
     created, ingested = results_through_handshake(

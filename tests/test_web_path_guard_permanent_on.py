@@ -18,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import tcip_store
+from tcip_mcp.dataset_layout import image_dir, image_root
 from tcip_mcp.tools.project_tools import DatasetEntry, upsert_dataset
 from tcip_web.paths import assert_path_allowed
 from tcip_web.state import store
@@ -50,7 +51,7 @@ def test_the_workspace_is_admitted_and_a_sibling_outside_it_is_refused_with_no_e
 ) -> None:
     from tcip_web.paths import allowed_roots
 
-    inside = tmp_path / "images" / "a.jpg"
+    inside = image_root(tmp_path) / "a.jpg"
     inside.parent.mkdir(parents=True)
     inside.write_bytes(b"x")
     assert assert_path_allowed(str(inside)) == inside.resolve()
@@ -75,8 +76,8 @@ def test_a_workspace_project_reached_through_a_link_is_admitted_as_itself(
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"symlinks not available on this machine: {exc}")
     assert (
-        assert_path_allowed(str(link / "images"))
-        == (real / "images").resolve()
+        assert_path_allowed(str(image_root(link)))
+        == image_root(real).resolve()
     )
 
 
@@ -86,13 +87,13 @@ def test_a_dataset_registered_to_a_workspace_project_is_admitted_wherever_it_liv
 ) -> None:
     project = new_project(tmp_path).root
     external = outside / "field-data"
-    (external / "images").mkdir(parents=True)
+    image_root(external).mkdir(parents=True)
     with pytest.raises(ValueError):
-        assert_path_allowed(str(external / "images"))
+        assert_path_allowed(str(image_root(external)))
     upsert_dataset(project, DatasetEntry(id="ds-1", path=str(external)))
     assert (
-        assert_path_allowed(str(external / "images"))
-        == (external / "images").resolve()
+        assert_path_allowed(str(image_root(external)))
+        == image_root(external).resolve()
     )
 
 
@@ -127,7 +128,7 @@ def test_an_imports_staging_tree_is_never_admitted_even_under_the_workspace(
     is in flight still refuses.
     """
     workspace = tmp_path.parent
-    staged = workspace / ".imports" / "run-1" / "images" / "a.jpg"
+    staged = image_root(workspace / ".imports" / "run-1") / "a.jpg"
     staged.parent.mkdir(parents=True)
     staged.write_bytes(b"x")
 
@@ -161,8 +162,8 @@ def test_a_root_listed_under_two_spellings_is_admitted_once(
     from tcip_web.paths import allowed_roots
 
     project = new_project(tmp_path).root
-    (project / "images").mkdir(exist_ok=True)
-    store.configure(store.workspace, (project / "images" / "..",))
+    image_root(project).mkdir(exist_ok=True)
+    store.configure(store.workspace, (image_root(project) / "..",))
 
     assert sum(root.samefile(project) for root in allowed_roots()) == 1
 
@@ -184,7 +185,7 @@ def test_a_path_that_does_not_exist_yet_is_judged_by_its_nearest_existing_ancest
 def test_containment_is_by_identity_so_a_case_variant_spelling_is_the_same_directory(
     tmp_path: Path,
 ) -> None:
-    inside = tmp_path / "Proj" / "images" / "a.jpg"
+    inside = image_root(tmp_path / "Proj") / "a.jpg"
     inside.parent.mkdir(parents=True)
     inside.write_bytes(b"x")
     variant = Path(str(inside).upper())
@@ -218,8 +219,8 @@ def test_dataset_routes_refuse_an_outside_root_and_serve_an_inside_one(
 ) -> None:
     open_new_project(tmp_path)
     inside = tmp_path / "proj"
-    write_image(inside / "images" / "2026-02-11" / "a.jpg", (8, 8))
-    write_image(outside / "images" / "2026-02-11" / "a.jpg", (8, 8))
+    write_image(image_dir(inside, "2026-02-11") / "a.jpg", (8, 8))
+    write_image(image_dir(outside, "2026-02-11") / "a.jpg", (8, 8))
 
     assert (
         client.get(
@@ -258,7 +259,7 @@ def test_the_proposals_route_confines_the_image_whose_bucket_it_reads(
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     inside = open_new_project(tmp_path / "proj").root
-    image = write_image(inside / "images" / "2026-02-11" / "a.jpg", (8, 8))
+    image = write_image(image_dir(inside, "2026-02-11") / "a.jpg", (8, 8))
     staged = stage_proposals(
         inside,
         str(image),
@@ -276,7 +277,7 @@ def test_the_proposals_route_confines_the_image_whose_bucket_it_reads(
         ],
     )
     assert "error" not in staged, staged
-    stranger = write_image(outside / "images" / "2026-02-11" / "a.jpg", (8, 8))
+    stranger = write_image(image_dir(outside, "2026-02-11") / "a.jpg", (8, 8))
 
     assert (
         client.get(
@@ -410,12 +411,10 @@ def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
     assert resp.status_code == 200, resp.text
     assert not elsewhere.exists()
 
-    foreign_images = write_image(
-        outside / "images" / "2026-02-11" / "z.jpg", (8, 8)
-    ).parent.parent
+    write_image(image_dir(outside, "2026-02-11") / "z.jpg", (8, 8))
     resp = client.post(
         "/api/results/plant_mapping/build",
-        json={**payload, "images_root": str(foreign_images)},
+        json={**payload, "dataset_root": str(outside)},
     )
     assert resp.status_code == 403
     assert "does not belong to project" in resp.json()["detail"]

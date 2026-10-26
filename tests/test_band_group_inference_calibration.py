@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 import tifffile
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
@@ -87,7 +87,7 @@ def _grouped_dataset(root: Path) -> Path:
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
-    images_dir = root / "images" / UNDATED_BUCKET
+    images_dir = image_dir(root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
 
     _write_group(images_dir, "capture_001", fill=(111, 222))
@@ -160,7 +160,7 @@ def test_run_inference_images_dir_folds_a_grouped_capture(
     """A pass over an images directory folds a grouped capture's band files into one image."""
     from tests._verified_checkpoint_fixtures import predicted_over
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     _write_group(images_dir, "capture_001")
     ckpt = _detection_checkpoint(tmp_path)

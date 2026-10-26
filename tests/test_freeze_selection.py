@@ -16,7 +16,11 @@ if TYPE_CHECKING:
 torch = pytest.importorskip("torch")
 
 import tcip_store as ts  # noqa: E402
-from tcip_mcp.dataset_layout import capture_label_keys, label_key  # noqa: E402
+from tcip_mcp.dataset_layout import (  # noqa: E402
+    capture_label_keys,
+    image_dir,
+    label_key,
+)
 from tcip_mcp.experiments import (  # noqa: E402
     RUN_FILE,
     experiment_dir,
@@ -61,7 +65,7 @@ def _real_drawn_experiment(
     ``experiment_id``'s launch record under ``project``; a run drawing no validation side
     selects on its training loss. Return the resolved ``data`` block.
     """
-    images_dir = root / "images" / date
+    images_dir = image_dir(root, date)
     opened_run(
         project,
         training_config(
@@ -136,7 +140,7 @@ def test_freeze_selection_round_trips_through_a_real_bind(
     assert (frozen.stratify_foreground, frozen.rationale) == (True, RATIONALE)
     assert {s.ground_truth.parts[-1] for s in frozen.samples} <= set("abcdef")
     for sample in frozen.samples:
-        assert Path(sample.source).parent == root / "images" / DATES[0]
+        assert Path(sample.source).parent == image_dir(root, DATES[0])
         assert ts.exists(sample.ground_truth)
 
     second = train_config(
@@ -160,19 +164,17 @@ def test_freeze_selection_names_the_sources_the_run_read_not_the_launch_input(
     With the launch record's stated config edited to name another images directory holding
     identically named files, each frozen sample's source stays in the directory the run read.
     """
-    from PIL import Image
-
     from tcip_mcp.tools.data_tools import freeze_selection
     from tcip_store import encode_record
+    from tests._producer_fixtures import write_image
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     data_cfg = _real_drawn_experiment(tmp_path, root, "exp-elsewhere")
     trained_images = Path(str(data_cfg.images_dir))
 
-    other = root / "images" / "other"
-    other.mkdir(parents=True)
+    other = image_dir(root, "other")
     for image in trained_images.iterdir():
-        Image.new("RGB", (16, 16), (200, 10, 10)).save(other / image.name)
+        write_image(other / image.name, (16, 16), (200, 10, 10))
     run_dir = experiment_dir("exp-elsewhere", project=tmp_path)
     launch = read_record(run_dir / RUN_FILE)
     assert isinstance(launch, dict)
@@ -212,7 +214,7 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     train, val = [], []
     for date in DATES:
-        images_dir = root / "images" / date
+        images_dir = image_dir(root, date)
         stems = [key.parts[-1] for key in capture_label_keys(root, date)][:2]
         for index, stem in enumerate(stems):
             key = label_key(root, date, stem)
@@ -273,7 +275,7 @@ def test_freeze_selection_carries_an_explicit_grouping_map_onto_its_samples(
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    images_dir = root / "images" / DATES[0]
+    images_dir = image_dir(root, DATES[0])
     resolved_run(
         tmp_path,
         {

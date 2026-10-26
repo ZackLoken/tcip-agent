@@ -13,7 +13,7 @@ import pytest
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.web_client import Panel
 
 if TYPE_CHECKING:
@@ -648,7 +648,7 @@ class TestTrainingToolOutputSchema:
         )
 
         images_dir = seed_bud_images(
-            tmp_path / "images" / UNDATED_BUCKET,
+            image_dir(tmp_path, UNDATED_BUCKET),
             n=2,
             size=128,
             box=(10, 10, 40, 40),
@@ -724,11 +724,11 @@ class TestInferenceToolOutputSchema:
         from tests._verified_checkpoint_fixtures import registered_checkpoint
 
         ckpt = registered_checkpoint(tmp_path, model_source=dict(BLOB_BUILDER))
-        (tmp_path / "images" / UNDATED_BUCKET).mkdir(parents=True)
+        image_dir(tmp_path, UNDATED_BUCKET).mkdir(parents=True)
         res = run_inference(
             tmp_path,
             ckpt,
-            images_dir=str(tmp_path / "images" / UNDATED_BUCKET),
+            images_dir=str(image_dir(tmp_path, UNDATED_BUCKET)),
             bucket="out/2026-01-01",
             dry_run=True,
             stated=Stated(
@@ -773,7 +773,7 @@ class TestInferenceToolOutputSchema:
             ]
 
         counts = {"row3_plant07": 1, "row3_plant11": 0, "row9_plant02": 4}
-        images = tmp_path / "dataset" / "images" / "2026-01-01"
+        images = image_dir(tmp_path / "dataset", "2026-01-01")
         bucket = published(
             tmp_path,
             "baseline/2026-01-01",

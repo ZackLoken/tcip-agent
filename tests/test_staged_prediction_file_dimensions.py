@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PIL import Image
 
 from tcip_annotation import json_io
 
@@ -29,11 +28,11 @@ def _staged(
     document is returned as its bucket records it.
     """
     from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.proposal_tools import stage_proposals
+    from tests._producer_fixtures import write_image
 
-    image = project / "ds" / "images" / DATE / "IMG_0007.jpg"
-    image.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", size).save(image)
+    image = write_image(image_dir(project / "ds", DATE) / "IMG_0007.jpg", size)
     w, h = size
     x1, y1, x2, y2 = box
     staged = stage_proposals(

@@ -5,6 +5,7 @@ import { ROUTES } from "@/api/routes";
 import {
   ACKNOWLEDGED_BY_HEADER,
   type Assessments,
+  type BuildMappingPayload,
   type CanopySegmentDisclosure,
   type ConfirmRevisionPayload,
   type DeliveryEvents,
@@ -19,7 +20,6 @@ import {
   type ServedDeliveryEvent,
   type ServedPlantMappingDisclosure,
   type Stated,
-  type StatedRadius,
   type TraitRevision,
   VALIDATED_HEADER,
 } from "@/api/types.generated";
@@ -304,15 +304,8 @@ export const resultsApi = {
       body,
     ),
 
-  buildPlantMapping: (body: {
-    name: string;
-    images_root: string;
-    plant_registry: string;
-    dates?: string[];
-    match_radius?: StatedRadius;
-    supersede?: boolean;
-    user: string;
-  }) => postJson<ServedPlantMapping>(ROUTES.postResultsPlantMappingBuild, body),
+  buildPlantMapping: (body: BuildMappingPayload) =>
+    postJson<ServedPlantMapping>(ROUTES.postResultsPlantMappingBuild, body),
 
   // Refuses with 404 when nothing is stored under the name.
   loadPlantMapping: (name: string) =>

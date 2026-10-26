@@ -17,7 +17,7 @@ from PIL import Image
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, label_key
 from tcip_mcp.pipelines.data import (
     dataset_fingerprint as fingerprint_mod,
     selection,
@@ -25,7 +25,7 @@ from tcip_mcp.pipelines.data import (
 from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
-from tests._producer_fixtures import label_image, registry_over
+from tests._producer_fixtures import label_image, registry_over, write_image
 
 if TYPE_CHECKING:
     import pytest
@@ -42,12 +42,9 @@ def _make_dataset(
 ) -> None:
     """Write a minimal nested-schema dataset: one dated image + its bud label + a registry."""
     date = "2026-02-11"
-    (root / "images" / date).mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (64, 64), color=pixel).save(
-        root / "images" / date / f"IMG_1.{ext}"
-    )
+    write_image(image_dir(root, date) / f"IMG_1.{ext}", (64, 64), pixel)
     label_image(
-        root / "images" / date / f"IMG_1.{ext}",
+        image_dir(root, date) / f"IMG_1.{ext}",
         [Annotation(subject="bud", geometry=BBox(*bud_box))],
         64,
         64,
@@ -101,10 +98,10 @@ def test_pixel_reencode_under_same_filename_changes_the_fingerprint(
     _make_dataset(tmp_path, pixel=(120, 120, 120), ext="bmp")
     before_fp = dataset_fingerprint(tmp_path)
     before_labels = fingerprint_mod._labels_term(tmp_path, {})
-    img_path = tmp_path / "images" / "2026-02-11" / "IMG_1.bmp"
+    img_path = image_dir(tmp_path, "2026-02-11") / "IMG_1.bmp"
     size_before = img_path.stat().st_size
     # re-encode the image with different pixels, same filename, labels untouched
-    Image.new("RGB", (64, 64), color=(0, 200, 0)).save(img_path)
+    write_image(img_path, (64, 64), (0, 200, 0))
     # confirms the size channel is closed, not just JPEG luck
     assert img_path.stat().st_size == size_before
     assert (
@@ -125,11 +122,11 @@ def test_an_image_rewritten_at_its_size_and_mtime_changes_the_fingerprint(
     import os
 
     _make_dataset(tmp_path, pixel=(120, 120, 120), ext="bmp")
-    img_path = tmp_path / "images" / "2026-02-11" / "IMG_1.bmp"
+    img_path = image_dir(tmp_path, "2026-02-11") / "IMG_1.bmp"
     before = dataset_fingerprint(tmp_path)
     stat = img_path.stat()
 
-    Image.new("RGB", (64, 64), color=(0, 200, 0)).save(img_path)
+    write_image(img_path, (64, 64), (0, 200, 0))
     os.utime(img_path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
 
     assert (img_path.stat().st_size, img_path.stat().st_mtime_ns) == (
@@ -208,7 +205,7 @@ def test_an_admitted_sample_enters_at_its_admitted_version_under_the_root_as_spe
     root = tmp_path / "elsewhere" / ".." / "ds"
     _make_dataset(root)
     samples = admitted_membership(
-        [("2026-02-11", root / "images" / "2026-02-11", None)],
+        [("2026-02-11", image_dir(root, "2026-02-11"), None)],
         scope=ClassScope(subject="bud"),
         grouping="tile_prefix",
     ).samples.values()
@@ -263,12 +260,12 @@ def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_
     The dataset holds fixed image bytes, one label document and a registry.
     """
     date = "2026-02-11"
-    (tmp_path / "images" / date).mkdir(parents=True)
-    (tmp_path / "images" / date / "IMG_1.jpg").write_bytes(
+    image_dir(tmp_path, date).mkdir(parents=True)
+    (image_dir(tmp_path, date) / "IMG_1.jpg").write_bytes(
         b"fixed-jpeg-bytes-for-fingerprint-test"
     )
     label_image(
-        tmp_path / "images" / date / "IMG_1.jpg",
+        image_dir(tmp_path, date) / "IMG_1.jpg",
         [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))],
         64,
         64,
@@ -291,7 +288,7 @@ def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(
     two calls.
     """
     date = "2026-02-11"
-    images = tmp_path / "images" / date
+    images = image_dir(tmp_path, date)
     images.mkdir(parents=True)
     Image.new("L", (16, 16), color=10).save(images / "band_r.png")
     Image.new("L", (16, 16), color=20).save(images / "band_nir.png")
@@ -358,7 +355,6 @@ def test_a_malformed_registry_refuses_the_fingerprint_and_an_absent_one_admits_i
 
 def test_bespoke_dataset_has_no_fingerprint(tmp_path: Path) -> None:
     # images but no labels, and labels but no images, both -> None (never a fabricated identity)
-    (tmp_path / "images" / "d").mkdir(parents=True)
-    Image.new("RGB", (8, 8)).save(tmp_path / "images" / "d" / "x.jpg")
+    write_image(image_dir(tmp_path, "d") / "x.jpg", (8, 8))
     assert dataset_fingerprint(tmp_path) is None  # no labels
     assert dataset_fingerprint(tmp_path / "nonexistent") is None

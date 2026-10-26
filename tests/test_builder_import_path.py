@@ -673,6 +673,7 @@ def test_a_module_an_earlier_layout_loaded_is_not_reachable_from_a_later_one(
     helper when it is imported. B refuses, at the import and at a real preflight of its config,
     though A loaded the helper.
     """
+    from tcip_mcp.dataset_layout import image_root
     from tcip_mcp.pipelines.model_build import import_source_builder
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -686,7 +687,7 @@ def test_a_module_an_earlier_layout_loaded_is_not_reachable_from_a_later_one(
         import_source_builder(builder, layouts["b"])
 
     import_source_builder(builder, layouts["a"])
-    images_dir = tmp_path / "images"
+    images_dir = image_root(tmp_path)
     images_dir.mkdir()
     issues = preflight_config(
         trees["b"],
@@ -984,11 +985,12 @@ def test_preflight_imports_a_builder_through_its_source_files(
     A config naming its builder's file passes preflight's importability check without the
     directory put on the path by hand.
     """
+    from tcip_mcp.dataset_layout import image_root
     from tcip_mcp.tools.training_tools import preflight_config
 
     src = _builder_dir(tmp_path)
     monkeypatch.setattr(sys, "path", [p for p in sys.path if p != str(src)])
-    images_dir = tmp_path / "images"
+    images_dir = image_root(tmp_path)
     images_dir.mkdir()
     cfg = training_config(
         tmp_path,

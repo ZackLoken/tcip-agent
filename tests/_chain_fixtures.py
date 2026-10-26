@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.assessment import read_assessment
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.execution import Stated
 from tests._training_values import (
     DISPERSION_QUANTILE,
@@ -285,7 +286,7 @@ def synthetic_capture(root: Path, *, date: str = DATE) -> Path:
     assert "error" not in ingested, ingested
     assert ingested["copied"] == len(STEMS), ingested
 
-    images_dir = root / "images" / date
+    images_dir = image_dir(root, date)
     for index, stem in enumerate(STEMS):
         x0, y0, size = object_at(index)
         label_image(
@@ -955,7 +956,7 @@ def attributed_series(
         assert "error" not in ingested, ingested
         for stem, (index, frame_values) in labeled.items():
             label_image(
-                root / "images" / date / f"{stem}.jpg",
+                image_dir(root, date) / f"{stem}.jpg",
                 [
                     Annotation(
                         subject=SUBJECT,
@@ -1033,7 +1034,7 @@ def attributed_series(
         published = run_inference(
             project,
             checkpoint_path=checkpoint_path,
-            images_dir=str(root / "images" / date),
+            images_dir=str(image_dir(root, date)),
             bucket=f"series/{date}",
             stated=stated,
             assessment_id=assessment["assessment_id"] if assessment else None,
@@ -1058,7 +1059,7 @@ def attributed_series(
     mapped = build_plant_mapping(
         project,
         name="valley",
-        images_root=str(root / "images"),
+        dataset_root=str(root),
         plant_registry=registry,
         dates=list(dates),
         actor=None,

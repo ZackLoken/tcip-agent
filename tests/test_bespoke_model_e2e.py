@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._audit_fixtures import audit_rows
 from tests._chain_fixtures import (
     FRAME_STATISTICS,
@@ -70,7 +70,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.model_contract import overfit_check
 
     # 1. Synthetic detection data: open (tall) boxes so GT-derived anchors are tall too.
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     shapes = [(15, 36), (16, 40), (17, 44)]
     for i in range(6):
         _save_png(images_dir / f"img{i}.png")

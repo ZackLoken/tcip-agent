@@ -172,19 +172,19 @@ def test_the_prepared_pass_tiles_when_asked_and_not_otherwise(
     )
 
     ckpt = _detection_checkpoint(tmp_path)
-    images_dir = str(Path(gray_frame(tmp_path)).parent)
+    gray_frame(tmp_path)
 
     tiled, tiled_results = predicted_over(
         tmp_path,
         ckpt,
-        images_dir,
+        str(tmp_path),
         tile=True,
         tile_size=TILE,
         overlap=SAMPLE_OVERLAP,
         conf=0.0,
     )
     whole, whole_results = predicted_over(
-        tmp_path, ckpt, images_dir, tile=False, conf=0.0
+        tmp_path, ckpt, str(tmp_path), tile=False, conf=0.0
     )
 
     assert tiled.execution.tile_size == TILE and len(tiled_results) == 1
@@ -257,9 +257,8 @@ def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(
         ),
     )
 
-    p, results = predicted_over(
-        tmp_path, ckpt, str(Path(gray_frame(tmp_path)).parent), conf=0.0
-    )
+    gray_frame(tmp_path)
+    p, results = predicted_over(tmp_path, ckpt, str(tmp_path), conf=0.0)
 
     assert p.scope.attributes == attributes
     for result in results:

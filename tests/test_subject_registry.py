@@ -95,10 +95,11 @@ def _scope(
 
     The dataset under ``tmp_path`` declares ``registry``.
     """
+    from tcip_mcp.dataset_layout import image_root
     from tcip_mcp.pipelines.data.label_queries import registry_scope
 
     registry_over(tmp_path, registry)
-    return registry_scope(tmp_path / "images", subject)
+    return registry_scope(image_root(tmp_path), subject)
 
 
 def test_a_value_id_is_its_declared_position_never_a_sorted_one(

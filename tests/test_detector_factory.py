@@ -14,7 +14,7 @@ pytest.importorskip("torchvision")
 
 from torch import Tensor, nn  # noqa: E402
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir  # noqa: E402
 from tests import bespoke_models  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
     detector_geometry,
@@ -151,7 +151,7 @@ def test_a_detector_over_that_backbone_builds_from_its_datasets_own_band_statist
     from tcip_mcp.pipelines.derivations import band_normalization_stats
     from tests._producer_fixtures import label_image, samples_over
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     for index, stem in enumerate(("a", "b")):
         bands = np.full((32, 32, 5), 20 * (index + 1), dtype=np.uint8)

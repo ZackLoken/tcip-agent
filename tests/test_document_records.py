@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from PIL import Image
 
 import tcip_store as ts
 from tcip_annotation import json_io
@@ -31,6 +30,7 @@ from tests._producer_fixtures import (
     image_label_key,
     label_image,
     registry_over,
+    write_image,
 )
 from tests._training_values import RATIONALE, VERTEX_SPACING
 
@@ -52,13 +52,14 @@ def _capture(root: Path) -> list[Path]:
         root,
         SubjectRegistry(subjects=(Subject(name=BUD, description="a bud"),)),
     )
-    images = []
-    for i, stem in enumerate(STEMS):
-        path = image_dir(root, DATE) / f"{stem}.png"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        Image.new("RGB", (SIZE, SIZE), (40 + 30 * i, 60, 60)).save(path)
-        images.append(path)
-    return images
+    return [
+        write_image(
+            image_dir(root, DATE) / f"{stem}.png",
+            (SIZE, SIZE),
+            (40 + 30 * i, 60, 60),
+        )
+        for i, stem in enumerate(STEMS)
+    ]
 
 
 def _save(
@@ -284,7 +285,7 @@ def test_a_document_its_bucket_names_is_required(tmp_path: Path) -> None:
         [predicted(p, [BUD]) for p in images[:2]],
         scope={"subject": BUD},
     )
-    ts.delete(prediction_key(root, bucket.name, "b"))
+    ts.delete(bucket.stem_keys["b"])
 
     with pytest.raises(
         json_io.UnreadableLabelDocumentError, match="has no record"
@@ -380,6 +381,27 @@ def test_a_publication_commits_whole_and_a_second_of_one_name_writes_nothing(
 
     assert sorted(read_bucket(root, f"n/{DATE}").documents) == ["b", "c"]
     assert len(audit_rows(root, "prediction_bucket_published")) == 2
+
+
+def test_a_publication_writes_each_document_under_its_own_stems_key(
+    tmp_path: Path,
+) -> None:
+    """Each published document is the one its source image's stem keys, read back as written."""
+    pytest.importorskip("torch")
+    from tcip_mcp.buckets import detection_rows
+    from tests._chain_fixtures import predicted, published
+
+    images = _capture(tmp_path / "ds")
+    bucket = published(
+        tmp_path,
+        f"m/{DATE}",
+        [predicted(image, [BUD] * n) for n, image in enumerate(images)],
+        scope={"subject": BUD},
+    )
+
+    assert {row["image"]: row["count"] for row in detection_rows(bucket)} == {
+        image.name: n for n, image in enumerate(images)
+    }
 
 
 # ── the reader that trains ─────────────────────────────────────────────────

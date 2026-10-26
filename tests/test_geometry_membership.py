@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 if TYPE_CHECKING:
     from torch.utils.data import Dataset
@@ -60,7 +60,7 @@ def _labeled(root: Path, stems: list[str], *, task: str = "detection") -> Path:
     Each stem gets a ``labeled_frame`` under ``root``'s undated bucket, labeled with one
     ``SUBJECT`` annotation of ``_target_geometry(task)``.
     """
-    images_dir = root / "images" / UNDATED_BUCKET
+    images_dir = image_dir(root, UNDATED_BUCKET)
     for stem in stems:
         labeled_frame(
             images_dir / f"{stem}.png",

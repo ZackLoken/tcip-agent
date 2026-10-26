@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tcip_annotation.state import Annotation
+from tcip_mcp.dataset_layout import image_dir
 from tests._audit_fixtures import (
     AUDIT_ENTRY_KEYS,
     audit_rows,
@@ -29,7 +30,7 @@ DATE = "2026-03-02"
 
 def _label(root: Path, stem: str, annotations: list[Annotation]) -> None:
     """Save ``annotations`` as the label document of image ``stem`` of capture :data:`DATE`."""
-    label_image(root / "images" / DATE / f"{stem}.jpg", annotations, 100, 100)
+    label_image(image_dir(root, DATE) / f"{stem}.jpg", annotations, 100, 100)
 
 
 def _unreadable(root: Path, stem: str) -> None:
@@ -38,7 +39,7 @@ def _unreadable(root: Path, stem: str) -> None:
 
     _label(root, stem, [box_annotation(1, 1, 2, 2)])
     damage_record(
-        image_label_key(root / "images" / DATE / f"{stem}.jpg"),
+        image_label_key(image_dir(root, DATE) / f"{stem}.jpg"),
         b"not json {][",
     )
 

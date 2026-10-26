@@ -308,15 +308,18 @@ def data_dir(tmp_path: Path) -> Path:
     ``live/2-11-26`` publishes boxes (288, 216, 352, 264) at 0.9 and (496, 372, 528, 396) at 0.7
     on each.
     """
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import label_image, registry_over
+    from tests._producer_fixtures import (
+        label_image,
+        registry_over,
+        write_image,
+    )
 
     date = "2-11-26"
     subject = DATA_DIR_SUBJECT
-    images_dir = tmp_path / "images" / date
+    images_dir = image_dir(tmp_path, date)
     images_dir.mkdir(parents=True)
 
     # One nested registry traveling with the labels: a single detection subject, no attributes.
@@ -328,9 +331,7 @@ def data_dir(tmp_path: Path) -> Path:
     )
 
     for name in ("img_001", "img_002", "img_003"):
-        Image.new("RGB", (640, 480), color=(128, 128, 128)).save(
-            images_dir / f"{name}.jpg"
-        )
+        write_image(images_dir / f"{name}.jpg", (640, 480), (128, 128, 128))
         # GT: 2 boxes per image (pixel xyxy), by subject name.
         label_image(
             images_dir / f"{name}.jpg",

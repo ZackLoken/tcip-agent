@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.dataset_layout import label_key
+from tcip_mcp.dataset_layout import image_dir, label_key
 from tcip_mcp.tools import doctor_tools as doctor
 from tests._producer_fixtures import write_image
 
@@ -60,7 +60,7 @@ def test_an_unreadable_label_record_is_an_error_per_document(
     """
     root = tmp_path / "unreadable"
     for stem in ("plotA_0_0", "plotA_0_1"):
-        write_image(root / "images" / DATE / f"{stem}.jpg", (96, 64))
+        write_image(image_dir(root, DATE) / f"{stem}.jpg", (96, 64))
         ts.replace(
             label_key(root, DATE, stem),
             {"shapes": [{"label": "bud", "points": [[3, 5], [40, 52]]}]},
@@ -75,7 +75,7 @@ def test_an_unreadable_label_record_is_an_error_per_document(
 
     bare = tmp_path / "unlabeled"
     for stem in ("plotA_0_0", "plotA_0_1"):
-        write_image(bare / "images" / DATE / f"{stem}.jpg", (96, 64))
+        write_image(image_dir(bare, DATE) / f"{stem}.jpg", (96, 64))
 
     findings = _check(bare)
     assert _errors(findings) == []
@@ -86,7 +86,7 @@ def test_a_label_with_no_matching_image_is_an_error(tmp_path: Path) -> None:
     """An orphan label is an error-level finding."""
     root = tmp_path / "ds"
     for stem in ("plotA_0_0", "plotB_0_0"):
-        write_image(root / "images" / DATE / f"{stem}.jpg", (96, 64))
+        write_image(image_dir(root, DATE) / f"{stem}.jpg", (96, 64))
     for stem in ("plotA_0_0", "plotB_0_0", "plotZ_9_9"):
         _label(
             root,
@@ -108,7 +108,7 @@ def test_an_unreadable_first_label_hides_no_later_finding(
     An unreadable label sorting first and the orphan after it are each reported.
     """
     root = tmp_path / "ds"
-    write_image(root / "images" / DATE / "0_bad.jpg", (96, 64))
+    write_image(image_dir(root, DATE) / "0_bad.jpg", (96, 64))
     ts.replace(label_key(root, DATE, "0_bad"), ["not", "a", "document"])
     _label(
         root,
@@ -127,7 +127,7 @@ def test_an_empty_label_not_marked_complete_is_an_error(
 ) -> None:
     """An empty label no person marked complete is the one error, naming it not marked complete."""
     root = tmp_path / "ds"
-    write_image(root / "images" / DATE / "plotA_0_0.jpg", (96, 64))
+    write_image(image_dir(root, DATE) / "plotA_0_0.jpg", (96, 64))
     _label(root, "plotA_0_0", [], keep_empty=True)
 
     errors = _errors(_check(root))
@@ -144,7 +144,7 @@ def test_a_confirmed_negative_empty_label_stays_clean(tmp_path: Path) -> None:
     from tests._producer_fixtures import mark_complete
 
     root = tmp_path / "ds"
-    image = root / "images" / DATE / "plotA_0_0.jpg"
+    image = image_dir(root, DATE) / "plotA_0_0.jpg"
     write_image(image, (96, 64))
     _label(root, "plotA_0_0", [], keep_empty=True)
     mark_complete(image, "bud", project=root)
@@ -160,8 +160,8 @@ def test_an_unreadable_label_is_a_finding_beside_a_readable_one(
     The refusal surfaces as one error-level finding and no warning.
     """
     root = tmp_path / "ds"
-    write_image(root / "images" / DATE / "plotA_0_0.jpg", (96, 64))
-    write_image(root / "images" / DATE / "plotB_0_0.jpg", (96, 64))
+    write_image(image_dir(root, DATE) / "plotA_0_0.jpg", (96, 64))
+    write_image(image_dir(root, DATE) / "plotB_0_0.jpg", (96, 64))
 
     _label(
         root,

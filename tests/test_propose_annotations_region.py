@@ -15,8 +15,9 @@ import pytest
 from PIL import Image
 
 from tcip_annotation.state import RING_MIN_POINTS
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.pipelines.proposal import Proposal
+from tests._producer_fixtures import write_image
 
 
 class PatchProposer:
@@ -89,8 +90,7 @@ def test_fixture_rotation_is_actually_reversed_by_exif_orientation(
     with Image.open(exif_rotated_source) as im:
         corrected = np.asarray(auto_orient_image(im).convert("RGB"))
     assert corrected.shape == (UPRIGHT_H, UPRIGHT_W, 3)
-    # JPEG's DCT ringing near a hard edge can swing tens of levels, so sample a background corner
-    # far from any edge and the patch interior rather than compare the full array pixel-for-pixel.
+    # JPEG's DCT ringing near a hard edge can swing tens of levels.
     x1, y1, x2, y2 = PATCH_BOX
     assert all(
         abs(int(c) - 20) <= 15 for c in corrected[5, 5]
@@ -287,7 +287,7 @@ class TestRegionFrameIsTheResolvedImageSources:
         from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools.proposal_tools import propose_annotations
 
-        images_dir = tmp_path / "images" / UNDATED_BUCKET
+        images_dir = image_dir(tmp_path, UNDATED_BUCKET)
         images_dir.mkdir(parents=True)
         manifest = _write_rgb_band_group(
             images_dir, "capture_001", np.asarray(_upright_frame())
@@ -326,7 +326,7 @@ class TestRegionFrameIsTheResolvedImageSources:
         )
         from tcip_mcp.tools.proposal_tools import propose_annotations
 
-        images_dir = tmp_path / "images" / UNDATED_BUCKET
+        images_dir = image_dir(tmp_path, UNDATED_BUCKET)
         images_dir.mkdir(parents=True)
         bands = {}
         for name, fill in (("Green", 111), ("Red", 222)):
@@ -381,7 +381,7 @@ class TestRegionFrameIsTheResolvedImageSources:
         from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools.proposal_tools import propose_annotations
 
-        images_dir = tmp_path / "images" / UNDATED_BUCKET
+        images_dir = image_dir(tmp_path, UNDATED_BUCKET)
         images_dir.mkdir(parents=True)
         path = images_dir / "rgb_row.tif"
         tifffile.imwrite(
@@ -473,8 +473,9 @@ class TestWholeFrameDefaultIsUnaffected:
             proposal, "resolve_proposer", lambda engine: OneBoxProposer()
         )
 
-        img_path = tmp_path / "whole_frame.jpg"
-        Image.new("RGB", (64, 64), color=(50, 50, 50)).save(img_path)
+        img_path = write_image(
+            tmp_path / "whole_frame.jpg", (64, 64), (50, 50, 50)
+        )
 
         result = proposal_tools.propose_annotations(
             tmp_path, image_path=str(img_path), engine="stub", actor=None
@@ -512,10 +513,11 @@ class TestWholeFrameDefaultIsUnaffected:
             proposal, "resolve_proposer", lambda engine: OneBoxProposer()
         )
 
-        images_dir = tmp_path / "images" / UNDATED_BUCKET
-        images_dir.mkdir(parents=True)
-        img_path = images_dir / "no_region.jpg"
-        Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
+        img_path = write_image(
+            image_dir(tmp_path, UNDATED_BUCKET) / "no_region.jpg",
+            (32, 32),
+            (10, 10, 10),
+        )
 
         result = proposal_tools.propose_annotations(
             tmp_path, image_path=str(img_path), engine="stub", actor=None
@@ -567,10 +569,11 @@ class TestWholeFrameDefaultIsUnaffected:
         monkeypatch.setattr(
             proposal, "resolve_proposer", lambda engine: TwoPointProposer()
         )
-        images_dir = tmp_path / "images" / UNDATED_BUCKET
-        images_dir.mkdir(parents=True)
-        img_path = images_dir / "short_ring.jpg"
-        Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
+        img_path = write_image(
+            image_dir(tmp_path, UNDATED_BUCKET) / "short_ring.jpg",
+            (32, 32),
+            (10, 10, 10),
+        )
 
         result = proposal_tools.propose_annotations(
             tmp_path, image_path=str(img_path), engine="stub", actor=None
@@ -613,10 +616,11 @@ class TestWholeFrameDefaultIsUnaffected:
             proposal, "resolve_proposer", lambda engine: OneBoxProposer()
         )
 
-        images_dir = tmp_path / "images" / UNDATED_BUCKET
-        images_dir.mkdir(parents=True)
-        img_path = images_dir / "storable.jpg"
-        Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
+        img_path = write_image(
+            image_dir(tmp_path, UNDATED_BUCKET) / "storable.jpg",
+            (32, 32),
+            (10, 10, 10),
+        )
 
         result = proposal_tools.propose_annotations(
             tmp_path, image_path=str(img_path), engine="stub", actor=None
@@ -657,10 +661,11 @@ class TestWholeFrameDefaultIsUnaffected:
                 )
 
         register_proposal_engine("unscored", UnscoredProposer())  # type: ignore[arg-type]
-        images_dir = tmp_path / "images" / UNDATED_BUCKET
-        images_dir.mkdir(parents=True)
-        img_path = images_dir / "unscored.jpg"
-        Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
+        img_path = write_image(
+            image_dir(tmp_path, UNDATED_BUCKET) / "unscored.jpg",
+            (32, 32),
+            (10, 10, 10),
+        )
 
         result = proposal_tools.propose_annotations(
             tmp_path, image_path=str(img_path), engine="unscored", actor=None

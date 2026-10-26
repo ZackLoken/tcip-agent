@@ -194,6 +194,7 @@ class TestDetectionPipelineRealData:
     """Tests of the detection pipeline, build to train to infer, over real bud images."""
 
     def test_build_train_infer(self, tmp_path: Path) -> None:
+        from tcip_mcp.dataset_layout import image_dir
         from tests._chain_fixtures import detector_values
         from tests._verified_checkpoint_fixtures import built_detector
 
@@ -208,16 +209,14 @@ class TestDetectionPipelineRealData:
         # image) ---
         date = _sample_date()
         assert date is not None
-        images_dir = SAMPLE_PROJECT / "images" / date
+        images_dir = image_dir(SAMPLE_PROJECT, date)
         dataset, data = run_over("detection", str(images_dir), subject="bud")
         # num_classes is the one subject the scope isolates (bud here), and num_samples comes
         # from the bud-annotated images on this date.
         assert dataset.num_classes == 1
         assert dataset.num_samples > 0
 
-        # Verify samples load with the right structure. Sample 0 may be a confirmed negative (zero
-        # boxes is a valid training sample), so check the shape here and that bud boxes exist
-        # somewhere in the set rather than assuming the first sample is annotated.
+        # Sample 0 may be a confirmed negative (zero boxes is a valid training sample).
         img, target = dataset[0]
         assert img.ndim == 3 and img.shape[0] == 3  # [C, H, W]
         assert (

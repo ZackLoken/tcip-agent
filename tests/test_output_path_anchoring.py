@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 
 def test_launch_training_defaults_into_the_projects_experiment_store(
@@ -32,7 +32,7 @@ def test_launch_training_defaults_into_the_projects_experiment_store(
     )
     from tests._verified_checkpoint_fixtures import run_to_end
 
-    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET, n=2)
+    images_dir = seed_bud_images(image_dir(tmp_path, UNDATED_BUCKET), n=2)
     no_tensorboard(monkeypatch)
 
     res = training_tools.launch_training(

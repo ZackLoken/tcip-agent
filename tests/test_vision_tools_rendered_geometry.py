@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._training_values import TRIAGE_WEIGHTS
 
 #: Plain gray so a drawn color's dominance over the background is unambiguous in either channel.
@@ -51,11 +51,10 @@ def split_instance_dataset(tmp_path: Path) -> Path:
     The rings are ``GT_RING_LEFT`` and ``GT_RING_RIGHT``.
     """
     from tcip_annotation.state import Annotation, Polygon
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, write_image
 
-    images = tmp_path / "images" / UNDATED_BUCKET
-    images.mkdir(parents=True)
-    Image.new("RGB", (320, 180), BACKGROUND).save(images / "split.png")
+    images = image_dir(tmp_path, UNDATED_BUCKET)
+    write_image(images / "split.png", (320, 180), BACKGROUND)
     label_image(
         images / "split.png",
         [
@@ -89,10 +88,7 @@ def test_every_region_of_a_split_annotation_is_drawn_on_the_mask_render(
         AnnotationsRender(
             source="annotations",
             path=str(
-                split_instance_dataset
-                / "images"
-                / UNDATED_BUCKET
-                / "split.png"
+                image_dir(split_instance_dataset, UNDATED_BUCKET) / "split.png"
             ),
             task="segment",
         ),
@@ -118,7 +114,7 @@ def test_every_region_of_a_split_prediction_is_drawn_on_the_mask_render(
     from tests._chain_fixtures import published
 
     root = split_instance_dataset
-    image = root / "images" / UNDATED_BUCKET / "split.png"
+    image = image_dir(root, UNDATED_BUCKET) / "split.png"
     published(
         root,
         "split-masks",
@@ -187,11 +183,10 @@ def mislocalized_prediction_dataset(tmp_path: Path) -> Path:
     The prediction is the bucket ``live``'s, scored 0.4; the return is the dataset root.
     """
     from tcip_annotation.state import Annotation, BBox
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, write_image
 
-    images = tmp_path / "images" / UNDATED_BUCKET
-    images.mkdir(parents=True)
-    Image.new("RGB", (300, 200), BACKGROUND).save(images / "miss.png")
+    images = image_dir(tmp_path, UNDATED_BUCKET)
+    write_image(images / "miss.png", (300, 200), BACKGROUND)
     label_image(
         images / "miss.png",
         [Annotation(subject="bud", geometry=BBox(*GT_BOX))],

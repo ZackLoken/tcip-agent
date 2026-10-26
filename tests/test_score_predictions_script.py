@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._cli_fixtures import run_tcip
 from tests._producer_fixtures import write_image
 
@@ -26,7 +26,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, str]:
     from tests._chain_fixtures import published
     from tests._producer_fixtures import label_image
 
-    img = tmp_path / "images" / UNDATED_BUCKET / "IMG_0000.jpg"
+    img = image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0000.jpg"
     write_image(img)
     label_image(
         img, [Annotation(subject="bud", geometry=BBox(1, 1, 40, 30))], 100, 80

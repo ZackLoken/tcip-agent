@@ -185,10 +185,11 @@ def _as_produced(raster_path: Path, bucket: str) -> list[tuple]:
 
 
 def test_resume_refuses_with_images_dir(tmp_path: Path) -> None:
+    from tcip_mcp.dataset_layout import image_root
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
 
-    images_dir = tmp_path / "images"
+    images_dir = image_root(tmp_path)
     images_dir.mkdir()
 
     result = run_inference(

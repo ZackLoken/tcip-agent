@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.delivery import DeliveryRefusedError, record_acknowledgment
 from tests import _trait_fixtures as fx, csv_rows
 
@@ -27,7 +28,7 @@ def _recorded_meaning(tmp_path: Path) -> None:
 
 def _image(project: Path, stem: str) -> Path:
     """Return where the capture's image ``stem`` sits under the project's dataset."""
-    return project / "ds" / "images" / "2026-01-01" / f"{stem}.png"
+    return image_dir(project / "ds", "2026-01-01") / f"{stem}.png"
 
 
 def _bucket(project: Path, results: list[dict], name: str = "m") -> str:

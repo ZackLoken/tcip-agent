@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._chain_fixtures import (
     BESPOKE_DETECTION,
     BESPOKE_MODELS,
@@ -103,7 +103,7 @@ def detection_images(
         attributes=dict(values or {}),
     )
     images_dir = seed_labeled_images(
-        where / "images" / UNDATED_BUCKET,
+        image_dir(where, UNDATED_BUCKET),
         [annotation],
         n=n,
         width=64,

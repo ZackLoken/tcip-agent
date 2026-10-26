@@ -74,7 +74,7 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
     try {
       const res = await resultsApi.buildPlantMapping({
         name: mappingName,
-        images_root: `${datasetRoot}/images`,
+        dataset_root: datasetRoot,
         plant_registry: plantRegistry,
         supersede: supersedeMapping,
         ...(statedRadius === ""

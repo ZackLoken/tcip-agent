@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._producer_fixtures import dataset_over, label_image, painted_array  # noqa: E402
 from tests._training_values import tiling_block
 
@@ -46,7 +46,7 @@ def _multiband_detection_fixture(
 
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     px, py = patch
     tifffile.imwrite(
@@ -119,7 +119,7 @@ def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(
     from tcip_annotation.state import Annotation, BBox
     from tcip_annotation.utils import oriented_size
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     tifffile.imwrite(images_dir / "a.tif", _patched())
 
@@ -207,7 +207,7 @@ def test_tiled_detection_handles_channel_first_rasters(tmp_path: Path) -> None:
 
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     tifffile.imwrite(
         images_dir / "a.tif", np.transpose(_patched(), (2, 0, 1))

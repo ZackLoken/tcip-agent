@@ -46,7 +46,7 @@ DOORS = [
     ),
     (
         "/api/results/plant_mapping/build",
-        {"name": "valley", "images_root": "i", "plant_registry": "r"},
+        {"name": "valley", "dataset_root": "d", "plant_registry": "r"},
     ),
     (
         "/api/results/export_csv",

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._chain_fixtures import (
     BESPOKE_CLASSIFIER,
     BESPOKE_DETECTION,
@@ -112,7 +112,7 @@ def test_preflight_refuses_statistics_with_no_source(tmp_path: Path) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs = image_dir(tmp_path, UNDATED_BUCKET)
     imgs.mkdir(parents=True)
     cfg = _cfg(
         tmp_path,
@@ -216,7 +216,7 @@ def test_preflight_refuses_a_window_path_outside_images_dir(
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs = image_dir(tmp_path, UNDATED_BUCKET)
     imgs.mkdir(parents=True)
     _frame(imgs / "a.jpg")
     _label(imgs, "a")
@@ -272,7 +272,7 @@ def test_preflight_admits_the_exact_derivations_own_record(
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs = image_dir(tmp_path, UNDATED_BUCKET)
     imgs.mkdir(parents=True)
     a = imgs / "a.jpg"
     _frame(a)
@@ -299,7 +299,7 @@ def test_preflight_admits_the_sampled_derivations_own_record(
     from tcip_mcp.pipelines.derivations import band_normalization_stats_sampled
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs = image_dir(tmp_path, UNDATED_BUCKET)
     imgs.mkdir(parents=True)
     a = imgs / "a.jpg"
     _frame(a)
@@ -338,7 +338,7 @@ def test_preflight_admits_the_exact_derivations_record_over_a_band_group_dataset
     from tcip_mcp.pipelines.image_utils import list_logical_images
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs = image_dir(tmp_path, UNDATED_BUCKET)
     imgs.mkdir(parents=True)
     band_a, band_b = imgs / "cap_G.tif", imgs / "cap_R.tif"
     ramp = np.arange(64, dtype=np.uint16).reshape(8, 8)
@@ -429,7 +429,7 @@ def test_preflight_refuses_a_hand_written_source_naming_the_record_keys(
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs = image_dir(tmp_path, UNDATED_BUCKET)
     imgs.mkdir(parents=True)
     cfg = _cfg(
         tmp_path,
@@ -457,7 +457,7 @@ def test_preflight_refuses_a_sampling_naming_no_window(tmp_path: Path) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs = image_dir(tmp_path, UNDATED_BUCKET)
     imgs.mkdir(parents=True)
     cfg = _cfg(
         tmp_path,
@@ -489,7 +489,7 @@ def test_preflight_reads_the_band_count_over_every_source_the_run_admits(
 
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs = image_dir(tmp_path, UNDATED_BUCKET)
     imgs.mkdir(parents=True)
     _frame(imgs / "a.png")
     tifffile.imwrite(
@@ -519,7 +519,7 @@ def test_a_copied_projects_run_reads_its_statistics_windows_from_the_copy(
     from tests._verified_checkpoint_fixtures import opened_run
 
     project = tmp_path / "project"
-    imgs = project / "images" / UNDATED_BUCKET
+    imgs = image_dir(project, UNDATED_BUCKET)
     imgs.mkdir(parents=True)
     a = imgs / "a.jpg"
     _frame(a)
@@ -548,7 +548,7 @@ def test_preflight_refuses_a_model_source_stating_no_statistics(
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs = image_dir(tmp_path, UNDATED_BUCKET)
     imgs.mkdir(parents=True)
     cfg = _cfg(tmp_path, imgs, normalization={})
     del cfg["model_source"]["normalization"]
@@ -670,22 +670,20 @@ def test_own_statistics_refuses_a_config_whose_frames_carry_none(
     derivation's ``image_std`` refusal.
     """
     pytest.importorskip("torch")
-    from PIL import Image
     from pydantic import ValidationError
 
     from tcip_annotation.state import Annotation, BBox
     from tests._chain_fixtures import DETECTION_SOURCE, training_config
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, write_image
 
     with pytest.raises(ValueError, match="images_dir"):
         training_config(
             tmp_path, DETECTION_SOURCE, {"scope": {"subject": "bud"}}
         )
 
-    imgs = tmp_path / "images" / UNDATED_BUCKET
-    imgs.mkdir(parents=True)
+    imgs = image_dir(tmp_path, UNDATED_BUCKET)
     for stem in ("a", "b"):
-        Image.new("RGB", (16, 16), (90, 90, 90)).save(imgs / f"{stem}.png")
+        write_image(imgs / f"{stem}.png", (16, 16), (90, 90, 90))
         label_image(
             imgs / f"{stem}.png",
             [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))],

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._chain_fixtures import (  # noqa: E402
     BESPOKE_CLASSIFIER,
     BESPOKE_DETECTION,
@@ -131,17 +131,14 @@ def _detection_dataset(
     tmp_path: Path, sizes: list[tuple[int, int]]
 ) -> Dataset:
     """Return a real DetectionDataset over tiny images, one per (width, height) in ``sizes``."""
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, write_image
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     registry_over(tmp_path, SubjectRegistry((Subject("bud", ""),)))
     for i, (w, h) in enumerate(sizes):
-        Image.new("RGB", (w, h)).save(images_dir / f"img{i}.png")
+        write_image(images_dir / f"img{i}.png", (w, h))
         label_image(
             images_dir / f"img{i}.png",
             [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],

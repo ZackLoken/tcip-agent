@@ -91,10 +91,10 @@ def _belonging(
 
 
 class BuildMappingPayload(BaseModel):
-    """A plant-mapping build: its name, images root, plant registry, dates, radius and person."""
+    """A plant-mapping build: its name, dataset root, plant registry, dates, radius and person."""
 
     name: str
-    images_root: str = Field(min_length=1)
+    dataset_root: str = Field(min_length=1)
     plant_registry: str
     dates: list[str] | None = None
     match_radius: plant_mapping.StatedRadius | None = None
@@ -107,7 +107,7 @@ def build_plant_mapping(payload: BuildMappingPayload) -> dict:
     """Build and persist the open project's plant mapping, answering it as served.
 
     The build is :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.build_plant_mapping`'s,
-    from an ``images_root`` confined to the project, by the person ``user`` names, answered as
+    from a ``dataset_root`` confined to the project, by the person ``user`` names, answered as
     ``MappingBuild.served`` states it.
 
     A refusal answers 400, an unknown registry 404, a rebuild a delivery event still cites 409
@@ -119,12 +119,12 @@ def build_plant_mapping(payload: BuildMappingPayload) -> dict:
 
     person = actor(payload.user)
     root = store.held().root
-    images_root = _belonging(root, payload.images_root)
+    dataset_root = _belonging(root, payload.dataset_root)
     try:
         return plant_mapping.build_plant_mapping(
             root,
             payload.name,
-            images_root,
+            dataset_root,
             payload.plant_registry,
             dates=payload.dates,
             match_radius=payload.match_radius,

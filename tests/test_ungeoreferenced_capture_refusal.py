@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import tcip_store as ts
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     Assignment,
@@ -81,8 +82,7 @@ def test_build_plant_mapping_refuses_when_every_capture_carries_no_position(
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root = dataset_root / "images"
-    _write_ungeoreferenced_image(images_root / DATE / "P1_a.jpg")
+    _write_ungeoreferenced_image(image_dir(dataset_root, DATE) / "P1_a.jpg")
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
     write_plant_csv(plant_csv, PLANTS)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
@@ -90,7 +90,7 @@ def test_build_plant_mapping_refuses_when_every_capture_carries_no_position(
     res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=registry,
         actor=None,
     )
@@ -106,8 +106,7 @@ def test_build_plant_mapping_names_the_unreadable_capture_before_the_position_cl
     """A plant-mapping build names a capture PIL cannot open as unreadable."""
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root = dataset_root / "images"
-    _write_corrupt_image(images_root / DATE / "P1_corrupt.jpg")
+    _write_corrupt_image(image_dir(dataset_root, DATE) / "P1_corrupt.jpg")
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
     write_plant_csv(plant_csv, PLANTS)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
@@ -115,7 +114,7 @@ def test_build_plant_mapping_names_the_unreadable_capture_before_the_position_cl
     res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=registry,
         actor=None,
     )
@@ -134,8 +133,7 @@ def test_build_route_refuses_when_every_capture_carries_no_position(
 
     project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root = dataset_root / "images"
-    _write_ungeoreferenced_image(images_root / DATE / "P1_a.jpg")
+    _write_ungeoreferenced_image(image_dir(dataset_root, DATE) / "P1_a.jpg")
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
     write_plant_csv(plant_csv, PLANTS)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
@@ -145,7 +143,7 @@ def test_build_route_refuses_when_every_capture_carries_no_position(
         "/api/results/plant_mapping/build",
         json={
             "name": "valley",
-            "images_root": str(images_root),
+            "dataset_root": str(dataset_root),
             "plant_registry": registry,
             "user": "tester",
         },
@@ -170,8 +168,8 @@ def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_a
 
     project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, _ = _write_scene(dataset_root, dates=[DATE])
-    (images_root / "2099-01-01").mkdir()
+    plant_csv, _ = _write_scene(dataset_root, dates=[DATE])
+    image_dir(dataset_root, "2099-01-01").mkdir()
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     asyncio.run(store.open_project(project))
 
@@ -179,7 +177,7 @@ def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_a
         "/api/results/plant_mapping/build",
         json={
             "name": "valley",
-            "images_root": str(images_root),
+            "dataset_root": str(dataset_root),
             "plant_registry": registry,
             "user": "tester",
             "dates": ["2099-01-01"],
@@ -277,7 +275,7 @@ def _delivery_scene(
     """
     project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    _, _, preds_by_date = _write_scene(dataset_root, dates=[DATE])
+    _, preds_by_date = _write_scene(dataset_root, dates=[DATE])
     _seed_currant_bloom_trait(tmp_path)
     return project, dataset_root, preds_by_date
 
@@ -510,7 +508,7 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(
 
 def _republished(dataset_root: Path, date: str) -> dict[str, str]:
     """Publish the JPEGs now under ``date`` as the bucket ``all/<date>``; map date to its name."""
-    images = sorted((dataset_root / "images" / date).glob("*.jpg"))
+    images = sorted(image_dir(dataset_root, date).glob("*.jpg"))
     return {date: _publish(dataset_root.parent, f"all/{date}", images)}
 
 
@@ -552,15 +550,17 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
 
     project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, _ = _write_scene(dataset_root, dates=[DATE])
-    _write_ungeoreferenced_image(images_root / DATE / "P3_extra.jpg")
+    plant_csv, _ = _write_scene(dataset_root, dates=[DATE])
+    _write_ungeoreferenced_image(
+        image_dir(dataset_root, DATE) / "P3_extra.jpg"
+    )
     preds_by_date = _republished(dataset_root, DATE)
 
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=registry,
         actor=None,
     )
@@ -595,16 +595,16 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     dates = ["2026-02-11", "2026-02-25"]
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=dates
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=dates)
+    _write_ungeoreferenced_image(
+        image_dir(dataset_root, dates[1]) / "P3_extra.jpg"
     )
-    _write_ungeoreferenced_image(images_root / dates[1] / "P3_extra.jpg")
 
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=registry,
         actor=None,
     )
@@ -630,17 +630,15 @@ def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATE]
-    )
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATE])
     empty_date = "2026-02-25"
-    (images_root / empty_date).mkdir()
+    image_dir(dataset_root, empty_date).mkdir()
 
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=registry,
         dates=[DATE, empty_date],
         actor=None,
@@ -659,14 +657,12 @@ def test_a_fully_positioned_scene_keeps_delivering_with_zero_unattributed(
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATE]
-    )
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATE])
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=registry,
         actor=None,
     )
@@ -688,16 +684,14 @@ def test_a_raster_beside_positioned_photographs_still_delivers(
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATE]
-    )
-    (images_root / DATE / "orthomosaic_block.tif").write_bytes(b"")
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATE])
+    (image_dir(dataset_root, DATE) / "orthomosaic_block.tif").write_bytes(b"")
 
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=registry,
         actor=None,
     )
@@ -719,9 +713,8 @@ def test_a_capture_at_the_origin_is_admitted_as_positioned(
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root = dataset_root / "images"
     _write_geo_image(
-        images_root / DATE / "P1_a.jpg",
+        image_dir(dataset_root, DATE) / "P1_a.jpg",
         0.0,
         0.0,
         datetime(2026, 2, 11, 9, 30),
@@ -737,7 +730,7 @@ def test_a_capture_at_the_origin_is_admitted_as_positioned(
     res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=registry,
         actor=None,
     )

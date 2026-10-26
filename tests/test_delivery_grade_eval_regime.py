@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._producer_fixtures import checkpoint_admission, seed_bud_images
 
 if TYPE_CHECKING:
@@ -67,7 +67,7 @@ def test_gating_path_runs_at_the_density_the_evaluated_reference_derives(
     from tcip_mcp.pipelines.derivations import OBJECT_DENSITY_DERIVATION
     from tcip_mcp.tools.training_tools import evaluate_model
 
-    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
+    images_dir = seed_bud_images(image_dir(tmp_path, UNDATED_BUCKET))
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
@@ -146,7 +146,7 @@ def test_diagnostic_path_runs_at_the_checkpoints_own_density(
     from tcip_mcp.tools.training_tools import evaluate_model
 
     captured = _captured_execution(monkeypatch)
-    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
+    images_dir = seed_bud_images(image_dir(tmp_path, UNDATED_BUCKET))
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
@@ -189,7 +189,7 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(
         return {"eval_regime": "full-frame-tiled-inference"}
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _fake)
-    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
+    images_dir = seed_bud_images(image_dir(tmp_path, UNDATED_BUCKET))
     from tests._verified_checkpoint_fixtures import (
         SCOPED_DATA,
         registered_checkpoint,
@@ -248,7 +248,7 @@ def test_gate_translates_geometry_refusal_to_error_dict(
         )
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _refuse)
-    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
+    images_dir = seed_bud_images(image_dir(tmp_path, UNDATED_BUCKET))
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
@@ -283,7 +283,7 @@ def test_gate_translates_unreadable_label_to_error_dict(
         )
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _refuse)
-    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
+    images_dir = seed_bud_images(image_dir(tmp_path, UNDATED_BUCKET))
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
@@ -311,7 +311,7 @@ def test_both_regimes_refuse_a_stray_labels_dir_by_name(
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
+    images_dir = seed_bud_images(image_dir(tmp_path, UNDATED_BUCKET))
     stray = tmp_path / "stray_labels"
     stray.mkdir()
     ckpt = registered_checkpoint(tmp_path)
@@ -385,7 +385,7 @@ def test_a_frame_that_hits_its_cap_is_reported_saturated(
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     images_dir = seed_bud_images(
-        tmp_path / "images" / UNDATED_BUCKET,
+        image_dir(tmp_path, UNDATED_BUCKET),
         n=1,
         size=200,
         box=(10, 10, 30, 30),
@@ -437,7 +437,7 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     images_dir = seed_bud_images(
-        tmp_path / "images" / UNDATED_BUCKET
+        image_dir(tmp_path, UNDATED_BUCKET)
     )  # three-band sources
     array = np.zeros((128, 128, 5), dtype=np.uint8)
     tifffile.imwrite(
@@ -480,7 +480,7 @@ def test_run_full_frame_evaluation_records_merge_and_execution(
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     images_dir = seed_bud_images(
-        tmp_path / "images" / UNDATED_BUCKET,
+        image_dir(tmp_path, UNDATED_BUCKET),
         n=1,
         size=128,
         box=(10, 10, 30, 30),
@@ -524,7 +524,7 @@ def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     images_dir = seed_labeled_images(
-        tmp_path / "images" / UNDATED_BUCKET,
+        image_dir(tmp_path, UNDATED_BUCKET),
         [Annotation(subject="bud", geometry=Point(20.0, 30.0))],
         n=8,
         width=128,
@@ -563,7 +563,8 @@ def test_the_gate_refuses_an_images_tree_with_no_ground_truth(
     from tests._producer_fixtures import blank_image
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
-    images_dir = blank_image(tmp_path, "a.png", (128, 128)).parent
+    blank_image(tmp_path, "a.png", (128, 128))
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     checkpoint = verified_checkpoint(tmp_path)
     _detector(monkeypatch)
     with pytest.raises(ValueError, match="no trainable samples"):

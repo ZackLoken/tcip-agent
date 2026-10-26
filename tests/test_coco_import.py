@@ -16,7 +16,12 @@ import pytest
 
 import tcip_store as ts
 from tcip_annotation import json_io
-from tcip_mcp.dataset_layout import capture_label_keys, label_key
+from tcip_mcp.dataset_layout import (
+    capture_label_keys,
+    image_dir,
+    image_root,
+    label_key,
+)
 from tests._audit_fixtures import audit_rows
 from tests._training_values import RATIONALE, VERTEX_SPACING
 from tests._web_fixtures import bound_to
@@ -164,7 +169,7 @@ def _loader(task: str, root: Path) -> Dataset:
 
     data = DataSpec.model_validate(
         {
-            "images_dir": str(root / "images" / DATE),
+            "images_dir": str(image_dir(root, DATE)),
             "scope": {"subject": SUBJECT},
             "split": drawn_split(val_ratio=0.0),
         }
@@ -234,16 +239,14 @@ def test_images_sitting_flat_under_images_are_no_capture_to_import_into(
     Images placed by hand in the flat ``images/`` root are no capture: the import refuses
     naming the capture it was given, and no label document is written.
     """
-    from PIL import Image
-
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
     from tcip_mcp.tools.annotation_tools import write_subject_registry
+    from tests._producer_fixtures import write_image
 
     root = tmp_path / "flat_bur_count"
-    (root / "images").mkdir(parents=True)
     for index, stem in enumerate(STEMS):
-        Image.new("RGB", (IMG, IMG), color=(40 + index, 60, 50)).save(
-            root / "images" / f"{stem}.png"
+        write_image(
+            image_root(root) / f"{stem}.png", (IMG, IMG), (40 + index, 60, 50)
         )
     registered = write_subject_registry(
         root,
@@ -488,7 +491,7 @@ def test_an_existing_per_image_document_refuses_the_whole_import(
 
     made = _dataset(tmp_path)
     root = made.root
-    image = root / "images" / DATE / "tree_02.png"
+    image = image_dir(root, DATE) / "tree_02.png"
     assert "error" not in save_annotations(
         bound_to(made),
         str(image),
@@ -519,7 +522,7 @@ def test_an_unannotated_images_faults_still_refuse_the_import(
 
     made = _dataset(tmp_path)
     root = made.root
-    image = root / "images" / DATE / "tree_03.png"
+    image = image_dir(root, DATE) / "tree_03.png"
     assert "error" not in save_annotations(
         bound_to(made),
         str(image),
@@ -558,7 +561,7 @@ def test_an_unannotated_images_existing_document_is_kept_and_admits_the_import(
 
     made = _dataset(tmp_path)
     root = made.root
-    image = root / "images" / DATE / "tree_03.png"
+    image = image_dir(root, DATE) / "tree_03.png"
     assert "error" not in save_annotations(
         bound_to(made),
         str(image),
@@ -780,7 +783,7 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(
         itools.run_inference(
             tmp_path,
             ckpt,
-            str(root / "images" / DATE),
+            str(image_dir(root, DATE)),
             bucket=f"detector/{DATE}",
             stated=Stated(
                 tile=False,
@@ -922,7 +925,7 @@ def test_a_band_grouped_capture_resolves_by_the_stem_the_document_names(
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
     root = _dataset(tmp_path).root
-    images_dir = root / "images" / DATE
+    images_dir = image_dir(root, DATE)
     band_g, band_r = images_dir / "plot7_G.tif", images_dir / "plot7_R.tif"
     tifffile.imwrite(str(band_g), np.full((IMG, IMG), 111, dtype=np.uint16))
     tifffile.imwrite(str(band_r), np.full((IMG, IMG), 222, dtype=np.uint16))
@@ -1176,7 +1179,7 @@ def test_a_missing_image_is_reported_whatever_document_its_stem_holds(
     root = made.root
     assert "error" not in save_annotations(
         bound_to(made),
-        str(root / "images" / DATE / "tree_02.png"),
+        str(image_dir(root, DATE) / "tree_02.png"),
         annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}],
         actor=None,
     )

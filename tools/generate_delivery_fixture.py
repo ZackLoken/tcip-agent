@@ -125,13 +125,13 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
     root = workspace / "phenology"
     project = binding._init(root)
     dataset_root = binding._dataset(root)
-    images_root, plant_csv, preds_by_date = binding._write_scene(dataset_root)
+    plant_csv, preds_by_date = binding._write_scene(dataset_root)
     registry = register_plant_registry_for(root, [plant_csv])
     delivered(
         build_plant_mapping(
             root,
             name="valley",
-            images_root=str(images_root),
+            dataset_root=str(dataset_root),
             plant_registry=registry,
             actor=None,
         )
@@ -153,7 +153,7 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, JsonValue]:
         build_plant_mapping(
             root,
             name="valley",
-            images_root=str(images_root),
+            dataset_root=str(dataset_root),
             plant_registry=registry,
             supersede=True,
             actor=None,

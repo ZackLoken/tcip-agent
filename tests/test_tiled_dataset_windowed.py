@@ -18,7 +18,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.data import datasets as datasets_module
 from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
@@ -76,7 +76,7 @@ def _write_labels(image: Path, size_wh: tuple[int, int]) -> None:
 def _jpeg_project(tmp_path: Path, size: int = 200) -> Path:
     from PIL import Image
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     Image.fromarray(_distinctive(size, size)).save(images_dir / "img0.jpg")
     _write_labels(images_dir / "img0.jpg", (size, size))
@@ -91,7 +91,7 @@ def _tiff_project(
 ) -> tuple[Path, np.ndarray]:
     import tifffile
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     arr = _distinctive(height, width, dtype=dtype)
     tifffile.imwrite(

@@ -17,6 +17,7 @@ import pytest
 
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.cli import hyphenated
+from tcip_mcp.dataset_layout import image_dir
 from tests._producer_fixtures import label_image, write_image
 from tests._training_values import RATIONALE, TRIAGE_WEIGHTS
 
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
 
 DATE = "2024-01-01"
-IMAGE = f"ds/images/{DATE}/a.png"
+IMAGE = (image_dir("ds", DATE) / "a.png").as_posix()
 """The project-relative spelling of the one labeled, predicted image every render reads."""
 
 BY = ["--user", "tester"]

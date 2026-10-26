@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import tcip_store
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
 from tcip_mcp.pipelines.execution import Stated
 from tcip_web.routes.results import (
     ACKNOWLEDGED_BY_HEADER,
@@ -70,31 +71,31 @@ def test_plant_mapping_build_requires_a_registered_dataset(
 ) -> None:
     """A plant mapping build over a directory that is no registered dataset is refused by name.
 
-    The refusal answers 400 saying the directory is not a dataset.
+    The refusal answers 400 naming ``register_dataset``.
     """
     resp = client.post(
         "/api/results/plant_mapping/build",
         json={
             "name": "valley",
-            "images_root": str(opened_project / "nope"),
+            "dataset_root": str(opened_project / "nope"),
             "plant_registry": "unregistered",
             "user": "tester",
         },
     )
     assert resp.status_code == 400
-    assert "is not a dataset" in resp.json()["detail"]
+    assert "register_dataset" in resp.json()["detail"]
 
 
-def test_plant_mapping_build_refuses_an_empty_images_root_as_malformed(
+def test_plant_mapping_build_refuses_an_empty_dataset_root_as_malformed(
     client: TestClient,
     opened_project: Path,
 ) -> None:
-    """A plant mapping build with an empty ``images_root`` is refused as malformed."""
+    """A plant mapping build with an empty ``dataset_root`` is refused as malformed."""
     resp = client.post(
         "/api/results/plant_mapping/build",
         json={
             "name": "valley",
-            "images_root": "",
+            "dataset_root": "",
             "plant_registry": "unregistered",
             "user": "tester",
         },
@@ -517,7 +518,7 @@ def test_phenology_measurement_refuses_when_the_delivered_dataset_carries_no_reg
         "live/2026-02-11",
         [
             predicted(
-                tmp_path / "images" / "2026-02-11" / "PLANT_A.png", ["bud"]
+                image_dir(tmp_path, "2026-02-11") / "PLANT_A.png", ["bud"]
             )
         ],
         scope={"subject": "bud"},
@@ -561,7 +562,7 @@ def _unassessed_count_bucket(
         project,
         "live/counts",
         [
-            predicted(project / "images" / f"img{i}.png", [subject] * 3)
+            predicted(image_root(project) / f"img{i}.png", [subject] * 3)
             for i in range(2)
         ],
         scope=scope,
@@ -867,7 +868,7 @@ def _orthomosaic(project: Path) -> tuple[Any, str]:
 
     fx.seed_delivery_traits(project)
     fx.seed_confirmed_aggregate(project, "stem_count", value_keys=["count"])
-    raster_path = project / "images" / "undated" / "mosaic.tif"
+    raster_path = image_dir(project, UNDATED_BUCKET) / "mosaic.tif"
     raster_path.parent.mkdir(parents=True, exist_ok=True)
     _write_geo_raster(raster_path)
     bucket = _raster_bucket(project, raster_path, [(8.0, 8.0, 12.0, 12.0)])

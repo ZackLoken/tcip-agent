@@ -74,7 +74,7 @@ def _build_plant_mapping(tmp_path: Path) -> dict:
     return build_plant_mapping(
         tmp_path,
         name="../no",
-        images_root=str(tmp_path),
+        dataset_root=str(tmp_path),
         plant_registry=str(tmp_path / "plants.csv"),
         actor=None,
     )
@@ -211,12 +211,13 @@ def test_a_door_refused_before_it_acts_leaves_no_row(
 def test_a_save_on_a_missing_image_leaves_no_row(
     bound: BoundProject,
 ) -> None:
+    from tcip_mcp.dataset_layout import image_root
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     before = audit_rows(bound.root)
     result = save_annotations(
         bound,
-        str(bound.root / "images" / "absent.png"),
+        str(image_root(bound.root) / "absent.png"),
         annotations=[{"subject": "cyme", "bbox": [1, 1, 5, 5]}],
         actor=None,
     )

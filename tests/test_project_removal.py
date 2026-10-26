@@ -15,11 +15,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from PIL import Image
 
 from tcip_mcp import workspace
+from tcip_mcp.dataset_layout import image_dir, image_root
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
+from tests._producer_fixtures import write_image
 from tests._web_fixtures import named_project
 
 if TYPE_CHECKING:
@@ -31,9 +32,7 @@ if TYPE_CHECKING:
 def _project(ws: Path, directory: str, display_name: str) -> OpenProject:
     """Make a project through the creation door (``named_project``), with one image."""
     made = named_project(ws / directory, display_name)
-    images = made.root / "images" / "2026-03-04"
-    images.mkdir(parents=True)
-    Image.new("RGB", (8, 8), (0, 0, 0)).save(images / "img.jpg")
+    write_image(image_dir(made.root, "2026-03-04") / "img.jpg", (8, 8))
     return made
 
 
@@ -220,7 +219,7 @@ def test_an_unfinished_inference_job_refuses_the_removal(
         project=str(made.root),
         checkpoint_path="m.pt",
         dataset_root="ds",
-        images_dir="ds/images",
+        images_dir=str(image_root("ds")),
         bucket="out/2026-01-01",
         stated=Stated(),
         status="running",

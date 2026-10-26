@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.active_learning import ScorerSpec
 from tcip_mcp.pipelines.execution import Stated
 from tests._producer_fixtures import write_image
@@ -135,9 +136,8 @@ def test_inference_cancel_endpoint_and_worker(
     from tests._audit_fixtures import audit_rows
     from tests._verified_checkpoint_fixtures import project_checkpoint
 
-    images_dir = write_image(
-        tmp_path / "images" / "2026-01-01" / "img.jpg", (16, 16)
-    ).parent
+    images_dir = image_dir(tmp_path, "2026-01-01")
+    write_image(images_dir / "img.jpg", (16, 16))
     _fake_predictor(monkeypatch)
 
     job = InferenceJob(

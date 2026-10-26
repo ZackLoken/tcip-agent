@@ -16,13 +16,17 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
-from PIL import Image
 
 import tcip_store
 from tcip_annotation import json_io
 from tcip_annotation.matching import pair_proposals
 from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
+from tcip_mcp.dataset_layout import (
+    UNDATED_BUCKET,
+    image_dir,
+    image_root,
+    label_key,
+)
 from tests._producer_fixtures import (
     blank_image,
     image_label_key,
@@ -116,7 +120,7 @@ def _scope(root: Path, *values: str) -> ClassScope:
             )
         ),
     )
-    return registry_scope(root / "images", "bud")
+    return registry_scope(image_root(root), "bud")
 
 
 def test_attribute_ids_still_give_a_box_its_row() -> None:
@@ -156,12 +160,11 @@ def test_a_point_only_document_carries_the_subject_and_the_detection_loader_refu
     one, saying its subject lies only in geometries a detection loader does not read, and the
     loader admits the box-bearing document alone as its one sample.
     """
-    from tests._producer_fixtures import dataset_over
+    from tests._producer_fixtures import dataset_over, write_image
 
-    images = tmp_path / "images" / UNDATED_BUCKET
-    images.mkdir(parents=True)
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     for stem in ("IMG_0001", "IMG_0002"):
-        Image.new("RGB", (100, 80)).save(images / f"{stem}.png")
+        write_image(images / f"{stem}.png")
     label_image(
         images / "IMG_0001.png",
         [Annotation(subject="bud", geometry=Point(20.0, 20.0))],

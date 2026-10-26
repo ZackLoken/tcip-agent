@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 
 import tcip_store
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.registry_paths import stored_path
 from tcip_mcp.tools.project_tools import (
     DatasetEntry,
@@ -34,15 +35,15 @@ if TYPE_CHECKING:
 
 def _make_dataset(root: Path) -> None:
     """Write a minimal nested-schema dataset (image + label + registry) under ``root``."""
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import label_image, registry_over
+    from tests._producer_fixtures import (
+        label_image,
+        registry_over,
+        write_image,
+    )
 
-    image = root / "images" / "2-11-26" / "img_000.jpg"
-    image.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (32, 32)).save(image)
+    image = write_image(image_dir(root, "2-11-26") / "img_000.jpg", (32, 32))
     label_image(
         image, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32
     )
@@ -251,7 +252,7 @@ def test_export_import_roundtrip(tmp_path: Path) -> None:
 
     src = tmp_path / "src_project"
     date = "2-11-26"
-    images = src / "images" / date
+    images = image_dir(src, date)
     images.mkdir(parents=True)
     record = _initialized(src)
 
@@ -260,9 +261,13 @@ def test_export_import_roundtrip(tmp_path: Path) -> None:
     from tcip_mcp import subject_registry
     from tcip_mcp.dataset_layout import label_key
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import label_image, registry_over
+    from tests._producer_fixtures import (
+        label_image,
+        registry_over,
+        write_image,
+    )
 
-    Image.new("RGB", (64, 64)).save(images / "img_000.jpg")
+    write_image(images / "img_000.jpg", (64, 64))
     label_image(
         images / "img_000.jpg",
         [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))],
@@ -323,11 +328,9 @@ def test_export_import_roundtrip(tmp_path: Path) -> None:
         label_key(dest, date, "img_000")
     ).annotations
     assert restored_label.subject == "bud"
-    # Comparing the enumeration rather than a file list pins the archive to the same notion of
-    # "image" the platform reads the restored directory back with.
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
-    restored_images = dest / "images" / date
+    restored_images = image_dir(dest, date)
     restored_manifest = restored_images / manifest.name
     assert restored_manifest.is_file()
     assert restored_manifest.read_bytes() == manifest.read_bytes()

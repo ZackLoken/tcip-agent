@@ -16,7 +16,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
 from tests._chain_fixtures import BLOB_BUILDER, training_config  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
@@ -67,7 +67,7 @@ def _detection_dataset(
 
     Returns the capture's directory and the stems.
     """
-    images_dir = root / "images" / UNDATED_BUCKET
+    images_dir = image_dir(root, UNDATED_BUCKET)
     all_stems = []
     for pref in prefixes:
         for t in range(tiles):
@@ -205,7 +205,7 @@ def test_auto_train_val_single_untiled_source_refuses_validation_and_trains_with
     A requested val share raises naming every share zero; with a val_ratio of zero, the training
     dataset holds the one sample and no validation dataset is built.
     """
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     _save_png(images_dir / "src_0_0.png")
     label_image(images_dir / "src_0_0.png", _BUD, IMG, IMG)
     data_cfg = {
@@ -406,7 +406,7 @@ def test_auto_train_val_single_source_spatial_split_ignores_a_stray_keep_regions
 
 def _two_mosaic_tiles(tmp_path: Path) -> tuple[Path, list[str]]:
     """Write the labeled images ``mosaicA_0_0`` and ``mosaicA_1_1``; return their tree and stems."""
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     stems = ["mosaicA_0_0", "mosaicA_1_1"]
     for stem in stems:
         _save_png(images_dir / f"{stem}.png")
@@ -585,9 +585,7 @@ def test_a_bodys_loader_on_a_within_image_split_run_refuses_another_sample_namin
     from tests._producer_fixtures import samples_over, seed_bud_images
 
     ctx, _partition, stem = _within_image_context(tmp_path)
-    other = seed_bud_images(
-        tmp_path / "other" / "images" / UNDATED_BUCKET, n=1
-    )
+    other = seed_bud_images(image_dir(tmp_path / "other", UNDATED_BUCKET), n=1)
     with pytest.raises(ValueError, match=stem):
         ctx.build_dataset(samples=samples_over(other, subject="bud"))
 
@@ -624,7 +622,7 @@ def test_a_runs_band_count_is_read_over_every_source_and_a_disagreement_refuses(
     Two five-band sources drawn to the two sides size both loaders at 5; adding a three-band
     source is refused, naming the different band counts.
     """
-    images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path / "ds", UNDATED_BUCKET)
     for stem in ("a", "b"):
         _multiband_source(images_dir, stem, 5)
     split = _drawn(grouping="stem", val_ratio=0.5)
@@ -673,7 +671,7 @@ def test_a_stated_band_count_reads_every_source_at_it_and_probes_none(
     """
     from PIL import Image
 
-    images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path / "ds", UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     for stem, mode in (("gray", "L"), ("color", "RGB")):
         Image.new(mode, (40, 24)).save(images_dir / f"{stem}.png")
@@ -706,7 +704,7 @@ def test_a_runs_sources_are_probed_once_each_for_the_whole_run(
 
     Four five-band sources are each probed exactly once while the run builds both loaders.
     """
-    images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path / "ds", UNDATED_BUCKET)
     for stem in ("a", "b", "c", "d"):
         _multiband_source(images_dir, stem, 5)
     probed = _probe_spy(monkeypatch)
@@ -766,7 +764,7 @@ def test_a_bound_run_records_the_width_it_read_its_sources_at(
     The resolved data block records five channels, and ``recorded_model_dims`` reads them back
     as ``in_chans``.
     """
-    images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path / "ds", UNDATED_BUCKET)
     for stem in ("a", "b"):
         _multiband_source(images_dir, stem, 5)
     data_cfg = {
@@ -866,7 +864,7 @@ def test_a_spatial_split_raises_on_unresolvable_extent(tmp_path: Path) -> None:
             "detection", samples[0], block, stated_shares(stated.split)
         )
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     _save_png(images_dir / "mosaic.png")
     # A readable, annotated document recording no width/height, distinct from an unreadable one.
     label_image(images_dir / "mosaic.png", _BUD, 0, 0)
@@ -891,7 +889,7 @@ def test_single_tiled_source_raises_on_an_unreadable_label(
     from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tests._producer_fixtures import image_label_key
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     _save_png(images_dir / "mosaic.png")
     # Not an object: unreadable, stored past the writer.
     tcip_store.replace(image_label_key(images_dir / "mosaic.png"), [])
@@ -934,7 +932,7 @@ def test_a_spatial_split_raises_on_empty_gt_bearing_side(
     With tiling.skip_empty set, ground truth placed between x 1300 and 3960 of a 4000-wide
     mosaic leaves a side whose tiles carry none, and the run refuses naming zero kept tiles.
     """
-    images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path / "ds", UNDATED_BUCKET)
     images_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
     width, height = 4000, 300
@@ -987,7 +985,7 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path) -> None:
     from tests._producer_fixtures import seed_labeled_images
 
     images_dir = seed_labeled_images(
-        tmp_path / "ds" / "images" / UNDATED_BUCKET,
+        image_dir(tmp_path / "ds", UNDATED_BUCKET),
         _BUD,
         n=8,
         width=IMG,

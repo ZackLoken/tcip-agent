@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 if TYPE_CHECKING:
     from torch import Tensor, nn
@@ -164,13 +164,11 @@ def test_contract_dims_take_the_admitted_attributes_without_the_loader_backgroun
     admitted under, with no background class added, after its registry has gained a third
     condition value.
     """
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
-    from tests._producer_fixtures import admit_over, label_image
+    from tests._producer_fixtures import admit_over, label_image, write_image
 
     dataset_root = tmp_path / "currant_2026"
-    images_dir = dataset_root / "images" / UNDATED_BUCKET
+    images_dir = image_dir(dataset_root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     registry_over(
         dataset_root,
@@ -191,7 +189,7 @@ def test_contract_dims_take_the_admitted_attributes_without_the_loader_backgroun
         ),
     )
     for stem, condition in (("leaf_a", "healthy"), ("leaf_b", "mild")):
-        Image.new("RGB", (64, 64)).save(images_dir / f"{stem}.png")
+        write_image(images_dir / f"{stem}.png", (64, 64))
         label_image(
             images_dir / f"{stem}.png",
             [
@@ -250,7 +248,7 @@ def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attribute
     attributes, and a run resolving no frame carries no frame size.
     """
     dataset_root = tmp_path / "subject_2026"
-    images_dir = dataset_root / "images" / UNDATED_BUCKET
+    images_dir = image_dir(dataset_root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     _write_registry(dataset_root)
 
@@ -549,7 +547,7 @@ def test_a_run_builds_at_the_width_and_heads_its_admitted_data_records(
     from tests._producer_fixtures import label_image, run_over
 
     dataset_root = tmp_path / "hazel_2026"
-    images_dir = dataset_root / "images" / UNDATED_BUCKET
+    images_dir = image_dir(dataset_root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     _write_registry(dataset_root)
     for stem, condition in (

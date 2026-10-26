@@ -83,9 +83,10 @@ def test_pair_proposals() -> None:
 
 
 def test_score_predictions_single_image(data_dir: Path) -> None:
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.annotation_tools import score_predictions
 
-    img = data_dir / "images" / "2-11-26" / "img_001.jpg"
+    img = image_dir(data_dir, "2-11-26") / "img_001.jpg"
     result = score_predictions(
         data_dir,
         str(img),

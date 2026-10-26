@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._producer_fixtures import (
     fake_popen as _fake_popen,
     seed_bud_images,
@@ -69,7 +69,7 @@ def test_a_launch_no_agent_declared_itself_to_shows_an_empty_declaration(
     """
     from tcip_mcp.tools import training_tools
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     seed_bud_images(images_dir, n=2, size=64, box=(1, 1, 9, 9))
     _fake_popen(monkeypatch, [])
 
@@ -96,7 +96,7 @@ def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_
     from tcip_mcp import agent_identity
     from tcip_mcp.tools import training_tools
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     seed_bud_images(images_dir, n=2, size=64, box=(1, 1, 9, 9))
     _fake_popen(monkeypatch, [])
 
@@ -128,7 +128,7 @@ def test_launch_refuses_when_the_launch_record_cannot_be_written(
     from tcip_mcp.tools import training_tools
     from tcip_store import StoreError
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     seed_bud_images(images_dir, n=2, size=64, box=(1, 1, 9, 9))
     captured: list[list[str]] = []
     _fake_popen(monkeypatch, captured)
@@ -158,7 +158,7 @@ def test_a_launch_records_the_seed_its_config_states(
     """A launch records the seed its config states in ``run.json``."""
     from tcip_mcp.tools import training_tools
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     seed_bud_images(images_dir, n=2, size=64, box=(1, 1, 9, 9))
     _fake_popen(monkeypatch, [])
 
@@ -184,7 +184,7 @@ def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(
     from tcip_mcp.experiments import observe, run_dirs
     from tcip_mcp.tools import training_tools
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     seed_bud_images(images_dir, n=2, size=64, box=(1, 1, 9, 9))
 
     monkeypatch.setattr(subprocess, "Popen", NoExecutableChild)

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.experiments import compare_experiments
 from tests._chain_fixtures import FRAME_STATISTICS, training_config
 from tests._training_values import drawn_split
@@ -33,7 +34,7 @@ def _make_dataset(root: Path, *, shade: int = 0) -> Path:
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import labeled_frame, registry_over
 
-    images_dir = root / "images" / "2-11-26"
+    images_dir = image_dir(root, "2-11-26")
     images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(2):
         labeled_frame(
@@ -142,7 +143,7 @@ def test_dataset_identity_helper_registered_vs_bespoke(tmp_path: Path) -> None:
     ds_id, fp = dataset_identity(
         DataSpec.model_validate(
             {
-                "images_dir": str(tmp_path / "images" / "2-11-26"),
+                "images_dir": str(image_dir(tmp_path, "2-11-26")),
                 "split": drawn_split(),
             }
         )
@@ -179,7 +180,7 @@ def test_dataset_identity_raises_a_fingerprint_read_failure(
         dataset_identity(
             DataSpec.model_validate(
                 {
-                    "images_dir": str(tmp_path / "images" / "2-11-26"),
+                    "images_dir": str(image_dir(tmp_path, "2-11-26")),
                     "split": drawn_split(),
                 }
             )

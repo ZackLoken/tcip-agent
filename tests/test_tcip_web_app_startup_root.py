@@ -71,15 +71,14 @@ def test_main_publishes_the_port_and_configures_the_backend_on_one_workspace(
     workspace, and an image under the image root is read while one under neither root is
     refused.
     """
-    from PIL import Image
-
     from tcip_mcp.web_client import NoBackendPortError, resolve_web_port
+    from tests._producer_fixtures import write_image
 
     elsewhere = tmp_path_factory.mktemp("elsewhere").resolve()
     extra = tmp_path_factory.mktemp("extra").resolve()
     outside = tmp_path_factory.mktemp("outside").resolve()
     for root in (extra, outside):
-        Image.new("RGB", (8, 8)).save(root / "IMG_0001.png")
+        write_image(root / "IMG_0001.png", (8, 8))
     env = {
         **os.environ,
         "TCIP_WORKSPACE": str(elsewhere),

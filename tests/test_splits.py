@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.pipelines.data.splits import (
     GROUP_KEY_FNS,
     default_group_key,
@@ -473,7 +473,7 @@ def test_label_document_extent_reads_the_frame_off_the_document_it_is_handed(
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import image_label_key, label_image
 
-    image = tmp_path / "images" / UNDATED_BUCKET / "mosaic1.png"
+    image = image_dir(tmp_path, UNDATED_BUCKET) / "mosaic1.png"
     label_image(
         image,
         [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))],
@@ -511,7 +511,7 @@ def test_count_label_lines_counts_every_instance_of_the_subject_assessed_or_not(
         registry_over,
     )
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     registry_over(
         tmp_path,
         cr.SubjectRegistry(

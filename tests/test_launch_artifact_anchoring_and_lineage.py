@@ -23,6 +23,7 @@ def _canonical_dataset(root: Path, date: str = "2-11-26") -> Path:
     Each frame holds its labeled object bright on a dim ground.
     """
     from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import (
         BRIGHT,
@@ -31,7 +32,7 @@ def _canonical_dataset(root: Path, date: str = "2-11-26") -> Path:
         registry_over,
     )
 
-    images_dir = root / "images" / date
+    images_dir = image_dir(root, date)
     images_dir.mkdir(parents=True)
     registry_over(
         root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))

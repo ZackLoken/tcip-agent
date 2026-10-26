@@ -10,18 +10,16 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 pytest.importorskip("torch")
-from PIL import Image  # noqa: E402
-
 from tcip_mcp.pipelines.active_learning.scorer import UncertaintyScorer  # noqa: E402
+from tests._producer_fixtures import write_image  # noqa: E402
 from tests.scorer_models import predictor_for  # noqa: E402
 
 
 def test_empty_frame_ranks_low_not_max(tmp_path: Path) -> None:
-    for name in ("a", "b"):
-        Image.new("RGB", (64, 64), (100, 100, 100)).save(
-            tmp_path / f"{name}.png"
-        )
-    paths = [tmp_path / "a.png", tmp_path / "b.png"]
+    paths = [
+        write_image(tmp_path / f"{name}.png", (64, 64), (100, 100, 100))
+        for name in ("a", "b")
+    ]
 
     predictor = predictor_for(tmp_path, "build_empty_then_low", "detection")
     ranked = UncertaintyScorer(task="detection").score(paths, predictor)
@@ -41,7 +39,7 @@ def test_empty_frame_ranks_low_not_max(tmp_path: Path) -> None:
 def test_a_detection_output_with_no_scores_refuses_rather_than_ranking_as_certain(
     tmp_path: Path,
 ) -> None:
-    Image.new("RGB", (64, 64), (100, 100, 100)).save(tmp_path / "a.png")
+    write_image(tmp_path / "a.png", (64, 64), (100, 100, 100))
 
     predictor = predictor_for(tmp_path, "build_scoreless", "detection")
     with pytest.raises(KeyError, match="scores"):

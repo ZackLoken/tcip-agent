@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
 from tcip_mcp.tools.feedback_tools import prioritize_review_queue
 from tests._training_values import COMBINED_SCORER, RATIONALE, drawn_split
@@ -36,18 +36,16 @@ def _dataset(tmp_path: Path, *, marked: tuple[str, ...]) -> Path:
     Each image holds an empty label document, and the images named in ``marked`` are marked
     complete for ``bud`` through ``save_label_document``.
     """
-    from PIL import Image
-
-    from tcip_mcp.dataset_layout import image_dir
-    from tests._producer_fixtures import label_image, mark_complete
+    from tests._producer_fixtures import (
+        label_image,
+        mark_complete,
+        write_image,
+    )
 
     root = tmp_path / "dataset"
     images = image_dir(root, DATE)
-    images.mkdir(parents=True)
     for stem in ("imgA", "imgB"):
-        Image.new("RGB", (64, 64), (120, 120, 120)).save(
-            images / f"{stem}.png"
-        )
+        write_image(images / f"{stem}.png", (64, 64), (120, 120, 120))
         label_image(images / f"{stem}.png", [], 64, 64, keep_empty=True)
         if stem in marked:
             mark_complete(images / f"{stem}.png", "bud", project=tmp_path)
@@ -144,7 +142,7 @@ def test_triage_predictions_surfaces_unscoreable(
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     images.mkdir(parents=True)
     (images / "a.jpg").write_bytes(b"x")
 
@@ -185,7 +183,7 @@ def _stubbed_triage_predictions(
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     images.mkdir(parents=True)
     for pred in predictions:
         (images / pred["image"]).write_bytes(b"x")
@@ -218,7 +216,7 @@ def _triage_over_one_image(
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path)
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     images.mkdir(parents=True)
     (images / "a.jpg").write_bytes(b"x")
     ran_at: list = []
@@ -435,7 +433,7 @@ def test_prioritize_review_queue_marks_a_bound_runs_reference_sides(
     r = prioritize_review_queue(
         tmp_path,
         checkpoint_path=ckpt_path,
-        images_dir=str(root / "images" / date),
+        images_dir=str(image_dir(root, date)),
         **QUEUE,
     )
     assert "error" not in r, r
@@ -492,7 +490,7 @@ def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selec
     r = prioritize_review_queue(
         tmp_path,
         checkpoint_path=ckpt_path,
-        images_dir=str(root / "images" / date),
+        images_dir=str(image_dir(root, date)),
         **QUEUE,
     )
     assert "error" not in r, r
@@ -506,8 +504,7 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(
     tmp_path: Path,
 ) -> None:
     """The review queue scores each three-band candidate under a one-channel checkpoint."""
-    from PIL import Image
-
+    from tests._producer_fixtures import write_image
     from tests._verified_checkpoint_fixtures import (
         BUILT_DETECTOR,
         registered_checkpoint,
@@ -518,10 +515,9 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(
         model_source=BUILT_DETECTOR,
         data={"num_channels": 1, "scope": {"subject": "bud"}},
     )
-    images = tmp_path / "images" / UNDATED_BUCKET
-    images.mkdir(parents=True)
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     for stem in ("a", "b"):
-        Image.new("RGB", (64, 64), (90, 110, 70)).save(images / f"{stem}.png")
+        write_image(images / f"{stem}.png", (64, 64), (90, 110, 70))
 
     r = prioritize_review_queue(
         tmp_path,
@@ -546,7 +542,7 @@ def test_prioritize_review_queue_unbound_run_carries_no_marks(
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
     ckpt = foreign_checkpoint(tmp_path)
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     images.mkdir(parents=True)
     (images / "a.jpg").write_bytes(b"x")
     _stub_scorer(monkeypatch)
@@ -572,7 +568,7 @@ def test_the_queue_operation_reads_the_locations_its_arrival_established(
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = Path(registered_checkpoint(tmp_path))
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     images.mkdir(parents=True)
     (images / "a.jpg").write_bytes(b"x")
     _stub_scorer(monkeypatch)
@@ -634,7 +630,7 @@ def _flat_images_dataset(
 ) -> Path:
     """Write labeled images in the undated capture alone and return the dataset root."""
     for stem in stems:
-        _labeled_flat_image(root / "images" / UNDATED_BUCKET / f"{stem}.jpg")
+        _labeled_flat_image(image_dir(root, UNDATED_BUCKET) / f"{stem}.jpg")
     return root
 
 
@@ -646,7 +642,7 @@ def _mixed_dated_and_flat_dataset(
     Return the dataset root.
     """
     for stem in stems:
-        _labeled_flat_image(root / "images" / date / f"{stem}.jpg")
+        _labeled_flat_image(image_dir(root, date) / f"{stem}.jpg")
     _flat_images_dataset(root, stems)
     return root
 
@@ -697,7 +693,7 @@ def test_prioritize_review_queue_marks_an_undated_capture_correctly(
     r = prioritize_review_queue(
         tmp_path,
         checkpoint_path=ckpt_path,
-        images_dir=str(root / "images" / UNDATED_BUCKET),
+        images_dir=str(image_dir(root, UNDATED_BUCKET)),
         **QUEUE,
     )
     assert "error" not in r, r
@@ -722,7 +718,7 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
     manifest_dir = tmp_path / "manifest"
     # A seed whose draw puts calibration samples under both dates, a stem among them under one only.
     drawn = _draw_flat(tmp_path, root, manifest_dir, seed=3)
-    here = (root / "images" / UNDATED_BUCKET).resolve()
+    here = image_dir(root, UNDATED_BUCKET).resolve()
     bound_stems = {
         Path(s.source).stem
         for s in _reference_samples(drawn)
@@ -745,7 +741,7 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
     r = prioritize_review_queue(
         tmp_path,
         checkpoint_path=ckpt_path,
-        images_dir=str(root / "images" / UNDATED_BUCKET),
+        images_dir=str(image_dir(root, UNDATED_BUCKET)),
         **QUEUE,
     )
     assert "error" not in r, r

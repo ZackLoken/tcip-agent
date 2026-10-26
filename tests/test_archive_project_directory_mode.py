@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.tools.project_tools import (
     TreeBundle,
     ZipBundle,
@@ -101,7 +102,7 @@ def test_archive_project_directory_mode_admits_valid_work(
     assert result["output_dir"] == str(dest)
     assert result["files_added"] > 0
     assert result["size_bytes"] > 0
-    assert (dest / "images" / "2026-03-04" / "a_1.jpg").is_file()
+    assert (image_dir(dest, "2026-03-04") / "a_1.jpg").is_file()
     assert (dest / "subjects.json").is_file()
 
 
@@ -149,7 +150,7 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
     assert read_label_document(
         label_key(dest.resolve(), date, "a_1")
     ).annotations
-    restored_images = dest / "images" / date
+    restored_images = image_dir(dest, date)
     restored_manifest = restored_images / manifest.name
     assert restored_manifest.is_file()
     assert restored_manifest.read_bytes() == manifest.read_bytes()
@@ -161,7 +162,7 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
 
     assert (
         sorted(list_logical_images(restored_images))
-        == sorted(list_logical_images(src / "images" / date))
+        == sorted(list_logical_images(image_dir(src, date)))
         == ["a_1", "cap_001", "cap_002"]
     )
 
@@ -190,12 +191,15 @@ def _populate_project(src: Path) -> tuple[Path, Path]:
 
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import label_image, registry_over
+    from tests._producer_fixtures import (
+        label_image,
+        registry_over,
+        write_image,
+    )
 
     date = "2026-03-04"
-    images = src / "images" / date
-    images.mkdir(parents=True)
-    Image.new("RGB", (32, 32)).save(images / "a_1.jpg")
+    images = image_dir(src, date)
+    write_image(images / "a_1.jpg", (32, 32))
     label_image(
         images / "a_1.jpg",
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],

@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from tcip_mcp.dataset_layout import image_dir
+
 pytest.importorskip("tcip_mcp.tools.annotation_tools")
 
 
@@ -93,7 +95,7 @@ def test_evaluate_single_image_golden(data_dir: Path) -> None:
     from tcip_mcp.tools.annotation_tools import score_predictions
     from tests.conftest import DATA_DIR_BUCKET
 
-    img = data_dir / "images" / "2-11-26" / "img_001.jpg"
+    img = image_dir(data_dir, "2-11-26") / "img_001.jpg"
     result = score_predictions(
         data_dir,
         str(img),
@@ -119,7 +121,7 @@ def test_evaluate_folder_golden(data_dir: Path) -> None:
     from tcip_mcp.tools.annotation_tools import score_predictions
     from tests.conftest import DATA_DIR_BUCKET
 
-    images_dir = str(data_dir / "images" / "2-11-26")
+    images_dir = str(image_dir(data_dir, "2-11-26"))
     result = score_predictions(
         data_dir,
         images_dir,

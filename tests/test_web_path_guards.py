@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tcip_mcp.dataset_layout import image_root
 from tcip_web.paths import (
     assert_path_allowed,
     image_roots_from_environment,
@@ -140,16 +141,16 @@ def test_derived_default_canonicalises_the_path_it_admits(
     monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
     assert image_roots_from_environment() == ()
 
-    images = tmp_path / "project" / "images"
+    images = image_root(tmp_path / "project")
     images.mkdir(parents=True)
     target = images / "IMG_0007.JPG"
     target.write_bytes(b"x")
 
-    dotted = images / ".." / "images" / "IMG_0007.JPG"
+    dotted = images / ".." / images.name / "IMG_0007.JPG"
     assert assert_path_allowed(str(dotted)) == target.resolve()
 
     monkeypatch.chdir(tmp_path)
-    relative = Path("project") / "images" / "IMG_0007.JPG"
+    relative = image_root("project") / "IMG_0007.JPG"
     with pytest.raises(ValueError, match="absolute path"):
         assert_path_allowed(relative)
 
@@ -170,22 +171,23 @@ def test_symlink_inside_the_root_pointing_out_is_refused(
     and a join that stays inside the root resolves.
     """
     base = tmp_path / "project"
-    (base / "images").mkdir(parents=True)
+    images = image_root(base)
+    images.mkdir(parents=True)
     outside = tmp_path / "elsewhere"
     outside.mkdir()
     (outside / "secret.txt").write_bytes(b"x")
-    link = base / "images" / "shortcut"
+    link = images / "shortcut"
     try:
         link.symlink_to(outside, target_is_directory=True)
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"symlinks not available on this machine: {exc}")
 
     with pytest.raises(ValueError, match="is outside"):
-        safe_join(base, "images/shortcut/secret.txt")
+        safe_join(base, f"{images.name}/shortcut/secret.txt")
 
-    real = base / "images" / "IMG_0007.JPG"
+    real = images / "IMG_0007.JPG"
     real.write_bytes(b"x")
-    assert safe_join(base, "images", "IMG_0007.JPG") == real.resolve()
+    assert safe_join(base, images.name, "IMG_0007.JPG") == real.resolve()
 
 
 # -- the workspace's own exclusion: .removed ---------------------------------------------
@@ -204,8 +206,8 @@ def test_a_removed_holding_directory_is_excluded_like_imports(
     store.configure(ws, ())
     holding = ws / ".removed" / "sample_plot_alpha-20260304T120000Z"
     holding.mkdir(parents=True)
-    (holding / "images").mkdir()
-    target = holding / "images" / "IMG_0001.JPG"
+    image_root(holding).mkdir()
+    target = image_root(holding) / "IMG_0001.JPG"
     target.write_bytes(b"x")
 
     with pytest.raises(ValueError, match="outside the allowed roots"):
@@ -224,12 +226,13 @@ def test_drive_relative_part_cannot_replace_the_root_anchor(
     its resolved destination, and a join that stays inside the root resolves.
     """
     base = tmp_path / "project"
-    (base / "images").mkdir(parents=True)
+    images = image_root(base)
+    images.mkdir(parents=True)
     other_drive = "Y" if base.drive.upper().startswith("Z") else "Z"
 
     with pytest.raises(ValueError, match="is outside"):
         safe_join(base, f"{other_drive}:evil.txt")
 
-    target = base / "images" / "IMG_0007.JPG"
+    target = images / "IMG_0007.JPG"
     target.write_bytes(b"x")
-    assert safe_join(base, "images", "IMG_0007.JPG") == target.resolve()
+    assert safe_join(base, images.name, "IMG_0007.JPG") == target.resolve()

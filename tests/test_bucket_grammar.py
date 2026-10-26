@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tcip_mcp.dataset_layout import list_dates
+from tcip_mcp.dataset_layout import image_dir, list_dates
 
 
 def test_is_bucket_name_admits_a_date_an_undated_token_and_a_literal() -> None:
@@ -33,9 +33,8 @@ def test_is_bucket_name_refuses_a_dot_prefixed_or_unsafe_name() -> None:
 
 
 def test_list_dates_excludes_a_hidden_directory(tmp_path: Path) -> None:
-    images = tmp_path / "images"
-    (images / "2026-03-02").mkdir(parents=True)
-    (images / ".DS_Store").mkdir(parents=True)
+    image_dir(tmp_path, "2026-03-02").mkdir(parents=True)
+    image_dir(tmp_path, ".DS_Store").mkdir(parents=True)
     assert list_dates(tmp_path) == ["2026-03-02"]
 
 
@@ -44,9 +43,8 @@ def test_list_dates_admits_a_literal_and_the_undated_bucket(
 ) -> None:
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
-    images = tmp_path / "images"
     for name in ("2026-03-02", UNDATED_BUCKET, "plot_14"):
-        (images / name).mkdir(parents=True)
+        image_dir(tmp_path, name).mkdir(parents=True)
     assert list_dates(tmp_path) == sorted(
         ["2026-03-02", UNDATED_BUCKET, "plot_14"]
     )
@@ -65,8 +63,8 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
     from tests._producer_fixtures import registry_over
 
     root = tmp_path / "Valley_Farm"
-    (root / "images" / "2026-03-02").mkdir(parents=True)
-    (root / "images" / ".hidden").mkdir(parents=True)
+    image_dir(root, "2026-03-02").mkdir(parents=True)
+    image_dir(root, ".hidden").mkdir(parents=True)
     registry_over(root, SubjectRegistry((Subject("leaf", ""),)))
 
     tree = client.get(

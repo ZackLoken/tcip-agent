@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 torch = pytest.importorskip("torch")
 
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir  # noqa: E402
 from tests._producer_fixtures import (  # noqa: E402
     dataset_over,
     label_image,
@@ -58,7 +58,7 @@ def test_a_boxs_width_and_height_reach_the_loader_unswapped(
     document states.
     """
     size = (120, 80)
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     _make_images(images, ["img0"], size)
     _write(images, "img0", [(10, 20, 70, 40), (80, 5, 95, 75)], size)
 
@@ -105,7 +105,7 @@ def test_a_seam_fragment_is_not_indexed_as_a_whole_object(
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
     size = (320, 256)
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     _make_images(images, ["img0"], size)
     _write(images, "img0", SEAM_BOXES, size)
 
@@ -138,7 +138,7 @@ def test_each_detection_sample_carries_its_own_index_as_image_id(
 ) -> None:
     """Each detection sample carries its own index as its image id, beside its own boxes."""
     size = (120, 80)
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     stems = ["a", "b", "c"]
     _make_images(images, stems, size)
     for i, stem in enumerate(stems):
@@ -164,7 +164,7 @@ def test_an_ordinal_sample_carries_the_rank_count_its_head_decodes_with(
     Over three samples ranked 0, 2 and 5, the run's rank count is six and each sample carries
     its own rank.
     """
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     _make_images(images, ["s0", "s1", "s2"], (48, 32))
     csv_path = tmp_path / "ranks.csv"
     csv_path.write_text("stem,rank\ns0,0\ns1,2\ns2,5\n", encoding="utf-8")

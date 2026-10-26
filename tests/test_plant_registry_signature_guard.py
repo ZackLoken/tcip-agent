@@ -25,7 +25,7 @@ def test_build_plant_mapping_refuses_plant_csv_paths_argument(
         build_plant_mapping(  # type: ignore[call-arg]
             tmp_path,
             name="valley",
-            images_root=str(tmp_path),
+            dataset_root=str(tmp_path),
             plant_csv_paths=["nope.csv"],
         )
 

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._producer_fixtures import checkpoint_admission
 
 if TYPE_CHECKING:
@@ -40,7 +40,11 @@ from tcip_mcp.pipelines.model_build import CONFIG_KEY  # noqa: E402
 from tcip_mcp.pipelines.schemas import ScoreWeights  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import evaluate  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
-from tests._producer_fixtures import label_image, seed_bud_images  # noqa: E402
+from tests._producer_fixtures import (  # noqa: E402
+    label_image,
+    seed_bud_images,
+    write_image,
+)
 from tests._training_values import (
     IOU_THRESHOLD,
     SCORE_WEIGHTS,
@@ -210,7 +214,7 @@ def test_run_id_reuses_training_tiling(
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import finished_run
 
-    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
+    images_dir = seed_bud_images(image_dir(tmp_path, UNDATED_BUCKET))
     data = {
         **SCOPED_DATA,
         "tiling": tiling_block(tile_size=64, sliver_frac=0.5),
@@ -252,7 +256,7 @@ def test_evaluating_a_run_leaves_its_directory_byte_identical(
     from tests._audit_fixtures import audit_rows
     from tests._verified_checkpoint_fixtures import finished_run
 
-    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
+    images_dir = seed_bud_images(image_dir(tmp_path, UNDATED_BUCKET))
     run_dir = finished_run(tmp_path, experiment_id="det-evaluated")
 
     def snapshot() -> dict:
@@ -287,7 +291,7 @@ def test_explicit_checkpoint_stays_untiled(
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
+    images_dir = seed_bud_images(image_dir(tmp_path, UNDATED_BUCKET))
     ckpt = registered_checkpoint(tmp_path)
 
     captured = _capture_run_test_evaluation(monkeypatch)
@@ -318,7 +322,7 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(
     )
 
     images_dir = seed_bud_images(
-        tmp_path / "images" / UNDATED_BUCKET
+        image_dir(tmp_path, UNDATED_BUCKET)
     )  # three-band sources
     scope = {"subject": "bud"}
     ckpt = registered_checkpoint(
@@ -424,7 +428,6 @@ def test_the_scored_model_is_the_one_the_door_already_built(
     """
     from typing import cast
 
-    from PIL import Image
     from pydantic import TypeAdapter
 
     import tcip_mcp.pipelines.inference.generic_predictor as generic_predictor
@@ -436,12 +439,9 @@ def test_the_scored_model_is_the_one_the_door_already_built(
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     for i in range(2):
-        Image.new("RGB", (128, 128), color=(120, 120, 120)).save(
-            images_dir / f"img{i}.png"
-        )
+        write_image(images_dir / f"img{i}.png", (128, 128), (120, 120, 120))
     # This seed's weights score just above 0.5, so a count at 0.6 keeps none of its detections.
     ckpt = registered_checkpoint(tmp_path, seed=0)
     verified = load_registered_checkpoint(ckpt, project=tmp_path)
@@ -550,8 +550,6 @@ def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
     are compared with each other. The predictor reads one band of three-band sources, and every
     door's builds carry one band.
     """
-    from PIL import Image
-
     import tcip_mcp.pipelines.data.datasets as datasets
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.schemas import run_tiling
@@ -564,12 +562,9 @@ def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
     )
 
     root = tmp_path / "ds"
-    images_dir = root / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
+    images_dir = image_dir(root, UNDATED_BUCKET)
     for i, size in enumerate(range(48, 112, 8)):
-        Image.new("RGB", (size, size), (100, 100, 100)).save(
-            images_dir / f"img{i}.png"
-        )
+        write_image(images_dir / f"img{i}.png", (size, size), (100, 100, 100))
         label_image(
             images_dir / f"img{i}.png",
             [Annotation(subject="bud", geometry=BBox(8, 8, 24, 24))],
@@ -675,7 +670,7 @@ def test_explicit_tiling_override_on_checkpoint(
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
+    images_dir = seed_bud_images(image_dir(tmp_path, UNDATED_BUCKET))
     ckpt = registered_checkpoint(tmp_path)
 
     captured = _capture_run_test_evaluation(monkeypatch)
@@ -862,13 +857,10 @@ def _pass_over(
     **stated: bool | int,
 ) -> tuple[Pass, list[dict]]:
     """Return the pass a registered checkpoint prepares over one image with ``stub`` predicting."""
-    from PIL import Image
-
     from tests._verified_checkpoint_fixtures import predicted_over
 
     images_dir = tmp_path / "one"
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (100, 100)).save(images_dir / "a.png")
+    write_image(images_dir / "a.png", (100, 100))
     install(monkeypatch, stub)
     return predicted_over(
         tmp_path,
@@ -1048,7 +1040,7 @@ def test_launch_training_persists_effective_tile_geometry(
 
     monkeypatch.setattr(gt, "train", _poison_train)
 
-    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET, n=2)
+    images_dir = seed_bud_images(image_dir(tmp_path, UNDATED_BUCKET), n=2)
 
     no_tensorboard(monkeypatch)
 
