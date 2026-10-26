@@ -165,7 +165,7 @@ describe("SetupTab trait revisions", () => {
     vi.spyOn(resultsApi, "traits").mockResolvedValue(LISTING);
     vi.spyOn(resultsApi, "confirmTraitRevision").mockRejectedValue(
       new StructuredRefusalError(
-        { message: "revision 2 of 'stem' holds another entry", record: { revisions: [] } },
+        { message: "revision 2 of 'stem' holds another entry", record: LISTING.traits[0] },
         409,
         "revision 2 of 'stem' holds another entry",
       ),

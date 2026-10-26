@@ -27,9 +27,9 @@ DATE = "2-11-26"
 
 def _check(root: Path) -> list[tuple[str, str]]:
     findings: list[tuple[str, str]] = []
-    doctor.check_data_quality(
-        root, findings, census=doctor._census(root, findings)
-    )
+    census = doctor._census(root, findings)
+    assert census is not None, findings
+    doctor.check_data_quality(root, findings, census=census)
     return findings
 
 

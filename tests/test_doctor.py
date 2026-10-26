@@ -492,9 +492,9 @@ def test_one_stem_in_two_captures_is_two_images_each_paired_with_its_own_label(
 
     scan = scan_dataset(root, str(root))
     findings: list[tuple[str, str]] = []
-    doctor.check_data_quality(
-        root, findings, census=doctor._census(root, findings)
-    )
+    census = doctor._census(root, findings)
+    assert census is not None, findings
+    doctor.check_data_quality(root, findings, census=census)
 
     assert (scan["paired_images"], scan["unlabeled_images"]) == (1, 1), scan
     assert not [msg for _, msg in findings if "no matching image" in msg], (
@@ -580,6 +580,77 @@ def test_doctor_reports_an_undecodable_trait_record_without_aborting(
     assert "will not read" in msg
 
 
+def test_doctor_reports_a_trait_record_holding_no_revision_without_aborting(
+    tmp_path: Path,
+) -> None:
+    """A trait record holding no revision is an error finding, and the call is answered.
+
+    A trait proposed and confirmed through ``propose_trait`` beside it still reads and stays
+    silent.
+    """
+    import tcip_store as ts
+
+    root = _layout_project(tmp_path, "2026-03-04")
+    fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
+    ts.replace(
+        traits.trait_key(root, "stem"),
+        {"revisions": []},
+        expect=ts.Version.ABSENT,
+    )
+
+    found = _diagnosed(root)
+
+    ((level, msg),) = _messages(found, "trait '")
+    assert level == "error"
+    assert "'stem' will not read" in msg
+    assert traits.read_trait("leaf", root).latest.confirmed
+
+
+def test_doctor_names_a_bucket_whose_record_will_not_read_without_aborting(
+    tmp_path: Path,
+) -> None:
+    """A published bucket whose record its schema refuses is named in an error finding.
+
+    The bucket is staged through the proposal door and its stored record then given documents
+    that are not a mapping; the call is answered rather than refused.
+    """
+    import tcip_store as ts
+    from tcip_mcp.dataset_layout import bucket_key
+    from tcip_mcp.tools.proposal_tools import stage_proposals
+
+    date = "2026-03-04"
+    root = _layout_project(tmp_path, date)
+    image = image_dir(root, date) / "IMG_P.JPG"
+    Image.new("RGB", (32, 32)).save(image)
+    staged = stage_proposals(
+        root,
+        str(image),
+        model_name="detector",
+        actor=None,
+        boxes=[
+            {
+                "subject": "bud",
+                "conf": 0.9,
+                "cx": 0.5,
+                "cy": 0.5,
+                "w": 0.25,
+                "h": 0.25,
+            }
+        ],
+    )
+    assert "error" not in staged, staged
+    key = bucket_key(root, staged["bucket"])
+    record = ts.read(key)
+    assert isinstance(record, dict)
+    ts.replace(key, record | {"documents": "not a mapping"})
+
+    found = _diagnosed(root)
+
+    ((level, msg),) = _messages(found, "bucket record will not read")
+    assert level == "error"
+    assert repr(staged["bucket"]) in msg
+
+
 def test_doctor_errors_on_a_project_whose_record_does_not_decode(
     tmp_path: Path,
 ) -> None:
@@ -644,9 +715,9 @@ def test_a_marked_empty_label_is_clean_to_the_data_quality_check(
     mark_complete(image, "bud", project=root)
 
     findings: list[tuple[str, str]] = []
-    doctor.check_data_quality(
-        root, findings, census=doctor._census(root, findings)
-    )
+    census = doctor._census(root, findings)
+    assert census is not None, findings
+    doctor.check_data_quality(root, findings, census=census)
     assert findings == []
 
 
@@ -683,8 +754,9 @@ def test_a_doctor_run_reads_each_label_once_and_reports_an_unreadable_one_once(
     monkeypatch.setattr(json_io, "read_label_document", _counting_read)
     findings: list[tuple[str, str]] = []
     census = doctor._census(root, findings)
-    for check in (doctor.check_data_quality, doctor.check_provenance):
-        check(root, findings, census=census)
+    assert census is not None, findings
+    doctor.check_data_quality(root, findings, census=census)
+    doctor.check_provenance(root, findings, census=census)
 
     assert sorted(reads) == ["IMG_A", "IMG_U"]
     unreadable = [

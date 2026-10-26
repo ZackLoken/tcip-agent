@@ -136,9 +136,9 @@ class TestE2EPipeline:
 
         # ── Step 4: Validate data quality ────────────────────────────
         findings: list[tuple[str, str]] = []
-        doctor.check_data_quality(
-            Path(root), findings, census=doctor._census(Path(root), findings)
-        )
+        census = doctor._census(Path(root), findings)
+        assert census is not None, findings
+        doctor.check_data_quality(Path(root), findings, census=census)
         assert not [f for f in findings if f[0] == "error"]
 
         # ── Step 5: Load annotations for one image ───────────────────

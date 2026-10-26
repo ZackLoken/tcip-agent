@@ -1049,7 +1049,7 @@ def test_traits_shares_the_state_database_rather_than_gaining_its_own(
     """
     ts.replace(
         traits.trait_key(store.root, "bud_opening"),
-        {"revisions": []},
+        {"n": 1},
         expect=ts.Version.ABSENT,
     )
     ts.replace(
