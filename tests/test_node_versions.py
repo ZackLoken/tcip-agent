@@ -38,7 +38,7 @@ def _admitted(version: str, tag: str) -> list[bool]:
         ["node", "-e", script],
         cwd=FRONTEND,
         capture_output=True,
-        encoding="utf-8",
+        text=True,
         check=True,
         input=json.dumps(
             {

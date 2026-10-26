@@ -153,7 +153,7 @@ def _browser_admits(names: list[str]) -> list[bool]:
     ran = subprocess.run(
         ["node", "-e", script],
         capture_output=True,
-        encoding="utf-8",
+        text=True,
         check=True,
         input=json.dumps({"rule": rule, "names": names}),
     )
