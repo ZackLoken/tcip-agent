@@ -4,6 +4,8 @@ import { compile, optimize } from "@tailwindcss/node";
 import postcss, { type Declaration, type Rule } from "postcss";
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { readFileSync, resolve, SOURCE_DIRECTORY } from "./test/node";
+
 /** The enclosing at-rule of `rule` that conditions it (`@media` or `@supports`), if any. */
 function conditionOf(rule: Rule): string | null {
   for (let node = rule.parent; node && node.type !== "root"; node = node.parent) {
@@ -40,18 +42,11 @@ describe("index.css component layer", () => {
   let root: postcss.Root;
 
   beforeAll(async () => {
-    // vitest's `css: false` stubs CSS imports, so read from disk; no @types/node here.
-    // @ts-expect-error TS2307: no @types/node in the frontend tsconfig
-    const { readFileSync } = (await import("node:fs")) as {
-      readFileSync: (path: string, encoding: "utf8") => string;
-    };
-    // @ts-expect-error TS2307: no @types/node in the frontend tsconfig
-    const { resolve } = (await import("node:path")) as { resolve: (path: string) => string };
-    // Vitest runs with cwd = frontend root (vitest.config.ts lives there).
-    const rawCss = readFileSync("src/index.css", "utf8");
+    // vitest's `css: false` stubs CSS imports, so read from disk.
+    const rawCss = readFileSync(resolve(SOURCE_DIRECTORY, "index.css"), "utf8");
 
     // An explicit candidate list instead of a source scan, so only the component classes emit.
-    const compiler = await compile(rawCss, { base: resolve("src"), onDependency: () => {} });
+    const compiler = await compile(rawCss, { base: SOURCE_DIRECTORY, onDependency: () => {} });
     const built = compiler.build([
       "tcip-btn",
       "tcip-btn-primary",

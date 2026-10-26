@@ -33,6 +33,7 @@ export function isNonTestSource(relative) {
  * Return the non-test sources under the source directory `src`, as sorted absolute paths.
  *
  * @param {string} src
+ * @returns {string[]}
  */
 export function nonTestSources(src) {
   return readdirSync(src, { recursive: true })

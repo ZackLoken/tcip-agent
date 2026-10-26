@@ -17,7 +17,7 @@ from fastapi import APIRouter, FastAPI
 from tcip_mcp.web_client import LOOPBACK_HOST, Panel
 from tcip_web.__main__ import DEFAULT_PORT
 from tcip_web.app import app
-from tests import FRONTEND_SRC
+from tests import FRONTEND
 from tests._route_walk import route_generator as _generator
 
 GENERATED = _generator().GENERATED_PATH
@@ -40,7 +40,7 @@ def dev_server_proxy() -> dict:
     """
     with pytest.MonkeyPatch.context() as patch:
         patch.delenv("TCIP_WEB_BACKEND", raising=False)
-        return _generator().printed_json(PROXY_SCRIPT, FRONTEND_SRC.parent)
+        return _generator().printed_json(PROXY_SCRIPT, FRONTEND)
 
 
 def test_the_generated_path_module_is_what_the_registered_routes_produce(

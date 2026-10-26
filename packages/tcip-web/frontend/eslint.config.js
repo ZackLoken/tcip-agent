@@ -1,3 +1,5 @@
+import { posix } from "node:path";
+
 import js from "@eslint/js";
 import importPlugin from "eslint-plugin-import";
 import jsxA11y from "eslint-plugin-jsx-a11y";
@@ -6,6 +8,8 @@ import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import globals from "globals";
 import tseslint from "typescript-eslint";
+
+import tsconfig from "./tsconfig.json" with { type: "json" };
 
 export default tseslint.config(
   { ignores: ["node_modules", "dist", "coverage", "src/api/types.generated.ts"] },
@@ -25,7 +29,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["src/**/*.{ts,tsx}"],
+    files: [posix.join(tsconfig.include[0], "**", "*.{ts,tsx}")],
     languageOptions: {
       ecmaVersion: 2022,
       globals: globals.browser,

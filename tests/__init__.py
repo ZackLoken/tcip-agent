@@ -1,8 +1,8 @@
 """The test suite and the helpers its tests share.
 
 It carries the root of the repository its tests read files from, the launcher of a child test
-session, the browser's sources, the names the person rule is tested on, and the reader of the CSV
-files its tests deliver.
+session, the browser's package and its sources, the names the person rule is tested on, and the
+reader of the CSV files its tests deliver.
 """
 
 import csv
@@ -56,8 +56,15 @@ def child_basetemp(tmp_path: Path) -> Path:
     return tmp_path / "child-basetemp"
 
 
-FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
-"""The browser's sources."""
+FRONTEND = REPO_ROOT / "packages" / "tcip-web" / "frontend"
+"""The browser's package: its manifest, its configuration and its sources."""
+FRONTEND_SRC = (
+    FRONTEND
+    / json.loads((FRONTEND / "tsconfig.json").read_text(encoding="utf-8"))[
+        "include"
+    ][0]
+)
+"""The browser's sources, the directory the frontend's ``tsconfig.json`` includes first."""
 
 _PERSON_NAMES = json.loads(
     (FRONTEND_SRC / "test" / "personNames.json").read_text(encoding="utf-8")
