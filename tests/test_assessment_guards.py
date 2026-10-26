@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 if TYPE_CHECKING:
     from PIL import ImageDraw
@@ -266,8 +266,6 @@ def test_a_selection_spanning_two_dataset_roots_refuses_naming_both(
     holdout frames of a second dataset; writing that selection refuses naming both roots and
     draw_splits, and the drawn selection stays as it was written.
     """
-    from PIL import Image
-
     from tcip_mcp import subject_registry as cr
     from tcip_mcp.pipelines.data.label_queries import admit
     from tcip_mcp.pipelines.data.selection import (
@@ -277,7 +275,11 @@ def test_a_selection_spanning_two_dataset_roots_refuses_naming_both(
         write_selection,
     )
     from tcip_mcp.pipelines.data.splits import recorded_group_key_fn
-    from tests._producer_fixtures import label_image, registry_over
+    from tests._producer_fixtures import (
+        label_image,
+        registry_over,
+        write_image,
+    )
     from tests.test_physical_scale_assessment import (
         DATE as SCALE_DATE,
         SUBJECT as BAR,
@@ -288,16 +290,14 @@ def test_a_selection_spanning_two_dataset_roots_refuses_naming_both(
     fx.seed_delivery_traits(tmp_path)
     selection_dir, _csv_path = _reference(tmp_path)
     other = tmp_path / "ds2"
-    images = other / "images" / SCALE_DATE
+    images = image_dir(other, SCALE_DATE)
     images.mkdir(parents=True)
     registry_over(
         other,
         cr.SubjectRegistry(subjects=(cr.Subject(name=BAR, description=""),)),
     )
     for i in range(2):
-        Image.new("RGB", (120, 120), color=(200, 20 + i, 20)).save(
-            images / f"s{i}.png"
-        )
+        write_image(images / f"s{i}.png", (120, 120), (200, 20 + i, 20))
         label_image(
             images / f"s{i}.png",
             [Annotation(subject=BAR, geometry=Polygon(rings=[_rect(100.0)]))],
@@ -693,11 +693,10 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(
 ) -> None:
     from types import SimpleNamespace
 
-    from PIL import Image
-
     from tcip_mcp.assessment import AssessmentRefusedError, _scalar
     from tcip_mcp.pipelines.data.selection import ClassScope, Sample
     from tcip_mcp.pipelines.execution import Pass, execution_record
+    from tests._producer_fixtures import write_image
 
     class Silent:
         def predict_batch(
@@ -719,7 +718,7 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(
         execution=execution_record(checkpoint, Stated(), None, None),
         tile_batch_size=1,
     )
-    Image.new("RGB", (8, 8)).save(tmp_path / "a.png")
+    write_image(tmp_path / "a.png", (8, 8))
     (tmp_path / "t.csv").write_text("image,value\na,1.0\n", encoding="utf-8")
     sample = Sample(
         member="a",
@@ -760,7 +759,7 @@ def test_a_polygon_that_fails_to_rasterize_refuses_rather_than_training_an_empty
 
     from tests._producer_fixtures import dataset_over, label_image, write_image
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     write_image(images_dir / "a.png", (IMG, IMG))
     label_image(
         images_dir / "a.png",

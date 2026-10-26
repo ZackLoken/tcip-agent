@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 from fastapi.testclient import TestClient
 
+from tcip_mcp.dataset_layout import image_dir
 from tests import REFUSED_NAMES
 from tests._web_fixtures import INVARIANCES
 
@@ -40,16 +41,13 @@ def _make_project(
 
     Its display name is ``name``, and it holds one image per date and the named subjects.
     """
-    from PIL import Image
-
+    from tests._producer_fixtures import write_image
     from tests._web_fixtures import named_project
 
     made = named_project(ws / name, name)
     proj = made.root
     for d in dates:
-        ddir = proj / "images" / d
-        ddir.mkdir(parents=True)
-        Image.new("RGB", (8, 8), (0, 0, 0)).save(ddir / "img.png")
+        write_image(image_dir(proj, d) / "img.png", (8, 8))
     if subjects:
         from tcip_mcp.subject_registry import Subject, SubjectRegistry
         from tests._producer_fixtures import registry_over
@@ -112,13 +110,13 @@ def test_projects_report_per_date_subject_model_availability(
         subjects=["bud", "bush"],
     ).root
     label_image(
-        proj / "images" / "2026-02-11" / "img.png",
+        image_dir(proj, "2026-02-11") / "img.png",
         [Annotation(subject="bud", geometry=BBox(1, 1, 7, 7))],
         8,
         8,
     )
     label_image(
-        proj / "images" / "2026-03-02" / "img.png",
+        image_dir(proj, "2026-03-02") / "img.png",
         [Annotation(subject="bush", geometry=BBox(2, 2, 6, 6))],
         8,
         8,
@@ -128,7 +126,7 @@ def test_projects_report_per_date_subject_model_availability(
         "baseline/2026-02-11",
         [
             {
-                "image": str(proj / "images" / "2026-02-11" / "img.png"),
+                "image": str(image_dir(proj, "2026-02-11") / "img.png"),
                 "width": 8,
                 "height": 8,
                 "boxes": [[1.0, 1.0, 7.0, 7.0]],
@@ -172,7 +170,7 @@ def test_projects_report_a_label_problem_and_still_list(
         dates=["2026-02-11", "2026-03-02"],
         subjects=["bud"],
     ).root
-    bad = proj / "images" / "2026-02-11" / "img.png"
+    bad = image_dir(proj, "2026-02-11") / "img.png"
     label_image(
         bad, [Annotation(subject="bud", geometry=BBox(1, 1, 7, 7))], 8, 8
     )

@@ -58,15 +58,15 @@ def test_annotate_labels_route_blocks_outside_allowed_root(
 ) -> None:
     pytest.importorskip("fastapi")
     from fastapi import HTTPException
-    from PIL import Image
 
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
     from tcip_web.routes.annotate import load_labels
+    from tests._producer_fixtures import write_image
 
-    img = tmp_path / "images" / "undated" / "ok.jpg"
-    img.parent.mkdir(parents=True)
-    Image.new("RGB", (8, 8)).save(img)
-    outside = tmp_path_factory.mktemp("outside") / "secret.jpg"
-    Image.new("RGB", (8, 8)).save(outside)
+    img = write_image(image_dir(tmp_path, UNDATED_BUCKET) / "ok.jpg", (8, 8))
+    outside = write_image(
+        tmp_path_factory.mktemp("outside") / "secret.jpg", (8, 8)
+    )
 
     assert (
         load_labels(str(img))["img_width"] == 8
@@ -85,14 +85,14 @@ def test_images_route_blocks_outside_allowed_root(
     """
     pytest.importorskip("fastapi")
     from fastapi import HTTPException
-    from PIL import Image
 
     from tcip_web.routes.images import get_bands
+    from tests._producer_fixtures import write_image
 
-    img = tmp_path / "ok.jpg"
-    Image.new("RGB", (8, 8)).save(img)
-    outside = tmp_path_factory.mktemp("outside") / "secret.jpg"
-    Image.new("RGB", (8, 8)).save(outside)
+    img = write_image(tmp_path / "ok.jpg", (8, 8))
+    outside = write_image(
+        tmp_path_factory.mktemp("outside") / "secret.jpg", (8, 8)
+    )
 
     assert (
         get_bands(path=str(img))["band_count"] == 3

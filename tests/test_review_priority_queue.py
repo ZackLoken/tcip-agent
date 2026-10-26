@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tcip_mcp.dataset_layout import image_root
+
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
@@ -48,7 +50,7 @@ def _wait_for_terminal(
 def test_launch_404s_on_missing_checkpoint(
     opened_client: TestClient, tmp_path: Path
 ) -> None:
-    images = tmp_path / "images"
+    images = image_root(tmp_path)
     images.mkdir()
     resp = opened_client.post(
         "/api/annotate/queue/launch",
@@ -65,7 +67,7 @@ def test_launch_404s_on_missing_checkpoint(
 def test_launch_refuses_a_queue_stating_no_scorer_budget_or_reason(
     opened_client: TestClient, tmp_path: Path
 ) -> None:
-    images = tmp_path / "images"
+    images = image_root(tmp_path)
     images.mkdir()
     for missing in QUEUE:
         resp = opened_client.post(
@@ -110,7 +112,7 @@ def test_job_completes_and_carries_the_tool_s_own_queue(
 ) -> None:
     ckpt = tmp_path / "model.pt"
     ckpt.write_bytes(b"not a real checkpoint")
-    images = tmp_path / "images"
+    images = image_root(tmp_path)
     images.mkdir()
 
     calls: list[dict] = []
@@ -218,7 +220,7 @@ def test_job_fails_honestly_on_the_tool_s_own_refusal(
     """
     ckpt = tmp_path / "model.pt"
     ckpt.write_bytes(b"not a real checkpoint")
-    images = tmp_path / "images"
+    images = image_root(tmp_path)
     images.mkdir()
 
     def fake_ranked_review_queue(

@@ -396,9 +396,8 @@ def test_snapshot_model_source_keeps_files_sharing_a_name_apart(
 def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(
     tmp_path: Path,
 ) -> None:
-    from PIL import Image
-
     from tcip_mcp.model_registry import load_registered_checkpoint
+    from tests._producer_fixtures import write_image
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     checkpoint = load_registered_checkpoint(
@@ -423,8 +422,7 @@ def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(
     assert p.predictor.task == "detection"
     assert p.predictor.in_chans == 3
 
-    img = tmp_path / "a.png"
-    Image.new("RGB", (64, 64), (120, 120, 120)).save(img)
+    img = write_image(tmp_path / "a.png", (64, 64), (120, 120, 120))
     (out,) = p.predict([str(img)])
     assert {"boxes", "scores", "labels", "count"} <= set(
         out
@@ -443,7 +441,7 @@ def test_predictor_loads_at_the_two_channels_its_run_recorded(
 
     import numpy as np
 
-    from tcip_mcp.dataset_layout import UNDATED_BUCKET
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tests._verified_checkpoint_fixtures import (
         fixture_data_dir,
@@ -451,7 +449,7 @@ def test_predictor_loads_at_the_two_channels_its_run_recorded(
     )
 
     where = fixture_data_dir(tmp_path, "two-band")
-    images = where / "images" / UNDATED_BUCKET
+    images = image_dir(where, UNDATED_BUCKET)
     images.mkdir(parents=True)
     with open(
         where / "labels.csv", "w", newline="", encoding="utf-8"

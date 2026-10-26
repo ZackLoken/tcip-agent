@@ -11,9 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PIL import Image
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.tools import doctor_tools as doctor
 from tcip_mcp.tools.annotation_tools import (
     read_annotations,
@@ -47,12 +46,16 @@ def project_dir(tmp_path: Path) -> Path:
     """
     root = tmp_path / "my_project"
     date = "2-11-26"
-    images = root / "images" / date
+    images = image_dir(root, date)
     images.mkdir(parents=True)
 
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import label_image, registry_over
+    from tests._producer_fixtures import (
+        label_image,
+        registry_over,
+        write_image,
+    )
 
     registry_over(
         root,
@@ -65,8 +68,9 @@ def project_dir(tmp_path: Path) -> Path:
     results = []
     for i in range(5):
         name = f"img_{i:03d}"
-        img = Image.new("RGB", (640, 480), color=(100 + i * 20, 100, 100))
-        img.save(images / f"{name}.jpg")
+        write_image(
+            images / f"{name}.jpg", (640, 480), (100 + i * 20, 100, 100)
+        )
 
         # GT: 2 boxes per image, name-based per-image JSON (pixel xyxy).
         label_image(
@@ -142,7 +146,7 @@ class TestE2EPipeline:
         assert not [f for f in findings if f[0] == "error"]
 
         # ── Step 5: Load annotations for one image ───────────────────
-        img_path = str(project_dir / "images" / "2-11-26" / "img_000.jpg")
+        img_path = str(image_dir(project_dir, "2-11-26") / "img_000.jpg")
         ann = read_annotations(project_dir, img_path, BUCKET)
         assert "error" not in ann
         assert ann["labels"]["count"] >= 2
@@ -203,7 +207,7 @@ class TestE2EPipeline:
         # ── Step 9: Evaluate full dataset ────────────────────────────
         dataset_eval = score_predictions(
             project_dir,
-            str(project_dir / "images" / "2-11-26"),
+            str(image_dir(project_dir, "2-11-26")),
             BUCKET,
             iou_threshold=0.5,
             conf_threshold=0.25,
@@ -266,16 +270,14 @@ class TestE2EPipelineEdgeCases:
 
     def test_dataset_with_missing_labels(self, tmp_path: Path) -> None:
         """scan_dataset counts three images, one label and two unlabeled images."""
-        images = tmp_path / "images" / UNDATED_BUCKET
-        images.mkdir(parents=True)
+        images = image_dir(tmp_path, UNDATED_BUCKET)
 
         # 3 images, only 1 label
         from tcip_annotation.state import Annotation, BBox
-        from tests._producer_fixtures import label_image
+        from tests._producer_fixtures import label_image, write_image
 
         for i in range(3):
-            img = Image.new("RGB", (64, 64))
-            img.save(images / f"img_{i:03d}.jpg")
+            write_image(images / f"img_{i:03d}.jpg", (64, 64))
         label_image(
             images / "img_000.jpg",
             [Annotation(subject="bud", geometry=BBox(28, 28, 36, 36))],
@@ -290,15 +292,12 @@ class TestE2EPipelineEdgeCases:
 
     def test_evaluate_no_predictions(self, tmp_path: Path) -> None:
         """score_predictions answers a dict for an image under an unpublished bucket name."""
-        images = tmp_path / "images" / UNDATED_BUCKET
-        images.mkdir(parents=True)
-
         from tcip_annotation.state import Annotation, BBox
-        from tests._producer_fixtures import label_image
+        from tests._producer_fixtures import label_image, write_image
 
-        img = Image.new("RGB", (640, 480))
-        img_path = images / "test.jpg"
-        img.save(img_path)
+        img_path = write_image(
+            image_dir(tmp_path, UNDATED_BUCKET) / "test.jpg", (640, 480)
+        )
         label_image(
             img_path,
             [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))],
@@ -322,13 +321,11 @@ class TestE2EPipelineEdgeCases:
     ) -> None:
         """save_annotations writes an image's first label document."""
         import tcip_store
-        from tests._producer_fixtures import image_label_key
+        from tests._producer_fixtures import image_label_key, write_image
 
-        images = tmp_path / "images" / UNDATED_BUCKET
-        images.mkdir(parents=True)
-        img = Image.new("RGB", (640, 480))
-        img_path = images / "new_img.jpg"
-        img.save(img_path)
+        img_path = write_image(
+            image_dir(tmp_path, UNDATED_BUCKET) / "new_img.jpg", (640, 480)
+        )
 
         result = save_annotations(
             bound,

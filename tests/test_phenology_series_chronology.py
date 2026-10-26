@@ -16,6 +16,7 @@ import pytest
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import subject_registry as cr
+from tcip_mcp.dataset_layout import image_dir, image_root
 from tcip_mcp.pipelines.postprocessing import phenology
 from tests import csv_rows
 from tests._trait_fixtures import BUD_OPENING
@@ -146,7 +147,7 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
             f"run/{d}",
             [
                 predicted(
-                    tmp_path / "ds" / "images" / d / f"{plant}_{d}.jpg",
+                    image_dir(tmp_path / "ds", d) / f"{plant}_{d}.jpg",
                     _states(pos, neg),
                     (SPARSE,),
                 )
@@ -227,7 +228,7 @@ def test_positive_detections_are_the_named_value_not_a_fixed_position(
     )
 
     registry_over(tmp_path, REGISTRY)
-    scope = registry_scope(tmp_path / "images", "bud")
+    scope = registry_scope(image_root(tmp_path), "bud")
     total, positive, unclassified = phenology.count_by_class(
         p, BUD_OPENING.positive_state, scope=scope
     )
@@ -247,7 +248,7 @@ def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
 
-    image = tmp_path / "ds" / "images" / "2026-03-05" / "P1_2026-03-05.jpg"
+    image = image_dir(tmp_path / "ds", "2026-03-05") / "P1_2026-03-05.jpg"
     bucket = published(
         tmp_path,
         "run/2026-03-05",

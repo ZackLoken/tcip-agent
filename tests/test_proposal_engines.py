@@ -22,7 +22,7 @@ import pytest
 from pydantic import ValidationError
 from sahi.models.base import DetectionModel
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests import test_propose_annotations_region as region
 from tests._producer_fixtures import kept
 
@@ -617,7 +617,7 @@ def test_an_engines_parameter_refusal_reaches_the_door_as_its_error(
     from tcip_mcp.tools.proposal_tools import propose_annotations
     from tests._producer_fixtures import write_image
 
-    image = write_image(tmp_path / "images" / UNDATED_BUCKET / "a.png")
+    image = write_image(image_dir(tmp_path, UNDATED_BUCKET) / "a.png")
 
     result = propose_annotations(
         tmp_path,
@@ -740,7 +740,7 @@ def test_a_ringless_candidate_renders_and_stages_as_its_box(
     from tests._producer_fixtures import write_image
 
     image = write_image(
-        tmp_path / "images" / UNDATED_BUCKET / "boxed.png",
+        image_dir(tmp_path, UNDATED_BUCKET) / "boxed.png",
         (96, 96),
         (40, 40, 40),
     )
@@ -808,7 +808,7 @@ def test_a_proposals_execution_record_reaches_its_staging_and_its_bucket(
         proposal, "resolve_proposer", lambda engine: Recorded()
     )
     image = write_image(
-        tmp_path / "images" / UNDATED_BUCKET / "recorded.png", (96, 96)
+        image_dir(tmp_path, UNDATED_BUCKET) / "recorded.png", (96, 96)
     )
 
     proposed = propose_annotations(

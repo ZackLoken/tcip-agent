@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import tcip_store as ts
+from tcip_mcp.dataset_layout import image_dir, image_root
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.tools.phenology_tools import build_plant_mapping
 from tcip_mcp.tools.project_tools import register_dataset
@@ -172,16 +173,15 @@ def _write_scene(
     dates: list[str] = DATES,
     plants: list[dict] | None = None,
     unpredicted: frozenset[str] = frozenset(),
-) -> tuple[Path, Path, dict[str, str]]:
+) -> tuple[Path, dict[str, str]]:
     """Write real geolocated images for ``plants`` across ``dates`` and publish their buckets.
 
     ``plants`` defaults to ``PLANTS``. One bucket per date is published under the project the
     dataset sits in, holding a document for every image but the stems ``unpredicted`` names.
-    Returns (images_root, plant_csv, preds_by_date).
+    Returns (plant_csv, preds_by_date).
     """
     pytest.importorskip("torch")
     plants = PLANTS if plants is None else plants
-    images_root = dataset_root / "images"
     preds_by_date: dict[str, str] = {}
     for date in dates:
         base_time = datetime.strptime(date, "%Y-%m-%d").replace(
@@ -191,14 +191,14 @@ def _write_scene(
         for j, plant in enumerate(plants):
             stem = f"{plant['plot']}_{date.replace('-', '')}"
             write_geo_image(
-                images_root / date / f"{stem}.jpg",
+                image_dir(dataset_root, date) / f"{stem}.jpg",
                 plant["lat"],
                 plant["lon"],
                 base_time + timedelta(minutes=j),
                 h_pos_err=PHOTO_POSITION_ERROR_M,
             )
             if stem not in unpredicted:
-                images.append(images_root / date / f"{stem}.jpg")
+                images.append(image_dir(dataset_root, date) / f"{stem}.jpg")
         preds_by_date[date] = _publish(
             dataset_root.parent, f"live/{date}", images
         )
@@ -206,7 +206,7 @@ def _write_scene(
     plant_csv = write_plant_csv(
         dataset_root.parent / f"{dataset_root.name}_plants.csv", plants
     )
-    return images_root, plant_csv, preds_by_date
+    return plant_csv, preds_by_date
 
 
 # ── rail 6: no project record ────────────────────────────────────────────
@@ -223,7 +223,7 @@ def test_build_plant_mapping_refuses_a_name_outside_name_segment(
     res = build_plant_mapping(
         tmp_path,
         name="Not Legal!",
-        images_root=str(tmp_path),
+        dataset_root=str(tmp_path),
         plant_registry="unregistered",
         actor=None,
     )
@@ -231,17 +231,17 @@ def test_build_plant_mapping_refuses_a_name_outside_name_segment(
     assert "lowercase" in res["error"]
 
 
-def test_build_plant_mapping_over_an_unregistered_images_dir_names_register_dataset(
+def test_build_plant_mapping_over_an_unregistered_dataset_names_register_dataset(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _init(tmp_path)
-    images_root = tmp_path / "ds" / "images"
-    (images_root / DATES[0]).mkdir(parents=True)
+    dataset_root = tmp_path / "ds"
+    image_dir(dataset_root, DATES[0]).mkdir(parents=True)
     res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry="unregistered",
         actor=None,
     )
@@ -250,28 +250,28 @@ def test_build_plant_mapping_over_an_unregistered_images_dir_names_register_data
     assert not (tmp_path / ".tcip" / "state" / "plant_mappings").exists()
 
 
-def test_build_plant_mapping_admits_the_dataset_images_root_spelled_variously(
+def test_build_plant_mapping_admits_the_dataset_root_spelled_variously(
     tmp_path: Path,
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, _ = _write_scene(dataset_root)
+    plant_csv, _ = _write_scene(dataset_root)
 
-    trailing = str(images_root) + os.sep
+    trailing = str(dataset_root) + os.sep
     res = build_plant_mapping(
         tmp_path,
         name="trailing-sep",
-        images_root=trailing,
+        dataset_root=trailing,
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
     assert "error" not in res, res
 
-    forward = str(images_root).replace("\\", "/")
+    forward = str(dataset_root).replace("\\", "/")
     res = build_plant_mapping(
         tmp_path,
         name="forward-slash",
-        images_root=forward,
+        dataset_root=forward,
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -280,7 +280,7 @@ def test_build_plant_mapping_admits_the_dataset_images_root_spelled_variously(
     res = build_plant_mapping(
         tmp_path,
         name="relative",
-        images_root=str(images_root.relative_to(tmp_path)),
+        dataset_root=str(dataset_root.relative_to(tmp_path)),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -293,11 +293,11 @@ def test_deliver_phenology_milestones_refuses_predictions_from_a_different_datas
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, _ = _write_scene(dataset_root)
+    plant_csv, _ = _write_scene(dataset_root)
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -305,7 +305,7 @@ def test_deliver_phenology_milestones_refuses_predictions_from_a_different_datas
     _seed_currant_bloom_trait(tmp_path)
 
     other_root = _dataset(tmp_path, name="ds2")
-    _, _, other_preds = _write_scene(other_root)
+    _, other_preds = _write_scene(other_root)
 
     res = _deliver(
         tmp_path,
@@ -329,13 +329,11 @@ def test_deliver_phenology_milestones_refuses_a_date_the_mapping_does_not_cover(
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATES[0]]
-    )
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -343,7 +341,7 @@ def test_deliver_phenology_milestones_refuses_a_date_the_mapping_does_not_cover(
     _seed_currant_bloom_trait(tmp_path)
 
     extra_date = "2026-03-01"
-    extra_image = images_root / extra_date / "P1_20260301.jpg"
+    extra_image = image_dir(dataset_root, extra_date) / "P1_20260301.jpg"
     write_geo_image(
         extra_image,
         PLANTS[0]["lat"],
@@ -377,7 +375,7 @@ def test_deliver_phenology_milestones_refuses_a_hand_written_record_missing_prov
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    _, _, preds_by_date = _write_scene(dataset_root)
+    _, preds_by_date = _write_scene(dataset_root)
     _seed_currant_bloom_trait(tmp_path)
 
     ts.replace(
@@ -407,7 +405,7 @@ def test_deliver_phenology_milestones_refuses_a_record_with_provenance_and_no_re
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    _, _, preds_by_date = _write_scene(dataset_root)
+    _, preds_by_date = _write_scene(dataset_root)
     _seed_currant_bloom_trait(tmp_path)
 
     record = {
@@ -449,11 +447,11 @@ def test_deliver_phenology_milestones_refuses_a_plant_csv_rewritten_in_place(
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
+    plant_csv, preds_by_date = _write_scene(dataset_root)
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -492,13 +490,13 @@ def test_an_unread_captures_bytes_going_bad_is_disclosed_never_opened(
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
+    plant_csv, preds_by_date = _write_scene(
         dataset_root, dates=[DATES[0]], unpredicted=UNREAD_P2
     )
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -506,7 +504,7 @@ def test_an_unread_captures_bytes_going_bad_is_disclosed_never_opened(
     _seed_currant_bloom_trait(tmp_path)
 
     p2_stem = f"{PLANTS[1]['plot']}_{DATES[0].replace('-', '')}"
-    (images_root / DATES[0] / f"{p2_stem}.jpg").write_bytes(
+    (image_dir(dataset_root, DATES[0]) / f"{p2_stem}.jpg").write_bytes(
         b"not a real jpeg any more"
     )
 
@@ -539,13 +537,13 @@ def test_an_unread_captures_bytes_changing_in_place_does_not_refuse_delivery(
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
+    plant_csv, preds_by_date = _write_scene(
         dataset_root, dates=[DATES[0]], unpredicted=UNREAD_P2
     )
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -554,7 +552,7 @@ def test_an_unread_captures_bytes_changing_in_place_does_not_refuse_delivery(
 
     p2_stem = f"{PLANTS[1]['plot']}_{DATES[0].replace('-', '')}"
     write_geo_image(
-        images_root / DATES[0] / f"{p2_stem}.jpg",
+        image_dir(dataset_root, DATES[0]) / f"{p2_stem}.jpg",
         PLANTS[1]["lat"],
         PLANTS[1]["lon"],
         datetime(2026, 2, 11, 10, 45),
@@ -590,11 +588,11 @@ def test_a_non_delivered_mapping_date_is_never_walked(
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
+    plant_csv, preds_by_date = _write_scene(dataset_root)
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -602,7 +600,7 @@ def test_a_non_delivered_mapping_date_is_never_walked(
     _seed_currant_bloom_trait(tmp_path)
 
     stem = f"{PLANTS[0]['plot']}_{DATES[1].replace('-', '')}"
-    (images_root / DATES[1] / f"{stem}.jpg").write_bytes(
+    (image_dir(dataset_root, DATES[1]) / f"{stem}.jpg").write_bytes(
         b"garbage, never read by this delivery"
     )
 
@@ -631,13 +629,11 @@ def test_a_moved_read_capture_refuses_naming_the_file(
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATES[0]]
-    )
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -645,7 +641,7 @@ def test_a_moved_read_capture_refuses_naming_the_file(
     _seed_currant_bloom_trait(tmp_path)
 
     stem = f"{PLANTS[0]['plot']}_{DATES[0].replace('-', '')}"
-    target = images_root / DATES[0] / f"{stem}.jpg"
+    target = image_dir(dataset_root, DATES[0]) / f"{stem}.jpg"
     # Several meters east: nowhere near either recorded plant, so nothing matches the distance
     # this mapping's own row recorded for it.
     write_geo_image(
@@ -684,13 +680,11 @@ def test_full_coverage_still_catches_an_in_place_exif_timestamp_change(
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATES[0]]
-    )
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -698,7 +692,7 @@ def test_full_coverage_still_catches_an_in_place_exif_timestamp_change(
     _seed_currant_bloom_trait(tmp_path)
 
     stem = f"{PLANTS[0]['plot']}_{DATES[0].replace('-', '')}"
-    target = images_root / DATES[0] / f"{stem}.jpg"
+    target = image_dir(dataset_root, DATES[0]) / f"{stem}.jpg"
     write_geo_image(
         target,
         PLANTS[0]["lat"],
@@ -734,15 +728,15 @@ def test_an_unmapped_raster_does_not_block_the_whole_date_digest_from_catching_a
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATES[0]]
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+    (image_dir(dataset_root, DATES[0]) / "orthomosaic_block.tif").write_bytes(
+        b""
     )
-    (images_root / DATES[0] / "orthomosaic_block.tif").write_bytes(b"")
 
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -750,7 +744,7 @@ def test_an_unmapped_raster_does_not_block_the_whole_date_digest_from_catching_a
     _seed_currant_bloom_trait(tmp_path)
 
     stem = f"{PLANTS[0]['plot']}_{DATES[0].replace('-', '')}"
-    target = images_root / DATES[0] / f"{stem}.jpg"
+    target = image_dir(dataset_root, DATES[0]) / f"{stem}.jpg"
     write_geo_image(
         target,
         PLANTS[0]["lat"],
@@ -785,15 +779,15 @@ def test_an_unmapped_raster_beside_a_full_mapped_read_delivers_with_nothing_disc
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATES[0]]
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+    (image_dir(dataset_root, DATES[0]) / "orthomosaic_block.tif").write_bytes(
+        b""
     )
-    (images_root / DATES[0] / "orthomosaic_block.tif").write_bytes(b"")
 
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -824,13 +818,13 @@ def test_a_partial_delivery_delivers_with_disclosures_naming_exactly_what_it_did
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
+    plant_csv, preds_by_date = _write_scene(
         dataset_root, unpredicted=UNREAD_P2
     )
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -864,13 +858,11 @@ def test_a_capture_readable_at_build_and_unreadable_at_verify_refuses(
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATES[0]]
-    )
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -878,7 +870,7 @@ def test_a_capture_readable_at_build_and_unreadable_at_verify_refuses(
     _seed_currant_bloom_trait(tmp_path)
 
     stem = f"{PLANTS[0]['plot']}_{DATES[0].replace('-', '')}"
-    target = images_root / DATES[0] / f"{stem}.jpg"
+    target = image_dir(dataset_root, DATES[0]) / f"{stem}.jpg"
     target.write_bytes(b"corrupted after the build")
 
     out_csv = tmp_path / "out.csv"
@@ -910,18 +902,18 @@ def test_a_capture_unreadable_at_build_is_never_read_so_replacing_it_only_disclo
     dataset_root = _dataset(tmp_path)
     # Both dates, not just DATES[0]: DATES[1] stays fully intact so the classifier is still
     # assessed somewhere with DATES[0]'s own P2 prediction absent.
-    images_root, plant_csv, preds_by_date = _write_scene(
+    plant_csv, preds_by_date = _write_scene(
         dataset_root, unpredicted=UNREAD_P2
     )
     stem = f"{PLANTS[0]['plot']}_{DATES[0].replace('-', '')}"
-    target = images_root / DATES[0] / f"{stem}.jpg"
+    target = image_dir(dataset_root, DATES[0]) / f"{stem}.jpg"
     original_bytes = target.read_bytes()
     target.write_bytes(b"garbage, no EXIF, unreadable at build time")
 
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -971,12 +963,11 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
     ts.bind(SqliteBackend(lock_timeout_s=0.2))
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, _ = _write_scene(dataset_root)
+    plant_csv, _ = _write_scene(dataset_root)
     build = plant_mapping.build_mapping(
-        images_root,
+        dataset_root,
         [plant_csv],
         name="valley",
-        dataset_root=dataset_root,
         dataset_id="whatever-id",
         project=tmp_path,
         plant_registry=plant_mapping.PlantRegistryReference(
@@ -1005,7 +996,7 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
 
     project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, _ = _write_scene(dataset_root)
+    plant_csv, _ = _write_scene(dataset_root)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     asyncio.run(store.open_project(project))
 
@@ -1016,7 +1007,7 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
             "/api/results/plant_mapping/build",
             json={
                 "name": "valley",
-                "images_root": str(images_root),
+                "dataset_root": str(dataset_root),
                 "plant_registry": registry,
                 "user": "tester",
             },
@@ -1067,7 +1058,7 @@ def test_a_supersede_whose_receipt_fails_answers_409_and_the_archive_still_loads
 
     project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
+    plant_csv, preds_by_date = _write_scene(dataset_root)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     asyncio.run(store.open_project(project))
 
@@ -1075,7 +1066,7 @@ def test_a_supersede_whose_receipt_fails_answers_409_and_the_archive_still_loads
         "/api/results/plant_mapping/build",
         json={
             "name": "valley",
-            "images_root": str(images_root),
+            "dataset_root": str(dataset_root),
             "plant_registry": registry,
             "user": "tester",
         },
@@ -1102,7 +1093,7 @@ def test_a_supersede_whose_receipt_fails_answers_409_and_the_archive_still_loads
         "/api/results/plant_mapping/build",
         json={
             "name": "valley",
-            "images_root": str(images_root),
+            "dataset_root": str(dataset_root),
             "plant_registry": registry,
             "user": "tester",
             "supersede": True,
@@ -1133,11 +1124,11 @@ def test_a_delivery_made_from_another_directory_names_the_projects_dataset(
     project = tmp_path / "project"
     _init(project)
     dataset_root = _dataset(project)
-    images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
+    plant_csv, preds_by_date = _write_scene(dataset_root)
     built = build_plant_mapping(
         project,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(project, [plant_csv]),
         actor=None,
     )
@@ -1173,12 +1164,12 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
+    plant_csv, preds_by_date = _write_scene(dataset_root)
 
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -1222,7 +1213,7 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
     blocked = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -1230,7 +1221,7 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
     build_res2 = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         supersede=True,
         actor=None,
@@ -1259,12 +1250,12 @@ def test_the_delivery_events_plant_mapping_block_carries_the_match_radius(
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
+    plant_csv, preds_by_date = _write_scene(dataset_root)
 
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -1302,11 +1293,11 @@ def test_a_moved_plant_csv_and_an_archived_date_deliver_with_disclosures(
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
+    plant_csv, preds_by_date = _write_scene(dataset_root)
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -1315,7 +1306,7 @@ def test_a_moved_plant_csv_and_an_archived_date_deliver_with_disclosures(
 
     moved = tmp_path / "plants_moved.csv"
     plant_csv.rename(moved)
-    shutil.rmtree(images_root / DATES[0])
+    shutil.rmtree(image_dir(dataset_root, DATES[0]))
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(
@@ -1348,9 +1339,7 @@ def test_a_read_capture_whose_plants_own_csv_is_missing_discloses_rather_than_re
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, _plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATES[0]]
-    )
+    _plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
 
     per_plant_csvs = [
         write_plant_csv(tmp_path / f"plants_{p['plot']}.csv", [p])
@@ -1359,7 +1348,7 @@ def test_a_read_capture_whose_plants_own_csv_is_missing_discloses_rather_than_re
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, per_plant_csvs),
         actor=None,
     )
@@ -1409,7 +1398,7 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
         }
     ]
     p3_stem = f"{plants3[2]['plot']}_{DATES[0].replace('-', '')}"
-    images_root, _plant_csv, preds_by_date = _write_scene(
+    _plant_csv, preds_by_date = _write_scene(
         dataset_root,
         dates=[DATES[0]],
         plants=plants3,
@@ -1423,7 +1412,7 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, per_plant_csvs),
         actor=None,
     )
@@ -1431,7 +1420,7 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
     _seed_currant_bloom_trait(tmp_path)
 
     p2_stem = f"{plants3[1]['plot']}_{DATES[0].replace('-', '')}"
-    moved = images_root / DATES[0] / f"{p2_stem}.jpg"
+    moved = image_dir(dataset_root, DATES[0]) / f"{p2_stem}.jpg"
     write_geo_image(
         moved,
         plants3[1]["lat"],
@@ -1468,11 +1457,11 @@ def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_ma
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
+    plant_csv, preds_by_date = _write_scene(dataset_root)
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -1512,7 +1501,7 @@ def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_ma
 
     # images/ removed under the original root: the check must resolve against the delivered
     # root, not the recorded dataset_root.
-    shutil.rmtree(str(images_root))
+    shutil.rmtree(image_root(dataset_root))
     out_csv2 = tmp_path / "out2.csv"
     res2 = _deliver(
         tmp_path,
@@ -1539,11 +1528,11 @@ def test_plant_mapping_names_lists_legal_names_and_omits_a_stray_file(
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, _ = _write_scene(dataset_root)
+    plant_csv, _ = _write_scene(dataset_root)
     res_a = build_plant_mapping(
         tmp_path,
         name="valley-a",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -1551,7 +1540,7 @@ def test_plant_mapping_names_lists_legal_names_and_omits_a_stray_file(
     res_b = build_plant_mapping(
         tmp_path,
         name="valley-b",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -1603,12 +1592,12 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
         )
         assert "error" not in reg, reg
 
-    images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
+    plant_csv, preds_by_date = _write_scene(dataset_root)
 
     build_a = build_plant_mapping(
         proj_a,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(proj_a, [plant_csv]),
         dates=[DATES[0]],
         actor=None,
@@ -1619,7 +1608,7 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
     build_b = build_plant_mapping(
         proj_b,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(proj_b, [plant_csv]),
         dates=list(DATES),
         actor=None,
@@ -1690,13 +1679,11 @@ def test_an_image_ingested_under_a_mapped_date_refuses_the_delivery_naming_the_d
 
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATES[0]]
-    )
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -1747,10 +1734,8 @@ def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_
 
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATES[0]]
-    )
-    date_dir = images_root / DATES[0]
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+    date_dir = image_dir(dataset_root, DATES[0])
     write_geo_image(
         date_dir / "aux_b1.jpg",
         43.1968,
@@ -1769,7 +1754,7 @@ def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -1821,13 +1806,11 @@ def test_build_mapping_persists_and_reads_back_capture_digests(
 
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATES[0]]
-    )
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -1841,7 +1824,9 @@ def test_build_mapping_persists_and_reads_back_capture_digests(
     recorded_stems = {a.stem for a in build.assignments[date]}
     assert set(build.capture_digests[date]) == recorded_stems
 
-    stamps = _read_date_stamps(list_logical_images(images_root / date), date)
+    stamps = _read_date_stamps(
+        list_logical_images(image_dir(dataset_root, date)), date
+    )
     assert capture_digests(stamps) == build.capture_digests[date]
 
     # Not build.record_sha256: that came from load_mapping's own read of this same raw document,
@@ -1887,10 +1872,8 @@ def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_th
 
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATES[0]]
-    )
-    date_dir = images_root / DATES[0]
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+    date_dir = image_dir(dataset_root, DATES[0])
     write_geo_image(
         date_dir / "aux_b1.jpg",
         43.1968,
@@ -1914,7 +1897,7 @@ def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_th
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -1962,10 +1945,8 @@ def test_a_date_with_an_unreadable_image_a_raster_and_a_band_group_builds_and_de
 
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATES[0]]
-    )
-    date_dir = images_root / DATES[0]
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+    date_dir = image_dir(dataset_root, DATES[0])
 
     bad = date_dir / "bad.jpg"
     bad.write_bytes(b"not a real jpeg")
@@ -2012,7 +1993,7 @@ def test_a_date_with_an_unreadable_image_a_raster_and_a_band_group_builds_and_de
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -2051,7 +2032,7 @@ def test_second_receipt_scan_in_one_process_reads_only_what_was_appended(
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, _ = _write_scene(dataset_root)
+    plant_csv, _ = _write_scene(dataset_root)
 
     calls: list[str | None] = []
     real_read_log = ts.read_log
@@ -2065,7 +2046,7 @@ def test_second_receipt_scan_in_one_process_reads_only_what_was_appended(
     res_a = build_plant_mapping(
         tmp_path,
         name="valley-a",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -2077,7 +2058,7 @@ def test_second_receipt_scan_in_one_process_reads_only_what_was_appended(
     res_b = build_plant_mapping(
         tmp_path,
         name="valley-b",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -2099,11 +2080,11 @@ def test_two_spellings_of_one_project_share_one_receipt_scan(
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, _ = _write_scene(dataset_root)
+    plant_csv, _ = _write_scene(dataset_root)
     built = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -2138,14 +2119,14 @@ def test_a_build_leaves_one_row_its_receipt(
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, _ = _write_scene(dataset_root)
+    plant_csv, _ = _write_scene(dataset_root)
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     before = len(audit_rows(tmp_path))
 
     res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=registry,
         actor=None,
     )

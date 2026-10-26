@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.tools.annotation_tools import score_predictions
 from tests._producer_fixtures import image_label_key, label_image, write_image
 from tests._training_values import TRIAGE_WEIGHTS
@@ -66,7 +66,7 @@ def test_score_predictions_single_image_reports_an_unreadable_gt(
 ) -> None:
     from tests._record_damage_fixtures import damage_record
 
-    img = tmp_path / "images" / UNDATED_BUCKET / "IMG_0000.jpg"
+    img = image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0000.jpg"
     write_image(img)
     label_image(img, ONE_BUD, 100, 80)
     damage_record(image_label_key(img), b"{not json")
@@ -83,7 +83,7 @@ def test_score_predictions_folder_reports_an_unreadable_prediction(
 ) -> None:
     from tests._record_damage_fixtures import damage_record
 
-    images = tmp_path / "ds" / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path / "ds", UNDATED_BUCKET)
     write_image(images / "IMG_0000.jpg")
     label_image(images / "IMG_0000.jpg", ONE_BUD, 100, 80)
     bucket = _published(tmp_path, "baseline", images / "IMG_0000.jpg")
@@ -105,7 +105,7 @@ def test_score_predictions_over_attributed_documents_scores_the_object_class(
     """
     from tcip_mcp import subject_registry as cr
 
-    img = tmp_path / "images" / UNDATED_BUCKET / "IMG_0000.jpg"
+    img = image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0000.jpg"
     write_image(img)
     label_image(img, ONE_BUD, 100, 80)
     _published(
@@ -144,7 +144,7 @@ def test_a_predicted_image_with_no_label_document_is_refused_as_a_reference(
     from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.tools.vision_tools import get_worst_predictions
 
-    img = tmp_path / "images" / UNDATED_BUCKET / "IMG_0000.jpg"
+    img = image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0000.jpg"
     write_image(img)
     bucket = _published(tmp_path, "baseline", img)
 
@@ -167,7 +167,7 @@ def test_an_image_the_bucket_names_no_document_for_is_unknown_never_a_miss(
     """
     from tcip_mcp.tools.vision_tools import get_worst_predictions
 
-    images = tmp_path / "ds" / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path / "ds", UNDATED_BUCKET)
     for stem in ("IMG_0000", "IMG_0001"):
         write_image(images / f"{stem}.jpg")
         label_image(images / f"{stem}.jpg", ONE_BUD, 100, 80)

@@ -180,11 +180,11 @@ def test_the_delivery_events_golden_carries_every_key_a_delivery_records(
 
     binding._init(tmp_path)
     dataset_root = binding._dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = binding._write_scene(dataset_root)
+    plant_csv, preds_by_date = binding._write_scene(dataset_root)
     built = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )

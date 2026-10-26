@@ -12,19 +12,17 @@ import json
 import shutil
 from pathlib import Path
 
-from PIL import Image
-
 import tcip_store as ts
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.tools.project_tools import register_dataset
 from tests._cli_fixtures import run_tcip
-from tests._producer_fixtures import label_image
+from tests._producer_fixtures import label_image, write_image
 from tests._web_fixtures import new_project
 
 
 def _real_dataset(root: Path) -> None:
-    images = root / "images" / "2024-01-01"
-    images.mkdir(parents=True)
-    Image.new("RGB", (10, 10), (1, 2, 3)).save(images / "a.png")
+    images = image_dir(root, "2024-01-01")
+    write_image(images / "a.png", (10, 10), (1, 2, 3))
     label_image(images / "a.png", [], 10, 10, keep_empty=True)
 
 
@@ -79,11 +77,9 @@ def test_content_carrying_no_identity_reports_unregistered(
 
 def test_a_real_content_change_still_reports_changed(tmp_path: Path) -> None:
     project, root, _ = _registered(tmp_path)
-    Image.new("RGB", (10, 10), (4, 5, 6)).save(
-        root / "images" / "2024-01-01" / "b.png"
-    )
+    write_image(image_dir(root, "2024-01-01") / "b.png", (10, 10), (4, 5, 6))
     label_image(
-        root / "images" / "2024-01-01" / "b.png", [], 10, 10, keep_empty=True
+        image_dir(root, "2024-01-01") / "b.png", [], 10, 10, keep_empty=True
     )
 
     verdict = _check(root, project)

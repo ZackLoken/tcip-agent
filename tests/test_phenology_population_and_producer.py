@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tcip_mcp.dataset_layout import image_dir
 from tests import csv_rows
 
 if TYPE_CHECKING:
@@ -171,7 +172,7 @@ def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
     published = run_inference(
         tmp_path,
         checkpoint_path=other.path,
-        images_dir=str(series.root / "images" / second),
+        images_dir=str(image_dir(series.root, second)),
         bucket=other_bucket,
         stated=chain_pass(),
         actor=None,

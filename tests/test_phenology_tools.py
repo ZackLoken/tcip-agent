@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 import tcip_store as ts
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     StatedRadius,
     plant_mapping_key,
@@ -37,9 +38,8 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
     from tests._web_fixtures import named_project
 
     named_project(tmp_path, "Orchard")
-    images_root = tmp_path / "images"
     write_geo_image(
-        images_root / "2026-02-11" / "img1.jpg",
+        image_dir(tmp_path, "2026-02-11") / "img1.jpg",
         43.19670,
         -90.058000,
         datetime(2026, 2, 11, 9, 30),
@@ -57,7 +57,7 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
     res = build_plant_mapping(
         tmp_path,
         name=name,
-        images_root=str(images_root),
+        dataset_root=str(tmp_path),
         plant_registry=registry,
         match_radius=StatedRadius(value=10.0, rationale="the receiver's spec"),
         actor=None,
@@ -88,19 +88,19 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
     assert "confidence" not in dated[0]
 
 
-def test_build_plant_mapping_missing_images_root(tmp_path: Path) -> None:
+def test_build_plant_mapping_missing_dataset_root(tmp_path: Path) -> None:
     from tests._web_fixtures import named_project
 
     named_project(tmp_path, "Orchard")
     res = build_plant_mapping(
         tmp_path,
-        images_root=str(tmp_path / "nope"),
+        dataset_root=str(tmp_path / "nope"),
         plant_registry="unregistered",
         name="m",
         actor=None,
     )
     assert "error" in res
-    assert "is not a dataset's own images/ root" in res["error"]
+    assert "register_dataset" in res["error"]
 
 
 def test_build_plant_mapping_missing_registry(tmp_path: Path) -> None:
@@ -109,14 +109,13 @@ def test_build_plant_mapping_missing_registry(tmp_path: Path) -> None:
     from tests._web_fixtures import named_project
 
     named_project(tmp_path, "Orchard")
-    images_root = tmp_path / "images"
-    (images_root / "2026-02-11").mkdir(parents=True)
+    image_dir(tmp_path, "2026-02-11").mkdir(parents=True)
     register_dataset(
         tmp_path, str(tmp_path), crop=sorted(registered_crops())[0], actor=None
     )
     res = build_plant_mapping(
         tmp_path,
-        images_root=str(images_root),
+        dataset_root=str(tmp_path),
         plant_registry="does-not-exist",
         name="m",
         actor=None,
@@ -240,7 +239,7 @@ def test_predictions_that_never_classified_the_positive_state_refuse(
     series = attributed_series(tmp_path, fractions=(0.0, 1.0), assessed=False)
     bare = []
     for date in series.buckets:
-        images = sorted((series.root / "images" / date).iterdir())
+        images = sorted(image_dir(series.root, date).iterdir())
         results = [predicted(p, ["bud", "bud"]) for p in images]
         bare.append(
             published(
@@ -274,7 +273,7 @@ def test_each_bucket_stands_for_the_date_its_record_states_and_two_on_one_date_r
     published = run_inference(
         tmp_path,
         checkpoint_path=series.checkpoint_path,
-        images_dir=str(series.root / "images" / second),
+        images_dir=str(image_dir(series.root, second)),
         bucket=misnamed,
         assessment_id=series.assessment["assessment_id"],
         stated=Stated(),

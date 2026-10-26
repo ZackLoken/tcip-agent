@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import tifffile
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     GeoreferencingError,
     GeoTransform,
@@ -472,7 +472,7 @@ def _raster_checkpoint(
         if model_source["task"] == "instance_seg"
         else BBox(8, 8, 24, 24)
     )
-    images = fixture_data_dir(tmp_path, "rasters") / "images" / UNDATED_BUCKET
+    images = image_dir(fixture_data_dir(tmp_path, "rasters"), UNDATED_BUCKET)
     images.mkdir(parents=True)
     for index in range(2):
         frame = images / f"frame{index}.tif"

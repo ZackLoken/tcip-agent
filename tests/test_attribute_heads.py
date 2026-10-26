@@ -67,8 +67,8 @@ def _documents(root: Path, bucket: str) -> dict[str, list[Annotation]]:
     from tcip_mcp.buckets import read_bucket
 
     return {
-        key.parts[-1]: read_predictions(key).annotations
-        for key in read_bucket(root, bucket).document_keys
+        stem: read_predictions(key).annotations
+        for stem, key in read_bucket(root, bucket).stem_keys.items()
     }
 
 
@@ -214,21 +214,19 @@ def test_a_scope_with_no_attribute_builds_the_plain_detector_and_writes_no_attri
     A subject its registry declares no attribute for builds the torchvision detector
     ``build_detector`` returns, and its records and documents carry no attribute.
     """
-    from PIL import Image
     from torchvision.models.detection import FasterRCNN
 
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.inference_tools import run_inference
+    from tests._producer_fixtures import write_image
     from tests._verified_checkpoint_fixtures import (
         predicted_over,
         registered_checkpoint,
     )
 
-    images_dir = tmp_path / "images" / "frames"
-    images_dir.mkdir(parents=True)
+    images_dir = image_dir(tmp_path, "frames")
     for i in range(2):
-        Image.new("RGB", (64, 64), (40 + 60 * i, 90, 60)).save(
-            images_dir / f"f{i}.png"
-        )
+        write_image(images_dir / f"f{i}.png", (64, 64), (40 + 60 * i, 90, 60))
     checkpoint = registered_checkpoint(tmp_path)
 
     p, results = predicted_over(

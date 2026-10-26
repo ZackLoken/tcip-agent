@@ -35,7 +35,11 @@ pytest.importorskip("torchvision")
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
+from tcip_mcp.dataset_layout import (  # noqa: E402
+    UNDATED_BUCKET,
+    image_dir,
+    image_root,
+)
 from tests import _trait_fixtures as fx  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
     BESPOKE_DETECTION,
@@ -152,7 +156,7 @@ def _build_experiment(
     ``calibration_ratio``, stating ``plant_csv_paths`` when given.
     """
     root = tmp_path / "ds"
-    images_dir = root / "images" / UNDATED_BUCKET
+    images_dir = image_dir(root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
     raster_path = images_dir / f"{stem}.tif"
@@ -205,7 +209,7 @@ def _attest_regions_complete(
 
     for x0, y0, x1, y1 in (r for region in regions for r in region):
         mark_complete(
-            root / "images" / UNDATED_BUCKET / f"{stem}.tif",
+            image_dir(root, UNDATED_BUCKET) / f"{stem}.tif",
             subject,
             project=root.parent,
             rect=(x0, y0, x1 - x0, y1 - y0),
@@ -940,9 +944,7 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(
                 "cap": 5,
             }
 
-    label = image_label_key(
-        tmp_path / "images" / UNDATED_BUCKET / "mosaic.tif"
-    )
+    label = image_label_key(image_dir(tmp_path, UNDATED_BUCKET) / "mosaic.tif")
     json_io.write_label_document(
         label,
         [
@@ -958,7 +960,7 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(
     )
     target = json_det_targets(
         json_io.read_label_document(label).annotations,
-        registry_scope(tmp_path / "images", "bur"),
+        registry_scope(image_root(tmp_path), "bur"),
     )
     gt = {
         "boxes": np.asarray(target["boxes"], dtype=np.float32).reshape(-1, 4),
@@ -1138,7 +1140,7 @@ def _build_attribute_scoped_experiment(
         )
 
     root = tmp_path / "ds_attribute"
-    images_dir = root / "images" / UNDATED_BUCKET
+    images_dir = image_dir(root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
     _write_mosaic(images_dir / f"{stem}.tif")

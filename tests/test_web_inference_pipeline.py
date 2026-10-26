@@ -54,7 +54,7 @@ def _job(
         actor="user:tester",
         project=str(project),
         checkpoint_path=str(ckpt),
-        dataset_root=str(images_dir.parent.parent),
+        dataset_root=str(project),
         images_dir=str(images_dir),
         bucket=bucket,
         stated=stated,
@@ -447,11 +447,10 @@ def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path: Path) -> None:
     logical image.
     """
     from tcip_web.routes.inference import _worker
+    from tests._producer_fixtures import write_image
 
     images_dir = _one_image(tmp_path, "foo")
-    from PIL import Image
-
-    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "foo.png")
+    write_image(images_dir / "foo.png", (100, 100), (120, 120, 120))
     ckpt = _checkpoint(tmp_path)
 
     job = _job(

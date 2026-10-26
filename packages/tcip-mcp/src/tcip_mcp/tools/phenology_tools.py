@@ -191,7 +191,7 @@ def register_plant_registry(
 def build_plant_mapping(
     project: Path,
     name: str,
-    images_root: str,
+    dataset_root: str,
     plant_registry: str,
     dates: list[str] | None = None,
     match_radius: StatedRadius | None = None,
@@ -212,11 +212,10 @@ def build_plant_mapping(
     Args:
         name: The mapping's name within this project (``plant_mapping_key``'s own naming rule). A
             rebuild under the same name replaces this project's own mapping of that name.
-        images_root: Directory whose immediate subfolders are ``<YYYY-MM-DD>/`` image buckets (the
-            ingest layout).
+        dataset_root: The registered dataset whose captures are mapped.
         plant_registry: The name of a plant registry already registered under this project by
             ``register_plant_registry``.
-        dates: Optional subset of date folders to map (default: all under ``images_root``).
+        dates: Optional subset of the dataset's captures to map (default: all of them).
         match_radius: ``{value, rationale}``, the radius (meters) every date's captures are
             matched within and how it is known. Omitted, each date's radius is the largest
             horizontal positioning error its photographs' EXIF reports; a date whose positioned
@@ -246,7 +245,7 @@ def build_plant_mapping(
         return plant_mapping.build_plant_mapping(
             project,
             name,
-            located(images_root, project),
+            located(dataset_root, project),
             plant_registry,
             dates=dates,
             match_radius=match_radius,

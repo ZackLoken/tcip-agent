@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from PIL import Image
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 if TYPE_CHECKING:
     import pytest
@@ -167,7 +167,7 @@ def test_a_completion_mark_lacking_its_time_fails_at_the_read(
     )
     from tests._producer_fixtures import image_label_key, mark_complete
 
-    image = tmp_path / "images" / UNDATED_BUCKET / "IMG_1.png"
+    image = image_dir(tmp_path, UNDATED_BUCKET) / "IMG_1.png"
     image.parent.mkdir(parents=True)
     Image.fromarray(np.zeros((80, 100, 3), dtype=np.uint8)).save(image)
     mark_complete(image, "bud", project=tmp_path, by="user:breeder")

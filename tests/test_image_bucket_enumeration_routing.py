@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
 from tests._chain_fixtures import (
     DETECTION_SOURCE,
@@ -17,31 +18,35 @@ from tests._chain_fixtures import (
     weights_statistics,
 )
 from tests._cli_fixtures import run_tcip
+from tests._producer_fixtures import write_image
 from tests._training_values import drawn_split, tiling_block
 
 
-def _ingested_bucket(tmp_path: Path) -> Path:
-    from PIL import Image
+def _ingested_bucket(tmp_path: Path) -> tuple[Path, Path]:
+    """Ingest one 16 px JPEG ``shoot_001`` into the project ``proj``.
 
+    Returns the project and its undated capture.
+    """
     from tcip_mcp.tools.ingest_tools import ingest_images
 
     source = tmp_path / "source"
-    source.mkdir()
-    Image.new("RGB", (16, 16)).save(source / "shoot_001.jpg")
+    write_image(source / "shoot_001.jpg", (16, 16))
 
-    result = ingest_images(tmp_path / "proj", str(source), actor=None)
+    project = tmp_path / "proj"
+    result = ingest_images(project, str(source), actor=None)
     assert "error" not in result, result
-    return Path(result["image_root"]) / "undated"
+    return project, image_dir(project, UNDATED_BUCKET)
 
 
 def _collide(bucket: Path) -> None:
-    from PIL import Image
-
-    Image.new("RGB", (16, 16)).save(bucket / "Shoot_001.png")
+    write_image(bucket / "Shoot_001.png", (16, 16))
 
 
-def _ingested_bucket_of(tmp_path: Path, stems: list[str]) -> Path:
-    """Ingest one 16 px JPEG per ``stem`` through ``ingest_images``; return the undated bucket."""
+def _ingested_bucket_of(tmp_path: Path, stems: list[str]) -> tuple[Path, Path]:
+    """Ingest one 16 px JPEG per ``stem`` into the project ``proj`` through ``ingest_images``.
+
+    Returns the project and its undated capture.
+    """
     from tcip_mcp.tools.ingest_tools import ingest_images
     from tests._producer_fixtures import BRIGHT, painted_frame
 
@@ -52,9 +57,10 @@ def _ingested_bucket_of(tmp_path: Path, stems: list[str]) -> Path:
             source / f"{stem}.jpg"
         )
 
-    result = ingest_images(tmp_path / "proj", str(source), actor=None)
+    project = tmp_path / "proj"
+    result = ingest_images(project, str(source), actor=None)
     assert "error" not in result, result
-    return Path(result["image_root"]) / "undated"
+    return project, image_dir(project, UNDATED_BUCKET)
 
 
 SUBJECT = "leaf"
@@ -79,7 +85,7 @@ def test_preflight_refuses_a_stem_collision(tmp_path: Path) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    bucket = _ingested_bucket(tmp_path)
+    _project, bucket = _ingested_bucket(tmp_path)
     _collide(bucket)
     _label(bucket, "shoot_001")
 
@@ -100,9 +106,8 @@ def test_scan_dataset_image_census_refuses_a_stem_collision(
 ) -> None:
     from tcip_mcp.tools.data_tools import _scan_dataset
 
-    bucket = _ingested_bucket(tmp_path)
+    project_root, bucket = _ingested_bucket(tmp_path)
     _collide(bucket)
-    project_root = bucket.parent.parent
 
     with pytest.raises(AmbiguousImageStemError):
         _scan_dataset(str(project_root))
@@ -118,9 +123,8 @@ def _diagnosed_collision(tmp_path: Path) -> list[list[str]]:
 
     from tests._web_fixtures import new_project
 
-    bucket = _ingested_bucket(tmp_path)
+    project_root, bucket = _ingested_bucket(tmp_path)
     _collide(bucket)
-    project_root = bucket.parent.parent
     new_project(project_root)
 
     res = run_tcip(
@@ -169,7 +173,9 @@ def test_preflight_admits_a_clean_multi_image_bucket(tmp_path: Path) -> None:
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
+    _project, bucket = _ingested_bucket_of(
+        tmp_path, ["shoot_001", "shoot_002"]
+    )
     _label(bucket, "shoot_001", "shoot_002")
 
     cfg = training_config(
@@ -192,7 +198,9 @@ def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
+    _project, bucket = _ingested_bucket_of(
+        tmp_path, ["shoot_001", "shoot_002"]
+    )
     _label(bucket, "shoot_001", "shoot_002")
 
     cfg = training_config(
@@ -217,7 +225,9 @@ def test_calibration_ratio_feasibility_admits_a_clean_multi_image_bucket(
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
+    _project, bucket = _ingested_bucket_of(
+        tmp_path, ["shoot_001", "shoot_002"]
+    )
     _label(bucket, "shoot_001", "shoot_002")
 
     cfg = training_config(
@@ -246,8 +256,9 @@ def test_scan_dataset_image_census_admits_a_clean_multi_image_bucket(
 ) -> None:
     from tcip_mcp.tools.data_tools import _scan_dataset
 
-    bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
-    project_root = bucket.parent.parent
+    project_root, _bucket = _ingested_bucket_of(
+        tmp_path, ["shoot_001", "shoot_002"]
+    )
 
     scan = _scan_dataset(str(project_root))
     assert {Path(p).stem for p in scan["images"]} == {"shoot_001", "shoot_002"}

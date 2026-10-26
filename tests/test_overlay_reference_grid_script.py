@@ -9,16 +9,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PIL import Image
-
+from tcip_mcp.dataset_layout import image_root
 from tests._cli_fixtures import run_tcip
+from tests._producer_fixtures import write_image
 
 
 def test_refuses_without_a_project_and_plants_no_store(
     tmp_path: Path,
 ) -> None:
-    img = tmp_path / "a.jpg"
-    Image.new("RGB", (640, 480), color=(90, 110, 70)).save(img)
+    img = write_image(tmp_path / "a.jpg", (640, 480), (90, 110, 70))
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
@@ -36,9 +35,7 @@ def test_refuses_without_a_project_and_plants_no_store(
 def test_renders_the_overlay_and_echoes_grid_geometry_under_the_named_project(
     project: Path, tmp_path: Path
 ) -> None:
-    img = project / "images" / "a.jpg"
-    img.parent.mkdir()
-    Image.new("RGB", (640, 480), color=(90, 110, 70)).save(img)
+    img = write_image(image_root(project) / "a.jpg", (640, 480), (90, 110, 70))
     cwd = tmp_path.parent / "operator_cwd"
     cwd.mkdir()
 

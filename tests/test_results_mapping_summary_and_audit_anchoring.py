@@ -17,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from tcip_mcp.dataset_layout import image_dir
 from tests._audit_fixtures import AUDIT_ENTRY_KEYS, audit_rows
 from tests._mapping_fixtures import write_plant_csv
 
@@ -76,33 +77,36 @@ def _capture_fixture(root: Path) -> dict:
     ``valley``.
     """
     csv_path = write_plant_csv(root / "plants.csv", PLANTS)
-    images = root / "images"
-    (images / "2026-02-11").mkdir(parents=True)
-    (images / "2026-02-25").mkdir(parents=True)
+    first, second = (
+        image_dir(root, "2026-02-11"),
+        image_dir(root, "2026-02-25"),
+    )
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
     _write_image(
-        images / "2026-02-11" / "a.jpg",
+        first / "a.jpg",
         "2026:02:11 09:00:00",
         43.20000,
         -90.0000123,
         FIRST_DATE_ERRORS["a.jpg"],
     )
     _write_image(
-        images / "2026-02-11" / "b.jpg",
+        first / "b.jpg",
         "2026:02:11 09:01:00",
         43.200027,
         -90.00015,
         FIRST_DATE_ERRORS["b.jpg"],
     )
     _write_image(
-        images / "2026-02-11" / "c.jpg",
+        first / "c.jpg",
         "2026:02:11 09:02:00",
         43.30000,
         -90.00030,
         FIRST_DATE_ERRORS["c.jpg"],
     )
-    _write_image(images / "2026-02-11" / "e.jpg", "2026:02:11 09:03:00")
+    _write_image(first / "e.jpg", "2026:02:11 09:03:00")
     _write_image(
-        images / "2026-02-25" / "d.jpg",
+        second / "d.jpg",
         "2026:02:25 09:00:00",
         43.20000,
         -90.00030,
@@ -121,7 +125,7 @@ def _capture_fixture(root: Path) -> dict:
     registry = register_plant_registry_for(root, [csv_path])
     return {
         "name": "valley",
-        "images_root": str(images),
+        "dataset_root": str(root),
         "plant_registry": registry,
         "user": "tester",
         # Not a BuildMappingPayload field (ignored by the route); carried for a test that needs
@@ -159,8 +163,7 @@ def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answe
     assert summary["n_images"] == 4
     assert summary["n_mapped"] == 2
     assert summary["n_unattributed"] == 2
-    # summary() rounds to 2 places, the same as build_plant_mapping's own tool-side per_date,
-    # so the two doors' summaries agree exactly rather than merely approximately.
+    # summary() rounds to 2 places, the same as build_plant_mapping's own tool-side per_date.
     assert summary["avg_distance_m"] == round(
         sum(distances) / len(distances), 2
     )
@@ -252,7 +255,7 @@ def test_the_route_and_the_tool_build_one_mapping_with_one_audit_line_each(
     tool_answer = build_plant_mapping(
         tmp_path,
         name="ridge",
-        images_root=payload["images_root"],
+        dataset_root=payload["dataset_root"],
         plant_registry=payload["plant_registry"],
         actor=None,
     )
@@ -334,7 +337,7 @@ def test_a_mapping_or_registry_name_outside_the_segment_rule_refuses_at_its_key(
     answer = build_plant_mapping(
         tmp_path,
         name="Bad_Name",
-        images_root=payload["images_root"],
+        dataset_root=payload["dataset_root"],
         plant_registry=payload["plant_registry"],
         actor=None,
     )
@@ -381,7 +384,7 @@ def test_every_phenology_door_refuses_a_mapping_name_that_names_no_mapping(
     built = build_plant_mapping(
         tmp_path,
         name="partial",
-        images_root=str(series.root / "images"),
+        dataset_root=str(series.root),
         plant_registry="reg",
         dates=sorted(series.buckets)[:1],
         actor=None,

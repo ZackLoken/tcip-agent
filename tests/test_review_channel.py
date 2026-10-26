@@ -44,7 +44,7 @@ def _stub_gui(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _images(root: Path, date: str, names: list[str]) -> None:
-    idir = Path(image_dir(root, date))
+    idir = image_dir(root, date)
     idir.mkdir(parents=True, exist_ok=True)
     for name in names:
         (idir / name).write_bytes(b"x")
@@ -82,7 +82,7 @@ def _publish(root: Path, date: str, preds: dict[str, list[float]]) -> str:
         f"baseline/{date}",
         [
             {
-                "image": str(Path(image_dir(root, date)) / name),
+                "image": str(image_dir(root, date) / name),
                 "width": 100,
                 "height": 100,
                 "boxes": [[10.0, 10.0, 20.0, 20.0]] * len(scores),
@@ -99,14 +99,12 @@ def _publish(root: Path, date: str, preds: dict[str, list[float]]) -> str:
 def _image(
     root: Path, date: str, stem: str, size: tuple[int, int] = (640, 480)
 ) -> None:
-    write_image(
-        Path(image_dir(root, date)) / f"{stem}.jpg", size, (90, 110, 70)
-    )
+    write_image(image_dir(root, date) / f"{stem}.jpg", size, (90, 110, 70))
 
 
 def _img_path(root: Path, date: str, stem: str) -> str:
     """Return the path ``_image`` wrote ``stem`` at, ``<stem>.jpg`` in ``root``'s ``date``."""
-    return str(Path(image_dir(root, date)) / f"{stem}.jpg")
+    return str(image_dir(root, date) / f"{stem}.jpg")
 
 
 def _no_ground_truth(root: Path) -> bool:
@@ -563,7 +561,7 @@ def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
     """A call naming neither input regime is refused naming both regimes."""
     res = stage_proposals(
         tmp_path,
-        str(tmp_path / "proj" / "images" / "2026-02-11" / "IMG_0001.jpg"),
+        str(image_dir(tmp_path / "proj", "2026-02-11") / "IMG_0001.jpg"),
         actor=None,
     )
     assert "error" in res and "boxes/polygons" in res["error"]
@@ -834,7 +832,7 @@ def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0201_b", size=(640, 480))
-    accept_image_path = str(Path(image_dir(root, date)) / "IMG_0201_b.jpg")
+    accept_image_path = str(image_dir(root, date) / "IMG_0201_b.jpg")
     proposed = propose_annotations(
         tmp_path, accept_image_path, actor=None, engine="fake_multi_ring"
     )

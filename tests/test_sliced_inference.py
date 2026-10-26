@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._training_values import (
     DISPERSION_QUANTILE,
     EQUIVALENCE_Z,
@@ -107,7 +107,7 @@ def _checkpoint(
                 )
             ),
         )
-    images = dataset / "images" / UNDATED_BUCKET
+    images = image_dir(dataset, UNDATED_BUCKET)
     images.mkdir(parents=True)
     annotations = [
         Annotation(
@@ -446,7 +446,7 @@ def test_an_instance_segmentation_pass_collecting_no_masks_evaluates_by_box(
     from tests._verified_checkpoint_fixtures import fixture_data_dir
 
     ckpt, _checkpoint_record = _checkpoint(tmp_path, with_masks=True)
-    images = fixture_data_dir(tmp_path, "blobs") / "images" / UNDATED_BUCKET
+    images = image_dir(fixture_data_dir(tmp_path, "blobs"), UNDATED_BUCKET)
 
     def evaluated(
         **stated: bool | int | float | str | MaskCut | None,
@@ -532,7 +532,7 @@ def test_training_and_inference_slice_one_frame_on_one_lattice(
     from tcip_mcp.pipelines.raster_source import open_raster
     from tests._producer_fixtures import dataset_over, label_image
 
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     images.mkdir(parents=True)
     np.save(images / "frame.npy", _frame())
     label_image(
@@ -763,7 +763,7 @@ def test_the_dry_run_reports_the_record_the_bucket_keeps(
     from tcip_mcp.tools.inference_tools import run_inference
 
     ckpt, _checkpoint_record = _checkpoint(tmp_path)
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     images.mkdir(parents=True)
     _png(images, _frame())
     stated = Stated(
@@ -841,7 +841,7 @@ def _blob_capture(project: Path) -> Path:
         actor=None,
     )
     assert "error" not in dated, dated
-    images = root / "images" / date
+    images = image_dir(root, date)
     for name, boxed in labels.items():
         label_image(images / name, boxed, FRAME, FRAME, keep_empty=True)
     return images
@@ -977,7 +977,7 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(
             ),
         )
     )
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     images.mkdir(parents=True)
     _png(images, _frame())
     cut = {"masks": True, "mask_cut": MASK_CUT} if with_masks else {}

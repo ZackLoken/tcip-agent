@@ -16,6 +16,7 @@ from pydantic import ValidationError
 if TYPE_CHECKING:
     from pydantic import JsonValue
 
+from tcip_mcp.dataset_layout import image_root
 from tcip_mcp.pipelines.schemas import (
     NESTED_TRAINING_SECTION_REFUSAL,
     SCHEDULER_TYPES,
@@ -89,7 +90,7 @@ FLAT_CONFIG: dict = training_config(
         }
     ),
     {
-        "images_dir": str(Path(__file__).parent / "images"),
+        "images_dir": str(image_root(Path(__file__).parent)),
         "split": drawn_split(),
         "tiling": tiling_block(tile_size=64, overlap=0.25),
     },

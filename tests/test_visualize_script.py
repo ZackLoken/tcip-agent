@@ -9,19 +9,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PIL import Image
-
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._cli_fixtures import run_tcip
-from tests._producer_fixtures import label_image
+from tests._producer_fixtures import label_image, write_image
 
 
 def _fixture(root: Path) -> Path:
-    images = root / "images" / UNDATED_BUCKET
-    images.mkdir(parents=True)
-    img = images / "a.jpg"
-    Image.new("RGB", (100, 80), color=(120, 120, 120)).save(img)
+    img = write_image(
+        image_dir(root, UNDATED_BUCKET) / "a.jpg", (100, 80), (120, 120, 120)
+    )
     label_image(
         img, [Annotation(subject="bud", geometry=BBox(1, 1, 40, 30))], 100, 80
     )

@@ -24,18 +24,15 @@ def _publish(
     **stated: bool | int | float | str | MaskCut | None,
 ) -> dict:
     """Run ``run_inference`` over one dated capture of the dataset ``dataset``, stubbed."""
-    from PIL import Image
-
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._predictor_fixtures import StubPredictor, install
+    from tests._producer_fixtures import write_image
     from tests._verified_checkpoint_fixtures import project_checkpoint
 
-    images_dir = tmp_path / "dataset" / "images" / "2026-03-01"
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (160, 120), color=(70, 90, 110)).save(
-        images_dir / "capture_a.png"
-    )
+    images_dir = image_dir(tmp_path / "dataset", "2026-03-01")
+    write_image(images_dir / "capture_a.png", (160, 120), (70, 90, 110))
     install(
         monkeypatch,
         StubPredictor(

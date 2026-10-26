@@ -12,6 +12,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from tcip_mcp.dataset_layout import image_dir
 from tests._producer_fixtures import (
     box_annotation,
     image_label_key,
@@ -66,7 +67,7 @@ def test_registry_derived_from_labels_keeps_each_name_exactly_as_labeled(
     actually carries, each unchanged.
     """
     label_image(
-        tmp_path / "images" / DATE / "IMG_A.jpg",
+        image_dir(tmp_path, DATE) / "IMG_A.jpg",
         [
             box_annotation(12, 30, 48, 140),
             box_annotation(300, 44, 372, 70, subject="Bud"),
@@ -96,7 +97,7 @@ def test_registry_derivation_reports_a_document_it_cannot_read(
     from tcip_store import encode_record
     from tests._record_damage_fixtures import damage_record
 
-    images = tmp_path / "images" / DATE
+    images = image_dir(tmp_path, DATE)
     label_image(
         images / "IMG_A.jpg", [box_annotation(12, 30, 48, 140)], 900, 500
     )

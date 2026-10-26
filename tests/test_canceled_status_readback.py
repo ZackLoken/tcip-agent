@@ -21,16 +21,15 @@ def test_a_canceled_inference_job_reads_as_canceled(
 ) -> None:
     pytest.importorskip("fastapi")
     monkeypatch.chdir(tmp_path)
-    from PIL import Image
-
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.execution import Stated
     from tcip_web.routes import inference
+    from tests._producer_fixtures import write_image
     from tests._training_values import RATIONALE
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    images_dir = tmp_path / "images" / "2026-01-01"
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (16, 16)).save(images_dir / "img.jpg")
+    images_dir = image_dir(tmp_path, "2026-01-01")
+    write_image(images_dir / "img.jpg", (16, 16))
     ckpt = registered_checkpoint(tmp_path)
 
     job = inference.InferenceJob(

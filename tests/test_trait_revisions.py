@@ -54,7 +54,7 @@ def _bucket(root: Path) -> Bucket:
     pytest.importorskip("torch")
     import tcip_store
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.dataset_layout import bucket_key
+    from tcip_mcp.dataset_layout import bucket_key, image_dir
     from tests._chain_fixtures import predicted, published
 
     dataset, name = root / "ds", "counts/2026-02-11"
@@ -64,7 +64,7 @@ def _bucket(root: Path) -> Bucket:
             name,
             [
                 predicted(
-                    dataset / "images" / "2026-02-11" / "a.png",
+                    image_dir(dataset, "2026-02-11") / "a.png",
                     [fx.COUNT_SUBJECT] * 3,
                 )
             ],

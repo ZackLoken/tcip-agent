@@ -13,6 +13,7 @@ import pytest
 
 from tcip_annotation.json_io import label_document
 from tcip_mcp import subject_registry as cr
+from tcip_mcp.dataset_layout import image_dir, image_root
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
@@ -34,7 +35,7 @@ def _scope(tmp_path: Path, *attributes: cr.Attribute) -> ClassScope:
             )
         ),
     )
-    return registry_scope(tmp_path / "images", SUBJECT)
+    return registry_scope(image_root(tmp_path), SUBJECT)
 
 
 COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
@@ -157,8 +158,6 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(
     its frame width and its outputs.
     """
     pytest.importorskip("torch")
-    from PIL import Image
-
     import tcip_store
     from tcip_mcp.buckets import pass_documents, publish
     from tcip_mcp.pipelines.execution import Stated, prepare
@@ -167,6 +166,7 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(
         BESPOKE_REGRESSOR,
         FRAME_STATISTICS,
     )
+    from tests._producer_fixtures import write_image
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     checkpoint = verified_checkpoint(
@@ -178,9 +178,8 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(
             "normalization": FRAME_STATISTICS,
         },
     )
-    images = tmp_path / "ds" / "images" / "2026-01-01"
-    images.mkdir(parents=True)
-    Image.new("RGB", (32, 32), color=(90, 90, 90)).save(images / "a.png")
+    images = image_dir(tmp_path / "ds", "2026-01-01")
+    write_image(images / "a.png", (32, 32), (90, 90, 90))
     p = prepare(checkpoint, Stated(), images_dir=str(images)).runnable()
 
     bucket = publish(

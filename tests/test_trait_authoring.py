@@ -459,6 +459,7 @@ def _bucket(
     published from a checkpoint whose scope declares them (``_chain_fixtures.published``).
     """
     pytest.importorskip("torch")
+    from tcip_mcp.dataset_layout import image_dir
     from tests._chain_fixtures import published
 
     registry = cr.SubjectRegistry(
@@ -484,8 +485,7 @@ def _bucket(
                     else {}
                 ),
             }
-            for image in images
-            or [project / "ds" / "images" / date / "P1.png"]
+            for image in images or [image_dir(project / "ds", date) / "P1.png"]
         ],
         scope={"subject": "bud"},
         registry=registry,

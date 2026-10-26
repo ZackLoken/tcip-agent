@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 import tomllib
-from PIL import Image
 
 from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
 from tcip_mcp.dataset_layout import image_dir
@@ -30,7 +29,7 @@ from tcip_web.app import app
 from tcip_web.cli import session_hook
 from tcip_web.cli.session_hook import session_start_url
 from tcip_web.routes import terminal as terminal_routes
-from tests._producer_fixtures import label_image, registry_over
+from tests._producer_fixtures import label_image, registry_over, write_image
 from tools.smoke_terminal_e2e import served
 
 if TYPE_CHECKING:
@@ -115,9 +114,7 @@ def remembered(opened: OpenProject) -> OpenProject:
     registry_over(
         root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
     )
-    image = image_dir(root, "2026-03-04") / "IMG_E.JPG"
-    image.parent.mkdir(parents=True)
-    Image.new("RGB", (32, 32)).save(image)
+    image = write_image(image_dir(root, "2026-03-04") / "IMG_E.JPG", (32, 32))
     label_image(image, [], 32, 32, keep_empty=True)
     return opened
 
@@ -328,10 +325,8 @@ def test_more_findings_than_fit_name_the_tool_answering_all_of_them(
         root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
     )
     images = image_dir(root, "2026-03-04")
-    images.mkdir(parents=True)
     for n in range(160):
-        image = images / f"IMG_{n:03d}.JPG"
-        Image.new("RGB", (8, 8)).save(image)
+        image = write_image(images / f"IMG_{n:03d}.JPG", (8, 8))
         label_image(image, [], 8, 8, keep_empty=True)
 
     counted, shown = _findings_part(pty_host.orientation(opened, "startup"))
@@ -362,9 +357,7 @@ def test_the_orientation_lists_the_first_findings_the_tool_answers(
     registry_over(
         root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
     )
-    images = image_dir(root, "2026-03-04")
-    images.mkdir(parents=True)
-    Image.new("RGB", (8, 8)).save(images / "IMG_U.JPG")
+    write_image(image_dir(root, "2026-03-04") / "IMG_U.JPG", (8, 8))
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
     damage_record(traits.trait_key(root, "leaf"), b"{not valid json")
     fx.propose(root, fx.entry("burr_size", ("leaf_length",)))

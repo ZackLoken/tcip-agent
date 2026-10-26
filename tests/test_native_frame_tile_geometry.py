@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._producer_fixtures import checkpoint_admission
 
 if TYPE_CHECKING:
@@ -510,9 +510,9 @@ def _trained_checkpoint(
     )
 
     images = seed_bud_images(
-        fixture_data_dir(tmp_path, f"frames-{size}")
-        / "images"
-        / UNDATED_BUCKET,
+        image_dir(
+            fixture_data_dir(tmp_path, f"frames-{size}"), UNDATED_BUCKET
+        ),
         n=2,
         size=size,
     )
@@ -558,10 +558,11 @@ def test_a_tiled_pass_over_a_native_frame_checkpoint_says_what_it_rests_on(
         tmp_path, augmentation(resize={"size": [32, 32]})
     )
 
+    gray_frame(tmp_path, IMAGE)
     p, results = predicted_over(
         tmp_path,
         ckpt,
-        str(Path(gray_frame(tmp_path, IMAGE)).parent),
+        str(tmp_path),
         device="cpu",
         tile=True,
         overlap=SAMPLE_OVERLAP,
@@ -588,10 +589,11 @@ def test_a_native_frame_checkpoint_stays_untiled_unless_asked(
 
     ckpt = _native_frame_checkpoint(tmp_path)
 
+    gray_frame(tmp_path, IMAGE)
     p, _results = predicted_over(
         tmp_path,
         ckpt,
-        str(Path(gray_frame(tmp_path, IMAGE)).parent),
+        str(tmp_path),
         device="cpu",
         conf=0.0,
     )
@@ -604,14 +606,10 @@ def _native_frame_gt(images_dir: Path) -> None:
 
     The lattice is gapless at the TILE edge, and the labels are ``_expected_middle_half_boxes()``.
     """
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
-    Image.new("RGB", (IMAGE, IMAGE), (120, 120, 120)).save(
-        images_dir / "a.png"
-    )
+    gray_frame(images_dir, IMAGE, "a.png")
     label_image(
         images_dir / "a.png",
         [
@@ -665,7 +663,7 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
         verified_checkpoint,
     )
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     _native_frame_gt(images_dir)
     checkpoint = verified_checkpoint(tmp_path)
@@ -769,7 +767,7 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
         verified_checkpoint,
     )
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     _native_frame_gt(images_dir)
 
@@ -921,11 +919,12 @@ def test_a_stated_edge_contradicting_the_checkpoints_geometry_refuses_the_pass(
 
     ckpt = make(tmp_path)
 
+    gray_frame(tmp_path, IMAGE)
     with pytest.raises(ExecutionRefusedError) as exc_info:
         predicted_over(
             tmp_path,
             ckpt,
-            str(Path(gray_frame(tmp_path, IMAGE)).parent),
+            str(tmp_path),
             device="cpu",
             tile=True,
             tile_size=64,
@@ -945,10 +944,11 @@ def test_a_stated_edge_matching_persisted_geometry_is_admitted_as_stated(
 
     ckpt = _tiled_checkpoint(tmp_path, TILE)
 
+    gray_frame(tmp_path, IMAGE)
     p, results = predicted_over(
         tmp_path,
         ckpt,
-        str(Path(gray_frame(tmp_path, IMAGE)).parent),
+        str(tmp_path),
         device="cpu",
         tile=True,
         tile_size=TILE,

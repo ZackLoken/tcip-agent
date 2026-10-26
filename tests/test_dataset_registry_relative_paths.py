@@ -9,9 +9,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PIL import Image
-
 from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.subject_registry import Subject, SubjectRegistry
 from tcip_mcp.tools.project_tools import (
     DatasetEntry,
@@ -19,17 +18,14 @@ from tcip_mcp.tools.project_tools import (
     register_dataset,
 )
 from tests._cli_fixtures import run_tcip
-from tests._producer_fixtures import label_image, registry_over
+from tests._producer_fixtures import label_image, registry_over, write_image
 
 
 def _make_dataset(root: Path) -> None:
     """Write a minimal nested-schema dataset: one image, its label and a registry."""
-    (root / "images" / "2-11-26").mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (32, 32)).save(
-        root / "images" / "2-11-26" / "img_000.jpg"
-    )
+    write_image(image_dir(root, "2-11-26") / "img_000.jpg", (32, 32))
     label_image(
-        root / "images" / "2-11-26" / "img_000.jpg",
+        image_dir(root, "2-11-26") / "img_000.jpg",
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
         32,
         32,

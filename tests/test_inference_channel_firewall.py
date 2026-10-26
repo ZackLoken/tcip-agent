@@ -73,9 +73,10 @@ def test_a_source_with_no_coercion_is_refused_at_the_models_own_band_count(
     A five-band raster under a three-channel checkpoint refuses, naming the truncation it
     declines.
     """
+    from tcip_mcp.dataset_layout import image_root
     from tests._verified_checkpoint_fixtures import SAMPLE_OVERLAP
 
-    images_dir = tmp_path / "images"
+    images_dir = image_root(tmp_path)
     images_dir.mkdir()
     _five_band_raster(images_dir)
     with pytest.raises(ValueError, match="refusing to silently truncate"):
@@ -93,9 +94,10 @@ def test_a_photographic_source_the_model_reads_is_predicted(
     tmp_path: Path,
 ) -> None:
     """An RGB capture under a one-channel checkpoint is predicted."""
+    from tcip_mcp.dataset_layout import image_root
     from tcip_mcp.pipelines.derivations import band_normalization_stats
 
-    images_dir = tmp_path / "images"
+    images_dir = image_root(tmp_path)
     images_dir.mkdir()
     image = _rgb_image(images_dir)
     stats = band_normalization_stats(

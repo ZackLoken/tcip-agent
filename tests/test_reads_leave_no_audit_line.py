@@ -12,13 +12,12 @@ if TYPE_CHECKING:
 
 
 def test_a_dataset_render_leaves_no_audit_line(project: Path) -> None:
-    from PIL import Image
-
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.vision_tools import DatasetRender, visualize
+    from tests._producer_fixtures import write_image
 
-    images = project / "dataset" / "images" / "2026-04-01"
-    images.mkdir(parents=True)
-    Image.new("RGB", (32, 24), (40, 90, 60)).save(images / "a.png")
+    images = image_dir(project / "dataset", "2026-04-01")
+    write_image(images / "a.png", (32, 24), (40, 90, 60))
     before = audit_rows(project)
 
     result = visualize(

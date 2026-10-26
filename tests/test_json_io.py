@@ -35,7 +35,7 @@ from tcip_annotation.state import (
     Polygon,
     bbox_of,
 )
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_root, label_key
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -1318,7 +1318,7 @@ def test_whole_image_rating_never_becomes_a_target(tmp_path: Path) -> None:
         ),
     )
     target = json_det_targets(
-        _read(key), registry_scope(tmp_path / "images", "bud")
+        _read(key), registry_scope(image_root(tmp_path), "bud")
     )
     assert target["boxes"] == [] and target["attributes"].shape == (0, 1)
 

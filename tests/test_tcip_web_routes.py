@@ -13,6 +13,7 @@ from PIL import Image
 import tcip_store
 from tcip_annotation.json_io import read_label_document
 from tcip_annotation.state import Annotation, BBox, Polygon
+from tcip_mcp.dataset_layout import image_dir, image_root
 from tcip_mcp.pipelines.proposal import Proposal
 from tcip_mcp.subject_registry import Subject, SubjectRegistry
 from tcip_web import jobstore
@@ -23,6 +24,7 @@ from tests._producer_fixtures import (
     image_label_key,
     label_image,
     registry_over,
+    write_image,
 )
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
 
@@ -92,7 +94,7 @@ def _write_pred(
         f"{name}/2-11-26",
         [
             {
-                "image": str(dataset_root / "images" / "2-11-26" / image),
+                "image": str(image_dir(dataset_root, "2-11-26") / image),
                 "width": w,
                 "height": h,
                 "boxes": [list(p[:4]) for p in boxes],
@@ -143,8 +145,8 @@ class TestSafeJoin:
     def test_joins_under_root(self, tmp_path: Path) -> None:
         base = tmp_path / "project"
         base.mkdir()
-        result = safe_join(base, "images", "2-11-26")
-        assert result == (base / "images" / "2-11-26").resolve()
+        result = safe_join(base, image_root(base).name, "2-11-26")
+        assert result == image_dir(base, "2-11-26").resolve()
 
     def test_rejects_parent_traversal(self, tmp_path: Path) -> None:
         base = tmp_path / "project"
@@ -158,8 +160,8 @@ class TestSafeJoin:
 
     def test_accepts_forward_slashes(self, tmp_path: Path) -> None:
         base = tmp_path
-        result = safe_join(base, "images/2-11-26/IMG.jpg")
-        assert result == (base / "images" / "2-11-26" / "IMG.jpg").resolve()
+        result = safe_join(base, f"{image_root(base).name}/2-11-26/IMG.jpg")
+        assert result == (image_dir(base, "2-11-26") / "IMG.jpg").resolve()
 
 
 # ── /api/dataset ─────────────────────────────────────────────────────────
@@ -168,16 +170,19 @@ class TestSafeJoin:
 @pytest.fixture
 def dataset_root(tmp_path: Path) -> Path:
     root = tmp_path / "Valley_Farm"
-    (root / "images" / "2-11-26").mkdir(parents=True)
-    (root / "images" / "3-2-26").mkdir(parents=True)
+    image_dir(root, "2-11-26").mkdir(parents=True)
+    image_dir(root, "3-2-26").mkdir(parents=True)
     # The dataset's subjects come from its nested registry, not from its label documents.
     registry_over(
         root, SubjectRegistry((Subject("bud", ""), Subject("bush", "")))
     )
     # Add some images
     for i in range(3):
-        img = Image.new("RGB", (100, 80), color=(128, 128, 128))
-        img.save(root / "images" / "2-11-26" / f"IMG_{i:04d}.JPG")
+        write_image(
+            image_dir(root, "2-11-26") / f"IMG_{i:04d}.JPG",
+            (100, 80),
+            (128, 128, 128),
+        )
     return root
 
 
@@ -204,7 +209,7 @@ def test_dataset_tree_reports_a_label_problem_and_keeps_listing_other_dates(
     dataset_root: Path,
 ) -> None:
     """The dataset tree names a corrupt label in ``label_problem`` and still lists both dates."""
-    _unreadable(dataset_root / "images" / "2-11-26" / "IMG_0000.JPG")
+    _unreadable(image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG")
 
     resp = opened_client.get(
         "/api/dataset/tree", params={"dataset_root": str(dataset_root)}
@@ -226,7 +231,7 @@ def test_dataset_tree_label_problem_is_not_stale_after_an_edit(
     dataset_root: Path,
 ) -> None:
     """The tree's label_problem names a document damaged after the tree was first answered."""
-    image = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    image = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     _write_gt(image, [(1, 1, 3, 3)])
 
     first = opened_client.get(
@@ -249,18 +254,16 @@ def test_dataset_tree_per_date_reflects_actual_labels(
     opened_project: Path,
 ) -> None:
     root = tmp_path / "ds"
-    (root / "images" / "2026-02-11").mkdir(parents=True)
-    (root / "images" / "2026-03-24").mkdir(parents=True)
-    Image.new("RGB", (8, 8)).save(root / "images" / "2026-02-11" / "IMG_1.JPG")
-    Image.new("RGB", (8, 8)).save(root / "images" / "2026-03-24" / "IMG_2.JPG")
+    write_image(image_dir(root, "2026-02-11") / "IMG_1.JPG", (8, 8))
+    write_image(image_dir(root, "2026-03-24") / "IMG_2.JPG", (8, 8))
     # bud labeled + a bucket published over 02-11; nothing on 03-24.
     _write_gt(
-        root / "images" / "2026-02-11" / "IMG_1.JPG", [(1, 1, 3, 3)], w=8, h=8
+        image_dir(root, "2026-02-11") / "IMG_1.JPG", [(1, 1, 3, 3)], w=8, h=8
     )
     name = _published_bucket(
         opened_project,
         "baseline/2026-02-11",
-        root / "images" / "2026-02-11" / "IMG_1.JPG",
+        image_dir(root, "2026-02-11") / "IMG_1.JPG",
         [1],
         scope={"subject": "bud"},
     )
@@ -283,7 +286,7 @@ def test_dataset_select_carries_a_label_problem_with_no_subject_named(
     A corrupt label makes the date's own subject list empty; the selection naming no subject
     still names the problem document.
     """
-    _unreadable(dataset_root / "images" / "2-11-26" / "IMG_0000.JPG")
+    _unreadable(image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG")
 
     resp = opened_client.post(
         "/api/dataset/select",
@@ -319,15 +322,17 @@ def test_dataset_select_populates_state(
     assert sel["date"] == "2-11-26"
     assert len(sel["image_list"]) == 3
     assert sel["image_list"][0].startswith("IMG_")
-    assert sel["images_dir"].replace("\\", "/").endswith("images/2-11-26")
+    assert (
+        sel["images_dir"]
+        .replace("\\", "/")
+        .endswith(image_dir("", "2-11-26").as_posix())
+    )
 
 
 def test_dataset_select_returns_400_for_a_stem_collision(
     opened_client: TestClient, dataset_root: Path, opened_project: Path
 ) -> None:
-    Image.new("RGB", (100, 80)).save(
-        dataset_root / "images" / "2-11-26" / "IMG_0000.PNG"
-    )
+    write_image(image_dir(dataset_root, "2-11-26") / "IMG_0000.PNG")
 
     resp = opened_client.post(
         "/api/dataset/select",
@@ -364,7 +369,7 @@ def test_dataset_select_advisory_reflects_actual_labels(
 
     # Save a real label and publish a bucket; the advisory flips to present (never rejects
     # either way).
-    image = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    image = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     _write_gt(image, [(40, 32, 60, 48)])
     _published_bucket(
         opened_project, bucket, image, [1], scope={"subject": "bud"}
@@ -382,7 +387,7 @@ def test_dataset_select_still_selects_over_an_unreadable_label(
     The selection answers ok with no annotations present and names the label in
     ``label_problem``.
     """
-    _unreadable(dataset_root / "images" / "2-11-26" / "IMG_0000.JPG")
+    _unreadable(image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG")
 
     resp = opened_client.post(
         "/api/dataset/select",
@@ -413,9 +418,7 @@ def test_an_undated_captures_subjects_are_listed_by_every_door_alike(
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, capture_subjects
 
     root = tmp_path / "undated_ds"
-    (root / "images" / UNDATED_BUCKET).mkdir(parents=True)
-    image = root / "images" / UNDATED_BUCKET / "IMG_F.JPG"
-    Image.new("RGB", (100, 80)).save(image)
+    image = write_image(image_dir(root, UNDATED_BUCKET) / "IMG_F.JPG")
     _write_gt(image, [(40, 32, 60, 48)])
 
     tree = opened_client.get(
@@ -445,7 +448,7 @@ def test_a_selection_states_its_capture(
     opened_client: TestClient, tmp_path: Path, opened_project: Path
 ) -> None:
     root = tmp_path / "no_capture_named"
-    (root / "images").mkdir(parents=True)
+    image_root(root).mkdir(parents=True)
 
     resp = opened_client.post(
         "/api/dataset/select",
@@ -520,7 +523,7 @@ def _view(path: Path) -> dict:
 
 
 def test_images_serve(opened_client: TestClient, dataset_root: Path) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     resp = opened_client.get("/api/images", params=_view(img_path))
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/jpeg"
@@ -531,7 +534,7 @@ def test_images_serve(opened_client: TestClient, dataset_root: Path) -> None:
 def test_images_downsample(
     opened_client: TestClient, dataset_root: Path
 ) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     resp = opened_client.get(
         "/api/images", params={"path": str(img_path), "display_pixels": 2000}
     )
@@ -544,7 +547,7 @@ def test_images_etag_revalidation(
 ) -> None:
     # First fetch carries an ETag + Cache-Control; re-requesting with If-None-Match gets a
     # cheap 304 (no re-decode/re-encode), and the ETag varies with the render params.
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     first = opened_client.get("/api/images", params=_view(img_path))
     etag = first.headers.get("etag")
     assert etag and "cache-control" in first.headers
@@ -575,10 +578,8 @@ def test_images_not_found(opened_client: TestClient, tmp_path: Path) -> None:
 def test_images_serve_returns_400_for_a_stem_collision(
     opened_client: TestClient, dataset_root: Path
 ) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    Image.new("RGB", (100, 80)).save(
-        dataset_root / "images" / "2-11-26" / "IMG_0000.PNG"
-    )
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
+    write_image(image_dir(dataset_root, "2-11-26") / "IMG_0000.PNG")
 
     resp = opened_client.get("/api/images", params=_view(img_path))
     assert resp.status_code == 400
@@ -588,10 +589,8 @@ def test_images_serve_returns_400_for_a_stem_collision(
 def test_images_bands_returns_400_for_a_stem_collision(
     opened_client: TestClient, dataset_root: Path
 ) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    Image.new("RGB", (100, 80)).save(
-        dataset_root / "images" / "2-11-26" / "IMG_0000.PNG"
-    )
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
+    write_image(image_dir(dataset_root, "2-11-26") / "IMG_0000.PNG")
 
     resp = opened_client.get(
         "/api/images/bands", params={"path": str(img_path)}
@@ -605,7 +604,7 @@ def test_images_bands_returns_400_for_a_stem_collision(
 def test_annotate_load_and_save_roundtrip(
     opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
 
     # Save a box annotation and a polygon annotation into the single per-image document.
     resp = opened_client.post(
@@ -651,9 +650,7 @@ def test_an_image_under_an_additive_image_root_loads_and_saves(
     from tcip_web.state import store
 
     extra = tmp_path_factory.mktemp("additive") / "archive"
-    image = extra / "images" / "2026-03-04" / "IMG_X.JPG"
-    image.parent.mkdir(parents=True)
-    Image.new("RGB", (100, 80)).save(image)
+    image = write_image(image_dir(extra, "2026-03-04") / "IMG_X.JPG")
     store.configure(store.workspace, (extra.resolve(),))
 
     saved = opened_client.post(
@@ -679,10 +676,8 @@ def test_annotate_load_returns_400_for_a_stem_collision(
     dataset_root: Path,
     tmp_path: Path,
 ) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    Image.new("RGB", (100, 80)).save(
-        dataset_root / "images" / "2-11-26" / "IMG_0000.PNG"
-    )
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
+    write_image(image_dir(dataset_root, "2-11-26") / "IMG_0000.PNG")
 
     resp = opened_client.get(
         "/api/annotate/labels",
@@ -696,7 +691,7 @@ def test_annotate_load_refuses_an_unreadable_label(
     dataset_root: Path,
     tmp_path: Path,
 ) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     _unreadable(img_path)
 
     resp = opened_client.get(
@@ -718,7 +713,7 @@ def test_annotate_load_authorship_person_tool_and_unattributed(
     no created_by at all reads unattributed. The records are written through ``label_image``,
     the platform's own writer.
     """
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     anns = [
         Annotation(
             subject="bush",
@@ -754,7 +749,7 @@ def test_annotate_load_authorship_agrees_with_is_unadjudicated_agent_authorship(
     """
     from tcip_annotation.json_io import is_unadjudicated_agent_authorship
 
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     anns = [
         Annotation(
             subject="bush",
@@ -796,7 +791,7 @@ def test_annotate_load_authorship_tool_accepted_through_the_editor(
     Its created_by travels into GT and accepted_by is the person's sign-off: an adjudicated
     tool proposal, not the person's own hand.
     """
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     _write_gt(img_path, [], keep_empty=True)
     bucket = _write_pred(
         dataset_root, {img_path.name: [(40, 32, 60, 48, 0.9)]}, subject="bush"
@@ -834,7 +829,7 @@ def test_annotate_save_empty_preserves_negative(
 ) -> None:
     # Clearing all annotations and saving must keep the label document (an {"annotations": []}
     # record), not delete it: it becomes a confirmed negative once the image is completed.
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
 
     opened_client.post(
         "/api/annotate/labels",
@@ -863,14 +858,10 @@ def test_annotate_save_of_an_image_outside_allowed_root_403(
     opened_client: TestClient, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     """An image outside every allowed root is refused, and no document is written for it."""
-    outside = (
-        tmp_path_factory.mktemp("outside")
-        / "images"
-        / "2-11-26"
+    outside = write_image(
+        image_dir(tmp_path_factory.mktemp("outside"), "2-11-26")
         / "IMG_0000.JPG"
     )
-    outside.parent.mkdir(parents=True)
-    Image.new("RGB", (100, 80)).save(outside)
     resp = opened_client.post(
         "/api/annotate/labels",
         json={
@@ -901,7 +892,7 @@ def _save_box(
 def test_annotate_save_refuses_a_token_the_document_has_moved_past(
     opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     base = _save_box(opened_client, img_path).json()["base_mtime"]
 
     # A concurrent writer changes the document after our client loaded it.
@@ -923,7 +914,7 @@ def test_annotate_save_refuses_a_token_the_document_has_moved_past(
 def test_annotate_save_with_the_current_token_is_accepted(
     opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     base = _save_box(opened_client, img_path).json()["base_mtime"]
 
     # No external change → the token still names the stored document → the save is accepted and
@@ -945,7 +936,7 @@ def test_annotate_load_hands_back_a_token_its_own_save_accepts(
     The load and save pair is one compare-and-set over what the client was shown: a fresh
     load's token saves again.
     """
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     params = {"image_path": str(img_path)}
 
     loaded = opened_client.get("/api/annotate/labels", params=params).json()
@@ -978,7 +969,7 @@ def test_annotate_save_without_a_token_still_writes(
     opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     """A caller that supplies no token skips the comparison and its write still lands."""
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     assert _save_box(opened_client, img_path).status_code == 200
     assert _save_box(opened_client, img_path).status_code == 200
     assert len(_stored(img_path)) == 1
@@ -989,7 +980,7 @@ def test_annotate_save_persists_polygon_as_polygon(
 ) -> None:
     # A polygon annotation round-trips as a polygon (its points are the source of truth), never
     # collapsed to a box on disk. Image is 100x80.
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     resp = opened_client.post(
         "/api/annotate/labels",
         json={
@@ -1020,7 +1011,7 @@ def test_annotate_multi_ring_polygon_round_trips_through_the_route(
 
     The save stores one instance with both rings, and the load reports those ``rings`` back.
     """
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     rings = [
         [[10, 10], [30, 10], [30, 30], [10, 30]],
         [[60, 10], [80, 10], [80, 30], [60, 30]],
@@ -1055,7 +1046,7 @@ def test_annotate_save_prefers_rings_over_points_when_both_are_sent(
 
     A two-ring shape sent with its first ring as `points` is stored with both rings.
     """
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     rings = [[[10, 10], [30, 10], [30, 30]], [[60, 10], [80, 10], [80, 30]]]
     resp = opened_client.post(
         "/api/annotate/labels",
@@ -1075,7 +1066,7 @@ def test_annotate_save_prefers_rings_over_points_when_both_are_sent(
 def test_annotate_save_persists_box_as_box(
     opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     resp = opened_client.post(
         "/api/annotate/labels",
         json={
@@ -1111,7 +1102,7 @@ def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
     from tcip_mcp.tools.annotation_tools import save_annotations
     from tests._web_fixtures import bound_to
 
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     before = len(audit_rows(dataset_root))
     resp = _save_box(opened_client, img_path)
     assert resp.status_code == 200
@@ -1224,7 +1215,7 @@ _PHRASE: dict[str, JsonValue] = {"phrase": "open bud"}
 
 
 def _image_of(dataset_root: Path) -> Path:
-    return dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    return image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
 
 
 def _propose(
@@ -1293,7 +1284,7 @@ def test_states_read_each_image_of_the_selected_capture_for_one_subject(
     opened_client: TestClient, dataset_root: Path
 ) -> None:
     """A labeled image reads partial, a marked one complete, the untouched one unannotated."""
-    images = dataset_root / "images" / "2-11-26"
+    images = image_dir(dataset_root, "2-11-26")
     _write_gt(images / "IMG_0000.JPG", [(10, 10, 30, 30)])
     opened_client.post(
         "/api/dataset/select",
@@ -1337,7 +1328,7 @@ def test_stagings_list_each_staged_bucket_of_an_image_and_none_of_another(
     second = _propose(
         opened_client, image, {"boxes": [[10, 10, 50, 40]]}
     ).json()
-    other = dataset_root / "images" / "2-11-26" / "IMG_0001.JPG"
+    other = image_dir(dataset_root, "2-11-26") / "IMG_0001.JPG"
 
     listed = opened_client.get(
         "/api/annotate/stagings", params={"image_path": str(image)}
@@ -1362,7 +1353,7 @@ def test_a_bucket_holding_no_document_for_an_image_serves_no_proposals(
     staged = _propose(
         opened_client, _image_of(dataset_root), {"points": [[20, 20]]}
     ).json()
-    other = dataset_root / "images" / "2-11-26" / "IMG_0001.JPG"
+    other = image_dir(dataset_root, "2-11-26") / "IMG_0001.JPG"
 
     served = opened_client.get(
         "/api/annotate/proposals",
@@ -1637,16 +1628,15 @@ def test_a_doors_error_answers_400_carrying_its_text(
 def _launch_setup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[str, str, str, ModuleType]:
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_web.routes import inference as inference_routes
 
     monkeypatch.setattr(inference_routes, "_worker", lambda job: None)
 
     dataset_root = tmp_path / "data"
     date = "2026-02-11"
-    images = image_dir(dataset_root, date)
-    images.mkdir(parents=True)
-    Image.new("RGB", (100, 100), (110, 110, 110)).save(images / "img.png")
+    write_image(
+        image_dir(dataset_root, date) / "img.png", (100, 100), (110, 110, 110)
+    )
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
     return str(ckpt), str(dataset_root), date, inference_routes
@@ -1701,7 +1691,7 @@ def test_a_launch_into_a_bucket_that_exists_fails_its_job_and_writes_nothing(
     _published_bucket(
         tmp_path,
         BUCKET,
-        Path(dataset_root) / "images" / date / "img.png",
+        image_dir(dataset_root, date) / "img.png",
         [1],
         scope={"subject": "bud"},
     )
@@ -2016,9 +2006,7 @@ def test_fs_list_directories(
     opened_client: TestClient, tmp_path: Path
 ) -> None:
     (tmp_path / "alpha").mkdir()
-    (tmp_path / "beta" / "images").mkdir(
-        parents=True
-    )  # looks like a dataset root
+    image_root(tmp_path / "beta").mkdir(parents=True)
     (tmp_path / ".hidden").mkdir()
     (tmp_path / "afile.txt").write_text("x")
     # Windows system/recovery folders that clutter a picker, filtered out by name.
@@ -2074,7 +2062,7 @@ def test_annotate_save_stamps_created_by(
     opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     """A human-drawn box is stamped created_by=user:<gui-user> + created_at."""
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     resp = opened_client.post(
         "/api/annotate/labels",
         json={
@@ -2093,7 +2081,7 @@ def test_annotate_save_polygon_stamps_author(
     opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     """A human-drawn polygon is stamped created_by=user:<gui-user> (not None)."""
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     resp = opened_client.post(
         "/api/annotate/labels",
         json={
@@ -2111,7 +2099,7 @@ def test_annotate_save_polygon_stamps_author(
 def test_annotate_save_naming_no_one_writes_nothing(
     opened_client: TestClient, dataset_root: Path
 ) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     for name in REFUSED_NAMES:
         resp = opened_client.post(
             "/api/annotate/labels",
@@ -2131,7 +2119,7 @@ def test_annotate_save_naming_no_one_writes_nothing(
 def test_annotate_load_returns_provenance(
     opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     label_image(
         img_path,
         [
@@ -2165,7 +2153,7 @@ def test_annotate_resave_preserves_original_creator(
     The loaded shape keeps its creator, creation time and acceptance; the added shape is
     created by the saving annotator.
     """
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     label_image(
         img_path,
         [
@@ -2213,7 +2201,7 @@ def test_annotate_resave_keeps_the_crowd_flag(
 
     The flag round-trips through the payload, and the shape without one saves without it.
     """
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     label_image(
         img_path,
         [
@@ -2271,7 +2259,7 @@ def test_annotate_save_reads_the_crowd_flag_through_the_decoders_check(
     A refused flag writes no label document; a null stores as no crowd, and ``True`` or ``1``
     as a crowd region.
     """
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     resp = opened_client.post(
         "/api/annotate/labels",
         json={
@@ -2301,7 +2289,7 @@ def test_the_mcp_read_and_the_web_load_project_an_annotation_alike(
     """
     from tcip_mcp.tools.annotation_tools import read_annotations as mcp_read
 
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     label_image(
         img_path,
         [
@@ -2339,7 +2327,7 @@ def test_the_mcp_read_and_the_web_load_project_an_annotation_alike(
 def test_annotate_polygons_keep_and_stamp_provenance(
     opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
     label_image(
         img_path,
         [

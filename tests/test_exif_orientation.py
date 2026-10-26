@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 pytest.importorskip("torch")
 import torch  # noqa: E402
@@ -44,13 +44,13 @@ def _make_orient6_dataset(
 ) -> tuple[Path, tuple[int, int, int, int]]:
     """Write an Orientation-6 ``m.jpg`` and its upright-frame label document.
 
-    The image lands in the undated bucket under ``tmp_path / "images"``, its on-disk pixels the
+    The image lands in the undated capture of ``tmp_path``, its on-disk pixels the
     upright image rotated 90°; the return is that directory and the marker's upright box.
     """
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image, painted_frame
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
 
     x1, y1, x2, y2 = MARKER

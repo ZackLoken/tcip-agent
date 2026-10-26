@@ -20,6 +20,7 @@ from tcip_mcp.pipelines.derivations import (
     probe_channels,
 )
 from tests import _trait_fixtures as fx
+from tests._producer_fixtures import write_image
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 
 
 def test_probe_channels_from_raster(tmp_path: Path) -> None:
-    Image.new("RGB", (8, 8)).save(tmp_path / "rgb.png")
+    write_image(tmp_path / "rgb.png", (8, 8))
     Image.new("L", (8, 8)).save(tmp_path / "gray.png")
     assert probe_channels(tmp_path / "rgb.png") == 3
     assert probe_channels(tmp_path / "gray.png") == 1
@@ -532,16 +533,13 @@ def test_derive_block_scale_px_photographic_raster_path_refuses_named(
 
     A ``raster_path`` that is a photographic plot image is refused naming its path.
     """
-    from PIL import Image
-
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
 
     plants = [
         PlantRecord("p0", "a0", 0, 0, 0, 45.0, -93.0),
         PlantRecord("p1", "a1", 0, 0, 0, 45.000898, -93.0),
     ]
-    photo_path = tmp_path / "plot.jpg"
-    Image.new("RGB", (8, 8)).save(photo_path)
+    photo_path = write_image(tmp_path / "plot.jpg", (8, 8))
     boxes = [(x, 0, 20, 20) for x in range(0, 40, 20)]
     with pytest.raises(ValueError) as exc_info:
         derive_block_scale_px(
@@ -597,8 +595,7 @@ def test_derive_block_scale_px_unprojected_raster_falls_back_to_gt_spacing(
 
     monkeypatch.setattr(orthomosaic_mapping, "geotransform_of", _boom)
     raster_path = tmp_path / "mosaic.tif"
-    # a real georeferenced raster: without the stub above the plant path would win, so this
-    # test exercises the GeoreferencingError fallback rather than an empty file's own decline
+    # A georeferenced raster, so the plant path would win without the stub above.
     write_geotiff(raster_path)
     boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
     px, source = derive_block_scale_px(

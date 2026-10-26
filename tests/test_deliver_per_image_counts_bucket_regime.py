@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_store.file_backend import is_bookkeeping
 from tests import _trait_fixtures as fx, csv_rows
 
@@ -61,7 +62,7 @@ def _bucket(
 
     name = f"{scope['subject'] or 'raster'}/2026-01-01"
     names = [scope["subject"]] * 2 if scope["subject"] else []
-    image = project / "ds" / "images" / "2026-01-01" / "a.png"
+    image = image_dir(project / "ds", "2026-01-01") / "a.png"
     return published(
         project, name, [predicted(image, names)], scope=scope, **published_kw
     ).name
@@ -81,7 +82,7 @@ def test_a_mosaic_bucket_refuses_naming_the_per_plant_door(
     import numpy as np
     import tifffile
 
-    raster = tmp_path / "ds" / "images" / "undated" / "mosaic.tif"
+    raster = image_dir(tmp_path / "ds", UNDATED_BUCKET) / "mosaic.tif"
     raster.parent.mkdir(parents=True)
     tifffile.imwrite(str(raster), np.zeros((32, 32, 3), dtype=np.uint8))
     from tests._chain_fixtures import predicted, published

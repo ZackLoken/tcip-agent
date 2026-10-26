@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 torch = pytest.importorskip("torch")
 
@@ -87,22 +87,17 @@ def _document_dataset(
     """
     from pathlib import Path
 
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, write_image
 
     root = Path(root)
-    images_dir = root / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
+    images_dir = image_dir(root, UNDATED_BUCKET)
     _write_classes_json(
         root, subject=subject, attribute=attribute, values=values
     )
     attrs = {attribute: values[0]} if attribute else {}
     for stem in ("a", "b"):
-        Image.new("RGB", (32, 32), (10, 20, 30)).save(
-            images_dir / f"{stem}.png"
-        )
+        write_image(images_dir / f"{stem}.png", (32, 32), (10, 20, 30))
         label_image(
             images_dir / f"{stem}.png",
             [
@@ -198,14 +193,13 @@ def test_a_run_whose_ground_truth_carries_its_own_classes_records_the_empty_scop
     """
     from PIL import Image
 
+    from tests._producer_fixtures import write_image
+
     root = tmp_path / "masks"
-    images_dir, masks_dir = root / "images" / UNDATED_BUCKET, root / "masks"
-    images_dir.mkdir(parents=True)
+    images_dir, masks_dir = image_dir(root, UNDATED_BUCKET), root / "masks"
     masks_dir.mkdir(parents=True)
     for stem in ("a", "b"):
-        Image.new("RGB", (32, 32), (10, 20, 30)).save(
-            images_dir / f"{stem}.png"
-        )
+        write_image(images_dir / f"{stem}.png", (32, 32), (10, 20, 30))
         Image.new("L", (32, 32), 1).save(masks_dir / f"{stem}.png")
     resolved = _resolved_data(
         tmp_path,
@@ -292,7 +286,7 @@ def test_launch_training_child_receives_its_own_run_directory(
     captured_argv: list[list[str]] = []
     fake_popen(monkeypatch, captured_argv)
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     seed_bud_images(images_dir, n=2, size=64, box=(1, 1, 9, 9))
 
     res = training_tools.launch_training(

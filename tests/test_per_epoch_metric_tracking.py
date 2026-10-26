@@ -54,6 +54,7 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(
     tmp_path: Path,
 ) -> None:
     from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.experiments import board_of, run_dirs
     from tcip_mcp.tools.training_tools import _run_hpo_trial
     from tests._chain_fixtures import training_config
@@ -65,7 +66,7 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(
     )
 
     images_dir = seed_labeled_images(
-        tmp_path / "ds" / "images" / "train",
+        image_dir(tmp_path / "ds", "train"),
         [Annotation(subject="leaf", geometry=BBox(10, 10, 30, 30))],
         n=2,
         width=128,

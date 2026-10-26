@@ -192,9 +192,9 @@ _GRID = ["plot0", "plot1", "plot2", "plot3"]
 
 def _raster(project: Path) -> Path:
     """Return the raster path in the undated capture of ``project``'s dataset ``ds``."""
-    from tcip_mcp.dataset_layout import UNDATED_BUCKET
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
-    return project / "ds" / "images" / UNDATED_BUCKET / "mosaic.tif"
+    return image_dir(project / "ds", UNDATED_BUCKET) / "mosaic.tif"
 
 
 def _raster_bucket(

@@ -20,6 +20,7 @@ import pytest
 
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.assessment import read_assessment
+from tcip_mcp.dataset_layout import image_dir
 from tests import _trait_fixtures as fx, csv_rows
 from tests._producer_fixtures import label_image
 from tests._training_values import drawn_split
@@ -74,16 +75,14 @@ def _reference(
     The frames sit in a registered dataset, beside their breeder CSV (each physical extent
     ``extents_mm[i]``, else the fixed scale's) and a selection drawn over them.
     """
-    from PIL import Image
-
     from tcip_mcp import subject_registry as cr
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import registry_over, write_image
 
     root = project / "ds"
-    images = root / "images" / DATE
+    images = image_dir(root, DATE)
     images.mkdir(parents=True)
     registry_over(
         root,
@@ -97,9 +96,7 @@ def _reference(
     rows = []
     for i in range(n):
         stem = f"r{i}"
-        Image.new("RGB", (120, 120), color=(20 + i, 20, 20)).save(
-            images / f"{stem}.png"
-        )
+        write_image(images / f"{stem}.png", (120, 120), (20 + i, 20, 20))
         label_image(
             images / f"{stem}.png",
             [
@@ -203,7 +200,7 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
         0.1
     )  # 10 mm over a 100 px reference length
 
-    image = tmp_path / "ds" / "images" / DATE / "r0.png"
+    image = image_dir(tmp_path / "ds", DATE) / "r0.png"
     published_bucket = published(
         tmp_path,
         f"m/{DATE}",
@@ -267,7 +264,7 @@ def test_a_box_reference_refuses_rather_than_reading_a_projected_extent(
     """The scale assessment refuses a box reference, naming the polygon a reference needs."""
     _author_tolerance(tmp_path)
     selection, csv_path = _reference(tmp_path)
-    for image in (tmp_path / "ds" / "images" / DATE).glob("*.png"):
+    for image in image_dir(tmp_path / "ds", DATE).glob("*.png"):
         label_image(
             image,
             [Annotation(subject=SUBJECT, geometry=BBox(10, 55, 110, 65))],
@@ -285,7 +282,7 @@ def test_an_image_with_two_reference_annotations_refuses_rather_than_picking_one
 ) -> None:
     _author_tolerance(tmp_path)
     selection, csv_path = _reference(tmp_path)
-    for image in (tmp_path / "ds" / "images" / DATE).glob("*.png"):
+    for image in image_dir(tmp_path / "ds", DATE).glob("*.png"):
         label_image(
             image,
             [

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import tcip_store as ts
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
 from tcip_mcp.identity import actor
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
@@ -221,7 +221,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     published = run_inference(
         project,
         checkpoint_path=str(checkpoint),
-        images_dir=str(project / "data" / "images" / UNDATED_BUCKET),
+        images_dir=str(image_dir(project / "data", UNDATED_BUCKET)),
         bucket=bucket,
         stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS),
         actor=None,
@@ -248,7 +248,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
                     }
                 },
                 base_config={
-                    "data": {"images_dir": str(project / "data" / "images")}
+                    "data": {"images_dir": str(image_root(project / "data"))}
                 },
                 relaunched_from=None,
                 split_draw_seeds=None,
@@ -310,7 +310,9 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     swept = observe_sweep(find_sweep("study", project=moved)).record.input
     swept_data = swept.base_config["data"]
     assert isinstance(swept_data, dict)
-    assert swept_data["images_dir"] == str(moved.resolve() / "data" / "images")
+    assert swept_data["images_dir"] == str(
+        image_root(moved.resolve() / "data")
+    )
     assert swept.baseline_params == {"data.images_dir": moved_other}
     labels_axis = swept.param_space["data.labels_dir"]
     assert isinstance(labels_axis, dict)

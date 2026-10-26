@@ -22,6 +22,7 @@ pytest.importorskip("fastapi")
 
 import tcip_store  # noqa: E402
 from tcip_annotation.viz import CanvasShape  # noqa: E402
+from tcip_mcp.dataset_layout import image_root  # noqa: E402
 from tcip_mcp.web_client import (  # noqa: E402
     canvas_geometry_key,
     canvas_meta_key,
@@ -121,7 +122,7 @@ def _other_project(tmp_path: Path) -> OpenProject:
 def test_full_push_writes_geometry_and_meta(
     client: TestClient, opened: OpenProject, opened_project: Path
 ) -> None:
-    image = str(opened_project / "images" / "a.jpg")
+    image = str(image_root(opened_project) / "a.jpg")
     r = client.post(
         "/api/canvas/state", json=_payload(opened.id, image, shapes=SHAPES)
     )
@@ -955,7 +956,7 @@ def test_capture_live_canvas_reads_a_multiband_raster_without_writing_a_preview(
     import numpy as np
     import tifffile
 
-    images = project / "images"
+    images = image_root(project)
     images.mkdir()
     rng = np.random.default_rng(3)
     src = images / "capture.tif"

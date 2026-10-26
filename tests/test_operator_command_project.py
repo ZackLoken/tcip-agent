@@ -10,13 +10,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tcip_mcp.dataset_layout import image_root
 from tests._cli_fixtures import run_tcip
 from tests._producer_fixtures import write_image
 
 
 def _image(tmp_path: Path) -> Path:
     return write_image(
-        tmp_path / "images" / "field.png", (64, 48), (40, 90, 60)
+        image_root(tmp_path) / "field.png", (64, 48), (40, 90, 60)
     )
 
 

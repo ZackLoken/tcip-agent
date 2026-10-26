@@ -19,7 +19,12 @@ import pytest
 from tcip_annotation import Annotation, BBox, Polygon
 from tcip_annotation.json_io import read_label_document, write_label_document
 from tcip_annotation.matching import pair_proposals
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key, prediction_key
+from tcip_mcp.dataset_layout import (
+    UNDATED_BUCKET,
+    image_root,
+    label_key,
+    prediction_key,
+)
 
 if TYPE_CHECKING:
     from tcip_store import Key
@@ -37,14 +42,11 @@ def _write(key: Key, annotations: list[Annotation]) -> list[Annotation]:
 @pytest.fixture
 def img_dir(tmp_path: Path) -> Path:
     """Write one 640x480 image under ``images/`` and return the dataset root."""
-    images = tmp_path / "images"
-    images.mkdir()
+    from tests._producer_fixtures import write_image
 
-    # Create a minimal test image
-    from PIL import Image
-
-    img = Image.new("RGB", (640, 480), color=(100, 150, 200))
-    img.save(images / "test_001.jpg")
+    write_image(
+        image_root(tmp_path) / "test_001.jpg", (640, 480), (100, 150, 200)
+    )
     return tmp_path
 
 

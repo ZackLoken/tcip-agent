@@ -511,6 +511,16 @@ export interface StatedRadius {
   rationale: string;
 }
 
+export interface BuildMappingPayload {
+  name: string;
+  dataset_root: string;
+  plant_registry: string;
+  dates?: string[] | null;
+  match_radius?: StatedRadius | null;
+  supersede?: boolean;
+  user: string;
+}
+
 export interface PlantRegistryReference {
   name: string;
   digest: string;

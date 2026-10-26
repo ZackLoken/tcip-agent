@@ -14,7 +14,7 @@ import pytest
 
 from tcip_annotation.matching import geometry_rings, shapely_geometry
 from tcip_annotation.state import BBox, Polygon
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.pipelines.data.datasets import clip_rows_to_tile
 from tests._producer_fixtures import dataset_over  # noqa: E402
 from tests._training_values import tiling_block
@@ -114,7 +114,7 @@ def _det_dataset(tmp_path: Path, n: int = 1, size: int = 128) -> Path:
     from tests._producer_fixtures import seed_bud_images
 
     return seed_bud_images(
-        tmp_path / "images" / UNDATED_BUCKET,
+        image_dir(tmp_path, UNDATED_BUCKET),
         n=n,
         size=size,
         box=(0.45 * size, 0.45 * size, 0.55 * size, 0.55 * size),
@@ -188,15 +188,13 @@ def test_detection_and_instance_seg_tiles_of_one_frame_agree(
     rounding at the region's edge, and every box lies within one pixel of its mask's pixel bounds.
     """
     torch = pytest.importorskip("torch")
-    from PIL import Image
     from shapely.geometry import Point as ShapelyPoint
 
     from tcip_annotation.state import Annotation
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import gray_frame, label_image
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (200, 200), (120, 120, 120)).save(images_dir / "a.png")
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+    gray_frame(images_dir, 200, "a.png")
     regions = [
         Polygon(rings=[[(x0, y0), (x1, y0), (x1, y1), (x0, y1)]])
         for x0, y0, x1, y1 in [
@@ -277,14 +275,11 @@ def test_detection_and_instance_seg_tiles_of_one_frame_agree(
 
 def test_tiled_dataset_keeps_empty_tiles(tmp_path: Path) -> None:
     pytest.importorskip("torch")
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import gray_frame, label_image
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (256, 256), (120, 120, 120)).save(images_dir / "a.jpg")
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+    gray_frame(images_dir, 256, "a.jpg")
     # YOLO "0 0.1 0.1 0.1 0.1" in a 256×256 image -> a 25.6px box in the top-left corner
     label_image(
         images_dir / "a.jpg",

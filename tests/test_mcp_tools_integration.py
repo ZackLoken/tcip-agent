@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING
 import pytest
 from PIL import Image
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+from tests._producer_fixtures import write_image
 from tests._training_values import augmentation
 from tests.conftest import DATA_DIR_BUCKET
 
@@ -69,9 +70,8 @@ class TestReadAnnotations:
         from tcip_mcp.tools.annotation_tools import read_annotations
         from tests._producer_fixtures import label_image
 
-        images_dir = tmp_path / "images" / UNDATED_BUCKET
-        images_dir.mkdir(parents=True)
-        Image.new("RGB", (100, 100)).save(images_dir / "a.jpg")
+        images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+        write_image(images_dir / "a.jpg", (100, 100))
         label_image(
             images_dir / "a.jpg",
             [
@@ -107,7 +107,7 @@ class TestEvaluatePredictions:
     def test_evaluate_single_image(self, data_dir: Path) -> None:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        img = str(data_dir / "images" / DATE / "img_001.jpg")
+        img = str(image_dir(data_dir, DATE) / "img_001.jpg")
         result = score_predictions(
             data_dir,
             img,
@@ -127,7 +127,7 @@ class TestEvaluatePredictions:
 
         result = score_predictions(
             data_dir,
-            str(data_dir / "images" / DATE),
+            str(image_dir(data_dir, DATE)),
             DATA_DIR_BUCKET,
             iou_threshold=0.5,
             conf_threshold=0.25,
@@ -146,7 +146,7 @@ class TestEvaluatePredictionsDetail:
     def test_detail_breakdown(self, data_dir: Path) -> None:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        img = str(data_dir / "images" / DATE / "img_001.jpg")
+        img = str(image_dir(data_dir, DATE) / "img_001.jpg")
         result = score_predictions(
             data_dir,
             img,
@@ -180,7 +180,7 @@ class TestEvaluateFolderEnumeration:
         )
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        images_dir = tmp_path / "images" / "2024-01-01"
+        images_dir = image_dir(tmp_path, "2024-01-01")
         images_dir.mkdir(parents=True)
         band_a, band_b = images_dir / "cap_G.tif", images_dir / "cap_R.tif"
         tifffile.imwrite(str(band_a), np.full((8, 8), 111, dtype=np.uint16))
@@ -212,7 +212,7 @@ class TestEvaluateFolderEnumeration:
 
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        images_dir = tmp_path / "images" / "2024-01-01"
+        images_dir = image_dir(tmp_path, "2024-01-01")
         images_dir.mkdir(parents=True)
         np.savez(
             str(images_dir / "cap.npz"),
@@ -236,13 +236,11 @@ class TestEvaluateFolderEnumeration:
     ) -> None:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        images_dir = tmp_path / "images" / "2024-01-01"
-        nested = images_dir / "nested"
-        nested.mkdir(parents=True)
-        Image.new("RGB", (8, 8)).save(nested / "inner.jpg")
-        elsewhere = tmp_path / "images" / "2024-01-02" / "other.jpg"
-        elsewhere.parent.mkdir(parents=True)
-        Image.new("RGB", (8, 8)).save(elsewhere)
+        images_dir = image_dir(tmp_path, "2024-01-01")
+        write_image(images_dir / "nested" / "inner.jpg", (8, 8))
+        elsewhere = write_image(
+            image_dir(tmp_path, "2024-01-02") / "other.jpg", (8, 8)
+        )
 
         result = score_predictions(
             tmp_path,
@@ -331,24 +329,19 @@ class TestReadAnnotationsUnknownFormat:
         The per-image reader refuses a record of a shape it does not read; read_annotations
         surfaces that as an error dict naming the problem, not an uncaught error.
         """
-        from PIL import Image
-
         import tcip_store
         from tcip_mcp.tools.annotation_tools import read_annotations
         from tests._producer_fixtures import image_label_key
 
-        (tmp_path / "images" / UNDATED_BUCKET).mkdir(parents=True)
-        Image.new("RGB", (32, 32)).save(
-            tmp_path / "images" / UNDATED_BUCKET / "a.jpg"
+        image = write_image(
+            image_dir(tmp_path, UNDATED_BUCKET) / "a.jpg", (32, 32)
         )
         # A record of a schema this platform does not read, stored past the writer.
         tcip_store.replace(
-            image_label_key(tmp_path / "images" / UNDATED_BUCKET / "a.jpg"),
+            image_label_key(image),
             {"regions": []},
         )
 
-        result = read_annotations(
-            tmp_path, str(tmp_path / "images" / UNDATED_BUCKET / "a.jpg")
-        )
+        result = read_annotations(tmp_path, str(image))
         assert "error" in result
         assert "not the list a label document holds" in result["error"]

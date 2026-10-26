@@ -17,11 +17,14 @@ import numpy as np
 import pytest
 import tifffile
 
+from tcip_mcp.dataset_layout import image_dir, image_root
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-REAL_DJI_DIR = Path(
-    r"C:\Users\breeder\tcip-projects\currant_multispectral_valley-farm-2023\images\2023-05-23"
+REAL_DJI_DIR = image_dir(
+    r"C:\Users\breeder\tcip-projects\currant_multispectral_valley-farm-2023",
+    "2023-05-23",
 )
 requires_real_dji_data = pytest.mark.skipif(
     not REAL_DJI_DIR.is_dir(),
@@ -37,7 +40,7 @@ def grouped_dir(tmp_path: Path) -> Path:
     """
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     band_a = d / "cap_G.tif"
     band_b = d / "cap_R.tif"
@@ -51,9 +54,9 @@ def grouped_dir(tmp_path: Path) -> Path:
         identity_tolerance={},
     )
 
-    from PIL import Image
+    from tests._producer_fixtures import write_image
 
-    Image.new("RGB", (8, 8), (10, 20, 30)).save(d / "plain.jpg")
+    write_image(d / "plain.jpg", (8, 8), (10, 20, 30))
     tifffile.imwrite(str(d / "loose.tif"), np.zeros((8, 8), dtype=np.uint16))
     return d
 
@@ -137,7 +140,7 @@ def test_list_logical_images_skips_a_corrupt_manifest_without_raising(
 ) -> None:
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     (d / "broken.bandgroup").write_text("not json", encoding="utf-8")
     assert list_logical_images(d) == {}
@@ -165,7 +168,7 @@ def test_list_logical_images_refuses_a_stem_collision_between_a_group_and_a_stan
         list_logical_images,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     band_a = d / "cap_a_G.tif"
     band_b = d / "cap_a_R.tif"
@@ -214,7 +217,7 @@ def test_list_logical_images_refuses_two_raw_files_sharing_one_stem(
         list_logical_images,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     (d / "foo.jpg").write_bytes(b"a")
     (d / "foo.png").write_bytes(b"b")
@@ -233,7 +236,7 @@ def test_list_logical_images_refuses_a_case_variant_stem_pair(
         list_logical_images,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     (d / "Foo.jpg").write_bytes(b"a")
     (d / "foo.png").write_bytes(b"b")
@@ -252,14 +255,13 @@ def test_list_logical_images_with_a_corrupt_manifest_beside_a_same_stem_raw_file
     Beside ``broken.bandgroup`` holding no JSON, the stem ``broken`` lists once, as
     ``broken.jpg``.
     """
-    from PIL import Image
-
     from tcip_mcp.pipelines.image_utils import list_logical_images
+    from tests._producer_fixtures import write_image
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     (d / "broken.bandgroup").write_text("not json", encoding="utf-8")
-    Image.new("RGB", (4, 4)).save(d / "broken.jpg")
+    write_image(d / "broken.jpg", (4, 4))
 
     logical = list_logical_images(d)
     assert set(logical) == {"broken"}
@@ -405,7 +407,7 @@ def test_a_band_group_of_channel_first_single_band_arrays_is_admitted_as_it_is_r
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.pipelines.raster_source import Rect, SourceHeader
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     np.save(str(d / "cap_a.npy"), np.full((1, 8, 12), 7, dtype=np.uint8))
     np.savez(str(d / "cap_b.npz"), band=np.full((1, 8, 12), 9, dtype=np.uint8))
@@ -439,7 +441,7 @@ def test_a_band_group_naming_a_four_dimensional_array_is_refused_at_its_header(
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.pipelines.raster_source import SourceHeader
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     ext = ".npy" if save is np.save else ".npz"
     for name in ("cap_a", "cap_b"):
@@ -471,10 +473,11 @@ def test_a_band_group_naming_a_multi_band_member_is_refused_at_its_header(
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.pipelines.raster_source import SourceHeader
+    from tests._producer_fixtures import write_image
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
-    Image.new("RGB", (8, 8), (255, 0, 0)).save(d / "cap_rgb.png")
+    write_image(d / "cap_rgb.png", (8, 8), (255, 0, 0))
     Image.new("L", (8, 8), 123).save(d / "cap_gray.png")
     write_band_group_manifest(
         d,
@@ -506,7 +509,7 @@ def test_real_dji_capture_decodes_as_a_4_band_stack(tmp_path: Path) -> None:
         resolve_image_path,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     for p in REAL_DJI_DIR.iterdir():
         shutil.copy2(p, d / p.name)

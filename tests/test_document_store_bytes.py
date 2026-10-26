@@ -162,9 +162,10 @@ def test_a_band_group_manifest_lands_as_the_json_the_image_enumerators_parse(
 
     The manifest is written through ``write_band_group_manifest``.
     """
+    from tcip_mcp.dataset_layout import image_root
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
-    images = tmp_path / "images"
+    images = image_root(tmp_path)
     images.mkdir()
     bands = {
         name: images / filename for name, filename in BAND_FILENAMES.items()

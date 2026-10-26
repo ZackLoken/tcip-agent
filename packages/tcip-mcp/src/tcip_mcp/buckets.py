@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -89,28 +90,28 @@ class Bucket:
     assessment_id: str | None
     __pydantic_config__ = ConfigDict(ser_json_inf_nan="constants")
 
+    @cached_property
+    def stem_keys(self) -> dict[str, tcip_store.Key]:
+        """The key of each document the record names, by its source image's stem, in stem order."""
+        from tcip_mcp.dataset_layout import prediction_key
+
+        return {
+            stem: prediction_key(self.root, self.name, stem)
+            for stem in sorted(self.documents)
+        }
+
     def document_key(self, stem: str) -> tcip_store.Key | None:
         """Return the key of the document this bucket holds for the source image of stem ``stem``.
 
-        The key is as the record names it, or ``None`` when the record names none for that image.
+        The key is as :attr:`stem_keys` names it, or ``None`` when the record names none for that
+        image.
         """
-        from tcip_mcp.dataset_layout import prediction_key
-
-        return (
-            prediction_key(self.root, self.name, stem)
-            if stem in self.documents
-            else None
-        )
+        return self.stem_keys.get(stem)
 
     @property
     def document_keys(self) -> list[tcip_store.Key]:
-        """Every document the record names, in stem order."""
-        from tcip_mcp.dataset_layout import prediction_key
-
-        return [
-            prediction_key(self.root, self.name, stem)
-            for stem in sorted(self.documents)
-        ]
+        """Every document the record names, in stem order (:attr:`stem_keys`)."""
+        return list(self.stem_keys.values())
 
     def raster(self, project: Path) -> str | None:
         """Return the raster this bucket was predicted on, resolved against ``project``.
@@ -306,7 +307,7 @@ def publish(
     the root (:class:`BucketExistsError`).
     """
     from tcip_mcp.audit import audit_entry, audit_log_key
-    from tcip_mcp.dataset_layout import bucket_key, capture_of, prediction_key
+    from tcip_mcp.dataset_layout import bucket_key, capture_of
     from tcip_mcp.registry_paths import recorded_paths
 
     documents = list(documents)
@@ -319,6 +320,7 @@ def publish(
             f"two documents of one publication name the stems {repeated}, and a "
             "document is written once."
         )
+    by_stem = dict(zip(stems, documents, strict=True))
     dataset_id, date = capture_of(
         raster_path if raster_path is not None else documents[0].source
     )
@@ -332,13 +334,11 @@ def publish(
         date=date,
         raster_path=raster_path,
         raster_identity=raster_identity,
-        documents={
-            Path(d.source).stem: Path(d.source).name for d in documents
-        },
+        documents={stem: Path(d.source).name for stem, d in by_stem.items()},
         dropped_boxes=sum(d.dropped for d in documents),
         assessment_id=assessment_id,
     )
-    keys = {stem: prediction_key(root, name, stem) for stem in stems}
+    keys = bucket.stem_keys
     held, audit = bucket_key(root, name), audit_log_key(root)
     with tcip_store.transaction(held, audit, *keys.values()) as txn:
         if (
@@ -350,8 +350,8 @@ def publish(
                 "once, so a new publication, a resumed raster pass included, names a bucket that "
                 "does not exist yet."
             )
-        for document, stem in zip(documents, stems, strict=True):
-            txn.write(keys[stem], document.data)
+        for stem, key in keys.items():
+            txn.write(key, by_stem[stem].data)
         txn.write(
             held,
             recorded_paths(
@@ -394,13 +394,13 @@ def detection_rows(bucket: Bucket) -> list[dict[str, Any]]:
     from tcip_annotation.state import prediction_score
 
     rows = []
-    for key in bucket.document_keys:
+    for stem, key in bucket.stem_keys.items():
         annotations = detection_annotations(
             read_label_document(key).annotations
         )
         rows.append(
             {
-                "image": bucket.documents[key.parts[-1]],
+                "image": bucket.documents[stem],
                 "count": len(annotations),
                 "scores": [prediction_score(a) for a in annotations],
             }

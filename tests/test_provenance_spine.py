@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tcip_mcp.dataset_layout import image_dir
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -102,20 +104,15 @@ def test_a_payloads_own_experiment_id_names_no_producer(
 def test_draw_splits_selection_embeds_digests_and_seed(
     data_dir: Path, tmp_path: Path
 ) -> None:
-    # A selection needs at least four foreground groups to clear the floor; the fixture's own
-    # three (img_001..003) need one more, added here rather than in the shared fixture.
-    from PIL import Image
-
+    # A draw's floor is four foreground groups; the fixture's three (img_001..003) need one more.
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, write_image
     from tests._training_values import drawn_split
 
-    images_dir = data_dir / "images" / "2-11-26"
-    Image.new("RGB", (640, 480), color=(128, 128, 128)).save(
-        images_dir / "img_004.jpg"
-    )
+    images_dir = image_dir(data_dir, "2-11-26")
+    write_image(images_dir / "img_004.jpg", (640, 480), (128, 128, 128))
     label_image(
         images_dir / "img_004.jpg",
         [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))],
@@ -169,7 +166,7 @@ def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_
 
     fx.seed_delivery_traits(tmp_path)
     fx.seed_confirmed_count(tmp_path)
-    image = tmp_path / "ds" / "images" / "2026-01-01" / "a.png"
+    image = image_dir(tmp_path / "ds", "2026-01-01") / "a.png"
     bucket = published(
         tmp_path,
         "m/2026-01-01",

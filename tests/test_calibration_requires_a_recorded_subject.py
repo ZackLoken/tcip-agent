@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -100,7 +100,7 @@ def _capture(root: Path) -> tuple[Path, Path]:
     """Write frames each holding one bright box, and its mask raster; return both directories."""
     from tests._producer_fixtures import BRIGHT, painted_frame
 
-    images, masks = root / "images" / UNDATED_BUCKET, root / "masks"
+    images, masks = image_dir(root, UNDATED_BUCKET), root / "masks"
     for d in (images, masks):
         d.mkdir(parents=True)
     for index, stem in enumerate(STEMS):

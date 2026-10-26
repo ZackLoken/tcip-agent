@@ -171,13 +171,14 @@ def test_read_audit_log_resolves_an_inner_path_to_its_dataset_root(
     project: Path,
     dataset_root: Path,
 ) -> None:
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     assert "error" not in write_subject_registry(
         project, str(dataset_root), subjects=_subjects(), actor=None
     )
 
-    inner = str(dataset_root / "images" / "2026-03-02")
+    inner = str(image_dir(dataset_root, "2026-03-02"))
     result = read_audit_log(project, scope=inner, tool="replace_registry")
 
     assert "error" not in result, result

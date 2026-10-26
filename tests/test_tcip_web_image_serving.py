@@ -17,7 +17,9 @@ import tifffile
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from tcip_mcp.dataset_layout import image_dir, image_root
 from tcip_web.routes import images as images_route
+from tests._producer_fixtures import write_image
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -363,8 +365,7 @@ def test_a_whole_view_over_the_area_cap_scales_to_fit_whichever_axis_limits(
     The shapes include a one-pixel-wide frame on either axis, and the served size header says
     what was served.
     """
-    path = tmp_path / "frame.png"
-    Image.new("RGB", size, (30, 60, 90)).save(path)
+    path = write_image(tmp_path / "frame.png", size, (30, 60, 90))
     resp = client.get(
         "/api/images", params={"path": str(path), "display_pixels": 20_000}
     )
@@ -546,7 +547,7 @@ def test_the_view_and_labels_routes_measure_the_frame_the_image_routes_reader_op
     """
     from tcip_mcp.pipelines.raster_source import SourceHeader
 
-    images = tmp_path / "rgb_ds" / "images" / "2026-01-01"
+    images = image_dir(tmp_path / "rgb_ds", "2026-01-01")
     images.mkdir(parents=True)
     path = images / "rgb_row.tif"
     tifffile.imwrite(
@@ -1708,7 +1709,7 @@ def test_a_band_group_rewritten_to_name_another_member_is_described_afresh(
 
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     for name, value in (("cap_a", 10), ("cap_b", 50), ("cap_c", 90)):
         np.save(
@@ -1990,8 +1991,7 @@ def test_get_bands_keeps_the_three_band_early_return(
     An ordinary RGB frame has no per-band symbology to show, so the response carries no band
     entries and no sampling facts.
     """
-    path = tmp_path / "plain.jpg"
-    Image.new("RGB", (40, 32), (5, 5, 5)).save(path)
+    path = write_image(tmp_path / "plain.jpg", (40, 32), (5, 5, 5))
     body = client.get("/api/images/bands", params={"path": str(path)}).json()
     assert body == {"band_count": 3, "bands": []}
 

@@ -26,7 +26,7 @@ pytest.importorskip("torch")
 
 from PIL import Image  # noqa: E402
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope, read_selection  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
     Partition,
@@ -35,7 +35,11 @@ from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
 from tcip_mcp.pipelines.schemas import DataSpec  # noqa: E402
 from tcip_mcp.tools.data_tools import draw_splits  # noqa: E402
 from tests._chain_fixtures import training_config  # noqa: E402
-from tests._producer_fixtures import painted_frame, staged_layout  # noqa: E402
+from tests._producer_fixtures import (  # noqa: E402
+    painted_frame,
+    staged_layout,
+    write_image,
+)
 from tests._training_values import IOU_THRESHOLD, drawn_split  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side, unbuilt_source  # noqa: E402
 
@@ -91,12 +95,14 @@ def _mask_dataset(root: Path) -> tuple[Path, Path]:
     For the nth of :data:`STEMS`, the 16 px image goes under ``root``'s undated bucket and the
     mask, painted 1 over a square of side n + 1 at its origin, under ``root / "masks"``.
     """
-    images_dir, masks_dir = root / "images" / UNDATED_BUCKET, root / "masks"
+    images_dir, masks_dir = image_dir(root, UNDATED_BUCKET), root / "masks"
     images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
     for index, stem in enumerate(STEMS):
-        Image.new("RGB", (16, 16), (10 * index, 20 + index, 30 + index)).save(
-            images_dir / f"{stem}.png"
+        write_image(
+            images_dir / f"{stem}.png",
+            (16, 16),
+            (10 * index, 20 + index, 30 + index),
         )
         painted_frame(
             16, 16, 0, [((0, 0, index + 1, index + 1), 1)], mode="L"
@@ -107,14 +113,16 @@ def _mask_dataset(root: Path) -> tuple[Path, Path]:
 def _table_dataset(root: Path) -> tuple[Path, Path]:
     """Write a dataset whose ground truth is one table row per image, labels cycling 0, 1, 2."""
     images_dir, csv_path = (
-        root / "images" / UNDATED_BUCKET,
+        image_dir(root, UNDATED_BUCKET),
         root / "labels.csv",
     )
     images_dir.mkdir(parents=True, exist_ok=True)
     rows = []
     for index, stem in enumerate(STEMS):
-        Image.new("RGB", (16, 16), (10 * index, 20 + index, 30 + index)).save(
-            images_dir / f"{stem}.png"
+        write_image(
+            images_dir / f"{stem}.png",
+            (16, 16),
+            (10 * index, 20 + index, 30 + index),
         )
         rows.append((stem, index % 3))
     with open(csv_path, "w", newline="") as handle:
@@ -207,12 +215,10 @@ def _document_dataset(root: Path) -> tuple[Path, None]:
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
-    images_dir = root / "images" / UNDATED_BUCKET
+    images_dir = image_dir(root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True, exist_ok=True)
     for stem in STEMS:
-        Image.new("RGB", (16, 16), (10, 20, 30)).save(
-            images_dir / f"{stem}.png"
-        )
+        write_image(images_dir / f"{stem}.png", (16, 16), (10, 20, 30))
         label_image(
             images_dir / f"{stem}.png",
             [Annotation(subject="bud", geometry=BBox(1, 1, 8, 8))],
@@ -312,15 +318,13 @@ def test_a_directory_named_like_a_mask_is_admitted_by_neither_read_of_it(
     from tcip_mcp.pipelines.data.label_queries import admit, readmitted_samples
 
     images_dir, masks_dir = (
-        tmp_path / "images" / UNDATED_BUCKET,
+        image_dir(tmp_path, UNDATED_BUCKET),
         tmp_path / "masks",
     )
     images_dir.mkdir(parents=True)
     masks_dir.mkdir()
     for stem in ("a.1", "b"):
-        Image.new("RGB", (16, 16), (10, 20, 30)).save(
-            images_dir / f"{stem}.png"
-        )
+        write_image(images_dir / f"{stem}.png", (16, 16), (10, 20, 30))
     Image.fromarray(np.zeros((16, 16), dtype=np.uint8), mode="L").save(
         masks_dir / "b.png"
     )
@@ -496,15 +500,17 @@ def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path) -> None:
     """
     root = tmp_path / "ds"
     images_dir, csv_path = (
-        root / "images" / UNDATED_BUCKET,
+        image_dir(root, UNDATED_BUCKET),
         root / "labels.csv",
     )
     images_dir.mkdir(parents=True, exist_ok=True)
     dotted = [f"a.{index}" for index in range(8)]
     rows = []
     for index, key in enumerate(dotted):
-        Image.new("RGB", (16, 16), (10 * index, 20 + index, 30 + index)).save(
-            images_dir / f"{key}.png"
+        write_image(
+            images_dir / f"{key}.png",
+            (16, 16),
+            (10 * index, 20 + index, 30 + index),
         )
         rows.append((key, index % 3))
     with open(csv_path, "w", newline="") as handle:
@@ -656,12 +662,14 @@ def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(
 
 def _three_class_masks(root: Path) -> tuple[Path, Path]:
     """Write four images and masks painted 1 over (0, 0, 8, 8), the first 2 over (8, 8, 16, 16)."""
-    images_dir, masks_dir = root / "images" / UNDATED_BUCKET, root / "masks"
+    images_dir, masks_dir = image_dir(root, UNDATED_BUCKET), root / "masks"
     images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
     for index, stem in enumerate(STEMS[:4]):
-        Image.new("RGB", (16, 16), (10 * index, 20 + index, 30 + index)).save(
-            images_dir / f"{stem}.png"
+        write_image(
+            images_dir / f"{stem}.png",
+            (16, 16),
+            (10 * index, 20 + index, 30 + index),
         )
         extents = [((0, 0, 8, 8), 1)] + (
             [((8, 8, 16, 16), 2)] if index == 0 else []
@@ -920,8 +928,7 @@ def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(
         Path(truth).parent
         for truth, _digest, _source in (*bound.values(), *drawn.values())
     } == {masks_dir}
-    # The bound run holds out a calibration side the drawn one trains on, so the two agree on
-    # every member they both name rather than on the union.
+    # The bound run holds out a calibration side the drawn one trains on.
     assert bound and drawn and set(bound) <= set(drawn)
     assert {member: bound[member] for member in bound} == {
         member: drawn[member] for member in bound

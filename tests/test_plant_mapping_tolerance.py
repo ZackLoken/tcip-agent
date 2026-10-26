@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 from pyproj import Geod
 
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     MatchRadius,
     MatchTolerance,
@@ -75,23 +76,22 @@ def _build(
     the last, taken in that order; ``errors`` gives each its reported positioning error, and only
     as many photographs as ``errors`` has entries are written.
     """
-    images_root = tmp_path / "ds" / "images"
+    dataset_root = tmp_path / "ds"
     positions = [(PLANTS[i]["lat"], PLANTS[i]["lon"]) for i in range(3)] + [
         _east(3 * PLANT_SPACING_M, STRAY_NORTH_M)
     ]
     for i, ((lat, lon), err) in enumerate(zip(positions, errors)):
         write_geo_image(
-            images_root / DATE / f"photo_{i}.jpg",
+            image_dir(dataset_root, DATE) / f"photo_{i}.jpg",
             lat,
             lon,
             datetime(2026, 2, 11, 9) + timedelta(seconds=i),
             h_pos_err=err,
         )
     return build_mapping(
-        images_root,
+        dataset_root,
         [write_plant_csv(tmp_path / "plants.csv", PLANTS)],
         name="valley",
-        dataset_root=tmp_path / "ds",
         dataset_id="ds-1",
         project=tmp_path,
         plant_registry=PlantRegistryReference(
@@ -172,11 +172,9 @@ def test_a_stated_radius_is_recorded_on_a_date_with_no_positioned_capture(
     tmp_path: Path,
 ) -> None:
     """A stated radius is recorded on every walked date, one with no positioned capture included."""
-    from PIL import Image
+    from tests._producer_fixtures import write_image
 
-    unpositioned = tmp_path / "ds" / "images" / "2026-02-12" / "nofix.jpg"
-    unpositioned.parent.mkdir(parents=True)
-    Image.new("RGB", (8, 8)).save(unpositioned)
+    write_image(image_dir(tmp_path / "ds", "2026-02-12") / "nofix.jpg", (8, 8))
     stated = StatedRadius(value=5.0, rationale="the receiver's own spec sheet")
 
     build = _build(tmp_path, [None, None, None, None], match_radius=stated)

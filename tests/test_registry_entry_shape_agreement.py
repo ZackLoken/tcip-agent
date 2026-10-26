@@ -43,7 +43,9 @@ def _registry_findings(root: Path) -> list[tuple[str, str]]:
     from tcip_mcp.tools import doctor_tools as doctor
 
     findings: list[tuple[str, str]] = []
-    doctor.check_registry(root, findings, buckets=doctor._buckets(root))
+    doctor.check_registry(
+        root, findings, buckets=doctor._buckets(root, findings)
+    )
     return findings
 
 

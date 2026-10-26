@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests import REPO_ROOT
 from tests._chain_fixtures import (
     BESPOKE_MODELS,
@@ -217,7 +217,7 @@ def _admitted_samples(root: Path) -> list[Sample]:
         samples_over,
     )
 
-    images_dir = root / "images" / UNDATED_BUCKET
+    images_dir = image_dir(root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True, exist_ok=True)
     registry_over(
         root, SubjectRegistry(subjects=(Subject(name="leaf", description=""),))
@@ -274,7 +274,7 @@ def _ctx(
             **data,
             "scope": asdict(_scope()),
             "split": drawn_split(val_ratio=0.0),
-            "images_dir": str(root / "ds" / "images" / UNDATED_BUCKET),
+            "images_dir": str(image_dir(root / "ds", UNDATED_BUCKET)),
         },
         evaluation=evaluation_block(selection_metric="loss"),
     )
@@ -474,7 +474,7 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(
     _admitted_samples(root)
     located_data = {
         **data,
-        "images_dir": str(root / "images" / UNDATED_BUCKET),
+        "images_dir": str(image_dir(root, UNDATED_BUCKET)),
         "scope": {"subject": "leaf"},
     }
     config = training_config(

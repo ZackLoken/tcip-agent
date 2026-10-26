@@ -15,15 +15,13 @@ def test_predict_batch_detection_uses_one_forward_per_batch(
 ) -> None:
     pytest.importorskip("torch")
     import torch
-    from PIL import Image
 
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tests._producer_fixtures import write_image
 
-    paths = []
-    for i in range(5):
-        p = tmp_path / f"img{i}.png"
-        Image.new("RGB", (16, 16)).save(p)
-        paths.append(str(p))
+    paths = [
+        str(write_image(tmp_path / f"img{i}.png", (16, 16))) for i in range(5)
+    ]
 
     # Construct without a real checkpoint; we only exercise the batching path.
     pred = GenericPredictor.__new__(GenericPredictor)

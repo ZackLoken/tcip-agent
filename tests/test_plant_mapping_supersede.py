@@ -52,18 +52,16 @@ def _cited_mapping(tmp_path: Path) -> tuple[OpenProject, str, dict[str, str]]:
     """Make ``tmp_path`` a project holding a mapping named ``valley`` that a delivery cites.
 
     The mapping is built, delivered from (so a delivery event cites its digest), and kept beside
-    the plant CSV it was built over. Return the project, the images root and the buckets by date.
+    the plant CSV it was built over. Return the project, the dataset root and the buckets by date.
     """
     project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(
-        dataset_root, dates=[DATES[0]]
-    )
+    plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     build_res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=registry,
         actor=None,
     )
@@ -72,7 +70,7 @@ def _cited_mapping(tmp_path: Path) -> tuple[OpenProject, str, dict[str, str]]:
 
     res = _deliver(tmp_path, preds_by_date, tmp_path / "out.csv")
     assert "error" not in res, res
-    return project, str(images_root), preds_by_date
+    return project, str(dataset_root), preds_by_date
 
 
 def test_a_cited_rebuild_refuses_naming_the_citing_events(
@@ -83,7 +81,7 @@ def test_a_cited_rebuild_refuses_naming_the_citing_events(
     A same-name rebuild whose current record a delivery event cites refuses with every citing
     event named, and the cited record stays untouched.
     """
-    _, images_root, _ = _cited_mapping(tmp_path)
+    _, dataset_root, _ = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
 
@@ -98,7 +96,7 @@ def test_a_cited_rebuild_refuses_naming_the_citing_events(
     res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=images_root,
+        dataset_root=dataset_root,
         plant_registry=(before.plant_registry.name),
         actor=None,
     )
@@ -125,7 +123,7 @@ def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_rea
     supersedes names the archived digest, the archived record stays readable on its own build's
     receipt, the supersede writing one receipt alone, and plant_mapping_names does not list it.
     """
-    _, images_root, preds_by_date = _cited_mapping(tmp_path)
+    _, dataset_root, preds_by_date = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
     archived_digest = before.record_sha256
@@ -135,7 +133,7 @@ def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_rea
     res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=images_root,
+        dataset_root=dataset_root,
         plant_registry=before.plant_registry.name,
         supersede=True,
         actor=None,
@@ -174,7 +172,7 @@ def test_resolved_mapping_key_for_citation_names_the_archive_once_superseded(
     A delivery event's own cited digest resolves to the current name while unmoved, and to the
     archived key after a supersede rebuild has moved the name on.
     """
-    _, images_root, _ = _cited_mapping(tmp_path)
+    _, dataset_root, _ = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
 
@@ -188,7 +186,7 @@ def test_resolved_mapping_key_for_citation_names_the_archive_once_superseded(
     res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=images_root,
+        dataset_root=dataset_root,
         plant_registry=before.plant_registry.name,
         supersede=True,
         actor=None,
@@ -217,7 +215,7 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
 
     from tcip_web.state import store
 
-    project, images_root, _ = _cited_mapping(tmp_path)
+    project, dataset_root, _ = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
 
@@ -232,7 +230,7 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
     res = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=images_root,
+        dataset_root=dataset_root,
         plant_registry=before.plant_registry.name,
         supersede=True,
         actor=None,
@@ -253,22 +251,21 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
 def _built(tmp_path: Path) -> tuple[Path, str]:
     """Build a mapping ``valley`` through the platform's own door.
 
-    Return its images root and registry.
+    Return its dataset root and registry.
     """
     _init(tmp_path)
-    images_root, plant_csv, _ = _write_scene(
-        _dataset(tmp_path), dates=[DATES[0]]
-    )
+    dataset_root = _dataset(tmp_path)
+    plant_csv, _ = _write_scene(dataset_root, dates=[DATES[0]])
     registry = register_plant_registry_for(tmp_path, [plant_csv])
     built = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=registry,
         actor=None,
     )
     assert "error" not in built, built
-    return images_root, registry
+    return dataset_root, registry
 
 
 def test_a_mapping_record_without_assignments_refuses_to_decode_by_name(
@@ -291,7 +288,7 @@ def test_a_rebuild_over_a_record_that_will_not_decode_proceeds_on_its_raw_digest
 
     The rebuild asks the citation check about the malformed record's raw digest, once, and lands.
     """
-    images_root, registry = _built(tmp_path)
+    dataset_root, registry = _built(tmp_path)
     key = plant_mapping.plant_mapping_key(tmp_path, "valley")
     malformed = {"name": "valley", "an old shape": True}
     ts.replace(key, malformed)
@@ -306,7 +303,7 @@ def test_a_rebuild_over_a_record_that_will_not_decode_proceeds_on_its_raw_digest
     rebuilt = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=registry,
         actor=None,
     )
@@ -320,13 +317,13 @@ def test_an_uncited_rebuild_replaces_as_today_recording_nothing_extra(
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, _ = _write_scene(dataset_root, dates=[DATES[0]])
+    plant_csv, _ = _write_scene(dataset_root, dates=[DATES[0]])
     registry = register_plant_registry_for(tmp_path, [plant_csv])
 
     first = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=registry,
         actor=None,
     )
@@ -337,7 +334,7 @@ def test_an_uncited_rebuild_replaces_as_today_recording_nothing_extra(
     second = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=registry,
         actor=None,
     )

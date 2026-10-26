@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from tcip_mcp.dataset_layout import image_dir
 from tests import _trait_fixtures as fx
 from tests._mapping_fixtures import write_plant_csv
 
@@ -47,7 +48,7 @@ def _scene(
     dataset_root, date = tmp_path / "ds", "2026-02-11"
     for i, (plant, (lat, lon)) in enumerate(plants.items()):
         write_geo_image(
-            dataset_root / "images" / date / f"{plant}.jpg",
+            image_dir(dataset_root, date) / f"{plant}.jpg",
             lat,
             lon,
             datetime(2026, 2, 11, 9, 30 + 5 * i),
@@ -90,7 +91,7 @@ def _mapped(
     mapped = build_plant_mapping(
         tmp_path,
         name="valley",
-        images_root=str(dataset_root / "images"),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
         actor=None,
     )
@@ -114,7 +115,7 @@ def _bucket(
 
     results = [
         {
-            "image": str(dataset_root / "images" / date / f"{stem}.jpg"),
+            "image": str(image_dir(dataset_root, date) / f"{stem}.jpg"),
             "width": 8,
             "height": 8,
             "boxes": [[1.0, 1.0, 3.0, 3.0]] * n,
@@ -222,7 +223,7 @@ def test_a_delivered_date_the_mapping_does_not_cover_refuses(
     dataset_root, date = _mapped(tmp_path)
     uncovered = "2026-03-01"
     write_geo_image(
-        dataset_root / "images" / uncovered / "P1.jpg",
+        image_dir(dataset_root, uncovered) / "P1.jpg",
         *ONE_PLANT["P1"],
         datetime(2026, 3, 1, 9, 30),
     )
@@ -253,7 +254,7 @@ def test_predictions_under_another_dataset_than_the_mappings_refuse(
     _dataset_root, date = _mapped(tmp_path)
     other = tmp_path / "ds2"
     write_geo_image(
-        other / "images" / date / "P1.jpg",
+        image_dir(other, date) / "P1.jpg",
         *ONE_PLANT["P1"],
         datetime(2026, 2, 11, 9, 30),
     )
@@ -353,7 +354,7 @@ def test_a_capture_added_since_the_mapping_was_built_refuses(
     dataset_root, date = _mapped(tmp_path)
     bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
     write_geo_image(
-        dataset_root / "images" / date / "P2.jpg",
+        image_dir(dataset_root, date) / "P2.jpg",
         43.19680,
         -90.057000,
         datetime(2026, 2, 11, 9, 35),

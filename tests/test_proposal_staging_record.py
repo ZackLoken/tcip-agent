@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._producer_fixtures import kept, write_image
 
 if TYPE_CHECKING:
@@ -99,8 +99,8 @@ def test_two_dated_buckets_with_the_same_stem_stage_and_read_back_independently(
         stage_proposals,
     )
 
-    first = tmp_path / "images" / "2026-01-01" / "leaf.jpg"
-    second = tmp_path / "images" / "2026-02-01" / "leaf.jpg"
+    first = image_dir(tmp_path, "2026-01-01") / "leaf.jpg"
+    second = image_dir(tmp_path, "2026-02-01") / "leaf.jpg"
     _make_image(first)
     _make_image(second)
 
@@ -157,7 +157,7 @@ def test_an_assignment_naming_no_subject_is_refused_never_skipped(
         stage_proposals,
     )
 
-    img_path = tmp_path / "images" / "2026-01-01" / "bur.jpg"
+    img_path = image_dir(tmp_path, "2026-01-01") / "bur.jpg"
     _make_image(img_path)
     _install_stub(monkeypatch, [_candidate(0, 5.0), _candidate(1, 30.0)])
     proposed = propose_annotations(
@@ -192,7 +192,7 @@ def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_r
         stage_proposals,
     )
 
-    img_path = tmp_path / "images" / UNDATED_BUCKET / "changed.jpg"
+    img_path = image_dir(tmp_path, UNDATED_BUCKET) / "changed.jpg"
     _make_image(img_path, fill=(50, 50, 50))
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
@@ -240,7 +240,7 @@ def test_the_envelope_carries_image_identity_at_the_dataset_rooted_location(
         propose_annotations,
     )
 
-    img_path = tmp_path / "images" / "2026-04-01" / "sample.jpg"
+    img_path = image_dir(tmp_path, "2026-04-01") / "sample.jpg"
     _make_image(img_path)
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
 
@@ -304,7 +304,7 @@ def test_propose_then_accept_stages_a_prediction_at_the_expected_location(
         stage_proposals,
     )
 
-    img_path = tmp_path / "images" / capture / "sample.jpg"
+    img_path = image_dir(tmp_path, capture) / "sample.jpg"
     _make_image(img_path)
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
 
@@ -345,7 +345,7 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
         stage_proposals,
     )
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     bands = {}
     for name in ("Red", "Green", "Blue"):
@@ -399,7 +399,7 @@ def test_propose_on_a_band_groups_member_path_refuses_naming_the_manifest(
         propose_annotations,
     )
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     bands = {}
     for name in ("Red", "Green", "Blue"):
@@ -443,7 +443,7 @@ def test_a_second_accept_of_the_same_staged_run_refuses_and_keeps_the_first(
         stage_proposals,
     )
 
-    img_path = tmp_path / "images" / UNDATED_BUCKET / "twice.jpg"
+    img_path = image_dir(tmp_path, UNDATED_BUCKET) / "twice.jpg"
     _make_image(img_path)
     _install_stub(monkeypatch, [_candidate(0, 5.0), _candidate(1, 40.0)])
 
@@ -486,7 +486,7 @@ def test_two_runs_on_one_image_stay_their_own_and_each_accept_stages_its_own(
         stage_proposals,
     )
 
-    img_path = tmp_path / "images" / UNDATED_BUCKET / "rerun.jpg"
+    img_path = image_dir(tmp_path, UNDATED_BUCKET) / "rerun.jpg"
     _make_image(img_path)
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
@@ -529,7 +529,7 @@ def test_a_run_finding_nothing_stages_nothing_and_leaves_an_earlier_run_staged(
         stage_proposals,
     )
 
-    img_path = tmp_path / "images" / UNDATED_BUCKET / "goes_empty.jpg"
+    img_path = image_dir(tmp_path, UNDATED_BUCKET) / "goes_empty.jpg"
     _make_image(img_path)
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
@@ -571,7 +571,7 @@ def test_accept_reports_an_unsampleable_image_as_an_error_dict(
         stage_proposals,
     )
 
-    img_path = tmp_path / "images" / UNDATED_BUCKET / "unsampleable.jpg"
+    img_path = image_dir(tmp_path, UNDATED_BUCKET) / "unsampleable.jpg"
     _make_image(img_path)
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
@@ -612,7 +612,7 @@ def test_a_region_proposal_and_its_accept_each_open_the_image_once(
         stage_proposals,
     )
 
-    img_path = tmp_path / "images" / UNDATED_BUCKET / "region.jpg"
+    img_path = image_dir(tmp_path, UNDATED_BUCKET) / "region.jpg"
     _make_image(img_path)
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
     opened: list = []
@@ -669,7 +669,7 @@ def test_a_staging_is_one_publication_with_one_audit_line(
 
     assert Document._fields == ("source", "data", "dropped")
     assert "Callable" not in str(inspect.signature(publish))
-    image = tmp_path / "images" / "2026-01-01" / "leaf.jpg"
+    image = image_dir(tmp_path, "2026-01-01") / "leaf.jpg"
     _make_image(image)
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
     proposed = propose_annotations(

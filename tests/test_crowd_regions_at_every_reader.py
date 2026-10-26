@@ -21,8 +21,16 @@ from PIL import Image  # noqa: E402
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key  # noqa: E402
-from tests._producer_fixtures import label_image, labeled_frame  # noqa: E402
+from tcip_mcp.dataset_layout import (  # noqa: E402
+    UNDATED_BUCKET,
+    image_dir,
+    label_key,
+)
+from tests._producer_fixtures import (  # noqa: E402
+    label_image,
+    labeled_frame,
+    write_image,
+)
 from tests._training_values import (  # noqa: E402
     DISPERSION_QUANTILE,
     TRIAGE_WEIGHTS,
@@ -87,7 +95,7 @@ def _labeled(
 
     When ``crowd``, each frame's label also carries one crowd region, left unpainted.
     """
-    images = root / "images" / UNDATED_BUCKET
+    images = image_dir(root, UNDATED_BUCKET)
     for stem in stems:
         anns = [Annotation(subject=SUBJECT, geometry=OBJECT)]
         if crowd:
@@ -131,9 +139,8 @@ def test_crowd_of_refuses_a_target_stating_no_flag_and_reads_the_producers_own()
 def test_the_instance_loader_carries_each_polygons_crowd_flag(
     tmp_path: Path,
 ) -> None:
-    images = tmp_path / "images" / UNDATED_BUCKET
-    images.mkdir(parents=True)
-    Image.new("RGB", (IMG, IMG), (40, 40, 40)).save(images / "p0.png")
+    images = image_dir(tmp_path, UNDATED_BUCKET)
+    write_image(images / "p0.png", (IMG, IMG), (40, 40, 40))
     label_image(
         images / "p0.png",
         [
@@ -168,9 +175,8 @@ def test_the_instance_loader_takes_each_polygons_class_from_the_one_target_decis
     """
     from tests._producer_fixtures import dataset_over
 
-    images = tmp_path / "images" / UNDATED_BUCKET
-    images.mkdir(parents=True)
-    Image.new("RGB", (IMG, IMG), (40, 40, 40)).save(images / "p0.png")
+    images = image_dir(tmp_path, UNDATED_BUCKET)
+    write_image(images / "p0.png", (IMG, IMG), (40, 40, 40))
     label_image(
         images / "p0.png",
         [
@@ -203,7 +209,7 @@ def test_a_samplers_class_for_a_frame_is_its_first_object_never_a_crowd_region(
     """
     from tests._producer_fixtures import dataset_over
 
-    images = tmp_path / "images" / UNDATED_BUCKET
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     crowd = Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)
     for stem, anns in (
         ("c0", [crowd, Annotation(subject=SUBJECT, geometry=OBJECT)]),
@@ -386,7 +392,7 @@ def test_the_object_density_counts_objects_not_crowd_regions(
             else []
         )
         images_dir = seed_labeled_images(
-            tmp_path / f"ds_{crowd}" / "images" / UNDATED_BUCKET,
+            image_dir(tmp_path / f"ds_{crowd}", UNDATED_BUCKET),
             anns,
             n=1,
             width=IMG,
@@ -628,10 +634,9 @@ def test_the_worst_predictions_triage_counts_objects_not_crowd_regions(
     from tcip_mcp.tools.vision_tools import get_worst_predictions
     from tests._chain_fixtures import published
 
-    images = tmp_path / "images" / UNDATED_BUCKET
-    images.mkdir(parents=True)
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     for stem in ("a", "b"):
-        Image.new("RGB", (IMG, IMG), (40, 40, 40)).save(images / f"{stem}.png")
+        write_image(images / f"{stem}.png", (IMG, IMG), (40, 40, 40))
     bucket = published(
         tmp_path,
         "preds",

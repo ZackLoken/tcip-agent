@@ -14,6 +14,7 @@ import pytest
 from pydantic import ValidationError
 
 import tcip_store
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.web_client import (
     GUI_STATE_DEFAULTS,
     gui_snapshot_key,
@@ -132,7 +133,7 @@ def test_a_reopened_project_holds_the_state_it_persisted(
     tmp_path: Path,
 ) -> None:
     project = named_project(tmp_path / "A", "A")
-    (project.root / "ds" / "images" / "undated").mkdir(parents=True)
+    image_dir(project.root / "ds", UNDATED_BUCKET).mkdir(parents=True)
     store = StateStore()
     asyncio.run(store.open_project(project))
     asyncio.run(
@@ -140,7 +141,7 @@ def test_a_reopened_project_holds_the_state_it_persisted(
             {
                 "active_tab": "results",
                 "dataset": selection_for(
-                    project.root / "ds", None, "undated", None, 0
+                    project.root / "ds", None, UNDATED_BUCKET, None, 0
                 ),
             },
             project=store.held(),

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import tcip_store
+from tcip_mcp.dataset_layout import image_root, list_dates
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     MappingBuild,
     PlantRecord,
@@ -28,6 +29,7 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
 )
 from tests._image_fixtures import write_geo_image
 from tests._mapping_fixtures import PLOTS, map_captures
+from tests._producer_fixtures import write_image
 from tests._web_fixtures import named_project
 
 if TYPE_CHECKING:
@@ -241,11 +243,7 @@ def test_assign_plants_one_to_one(
 
 def test_assign_plants_handles_missing_gps(tmp_path: Path) -> None:
     plants = [_plant("P1", "A", 43.1960, -90.0580)]
-    path = tmp_path / DATE / "img1.JPG"
-    path.parent.mkdir(parents=True)
-    from PIL import Image
-
-    Image.new("RGB", (8, 8)).save(path)
+    path = write_image(tmp_path / DATE / "img1.JPG", (8, 8))
     stamps = [read_image_stamp(path, DATE)]
     assignments = _assign(stamps, plants)
     assert assignments[0].source == "unmapped"
@@ -321,10 +319,9 @@ def test_build_mapping_empty_dir_refuses_naming_no_capture(
     """``build_mapping`` over no capture refuses with ``UngeoreferencedCaptureError``, saying so."""
     with pytest.raises(Exception, match="no capture under") as exc:
         build_mapping(
-            tmp_path / "nope",
+            tmp_path / "ds",
             [],
             name="mapping",
-            dataset_root=tmp_path / "ds",
             dataset_id="ds-1",
             project=tmp_path,
             plant_registry=PlantRegistryReference(
@@ -332,6 +329,23 @@ def test_build_mapping_empty_dir_refuses_naming_no_capture(
             ),
         )
     assert type(exc.value).__name__ == "UngeoreferencedCaptureError"
+
+
+def test_a_mapping_walks_the_captures_its_dataset_lists(
+    tmp_path: Path,
+) -> None:
+    """A mapping's dates are its dataset's ``list_dates``; a hidden directory is no capture."""
+    named_project(tmp_path, "Orchard")
+    dataset_root = tmp_path / "ds"
+    write_geo_image(
+        image_root(dataset_root) / ".staging" / "P1_staged.jpg",
+        *PLOTS["P1"],
+        datetime(2026, 2, 11, 9),
+    )
+    map_captures(tmp_path, dataset_root, [DATE], name="mapping")
+
+    built = load_mapping(tmp_path, "mapping")
+    assert built.dates == list_dates(dataset_root) == [DATE]
 
 
 def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lands(

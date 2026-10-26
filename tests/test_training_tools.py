@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._chain_fixtures import (
     BESPOKE_CLASSIFIER,
     BESPOKE_DETECTION,
@@ -365,7 +365,7 @@ def test_preflight_config_warns_when_most_candidates_wont_train(
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs = image_dir(tmp_path, UNDATED_BUCKET)
     # 1 annotated, 3 unannotated (no label document at all) -> 75% of candidates won't train.
     _bud_image(imgs / "ann.jpg")
     for stem in ("a", "b", "c"):
@@ -396,7 +396,7 @@ def test_preflight_config_no_coverage_warning_when_everything_trains(
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs = image_dir(tmp_path, UNDATED_BUCKET)
     _bud_image(imgs / "ann.jpg")
 
     cfg = training_config(
@@ -430,7 +430,7 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._producer_fixtures import staged_layout
 
-    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs = image_dir(tmp_path, UNDATED_BUCKET)
     _bud_image(imgs / "ann.jpg")
     _bud_image(imgs / "bad.jpg")
     _damaged(imgs / "bad.jpg", b"{not json")
@@ -527,7 +527,7 @@ def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(
     from tcip_mcp.tools.training_tools import preflight_config
     from tcip_store import encode_record
 
-    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs = image_dir(tmp_path, UNDATED_BUCKET)
     _bud_image(imgs / "ann.jpg")
     _bud_image(imgs / "bad.jpg")
     _damaged(imgs / "bad.jpg", encode_record(json.loads(bad_document)))
@@ -622,7 +622,7 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
-    imgs = tmp_path / "images" / UNDATED_BUCKET
+    imgs = image_dir(tmp_path, UNDATED_BUCKET)
     imgs.mkdir(parents=True)
     cfg = training_config(
         tmp_path,
@@ -682,7 +682,7 @@ def test_preflight_calibration_ratio_multi_member_flags_issue(
     """
     from tcip_mcp.tools.training_tools import preflight_config
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     for stem in ("a", "b"):
         _bud_image(images_dir / f"{stem}.png")
     cfg = training_config(
@@ -1675,18 +1675,15 @@ def test_get_worst_predictions_reads_canonical_confidence(
     box geometry.
     """
     pytest.importorskip("torch")
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.vision_tools import get_worst_predictions
     from tests._chain_fixtures import published
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, write_image
 
-    images = tmp_path / "images" / UNDATED_BUCKET
-    images.mkdir(parents=True)
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     scored = {"confident": [0.9, 0.9], "shaky": [0.1, 0.1]}
     for stem, scores in scored.items():
-        Image.new("RGB", (100, 100)).save(images / f"{stem}.png")
+        write_image(images / f"{stem}.png", (100, 100))
         # Matching GT count → missed = extra = 0, error is exactly (1 - avg_conf).
         gt_anns = [
             Annotation(subject="bud", geometry=BBox(20.0, 11.0, 40.0, 31.0))
@@ -2347,7 +2344,7 @@ def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
     from tcip_mcp.pipelines.schemas import DataSpec
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
 
     ds_id, fp = dataset_identity(

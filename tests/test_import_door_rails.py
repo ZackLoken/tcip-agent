@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import tcip_store as ts
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.tools.project_tools import (
     ZipBundle,
     archive_project,
@@ -361,7 +362,7 @@ def _annotated_dataset(root: Path, n: int) -> None:
         registry_over,
     )
 
-    images_dir = root / "images" / "2026-03-04"
+    images_dir = image_dir(root, "2026-03-04")
     images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n):
         stem = f"img_{i:03d}"
@@ -504,7 +505,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
                 "normalization": FRAME_STATISTICS,
             },
             {
-                "images_dir": str(root / "images" / "2026-03-04"),
+                "images_dir": str(image_dir(root, "2026-03-04")),
                 "scope": {"subject": "bud"},
                 "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
             },

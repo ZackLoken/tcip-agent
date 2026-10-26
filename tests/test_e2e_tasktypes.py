@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.pipelines.execution import Stated
 
 if TYPE_CHECKING:
@@ -127,7 +127,7 @@ def _assert_trained(observation: RunObservation) -> None:
 
 
 def test_detection_e2e(tmp_path: Path) -> None:
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
         # one centered box covering the middle of the image
@@ -150,7 +150,7 @@ def test_detection_e2e(tmp_path: Path) -> None:
 
 
 def test_instance_seg_e2e(tmp_path: Path) -> None:
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     square = Polygon(
         [[(19.2, 19.2), (44.8, 19.2), (44.8, 44.8), (19.2, 44.8)]]
     )
@@ -184,7 +184,7 @@ def test_instance_seg_e2e(tmp_path: Path) -> None:
 
 
 def test_semantic_seg_e2e(tmp_path: Path) -> None:
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     masks_dir = tmp_path / "masks"
     masks_dir.mkdir(parents=True, exist_ok=True)
     from tests._producer_fixtures import painted_frame

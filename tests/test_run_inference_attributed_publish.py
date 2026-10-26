@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 torch = pytest.importorskip("torch")
 
 from tcip_mcp import subject_registry as cr  # noqa: E402
+from tcip_mcp.dataset_layout import image_dir  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._predictor_fixtures import BOX, StubPredictor, install  # noqa: E402
 from tests._producer_fixtures import write_image  # noqa: E402
@@ -89,7 +90,7 @@ def test_an_attributed_run_writes_every_attribute_value_and_stamps_its_scope(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    images_dir = tmp_path / "images" / "2026-01-01"
+    images_dir = image_dir(tmp_path, "2026-01-01")
     write_image(images_dir / "img.png", (100, 100))
     checkpoint = _checkpoint(tmp_path, COLOR, GRADE)
     install(monkeypatch, _attributed_predictor())
@@ -109,7 +110,7 @@ def test_a_detector_run_declaring_no_attribute_writes_the_ordinary_shape_and_sta
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    images_dir = tmp_path / "images" / "2026-01-01"
+    images_dir = image_dir(tmp_path, "2026-01-01")
     write_image(images_dir / "img.png", (100, 100))
     checkpoint = _checkpoint(tmp_path)
     install(monkeypatch, StubPredictor())

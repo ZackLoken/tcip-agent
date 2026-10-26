@@ -24,6 +24,7 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
     from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools import training_tools
     from tcip_mcp.traits import read_trait
     from tests._chain_fixtures import BLOB_BUILDER, training_config
@@ -34,7 +35,7 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
     no_tensorboard(monkeypatch)
 
     images_dir = seed_labeled_images(
-        tmp_path / "ds" / "images" / "train",
+        image_dir(tmp_path / "ds", "train"),
         [Annotation(subject="leaf", geometry=BBox(10, 10, 30, 30))],
         n=2,
         width=128,

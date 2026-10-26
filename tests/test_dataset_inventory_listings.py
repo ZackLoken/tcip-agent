@@ -14,6 +14,8 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import (
     capture_subjects,
+    image_dir,
+    image_root,
     label_key,
     list_dates,
     list_subjects,
@@ -51,7 +53,7 @@ def test_only_published_buckets_are_listed_under_the_date_their_record_states(
         published(
             root,
             f"{model}/{date}",
-            [predicted(root / "images" / date / f"{stem}.png", ["bud"])],
+            [predicted(image_dir(root, date) / f"{stem}.png", ["bud"])],
             scope=scope,
         )
 
@@ -72,9 +74,9 @@ def test_capture_dates_are_the_bucket_directories_not_loose_images(
     lists none.
     """
     root = tmp_path
-    (root / "images" / "2026-02-11").mkdir(parents=True)
-    (root / "images" / "2026-03-02").mkdir()
-    (root / "images" / "flat_capture.JPG").write_bytes(b"x")
+    image_dir(root, "2026-02-11").mkdir(parents=True)
+    image_dir(root, "2026-03-02").mkdir()
+    (image_root(root) / "flat_capture.JPG").write_bytes(b"x")
 
     assert list_dates(root) == ["2026-02-11", "2026-03-02"]
     assert list_dates(tmp_path / "no_such_dataset") == []

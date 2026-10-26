@@ -12,6 +12,7 @@ import pytest
 
 import tcip_store as ts
 from tcip_annotation import json_io
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._producer_fixtures import (
     blank_image,
     box_annotation,
@@ -37,7 +38,11 @@ def test_mcp_save_annotations_empty_writes_the_empty_document_the_route_writes(
     img = blank_image(bound.root)
     label_image(img, [box_annotation(1, 1, 9, 9)], 100, 80)
     res = save_annotations(bound, str(img), annotations=[], actor=None)
-    assert res == {"capture": "undated", "written": [img.stem], "count": 0}
+    assert res == {
+        "capture": UNDATED_BUCKET,
+        "written": [img.stem],
+        "count": 0,
+    }
     assert ts.read(image_label_key(img), default=None) is not None
     assert json_io.read_label_document(image_label_key(img)).annotations == []
 

@@ -155,15 +155,13 @@ def test_a_detector_pass_refuses_an_unstated_conf_by_name(
 
 def _in_model_point(p: Pass, tmp_path: Path) -> dict:
     """Return the operating point the pass's model holds after predicting one 64 px frame."""
-    from PIL import Image
-
     from tcip_mcp.pipelines.operating_point import (
         OPERATING_POINT_ATTRS,
         detector_operating_point_holder,
     )
+    from tests._producer_fixtures import write_image
 
-    Image.new("RGB", (64, 64)).save(tmp_path / "frame.png")
-    p.predict([str(tmp_path / "frame.png")])
+    p.predict([str(write_image(tmp_path / "frame.png", (64, 64)))])
     holder, _path = detector_operating_point_holder(p.predictor.model)
     return {attr: getattr(holder, attr) for attr in OPERATING_POINT_ATTRS}
 
@@ -283,10 +281,10 @@ def test_the_dry_run_reports_the_stated_values_and_refuses_an_unstated_conf(
     Over images and over a raster alike, the dry-run report carries the stated conf and the
     checkpoint's density; a dry run stating no conf refuses, and no bucket is published.
     """
-    from PIL import Image
-
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
+    from tests._producer_fixtures import write_image
     from tests._training_values import RATIONALE
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_CONF,
@@ -297,12 +295,11 @@ def test_the_dry_run_reports_the_stated_values_and_refuses_an_unstated_conf(
 
     checkpoint = project_checkpoint(tmp_path)
     density = _checkpoint(tmp_path).geometry.object_density
-    images_dir = tmp_path / "images" / "undated"
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (64, 64)).save(images_dir / "a.png")
-    raster = tmp_path / "ortho" / "images" / "undated" / "mosaic.tif"
-    raster.parent.mkdir(parents=True)
-    Image.new("RGB", (64, 64)).save(raster)
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+    write_image(images_dir / "a.png", (64, 64))
+    raster = write_image(
+        image_dir(tmp_path / "ortho", UNDATED_BUCKET) / "mosaic.tif", (64, 64)
+    )
 
     over_images = run_inference(
         tmp_path,

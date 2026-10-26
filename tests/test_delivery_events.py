@@ -14,6 +14,7 @@ import pytest
 
 import tcip_store as ts
 from tcip_mcp import delivery
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.delivery import read_delivery_events
 from tcip_mcp.traits import PER_IMAGE_COUNT, STATE_CROSSING_DATES, read_trait
 from tests._audit_fixtures import audit_rows
@@ -43,7 +44,7 @@ def _bucket(project: Path) -> Bucket:
     return published(
         project,
         "m/2026-01-01",
-        [predicted(project / "ds" / "images" / "2026-01-01" / "a.png", [])],
+        [predicted(image_dir(project / "ds", "2026-01-01") / "a.png", [])],
         scope={"subject": COUNT_SUBJECT},
     )
 
@@ -330,11 +331,11 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(
     mapped = tmp_path / "mapped"
     binding._init(mapped)
     dataset_root = binding._dataset(mapped)
-    images_root, plant_csv, preds_by_date = binding._write_scene(dataset_root)
+    plant_csv, preds_by_date = binding._write_scene(dataset_root)
     built = build_plant_mapping(
         mapped,
         name="valley",
-        images_root=str(images_root),
+        dataset_root=str(dataset_root),
         plant_registry=register_plant_registry_for(mapped, [plant_csv]),
         actor=None,
     )

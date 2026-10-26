@@ -17,11 +17,14 @@ import numpy as np
 import pytest
 import tifffile
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
+
 if TYPE_CHECKING:
     from tcip_store import Version
 
-REAL_DJI_DIR = Path(
-    r"C:\Users\breeder\tcip-projects\currant_multispectral_valley-farm-2023\images\2023-05-23"
+REAL_DJI_DIR = image_dir(
+    r"C:\Users\breeder\tcip-projects\currant_multispectral_valley-farm-2023",
+    "2023-05-23",
 )
 requires_real_dji_data = pytest.mark.skipif(
     not REAL_DJI_DIR.is_dir(),
@@ -142,7 +145,7 @@ def _write_band_file_with_identity(
 @pytest.fixture
 def dji_copy(tmp_path: Path) -> Path:
     """Return the real 64-file sample, copied into an isolated tmp dir (never mutated in place)."""
-    dest = tmp_path / "images"
+    dest = image_root(tmp_path)
     dest.mkdir()
     for p in REAL_DJI_DIR.iterdir():
         shutil.copy2(p, dest / p.name)
@@ -334,7 +337,7 @@ def test_tolerance_agrees_with_a_synthetic_buckets_own_gap(
         detect_and_write_band_groups,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     captures = [
         ("17:06:28.931", 43.1969463, -90.0580036),
@@ -366,7 +369,7 @@ def test_a_lone_capture_forms_recording_that_its_identity_had_no_reference(
         detect_and_write_band_groups,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     for band, wavelength in (("Green", 560), ("NIR", 860)):
         _write_band_file_with_identity(
@@ -404,7 +407,7 @@ def test_duplicate_band_identity_is_refused_not_silently_overwritten(
         detect_and_write_band_groups,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     utc, lat, lon = "2023-05-23T17:06:28.931664", 43.196946355, -90.058003633
     _write_band_file_with_identity(
@@ -465,7 +468,7 @@ def test_two_unrelated_captures_sharing_a_group_id_are_refused_not_spliced(
         detect_and_write_band_groups,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     same_gid = "collided-group-id"
     # Capture A: one place/time.
@@ -547,7 +550,7 @@ def test_a_colliding_group_id_with_no_identity_signal_at_all_is_refused(
         detect_and_write_band_groups,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     same_gid = "no-identity-tags-at-all"
     _write_band_file(d / "A_G.tif", same_gid, "Green", 560)
@@ -572,7 +575,7 @@ def test_a_genuine_capture_with_identity_tags_still_forms_normally(
         detect_and_write_band_groups,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     gid = "real-capture"
     bands = [
@@ -616,7 +619,7 @@ def test_no_metadata_and_no_manifest_leaves_files_independent(
         detect_and_write_band_groups,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     arr = np.zeros((4, 4), dtype=np.uint16)
     tifffile.imwrite(str(d / "plain_a.tif"), arr)
@@ -631,7 +634,7 @@ def test_a_lone_file_with_a_group_id_forms_no_group(tmp_path: Path) -> None:
         detect_and_write_band_groups,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     _write_band_file(d / "solo_G.tif", "capSolo", "Green", 560)
 
@@ -704,9 +707,9 @@ def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(
     refusal = bg["refused"][0]
     assert refusal["group_id"] == "capA"
     assert "capA.tif" in refusal["reason"]
-    assert refusal["bucket"] == "undated"
+    assert refusal["bucket"] == UNDATED_BUCKET
     assert {g["stem"] for g in bg["formed"]} == {"capB"}
-    bucket_dir = project / "images" / "undated"
+    bucket_dir = image_dir(project, UNDATED_BUCKET)
     assert not (bucket_dir / "capA.bandgroup").exists()
     assert (bucket_dir / "capB.bandgroup").exists()
 
@@ -723,7 +726,7 @@ def test_explicit_group_id_equal_to_one_of_its_own_members_stem_forms(
     )
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     for name in ("cap.tif", "cap_other.tif"):
         tifffile.imwrite(str(d / name), np.zeros((4, 4), dtype=np.uint16))
@@ -746,7 +749,7 @@ def test_two_explicit_group_ids_folding_to_one_key_form_one_and_refuse_the_other
         detect_and_write_band_groups,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     for name in ("a1.tif", "a2.tif", "b1.tif", "b2.tif"):
         tifffile.imwrite(str(d / name), np.zeros((4, 4), dtype=np.uint16))
@@ -779,7 +782,7 @@ def test_a_group_that_claims_a_members_stem_lets_a_later_group_form_under_it(
     )
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     for name in ("y.tif", "other.tif", "y_band1.tif", "y_band2.tif"):
         tifffile.imwrite(str(d / name), np.zeros((4, 4), dtype=np.uint16))
@@ -807,7 +810,7 @@ def test_explicit_manifest_groups_a_sensor_with_no_embedded_metadata(
         detect_and_write_band_groups,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     for name in ("cap1_band1.tif", "cap1_band2.tif", "cap1_band3.tif"):
         tifffile.imwrite(str(d / name), np.zeros((4, 4), dtype=np.uint16))
@@ -837,7 +840,7 @@ def test_explicit_manifest_drops_a_group_missing_files(tmp_path: Path) -> None:
         groups_from_explicit_mapping,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     tifffile.imwrite(
         str(d / "only_one.tif"), np.zeros((4, 4), dtype=np.uint16)
@@ -859,7 +862,7 @@ def test_manifest_round_trip(tmp_path: Path) -> None:
         write_band_group_manifest,
     )
 
-    d = tmp_path / "images"
+    d = image_root(tmp_path)
     d.mkdir()
     band_a = d / "a.tif"
     band_b = d / "b.tif"
@@ -913,7 +916,7 @@ def test_ingest_images_groups_real_dji_bucket(
     assert manifest["band_groups"]["refused"] == []
 
     (bucket,) = {f["bucket"] for f in manifest["files"]}
-    images_dir = proj / "images" / bucket
+    images_dir = image_dir(proj, bucket)
     assert len(list(images_dir.glob("*.bandgroup"))) == 16
     assert (
         len(list(images_dir.glob("*.TIF"))) == 64
@@ -960,7 +963,7 @@ def test_a_manifest_recorded_mid_detection_is_kept_rather_than_overwritten(
     """
     from tcip_mcp.pipelines.data import band_groups
 
-    images = tmp_path / "images"
+    images = image_root(tmp_path)
     images.mkdir()
     (images / "a.tif").write_bytes(b"a")
     (images / "b.tif").write_bytes(b"b")

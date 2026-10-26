@@ -75,6 +75,7 @@ def test_a_classification_config_launches_with_images_and_csv_only(
 def test_a_classification_config_naming_a_missing_csv_is_refused_by_name(
     tmp_path: Path,
 ) -> None:
+    from tcip_mcp.dataset_layout import image_root
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._chain_fixtures import weights_normalization
     from tests.tiny_trainer_fixtures import (
@@ -82,7 +83,7 @@ def test_a_classification_config_naming_a_missing_csv_is_refused_by_name(
         TINY_TRAINER_FILE,
     )
 
-    images_dir = tmp_path / "images"
+    images_dir = image_root(tmp_path)
     images_dir.mkdir()
     cfg = training_config(
         tmp_path,

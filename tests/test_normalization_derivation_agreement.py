@@ -165,11 +165,11 @@ def test_a_band_of_one_value_has_no_statistics_to_normalize_by(
     Its std is zero, which no normalization divides by, so the refusal comes where the derivation
     produces the record.
     """
-    from PIL import Image
     from pydantic import ValidationError
 
-    path = tmp_path / "flat.png"
-    Image.new("RGB", (8, 8), (20, 40, 60)).save(path)
+    from tests._producer_fixtures import write_image
+
+    path = write_image(tmp_path / "flat.png", (8, 8), (20, 40, 60))
 
     with pytest.raises(ValidationError, match="image_std"):
         band_normalization_stats([path], 3, max_images=1, seed=0)

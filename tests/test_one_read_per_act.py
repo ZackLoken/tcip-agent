@@ -278,21 +278,16 @@ def test_a_reference_document_emptied_before_the_assessment_reads_it_refuses(
 def test_a_semantic_run_reads_each_mask_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from PIL import Image
-
-    from tcip_mcp.dataset_layout import UNDATED_BUCKET
-    from tests._producer_fixtures import painted_frame, train_val
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+    from tests._producer_fixtures import painted_frame, train_val, write_image
 
     images_dir, masks_dir = (
-        tmp_path / "images" / UNDATED_BUCKET,
+        image_dir(tmp_path, UNDATED_BUCKET),
         tmp_path / "masks",
     )
-    images_dir.mkdir(parents=True)
     masks_dir.mkdir()
     for i in range(4):
-        Image.new("RGB", (8, 8), (i * 40, 0, 0)).save(
-            images_dir / f"tree{i}.png"
-        )
+        write_image(images_dir / f"tree{i}.png", (8, 8), (i * 40, 0, 0))
         painted_frame(8, 8, 0, [((2, 2, 6, 6), 1)], mode="L").save(
             masks_dir / f"tree{i}.png"
         )
@@ -374,19 +369,17 @@ def _published_frames(root: Path) -> list[Path]:
 
     Each frame has its predictions published as the bucket ``published``.
     """
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.dataset_layout import UNDATED_BUCKET
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
     from tests._chain_fixtures import published
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import label_image, write_image
 
-    images_dir = root / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
+    images_dir = image_dir(root, UNDATED_BUCKET)
     frames = []
     for name in ("leaf_a", "leaf_b"):
-        frame = images_dir / f"{name}.png"
-        Image.new("RGB", (64, 48), color=(90, 110, 70)).save(frame)
+        frame = write_image(
+            images_dir / f"{name}.png", (64, 48), (90, 110, 70)
+        )
         label_image(
             frame,
             [Annotation(subject="leaf", geometry=BBox(8, 8, 24, 24))],

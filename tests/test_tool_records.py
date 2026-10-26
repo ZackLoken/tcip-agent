@@ -15,6 +15,7 @@ import pytest
 from pydantic import ValidationError
 
 import tcip_store as ts
+from tcip_mcp.dataset_layout import image_dir, image_root
 from tests._producer_fixtures import kept
 
 if TYPE_CHECKING:
@@ -193,7 +194,7 @@ def _proposed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
         _make_image,
     )
 
-    image = tmp_path / "images" / "2026-04-01" / "leaf.jpg"
+    image = image_dir(tmp_path, "2026-04-01") / "leaf.jpg"
     _make_image(image)
     candidate = _candidate(0, 5.0)
     _install_stub(monkeypatch, [candidate])
@@ -321,7 +322,7 @@ def _pushed(
     payload = {
         "project_id": opened.id,
         "tab": "annotate",
-        "image_path": str(opened_project / "images" / "a.jpg"),
+        "image_path": str(image_root(opened_project) / "a.jpg"),
         "image": "a.jpg",
         "img_width": 200,
         "img_height": 100,
