@@ -42,8 +42,9 @@ when the harness takes its MCP server, its tool approvals or its hooks only thro
 configuration (the Antigravity row registers the server through `agy mcp add`, allows every tcip
 tool in agy's settings file, keeping the file's other entries, writes the session hook into the
 workspace's `.agents/hooks.json`, keeping that file's other entries, and writes one always-on rule
-into the workspace's `.agents/rules/`, each write recorded on the launch). The MCP server a launch hands its harness has one producer, `mcp_server`, written as the
-JSON configuration file Claude's row passes, registered through `agy mcp add` for Antigravity's and
+into the workspace's `.agents/rules/`, each write recorded on the launch). The MCP server a
+launch hands its harness has one producer, `mcp_server`, written as the JSON configuration file
+Claude's row passes, registered through `agy mcp add` for Antigravity's and
 rendered as `-c` overrides for Codex's, which also make the server `required`, so Codex's startup
 and resume wait for it before a turn's first tool catalog. The session hook every launch registers
 has one producer, `session_hook_argv`, running `tcip_web.cli session-hook` under the backend's own
@@ -65,8 +66,9 @@ new conversation it is the project as `inspect_project` answers for it, the find
 `load_project_memory` pages them; after a compaction the memory alone; on a resume nothing; with
 where the knowledge documents are served beside each. Antigravity documents no hook after a
 compaction and injects an always-on rule into every turn, so its row's rule names the tools those
-parts come from, to read them again through once the conversation's earlier turns are summarized. The parts are fit to `ORIENTATION_CAP`,
-Claude Code's documented cap: whole while all fit together, otherwise sharing the room so a part
+parts come from, to read them again through once the conversation's earlier turns are
+summarized. The parts are fit to `ORIENTATION_CAP`, Claude Code's documented cap: whole while all
+fit together, otherwise sharing the room so a part
 needing less than an equal share keeps all of it, each cut part stating how many it was cut from
 and a part that does not fit standing as a short fixed statement of it; Codex's hook passes its
 whole context (`additionalContextLimit = 0`). The hook prints it in the shape its harness reads
