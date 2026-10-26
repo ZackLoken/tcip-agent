@@ -45,7 +45,6 @@ describe("index.css component layer", () => {
     // vitest's `css: false` stubs CSS imports, so read from disk.
     const rawCss = readFileSync(resolve(SOURCE_DIRECTORY, "index.css"), "utf8");
 
-    // An explicit candidate list instead of a source scan, so only the component classes emit.
     const compiler = await compile(rawCss, { base: SOURCE_DIRECTORY, onDependency: () => {} });
     const built = compiler.build([
       "tcip-btn",

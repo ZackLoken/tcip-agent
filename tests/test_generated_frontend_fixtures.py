@@ -1,14 +1,8 @@
-"""The browser's delivery-event fixtures are what the platform's own deliveries record and serve.
+"""The browser's fixtures are what the platform's own producers record and serve.
 
-``tools/generate_delivery_fixture.py`` makes real deliveries in scratch projects and writes the
-records ``GET /api/results/delivery-events`` serves for them to
-``frontend/src/test/deliveryEvents.json``; this test regenerates them and holds the checked-in
-file to what a regeneration serves, each value compared but the ones a run mints. The trait
-listings ``tools/generate_trait_fixture.py`` writes, the project fixtures
-``tools/generate_project_fixture.py`` writes, the TensorBoard serving answers
-``tools/generate_tensorboard_fixture.py`` writes, the open answer and state envelope
-``tools/generate_open_fixture.py`` writes and the training routes' answers
-``tools/generate_training_fixture.py`` writes are held the same way, and the scratch
+Each fixture generator's checked-in file is held to what a regeneration serves: the delivery
+events ``tools/generate_delivery_fixture.py`` writes, each value compared but the ones a run
+mints, and the file of each generator :data:`SERVED_FIXTURES` names, value for value. The scratch
 session the generators make their scenes in (``tools/fixture_session.py``) is held to leaving
 nothing behind.
 """
@@ -36,7 +30,8 @@ def _generator(name: str) -> ModuleType:
     return importlib.import_module(f"tools.{name}")
 
 
-GENERATED = _generator("generate_delivery_fixture").GENERATED_PATH
+DELIVERY = _generator("generate_delivery_fixture")
+GENERATED = DELIVERY.GENERATED_PATH
 
 
 PER_RUN = frozenset(
@@ -180,30 +175,30 @@ def test_each_disclosure_normalizes_through_its_own_type() -> None:
         assert "resolved_key" not in normal[name]["plant_mapping"]
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "generate_trait_fixture",
-        "generate_project_fixture",
-        "generate_tensorboard_fixture",
-        "generate_open_fixture",
-        "generate_training_fixture",
-    ],
+SERVED_FIXTURES = (
+    "generate_trait_fixture",
+    "generate_project_fixture",
+    "generate_tensorboard_fixture",
+    "generate_open_fixture",
+    "generate_training_fixture",
 )
+"""The fixture generators whose files hold no value a run mints, compared value for value."""
+
+
+@pytest.mark.parametrize("name", SERVED_FIXTURES)
 def test_the_fixture_is_what_a_regeneration_serves_value_for_value(
     name: str,
 ) -> None:
-    """A trait, project, TensorBoard, open or training fixture is what a regeneration serves.
-
-    Each generator's checked-in file equals what its ``produce`` serves, value for value.
-    """
+    """The generator's checked-in file equals what its ``produce`` serves, value for value."""
     module = _generator(name)
 
     served = module.produce()
 
     assert (
         json.loads(module.GENERATED_PATH.read_text(encoding="utf-8")) == served
-    ), f"{module.GENERATED_PATH} is out of date; run python -m tools.{name}"
+    ), (
+        f"{module.GENERATED_PATH} is out of date; run python -m {module.__name__}"
+    )
 
 
 def test_a_tensorboard_whose_stop_is_unconfirmed_fails_the_production(
@@ -307,11 +302,10 @@ def test_the_delivery_fixture_is_what_a_regeneration_serves() -> None:
     regeneration of the scenes produces.
     """
     pytest.importorskip("torch")
-    produced = _generator("generate_delivery_fixture").produce()
+    produced = DELIVERY.produce()
     checked = json.loads(GENERATED.read_text(encoding="utf-8"))
     assert _normalized(checked) == _normalized(produced), (
-        "packages/tcip-web/frontend/src/test/deliveryEvents.json is out of date; "
-        "run python -m tools.generate_delivery_fixture"
+        f"{GENERATED} is out of date; run python -m {DELIVERY.__name__}"
     )
 
 

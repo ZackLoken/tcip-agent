@@ -220,44 +220,19 @@ class PanelEvent(BaseModel):
     project_id: str
 
 
-def _static_dir_candidates() -> list[Path]:
-    """Return the built frontend's install-layout candidates, in preference order.
+STATIC_DIR = Path(__file__).parent / "static"
+"""The frontend build's output, inside the package in a checkout, an editable install or a wheel."""
 
-    The packaged copy inside an installed wheel, then the src-layout checkout.
-    """
-    return [
-        Path(__file__).parent / "static",
-        Path(__file__).parent.parent.parent / "static",
-    ]
+ASSETS_DIR = STATIC_DIR / "assets"
+"""The bundle's assets, which its page references absolutely under Vite's default base ``/``."""
 
-
-def _find_static_dir() -> Path:
-    """Locate the built frontend across install layouts.
-
-    Prefers a copy packaged inside the installed package (``tcip_web/static/``) and falls back
-    to the src-layout checkout (``packages/tcip-web/static/``). Returns the src-layout path if
-    neither is built yet.
-    """
-    candidates = _static_dir_candidates()
-    for c in candidates:
-        if (c / "index.html").exists():
-            return c
-    return candidates[-1]
+if ASSETS_DIR.exists():
+    app.mount(f"/{ASSETS_DIR.name}", StaticFiles(directory=str(ASSETS_DIR)))
 
 
-STATIC_DIR = _find_static_dir()
-if STATIC_DIR.exists():
-    # The built frontend references /assets/... absolutely, under Vite's default base "/".
-    assets_dir = STATIC_DIR / "assets"
-    if assets_dir.exists():
-        app.mount(
-            "/assets", StaticFiles(directory=str(assets_dir)), name="assets"
-        )
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
-
-# Served by this app, so the generated dev proxy never claims them and Vite keeps its own root.
 FRONTEND_SERVING_PATHS = frozenset({"/", "/health"})
+"""The paths this app serves for itself, the built frontend's page and the health probe; neither
+is an API route."""
 
 
 @app.get("/health")
@@ -268,7 +243,7 @@ def health() -> dict:
 
 @app.get("/")
 def index() -> Response:
-    """Serve the built frontend's ``index.html``, or a 503 naming how to build it when absent."""
+    """Serve the built frontend's ``index.html``, or a 503 saying the bundle is missing."""
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
         return FileResponse(str(index_path))
@@ -277,8 +252,8 @@ def index() -> Response:
         content={
             "error": "GUI not built",
             "detail": (
-                "The frontend bundle is missing. Build it, then reload: "
-                "cd packages/tcip-web/frontend && npm install && npm run build"
+                "This installation carries no frontend bundle; the repository "
+                "README's Setup section states how the bundle is built and installed."
             ),
             "api_docs": "/docs",
         },

@@ -12,7 +12,7 @@ import tseslint from "typescript-eslint";
 import tsconfig from "./tsconfig.json" with { type: "json" };
 
 export default tseslint.config(
-  { ignores: ["node_modules", "dist", "coverage", "src/api/types.generated.ts"] },
+  { ignores: ["coverage"] },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   importPlugin.flatConfigs.recommended,
@@ -23,8 +23,7 @@ export default tseslint.config(
   {
     settings: { react: { version: "detect" } },
     rules: {
-      // tsc resolves every import (typecheck runs beside lint), so the import plugin's own
-      // resolver, which does not read tsconfig paths, is not asked to.
+      // The import plugin's resolver does not read tsconfig paths; tsc resolves every import.
       "import/no-unresolved": "off",
     },
   },
@@ -42,13 +41,11 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
-      // Allow intentionally-unused args/vars prefixed with underscore.
       "@typescript-eslint/no-unused-vars": [
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "none" },
       ],
-      // ESLint's type service and tsc disagree on four assertions tsc requires, so the
-      // typecheck gate, not this rule, judges an assertion.
+      // tsc requires assertions this rule reports as unnecessary.
       "@typescript-eslint/no-unnecessary-type-assertion": "off",
       "import/order": [
         "error",
@@ -61,7 +58,6 @@ export default tseslint.config(
     },
   },
   {
-    // Node-side config files and scripts: the untyped rules only, with Node's globals.
     files: ["*.config.{ts,js}", "eslint.config.js", "scripts/**/*.mjs"],
     ...tseslint.configs.disableTypeChecked,
     languageOptions: { globals: globals.node },

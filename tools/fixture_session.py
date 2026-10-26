@@ -17,6 +17,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from tests import formatted, write_generated
 from tests._web_fixtures import backend_session
 
 if TYPE_CHECKING:
@@ -136,12 +137,5 @@ def normalized(
 
 
 def write_fixture(path: Path, content: JsonValue) -> int:
-    """Write ``content`` to ``path`` as indented JSON with LF line endings and say so.
-
-    Returns the exit code 0.
-    """
-    path.write_text(
-        json.dumps(content, indent=2) + "\n", encoding="utf-8", newline="\n"
-    )
-    print(f"wrote {path}")
-    return 0
+    """Write ``content`` to ``path`` as JSON the frontend's Prettier formats; return exit code 0."""
+    return write_generated(path, formatted(json.dumps(content), path))

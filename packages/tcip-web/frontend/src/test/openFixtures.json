@@ -1,19 +1,12 @@
 {
   "opened": {
-    "project": {
-      "id": "<valley id>",
-      "path": "<workspace>/valley"
-    },
+    "project": { "id": "<valley id>", "path": "<workspace>/valley" },
     "display_name": "valley"
   },
   "envelope": {
     "state": {
       "active_tab": "annotate",
-      "view": {
-        "scale": 1.0,
-        "offset_x": 0.0,
-        "offset_y": 0.0
-      },
+      "view": { "scale": 1.0, "offset_x": 0.0, "offset_y": 0.0 },
       "mode": "box",
       "active_subject": null,
       "dataset": {
@@ -28,10 +21,7 @@
     },
     "version": 0,
     "type": "state_snapshot",
-    "project": {
-      "id": "<valley id>",
-      "path": "<workspace>/valley"
-    },
+    "project": { "id": "<valley id>", "path": "<workspace>/valley" },
     "epoch": "<epoch>"
   }
 }

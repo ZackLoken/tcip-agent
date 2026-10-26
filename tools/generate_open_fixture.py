@@ -4,7 +4,7 @@ In a scratch session (``tools/fixture_session.py``), a project created through
 ``tests._web_fixtures.named_project`` is opened through the picker's route; the route's answer
 (``opened``) and the envelope ``/ws/state`` then sends on connect
 (``tcip_web.app.state_snapshot_message``, ``envelope``) are written, normalized
-(``fixture_session.normalized``), to ``frontend/src/test/openFixtures.json``.
+(``fixture_session.normalized``), to :data:`GENERATED_PATH`.
 
     python -m tools.generate_open_fixture
 """

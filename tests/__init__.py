@@ -1,8 +1,9 @@
 """The test suite and the helpers its tests share.
 
 It carries the root of the repository its tests read files from, the launcher of a child test
-session, the browser's package and its sources, the names the person rule is tested on, and the
-reader of the CSV files its tests deliver.
+session, the browser's package, its sources, its formatter, the writer of its generated files and
+its Node scripts with their runner, the names the person rule is tested on, and the reader of the
+CSV files its tests deliver.
 """
 
 import csv
@@ -65,6 +66,48 @@ FRONTEND_SRC = (
     ][0]
 )
 """The browser's sources, the directory the frontend's ``tsconfig.json`` includes first."""
+
+PRETTIER = FRONTEND / "node_modules" / "prettier" / "bin" / "prettier.cjs"
+"""The frontend's installed Prettier."""
+SCRIPTS = FRONTEND / "scripts"
+"""The frontend's Node scripts, each printing one JSON object (:func:`printed_json`)."""
+READS_SCRIPT = SCRIPTS / "routeReads.mjs"
+"""The script printing the frontend's non-test sources and what they read and declare."""
+VITE_CONFIG = SCRIPTS / "viteConfig.mjs"
+"""The script printing the frontend's Vite configuration as Vite resolves it."""
+
+
+def printed_json(script: Path, argument: Path) -> dict:
+    """Return the JSON object the frontend script ``script`` prints over ``argument``."""
+    printed = subprocess.run(
+        ["node", str(script), str(argument)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(printed.stdout)
+
+
+def formatted(text: str, path: Path) -> str:
+    """Return ``text`` as the frontend's installed Prettier formats a file at ``path``.
+
+    Prettier reads the frontend's own configuration for ``path``.
+    """
+    return subprocess.run(
+        ["node", str(PRETTIER), "--stdin-filepath", str(path)],
+        input=text,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def write_generated(path: Path, text: str) -> int:
+    """Write ``text`` to ``path`` with LF line endings and say so; return the exit code 0."""
+    path.write_text(text, encoding="utf-8", newline="\n")
+    print(f"wrote {path}")
+    return 0
+
 
 _PERSON_NAMES = json.loads(
     (FRONTEND_SRC / "test" / "personNames.json").read_text(encoding="utf-8")

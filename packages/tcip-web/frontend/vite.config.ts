@@ -12,17 +12,12 @@ export default defineConfig({
   resolve: { tsconfigPaths: true },
   server: {
     host: LOOPBACK_HOST,
-    port: 5173,
     proxy: Object.fromEntries(
       DEV_PROXY.map(({ path, ws }) => [path, { target: BACKEND, changeOrigin: true, ws }]),
     ),
   },
   build: {
-    // Same path is restated in the repo root .gitignore and this dir's .prettierignore.
-    outDir: "../static",
+    outDir: "../src/tcip_web/static",
     emptyOutDir: true,
-    // No sourcemaps in the shipped bundle: keeps static/ (and any wheel) lean. Use
-    // `npm run dev` (HMR + sourcemaps) for debugging instead.
-    sourcemap: false,
   },
 });

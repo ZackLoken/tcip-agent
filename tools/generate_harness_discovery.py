@@ -5,7 +5,7 @@ document under `.claude/skills/` and `.agents/skills/`, the generated block of `
 the `WebFetch(domain:...)` grants of Claude Code's row settings file from the hosts the
 `cv-research` document's source list names.
 
-    python tools/generate_harness_discovery.py
+    python -m tools.generate_harness_discovery
 """
 
 from __future__ import annotations
@@ -15,12 +15,13 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from tests import REPO_ROOT, write_generated
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from tcip_mcp.knowledge import DocumentInfo
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 CLAUDE_SKILLS = Path(".claude") / "skills"
 AGENTS_SKILLS = Path(".agents") / "skills"
 AGENTS_MD = Path("AGENTS.md")
@@ -31,8 +32,7 @@ AGENTS_MD_PATH = REPO_ROOT / AGENTS_MD
 AGENTS_BLOCK_START = "<!-- tcip:harness-discovery:start -->"
 AGENTS_BLOCK_END = "<!-- tcip:harness-discovery:end -->"
 
-# Codex reads up to 32 KiB combined across every AGENTS.md it concatenates; this generator owns
-# one block in one file, so it is held to half that shared budget rather than the whole thing.
+# Half the 32 KiB Codex reads across every AGENTS.md it concatenates, this block owning one file.
 AGENTS_BLOCK_MAX_BYTES = 16 * 1024
 
 
@@ -71,10 +71,7 @@ def render_skill(name: str, description: str, document_path: Path) -> str:
 def render_agents_skill(
     name: str, description: str, document_path: Path
 ) -> str:
-    """Return the generated Codex/Antigravity SKILL.md text for one knowledge document.
-
-    It is phrased for a harness with its own file reader rather than a Claude tool.
-    """
+    """Return the generated Codex/Antigravity SKILL.md text for one knowledge document."""
     return _render_skill_md(
         name,
         description,
@@ -160,10 +157,9 @@ def _write_skill_tree(
         skill_dir = skills_dir / document.name
         skill_dir.mkdir(parents=True, exist_ok=True)
         skill_path = skill_dir / "SKILL.md"
-        skill_path.write_text(
+        write_generated(
+            skill_path,
             render(document.name, document.description, document.path),
-            encoding="utf-8",
-            newline="\n",
         )
         written.append(skill_path)
     return written
@@ -208,7 +204,7 @@ def write_agents_block(
         raise ValueError(
             f"{path}: carries a start marker or an end marker but not both, malformed"
         )
-    path.write_text(new_text, encoding="utf-8", newline="\n")
+    write_generated(path, new_text)
     return path
 
 
@@ -276,17 +272,14 @@ def generate(root: Path = REPO_ROOT) -> list[Path]:
     written.append(write_agents_block(documents, root / AGENTS_MD))
     settings = root / CLAUDE_SETTINGS.relative_to(REPO_ROOT)
     settings.parent.mkdir(parents=True, exist_ok=True)
-    settings.write_text(
-        expected_claude_settings(), encoding="utf-8", newline="\n"
-    )
+    write_generated(settings, expected_claude_settings())
     written.append(settings)
     return written
 
 
 def main() -> int:
-    """Generate every file, print each path written, and return 0."""
-    for path in generate():
-        print(f"wrote {path.relative_to(REPO_ROOT)}")
+    """Generate every file and return 0."""
+    generate()
     return 0
 
 

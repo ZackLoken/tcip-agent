@@ -32,26 +32,19 @@ commands a breeder or an operator runs against a project are documented in `READ
   requested gate runs in the foreground, stopping at the first failure with its exit code.
 - `generate_frontend_routes.py` - generates the browser's route-path module, over FastAPI's
   effective route contexts whose names the frontend's non-test sources read as `ROUTES.<name>` (the
-  reads `frontend/scripts/routeReads.mjs` finds through the TypeScript compiler, run under `node`
+  reads `tests.READS_SCRIPT` finds through the TypeScript compiler, run under `node`
   over the frontend's installed packages; a read naming no registered route is refused), and the
   dev server's proxy config over every registered route, both formatted by the frontend's
   installed Prettier, so the frontend references a path by name instead of restating the string a
   second time.
-- `generate_frontend_types.py` - renders `frontend/src/api/types.generated.ts` from the pydantic
-  models that declare the backend's response shapes and the GUI's tab/mode vocabulary
-  (`tcip_web.state.GuiVocabulary`), so the browser's types are a projection of the backend's rather
-  than hand-transcribed. Run after changing a declared model;
+- `generate_frontend_types.py` - renders the browser's types module at its `GENERATED_PATH` from
+  the pydantic models its `declared_models` lists, so the browser's types are a projection of the
+  backend's rather than hand-transcribed. Run after changing a declared model;
   `tests/test_generated_frontend_types.py` fails when the checked-in module is stale.
-- `generate_trait_fixture.py` - writes `frontend/src/test/traitListings.json`, the trait listings
-  the frontend tests read, by proposing and confirming traits in a scratch project and serving them
-  through the traits route. Run after changing the trait record's shape.
-- `generate_delivery_fixture.py` - writes `frontend/src/test/deliveryEvents.json`, the delivery
-  events the frontend tests read, by making real deliveries in scratch projects and serving them
-  through the delivery-events route; `tests/test_generated_frontend_fixtures.py` holds the file to
-  what a regeneration serves. Run after changing a delivery's record or that route.
-- `generate_tensorboard_fixture.py` - writes `frontend/src/test/tensorboardServings.json`, the
-  answers the TensorBoard launch route gives for two runs in a scratch project, each served by a
-  real TensorBoard, its port written as 0. Run after changing that answer or that route.
+- `generate_*_fixture.py` - each writes to its `GENERATED_PATH` what the platform's own routes
+  serve for scenes it makes in a scratch session (`fixture_session.py`), the fixtures the frontend
+  tests read; its module docstring names the scenes. Run after changing what those routes serve;
+  `tests/test_generated_frontend_fixtures.py` holds each file to what a regeneration serves.
 - `generate_harness_discovery.py` - renders the thin `.claude/skills/<name>/SKILL.md` and
   `.agents/skills/<name>/SKILL.md` files, plus the generated block in `AGENTS.md`, from the
   canonical knowledge documents under `packages/tcip-mcp/src/tcip_mcp/knowledge/`. Run after adding,

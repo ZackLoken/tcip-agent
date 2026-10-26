@@ -1,6 +1,3 @@
-# Run with `docker run --network host -e TCIP_WORKSPACE=<workspace>`: the backend refuses to start
-# without a workspace, binds the host's loopback, and no port is published. A published port (`-p`) cannot serve this image either: it would arrive through a bridged, non-loopback address, which the backend's trust boundary refuses. The GUI's in-app agent terminal needs an installed agent harness, which this image does not carry.
-
 FROM node:22.23 AS frontend-builder
 WORKDIR /app
 COPY packages/tcip-web/frontend/ packages/tcip-web/frontend/
@@ -23,8 +20,8 @@ COPY packages/tcip-annotation/ packages/tcip-annotation/
 COPY packages/tcip-mcp/ packages/tcip-mcp/
 COPY packages/tcip-web/ packages/tcip-web/
 
-# The built bundle lands inside the package before the install below, so the wheel carries it.
-COPY --from=frontend-builder /app/packages/tcip-web/static/ packages/tcip-web/src/tcip_web/static/
+# The builder's package source holds the built bundle alone; the install below carries it.
+COPY --from=frontend-builder /app/packages/tcip-web/src/ packages/tcip-web/src/
 
 RUN pip install --no-cache-dir \
     packages/tcip-store \

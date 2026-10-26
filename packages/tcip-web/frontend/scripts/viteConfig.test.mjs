@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { devServerProxy } from "./devServerProxy.mjs";
+import { servedConfig } from "./viteConfig.mjs";
 
 const roots = [];
 
@@ -12,9 +12,9 @@ afterEach(() => {
   roots.splice(0).forEach((root) => rmSync(root, { recursive: true }));
 });
 
-describe("the dev server's proxy", () => {
-  it("is the proxy a TypeScript configuration builds from a module it imports", async () => {
-    const root = mkdtempSync(join(tmpdir(), "dev-server-proxy-"));
+describe("the served Vite configuration", () => {
+  it("carries the proxy a TypeScript configuration builds from a module it imports", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vite-config-"));
     roots.push(root);
     writeFileSync(
       join(root, "entries.ts"),
@@ -31,7 +31,7 @@ describe("the dev server's proxy", () => {
         "  },\n" +
         "};\n",
     );
-    expect(await devServerProxy(root)).toEqual({
+    expect((await servedConfig(root)).server.proxy).toEqual({
       "/orchard": { target: "http://127.0.0.1:1", ws: true },
     });
   });

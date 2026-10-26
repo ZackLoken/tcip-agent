@@ -1,12 +1,9 @@
 """The browser's server-declared types are a projection of the models that declare them.
 
-``tools/generate_frontend_types.py`` renders ``frontend/src/api/types.generated.ts`` from
-``routes/images.py``, ``routes/training.py``, ``routes/terminal.py`` and
-``tcip_web.state.GuiVocabulary`` (the declared pydantic models), the server's ``Literal``
-vocabularies the browser names, plus a handful of runtime constants from ``routes/images.py``,
-``tcip_mcp.web_client`` and ``tcip_web.jobstore``. These tests hold that projection to what the
-models produce, and check that no other frontend module declares an interface with a generated
-field set or a bare union alias matching a generated vocabulary.
+``tools/generate_frontend_types.py`` renders the module at its ``GENERATED_PATH`` from the models
+its ``declared_models`` lists and the constants and vocabularies it names. These tests hold that
+projection to what the models produce, and check that no other frontend module declares an
+interface with a generated field set or a bare union alias matching a generated vocabulary.
 """
 
 from __future__ import annotations
@@ -54,8 +51,7 @@ def test_the_generated_types_module_is_what_the_declared_models_produce() -> (
     """The checked-in types module equals what the generator renders from the declared models."""
     generated = _generator().render()
     assert GENERATED.read_text(encoding="utf-8") == generated, (
-        "packages/tcip-web/frontend/src/api/types.generated.ts is out of date; "
-        "run python -m tools.generate_frontend_types"
+        f"{GENERATED} is out of date; run python -m {_generator().__name__}"
     )
 
 

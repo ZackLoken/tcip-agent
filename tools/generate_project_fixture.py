@@ -7,7 +7,7 @@ In a scratch session (``tools/fixture_session.py``), two projects are created th
 for them, the answer ``POST /api/projects/invariances`` gives for one correction of the second,
 and that route's refusal of a block whose rotation is out of range are written, the listed
 projects ordered by display name and normalized (``fixture_session.normalized``), to
-``frontend/src/test/projectFixtures.json``.
+:data:`GENERATED_PATH`.
 
     python -m tools.generate_project_fixture
 """

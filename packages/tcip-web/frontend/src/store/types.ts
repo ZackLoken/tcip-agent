@@ -1,6 +1,6 @@
 /**
- * The GUI state's shape is generated from the backend's own model (types.generated.ts). The
- * label schema below mirrors routes/annotate.py.
+ * The GUI state's shape is generated from the backend's own model and imported below. The label
+ * schema below mirrors routes/annotate.py.
  */
 
 import {
@@ -27,9 +27,7 @@ export interface Annotation extends CarriedFields {
   // Every ring of a polygon, pixel: an occlusion-split instance_seg shape is genuinely more than
   // one region, and both load routes (annotation_dict in annotate.py) always send them all.
   rings?: [number, number][][] | null;
-  // A single labeled location, pixel: a keypoint or landmark. Geometry is a union
-  // server-side (tcip_annotation.state.Annotation), so this never arrives alongside bbox/rings, and
-  // a point carries no extent: never derive a box from it (see bbox_of, which refuses one).
+  // A single labeled location, pixel, a keypoint or landmark; it never arrives beside bbox or rings.
   point?: [number, number] | null;
   attributes: Record<string, string>;
   score?: number | null;
@@ -92,8 +90,8 @@ export interface PolygonShape extends CanvasShape {
   rings: [number, number][][];
 }
 
-/** A point on the canvas: one labeled location, the whole annotation. No extent, so no derived
- *  box and no vertices; it is placed, moved and deleted as a single coordinate. */
+/** A point on the canvas: one labeled location, the whole annotation, placed, moved and deleted
+ *  as a single coordinate. */
 export interface PointShape extends CanvasShape {
   x: number;
   y: number;

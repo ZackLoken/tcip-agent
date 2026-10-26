@@ -1,10 +1,10 @@
 """The browser and the backend meet on one declaration of the API's paths.
 
 The FastAPI app registers the paths; ``tools/generate_frontend_routes.py`` projects the ones the
-frontend's sources read into ``frontend/src/api/routes.ts``. These tests hold that projection to
-the app's registered routes and the sources' reads, check that the frontend writes no backend
-path of its own beside it, and check that each path the browser asks for is one the dev server
-forwards, as Vite loads its proxy from ``vite.config.ts``.
+frontend's sources read into the module at its ``GENERATED_PATH``. These tests hold that
+projection to the app's registered routes and the sources' reads, check that the frontend writes
+no backend path of its own beside it, and check that each path the browser asks for is one the dev
+server forwards, as Vite resolves its proxy from ``vite.config.ts``.
 """
 
 from __future__ import annotations
@@ -17,12 +17,11 @@ from fastapi import APIRouter, FastAPI
 from tcip_mcp.web_client import LOOPBACK_HOST, Panel
 from tcip_web.__main__ import DEFAULT_PORT
 from tcip_web.app import app
-from tests import FRONTEND
+from tests import FRONTEND, VITE_CONFIG, printed_json
 from tests._route_walk import route_generator as _generator
 
 GENERATED = _generator().GENERATED_PATH
 PROXY_GENERATED = _generator().PROXY_GENERATED_PATH
-PROXY_SCRIPT = _generator().READS_SCRIPT.with_name("devServerProxy.mjs")
 
 
 @pytest.fixture(scope="module")
@@ -33,14 +32,15 @@ def frontend() -> dict:
 
 @pytest.fixture(scope="module")
 def dev_server_proxy() -> dict:
-    """Return the dev server's proxy rules, as Vite loads them from the real ``vite.config.ts``.
+    """Return the dev server's proxy rules, as Vite resolves them from the real ``vite.config.ts``.
 
-    They are what :data:`PROXY_SCRIPT` prints over the frontend directory, loaded with no
-    ``TCIP_WEB_BACKEND`` override in its environment, so they forward to the default backend.
+    They are the ``proxy`` :data:`~tests.VITE_CONFIG` prints over the frontend directory, resolved
+    with no ``TCIP_WEB_BACKEND`` override in its environment, so they forward to the default
+    backend.
     """
     with pytest.MonkeyPatch.context() as patch:
         patch.delenv("TCIP_WEB_BACKEND", raising=False)
-        return _generator().printed_json(PROXY_SCRIPT, FRONTEND)
+        return printed_json(VITE_CONFIG, FRONTEND)["proxy"]
 
 
 def test_the_generated_path_module_is_what_the_registered_routes_produce(
@@ -49,8 +49,7 @@ def test_the_generated_path_module_is_what_the_registered_routes_produce(
     """The checked-in path module equals what the generator renders over the sources' reads."""
     generated = _generator().render(app, frontend["reads"])
     assert GENERATED.read_text(encoding="utf-8") == generated, (
-        "packages/tcip-web/frontend/src/api/routes.ts is out of date; "
-        "run python -m tools.generate_frontend_routes"
+        f"{GENERATED} is out of date; run python -m {_generator().__name__}"
     )
 
 
@@ -74,8 +73,7 @@ def test_the_generated_proxy_module_is_what_the_registered_routes_produce() -> (
     """The checked-in dev-proxy module equals what the generator renders from the app's routes."""
     generated = _generator().render_proxy(app)
     assert PROXY_GENERATED.read_text(encoding="utf-8") == generated, (
-        "packages/tcip-web/frontend/src/api/devProxy.generated.ts is out of date; "
-        "run python -m tools.generate_frontend_routes"
+        f"{PROXY_GENERATED} is out of date; run python -m {_generator().__name__}"
     )
 
 
@@ -136,11 +134,11 @@ def test_every_path_the_browser_asks_for_is_forwarded_by_the_dev_server(
 ) -> None:
     """The paths the frontend reads all fall under a prefix the dev server forwards.
 
-    The prefixes are the dev server's proxy rules as Vite loads them, and the routes read are
+    The prefixes are the dev server's proxy rules as Vite resolves them, and the routes read are
     the generator's own read of the frontend's sources.
     """
     prefixes = tuple(dev_server_proxy)
-    assert prefixes, "Vite loads no proxy rule from vite.config.ts"
+    assert prefixes, "Vite resolves no proxy rule from vite.config.ts"
 
     read = _generator().read_routes(app, frontend["reads"])
     assert read, (
