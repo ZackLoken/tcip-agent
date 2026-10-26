@@ -183,10 +183,11 @@ def formatted(text: str, path: Path) -> str:
     """
     return subprocess.run(
         ["node", str(PRETTIER), "--stdin-filepath", str(path)],
-        input=text.encode("utf-8"),
+        input=text,
         capture_output=True,
+        text=True,
         check=True,
-    ).stdout.decode("utf-8")
+    ).stdout
 
 
 def render(app: FastAPI, names: Collection[str]) -> str:

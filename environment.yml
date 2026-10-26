@@ -24,3 +24,5 @@ dependencies:
       - -e ./packages/tcip-annotation
       - -e ./packages/tcip-mcp[dev,hpo]
       - -e ./packages/tcip-web
+variables:
+  PYTHONUTF8: "1"

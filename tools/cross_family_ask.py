@@ -12,8 +12,8 @@ Antigravity in headless mode auto-denies shell commands, so a prompt sent to it 
 answerable by file reads alone, with any material to review given as files inside the
 working tree it is pointed at.
 
-Runs on the standard library alone, so it needs no project environment and is invoked as
-``python tools/cross_family_ask.py``.
+Runs on the standard library alone, in a Python whose UTF-8 mode is on (the project environment
+sets ``PYTHONUTF8``), and is invoked as ``python tools/cross_family_ask.py``.
 """
 
 from __future__ import annotations
@@ -205,7 +205,7 @@ def as_text(stream: object) -> str:
     if stream is None:
         return ""
     if isinstance(stream, bytes):
-        return stream.decode("utf-8", errors="replace")
+        return stream.decode(errors="replace")
     return str(stream)
 
 
@@ -512,8 +512,6 @@ def extract_response(
                         return reply, "result_field"
                     empty_string_answer = True
                 else:
-                    # A non-string answer value is an unknown shape: dump it whole rather
-                    # than misread it as empty.
                     non_string_answer = True
             if drafted:
                 return drafted, "denied_write_draft"
@@ -613,9 +611,6 @@ def run_one(
             input=body if family in STDIN_FAMILIES else None,
             capture_output=True,
             text=True,
-            # Never the console codepage: cp1252 stdin kills a run on the first
-            # unencodable character.
-            encoding="utf-8",
             errors="replace",
             timeout=timeout,
             cwd=str(cwd),
@@ -629,8 +624,7 @@ def run_one(
         timed_out = False
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout or ""
-        # exc.stderr can be raw bytes even under text=True; normalize before concatenating the
-        # str suffix below, rather than risking a bytes + str TypeError on this rare path.
+        # A timeout's captured output can be bytes whatever text=True says.
         stderr = as_text(exc.stderr) + f"\nTIMEOUT after {timeout}s"
         code = -1
         timed_out = True
@@ -643,8 +637,6 @@ def run_one(
         )
 
     duration = (datetime.datetime.now() - clock).total_seconds()
-    # A harness that produces nothing, or that a timeout captured as raw bytes, is an outcome to
-    # record rather than a crash: the run's own transcript is what makes the comparison auditable.
     stdout, stderr = as_text(stdout), as_text(stderr)
     (run_dir / "stdout.txt").write_text(stdout, encoding="utf-8")
     (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
@@ -860,8 +852,6 @@ def main() -> int:
                 try:
                     results.append(future.result())
                 except Exception as exc:  # noqa: BLE001
-                    # One family failing must not discard the families that answered: their
-                    # transcripts are the artifact, and a lost run is unrecoverable.
                     results.append(failed_run_meta(family, exc))
 
     results.sort(key=lambda r: r["family"])

@@ -130,8 +130,6 @@ def test_one_familys_failure_leaves_the_others_results_intact(
     monkeypatch.setattr(
         cross_family_ask, "harness_version", lambda *a, **k: "stub-version"
     )
-    # Keep the test hermetic: without this, main()'s harness-on-PATH check exits before the
-    # collection loop whenever the real codex/agy CLIs are absent (the CI environment).
     monkeypatch.setattr(
         cross_family_ask.shutil, "which", lambda *a, **k: "/stub/harness"
     )
@@ -715,9 +713,7 @@ def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_c
     echo_child = [
         sys.executable,
         "-c",
-        "import sys; sys.stdin.reconfigure(encoding='utf-8'); "
-        "sys.stdout.reconfigure(encoding='utf-8'); "
-        "sys.stdout.write(sys.stdin.read())",
+        "import sys; sys.stdout.write(sys.stdin.read())",
     ]
     monkeypatch.setattr(
         cross_family_ask, "harness_version", lambda *a, **k: "stub-version"

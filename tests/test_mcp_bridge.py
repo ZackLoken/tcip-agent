@@ -22,21 +22,20 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-def _send_jsonrpc(proc: subprocess.Popen[bytes], obj: dict) -> None:
+def _send_jsonrpc(proc: subprocess.Popen[str], obj: dict) -> None:
     """Send a JSON-RPC message as newline-delimited JSON."""
-    line = json.dumps(obj) + "\n"
-    proc.stdin.write(line.encode("utf-8"))
+    proc.stdin.write(json.dumps(obj) + "\n")
     proc.stdin.flush()
 
 
-def _reader_thread(stdout: IO[bytes], queue: Queue) -> None:
+def _reader_thread(stdout: IO[str], queue: Queue) -> None:
     """Read newline-delimited JSON-RPC messages into ``queue``, then ``None`` at EOF."""
     while True:
         line = stdout.readline()
         if not line:
             queue.put(None)  # EOF
             return
-        line_str = line.decode("utf-8", errors="replace").strip()
+        line_str = line.strip()
         if not line_str:
             continue
         try:
@@ -76,6 +75,8 @@ class TestMcpBridge:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            text=True,
+            errors="replace",
             env=env,
             cwd=str(REPO_ROOT),
         )
