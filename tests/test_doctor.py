@@ -29,7 +29,7 @@ from tests._web_fixtures import new_project
 if TYPE_CHECKING:
     from tcip_annotation.json_io import LabelDocument
     from tcip_mcp.workspace import BoundProject
-    from tcip_store import Key
+    from tcip_store import Key, ReadDefault, Versioned
 
 
 def _answered(bound: BoundProject) -> list[tuple[str, str]]:
@@ -606,49 +606,131 @@ def test_doctor_reports_a_trait_record_holding_no_revision_without_aborting(
     assert traits.read_trait("leaf", root).latest.confirmed
 
 
+def _reviewed_bucket(root: Path, stems: tuple[str, ...]) -> str:
+    """Publish one proposal bucket over a new image of each of ``stems`` and review each image.
+
+    The images lie under capture ``2026-03-04`` of ``root``; the bucket holds one ``bud`` box per
+    image, its documents encoded as the proposal door encodes them, and a save of each image
+    rejecting that box writes the image's verdict shard. Returns the bucket's name.
+    """
+    from tcip_mcp.buckets import Document, Proposed, publish, source_root
+    from tcip_mcp.dataset_layout import Gestures, save_label_document
+    from tcip_mcp.pipelines.data.selection import ClassScope
+
+    images = [image_dir(root, "2026-03-04") / f"{s}.JPG" for s in stems]
+    for image in images:
+        Image.new("RGB", (32, 32)).save(image)
+    box = Annotation(
+        subject="bud", geometry=BBox(1, 1, 9, 9), score=0.9, created_by="agent"
+    )
+    name = publish(
+        root,
+        source_root(images),
+        "proposals",
+        [
+            Document(str(i), json_io.document_payload([box], 32, 32))
+            for i in images
+        ],
+        producer=Proposed(proposed_by="agent"),
+        scope=ClassScope(),
+        execution=None,
+        raster_path=None,
+        raster_identity=None,
+        assessment_id=None,
+        actor=None,
+    ).name
+    for image in images:
+        save_label_document(
+            root,
+            image_label_key(image),
+            [],
+            width=32,
+            height=32,
+            author="user:breeder",
+            actor=None,
+            gestures=Gestures(bucket=name, reject=frozenset({0})),
+        )
+    return name
+
+
+def _replace_documents(
+    root: Path, name: str, documents: dict[str, str] | str
+) -> None:
+    """Replace the ``documents`` of the stored record of bucket ``name`` under ``root``."""
+    import tcip_store as ts
+    from tcip_mcp.dataset_layout import bucket_key
+
+    record = ts.read(bucket_key(root, name))
+    assert isinstance(record, dict)
+    ts.replace(bucket_key(root, name), record | {"documents": documents})
+
+
+def test_a_diagnosis_reads_a_bucket_reviewed_on_two_images_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A diagnosis reads the record of a bucket with two verdict shards once, at the store."""
+    from tcip_mcp.dataset_layout import PREDICTION_BUCKETS
+    from tcip_store.sqlite_backend import SqliteBackend
+
+    root = _layout_project(tmp_path, "2026-03-04")
+    name = _reviewed_bucket(root, ("IMG_A", "IMG_B"))
+    reads: list[tuple[str, ...]] = []
+    real_read = SqliteBackend.read_versioned
+
+    def counted(
+        self: SqliteBackend, key: Key, **default: ReadDefault
+    ) -> Versioned:
+        if key.store == PREDICTION_BUCKETS:
+            reads.append(key.parts)
+        return real_read(self, key, **default)
+
+    monkeypatch.setattr(SqliteBackend, "read_versioned", counted)
+    found = doctor.diagnose_project(root)["findings"]
+
+    assert reads == [(name,)]
+    assert not _messages(found, "verdict shard"), found
+
+
+def test_a_verdict_shard_naming_an_image_its_bucket_names_no_document_for_is_a_warning(
+    tmp_path: Path,
+) -> None:
+    """A shard whose image the bucket's record no longer names is one warning naming that image.
+
+    The bucket's record is rewritten after both shards were written to name the first image's
+    document alone; the first image's shard stays silent.
+    """
+    root = _layout_project(tmp_path, "2026-03-04")
+    name = _reviewed_bucket(root, ("IMG_A", "IMG_B"))
+    _replace_documents(root, name, {"IMG_A": "IMG_A.JPG"})
+
+    found = _diagnosed(root)
+
+    ((level, msg),) = _messages(found, "verdict shard")
+    assert level == "warn"
+    assert f"{name}/IMG_B" in msg and "names no document for" in msg
+
+
 def test_doctor_names_a_bucket_whose_record_will_not_read_without_aborting(
     tmp_path: Path,
 ) -> None:
-    """A published bucket whose record its schema refuses is named in an error finding.
+    """A published bucket whose record its schema refuses is named in one error finding.
 
-    The bucket is staged through the proposal door and its stored record then given documents
-    that are not a mapping; the call is answered rather than refused.
+    The bucket is published and reviewed on one image, and its stored record then given
+    documents that are not a mapping; the call is answered rather than refused, and the image's
+    verdict shard is one warning that its bucket has no readable record.
     """
-    import tcip_store as ts
-    from tcip_mcp.dataset_layout import bucket_key
-    from tcip_mcp.tools.proposal_tools import stage_proposals
-
-    date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
-    image = image_dir(root, date) / "IMG_P.JPG"
-    Image.new("RGB", (32, 32)).save(image)
-    staged = stage_proposals(
-        root,
-        str(image),
-        model_name="detector",
-        actor=None,
-        boxes=[
-            {
-                "subject": "bud",
-                "conf": 0.9,
-                "cx": 0.5,
-                "cy": 0.5,
-                "w": 0.25,
-                "h": 0.25,
-            }
-        ],
-    )
-    assert "error" not in staged, staged
-    key = bucket_key(root, staged["bucket"])
-    record = ts.read(key)
-    assert isinstance(record, dict)
-    ts.replace(key, record | {"documents": "not a mapping"})
+    root = _layout_project(tmp_path, "2026-03-04")
+    name = _reviewed_bucket(root, ("IMG_P",))
+    _replace_documents(root, name, "not a mapping")
 
     found = _diagnosed(root)
 
     ((level, msg),) = _messages(found, "bucket record will not read")
     assert level == "error"
-    assert repr(staged["bucket"]) in msg
+    assert repr(name) in msg
+    ((level, msg),) = _messages(found, "verdict shard")
+    assert level == "warn"
+    assert f"{name}/IMG_P" in msg and "has no readable record" in msg
 
 
 def test_doctor_errors_on_a_project_whose_record_does_not_decode(

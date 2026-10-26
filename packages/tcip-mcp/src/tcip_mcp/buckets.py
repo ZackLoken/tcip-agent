@@ -156,14 +156,19 @@ def read_bucket(dataset_root: str | Path, name: str) -> Bucket:
     )
 
 
-def buckets_under(dataset_root: str | Path) -> list[Bucket]:
-    """Return every bucket published under ``dataset_root``, in name order."""
+def bucket_names(dataset_root: str | Path) -> list[str]:
+    """Return the name of every bucket published under ``dataset_root``, in name order."""
     from tcip_mcp.dataset_layout import PREDICTION_BUCKETS
 
     return [
-        read_bucket(dataset_root, key.parts[0])
+        key.parts[0]
         for key in tcip_store.keys(PREDICTION_BUCKETS, str(dataset_root))
     ]
+
+
+def buckets_under(dataset_root: str | Path) -> list[Bucket]:
+    """Return every bucket published under ``dataset_root``, in name order."""
+    return [read_bucket(dataset_root, n) for n in bucket_names(dataset_root)]
 
 
 def by_recorded_date(buckets: Iterable[Bucket]) -> dict[str, Bucket]:

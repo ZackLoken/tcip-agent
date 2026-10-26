@@ -385,7 +385,7 @@ def test_doctor_names_a_flags_record_that_will_not_read_and_passes_one_that_does
     tmp_path: Path,
 ) -> None:
     import tcip_store as ts
-    from tcip_mcp.tools.doctor_tools import check_state
+    from tcip_mcp.tools.doctor_tools import _buckets, check_state
 
     image = _image(tmp_path)
     _save(
@@ -397,11 +397,11 @@ def test_doctor_names_a_flags_record_that_will_not_read_and_passes_one_that_does
         ),
     )
     findings: list = []
-    check_state(tmp_path, findings)
+    check_state(tmp_path, findings, buckets=_buckets(tmp_path))
     assert findings == []
 
     ts.replace(flag_key(image_label_key(image)), {"flags": [{"id": "x"}]})
-    check_state(tmp_path, findings)
+    check_state(tmp_path, findings, buckets=_buckets(tmp_path))
     assert [level for level, _ in findings] == ["warn"]
     assert (
         "flags record" in findings[0][1] and "will not read" in findings[0][1]

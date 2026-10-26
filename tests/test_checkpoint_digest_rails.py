@@ -658,7 +658,9 @@ def test_doctor_lists_a_bucket_naming_an_unregistered_digest_and_stays_silent_on
         )
 
     findings: list = []
-    doctor_module.check_registry(tmp_path, findings)
+    doctor_module.check_registry(
+        tmp_path, findings, buckets=doctor_module._buckets(tmp_path)
+    )
 
     messages = [m for _, m in findings]
     assert len([m for m in messages if "a" * 64 in m]) == 1, messages

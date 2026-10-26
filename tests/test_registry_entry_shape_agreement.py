@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -17,9 +16,6 @@ from tcip_mcp.model_registry import (
     Producer,
     load_registered_checkpoint,
 )
-
-if TYPE_CHECKING:
-    from types import ModuleType
 
 # Checkpoints of distinct content, so an entry can never be matched by accident.
 _RUNS = {
@@ -39,11 +35,16 @@ def _checkpoint(path: Path, content: str) -> Path:
     return produced_checkpoint(path, content)
 
 
-def _doctor() -> ModuleType:
-    """Return the ``tcip_mcp.tools.doctor_tools`` module."""
+def _registry_findings(root: Path) -> list[tuple[str, str]]:
+    """Return the findings the doctor's registry check states for ``root``.
+
+    The check reads the buckets through the diagnosis's own read of them.
+    """
     from tcip_mcp.tools import doctor_tools as doctor
 
-    return doctor
+    findings: list[tuple[str, str]] = []
+    doctor.check_registry(root, findings, buckets=doctor._buckets(root))
+    return findings
 
 
 @pytest.fixture()
@@ -81,8 +82,7 @@ def test_doctor_flags_every_registry_entry_the_registry_wrote(
     registered = [m.entry for m in reg.list_models()]
     assert len(registered) == len(_RUNS)
 
-    findings: list[tuple[str, str]] = []
-    _doctor().check_registry(root, findings)
+    findings = _registry_findings(root)
 
     errors = [msg for level, msg in findings if level == "error"]
     assert len(errors) == len(_RUNS)
@@ -102,9 +102,7 @@ def test_doctor_reports_nothing_for_a_project_with_no_registered_models(
     reg = ModelRegistry(str(root))
     assert reg.list_models() == []
 
-    findings: list[tuple[str, str]] = []
-    _doctor().check_registry(root, findings)
-    assert findings == []
+    assert _registry_findings(root) == []
 
 
 def test_identity_resolution_matches_a_registered_checkpoint_by_content(
@@ -152,8 +150,7 @@ def test_doctor_reports_an_index_that_will_not_decode_rather_than_reading_it_as_
 
     damage_record(registry_index_key(root), b'{"entries": [{"name": "currant')
 
-    findings: list[tuple[str, str]] = []
-    _doctor().check_registry(root, findings)
+    findings = _registry_findings(root)
     assert [level for level, _ in findings] == ["error"]
     assert "will not decode" in findings[0][1]
 
@@ -169,8 +166,7 @@ def test_a_readable_index_is_still_read_entry_by_entry(
     root, reg = polluted_project
     assert len(reg.list_models()) == len(_RUNS)
 
-    findings: list[tuple[str, str]] = []
-    _doctor().check_registry(root, findings)
+    findings = _registry_findings(root)
     assert len(findings) == len(_RUNS)
     assert not any("decode" in message for _, message in findings)
     for listed in reg.list_models():
