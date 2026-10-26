@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from tcip_mcp.server import tool
 
 if TYPE_CHECKING:
+    from tcip_mcp.buckets import Bucket
     from tcip_store import Key
 
 
@@ -42,6 +43,23 @@ def _census(root: Path, findings: list) -> dict | None:
         except UnreadableLabelDocumentError as exc:
             label_reads[key] = exc
     return {**scan, "label_reads": label_reads}
+
+
+def _buckets(root: Path) -> dict[str, Bucket | ValueError]:
+    """Read every bucket published under ``root`` once (:func:`~tcip_mcp.buckets.bucket_names`).
+
+    Returns each name mapped to its :class:`~tcip_mcp.buckets.Bucket`, or to the ``ValueError``
+    its record's read raised (:func:`~tcip_mcp.buckets.read_bucket`).
+    """
+    from tcip_mcp.buckets import bucket_names, read_bucket
+
+    reads: dict[str, Bucket | ValueError] = {}
+    for name in bucket_names(root):
+        try:
+            reads[name] = read_bucket(root, name)
+        except ValueError as exc:
+            reads[name] = exc
+    return reads
 
 
 def check_data_quality(root: Path, findings: list, *, census: dict) -> None:
@@ -101,10 +119,13 @@ TEMP_TREE_MARKERS = ("pytest-of-", "\\Temp\\", "/Temp/")
 """Path fragments that place a registered checkpoint inside a test or temp tree."""
 
 
-def check_registry(root: Path, findings: list) -> None:
+def check_registry(
+    root: Path, findings: list, *, buckets: dict[str, Bucket | ValueError]
+) -> None:
     """Flag registered models whose checkpoint is missing or points into a test or temp tree.
 
-    Also flags every published bucket whose record names a checkpoint digest no registry entry
+    Also flags, over the published buckets ``buckets`` (:func:`_buckets`), every bucket whose
+    record will not read and every one whose record names a checkpoint digest no registry entry
     carries.
 
     A checkpoint resolving under the project root never triggers the temp-tree marker scan, even
@@ -116,9 +137,6 @@ def check_registry(root: Path, findings: list) -> None:
     """
     from pydantic import ValidationError
 
-    import tcip_store
-    from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.dataset_layout import PREDICTION_BUCKETS
     from tcip_mcp.model_registry import Producer, registered_entries
     from tcip_mcp.registry_paths import (
         RegistryPathEmptyError,
@@ -172,28 +190,24 @@ def check_registry(root: Path, findings: list) -> None:
             )
 
     registered_shas = {m.sha256 for m in entries}
-    for key in tcip_store.keys(PREDICTION_BUCKETS, str(root)):
-        name = key.parts[0]
-        try:
-            producer = read_bucket(root, name).producer
-        except ValueError as exc:
+    for name, bucket in buckets.items():
+        if isinstance(bucket, ValueError):
             findings.append(
                 (
                     "error",
-                    f"bucket {name!r}: bucket record will not read: {exc}",
+                    f"bucket {name!r}: bucket record will not read: {bucket}",
                 )
             )
-            continue
-        if (
-            isinstance(producer, Producer)
-            and producer.checkpoint_sha256 not in registered_shas
+        elif (
+            isinstance(bucket.producer, Producer)
+            and bucket.producer.checkpoint_sha256 not in registered_shas
         ):
             findings.append(
                 (
                     "warn",
                     f"bucket {name!r}: prediction bucket's record names checkpoint "
-                    f"{producer.checkpoint_sha256}, which no registry entry names, so the "
-                    "bucket's provenance is not verifiable against the registry.",
+                    f"{bucket.producer.checkpoint_sha256}, which no registry entry names, so "
+                    "the bucket's provenance is not verifiable against the registry.",
                 )
             )
 
@@ -225,18 +239,21 @@ def check_provenance(root: Path, findings: list, *, census: dict) -> None:
         )
 
 
-def check_state(root: Path, findings: list) -> None:
+def check_state(
+    root: Path, findings: list, *, buckets: dict[str, Bucket | ValueError]
+) -> None:
     """Warn of every unreadable flags record or verdict shard and every shard naming no document.
 
     Warns of every verdict shard that will not read through
-    :func:`~tcip_annotation.verdicts.read_verdicts`, every one naming an image its bucket's
-    record names no document for (:func:`~tcip_mcp.buckets.read_bucket`), and every flags record
-    that will not read (:func:`~tcip_annotation.flags.read_flags`).
+    :func:`~tcip_annotation.verdicts.read_verdicts`, every one whose bucket the published buckets
+    ``buckets`` (:func:`_buckets`) hold no readable record of, every one naming an image its
+    bucket's record names no document for, and every flags record that will not read
+    (:func:`~tcip_annotation.flags.read_flags`).
     """
     import tcip_store
     from tcip_annotation.flags import REVIEW_FLAGS_STORE, read_flags
     from tcip_annotation.verdicts import REVIEW_VERDICTS_STORE, read_verdicts
-    from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.buckets import Bucket
     from tcip_store import StoreError
 
     for key in tcip_store.keys(REVIEW_FLAGS_STORE, str(root)):
@@ -250,20 +267,28 @@ def check_state(root: Path, findings: list) -> None:
                 )
             )
     for key in tcip_store.keys(REVIEW_VERDICTS_STORE, str(root)):
-        bucket, stem = key.parts
+        name, stem = key.parts
         try:
             read_verdicts(key)
-            known = stem in read_bucket(root, bucket).documents
         except (ValueError, StoreError) as exc:
             findings.append(
-                ("warn", f"verdict shard {bucket}/{stem} will not read: {exc}")
+                ("warn", f"verdict shard {name}/{stem} will not read: {exc}")
             )
             continue
-        if not known:
+        bucket = buckets.get(name)
+        if not isinstance(bucket, Bucket):
             findings.append(
                 (
                     "warn",
-                    f"verdict shard {bucket}/{stem} names image {stem!r}, "
+                    f"verdict shard {name}/{stem} names bucket {name!r}, which has no "
+                    "readable record, so the image it names is checked against none",
+                )
+            )
+        elif stem not in bucket.documents:
+            findings.append(
+                (
+                    "warn",
+                    f"verdict shard {name}/{stem} names image {stem!r}, "
                     "which its bucket's record names no document for",
                 )
             )
@@ -312,20 +337,22 @@ def diagnose_project(project: Path) -> dict[str, list[tuple[str, str]]]:
 
     The checks: label documents with no image, that will not read, or empty with no completion
     mark for any subject; images with no label record; registry entries whose checkpoint is
-    missing or under a test or temp tree; prediction buckets naming a checkpoint no registry
-    entry names; annotations accepted without an origin; flags records and verdict shards that
-    will not read or name no document; trait records that will not read or whose latest revision
-    is unconfirmed; and a project record that will not read. ``findings`` holds each finding as
-    its level (``error``, ``warn`` or ``info``) and its message. Reads only, through the store
-    this process already bound.
+    missing or under a test or temp tree; prediction buckets whose record will not read or names
+    a checkpoint no registry entry names; annotations accepted without an origin; flags records
+    and verdict shards that will not read, and shards whose bucket has no readable record or
+    names no document for their image; trait records that will not read or whose latest
+    revision is unconfirmed; and a project record that will not read. ``findings`` holds each
+    finding as its level (``error``, ``warn`` or ``info``) and its message. Reads only, through
+    the store this process already bound.
     """
     found: list[tuple[str, str]] = []
     census = _census(project, found)
     if census is not None:
         check_data_quality(project, found, census=census)
         check_provenance(project, found, census=census)
-    check_registry(project, found)
-    check_state(project, found)
+    buckets = _buckets(project)
+    check_registry(project, found, buckets=buckets)
+    check_state(project, found, buckets=buckets)
     check_traits(project, found)
     check_project_record(project, found)
     rank = {"error": 0, "warn": 1, "info": 2}
