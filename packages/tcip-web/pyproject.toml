@@ -28,9 +28,6 @@ dependencies = [
     "psutil>=5.9",
 ]
 
-[project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "pytest-cov"]
-
 [project.scripts]
 tcip = "tcip_web.cli:main"
 
