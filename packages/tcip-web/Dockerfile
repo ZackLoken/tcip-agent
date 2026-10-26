@@ -1,7 +1,7 @@
 # Run with `docker run --network host -e TCIP_WORKSPACE=<workspace>`: the backend refuses to start
 # without a workspace, binds the host's loopback, and no port is published. A published port (`-p`) cannot serve this image either: it would arrive through a bridged, non-loopback address, which the backend's trust boundary refuses. The GUI's in-app agent terminal needs an installed agent harness, which this image does not carry.
 
-FROM node:22 AS frontend-builder
+FROM node:22.23 AS frontend-builder
 WORKDIR /app
 COPY packages/tcip-web/frontend/ packages/tcip-web/frontend/
 WORKDIR /app/packages/tcip-web/frontend
@@ -16,7 +16,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libexpat1 libgomp1 libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# CPU-only torch, the way .github/workflows/ci.yml installs it.
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
 COPY packages/tcip-store/ packages/tcip-store/
@@ -24,8 +23,7 @@ COPY packages/tcip-annotation/ packages/tcip-annotation/
 COPY packages/tcip-mcp/ packages/tcip-mcp/
 COPY packages/tcip-web/ packages/tcip-web/
 
-# _find_static_dir (tcip_web/app.py) checks tcip_web/static/ before the src-layout checkout;
-# landing the built bundle there before the pip install below carries it into that wheel.
+# The built bundle lands inside the package before the install below, so the wheel carries it.
 COPY --from=frontend-builder /app/packages/tcip-web/static/ packages/tcip-web/src/tcip_web/static/
 
 RUN pip install --no-cache-dir \
