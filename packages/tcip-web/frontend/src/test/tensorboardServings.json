@@ -1,10 +1,4 @@
 {
-  "train-x": {
-    "url": "/api/training/runs/train-x/tensorboard/",
-    "port": 0
-  },
-  "train-y": {
-    "url": "/api/training/runs/train-y/tensorboard/",
-    "port": 0
-  }
+  "train-x": { "url": "/api/training/runs/train-x/tensorboard/", "port": 0 },
+  "train-y": { "url": "/api/training/runs/train-y/tensorboard/", "port": 0 }
 }

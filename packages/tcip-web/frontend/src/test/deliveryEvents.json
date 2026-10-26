@@ -4,11 +4,11 @@
       "trait": "stem",
       "trait_revision": 1,
       "trait_revision_sha256": "01ff00e946b3c9674941e9e3f6ee4d3afe6385681a837abaf431d25d8cc0ed77",
-      "event_id": "d26699bf82dc43c88a371b918e7fae51",
+      "event_id": "60b974ef4b3b4de2a748fb3a1743e3d6",
       "door": "deliver_per_image_counts",
       "delivery_kind": "per_image_count",
       "output_path": "/scratch/workspace/counts/counts.csv",
-      "output_sha256": "0996e1f40a2a1db2edd76fcb003e829ac6f66a85e3492f48aa0d0cafc4ccac43",
+      "output_sha256": "e6c4a44b73c939ab4eedfefad835f2ce897f32d509b13c04941c53f2308270a0",
       "producer": {
         "checkpoint_sha256": "3cc1a4ca22f25103af57ee7b4fe97e8751622635a0afebef238cf3c381c93ef9",
         "experiment_id": "exp-fixture"
@@ -18,7 +18,7 @@
           "dataset_root": "/scratch/workspace/counts/ds",
           "bucket": "chain/2026-02-11",
           "date": "2026-02-11",
-          "assessment_id": "assessment_1792991280_363c4b",
+          "assessment_id": "assessment_1793038079_c5c25e",
           "validated": true,
           "reason": null
         }
@@ -69,20 +69,20 @@
         "s39"
       ],
       "plant_mapping": null,
-      "produced_at": "2026-10-26T05:08:00.935121+00:00"
+      "produced_at": "2026-10-26T18:08:00.545975+00:00"
     },
     "acknowledged_mapping": {
       "trait": "currant_bloom",
       "trait_revision": 2,
       "trait_revision_sha256": "2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08",
-      "event_id": "d8e81f8716074382b22b7c55e2189230",
+      "event_id": "c14ab8a6e4a24764b7f2e6228a002cf9",
       "door": "test_mapping_delivery",
       "delivery_kind": "state_crossing_dates",
       "output_path": "/scratch/workspace/phenology/phenology.csv",
-      "output_sha256": "82590dce5bf6b08055f6690b1021b8925d332a51207c3dd8de364dd12dd2e2b5",
+      "output_sha256": "4ec8146d37734f72d65e41a00384068a1ec693637001619e7561f4bf50d5a0ed",
       "producer": {
-        "checkpoint_sha256": "60723e02953d252f7e7b1a244757260b2f70bf0064edcf4bc247cb4f880f9fa6",
-        "experiment_id": "run_1792991281_a1b83f"
+        "checkpoint_sha256": "5b9288dc9d392cf7e28a20acb341c9f68153bbc16fa7d66e90c2dca8e94d6973",
+        "experiment_id": "run_1793038081_07af42"
       },
       "buckets": [
         {
@@ -105,69 +105,49 @@
       "scale_assessment_id": null,
       "validated": false,
       "acknowledgment": {
-        "acknowledgment_id": "eece4b7d475945d7a02dba2a61aabad0",
+        "acknowledgment_id": "6cd590e7eca441d78e0682ed4e9ae92b",
         "acknowledged_by": "user:breeder",
         "reason": "mapping rails, not the assessment",
-        "result_sha256": "27b73a49e816b1537a86810215b2349aaee444f56d1600e0bc3173440c2548a9",
-        "recorded_at": "2026-10-26T05:08:03.188315+00:00"
+        "result_sha256": "d147b0d540ddcc25be244c586608da1627b60b18adf8e6056dff67b6f4e68c93",
+        "recorded_at": "2026-10-26T18:08:05.100543+00:00"
       },
-      "population": [
-        "P1",
-        "P2"
-      ],
+      "population": ["P1", "P2"],
       "plant_mapping": {
         "name": "valley",
-        "dataset_id": "eddbc5af80a0",
+        "dataset_id": "30b0ab327a52",
         "dataset_root": "/scratch/workspace/phenology/ds",
-        "built_at": "2026-10-26T05:08:03.049432+00:00",
-        "record_sha256": "ef6ba41c9dcfb4ff85178dd4e26efa7e3d389fb3169d77a93db22a4d8a4f903b",
+        "built_at": "2026-10-26T18:08:04.895074+00:00",
+        "record_sha256": "f86a6a0019c993c2eb41e7c6023c91c6348824f9b6b88db5a723541e832088c4",
         "match_radius": {
-          "2026-02-11": {
-            "value": 1.0,
-            "source": "h_pos_err",
-            "rationale": null
-          },
-          "2026-02-25": {
-            "value": 1.0,
-            "source": "h_pos_err",
-            "rationale": null
-          }
+          "2026-02-11": { "value": 1.0, "source": "h_pos_err", "rationale": null },
+          "2026-02-25": { "value": 1.0, "source": "h_pos_err", "rationale": null }
         },
         "capture_digests": {
-          "2026-02-11": {
-            "P1_20260211": "fc1c64aab30a4fe4",
-            "P2_20260211": "b235adba7e424a65"
-          },
-          "2026-02-25": {
-            "P1_20260225": "efb5efc2a3abc515",
-            "P2_20260225": "79d169ef0d7897cf"
-          }
+          "2026-02-11": { "P1_20260211": "fc1c64aab30a4fe4", "P2_20260211": "b235adba7e424a65" },
+          "2026-02-25": { "P1_20260225": "efb5efc2a3abc515", "P2_20260225": "79d169ef0d7897cf" }
         },
         "captures_unverified": [],
         "plant_csvs_unverified": [],
-        "dates_delivered": [
-          "2026-02-11",
-          "2026-02-25"
-        ],
+        "dates_delivered": ["2026-02-11", "2026-02-25"],
         "images_unattributed": 0,
         "images_unattributed_scope": "delivered_dates",
         "plant_attribution": "image",
         "resolved_key": "valley"
       },
-      "produced_at": "2026-10-26T05:08:03.192142+00:00"
+      "produced_at": "2026-10-26T18:08:05.106216+00:00"
     },
     "archived_mapping": {
       "trait": "currant_bloom",
       "trait_revision": 2,
       "trait_revision_sha256": "2d0c3f2d0c9fbba2584b9017ae2c13f5eb07596b1cea2817dddbfc1f2add6a08",
-      "event_id": "d8e81f8716074382b22b7c55e2189230",
+      "event_id": "c14ab8a6e4a24764b7f2e6228a002cf9",
       "door": "test_mapping_delivery",
       "delivery_kind": "state_crossing_dates",
       "output_path": "/scratch/workspace/phenology/phenology.csv",
-      "output_sha256": "82590dce5bf6b08055f6690b1021b8925d332a51207c3dd8de364dd12dd2e2b5",
+      "output_sha256": "4ec8146d37734f72d65e41a00384068a1ec693637001619e7561f4bf50d5a0ed",
       "producer": {
-        "checkpoint_sha256": "60723e02953d252f7e7b1a244757260b2f70bf0064edcf4bc247cb4f880f9fa6",
-        "experiment_id": "run_1792991281_a1b83f"
+        "checkpoint_sha256": "5b9288dc9d392cf7e28a20acb341c9f68153bbc16fa7d66e90c2dca8e94d6973",
+        "experiment_id": "run_1793038081_07af42"
       },
       "buckets": [
         {
@@ -190,69 +170,49 @@
       "scale_assessment_id": null,
       "validated": false,
       "acknowledgment": {
-        "acknowledgment_id": "eece4b7d475945d7a02dba2a61aabad0",
+        "acknowledgment_id": "6cd590e7eca441d78e0682ed4e9ae92b",
         "acknowledged_by": "user:breeder",
         "reason": "mapping rails, not the assessment",
-        "result_sha256": "27b73a49e816b1537a86810215b2349aaee444f56d1600e0bc3173440c2548a9",
-        "recorded_at": "2026-10-26T05:08:03.188315+00:00"
+        "result_sha256": "d147b0d540ddcc25be244c586608da1627b60b18adf8e6056dff67b6f4e68c93",
+        "recorded_at": "2026-10-26T18:08:05.100543+00:00"
       },
-      "population": [
-        "P1",
-        "P2"
-      ],
+      "population": ["P1", "P2"],
       "plant_mapping": {
         "name": "valley",
-        "dataset_id": "eddbc5af80a0",
+        "dataset_id": "30b0ab327a52",
         "dataset_root": "/scratch/workspace/phenology/ds",
-        "built_at": "2026-10-26T05:08:03.049432+00:00",
-        "record_sha256": "ef6ba41c9dcfb4ff85178dd4e26efa7e3d389fb3169d77a93db22a4d8a4f903b",
+        "built_at": "2026-10-26T18:08:04.895074+00:00",
+        "record_sha256": "f86a6a0019c993c2eb41e7c6023c91c6348824f9b6b88db5a723541e832088c4",
         "match_radius": {
-          "2026-02-11": {
-            "value": 1.0,
-            "source": "h_pos_err",
-            "rationale": null
-          },
-          "2026-02-25": {
-            "value": 1.0,
-            "source": "h_pos_err",
-            "rationale": null
-          }
+          "2026-02-11": { "value": 1.0, "source": "h_pos_err", "rationale": null },
+          "2026-02-25": { "value": 1.0, "source": "h_pos_err", "rationale": null }
         },
         "capture_digests": {
-          "2026-02-11": {
-            "P1_20260211": "fc1c64aab30a4fe4",
-            "P2_20260211": "b235adba7e424a65"
-          },
-          "2026-02-25": {
-            "P1_20260225": "efb5efc2a3abc515",
-            "P2_20260225": "79d169ef0d7897cf"
-          }
+          "2026-02-11": { "P1_20260211": "fc1c64aab30a4fe4", "P2_20260211": "b235adba7e424a65" },
+          "2026-02-25": { "P1_20260225": "efb5efc2a3abc515", "P2_20260225": "79d169ef0d7897cf" }
         },
         "captures_unverified": [],
         "plant_csvs_unverified": [],
-        "dates_delivered": [
-          "2026-02-11",
-          "2026-02-25"
-        ],
+        "dates_delivered": ["2026-02-11", "2026-02-25"],
         "images_unattributed": 0,
         "images_unattributed_scope": "delivered_dates",
         "plant_attribution": "image",
-        "resolved_key": "valley@ef6ba41c9dcf"
+        "resolved_key": "valley@f86a6a0019c9"
       },
-      "produced_at": "2026-10-26T05:08:03.192142+00:00"
+      "produced_at": "2026-10-26T18:08:05.106216+00:00"
     },
     "registry": {
       "trait": "stem",
       "trait_revision": 2,
       "trait_revision_sha256": "8fc7e93c57cbc12a4ab047d9dd1d42e56100b6b438924f016b74c71aa13e4f77",
-      "event_id": "7963feaa900e40698d6220bbb11fdeed",
+      "event_id": "1da094071d674990802801cb250e4fb4",
       "door": "test_orthomosaic",
       "delivery_kind": "per_plant_count_aggregate",
       "output_path": "/scratch/workspace/nearest/counts.csv",
-      "output_sha256": "49b03d0426255720c9aa820e5752a4af2880cff6b6334b37e56b662b065611db",
+      "output_sha256": "06138b203833026fe6988cf791be501b4b48f8cd14c8f7a6fa7cafe7568b3efd",
       "producer": {
-        "checkpoint_sha256": "ec41d26f1fdff58ea7984f1af678678024c0370577f6bea96c165ac3e1575df3",
-        "experiment_id": "run_1792991283_47416f"
+        "checkpoint_sha256": "fdf1ff785e0dc5e10c7cd3352935e9e3b632cec345f4fe7d09d0118952d30cea",
+        "experiment_id": "run_1793038085_b7f947"
       },
       "buckets": [
         {
@@ -267,16 +227,13 @@
       "scale_assessment_id": null,
       "validated": false,
       "acknowledgment": {
-        "acknowledgment_id": "88cc17431550490f93328a3cc779fc5e",
+        "acknowledgment_id": "91615739e36a4046ae61981a03176c59",
         "acknowledged_by": "user:breeder",
         "reason": "an unassessed bucket",
-        "result_sha256": "afc3c7124dbed54844f60674597695329af9dd31057355055c52a801a8d3ffd4",
-        "recorded_at": "2026-10-26T05:08:05.108891+00:00"
+        "result_sha256": "9fb5ce298b6a292433d39fbab7741dcdfca00ba266c8615bfd32ed9a56c8bcfc",
+        "recorded_at": "2026-10-26T18:08:09.340574+00:00"
       },
-      "population": [
-        "plot0",
-        "plot2"
-      ],
+      "population": ["plot0", "plot2"],
       "plant_mapping": {
         "plant_registry": {
           "name": "reg",
@@ -292,11 +249,7 @@
           "window_size": 1024,
           "max_windows": 8,
           "pixel_fraction": 1.0,
-          "band_interpretations": [
-            "red",
-            "green",
-            "blue"
-          ],
+          "band_interpretations": ["red", "green", "blue"],
           "geotransform": {
             "tiepoint_pixel_x": 0.0,
             "tiepoint_pixel_y": 0.0,
@@ -307,31 +260,26 @@
             "epsg": 32615
           }
         },
-        "nn_tolerance_m": {
-          "value": 10.004001600833691,
-          "source": "grid_pitch"
-        },
+        "nn_tolerance_m": { "value": 10.004001600833691, "source": "grid_pitch" },
         "detections_unattributed": 0,
         "detections_unattributed_scope": "delivered_raster",
         "plant_attribution": "detection",
-        "plants_outside_raster": [
-          "plot9"
-        ]
+        "plants_outside_raster": ["plot9"]
       },
-      "produced_at": "2026-10-26T05:08:05.181651+00:00"
+      "produced_at": "2026-10-26T18:08:09.460873+00:00"
     },
     "canopy": {
       "trait": "stem",
       "trait_revision": 2,
       "trait_revision_sha256": "8fc7e93c57cbc12a4ab047d9dd1d42e56100b6b438924f016b74c71aa13e4f77",
-      "event_id": "f66515de1f0842388581081118687871",
+      "event_id": "6de6615c26d046968636998abd6278d3",
       "door": "test_orthomosaic",
       "delivery_kind": "per_plant_count_aggregate",
       "output_path": "/scratch/workspace/segmented/counts.csv",
-      "output_sha256": "41ba4dac906a13891a9abd5a1c2163a8a6745481c8c2c01c0d13413f572e7213",
+      "output_sha256": "cfb93122257a5648d19cb31aba8f59e9472e3b395b203e1315161852528fc796",
       "producer": {
-        "checkpoint_sha256": "55ef7454b8f796253a448ce9a748d048d5288b776f1c00781f800c301176523f",
-        "experiment_id": "run_1792991285_076be3"
+        "checkpoint_sha256": "4f4fa3c73984edfe70f03c45db154b7e541effd7d8e429ab1f1eee09eed3c72e",
+        "experiment_id": "run_1793038090_a565d5"
       },
       "buckets": [
         {
@@ -346,16 +294,13 @@
       "scale_assessment_id": null,
       "validated": false,
       "acknowledgment": {
-        "acknowledgment_id": "43f6d578771241b0831e5bc4d9593b49",
+        "acknowledgment_id": "b1973eb417e84836a2995e22c9d7e284",
         "acknowledged_by": "user:breeder",
         "reason": "an unassessed bucket",
-        "result_sha256": "dc22d05c5fd017feeb0bd621a2c75cca8c29db4754346c87c523a038b9f17044",
-        "recorded_at": "2026-10-26T05:08:07.001790+00:00"
+        "result_sha256": "95a0a7944326aab337f5566d46ec494d09e835f97059b7812f916abc4a29410e",
+        "recorded_at": "2026-10-26T18:08:13.472980+00:00"
       },
-      "population": [
-        "plot0",
-        "plot2"
-      ],
+      "population": ["plot0", "plot2"],
       "plant_mapping": {
         "plant_registry": {
           "name": "reg",
@@ -371,11 +316,7 @@
           "window_size": 1024,
           "max_windows": 8,
           "pixel_fraction": 1.0,
-          "band_interpretations": [
-            "red",
-            "green",
-            "blue"
-          ],
+          "band_interpretations": ["red", "green", "blue"],
           "geotransform": {
             "tiepoint_pixel_x": 0.0,
             "tiepoint_pixel_y": 0.0,
@@ -394,36 +335,16 @@
           "n_segments": 5
         },
         "segment_ties": [
-          {
-            "segment_index": 0,
-            "plant_id": "plot0",
-            "clearance_m": 2.499999999650754
-          },
-          {
-            "segment_index": 1,
-            "plant_id": "plot2",
-            "clearance_m": 2.4999999990686774
-          },
-          {
-            "segment_index": 3,
-            "plant_id": "plot4",
-            "clearance_m": 1.999999999650754
-          }
+          { "segment_index": 0, "plant_id": "plot0", "clearance_m": 2.499999999650754 },
+          { "segment_index": 1, "plant_id": "plot2", "clearance_m": 2.4999999990686774 },
+          { "segment_index": 3, "plant_id": "plot4", "clearance_m": 1.999999999650754 }
         ],
         "position_error_m": 0.5,
         "segments_without_plant": 1,
-        "plants_outside_raster": [
-          "plot9"
-        ],
-        "plants_without_segment": [
-          "plot1"
-        ],
-        "plants_within_position_error": [
-          "plot3"
-        ],
-        "plants_with_ambiguous_detections": [
-          "plot4"
-        ],
+        "plants_outside_raster": ["plot9"],
+        "plants_without_segment": ["plot1"],
+        "plants_within_position_error": ["plot3"],
+        "plants_with_ambiguous_detections": ["plot4"],
         "detections_unattributed": 2,
         "detections_unattributed_by_source": {
           "outside_segments": 1,
@@ -434,7 +355,7 @@
         "detections_unattributed_scope": "delivered_raster",
         "plant_attribution": "segment"
       },
-      "produced_at": "2026-10-26T05:08:07.076311+00:00"
+      "produced_at": "2026-10-26T18:08:13.587037+00:00"
     }
   },
   "count_export_headers": {

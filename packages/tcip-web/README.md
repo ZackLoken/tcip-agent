@@ -29,50 +29,21 @@ packages/tcip-web/
       terminal.py       # in-app agent terminal endpoints
       training.py       # run and sweep relaunch / list / cancel / TensorBoard / metrics WS stream
   frontend/             # Vite + React + TS + Tailwind + Zustand + Konva
-  static/               # vite build output (served at /)
 ```
 
 ## Run
 
-### Backend
-
-```bash
-# From repo root, in the tcip-agent conda env
-conda activate tcip-agent
-python -m tcip_web
-```
-
-On startup, the backend:
+The repository README's Setup and Running sections install the frontend, build the bundle the
+backend serves from `/` (`app.STATIC_DIR`), and start the backend and Vite's dev server, which
+proxies the API routes to the backend. On startup, the backend:
 
 - Resolves the workspace `TCIP_WORKSPACE` names, once, and refuses to start when it is unset.
-- Binds the loopback address `127.0.0.1` at `TCIP_WEB_PORT` (default `8765`).
+- Binds the loopback address at `TCIP_WEB_PORT`, or at its default port.
 - Records the port it bound in the workspace root's store so MCP tools can discover it, the one
   location every process on the machine resolves the same way regardless of which project each has
   open.
 - Opens no project: the GUI starts at the project picker, and opening a project there replays its
   GUI snapshot if present.
-
-Open `http://127.0.0.1:8765/` once the backend is up.
-
-### Frontend (development mode)
-
-When iterating on the UI, run Vite's dev server instead of hitting the pre-built bundle:
-
-```bash
-cd packages/tcip-web/frontend
-npm install
-npm run dev        # http://127.0.0.1:5173  (proxies /api + /ws to :8765)
-```
-
-### Frontend (production build)
-
-```bash
-cd packages/tcip-web/frontend
-npm install
-npm run build      # emits into ../static/
-```
-
-`python -m tcip_web` then serves the built bundle from `/`.
 
 ## Agent ↔ GUI integration
 
@@ -97,8 +68,6 @@ Calls made for this single-operator desktop GUI:
   controls). Full ARIA/screen-reader support is not targeted for this local single-user tool.
 - Touch / pen: not supported. The annotation canvas is mouse-only (wheel-zoom, middle-drag pan,
   click-to-draw). Field-tablet (touch/pen) annotation is a known limitation and future work.
-- Sourcemaps. The shipped `static/` bundle is built without sourcemaps. Use `npm run dev` (HMR +
-  sourcemaps) to debug.
 - Trust boundary. A connection from this machine (a loopback address) is served with no auth; a
   connection through a network address is refused, because the GUI hands its client filesystem reads
   and writes and the interactive agent terminal (keyboard access to a coding agent) with no login.
@@ -107,14 +76,3 @@ Calls made for this single-operator desktop GUI:
   Origin at all (the non-browser allowance; the MCP tools send none) or carries a loopback origin at
   any port. Another local server's page is admitted by this layer too; only the JSON-body guard's
   unanswered preflight stops its browser from mutating.
-
-### Packaging the GUI into a wheel
-
-`STATIC_DIR` resolves the built frontend from either the installed package (`tcip_web/static/`) or
-the src-layout checkout (`packages/tcip-web/static/`). Running from a checkout
-(`python -m tcip_web`) needs only `npm run build` (writes `packages/tcip-web/static/`). To ship the
-GUI inside a wheel, build the frontend first, then include the built `static/` at `tcip_web/static/`
-in the wheel (e.g. a hatch `force-include`); the Dockerfile takes the same route with a build-time
-`COPY` into `src/tcip_web/static/` before the pip install, rather than a hatch declaration. Build
-the frontend before building the wheel, or the wheel will ship API-only and `/` returns a 503 with
-build instructions.

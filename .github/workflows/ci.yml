@@ -122,8 +122,7 @@ jobs:
           python -c "import cv2; print('cv2', cv2.__version__, cv2.__file__)"
           python -c "import sahi; print('sahi', sahi.__version__)"
 
-      # The route and type tests read the frontend's sources through the TypeScript it installs,
-      # its dev proxy through its Vite, and the route generator formats through its Prettier.
+      # The suite runs the frontend's scripts and tools from its installed packages.
       - uses: actions/setup-node@v4
         with:
           node-version-file: packages/tcip-web/frontend/package.json

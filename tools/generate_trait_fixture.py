@@ -4,8 +4,7 @@ In projects created through ``tests._web_fixtures.named_project`` and opened thr
 route in a scratch session (``tools/fixture_session.py``), each trait entry is proposed through
 ``traits.propose_trait``, confirmed through ``POST /api/results/traits/confirm`` and served by
 ``GET /api/results/traits``; the served listings are written, normalized by :data:`STAMPED`
-(``fixture_session.normalized``), to
-``frontend/src/test/traitListings.json``, keyed by fixture name.
+(``fixture_session.normalized``), to :data:`GENERATED_PATH`, keyed by fixture name.
 
     python -m tools.generate_trait_fixture
 """

@@ -11,7 +11,7 @@ run whose builder no import resolves (``tests.test_tcip_web_training_routes._ope
 the child's own entry completes taking no optimizer step (``finished_run``), registering its
 checkpoint. Each request is built through its route's request model. The routes' answers are
 written, normalized by :data:`STAMPED` (``fixture_session.normalized``), to
-``frontend/src/test/trainingAnswers.json``, keyed by answer: the listing, the first run's detail,
+:data:`GENERATED_PATH`, keyed by answer: the listing, the first run's detail,
 data choices and cancellation, the comparison of the first run and the completed one, that
 comparison's ranking and two refusals of it, the metric directions, a relaunch of the first run and
 of the sweep, each spawn recorded by ``tests._producer_fixtures.fake_popen`` and starting nothing,

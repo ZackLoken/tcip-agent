@@ -103,6 +103,9 @@ npm --prefix packages/tcip-web/frontend run build
 
 The environment installs the CUDA (cu130) torch wheel by default; it runs without a GPU too.
 
+The build writes the bundle inside the `tcip-web` package, so the environment's editable install
+serves it at once; a wheel or the Docker image carries the bundle built before it was made.
+
 `docker build -f packages/tcip-web/Dockerfile -t tcip .` from the repository root, then `docker run
 --network host -e TCIP_WORKSPACE=<workspace> tcip`, builds and runs the platform as a container,
 serving the GUI on the host's loopback. The image carries no agent harness, so the GUI's agent

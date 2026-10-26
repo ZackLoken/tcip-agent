@@ -8,9 +8,7 @@
             "number": 1,
             "entry": {
               "name": "stem",
-              "delivers": [
-                "stem_count"
-              ],
+              "delivers": ["stem_count"],
               "positive_state": null,
               "milestone_fractions": [],
               "milestone_on": "",
@@ -58,9 +56,7 @@
             "number": 2,
             "entry": {
               "name": "stem",
-              "delivers": [
-                "stem_count"
-              ],
+              "delivers": ["stem_count"],
               "positive_state": null,
               "milestone_fractions": [],
               "milestone_on": "",
@@ -109,9 +105,7 @@
       }
     ],
     "unreadable": [],
-    "definitions": {
-      "stem_count": "Total number of stems"
-    }
+    "definitions": { "stem_count": "Total number of stems" }
   },
   "unconfirmed": {
     "traits": [
@@ -122,14 +116,9 @@
             "number": 1,
             "entry": {
               "name": "subject_a",
-              "delivers": [
-                "stem_count"
-              ],
+              "delivers": ["stem_count"],
               "positive_state": null,
-              "milestone_fractions": [
-                0.5,
-                0.95
-              ],
+              "milestone_fractions": [0.5, 0.95],
               "milestone_on": "positive_fraction",
               "crossing_rule": "",
               "majority_milestone": "",
@@ -168,9 +157,7 @@
       }
     ],
     "unreadable": [],
-    "definitions": {
-      "stem_count": "Total number of stems"
-    }
+    "definitions": { "stem_count": "Total number of stems" }
   },
   "results": {
     "traits": [
@@ -181,14 +168,9 @@
             "number": 1,
             "entry": {
               "name": "subject_a",
-              "delivers": [
-                "stem_count"
-              ],
+              "delivers": ["stem_count"],
               "positive_state": null,
-              "milestone_fractions": [
-                0.5,
-                0.95
-              ],
+              "milestone_fractions": [0.5, 0.95],
               "milestone_on": "positive_fraction",
               "crossing_rule": "",
               "majority_milestone": "",
@@ -227,8 +209,6 @@
       }
     ],
     "unreadable": [],
-    "definitions": {
-      "stem_count": "Total number of stems"
-    }
+    "definitions": { "stem_count": "Total number of stems" }
   }
 }

@@ -31,13 +31,7 @@ venv/
 node_modules/
 # package-lock.json IS committed (reproducible installs + `npm ci` in CI).
 *.tsbuildinfo
-
-# ── Frontend build output (keep static assets, ignore generated bundles) ──
-# Same output path is restated in frontend/.prettierignore and frontend/vite.config.ts's outDir.
-packages/tcip-web/static/index.html
-packages/tcip-web/static/assets/*.js
-packages/tcip-web/static/assets/*.js.map
-packages/tcip-web/static/assets/*.css
+packages/tcip-web/src/tcip_web/static/
 
 # ── Retired VS Code extension build output ───────────────────────────────
 packages/tcip-vscode/out/

@@ -11,7 +11,7 @@ superseding rebuild archives the mapping it cites. The count project's bucket is
 through ``POST /api/results/export_count_csv``. The served records, keyed by fixture name under
 ``records``, and that answer's three delivery headers, under ``count_export_headers``, are
 written, the scratch directory read as ``fixture_session.SCRATCH_ROOT``
-(``fixture_session.normalized``), to ``frontend/src/test/deliveryEvents.json``.
+(``fixture_session.normalized``), to :data:`GENERATED_PATH`.
 
     python -m tools.generate_delivery_fixture
 """

@@ -19,7 +19,8 @@ if TYPE_CHECKING:
 
     from tcip_mcp.knowledge import DocumentInfo
 
-GENERATOR = REPO_ROOT / "tools" / "generate_harness_discovery.py"
+RUN = f"run python -m {generate_harness_discovery.__name__}"
+"""The command a staleness message names."""
 
 
 def _documents() -> list[DocumentInfo]:
@@ -51,9 +52,7 @@ def test_every_generated_skill_matches_its_document() -> None:
         stale = generate_harness_discovery.stale_skills(
             skills_dir, render, documents
         )
-        assert not stale, (
-            f"{stale} out of date under {skills_dir}; run {GENERATOR.name}"
-        )
+        assert not stale, f"{stale} out of date under {skills_dir}; {RUN}"
 
 
 def test_the_claude_settings_grant_exactly_the_research_documents_hosts() -> (
@@ -64,9 +63,7 @@ def test_the_claude_settings_grant_exactly_the_research_documents_hosts() -> (
     assert (
         CLAUDE_SETTINGS.read_text(encoding="utf-8")
         == generate_harness_discovery.expected_claude_settings()
-    ), (
-        f"{CLAUDE_SETTINGS} is out of date; run python tools/generate_harness_discovery.py"
-    )
+    ), f"{CLAUDE_SETTINGS} is out of date; {RUN}"
 
 
 def test_research_hosts_are_read_from_the_source_list_alone() -> None:
@@ -129,10 +126,7 @@ def test_agents_md_generated_block_matches_the_canonical_documents() -> None:
     )
     assert actual_block == generate_harness_discovery.render_agents_block(
         _documents()
-    ), (
-        "AGENTS.md's generated block is out of date; run "
-        "python tools/generate_harness_discovery.py"
-    )
+    ), f"AGENTS.md's generated block is out of date; {RUN}"
 
 
 def test_agents_md_generated_block_stays_under_the_byte_budget() -> None:

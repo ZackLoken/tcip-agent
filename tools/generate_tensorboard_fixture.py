@@ -6,8 +6,8 @@ In a scratch session (``tools/fixture_session.py``), a project created through
 (``tests._verified_checkpoint_fixtures.opened_run``) with one scalar a ``SummaryWriter`` wrote on
 its board. ``POST /api/training/runs/<id>/tensorboard`` starts a TensorBoard over each board and
 answers it; the answers are written, normalized by :data:`STAMPED`
-(``fixture_session.normalized``), to ``frontend/src/test/tensorboardServings.json``, keyed by run
-id. Each TensorBoard is stopped before the session ends.
+(``fixture_session.normalized``), to :data:`GENERATED_PATH`, keyed by run id. Each TensorBoard is
+stopped before the session ends.
 
     python -m tools.generate_tensorboard_fixture
 """

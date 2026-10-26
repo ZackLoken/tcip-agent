@@ -11,8 +11,6 @@ import viteConfig from "./vite.config";
 const [SRC] = tsconfig.include;
 const SOURCE_DIRECTORY = join(import.meta.dirname, SRC);
 
-// Reuse the app's Vite config (notably its tsconfig paths) for tests, adding a jsdom
-// environment and jest-dom matchers. Tests live next to source as *.test.ts(x).
 export default mergeConfig(
   viteConfig,
   defineConfig({
@@ -29,7 +27,6 @@ export default mergeConfig(
         include: nonTestSources(SOURCE_DIRECTORY).map((file) =>
           normalizePath(relative(import.meta.dirname, file)),
         ),
-        exclude: ["src/api/*.generated.ts"],
         // Lowest of four AST-remapped V8 coverage runs under vitest 5 on this tree, rounded down:
         // statements 86.07, branches 79.6, functions 85.00, lines 87.94; runs vary by hundredths.
         thresholds: { statements: 86, branches: 79, functions: 85, lines: 87 },
