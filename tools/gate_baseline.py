@@ -192,15 +192,19 @@ def build_plan() -> list[Stage]:
     return stages
 
 
-_MYPY_PIN_RE = re.compile(r"mypy==([\w.]+)")
+DEV_EXTRA_PROJECT = REPO_ROOT / "packages" / "tcip-mcp" / "pyproject.toml"
 
 
 def mypy_pin() -> str | None:
-    """Return the mypy version CI pins, read from the (skipped) install step's ``run:`` text."""
-    for step in _load_workflow()["jobs"]["mypy"]["steps"]:
-        match = _MYPY_PIN_RE.search(step.get("run", ""))
-        if match:
-            return match.group(1)
+    """Return the mypy version pinned in tcip-mcp's ``dev`` extra, which CI installs."""
+    import tomllib
+    from packaging.requirements import Requirement
+
+    project = tomllib.loads(DEV_EXTRA_PROJECT.read_text(encoding="utf-8"))
+    for entry in project["project"]["optional-dependencies"]["dev"]:
+        requirement = Requirement(entry)
+        if requirement.name == "mypy":
+            return next(iter(requirement.specifier)).version
     return None
 
 

@@ -74,13 +74,10 @@ jobs:
 
       - name: Install packages
         run: |
-          # mypy pinned to the version environment.win.lock.yml resolves, so a mypy release
-          # cannot silently redefine the gate's module discovery.
-          pip install mypy==2.2.0
           pip install -e packages/tcip-store
           pip install -e packages/tcip-annotation
           pip install -e "packages/tcip-mcp[dev,hpo]"
-          pip install -e "packages/tcip-web[dev]"
+          pip install -e packages/tcip-web
 
       - name: Type check (mypy; see mypy.ini)
         # bare mypy: the roots come from mypy.ini's files list, the single source.
@@ -115,16 +112,13 @@ jobs:
 
       - name: Install packages
         run: |
-          # ruff pinned to the version environment.win.lock.yml resolves: ruff.toml runs
-          # pycodestyle's preview rules, which move between releases.
-          pip install pytest-timeout pytest-xdist ruff==0.16.8
           # The toolcache's setuptools and the PyTorch index's filelock are releases pip-audit
           # flags; the audit covers the installed set, so the set carries the fixed releases.
           pip install --upgrade setuptools filelock
           pip install -e packages/tcip-store
           pip install -e packages/tcip-annotation
           pip install -e "packages/tcip-mcp[dev,hpo]"
-          pip install -e "packages/tcip-web[dev]"
+          pip install -e packages/tcip-web
           python -c "import cv2; print('cv2', cv2.__version__, cv2.__file__)"
           python -c "import sahi; print('sahi', sahi.__version__)"
 

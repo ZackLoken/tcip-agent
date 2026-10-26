@@ -26,6 +26,8 @@ dependencies = [
     # shp_to_plant_csv tool built over it.
     "fiona>=1.9",
     "pycocotools>=2.0.7",
+    # cv2, read by the derivations, the slice lattice and the raster source.
+    "opencv-python>=4.12.0.88",
     # Tiled inference: the slice lattice, the detection-model wrapper and the cross-tile merge.
     "sahi>=0.12.6",
     # The sam and grounding_dino proposal engines: their models, processors and checkpoints.
@@ -44,7 +46,16 @@ dependencies = [
 # [default] adds the dashboard's own deps (aiohttp, grpcio); hpo._ray_session only requests it when importable.
 # bayesian-optimization<2: Ray Tune's BayesOptSearch (2.58) calls bayes_opt.UtilityFunction, removed in 2.0.
 hpo = ["ray[default,tune]>=2.9", "optuna>=3.0", "hyperopt", "bayesian-optimization<2"]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "pytest-timeout>=2.0", "pytest-xdist>=3.0"]
+# ruff and mypy pinned: ruff.toml runs pycodestyle's preview rules, which move between releases,
+# and a mypy release can redefine the gate's module discovery.
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pytest-timeout>=2.0",
+    "pytest-xdist>=3.0",
+    "ruff==0.16.8",
+    "mypy==2.2.0",
+]
 
 [build-system]
 requires = ["hatchling"]
