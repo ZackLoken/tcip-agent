@@ -12,7 +12,6 @@ field set or a bare union alias matching a generated vocabulary.
 from __future__ import annotations
 
 import importlib
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -25,17 +24,6 @@ from tests._route_walk import route_generator
 if TYPE_CHECKING:
     from types import ModuleType
 
-_TS_BLOCK_RE = re.compile(r"(?:interface|type)\s+\w+\s*=?\s*\{(.*?)\n\}", re.S)
-_TS_FIELD_RE = re.compile(r"^\s+(\w+)(\??):", re.M)
-_FIELD_UNION_RE = re.compile(
-    r'\w+\??:\s*((?:"[^"]+"\s*\|\s*)+"[^"]+")(?:\s*\|\s*null)?[;,]'
-)
-_TYPE_ALIAS_UNION_RE = re.compile(
-    r'^\s*(?:export\s+)?type\s+(\w+)\s*=\s*((?:"[^"]+"\s*\|\s*)+"[^"]+")\s*;',
-    re.M,
-)
-_QUOTED_RE = re.compile(r'"([^"]+)"')
-
 
 def _generator() -> ModuleType:
     """Import and return the type-module generator, ``tools.generate_frontend_types``."""
@@ -46,16 +34,18 @@ GENERATED = _generator().GENERATED_PATH
 
 
 @pytest.fixture(scope="module")
-def sources() -> list[Path]:
-    """Return the frontend's non-test sources but the generated types module.
+def frontend() -> dict:
+    """Return the route generator's own read of the frontend's sources, run once for the module.
 
-    They are the route generator's own read of the frontend's sources.
+    Its ``shapes`` and ``unions`` are the sources' declarations as the TypeScript compiler
+    parses them.
     """
-    return [
-        Path(p)
-        for p in route_generator().frontend_reads()["sources"]
-        if Path(p) != GENERATED
-    ]
+    return route_generator().frontend_reads()
+
+
+def _source(declaration: dict) -> str:
+    """Return the repository-relative path of the file ``declaration`` lies in."""
+    return Path(declaration["file"]).relative_to(REPO_ROOT).as_posix()
 
 
 def test_the_generated_types_module_is_what_the_declared_models_produce() -> (
@@ -147,73 +137,64 @@ def test_an_object_with_its_own_fixed_property_set_still_refuses() -> None:
         generator._ts_type(schema, "_fixed_object")
 
 
-def _generated_field_sets() -> list[set[str]]:
-    text = GENERATED.read_text(encoding="utf-8")
-    return [
-        {name for name, _ in _TS_FIELD_RE.findall(block)}
-        for block in _TS_BLOCK_RE.findall(text)
-    ]
-
-
 def test_no_other_frontend_module_declares_an_interface_with_a_generated_field_set(
-    sources: list[Path],
+    frontend: dict,
 ) -> None:
     """No other frontend module declares an interface with a generated field set."""
-    generated_sets = [s for s in _generated_field_sets() if s]
-    assert generated_sets, "no interfaces parsed out of the generated module"
+    generated_sets = [
+        set(shape["fields"])
+        for shape in frontend["shapes"]
+        if Path(shape["file"]) == GENERATED and shape["fields"]
+    ]
+    assert generated_sets, "no interfaces read from the generated module"
+    others = [
+        shape
+        for shape in frontend["shapes"]
+        if Path(shape["file"]) != GENERATED
+    ]
+    assert others, "no interface read from a source but the generated module"
 
-    assert sources, "no frontend sources found, so nothing was checked"
-    offenders = []
-    for source in sources:
-        text = source.read_text(encoding="utf-8")
-        for block in _TS_BLOCK_RE.findall(text):
-            fields = {name for name, _ in _TS_FIELD_RE.findall(block)}
-            if fields and fields in generated_sets:
-                offenders.append(source.relative_to(REPO_ROOT).as_posix())
+    offenders = [
+        _source(shape)
+        for shape in others
+        if shape["fields"] and set(shape["fields"]) in generated_sets
+    ]
     assert not offenders, (
         "these declare an interface with the same field set as a generated coverage type:\n"
         + "\n".join(offenders)
     )
 
 
-def _generated_vocabularies() -> list[set[str]]:
-    """Return the vocabularies the generator emits.
-
-    Each generated field's literal union, each tuple constant, each record constant's keys, and
-    each literal alias.
-    """
-    text = GENERATED.read_text(encoding="utf-8")
-    generator = _generator()
-    return (
-        [
-            set(_QUOTED_RE.findall(m.group(1)))
-            for m in _FIELD_UNION_RE.finditer(text)
-        ]
-        + [set(v) for v in generator.tuple_constants().values()]
-        + [set(v) for v in generator.record_constants().values()]
-        + [set(v) for v in generator.literal_aliases().values()]
-    )
-
-
 def test_no_frontend_module_hand_declares_a_generated_vocabulary(
-    sources: list[Path],
+    frontend: dict,
 ) -> None:
     """No frontend module hand-declares a union alias matching a generated vocabulary.
 
-    A bare ``type X = "a" | "b" | ...;`` alias whose members exactly match a vocabulary the
-    generator emits is an offender.
+    The vocabularies are each string literal union the generated module declares, each tuple
+    constant and each record constant's keys; a type alias of a string literal union whose
+    members exactly match one is an offender.
     """
-    generated_sets = [s for s in _generated_vocabularies() if len(s) > 1]
-    assert generated_sets, "no vocabularies read from the generator"
+    generator = _generator()
+    unions = [
+        set(union["members"])
+        for union in frontend["unions"]
+        if Path(union["file"]) == GENERATED
+    ]
+    assert unions, "no string literal union read from the generated module"
+    vocabularies = (
+        unions
+        + [set(v) for v in generator.tuple_constants().values()]
+        + [set(v) for v in generator.record_constants().values()]
+    )
+    generated_sets = [s for s in vocabularies if len(s) > 1]
 
-    offenders = []
-    for source in sources:
-        text = source.read_text(encoding="utf-8")
-        for m in _TYPE_ALIAS_UNION_RE.finditer(text):
-            if set(_QUOTED_RE.findall(m.group(2))) in generated_sets:
-                offenders.append(
-                    f"{source.relative_to(REPO_ROOT).as_posix()}: {m.group(1)}"
-                )
+    offenders = [
+        f"{_source(union)}: {union['alias']}"
+        for union in frontend["unions"]
+        if Path(union["file"]) != GENERATED
+        and union["alias"] is not None
+        and set(union["members"]) in generated_sets
+    ]
     assert not offenders, (
         "these declare a union alias matching a generated vocabulary by hand:\n"
         + "\n".join(offenders)
