@@ -47,10 +47,6 @@ describe("subjectColor collision-free registry slots", () => {
 });
 
 describe("registry save", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("carries the version it was loaded at, so a stale save is refused", async () => {
     stubFetch({ status: "ok", n_subjects: 1, subjects_path: "s", version: "v2" });
     await subjectsApi.save({ bush: {} }, "C:/data", "v1", "jordan");

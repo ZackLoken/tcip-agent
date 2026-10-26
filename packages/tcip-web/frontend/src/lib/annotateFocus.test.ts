@@ -4,12 +4,11 @@ import { api } from "@/api/client";
 import type { DatasetSelection } from "@/api/types.generated";
 import { applyAnnotateFocus } from "@/lib/annotateFocus";
 import { useStore } from "@/store";
+import { stateEnvelope, TEST_PROJECT as PROJECT } from "@/test/store";
 
 vi.mock("@/api/client", () => ({
   api: { dataset: { select: vi.fn(), nav: vi.fn(() => Promise.resolve({ status: "ok" })) } },
 }));
-
-const PROJECT = { id: "a1b2c3d4e5f6", path: "/ws/proj" };
 
 function seedDataset(partial: Record<string, unknown>) {
   useStore.getState().patchGui({
@@ -97,14 +96,13 @@ describe("applyAnnotateFocus", () => {
 
     // Emulate the backend's /select broadcast landing after the local setters: same identity
     // now, so mergeSnapshot must keep the local (focus) index, not reset to 0.
-    useStore
-      .getState()
-      .mergeSnapshot(
-        { ...useStore.getState().gui, dataset: { ...newIdentity, current_image_index: 0 } },
-        999,
-        PROJECT,
-        null,
-      );
+    useStore.getState().mergeSnapshot(
+      stateEnvelope({
+        state: { ...useStore.getState().gui, dataset: { ...newIdentity, current_image_index: 0 } },
+        version: 999,
+        project: PROJECT,
+      }),
+    );
     expect(useStore.getState().gui.dataset.current_image_index).toBe(47);
   });
 

@@ -46,7 +46,6 @@ beforeEach(() => {
 
 afterEach(() => {
   document.body.innerHTML = "";
-  vi.restoreAllMocks();
 });
 
 /** A native read the server names: its rect in the native grid is also where it lies. */
@@ -112,13 +111,10 @@ describe("useRegionServes", () => {
   });
 
   it("never lets an answer for a view it has left replace the current one", async () => {
-    let releaseFirst: (value: { reads: ServingCell[] }) => void = () => {};
-    const first = new Promise<{ reads: ServingCell[] }>((resolve) => {
-      releaseFirst = resolve;
-    });
+    const first = Promise.withResolvers<{ reads: ServingCell[] }>();
     const reads = vi
       .spyOn(api.images, "viewReads")
-      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(first.promise)
       .mockResolvedValueOnce({ reads: [native("NEW", 0, 0, 500, 300)] });
     const args = baseArgs();
     const { result, rerender } = renderHook((props) => useRegionServes(props), {
@@ -126,7 +122,7 @@ describe("useRegionServes", () => {
     });
     rerender({ ...args, view: { scale: 2, offset_x: 0, offset_y: 0 } });
     await waitFor(() => expect(result.current.map((r) => r.key)).toEqual(["0:NEW"]));
-    await act(() => Promise.resolve(releaseFirst({ reads: [native("OLD", 0, 0, 1000, 600)] })));
+    await act(() => Promise.resolve(first.resolve({ reads: [native("OLD", 0, 0, 1000, 600)] })));
     expect(result.current.map((r) => r.key)).toEqual(["0:NEW"]);
     expect(reads).toHaveBeenCalledTimes(2);
   });

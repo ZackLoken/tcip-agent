@@ -18,6 +18,7 @@ from tcip_annotation.json_io import (
 )
 from tcip_annotation.state import polygonal
 from tcip_mcp.server import tool
+from tcip_mcp.web_client import Panel
 from tcip_mcp.workspace import BoundProject
 
 
@@ -40,7 +41,7 @@ def _logical_image_names(images_dir: Path) -> list[str]:
 
 @tool()
 def push_panel_event(
-    bound: BoundProject, panel: str, event_type: str, data: dict
+    bound: BoundProject, panel: Panel, event_type: str, data: dict
 ) -> dict:
     """Push structured data to a TCIP GUI panel via the tcip-web backend.
 
@@ -54,7 +55,7 @@ def push_panel_event(
 
     Args:
         panel: Target panel: one per GUI tab, or 'app' for app-level events like
-            annotate_focus. See ``web_client.VALID_PANELS`` for the current set.
+            annotate_focus.
         event_type: Any event type the panel understands, not confined to
             ``web_client.PLATFORM_PANEL_EVENTS`` (the platform's own emitters). 'banner' is the one
             example the browser renders directly: ``data['text']`` shows as a quiet note above that
@@ -62,12 +63,7 @@ def push_panel_event(
         data: Arbitrary JSON data payload.
 
     """
-    from tcip_mcp.web_client import VALID_PANELS, post_panel_event
-
-    if panel not in VALID_PANELS:
-        return {
-            "error": f"Unknown panel: {panel}. Valid: {sorted(VALID_PANELS)}"
-        }
+    from tcip_mcp.web_client import post_panel_event
 
     result = post_panel_event(bound, panel, event_type, data)
     result.setdefault("panel", panel)

@@ -17,10 +17,7 @@ beforeEach(() => {
   act(() => useStore.getState().setActiveSubject("bud"));
 });
 
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
+afterEach(cleanup);
 
 /** Type `text` into the input labeled `label` and press Enter. */
 function enter(label: string, text: string) {

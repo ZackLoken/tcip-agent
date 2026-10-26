@@ -1,13 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { sessionsApi } from "@/api/sessions";
 
 const REF = { project_id: "a1b2c3d4e5f6", started: "2026-10-07T14:00:00+00:00" };
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
-});
 
 describe("sessionsApi.endAsPageLeaves", () => {
   it("sends the session reference as one beacon when the browser accepts it", async () => {

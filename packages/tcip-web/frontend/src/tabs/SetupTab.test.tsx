@@ -8,7 +8,7 @@ import type { CaptureInvariances, MatchRadius } from "@/api/types.generated";
 import { useStore } from "@/store";
 import { SetupTab } from "@/tabs/SetupTab";
 import { PROJECT_FIXTURES } from "@/test/projectRecords";
-import { openTestProject } from "@/test/store";
+import { openTestProject, testProject } from "@/test/store";
 import { TRAIT_LISTINGS } from "@/test/traitRecords";
 
 const initialStoreState = useStore.getState();
@@ -31,7 +31,7 @@ describe("SetupTab capture invariances", () => {
   const ROTATION = "rotation (degrees)";
 
   beforeEach(() => {
-    useStore.setState({ openProject: { id: CORRECTION.id, path: CORRECTED.path } });
+    useStore.setState({ openProject: testProject({ id: CORRECTION.id, path: CORRECTED.path }) });
   });
 
   it("shows the six answers the open project's record carries", async () => {
@@ -92,10 +92,7 @@ describe("SetupTab capture invariances", () => {
   });
 });
 
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
+afterEach(cleanup);
 
 describe("SetupTab trait revisions", () => {
   const LISTING = TRAIT_LISTINGS.setup;

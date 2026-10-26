@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { TAB_NAMES } from "@/api/types.generated";
 import { datasetKey, loadLastTab, recordLastTab, saveDatasetUi } from "@/lib/datasetUiState";
 import { useStore } from "@/store";
-import type { DatasetSelection, OpenProject, TabName } from "@/store/types";
+import type { DatasetSelection, TabName } from "@/store/types";
+import { TEST_PROJECT } from "@/test/store";
 
 const s = () => useStore.getState();
 
-const ROOT = "/w/alpha";
-const PROJECT: OpenProject = { id: "a1b2c3d4e5f6", path: ROOT };
+const PROJECT = TEST_PROJECT;
+const ROOT = PROJECT.path;
 
 function selection(over: Partial<DatasetSelection> = {}): DatasetSelection {
   return {

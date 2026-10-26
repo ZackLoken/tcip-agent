@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 // jsdom lacks xterm's canvas and measurement APIs, so the emulator and its addons are mocked unless
 // a test sets `emulator.real`; vi.hoisted makes these exist when the hoisted vi.mock factories run.
@@ -95,15 +95,7 @@ import { TerminalRail } from "@/components/TerminalRail";
 import { MAX_BACKOFF_MS } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
 
-// jsdom lacks WebSocket and the matchMedia a real xterm's open reads.
-vi.stubGlobal("matchMedia", (media: string) => ({
-  matches: false,
-  media,
-  addListener: vi.fn(),
-  removeListener: vi.fn(),
-  addEventListener: vi.fn(),
-  removeEventListener: vi.fn(),
-}));
+/** The browser's WebSocket as the rail's tests stand it in, so no test opens a connection. */
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
   static OPEN = 1;
@@ -124,7 +116,6 @@ class MockWebSocket {
     this.onclose?.({ code });
   }
 }
-vi.stubGlobal("WebSocket", MockWebSocket);
 
 const PROVIDER = { id: "harness", name: "A harness", unavailable_reason: null };
 const LAUNCHED = {
@@ -137,6 +128,12 @@ const LAUNCHED = {
 };
 const LAUNCH = { session_id: "t1", launched: LAUNCHED };
 
+type Globals = { IS_REACT_ACT_ENVIRONMENT?: boolean };
+
+// Read before any test overrides them.
+const JSDOM_PLATFORM = navigator.platform;
+const ACT_ENVIRONMENT = (globalThis as Globals).IS_REACT_ACT_ENVIRONMENT;
+
 afterEach(cleanup);
 beforeEach(() => {
   localStorage.clear();
@@ -144,6 +141,16 @@ beforeEach(() => {
   emulator.real = false;
   emulator.term = null;
   MockWebSocket.instances.length = 0;
+  vi.stubGlobal("WebSocket", MockWebSocket);
+  // The matchMedia a real xterm's open reads, which jsdom lacks.
+  vi.stubGlobal("matchMedia", (media: string) => ({
+    matches: false,
+    media,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
   useStore.setState({
     pendingTerminalMessages: [],
     terminalPhase: "live",
@@ -167,11 +174,10 @@ function submitted(): [string, string][] {
   return vi.mocked(terminalApi.submit).mock.calls.map(([id, { text }]) => [id, text]);
 }
 
-/** A promise and the function that settles it, for an answer the test releases itself. */
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-  let resolve: (value: T) => void = () => {};
-  const promise = new Promise<T>((settle) => (resolve = settle));
-  return { promise, resolve };
+/** Give the browser `clipboard` for the running test, removed when the test finishes. */
+function withClipboard(clipboard: Partial<Clipboard>) {
+  Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
+  onTestFinished(() => void Reflect.deleteProperty(navigator, "clipboard"));
 }
 
 /** Wait for the rail's `index`th socket and open it the way a live connection opens. */
@@ -243,7 +249,7 @@ describe("TerminalRail", () => {
 
     /** Have the browser report `platform` as the platform the rail runs on. */
     function onPlatform(platform: string) {
-      Object.defineProperty(navigator, "platform", { value: platform, configurable: true });
+      vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
     }
 
     beforeEach(() => {
@@ -303,7 +309,7 @@ describe("TerminalRail", () => {
 
     it("reads no clipboard for a keyboard paste", async () => {
       const readText = vi.fn().mockResolvedValue("clipboard text");
-      Object.defineProperty(navigator, "clipboard", { value: { readText }, configurable: true });
+      withClipboard({ readText });
       const { textarea } = await mounted();
       for (const init of KEYBOARD_PASTES) press(textarea, init);
       expect(readText).not.toHaveBeenCalled();
@@ -311,7 +317,7 @@ describe("TerminalRail", () => {
 
     it("a right click pastes the clipboard only while the program has not taken the mouse", async () => {
       const readText = vi.fn().mockResolvedValue("clipboard text");
-      Object.defineProperty(navigator, "clipboard", { value: { readText }, configurable: true });
+      withClipboard({ readText });
       const { host, ws, input } = await mounted();
       fireEvent.contextMenu(host);
       await waitFor(() => expect(input()).toEqual(["clipboard text"]));
@@ -324,7 +330,7 @@ describe("TerminalRail", () => {
 
   it("copies the terminal selection to the clipboard when a drag-select ends", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    withClipboard({ writeText });
     render(<TerminalRail />);
     const host = await screen.findByTestId("terminal-host");
     await waitFor(() => expect(termInstances[0].focus).toHaveBeenCalled());
@@ -395,31 +401,31 @@ describe("TerminalRail", () => {
     // A browser reports the move as the current event, which React schedules as continuous work;
     // jsdom still reports the mousedown, which React would render and flush synchronously.
     const move = new MouseEvent("mousemove", { clientX: window.innerWidth - 600 });
-    const currentEvent = vi.spyOn(window, "event", "get").mockReturnValue(move);
+    vi.spyOn(window, "event", "get").mockReturnValue(move);
     // Each clock read passes React's 5 ms frame, so the scheduler yields after the commit.
     let now = performance.now();
-    const clock = vi.spyOn(performance, "now").mockImplementation(() => (now += 6));
-    const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
-    const actEnvironment = environment.IS_REACT_ACT_ENVIRONMENT;
-    environment.IS_REACT_ACT_ENVIRONMENT = false;
-    try {
-      const released = new Promise<void>((resolve) => {
-        const observer = new MutationObserver(() => {
-          observer.disconnect();
-          window.dispatchEvent(new MouseEvent("mouseup"));
-          resolve();
-        });
-        observer.observe(rail, { attributeFilter: ["style"] });
+    vi.spyOn(performance, "now").mockImplementation(() => (now += 6));
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", false);
+    const released = new Promise<void>((resolve) => {
+      const observer = new MutationObserver(() => {
+        observer.disconnect();
+        window.dispatchEvent(new MouseEvent("mouseup"));
+        resolve();
       });
-      window.dispatchEvent(move);
-      await released;
-      expect(rail.style.width).toBe("600px");
-      expect(localStorage.getItem("tcip.terminal_width")).toBe("600");
-    } finally {
-      environment.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
-      clock.mockRestore();
-      currentEvent.mockRestore();
-    }
+      observer.observe(rail, { attributeFilter: ["style"] });
+    });
+    window.dispatchEvent(move);
+    await released;
+    expect(rail.style.width).toBe("600px");
+    expect(localStorage.getItem("tcip.terminal_width")).toBe("600");
+  });
+
+  // Runs after the tests above in file order and observes what they overrode: a stubbed global
+  // (unstubGlobals), a spied platform (restoreMocks) and the test-scoped clipboard.
+  it("finds every global the tests before it overrode back at its value from before them", () => {
+    expect((globalThis as Globals).IS_REACT_ACT_ENVIRONMENT).toBe(ACT_ENVIRONMENT);
+    expect(navigator.platform).toBe(JSDOM_PLATFORM);
+    expect("clipboard" in navigator).toBe(false);
   });
 
   it("leaves the width alone when no column has been painted to measure", async () => {
@@ -540,7 +546,7 @@ describe("TerminalRail", () => {
     });
 
     it("while an end is pending the picker is disabled and says the agent is ending", async () => {
-      const answer = deferred<{ undelivered: string[] }>();
+      const answer = Promise.withResolvers<{ undelivered: string[] }>();
       vi.mocked(terminalApi.end).mockReturnValueOnce(answer.promise);
       vi.mocked(terminalApi.status).mockResolvedValue({ providers: [PROVIDER, SECOND] });
       render(<TerminalRail />);
@@ -715,7 +721,7 @@ describe("TerminalRail", () => {
     });
 
     it("shows the agent ended and offers Start only once the end answers", async () => {
-      const answer = deferred<{ undelivered: string[] }>();
+      const answer = Promise.withResolvers<{ undelivered: string[] }>();
       vi.mocked(terminalApi.end).mockReturnValueOnce(answer.promise);
       render(<TerminalRail />);
       await openSocket();
@@ -729,7 +735,7 @@ describe("TerminalRail", () => {
     });
 
     it("ends only once the submit in flight settles, keeping equal requests in their order", async () => {
-      const taken = deferred<Record<string, never>>();
+      const taken = Promise.withResolvers<Record<string, never>>();
       vi.mocked(terminalApi.submit)
         .mockResolvedValueOnce({})
         .mockResolvedValueOnce({})
@@ -753,7 +759,7 @@ describe("TerminalRail", () => {
     });
 
     it("an end the backend could not carry out resumes the staged requests too", async () => {
-      const taken = deferred<Record<string, never>>();
+      const taken = Promise.withResolvers<Record<string, never>>();
       vi.mocked(terminalApi.submit).mockReturnValueOnce(taken.promise);
       vi.mocked(terminalApi.end).mockRejectedValue(
         new StructuredRefusalError({ message: "survived" }, 503, "survived"),
@@ -776,7 +782,7 @@ describe("TerminalRail", () => {
     });
 
     it("reopening the rail while an End is unanswered creates no session", async () => {
-      const answer = deferred<{ undelivered: string[] }>();
+      const answer = Promise.withResolvers<{ undelivered: string[] }>();
       vi.mocked(terminalApi.end).mockReturnValueOnce(answer.promise);
       render(<TerminalRail />);
       await openSocket();
@@ -870,7 +876,7 @@ describe("TerminalRail", () => {
     });
 
     it("keeps a request staged until the backend takes it", async () => {
-      const answer = deferred<Record<string, never>>();
+      const answer = Promise.withResolvers<Record<string, never>>();
       vi.mocked(terminalApi.submit).mockReturnValueOnce(answer.promise);
       render(<TerminalRail />);
       act(() => useStore.getState().sendToAgentTerminal("after reopen"));
@@ -908,8 +914,8 @@ describe("TerminalRail", () => {
     });
 
     it("submits a request once to the session two overlapping creates across a reopen share", async () => {
-      const first = deferred<typeof LAUNCH>();
-      const second = deferred<typeof LAUNCH>();
+      const first = Promise.withResolvers<typeof LAUNCH>();
+      const second = Promise.withResolvers<typeof LAUNCH>();
       vi.mocked(terminalApi.createSession)
         .mockReturnValueOnce(first.promise)
         .mockReturnValueOnce(second.promise);

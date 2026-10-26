@@ -68,11 +68,11 @@ async function performOpen(
   useStore.getState().saveCurrentDatasetUi();
   await settleVisits();
   if (!heldOpen(requestId)) return;
-  const opened = await api.projects.open({ id: p.id, user: useStore.getState().user });
+  const { project } = await api.projects.open({ id: p.id, user: useStore.getState().user });
   if (!heldOpen(requestId)) return;
   const res = date
     ? await api.dataset.select({
-        dataset_root: opened.path,
+        dataset_root: project.path,
         subject: subject || null,
         date,
         bucket: bucket || null,
@@ -80,7 +80,7 @@ async function performOpen(
     : { selection: GUI_STATE_DEFAULTS.dataset, label_problem: null };
   if (!heldOpen(requestId)) return;
   try {
-    recordRecentProject(opened.id);
+    recordRecentProject(project.id);
   } catch (e) {
     useStore
       .getState()
@@ -88,7 +88,7 @@ async function performOpen(
         `Opened, but the recent projects list was not updated: ${e instanceof Error ? e.message : String(e)}`,
       );
   }
-  useStore.getState().applyRestoredDataset(res.selection, { id: opened.id, path: opened.path });
+  useStore.getState().applyRestoredDataset(res.selection, project);
   toastLabelProblem(res.label_problem);
 }
 

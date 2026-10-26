@@ -16,12 +16,6 @@ export type TabName = GuiState["active_tab"];
 
 export type Mode = GuiState["mode"];
 
-/** The project the backend has open, as its state envelope names it. */
-export interface OpenProject {
-  id: string;
-  path: string;
-}
-
 /* ── Label schema (name-based, one unified file per image) ───────────────── */
 
 /** One annotation as it lives on disk / crosses the wire: a subject, an optional geometry

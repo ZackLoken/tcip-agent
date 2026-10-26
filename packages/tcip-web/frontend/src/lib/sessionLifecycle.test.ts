@@ -1,14 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StructuredRefusalError } from "@/api/http";
 import { sessionsApi } from "@/api/sessions";
-import type { ImageEventPayload, SessionWrite } from "@/api/types.generated";
+import type { ImageEventPayload, SessionWrite, SnapshotProject } from "@/api/types.generated";
 import { endRecordedSession, postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
 import { textOf } from "@/store/slices/toasts";
-import { openTestProject, TEST_PROJECT } from "@/test/store";
+import { openTestProject, stateEnvelope, TEST_PROJECT, testProject } from "@/test/store";
 
 const initialStoreState = useStore.getState();
+
+/** A project other than the one each test opens. */
+const OTHER = testProject({ id: "f6e5d4c3b2a1", path: "C:/other" });
 
 function contribution(image: string): ImageEventPayload {
   return {
@@ -28,16 +31,13 @@ function landed(started: string): SessionWrite {
   return { status: "ok", session: { started, ended: false } };
 }
 
-/** A pending answer the test resolves when it chooses. */
-function deferred() {
-  let resolve!: (value: SessionWrite) => void;
-  let reject!: (e: unknown) => void;
-  const promise = new Promise<SessionWrite>((r, j) => {
-    resolve = r;
-    reject = j;
+/** The envelope of a snapshot naming `project`, the GUI state otherwise as the store holds it. */
+const naming = (project: SnapshotProject) =>
+  stateEnvelope({
+    state: useStore.getState().gui,
+    version: useStore.getState().wsVersion,
+    project,
   });
-  return { promise, resolve, reject };
-}
 
 async function flush() {
   for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -49,12 +49,10 @@ beforeEach(() => {
   vi.spyOn(sessionsApi, "endAsPageLeaves").mockImplementation(() => {});
 });
 
-afterEach(() => vi.restoreAllMocks());
-
 describe("session lifecycle", () => {
   it("posts held contributions one after another, each after the one before it answers", async () => {
-    const first = deferred();
-    const second = deferred();
+    const first = Promise.withResolvers<SessionWrite>();
+    const second = Promise.withResolvers<SessionWrite>();
     const post = vi
       .spyOn(sessionsApi, "imageEvent")
       .mockReturnValueOnce(first.promise)
@@ -86,7 +84,7 @@ describe("session lifecycle", () => {
 
   it("posts a held visit of a project no longer open, in the order it was held", async () => {
     const post = vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue(landed("s1"));
-    const departed = { ...contribution("a.jpg"), project_id: "f6e5d4c3b2a1", started: "s0" };
+    const departed = { ...contribution("a.jpg"), project_id: OTHER.id, started: "s0" };
     const current = contribution("b.jpg");
     useStore.setState({ heldContributions: [departed, current] });
 
@@ -99,7 +97,7 @@ describe("session lifecycle", () => {
   });
 
   it("ends the session a pending contribution answers, once, after that answer", async () => {
-    const pending = deferred();
+    const pending = Promise.withResolvers<SessionWrite>();
     vi.spyOn(sessionsApi, "imageEvent").mockReturnValueOnce(pending.promise);
     useStore.setState({ heldContributions: [contribution("a.jpg")] });
     postHeldContributions();
@@ -127,20 +125,15 @@ describe("session lifecycle", () => {
     await flush();
     expect(useStore.getState().recordedSession).not.toBeNull();
 
-    const other = { id: "f6e5d4c3b2a1", path: "C:/other" };
-    useStore.getState().mergeSnapshot(useStore.getState().gui, null, other, null);
+    useStore.getState().mergeSnapshot(naming(OTHER));
     endRecordedSession();
     await flush();
 
     expect(sessionsApi.endAsPageLeaves).not.toHaveBeenCalled();
   });
 
-  const OTHER = { id: "f6e5d4c3b2a1", path: "C:/other" };
   const SWITCHES: [string, () => void][] = [
-    [
-      "a snapshot naming another project",
-      () => useStore.getState().mergeSnapshot(useStore.getState().gui, null, OTHER, null),
-    ],
+    ["a snapshot naming another project", () => useStore.getState().mergeSnapshot(naming(OTHER))],
     [
       "a dataset opened in another project",
       () => useStore.getState().applyRestoredDataset(useStore.getState().gui.dataset, OTHER),
@@ -150,7 +143,7 @@ describe("session lifecycle", () => {
   it.each(SWITCHES)(
     "retires a contribution answered after %s and records no session for it",
     async (_name, switchProject) => {
-      const pending = deferred();
+      const pending = Promise.withResolvers<SessionWrite>();
       vi.spyOn(sessionsApi, "imageEvent").mockReturnValueOnce(pending.promise);
       useStore.setState({ heldContributions: [contribution("a.jpg")] });
       postHeldContributions();
@@ -202,22 +195,20 @@ describe("session lifecycle", () => {
     await flush();
     expect(useStore.getState().toasts).toHaveLength(1);
 
-    const s = useStore.getState();
-    s.mergeSnapshot(s.gui, null, OTHER, null);
+    useStore.getState().mergeSnapshot(naming(OTHER));
 
     expect(useStore.getState().heldContributions).toEqual([]);
     expect(useStore.getState().toasts.map(textOf)).toEqual([UNCONFIRMED]);
   });
 
   it("says recording is unconfirmed for a visit in flight when its project departed, and nothing more when the send then fails", async () => {
-    const pending = deferred();
+    const pending = Promise.withResolvers<SessionWrite>();
     vi.spyOn(sessionsApi, "imageEvent").mockReturnValueOnce(pending.promise);
     useStore.setState({ heldContributions: [contribution("a.jpg")], toasts: [] });
     postHeldContributions();
     await flush();
 
-    const s = useStore.getState();
-    s.mergeSnapshot(s.gui, null, OTHER, null);
+    useStore.getState().mergeSnapshot(naming(OTHER));
     pending.reject(new TypeError("Failed to fetch"));
     await flush();
 
@@ -398,15 +389,14 @@ describe("session lifecycle", () => {
   });
 
   it("lets the late answer to a contribution its departure retired name no session once its project is open again", async () => {
-    const pending = deferred();
+    const pending = Promise.withResolvers<SessionWrite>();
     vi.spyOn(sessionsApi, "imageEvent").mockReturnValueOnce(pending.promise);
     useStore.setState({ heldContributions: [contribution("a.jpg")] });
     postHeldContributions();
     await flush();
 
-    const s = useStore.getState();
-    s.mergeSnapshot(s.gui, null, OTHER, null);
-    s.mergeSnapshot(s.gui, null, TEST_PROJECT, null);
+    useStore.getState().mergeSnapshot(naming(OTHER));
+    useStore.getState().mergeSnapshot(naming(TEST_PROJECT));
     pending.resolve(landed("s-ended"));
     await flush();
 

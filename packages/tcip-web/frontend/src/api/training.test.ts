@@ -1,12 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { trainingApi } from "@/api/training";
 
 describe("trainingApi.cancel", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("POSTs to the run's cancel endpoint, naming the person", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

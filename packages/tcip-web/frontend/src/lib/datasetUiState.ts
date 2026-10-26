@@ -3,8 +3,8 @@
  * returning within a session lands where you were. Each project's last tab is in localStorage.
  */
 
-import { TAB_NAMES } from "@/api/types.generated";
-import type { DatasetSelection, OpenProject, TabName } from "@/store/types";
+import { TAB_NAMES, type SnapshotProject } from "@/api/types.generated";
+import type { DatasetSelection, TabName } from "@/store/types";
 
 export interface DatasetUiState {
   index: number;
@@ -14,7 +14,7 @@ const UI_PREFIX = "tcip.dsui.";
 
 /** Stable key for a dataset selection: project + dataset root + date + subject + bucket, so
  *  distinct views don't share. */
-export function datasetKey(project: OpenProject | null, d: DatasetSelection): string | null {
+export function datasetKey(project: SnapshotProject | null, d: DatasetSelection): string | null {
   if (!project || !d.dataset_root || !d.date) return null;
   return JSON.stringify([project.id, d.dataset_root, d.date, d.subject, d.bucket]);
 }

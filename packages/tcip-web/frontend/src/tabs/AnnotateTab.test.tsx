@@ -21,7 +21,7 @@ import {
 import { useStore } from "@/store";
 import type { Flag, ServedProposals } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
-import { openTestProject } from "@/test/store";
+import { openTestProject, TEST_PROJECT, testProject } from "@/test/store";
 
 // Konva needs a real 2D canvas; these tests exercise label I/O ordering and
 // store->canvas prop flow, not drawing. Render Konva shapes as inspectable divs
@@ -214,6 +214,17 @@ const pressSave = () => fireEvent.keyDown(window, { key: "s", ctrlKey: true });
 let loadSpy: MockInstance<typeof api.annotate.load>;
 let saveSpy: MockInstance<typeof api.annotate.save>;
 
+/** Hold every save until the test answers it; each save's resolver joins the list, oldest first. */
+function heldSaves(): ((r: SaveResult) => void)[] {
+  const pending: ((r: SaveResult) => void)[] = [];
+  saveSpy.mockImplementation(() => {
+    const save = Promise.withResolvers<SaveResult>();
+    pending.push(save.resolve);
+    return save.promise;
+  });
+  return pending;
+}
+
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
   useStore.getState().setUser("grower");
@@ -312,7 +323,9 @@ describe("AnnotateTab session contributions", () => {
     await leaveFirstImage();
     const own = useStore.getState().openProject!.id;
 
-    act(() => useStore.setState({ openProject: { id: "other0000000", path: "C:/other" } }));
+    act(() =>
+      useStore.setState({ openProject: testProject({ id: "other0000000", path: "C:/other" }) }),
+    );
     await flush();
 
     expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(2);
@@ -382,10 +395,8 @@ describe("AnnotateTab save/load race", () => {
     // it; hold its response so the img2 load resolves first (slow label write vs
     // cached read): this interleaving must never corrupt cross-image GT.
     act(addBox);
-    let resolveFlushSave!: (r: SaveResult) => void;
-    saveSpy.mockImplementationOnce(
-      () => new Promise<SaveResult>((res) => (resolveFlushSave = res)),
-    );
+    const flushSave = Promise.withResolvers<SaveResult>();
+    saveSpy.mockReturnValueOnce(flushSave.promise);
     act(() => {
       const s = useStore.getState();
       s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
@@ -398,7 +409,7 @@ describe("AnnotateTab save/load race", () => {
 
     // Edit img2 while the img1 save is still in flight, then let it resolve late.
     act(addBox);
-    await act(() => Promise.resolve(resolveFlushSave(saved("150"))));
+    await act(() => Promise.resolve(flushSave.resolve(saved("150"))));
 
     // The stale result must not markClean() the img2 edits...
     expect(useStore.getState().canvas.dirty).toBe(true);
@@ -418,8 +429,7 @@ describe("AnnotateTab save/load race", () => {
     await flush();
 
     act(addBox);
-    const pending: ((r: SaveResult) => void)[] = [];
-    saveSpy.mockImplementation(() => new Promise<SaveResult>((res) => pending.push(res)));
+    const pending = heldSaves();
     act(() => {
       const s = useStore.getState();
       s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
@@ -448,11 +458,11 @@ describe("AnnotateTab save/load race", () => {
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
       await flush();
       act(addBox);
-      let answer!: (r: SaveResult) => void;
+      const save = Promise.withResolvers<SaveResult>();
       let signal!: AbortSignal;
       saveSpy.mockImplementationOnce((_body, s) => {
         signal = s as AbortSignal;
-        return new Promise<SaveResult>((res) => (answer = res));
+        return save.promise;
       });
       pressSave();
       await flush();
@@ -461,7 +471,7 @@ describe("AnnotateTab save/load race", () => {
       render(<AnnotateTab />);
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
       await flush();
-      return { answer, signal };
+      return { answer: save.resolve, signal };
     }
 
     it("is canceled by the toolbar of the new editor", async () => {
@@ -486,8 +496,8 @@ describe("AnnotateTab save/load race", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
     act(addBox);
-    let reject!: (e: unknown) => void;
-    saveSpy.mockImplementationOnce(() => new Promise<SaveResult>((_res, rej) => (reject = rej)));
+    const save = Promise.withResolvers<SaveResult>();
+    saveSpy.mockReturnValueOnce(save.promise);
     pressSave();
     await flush();
     fireEvent.click(screen.getByRole("button", { name: "toolbar-cancel-save" }));
@@ -497,7 +507,7 @@ describe("AnnotateTab save/load race", () => {
     });
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
     await flush();
-    await act(() => Promise.resolve(reject(new DOMException("aborted", "AbortError"))));
+    await act(() => Promise.resolve(save.reject(new DOMException("aborted", "AbortError"))));
     expect(screen.queryByText(/Save canceled/)).not.toBeInTheDocument();
   });
 
@@ -507,8 +517,7 @@ describe("AnnotateTab save/load race", () => {
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
       await flush();
       act(addBox);
-      const pending: ((r: SaveResult) => void)[] = [];
-      saveSpy.mockImplementation(() => new Promise<SaveResult>((res) => pending.push(res)));
+      const pending = heldSaves();
       pressSave();
       await flush();
       first.unmount();
@@ -544,11 +553,11 @@ describe("AnnotateTab save/load race", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
     act(addBox);
-    let late!: (r: SaveResult) => void;
+    const late = Promise.withResolvers<SaveResult>();
     let signal: AbortSignal | undefined;
     saveSpy.mockImplementationOnce((_body, s) => {
       signal = s;
-      return new Promise<SaveResult>((res) => (late = res));
+      return late.promise;
     });
     pressSave();
     await flush();
@@ -559,7 +568,7 @@ describe("AnnotateTab save/load race", () => {
     expect(useStore.getState().canvas.saving).toBeNull();
     act(addBox);
     expect(useStore.getState().canvas.boxes).toHaveLength(2);
-    await act(() => Promise.resolve(late(saved("150", { boxes: [] }))));
+    await act(() => Promise.resolve(late.resolve(saved("150", { boxes: [] }))));
     expect(useStore.getState().canvas.boxes).toHaveLength(2);
     expect(useStore.getState().canvas.dirty).toBe(true);
   });
@@ -585,8 +594,7 @@ describe("AnnotateTab save/load race", () => {
 
     // Interactive Ctrl+S save held in flight, then the user navigates away.
     act(addBox);
-    const pending: ((r: SaveResult) => void)[] = [];
-    saveSpy.mockImplementation(() => new Promise<SaveResult>((res) => pending.push(res)));
+    const pending = heldSaves();
     pressSave();
     act(() => {
       const s = useStore.getState();
@@ -935,13 +943,13 @@ describe("AnnotateTab point tool", () => {
     fireEvent.mouseDown(stage(), { clientX: 100, clientY: 100, button: 0 });
     fireEvent.mouseMove(stage(), { clientX: 200, clientY: 200 });
     await frame();
-    let answer!: (r: SaveResult) => void;
-    saveSpy.mockImplementationOnce(() => new Promise<SaveResult>((res) => (answer = res)));
+    const answer = Promise.withResolvers<SaveResult>();
+    saveSpy.mockReturnValueOnce(answer.promise);
     pressSave();
     await flush();
     await act(() =>
       Promise.resolve(
-        answer(
+        answer.resolve(
           saved("5", { points: [{ x: 200, y: 200, subject: "tip", attributes: {}, index: 0 }] }),
         ),
       ),
@@ -2143,7 +2151,7 @@ describe("AnnotateTab canvas push names its project", () => {
     await flush();
 
     expect(pushSpy).toHaveBeenCalled();
-    expect(pushSpy.mock.calls[0][0].project_id).toBe("a1b2c3d4e5f6");
+    expect(pushSpy.mock.calls[0][0].project_id).toBe(TEST_PROJECT.id);
   });
 });
 
@@ -2644,8 +2652,8 @@ describe("AnnotateTab review symbology", () => {
   it("e whose answer arrives after another image was selected focuses nothing there", async () => {
     await mountReviewing();
     act(() => useStore.getState().setFocus({ kind: "proposal", index: 1 }));
-    let answer!: (r: SaveResult) => void;
-    saveSpy.mockImplementationOnce(() => new Promise<SaveResult>((resolve) => (answer = resolve)));
+    const answer = Promise.withResolvers<SaveResult>();
+    saveSpy.mockReturnValueOnce(answer.promise);
     fireEvent.keyDown(window, { key: "e" });
     await flush();
 
@@ -2655,7 +2663,7 @@ describe("AnnotateTab review symbology", () => {
       s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
     });
     await flush();
-    await act(() => Promise.resolve(answer(saved("9", { boxes: boxes() }))));
+    await act(() => Promise.resolve(answer.resolve(saved("9", { boxes: boxes() }))));
 
     expect(useStore.getState().canvas.focus).toBeNull();
   });
@@ -2674,8 +2682,8 @@ describe("AnnotateTab review symbology", () => {
   it("e's focus is cleared by a navigation that follows its adoption, and the next image keeps none", async () => {
     await mountReviewing();
     act(() => useStore.getState().setFocus({ kind: "proposal", index: 1 }));
-    let answer!: (r: SaveResult) => void;
-    saveSpy.mockImplementationOnce(() => new Promise<SaveResult>((res) => (answer = res)));
+    const answer = Promise.withResolvers<SaveResult>();
+    saveSpy.mockReturnValueOnce(answer.promise);
     fireEvent.keyDown(window, { key: "e" });
     await flush();
     let armed = true;
@@ -2694,7 +2702,9 @@ describe("AnnotateTab review symbology", () => {
       }),
     );
     await act(() =>
-      Promise.resolve(answer(saved("8", { boxes: boxes(), polygons: [polygon()] }, { "1": 0 }))),
+      Promise.resolve(
+        answer.resolve(saved("8", { boxes: boxes(), polygons: [polygon()] }, { "1": 0 })),
+      ),
     );
     stop();
     await waitFor(() => expect(useStore.getState().canvas.boxes[0]?.subject).toBe("other"));
@@ -2704,13 +2714,15 @@ describe("AnnotateTab review symbology", () => {
   it("e sets the tool from the tool in use when the answer lands, not when e was pressed", async () => {
     await mountReviewing();
     act(() => useStore.getState().setFocus({ kind: "proposal", index: 1 }));
-    let answer!: (r: SaveResult) => void;
-    saveSpy.mockImplementationOnce(() => new Promise<SaveResult>((res) => (answer = res)));
+    const answer = Promise.withResolvers<SaveResult>();
+    saveSpy.mockReturnValueOnce(answer.promise);
     fireEvent.keyDown(window, { key: "e" });
     await flush();
     act(() => useStore.getState().setMode("polygon"));
     await act(() =>
-      Promise.resolve(answer(saved("8", { boxes: boxes(), polygons: [polygon()] }, { "1": 0 }))),
+      Promise.resolve(
+        answer.resolve(saved("8", { boxes: boxes(), polygons: [polygon()] }, { "1": 0 })),
+      ),
     );
     expect(useStore.getState().gui.mode).toBe("box");
     expect(useStore.getState().canvas.focus).toEqual({ kind: "box", index: 0 });
@@ -2772,10 +2784,8 @@ describe("AnnotateTab review symbology", () => {
 
     it("refuses an edit made while it is in flight, then adopts the answer whole", async () => {
       await editedTwo();
-      let answer!: (r: SaveResult) => void;
-      saveSpy.mockImplementationOnce(
-        () => new Promise<SaveResult>((resolve) => (answer = resolve)),
-      );
+      const answer = Promise.withResolvers<SaveResult>();
+      saveSpy.mockReturnValueOnce(answer.promise);
       pressSave();
       await flush();
       expect(useStore.getState().canvas.saving).not.toBeNull();
@@ -2793,7 +2803,7 @@ describe("AnnotateTab review symbology", () => {
       expect(useStore.getState().canvas.boxes).toHaveLength(3);
       expect(useStore.getState().canvas.focus).toBeNull();
 
-      await act(() => Promise.resolve(answer(saved("7", { boxes: personBoxes() }))));
+      await act(() => Promise.resolve(answer.resolve(saved("7", { boxes: personBoxes() }))));
       const { canvas } = useStore.getState();
       expect(canvas.saving).toBeNull();
       expect(canvas.boxes[2].authorship).toBe("person");
@@ -2904,13 +2914,13 @@ describe("AnnotateTab flags", () => {
     await mountWith([]);
     fireEvent.keyDown(window, { key: "f" });
     await flush();
-    let answer!: (r: SaveResult) => void;
-    saveSpy.mockImplementationOnce(() => new Promise<SaveResult>((res) => (answer = res)));
+    const answer = Promise.withResolvers<SaveResult>();
+    saveSpy.mockReturnValueOnce(answer.promise);
     fireEvent.change(comment(), { target: { value: "first" } });
     fireEvent.keyDown(comment(), { key: "Enter" });
     await flush();
     fireEvent.change(comment(), { target: { value: "second, not submitted" } });
-    await act(() => Promise.resolve(answer(saved("5"))));
+    await act(() => Promise.resolve(answer.resolve(saved("5"))));
     expect(comment()).toHaveValue("second, not submitted");
   });
 
@@ -3263,8 +3273,8 @@ describe("AnnotateTab engine prompt", () => {
 
   it("an answer arriving after the person moved on serves nothing and names its bucket", async () => {
     const { propose, proposals } = await mountArmed("point");
-    let answer: (a: { bucket: string; proposal_count: number }) => void = () => {};
-    propose.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    const answer = Promise.withResolvers<Awaited<ReturnType<typeof api.annotate.propose>>>();
+    propose.mockReturnValue(answer.promise);
     fireEvent.click(stage(), { clientX: 120, clientY: 340 });
     fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
@@ -3273,7 +3283,7 @@ describe("AnnotateTab engine prompt", () => {
       s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
     });
     await flush();
-    act(() => answer({ bucket: BUCKET, proposal_count: 2 }));
+    act(() => answer.resolve({ bucket: BUCKET, proposal_count: 2 }));
     await flush();
 
     expect(useStore.getState().gui.dataset.current_image_index).toBe(1);

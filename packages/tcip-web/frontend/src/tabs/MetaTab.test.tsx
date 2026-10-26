@@ -16,10 +16,7 @@ beforeEach(() => {
   vi.spyOn(metaApi, "retrospectives").mockResolvedValue({ entries: [], total_available: 0 });
 });
 
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
+afterEach(cleanup);
 
 describe("MetaTab heading", () => {
   it("renders exactly one top-level heading naming the tab", () => {

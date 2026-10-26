@@ -12,13 +12,14 @@ import logging
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, NamedTuple, TypeVar
+from typing import Any, Literal, NamedTuple, TypeVar
 
 from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
 from tcip_mcp.web_client import (
     GUI_STATE_DEFAULTS,
     GuiState,
+    Panel,
     read_gui_snapshot,
     write_gui_snapshot,
 )
@@ -39,6 +40,29 @@ class StateNotification(BaseModel):
     version: int
 
 
+class SnapshotProject(BaseModel):
+    """The open project as the backend's answers name it: its id and its directory."""
+
+    id: str
+    path: str
+
+    @classmethod
+    def of(cls, project: OpenProject) -> SnapshotProject:
+        """Return ``project``'s id and its directory as text."""
+        return cls(id=project.id, path=str(project.root))
+
+
+class StateSnapshotMessage(StateNotification):
+    """The state-snapshot envelope: a notification with the open project and the backend's epoch.
+
+    ``project`` is ``None`` when no project is open.
+    """
+
+    type: Literal["state_snapshot"]
+    project: SnapshotProject | None
+    epoch: str
+
+
 type Subscriber = Callable[[StateNotification], Awaitable[None]]
 """A coroutine called with each held state's notification."""
 
@@ -52,7 +76,7 @@ class PanelEnvelope(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    panel: str
+    panel: Panel
     event_type: str
     data: dict[str, JsonValue]
     event_id: str
@@ -105,7 +129,7 @@ class StateStore:
         self._subscribers: list[Subscriber] = []
         self._workspace: Path | None = None
         self._image_roots: tuple[Path, ...] = ()
-        self._retained: dict[str, deque[PanelEnvelope]] = defaultdict(
+        self._retained: dict[Panel, deque[PanelEnvelope]] = defaultdict(
             lambda: deque(maxlen=RETAINED_EVENTS_PER_PANEL)
         )
 
@@ -234,7 +258,7 @@ class StateStore:
         """Append ``event`` to its panel's retained events."""
         self._retained[event.panel].append(event)
 
-    def retained_events(self, panel: str) -> list[PanelEnvelope]:
+    def retained_events(self, panel: Panel) -> list[PanelEnvelope]:
         """Return the open project's latest events on ``panel``, oldest first."""
         return list(self._retained.get(panel, ()))
 

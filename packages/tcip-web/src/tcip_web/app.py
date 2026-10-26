@@ -14,7 +14,7 @@ from collections import defaultdict
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.gzip import GZipMiddleware
@@ -26,7 +26,7 @@ from pydantic import BaseModel, JsonValue
 from tcip_mcp.audit import now_iso
 from tcip_mcp.buckets import NotABucketError
 from tcip_mcp.identity import NoActorError
-from tcip_mcp.web_client import PANEL_EVENT_ANNOTATE_FOCUS, VALID_PANELS
+from tcip_mcp.web_client import PANEL_EVENT_ANNOTATE_FOCUS, Panel
 from tcip_store import bind
 from tcip_web.trust_boundary import TrustBoundaryMiddleware
 
@@ -90,7 +90,9 @@ from tcip_web.state import (  # noqa: E402  (needs `app`)
     NoProjectOpenError,
     PanelEnvelope,
     ProjectNotOpenError,
+    SnapshotProject,
     StateNotification,
+    StateSnapshotMessage,
     store as _gui_store,
 )
 
@@ -142,35 +144,16 @@ async def _project_not_open_handler(
 SERVER_EPOCH = uuid.uuid4().hex
 
 
-class SnapshotProject(BaseModel):
-    """The open project as a state snapshot names it: its id and its directory."""
-
-    id: str
-    path: str
-
-
-class StateSnapshotMessage(StateNotification):
-    """The state-snapshot envelope: a notification with the open project and this epoch.
-
-    ``project`` is ``None`` when no project is open.
-    """
-
-    type: Literal["state_snapshot"] = "state_snapshot"
-    project: SnapshotProject | None
-    epoch: str
-
-
 def state_snapshot_message(
     notification: StateNotification,
 ) -> StateSnapshotMessage:
     """Return ``notification``'s state-snapshot envelope."""
     opened = _gui_store.opened
     return StateSnapshotMessage(
+        type="state_snapshot",
         state=notification.state,
         version=notification.version,
-        project=None
-        if opened is None
-        else SnapshotProject(id=opened.id, path=str(opened.root)),
+        project=None if opened is None else SnapshotProject.of(opened),
         epoch=SERVER_EPOCH,
     )
 
@@ -230,8 +213,8 @@ async def state_ws(websocket: WebSocket) -> None:
         await websocket.send_text(
             state_snapshot_message(_gui_store.notification()).model_dump_json()
         )
-        while True:
-            await websocket.receive_text()
+        async for _ in websocket.iter_text():
+            pass
     except WebSocketDisconnect:
         pass
     finally:
@@ -244,13 +227,12 @@ async def state_ws(websocket: WebSocket) -> None:
 # while browsers keep their dismissals.
 _event_counter = itertools.count(1)
 # Open WebSocket subscribers per panel.
-_panel_subscribers: dict[str, set[WebSocket]] = defaultdict(set)
+_panel_subscribers: dict[Panel, set[WebSocket]] = defaultdict(set)
 
 
 class PanelEvent(BaseModel):
     """An event pushed to a panel: its type, its data and the project the sender acts on."""
 
-    panel: str | None = None
     event_type: str
     data: dict[str, JsonValue] = {}
     # The id of the project the sender acts on.
@@ -338,25 +320,20 @@ def index() -> Response:
 
 @app.post("/api/events/{panel}")
 async def post_panel_event(
-    panel: str, event: PanelEvent, request: Request
+    panel: Panel, event: PanelEvent, request: Request
 ) -> dict:
     """Accept a pushed event and broadcast it to subscribers.
 
-    Payload shape: ``{panel, event_type, data, project_id}``. An event naming any project but the
-    open one answers 409 (``StateStore.admit``), naming the open one's ``open_project_id`` when
-    another is open and the none-open message when none is, and is neither retained nor
-    broadcast. The broadcast
-    and replay payload, not this route's response, carries every agent identity field the sender
-    declared in its headers (``agent_identity.HEADERS``, each ``None`` when not sent). Declared,
-    not verified: any sender can set the headers.
+    Payload shape: ``{event_type, data, project_id}``. A path naming no panel answers 422. An
+    event naming any project but the open one answers 409 (``StateStore.admit``), naming the
+    open one's ``open_project_id`` when another is open and the none-open message when none is,
+    and is neither retained nor broadcast. The broadcast and replay payload, not this route's
+    response, carries every agent identity field the sender declared in its headers
+    (``agent_identity.HEADERS``, each ``None`` when not sent). Declared, not verified: any
+    sender can set the headers.
     """
     from tcip_mcp import agent_identity
 
-    if panel not in VALID_PANELS:
-        return {
-            "error": f"unknown panel: {panel}",
-            "valid": sorted(VALID_PANELS),
-        }
     project = _gui_store.admit(event.project_id)
     envelope = PanelEnvelope(
         panel=panel,
@@ -380,23 +357,20 @@ async def post_panel_event(
 
 
 @app.websocket("/ws/panel/{panel}")
-async def panel_ws(websocket: WebSocket, panel: str) -> None:
+async def panel_ws(websocket: WebSocket, panel: Panel) -> None:
     """Stream ``panel``'s events over the socket, the open project's retained events first.
 
-    An unknown panel closes the socket with 1008.
+    A path naming no panel is closed with 1008 before it is accepted. An inbound frame is read
+    and discarded, only to detect disconnect.
     """
-    if panel not in VALID_PANELS:
-        await websocket.close(code=1008, reason=f"unknown panel: {panel}")
-        return
     await websocket.accept()
     _panel_subscribers[panel].add(websocket)
     try:
         # Replay the open project's retained events so a late-joining browser sees its state.
         for event in _gui_store.retained_events(panel):
             await websocket.send_text(event.model_dump_json())
-        while True:
-            # Keep the socket open; clients are read-only subscribers here.
-            await websocket.receive_text()
+        async for _ in websocket.iter_text():
+            pass
     except WebSocketDisconnect:
         pass
     finally:

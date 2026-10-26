@@ -1,13 +1,15 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, expectTypeOf, it } from "vitest";
 
+import type { StateSnapshotMessage } from "@/api/types.generated";
 import { recordLastTab } from "@/lib/datasetUiState";
 import { useStore } from "@/store";
-import type { DatasetSelection, GuiState, OpenProject } from "@/store/types";
+import type { DatasetSelection, GuiState } from "@/store/types";
+import { stateEnvelope, TEST_EPOCH, TEST_PROJECT, testProject } from "@/test/store";
 
 const s = () => useStore.getState();
 
-const PROJECT: OpenProject = { id: "a1b2c3d4e5f6", path: "/proj" };
-const OTHER: OpenProject = { id: "ffffffffffff", path: "/other" };
+const PROJECT = TEST_PROJECT;
+const OTHER = testProject({ id: "ffffffffffff", path: "/other" });
 
 function dataset(over: Partial<DatasetSelection> = {}): DatasetSelection {
   return {
@@ -35,6 +37,13 @@ function snapshot(over: Partial<GuiState> = {}): GuiState {
   };
 }
 
+describe("the envelope mergeSnapshot reads", () => {
+  it("is the backend's envelope whole, every field it sends required", () => {
+    expectTypeOf(s().mergeSnapshot).parameter(0).toEqualTypeOf<StateSnapshotMessage>();
+    expectTypeOf<StateSnapshotMessage>().toEqualTypeOf<Required<StateSnapshotMessage>>();
+  });
+});
+
 describe("mergeSnapshot ownership model", () => {
   beforeEach(() => {
     // Known populated local state: user is on Results, polygon mode, subject "bush", image 2.
@@ -47,7 +56,7 @@ describe("mergeSnapshot ownership model", () => {
       }),
       openProject: PROJECT,
       wsVersion: 5,
-      wsEpoch: null,
+      wsEpoch: TEST_EPOCH,
       heldContributions: [],
     });
   });
@@ -55,15 +64,16 @@ describe("mergeSnapshot ownership model", () => {
   it("preserves client-owned fields on a same-dataset snapshot", () => {
     // Backend re-broadcasts with its stale active_tab / mode / index / subject.
     s().mergeSnapshot(
-      snapshot({
-        active_tab: "annotate",
-        mode: "box",
-        active_subject: "subject_a",
-        dataset: dataset({ current_image_index: 0 }),
+      stateEnvelope({
+        state: snapshot({
+          active_tab: "annotate",
+          mode: "box",
+          active_subject: "subject_a",
+          dataset: dataset({ current_image_index: 0 }),
+        }),
+        version: 6,
+        project: PROJECT,
       }),
-      6,
-      PROJECT,
-      null,
     );
     expect(s().gui.active_tab).toBe("results");
     expect(s().gui.mode).toBe("polygon");
@@ -72,41 +82,53 @@ describe("mergeSnapshot ownership model", () => {
   });
 
   it("keeps a populated dataset when the same project's snapshot carries none", () => {
-    s().mergeSnapshot(snapshot({ dataset: dataset(EMPTY) }), 7, PROJECT, null);
+    s().mergeSnapshot(
+      stateEnvelope({ state: snapshot({ dataset: dataset(EMPTY) }), version: 7, project: PROJECT }),
+    );
     expect(s().gui.dataset.dataset_root).toBe("/proj/ds");
     expect(s().gui.dataset.image_list).toHaveLength(3);
   });
 
   it("adopts the snapshot wholesale when it names another open project", () => {
     s().mergeSnapshot(
-      snapshot({ dataset: dataset({ dataset_root: "/other", date: "3-2-26" }) }),
-      7,
-      OTHER,
-      null,
+      stateEnvelope({
+        state: snapshot({ dataset: dataset({ dataset_root: "/other", date: "3-2-26" }) }),
+        version: 7,
+        project: OTHER,
+      }),
     );
     expect(s().openProject).toEqual(OTHER);
     expect(s().gui.dataset.dataset_root).toBe("/other");
   });
 
   it("drops the dataset when the backend has no project open", () => {
-    s().mergeSnapshot(snapshot({ dataset: dataset(EMPTY) }), 7, null, null);
+    s().mergeSnapshot(
+      stateEnvelope({ state: snapshot({ dataset: dataset(EMPTY) }), version: 7, project: null }),
+    );
     expect(s().openProject).toBeNull();
     expect(s().gui.dataset.dataset_root).toBeNull();
   });
 
   it("adopts a new dataset identity and resets the index", () => {
     s().mergeSnapshot(
-      snapshot({ dataset: dataset({ date: "3-2-26", current_image_index: 0 }) }),
-      8,
-      PROJECT,
-      null,
+      stateEnvelope({
+        state: snapshot({ dataset: dataset({ date: "3-2-26", current_image_index: 0 }) }),
+        version: 8,
+        project: PROJECT,
+      }),
     );
     expect(s().gui.dataset.date).toBe("3-2-26");
     expect(s().gui.dataset.current_image_index).toBe(0);
   });
 
   it("drops a stale (older-version) replay", () => {
-    s().mergeSnapshot(snapshot({ dataset: dataset({ date: "9-9-99" }) }), 3, PROJECT, null); // 3 < wsVersion 5
+    s().mergeSnapshot(
+      stateEnvelope({
+        state: snapshot({ dataset: dataset({ date: "9-9-99" }) }),
+        version: 3, // < wsVersion 5
+        project: PROJECT,
+      }),
+    );
     expect(s().gui.dataset.date).toBe("2-11-26"); // unchanged
   });
 
@@ -114,7 +136,7 @@ describe("mergeSnapshot ownership model", () => {
     s().setUser("grower");
     s().startImageSessionTracking("a.jpg");
 
-    s().mergeSnapshot(snapshot(), 3, OTHER, null); // 3 < wsVersion 5
+    s().mergeSnapshot(stateEnvelope({ state: snapshot(), version: 3, project: OTHER })); // 3 < wsVersion 5
 
     expect(s().openProject).toEqual(PROJECT);
     expect(s().sessionTracking.currentImageName).toBe("a.jpg");
@@ -130,7 +152,7 @@ describe("mergeSnapshot ownership model", () => {
       if (i < images.length - 1) s().closeSessionInterval();
     });
 
-    s().mergeSnapshot(snapshot(), 6, OTHER, null);
+    s().mergeSnapshot(stateEnvelope({ state: snapshot(), version: 6, project: OTHER }));
 
     expect(s().sessionTracking.currentImageName).toBeNull();
     expect(s().heldContributions).toEqual([]);
@@ -141,18 +163,25 @@ describe("mergeSnapshot ownership model", () => {
 
   it("applies a snapshot carrying the version already recorded", () => {
     // Only an older version is a stale replay; a re-broadcast at the current version is real state.
-    s().mergeSnapshot(snapshot({ dataset: dataset({ date: "3-2-26" }) }), 5, PROJECT, null);
+    s().mergeSnapshot(
+      stateEnvelope({
+        state: snapshot({ dataset: dataset({ date: "3-2-26" }) }),
+        version: 5,
+        project: PROJECT,
+      }),
+    );
     expect(s().gui.dataset.date).toBe("3-2-26");
     expect(s().wsVersion).toBe(5);
   });
 
   it("accepts a lower version when the epoch moved (a restarted backend's own replay)", () => {
-    useStore.setState({ wsEpoch: "epoch-1" });
     s().mergeSnapshot(
-      snapshot({ dataset: dataset({ date: "3-2-26" }) }),
-      1, // lower than wsVersion 5, and would ordinarily be dropped as stale
-      PROJECT,
-      "epoch-2",
+      stateEnvelope({
+        state: snapshot({ dataset: dataset({ date: "3-2-26" }) }),
+        version: 1, // lower than wsVersion 5, and would ordinarily be dropped as stale
+        project: PROJECT,
+        epoch: "epoch-2",
+      }),
     );
     expect(s().gui.dataset.date).toBe("3-2-26"); // accepted, not dropped
     expect(s().wsVersion).toBe(1);
@@ -169,7 +198,7 @@ describe("mergeSnapshot ownership model", () => {
     expect(incoming.dataset.image_list).not.toBe(localList);
     expect(incoming.dataset.image_list).toEqual(localList);
 
-    s().mergeSnapshot(incoming, 6, PROJECT, null);
+    s().mergeSnapshot(stateEnvelope({ state: incoming, version: 6, project: PROJECT }));
 
     expect(s().gui.dataset.image_list).toBe(localList);
     expect(s().gui.dataset.bucket).toBe("m2/2-11-26");
@@ -185,15 +214,16 @@ describe("mergeSnapshot ownership model", () => {
       wsVersion: 0,
     });
     s().mergeSnapshot(
-      snapshot({
-        active_tab: "results",
-        mode: "polygon",
-        active_subject: "bush",
-        dataset: dataset({ current_image_index: 2 }),
+      stateEnvelope({
+        state: snapshot({
+          active_tab: "results",
+          mode: "polygon",
+          active_subject: "bush",
+          dataset: dataset({ current_image_index: 2 }),
+        }),
+        version: 1,
+        project: PROJECT,
       }),
-      1,
-      PROJECT,
-      null,
     );
     expect(s().gui.active_tab).toBe("annotate"); // no record yet: first-open default
     expect(s().gui.mode).toBe("polygon");
@@ -209,7 +239,9 @@ describe("mergeSnapshot ownership model", () => {
       openProject: null,
       wsVersion: 0,
     });
-    s().mergeSnapshot(snapshot({ active_tab: "results" }), 1, PROJECT, null);
+    s().mergeSnapshot(
+      stateEnvelope({ state: snapshot({ active_tab: "results" }), version: 1, project: PROJECT }),
+    );
     expect(s().gui.active_tab).toBe("training");
     localStorage.removeItem(`tcip.lasttab.${PROJECT.id}`);
   });

@@ -12,10 +12,7 @@ beforeEach(() => {
   vi.useFakeTimers();
 });
 
-afterEach(() => {
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-});
+afterEach(() => vi.useRealTimers());
 
 describe("useActiveTabSync", () => {
   it("a store tab change fires one debounced POST carrying the settled tab", () => {

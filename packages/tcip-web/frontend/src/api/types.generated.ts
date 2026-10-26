@@ -4,7 +4,7 @@
  * routes/terminal.py, routes/projects.py, routes/results.py, tcip_mcp.experiments,
  * tcip_mcp.pipelines.proposal_engines, tcip_mcp.pipelines.training.tensorboard_manager,
  * tcip_mcp.project_record, tcip_mcp.tools.meta_tools, tcip_mcp.tools.training_tools,
- * tcip_mcp.traits, tcip_mcp.web_client.GuiState), plus a
+ * tcip_mcp.traits, tcip_web.state.StateSnapshotMessage), plus a
  * handful of runtime constants and vocabularies (routes/images.py, tcip_mcp.web_client,
  * tcip_mcp.experiments, tcip_mcp.pipelines.execution, tcip_mcp.subject_registry,
  * tcip_mcp.agent_identity, tcip_mcp.pipelines.training.tensorboard_manager,
@@ -57,6 +57,8 @@ export const CROSS_TILE_MERGE_DESCRIPTIONS: Record<string, string> = {
 };
 
 export type JobStatus = "pending" | "running" | "completed" | "failed" | "canceled";
+
+export type Panel = "setup" | "annotate" | "training" | "inference" | "results" | "meta" | "app";
 
 export type StretchMode = "minmax" | "percent_clip" | "none";
 
@@ -361,6 +363,11 @@ export interface ProjectSummary {
 export interface OpenRequest {
   id: string;
   user: string;
+}
+
+export interface OpenAnswer {
+  project: SnapshotProject;
+  display_name: string;
 }
 
 export interface RemovalRequest {
@@ -795,6 +802,19 @@ export interface Viewport {
   w: number;
   h: number;
   scale: number;
+}
+
+export interface StateSnapshotMessage {
+  state: GuiState;
+  version: number;
+  type: "state_snapshot";
+  project: SnapshotProject | null;
+  epoch: string;
+}
+
+export interface SnapshotProject {
+  id: string;
+  path: string;
 }
 
 export interface GuiState {

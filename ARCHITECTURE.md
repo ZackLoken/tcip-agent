@@ -950,11 +950,13 @@ address, read in `web_client.py`). Side B: `packages/tcip-web/src/tcip_web/__mai
 workspace `main` resolved once, and raising rather than swallowing a failure, since the fallback
 silently misses an OS-picked port).
 
-## S04. Panel-event panel vocabulary (VALID_PANELS)
+## S04. Panel-event panel vocabulary (Panel)
 
-Must agree: sender and receiver accept the same set of panel names. Side A:
-`packages/tcip-mcp/src/tcip_mcp/web_client.py` (`VALID_PANELS = frozenset(`). Side B:
-`packages/tcip-web/src/tcip_web/app.py` (`VALID_PANELS,`).
+Must agree: sender and receiver accept the same set of panel names. One type states it,
+`packages/tcip-mcp/src/tcip_mcp/web_client.py` (`Panel = Literal[ActiveTab, "app"]`), which the
+`push_panel_event` tool's parameter, `post_panel_event`'s and both panel routes in
+`packages/tcip-web/src/tcip_web/app.py` annotate, so the MCP server's argument schema and FastAPI
+refuse any other name; `tools/generate_frontend_types.py` renders it as the frontend's `Panel`.
 
 ## S05. Panel event_type vocabulary
 

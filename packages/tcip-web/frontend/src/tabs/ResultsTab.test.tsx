@@ -46,10 +46,7 @@ beforeEach(() => {
   vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [] });
 });
 
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
+afterEach(cleanup);
 
 describe("ResultsTab structured predictions-by-date picker", () => {
   it("delivers only the bucket the breeder picks per date, and offers none for a date with none", async () => {
@@ -571,7 +568,6 @@ describe("ResultsTab meaning refusals", () => {
     expect(
       screen.queryByRole("button", { name: /ask the agent to assess this/i }),
     ).not.toBeInTheDocument();
-    vi.unstubAllGlobals();
   });
 });
 
@@ -719,19 +715,11 @@ describe("ResultsTab delivery events (read-only)", () => {
 });
 
 describe("ResultsTab count export", () => {
-  // jsdom carries no Blob-URL support at all; every export path that reaches a completed
-  // download needs these stubbed, the same way a real browser's URL object provides them.
+  // A completed download makes and revokes a Blob URL; these stand in for both so no test
+  // allocates one.
   beforeEach(() => {
-    Object.defineProperty(URL, "createObjectURL", {
-      value: vi.fn(() => "blob:mock-url"),
-      writable: true,
-      configurable: true,
-    });
-    Object.defineProperty(URL, "revokeObjectURL", {
-      value: vi.fn(),
-      writable: true,
-      configurable: true,
-    });
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:mock-url");
+    vi.spyOn(URL, "revokeObjectURL").mockReturnValue(undefined);
   });
 
   // Every field in the count-export panel sits immediately after its own <label>, the DOM
@@ -956,15 +944,9 @@ describe("ResultsTab count export", () => {
 
   it("disables the Export button while a post is in flight", async () => {
     const panel = await renderCountPanel();
-    let resolveDownload!: (value: {
-      blob: Blob;
-      headers: Awaited<ReturnType<typeof resultsApi.downloadCountCsv>>["headers"];
-    }) => void;
-    vi.spyOn(resultsApi, "downloadCountCsv").mockReturnValue(
-      new Promise((resolve) => {
-        resolveDownload = resolve;
-      }),
-    );
+    const download =
+      Promise.withResolvers<Awaited<ReturnType<typeof resultsApi.downloadCountCsv>>>();
+    vi.spyOn(resultsApi, "downloadCountCsv").mockReturnValue(download.promise);
 
     chooseBucket(panel);
     fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
@@ -974,7 +956,7 @@ describe("ResultsTab count export", () => {
 
     await waitFor(() => expect(button).toBeDisabled());
 
-    resolveDownload({
+    download.resolve({
       blob: new Blob(["x"]),
       headers: {
         savedTo: "C:/proj/results_export/counts.csv",

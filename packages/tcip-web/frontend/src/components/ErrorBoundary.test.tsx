@@ -12,7 +12,7 @@ afterEach(cleanup);
 describe("ErrorBoundary", () => {
   it("renders a fallback when a child throws, and recovers when resetKey changes", () => {
     // React logs the caught render error to console.error; silence it for the test.
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const { rerender } = render(
       <ErrorBoundary resetKey="a">
         <Boom />
@@ -26,7 +26,6 @@ describe("ErrorBoundary", () => {
       </ErrorBoundary>,
     );
     expect(screen.getByText("healthy")).toBeInTheDocument();
-    spy.mockRestore();
   });
 
   it("reports the caught error and the crashing subtree's stack, not only the fallback", () => {
@@ -40,11 +39,10 @@ describe("ErrorBoundary", () => {
     expect(reported).toHaveLength(1);
     expect((reported[0][1] as Error).message).toBe("boom");
     expect(String(reported[0][2])).toContain("Boom");
-    spy.mockRestore();
   });
 
   it("keeps the fallback up when a re-render leaves resetKey unchanged", () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const { rerender } = render(
       <ErrorBoundary resetKey="a">
         <Boom />
@@ -59,6 +57,5 @@ describe("ErrorBoundary", () => {
     );
     expect(screen.queryByText("healthy")).not.toBeInTheDocument();
     expect(screen.getByText(/something went wrong/i)).toBeInTheDocument();
-    spy.mockRestore();
   });
 });

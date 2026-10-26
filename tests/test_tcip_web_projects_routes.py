@@ -230,12 +230,27 @@ def test_opening_a_project_by_id_marks_it_open_in_the_list(
     )
     assert resp.status_code == 200
     assert resp.json() == {
-        "id": made.id,
+        "project": {"id": made.id, "path": str(made.root.resolve())},
         "display_name": "currant_bud_valley-farm",
-        "path": str(made.root.resolve()),
     }
 
     assert client.get("/api/projects").json()["open_id"] == made.id
+
+
+def test_the_open_answer_names_the_project_as_the_state_snapshot_names_it(
+    client: TestClient, workspace_dir: Path
+) -> None:
+    """The open route's project and the state snapshot's project, read after it, are equal."""
+    made = _make_project(workspace_dir, "hill_block")
+
+    answer = client.post(
+        "/api/projects/open", json={"id": made.id, "user": "grower"}
+    )
+    assert answer.status_code == 200, answer.text
+    with client.websocket_connect("ws://127.0.0.1/ws/state") as ws:
+        snapshot = ws.receive_json()
+
+    assert answer.json()["project"] == snapshot["project"]
 
 
 def test_opening_an_id_no_project_holds_is_404(

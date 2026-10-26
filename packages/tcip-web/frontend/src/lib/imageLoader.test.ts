@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { loadImage } from "@/lib/imageLoader";
 
@@ -13,10 +13,6 @@ function stubFetch(status: number, headers: Record<string, string>) {
     }),
   );
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
 
 describe("loadImage header parsing", () => {
   it("parses X-TCIP-Served-Size into its pair", async () => {

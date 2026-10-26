@@ -1,6 +1,10 @@
 import type { StateCreator } from "zustand";
 
-import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
+import {
+  GUI_STATE_DEFAULTS,
+  type SnapshotProject,
+  type StateSnapshotMessage,
+} from "@/api/types.generated";
 import {
   datasetKey,
   loadDatasetUi,
@@ -9,14 +13,7 @@ import {
   saveDatasetUi,
 } from "@/lib/datasetUiState";
 import type { AppState } from "@/store/appState";
-import type {
-  DatasetSelection,
-  GuiState,
-  Mode,
-  OpenProject,
-  TabName,
-  ViewState,
-} from "@/store/types";
+import type { DatasetSelection, GuiState, Mode, TabName, ViewState } from "@/store/types";
 
 const DEFAULT_DATASET: DatasetSelection = GUI_STATE_DEFAULTS.dataset;
 
@@ -30,12 +27,12 @@ function datasetIdentityChanged(
 }
 
 /** The tab a project opens on: the one last worked in, else the default tab. */
-function landingTab(project: OpenProject | null): TabName {
+function landingTab(project: SnapshotProject | null): TabName {
   return (project && loadLastTab(project.id)) ?? GUI_STATE_DEFAULTS.active_tab;
 }
 
 /** The incoming snapshot's GUI state, on ``project``'s landing tab, with no subject unless named. */
-function adoptedGui(incoming: GuiState, project: OpenProject | null): GuiState {
+function adoptedGui(incoming: GuiState, project: SnapshotProject | null): GuiState {
   return {
     ...incoming,
     active_tab: landingTab(project),
@@ -51,7 +48,7 @@ export interface GuiSlice {
   /** Server-synchronized state (mirrors backend GuiState). */
   gui: GuiState;
   /** The project the backend has open, from its state envelope or the open request's answer. */
-  openProject: OpenProject | null;
+  openProject: SnapshotProject | null;
   wsStatus: "disconnected" | "connecting" | "connected" | "error";
   /** Highest backend state version applied; used to drop stale snapshot replays. */
   wsVersion: number;
@@ -69,20 +66,13 @@ export interface GuiSlice {
    *  saved position when the user has been here before (else the selection's own values).
    *  Establishes the new identity locally so a same-identity backend snapshot keeps the restored
    *  index instead of resetting it to 0. */
-  applyRestoredDataset: (sel: DatasetSelection, project: OpenProject) => void;
+  applyRestoredDataset: (sel: DatasetSelection, project: SnapshotProject) => void;
   /**
-   * Apply a backend state snapshot with ownership-aware merge, not a wholesale
-   * replace: a wholesale replace would clobber unsaved edits, the active tab, and
-   * the scroll position. Backend owns the dataset selection and the open project; the browser
-   * owns navigation/view/mode/subject state and keeps its own copy. ``project``
-   * and ``epoch`` come from the same envelope and are adopted in this one update.
+   * Apply a backend state snapshot by ownership: the backend owns the dataset selection and the
+   * open project; the browser owns navigation/view/mode/subject state and keeps its own copy. The
+   * envelope's project and epoch are adopted in this one update.
    */
-  mergeSnapshot: (
-    state: GuiState,
-    version: number | null,
-    project: OpenProject | null,
-    epoch: string | null,
-  ) => void;
+  mergeSnapshot: (envelope: StateSnapshotMessage) => void;
   setWsStatus: (s: "disconnected" | "connecting" | "connected" | "error") => void;
   setActiveTab: (tab: TabName) => void;
   setView: (view: ViewState) => void;
@@ -127,19 +117,14 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
     });
   },
 
-  mergeSnapshot: (incoming, version, project, epoch) => {
+  mergeSnapshot: ({ state: incoming, version, project, epoch }) => {
     let adoptedOther = false;
     set((s) => {
       // A moved epoch is a restarted backend's own replay: accepted regardless of version, since
       // its lower-numbered first snapshot would otherwise drop as a stale one.
-      const epochChanged = epoch != null && epoch !== s.wsEpoch;
-      if (!epochChanged && version != null && version < s.wsVersion) return s;
-      const nextVersion = epochChanged
-        ? (version ?? 0)
-        : version != null
-          ? Math.max(s.wsVersion, version)
-          : s.wsVersion;
-      const nextEpoch = epoch ?? s.wsEpoch;
+      const epochChanged = epoch !== s.wsEpoch;
+      if (!epochChanged && version < s.wsVersion) return s;
+      const nextVersion = epochChanged ? version : Math.max(s.wsVersion, version);
       const local = s.gui;
       const inDs = incoming.dataset;
 
@@ -151,12 +136,12 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
           gui: project ? adoptedGui(incoming, project) : { ...local, dataset: DEFAULT_DATASET },
           openProject: project,
           wsVersion: nextVersion,
-          wsEpoch: nextEpoch,
+          wsEpoch: epoch,
         };
       }
 
       if (!inDs.dataset_root) {
-        return { wsVersion: nextVersion, wsEpoch: nextEpoch };
+        return { wsVersion: nextVersion, wsEpoch: epoch };
       }
 
       // Boot hydration: no local dataset to protect, so adopt the persisted mode/filters/position;
@@ -165,7 +150,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
         return {
           gui: adoptedGui(incoming, project),
           wsVersion: nextVersion,
-          wsEpoch: nextEpoch,
+          wsEpoch: epoch,
         };
       }
 
@@ -175,7 +160,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
         return {
           gui: { ...local, dataset: inDs },
           wsVersion: nextVersion,
-          wsEpoch: nextEpoch,
+          wsEpoch: epoch,
         };
       }
       /** Same dataset: accept backend-owned dataset fields (e.g. a changed model's prediction
@@ -193,7 +178,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
           },
         },
         wsVersion: nextVersion,
-        wsEpoch: nextEpoch,
+        wsEpoch: epoch,
       };
     });
     if (adoptedOther) {
