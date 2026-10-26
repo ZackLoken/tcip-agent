@@ -34,7 +34,7 @@ def test_a_classification_config_launches_with_images_and_csv_only(
     """
     import os
 
-    from tcip_mcp.tools.training_tools import launch_training
+    from tcip_mcp.tools.training_tools import RunLaunched, launch_training
     from tests._producer_fixtures import no_tensorboard
     from tests.tiny_trainer_fixtures import (
         MEAN_INTENSITY_CLASSIFIER,
@@ -66,9 +66,9 @@ def test_a_classification_config_launches_with_images_and_csv_only(
 
     res = launch_training(tmp_path, cfg, actor=None)
 
-    assert "error" not in res, res
-    assert res["pid"] != os.getpid()
-    status = run_to_end(tmp_path, res["experiment_id"])
+    assert isinstance(res, RunLaunched), res
+    assert res.pid != os.getpid()
+    status = run_to_end(tmp_path, res.experiment_id)
     assert status["state"] == "completed", status
 
 

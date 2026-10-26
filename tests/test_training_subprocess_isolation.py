@@ -300,8 +300,8 @@ def test_launch_training_child_receives_its_own_run_directory(
         small_detection_config(images_dir, project=tmp_path),
         actor=None,
     )
-    assert "error" not in res, res
-    run_dir = experiment_dir(res["experiment_id"], project=tmp_path)
+    assert isinstance(res, training_tools.RunLaunched), res
+    run_dir = experiment_dir(res.experiment_id, project=tmp_path)
     children = [argv for argv in captured_argv if "--run-dir" in argv]
     assert children == [children[0]] and children[0][-2:] == [
         "--run-dir",

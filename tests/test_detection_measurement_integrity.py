@@ -1060,8 +1060,9 @@ def test_launch_training_persists_effective_tile_geometry(
         tiling=tiling_block(sliver_frac=0.5),
     )
     res = training_tools.launch_training(tmp_path, cfg, actor=None)
-    assert res["pid"] != os.getpid()  # a different OS process, not this one
-    eid = res["experiment_id"]
+    assert isinstance(res, training_tools.RunLaunched), res
+    assert res.pid != os.getpid()  # a different OS process, not this one
+    eid = res.experiment_id
 
     resolution = run_resolution(eid, project=tmp_path)
     tiling = resolution.data.tiling

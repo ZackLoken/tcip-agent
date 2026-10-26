@@ -13,8 +13,9 @@ answer, the submitted request, and the session end request and answer;
 ``routes/projects.py`` declares the project summary, the open, removal, rename and
 invariances request shapes and the open's answer, and ``tcip_mcp.project_record`` the capture
 invariances and their correction's answer; ``routes/results.py`` declares
-the phenology and count export request shapes, the revision confirmation and the registered
-models;
+the phenology and count export request shapes, the revision confirmation, the registered
+models and the served delivery events; ``tcip_mcp.tools.training_tools`` the launch doors'
+answers;
 ``tcip_mcp.traits`` declares the trait record and its revisions; ``tcip_mcp.tools.meta_tools``
 the page of a project-memory corpus the meta routes answer; and
 ``tcip_web.state.StateSnapshotMessage`` declares the state envelope the backend broadcasts,
@@ -95,9 +96,7 @@ def declared_models() -> list[type[BaseModel]]:
         BucketFinding,
         CanopySegmentDisclosure,
         CanopySegmentsDocument,
-        DeliveryEventRecord,
         MatchTolerance,
-        PlantMappingDisclosure,
         PlantRegistryDisclosure,
         PlantRegistryReference,
         SegmentTieDisclosure,
@@ -116,6 +115,7 @@ def declared_models() -> list[type[BaseModel]]:
         InvariancesCorrection,
     )
     from tcip_mcp.tools.meta_tools import MemoryKind, MemoryPage
+    from tcip_mcp.tools.training_tools import RunLaunched, SweepLaunched
     from tcip_mcp.traits import (
         Operationalization,
         PositiveState,
@@ -148,6 +148,7 @@ def declared_models() -> list[type[BaseModel]]:
         Assessments,
         AssessmentSummary,
         ConfirmRevisionPayload,
+        DeliveryEvents,
         ExportCountCsvPayload,
         ExportCsvPayload,
         OrthomosaicPlantCountsDelivery,
@@ -155,6 +156,8 @@ def declared_models() -> list[type[BaseModel]]:
         PhenologyPayload,
         RegisteredModel,
         RegisteredModels,
+        ServedDeliveryEvent,
+        ServedPlantMappingDisclosure,
     )
     from tcip_web.routes.sessions import (
         ImageEntry,
@@ -204,6 +207,8 @@ def declared_models() -> list[type[BaseModel]]:
         TrainingListing,
         TensorboardServing,
         TensorboardFailure,
+        RunLaunched,
+        SweepLaunched,
         TrainingRowFrame,
         TrainingStatusFrame,
         TerminalInputFrame,
@@ -238,7 +243,6 @@ def declared_models() -> list[type[BaseModel]]:
         MatchRadius,
         StatedRadius,
         PlantRegistryReference,
-        PlantMappingDisclosure,
         PlantRegistryDisclosure,
         CanopySegmentsDocument,
         SegmentTieDisclosure,
@@ -246,7 +250,9 @@ def declared_models() -> list[type[BaseModel]]:
         Producer,
         BucketFinding,
         Acknowledgment,
-        DeliveryEventRecord,
+        ServedPlantMappingDisclosure,
+        ServedDeliveryEvent,
+        DeliveryEvents,
         Operationalization,
         PositiveState,
         TraitEntry,
@@ -280,12 +286,20 @@ def scalar_constants() -> dict[str, int | str]:
         OVERVIEWS_REQUIRED,
         RENDER_CACHE_VERSION,
     )
+    from tcip_web.routes.results import (
+        ACKNOWLEDGED_BY_HEADER,
+        SAVED_TO_HEADER,
+        VALIDATED_HEADER,
+    )
     from tcip_web.routes.terminal import ENDED_CLOSE_CODE
 
     return {
         "RENDER_CACHE_VERSION": RENDER_CACHE_VERSION,
         "TERMINAL_ENDED_CLOSE_CODE": ENDED_CLOSE_CODE,
         "IMAGE_ERROR_HEADER": IMAGE_ERROR_HEADER,
+        "SAVED_TO_HEADER": SAVED_TO_HEADER,
+        "VALIDATED_HEADER": VALIDATED_HEADER,
+        "ACKNOWLEDGED_BY_HEADER": ACKNOWLEDGED_BY_HEADER,
         "OVERVIEWS_REQUIRED": OVERVIEWS_REQUIRED,
         "NOT_FINITE_SUFFIX": NOT_FINITE_SUFFIX,
         "VAL_METRIC_PREFIX": VAL_METRIC_PREFIX,
@@ -367,6 +381,7 @@ def model_unions() -> dict[str, tuple[str, ...]]:
     from tcip_mcp.pipelines.training.tensorboard_manager import (
         TensorboardLaunch,
     )
+    from tcip_mcp.tools.training_tools import Launched
     from tcip_web.routes.terminal import TerminalFrame
 
     (union, _) = get_args(TerminalFrame)
@@ -375,6 +390,7 @@ def model_unions() -> dict[str, tuple[str, ...]]:
         "TensorboardLaunch": tuple(
             m.__name__ for m in get_args(TensorboardLaunch)
         ),
+        "Launched": tuple(m.__name__ for m in get_args(Launched)),
     }
 
 
@@ -385,12 +401,12 @@ def _ts_type(schema: dict, where: str) -> str:
         # pydantic's JsonValue declares the empty schema: a value carried uninterpreted.
         return "unknown" if name == "JsonValue" else name
     if "anyOf" in schema or "oneOf" in schema:
-        parts: list[str] = []
-        for part in schema.get("anyOf") or schema["oneOf"]:
-            mapped = _ts_type(part, where)
-            if mapped not in parts:
-                parts.append(mapped)
-        return " | ".join(parts)
+        return " | ".join(
+            dict.fromkeys(
+                _ts_type(part, where)
+                for part in schema.get("anyOf") or schema["oneOf"]
+            )
+        )
     if "enum" in schema:
         return " | ".join(json.dumps(v) for v in schema["enum"])
     if "const" in schema:

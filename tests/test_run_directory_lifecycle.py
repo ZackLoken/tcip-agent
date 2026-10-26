@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.model_build import STATE_DICT_KEY  # noqa: E402
+from tcip_mcp.tools.training_tools import RunLaunched  # noqa: E402
 from tests._training_values import (  # noqa: E402
     drawn_split,
     fifo_search,
@@ -57,7 +58,7 @@ def children(monkeypatch: pytest.MonkeyPatch) -> list:
 @pytest.fixture
 def launch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, children: list
-) -> Callable[..., dict]:
+) -> Callable[..., RunLaunched | dict]:
     """Return a ``launch_training`` caller in the project ``tmp_path`` over a tiny dataset.
 
     Each launch is over the regression dataset written under ``tmp_path / "ds"``, drawing 0.15
@@ -80,7 +81,7 @@ def launch(
 
     def _launch(
         horizon: int = 1, *, resume_from: str = "", **extra: object
-    ) -> dict:
+    ) -> RunLaunched | dict:
         config = regressor_config(
             horizon,
             data={
@@ -132,7 +133,7 @@ def _contents(directory: Path) -> dict[str, bytes]:
 
 
 def test_a_launched_run_completes_and_its_completion_is_its_registration(
-    launch: Callable[..., dict], tmp_path: Path
+    launch: Callable[..., RunLaunched | dict], tmp_path: Path
 ) -> None:
     from tcip_mcp.experiments import METRICS_FILE, RUN_FILE, observe, read_rows
     from tcip_mcp.model_registry import (
@@ -141,8 +142,8 @@ def test_a_launched_run_completes_and_its_completion_is_its_registration(
     )
 
     res = launch()
-    assert "error" not in res, res
-    run_dir = Path(res["output_dir"])
+    assert isinstance(res, RunLaunched), res
+    run_dir = Path(res.output_dir)
 
     final = _wait_final(run_dir)
     assert final.state == "completed", final
@@ -165,7 +166,7 @@ def test_a_launched_run_completes_and_its_completion_is_its_registration(
 
 
 def test_a_cancel_requested_by_id_ends_the_child_canceled(
-    launch: Callable[..., dict], tmp_path: Path
+    launch: Callable[..., RunLaunched | dict], tmp_path: Path
 ) -> None:
     """A cancel requested by id ends a training child canceled, completing no checkpoint.
 
@@ -175,15 +176,15 @@ def test_a_cancel_requested_by_id_ends_the_child_canceled(
     from tcip_mcp.tools.training_tools import cancel_training
 
     res = launch(horizon=200)
-    assert "error" not in res, res
-    run_dir = Path(res["output_dir"])
+    assert isinstance(res, RunLaunched), res
+    run_dir = Path(res.output_dir)
     _until(
         "the child's first epoch row",
         lambda: read_rows(run_dir / METRICS_FILE)[0],
     )
 
     assert (
-        cancel_training(tmp_path, res["experiment_id"], actor=None)[
+        cancel_training(tmp_path, res.experiment_id, actor=None)[
             "cancel_requested"
         ]
         is True
@@ -195,21 +196,22 @@ def test_a_cancel_requested_by_id_ends_the_child_canceled(
 
 
 def test_a_resume_is_a_new_directory_that_leaves_its_source_untouched(
-    launch: Callable[..., dict], tmp_path: Path
+    launch: Callable[..., RunLaunched | dict], tmp_path: Path
 ) -> None:
     from tcip_mcp.experiments import RUN_FILE, read_record
     from tcip_mcp.registry_paths import stored_path
 
     first = launch(horizon=2, checkpoint_every_n_epochs=1)
-    source = Path(first["output_dir"])
+    assert isinstance(first, RunLaunched), first
+    source = Path(first.output_dir)
     assert _wait_final(source).state == "completed"
     epoch_checkpoints = sorted(source.glob("checkpoint_epoch_*.pt"))
     assert epoch_checkpoints, sorted(p.name for p in source.iterdir())
     before = _contents(source)
 
     resumed = launch(horizon=3, resume_from=str(epoch_checkpoints[-1]))
-    assert "error" not in resumed, resumed
-    run_dir = Path(resumed["output_dir"])
+    assert isinstance(resumed, RunLaunched), resumed
+    run_dir = Path(resumed.output_dir)
     assert run_dir != source
     assert _wait_final(run_dir).state == "completed"
 
@@ -223,7 +225,7 @@ def test_a_resume_is_a_new_directory_that_leaves_its_source_untouched(
 
 
 def test_a_child_killed_before_its_final_status_reads_running_then_interrupted(
-    launch: Callable[..., dict],
+    launch: Callable[..., RunLaunched | dict],
     children: list,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -236,8 +238,8 @@ def test_a_child_killed_before_its_final_status_reads_running_then_interrupted(
     from tcip_mcp import experiments
 
     res = launch(horizon=200)
-    assert "error" not in res, res
-    run_dir = Path(res["output_dir"])
+    assert isinstance(res, RunLaunched), res
+    run_dir = Path(res.output_dir)
     [child] = children
     child.kill()
     child.wait()
@@ -249,7 +251,7 @@ def test_a_child_killed_before_its_final_status_reads_running_then_interrupted(
 
 
 def test_progress_logged_after_the_final_status_never_reopens_the_run(
-    launch: Callable[..., dict], tmp_path: Path
+    launch: Callable[..., RunLaunched | dict], tmp_path: Path
 ) -> None:
     """A metrics row logged after the final status is refused and the run stays completed.
 
@@ -270,7 +272,8 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(
     from tcip_mcp.tools.training_tools import monitor_training
 
     res = launch(horizon=2)
-    run_dir = Path(res["output_dir"])
+    assert isinstance(res, RunLaunched), res
+    run_dir = Path(res.output_dir)
     assert _wait_final(run_dir).state == "completed"
     before = {
         name: (run_dir / name).read_bytes()
@@ -286,7 +289,7 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(
 
     assert {name: (run_dir / name).read_bytes() for name in before} == before
     rows = read_rows(observation.metrics_log)[0]
-    summary = monitor_training(tmp_path, res["experiment_id"])["run"]
+    summary = monitor_training(tmp_path, res.experiment_id)["run"]
     assert summary["state"] == "completed"
     assert summary["best_metric"] is not None
     assert observation.record.spec.evaluation.selection_metric == "loss"
@@ -470,7 +473,7 @@ def test_a_completed_run_missing_its_checkpoint_refuses_naming_it(
 
 
 def test_a_config_naming_its_run_refuses_naming_the_key_and_writes_nothing(
-    launch: Callable[..., dict], tmp_path: Path
+    launch: Callable[..., RunLaunched | dict], tmp_path: Path
 ) -> None:
     """A config stating ``experiment_id`` is refused naming the key and makes no directory.
 
@@ -480,13 +483,15 @@ def test_a_config_naming_its_run_refuses_naming_the_key_and_writes_nothing(
     from tcip_mcp.experiments import run_dirs
 
     first = launch()
-    run_dir = Path(first["output_dir"])
-    assert run_dir.name == first["experiment_id"]
+    assert isinstance(first, RunLaunched), first
+    run_dir = Path(first.output_dir)
+    assert run_dir.name == first.experiment_id
     _wait_final(run_dir)
     before = _contents(run_dir)
 
-    for named in (first["experiment_id"], "a-name-of-my-own"):
+    for named in (first.experiment_id, "a-name-of-my-own"):
         refused = launch(experiment_id=named)
+        assert isinstance(refused, dict), refused
         assert "config.experiment_id" in refused["error"], refused
     assert _contents(run_dir) == before
     assert run_dirs(tmp_path) == [run_dir]

@@ -271,7 +271,7 @@ def _render_failure_cases(project: Path) -> list[str]:
     _published(project)
     result = render_failure_cases(project, ".", "preds", 10, **TRIAGE_WEIGHTS)
     assert "error" not in result, result
-    return sorted(item["stem"] for item in result.get("worst_images") or [])
+    return sorted(item["stem"] for item in result["worst_images"])
 
 
 def _propose_trait_registry(project: Path) -> list[str]:
@@ -1152,7 +1152,7 @@ def test_a_resumed_run_records_the_project_rooted_checkpoint(
     """
     pytest.importorskip("torchvision")
     from tcip_mcp.experiments import read_run
-    from tcip_mcp.tools.training_tools import launch_training
+    from tcip_mcp.tools.training_tools import RunLaunched, launch_training
     from tests._audit_fixtures import audit_rows
     from tests._producer_fixtures import fake_popen
     from tests._verified_checkpoint_fixtures import registered_checkpoint
@@ -1173,8 +1173,8 @@ def test_a_resumed_run_records_the_project_rooted_checkpoint(
         actor=None,
     )
 
-    assert "error" not in result, result
-    assert read_run(Path(result["output_dir"])).resume_from == expected
+    assert isinstance(result, RunLaunched), result
+    assert read_run(Path(result.output_dir)).resume_from == expected
     (row,) = audit_rows(project, "launch_training")
     assert row["arguments"]["resume_from"] == expected
 

@@ -17,6 +17,11 @@ from fastapi.testclient import TestClient
 
 import tcip_store
 from tcip_mcp.pipelines.execution import Stated
+from tcip_web.routes.results import (
+    ACKNOWLEDGED_BY_HEADER,
+    SAVED_TO_HEADER,
+    VALIDATED_HEADER,
+)
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import audit_rows, refuse_audit_appends
 from tests._web_fixtures import BROWSER, acknowledged_post, open_new_project
@@ -363,7 +368,7 @@ def test_an_export_saves_the_delivery_under_the_project_and_logs_it_with_its_dat
 
     assert resp.status_code == 200, resp.text[:300]
     saved = tmp_path / "results_export" / "bud_delivery.csv"
-    assert resp.headers["X-TCIP-Saved-To"] == str(saved)
+    assert resp.headers[SAVED_TO_HEADER] == str(saved)
     assert saved.read_bytes() == resp.content
     header = resp.text.splitlines()[0].split(",")
     assert header == phenology.phenology_csv_columns(
@@ -404,7 +409,7 @@ def test_a_walked_mapping_event_names_the_mapping_key_it_resolves_to(
     (event,) = client.get("/api/results/delivery-events").json()["records"]
 
     assert event["plant_mapping"]["name"] == "valley"
-    assert event["plant_mapping_resolved_key"] == "valley"
+    assert event["plant_mapping"]["resolved_key"] == "valley"
 
 
 def test_export_csv_answers_409_when_the_delivery_event_audit_line_cannot_be_appended(
@@ -628,8 +633,8 @@ def test_an_unassessed_count_bucket_delivers_under_acknowledgment(
     )
 
     assert resp.status_code == 200, resp.text[:300]
-    assert resp.headers["X-TCIP-Validated"] == "false"
-    assert unquote(resp.headers["X-TCIP-Acknowledged-By"]) == "user:breeder"
+    assert resp.headers[VALIDATED_HEADER] == "false"
+    assert unquote(resp.headers[ACKNOWLEDGED_BY_HEADER]) == "user:breeder"
     rows = _rows(resp.text)
     assert [r["detection_count"] for r in rows] == ["3", "3"]
     assert {r["validated"] for r in rows} == {"False"}
@@ -680,11 +685,11 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
 
     assert unregistered.status_code == 403, unregistered.text[:300]
     assert bare.status_code == 200, bare.text[:300]
-    assert bare.headers["X-TCIP-Validated"] == "true"
-    assert bare.headers["X-TCIP-Acknowledged-By"] == ""
+    assert bare.headers[VALIDATED_HEADER] == "true"
+    assert bare.headers[ACKNOWLEDGED_BY_HEADER] == ""
     assert {r["validated"] for r in _rows(bare.text)} == {"True"}
     assert posted.status_code == 200
-    assert posted.headers["X-TCIP-Acknowledged-By"] == ""
+    assert posted.headers[ACKNOWLEDGED_BY_HEADER] == ""
     events = client.get("/api/results/delivery-events").json()["records"]
     assert [e["acknowledgment"] for e in events] == [None, None]
     lines = [
@@ -927,15 +932,15 @@ def test_an_unassessed_raster_bucket_delivers_under_acknowledgment_with_its_regi
     )
 
     assert resp.status_code == 200, resp.text[:300]
-    assert resp.headers["X-TCIP-Validated"] == "false"
-    assert unquote(resp.headers["X-TCIP-Acknowledged-By"]) == "user:breeder"
+    assert resp.headers[VALIDATED_HEADER] == "false"
+    assert unquote(resp.headers[ACKNOWLEDGED_BY_HEADER]) == "user:breeder"
     rows = {r["plant_id"]: r for r in _rows(resp.text)}
     assert rows["plot0"]["value"] == "1" and rows["plot3"]["value"] == "0"
     assert {r["validated"] for r in rows.values()} == {"False"}
     (event,) = client.get("/api/results/delivery-events").json()["records"]
     assert event["door"] == "results.export_count_csv"
     assert event["plant_mapping"]["plant_registry"]["name"] == registry
-    assert "plant_mapping_resolved_key" not in event
+    assert "resolved_key" not in event["plant_mapping"]
 
 
 def test_a_filename_with_a_directory_saves_by_its_basename(
@@ -952,7 +957,7 @@ def test_a_filename_with_a_directory_saves_by_its_basename(
     )
 
     assert resp.status_code == 200, resp.text[:300]
-    assert resp.headers["X-TCIP-Saved-To"] == str(
+    assert resp.headers[SAVED_TO_HEADER] == str(
         tmp_path / "results_export" / "plant_counts.csv"
     )
 

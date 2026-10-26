@@ -507,7 +507,7 @@ class TestPushPanelDataTool:
         # both are acceptable. Tool must not raise.
         assert "status" in result or "error" in result
         # Panel name preserved in result
-        assert result.get("panel") == "training"
+        assert result["panel"] == "training"
 
     def test_the_server_refuses_a_name_outside_the_panels_and_admits_each_panel(
         self, bound: BoundProject
@@ -662,15 +662,15 @@ class TestTrainingToolOutputSchema:
             actor=None,
         )
 
-        assert "error" not in res, res
-        assert res["status"] == "launched"
-        assert find_run(res["experiment_id"], project=tmp_path) == Path(
-            res["output_dir"]
+        assert isinstance(res, training_tools.RunLaunched), res
+        assert res.status == "launched"
+        assert find_run(res.experiment_id, project=tmp_path) == Path(
+            res.output_dir
         )
-        assert Path(res["output_dir"]) == experiment_dir(
-            res["experiment_id"], project=tmp_path
+        assert Path(res.output_dir) == experiment_dir(
+            res.experiment_id, project=tmp_path
         )
-        assert res["pid"] == child.pid
+        assert res.pid == child.pid
 
     def test_monitor_training_answers_for_the_run_it_was_asked_about(
         self,

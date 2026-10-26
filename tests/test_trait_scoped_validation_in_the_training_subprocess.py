@@ -55,13 +55,13 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
         evaluation=evaluation_block(trait="leaf"),
     )
     res = training_tools.launch_training(tmp_path, cfg, actor=None)
-    assert "error" not in res, res
-    assert res["pid"] != os.getpid()
+    assert isinstance(res, training_tools.RunLaunched), res
+    assert res.pid != os.getpid()
 
     from tests._verified_checkpoint_fixtures import run_to_end
 
     assert (
-        run_to_end(tmp_path, res["experiment_id"], seconds=180)["state"]
+        run_to_end(tmp_path, res.experiment_id, seconds=180)["state"]
         == "completed"
     )
 

@@ -10,7 +10,9 @@ import sys
 import threading
 from collections import Counter
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
+
+from pydantic import BaseModel, JsonValue
 
 from tcip_mcp import experiments
 from tcip_mcp.audit import audited, now_iso, record_event_or_raise
@@ -35,6 +37,7 @@ from tcip_mcp.pipelines.training.hpo import (
     available_schedulers,
     available_search_algs,
 )
+from tcip_mcp.pipelines.training.tensorboard_manager import TensorboardLaunch
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_store import StoreError, canonical_path
@@ -76,9 +79,6 @@ def data_with_selection(
         {**kept, "split": {"selection_dir": selection_dir}},
         context={"project": project},
     )
-
-
-# Lazy imports of heavy dependencies inside tool functions to keep server startup fast.
 
 
 @tool()
@@ -245,11 +245,6 @@ def _preflight(
                     f"run's own {len(known)} source(s)."
                 )
 
-    # Smoke: build the model and run the correctness contract at the resolved dims, so a broken
-    # bespoke builder is caught here (before the training subprocess spawns) rather than surfacing
-    # only as run.status='failed'. Only attempt once the structural checks pass, otherwise the
-    # config can't build and the contract would just re-report the same failure. Overfit stays a
-    # voluntary, non-gating diagnostic (a valid model can fail 20 steps on noise).
     if smoke and not issues:
         assert resolution is not None and sources is not None, (
             "a config with no issue resolved"
@@ -317,7 +312,7 @@ def _preflight(
                 "dims": prepared.dims,
             }
             contract_passed = report["ok"]
-            if report.get("not_smokeable"):
+            if report["not_smokeable"]:
                 issues.append(
                     f"model contract: {report['not_smokeable']} Building one from the run's data "
                     f"config failed too ({prepared.unavailable}), so the measurement boundary is "
@@ -498,6 +493,35 @@ def open_run(
     )
 
 
+class RunLaunched(BaseModel):
+    """A run :func:`launch_training` started.
+
+    It holds the run's minted id, its directory, the TensorBoard launched over its board, its
+    worker's pid, the overfit check its preflight ran (``None`` unless asked) and the
+    preflight's warnings.
+    """
+
+    experiment_id: str
+    status: Literal["launched"]
+    output_dir: str
+    tensorboard: TensorboardLaunch
+    pid: int
+    overfit_check: dict[str, JsonValue] | None
+    warnings: list[str]
+
+
+class SweepLaunched(BaseModel):
+    """A sweep :func:`launch_sweep` relaunched: its minted id and its base preflight's warnings."""
+
+    sweep_id: str
+    status: Literal["launched"]
+    warnings: list[str]
+
+
+Launched = RunLaunched | SweepLaunched
+"""What a launch door answers for a run or a sweep it started."""
+
+
 @tool()
 def launch_training(
     project: Path,
@@ -508,7 +532,7 @@ def launch_training(
     relaunched_from: str | None = None,
     *,
     actor: str | None,
-) -> dict:
+) -> RunLaunched | dict:
     """Launch a training run by ``actor`` in an isolated subprocess.
 
     The run builds its model from a bespoke ``model_source`` builder.
@@ -526,7 +550,8 @@ def launch_training(
 
     Writes the run's ``run.json`` once, then the act's one audit line naming the minted
     ``experiment_id`` (``AuditEntryNotWrittenError`` when it cannot be appended, and no subprocess
-    starts), then starts the subprocess. The answer carries the preflight's ``warnings``.
+    starts), then starts the subprocess. Answers the started run's :class:`RunLaunched`, carrying
+    the preflight's ``warnings``, or the refusal dict naming why nothing started.
 
     Args:
         config: Full training configuration dict: model_source and data, with every training
@@ -556,8 +581,6 @@ def launch_training(
             "mints every run's id and answers it as experiment_id."
         }
     resume = str(located(resume_from, project)) if resume_from else None
-    # smoke=True: build the model and run the correctness contract before spawning the training
-    # subprocess, so a broken builder returns here instead of wasting a full audited run.
     spec, sources, issues = _admitted(config, {}, project)
     validation, resolution = _preflight(
         project, spec, sources, issues, smoke=True, overfit=overfit_check
@@ -568,18 +591,16 @@ def launch_training(
         "a valid config resolved"
     )
 
-    # The top-level key, never the smoke sub-report: overfit_check runs beside the contract's
-    # build; preflight_config already rendered it for storage.
     rendered_overfit_report = validation.get("overfit_check")
 
-    smoke_report = validation.get("smoke") or {}
+    smoke_report = validation["smoke"]
     model_contract_record = LaunchContract(
         subject="the model as built at launch, before any training step",
         gating=True,
-        batch_source=smoke_report.get("batch_source"),
-        dims=smoke_report.get("dims"),
-        issues=smoke_report.get("issues", []),
-        gradient_magnitudes=smoke_report.get("gradient_magnitudes"),
+        batch_source=smoke_report["batch_source"],
+        dims=smoke_report["dims"],
+        issues=smoke_report["issues"],
+        gradient_magnitudes=smoke_report["gradient_magnitudes"],
         overfit_check=rendered_overfit_report,
     )
 
@@ -618,15 +639,15 @@ def launch_training(
         launch_tensorboard,
     )
 
-    return {
-        "experiment_id": experiment_id,
-        "status": "launched",
-        "output_dir": str(run_dir),
-        "tensorboard": launch_tensorboard(run_dir).model_dump(),
-        "pid": proc.pid,
-        "overfit_check": rendered_overfit_report,
-        "warnings": validation["warnings"],
-    }
+    return RunLaunched(
+        experiment_id=experiment_id,
+        status="launched",
+        output_dir=str(run_dir),
+        tensorboard=launch_tensorboard(run_dir),
+        pid=proc.pid,
+        overfit_check=rendered_overfit_report,
+        warnings=validation["warnings"],
+    )
 
 
 def _worker_env() -> dict[str, str]:
@@ -1339,8 +1360,6 @@ def open_sweep(
             "issues": first_issues,
         }
 
-    # Checked ahead of preflight, so its own reason is what a zero validation share's refusal
-    # reads as, not whatever preflight would have hit first.
     draws_refusal = _split_draws_refusal(
         first_spec.data,
         param_space,
@@ -1453,13 +1472,15 @@ def open_sweep(
     return OpenedSweep(directory, preflight["warnings"])
 
 
-def launch_sweep(project: Path, source: Path, *, actor: str | None) -> dict:
+def launch_sweep(
+    project: Path, source: Path, *, actor: str | None
+) -> SweepLaunched | dict:
     """Relaunch the sweep directory ``source`` as a new sweep of ``project`` by ``actor``.
 
     The new sweep is opened by :func:`open_sweep`, which mints its id, from the recorded input of
     ``source``, relaunched from it, and run (:func:`run_sweep`) in its own worker process.
-    Returns ``{"sweep_id", "status": "launched", "warnings"}``, the warnings its base preflight
-    gave, or the refusal dict when that input no longer opens.
+    Returns its :class:`SweepLaunched`, carrying the warnings its base preflight gave, or the
+    refusal dict when that input no longer opens.
     """
     given = experiments.observe_sweep(source).record.input
     opened = open_sweep(
@@ -1482,11 +1503,11 @@ def launch_sweep(project: Path, source: Path, *, actor: str | None) -> dict:
     if isinstance(opened, dict):
         return opened
     _start_worker(opened.directory, _worker_env())
-    return {
-        "sweep_id": opened.directory.name,
-        "status": "launched",
-        "warnings": opened.warnings,
-    }
+    return SweepLaunched(
+        sweep_id=opened.directory.name,
+        status="launched",
+        warnings=opened.warnings,
+    )
 
 
 def run_sweep(directory: Path) -> SweepGroup:

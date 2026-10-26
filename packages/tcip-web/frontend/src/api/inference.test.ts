@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { StructuredRefusalError } from "@/api/http";
 import { inferenceApi, operationalizationRefusalOf, resultsApi } from "@/api/inference";
+import { ACKNOWLEDGED_BY_HEADER } from "@/api/types.generated";
+import { COUNT_EXPORT_HEADERS } from "@/test/deliveryRecords";
 
 function stubFetch(status: number, body: unknown) {
   vi.stubGlobal(
@@ -61,6 +63,39 @@ describe("downloadCsv refusal decoding", () => {
   it("keeps the status-only message when the refusal body carries no detail", async () => {
     stubFetch(500, {});
     await expect(resultsApi.downloadCsv(REQUEST)).rejects.toThrow("500");
+  });
+});
+
+describe("downloadCountCsv headers", () => {
+  const REQUEST = {
+    delivery: {
+      kind: "per_image_count" as const,
+      dataset_root: "C:/data",
+      bucket: "chain/2026-02-11",
+      trait: "stem",
+    },
+    filename: "counts.csv",
+    user: "breeder",
+  };
+
+  function answering(headers: Record<string, string>) {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("image,count\n", { headers })));
+  }
+
+  it("decodes the three headers the count-export door answered", async () => {
+    answering(COUNT_EXPORT_HEADERS);
+    const { headers } = await resultsApi.downloadCountCsv(REQUEST);
+    expect(headers).toEqual({
+      savedTo: "/scratch/workspace/counts/results_export/counts.csv",
+      validated: true,
+      acknowledgedBy: "",
+    });
+  });
+
+  it("refuses an answer the door sent without its acknowledger header", async () => {
+    const { [ACKNOWLEDGED_BY_HEADER]: _removed, ...withoutAcknowledger } = COUNT_EXPORT_HEADERS;
+    answering(withoutAcknowledger);
+    await expect(resultsApi.downloadCountCsv(REQUEST)).rejects.toThrow(ACKNOWLEDGED_BY_HEADER);
   });
 });
 

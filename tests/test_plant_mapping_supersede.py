@@ -210,8 +210,8 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
 ) -> None:
     """The delivery-events route resolves a superseded citation to the archive.
 
-    The panel route's own plant_mapping_resolved_key names the plain name while the cited name
-    has not moved, and the archive after a supersede rebuild has moved it on.
+    The served disclosure's own resolved key names the plain name while the cited name has not
+    moved, and the archive after a supersede rebuild has moved it on.
     """
     import asyncio
 
@@ -224,8 +224,8 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
     asyncio.run(store.open_project(project))
     resp = client.get("/api/results/delivery-events")
     assert resp.status_code == 200, resp.text
-    record = next(r for r in resp.json()["records"] if r.get("plant_mapping"))
-    assert record["plant_mapping_resolved_key"] == "valley"
+    record = next(r for r in resp.json()["records"] if r["plant_mapping"] is not None)
+    assert record["plant_mapping"]["resolved_key"] == "valley"
 
     res = build_plant_mapping(
         tmp_path,
@@ -239,11 +239,9 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
 
     resp2 = client.get("/api/results/delivery-events")
     assert resp2.status_code == 200, resp2.text
-    record2 = next(
-        r for r in resp2.json()["records"] if r.get("plant_mapping")
-    )
+    record2 = next(r for r in resp2.json()["records"] if r["plant_mapping"] is not None)
     assert (
-        record2["plant_mapping_resolved_key"]
+        record2["plant_mapping"]["resolved_key"]
         == f"valley@{before.record_sha256[:12]}"
     )
 

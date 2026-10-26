@@ -165,10 +165,11 @@ class Acknowledgment(BaseModel):
     recorded_at: str
 
 
-PlantMapping = (
-    PlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure
-)
-"""The one of three disclosures a delivery's ``plant_mapping`` is."""
+RasterDisclosure = PlantRegistryDisclosure | CanopySegmentDisclosure
+"""The disclosures of an orthomosaic delivery, which attributes through a plant registry."""
+
+PlantMapping = PlantMappingDisclosure | RasterDisclosure
+"""The disclosure a delivery's ``plant_mapping`` is: a walked mapping's or a raster one."""
 
 
 class DeliveryEventRecord(TraitRevisionRef):

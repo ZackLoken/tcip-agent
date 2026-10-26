@@ -18,6 +18,12 @@ export const TERMINAL_ENDED_CLOSE_CODE = 4000;
 
 export const IMAGE_ERROR_HEADER = "X-TCIP-Image-Error";
 
+export const SAVED_TO_HEADER = "X-TCIP-Saved-To";
+
+export const VALIDATED_HEADER = "X-TCIP-Validated";
+
+export const ACKNOWLEDGED_BY_HEADER = "X-TCIP-Acknowledged-By";
+
 export const OVERVIEWS_REQUIRED = "overviews_required";
 
 export const NOT_FINITE_SUFFIX = "_state";
@@ -69,6 +75,8 @@ export type VerdictAction = "accepted" | "rejected";
 export type TerminalFrame = TerminalInputFrame | TerminalResizeFrame;
 
 export type TensorboardLaunch = TensorboardServing | TensorboardFailure;
+
+export type Launched = RunLaunched | SweepLaunched;
 
 export interface LaunchPriorityQueuePayload {
   checkpoint_path: string;
@@ -265,6 +273,22 @@ export interface TensorboardServing {
 export interface TensorboardFailure {
   error: string;
   output: string | null;
+}
+
+export interface RunLaunched {
+  experiment_id: string;
+  status: "launched";
+  output_dir: string;
+  tensorboard: TensorboardServing | TensorboardFailure;
+  pid: number;
+  overfit_check: Record<string, unknown> | null;
+  warnings: string[];
+}
+
+export interface SweepLaunched {
+  sweep_id: string;
+  status: "launched";
+  warnings: string[];
 }
 
 export interface TrainingRowFrame {
@@ -492,22 +516,6 @@ export interface PlantRegistryReference {
   digest: string;
 }
 
-export interface PlantMappingDisclosure {
-  name: string;
-  dataset_id: string;
-  dataset_root: string;
-  built_at: string;
-  record_sha256: string;
-  match_radius: Record<string, MatchRadius>;
-  capture_digests: Record<string, Record<string, string>>;
-  captures_unverified: string[];
-  plant_csvs_unverified: string[];
-  dates_delivered: string[];
-  images_unattributed: number;
-  images_unattributed_scope: "delivered_dates";
-  plant_attribution: string;
-}
-
 export interface PlantRegistryDisclosure {
   plant_registry: PlantRegistryReference;
   raster_identity: RasterIdentity;
@@ -571,7 +579,24 @@ export interface Acknowledgment {
   recorded_at: string;
 }
 
-export interface DeliveryEventRecord {
+export interface ServedPlantMappingDisclosure {
+  name: string;
+  dataset_id: string;
+  dataset_root: string;
+  built_at: string;
+  record_sha256: string;
+  match_radius: Record<string, MatchRadius>;
+  capture_digests: Record<string, Record<string, string>>;
+  captures_unverified: string[];
+  plant_csvs_unverified: string[];
+  dates_delivered: string[];
+  images_unattributed: number;
+  images_unattributed_scope: "delivered_dates";
+  plant_attribution: string;
+  resolved_key: string | null;
+}
+
+export interface ServedDeliveryEvent {
   trait: string;
   trait_revision: number;
   trait_revision_sha256: string;
@@ -586,8 +611,12 @@ export interface DeliveryEventRecord {
   validated: boolean;
   acknowledgment: Acknowledgment | null;
   population: string[];
-  plant_mapping: PlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure | null;
+  plant_mapping: ServedPlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure | null;
   produced_at: string;
+}
+
+export interface DeliveryEvents {
+  records: ServedDeliveryEvent[];
 }
 
 export interface Operationalization {

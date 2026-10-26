@@ -232,7 +232,7 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(
     pytest.importorskip("torch")
     from tcip_mcp.experiments import read_run
     from tcip_mcp.tools.project_tools import register_dataset
-    from tcip_mcp.tools.training_tools import launch_training
+    from tcip_mcp.tools.training_tools import RunLaunched, launch_training
     from tests._producer_fixtures import fake_popen
 
     fake_popen(monkeypatch, [])
@@ -256,9 +256,9 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(
         ),
         actor=None,
     )
-    assert "error" not in launched, launched
+    assert isinstance(launched, RunLaunched), launched
 
-    dataset = read_run(Path(launched["output_dir"])).dataset
+    dataset = read_run(Path(launched.output_dir)).dataset
     assert (dataset.id, dataset.fingerprint) == (
         registered["id"],
         registered["fingerprint"],

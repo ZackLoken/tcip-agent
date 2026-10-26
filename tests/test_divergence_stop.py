@@ -242,7 +242,7 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(
     intensities, launched through a real subprocess ends failed, naming the diverged stop.
     """
     pytest.importorskip("torchvision")
-    from tcip_mcp.tools.training_tools import launch_training
+    from tcip_mcp.tools.training_tools import RunLaunched, launch_training
     from tests._producer_fixtures import no_tensorboard
     from tests._verified_checkpoint_fixtures import run_to_end
     from tests.tiny_trainer_fixtures import write_regression_dataset
@@ -265,11 +265,11 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(
         batch_size=4,
     )
     res = launch_training(tmp_path, cfg, actor=None)
-    assert "error" not in res, res
-    experiment_id = res["experiment_id"]
+    assert isinstance(res, RunLaunched), res
+    experiment_id = res.experiment_id
 
     status = run_to_end(tmp_path, experiment_id, seconds=60)
 
-    assert status.get("state") == "failed", status
+    assert status["state"] == "failed", status
     assert status["status_error"] is not None
     assert DIVERGED_PASSES_PHRASE in status["status_error"]

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from tcip_mcp.tools.training_tools import RunLaunched
 from tests._chain_fixtures import BESPOKE_DETECTION
 from tests._producer_fixtures import fake_popen
 from tests._training_values import drawn_split, evaluation_block
@@ -86,11 +87,11 @@ def _detection_config(
     )
 
 
-def _launch_record(res: dict) -> dict:
+def _launch_record(res: RunLaunched) -> dict:
     """Return the launch record of the run ``res`` names."""
     from tcip_mcp.experiments import RUN_FILE, read_record
 
-    return read_record(Path(res["output_dir"]) / RUN_FILE)
+    return read_record(Path(res.output_dir) / RUN_FILE)
 
 
 def test_the_run_directory_lies_under_its_project_not_the_process_cwd(
@@ -117,8 +118,8 @@ def test_the_run_directory_lies_under_its_project_not_the_process_cwd(
         project, _detection_config(project, images_dir)
     )
 
-    run_dir = Path(res["output_dir"])
-    assert run_dir == experiments_dir(project) / res["experiment_id"]
+    run_dir = Path(res.output_dir)
+    assert run_dir == experiments_dir(project) / res.experiment_id
     assert (run_dir / RUN_FILE).is_file()
     assert list(server_cwd.iterdir()) == []
 
@@ -200,7 +201,7 @@ def test_launch_omitting_overfit_check_records_null(
     res = training_tools_launch(
         project, _detection_config(project, images_dir)
     )
-    assert res["overfit_check"] is None
+    assert res.overfit_check is None
 
     assert _launch_record(res)["model_contract"]["overfit_check"] is None
 
@@ -210,8 +211,8 @@ def test_launch_with_overfit_check_records_the_rendered_report(
 ) -> None:
     """A launch with the overfit check records the rendered report.
 
-    ``launch_training(overfit_check=True)`` records the rendered report on both the returned
-    dict and the run record's model contract.
+    ``launch_training(overfit_check=True)`` records the rendered report on both its answer and
+    the run record's model contract.
     """
     pytest.importorskip("torchvision")
     from tcip_mcp.tools import training_tools
@@ -228,12 +229,12 @@ def test_launch_with_overfit_check_records_the_rendered_report(
         overfit_check=True,
         actor=None,
     )
-    assert "error" not in res, res
-    assert res["overfit_check"] is not None
-    assert "passed" in res["overfit_check"]
+    assert isinstance(res, RunLaunched), res
+    assert res.overfit_check is not None
+    assert "passed" in res.overfit_check
 
     record = _launch_record(res)["model_contract"]
-    assert record["overfit_check"] == res["overfit_check"]
+    assert record["overfit_check"] == res.overfit_check
 
 
 def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_safe_record(
@@ -260,14 +261,14 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
     res = training_tools.launch_training(
         project, config, overfit_check=True, actor=None
     )
-    assert "error" not in res, res
+    assert isinstance(res, RunLaunched), res
 
     record = _launch_record(res)["model_contract"]
     check_json_value(record, path="model_contract")
     report = record["overfit_check"]
     assert report["passed"] is False
     assert any(loss is None for loss in report["losses"])
-    assert report.get("final_state") in (
+    assert report["final_state"] in (
         "nan",
         "positive_infinity",
         "negative_infinity",
@@ -295,17 +296,17 @@ def test_the_run_record_the_worker_reads_carries_the_seed_and_the_training_keys(
     record = _launch_record(res)
     config = record["config"]
 
-    assert Path(res["output_dir"]).name == res["experiment_id"]
+    assert Path(res.output_dir).name == res.experiment_id
     assert config["seed"] == stated["seed"]
     assert config["device"] == "cpu"
     assert "training" not in config
     assert "experiment_id" not in config
 
 
-def training_tools_launch(project: Path, config: dict) -> dict:
-    """Launch a run of ``project`` and assert the config was accepted."""
+def training_tools_launch(project: Path, config: dict) -> RunLaunched:
+    """Launch a run of ``project`` and return its answer, asserting the config was accepted."""
     from tcip_mcp.tools import training_tools
 
     res = training_tools.launch_training(project, config, actor=None)
-    assert "error" not in res, res
+    assert isinstance(res, RunLaunched), res
     return res
