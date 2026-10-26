@@ -69,6 +69,13 @@ ANTIGRAVITY_SETTINGS = (
 """Antigravity's own settings file, whose ``permissions.allow`` list its tool approvals persist
 to as ``mcp(<server>/<tool>)`` entries."""
 
+ANTIGRAVITY_HOOKS = Path(".agents") / "hooks.json"
+"""The workspace's Antigravity hooks file, relative to the workspace."""
+ANTIGRAVITY_HOOK_ENTRY = "tcip-session-start"
+"""The entry of :data:`ANTIGRAVITY_HOOKS` an Antigravity launch's session hook is set under."""
+ANTIGRAVITY_RULE = ANTIGRAVITY_HOOKS.parent / "rules" / "tcip-orientation.md"
+"""The always-on rule an Antigravity launch writes, relative to the workspace."""
+
 
 class PreparationFailedError(Exception):
     """A row's launch preparation did not complete; the message names the step and why."""
@@ -349,11 +356,11 @@ def prepare_antigravity(
     """Prepare an Antigravity launch of ``executable`` for ``project`` and ``session``.
 
     It registers :func:`mcp_server` as ``tcip`` through ``agy mcp add``, runs
-    :func:`allow_tcip_tools` on agy's settings file, sets the ``tcip-session-start`` entry of
-    the workspace's ``.agents/hooks.json`` to :func:`session_hook_argv` naming ``session``'s
-    start route, as :func:`shell_line`, and writes the always-on rule
-    ``.agents/rules/tcip-orientation.md`` naming :func:`orientation_tools`; the entry and the
-    rule replace an earlier launch's, leaving the rest of the hooks file and the rules directory.
+    :func:`allow_tcip_tools` on agy's settings file, sets the :data:`ANTIGRAVITY_HOOK_ENTRY`
+    entry of the workspace's :data:`ANTIGRAVITY_HOOKS` to :func:`session_hook_argv` naming
+    ``session``'s start route, as :func:`shell_line`, and writes the always-on rule
+    :data:`ANTIGRAVITY_RULE` naming :func:`orientation_tools`; the entry and the rule replace an
+    earlier launch's, leaving the rest of the hooks file and the rules directory.
     Returns one line per step.
     Raises :class:`PreparationFailedError` naming why, before anything is written, for a hook
     that cannot be spelled, a backend that recorded no port or a hooks file
@@ -372,10 +379,9 @@ def prepare_antigravity(
         raise PreparationFailedError(
             f"the session hook was not registered: {exc}"
         ) from exc
-    agents = store.workspace / ".agents"
-    hooks = agents / "hooks.json"
+    hooks = store.workspace / ANTIGRAVITY_HOOKS
     body = _json_object(hooks)
-    body["tcip-session-start"] = {
+    body[ANTIGRAVITY_HOOK_ENTRY] = {
         "SessionStart": [{"type": "command", "command": hook}]
     }
     server = mcp_server(project)
@@ -385,7 +391,7 @@ def prepare_antigravity(
     )
     allowed = allow_tcip_tools(ANTIGRAVITY_SETTINGS)
     _write_json(hooks, body)
-    rule = agents / "rules" / "tcip-orientation.md"
+    rule = store.workspace / ANTIGRAVITY_RULE
     _write_text(
         rule,
         "---\ntrigger: always_on\n---\n"
@@ -927,17 +933,6 @@ class _WinPty:
         """Perform no explicit cleanup."""
 
 
-def _set_winsize(fd: int, rows: int, cols: int) -> None:
-    """Set the POSIX terminal on ``fd`` to ``rows`` by ``cols``."""
-    if sys.platform == "win32":
-        raise AssertionError("_set_winsize is POSIX-only")
-    import fcntl
-    import struct
-    import termios
-
-    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
-
-
 class _PosixPty:
     """The stdlib ``pty`` plus a subprocess."""
 
@@ -961,6 +956,7 @@ class _PosixPty:
         if sys.platform == "win32":
             raise AssertionError("_PosixPty is POSIX-only")
         import pty
+        import termios
 
         # ``owned`` closes the master and the writer's descriptor unless the spawn succeeds.
         with ExitStack() as owned, ExitStack() as spent:
@@ -970,7 +966,7 @@ class _PosixPty:
             # The writer's own descriptor, so the reader's close never frees a number it writes on.
             self._input = os.dup(self._master)
             owned.callback(os.close, self._input)
-            _set_winsize(slave, rows, cols)
+            termios.tcsetwinsize(slave, (rows, cols))
             self._proc = subprocess.Popen(
                 argv,
                 cwd=cwd,
@@ -995,7 +991,11 @@ class _PosixPty:
         return os.write(self._input, data)
 
     def resize(self, rows: int, cols: int) -> None:
-        _set_winsize(self._master, rows, cols)
+        if sys.platform == "win32":
+            raise AssertionError("_PosixPty is POSIX-only")
+        import termios
+
+        termios.tcsetwinsize(self._master, (rows, cols))
 
     def isalive(self) -> bool:
         return self._proc.poll() is None

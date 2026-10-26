@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import threading
 import time
 from queue import Empty, Queue
@@ -16,6 +15,7 @@ from typing import IO, TYPE_CHECKING
 
 import pytest
 
+from tcip_web import terminal as pty_host
 from tests import REPO_ROOT
 
 if TYPE_CHECKING:
@@ -69,9 +69,10 @@ class TestMcpBridge:
     @pytest.fixture(autouse=True)
     def mcp_server(self) -> Iterator[None]:
         env = os.environ.copy()
+        server = pty_host.mcp_server(None)
 
         self.proc = subprocess.Popen(
-            [sys.executable, "-m", "tcip_mcp"],
+            [server.command, *server.args],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

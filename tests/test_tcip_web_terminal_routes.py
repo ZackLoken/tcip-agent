@@ -50,8 +50,6 @@ _PLACEHOLDERS = (
 INTERPRETER = pty_host.backend_interpreter()
 """The interpreter this backend runs, the one every launch's MCP server and session hook name."""
 
-HOOK_ARGV = [INTERPRETER, "-m", "tcip_web.cli", "session-hook"]
-
 
 def _tool_names() -> list[str]:
     """Return the sorted name of every tool a server for no project lists."""
@@ -91,7 +89,7 @@ def _rows_with(
 
     The override is cleared so the rows themselves launch.
     """
-    monkeypatch.delenv("TCIP_TERMINAL_CMD", raising=False)
+    monkeypatch.delenv(pty_host.TERMINAL_CMD_ENV, raising=False)
     rows = tuple(
         dataclasses.replace(row, **changes) for row in pty_host.PROVIDERS
     )
@@ -125,7 +123,7 @@ def _agy_hooks() -> dict:
     """Return the Antigravity hooks file of the backend's workspace."""
     from tcip_web.state import store
 
-    hooks = store.workspace / ".agents" / "hooks.json"
+    hooks = store.workspace / pty_host.ANTIGRAVITY_HOOKS
     return json.loads(hooks.read_text(encoding="utf-8"))
 
 
@@ -141,7 +139,7 @@ def _port_recorded() -> None:
 
 
 def test_resolve_command_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TCIP_TERMINAL_CMD", "python fake.py")
+    monkeypatch.setenv(pty_host.TERMINAL_CMD_ENV, "python fake.py")
     assert pty_host.resolve_terminal_command(pty_host.PROVIDERS[0]) == (
         ["python", "fake.py"],
         True,
@@ -218,12 +216,7 @@ def test_rendering_replaces_each_placeholder_and_leaves_every_other_argument(
     server = json.loads(Path(config).read_text(encoding="utf-8"))[
         "mcpServers"
     ]["tcip"]
-    assert server["args"] == [
-        "-m",
-        "tcip_mcp",
-        "--project",
-        opened.root.as_posix(),
-    ]
+    assert server["args"] == list(pty_host.mcp_server(opened).args)
 
 
 def test_the_orientation_for_no_project_says_the_session_was_launched_with_none() -> (
@@ -361,7 +354,7 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
             ),
         ),
     )
-    monkeypatch.delenv("TCIP_TERMINAL_CMD")
+    monkeypatch.delenv(pty_host.TERMINAL_CMD_ENV)
     settings = tmp_path / "agy-settings.json"
     monkeypatch.setattr(pty_host, "ANTIGRAVITY_SETTINGS", settings)
     argv_file = tmp_path / "argv.json"
@@ -381,15 +374,16 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     assert not any(
         placeholder in arg for arg in launched for placeholder in _PLACEHOLDERS
     )
+    hook_argv = pty_host.session_hook_argv()
     hook = {
         "claude": {
             "type": "command",
-            "command": HOOK_ARGV[0],
-            "args": HOOK_ARGV[1:],
+            "command": hook_argv[0],
+            "args": hook_argv[1:],
         },
         "codex": {
             "type": "command",
-            "command": " ".join(HOOK_ARGV),
+            "command": " ".join(hook_argv),
             "additionalContextLimit": 0,
         },
         "antigravity": None,
@@ -415,24 +409,20 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     if row.prepare is None:
         expected_prepared: list[str] = []
     else:
-        hooks = store.workspace / ".agents" / "hooks.json"
+        hooks = store.workspace / pty_host.ANTIGRAVITY_HOOKS
         url = session_start_url(store.workspace, sid)
         assert _agy_hooks() == {
-            "tcip-session-start": {
+            pty_host.ANTIGRAVITY_HOOK_ENTRY: {
                 "SessionStart": [
                     {
                         "type": "command",
-                        "command": " ".join([*HOOK_ARGV, url]),
+                        "command": " ".join([*hook_argv, url]),
                     }
                 ]
             }
         }
         server = pty_host.mcp_server(opened)
-        (rule,) = [
-            path
-            for path in hooks.parent.rglob("*")
-            if path.is_file() and path != hooks
-        ]
+        rule = store.workspace / pty_host.ANTIGRAVITY_RULE
         expected_prepared = [
             pty_host.subprocess.list2cmdline(
                 [
@@ -487,7 +477,7 @@ def test_a_launch_preparation_that_fails_refuses_the_launch_naming_it(
         prepare=prepare,
     )
     monkeypatch.setattr(pty_host, "PROVIDERS", (row,))
-    monkeypatch.delenv("TCIP_TERMINAL_CMD")
+    monkeypatch.delenv(pty_host.TERMINAL_CMD_ENV)
 
     resp = client.post(
         "/api/terminal/sessions", json={**LAUNCH, "provider": row.id}
@@ -563,7 +553,7 @@ def test_agys_hook_registration_keeps_the_hooks_files_other_entries(
         pty_host, "run_to_completion", lambda argv, step: "added"
     )
     _port_recorded()
-    hooks = store.workspace / ".agents" / "hooks.json"
+    hooks = store.workspace / pty_host.ANTIGRAVITY_HOOKS
     hooks.parent.mkdir()
     linter = {
         "PostToolUse": [
@@ -580,10 +570,10 @@ def test_agys_hook_registration_keeps_the_hooks_files_other_entries(
 
     written = _agy_hooks()
     assert written.get("my-linter-hook") == linter
-    (tcip,) = written["tcip-session-start"]["SessionStart"]
+    (tcip,) = written[pty_host.ANTIGRAVITY_HOOK_ENTRY]["SessionStart"]
     assert set(tcip) == {"type", "command"}
     assert tcip["command"].endswith("/term_second/session-start")
-    assert set(written) == {"my-linter-hook", "tcip-session-start"}
+    assert set(written) == {"my-linter-hook", pty_host.ANTIGRAVITY_HOOK_ENTRY}
 
     hooks.write_text("[]", encoding="utf-8")
     with pytest.raises(
@@ -614,13 +604,13 @@ def test_agys_preparation_writes_one_always_on_rule_naming_the_orientations_tool
         pty_host, "run_to_completion", lambda argv, step: "added"
     )
     _port_recorded()
-    rules = store.workspace / ".agents" / "rules"
+    rule = store.workspace / pty_host.ANTIGRAVITY_RULE
+    rules = rule.parent
     rules.mkdir(parents=True)
     neighbor, ours = rules / "team.md", "---\ntrigger: manual\n---\nours\n"
     neighbor.write_text(ours, encoding="utf-8")
 
     prepared = pty_host.prepare_antigravity("agy", opened, "term_first")
-    (rule,) = [path for path in rules.iterdir() if path != neighbor]
     assert str(rule) in prepared[-1]
     written = rule.read_text(encoding="utf-8")
     rule.write_text("stale", encoding="utf-8")
@@ -708,7 +698,7 @@ def test_the_session_hook_line_refuses_an_interpreter_no_shell_reads_as_one_word
         assert _registered_hook(["--settings", settings]) == {
             "type": "command",
             "command": interpreter,
-            "args": HOOK_ARGV[1:],
+            "args": pty_host.session_hook_argv()[1:],
         }
 
 
@@ -739,7 +729,7 @@ def test_claudes_codexs_and_agys_hooks_run_one_session_hook_argv(
         pty_host, "run_to_completion", lambda argv, step: "added"
     )
     _port_recorded()
-    argv = [interpreter, *HOOK_ARGV[1:]]
+    argv = pty_host.session_hook_argv()
     (claude_settings,) = pty_host.render_argv(
         [pty_host.CLAUDE_SETTINGS_ARG], opened, {}, None
     )
@@ -754,14 +744,16 @@ def test_claudes_codexs_and_agys_hooks_run_one_session_hook_argv(
             pty_host.PreparationFailedError, match="shell line refuses"
         ):
             pty_host.prepare_antigravity("agy", opened, "term_test")
-        assert not (store.workspace / ".agents").exists()
+        assert not (
+            store.workspace / pty_host.ANTIGRAVITY_HOOKS.parent
+        ).exists()
         assert not (tmp_path / "agy-settings.json").exists()
         return
     codex = _registered_hook(pty_host.codex_overrides(opened, {}))
     assert codex is not None
     assert codex["command"].split(" ") == argv
     pty_host.prepare_antigravity("agy", opened, "term_test")
-    (agy,) = _agy_hooks()["tcip-session-start"]["SessionStart"]
+    (agy,) = _agy_hooks()[pty_host.ANTIGRAVITY_HOOK_ENTRY]["SessionStart"]
     assert agy["command"].split(" ") == [
         *argv,
         session_start_url(store.workspace, "term_test"),
@@ -919,7 +911,7 @@ def test_the_codex_overrides_name_the_one_server_and_hook_and_forward_the_spawn_
                 "hooks": [
                     {
                         "type": "command",
-                        "command": " ".join(HOOK_ARGV),
+                        "command": " ".join(pty_host.session_hook_argv()),
                         "additionalContextLimit": 0,
                     }
                 ]
@@ -946,7 +938,7 @@ def test_the_codex_overrides_carry_any_project_path_as_toml_reads_it_back() -> (
         pty_host.codex_overrides(project, pty_host.spawn_env("term_test"))
     )
 
-    assert parsed["args"] == ["-m", "tcip_mcp", "--project", root.as_posix()]
+    assert parsed["args"] == list(pty_host.mcp_server(project).args)
 
 
 def _wait_for(
@@ -1394,7 +1386,9 @@ def test_a_harness_exiting_at_its_start_is_recorded_started_then_ended(
 
     A socket opened to its session afterwards is closed with the ended code.
     """
-    monkeypatch.setenv("TCIP_TERMINAL_CMD", f"{sys.executable} -u {FAKE} fail")
+    monkeypatch.setenv(
+        pty_host.TERMINAL_CMD_ENV, f"{sys.executable} -u {FAKE} fail"
+    )
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
@@ -2082,7 +2076,11 @@ def test_a_posix_spawn_that_fails_leaves_none_of_its_descriptors_open(
     monkeypatch.setattr(pty_host, "os", fds)
     monkeypatch.setitem(sys.modules, "pty", fds)
     monkeypatch.setattr(pty_host, "sys", SimpleNamespace(platform="linux"))
-    monkeypatch.setattr(pty_host, "_set_winsize", lambda *args: None)
+    monkeypatch.setitem(
+        sys.modules,
+        "termios",
+        SimpleNamespace(tcsetwinsize=lambda *args: None),
+    )
     monkeypatch.setattr(pty_host, "subprocess", SimpleNamespace(Popen=refused))
 
     with pytest.raises(OSError, match="the spawn was refused"):
@@ -2480,7 +2478,7 @@ def test_the_resolved_command_decides_whether_its_version_is_probed(
 ) -> None:
     command = pty_host.resolve_terminal_command(pty_host.PROVIDERS[0])
     assert command is not None
-    monkeypatch.delenv("TCIP_TERMINAL_CMD")
+    monkeypatch.delenv(pty_host.TERMINAL_CMD_ENV)
 
     assert pty_host.launched_program(*command)["version"] is None
 
@@ -2536,7 +2534,7 @@ def test_a_harness_updated_in_place_is_seen_at_its_next_launch_without_a_backend
             ),
         ),
     )
-    monkeypatch.delenv("TCIP_TERMINAL_CMD")
+    monkeypatch.delenv(pty_host.TERMINAL_CMD_ENV)
 
     created = client.post("/api/terminal/sessions", json=LAUNCH).json()
     assert created["launched"]["version"] == "1.0.0"

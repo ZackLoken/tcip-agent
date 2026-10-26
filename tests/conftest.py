@@ -182,9 +182,10 @@ def fake_terminal(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     The fake is ``tests/fake_terminal_app.py`` through ``TCIP_TERMINAL_CMD``.
     """
     from tcip_web.routes import terminal as terminal_routes
+    from tcip_web.terminal import TERMINAL_CMD_ENV
     from tests._terminal_fixtures import FAKE
 
-    monkeypatch.setenv("TCIP_TERMINAL_CMD", f"{sys.executable} -u {FAKE}")
+    monkeypatch.setenv(TERMINAL_CMD_ENV, f"{sys.executable} -u {FAKE}")
     yield
     terminal_routes.shutdown_all()
     terminal_routes._SESSIONS.clear()
