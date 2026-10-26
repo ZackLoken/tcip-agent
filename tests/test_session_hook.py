@@ -464,11 +464,11 @@ def test_each_rows_own_hook_spelling_runs_reports_and_prints_its_orientation(
     ]
     pty_host.prepare_antigravity("agy", remembered, started.id)
     hooks = json.loads(
-        (store.workspace / ".agents" / "hooks.json").read_text(
+        (store.workspace / pty_host.ANTIGRAVITY_HOOKS).read_text(
             encoding="utf-8"
         )
     )
-    (agy,) = hooks["tcip-session-start"]["SessionStart"]
+    (agy,) = hooks[pty_host.ANTIGRAVITY_HOOK_ENTRY]["SessionStart"]
     unnamed = {k: v for k, v in env.items() if k != TERMINAL_SESSION_ENV}
 
     for command, event, run_env, told in (
