@@ -224,7 +224,9 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
     asyncio.run(store.open_project(project))
     resp = client.get("/api/results/delivery-events")
     assert resp.status_code == 200, resp.text
-    record = next(r for r in resp.json()["records"] if r["plant_mapping"] is not None)
+    record = next(
+        r for r in resp.json()["records"] if r["plant_mapping"] is not None
+    )
     assert record["plant_mapping"]["resolved_key"] == "valley"
 
     res = build_plant_mapping(
@@ -239,7 +241,9 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
 
     resp2 = client.get("/api/results/delivery-events")
     assert resp2.status_code == 200, resp2.text
-    record2 = next(r for r in resp2.json()["records"] if r["plant_mapping"] is not None)
+    record2 = next(
+        r for r in resp2.json()["records"] if r["plant_mapping"] is not None
+    )
     assert (
         record2["plant_mapping"]["resolved_key"]
         == f"valley@{before.record_sha256[:12]}"
