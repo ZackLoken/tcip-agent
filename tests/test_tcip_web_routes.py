@@ -1141,9 +1141,7 @@ def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
             "resolved": [],
         }
     ] * 2
-    assert not any(
-        e.get("tool") == "save_label_document" for e in audit_rows(tmp_path)
-    )
+    assert audit_rows(tmp_path, "save_label_document") == []
 
 
 def test_a_document_the_bucket_record_does_not_name_is_no_prediction_of_it(

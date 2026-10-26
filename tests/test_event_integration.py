@@ -7,14 +7,14 @@ The output shapes of the tools that push are part of the subject.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 
 import pytest
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tcip_mcp.web_client import VALID_PANELS
+from tcip_mcp.web_client import Panel
 
 if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
@@ -50,9 +50,12 @@ class TestPostPanelEventRoute:
         assert body["panel"] == "training"
         assert body["event_type"] == "metrics_update"
 
-    def test_rejects_invalid_panel(
+    def test_a_path_naming_no_panel_is_refused_and_retained_nowhere(
         self, opened_client: TestClient, project_id: str
     ) -> None:
+        """An event posted to a path naming no panel answers 422 and is retained nowhere."""
+        from tcip_web.state import store
+
         resp = opened_client.post(
             "/api/events/bogus",
             json={
@@ -61,15 +64,25 @@ class TestPostPanelEventRoute:
                 "data": {},
             },
         )
-        body = resp.json()
-        assert "error" in body
+        assert resp.status_code == 422
+        assert all(
+            store.retained_events(panel) == [] for panel in get_args(Panel)
+        )
+
+    def test_a_socket_naming_no_panel_is_closed_with_1008(
+        self, opened_client: TestClient
+    ) -> None:
+        with (
+            pytest.raises(WebSocketDisconnect) as closed,
+            opened_client.websocket_connect("ws://127.0.0.1/ws/panel/bogus"),
+        ):
+            pass
+        assert closed.value.code == 1008
 
     def test_all_valid_panels(
         self, opened_client: TestClient, project_id: str
     ) -> None:
-        # Iterates the shared set the tool and the route both validate against, so a panel added
-        # there is covered here without a third copy of the list drifting out of step.
-        for panel in sorted(VALID_PANELS):
+        for panel in get_args(Panel):
             resp = opened_client.post(
                 f"/api/events/{panel}",
                 json={
@@ -212,6 +225,41 @@ class TestPostPanelEventRoute:
         assert registered == (False, False)
         assert pushed["state"]["active_tab"] == "training"
         assert event["data"] == {"trial": 7}
+
+    @pytest.mark.parametrize("route", ["state", "panel"])
+    def test_a_socket_that_disconnects_mid_iteration_leaves_no_registration(
+        self, opened_client: TestClient, route: str
+    ) -> None:
+        """A socket registered while it reads frames is unregistered once its peer disconnects."""
+        import anyio
+        from starlette.types import Message
+
+        from tcip_web import app as web_app
+
+        inbound: list[Message] = [
+            {"type": "websocket.connect"},
+            {"type": "websocket.receive", "text": "read and discarded"},
+            {"type": "websocket.disconnect", "code": 1001},
+        ]
+        registered_while_reading: list[bool] = []
+
+        async def receive() -> Message:
+            if len(inbound) == 1:
+                registered_while_reading.append(socket in registry)
+            return inbound.pop(0)
+
+        async def send(_message: Message) -> None:
+            pass
+
+        socket = WebSocket({"type": "websocket"}, receive, send)
+        if route == "state":
+            registry = web_app._state_watchers
+            anyio.run(web_app.state_ws, socket)
+        else:
+            registry = web_app._panel_subscribers["training"]
+            anyio.run(web_app.panel_ws, socket, "training")
+        assert registered_while_reading == [True]
+        assert socket not in registry
 
     def test_events_posted_before_connecting_are_replayed_on_connect(
         self, opened_client: TestClient, project_id: str
@@ -404,7 +452,7 @@ class TestPostPanelEventRoute:
         posted: dict = {}
 
         def _capture(
-            target: BoundProject, panel: str, event_type: str, data: dict
+            target: BoundProject, panel: Panel, event_type: str, data: dict
         ) -> dict:
             posted.update(
                 project_id=target.id,
@@ -461,12 +509,37 @@ class TestPushPanelDataTool:
         # Panel name preserved in result
         assert result.get("panel") == "training"
 
-    def test_invalid_panel_rejected(self, bound: BoundProject) -> None:
-        """``push_panel_event`` answers an unknown panel name with an error."""
-        from tcip_mcp.tools.gui_tools import push_panel_event
+    def test_the_server_refuses_a_name_outside_the_panels_and_admits_each_panel(
+        self, bound: BoundProject
+    ) -> None:
+        """The tool's advertised schema names the panels; the server refuses any other name."""
+        import asyncio
 
-        result = push_panel_event(bound, "bogus", "test", {})
-        assert "error" in result
+        from tests._server_calls import (
+            called_through_the_server,
+            client_server,
+        )
+
+        (listed,) = [
+            t
+            for t in asyncio.run(client_server(bound).list_tools())
+            if t.name == "push_panel_event"
+        ]
+        assert listed.input_schema["properties"]["panel"]["enum"] == list(
+            get_args(Panel)
+        )
+        arguments = {"event_type": "test", "data": {}}
+        refused = called_through_the_server(
+            "push_panel_event", {**arguments, "panel": "bogus"}, bound=bound
+        )
+        assert isinstance(refused, str)
+        assert "panel" in refused
+        for panel in get_args(Panel):
+            admitted = called_through_the_server(
+                "push_panel_event", {**arguments, "panel": panel}, bound=bound
+            )
+            assert isinstance(admitted, dict)
+            assert admitted["panel"] == panel
 
 
 class TestPortDiscovery:
@@ -506,7 +579,7 @@ class TestPortDiscovery:
     def test_the_port_handoff_is_one_declaration_that_both_packages_reach(
         self,
     ) -> None:
-        """The port's record is written by ``web_client``'s one writer, which the backend calls."""
+        """The backend's ``record_backend_port`` is ``web_client``'s own."""
         from tcip_mcp import web_client
         from tcip_web import __main__ as web_main
 
@@ -523,7 +596,7 @@ class TestPortDiscovery:
 
 
 class TestSharedWebStateDeclarations:
-    """Tests that shared web records have their one key builder in ``web_client``."""
+    """The backend reaches each shared web record through ``web_client``'s own functions."""
 
     def test_the_gui_snapshot_is_one_declaration_that_both_packages_reach(
         self,

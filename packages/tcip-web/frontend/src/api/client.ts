@@ -22,6 +22,7 @@ import {
   type RemovalRequest,
   type PriorityQueueJob,
   type RenameRequest,
+  type OpenAnswer,
   type ViewReads,
 } from "@/api/types.generated";
 import { stateSocket } from "@/api/ws";
@@ -188,8 +189,7 @@ export const api = {
         open_id: string | null;
         projects: ProjectSummary[];
       }>(ROUTES.getProjects),
-    open: (body: OpenRequest) =>
-      postJson<{ id: string; display_name: string; path: string }>(ROUTES.postProjectsOpen, body),
+    open: (body: OpenRequest) => postJson<OpenAnswer>(ROUTES.postProjectsOpen, body),
     remove: (body: RemovalRequest) =>
       postJson<{ archive_path: string; moved_to: string }>(ROUTES.postProjectsRemove, body),
     rename: (body: RenameRequest) =>

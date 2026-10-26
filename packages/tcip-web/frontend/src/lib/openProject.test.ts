@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type ProjectSummary } from "@/api/client";
-import { GUI_STATE_DEFAULTS, type SessionWrite } from "@/api/types.generated";
+import { GUI_STATE_DEFAULTS, type OpenAnswer, type SessionWrite } from "@/api/types.generated";
 import { openWithDefaults, startOpen } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { INVARIANCES } from "@/test/projectRecords";
+import { openAnswer, stateEnvelope } from "@/test/store";
 
 vi.mock("@/api/client", () => ({
   api: {
@@ -40,10 +41,16 @@ beforeEach(() => {
     selection: GUI_STATE_DEFAULTS.dataset,
   });
   useStore.getState().setUser("grower");
-  vi.mocked(api.projects.open).mockImplementation(({ id }) =>
-    Promise.resolve({ id, display_name: `Project ${id}`, path: `/ws/${id}` }),
-  );
+  vi.mocked(api.projects.open).mockImplementation(({ id }) => Promise.resolve(openedAs(id)));
 });
+
+/** The open route's answer for the listed project `id`: the produced answer with that project's
+ *  id, directory and display name. */
+function openedAs(id: string): OpenAnswer {
+  const listed = project({ id });
+  return openAnswer({ id, path: listed.path, display_name: listed.display_name! });
+}
+
 afterEach(() => vi.clearAllMocks());
 
 describe("openWithDefaults", () => {
@@ -86,7 +93,7 @@ describe("openWithDefaults", () => {
 
     expect(api.projects.open).toHaveBeenCalledWith({ id: "site-a", user: "grower" });
     expect(vi.mocked(api.dataset.select).mock.calls[0][0].dataset_root).toBe("/ws/site-a");
-    expect(useStore.getState().openProject).toEqual({ id: "site-a", path: "/ws/site-a" });
+    expect(useStore.getState().openProject).toEqual(openedAs("site-a").project);
   });
 
   it("opens a project holding no capture with no dataset selected", async () => {
@@ -95,7 +102,7 @@ describe("openWithDefaults", () => {
     expect(api.projects.open).toHaveBeenCalledWith({ id: "empty", user: "grower" });
     expect(api.dataset.select).not.toHaveBeenCalled();
     expect(useStore.getState().gui.dataset.dataset_root).toBeNull();
-    expect(useStore.getState().openProject).toEqual({ id: "empty", path: "/ws/empty" });
+    expect(useStore.getState().openProject).toEqual(openedAs("empty").project);
   });
 });
 
@@ -112,10 +119,10 @@ describe("a switch this page starts", () => {
     });
     vi.mocked(api.projects.open).mockImplementation(({ id }) => {
       order.push(`open ${id}`);
-      return Promise.resolve({ id, display_name: `Project ${id}`, path: `/ws/${id}` });
+      return Promise.resolve(openedAs(id));
     });
     useStore.setState({
-      openProject: { id: "valley", path: "/ws/valley" },
+      openProject: openedAs("valley").project,
       recordedSession: { project_id: "valley", started: "s1", user: "user:grower" },
     });
     useStore.setState({ user: "user:grower" });
@@ -130,7 +137,7 @@ describe("a switch this page starts", () => {
   it("asks nothing of the backend, and shows why, when the visit it leaves gets no answer", async () => {
     const { sessionsApi } = await import("@/api/sessions");
     vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(new TypeError("Failed to fetch"));
-    useStore.setState({ openProject: { id: "valley", path: "/ws/valley" }, recordedSession: null });
+    useStore.setState({ openProject: openedAs("valley").project, recordedSession: null });
     useStore.getState().startImageSessionTracking("a.jpg", Date.now() - 2000);
 
     await openWithDefaults(project({ id: "ridge" }));
@@ -152,20 +159,22 @@ describe("a switch this page starts", () => {
 
   it("sends no open once a snapshot adopting another project superseded it during settlement", async () => {
     const { sessionsApi } = await import("@/api/sessions");
-    let answer!: (w: SessionWrite) => void;
-    vi.spyOn(sessionsApi, "imageEvent").mockReturnValueOnce(
-      new Promise((resolve) => {
-        answer = resolve;
-      }),
-    );
-    useStore.setState({ openProject: { id: "valley", path: "/ws/valley" }, recordedSession: null });
+    const answer = Promise.withResolvers<SessionWrite>();
+    vi.spyOn(sessionsApi, "imageEvent").mockReturnValueOnce(answer.promise);
+    useStore.setState({ openProject: openedAs("valley").project, recordedSession: null });
     useStore.getState().startImageSessionTracking("a.jpg", Date.now() - 2000);
 
     const opening = openWithDefaults(project({ id: "ridge" }));
     await Promise.resolve();
     const s = useStore.getState();
-    s.mergeSnapshot(s.gui, null, { id: "hill", path: "/ws/hill" }, null);
-    answer({ status: "ok", session: { started: "s1", ended: false } });
+    s.mergeSnapshot(
+      stateEnvelope({
+        state: s.gui,
+        version: s.wsVersion,
+        project: openedAs("hill").project,
+      }),
+    );
+    answer.resolve({ status: "ok", session: { started: "s1", ended: false } });
     await opening;
 
     expect(api.projects.open).not.toHaveBeenCalled();

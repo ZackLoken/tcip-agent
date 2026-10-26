@@ -37,12 +37,19 @@ def scratch_session() -> Iterator[tuple[Path, TestClient]]:
             yield workspace, client
 
 
-def opened(client: TestClient, project: OpenProject) -> None:
-    """Open ``project`` through ``POST /api/projects/open``; raises on a refusal."""
+def opened(client: TestClient, project: OpenProject) -> JsonValue:
+    """Open ``project`` through ``POST /api/projects/open`` and return its answer.
+
+    Raises on a refusal.
+    """
+    from tcip_web.app import app
+
     response = client.post(
-        "/api/projects/open", json={"id": project.id, "user": "grower"}
+        app.url_path_for("open_project"),
+        json={"id": project.id, "user": "grower"},
     )
     response.raise_for_status()
+    return response.json()
 
 
 type Leaf = Callable[[str | None, JsonValue], JsonValue]

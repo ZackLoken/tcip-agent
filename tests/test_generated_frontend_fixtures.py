@@ -5,10 +5,11 @@ records ``GET /api/results/delivery-events`` serves for them to
 ``frontend/src/test/deliveryEvents.json``; this test regenerates them and holds the checked-in
 file to what a regeneration serves, each value compared but the ones a run mints. The trait
 listings ``tools/generate_trait_fixture.py`` writes, the project fixtures
-``tools/generate_project_fixture.py`` writes and the TensorBoard serving answers
-``tools/generate_tensorboard_fixture.py`` writes are held the same way, and the scratch session the
-generators make their scenes in (``tools/fixture_session.py``) is held to leaving nothing
-behind.
+``tools/generate_project_fixture.py`` writes, the TensorBoard serving answers
+``tools/generate_tensorboard_fixture.py`` writes and the open answer and state envelope
+``tools/generate_open_fixture.py`` writes are held the same way, and the scratch
+session the generators make their scenes in (``tools/fixture_session.py``) is held to leaving
+nothing behind.
 """
 
 from __future__ import annotations
@@ -173,14 +174,15 @@ def test_the_comparison_keeps_every_value_a_run_does_not_mint() -> None:
         "generate_trait_fixture",
         "generate_project_fixture",
         "generate_tensorboard_fixture",
+        "generate_open_fixture",
     ],
 )
 def test_the_fixture_is_what_a_regeneration_serves_value_for_value(
     name: str,
 ) -> None:
-    """A trait, project or TensorBoard fixture is what a regeneration serves, value for value.
+    """A trait, project, TensorBoard or open fixture is what a regeneration serves.
 
-    Each generator's checked-in file equals what its ``produce`` serves.
+    Each generator's checked-in file equals what its ``produce`` serves, value for value.
     """
     module = _generator(name)
 

@@ -1,5 +1,5 @@
 import { renderHook } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
 import { RENDER_CACHE_VERSION } from "@/api/types.generated";
@@ -24,10 +24,6 @@ function stubFetch(status: number, body: unknown = {}) {
 }
 
 describe("annotate.save lost-update handling", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("returns ok + a fresh mtime token on a 200, preserved exactly at real ns magnitude", async () => {
     // A 2026 st_mtime_ns (~1.78e18) exceeds 2**53: as a JSON number it would be rounded
     // by JSON.parse and every echo would 409. String tokens must survive byte-for-byte.
@@ -98,11 +94,6 @@ describe("annotate.save lost-update handling", () => {
 });
 
 describe("canvas.pushState 409 recovery", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
   const body = () => ({
     project_id: "a1b2c3d4e5f6",
     tab: "annotate" as const,
@@ -144,10 +135,6 @@ describe("canvas.pushState 409 recovery", () => {
 });
 
 describe("annotate.load", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("reports the raster's own width and height, each in its own field", async () => {
     // Non-square on purpose: equal dimensions would read the same whichever field they land in.
     stubFetch(200, {
@@ -183,10 +170,6 @@ describe("annotate.load", () => {
 });
 
 describe("query string assembly", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("carries each named parameter, a bucket name with its separator encoded", async () => {
     stubFetch(200, { bucket: "m/2026-01-01", proposals: [] });
     await api.annotate.proposals("img.jpg", "m/2026-01-01");
@@ -212,10 +195,6 @@ describe("query string assembly", () => {
 });
 
 describe("request defaults", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("sends the JSON content type on a request that names no headers of its own", async () => {
     stubFetch(200, { status: "ok", current_image_index: 7 });
     await api.dataset.nav(7);
@@ -240,18 +219,12 @@ describe("images.url", () => {
 
   it("names this display's pixel count and no size or encoding, whole or region", () => {
     vi.stubGlobal("devicePixelRatio", 2);
-    try {
-      const pixels = display();
-      expect(pixels).toBe(3840 * 2160);
-      for (const opts of [{}, { x0: 0, y0: 0, x1: 512, y1: 512 }]) {
-        const params = parseQuery(
-          api.images.url("C:/data/images/2026-01-01/img1.jpg", pixels, opts),
-        );
-        expect(params.get("display_pixels")).toBe(String(pixels));
-        for (const key of ["max_width", "width", "quality"]) expect(params.has(key)).toBe(false);
-      }
-    } finally {
-      vi.unstubAllGlobals();
+    const pixels = display();
+    expect(pixels).toBe(3840 * 2160);
+    for (const opts of [{}, { x0: 0, y0: 0, x1: 512, y1: 512 }]) {
+      const params = parseQuery(api.images.url("C:/data/images/2026-01-01/img1.jpg", pixels, opts));
+      expect(params.get("display_pixels")).toBe(String(pixels));
+      for (const key of ["max_width", "width", "quality"]) expect(params.has(key)).toBe(false);
     }
   });
 
@@ -290,10 +263,6 @@ describe("images.url region params", () => {
 });
 
 describe("images.bands", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("hits GET /api/images/bands with the path and returns the reported contract", async () => {
     stubFetch(200, {
       band_count: 4,

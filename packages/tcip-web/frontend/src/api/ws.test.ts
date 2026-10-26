@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StateSocket } from "@/api/ws";
 import { useStore } from "@/store";
+import { PRODUCED_ENVELOPE } from "@/test/store";
 
 /** Minimal WebSocket stand-in: records instances, lets tests drive events. */
 class FakeWebSocket {
@@ -60,10 +61,7 @@ describe("StateSocket.connect", () => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
-  });
+  afterEach(() => vi.useRealTimers());
 
   it("opens the state socket once and does not stack a second one while it is live", () => {
     const socket = new StateSocket();
@@ -119,13 +117,9 @@ describe("StateSocket state_snapshot dispatch", () => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
-    vi.restoreAllMocks();
-  });
+  afterEach(() => vi.useRealTimers());
 
-  it("carries the envelope's open project and epoch into one mergeSnapshot call", () => {
+  it("hands the backend's envelope whole to one mergeSnapshot call", () => {
     const mergeSnapshot = vi
       .spyOn(useStore.getState(), "mergeSnapshot")
       .mockImplementation(() => {});
@@ -133,13 +127,25 @@ describe("StateSocket state_snapshot dispatch", () => {
     socket.connect();
     lastSocket().open();
 
-    const state = { active_tab: "annotate", dataset: { dataset_root: "/w/p" } };
-    const project = { id: "a1b2c3d4e5f6", path: "/w/p" };
-    lastSocket().message(
-      JSON.stringify({ type: "state_snapshot", state, version: 4, project, epoch: "e1" }),
-    );
+    lastSocket().message(JSON.stringify(PRODUCED_ENVELOPE));
 
-    expect(mergeSnapshot).toHaveBeenCalledWith(state, 4, project, "e1");
+    expect(mergeSnapshot).toHaveBeenCalledWith(PRODUCED_ENVELOPE);
+    socket.close();
+  });
+
+  it("supplies no field an envelope lacks: one missing its epoch reaches mergeSnapshot missing it", () => {
+    const mergeSnapshot = vi
+      .spyOn(useStore.getState(), "mergeSnapshot")
+      .mockImplementation(() => {});
+    const socket = new StateSocket();
+    socket.connect();
+    lastSocket().open();
+    // The produced envelope with its epoch removed, a frame the backend never sends.
+    const { epoch: _removed, ...withoutEpoch } = PRODUCED_ENVELOPE;
+
+    lastSocket().message(JSON.stringify(withoutEpoch));
+
+    expect(mergeSnapshot.mock.calls[0][0]).toStrictEqual(withoutEpoch);
     socket.close();
   });
 
@@ -166,10 +172,7 @@ describe("StateSocket wsStatus transitions", () => {
     useStore.setState({ wsStatus: "disconnected" });
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
-  });
+  afterEach(() => vi.useRealTimers());
 
   it("drives connecting, connected, error and an unexpected drop's disconnected", () => {
     const socket = new StateSocket();
@@ -205,10 +208,7 @@ describe("StateSocket.subscribePanel", () => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
-  });
+  afterEach(() => vi.useRealTimers());
 
   it("opens a socket for the panel and dispatches parsed events to the handler", () => {
     const handler = vi.fn();

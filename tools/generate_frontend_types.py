@@ -10,15 +10,16 @@ engine prompt the canvas sends (the detector's own parameters,
 of one; ``routes/training.py`` and ``routes/terminal.py`` declare their WebSocket frame
 vocabularies, and ``routes/terminal.py`` the provider status, the session launch request and
 answer, the submitted request, and the session end request and answer;
-``routes/projects.py`` declares the project summary and the open, removal, rename and
-invariances request shapes, and ``tcip_mcp.project_record`` the capture invariances and their
-correction's answer; ``routes/results.py`` declares
+``routes/projects.py`` declares the project summary, the open, removal, rename and
+invariances request shapes and the open's answer, and ``tcip_mcp.project_record`` the capture
+invariances and their correction's answer; ``routes/results.py`` declares
 the phenology and count export request shapes, the revision confirmation and the registered
 models;
 ``tcip_mcp.traits`` declares the trait record and its revisions; ``tcip_mcp.tools.meta_tools``
 the page of a project-memory corpus the meta routes answer; and
-``tcip_mcp.web_client.GuiState`` declares the GUI state the backend broadcasts, rendered as the
-shape it serializes to, with ``tcip_mcp.web_client.GUI_STATE_DEFAULTS`` as
+``tcip_web.state.StateSnapshotMessage`` declares the state envelope the backend broadcasts,
+nesting ``tcip_mcp.web_client.GuiState``, rendered as the shape it serializes to, with
+``tcip_mcp.web_client.GUI_STATE_DEFAULTS`` as
 ``GUI_STATE_DEFAULTS``. This script projects them into ``frontend/src/api/types.generated.ts``
 through each model's own JSON schema, each interface named as the definition pydantic's schema
 refers to it by (a parametrized generic as ``MemoryPage_FrictionReport_``). The mapper covers
@@ -58,7 +59,7 @@ HEADER = """/**
  * routes/terminal.py, routes/projects.py, routes/results.py, tcip_mcp.experiments,
  * tcip_mcp.pipelines.proposal_engines, tcip_mcp.pipelines.training.tensorboard_manager,
  * tcip_mcp.project_record, tcip_mcp.tools.meta_tools, tcip_mcp.tools.training_tools,
- * tcip_mcp.traits, tcip_mcp.web_client.GuiState), plus a
+ * tcip_mcp.traits, tcip_web.state.StateSnapshotMessage), plus a
  * handful of runtime constants and vocabularies (routes/images.py, tcip_mcp.web_client,
  * tcip_mcp.experiments, tcip_mcp.pipelines.execution, tcip_mcp.subject_registry,
  * tcip_mcp.agent_identity, tcip_mcp.pipelines.training.tensorboard_manager,
@@ -136,6 +137,7 @@ def declared_models() -> list[type[BaseModel]]:
     from tcip_web.routes.images import ServingCell, ViewReads
     from tcip_web.routes.projects import (
         InvariancesRequest,
+        OpenAnswer,
         OpenRequest,
         ProjectSummary,
         RemovalRequest,
@@ -217,6 +219,7 @@ def declared_models() -> list[type[BaseModel]]:
         CaptureInvariances,
         ProjectSummary,
         OpenRequest,
+        OpenAnswer,
         RemovalRequest,
         RenameRequest,
         InvariancesRequest,
@@ -255,8 +258,14 @@ def declared_models() -> list[type[BaseModel]]:
     ]
 
 
-TRANSPORT_MODELS = ("GuiState", "DatasetSelection", "ViewState")
-"""The broadcast GUI state and the models it nests, rendered as they serialize."""
+TRANSPORT_MODELS = (
+    "StateSnapshotMessage",
+    "SnapshotProject",
+    "GuiState",
+    "DatasetSelection",
+    "ViewState",
+)
+"""The broadcast state envelope and the models it nests, rendered as they serialize."""
 
 
 def scalar_constants() -> dict[str, int | str]:
@@ -339,10 +348,12 @@ def literal_aliases() -> dict[str, tuple[str, ...]]:
     from tcip_annotation.json_io import SubjectState
     from tcip_annotation.verdicts import VerdictAction
     from tcip_mcp.pipelines.band_stats import StretchMode
+    from tcip_mcp.web_client import Panel
     from tcip_web.jobstore import JobStatus
 
     return {
         "JobStatus": get_args(JobStatus),
+        "Panel": get_args(Panel),
         "StretchMode": get_args(StretchMode),
         "SubjectState": get_args(SubjectState),
         "VerdictAction": get_args(VerdictAction),
@@ -451,11 +462,13 @@ def _interface(name: str, schema: dict) -> str:
 
 def render() -> str:
     """Return the full text of the generated module."""
-    from tcip_mcp.web_client import GUI_STATE_DEFAULTS, GuiState
+    from tcip_mcp.web_client import GUI_STATE_DEFAULTS
+    from tcip_web.state import StateSnapshotMessage
 
     models = declared_models()
     refs, combined = models_json_schema(
-        [(m, "validation") for m in models] + [(GuiState, "serialization")]
+        [(m, "validation") for m in models]
+        + [(StateSnapshotMessage, "serialization")]
     )
     defs = combined["$defs"]
     names = [

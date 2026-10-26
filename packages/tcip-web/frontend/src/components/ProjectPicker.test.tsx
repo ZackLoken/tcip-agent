@@ -3,11 +3,14 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type ProjectSummary } from "@/api/client";
-import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
+import type { OpenAnswer, SnapshotProject } from "@/api/types.generated";
 import { LISTING_REFRESH_MS, ProjectPicker } from "@/components/ProjectPicker";
 import { startOpen } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { INVARIANCES } from "@/test/projectRecords";
+import { openAnswer, stateEnvelope } from "@/test/store";
+
+type Selected = Awaited<ReturnType<typeof api.dataset.select>>;
 
 vi.mock("@/api/client", () => {
   return {
@@ -70,6 +73,12 @@ function listing(overrides: Partial<Awaited<ReturnType<typeof api.projects.list>
   };
 }
 
+/** The open route's answer for the listed project `p`, whose record reads: the produced answer
+ *  with that project's id, directory and display name. */
+function openedAs(p: ProjectSummary): OpenAnswer {
+  return openAnswer({ id: p.id!, path: p.path, display_name: p.display_name! });
+}
+
 function selection(root: string) {
   return {
     status: "ok",
@@ -88,11 +97,7 @@ function selection(root: string) {
 // The backend already holds the project open, as it does when the person switches projects.
 function backendHoldsValleyOpen() {
   vi.mocked(api.projects.list).mockResolvedValue(listing({ open_id: "a1b2c3d4e5f6" }));
-  vi.mocked(api.projects.open).mockResolvedValue({
-    id: "a1b2c3d4e5f6",
-    display_name: "Valley farm",
-    path: "/ws/valley",
-  });
+  vi.mocked(api.projects.open).mockResolvedValue(openedAs(PROJECTS[0]));
   vi.mocked(api.dataset.select).mockResolvedValue(selection("/ws/valley"));
 }
 
@@ -132,11 +137,7 @@ describe("ProjectPicker", () => {
 
   it("opens a project by its id, then selects a dataset inside its own directory", async () => {
     vi.mocked(api.projects.list).mockResolvedValue(listing());
-    vi.mocked(api.projects.open).mockResolvedValue({
-      id: "a1b2c3d4e5f6",
-      display_name: "Valley farm",
-      path: "/ws/valley",
-    });
+    vi.mocked(api.projects.open).mockResolvedValue(openedAs(PROJECTS[0]));
     vi.mocked(api.dataset.select).mockResolvedValue(selection("/ws/valley"));
     render(<ProjectPicker />);
 
@@ -149,7 +150,7 @@ describe("ProjectPicker", () => {
       dataset_root: "/ws/valley",
       date: "2026-03-01",
     });
-    expect(useStore.getState().openProject).toEqual({ id: "a1b2c3d4e5f6", path: "/ws/valley" });
+    expect(useStore.getState().openProject).toEqual(openedAs(PROJECTS[0]).project);
   });
 
   it("lists a project created while the picker is on screen without a reload", async () => {
@@ -184,19 +185,13 @@ describe("ProjectPicker", () => {
       image_count: 0,
     };
     vi.mocked(api.projects.list).mockResolvedValue(listing({ projects: [empty] }));
-    vi.mocked(api.projects.open).mockResolvedValue({
-      id: "0f0e0d0c0b0a",
-      display_name: "Empty block",
-      path: "/ws/empty",
-    });
+    vi.mocked(api.projects.open).mockResolvedValue(openedAs(empty));
     render(<ProjectPicker />);
 
     fireEvent.click(await screen.findByText("Empty block"));
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
-    await waitFor(() =>
-      expect(useStore.getState().openProject).toEqual({ id: "0f0e0d0c0b0a", path: "/ws/empty" }),
-    );
+    await waitFor(() => expect(useStore.getState().openProject).toEqual(openedAs(empty).project));
     expect(api.projects.open).toHaveBeenCalledWith({ id: "0f0e0d0c0b0a", user: "grower" });
     expect(api.dataset.select).not.toHaveBeenCalled();
   });
@@ -237,11 +232,7 @@ describe("ProjectPicker", () => {
 
   it("commits the typed name as typed and opens the project from the open button", async () => {
     vi.mocked(api.projects.list).mockResolvedValue(listing());
-    vi.mocked(api.projects.open).mockResolvedValue({
-      id: "a1b2c3d4e5f6",
-      display_name: "Valley farm",
-      path: "/ws/valley",
-    });
+    vi.mocked(api.projects.open).mockResolvedValue(openedAs(PROJECTS[0]));
     vi.mocked(api.dataset.select).mockResolvedValue(selection("/ws/valley"));
     useStore.getState().setUser("");
     render(<ProjectPicker />);
@@ -263,17 +254,26 @@ describe("ProjectPicker", () => {
       display_name: "Hill farm",
       path: "/ws/hill",
     };
-    const VALLEY_OPENED = { id: "a1b2c3d4e5f6", display_name: "Valley farm", path: "/ws/valley" };
+    const VALLEY_OPENED = openedAs(PROJECTS[0]);
+    const HILL_OPENED = openedAs(HILL);
 
     function pendingOpen() {
-      let reject!: (e: Error) => void;
-      const promise = new Promise<Awaited<ReturnType<typeof api.projects.open>>>((_, rej) => {
-        reject = rej;
-      });
+      const open = Promise.withResolvers<OpenAnswer>();
       vi.mocked(api.projects.list).mockResolvedValue(listing({ projects: [PROJECTS[0], HILL] }));
-      vi.mocked(api.projects.open).mockReturnValue(promise);
-      return reject;
+      vi.mocked(api.projects.open).mockReturnValue(open.promise);
+      return open.reject;
     }
+
+    /** Have the dataset select pending until the test resolves the promise returned. */
+    function pendingSelect() {
+      const select = Promise.withResolvers<Selected>();
+      vi.mocked(api.dataset.select).mockReturnValue(select.promise);
+      return select;
+    }
+
+    /** Merge the backend's snapshot naming `project` at `version`. */
+    const merge = (project: SnapshotProject, version = 1) =>
+      act(() => useStore.getState().mergeSnapshot(stateEnvelope({ version, project })));
 
     async function startOpeningValley() {
       render(<ProjectPicker />);
@@ -309,11 +309,7 @@ describe("ProjectPicker", () => {
     it("drops the failure once a snapshot has adopted another project", async () => {
       const reject = pendingOpen();
       await startOpeningValley();
-      act(() =>
-        useStore
-          .getState()
-          .mergeSnapshot(GUI_STATE_DEFAULTS, 1, { id: "b1b2c3d4e5f6", path: "/ws/hill" }, "e1"),
-      );
+      merge(HILL_OPENED.project);
 
       await act(() => Promise.resolve(reject(new Error("valley refused"))));
 
@@ -326,25 +322,18 @@ describe("ProjectPicker", () => {
       vi.mocked(api.dataset.select).mockResolvedValue(selection("/ws/valley"));
       await startOpeningValley();
 
-      await waitFor(() =>
-        expect(useStore.getState().openProject).toEqual({ id: "a1b2c3d4e5f6", path: "/ws/valley" }),
-      );
+      await waitFor(() => expect(useStore.getState().openProject).toEqual(VALLEY_OPENED.project));
     });
 
     it("drops a success once another project has been chosen", async () => {
       pendingOpen();
       vi.mocked(api.projects.open).mockResolvedValue(VALLEY_OPENED);
-      let release!: () => void;
-      vi.mocked(api.dataset.select).mockReturnValue(
-        new Promise((resolve) => {
-          release = () => resolve(selection("/ws/valley"));
-        }),
-      );
+      const select = pendingSelect();
       await startOpeningValley();
       await waitFor(() => expect(api.dataset.select).toHaveBeenCalled());
       fireEvent.click(screen.getByText("Hill farm"));
 
-      await act(() => Promise.resolve(release()));
+      await act(() => Promise.resolve(select.resolve(selection("/ws/valley"))));
 
       expect(useStore.getState().openProject).toBeNull();
       expect(useStore.getState().opening).toBeNull();
@@ -353,64 +342,40 @@ describe("ProjectPicker", () => {
     it("drops a success arriving after a newer snapshot adopted another project", async () => {
       pendingOpen();
       vi.mocked(api.projects.open).mockResolvedValue(VALLEY_OPENED);
-      let release!: () => void;
-      vi.mocked(api.dataset.select).mockReturnValue(
-        new Promise((resolve) => {
-          release = () => resolve(selection("/ws/valley"));
-        }),
-      );
+      const select = pendingSelect();
       await startOpeningValley();
       await waitFor(() => expect(api.dataset.select).toHaveBeenCalled());
-      act(() =>
-        useStore
-          .getState()
-          .mergeSnapshot(GUI_STATE_DEFAULTS, 1, { id: "b1b2c3d4e5f6", path: "/ws/hill" }, "e1"),
-      );
+      merge(HILL_OPENED.project);
 
-      await act(() => Promise.resolve(release()));
+      await act(() => Promise.resolve(select.resolve(selection("/ws/valley"))));
 
-      expect(useStore.getState().openProject).toEqual({ id: "b1b2c3d4e5f6", path: "/ws/hill" });
+      expect(useStore.getState().openProject).toEqual(HILL_OPENED.project);
     });
 
     it("drops a success once the project open before it has been adopted again", async () => {
       pendingOpen();
       vi.mocked(api.projects.open).mockResolvedValue(VALLEY_OPENED);
-      let release!: () => void;
-      vi.mocked(api.dataset.select).mockReturnValue(
-        new Promise((resolve) => {
-          release = () => resolve(selection("/ws/valley"));
-        }),
-      );
-      const hill = { id: "b1b2c3d4e5f6", path: "/ws/hill" };
+      const select = pendingSelect();
+      const hill = HILL_OPENED.project;
       useStore.setState({ openProject: hill });
       await startOpeningValley();
       await waitFor(() => expect(api.dataset.select).toHaveBeenCalled());
-      const merge = (project: { id: string; path: string }, version: number) =>
-        act(() => useStore.getState().mergeSnapshot(GUI_STATE_DEFAULTS, version, project, "e1"));
-      merge({ id: "a1b2c3d4e5f6", path: "/ws/valley" }, 1);
+      merge(VALLEY_OPENED.project, 1);
       merge(hill, 2);
 
-      await act(() => Promise.resolve(release()));
+      await act(() => Promise.resolve(select.resolve(selection("/ws/valley"))));
 
       expect(useStore.getState().openProject).toEqual(hill);
     });
 
     it("selects no dataset for an open whose project was superseded before it answered", async () => {
       vi.mocked(api.projects.list).mockResolvedValue(listing({ projects: [PROJECTS[0], HILL] }));
-      let answer!: () => void;
-      vi.mocked(api.projects.open).mockReturnValue(
-        new Promise((resolve) => {
-          answer = () => resolve(VALLEY_OPENED);
-        }),
-      );
+      const open = Promise.withResolvers<OpenAnswer>();
+      vi.mocked(api.projects.open).mockReturnValue(open.promise);
       await startOpeningValley();
-      act(() =>
-        useStore
-          .getState()
-          .mergeSnapshot(GUI_STATE_DEFAULTS, 1, { id: "b1b2c3d4e5f6", path: "/ws/hill" }, "e1"),
-      );
+      merge(HILL_OPENED.project);
 
-      await act(() => Promise.resolve(answer()));
+      await act(() => Promise.resolve(open.resolve(VALLEY_OPENED)));
 
       expect(api.dataset.select).not.toHaveBeenCalled();
     });
@@ -418,30 +383,17 @@ describe("ProjectPicker", () => {
     it("keeps a held open when the store rejects a stale snapshot of another project", async () => {
       pendingOpen();
       vi.mocked(api.projects.open).mockResolvedValue(VALLEY_OPENED);
-      let release!: () => void;
-      vi.mocked(api.dataset.select).mockReturnValue(
-        new Promise((resolve) => {
-          release = () => resolve(selection("/ws/valley"));
-        }),
-      );
-      act(() =>
-        useStore
-          .getState()
-          .mergeSnapshot(GUI_STATE_DEFAULTS, 10, { id: "a1b2c3d4e5f6", path: "/ws/valley" }, "e1"),
-      );
+      const select = pendingSelect();
+      merge(VALLEY_OPENED.project, 10);
       await startOpeningValley();
       await waitFor(() => expect(api.dataset.select).toHaveBeenCalled());
-      act(() =>
-        useStore
-          .getState()
-          .mergeSnapshot(GUI_STATE_DEFAULTS, 9, { id: "b1b2c3d4e5f6", path: "/ws/hill" }, "e1"),
-      );
+      merge(HILL_OPENED.project, 9);
 
       expect(useStore.getState().opening?.projectId).toBe("a1b2c3d4e5f6");
-      await act(() => Promise.resolve(release()));
+      await act(() => Promise.resolve(select.resolve(selection("/ws/valley"))));
 
       expect(useStore.getState().opening).toBeNull();
-      expect(useStore.getState().openProject).toEqual({ id: "a1b2c3d4e5f6", path: "/ws/valley" });
+      expect(useStore.getState().openProject).toEqual(VALLEY_OPENED.project);
       expect(useStore.getState().gui.dataset.dataset_root).toBe("/ws/valley");
     });
 
@@ -461,13 +413,9 @@ describe("ProjectPicker", () => {
 
     it("leaves a newer request for the same project held when the obsolete one ends", async () => {
       vi.mocked(api.projects.list).mockResolvedValue(listing({ projects: [PROJECTS[0], HILL] }));
-      let rejectFirst!: (e: Error) => void;
+      const obsolete = Promise.withResolvers<OpenAnswer>();
       vi.mocked(api.projects.open)
-        .mockReturnValueOnce(
-          new Promise((_, reject) => {
-            rejectFirst = reject;
-          }),
-        )
+        .mockReturnValueOnce(obsolete.promise)
         .mockReturnValueOnce(new Promise(() => {}));
       await startOpeningValley();
       const first = useStore.getState().opening?.requestId;
@@ -478,7 +426,7 @@ describe("ProjectPicker", () => {
       const second = useStore.getState().opening?.requestId;
       expect(second).not.toBe(first);
 
-      await act(() => Promise.resolve(rejectFirst(new Error("first refused"))));
+      await act(() => Promise.resolve(obsolete.reject(new Error("first refused"))));
 
       expect(useStore.getState().opening).toEqual({
         requestId: second,

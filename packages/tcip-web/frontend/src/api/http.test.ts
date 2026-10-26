@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   asJson,
@@ -20,10 +20,6 @@ function res(status: number, body: unknown): Response {
 }
 
 describe("http helpers", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("asJson returns the parsed body on a 2xx", async () => {
     expect(await asJson<{ a: number }>(res(200, { a: 1 }))).toEqual({ a: 1 });
   });

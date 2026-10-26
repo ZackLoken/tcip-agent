@@ -366,9 +366,8 @@ def read_gui_snapshot(project: Path) -> GuiState | None:
     )
 
 
-# One panel per GUI tab, plus "app" for steering the GUI itself (open a project, focus a tab).
-# The pusher and the receiver both validate against this one set, so neither drifts apart.
-VALID_PANELS = frozenset(TAB_NAMES) | {"app"}
+Panel = Literal[ActiveTab, "app"]
+"""A GUI panel: one per tab, plus ``"app"`` for steering the GUI itself."""
 
 # The event types the platform's own tool-driven emitters send; ``push_panel_event`` accepts any
 # caller-supplied type beyond this set, so this is not the full panel-event vocabulary.
@@ -414,7 +413,7 @@ def backend_url(workspace: Path, path: str) -> str:
 
 def post_panel_event(
     bound: BoundProject,
-    panel: str,
+    panel: Panel,
     event_type: str,
     data: dict[str, Any],
     *,
@@ -459,7 +458,6 @@ def post_panel_event(
         answer = httpx.post(
             url,
             json={
-                "panel": panel,
                 "event_type": event_type,
                 "data": data,
                 "project_id": bound.id,

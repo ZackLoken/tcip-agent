@@ -910,9 +910,9 @@ async def terminal_ws(websocket: WebSocket, session_id: str) -> None:
         if replay:
             await websocket.send_text(replay)
         pump_task = asyncio.create_task(_pump(queue, websocket))
-        while True:
+        async for text in websocket.iter_text():
             try:
-                frame = _FRAME.validate_json(await websocket.receive_text())
+                frame = _FRAME.validate_json(text)
             except ValidationError:
                 continue
             if isinstance(frame, TerminalResizeFrame):

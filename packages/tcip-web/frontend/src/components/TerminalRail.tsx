@@ -375,7 +375,7 @@ export function TerminalRail() {
         setError(null);
         setConn("open");
         term.reset(); // the replay repaints the screen from scratch
-        send({ type: "resize", rows: term.rows, cols: term.cols });
+        sendSize();
       },
       onMessage: (data) => term.write(data),
       // The ended code closes a session whose agent ended, starting a switch's chosen row; any
@@ -388,11 +388,12 @@ export function TerminalRail() {
     });
 
     const send = (payload: TerminalFrame) => socket.send(JSON.stringify(payload));
+    const sendSize = () => send({ type: "resize", rows: term.rows, cols: term.cols });
     socketRef.current = socket;
     if (running(useStore.getState().terminalPhase)) socket.start();
 
     const dataSub = term.onData((data) => send({ type: "input", data }));
-    const resizeSub = term.onResize(({ rows, cols }) => send({ type: "resize", rows, cols }));
+    const resizeSub = term.onResize(sendSize);
     const observer = new ResizeObserver(() => {
       try {
         fit.fit();
@@ -446,9 +447,16 @@ export function TerminalRail() {
       resume(was);
       return;
     }
-    useStore.getState().restageTerminalMessages(answer.undelivered);
-    if (was === "handing-off") switchToChosen();
-    else showEnded();
+    const closesSwitch = was === "handing-off";
+    settleEnd(answer, closesSwitch);
+    if (!closesSwitch) showEnded();
+  }
+
+  /** Stage the requests an ended session's agent was never given ahead of the others, then start
+   *  the chosen row when the end closes a switch. */
+  function settleEnd(ended: TerminalEnd, closesSwitch: boolean) {
+    useStore.getState().restageTerminalMessages(ended.undelivered);
+    if (closesSwitch) switchToChosen();
   }
 
   /** Remember the chosen row at once when the rail holds no agent; while one is live, also ask
@@ -471,9 +479,8 @@ export function TerminalRail() {
       setPhase("live");
       return;
     }
-    if (ended === null) return;
-    useStore.getState().restageTerminalMessages(ended.undelivered);
-    if (useStore.getState().terminalPhase === "handing-off") switchToChosen();
+    // An End or the socket's ended close may have closed the switch while the answer was awaited.
+    if (ended !== null) settleEnd(ended, useStore.getState().terminalPhase === "handing-off");
   }
 
   if (!open) return null;

@@ -24,10 +24,7 @@ beforeEach(() => {
   vi.spyOn(api.dataset, "nav").mockResolvedValue({ status: "ok" } as never);
 });
 
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
+afterEach(cleanup);
 
 function renderToolbar(
   bandsInfo?: ImageBandsResponse | null,

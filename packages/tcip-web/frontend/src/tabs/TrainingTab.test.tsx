@@ -107,10 +107,7 @@ beforeEach(() => {
   useStore.setState({ user: "jordan" });
 });
 
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
+afterEach(cleanup);
 
 describe("TrainingTab run list", () => {
   it("offers a stop control for a running run, and cancels it by id", async () => {
@@ -262,16 +259,8 @@ describe("TrainingTab run list", () => {
 
   it("shows an in-flight Cancel as a disabled, pending row control, and a failure in the row", async () => {
     listing([run({ experiment_id: "train-cancel-flight" })]);
-    let resolveCancel: (v: {
-      experiment_id: string;
-      state: string;
-      cancel_requested: boolean;
-    }) => void = () => {};
-    vi.spyOn(trainingApi, "cancel").mockReturnValue(
-      new Promise((resolve) => {
-        resolveCancel = resolve;
-      }),
-    );
+    const cancel = Promise.withResolvers<Awaited<ReturnType<typeof trainingApi.cancel>>>();
+    vi.spyOn(trainingApi, "cancel").mockReturnValue(cancel.promise);
 
     render(<TrainingTab />);
     const button = await screen.findByRole("button", { name: "Cancel train-cancel-flight" });
@@ -280,7 +269,7 @@ describe("TrainingTab run list", () => {
     expect(await screen.findByText("Canceling…")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel train-cancel-flight" })).toBeDisabled();
 
-    resolveCancel({
+    cancel.resolve({
       experiment_id: "train-cancel-flight",
       state: "running",
       cancel_requested: true,
@@ -942,12 +931,8 @@ describe("TrainingTab launch picker", () => {
 
   it("disables Start while a selected row's data choices are still loading", async () => {
     listing([run({ experiment_id: "exp-1", state: "completed" })]);
-    let resolveChoices: (v: SplitChoices) => void = () => {};
-    vi.spyOn(trainingApi, "listSplitChoices").mockReturnValue(
-      new Promise<SplitChoices>((resolve) => {
-        resolveChoices = resolve;
-      }),
-    );
+    const choices = Promise.withResolvers<SplitChoices>();
+    vi.spyOn(trainingApi, "listSplitChoices").mockReturnValue(choices.promise);
 
     render(<TrainingTab />);
     await screen.findByText("exp-1");
@@ -957,7 +942,7 @@ describe("TrainingTab launch picker", () => {
 
     expect(await screen.findByRole("button", { name: "Start" })).toBeDisabled();
 
-    resolveChoices({
+    choices.resolve({
       as_recorded: { case: "drawn", line: "draws its split again", compatible: true, reason: null },
       selections: [],
     });

@@ -71,10 +71,11 @@ const loader = vi.hoisted(() => {
   return { pending };
 });
 vi.mock("@/lib/imageLoader", () => ({
-  loadImage: (url: string) =>
-    new Promise((resolve) => {
-      loader.pending.push({ url, resolve });
-    }),
+  loadImage: (url: string) => {
+    const { promise, resolve } = Promise.withResolvers();
+    loader.pending.push({ url, resolve });
+    return promise;
+  },
 }));
 
 function makeLoaded(over: Partial<LoadedImage> = {}): LoadedImage {

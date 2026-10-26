@@ -111,10 +111,7 @@ beforeEach(() => {
   vi.spyOn(resultsApi, "assessments").mockResolvedValue({ assessments: [] });
 });
 
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
+afterEach(cleanup);
 
 describe("InferenceTab date selection", () => {
   it("launches one job per selected date, each its own bucket under the named one", async () => {
@@ -552,13 +549,8 @@ describe("InferenceTab bucket refusals", () => {
   });
 
   it("disables the launch button while onLaunch's loop is in flight", async () => {
-    let resolveLaunch: (value: ReturnType<typeof launched>) => void = () => {};
-    vi.spyOn(inferenceApi, "launch").mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveLaunch = resolve;
-        }),
-    );
+    const launch = Promise.withResolvers<ReturnType<typeof launched>>();
+    vi.spyOn(inferenceApi, "launch").mockReturnValue(launch.promise);
 
     render(<InferenceTab />);
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
@@ -568,7 +560,7 @@ describe("InferenceTab bucket refusals", () => {
     fireEvent.click(launchButton);
 
     await waitFor(() => expect(launchButton).toBeDisabled());
-    act(() => resolveLaunch(launched("2026-01-01", "baseline")));
+    act(() => launch.resolve(launched("2026-01-01", "baseline")));
     await waitFor(() => expect(launchButton).not.toBeDisabled());
   });
 

@@ -5,20 +5,10 @@
 
 import { wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
+import type { Panel, StateSnapshotMessage } from "@/api/types.generated";
 import { createReconnectingSocket, type ReconnectingSocket } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
 import type { DeclaredIdentity } from "@/store/slices/agentActivity";
-import type { GuiState, OpenProject } from "@/store/types";
-
-type IncomingMessage =
-  | {
-      type: "state_snapshot";
-      state: GuiState;
-      version?: number;
-      project?: OpenProject | null;
-      epoch?: string | null;
-    }
-  | { type: string; [k: string]: unknown };
 
 export class StateSocket {
   private socket: ReconnectingSocket;
@@ -31,13 +21,13 @@ export class StateSocket {
       onError: () => useStore.getState().setWsStatus("error"),
       onClose: () => useStore.getState().setWsStatus("disconnected"),
       onMessage: (data) => {
-        let msg: IncomingMessage;
+        let envelope: StateSnapshotMessage;
         try {
-          msg = JSON.parse(data) as IncomingMessage;
+          envelope = JSON.parse(data) as StateSnapshotMessage;
         } catch {
           return;
         }
-        this.handle(msg);
+        useStore.getState().mergeSnapshot(envelope);
       },
     });
   }
@@ -57,29 +47,15 @@ export class StateSocket {
     this.socket.start();
   }
 
-  private handle(msg: IncomingMessage) {
-    if (msg.type === "state_snapshot") {
-      const m = msg as {
-        state: GuiState;
-        version?: number;
-        project?: OpenProject | null;
-        epoch?: string | null;
-      };
-      useStore
-        .getState()
-        .mergeSnapshot(m.state, m.version ?? null, m.project ?? null, m.epoch ?? null);
-    }
-  }
-
   /** Subscribe to server-pushed events for one panel; without reconnect, panel events would
    *  silently stop for the rest of the browser session on a backend restart or a drop. The
    *  returned unsubscribe closes the live socket and cancels any pending reconnect. */
   subscribePanel(
-    panel: string,
+    panel: Panel,
     // The declared identity is spread at the top level by the backend's own broadcast payload.
     handler: (
       event: {
-        panel: string;
+        panel: Panel;
         event_type: string;
         data: Record<string, unknown>;
         // Stamped per event by the backend: the ring buffer replays on every reconnect, so a

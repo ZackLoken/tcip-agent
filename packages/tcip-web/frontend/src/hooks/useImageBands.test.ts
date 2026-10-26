@@ -1,12 +1,8 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
 import { useImageBands } from "@/hooks/useImageBands";
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 describe("useImageBands", () => {
   it("returns null and fetches nothing for a null path", () => {

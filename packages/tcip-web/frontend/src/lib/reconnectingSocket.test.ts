@@ -57,10 +57,7 @@ beforeEach(() => {
   vi.stubGlobal("WebSocket", FakeWebSocket);
 });
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-  vi.useRealTimers();
-});
+afterEach(() => vi.useRealTimers());
 
 describe("createReconnectingSocket", () => {
   it("connects, reconnects on drop with capped backoff, and stop suppresses further attempts", () => {

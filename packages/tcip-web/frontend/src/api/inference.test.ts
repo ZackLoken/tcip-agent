@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { StructuredRefusalError } from "@/api/http";
 import { inferenceApi, operationalizationRefusalOf, resultsApi } from "@/api/inference";
@@ -15,10 +15,6 @@ function stubFetch(status: number, body: unknown) {
 }
 
 describe("results api error handling (asJson)", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("returns the parsed body on a 2xx", async () => {
     stubFetch(200, {
       models: [{ name: "m", checkpoint_path: "/w.pt", tags: ["best"] }],
@@ -48,10 +44,6 @@ describe("downloadCsv refusal decoding", () => {
     user: "jordan",
   };
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("carries a structured refusal through the blob path parsed, not stringified", async () => {
     const detail = {
       kind: "operationalization",
@@ -73,10 +65,6 @@ describe("downloadCsv refusal decoding", () => {
 });
 
 describe("inferenceApi.cancel", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("POSTs to the job's cancel endpoint", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

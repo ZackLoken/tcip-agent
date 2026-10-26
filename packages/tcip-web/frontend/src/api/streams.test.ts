@@ -54,10 +54,7 @@ beforeEach(() => {
   vi.stubGlobal("WebSocket", FakeWebSocket);
 });
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-  vi.useRealTimers();
-});
+afterEach(() => vi.useRealTimers());
 
 describe("openInferenceStream", () => {
   it("opens the job's stream over ws, percent-escaping the job id", () => {
@@ -146,7 +143,6 @@ describe("openInferenceStream", () => {
     const parseSpy = vi.spyOn(JSON, "parse");
     lastSocket().message(JSON.stringify({ type: "progress", done: 1, total: 4 }));
     expect(parseSpy).toHaveBeenCalledTimes(1);
-    parseSpy.mockRestore();
   });
 });
 
@@ -266,6 +262,5 @@ describe("openTrainingStream", () => {
     const parseSpy = vi.spyOn(JSON, "parse");
     lastSocket().message(JSON.stringify({ type: "row", experiment_id: "r1", row: { epoch: 2 } }));
     expect(parseSpy).toHaveBeenCalledTimes(1);
-    parseSpy.mockRestore();
   });
 });

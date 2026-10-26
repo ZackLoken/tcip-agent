@@ -3,10 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useEmbeddedToolRetry } from "@/hooks/useEmbeddedToolRetry";
 
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
+afterEach(cleanup);
 
 describe("useEmbeddedToolRetry", () => {
   it("retries a failing step on the given cadence until it reports done", async () => {

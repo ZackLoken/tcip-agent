@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { useStore } from "@/store";
 import type { GuiState } from "@/store/types";
+import { stateEnvelope, TEST_PROJECT } from "@/test/store";
 
 // Captured before any test runs, so the opening shape is read from the store itself and not
 // from whatever an earlier test left behind.
@@ -43,7 +44,7 @@ describe("the GUI state the browser opens with", () => {
 
 describe("adopting a different dataset selection", () => {
   it("takes every field of the new selection, leaving none of the old one behind", () => {
-    const project = { id: "a1b2c3d4e5f6", path: "/proj/alpha" };
+    const project = TEST_PROJECT;
     useStore.setState({
       gui: {
         active_tab: "results",
@@ -80,7 +81,7 @@ describe("adopting a different dataset selection", () => {
       active_subject: "bud",
     };
 
-    s().mergeSnapshot(incoming, 5, project, null);
+    s().mergeSnapshot(stateEnvelope({ state: incoming, version: 5, project }));
 
     expect(s().gui.dataset).toEqual(incoming.dataset);
   });

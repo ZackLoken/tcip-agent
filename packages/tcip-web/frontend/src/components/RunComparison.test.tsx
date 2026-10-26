@@ -22,10 +22,7 @@ beforeEach(() => {
   vi.spyOn(trainingApi, "metricDirections").mockResolvedValue({ higher_is_better: {} });
 });
 
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
+afterEach(cleanup);
 
 const MARKED: MarkedRun[] = [{ experimentId: "exp-a" }, { experimentId: "exp-b" }];
 

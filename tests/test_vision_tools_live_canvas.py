@@ -14,6 +14,7 @@ import pytest
 from PIL import Image
 from pydantic import ValidationError
 
+from tcip_mcp.web_client import Panel
 from tcip_mcp.workspace import BoundProject
 from tests._producer_fixtures import write_image
 
@@ -178,7 +179,7 @@ def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
 
     def silent_hub(
         target: BoundProject,
-        panel: str,
+        panel: Panel,
         event_type: str,
         data: dict,
         **kwargs: object,
@@ -215,7 +216,7 @@ def test_a_capture_the_gui_answered_reports_the_state_as_live(
 
     def answering_hub(
         target: BoundProject,
-        panel: str,
+        panel: Panel,
         event_type: str,
         data: dict,
         **kwargs: object,

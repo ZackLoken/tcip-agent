@@ -26,7 +26,7 @@ from tcip_mcp.project_record import (
     rename_project,
     replace_invariances,
 )
-from tcip_web.state import OpenProject, store
+from tcip_web.state import OpenProject, SnapshotProject, store
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -122,9 +122,16 @@ class OpenRequest(BaseModel):
     user: str
 
 
+class OpenAnswer(BaseModel):
+    """The project an open made the backend's open one, and its record's display name."""
+
+    project: SnapshotProject
+    display_name: str
+
+
 @router.post("/open")
-async def open_project(req: OpenRequest) -> dict:
-    """Open the project ``req.id`` names and return ``{id, display_name, path}``.
+async def open_project(req: OpenRequest) -> OpenAnswer:
+    """Open the project ``req.id`` names and return it (:class:`OpenAnswer`).
 
     400 for a request naming no one, 404 when the workspace holds no single project with it (a
     project whose record will not read is not found by its id), 409 naming why when its
@@ -134,15 +141,15 @@ async def open_project(req: OpenRequest) -> dict:
 
     actor(req.user)
     root, record = workspace_project(req.id)
+    project = OpenProject(root, record["id"])
     try:
-        await store.open_project(OpenProject(root, record["id"]))
+        await store.open_project(project)
     except (ValueError, StoreError) as exc:
         raise HTTPException(409, str(exc)) from exc
-    return {
-        "id": record["id"],
-        "display_name": record["display_name"],
-        "path": str(root),
-    }
+    return OpenAnswer(
+        project=SnapshotProject.of(project),
+        display_name=record["display_name"],
+    )
 
 
 def _job_conflict(target: Path) -> str | None:

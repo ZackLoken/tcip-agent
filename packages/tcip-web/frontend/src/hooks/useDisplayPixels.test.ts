@@ -1,14 +1,12 @@
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { useDisplayPixels } from "@/hooks/useDisplayPixels";
 
 function setScreen(width: number, height: number) {
-  Object.defineProperty(window.screen, "width", { value: width, configurable: true });
-  Object.defineProperty(window.screen, "height", { value: height, configurable: true });
+  vi.spyOn(window.screen, "width", "get").mockReturnValue(width);
+  vi.spyOn(window.screen, "height", "get").mockReturnValue(height);
 }
-
-afterEach(() => setScreen(1920, 1080));
 
 describe("useDisplayPixels", () => {
   it("reads the screen's device pixels and reads them again when the window resizes", () => {

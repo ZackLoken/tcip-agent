@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import * as client from "@/api/client";
 import { OVERVIEWS_REQUIRED } from "@/api/types.generated";
@@ -7,10 +7,6 @@ import { STALL_MS, useOverviewBuild, writtenLabel } from "@/hooks/useOverviewBui
 
 const URL = "/api/images?path=C:/data/mosaic.tif";
 const PATH = "C:/data/mosaic.tif";
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 function job(status: client.OverviewJob["status"], bytesWritten = 0, error: string | null = null) {
   return { job_id: "ovr-1", path: PATH, status, bytes_written: bytesWritten, error };

@@ -3,11 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type ProjectSummary } from "@/api/client";
 import { sessionsApi } from "@/api/sessions";
-import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
+import type { OpenAnswer } from "@/api/types.generated";
 import App from "@/App";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { useStore } from "@/store";
 import { INVARIANCES } from "@/test/projectRecords";
+import { openAnswer, stateEnvelope } from "@/test/store";
 
 // App's own socket/tab-sync effects reach the network; only the tab/panel wiring is under
 // test here, so both are stubbed rather than left to hit a backend that isn't running.
@@ -72,7 +73,11 @@ const VALLEY: ProjectSummary = {
   label_problem: null,
 };
 
-const VALLEY_OPENED = { id: "a1b2c3d4e5f6", display_name: "Valley farm", path: "/ws/valley" };
+/** The open route's answer for the listed project `p`. */
+const openedAs = (p: ProjectSummary) =>
+  openAnswer({ id: p.id!, path: p.path, display_name: p.display_name! });
+
+const VALLEY_OPENED = openedAs(VALLEY);
 
 function listProjects(openId: string | null) {
   vi.mocked(api.projects.list).mockResolvedValue({
@@ -206,12 +211,8 @@ describe("App admission through the picker", () => {
   });
 
   it("toasts a failed open whose project a snapshot adopted while the open was pending", async () => {
-    let reject!: (e: Error) => void;
-    vi.mocked(api.projects.open).mockReturnValue(
-      new Promise((_, rej) => {
-        reject = rej;
-      }),
-    );
+    const open = Promise.withResolvers<OpenAnswer>();
+    vi.mocked(api.projects.open).mockReturnValue(open.promise);
     act(() => useStore.getState().setUser(""));
     render(<App />);
     fireEvent.click(await screen.findByText("Valley farm"));
@@ -221,10 +222,10 @@ describe("App admission through the picker", () => {
     act(() =>
       useStore
         .getState()
-        .mergeSnapshot(GUI_STATE_DEFAULTS, 1, { id: "a1b2c3d4e5f6", path: "/ws/valley" }, "e1"),
+        .mergeSnapshot(stateEnvelope({ version: 1, project: VALLEY_OPENED.project })),
     );
 
-    await act(() => Promise.resolve(reject(new Error("selection failed"))));
+    await act(() => Promise.resolve(open.reject(new Error("selection failed"))));
 
     expect(useStore.getState().toasts.map((t) => t.message)).toContainEqual(
       expect.stringContaining("selection failed"),
@@ -252,34 +253,28 @@ describe("App visit attribution across a change of person", () => {
       bucket: null,
     },
   });
-  const spies: { mockRestore: () => void }[] = [];
-
-  afterEach(() => spies.splice(0).forEach((s) => s.mockRestore()));
-
   it("attributes the outgoing visit to the first person and project, the next to the second", async () => {
-    spies.push(
-      vi.spyOn(api.annotate, "load").mockImplementation((path) =>
-        Promise.resolve({
-          image_path: path,
-          img_width: 1000,
-          img_height: 800,
-          boxes: [],
-          polygons: [],
-          points: [],
-          imageAnnotations: [],
-          completion: {},
-          flags: [],
-          base_mtime: "1",
-        }),
-      ),
-      vi.spyOn(api.annotate, "save"),
-      vi.spyOn(api.images, "bands").mockResolvedValue({ band_count: 3, bands: [] }),
-      vi.spyOn(api.images, "viewReads").mockResolvedValue({ reads: [] }),
-      vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({
-        status: "ok",
-        session: { started: "s1", ended: false },
+    vi.spyOn(api.annotate, "load").mockImplementation((path) =>
+      Promise.resolve({
+        image_path: path,
+        img_width: 1000,
+        img_height: 800,
+        boxes: [],
+        polygons: [],
+        points: [],
+        imageAnnotations: [],
+        completion: {},
+        flags: [],
+        base_mtime: "1",
       }),
     );
+    vi.spyOn(api.annotate, "save");
+    vi.spyOn(api.images, "bands").mockResolvedValue({ band_count: 3, bands: [] });
+    vi.spyOn(api.images, "viewReads").mockResolvedValue({ reads: [] });
+    vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({
+      status: "ok",
+      session: { started: "s1", ended: false },
+    });
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       open_id: null,
@@ -287,7 +282,7 @@ describe("App visit attribution across a change of person", () => {
     });
     vi.mocked(api.projects.open)
       .mockResolvedValueOnce(VALLEY_OPENED)
-      .mockResolvedValueOnce({ id: RIDGE.id!, display_name: "Ridge farm", path: "/ws/ridge" });
+      .mockResolvedValueOnce(openedAs(RIDGE));
     vi.mocked(api.dataset.select)
       .mockResolvedValueOnce(selectionOf("/ws/valley"))
       .mockResolvedValueOnce(selectionOf("/ws/ridge"));
@@ -336,7 +331,7 @@ describe("App session end", () => {
   it("ends the recorded session by its project and start stamp, once, when the shell goes", async () => {
     const send = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
     useStore.setState({
-      openProject: { id: "a1b2c3d4e5f6", path: "/ws/valley" },
+      openProject: VALLEY_OPENED.project,
       recordedSession: { ...RECORDED, user: "grower" },
     });
     const view = render(<App />);
@@ -355,7 +350,7 @@ describe("App session end", () => {
 
   it("sends nothing when no contribution of this page was recorded", async () => {
     const send = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
-    useStore.setState({ openProject: { id: "a1b2c3d4e5f6", path: "/ws/valley" } });
+    useStore.setState({ openProject: VALLEY_OPENED.project });
     const view = render(<App />);
 
     window.dispatchEvent(new Event("pagehide"));

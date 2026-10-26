@@ -2,11 +2,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type ProjectSummary } from "@/api/client";
-import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
+import type { OpenAnswer } from "@/api/types.generated";
 import { ProjectBreadcrumb } from "@/components/ProjectBreadcrumb";
 import { openWithDefaults } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { INVARIANCES } from "@/test/projectRecords";
+import { openAnswer, stateEnvelope, testProject } from "@/test/store";
 
 vi.mock("@/api/client", () => {
   return {
@@ -45,6 +46,12 @@ function summary(id: string, displayName: string): ProjectSummary {
   };
 }
 
+/** The open route's answer for the listed project `id`: the produced answer with that project's
+ *  id, directory and display name. */
+function opened(id: string, displayName: string): OpenAnswer {
+  return openAnswer({ id, path: `/w/${id}`, display_name: displayName });
+}
+
 function selection(root: string) {
   return {
     status: "ok",
@@ -74,7 +81,7 @@ function openOn(id: string, date: string | null = "2026-01-01") {
         bucket: null,
       },
     },
-    openProject: { id, path: `/w/${id}` },
+    openProject: testProject({ id, path: `/w/${id}` }),
   }));
 }
 
@@ -114,11 +121,7 @@ describe("recent-projects menu", () => {
 
   it("another recent project opens by its id, then selects inside its own directory", async () => {
     localStorage.setItem("tcip.recent_projects", JSON.stringify(["a1", "b2"]));
-    vi.mocked(api.projects.open).mockResolvedValue({
-      id: "b2",
-      display_name: "Beta block",
-      path: "/w/b2",
-    });
+    vi.mocked(api.projects.open).mockResolvedValue(opened("b2", "Beta block"));
     vi.mocked(api.dataset.select).mockResolvedValue(selection("/w/b2"));
     render(<ProjectBreadcrumb />);
     fireEvent.click(screen.getByTitle("Recent projects"));
@@ -126,7 +129,7 @@ describe("recent-projects menu", () => {
     await waitFor(() => expect(api.dataset.select).toHaveBeenCalledTimes(1));
     expect(api.projects.open).toHaveBeenCalledWith({ id: "b2", user: "grower" });
     expect(vi.mocked(api.dataset.select).mock.calls[0][0].dataset_root).toBe("/w/b2");
-    expect(useStore.getState().openProject).toEqual({ id: "b2", path: "/w/b2" });
+    expect(useStore.getState().openProject).toEqual(opened("b2", "Beta block").project);
   });
 });
 
@@ -145,7 +148,7 @@ describe("recent-projects menu through the one opening transition", () => {
     let listingsBeforeOpen = -1;
     vi.mocked(api.projects.open).mockImplementation(() => {
       listingsBeforeOpen = vi.mocked(api.projects.list).mock.calls.length;
-      return Promise.resolve({ id: "b2", display_name: "Beta block", path: "/w/b2" });
+      return Promise.resolve(opened("b2", "Beta block"));
     });
     vi.mocked(api.dataset.select).mockResolvedValue(selection("/w/b2"));
     render(<ProjectBreadcrumb />);
@@ -154,7 +157,7 @@ describe("recent-projects menu through the one opening transition", () => {
     fireEvent.click(await screen.findByText("Beta block"));
 
     await waitFor(() =>
-      expect(useStore.getState().openProject).toEqual({ id: "b2", path: "/w/b2" }),
+      expect(useStore.getState().openProject).toEqual(opened("b2", "Beta block").project),
     );
     expect(listingsBeforeOpen).toBe(1);
   });
@@ -174,12 +177,8 @@ describe("recent-projects menu through the one opening transition", () => {
   });
 
   it("drops a date switch's result once a snapshot adopted another project", async () => {
-    let answer!: () => void;
-    vi.mocked(api.projects.open).mockReturnValue(
-      new Promise((resolve) => {
-        answer = () => resolve({ id: "a1", display_name: "Alpha block", path: "/w/a1" });
-      }),
-    );
+    const open = Promise.withResolvers<OpenAnswer>();
+    vi.mocked(api.projects.open).mockReturnValue(open.promise);
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/w",
       open_id: "a1",
@@ -190,13 +189,15 @@ describe("recent-projects menu through the one opening transition", () => {
     fireEvent.click(await screen.findByText("2026-02-02"));
     await waitFor(() => expect(api.projects.open).toHaveBeenCalled());
     act(() =>
-      useStore.getState().mergeSnapshot(GUI_STATE_DEFAULTS, 1, { id: "b2", path: "/w/b2" }, "e1"),
+      useStore
+        .getState()
+        .mergeSnapshot(stateEnvelope({ version: 1, project: opened("b2", "Beta block").project })),
     );
 
-    await act(() => Promise.resolve(answer()));
+    await act(() => Promise.resolve(open.resolve(opened("a1", "Alpha block"))));
 
     expect(api.dataset.select).not.toHaveBeenCalled();
-    expect(useStore.getState().openProject).toEqual({ id: "b2", path: "/w/b2" });
+    expect(useStore.getState().openProject).toEqual(opened("b2", "Beta block").project);
   });
 });
 
@@ -227,11 +228,7 @@ describe("footer open state", () => {
 
 describe("switching date", () => {
   it("reopens the same project on the chosen date", async () => {
-    vi.mocked(api.projects.open).mockResolvedValue({
-      id: "a1",
-      display_name: "Alpha block",
-      path: "/w/a1",
-    });
+    vi.mocked(api.projects.open).mockResolvedValue(opened("a1", "Alpha block"));
     vi.mocked(api.dataset.select).mockResolvedValue(selection("/w/a1"));
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/w",

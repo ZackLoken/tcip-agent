@@ -19,6 +19,7 @@ export default mergeConfig(
       include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
       css: false,
       restoreMocks: true,
+      unstubGlobals: true,
       coverage: {
         provider: "v8",
         include: nonTestSources(SRC).map((file) =>

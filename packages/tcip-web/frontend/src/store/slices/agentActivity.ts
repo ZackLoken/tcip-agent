@@ -1,6 +1,6 @@
 import type { StateCreator } from "zustand";
 
-import type { AGENT_IDENTITY_FIELDS } from "@/api/types.generated";
+import type { AGENT_IDENTITY_FIELDS, Panel } from "@/api/types.generated";
 import type { AppState } from "@/store/appState";
 
 /** The identity fields a record or a push declared (tcip_mcp.agent_identity), each null or
@@ -12,7 +12,7 @@ export type DeclaredIdentity = Partial<
 export interface AgentActivity {
   /** Increments per event so effects can react to the latest one. */
   seq: number;
-  panel: string;
+  panel: Panel;
   eventType: string;
   data: Record<string, unknown>;
   /** The harness that declared itself on this push (``agent_client_name``, its version appended
@@ -33,7 +33,7 @@ export interface AgentActivitySlice {
   /** The last panel event and the client it declared, or null when none has arrived. */
   agentActivity: AgentActivity | null;
   pushAgentActivity: (
-    panel: string,
+    panel: Panel,
     eventType: string,
     data: Record<string, unknown>,
     client: string | null,
