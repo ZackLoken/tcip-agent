@@ -1,20 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { isNonTestSource } from "../../scripts/routeReads.mjs";
+import { nonTestSources } from "../../scripts/routeReads.mjs";
 
 import { UNSET_GLYPH } from "@/lib/glyphs";
+import { readFileSync, SOURCE_DIRECTORY } from "@/test/node";
 
 const EM_DASH = String.fromCharCode(0x2014);
 
-// Every non-test source .tsx under src, as raw text keyed by path, resolved eagerly (a Vite
-// build-time feature, not a filesystem read) so the check runs synchronously against what ships.
-const sourceFiles = Object.entries(
-  import.meta.glob("/src/**/*.tsx", {
-    eager: true,
-    query: "?raw",
-    import: "default",
-  }) as Record<string, string>,
-).filter(([path]) => isNonTestSource(path.slice("/src/".length)));
+// Every non-test source .tsx under the source directory, as its path and its text.
+const sourceFiles = nonTestSources(SOURCE_DIRECTORY)
+  .filter((path) => path.endsWith(".tsx"))
+  .map((path) => [path, readFileSync(path, "utf8")]);
 
 describe("UNSET_GLYPH", () => {
   it("is a colon, never an em dash or a hyphen", () => {
@@ -23,7 +19,7 @@ describe("UNSET_GLYPH", () => {
 });
 
 describe("unset-value placeholder sweep", () => {
-  it("renders no em dash or bare hyphen as a value placeholder anywhere under src", () => {
+  it("renders no em dash or bare hyphen as a value placeholder in any source", () => {
     const offenders = sourceFiles
       .filter(([, content]) => content.includes(EM_DASH) || content.includes(">-<"))
       .map(([path]) => path);

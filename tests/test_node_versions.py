@@ -13,9 +13,7 @@ import subprocess
 
 import yaml
 
-from tests import FRONTEND_SRC, REPO_ROOT
-
-FRONTEND = FRONTEND_SRC.parent
+from tests import FRONTEND, REPO_ROOT
 
 
 def _admitted(version: str, tag: str) -> list[bool]:

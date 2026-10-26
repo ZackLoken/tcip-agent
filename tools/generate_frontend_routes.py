@@ -34,7 +34,7 @@ from fastapi.routing import (
     iter_route_contexts,
 )
 
-from tests import FRONTEND_SRC
+from tests import FRONTEND, FRONTEND_SRC
 from tools.generate_frontend_types import (
     GENERATED_PATH as TYPES_PATH,
     literal_aliases,
@@ -47,10 +47,8 @@ if TYPE_CHECKING:
 
 GENERATED_PATH = FRONTEND_SRC / "api" / "routes.ts"
 PROXY_GENERATED_PATH = FRONTEND_SRC / "api" / "devProxy.generated.ts"
-READS_SCRIPT = FRONTEND_SRC.parent / "scripts" / "routeReads.mjs"
-PRETTIER = (
-    FRONTEND_SRC.parent / "node_modules" / "prettier" / "bin" / "prettier.cjs"
-)
+READS_SCRIPT = FRONTEND / "scripts" / "routeReads.mjs"
+PRETTIER = FRONTEND / "node_modules" / "prettier" / "bin" / "prettier.cjs"
 
 HEADER = """/**
  * The backend routes the frontend's non-test sources read by name, each named for its method and
