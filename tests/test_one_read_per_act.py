@@ -410,15 +410,13 @@ def _counting_scans(monkeypatch: pytest.MonkeyPatch) -> Counter:
     from tcip_mcp.pipelines import image_utils
 
     scans: Counter = Counter()
-    real_scan = image_utils._scan_identities
+    real_scan = image_utils.scan_identities
 
-    def counted_scan(
-        directory: Path,
-    ) -> dict[str, list[tuple[Path, BandGroupRef | None]]]:
+    def counted_scan(directory: Path) -> dict[str, list[Path | BandGroupRef]]:
         scans[str(directory)] += 1
         return real_scan(directory)
 
-    monkeypatch.setattr(image_utils, "_scan_identities", counted_scan)
+    monkeypatch.setattr(image_utils, "scan_identities", counted_scan)
     return scans
 
 
@@ -607,7 +605,7 @@ def test_each_whole_dataset_reader_scans_each_capture_once_in_the_one_walk(
     walking: list[bool] = []
     listings: list[str | Path] = []
     real_scan, real_list = (
-        image_utils._scan_identities,
+        image_utils.scan_identities,
         dataset_layout.list_dates,
     )
 
@@ -615,9 +613,7 @@ def test_each_whole_dataset_reader_scans_each_capture_once_in_the_one_walk(
         listings.append(dataset_root)
         return real_list(dataset_root)
 
-    def counted_scan(
-        directory: Path,
-    ) -> dict[str, list[tuple[Path, BandGroupRef | None]]]:
+    def counted_scan(directory: Path) -> dict[str, list[Path | BandGroupRef]]:
         (walked if walking else outside)[str(directory)] += 1
         return real_scan(directory)
 
@@ -631,7 +627,7 @@ def test_each_whole_dataset_reader_scans_each_capture_once_in_the_one_walk(
 
         return counted
 
-    monkeypatch.setattr(image_utils, "_scan_identities", counted_scan)
+    monkeypatch.setattr(image_utils, "scan_identities", counted_scan)
     monkeypatch.setattr(dataset_layout, "list_dates", counted_list)
     monkeypatch.setattr(
         image_utils, "scan_captures", walked_inside(image_utils.scan_captures)
@@ -653,3 +649,41 @@ def test_each_whole_dataset_reader_scans_each_capture_once_in_the_one_walk(
         assert walked == Counter(
             {str(image_dir(root, date)): 1 for date in dates}
         ), walked
+
+
+def test_a_detection_pass_reads_each_recorded_manifest_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A band-group detection pass scans its capture once, each manifest read once.
+
+    The manifest is the one an earlier pass recorded for an explicit group.
+    """
+    import numpy as np
+    import tifffile
+
+    from tcip_mcp.dataset_layout import image_root
+    from tcip_mcp.pipelines import image_utils
+    from tcip_mcp.pipelines.data import band_groups
+
+    images = image_root(tmp_path)
+    images.mkdir()
+    for name in ("cap_G.tif", "cap_R.tif"):
+        tifffile.imwrite(str(images / name), np.zeros((4, 4), np.uint16))
+    (manifest,) = band_groups.detect_and_write_band_groups(
+        images, explicit_groups={"cap": {"G": "cap_G.tif", "R": "cap_R.tif"}}
+    )["manifests"]
+    scans = _counting_scans(monkeypatch)
+    reads: Counter = Counter()
+    real_read = band_groups.read_band_group_manifest
+
+    def counted_read(path: Path) -> BandGroupRef:
+        reads[str(path)] += 1
+        return real_read(path)
+
+    for module in (band_groups, image_utils):
+        monkeypatch.setattr(module, "read_band_group_manifest", counted_read)
+
+    band_groups.detect_and_write_band_groups(images)
+
+    assert scans == Counter({str(images): 1})
+    assert reads == Counter({manifest: 1})

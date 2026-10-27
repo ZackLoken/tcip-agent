@@ -172,26 +172,23 @@ class TestEvaluateFolderEnumeration:
         import numpy as np
         import tifffile
 
-        from tcip_mcp.pipelines.data.band_groups import (
-            write_band_group_manifest,
-        )
         from tcip_mcp.tools.annotation_tools import score_predictions
+        from tests._producer_fixtures import write_band_group
 
         images_dir = image_dir(tmp_path, "2024-01-01")
         images_dir.mkdir(parents=True)
         band_a, band_b = images_dir / "cap_G.tif", images_dir / "cap_R.tif"
         tifffile.imwrite(str(band_a), np.full((8, 8), 111, dtype=np.uint16))
         tifffile.imwrite(str(band_b), np.full((8, 8), 222, dtype=np.uint16))
-        write_band_group_manifest(
+        manifest = write_band_group(
             images_dir,
             "cap",
             {"Green": band_a, "Red": band_b},
             central_wavelength_nm=None,
-            identity_tolerance={},
         )
-        _write_empty_label(images_dir / "cap.bandgroup", 8, 8)
+        _write_empty_label(manifest, 8, 8)
 
-        bucket = _empty_bucket(tmp_path, images_dir / "cap.bandgroup")
+        bucket = _empty_bucket(tmp_path, manifest)
         result = score_predictions(
             tmp_path,
             str(images_dir),

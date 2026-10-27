@@ -325,11 +325,11 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
     """
     import tifffile
 
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
     from tcip_mcp.tools.proposal_tools import (
         propose_annotations,
         stage_proposals,
     )
+    from tests._producer_fixtures import write_band_group
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
@@ -338,12 +338,8 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
         band_path = images_dir / f"capture_{name}.tif"
         tifffile.imwrite(str(band_path), np.full((48, 48), 30, dtype=np.uint8))
         bands[name] = band_path
-    manifest = write_band_group_manifest(
-        images_dir,
-        "capture",
-        bands,
-        central_wavelength_nm=None,
-        identity_tolerance={},
+    manifest = write_band_group(
+        images_dir, "capture", bands, central_wavelength_nm=None
     )
 
     install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
@@ -379,11 +375,11 @@ def test_propose_on_a_band_groups_member_path_refuses_naming_the_manifest(
     import tifffile
 
     import tcip_store as ts
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
     from tcip_mcp.tools.proposal_tools import (
         PROPOSAL_STAGING_STORE,
         propose_annotations,
     )
+    from tests._producer_fixtures import write_band_group
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
@@ -392,12 +388,8 @@ def test_propose_on_a_band_groups_member_path_refuses_naming_the_manifest(
         band_path = images_dir / f"capture_{name}.tif"
         tifffile.imwrite(str(band_path), np.full((48, 48), 30, dtype=np.uint8))
         bands[name] = band_path
-    manifest = write_band_group_manifest(
-        images_dir,
-        "capture",
-        bands,
-        central_wavelength_nm=None,
-        identity_tolerance={},
+    manifest = write_band_group(
+        images_dir, "capture", bands, central_wavelength_nm=None
     )
 
     install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])

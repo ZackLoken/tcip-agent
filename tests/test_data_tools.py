@@ -462,7 +462,7 @@ def test_draw_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(
     """
     import numpy as np
 
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tests._producer_fixtures import write_band_group
 
     root = tmp_path / "ds"
     images_dir = image_dir(root, "2-11-26")
@@ -471,12 +471,11 @@ def test_draw_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(
     band_a, band_b = images_dir / "plotA_B1.npy", images_dir / "plotA_B2.npy"
     np.save(band_a, np.zeros((4, 4), dtype=np.uint8))
     np.save(band_b, np.zeros((4, 4), dtype=np.uint8))
-    write_band_group_manifest(
+    write_band_group(
         images_dir,
         "plotA",
         {"B1": band_a, "B2": band_b},
         central_wavelength_nm=None,
-        identity_tolerance={},
     )
     (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
     label_image(
@@ -507,7 +506,7 @@ def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(
     """A stats-only draw answers an ambiguous image stem as an error naming the stem."""
     import numpy as np
 
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tests._producer_fixtures import write_band_group
 
     root = tmp_path / "ds"
     images_dir = image_dir(root, "2-11-26")
@@ -516,12 +515,11 @@ def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(
     band_a, band_b = images_dir / "plotA_B1.npy", images_dir / "plotA_B2.npy"
     np.save(band_a, np.zeros((4, 4), dtype=np.uint8))
     np.save(band_b, np.zeros((4, 4), dtype=np.uint8))
-    write_band_group_manifest(
+    write_band_group(
         images_dir,
         "plotA",
         {"B1": band_a, "B2": band_b},
         central_wavelength_nm=None,
-        identity_tolerance={},
     )
     (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
     label_image(
@@ -543,7 +541,7 @@ def test_scan_dataset_answers_an_ambiguous_image_stem_as_an_error(
     """``scan_dataset`` answers an ambiguous image stem as an error naming the stem."""
     import numpy as np
 
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tests._producer_fixtures import write_band_group
 
     root = tmp_path / "ds"
     images_dir = image_dir(root, "2-11-26")
@@ -552,12 +550,11 @@ def test_scan_dataset_answers_an_ambiguous_image_stem_as_an_error(
     band_a, band_b = images_dir / "plotA_B1.npy", images_dir / "plotA_B2.npy"
     np.save(band_a, np.zeros((4, 4), dtype=np.uint8))
     np.save(band_b, np.zeros((4, 4), dtype=np.uint8))
-    write_band_group_manifest(
+    write_band_group(
         images_dir,
         "plotA",
         {"B1": band_a, "B2": band_b},
         central_wavelength_nm=None,
-        identity_tolerance={},
     )
     (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
 
@@ -592,7 +589,7 @@ def test_draw_splits_refuses_an_incomplete_band_group_before_writing(
     """
     import numpy as np
 
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tests._producer_fixtures import write_band_group
 
     root = tmp_path / "ds"
     images_dir = image_dir(root, "2-11-26")
@@ -600,15 +597,14 @@ def test_draw_splits_refuses_an_incomplete_band_group_before_writing(
 
     band_g, band_r = images_dir / "plotA_G.npy", images_dir / "plotA_R.npy"
     np.save(band_g, np.zeros((4, 4), dtype=np.uint8))
-    write_band_group_manifest(
+    manifest = write_band_group(
         images_dir,
         "plotA",
         {"G": band_g, "R": band_r},
         central_wavelength_nm=None,
-        identity_tolerance={},
     )  # R never created
     label_image(
-        images_dir / "plotA.bandgroup",
+        manifest,
         [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
         100,
         80,

@@ -123,10 +123,8 @@ def _npz(tmp_path: Path) -> tuple[Path, int]:
 
 
 def _band_group(tmp_path: Path) -> tuple[BandGroupRef, int]:
-    from tcip_mcp.pipelines.data.band_groups import (
-        read_band_group_manifest,
-        write_band_group_manifest,
-    )
+    from tcip_mcp.pipelines.data.band_groups import read_band_group_manifest
+    from tests._producer_fixtures import write_band_group
 
     d = tmp_path / "grouped"
     d.mkdir()
@@ -134,12 +132,8 @@ def _band_group(tmp_path: Path) -> tuple[BandGroupRef, int]:
     red = d / "cap_R.tif"
     tifffile.imwrite(str(green), np.full((8, 8), 111, dtype=np.uint16))
     tifffile.imwrite(str(red), np.arange(64, dtype=np.uint16).reshape(8, 8))
-    manifest = write_band_group_manifest(
-        d,
-        "cap",
-        {"Green": green, "Red": red},
-        central_wavelength_nm=None,
-        identity_tolerance={},
+    manifest = write_band_group(
+        d, "cap", {"Green": green, "Red": red}, central_wavelength_nm=None
     )
     return read_band_group_manifest(manifest), 2
 
@@ -1028,10 +1022,8 @@ def test_a_band_group_whose_members_disagree_on_the_frame_refuses(
     A 12x12 member beside an 8x8 one makes the open refuse, saying the members disagree on the
     frame.
     """
-    from tcip_mcp.pipelines.data.band_groups import (
-        read_band_group_manifest,
-        write_band_group_manifest,
-    )
+    from tcip_mcp.pipelines.data.band_groups import read_band_group_manifest
+    from tests._producer_fixtures import write_band_group
 
     d = tmp_path / "grouped"
     d.mkdir()
@@ -1040,12 +1032,8 @@ def test_a_band_group_whose_members_disagree_on_the_frame_refuses(
     tifffile.imwrite(str(green), np.full((8, 8), 111, dtype=np.uint16))
     tifffile.imwrite(str(red), np.zeros((12, 12), dtype=np.uint16))
     ref = read_band_group_manifest(
-        write_band_group_manifest(
-            d,
-            "cap",
-            {"Green": green, "Red": red},
-            central_wavelength_nm=None,
-            identity_tolerance={},
+        write_band_group(
+            d, "cap", {"Green": green, "Red": red}, central_wavelength_nm=None
         )
     )
 

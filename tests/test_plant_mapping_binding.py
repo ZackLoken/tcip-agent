@@ -1845,7 +1845,6 @@ def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_th
     delivery refuses naming the date and the band group's manifest, and no CSV is written.
     """
     from tcip_mcp.pipelines.data.band_groups import (
-        band_group_manifest_path,
         detect_and_write_band_groups,
     )
 
@@ -1883,7 +1882,7 @@ def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_th
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
-    manifest_path = band_group_manifest_path(date_dir, "aux")
+    (manifest_path,) = map(Path, grouped["manifests"])
     # Same "bands" claimed (same members, same kind): a rewrite in place, not an added/removed
     # capture, so only the whole-date identity recompute can catch it.
     manifest_path.write_text(

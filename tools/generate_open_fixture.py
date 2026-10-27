@@ -48,8 +48,7 @@ def _captures(raw_root: Path, grouped_root: Path) -> list[tuple[Path, str]]:
     import tifffile
 
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
-    from tests._producer_fixtures import write_image
+    from tests._producer_fixtures import write_band_group, write_image
 
     raw, grouped = "2026-01-01", "2026-01-02"
     for name in RAW_IMAGES:
@@ -59,13 +58,7 @@ def _captures(raw_root: Path, grouped_root: Path) -> list[tuple[Path, str]]:
     bands = {band: group_dir / f"cap_{band}.tif" for band in ("Green", "Red")}
     for band_path in bands.values():
         tifffile.imwrite(band_path, np.zeros((8, 8), np.uint16))
-    write_band_group_manifest(
-        group_dir,
-        "cap",
-        bands,
-        central_wavelength_nm=None,
-        identity_tolerance={},
-    )
+    write_band_group(group_dir, "cap", bands, central_wavelength_nm=None)
     return [(raw_root, raw), (grouped_root, grouped)]
 
 
@@ -76,9 +69,8 @@ def produce() -> dict[str, JsonValue]:
     in the project's datasets ``ds`` and ``grouped``, made after the envelope, and
     :func:`~tcip_mcp.web_client.selection_for`'s selection of the photographs' capture under its
     root spelled with a trailing separator (``separated``), which keeps that spelling while each
-    image's place is the one its scan found, so no join of the root, the capture and an image's
-    name rebuilds it. All are normalized by :data:`STAMPED`, the project's minted id read as
-    ``<valley id>`` and the workspace as ``<workspace>``.
+    image's place is the one its scan found. All are normalized by :data:`STAMPED`, the project's
+    minted id read as ``<valley id>`` and the workspace as ``<workspace>``.
     """
     import os
 

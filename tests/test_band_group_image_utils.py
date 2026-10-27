@@ -39,17 +39,14 @@ def grouped_dir(tmp_path: Path) -> GroupedDataset:
 
     The group is two sibling single-band files sharing a manifest, valued 111 and 222.
     """
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
-    from tests._producer_fixtures import write_image
+    from tests._producer_fixtures import write_band_group, write_image
 
     d = image_root(tmp_path)
     d.mkdir()
     bands = {"Green": d / "cap_G.tif", "Red": d / "cap_R.tif"}
     for band, value in zip(bands.values(), (111, 222), strict=True):
         tifffile.imwrite(str(band), np.full((8, 8), value, dtype=np.uint16))
-    manifest = write_band_group_manifest(
-        d, "cap", bands, central_wavelength_nm=None, identity_tolerance={}
-    )
+    manifest = write_band_group(d, "cap", bands, central_wavelength_nm=None)
     plain = write_image(d / "plain.jpg", (8, 8), (10, 20, 30))
     return GroupedDataset(tmp_path, d, manifest, bands, plain)
 
@@ -161,11 +158,11 @@ def test_list_logical_images_refuses_a_stem_collision_between_a_group_and_a_stan
     A raw standalone file whose own stem collides with a manifest's canonical stem is refused
     loudly, not dropped silently behind the manifest entry.
     """
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
     from tcip_mcp.pipelines.image_utils import (
         AmbiguousImageStemError,
         list_logical_images,
     )
+    from tests._producer_fixtures import write_band_group
 
     d = image_root(tmp_path)
     d.mkdir()
@@ -174,12 +171,11 @@ def test_list_logical_images_refuses_a_stem_collision_between_a_group_and_a_stan
     tifffile.imwrite(str(band_a), np.full((8, 8), 1, dtype=np.uint16))
     tifffile.imwrite(str(band_b), np.full((8, 8), 2, dtype=np.uint16))
     # The manifest's own canonical stem (commonprefix of "cap_a_G"/"cap_a_R", trimmed) is "cap_a".
-    write_band_group_manifest(
+    write_band_group(
         d,
         "cap_a",
         {"Green": band_a, "Red": band_b},
         central_wavelength_nm=None,
-        identity_tolerance={},
     )
     # An unrelated standalone file that happens to share that exact stem.
     tifffile.imwrite(str(d / "cap_a.tif"), np.full((8, 8), 3, dtype=np.uint16))
@@ -401,23 +397,22 @@ def test_a_band_group_of_channel_first_single_band_arrays_is_admitted_as_it_is_r
     A member stored as a ``(1, H, W)`` array is one band read the way it is opened, at one band:
     the header admits it and states the frame and count the reader serves.
     """
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.pipelines.raster_source import Rect, SourceHeader
+    from tests._producer_fixtures import write_band_group
 
     d = image_root(tmp_path)
     d.mkdir()
     np.save(str(d / "cap_a.npy"), np.full((1, 8, 12), 7, dtype=np.uint8))
     np.savez(str(d / "cap_b.npz"), band=np.full((1, 8, 12), 9, dtype=np.uint8))
-    write_band_group_manifest(
+    manifest = write_band_group(
         d,
         "cap",
         {"A": d / "cap_a.npy", "B": d / "cap_b.npz"},
         central_wavelength_nm=None,
-        identity_tolerance={},
     )
 
-    header = SourceHeader(resolve_image_path(d / "cap.bandgroup"))
+    header = SourceHeader(resolve_image_path(manifest))
     assert header.channels == 2
     assert header.frame_at(2) == (12, 8)
     with header.open(header.channels) as reader:
@@ -435,24 +430,23 @@ def test_a_band_group_naming_a_four_dimensional_array_is_refused_at_its_header(
     An array of four dimensions is no image of one band: the header refuses it when asked for its
     band count and when opened, naming the member file and its shape.
     """
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.pipelines.raster_source import SourceHeader
+    from tests._producer_fixtures import write_band_group
 
     d = image_root(tmp_path)
     d.mkdir()
     ext = ".npy" if save is np.save else ".npz"
     for name in ("cap_a", "cap_b"):
         save(str(d / f"{name}{ext}"), np.zeros((1, 8, 12, 2), dtype=np.uint8))
-    write_band_group_manifest(
+    manifest = write_band_group(
         d,
         "cap",
         {"A": d / f"cap_a{ext}", "B": d / f"cap_b{ext}"},
         central_wavelength_nm=None,
-        identity_tolerance={},
     )
 
-    header = SourceHeader(resolve_image_path(d / "cap.bandgroup"))
+    header = SourceHeader(resolve_image_path(manifest))
     with pytest.raises(
         ValueError,
         match=r"cap_a\.np[yz]' decodes to an array shaped \(1, 8, 12, 2\)",
@@ -468,16 +462,15 @@ def test_a_band_group_naming_a_multi_band_member_is_refused_at_its_header(
     """A band group naming a three-band member is refused by name at its header."""
     from PIL import Image
 
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.pipelines.raster_source import SourceHeader
-    from tests._producer_fixtures import write_image
+    from tests._producer_fixtures import write_band_group, write_image
 
     d = image_root(tmp_path)
     d.mkdir()
     gray = d / "cap_gray.png"
     Image.new("L", (8, 8), 123).save(gray)
-    manifest = write_band_group_manifest(
+    manifest = write_band_group(
         d,
         "cap",
         {
@@ -485,7 +478,6 @@ def test_a_band_group_naming_a_multi_band_member_is_refused_at_its_header(
             "Gray": gray,
         },
         central_wavelength_nm=None,
-        identity_tolerance={},
     )
 
     header = SourceHeader(resolve_image_path(manifest))
@@ -514,10 +506,9 @@ def test_real_dji_capture_decodes_as_a_4_band_stack(tmp_path: Path) -> None:
     d.mkdir()
     for p in REAL_DJI_DIR.iterdir():
         shutil.copy2(p, d / p.name)
-    detect_and_write_band_groups(d)
+    manifests = detect_and_write_band_groups(d)["manifests"]
 
-    logical_stem = sorted(p.stem for p in d.glob("*.bandgroup"))[0]
-    ref = resolve_image_path(d / f"{logical_stem}.bandgroup")
+    ref = resolve_image_path(sorted(manifests)[0])
     assert probe_channels(ref) == 4
     assert image_dimensions(ref, 4) == (
         2592,

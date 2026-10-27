@@ -34,23 +34,24 @@ def _write_group(
     from the ``base`` entry and one horizontal gradient. Returns the manifest written and the
     band paths by name.
     """
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tests._producer_fixtures import write_band_group
 
     gradient = np.linspace(0, 500, 24, dtype=np.uint16)
     band_paths = {}
-    for name, val in zip(("Green", "Red", "NIR"), base):
+    for name, val in zip(
+        wavelengths := {"Green": 560.0, "Red": 650.0, "NIR": 860.0}, base
+    ):
         p = images_dir / f"{stem}_{name}.tif"
         arr = (
             np.full((20, 24), val, dtype=np.uint32) + gradient[None, :]
         ).astype(np.uint16)
         tifffile.imwrite(str(p), arr)
         band_paths[name] = p
-    manifest = write_band_group_manifest(
+    manifest = write_band_group(
         images_dir,
         stem,
         band_paths,
-        central_wavelength_nm={"Green": 560.0, "Red": 650.0, "NIR": 860.0},
-        identity_tolerance={},
+        central_wavelength_nm=wavelengths,
     )
     return manifest, band_paths
 

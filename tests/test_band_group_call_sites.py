@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 def _write_group(images_dir: Path, stem: str) -> tuple[Path, dict[str, Path]]:
     """Write ``stem``'s two-band group into ``images_dir``; return its manifest and its bands."""
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tests._producer_fixtures import write_band_group
 
     bands = {
         "Green": images_dir / f"{stem}_G.tif",
@@ -37,12 +37,8 @@ def _write_group(images_dir: Path, stem: str) -> tuple[Path, dict[str, Path]]:
     }
     for band, fill in zip(bands.values(), (111, 222), strict=True):
         tifffile.imwrite(str(band), np.full((16, 16), fill, dtype=np.uint16))
-    manifest = write_band_group_manifest(
-        images_dir,
-        stem,
-        bands,
-        central_wavelength_nm=None,
-        identity_tolerance={},
+    manifest = write_band_group(
+        images_dir, stem, bands, central_wavelength_nm=None
     )
     return manifest, bands
 
@@ -142,12 +138,10 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
 ) -> None:
     """The channel probe raises ``BandGroupIncompleteError`` on a stale manifest, not a default."""
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_root, label_key
-    from tcip_mcp.pipelines.data.band_groups import (
-        BandGroupIncompleteError,
-        write_band_group_manifest,
-    )
+    from tcip_mcp.pipelines.data.band_groups import BandGroupIncompleteError
     from tcip_mcp.pipelines.data.datasets import _band_count
     from tcip_mcp.pipelines.data.selection import Sample
+    from tests._producer_fixtures import write_band_group
 
     images_dir = image_root(tmp_path)
     images_dir.mkdir()
@@ -155,12 +149,11 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
     band_b = images_dir / "cap_R.tif"
     tifffile.imwrite(str(band_a), np.full((8, 8), 1, dtype=np.uint16))
     tifffile.imwrite(str(band_b), np.full((8, 8), 2, dtype=np.uint16))
-    manifest = write_band_group_manifest(
+    manifest = write_band_group(
         images_dir,
         "cap",
         {"Green": band_a, "Red": band_b},
         central_wavelength_nm=None,
-        identity_tolerance={},
     )
     band_b.unlink()  # the manifest now references a sibling that no longer exists
 

@@ -209,20 +209,16 @@ def _populate_project(src: Path) -> tuple[Path, Path]:
 
     # A multispectral capture written one file per band: the manifest beside the bands is what
     # makes those files one logical image, so a directory bundle has to carry all of them too.
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tests._producer_fixtures import write_band_group
 
+    wavelengths = {"green": 560.0, "red": 668.0}
     bands = {}
-    for band, wavelength in (("green", 560.0), ("red", 668.0)):
+    for band in wavelengths:
         band_file = images / f"cap_001_{band}.tif"
         Image.new("L", (32, 32)).save(band_file)
         bands[band] = band_file
-    manifest = write_band_group_manifest(
-        images,
-        "cap_001",
-        bands,
-        central_wavelength_nm={"green": 560.0, "red": 668.0},
-        source="explicit-manifest",
-        identity_tolerance={},
+    manifest = write_band_group(
+        images, "cap_001", bands, central_wavelength_nm=wavelengths
     )
     # A sensor that writes one multi-band file per capture instead of one file per band.
     import numpy as np

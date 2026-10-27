@@ -1707,7 +1707,7 @@ def test_a_band_group_rewritten_to_name_another_member_is_described_afresh(
     """
     import os
 
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tests._producer_fixtures import write_band_group
 
     d = image_root(tmp_path)
     d.mkdir()
@@ -1717,24 +1717,22 @@ def test_a_band_group_rewritten_to_name_another_member_is_described_afresh(
         )
     stamp = (d / "cap_a.npy").stat().st_mtime_ns
     os.utime(d / "cap_c.npy", ns=(stamp, stamp))
-    manifest = write_band_group_manifest(
+    manifest = write_band_group(
         d,
         "cap",
         {"A": d / "cap_a.npy", "B": d / "cap_b.npy"},
         central_wavelength_nm=None,
-        identity_tolerance={},
     )
     first = client.get(
         "/api/images/bands", params={"path": str(manifest)}
     ).json()
     assert first["bands"][0]["max"] == 10
 
-    write_band_group_manifest(
+    write_band_group(
         d,
         "cap",
         {"A": d / "cap_c.npy", "B": d / "cap_b.npy"},
         central_wavelength_nm=None,
-        identity_tolerance={},
     )
     again = client.get(
         "/api/images/bands", params={"path": str(manifest)}
