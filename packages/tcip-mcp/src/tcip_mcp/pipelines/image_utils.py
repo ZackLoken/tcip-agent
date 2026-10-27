@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Container, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -132,20 +132,38 @@ def bucket_logical_identities(images_dir: str | Path) -> dict[str, list[Path]]:
     }
 
 
-def logical_image_count(root: str | Path) -> int:
-    """Count the logical images every capture under the dataset root ``root`` holds.
+def scan_captures[T](
+    root: str | Path,
+    scan: Callable[[Path], T],
+    captures: Container[str] | None = None,
+) -> dict[str, T]:
+    """Return ``scan`` of each capture directory under the dataset root ``root``, by capture.
 
-    Counted by :func:`bucket_logical_identities`, each identity of an ambiguous stem counted.
+    The captures are :func:`~tcip_mcp.dataset_layout.list_dates`', in its order, or those of them
+    ``captures`` holds when it is given; a capture it does not hold is never scanned. ``scan``'s
+    refusals propagate.
     """
     from tcip_mcp import dataset_layout
 
-    return sum(
-        len(ids)
-        for date in dataset_layout.list_dates(root)
-        for ids in bucket_logical_identities(
-            dataset_layout.image_dir(root, date)
-        ).values()
-    )
+    return {
+        capture: scan(dataset_layout.image_dir(root, capture))
+        for capture in dataset_layout.list_dates(root)
+        if captures is None or capture in captures
+    }
+
+
+def logical_image_counts(root: str | Path) -> dict[str, int]:
+    """Count the logical images each capture under the dataset root ``root`` holds, by capture.
+
+    The captures are :func:`scan_captures`'; each is counted by :func:`bucket_logical_identities`,
+    each identity of an ambiguous stem counted.
+    """
+    return {
+        capture: sum(len(ids) for ids in found.values())
+        for capture, found in scan_captures(
+            root, bucket_logical_identities
+        ).items()
+    }
 
 
 def list_logical_images(
@@ -281,39 +299,28 @@ def source_path_of(source: str | Path | BandGroupRef) -> str:
 
 
 def logical_image_name(source: Path | BandGroupRef) -> str:
-    """Return this logical image's file name.
-
-    That is a :class:`BandGroupRef`'s ``.bandgroup`` manifest basename, otherwise the path's own
-    basename.
-    """
-    return (
-        source.manifest_path.name
-        if isinstance(source, BandGroupRef)
-        else source.name
-    )
+    """Return this logical image's file name: the basename of :func:`source_path_of`."""
+    return Path(source_path_of(source)).name
 
 
-def logical_images_by_name(images_dir: str | Path) -> dict[str, str]:
-    """Map every logical image in ``images_dir`` from its name to its exact stem, in name order.
+def logical_images_by_name(
+    images_dir: str | Path,
+) -> dict[str, Path | BandGroupRef]:
+    """Map every logical image in ``images_dir`` from its name to itself, in name order.
 
     The images are :func:`list_logical_images`'; the name is :func:`logical_image_name`. Raises
     what :func:`list_logical_images` raises.
     """
     named = {
-        logical_image_name(src): stem
-        for stem, src in list_logical_images(images_dir).items()
+        logical_image_name(src): src
+        for src in list_logical_images(images_dir).values()
     }
     return {name: named[name] for name in sorted(named)}
 
 
 def stem_of(source: str | Path | BandGroupRef) -> str:
-    """Return the logical image's own stem, whatever concrete type ``source`` is.
-
-    That is a :class:`BandGroupRef`'s canonical stem, else ``Path(...).stem``.
-    """
-    if isinstance(source, BandGroupRef):
-        return source.stem
-    return Path(source).stem
+    """Return this logical image's stem: the stem of :func:`source_path_of`."""
+    return Path(source_path_of(source)).stem
 
 
 CAPTURE_TIME_FORMATS = (

@@ -78,7 +78,6 @@ class ImageStamp:
     band group's own.
     """
 
-    stem: str
     date_folder: str
     kind: str
     name: str
@@ -89,6 +88,11 @@ class ImageStamp:
     readable: bool | None
     manifest_sha256: str | None = None
     members: tuple[str, ...] = ()
+
+    @property
+    def stem(self) -> str:
+        """The capture's stem, its file name's."""
+        return Path(self.name).stem
 
     @property
     def position(self) -> tuple[float, float] | None:
@@ -189,12 +193,16 @@ class Assignment:
     __pydantic_config__ = _DECODED
 
     image: str
-    stem: str
     date_folder: str
     plant_id: str | None
     accession_name: str | None
     source: GpsSource
     distance_m: float | None
+
+    @property
+    def stem(self) -> str:
+        """The image's stem, its file name's."""
+        return Path(self.image).stem
 
     @classmethod
     def of(
@@ -207,7 +215,6 @@ class Assignment:
         """Return an assignment of ``stamp`` to ``plant`` (``None`` for none) from ``source``."""
         return cls(
             image=stamp.name,
-            stem=stamp.stem,
             date_folder=stamp.date_folder,
             plant_id=plant.plant_id if plant else None,
             accession_name=plant.accession_name if plant else None,
@@ -267,7 +274,6 @@ class MappingBuild:
     dataset_id: str
     built_at: str
     dates_requested: list[str] | None
-    dates: list[str]
     match_radius: dict[str, MatchRadius]
     plant_registry: PlantRegistryReference
     """The named :data:`PLANT_REGISTRY_STORE` record this build's plants were read from."""
@@ -285,6 +291,11 @@ class MappingBuild:
     """The granularity at which this mapping's own assignments attribute objects to plants: one
     frame per plant, by the capture protocol the platform assumes for a walked, EXIF-geolocated
     scene. Never a field of the record."""
+
+    @property
+    def dates(self) -> list[str]:
+        """The dates this build walked, in walk order: those it holds assignments for."""
+        return list(self.assignments)
 
     def to_record(self) -> dict:
         """Return the stored document: every field but ``record_sha256``."""
@@ -461,7 +472,6 @@ def read_image_stamp(path: Path, date_folder: str) -> ImageStamp:
     )
 
     stamp = ImageStamp(
-        stem=path.stem,
         date_folder=date_folder,
         kind="photo",
         name=path.name,
@@ -540,7 +550,6 @@ def _read_date_stamps(
             members = tuple(sorted(p.name for p in source.bands.values()))
             stamps.append(
                 ImageStamp(
-                    stem=stem,
                     date_folder=date_folder,
                     kind=kind,
                     name=source.manifest_path.name,
@@ -561,7 +570,6 @@ def _read_date_stamps(
             assert isinstance(p, Path)
             stamps.append(
                 ImageStamp(
-                    stem=stem,
                     date_folder=date_folder,
                     kind=kind,
                     name=p.name,
@@ -1207,10 +1215,12 @@ def _derive_row_break_threshold(gaps: list[float]) -> float | None:
     if not other_log_ratios:
         # Only one candidate split to compare against: no basis to call it a genuine transition.
         return None
+    from scipy.stats import median_abs_deviation
+
     median_other = statistics.median(other_log_ratios)
-    mad = statistics.median([abs(r - median_other) for r in other_log_ratios])
+    mad = float(median_abs_deviation(other_log_ratios, scale="normal"))
     if mad > 0:
-        modified_z = 0.6745 * (best_log_ratio - median_other) / mad
+        modified_z = (best_log_ratio - median_other) / mad
         if modified_z < _ROW_BREAK_MODIFIED_Z:
             return None
     elif best_log_ratio <= median_other:
@@ -1415,8 +1425,9 @@ def build_mapping(
     stated and derived from the date's own positioning errors when not, which the record carries
     per date; :class:`NoMatchRadiusError` propagates.
 
-    The captures are ``dataset_root``'s :func:`~tcip_mcp.dataset_layout.list_dates`, each
-    enumerated through ``image_utils.list_logical_images``, so a band raster or a band group
+    The captures are ``dataset_root``'s, those of ``dates`` when it is given
+    (:func:`~tcip_mcp.pipelines.image_utils.scan_captures`), each enumerated through
+    ``image_utils.list_logical_images``, so a band raster or a band group
     ingested under a mapped date is a capture the identity sees; its
     :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStemError` propagates.
 
@@ -1425,25 +1436,24 @@ def build_mapping(
     capture PIL could not open before the position clause) when every capture that was read
     carries no position this door reads.
     """
-    from tcip_mcp.dataset_layout import image_dir, image_root, list_dates
-    from tcip_mcp.pipelines.image_utils import list_logical_images
+    from tcip_mcp.dataset_layout import image_root
+    from tcip_mcp.pipelines.image_utils import (
+        list_logical_images,
+        scan_captures,
+    )
 
     plant_csv_paths = [Path(p) for p in plant_csv_paths]
     plants = read_plant_csvs(plant_csv_paths)
 
     images = image_root(dataset_root)
-    dates_walked: list[str] = []
     assignments: dict[str, list[Assignment]] = {}
     radii: dict[str, MatchRadius] = {}
     capture_digests_by_date: dict[str, dict[str, str]] = {}
     unreadable: dict[str, list[str]] = {}
     n_stamps = 0
     n_positioned = 0
-    for date in list_dates(dataset_root):
-        if dates is not None and date not in dates:
-            continue
-        dates_walked.append(date)
-        logical = list_logical_images(image_dir(dataset_root, date))
+    captures = scan_captures(dataset_root, list_logical_images, dates)
+    for date, logical in captures.items():
         stamps = _read_date_stamps(logical, date)
         n_stamps += len(stamps)
         n_positioned += sum(1 for s in stamps if s.position is not None)
@@ -1462,11 +1472,7 @@ def build_mapping(
         )
     if n_positioned == 0:
         all_unreadable = sorted(
-            {
-                name
-                for date in dates_walked
-                for name in unreadable.get(date, [])
-            }
+            {name for names in unreadable.values() for name in names}
         )
         raise UngeoreferencedCaptureError(
             ungeoreferenced_capture_message(str(images), all_unreadable)
@@ -1480,7 +1486,6 @@ def build_mapping(
         dataset_id=dataset_id,
         built_at=now_iso(),
         dates_requested=list(dates) if dates is not None else None,
-        dates=sorted(dates_walked),
         match_radius=radii,
         plant_registry=plant_registry,
         capture_digests=capture_digests_by_date,
@@ -1796,8 +1801,8 @@ def verify_mapping_inputs(
 
     A mapped date no delivered bucket records is never walked (no enumeration, no EXIF):
     disclosed in ``captures_unverified`` as the bare date string, the same as a named date whose
-    image folder is absent. A named date's folder is enumerated once
-    (``image_utils.list_logical_images``, refusing by name on
+    image folder is absent. The named dates' folders are enumerated once, in one walk
+    (``image_utils.scan_captures`` over ``list_logical_images``, refusing by name on
     :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStemError`); an enumerated stem the
     mapping's own assignment rows for that date do not name refuses, naming the date, the file(s)
     and the rebuild remedy. A recorded stem no longer enumerated is disclosed as
@@ -1829,11 +1834,11 @@ def verify_mapping_inputs(
     register the current file under a new registry name, rebuild the mapping against it, and
     deliver under that name).
     """
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.image_utils import (
         AmbiguousImageStemError,
         list_logical_images,
         logical_image_name,
+        scan_captures,
     )
 
     remedy = "rebuild with build_plant_mapping"
@@ -1862,6 +1867,15 @@ def verify_mapping_inputs(
         for plant in read_plant_csv_bytes(verified_csv_bytes[entry["path"]])
     ]
 
+    try:
+        on_disk = scan_captures(
+            dataset_root,
+            list_logical_images,
+            [date for date in build.dates if date in buckets],
+        )
+    except AmbiguousImageStemError as exc:
+        return {"refusal": str(exc)}
+
     captures_unverified: list[str] = []
     for date in build.dates:
         rows = build.assignments.get(date, [])
@@ -1869,19 +1883,10 @@ def verify_mapping_inputs(
         recorded_stems = set(recorded_by_stem)
 
         bucket = buckets.get(date)
-        if bucket is None:
+        logical = on_disk.get(date)
+        if bucket is None or logical is None:
             captures_unverified.append(date)
             continue
-
-        date_dir = image_dir(dataset_root, date)
-        if not date_dir.is_dir():
-            captures_unverified.append(date)
-            continue
-
-        try:
-            logical = list_logical_images(date_dir)
-        except AmbiguousImageStemError as exc:
-            return {"refusal": str(exc)}
 
         enumerated_stems = set(logical)
         added = enumerated_stems - recorded_stems

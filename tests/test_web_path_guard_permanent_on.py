@@ -235,7 +235,7 @@ def test_dataset_routes_refuse_an_outside_root_and_serve_an_inside_one(
         ).status_code
         == 403
     )
-    assert store.state.dataset.dataset_root is None
+    assert store.state.dataset is None
 
     assert (
         client.get(
@@ -248,7 +248,9 @@ def test_dataset_routes_refuse_an_outside_root_and_serve_an_inside_one(
         json={"dataset_root": str(inside), "date": "2026-02-11"},
     )
     assert selected.status_code == 200
-    assert selected.json()["selection"]["image_list"] == ["a.jpg"]
+    assert [
+        image["name"] for image in selected.json()["selection"]["images"]
+    ] == ["a.jpg"]
 
 
 def test_the_proposals_route_confines_the_image_whose_bucket_it_reads(

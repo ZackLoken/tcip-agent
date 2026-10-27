@@ -127,33 +127,26 @@ def test_inference_cancel_endpoint_and_worker(
     from fastapi import HTTPException
 
     from tcip_web.routes._body_common import PersonPayload
-    from tcip_web.routes.inference import (
-        InferenceJob,
-        _register,
-        _worker,
-        cancel_job,
-    )
+    from tcip_web.routes.inference import _registry, _worker, cancel_job
     from tests._audit_fixtures import audit_rows
     from tests._verified_checkpoint_fixtures import project_checkpoint
+    from tests._web_fixtures import inference_job
 
     images_dir = image_dir(tmp_path, "2026-01-01")
     write_image(images_dir / "img.jpg", (16, 16))
     _fake_predictor(monkeypatch)
 
-    job = InferenceJob(
+    job = inference_job(
+        images_dir,
+        tmp_path,
         job_id="j1",
-        actor="user:tester",
-        project=str(tmp_path),
         checkpoint_path=project_checkpoint(tmp_path),
-        dataset_root=str(tmp_path),
-        images_dir=str(images_dir),
-        bucket="out",
         stated=STATED,
     )
-    _register(job)
+    _registry.register(job)
 
     res = cancel_job("j1", PersonPayload(user="Alice"))
-    assert res["cancel_requested"] is True and job.cancel_event.is_set()
+    assert res is job and job.cancel_event.is_set()
     (line,) = audit_rows(tmp_path, "inference_canceled")
     assert (line["actor"], line["arguments"]["job_id"]) == ("user:Alice", "j1")
     # Canceling a job that was never registered is a client-side miss, so it has to reach the
@@ -181,35 +174,29 @@ def test_inference_cancel_reaches_a_job_launched_for_a_previously_open_project(
 
     from tcip_web.routes._body_common import PersonPayload
     from tcip_web.routes.inference import (
-        InferenceJob,
         _get,
-        _register,
         _registry,
         cancel_job,
         list_jobs,
     )
-    from tests._web_fixtures import open_new_project
+    from tests._web_fixtures import inference_job, open_new_project
 
-    job = InferenceJob(
+    job = inference_job(
+        image_dir(tmp_path / "ds", "2026-01-01"),
+        opened_project,
         job_id="launched-under-a",
-        actor="user:tester",
-        project=str(opened_project),
-        checkpoint_path="c",
-        dataset_root="d",
-        images_dir="i",
-        bucket="b",
-        stated=STATED,
     )
-    _register(job)
+    _registry.register(job)
 
     try:
         open_new_project(tmp_path / "other")
 
         assert _get("launched-under-a") is job
-        assert list_jobs()["jobs"] == []
+        assert list_jobs().jobs == []
 
-        res = cancel_job("launched-under-a", PersonPayload(user="Alice"))
-        assert res["cancel_requested"] is True
+        assert (
+            cancel_job("launched-under-a", PersonPayload(user="Alice")) is job
+        )
         assert job.cancel_event.is_set()
 
         with pytest.raises(HTTPException) as miss:

@@ -19,7 +19,7 @@ import tifffile
 import tcip_store as ts
 from tcip_mcp.cli import hyphenated
 from tcip_mcp.tools.data_tools import derive_plant_group_key_map
-from tests._mapping_fixtures import write_plant_csv
+from tests._mapping_fixtures import write_plant_csv, write_plots_csv
 from tests._training_values import RATIONALE, drawn_split
 
 UTM_15N_EPSG = 32615
@@ -99,36 +99,32 @@ FAR_TIEPOINT = (
 )  # ~100 km away: outside tolerance for both plants
 
 
-def _plant_at(
-    plot: str, accession: str, tiepoint: tuple[float, float]
-) -> dict:
-    """Return a plant at the geometric center of a ``SHAPE`` raster tied at ``tiepoint``."""
-    lat, lon = _center_latlon(*tiepoint)
-    return {"plot": plot, "accession": accession, "lat": lat, "lon": lon}
-
-
 @pytest.fixture
 def two_plant_csv(tmp_path: Path) -> Path:
-    return write_plant_csv(
+    """Return a plant CSV of two plants, each at the center of its own tiepoint's raster."""
+    return write_plots_csv(
         tmp_path / "plants.csv",
-        [
-            _plant_at("P1", "acc-A", P1_TIEPOINT),
-            _plant_at("P2", "acc-B", P2_TIEPOINT),
-        ],
+        {
+            plot: _center_latlon(*tiepoint)
+            for plot, tiepoint in (("P1", P1_TIEPOINT), ("P2", P2_TIEPOINT))
+        },
     )
 
 
 @pytest.fixture
 def four_plant_csv(tmp_path: Path) -> Path:
     """Return a plant CSV of four plants, each at the center of its own tiepoint's raster."""
-    return write_plant_csv(
+    return write_plots_csv(
         tmp_path / "plants4.csv",
-        [
-            _plant_at("P1", "acc-A", P1_TIEPOINT),
-            _plant_at("P2", "acc-B", P2_TIEPOINT),
-            _plant_at("P3", "acc-C", P3_TIEPOINT),
-            _plant_at("P4", "acc-D", P4_TIEPOINT),
-        ],
+        {
+            plot: _center_latlon(*tiepoint)
+            for plot, tiepoint in (
+                ("P1", P1_TIEPOINT),
+                ("P2", P2_TIEPOINT),
+                ("P3", P3_TIEPOINT),
+                ("P4", P4_TIEPOINT),
+            )
+        },
     )
 
 
@@ -196,12 +192,9 @@ def test_a_planar_raster_is_located_by_its_own_frame(tmp_path: Path) -> None:
     _write_geotiff(raster, *P1_TIEPOINT, shape=wide, planar=True)
     lat, lon = _center_latlon(*P1_TIEPOINT, shape=wide)
     plants = _plants(
-        write_plant_csv(
+        write_plots_csv(
             tmp_path / "plants.csv",
-            [
-                {"plot": "P1", "accession": "acc-A", "lat": lat, "lon": lon},
-                _plant_at("P2", "acc-B", P2_TIEPOINT),
-            ],
+            {"P1": (lat, lon), "P2": _center_latlon(*P2_TIEPOINT)},
         )
     )
 

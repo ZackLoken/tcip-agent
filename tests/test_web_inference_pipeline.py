@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -11,9 +10,7 @@ from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.schemas import AugmentationSpec
 from tests._predictor_fixtures import BOX, StubPredictor, install
 from tests._training_values import RATIONALE, augmentation
-
-if TYPE_CHECKING:
-    from tcip_web.routes.inference import InferenceJob
+from tests._web_fixtures import inference_job
 
 BUCKET = "out/2026-01-01"
 
@@ -37,28 +34,6 @@ def _one_image(project: Path, *stems: str) -> Path:
     for stem in stems or ("img",):
         write_image(images_dir / f"{stem}.jpg", (100, 100))
     return images_dir
-
-
-def _job(
-    job_id: str,
-    project: Path,
-    ckpt: Path,
-    images_dir: Path,
-    stated: Stated,
-    bucket: str = BUCKET,
-) -> InferenceJob:
-    from tcip_web.routes.inference import InferenceJob
-
-    return InferenceJob(
-        job_id=job_id,
-        actor="user:tester",
-        project=str(project),
-        checkpoint_path=str(ckpt),
-        dataset_root=str(project),
-        images_dir=str(images_dir),
-        bucket=bucket,
-        stated=stated,
-    )
 
 
 def _annotations(
@@ -137,12 +112,12 @@ def test_web_worker_uses_generic_predictor_and_publishes_its_documents(
     # scale; this checkpoint persisted its own training geometry.
     predictor = install(monkeypatch, StubPredictor(train_tile_size=640))
 
-    job = _job(
-        "t",
-        tmp_path,
-        ckpt,
+    job = inference_job(
         images_dir,
-        Stated(
+        tmp_path,
+        checkpoint_path=str(ckpt),
+        bucket=BUCKET,
+        stated=Stated(
             tile=True,
             conf=0.25,
             cross_tile_nms=0.7,
@@ -203,12 +178,12 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_scope(
 
     install(monkeypatch, StubPredictor(attributes=[[1]]))
 
-    job = _job(
-        "t3",
-        tmp_path,
-        ckpt,
+    job = inference_job(
         images_dir,
-        Stated(
+        tmp_path,
+        checkpoint_path=str(ckpt),
+        bucket=BUCKET,
+        stated=Stated(
             tile=False,
             conf=0.25,
             cross_tile_nms=0.7,
@@ -247,12 +222,12 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(
         monkeypatch, StubPredictor(task="instance_seg", train_tile_size=640)
     )
 
-    job = _job(
-        "t3",
-        tmp_path,
-        ckpt,
+    job = inference_job(
         images_dir,
-        Stated(
+        tmp_path,
+        checkpoint_path=str(ckpt),
+        bucket=BUCKET,
+        stated=Stated(
             tile=True,
             conf=0.25,
             cross_tile_nms=0.7,
@@ -301,12 +276,12 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
         ),
     )
 
-    job = _job(
-        "t4",
-        tmp_path,
-        ckpt,
+    job = inference_job(
         images_dir,
-        Stated(
+        tmp_path,
+        checkpoint_path=str(ckpt),
+        bucket=BUCKET,
+        stated=Stated(
             tile=True,
             conf=0.25,
             cross_tile_nms=0.7,
@@ -344,12 +319,12 @@ def test_web_worker_stamps_the_stated_conf_explicit_and_the_checkpoints_density(
     ckpt = _checkpoint(tmp_path)
     install(monkeypatch, StubPredictor())
 
-    job = _job(
-        "conf-explicit",
-        tmp_path,
-        ckpt,
+    job = inference_job(
         images_dir,
-        Stated(
+        tmp_path,
+        checkpoint_path=str(ckpt),
+        bucket=BUCKET,
+        stated=Stated(
             tile=False,
             conf=SAMPLE_CONF,
             cross_tile_nms=0.7,
@@ -378,12 +353,12 @@ def test_web_worker_fails_a_job_stating_no_conf_naming_it(
     ckpt = _checkpoint(tmp_path)
     install(monkeypatch, StubPredictor())
 
-    job = _job(
-        "conf-unstated",
-        tmp_path,
-        ckpt,
+    job = inference_job(
         images_dir,
-        Stated(tile=False, cross_tile_nms=0.7, rationale=RATIONALE),
+        tmp_path,
+        checkpoint_path=str(ckpt),
+        bucket=BUCKET,
+        stated=Stated(tile=False, cross_tile_nms=0.7, rationale=RATIONALE),
     )
     _worker(job)
 
@@ -395,12 +370,13 @@ def test_web_worker_dropped_boxes_agree_with_the_published_document_on_a_degener
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The job's dropped-box count agrees with the published document on a degenerate box.
+    """The bucket a job publishes counts its dropped boxes as its document drops them.
 
-    Of the model's two raw detections, one has zero width: the job counts one dropped box, and
-    the published document holds one object.
+    Of the model's two raw detections, one has zero width: the published bucket's record counts
+    one dropped box, and the published document holds one object.
     """
     pytest.importorskip("fastapi")
+    from tcip_mcp.buckets import read_bucket
     from tcip_web.routes.inference import _worker
 
     images_dir = _one_image(tmp_path)
@@ -415,12 +391,12 @@ def test_web_worker_dropped_boxes_agree_with_the_published_document_on_a_degener
         ),
     )
 
-    job = _job(
-        "degenerate",
-        tmp_path,
-        ckpt,
+    job = inference_job(
         images_dir,
-        Stated(
+        tmp_path,
+        checkpoint_path=str(ckpt),
+        bucket=BUCKET,
+        stated=Stated(
             tile=True,
             conf=0.25,
             cross_tile_nms=0.7,
@@ -432,7 +408,7 @@ def test_web_worker_dropped_boxes_agree_with_the_published_document_on_a_degener
     _worker(job)
 
     assert job.status == "completed"
-    assert job.dropped_boxes == 1
+    assert read_bucket(tmp_path, BUCKET).dropped_boxes == 1
     assert len(_annotations(tmp_path)) == 1
 
 
@@ -450,12 +426,12 @@ def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path: Path) -> None:
     write_image(images_dir / "foo.png", (100, 100), (120, 120, 120))
     ckpt = _checkpoint(tmp_path)
 
-    job = _job(
-        "collision",
-        tmp_path,
-        ckpt,
+    job = inference_job(
         images_dir,
-        Stated(
+        tmp_path,
+        checkpoint_path=str(ckpt),
+        bucket=BUCKET,
+        stated=Stated(
             tile=False,
             conf=0.25,
             cross_tile_nms=0.7,

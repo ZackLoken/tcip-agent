@@ -11,7 +11,7 @@ import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
 import type { AnnotateView, SubjectState } from "@/store/types";
-import { openTestProject } from "@/test/store";
+import { openTestProject, selected } from "@/test/store";
 
 const initialStoreState = useStore.getState();
 
@@ -313,7 +313,7 @@ describe("AnnotateToolbar Cut item", () => {
 
 describe("AnnotateToolbar subject authoring", () => {
   function seedDataset() {
-    openTestProject({ dataset_root: "C:/data", date: "2026-01-01" });
+    openTestProject(selected({ count: 0 }));
   }
 
   function openSubjectMenu() {
@@ -494,7 +494,7 @@ describe("AnnotateToolbar subject authoring", () => {
 
 describe("AnnotateToolbar subject menu attributes", () => {
   it("holds the active subject's attributes under the subject list, absent with no subject", () => {
-    openTestProject({ dataset_root: "C:/data", date: "2026-01-01" });
+    openTestProject(selected({ count: 0 }));
     act(() => useStore.getState().setRegistry({ leaf: {} }));
     renderToolbar();
     fireEvent.click(screen.getByRole("button", { name: /select subject/ }));
@@ -508,7 +508,7 @@ describe("AnnotateToolbar subject menu attributes", () => {
   });
 
   it("edits the focused box's attributes inside the menu", () => {
-    openTestProject({ dataset_root: "C:/data", date: "2026-01-01" });
+    openTestProject(selected({ count: 0 }));
     act(() => {
       useStore
         .getState()
@@ -561,50 +561,32 @@ describe("AnnotateToolbar band picker (progressive disclosure)", () => {
 });
 
 function seedSubject(subject: string) {
-  useStore.setState((s) => ({
-    gui: {
-      ...s.gui,
-      dataset: { ...s.gui.dataset, subject, image_list: ["img1.jpg"], current_image_index: 0 },
-    },
-  }));
+  openTestProject(selected({ subject, count: 1 }));
 }
 
 describe("AnnotateToolbar image stepping", () => {
   it("leaves the focused item behind on the image it left", () => {
-    useStore.setState((s) => ({
-      gui: {
-        ...s.gui,
-        dataset: { ...s.gui.dataset, image_list: ["img1.jpg", "img2.jpg"], current_image_index: 0 },
-      },
-    }));
+    openTestProject(selected({ count: 2 }));
     useStore.getState().setFocus({ kind: "proposal", index: 3 });
     expect(useStore.getState().canvas.focus).not.toBeNull();
     renderToolbar();
 
     fireEvent.click(screen.getByRole("button", { name: "Next image" }));
 
-    expect(useStore.getState().gui.dataset.current_image_index).toBe(1);
+    expect(useStore.getState().gui.dataset?.current_image_index).toBe(1);
     expect(useStore.getState().canvas.focus).toBeNull();
   });
 });
 
 describe("AnnotateToolbar image filter", () => {
   it("names each filter with its count and steps through the kept images only", () => {
-    useStore.setState((s) => ({
-      gui: {
-        ...s.gui,
-        dataset: {
-          ...s.gui.dataset,
-          subject: "leaf",
-          image_list: ["a.jpg", "b.jpg", "c.jpg"],
-          current_image_index: 0,
-        },
-      },
-    }));
+    openTestProject(selected({ subject: "leaf", count: 3 }));
     act(() =>
-      useStore
-        .getState()
-        .setImageStates({ "a.jpg": "unannotated", "b.jpg": "complete", "c.jpg": "unannotated" }),
+      useStore.getState().setImageStates({
+        "img1.jpg": "unannotated",
+        "img2.jpg": "complete",
+        "img3.jpg": "unannotated",
+      }),
     );
     renderToolbar();
     const filter = screen.getByRole("combobox", { name: "Images" });
@@ -618,7 +600,7 @@ describe("AnnotateToolbar image filter", () => {
     fireEvent.change(filter, { target: { value: "unannotated" } });
     expect(screen.getByRole("textbox", { name: "Image position" })).toHaveValue("1");
     fireEvent.click(screen.getByRole("button", { name: "Next image" }));
-    expect(useStore.getState().gui.dataset.current_image_index).toBe(2);
+    expect(useStore.getState().gui.dataset?.current_image_index).toBe(2);
     expect(screen.getByRole("button", { name: "Next image" })).toBeDisabled();
   });
 });

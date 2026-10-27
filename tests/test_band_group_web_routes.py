@@ -81,8 +81,46 @@ def test_dataset_select_route_folds_the_group(
         },
     )
     assert resp.status_code == 200
-    images = resp.json()["selection"]["image_list"]
-    assert sorted(images) == ["cap_001.bandgroup", "plain_002.jpg"]
+    images = resp.json()["selection"]["images"]
+    assert sorted(image["name"] for image in images) == [
+        "cap_001.bandgroup",
+        "plain_002.jpg",
+    ]
+
+
+def test_each_selected_image_is_placed_where_the_layout_reads_it_back(
+    client: TestClient,
+    grouped_dataset: GroupedDataset,
+    opened_project: Path,
+) -> None:
+    """Each image's place in a selection decodes back to the selection's root, capture and stem.
+
+    The capture holds a raw image and a grouped capture; the selection answers them in name
+    order, each at the path ``parse_image_path`` reads as the selection's root, its capture and
+    the image's stem.
+    """
+    from tcip_mcp.dataset_layout import parse_image_path
+    from tcip_mcp.pipelines.image_utils import logical_images_by_name, stem_of
+
+    resp = client.post(
+        "/api/dataset/select",
+        json={
+            "dataset_root": str(grouped_dataset.root),
+            "date": grouped_dataset.images_dir.name,
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    selection = resp.json()["selection"]
+    root, capture = Path(selection["dataset_root"]), selection["date"]
+    found = logical_images_by_name(image_dir(root, capture))
+    assert [
+        (image["name"], parse_image_path(image["path"]))
+        for image in selection["images"]
+    ] == [
+        (name, (root, capture, stem_of(source)))
+        for name, source in found.items()
+    ]
 
 
 # ── routes/annotate.py image dimensions ──────────────────────────────────────────────────
@@ -287,8 +325,9 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
         DEFAULT_TILE_BATCH_SIZE,
         Stated,
     )
-    from tcip_web.routes.inference import InferenceJob, _worker
+    from tcip_web.routes.inference import _worker
     from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._web_fixtures import inference_job
 
     images_dir = image_dir(tmp_path, "2026-01-01")
     images_dir.mkdir(parents=True)
@@ -336,14 +375,10 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
         ),
     )
 
-    job = InferenceJob(
-        job_id="t2",
-        actor="user:tester",
+    job = inference_job(
+        images_dir,
+        tmp_path,
         checkpoint_path=str(ckpt),
-        images_dir=str(images_dir),
-        dataset_root=str(tmp_path),
-        bucket="out",
-        project=str(tmp_path),
         stated=Stated(
             tile=False,
             conf=0.25,

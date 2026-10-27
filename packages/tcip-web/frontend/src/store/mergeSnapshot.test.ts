@@ -4,27 +4,28 @@ import type { StateSnapshotMessage } from "@/api/types.generated";
 import { recordLastTab } from "@/lib/datasetUiState";
 import { useStore } from "@/store";
 import type { DatasetSelection, GuiState } from "@/store/types";
-import { stateEnvelope, TEST_EPOCH, TEST_PROJECT, testProject } from "@/test/store";
+import {
+  GROUPED_SELECTION,
+  RAW_SELECTION,
+  selected,
+  type SelectionChange,
+  stateEnvelope,
+  TEST_EPOCH,
+  TEST_PROJECT,
+  testProject,
+} from "@/test/store";
 
 const s = () => useStore.getState();
 
 const PROJECT = TEST_PROJECT;
 const OTHER = testProject({ id: "ffffffffffff", path: "/other" });
 
-function dataset(over: Partial<DatasetSelection> = {}): DatasetSelection {
-  return {
-    dataset_root: "/proj/ds",
-    subject: "subject_a",
-    date: "2-11-26",
-    image_list: ["a.jpg", "b.jpg", "c.jpg"],
-    current_image_index: 0,
-    images_dir: "/proj/ds/images/2-11-26",
-    bucket: null,
-    ...over,
-  };
+function dataset(change: SelectionChange = {}): DatasetSelection {
+  return selected({ subject: "subject_a", count: 3, ...change });
 }
 
-const EMPTY = { dataset_root: null, date: null, image_list: [] };
+/** Another capture: the produced grouped one. */
+const OTHER_CAPTURE = selected({ subject: "subject_a" }, GROUPED_SELECTION);
 
 function snapshot(over: Partial<GuiState> = {}): GuiState {
   return {
@@ -78,58 +79,57 @@ describe("mergeSnapshot ownership model", () => {
     expect(s().gui.active_tab).toBe("results");
     expect(s().gui.mode).toBe("polygon");
     expect(s().gui.active_subject).toBe("bush");
-    expect(s().gui.dataset.current_image_index).toBe(2); // navigation kept
+    expect(s().gui.dataset?.current_image_index).toBe(2); // navigation kept
   });
 
-  it("keeps a populated dataset when the same project's snapshot carries none", () => {
+  it("adopts the same project's snapshot carrying no selection", () => {
     s().mergeSnapshot(
-      stateEnvelope({ state: snapshot({ dataset: dataset(EMPTY) }), version: 7, project: PROJECT }),
+      stateEnvelope({ state: snapshot({ dataset: null }), version: 7, project: PROJECT }),
     );
-    expect(s().gui.dataset.dataset_root).toBe("/proj/ds");
-    expect(s().gui.dataset.image_list).toHaveLength(3);
+    expect(s().gui.dataset).toBeNull();
   });
 
   it("adopts the snapshot wholesale when it names another open project", () => {
     s().mergeSnapshot(
       stateEnvelope({
-        state: snapshot({ dataset: dataset({ dataset_root: "/other", date: "3-2-26" }) }),
+        state: snapshot({ dataset: OTHER_CAPTURE }),
         version: 7,
         project: OTHER,
       }),
     );
     expect(s().openProject).toEqual(OTHER);
-    expect(s().gui.dataset.dataset_root).toBe("/other");
+    expect(s().gui.dataset).toEqual(OTHER_CAPTURE);
   });
 
   it("drops the dataset when the backend has no project open", () => {
     s().mergeSnapshot(
-      stateEnvelope({ state: snapshot({ dataset: dataset(EMPTY) }), version: 7, project: null }),
+      stateEnvelope({ state: snapshot({ dataset: null }), version: 7, project: null }),
     );
     expect(s().openProject).toBeNull();
-    expect(s().gui.dataset.dataset_root).toBeNull();
+    expect(s().gui.dataset).toBeNull();
   });
 
   it("adopts a new dataset identity and resets the index", () => {
     s().mergeSnapshot(
       stateEnvelope({
-        state: snapshot({ dataset: dataset({ date: "3-2-26", current_image_index: 0 }) }),
+        state: snapshot({ dataset: OTHER_CAPTURE }),
         version: 8,
         project: PROJECT,
       }),
     );
-    expect(s().gui.dataset.date).toBe("3-2-26");
-    expect(s().gui.dataset.current_image_index).toBe(0);
+    expect(s().gui.dataset?.date).toBe(OTHER_CAPTURE.date);
+    expect(s().gui.dataset?.current_image_index).toBe(0);
   });
 
   it("drops a stale (older-version) replay", () => {
     s().mergeSnapshot(
       stateEnvelope({
-        state: snapshot({ dataset: dataset({ date: "9-9-99" }) }),
+        state: snapshot({ dataset: OTHER_CAPTURE }),
         version: 3, // < wsVersion 5
         project: PROJECT,
       }),
     );
-    expect(s().gui.dataset.date).toBe("2-11-26"); // unchanged
+    expect(s().gui.dataset?.date).toBe(RAW_SELECTION.date); // unchanged
   });
 
   it("leaves an image visit open when a stale snapshot of another project is rejected", () => {
@@ -165,43 +165,39 @@ describe("mergeSnapshot ownership model", () => {
     // Only an older version is a stale replay; a re-broadcast at the current version is real state.
     s().mergeSnapshot(
       stateEnvelope({
-        state: snapshot({ dataset: dataset({ date: "3-2-26" }) }),
+        state: snapshot({ dataset: OTHER_CAPTURE }),
         version: 5,
         project: PROJECT,
       }),
     );
-    expect(s().gui.dataset.date).toBe("3-2-26");
+    expect(s().gui.dataset?.date).toBe(OTHER_CAPTURE.date);
     expect(s().wsVersion).toBe(5);
   });
 
   it("accepts a lower version when the epoch moved (a restarted backend's own replay)", () => {
     s().mergeSnapshot(
       stateEnvelope({
-        state: snapshot({ dataset: dataset({ date: "3-2-26" }) }),
+        state: snapshot({ dataset: OTHER_CAPTURE }),
         version: 1, // lower than wsVersion 5, and would ordinarily be dropped as stale
         project: PROJECT,
         epoch: "epoch-2",
       }),
     );
-    expect(s().gui.dataset.date).toBe("3-2-26"); // accepted, not dropped
+    expect(s().gui.dataset?.date).toBe(OTHER_CAPTURE.date); // accepted, not dropped
     expect(s().wsVersion).toBe(1);
     expect(s().wsEpoch).toBe("epoch-2");
   });
 
-  it("keeps the local image-list array itself on a same-dataset snapshot", () => {
-    // Effects keyed on the image_list reference must not re-fire, so the array object has to
-    // survive, not just its contents.
-    const localList = s().gui.dataset.image_list;
-    const incoming = snapshot({
-      dataset: dataset({ bucket: "m2/2-11-26" }),
-    });
-    expect(incoming.dataset.image_list).not.toBe(localList);
-    expect(incoming.dataset.image_list).toEqual(localList);
+  it("adopts the backend's changed image list on a same-capture snapshot, at the local position", () => {
+    const incoming = dataset({ bucket: "m2/2026-01-01", count: 4 });
 
-    s().mergeSnapshot(stateEnvelope({ state: incoming, version: 6, project: PROJECT }));
+    s().mergeSnapshot(
+      stateEnvelope({ state: snapshot({ dataset: incoming }), version: 6, project: PROJECT }),
+    );
 
-    expect(s().gui.dataset.image_list).toBe(localList);
-    expect(s().gui.dataset.bucket).toBe("m2/2-11-26");
+    expect(s().gui.dataset?.images).toEqual(incoming.images);
+    expect(s().gui.dataset?.bucket).toBe("m2/2026-01-01");
+    expect(s().gui.dataset?.current_image_index).toBe(2);
   });
 
   it("adopts the persisted state on boot, with the tab from the project's own record", () => {
@@ -209,7 +205,7 @@ describe("mergeSnapshot ownership model", () => {
     // backend's active_tab only moves on agent focus events.
     localStorage.removeItem(`tcip.lasttab.${PROJECT.id}`);
     useStore.setState({
-      gui: snapshot({ active_subject: null, dataset: dataset({ ...EMPTY, subject: null }) }),
+      gui: snapshot({ active_subject: null, dataset: null }),
       openProject: null,
       wsVersion: 0,
     });
@@ -228,14 +224,14 @@ describe("mergeSnapshot ownership model", () => {
     expect(s().gui.active_tab).toBe("annotate"); // no record yet: first-open default
     expect(s().gui.mode).toBe("polygon");
     expect(s().gui.active_subject).toBe("bush");
-    expect(s().gui.dataset.current_image_index).toBe(2);
+    expect(s().gui.dataset?.current_image_index).toBe(2);
     expect(s().openProject).toEqual(PROJECT);
   });
 
   it("boot hydration lands on the project's recorded last-used tab when one exists", () => {
     recordLastTab(PROJECT.id, "training");
     useStore.setState({
-      gui: snapshot({ active_subject: null, dataset: dataset({ ...EMPTY, subject: null }) }),
+      gui: snapshot({ active_subject: null, dataset: null }),
       openProject: null,
       wsVersion: 0,
     });
@@ -253,8 +249,8 @@ describe("applyRestoredDataset", () => {
   });
 
   it("adopts the open project in the same update as the dataset", () => {
-    s().applyRestoredDataset(dataset({ dataset_root: "/other", date: "3-2-26" }), OTHER);
-    expect(s().gui.dataset.date).toBe("3-2-26");
+    s().applyRestoredDataset(OTHER_CAPTURE, OTHER);
+    expect(s().gui.dataset?.date).toBe(OTHER_CAPTURE.date);
     expect(s().openProject).toEqual(OTHER);
   });
 });
@@ -263,6 +259,6 @@ describe("clearDataset", () => {
   it("clears the dataset selection", () => {
     useStore.setState({ gui: snapshot({ dataset: dataset() }) });
     s().clearDataset();
-    expect(s().gui.dataset.dataset_root).toBeNull();
+    expect(s().gui.dataset).toBeNull();
   });
 });

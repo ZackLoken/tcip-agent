@@ -84,7 +84,7 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
     assert list(assignments.keys()) == ["2026-02-11"]
     dated = assignments["2026-02-11"]
     assert isinstance(dated, list) and isinstance(dated[0], dict)
-    assert dated[0]["stem"] == "img1"
+    assert Path(str(dated[0]["image"])).stem == "img1"
     assert "confidence" not in dated[0]
 
 

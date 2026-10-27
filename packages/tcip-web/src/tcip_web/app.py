@@ -14,24 +14,34 @@ from collections import defaultdict
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.websockets import WebSocketState
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, JsonValue, ValidationError
 
 from tcip_mcp.audit import now_iso
 from tcip_mcp.buckets import NotABucketError
 from tcip_mcp.identity import NoActorError
-from tcip_mcp.web_client import PANEL_EVENT_ANNOTATE_FOCUS, Panel
+from tcip_mcp.web_client import (
+    PANEL_EVENT_ANNOTATE_FOCUS,
+    AnnotateFocus,
+    Panel,
+)
 from tcip_store import bind
 from tcip_web.routes import register_all as _register_routes
 from tcip_web.state import (
     GuiMutationInvalidError,
     NoProjectOpenError,
+    NoSelectionError,
     PanelEnvelope,
     ProjectNotOpenError,
     SnapshotProject,
@@ -91,13 +101,14 @@ async def _bad_request_handler(
 ) -> JSONResponse:
     """Answer 400 with the reason.
 
-    For an invalid GUI mutation, a directory read as a bucket it is not, or an act naming no
-    person.
+    For an invalid GUI mutation, a request on the selected capture while none is, a directory
+    read as a bucket it is not, or an act naming no person.
     """
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
 app.add_exception_handler(GuiMutationInvalidError, _bad_request_handler)
+app.add_exception_handler(NoSelectionError, _bad_request_handler)
 app.add_exception_handler(NotABucketError, _bad_request_handler)
 app.add_exception_handler(NoActorError, _bad_request_handler)
 
@@ -182,7 +193,8 @@ class ActiveTabPayload(BaseModel):
 async def set_active_tab(payload: ActiveTabPayload) -> dict:
     """Record ``active_tab`` in the GUI state and answer it."""
     await _gui_store.mutate(
-        {"active_tab": payload.active_tab}, project=_gui_store.opened
+        lambda _held: {"active_tab": payload.active_tab},
+        project=_gui_store.opened,
     )
     return {"status": "ok", "active_tab": payload.active_tab}
 
@@ -269,7 +281,9 @@ async def post_panel_event(
     Payload shape: ``{event_type, data, project_id}``. A path naming no panel answers 422. An
     event naming any project but the open one answers 409 (``StateStore.admit``), naming the
     open one's ``open_project_id`` when another is open and the none-open message when none is,
-    and is neither retained nor broadcast. The broadcast and replay payload, not this route's
+    and is neither retained nor broadcast. A focus event is admitted as :class:`AnnotateFocus`
+    (400 otherwise) and retained and broadcast as that model only once its state change is held;
+    a refused one is neither. The broadcast and replay payload, not this route's
     response, carries every agent identity field the sender declared in its headers
     (``agent_identity.HEADERS``, each ``None`` when not sent). Declared, not verified: any
     sender can set the headers.
@@ -277,22 +291,30 @@ async def post_panel_event(
     from tcip_mcp import agent_identity
 
     project = _gui_store.admit(event.project_id)
+    data = event.data
+    # The browser applies a focus event locally and never syncs it back, so the snapshot moves here.
+    if event.event_type == PANEL_EVENT_ANNOTATE_FOCUS:
+        try:
+            focus = AnnotateFocus.model_validate(event.data)
+        except ValidationError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        await _gui_store.mutate(
+            lambda _held: {
+                "active_tab": "annotate",
+                "mode": focus.mode,
+                "active_subject": focus.subject,
+            },
+            project=project,
+        )
+        data = focus.model_dump(mode="json")
     envelope = PanelEnvelope(
         panel=panel,
         event_type=event.event_type,
-        data=event.data,
+        data=data,
         event_id=f"{now_iso()}#{next(_event_counter)}",
         **agent_identity.fields_from_headers(request.headers),
     )
     _gui_store.retain_event(envelope)
-    # The browser applies a focus event locally and never syncs it back, so the snapshot moves here.
-    if event.event_type == PANEL_EVENT_ANNOTATE_FOCUS:
-        mutation: dict[str, Any] = {"active_tab": "annotate"}
-        if "mode" in event.data:
-            mutation["mode"] = event.data["mode"]
-        if "active_subject" in event.data:
-            mutation["active_subject"] = event.data["active_subject"]
-        await _gui_store.mutate(mutation, project=project)
     await _send_to_each(envelope, _panel_subscribers[panel])
     return {"status": "ok", "panel": panel, "event_type": event.event_type}
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { jumpTarget, stepTarget } from "@/hooks/useImageNav";
 import { filteredIndices } from "@/lib/imageFilter";
+import { RAW_SELECTION } from "@/test/store";
 
 describe("stepTarget (shared by arrows + Prev/Next)", () => {
   it("steps by delta and clamps at the ends", () => {
@@ -36,12 +37,12 @@ describe("jumpTarget (counter box)", () => {
 
 describe("filteredIndices", () => {
   it("keeps the images whose state the filter names, an unknown state only under all", () => {
-    const list = ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg"];
+    const list = RAW_SELECTION.images;
     const states = {
-      "a.jpg": "unannotated" as const,
-      "b.jpg": "partial" as const,
-      "c.jpg": "complete" as const,
-      "d.jpg": "negative" as const,
+      "img1.jpg": "unannotated" as const,
+      "img2.jpg": "partial" as const,
+      "img3.jpg": "complete" as const,
+      "img4.jpg": "negative" as const,
     };
     expect(filteredIndices(list, states, "all")).toEqual([0, 1, 2, 3, 4]);
     expect(filteredIndices(list, states, "unannotated")).toEqual([0]);

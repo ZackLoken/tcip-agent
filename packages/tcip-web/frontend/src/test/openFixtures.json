@@ -9,19 +9,62 @@
       "view": { "scale": 1.0, "offset_x": 0.0, "offset_y": 0.0 },
       "mode": "box",
       "active_subject": null,
-      "dataset": {
-        "dataset_root": null,
-        "subject": null,
-        "date": null,
-        "image_list": [],
-        "current_image_index": 0,
-        "images_dir": null,
-        "bucket": null
-      }
+      "dataset": null
     },
     "version": 0,
     "type": "state_snapshot",
     "project": { "id": "<valley id>", "path": "<workspace>/valley" },
     "epoch": "<epoch>"
+  },
+  "raw": {
+    "selection": {
+      "dataset_root": "<workspace>/valley/ds",
+      "subject": null,
+      "date": "2026-01-01",
+      "bucket": null,
+      "current_image_index": 0,
+      "images": [
+        { "path": "<workspace>/valley/ds/images/2026-01-01/img1.jpg", "name": "img1.jpg" },
+        { "path": "<workspace>/valley/ds/images/2026-01-01/img2.jpg", "name": "img2.jpg" },
+        { "path": "<workspace>/valley/ds/images/2026-01-01/img3.jpg", "name": "img3.jpg" },
+        { "path": "<workspace>/valley/ds/images/2026-01-01/img4.jpg", "name": "img4.jpg" },
+        { "path": "<workspace>/valley/ds/images/2026-01-01/img5.jpg", "name": "img5.jpg" }
+      ]
+    },
+    "annotations_present": false,
+    "predictions_present": false,
+    "label_problem": null
+  },
+  "grouped": {
+    "selection": {
+      "dataset_root": "<workspace>/valley/grouped",
+      "subject": null,
+      "date": "2026-01-02",
+      "bucket": null,
+      "current_image_index": 0,
+      "images": [
+        {
+          "path": "<workspace>/valley/grouped/images/2026-01-02/cap.bandgroup",
+          "name": "cap.bandgroup"
+        }
+      ]
+    },
+    "annotations_present": false,
+    "predictions_present": false,
+    "label_problem": null
+  },
+  "separated": {
+    "dataset_root": "<workspace>/valley/ds/",
+    "subject": null,
+    "date": "2026-01-01",
+    "bucket": null,
+    "current_image_index": 0,
+    "images": [
+      { "path": "<workspace>/valley/ds/images/2026-01-01/img1.jpg", "name": "img1.jpg" },
+      { "path": "<workspace>/valley/ds/images/2026-01-01/img2.jpg", "name": "img2.jpg" },
+      { "path": "<workspace>/valley/ds/images/2026-01-01/img3.jpg", "name": "img3.jpg" },
+      { "path": "<workspace>/valley/ds/images/2026-01-01/img4.jpg", "name": "img4.jpg" },
+      { "path": "<workspace>/valley/ds/images/2026-01-01/img5.jpg", "name": "img5.jpg" }
+    ]
   }
 }

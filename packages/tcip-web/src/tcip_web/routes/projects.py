@@ -60,12 +60,12 @@ class ProjectSummary(BaseModel):
 
 def _summarize(project_dir: Path, record: dict) -> ProjectSummary:
     """Summarize ``project_dir`` with ``record``, its record's fields."""
-    from tcip_mcp.pipelines.image_utils import logical_image_count
+    from tcip_mcp.pipelines.image_utils import logical_image_counts
     from tcip_web.routes.dataset import _subjects_by_date
 
     st = project_dir.stat()
-    image_count = logical_image_count(project_dir)
-    dates = dataset_layout.list_dates(project_dir)
+    counts = logical_image_counts(project_dir)
+    dates = list(counts)
     subjects_by_date, label_problem = _subjects_by_date(project_dir, dates)
     return ProjectSummary(
         **record,
@@ -76,7 +76,7 @@ def _summarize(project_dir: Path, record: dict) -> ProjectSummary:
         subjects=dataset_layout.list_subjects(project_dir),
         subjects_by_date=subjects_by_date,
         buckets_by_date=buckets_by_date(project_dir, dates),
-        image_count=image_count,
+        image_count=sum(counts.values()),
         label_problem=label_problem,
     )
 

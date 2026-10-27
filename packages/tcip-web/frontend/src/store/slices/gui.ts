@@ -15,14 +15,9 @@ import {
 import type { AppState } from "@/store/appState";
 import type { DatasetSelection, GuiState, Mode, TabName, ViewState } from "@/store/types";
 
-const DEFAULT_DATASET: DatasetSelection = GUI_STATE_DEFAULTS.dataset;
-
 /** True when two selections name a different (dataset_root, date, subject): a different dataset
  *  whose own position the browser adopts. */
-function datasetIdentityChanged(
-  a: Pick<DatasetSelection, "dataset_root" | "date" | "subject">,
-  b: Pick<DatasetSelection, "dataset_root" | "date" | "subject">,
-): boolean {
+function datasetIdentityChanged(a: DatasetSelection, b: DatasetSelection): boolean {
   return a.dataset_root !== b.dataset_root || a.date !== b.date || a.subject !== b.subject;
 }
 
@@ -43,6 +38,10 @@ function adoptedGui(incoming: GuiState, project: SnapshotProject | null): GuiSta
 /** The open project's directory, or null when the backend has none open. */
 export const selectProjectRoot = (s: Pick<AppState, "openProject">): string | null =>
   s.openProject?.path ?? null;
+
+/** The selected capture's dataset root, or null when no capture is selected. */
+export const selectDatasetRoot = ({ gui: { dataset } }: Pick<AppState, "gui">): string | null =>
+  dataset && dataset.dataset_root;
 
 export interface GuiSlice {
   /** Server-synchronized state (mirrors backend GuiState). */
@@ -66,7 +65,7 @@ export interface GuiSlice {
    *  saved position when the user has been here before (else the selection's own values).
    *  Establishes the new identity locally so a same-identity backend snapshot keeps the restored
    *  index instead of resetting it to 0. */
-  applyRestoredDataset: (sel: DatasetSelection, project: SnapshotProject) => void;
+  applyRestoredDataset: (sel: DatasetSelection | null, project: SnapshotProject) => void;
   /**
    * Apply a backend state snapshot by ownership: the backend owns the dataset selection and the
    * open project; the browser owns navigation/view/mode/subject state and keeps its own copy. The
@@ -88,29 +87,31 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
   wsEpoch: null,
 
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
-  clearDataset: () => set((s) => ({ gui: { ...s.gui, dataset: DEFAULT_DATASET } })),
+  clearDataset: () => set((s) => ({ gui: { ...s.gui, dataset: null } })),
 
   saveCurrentDatasetUi: () => {
     const s = get();
-    const key = datasetKey(s.openProject, s.gui.dataset);
-    if (!key) return;
-    saveDatasetUi(key, { index: s.gui.dataset.current_image_index });
+    if (!s.openProject || !s.gui.dataset) return;
+    saveDatasetUi(datasetKey(s.openProject, s.gui.dataset), {
+      index: s.gui.dataset.current_image_index,
+    });
   },
 
   applyRestoredDataset: (sel, project) => {
     if (project.id !== get().openProject?.id) get().leaveProjectSession(project.id);
     set((s) => {
-      const key = datasetKey(project, sel);
-      const restored = key ? loadDatasetUi(key) : null;
-      const index =
-        restored && sel.image_list.length
-          ? Math.max(0, Math.min(restored.index, sel.image_list.length - 1))
-          : sel.current_image_index;
+      const restored = sel && loadDatasetUi(datasetKey(project, sel));
       return {
         gui: {
           ...s.gui,
           active_tab: landingTab(project),
-          dataset: { ...sel, current_image_index: index },
+          dataset:
+            sel && restored && sel.images.length
+              ? {
+                  ...sel,
+                  current_image_index: Math.max(0, Math.min(restored.index, sel.images.length - 1)),
+                }
+              : sel,
         },
         openProject: project,
       };
@@ -133,20 +134,20 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
       if (project?.id !== s.openProject?.id) {
         adoptedOther = true;
         return {
-          gui: project ? adoptedGui(incoming, project) : { ...local, dataset: DEFAULT_DATASET },
+          gui: project ? adoptedGui(incoming, project) : { ...local, dataset: null },
           openProject: project,
           wsVersion: nextVersion,
           wsEpoch: epoch,
         };
       }
 
-      if (!inDs.dataset_root) {
-        return { wsVersion: nextVersion, wsEpoch: epoch };
+      if (!inDs) {
+        return { gui: { ...local, dataset: null }, wsVersion: nextVersion, wsEpoch: epoch };
       }
 
       // Boot hydration: no local dataset to protect, so adopt the persisted mode/filters/position;
       // the tab is the client's per-project record (backend active_tab only moves on agent focus).
-      if (!local.dataset.dataset_root) {
+      if (!local.dataset) {
         return {
           gui: adoptedGui(incoming, project),
           wsVersion: nextVersion,
@@ -163,18 +164,16 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
           wsEpoch: epoch,
         };
       }
-      /** Same dataset: accept backend-owned dataset fields (e.g. a changed model's prediction
-       *  dir) but keep the user's navigation position and the local image_list reference (same
-       *  identity => same list; reusing the ref avoids spuriously re-firing effects keyed on it,
-       *  like registry hydration). Everything else (active_tab / mode / active_subject / view)
-       *  is client-owned; keep local. */
+      // Same capture: the backend's selection and images, at the user's own position in them.
       return {
         gui: {
           ...local,
           dataset: {
             ...inDs,
-            image_list: local.dataset.image_list,
-            current_image_index: local.dataset.current_image_index,
+            current_image_index: Math.min(
+              local.dataset.current_image_index,
+              Math.max(0, inDs.images.length - 1),
+            ),
           },
         },
         wsVersion: nextVersion,

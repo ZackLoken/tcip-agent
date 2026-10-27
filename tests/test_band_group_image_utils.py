@@ -298,28 +298,20 @@ def test_stem_of_a_plain_path_and_a_band_group(
     assert stem_of(resolve_image_path(grouped_dir.manifest)) == "cap"
 
 
-def test_logical_image_name_agrees_with_source_paths_basename(
+def test_logical_image_name_is_the_file_an_image_is_recorded_under(
     grouped_dir: GroupedDataset,
 ) -> None:
-    """``logical_image_name`` is the basename of the path an image is recorded under.
-
-    It agrees with ``source_path_of`` for a plain path and a band group alike.
-    """
+    """``logical_image_name`` is a plain image's own file name and a band group's manifest's."""
     from tcip_mcp.pipelines.image_utils import (
         logical_image_name,
         resolve_image_path,
-        source_path_of,
     )
 
-    plain = grouped_dir.plain
+    assert logical_image_name(grouped_dir.plain) == "plain.jpg"
     assert (
-        Path(source_path_of(plain)).name
-        == logical_image_name(plain)
-        == "plain.jpg"
+        logical_image_name(resolve_image_path(grouped_dir.manifest))
+        == "cap.bandgroup"
     )
-
-    ref = resolve_image_path(grouped_dir.manifest)
-    assert Path(source_path_of(ref)).name == logical_image_name(ref)
 
 
 def test_probe_channels_of_a_plain_tif_does_not_decode_pixels(

@@ -14,7 +14,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
-from tcip_mcp.web_client import Panel
+from tcip_mcp.web_client import AnnotateFocus, AnnotateMode, Panel
 
 if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
@@ -26,6 +26,18 @@ if TYPE_CHECKING:
 def project_id(opened: OpenProject) -> str:
     """Return the open project's id."""
     return opened.id
+
+
+def _focus(mode: AnnotateMode) -> dict:
+    """Return the event data of a focus on the first image of a dated capture, in ``mode``."""
+    return AnnotateFocus(
+        dataset_root="/data",
+        subject="bud",
+        date="2-11-26",
+        image_index=0,
+        mode=mode,
+        proposal=None,
+    ).model_dump()
 
 
 # ── HTTP event bridge ────────────────────────────────────────────────────
@@ -361,22 +373,13 @@ class TestPostPanelEventRoute:
     def test_annotate_focus_persists_advisory_state(
         self, opened_client: TestClient, project_id: str
     ) -> None:
-        """An annotate_focus event writes its mode, subject and tab into the advisory state.
-
-        An annotate_focus event carrying a mode and an active_subject writes both into the
-        advisory state, alongside the tab it lands on.
-        """
+        """An annotate_focus event writes its mode, its subject as the active one and the tab."""
         resp = opened_client.post(
             "/api/events/app",
             json={
                 "project_id": project_id,
                 "event_type": "annotate_focus",
-                "data": {
-                    "subject": "bush",
-                    "date": "2-11-26",
-                    "mode": "polygon",
-                    "active_subject": "bud",
-                },
+                "data": _focus(mode="polygon"),
             },
         )
         assert resp.status_code == 200
@@ -394,12 +397,36 @@ class TestPostPanelEventRoute:
             json={
                 "project_id": project_id,
                 "event_type": "annotate_focus",
-                "data": {"mode": "lasso"},
+                "data": {**_focus(mode="polygon"), "mode": "lasso"},
             },
         )
         assert resp.status_code == 400
         assert "lasso" in resp.json()["detail"]
         assert opened_client.get("/api/state").json()["mode"] == before
+
+    def test_the_panel_socket_replays_no_refused_focus(
+        self, opened_client: TestClient, project_id: str
+    ) -> None:
+        """A focus refused for its mode is replayed to no socket; the admitted one after it is.
+
+        The socket's first frame is the admitted focus, carried as its model states it.
+        """
+        for mode in ("lasso", "point"):
+            opened_client.post(
+                "/api/events/app",
+                json={
+                    "project_id": project_id,
+                    "event_type": "annotate_focus",
+                    "data": {**_focus(mode="polygon"), "mode": mode},
+                },
+            )
+
+        with opened_client.websocket_connect(
+            "ws://127.0.0.1/ws/panel/app"
+        ) as ws:
+            replayed = ws.receive_json()
+
+        assert replayed["data"] == _focus(mode="point")
 
     def test_the_focus_tool_answers_the_event_channels_refusal_whole(
         self,

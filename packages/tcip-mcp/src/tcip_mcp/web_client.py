@@ -12,10 +12,17 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, JsonValue, PositiveFloat
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    JsonValue,
+    PositiveFloat,
+    computed_field,
+)
 
 import tcip_store
 from tcip_annotation.viz import CanvasShape
+from tcip_mcp.dataset_layout import image_dir
 from tcip_store import Key
 
 if TYPE_CHECKING:
@@ -176,21 +183,68 @@ def read_canvas_geometry(project: str) -> CanvasGeometry | None:
     return None if raw is None else CanvasGeometry.model_validate(raw)
 
 
-class DatasetSelection(BaseModel):
-    """Which dataset the GUI is looking at inside the open project.
+class CaptureChoice(BaseModel):
+    """A capture chosen to look at: its dataset root, subject, capture and the bucket reviewed.
 
-    It holds the capture, its image list, and the name of a bucket under the dataset root.
+    ``subject`` and ``bucket`` are ``None`` when none is chosen; every field is sent.
+    """
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
+    dataset_root: str
+    subject: str | None = None
+    # The capture: a date folder, a literal bucket or ``UNDATED_BUCKET``.
+    date: str
+    # The name of the bucket to review, published under dataset_root.
+    bucket: str | None = None
+
+
+class DatasetChoice(CaptureChoice):
+    """The chosen part of a selection, the only part the GUI snapshot holds.
+
+    It is the capture chosen and the position of the image in view within it.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    dataset_root: str | None
-    subject: str | None
-    date: str | None
-    image_list: list[str]
     current_image_index: int
-    images_dir: str | None
-    bucket: str | None
+
+
+class AnnotateFocus(CaptureChoice):
+    """Where the agent drives the Annotate tab: a capture, the image, the mode and the proposal.
+
+    ``subject`` is the one made active; ``proposal`` is the index of the proposal focused in the
+    bucket's document for the image, or ``None``.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid", json_schema_mode_override="serialization"
+    )
+
+    subject: str
+    image_index: int
+    mode: AnnotateMode
+    proposal: int | None
+
+
+class CaptureImage(BaseModel):
+    """One image of a selected capture: the path its bytes are read from, and its name."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def name(self) -> str:
+        """The image's file name, its path's basename."""
+        return Path(self.path).name
+
+
+class DatasetSelection(DatasetChoice):
+    """Which capture the GUI is looking at inside the open project, its images in name order."""
+
+    images: list[CaptureImage]
 
 
 class ViewState(BaseModel):
@@ -217,10 +271,11 @@ class _GuiFields(BaseModel):
 class GuiState(_GuiFields):
     """The GUI state the backend holds for its open project.
 
-    Only ``dataset`` is the backend's own, the rest advisory.
+    Only ``dataset`` is the backend's own, the rest advisory; it is ``None`` while no capture is
+    chosen.
     """
 
-    dataset: DatasetSelection
+    dataset: DatasetSelection | None
 
 
 GUI_STATE_DEFAULTS = GuiState(
@@ -228,87 +283,48 @@ GUI_STATE_DEFAULTS = GuiState(
     view=ViewState(scale=1.0, offset_x=0.0, offset_y=0.0),
     mode="box",
     active_subject=None,
-    dataset=DatasetSelection(
-        dataset_root=None,
-        subject=None,
-        date=None,
-        image_list=[],
-        current_image_index=0,
-        images_dir=None,
-        bucket=None,
-    ),
+    dataset=None,
 )
 """The GUI state a project holds before it has any of its own: the Annotate tab in box mode at
 unit zoom, no subject active and no dataset chosen."""
 
 
-class _DatasetChoice(BaseModel):
-    """The chosen part of a selection, the only part the GUI snapshot holds.
+class _PersistedGuiState(_GuiFields):
+    """The GUI snapshot's whole shape: :class:`GuiState` with its dataset held as the choice.
 
-    ``dataset_root`` is spelled by :func:`tcip_mcp.registry_paths.stored_path` against the
-    project.
+    The choice's ``dataset_root`` is spelled by :func:`tcip_mcp.registry_paths.stored_path`
+    against the project.
     """
 
-    model_config = ConfigDict(extra="forbid")
-
-    dataset_root: str
-    subject: str | None
-    date: str
-    bucket: str | None
-    current_image_index: int
+    dataset: DatasetChoice | None
 
 
-class _PersistedGuiState(_GuiFields):
-    """The GUI snapshot's whole shape: :class:`GuiState` with its dataset held as the choice."""
+def selection_for(choice: DatasetChoice) -> DatasetSelection:
+    """Return the selection ``choice`` names, its images the capture's in name order.
 
-    dataset: _DatasetChoice | None
-
-
-def selection_for(
-    dataset_root: Path,
-    subject: str | None,
-    date: str,
-    bucket: str | None,
-    current_image_index: int,
-) -> DatasetSelection:
-    """Return the selection a choice names.
-
-    It holds the image list of capture ``date`` and the name of a bucket under ``dataset_root``.
-    ``current_image_index`` is clamped to the list. Raises
+    Each image is placed at the path its scan found it at
+    (:func:`~tcip_mcp.pipelines.image_utils.source_path_of`); the index is clamped to them. Raises
     ``AmbiguousImageStemError`` for a capture holding two images of one stem, and ``ValueError``
     for a ``date`` that is no capture name.
     """
-    from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.pipelines.image_utils import logical_images_by_name
-
-    images_dir = image_dir(dataset_root, date)
-    image_list = list(logical_images_by_name(images_dir))
-    index = (
-        max(0, min(current_image_index, len(image_list) - 1))
-        if image_list
-        else 0
-    )
-    return DatasetSelection(
-        dataset_root=str(dataset_root),
-        subject=subject,
-        date=date,
-        image_list=image_list,
-        current_image_index=index,
-        images_dir=str(images_dir),
-        bucket=bucket or None,
+    from tcip_mcp.pipelines.image_utils import (
+        logical_images_by_name,
+        source_path_of,
     )
 
-
-def current_image(selection: DatasetSelection) -> str | None:
-    """Return the image the selection's index names, under its images directory, or ``None``.
-
-    ``None`` when the selection has no images directory or no images.
-    """
-    if selection.images_dir is None or not selection.image_list:
-        return None
-    return str(
-        Path(selection.images_dir)
-        / selection.image_list[selection.current_image_index]
+    found = logical_images_by_name(image_dir(choice.dataset_root, choice.date))
+    images = [
+        CaptureImage(path=source_path_of(source)) for source in found.values()
+    ]
+    return DatasetSelection.model_validate(
+        {
+            **choice.model_dump(),
+            "bucket": choice.bucket or None,
+            "current_image_index": max(
+                0, min(choice.current_image_index, len(images) - 1)
+            ),
+            "images": images,
+        }
     )
 
 
@@ -316,21 +332,13 @@ def write_gui_snapshot(project: Path, state: GuiState) -> None:
     """Persist ``state`` as ``project``'s GUI snapshot, its dataset held as the choice."""
     from tcip_mcp.registry_paths import stored_path
 
-    dataset = state.dataset
-    choice = (
-        None
-        if dataset.dataset_root is None or dataset.date is None
-        else _DatasetChoice(
-            dataset_root=stored_path(dataset.dataset_root, project),
-            subject=dataset.subject,
-            date=dataset.date,
-            current_image_index=dataset.current_image_index,
-            bucket=dataset.bucket,
+    document = _PersistedGuiState.model_validate(
+        state.model_dump(exclude={"dataset": {"images"}})
+    )
+    if document.dataset is not None:
+        document.dataset.dataset_root = stored_path(
+            document.dataset.dataset_root, project
         )
-    )
-    document = _PersistedGuiState(
-        **{**state.model_dump(exclude={"dataset"}), "dataset": choice}
-    )
     tcip_store.replace(
         gui_snapshot_key(project), document.model_dump(mode="json")
     )
@@ -350,19 +358,23 @@ def read_gui_snapshot(project: Path) -> GuiState | None:
         return None
     persisted = _PersistedGuiState.model_validate(raw)
     choice = persisted.dataset
-    dataset = (
-        GUI_STATE_DEFAULTS.dataset
-        if choice is None
-        else selection_for(
-            resolved_registry_path(project, choice.dataset_root),
-            choice.subject,
-            choice.date,
-            choice.bucket,
-            choice.current_image_index,
-        )
-    )
-    return GuiState(
-        **{**persisted.model_dump(exclude={"dataset"}), "dataset": dataset}
+    return GuiState.model_validate(
+        {
+            **persisted.model_dump(exclude={"dataset"}),
+            "dataset": None
+            if choice is None
+            else selection_for(
+                choice.model_copy(
+                    update={
+                        "dataset_root": str(
+                            resolved_registry_path(
+                                project, choice.dataset_root
+                            )
+                        )
+                    }
+                )
+            ),
+        }
     )
 
 

@@ -166,10 +166,14 @@ class BandGroupRef:
     one.
     """
 
-    stem: str
     manifest_path: Path
     bands: dict[str, Path]
     central_wavelength_nm: dict[str, float] | None
+
+    @property
+    def stem(self) -> str:
+        """The logical image's stem, its manifest's."""
+        return self.manifest_path.stem
 
 
 class BandGroupIncompleteError(FileNotFoundError):
@@ -466,7 +470,6 @@ def read_band_group_manifest(manifest_path: Path) -> BandGroupRef:
         else {str(k): float(v) for k, v in wl_field.items()}
     )
     return BandGroupRef(
-        stem=manifest_path.stem,
         manifest_path=manifest_path,
         bands=bands,
         central_wavelength_nm=wavelengths,

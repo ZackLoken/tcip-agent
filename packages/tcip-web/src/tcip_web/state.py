@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
 from tcip_mcp.web_client import (
     GUI_STATE_DEFAULTS,
+    DatasetSelection,
     GuiState,
     Panel,
     read_gui_snapshot,
@@ -84,6 +85,22 @@ class PanelEnvelope(BaseModel):
 
 class GuiMutationInvalidError(ValueError):
     """A :meth:`StateStore.mutate` call whose merged result does not validate as ``GuiState``."""
+
+
+class NoSelectionError(ValueError):
+    """A request that acts on the selected capture arrived while none is selected."""
+
+
+def selected(state: GuiState) -> DatasetSelection:
+    """Return ``state``'s capture selection.
+
+    Raises :class:`NoSelectionError` naming the select route when none is selected.
+    """
+    if state.dataset is None:
+        raise NoSelectionError(
+            "no capture is selected; select one through /api/dataset/select"
+        )
+    return state.dataset
 
 
 class NoProjectOpenError(RuntimeError):
@@ -310,7 +327,10 @@ class StateStore:
         return StateNotification(state=self._now.state, version=self._version)
 
     async def mutate(
-        self, mutation: dict[str, Any], *, project: OpenProject | None
+        self,
+        mutation: Callable[[GuiState], dict[str, Any]],
+        *,
+        project: OpenProject | None,
     ) -> None:
         """Apply a partial mutation, validated, persist it to the open project, and hold it.
 
@@ -318,20 +338,25 @@ class StateStore:
         (:meth:`admit`; :class:`ProjectNotOpenError` when it is no longer the open one,
         :class:`NoProjectOpenError` when none is, nothing held either way), or ``None`` for a
         mutation made while no project was open, which is held and persisted nowhere.
-        ``mutation`` is a shallow dict of top-level field names; a nested field is set by
-        passing a fully built model instance or a complete dict for it.
-        After the admission the merged result is validated through :class:`GuiState`: a mutation
-        that does not validate, or states a nested field partly, raises
-        :class:`GuiMutationInvalidError` naming the field. A state that cannot be persisted raises
-        the store's own error, and nothing is held.
+        ``mutation`` returns, from the state held once the project is admitted, a shallow dict of
+        top-level field names; its exception propagates with nothing held, and a nested field is
+        set by a fully built model instance or a complete dict for it. The merged result is
+        validated through :class:`GuiState`: a mutation that does not validate, or states a
+        nested field partly, raises :class:`GuiMutationInvalidError` naming the field. A state
+        that cannot be persisted raises the store's own error, and nothing is held.
         """
         async with self._lock:
             opened = None if project is None else self.admit(project.id)
             dumped = {
-                k: v.model_dump(mode="json") if isinstance(v, BaseModel) else v
-                for k, v in mutation.items()
+                k: v.model_dump(mode="json", round_trip=True)
+                if isinstance(v, BaseModel)
+                else v
+                for k, v in mutation(self._now.state).items()
             }
-            merged = {**self._now.state.model_dump(mode="json"), **dumped}
+            merged = {
+                **self._now.state.model_dump(mode="json", round_trip=True),
+                **dumped,
+            }
             try:
                 new_state = GuiState.model_validate(merged)
             except ValidationError as exc:

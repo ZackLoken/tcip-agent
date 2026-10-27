@@ -10,13 +10,19 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from tcip_mcp.buckets import buckets_by_date
 from tcip_mcp.dataset_layout import capture_subjects, list_dates, list_subjects
-from tcip_mcp.web_client import selection_for
+from tcip_mcp.web_client import (
+    CaptureChoice,
+    DatasetChoice,
+    DatasetSelection,
+    GuiState,
+    selection_for,
+)
 from tcip_web.paths import allowed_path
-from tcip_web.state import store
+from tcip_web.state import selected, store
 
 router = APIRouter(prefix="/api/dataset", tags=["dataset"])
 
@@ -39,7 +45,7 @@ class DatasetTree(BaseModel):
     buckets_by_date: dict[str, list[str]]
     # The first date whose labels would not read, naming the documents; every other document's
     # subjects are still listed.
-    label_problem: str | None = None
+    label_problem: str | None
 
 
 def _label_problem(capture: str, unreadable: list[str]) -> str | None:
@@ -83,19 +89,24 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
     )
 
 
-class SelectionRequest(BaseModel):
-    """A dataset selection: its root, subject, capture and bucket."""
+class SelectAnswer(BaseModel):
+    """A selection made: the selection held, and what its capture's documents advise of it.
 
-    dataset_root: str
-    subject: str | None = None
-    # The capture: a date folder, a literal bucket or ``UNDATED_BUCKET``.
-    date: str
-    # The name of the bucket to review, published under dataset_root.
-    bucket: str | None = None
+    ``annotations_present`` is whether the capture's labels hold the subject,
+    ``predictions_present`` whether the bucket holds a document for one of its images, and
+    ``label_problem`` the line naming the label documents that will not read, if any.
+    """
+
+    model_config = ConfigDict(json_schema_mode_override="serialization")
+
+    selection: DatasetSelection
+    annotations_present: bool
+    predictions_present: bool
+    label_problem: str | None
 
 
 @router.post("/select")
-async def select_dataset(req: SelectionRequest) -> dict:
+async def select_dataset(req: CaptureChoice) -> SelectAnswer:
     """Set the open project's ``GuiState.dataset`` selection; broadcasts a state delta.
 
     Answers 409 while no project is open, and 400 for a bucket name no bucket is published
@@ -114,36 +125,40 @@ async def select_dataset(req: SelectionRequest) -> dict:
     # the first select of a fresh process starts at image 0.
     global _selected_this_session
     prev = held.dataset
-    same_identity = (
-        _selected_this_session
-        and prev.dataset_root == str(root)
-        and prev.date == req.date
-        and prev.subject == req.subject
+    resumed = (
+        prev.current_image_index
+        if _selected_this_session
+        and prev is not None
+        and (prev.dataset_root, prev.date, prev.subject)
+        == (str(root), req.date, req.subject)
+        else 0
     )
     _selected_this_session = True
     documents = read_bucket(root, req.bucket).documents if req.bucket else {}
     try:
         selection = selection_for(
-            root,
-            req.subject,
-            req.date,
-            req.bucket,
-            prev.current_image_index if same_identity else 0,
+            DatasetChoice.model_validate(
+                {
+                    **req.model_dump(),
+                    "dataset_root": str(root),
+                    "current_image_index": resumed,
+                }
+            )
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    await store.mutate({"dataset": selection}, project=project)
+    await store.mutate(lambda _held: {"dataset": selection}, project=project)
 
     found, unreadable = capture_subjects(root, req.date)
-    return {
-        "status": "ok",
-        "selection": selection.model_dump(mode="json"),
-        "annotations_present": req.subject in found,
-        "predictions_present": bool(
-            set(documents.values()) & set(selection.image_list)
+    return SelectAnswer(
+        selection=selection,
+        annotations_present=req.subject in found,
+        predictions_present=bool(
+            set(documents.values())
+            & {image.name for image in selection.images}
         ),
-        "label_problem": _label_problem(req.date, unreadable),
-    }
+        label_problem=_label_problem(req.date, unreadable),
+    )
 
 
 class NavRequest(BaseModel):
@@ -153,21 +168,28 @@ class NavRequest(BaseModel):
 
 
 @router.post("/nav")
-async def set_current_image(req: NavRequest) -> dict:
-    """Persist the current image position into ``GuiState.dataset``.
+async def set_current_image(req: NavRequest) -> NavRequest:
+    """Persist the current image position into ``GuiState.dataset`` and answer it.
 
-    The open project and its selection are read as one value
-    (:meth:`~tcip_web.state.StateStore.held_state`), the index replaced, and held once
-    :meth:`~tcip_web.state.StateStore.mutate` admits that project under the lock.
+    The open project is read once (:meth:`~tcip_web.state.StateStore.held`) and the index
+    replaced in the selection :meth:`~tcip_web.state.StateStore.mutate` holds once it admits
+    that project under the lock, so the project's refusal answers first; then no capture
+    selected (:func:`~tcip_web.state.selected`) or an index outside its images answers 400.
     """
-    project, held = store.held_state()
-    dataset = held.dataset
-    n = len(dataset.image_list)
     index = req.current_image_index
-    if n and not (0 <= index < n):
-        raise HTTPException(400, f"index {index} out of range for {n} images")
-    await store.mutate(
-        {"dataset": dataset.model_copy(update={"current_image_index": index})},
-        project=project,
-    )
-    return {"status": "ok", "current_image_index": index}
+
+    def navigated(state: GuiState) -> dict[str, DatasetSelection]:
+        dataset = selected(state)
+        n = len(dataset.images)
+        if n and not (0 <= index < n):
+            raise HTTPException(
+                400, f"index {index} out of range for {n} images"
+            )
+        return {
+            "dataset": dataset.model_copy(
+                update={"current_image_index": index}
+            )
+        }
+
+    await store.mutate(navigated, project=store.held())
+    return req

@@ -299,9 +299,7 @@ def initialize_project(
     it as it stands; one recording a different site, display name or invariances refuses rather
     than overwriting it. A refused record leaves nothing on disk.
 
-    Called through an MCP server started for no project, every project tool of that server acts
-    on the project created from then on; a server started for a project stays on it. Through a
-    server the answer carries ``session_project``, the project its tools act on after the call.
+    Through a server the answer carries ``session_project``, the project its tools act on after.
 
     Args:
         project_path: Root directory of the project.
@@ -337,21 +335,18 @@ def view_gui_state(project: Path) -> dict:
     """Read the GUI state the human last left in this project.
 
     The state comes from its GUI snapshot (``web_client.read_gui_snapshot``): the tab, the mode
-    and the dataset selection, with ``current_image``, the image the selection's index names. A
-    ``note`` stands in for all of it when the GUI has persisted nothing for this project; a
-    snapshot that will not read raises.
+    and the dataset selection, ``None`` while no capture is chosen, whose ``images`` entry at
+    ``current_image_index`` is the image in view. A ``note`` stands in for all of it when the GUI
+    has persisted nothing for this project; a snapshot that will not read raises.
     """
-    from tcip_mcp.web_client import current_image, read_gui_snapshot
+    from tcip_mcp.web_client import read_gui_snapshot
 
     state = read_gui_snapshot(project)
     if state is None:
         return {
             "note": "the GUI has not persisted a selection for this project"
         }
-    return {
-        **state.model_dump(mode="json"),
-        "current_image": current_image(state.dataset),
-    }
+    return state.model_dump(mode="json")
 
 
 @tool()
@@ -384,11 +379,12 @@ def inspect_project(project: Path) -> dict:
 
     # The logical images under <root>/images/<date>/ and the capture dates they sit under.
     from tcip_mcp import dataset_layout
-    from tcip_mcp.pipelines.image_utils import logical_image_count
+    from tcip_mcp.pipelines.image_utils import logical_image_counts
 
     if dataset_layout.image_root(project).is_dir():
-        status["image_count"] = logical_image_count(project)
-        status["dates"] = dataset_layout.list_dates(project)
+        counts = logical_image_counts(project)
+        status["image_count"] = sum(counts.values())
+        status["dates"] = list(counts)
 
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         plant_mapping_names,

@@ -22,15 +22,17 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     MatchTolerance,
     NoMatchRadiusError,
     NoMatchToleranceError,
-    PlantRegistryReference,
     StatedRadius,
-    build_mapping,
     grid_pitch_m,
     read_plant_csvs,
     resolve_nn_tolerance_m,
 )
-from tests._image_fixtures import write_geo_image
-from tests._mapping_fixtures import write_plant_csv
+from tests._mapping_fixtures import (
+    mapping_over,
+    plant_rows,
+    write_photos,
+    write_plant_csv,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -55,12 +57,7 @@ def _east(meters: float, north: float = 0.0) -> tuple[float, float]:
     return lat, lon
 
 
-PLANTS = [
-    {"plot": f"P{i}", "accession": f"acc-{i}", "lat": lat, "lon": lon}
-    for i, (lat, lon) in enumerate(
-        _east(i * PLANT_SPACING_M) for i in range(4)
-    )
-]
+PLANTS = plant_rows({f"P{i}": _east(i * PLANT_SPACING_M) for i in range(4)})
 STRAY_NORTH_M = 4.0
 """How far north of the last plant the one stray photograph was taken."""
 
@@ -80,23 +77,19 @@ def _build(
     positions = [(PLANTS[i]["lat"], PLANTS[i]["lon"]) for i in range(3)] + [
         _east(3 * PLANT_SPACING_M, STRAY_NORTH_M)
     ]
-    for i, ((lat, lon), err) in enumerate(zip(positions, errors)):
-        write_geo_image(
-            image_dir(dataset_root, DATE) / f"photo_{i}.jpg",
-            lat,
-            lon,
-            datetime(2026, 2, 11, 9) + timedelta(seconds=i),
-            h_pos_err=err,
-        )
-    return build_mapping(
+    write_photos(
+        image_dir(dataset_root, DATE),
+        {
+            f"photo_{i}.jpg": (lat, lon, err)
+            for i, ((lat, lon), err) in enumerate(zip(positions, errors))
+        },
+        datetime(2026, 2, 11, 9),
+        timedelta(seconds=1),
+    )
+    return mapping_over(
         dataset_root,
         [write_plant_csv(tmp_path / "plants.csv", PLANTS)],
-        name="valley",
-        dataset_id="ds-1",
-        project=tmp_path,
-        plant_registry=PlantRegistryReference(
-            name="unregistered", digest="0" * 64
-        ),
+        tmp_path,
         match_radius=match_radius,
     )
 

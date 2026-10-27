@@ -12,42 +12,31 @@
  */
 
 import { api } from "@/api/client";
+import type { AnnotateFocus } from "@/api/types.generated";
 import { toastLabelProblem } from "@/lib/labelProblemToast";
 import { useStore } from "@/store";
-import type { Mode } from "@/store/types";
-
-export interface AnnotateFocusData {
-  dataset_root?: string;
-  subject?: string | null;
-  date: string;
-  image_index?: number;
-  mode?: Mode;
-  active_subject?: string | null;
-  bucket?: string | null;
-  proposal?: number | null;
-}
 
 export type AnnotateFocusOutcome = "adopted" | "declined-unselected" | "declined-selected";
 
 export async function applyAnnotateFocus(
-  d: AnnotateFocusData,
+  d: AnnotateFocus,
   wanted: () => boolean,
 ): Promise<AnnotateFocusOutcome> {
   if (!wanted()) return "declined-unselected";
   const cur = useStore.getState().gui.dataset;
   const needsSwitch =
-    !!d.dataset_root &&
-    (d.dataset_root !== cur.dataset_root ||
-      (d.subject ?? null) !== cur.subject ||
-      d.date !== cur.date ||
-      (d.bucket ?? null) !== cur.bucket);
+    cur === null ||
+    d.dataset_root !== cur.dataset_root ||
+    d.subject !== cur.subject ||
+    d.date !== cur.date ||
+    d.bucket !== cur.bucket;
   const project = useStore.getState().openProject;
   if (needsSwitch && project) {
     const res = await api.dataset.select({
-      dataset_root: d.dataset_root!,
-      subject: d.subject ?? null,
+      dataset_root: d.dataset_root,
+      subject: d.subject,
       date: d.date,
-      bucket: d.bucket ?? null,
+      bucket: d.bucket,
     });
     if (!wanted()) return "declined-selected";
     useStore.getState().applyRestoredDataset(res.selection, project);
@@ -56,18 +45,17 @@ export async function applyAnnotateFocus(
   // Apply the view controls after any dataset switch has resolved, so a same-identity
   // snapshot (which keeps index/mode local) can't overwrite them.
   const store = useStore.getState();
-  if (typeof d.image_index === "number") {
-    const ds = store.gui.dataset;
+  const ds = store.gui.dataset;
+  if (ds) {
     store.patchGui({ dataset: { ...ds, current_image_index: d.image_index } });
     // Persist like user navigation does, so view_gui_state sees the focused frame.
     void api.dataset.nav(d.image_index).catch(() => {});
   }
-  if (d.mode) store.setMode(d.mode);
-  // The canvas renders only shapes of the active subject, so set it to the subject present on the
-  // focused frame, otherwise a frame labeled for another subject shows a blank canvas even in
-  // the right mode.
-  if (d.active_subject) store.setActiveSubject(d.active_subject);
-  store.setFocus(typeof d.proposal === "number" ? { kind: "proposal", index: d.proposal } : null);
+  store.setMode(d.mode);
+  // The canvas renders only shapes of the active subject, so a frame labeled for another
+  // subject would show a blank canvas even in the right mode.
+  store.setActiveSubject(d.subject);
+  store.setFocus(d.proposal === null ? null : { kind: "proposal", index: d.proposal });
   store.setActiveTab("annotate");
   return "adopted";
 }

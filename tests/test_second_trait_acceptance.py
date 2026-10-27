@@ -66,10 +66,9 @@ def _currant_bloom_body(tmp_path: Path) -> dict:
 
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
     from tcip_web.state import store
-    from tests._mapping_fixtures import register_plant_registry_for
+    from tests._mapping_fixtures import PLANTS, register_plant_registry_for
     from tests.test_plant_mapping_binding import (
         DATES,
-        PLANTS,
         _dataset,
         _init,
         _write_scene,

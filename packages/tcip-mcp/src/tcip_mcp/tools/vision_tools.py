@@ -807,16 +807,12 @@ def _viz_dataset_sample(
     project: Path, folder_path: str, *, n: int, task: VizTask
 ) -> dict:
     """Render a grid of random annotated dataset samples."""
-    from tcip_mcp.dataset_layout import (
-        image_dir,
-        image_root,
-        label_key,
-        list_dates,
-    )
+    from tcip_mcp.dataset_layout import image_root, label_key
     from tcip_mcp.pipelines.image_utils import (
         BandGroupIncompleteError,
         list_logical_images,
         refuse_incomplete_band_group,
+        scan_captures,
     )
 
     root = Path(folder_path)
@@ -824,13 +820,12 @@ def _viz_dataset_sample(
     if not images_dir.is_dir():
         return {"error": f"Images directory not found: {images_dir}"}
 
-    # Every logical image of every capture, a grouped capture as one entry.
     all_images = [
         (capture, stem, src)
-        for capture in list_dates(root)
-        for stem, src in sorted(
-            list_logical_images(image_dir(root, capture)).items()
-        )
+        for capture, logical in scan_captures(
+            root, list_logical_images
+        ).items()
+        for stem, src in sorted(logical.items())
     ]
     if not all_images:
         return {"error": "No images found in dataset"}

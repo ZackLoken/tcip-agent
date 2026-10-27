@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from httpx import Response
 
     from tcip_mcp.workspace import BoundProject
+    from tcip_web.routes.inference import InferenceJob
     from tcip_web.state import OpenProject
 
 INVARIANCES = CaptureInvariances(
@@ -31,6 +32,28 @@ INVARIANCES = CaptureInvariances(
     scale=True,
 )
 """A sample breeder's answer: every capture transform leaves the trait's measurement unchanged."""
+
+
+def inference_job(
+    images_dir: str | Path, project: str | Path, **change: object
+) -> InferenceJob:
+    """Return a job over the capture ``images_dir`` for ``project``, as the launch route makes one.
+
+    It is ``user:tester``'s, publishing the bucket ``out`` from no checkpoint under an empty
+    statement, with ``change`` laid over it.
+    """
+    from tcip_mcp.pipelines.execution import Stated
+    from tcip_web.routes.inference import InferenceJob
+
+    return InferenceJob(
+        job_id="job",
+        project=str(project),
+        checkpoint_path="",
+        images_dir=str(images_dir),
+        bucket="out",
+        actor="user:tester",
+        stated=Stated(),
+    ).model_copy(update=change)
 
 
 def named_project(

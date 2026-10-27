@@ -12,7 +12,7 @@ import asyncio
 import os
 import shutil
 from collections.abc import Iterable
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,6 +28,9 @@ from tests._audit_fixtures import audit_rows, held_by_another_writer
 from tests._image_fixtures import write_geo_image
 from tests._mapping_fixtures import (
     PHOTO_POSITION_ERROR_M,
+    PLANTS,
+    geolocated_captures,
+    mapping_over,
     register_plant_registry_for,
     write_plant_csv,
 )
@@ -43,10 +46,6 @@ if TYPE_CHECKING:
 
     from tcip_web.state import OpenProject
 
-PLANTS = [
-    {"plot": "P1", "accession": "acc-A", "lat": 43.19670, "lon": -90.058000},
-    {"plot": "P2", "accession": "acc-B", "lat": 43.19670, "lon": -90.058037},
-]
 DATES = ["2026-02-11", "2026-02-25"]
 UNREAD_P2 = frozenset({f"{PLANTS[1]['plot']}_{DATES[0].replace('-', '')}"})
 """The second plant's first-date capture, left without a prediction document."""
@@ -182,26 +181,16 @@ def _write_scene(
     """
     pytest.importorskip("torch")
     plants = PLANTS if plants is None else plants
-    preds_by_date: dict[str, str] = {}
-    for date in dates:
-        base_time = datetime.strptime(date, "%Y-%m-%d").replace(
-            hour=9, minute=30
+    preds_by_date = {
+        date: _publish(
+            dataset_root.parent,
+            f"live/{date}",
+            [image for image in images if image.stem not in unpredicted],
         )
-        images = []
-        for j, plant in enumerate(plants):
-            stem = f"{plant['plot']}_{date.replace('-', '')}"
-            write_geo_image(
-                image_dir(dataset_root, date) / f"{stem}.jpg",
-                plant["lat"],
-                plant["lon"],
-                base_time + timedelta(minutes=j),
-                h_pos_err=PHOTO_POSITION_ERROR_M,
-            )
-            if stem not in unpredicted:
-                images.append(image_dir(dataset_root, date) / f"{stem}.jpg")
-        preds_by_date[date] = _publish(
-            dataset_root.parent, f"live/{date}", images
-        )
+        for date, images in geolocated_captures(
+            dataset_root, dates, plants
+        ).items()
+    }
 
     plant_csv = write_plant_csv(
         dataset_root.parent / f"{dataset_root.name}_plants.csv", plants
@@ -414,7 +403,6 @@ def test_deliver_phenology_milestones_refuses_a_record_with_provenance_and_no_re
         "dataset_id": "whatever-id",
         "built_at": "2026-02-11T00:00:00+00:00",
         "dates_requested": None,
-        "dates": list(DATES),
         "match_radius": {},
         "plant_registry": {"name": "unregistered", "digest": "0" * 64},
         "capture_digests": {d: {} for d in DATES},
@@ -964,16 +952,7 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     plant_csv, _ = _write_scene(dataset_root)
-    build = plant_mapping.build_mapping(
-        dataset_root,
-        [plant_csv],
-        name="valley",
-        dataset_id="whatever-id",
-        project=tmp_path,
-        plant_registry=plant_mapping.PlantRegistryReference(
-            name="unregistered", digest="0" * 64
-        ),
-    )
+    build = mapping_over(dataset_root, [plant_csv], tmp_path, name="valley")
 
     with (
         held_by_another_writer(audit_log_key(tmp_path)),

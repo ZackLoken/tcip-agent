@@ -109,15 +109,15 @@ def console_cases(
         visualize,
     )
     from tests._chain_fixtures import published
-    from tests._mapping_fixtures import write_plant_csv
+    from tests._mapping_fixtures import write_plots_csv
     from tests._verified_checkpoint_fixtures import registered_checkpoint
     from tests.test_plant_aware_group_splits_script import (
         P1_TIEPOINT,
         P2_TIEPOINT,
         P3_TIEPOINT,
         P4_TIEPOINT,
+        _center_latlon,
         _four_plant_dataset,
-        _plant_at,
     )
     from tests.test_preflight_config_script import _fixture_config
     from tests.test_shp_to_plant_csv_script import _point_shapefile
@@ -162,14 +162,14 @@ def console_cases(
         ),
     )
     _four_plant_dataset(project)
-    plants = [
-        _plant_at(f"P{k}", f"acc-{k}", tiepoint)
+    centers = {
+        f"P{k}": _center_latlon(*tiepoint)
         for k, tiepoint in enumerate(
             (P1_TIEPOINT, P2_TIEPOINT, P3_TIEPOINT, P4_TIEPOINT), 1
         )
-    ]
-    write_plant_csv(project / "west.csv", plants[:2])
-    write_plant_csv(project / "east.csv", plants[2:])
+    }
+    write_plots_csv(project / "west.csv", dict(list(centers.items())[:2]))
+    write_plots_csv(project / "east.csv", dict(list(centers.items())[2:]))
     _point_shapefile(project)
     _fixture_config(project)
     runs = sorted(obs.directory.name for obs in run_observations(project))

@@ -16,20 +16,14 @@ from pydantic import ValidationError
 import tcip_store as ts
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tests._mapping_fixtures import (
-    PLOTS,
     register_plant_registry_for,
-    write_plant_csv,
+    write_plots_csv,
 )
-
-_PLANTS = [
-    {"plot": plot, "accession": f"acc-{plot}", "lat": lat, "lon": lon}
-    for plot, (lat, lon) in PLOTS.items()
-]
 
 
 def _registered(project: Path) -> str:
     """Register a two-plant CSV under ``project`` and return the registry's name."""
-    csv_path = write_plant_csv(project / "plants.csv", _PLANTS)
+    csv_path = write_plots_csv(project / "plants.csv")
     return register_plant_registry_for(project, [csv_path])
 
 
@@ -37,7 +31,7 @@ def test_a_registered_plant_registry_reads_back_as_its_producer_wrote_it(
     tmp_path: Path,
 ) -> None:
     """The record ``register_plant_registry_record`` returns is the one ``load_registry`` reads."""
-    csv_path = write_plant_csv(tmp_path / "plants.csv", _PLANTS)
+    csv_path = write_plots_csv(tmp_path / "plants.csv")
 
     written = plant_mapping.register_plant_registry_record(
         tmp_path, "rows", [csv_path], crop="currant", site="orchard"

@@ -14,8 +14,7 @@ const UI_PREFIX = "tcip.dsui.";
 
 /** Stable key for a dataset selection: project + dataset root + date + subject + bucket, so
  *  distinct views don't share. */
-export function datasetKey(project: SnapshotProject | null, d: DatasetSelection): string | null {
-  if (!project || !d.dataset_root || !d.date) return null;
+export function datasetKey(project: SnapshotProject, d: DatasetSelection): string {
   return JSON.stringify([project.id, d.dataset_root, d.date, d.subject, d.bucket]);
 }
 

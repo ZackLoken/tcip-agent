@@ -8,7 +8,7 @@ import type { CaptureInvariances, MatchRadius } from "@/api/types.generated";
 import { useStore } from "@/store";
 import { SetupTab } from "@/tabs/SetupTab";
 import { PROJECT_FIXTURES } from "@/test/projectRecords";
-import { openTestProject, testProject } from "@/test/store";
+import { openTestProject, RAW_SELECTION, testProject } from "@/test/store";
 import { TRAIT_LISTINGS } from "@/test/traitRecords";
 
 const initialStoreState = useStore.getState();
@@ -21,7 +21,7 @@ const answers = (block: CaptureInvariances) =>
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
-  openTestProject({ dataset_root: "C:/data" });
+  openTestProject(RAW_SELECTION);
   vi.spyOn(resultsApi, "traits").mockResolvedValue({ traits: [], unreadable: [], definitions: {} });
   vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue({ names: [] });
   vi.spyOn(api.projects, "list").mockResolvedValue(LISTING);

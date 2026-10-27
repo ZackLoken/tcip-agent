@@ -7,6 +7,7 @@ import type { CaptureInvariances, MatchRadius } from "@/api/types.generated";
 import { TabHeading } from "@/components/TabHeading";
 import { TraitRevisionPanel } from "@/components/TraitRevisionPanel";
 import { useStore } from "@/store";
+import { selectDatasetRoot } from "@/store/slices/gui";
 
 // A date's match radius as the breeder reads it, from the record's own source.
 function radiusPhrase(radius: MatchRadius): string {
@@ -326,7 +327,7 @@ function InvariancesPanel({ projectId }: { projectId: string }) {
  *  mapping a phenology delivery reads. */
 export function SetupTab() {
   const projectId = useStore((s) => s.openProject?.id ?? null);
-  const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
+  const datasetRoot = useStore(selectDatasetRoot);
   if (!projectId) return null;
   return (
     <div className="flex-1 overflow-auto p-5">

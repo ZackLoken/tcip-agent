@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 
 import { api } from "@/api/client";
-import { inImagesDir } from "@/lib/paths";
 import { useStore } from "@/store";
 
 /**
@@ -19,22 +18,21 @@ export function usePrefetchAdjacentImages(
   bands?: string,
   stretch?: string,
 ): void {
-  const imagesDir = useStore((s) => s.gui.dataset.images_dir);
-  const imageList = useStore((s) => s.gui.dataset.image_list);
-  const currentIndex = useStore((s) => s.gui.dataset.current_image_index);
+  const dataset = useStore((s) => s.gui.dataset);
 
   useEffect(() => {
-    if (!imagesDir) return;
+    if (dataset === null) return;
+    const { images, current_image_index: currentIndex } = dataset;
     // Forward-biased lookahead, deeper than one step so fast stepping lands on a warm frame.
-    const targets = [1, 2, 3, -1].map((d) => imageList[currentIndex + d]).filter(Boolean);
+    const targets = [1, 2, 3, -1].map((d) => images[currentIndex + d]).filter(Boolean);
     if (!targets.length) return;
     // Give the current image's own request a head start before warming neighbors.
     const t = setTimeout(() => {
-      for (const name of targets) {
+      for (const image of targets) {
         const img = new Image();
-        img.src = api.images.url(inImagesDir(imagesDir, name), displayPixels, { bands, stretch });
+        img.src = api.images.url(image.path, displayPixels, { bands, stretch });
       }
     }, 600);
     return () => clearTimeout(t);
-  }, [imagesDir, imageList, currentIndex, displayPixels, bands, stretch]);
+  }, [dataset, displayPixels, bands, stretch]);
 }

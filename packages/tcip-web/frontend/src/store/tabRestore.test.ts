@@ -3,26 +3,15 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { TAB_NAMES } from "@/api/types.generated";
 import { datasetKey, loadLastTab, recordLastTab, saveDatasetUi } from "@/lib/datasetUiState";
 import { useStore } from "@/store";
-import type { DatasetSelection, TabName } from "@/store/types";
-import { TEST_PROJECT } from "@/test/store";
+import type { TabName } from "@/store/types";
+import { selected, type SelectionChange, TEST_PROJECT } from "@/test/store";
 
 const s = () => useStore.getState();
 
 const PROJECT = TEST_PROJECT;
-const ROOT = PROJECT.path;
 
-function selection(over: Partial<DatasetSelection> = {}): DatasetSelection {
-  return {
-    dataset_root: ROOT,
-    subject: "subject_a",
-    date: "2026-01-01",
-    image_list: ["a.jpg"],
-    current_image_index: 0,
-    images_dir: null,
-    bucket: null,
-    ...over,
-  };
-}
+const selection = (change: SelectionChange = {}) =>
+  selected({ subject: "subject_a", count: 1, ...change });
 
 describe("per-project last-used tab", () => {
   beforeEach(() => {
@@ -80,13 +69,11 @@ describe("saved position on reopening a dataset", () => {
   });
 
   it("brings back the image the person left this dataset on", () => {
-    const sel = selection({ image_list: ["a.jpg", "b.jpg", "c.jpg"] });
-    const key = datasetKey(PROJECT, sel);
-    expect(key).not.toBeNull();
-    saveDatasetUi(key as string, { index: 2 });
+    const sel = selection({ count: 3 });
+    saveDatasetUi(datasetKey(PROJECT, sel), { index: 2 });
 
     s().applyRestoredDataset(sel, PROJECT);
 
-    expect(s().gui.dataset.current_image_index).toBe(2);
+    expect(s().gui.dataset?.current_image_index).toBe(2);
   });
 });

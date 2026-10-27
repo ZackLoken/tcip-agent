@@ -16,9 +16,8 @@ from tcip_mcp.tools.phenology_tools import (
     build_plant_mapping,
     register_plant_registry,
 )
-from tests._mapping_fixtures import write_plant_csv
+from tests._mapping_fixtures import PLANTS, write_plant_csv
 from tests.test_plant_mapping_binding import (
-    PLANTS,
     POPULATION,
     _dataset,
     _init,

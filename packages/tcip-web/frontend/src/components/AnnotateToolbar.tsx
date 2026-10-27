@@ -22,6 +22,7 @@ import {
   IMAGE_FILTERS,
   type ImageFilter,
 } from "@/lib/imageFilter";
+import { currentImage } from "@/lib/paths";
 import { saveRegistry } from "@/lib/registrySave";
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useSubjectColors } from "@/lib/subjectColors";
@@ -225,7 +226,7 @@ export function AnnotateToolbar({
     return counts;
   }, [canvasBoxes, canvasPolygons, canvasPoints, canvasImageAnnotations]);
 
-  const currentImage = dataset.image_list[dataset.current_image_index] ?? null;
+  const imageName = currentImage(dataset)?.name ?? null;
   const nav = useImageNav();
   const finished = isFinished(subjectState);
   const polygonTools = mode === "polygon";
@@ -249,7 +250,7 @@ export function AnnotateToolbar({
     const previousSubject = activeSubject;
     setActiveSubject(trimmed);
     const landed = await saveRegistry({ ...registry, [trimmed]: {} }, "Could not add the subject");
-    if (!landed && projectRoot && dataset.dataset_root) setActiveSubject(previousSubject);
+    if (!landed && projectRoot && dataset) setActiveSubject(previousSubject);
   }
 
   return (
@@ -468,7 +469,7 @@ export function AnnotateToolbar({
         <Stepper
           label="Image"
           noun="image"
-          name={currentImage}
+          name={imageName}
           position={nav.position}
           total={nav.total}
           canPrev={nav.canPrev}
@@ -477,24 +478,26 @@ export function AnnotateToolbar({
           onJump={nav.jumpToPosition}
         />
 
-        <select
-          aria-label="Images"
-          className="tcip-select h-[30px]"
-          value={annotateUi.imageFilter}
-          onChange={(e) => setImageFilter(e.target.value as ImageFilter)}
-          title={`Which images the stepper steps through, by what the labels say of ${dataset.subject ?? "the subject"}`}
-        >
-          {IMAGE_FILTERS.map((f) => (
-            <option key={f} value={f}>
-              {`${IMAGE_FILTER_WORDS[f]} (${filteredIndices(dataset.image_list, annotateUi.imageStates, f).length})`}
-            </option>
-          ))}
-        </select>
+        {dataset && (
+          <select
+            aria-label="Images"
+            className="tcip-select h-[30px]"
+            value={annotateUi.imageFilter}
+            onChange={(e) => setImageFilter(e.target.value as ImageFilter)}
+            title={`Which images the stepper steps through, by what the labels say of ${dataset.subject ?? "the subject"}`}
+          >
+            {IMAGE_FILTERS.map((f) => (
+              <option key={f} value={f}>
+                {`${IMAGE_FILTER_WORDS[f]} (${filteredIndices(dataset.images, annotateUi.imageStates, f).length})`}
+              </option>
+            ))}
+          </select>
+        )}
 
         <label
           className="flex items-center gap-1.5"
           title={
-            !dataset.subject
+            !dataset?.subject
               ? "Select a subject first"
               : subjectState !== null
                 ? `Every ${dataset.subject} on this image is annotated (c)`
@@ -505,7 +508,7 @@ export function AnnotateToolbar({
             type="checkbox"
             checked={finished}
             onChange={(e) => onComplete(e.target.checked)}
-            disabled={!currentImage || subjectState === null || !dataset.subject}
+            disabled={!imageName || subjectState === null || !dataset?.subject}
           />
           {subjectState === "negative" ? "Complete (none)" : "Complete"}
         </label>

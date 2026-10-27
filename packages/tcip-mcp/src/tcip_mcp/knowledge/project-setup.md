@@ -212,8 +212,9 @@ predictions, then deliver per `packages/tcip-mcp/src/tcip_mcp/knowledge/delivery
 
 The GUI (a separate process) and you share the project's store, not memory. `view_gui_state`
 is the bridge: it reads this project's GUI snapshot and returns what the human is
-looking at right now: `dataset_root`, `subject`, `date`, `active_tab`, and
-`current_image_index` / `current_image`. Call it when the human says "this image" or "the
+looking at right now: `active_tab` and the `dataset` (`dataset_root`, `subject`, `date`,
+`images`, each a name and its path, and `current_image_index`, the one in view; `null` while no
+capture is chosen). Call it when the human says "this image" or "the
 one I'm on" without a path. The nav index is persisted debounced as they page through
 frames, so it lags a beat; treat it as "roughly where they are," not a frame-exact cursor.
 It reads this project's own snapshot: while the GUI has another project open, that snapshot is

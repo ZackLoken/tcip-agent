@@ -34,12 +34,12 @@ from tcip_mcp.tools.phenology_tools import (
 from tests._image_fixtures import write_geo_image as _write_geo_image
 from tests._mapping_fixtures import (
     PHOTO_POSITION_ERROR_M,
+    PLANTS,
     register_plant_registry_for,
     write_plant_csv,
 )
 from tests._producer_fixtures import mapping_of, write_image
 from tests.test_plant_mapping_binding import (
-    PLANTS,
     _dataset,
     _deliver,
     _events,
@@ -232,7 +232,6 @@ def _persist_synthetic_mapping(
         dataset_id=dataset_id,
         built_at="2026-02-11T00:00:00+00:00",
         dates_requested=None,
-        dates=sorted(assignments),
         match_radius={
             d: MatchRadius(
                 value=10.0,
@@ -462,7 +461,6 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(
         dataset_id="ds-1",
         built_at="2026-02-11T00:00:00+00:00",
         dates_requested=None,
-        dates=[DATE],
         match_radius={},
         plant_registry={"name": "unregistered", "digest": "0" * 64},
         capture_digests={DATE: {}},

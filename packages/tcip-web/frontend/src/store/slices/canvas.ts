@@ -1,6 +1,6 @@
 import type { StateCreator } from "zustand";
 
-import { currentImage, pathInDir } from "@/lib/paths";
+import { currentImage } from "@/lib/paths";
 import type { AppState } from "@/store/appState";
 import {
   contentOf,
@@ -96,9 +96,9 @@ interface CanvasSnapshot extends CanvasContent {
 }
 
 /** What a focus names an index of: the image's labels and the bucket's document. Focus clears
- *  when this changes and survives a refresh of the same one; the one place that rule is stated. */
-export const focusContext = (s: Pick<AppState, "gui">): string =>
-  [s.gui.dataset.images_dir, currentImage(s.gui.dataset).name, s.gui.dataset.bucket].join("\0");
+ *  when this changes and survives a refresh of the same one. */
+export const focusContext = ({ gui: { dataset } }: Pick<AppState, "gui">): string =>
+  dataset === null ? "" : [currentImage(dataset)?.path, dataset.bucket].join("\0");
 
 const EMPTY_CANVAS: CanvasState = {
   imgWidth: 0,
@@ -116,12 +116,10 @@ const EMPTY_CANVAS: CanvasState = {
   saving: null,
 };
 
-/** Whether the loaded canvas belongs to the open dataset's own image directory: nothing clears
- *  the canvas when another project opens, so a project with no images would otherwise keep
- *  showing the previous project's image facts. The one place that fact is asked, so a status
- *  read and a future consumer can't drift into two different answers. */
-export const selectCanvasMatchesDataset = (s: Pick<AppState, "gui" | "canvas">): boolean =>
-  pathInDir(s.canvas.loadedImagePath, s.gui.dataset.images_dir);
+/** Whether the loaded canvas is one of the selected capture's own images; false with no
+ *  selection. */
+export const selectCanvasMatchesDataset = ({ gui, canvas }: Pick<AppState, "gui" | "canvas">) =>
+  gui.dataset !== null && gui.dataset.images.some((image) => image.path === canvas.loadedImagePath);
 
 function snapshot(s: AppState): CanvasSnapshot {
   const c = s.canvas;

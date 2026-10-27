@@ -21,7 +21,14 @@ import {
 import { useStore } from "@/store";
 import type { Flag, ServedProposals } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
-import { openTestProject, TEST_PROJECT, testProject } from "@/test/store";
+import {
+  changeSelection,
+  openTestProject,
+  RAW_SELECTION,
+  selected,
+  TEST_PROJECT,
+  testProject,
+} from "@/test/store";
 
 // Konva needs a real 2D canvas; these tests exercise label I/O ordering and
 // store->canvas prop flow, not drawing. Render Konva shapes as inspectable divs
@@ -156,10 +163,10 @@ const initialStoreState = useStore.getState();
 
 // Distinct mtime tokens per image so a save's echoed token identifies which image's load it
 // came from. Strings, since the ns value exceeds JS's exact-integer range.
-const LOAD_MTIME: Record<string, number> = { "img1.jpg": 100, "img2.jpg": 200 };
+const [IMG1, IMG2] = RAW_SELECTION.images.map((image) => image.path);
+const LOAD_MTIME: Record<string, number> = { [IMG1]: 100, [IMG2]: 200 };
 
 function labelsFor(imagePath: string) {
-  const name = imagePath.split("/").pop() ?? "";
   return {
     image_path: imagePath,
     img_width: 1000,
@@ -170,7 +177,7 @@ function labelsFor(imagePath: string) {
     imageAnnotations: [],
     completion: {},
     flags: [] as Flag[],
-    base_mtime: String(LOAD_MTIME[name] ?? 1),
+    base_mtime: String(LOAD_MTIME[imagePath] ?? 1),
   };
 }
 
@@ -181,23 +188,15 @@ const saved = (
   accepted: Record<string, number> = {},
 ): SaveResult => ({
   status: "ok",
-  labels: { ...labelsFor("C:/data/images/2026-01-01/img1.jpg"), ...over, base_mtime },
+  labels: { ...labelsFor(IMG1), ...over, base_mtime },
   accepted,
 });
 
 function setupDataset() {
-  openTestProject(
-    {
-      dataset_root: "C:/data",
-      subject: "subject_a",
-      date: "2026-01-01",
-      image_list: ["img1.jpg", "img2.jpg"],
-      current_image_index: 0,
-      images_dir: "C:/data/images/2026-01-01",
-      bucket: null,
-    },
-    { mode: "box", active_subject: "subject_a" },
-  );
+  openTestProject(selected({ subject: "subject_a", count: 2 }), {
+    mode: "box",
+    active_subject: "subject_a",
+  });
 }
 
 function addBox() {
@@ -269,8 +268,7 @@ describe("AnnotateTab session contributions", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
     act(() => {
-      const s = useStore.getState();
-      s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
+      changeSelection({ current_image_index: 1 });
     });
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
     await flush();
@@ -374,7 +372,7 @@ describe("AnnotateTab save/load race", () => {
     await flush();
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
-    expect(saveSpy.mock.calls[0][0].image_path).toBe("C:/data/images/2026-01-01/img1.jpg");
+    expect(saveSpy.mock.calls[0][0].image_path).toBe(IMG1);
     expect(saveSpy.mock.calls[0][0].base_mtime).toBe("100");
     expect(useStore.getState().canvas.dirty).toBe(false);
 
@@ -398,13 +396,12 @@ describe("AnnotateTab save/load race", () => {
     const flushSave = Promise.withResolvers<SaveResult>();
     saveSpy.mockReturnValueOnce(flushSave.promise);
     act(() => {
-      const s = useStore.getState();
-      s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
+      changeSelection({ current_image_index: 1 });
     });
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
     await flush();
     expect(saveSpy).toHaveBeenCalledTimes(1);
-    expect(saveSpy.mock.calls[0][0].image_path).toBe("C:/data/images/2026-01-01/img1.jpg");
+    expect(saveSpy.mock.calls[0][0].image_path).toBe(IMG1);
     expect(saveSpy.mock.calls[0][0].base_mtime).toBe("100");
 
     // Edit img2 while the img1 save is still in flight, then let it resolve late.
@@ -419,7 +416,7 @@ describe("AnnotateTab save/load race", () => {
     pressSave();
     await flush();
     expect(saveSpy).toHaveBeenCalledTimes(2);
-    expect(saveSpy.mock.calls[1][0].image_path).toBe("C:/data/images/2026-01-01/img2.jpg");
+    expect(saveSpy.mock.calls[1][0].image_path).toBe(IMG2);
     expect(saveSpy.mock.calls[1][0].base_mtime).toBe("200");
   });
 
@@ -431,8 +428,7 @@ describe("AnnotateTab save/load race", () => {
     act(addBox);
     const pending = heldSaves();
     act(() => {
-      const s = useStore.getState();
-      s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
+      changeSelection({ current_image_index: 1 });
     });
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
     await flush();
@@ -440,10 +436,10 @@ describe("AnnotateTab save/load race", () => {
     pressSave();
     await flush();
     expect(pending).toHaveLength(2);
-    expect(useStore.getState().canvas.saving?.image).toBe("C:/data/images/2026-01-01/img2.jpg");
+    expect(useStore.getState().canvas.saving?.image).toBe(IMG2);
 
     await act(() => Promise.resolve(pending[0](saved("150"))));
-    expect(useStore.getState().canvas.saving?.image).toBe("C:/data/images/2026-01-01/img2.jpg");
+    expect(useStore.getState().canvas.saving?.image).toBe(IMG2);
     act(addBox);
     expect(useStore.getState().canvas.boxes).toHaveLength(1);
 
@@ -502,8 +498,7 @@ describe("AnnotateTab save/load race", () => {
     await flush();
     fireEvent.click(screen.getByRole("button", { name: "toolbar-cancel-save" }));
     act(() => {
-      const st = useStore.getState();
-      st.patchGui({ dataset: { ...st.gui.dataset, current_image_index: 1 } });
+      changeSelection({ current_image_index: 1 });
     });
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
     await flush();
@@ -597,8 +592,7 @@ describe("AnnotateTab save/load race", () => {
     const pending = heldSaves();
     pressSave();
     act(() => {
-      const s = useStore.getState();
-      s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
+      changeSelection({ current_image_index: 1 });
     });
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
     await flush();
@@ -1265,7 +1259,7 @@ describe("AnnotateTab labels-written conflict sentence", () => {
         .pushAgentActivity(
           "annotate",
           "labels_written",
-          { image_path: "C:/data/images/2026-01-01/img1.jpg" },
+          { image_path: IMG1 },
           "claude-code 2.1.238",
         );
     });
@@ -1286,12 +1280,7 @@ describe("AnnotateTab labels-written conflict sentence", () => {
     act(() => {
       useStore
         .getState()
-        .pushAgentActivity(
-          "annotate",
-          "labels_written",
-          { image_path: "C:/data/images/2026-01-01/img1.jpg" },
-          null,
-        );
+        .pushAgentActivity("annotate", "labels_written", { image_path: IMG1 }, null);
     });
 
     expect(
@@ -1421,7 +1410,7 @@ const POLY_B = {
 
 function seedPolygons(polygons: (typeof POLY_A)[]) {
   useStore.getState().loadLabelsIntoCanvas({
-    image_path: "C:/data/images/2026-01-01/img1.jpg",
+    image_path: IMG1,
     img_width: 1000,
     img_height: 800,
     boxes: [],
@@ -1642,9 +1631,7 @@ describe("Cut gesture", () => {
     armOnPolyA();
     fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
     act(() => {
-      useStore
-        .getState()
-        .patchGui({ dataset: { ...useStore.getState().gui.dataset, current_image_index: 1 } });
+      changeSelection({ current_image_index: 1 });
     });
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
     await flush();
@@ -1847,7 +1834,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
     await flush();
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
-    expect(saveSpy.mock.calls[0][0].image_path).toBe("C:/data/images/2026-01-01/img1.jpg");
+    expect(saveSpy.mock.calls[0][0].image_path).toBe(IMG1);
     expect(Object.keys(saveSpy.mock.calls[0][0])).not.toContain("label_path");
   });
 
@@ -1986,8 +1973,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
         }),
       );
       act(() => {
-        const st = useStore.getState();
-        st.patchGui({ dataset: { ...st.gui.dataset, current_image_index: 1 } });
+        changeSelection({ current_image_index: 1 });
       });
       await flush();
       expect(saveSpy.mock.calls[0][0].annotations[0]).toMatchObject({ bbox: [10, 10, 50, 50] });
@@ -2174,9 +2160,7 @@ const PROPOSALS: ServedProposals = {
 };
 
 function withBucket() {
-  useStore.setState((s) => ({
-    gui: { ...s.gui, dataset: { ...s.gui.dataset, bucket: BUCKET } },
-  }));
+  changeSelection({ bucket: BUCKET });
   return vi.spyOn(api.annotate, "proposals").mockResolvedValue(PROPOSALS);
 }
 
@@ -2225,14 +2209,13 @@ describe("AnnotateTab proposals", () => {
     const proposalsSpy = withBucket();
     await mountTab();
     await waitFor(() => expect(dottedRects()).toHaveLength(1));
-    expect(proposalsSpy).toHaveBeenCalledWith("C:/data/images/2026-01-01/img1.jpg", BUCKET);
+    expect(proposalsSpy).toHaveBeenCalledWith(IMG1, BUCKET);
 
     toggleProposals();
     await flush();
     expect(dottedRects()).toHaveLength(0);
     act(() => {
-      const s = useStore.getState();
-      s.patchGui({ dataset: { ...s.gui.dataset } });
+      changeSelection({});
     });
     await flush();
     expect(proposalsSpy).toHaveBeenCalledTimes(1);
@@ -2320,9 +2303,7 @@ describe("AnnotateTab review symbology", () => {
     loadSpy.mockImplementation((imagePath) =>
       Promise.resolve({ ...labelsFor(imagePath), boxes: boxes(), polygons: [polygon()], flags }),
     );
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, bucket: BUCKET } },
-    }));
+    changeSelection({ bucket: BUCKET });
     const proposalsSpy = vi.spyOn(api.annotate, "proposals").mockResolvedValue(served());
     await mountTab();
     await waitFor(() => expect(proposalsSpy).toHaveBeenCalled());
@@ -2369,11 +2350,7 @@ describe("AnnotateTab review symbology", () => {
     await flush();
     expect(floor()).toHaveValue(0.1);
 
-    act(() =>
-      useStore.setState((s) => ({
-        gui: { ...s.gui, dataset: { ...s.gui.dataset, bucket: "other/2026-01-01" } },
-      })),
-    );
+    act(() => changeSelection({ bucket: "other/2026-01-01" }));
     await flush();
     expect(floor()).toHaveValue(0.5);
   });
@@ -2472,7 +2449,7 @@ describe("AnnotateTab review symbology", () => {
     await flush();
     expect(position()).toHaveValue("3");
     // The left and right arrows still step images, never items.
-    expect(useStore.getState().gui.dataset.current_image_index).toBe(0);
+    expect(useStore.getState().gui.dataset?.current_image_index).toBe(0);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Step through" }), {
       target: { value: "unreviewed" },
@@ -2545,9 +2522,7 @@ describe("AnnotateTab review symbology", () => {
         flags: [],
       }),
     );
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, bucket: BUCKET } },
-    }));
+    changeSelection({ bucket: BUCKET });
     vi.spyOn(api.annotate, "proposals").mockResolvedValue(served());
     await mountTab();
     await flush();
@@ -2659,8 +2634,7 @@ describe("AnnotateTab review symbology", () => {
 
     loadSpy.mockImplementation(() => new Promise(() => {}));
     act(() => {
-      const s = useStore.getState();
-      s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
+      changeSelection({ current_image_index: 1 });
     });
     await flush();
     await act(() => Promise.resolve(answer.resolve(saved("9", { boxes: boxes() }))));
@@ -2691,8 +2665,7 @@ describe("AnnotateTab review symbology", () => {
       if (!armed || now.canvas.boxes === prev.canvas.boxes) return;
       armed = false;
       queueMicrotask(() => {
-        const st = useStore.getState();
-        st.patchGui({ dataset: { ...st.gui.dataset, current_image_index: 1 } });
+        changeSelection({ current_image_index: 1 });
       });
     });
     loadSpy.mockImplementation((imagePath) =>
@@ -2950,7 +2923,7 @@ describe("AnnotateTab flags", () => {
     fireEvent.keyDown(comment(), { key: "Enter" });
     await flush();
     expect(saveSpy.mock.calls[0][0]).toMatchObject({
-      image_path: "C:/data/images/2026-01-01/img1.jpg",
+      image_path: IMG1,
       flag: [{ text: "open or closed?", point: [30, 30], subject: "subject_a" }],
     });
     expect(loadSpy).toHaveBeenCalledTimes(1);
@@ -3039,7 +3012,7 @@ describe("AnnotateTab engine prompt", () => {
     await flush();
 
     expect(propose).toHaveBeenCalledWith({
-      image_path: "C:/data/images/2026-01-01/img1.jpg",
+      image_path: IMG1,
       subject: "subject_a",
       user: "grower",
       prompt: {
@@ -3066,7 +3039,7 @@ describe("AnnotateTab engine prompt", () => {
     await flush();
 
     expect(propose).toHaveBeenCalledWith({
-      image_path: "C:/data/images/2026-01-01/img1.jpg",
+      image_path: IMG1,
       subject: "subject_a",
       user: "grower",
       prompt: { points: [], boxes: [[10, 20, 90, 80]] },
@@ -3089,8 +3062,7 @@ describe("AnnotateTab engine prompt", () => {
     await mountArmed("point");
     fireEvent.click(stage(), { clientX: 120, clientY: 340 });
     act(() => {
-      const s = useStore.getState();
-      s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
+      changeSelection({ current_image_index: 1 });
     });
     await flush();
 
@@ -3109,7 +3081,7 @@ describe("AnnotateTab engine prompt", () => {
     await flush();
 
     expect(find).toHaveBeenCalledWith({
-      image_path: "C:/data/images/2026-01-01/img1.jpg",
+      image_path: IMG1,
       phrase: "open bud",
       user: "grower",
     });
@@ -3201,10 +3173,8 @@ describe("AnnotateTab engine prompt", () => {
     await flush();
     await flush();
 
-    await waitFor(() =>
-      expect(proposals).toHaveBeenCalledWith("C:/data/images/2026-01-01/img1.jpg", BUCKET),
-    );
-    expect(useStore.getState().gui.dataset.bucket).toBeNull();
+    await waitFor(() => expect(proposals).toHaveBeenCalledWith(IMG1, BUCKET));
+    expect(useStore.getState().gui.dataset?.bucket).toBeNull();
     expect(screen.getByTestId("toolbar")).toHaveAttribute("data-view-proposals", "true");
     expect(useStore.getState().toasts.at(-1)?.message).toBe("2 proposals for img1.jpg");
     await waitFor(() =>
@@ -3219,9 +3189,7 @@ describe("AnnotateTab engine prompt", () => {
 
   it("serves a staging beside the selected bucket's proposals, each decided in its own bucket", async () => {
     const { stagings, proposals } = await mountArmed("box");
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, bucket: "m1/2026-01-01" } },
-    }));
+    changeSelection({ bucket: "m1/2026-01-01" });
     stagings.mockResolvedValue({ buckets: [BUCKET] });
     const one = (index: number, x: number) => ({
       subject: "subject_a",
@@ -3279,14 +3247,13 @@ describe("AnnotateTab engine prompt", () => {
     fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
     act(() => {
-      const s = useStore.getState();
-      s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
+      changeSelection({ current_image_index: 1 });
     });
     await flush();
     act(() => answer.resolve({ bucket: BUCKET, proposal_count: 2 }));
     await flush();
 
-    expect(useStore.getState().gui.dataset.current_image_index).toBe(1);
+    expect(useStore.getState().gui.dataset?.current_image_index).toBe(1);
     expect(proposals).not.toHaveBeenCalledWith(expect.any(String), BUCKET);
     expect(useStore.getState().toasts.at(-1)?.message).toBe(
       `2 proposals for img1.jpg, staged under ${BUCKET}.`,

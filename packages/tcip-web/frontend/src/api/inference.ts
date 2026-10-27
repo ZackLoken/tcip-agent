@@ -5,13 +5,17 @@ import { ROUTES } from "@/api/routes";
 import {
   ACKNOWLEDGED_BY_HEADER,
   type Assessments,
+  type BucketExistsRefusal,
   type BuildMappingPayload,
   type CanopySegmentDisclosure,
   type ConfirmRevisionPayload,
   type DeliveryEvents,
   type ExportCountCsvPayload,
   type ExportCsvPayload,
-  type JobStatus,
+  type InferenceFrame,
+  type InferenceJob,
+  type InferenceJobs,
+  type LaunchInferencePayload,
   type MatchRadius,
   type PhenologyPayload,
   type PlantRegistryDisclosure,
@@ -19,55 +23,19 @@ import {
   SAVED_TO_HEADER,
   type ServedDeliveryEvent,
   type ServedPlantMappingDisclosure,
-  type Stated,
   type TraitRevision,
   VALIDATED_HEADER,
 } from "@/api/types.generated";
 import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
 
-export type InferenceStatus = JobStatus;
-
-export interface InferenceJob {
-  job_id: string;
-  status: InferenceStatus;
-  done: number;
-  total: number;
-  images_dir: string;
-  dataset_root: string;
-  bucket: string;
-  error: string | null;
-}
-
-/** A run over one capture date's images into a bucket name not yet published under the dataset
- *  root, under the execution values ``stated`` names (``run_inference`` resolves or refuses the
- *  rest); an ``assessment_id`` runs that assessment's execution record and publishes under it. */
-export interface LaunchInferenceBody {
-  checkpoint_path: string;
-  dataset_root: string;
-  date: string;
-  bucket: string;
-  stated: Stated;
-  assessment_id: string | null;
-  user: string;
-}
-
 export const inferenceApi = {
-  launch: (body: LaunchInferenceBody) =>
-    postJson<{
-      status: string;
-      job_id: string;
-      images_dir: string;
-      dataset_root: string;
-      bucket: string;
-    }>(ROUTES.postInferenceLaunch, body),
+  launch: (body: LaunchInferencePayload) =>
+    postJson<InferenceJob>(ROUTES.postInferenceLaunch, body),
 
-  listJobs: () => getJson<{ jobs: InferenceJob[] }>(ROUTES.getInferenceJobs),
+  listJobs: () => getJson<InferenceJobs>(ROUTES.getInferenceJobs),
 
   cancel: (jobId: string, user: string) =>
-    postJson<{ job_id: string; status: string; cancel_requested: boolean }>(
-      ROUTES.postInferenceJobsByJobIdCancel(jobId),
-      { user },
-    ),
+    postJson<InferenceJob>(ROUTES.postInferenceJobsByJobIdCancel(jobId), { user }),
 };
 
 /**
@@ -77,11 +45,11 @@ export const inferenceApi = {
  */
 export function openInferenceStream(
   jobId: string,
-  onMessage: (msg: Record<string, unknown>) => void,
+  onMessage: (frame: InferenceFrame) => void,
 ): () => void {
   const socket = createReconnectingSocket({
     url: wsUrl(ROUTES.socketInferenceJobsByJobIdStream(jobId)),
-    ...jsonFrameHandlers<Record<string, unknown>>(onMessage, (frame) => frame.type === "final"),
+    ...jsonFrameHandlers<InferenceFrame>(onMessage, (frame) => frame.type === "final"),
   });
   socket.start();
   return () => socket.stop();
@@ -238,34 +206,11 @@ export function deliveryRefusalOf(e: unknown): DeliveryRefusal | null {
   };
 }
 
-/** The Inference tab's launch refusing the bucket a live job is still writing: the requested
- *  bucket name and that job. */
-export interface BucketExistsRefusal {
-  kind: "bucket_exists";
-  message: string;
-  date: string;
-  requested_bucket: string | null;
-  job_id: string;
-}
-
 /** The launch's bucket refusal a thrown error carries, read by kind off its parsed detail, or
  *  null for every other failure. */
 export function bucketRefusalOf(e: unknown): BucketExistsRefusal | null {
-  if (!(e instanceof StructuredRefusalError)) return null;
-  const detail = e.detail;
-  if (
-    detail.kind !== "bucket_exists" ||
-    typeof detail.job_id !== "string" ||
-    typeof detail.date !== "string"
-  )
-    return null;
-  return {
-    kind: "bucket_exists",
-    message: typeof detail.message === "string" ? detail.message : e.message,
-    date: detail.date,
-    requested_bucket: typeof detail.requested_bucket === "string" ? detail.requested_bucket : null,
-    job_id: detail.job_id,
-  };
+  if (!(e instanceof StructuredRefusalError) || e.detail.kind !== "bucket_exists") return null;
+  return e.detail as unknown as BucketExistsRefusal;
 }
 
 export type PlantMappingUnion = NonNullable<ServedDeliveryEvent["plant_mapping"]>;

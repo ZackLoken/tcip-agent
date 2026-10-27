@@ -34,7 +34,7 @@ import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 import { TabHeading } from "@/components/TabHeading";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { useStore } from "@/store";
-import { selectProjectRoot } from "@/store/slices/gui";
+import { selectDatasetRoot, selectProjectRoot } from "@/store/slices/gui";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 
 interface DateRow {
@@ -61,9 +61,8 @@ function dateKey(date: string): number {
 }
 
 export function ResultsTab() {
-  const dataset = useStore((s) => s.gui.dataset);
   const projectRoot = useStore(selectProjectRoot);
-  const datasetRoot = dataset.dataset_root;
+  const datasetRoot = useStore(selectDatasetRoot);
 
   // The mapping this measurement reads, picked from those built on the Setup tab.
   const [mappingName, setMappingName] = useState("");

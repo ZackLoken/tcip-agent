@@ -7,7 +7,7 @@ import { ProjectBreadcrumb } from "@/components/ProjectBreadcrumb";
 import { openWithDefaults } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { INVARIANCES } from "@/test/projectRecords";
-import { openAnswer, stateEnvelope, testProject } from "@/test/store";
+import { openAnswer, selectAnswer, selected, stateEnvelope, testProject } from "@/test/store";
 
 vi.mock("@/api/client", () => {
   return {
@@ -52,35 +52,12 @@ function opened(id: string, displayName: string): OpenAnswer {
   return openAnswer({ id, path: `/w/${id}`, display_name: displayName });
 }
 
-function selection(root: string) {
-  return {
-    status: "ok",
-    selection: {
-      dataset_root: root,
-      subject: "subject_a",
-      date: "2026-01-01",
-      image_list: [],
-      current_image_index: 0,
-      images_dir: null,
-      bucket: null,
-    },
-  };
-}
+const SELECT_ANSWER = selectAnswer(selected({ subject: "subject_a" }));
 
-function openOn(id: string, date: string | null = "2026-01-01") {
+/** Open the project `id` on the produced capture of photographs, or on none. */
+function openOn(id: string, captured = true) {
   useStore.setState((st) => ({
-    gui: {
-      ...st.gui,
-      dataset: {
-        ...st.gui.dataset,
-        dataset_root: `/w/${id}`,
-        subject: "subject_a",
-        date,
-        image_list: [],
-        current_image_index: 0,
-        bucket: null,
-      },
-    },
+    gui: { ...st.gui, dataset: captured ? selected({ subject: "subject_a" }) : null },
     openProject: testProject({ id, path: `/w/${id}` }),
   }));
 }
@@ -122,7 +99,7 @@ describe("recent-projects menu", () => {
   it("another recent project opens by its id, then selects inside its own directory", async () => {
     localStorage.setItem("tcip.recent_projects", JSON.stringify(["a1", "b2"]));
     vi.mocked(api.projects.open).mockResolvedValue(opened("b2", "Beta block"));
-    vi.mocked(api.dataset.select).mockResolvedValue(selection("/w/b2"));
+    vi.mocked(api.dataset.select).mockResolvedValue(SELECT_ANSWER);
     render(<ProjectBreadcrumb />);
     fireEvent.click(screen.getByTitle("Recent projects"));
     fireEvent.click(await screen.findByText("Beta block"));
@@ -150,7 +127,7 @@ describe("recent-projects menu through the one opening transition", () => {
       listingsBeforeOpen = vi.mocked(api.projects.list).mock.calls.length;
       return Promise.resolve(opened("b2", "Beta block"));
     });
-    vi.mocked(api.dataset.select).mockResolvedValue(selection("/w/b2"));
+    vi.mocked(api.dataset.select).mockResolvedValue(SELECT_ANSWER);
     render(<ProjectBreadcrumb />);
     await waitFor(() => expect(api.projects.list).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByTitle("Recent projects"));
@@ -203,7 +180,7 @@ describe("recent-projects menu through the one opening transition", () => {
 
 describe("footer open state", () => {
   it("names the open project by its display name, and shows no dated images when it has no date", async () => {
-    openOn("a1", null);
+    openOn("a1", false);
     render(<ProjectBreadcrumb />);
     expect(await screen.findByText("Alpha block")).toBeInTheDocument();
     expect(screen.getByText("No dated images")).toBeInTheDocument();
@@ -211,16 +188,13 @@ describe("footer open state", () => {
   });
 
   it("reads Loading in place of the project name until the listing answers", () => {
-    openOn("a1", null);
+    openOn("a1", false);
     render(<ProjectBreadcrumb />);
     expect(screen.getByRole("button", { name: "Loading…" })).toBeInTheDocument();
   });
 
   it("reads no project open only once nothing is open", () => {
-    useStore.setState((st) => ({
-      gui: { ...st.gui, dataset: { ...st.gui.dataset, dataset_root: null, date: null } },
-      openProject: null,
-    }));
+    useStore.setState((st) => ({ gui: { ...st.gui, dataset: null }, openProject: null }));
     render(<ProjectBreadcrumb />);
     expect(screen.getByText("no project open")).toBeInTheDocument();
   });
@@ -229,7 +203,7 @@ describe("footer open state", () => {
 describe("switching date", () => {
   it("reopens the same project on the chosen date", async () => {
     vi.mocked(api.projects.open).mockResolvedValue(opened("a1", "Alpha block"));
-    vi.mocked(api.dataset.select).mockResolvedValue(selection("/w/a1"));
+    vi.mocked(api.dataset.select).mockResolvedValue(SELECT_ANSWER);
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/w",
       open_id: "a1",

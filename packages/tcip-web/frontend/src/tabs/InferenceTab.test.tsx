@@ -2,18 +2,18 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StructuredRefusalError } from "@/api/http";
-import {
-  inferenceApi,
-  openInferenceStream,
-  resultsApi,
-  type BucketExistsRefusal,
-  type InferenceJob,
-} from "@/api/inference";
-import type { AssessmentSummary, RegisteredModel } from "@/api/types.generated";
+import { inferenceApi, openInferenceStream, resultsApi } from "@/api/inference";
+import type {
+  AssessmentSummary,
+  BucketExistsRefusal,
+  InferenceFrame,
+  InferenceJob,
+  RegisteredModel,
+} from "@/api/types.generated";
 import { useStore } from "@/store";
 import { InferenceTab } from "@/tabs/InferenceTab";
 import { mockDatasetTree } from "@/test/datasetTree";
-import { openTestProject } from "@/test/store";
+import { GROUPED_SELECTION, openTestProject, RAW_SELECTION } from "@/test/store";
 
 // The live job stream owns a real WebSocket; only its frame-to-state mapping is under test here,
 // so the transport is replaced while the rest of the module stays real.
@@ -42,19 +42,23 @@ const PASSED_ASSESSMENT: AssessmentSummary = {
 
 function job(overrides: Partial<InferenceJob> & { job_id: string }): InferenceJob {
   return {
-    status: "running",
-    done: 1,
-    total: 9,
+    project: "C:/proj",
+    checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt",
     images_dir: "C:/data/images/2026-01-01",
-    dataset_root: "C:/data",
     bucket: "baseline/2026-01-01",
+    actor: "user:jordan",
+    stated: {},
+    assessment_id: null,
+    total: 9,
+    done: 1,
+    status: "running",
     error: null,
     ...overrides,
   };
 }
 
 function setupDataset() {
-  openTestProject({ dataset_root: "C:/data" });
+  openTestProject(RAW_SELECTION);
 }
 
 function mockTree(dates: string[]) {
@@ -77,15 +81,11 @@ function paragraphMatching(pattern: RegExp) {
     element?.tagName === "P" && pattern.test(element.textContent ?? "");
 }
 
-function existsRefusal(overrides: Partial<BucketExistsRefusal> = {}): StructuredRefusalError {
+function existsRefusal(live: InferenceJob = job({ job_id: "inf-live" })): StructuredRefusalError {
   const detail: BucketExistsRefusal = {
     kind: "bucket_exists",
-    message:
-      "bucket 'baseline/2026-01-01' under C:/data is the bucket job inf-live is still writing.",
-    date: "2026-01-01",
-    requested_bucket: "baseline/2026-01-01",
-    job_id: "inf-live",
-    ...overrides,
+    message: `bucket '${live.bucket}' under C:/data is the bucket job ${live.job_id} is still writing.`,
+    job: live,
   };
   return new StructuredRefusalError(
     detail as unknown as Record<string, unknown>,
@@ -95,13 +95,7 @@ function existsRefusal(overrides: Partial<BucketExistsRefusal> = {}): Structured
 }
 
 function launched(date: string, bucket: string) {
-  return {
-    status: "launched",
-    job_id: `inf-${date}`,
-    images_dir: `C:/data/images/${date}`,
-    dataset_root: "C:/data",
-    bucket,
-  };
+  return job({ job_id: `inf-${date}`, status: "pending", done: 0, total: 0, bucket });
 }
 
 beforeEach(() => {
@@ -136,7 +130,7 @@ describe("InferenceTab date selection", () => {
     expect(launchSpy.mock.calls.map(([body]) => body)).toEqual([
       {
         checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt",
-        dataset_root: "C:/data",
+        dataset_root: RAW_SELECTION.dataset_root,
         date: "2026-01-01",
         bucket: "baseline/2026-01-01",
         stated: {},
@@ -145,7 +139,7 @@ describe("InferenceTab date selection", () => {
       },
       {
         checkpoint_path: "C:/proj/.tcip/models/baseline/best.pt",
-        dataset_root: "C:/data",
+        dataset_root: RAW_SELECTION.dataset_root,
         date: "2026-01-08",
         bucket: "baseline/2026-01-08",
         stated: {},
@@ -266,11 +260,9 @@ describe("InferenceTab job table", () => {
         job({ job_id: "inf-done", status: "completed", done: 9 }),
       ],
     });
-    const cancelSpy = vi.spyOn(inferenceApi, "cancel").mockResolvedValue({
-      job_id: "inf-live",
-      status: "canceled",
-      cancel_requested: true,
-    });
+    const cancelSpy = vi
+      .spyOn(inferenceApi, "cancel")
+      .mockResolvedValue(job({ job_id: "inf-live", status: "canceled" }));
     useStore.setState({ user: "jordan" });
 
     render(<InferenceTab />);
@@ -287,11 +279,7 @@ describe("InferenceTab job table", () => {
     vi.useFakeTimers();
     try {
       vi.mocked(inferenceApi.listJobs).mockResolvedValue({ jobs: [job({ job_id: "inf-live" })] });
-      vi.spyOn(inferenceApi, "cancel").mockResolvedValue({
-        job_id: "inf-live",
-        status: "running",
-        cancel_requested: true,
-      });
+      vi.spyOn(inferenceApi, "cancel").mockResolvedValue(job({ job_id: "inf-live" }));
 
       render(<InferenceTab />);
       await vi.waitFor(() => expect(screen.getByText("inf-live")).toBeInTheDocument());
@@ -345,15 +333,7 @@ describe("InferenceTab job table", () => {
     await waitFor(() => expect(vi.mocked(openInferenceStream)).toHaveBeenCalled());
 
     const onFrame = vi.mocked(openInferenceStream).mock.calls[0][1];
-    act(() =>
-      onFrame({
-        type: "progress",
-        done: 4,
-        total: 9,
-        status: "running",
-        error: null,
-      }),
-    );
+    act(() => onFrame({ type: "progress", job: job({ job_id: "inf-live", done: 4 }) }));
 
     expect(await screen.findByText("running, 4 of 9")).toBeInTheDocument();
   });
@@ -366,9 +346,13 @@ describe("InferenceTab job table", () => {
     await waitFor(() => expect(vi.mocked(openInferenceStream)).toHaveBeenCalled());
 
     const onFrame = vi.mocked(openInferenceStream).mock.calls[0][1];
-    act(() => onFrame({ type: "final", status: "failed", error: "job not found" }));
+    const failed: InferenceFrame = {
+      type: "final",
+      job: job({ job_id: "inf-live", status: "failed", error: "disk full" }),
+    };
+    act(() => onFrame(failed));
 
-    expect(await screen.findByText("job not found")).toBeInTheDocument();
+    expect(await screen.findByText("disk full")).toBeInTheDocument();
   });
 
   it("shows the frame's error alone once the poll no longer lists the watched job", async () => {
@@ -432,7 +416,7 @@ describe("InferenceTab bucket refusals", () => {
     vi.mocked(inferenceApi.listJobs).mockResolvedValue({
       jobs: [job({ job_id: "inf-live", status: "running" })],
     });
-    vi.spyOn(inferenceApi, "launch").mockRejectedValue(existsRefusal({ job_id: "inf-live" }));
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(existsRefusal());
     await launchOneRefused();
 
     fireEvent.click(
@@ -441,8 +425,8 @@ describe("InferenceTab bucket refusals", () => {
     expect(await screen.findByText("running, 1 of 9")).toBeInTheDocument();
   });
 
-  it("seeds the watched stub's bucket from the refusal when the poll hasn't listed the job yet", async () => {
-    vi.spyOn(inferenceApi, "launch").mockRejectedValue(existsRefusal({ job_id: "inf-live" }));
+  it("watches the job the refusal carries when the poll hasn't listed it yet", async () => {
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(existsRefusal());
     await launchOneRefused();
 
     fireEvent.click(
@@ -458,7 +442,7 @@ describe("InferenceTab bucket refusals", () => {
     vi.spyOn(inferenceApi, "launch").mockImplementation((body) =>
       body.date === "2026-01-01"
         ? Promise.resolve(launched(body.date, body.bucket))
-        : Promise.reject(existsRefusal({ date: body.date })),
+        : Promise.reject(existsRefusal()),
     );
 
     render(<InferenceTab />);
@@ -477,9 +461,7 @@ describe("InferenceTab bucket refusals", () => {
 
   it("keeps two refused dates' controls distinguishable by accessible name", async () => {
     mockTree(["2026-01-01", "2026-01-08"]);
-    vi.spyOn(inferenceApi, "launch").mockImplementation((body) =>
-      Promise.reject(existsRefusal({ date: body.date ?? undefined })),
-    );
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(existsRefusal());
 
     render(<InferenceTab />);
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
@@ -540,11 +522,7 @@ describe("InferenceTab bucket refusals", () => {
     await launchOneRefused();
     expect(await screen.findByText("Refused")).toBeInTheDocument();
 
-    act(() => {
-      useStore.setState((s) => ({
-        gui: { ...s.gui, dataset: { ...s.gui.dataset, dataset_root: "C:/data2" } },
-      }));
-    });
+    act(() => openTestProject(GROUPED_SELECTION));
     expect(screen.queryByText("Refused")).not.toBeInTheDocument();
   });
 

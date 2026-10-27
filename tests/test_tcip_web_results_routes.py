@@ -1148,10 +1148,7 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
             f"/api/inference/jobs/{job_id}/cancel", json={"user": "tester"}
         )
         assert canceled.status_code == 200, canceled.text
-        assert (
-            canceled.json()["job_id"],
-            canceled.json()["cancel_requested"],
-        ) == (job_id, True)
+        assert canceled.json()["job_id"] == job_id
         lines = audit_rows(opened_project, "inference_canceled")[before:]
         assert [
             (arguments["job_id"], r["actor"])
@@ -1184,25 +1181,14 @@ def test_inference_list_row_and_stream_frame_are_one_projection(
     client: TestClient,
     opened_project: Path,
 ) -> None:
-    """The inference list row and the stream's final frame are one projection.
-
-    The stream's final frame equals the list row, and both carry the job's dropped-box count.
-    """
+    """The inference list row and the stream's final frame carry one record of the job."""
     from tcip_web.routes import inference as inference_routes
+    from tests._web_fixtures import inference_job
 
-    job = inference_routes.InferenceJob(
-        job_id="inf-warn-test",
-        actor="user:tester",
-        project=str(opened_project),
-        checkpoint_path="",
-        dataset_root="",
-        images_dir="",
-        bucket="",
-        stated=Stated(),
-        status="completed",
-        dropped_boxes=3,
+    job = inference_job(
+        "", opened_project, job_id="inf-warn-test", status="completed"
     )
-    inference_routes._register(job)
+    inference_routes._registry.register(job)
     try:
         row = next(
             r
@@ -1213,9 +1199,8 @@ def test_inference_list_row_and_stream_frame_are_one_projection(
             "ws://127.0.0.1/api/inference/jobs/inf-warn-test/stream"
         ) as ws:
             frames = [ws.receive_json(), ws.receive_json()]
-        assert [f.pop("type") for f in frames] == ["progress", "final"]
-        assert frames[1] == row
-        assert row["dropped_boxes"] == 3
+        assert [f["type"] for f in frames] == ["progress", "final"]
+        assert frames[1]["job"] == row
     finally:
         with inference_routes._registry.lock:
             inference_routes._registry.jobs.pop("inf-warn-test", None)
@@ -1236,18 +1221,10 @@ def test_inference_stream_to_a_missing_job_sends_a_typed_terminal_frame(
 def test_inference_by_id_job_route_is_retired(client: TestClient) -> None:
     """A GET of one inference job by id answers 404, even for a registered job."""
     from tcip_web.routes import inference as inference_routes
+    from tests._web_fixtures import inference_job
 
-    job = inference_routes.InferenceJob(
-        job_id="inf-retired-test",
-        actor="user:tester",
-        project="",
-        checkpoint_path="",
-        dataset_root="",
-        images_dir="",
-        bucket="",
-        stated=Stated(),
-    )
-    inference_routes._register(job)
+    job = inference_job("", "", job_id="inf-retired-test")
+    inference_routes._registry.register(job)
     try:
         assert (
             client.get("/api/inference/jobs/inf-retired-test").status_code

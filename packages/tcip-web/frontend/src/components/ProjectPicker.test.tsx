@@ -8,7 +8,7 @@ import { LISTING_REFRESH_MS, ProjectPicker } from "@/components/ProjectPicker";
 import { startOpen } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { INVARIANCES } from "@/test/projectRecords";
-import { openAnswer, stateEnvelope } from "@/test/store";
+import { openAnswer, selectAnswer, selected, stateEnvelope } from "@/test/store";
 
 type Selected = Awaited<ReturnType<typeof api.dataset.select>>;
 
@@ -79,26 +79,13 @@ function openedAs(p: ProjectSummary): OpenAnswer {
   return openAnswer({ id: p.id!, path: p.path, display_name: p.display_name! });
 }
 
-function selection(root: string) {
-  return {
-    status: "ok",
-    selection: {
-      dataset_root: root,
-      subject: "subject_a",
-      date: "2026-03-01",
-      image_list: [],
-      current_image_index: 0,
-      images_dir: null,
-      bucket: null,
-    },
-  };
-}
+const SELECT_ANSWER = selectAnswer(selected({ subject: "subject_a" }));
 
 // The backend already holds the project open, as it does when the person switches projects.
 function backendHoldsValleyOpen() {
   vi.mocked(api.projects.list).mockResolvedValue(listing({ open_id: "a1b2c3d4e5f6" }));
   vi.mocked(api.projects.open).mockResolvedValue(openedAs(PROJECTS[0]));
-  vi.mocked(api.dataset.select).mockResolvedValue(selection("/ws/valley"));
+  vi.mocked(api.dataset.select).mockResolvedValue(SELECT_ANSWER);
 }
 
 const initialStoreState = useStore.getState();
@@ -138,7 +125,7 @@ describe("ProjectPicker", () => {
   it("opens a project by its id, then selects a dataset inside its own directory", async () => {
     vi.mocked(api.projects.list).mockResolvedValue(listing());
     vi.mocked(api.projects.open).mockResolvedValue(openedAs(PROJECTS[0]));
-    vi.mocked(api.dataset.select).mockResolvedValue(selection("/ws/valley"));
+    vi.mocked(api.dataset.select).mockResolvedValue(SELECT_ANSWER);
     render(<ProjectPicker />);
 
     fireEvent.click(await screen.findByText("Valley farm"));
@@ -233,7 +220,7 @@ describe("ProjectPicker", () => {
   it("commits the typed name as typed and opens the project from the open button", async () => {
     vi.mocked(api.projects.list).mockResolvedValue(listing());
     vi.mocked(api.projects.open).mockResolvedValue(openedAs(PROJECTS[0]));
-    vi.mocked(api.dataset.select).mockResolvedValue(selection("/ws/valley"));
+    vi.mocked(api.dataset.select).mockResolvedValue(SELECT_ANSWER);
     useStore.getState().setUser("");
     render(<ProjectPicker />);
 
@@ -319,7 +306,7 @@ describe("ProjectPicker", () => {
     it("applies a success while the project is still the chosen one", async () => {
       pendingOpen();
       vi.mocked(api.projects.open).mockResolvedValue(VALLEY_OPENED);
-      vi.mocked(api.dataset.select).mockResolvedValue(selection("/ws/valley"));
+      vi.mocked(api.dataset.select).mockResolvedValue(SELECT_ANSWER);
       await startOpeningValley();
 
       await waitFor(() => expect(useStore.getState().openProject).toEqual(VALLEY_OPENED.project));
@@ -333,7 +320,7 @@ describe("ProjectPicker", () => {
       await waitFor(() => expect(api.dataset.select).toHaveBeenCalled());
       fireEvent.click(screen.getByText("Hill farm"));
 
-      await act(() => Promise.resolve(select.resolve(selection("/ws/valley"))));
+      await act(() => Promise.resolve(select.resolve(SELECT_ANSWER)));
 
       expect(useStore.getState().openProject).toBeNull();
       expect(useStore.getState().opening).toBeNull();
@@ -347,7 +334,7 @@ describe("ProjectPicker", () => {
       await waitFor(() => expect(api.dataset.select).toHaveBeenCalled());
       merge(HILL_OPENED.project);
 
-      await act(() => Promise.resolve(select.resolve(selection("/ws/valley"))));
+      await act(() => Promise.resolve(select.resolve(SELECT_ANSWER)));
 
       expect(useStore.getState().openProject).toEqual(HILL_OPENED.project);
     });
@@ -363,7 +350,7 @@ describe("ProjectPicker", () => {
       merge(VALLEY_OPENED.project, 1);
       merge(hill, 2);
 
-      await act(() => Promise.resolve(select.resolve(selection("/ws/valley"))));
+      await act(() => Promise.resolve(select.resolve(SELECT_ANSWER)));
 
       expect(useStore.getState().openProject).toEqual(hill);
     });
@@ -390,11 +377,11 @@ describe("ProjectPicker", () => {
       merge(HILL_OPENED.project, 9);
 
       expect(useStore.getState().opening?.projectId).toBe("a1b2c3d4e5f6");
-      await act(() => Promise.resolve(select.resolve(selection("/ws/valley"))));
+      await act(() => Promise.resolve(select.resolve(SELECT_ANSWER)));
 
       expect(useStore.getState().opening).toBeNull();
       expect(useStore.getState().openProject).toEqual(VALLEY_OPENED.project);
-      expect(useStore.getState().gui.dataset.dataset_root).toBe("/ws/valley");
+      expect(useStore.getState().gui.dataset).toEqual(SELECT_ANSWER.selection);
     });
 
     it("preselects the listed open project under the replayed mount effect of StrictMode", async () => {

@@ -104,12 +104,12 @@ describe("inferenceApi.cancel", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ job_id: "j1", status: "running", cancel_requested: true }),
+      json: () => Promise.resolve({ job_id: "j1", status: "running" }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
     const res = await inferenceApi.cancel("j1", "jordan");
-    expect(res.cancel_requested).toBe(true);
+    expect(res.job_id).toBe("j1");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/inference/jobs/j1/cancel",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ user: "jordan" }) }),

@@ -17,6 +17,7 @@ import tcip_store
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.web_client import (
     GUI_STATE_DEFAULTS,
+    DatasetChoice,
     gui_snapshot_key,
     read_gui_snapshot,
     selection_for,
@@ -41,9 +42,11 @@ if TYPE_CHECKING:
 def test_version_increments_on_mutate() -> None:
     store = StateStore()
     assert store.version == 0
-    asyncio.run(store.mutate({"active_tab": "training"}, project=None))
+    asyncio.run(
+        store.mutate(lambda _held: {"active_tab": "training"}, project=None)
+    )
     assert store.version == 1
-    asyncio.run(store.mutate({"mode": "polygon"}, project=None))
+    asyncio.run(store.mutate(lambda _held: {"mode": "polygon"}, project=None))
     assert store.version == 2
 
 
@@ -56,7 +59,11 @@ def test_a_change_persists_to_the_project_open_when_it_is_made(
 
     asyncio.run(store.open_project(proj_a))
     asyncio.run(store.open_project(proj_b))
-    asyncio.run(store.mutate({"active_tab": "results"}, project=store.held()))
+    asyncio.run(
+        store.mutate(
+            lambda _held: {"active_tab": "results"}, project=store.held()
+        )
+    )
 
     snapshot = read_gui_snapshot(proj_b.root)
     assert snapshot is not None and snapshot.active_tab == "results"
@@ -79,7 +86,11 @@ def test_a_mutation_made_for_a_project_no_longer_open_is_refused_and_not_held(
     asyncio.run(store.open_project(proj_b))
 
     with pytest.raises(ProjectNotOpenError) as refused:
-        asyncio.run(store.mutate({"active_tab": "results"}, project=captured))
+        asyncio.run(
+            store.mutate(
+                lambda _held: {"active_tab": "results"}, project=captured
+            )
+        )
     assert refused.value.open_project_id == proj_b.id
     assert store.state.active_tab == "annotate"
     assert not tcip_store.exists(gui_snapshot_key(proj_a.root))
@@ -96,17 +107,23 @@ def test_a_mutation_made_for_no_project_persists_nowhere(
     """
     store = StateStore()
     project = named_project(tmp_path / "A", "A")
-    asyncio.run(store.mutate({"active_tab": "results"}, project=None))
+    asyncio.run(
+        store.mutate(lambda _held: {"active_tab": "results"}, project=None)
+    )
     assert not tcip_store.exists(gui_snapshot_key(project.root))
 
     asyncio.run(store.open_project(project))
-    asyncio.run(store.mutate({"active_tab": "training"}, project=None))
+    asyncio.run(
+        store.mutate(lambda _held: {"active_tab": "training"}, project=None)
+    )
     assert store.state.active_tab == "training"
     assert not tcip_store.exists(gui_snapshot_key(project.root))
 
     asyncio.run(store.close_project(project.id))
     assert store.opened is None
-    asyncio.run(store.mutate({"active_tab": "results"}, project=None))
+    asyncio.run(
+        store.mutate(lambda _held: {"active_tab": "results"}, project=None)
+    )
     assert not tcip_store.exists(gui_snapshot_key(project.root))
 
 
@@ -124,7 +141,9 @@ def test_a_state_that_cannot_be_persisted_raises_and_is_not_held(
     monkeypatch.setattr(web_client.tcip_store, "replace", _refuse)
     with pytest.raises(tcip_store.StoreError):
         asyncio.run(
-            store.mutate({"active_tab": "results"}, project=store.held())
+            store.mutate(
+                lambda _held: {"active_tab": "results"}, project=store.held()
+            )
         )
     assert store.state.active_tab == "annotate"
 
@@ -138,10 +157,14 @@ def test_a_reopened_project_holds_the_state_it_persisted(
     asyncio.run(store.open_project(project))
     asyncio.run(
         store.mutate(
-            {
+            lambda _held: {
                 "active_tab": "results",
                 "dataset": selection_for(
-                    project.root / "ds", None, UNDATED_BUCKET, None, 0
+                    DatasetChoice(
+                        dataset_root=str(project.root / "ds"),
+                        date=UNDATED_BUCKET,
+                        current_image_index=0,
+                    )
                 ),
             },
             project=store.held(),
@@ -152,7 +175,49 @@ def test_a_reopened_project_holds_the_state_it_persisted(
     restarted = StateStore()
     asyncio.run(restarted.open_project(project))
     assert restarted.state.active_tab == "results"
-    assert restarted.state.dataset.dataset_root == str(project.root / "ds")
+    dataset = restarted.state.dataset
+    assert dataset is not None
+    assert dataset.dataset_root == str(project.root / "ds")
+
+
+def test_a_held_selection_survives_a_mutation_of_another_field(
+    tmp_path: Path,
+) -> None:
+    """A selection mutated in is held whole through a later mutation of another field.
+
+    Both mutations merge the held state, whose selection carries its images; the snapshot holds
+    the choice alone.
+    """
+    from tests._producer_fixtures import write_image
+
+    project = named_project(tmp_path / "A", "A")
+    write_image(image_dir(project.root / "ds", "2026-01-01") / "a.jpg", (8, 8))
+    selection = selection_for(
+        DatasetChoice(
+            dataset_root=str(project.root / "ds"),
+            date="2026-01-01",
+            current_image_index=0,
+        )
+    )
+    store = StateStore()
+    asyncio.run(store.open_project(project))
+
+    asyncio.run(
+        store.mutate(
+            lambda _held: {"dataset": selection}, project=store.held()
+        )
+    )
+    asyncio.run(
+        store.mutate(
+            lambda _held: {"active_tab": "results"}, project=store.held()
+        )
+    )
+
+    assert store.state.dataset == selection
+    assert [image.name for image in selection.images] == ["a.jpg"]
+    persisted = tcip_store.read(gui_snapshot_key(project.root))
+    assert isinstance(persisted, dict)
+    assert set(persisted["dataset"]) == set(DatasetChoice.model_fields)
 
 
 def test_opening_a_project_with_no_snapshot_holds_a_fresh_state(
@@ -197,7 +262,11 @@ def test_a_persisted_snapshot_stating_a_nested_field_partly_is_reported_not_defa
     store = StateStore()
     project = named_project(tmp_path / "A", "A")
     asyncio.run(store.open_project(project))
-    asyncio.run(store.mutate({"active_tab": "results"}, project=store.held()))
+    asyncio.run(
+        store.mutate(
+            lambda _held: {"active_tab": "results"}, project=store.held()
+        )
+    )
     written = tcip_store.read(gui_snapshot_key(project.root))
     assert isinstance(written, dict)
 
@@ -213,7 +282,9 @@ def test_a_persisted_snapshot_stating_a_nested_field_partly_is_reported_not_defa
 def test_mutate_refuses_a_partial_nested_object_and_holds_nothing() -> None:
     store = StateStore()
     with pytest.raises(GuiMutationInvalidError, match="view"):
-        asyncio.run(store.mutate({"view": {"scale": 2.0}}, project=None))
+        asyncio.run(
+            store.mutate(lambda _held: {"view": {"scale": 2.0}}, project=None)
+        )
     assert store.version == 0
     assert store.state.view.scale == 1.0
 
@@ -221,26 +292,42 @@ def test_mutate_refuses_a_partial_nested_object_and_holds_nothing() -> None:
 def test_mutate_refuses_an_unknown_tab_and_holds_nothing() -> None:
     store = StateStore()
     with pytest.raises(GuiMutationInvalidError):
-        asyncio.run(store.mutate({"active_tab": "nonexistent"}, project=None))
+        asyncio.run(
+            store.mutate(
+                lambda _held: {"active_tab": "nonexistent"}, project=None
+            )
+        )
     assert store.version == 0
     assert store.state.active_tab == "annotate"
 
 
-def test_mutate_refuses_a_built_model_with_a_wrongly_typed_field_and_holds_nothing() -> (
-    None
-):
-    """A mutation carrying a built model with a wrongly typed field is refused and holds nothing.
+def test_mutate_refuses_a_built_model_with_a_wrongly_typed_field_and_holds_nothing(
+    tmp_path: Path,
+) -> None:
+    """A mutation carrying a built selection with a wrongly typed field is refused, holding nothing.
 
-    The store's version and state are unchanged.
+    The selection is the producer's over a capture holding an image, its index replaced; the
+    store's version and state are unchanged.
     """
+    from tests._producer_fixtures import write_image
+
+    write_image(image_dir(tmp_path / "ds", "2026-01-01") / "a.jpg", (8, 8))
+    bad_selection = selection_for(
+        DatasetChoice(
+            dataset_root=str(tmp_path / "ds"),
+            date="2026-01-01",
+            current_image_index=0,
+        )
+    ).model_copy(update={"current_image_index": "banana"})
     store = StateStore()
-    bad_dataset = GUI_STATE_DEFAULTS.dataset.model_copy(
-        update={"current_image_index": "banana"}
-    )
     with pytest.raises(GuiMutationInvalidError):
-        asyncio.run(store.mutate({"dataset": bad_dataset}, project=None))
+        asyncio.run(
+            store.mutate(
+                lambda _held: {"dataset": bad_selection}, project=None
+            )
+        )
     assert store.version == 0
-    assert store.state.dataset.current_image_index == 0
+    assert store.state.dataset is None
 
 
 def test_mutate_refuses_an_unknown_top_level_key_and_holds_nothing() -> None:
@@ -250,7 +337,9 @@ def test_mutate_refuses_an_unknown_top_level_key_and_holds_nothing() -> None:
     """
     store = StateStore()
     with pytest.raises(GuiMutationInvalidError):
-        asyncio.run(store.mutate({"activ_tab": "results"}, project=None))
+        asyncio.run(
+            store.mutate(lambda _held: {"activ_tab": "results"}, project=None)
+        )
     assert store.version == 0
     assert store.state.active_tab == "annotate"
 
@@ -340,7 +429,9 @@ def test_a_switch_publishes_nothing_until_its_departure_commits(
     proj_a = named_project(tmp_path / "A", "A")
     proj_b = named_project(tmp_path / "B", "B")
     asyncio.run(store.open_project(proj_a))
-    asyncio.run(store.mutate({"active_tab": "results"}, project=proj_a))
+    asyncio.run(
+        store.mutate(lambda _held: {"active_tab": "results"}, project=proj_a)
+    )
     held_a = (store.opened, store.state)
     real = tcip_store.transaction
     seen: list = []
