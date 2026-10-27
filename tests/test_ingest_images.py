@@ -429,7 +429,7 @@ def test_ingest_admits_a_source_after_a_band_group_manifest_with_a_different_ste
     project: Path, tmp_path: Path
 ) -> None:
     """A manifest at one stem does not block an ordinary source at another stem in its bucket."""
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tests._producer_fixtures import write_band_group
 
     src = tmp_path / "raw"
     _make_image(src / "plain.png")
@@ -441,12 +441,11 @@ def test_ingest_admits_a_source_after_a_band_group_manifest_with_a_different_ste
     band_b = bucket_dir / "cap_R.tif"
     band_a.write_bytes(b"a")
     band_b.write_bytes(b"b")
-    write_band_group_manifest(
+    write_band_group(
         bucket_dir,
         "cap",
         {"Green": band_a, "Red": band_b},
         central_wavelength_nm=None,
-        identity_tolerance={},
     )
 
     src2 = tmp_path / "raw2"
@@ -460,7 +459,7 @@ def test_ingest_after_a_band_group_manifest_refuses_naming_the_manifest(
     project: Path, tmp_path: Path
 ) -> None:
     """Ingest at a band-group manifest's own stem refuses naming the manifest, copying nothing."""
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tests._producer_fixtures import write_band_group
 
     src = tmp_path / "raw"
     _make_image(src / "plain.png")
@@ -472,12 +471,11 @@ def test_ingest_after_a_band_group_manifest_refuses_naming_the_manifest(
     band_b = bucket_dir / "cap_R.tif"
     band_a.write_bytes(b"a")
     band_b.write_bytes(b"b")
-    write_band_group_manifest(
+    write_band_group(
         bucket_dir,
         "cap",
         {"Green": band_a, "Red": band_b},
         central_wavelength_nm=None,
-        identity_tolerance={},
     )
 
     src2 = tmp_path / "raw2"

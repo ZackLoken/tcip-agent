@@ -197,23 +197,15 @@ class TestActiveLearningScoringLogic:
             BaseScorer,
             CombinedScorer,
         )
-        from tcip_mcp.pipelines.data.band_groups import (
-            write_band_group_manifest,
-        )
         from tcip_mcp.pipelines.image_utils import list_logical_images, stem_of
+        from tests._producer_fixtures import write_band_group
 
         images = image_root(tmp_path)
         images.mkdir()
         bands = {name: images / f"cap_{name}.tif" for name in ("G", "R")}
         for path in [*bands.values(), images / "plain.tif"]:
             tifffile.imwrite(str(path), np.zeros((8, 8), dtype=np.uint16))
-        write_band_group_manifest(
-            images,
-            "cap",
-            bands,
-            central_wavelength_nm=None,
-            identity_tolerance={},
-        )
+        write_band_group(images, "cap", bands, central_wavelength_nm=None)
         candidates = list(list_logical_images(images).values())
 
         class _Fixed(BaseScorer):

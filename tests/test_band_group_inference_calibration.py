@@ -33,20 +33,20 @@ TILE = 32
 
 def _write_group(
     images_dir: Path, stem: str, fill: tuple[int, int] = (111, 222)
-) -> None:
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+) -> Path:
+    """Write the two band files of ``stem`` in ``images_dir`` and their manifest; return it."""
+    from tests._producer_fixtures import write_band_group
 
     band_a = images_dir / f"{stem}_G.tif"
     band_b = images_dir / f"{stem}_R.tif"
     ramp = np.arange(TILE, dtype=np.uint16)[None, :].repeat(TILE, axis=0)
     tifffile.imwrite(str(band_a), ramp + fill[0])
     tifffile.imwrite(str(band_b), ramp + fill[1])
-    write_band_group_manifest(
+    return write_band_group(
         images_dir,
         stem,
         {"Green": band_a, "Red": band_b},
         central_wavelength_nm=None,
-        identity_tolerance={},
     )
 
 
@@ -90,12 +90,12 @@ def _grouped_dataset(root: Path) -> Path:
     images_dir = image_dir(root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
 
-    _write_group(images_dir, "capture_001", fill=(111, 222))
-    _write_group(images_dir, "capture_002", fill=(50, 90))
-
-    for stem in ("capture_001", "capture_002"):
+    for manifest in (
+        _write_group(images_dir, "capture_001", fill=(111, 222)),
+        _write_group(images_dir, "capture_002", fill=(50, 90)),
+    ):
         label_image(
-            images_dir / f"{stem}.bandgroup",
+            manifest,
             [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))],
             TILE,
             TILE,
@@ -162,7 +162,7 @@ def test_run_inference_images_dir_folds_a_grouped_capture(
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
-    _write_group(images_dir, "capture_001")
+    manifest = _write_group(images_dir, "capture_001")
     ckpt = _detection_checkpoint(tmp_path)
 
     _pass, results = predicted_over(
@@ -170,7 +170,7 @@ def test_run_inference_images_dir_folds_a_grouped_capture(
     )
 
     assert len(results) == 1
-    assert results[0]["image"].endswith("capture_001.bandgroup")
+    assert results[0]["image"].endswith(manifest.name)
 
 
 def test_predict_batch_rejects_stringified_band_group_refs(

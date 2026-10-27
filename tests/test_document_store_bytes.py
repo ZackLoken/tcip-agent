@@ -163,21 +163,26 @@ def test_a_band_group_manifest_lands_as_the_json_the_image_enumerators_parse(
     The manifest is written through ``write_band_group_manifest``.
     """
     from tcip_mcp.dataset_layout import image_root
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tcip_mcp.pipelines.data.band_groups import (
+        BandGroupManifest,
+        BandGroupRef,
+        band_group_manifest_path,
+        write_band_group_manifest,
+    )
 
     images = image_root(tmp_path)
     images.mkdir()
-    bands = {
-        name: images / filename for name, filename in BAND_FILENAMES.items()
-    }
 
     path = write_band_group_manifest(
-        images,
-        "cap",
-        bands,
-        central_wavelength_nm=BAND_WAVELENGTHS,
-        source="embedded-metadata",
-        identity_tolerance={},
+        BandGroupRef(
+            band_group_manifest_path(images, "cap"),
+            BandGroupManifest(
+                bands=BAND_FILENAMES,
+                source="embedded-metadata",
+                identity_tolerance={},
+                central_wavelength_nm=BAND_WAVELENGTHS,
+            ),
+        ),
         expect=ts.Version.ABSENT,
     )
 

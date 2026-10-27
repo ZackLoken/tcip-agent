@@ -547,7 +547,7 @@ def _read_date_stamps(
             manifest_sha256 = hashlib.sha256(
                 source.manifest_path.read_bytes()
             ).hexdigest()
-            members = tuple(sorted(p.name for p in source.bands.values()))
+            members = tuple(sorted(source.manifest.bands.values()))
             stamps.append(
                 ImageStamp(
                     date_folder=date_folder,

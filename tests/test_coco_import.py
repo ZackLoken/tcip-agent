@@ -922,19 +922,18 @@ def test_a_band_grouped_capture_resolves_by_the_stem_the_document_names(
     import numpy as np
     import tifffile
 
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tests._producer_fixtures import write_band_group
 
     root = _dataset(tmp_path).root
     images_dir = image_dir(root, DATE)
     band_g, band_r = images_dir / "plot7_G.tif", images_dir / "plot7_R.tif"
     tifffile.imwrite(str(band_g), np.full((IMG, IMG), 111, dtype=np.uint16))
     tifffile.imwrite(str(band_r), np.full((IMG, IMG), 222, dtype=np.uint16))
-    write_band_group_manifest(
+    write_band_group(
         images_dir,
         "plot7",
         {"Green": band_g, "Red": band_r},
         central_wavelength_nm=None,
-        identity_tolerance={},
     )
     images = [{"id": 1, "file_name": "plot7.tif", "width": IMG, "height": IMG}]
     annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX}]

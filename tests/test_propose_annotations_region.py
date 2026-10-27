@@ -17,7 +17,17 @@ from PIL import Image
 from tcip_annotation.state import RING_MIN_POINTS
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.pipelines.proposal import Proposal
-from tests._producer_fixtures import write_image
+from tests._producer_fixtures import install_stub_proposer, write_image
+
+UNIT_CANDIDATE = {
+    "candidate_id": 0,
+    "bbox": [1.0, 1.0, 2.0, 2.0],
+    "area": 1,
+    "score": 0.5,
+    "engine_meta": {},
+    "rings": [[(1, 1), (2, 1), (2, 2)]],
+}
+"""An ordinary candidate: a unit box scored 0.5, its ring three points."""
 
 
 class PatchProposer:
@@ -255,19 +265,15 @@ def _write_rgb_band_group(
     """
     import tifffile
 
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tests._producer_fixtures import write_band_group
 
     bands = {}
     for i, name in enumerate(("Red", "Green", "Blue")):
         band_path = images_dir / f"{stem}_{name}.tif"
         tifffile.imwrite(str(band_path), frame[:, :, i])
         bands[name] = band_path
-    return write_band_group_manifest(
-        images_dir,
-        stem,
-        bands,
-        central_wavelength_nm=None,
-        identity_tolerance={},
+    return write_band_group(
+        images_dir, stem, bands, central_wavelength_nm=None
     )
 
 
@@ -321,10 +327,8 @@ class TestRegionFrameIsTheResolvedImageSources:
         import tifffile
 
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.pipelines.data.band_groups import (
-            write_band_group_manifest,
-        )
         from tcip_mcp.tools.proposal_tools import propose_annotations
+        from tests._producer_fixtures import write_band_group
 
         images_dir = image_dir(tmp_path, UNDATED_BUCKET)
         images_dir.mkdir(parents=True)
@@ -336,12 +340,8 @@ class TestRegionFrameIsTheResolvedImageSources:
                 np.full((UPRIGHT_H, UPRIGHT_W), fill, dtype=np.uint16),
             )
             bands[name] = band_path
-        manifest = write_band_group_manifest(
-            images_dir,
-            "cap",
-            bands,
-            central_wavelength_nm=None,
-            identity_tolerance={},
+        manifest = write_band_group(
+            images_dir, "cap", bands, central_wavelength_nm=None
         )
 
         class NeverProposer:
@@ -436,7 +436,6 @@ class TestWholeFrameDefaultIsUnaffected:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools import proposal_tools
 
         called = []
@@ -451,26 +450,18 @@ class TestWholeFrameDefaultIsUnaffected:
             proposal_tools, "_offset_candidates", recording_offset_candidates
         )
 
-        class OneBoxProposer:
-            def propose(self, image_path: str, **params: object) -> Proposal:
-                return Proposal(
-                    [
-                        {
-                            "candidate_id": 0,
-                            "bbox": [10.0, 10.0, 30.0, 30.0],
-                            "area": 400,
-                            "score": 0.9,
-                            "engine_meta": {},
-                            "rings": [
-                                [(10, 10), (30, 10), (30, 30), (10, 30)]
-                            ],
-                        }
-                    ],
-                    None,
-                )
-
-        monkeypatch.setattr(
-            proposal, "resolve_proposer", lambda engine: OneBoxProposer()
+        install_stub_proposer(
+            monkeypatch,
+            [
+                {
+                    "candidate_id": 0,
+                    "bbox": [10.0, 10.0, 30.0, 30.0],
+                    "area": 400,
+                    "score": 0.9,
+                    "engine_meta": {},
+                    "rings": [[(10, 10), (30, 10), (30, 30), (10, 30)]],
+                }
+            ],
         )
 
         img_path = write_image(
@@ -490,28 +481,9 @@ class TestWholeFrameDefaultIsUnaffected:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         import tcip_store as ts
-        from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools import proposal_tools
 
-        class OneBoxProposer:
-            def propose(self, image_path: str, **params: object) -> Proposal:
-                return Proposal(
-                    [
-                        {
-                            "candidate_id": 0,
-                            "bbox": [1.0, 1.0, 2.0, 2.0],
-                            "area": 1,
-                            "score": 0.5,
-                            "engine_meta": {},
-                            "rings": [[(1, 1), (2, 1), (2, 2)]],
-                        }
-                    ],
-                    None,
-                )
-
-        monkeypatch.setattr(
-            proposal, "resolve_proposer", lambda engine: OneBoxProposer()
-        )
+        install_stub_proposer(monkeypatch, [UNIT_CANDIDATE])
 
         img_path = write_image(
             image_dir(tmp_path, UNDATED_BUCKET) / "no_region.jpg",
@@ -547,27 +519,10 @@ class TestWholeFrameDefaultIsUnaffected:
         shape refuses the proposal, naming the minimum point count, and nothing is staged.
         """
         import tcip_store as ts
-        from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools import proposal_tools
 
-        class TwoPointProposer:
-            def propose(self, image_path: str, **params: object) -> Proposal:
-                return Proposal(
-                    [
-                        {
-                            "candidate_id": 0,
-                            "bbox": [1.0, 1.0, 2.0, 2.0],
-                            "area": 1,
-                            "score": 0.5,
-                            "engine_meta": {},
-                            "rings": [[(1, 1), (2, 2)]],
-                        }
-                    ],
-                    None,
-                )
-
-        monkeypatch.setattr(
-            proposal, "resolve_proposer", lambda engine: TwoPointProposer()
+        install_stub_proposer(
+            monkeypatch, [{**UNIT_CANDIDATE, "rings": [[(1, 1), (2, 2)]]}]
         )
         img_path = write_image(
             image_dir(tmp_path, UNDATED_BUCKET) / "short_ring.jpg",
@@ -593,28 +548,9 @@ class TestWholeFrameDefaultIsUnaffected:
     ) -> None:
         """A working engine's ordinary candidate is staged."""
         import tcip_store as ts
-        from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools import proposal_tools
 
-        class OneBoxProposer:
-            def propose(self, image_path: str, **params: object) -> Proposal:
-                return Proposal(
-                    [
-                        {
-                            "candidate_id": 0,
-                            "bbox": [1.0, 1.0, 2.0, 2.0],
-                            "area": 1,
-                            "score": 0.5,
-                            "engine_meta": {},
-                            "rings": [[(1, 1), (2, 1), (2, 2)]],
-                        }
-                    ],
-                    None,
-                )
-
-        monkeypatch.setattr(
-            proposal, "resolve_proposer", lambda engine: OneBoxProposer()
-        )
+        install_stub_proposer(monkeypatch, [UNIT_CANDIDATE])
 
         img_path = write_image(
             image_dir(tmp_path, UNDATED_BUCKET) / "storable.jpg",
@@ -639,28 +575,16 @@ class TestWholeFrameDefaultIsUnaffected:
     def test_a_candidate_stating_no_confidence_is_refused_where_it_arrives(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A candidate stating no confidence is refused by name where it arrives, and not staged."""
         import tcip_store as ts
-        from tcip_mcp.pipelines.proposal import register_proposal_engine
         from tcip_mcp.tools import proposal_tools
 
-        class UnscoredProposer:
-            def propose(self, image_path: str, **params: object) -> Proposal:
-                return Proposal(
-                    [
-                        {
-                            "candidate_id": 0,
-                            "bbox": [1.0, 1.0, 2.0, 2.0],
-                            "area": 1,
-                            "engine_meta": {},
-                            "rings": [[(1, 1), (2, 1), (2, 2)]],
-                        }
-                    ],
-                    None,
-                )
-
-        register_proposal_engine("unscored", UnscoredProposer())  # type: ignore[arg-type]
+        install_stub_proposer(
+            monkeypatch,
+            [{k: v for k, v in UNIT_CANDIDATE.items() if k != "score"}],
+        )
         img_path = write_image(
             image_dir(tmp_path, UNDATED_BUCKET) / "unscored.jpg",
             (32, 32),

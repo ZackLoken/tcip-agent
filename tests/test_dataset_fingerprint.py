@@ -22,13 +22,13 @@ from tcip_mcp.pipelines.data import (
     dataset_fingerprint as fingerprint_mod,
     selection,
 )
-from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 from tcip_mcp.subject_registry import Attribute
 from tests._producer_fixtures import (
     label_image,
     registry_of,
     registry_over,
+    write_band_group,
     write_image,
 )
 
@@ -266,12 +266,8 @@ def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(
     Image.new("L", (16, 16), color=10).save(images / "band_r.png")
     Image.new("L", (16, 16), color=20).save(images / "band_nir.png")
     bands = {"r": images / "band_r.png", "nir": images / "band_nir.png"}
-    manifest_path = write_band_group_manifest(
-        images,
-        "capture_1",
-        bands,
-        central_wavelength_nm=None,
-        identity_tolerance={},
+    manifest_path = write_band_group(
+        images, "capture_1", bands, central_wavelength_nm=None
     )
     label_image(
         manifest_path,
@@ -288,12 +284,11 @@ def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(
     )  # deterministic across two calls
 
     # Rewrite the manifest's own bytes; the band files it names are untouched.
-    write_band_group_manifest(
+    write_band_group(
         images,
         "capture_1",
         bands,
         central_wavelength_nm={"r": 660.0, "nir": 850.0},
-        identity_tolerance={},
     )
     assert dataset_fingerprint(tmp_path) != fp1
 

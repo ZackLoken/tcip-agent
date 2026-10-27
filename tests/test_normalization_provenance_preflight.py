@@ -334,9 +334,9 @@ def test_preflight_admits_the_exact_derivations_record_over_a_band_group_dataset
     import numpy as np
     import tifffile
 
-    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
     from tcip_mcp.pipelines.image_utils import list_logical_images
     from tcip_mcp.tools.training_tools import preflight_config
+    from tests._producer_fixtures import write_band_group
 
     imgs = image_dir(tmp_path, UNDATED_BUCKET)
     imgs.mkdir(parents=True)
@@ -344,12 +344,11 @@ def test_preflight_admits_the_exact_derivations_record_over_a_band_group_dataset
     ramp = np.arange(64, dtype=np.uint16).reshape(8, 8)
     tifffile.imwrite(str(band_a), ramp + 111)
     tifffile.imwrite(str(band_b), ramp + 222)
-    write_band_group_manifest(
+    write_band_group(
         imgs,
         "cap",
         {"Green": band_a, "Red": band_b},
         central_wavelength_nm=None,
-        identity_tolerance={},
     )
     _label(imgs, "cap", width=8, height=8)
 

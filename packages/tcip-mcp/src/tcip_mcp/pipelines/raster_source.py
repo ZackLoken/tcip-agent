@@ -819,7 +819,7 @@ class BandGroupSource(_ClosableSource):
         ref = group.group
         self._members = [member.open(1) for member in group.members]
         first = self._members[0]
-        for name, member in zip(ref.bands, self._members):
+        for name, member in zip(ref.manifest.bands, self._members):
             if (member.width, member.height) != (first.width, first.height):
                 self._release()
                 raise ValueError(
@@ -1152,7 +1152,7 @@ class SourceHeader:
         read that way.
         """
         members = [SourceHeader(p) for p in self.group.bands.values()]
-        for name, member in zip(self.group.bands, members):
+        for name, member in zip(self.group.manifest.bands, members):
             bands = member._layout_at(1)[2]
             if bands != 1:
                 raise ValueError(

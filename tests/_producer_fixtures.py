@@ -150,6 +150,38 @@ class GroupedDataset(NamedTuple):
     plain: Path
 
 
+def write_band_group(
+    images_dir: Path,
+    stem: str,
+    bands: dict[str, Path],
+    *,
+    central_wavelength_nm: dict[str, float] | None,
+) -> Path:
+    """Write the manifest grouping ``bands`` under ``stem`` in ``images_dir``; return its path.
+
+    The record names each band's file, states ``central_wavelength_nm``, the explicit-manifest
+    source and no identity tolerance, and is written by ``write_band_group_manifest``.
+    """
+    from tcip_mcp.pipelines.data.band_groups import (
+        BandGroupManifest,
+        BandGroupRef,
+        band_group_manifest_path,
+        write_band_group_manifest,
+    )
+
+    return write_band_group_manifest(
+        BandGroupRef(
+            band_group_manifest_path(images_dir, stem),
+            BandGroupManifest(
+                bands={name: path.name for name, path in bands.items()},
+                source="explicit-manifest",
+                identity_tolerance={},
+                central_wavelength_nm=central_wavelength_nm,
+            ),
+        )
+    )
+
+
 def stub_images(images_dir: Path, names: list[str]) -> list[Path]:
     """Write a one-byte file at each of ``names`` in ``images_dir``, its directory made.
 

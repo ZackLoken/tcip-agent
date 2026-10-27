@@ -38,6 +38,7 @@ __all__ = [
     "refuse_incomplete_band_group",
     "resolve_image_path",
     "resolve_image_paths",
+    "scan_identities",
     "source_path_of",
     "stem_collision_key",
     "stem_of",
@@ -79,40 +80,36 @@ def stem_collision_key(name: str) -> str:
     return name.lower()
 
 
-def _scan_identities(
-    d: Path,
-) -> dict[str, list[tuple[Path, BandGroupRef | None]]]:
+def scan_identities(d: Path) -> dict[str, list[Path | BandGroupRef]]:
     """Scan ``d`` for its logical identities, keyed by :func:`stem_collision_key`.
 
     The scan is one manifest glob and one ``d.iterdir()`` walk with one extension test; a key's
     list holds more than one entry exactly when it is ambiguous.
 
-    A readable manifest is one identity under its own exact stem, paired with the parsed
-    :class:`BandGroupRef`; its claimed band files are that identity's members and no identity of
-    their own. An unreadable or corrupt manifest claims nothing and is no identity. Every other
-    file with a suffix in :data:`IMAGE_EXTS` that no readable manifest claims is one raw identity
-    under its own exact stem, paired with ``None``.
+    A readable manifest is one identity under its own exact stem, its parsed
+    :class:`BandGroupRef`; its band files are that identity's members and no identity of their
+    own. An unreadable or corrupt manifest claims nothing and is no identity. Every other file
+    with a suffix in :data:`IMAGE_EXTS` that no readable manifest claims is one raw identity under
+    its own exact stem, its own path.
     """
-    identities: dict[str, list[tuple[Path, BandGroupRef | None]]] = {}
-    claimed: set[str] = set()
+    identities: dict[str, list[Path | BandGroupRef]] = {}
+    claimed: set[Path] = set()
     for mp in sorted(d.glob(f"*{MANIFEST_EXT}")):
         try:
             ref = read_band_group_manifest(mp)
         except (OSError, ValueError):
             continue
-        identities.setdefault(stem_collision_key(ref.stem), []).append(
-            (ref.manifest_path, ref)
-        )
-        claimed.update(p.name for p in ref.bands.values())
+        identities.setdefault(stem_collision_key(ref.stem), []).append(ref)
+        claimed.update(ref.bands.values())
     for p in sorted(d.iterdir()):
         if not p.is_file():
             continue
         ext = p.suffix.lower()
-        if ext == MANIFEST_EXT or p.name in claimed:
+        if ext == MANIFEST_EXT or p in claimed:
             continue
         if ext not in IMAGE_EXTS:
             continue
-        identities.setdefault(stem_collision_key(p.stem), []).append((p, None))
+        identities.setdefault(stem_collision_key(p.stem), []).append(p)
     return identities
 
 
@@ -127,8 +124,8 @@ def bucket_logical_identities(images_dir: str | Path) -> dict[str, list[Path]]:
     if not d.is_dir():
         return {}
     return {
-        key: [path for path, _ref in entries]
-        for key, entries in _scan_identities(d).items()
+        key: [Path(source_path_of(entry)) for entry in entries]
+        for key, entries in scan_identities(d).items()
     }
 
 
@@ -171,40 +168,30 @@ def list_logical_images(
 ) -> dict[str, Path | BandGroupRef]:
     """Return every logical image in ``images_dir``, by exact stem.
 
-    Built from :func:`_scan_identities`: a :class:`BandGroupRef` for a manifest identity, that
+    Built from :func:`scan_identities`: a :class:`BandGroupRef` for a manifest identity, that
     file's own path for a raw one. Raises :class:`AmbiguousImageStemError` naming every ambiguous
     key's own paths; the returned mapping is keyed by the exact stem.
     """
     d = Path(images_dir)
     if not d.is_dir():
         return {}
-    scanned = _scan_identities(d)
+    scanned = scan_identities(d)
     _refuse_ambiguous(d, scanned.values())
-    return {
-        stem_of(source): source for source in map(_identity, scanned.values())
-    }
-
-
-def _identity(
-    entries: list[tuple[Path, BandGroupRef | None]],
-) -> Path | BandGroupRef:
-    """Return the logical image one unambiguous :func:`_scan_identities` key holds."""
-    path, ref = entries[0]
-    return ref if ref is not None else path
+    return {stem_of(first): first for first, *_ in scanned.values()}
 
 
 def _refuse_ambiguous(
-    d: Path, keys: Iterable[list[tuple[Path, BandGroupRef | None]]]
+    d: Path, keys: Iterable[list[Path | BandGroupRef]]
 ) -> None:
-    """Refuse the :func:`_scan_identities` keys of ``d`` holding more than one identity.
+    """Refuse the :func:`scan_identities` keys of ``d`` holding more than one identity.
 
     The :class:`AmbiguousImageStemError` names their paths.
     """
     names = sorted(
-        str(path)
+        source_path_of(entry)
         for entries in keys
         if len(entries) > 1
-        for path, _ref in entries
+        for entry in entries
     )
     if names:
         raise AmbiguousImageStemError(
@@ -233,7 +220,7 @@ def resolve_image_paths(
 ) -> list[Path | BandGroupRef]:
     """Resolve the logical image each of ``paths`` names, each directory scanned once.
 
-    The scan is :func:`_scan_identities`: a ``.bandgroup`` manifest's grouped capture, a raw image
+    The scan is :func:`scan_identities`: a ``.bandgroup`` manifest's grouped capture, a raw image
     its own file. Refuses ``FileNotFoundError`` for a path naming no logical image, naming the
     manifest that claims it when it is a band of a grouped capture;
     :class:`AmbiguousImageStemError` when its own stem names more than one;
@@ -241,19 +228,19 @@ def resolve_image_paths(
     """
     named_paths = [Path(p) for p in paths]
     scanned = {
-        d: _scan_identities(d) if d.is_dir() else {}
+        d: scan_identities(d) if d.is_dir() else {}
         for d in {p.parent for p in named_paths}
     }
 
     def named(path: Path) -> Path | BandGroupRef:
         entries = scanned[path.parent].get(stem_collision_key(path.stem), [])
         _refuse_ambiguous(path.parent, [entries])
-        if not entries or entries[0][0].name != path.name:
+        if not entries or logical_image_name(entries[0]) != path.name:
             owners = [
-                str(ref.manifest_path)
-                for (_p, ref), *_ in scanned[path.parent].values()
-                if ref is not None
-                and path.name in {b.name for b in ref.bands.values()}
+                source_path_of(first)
+                for first, *_ in scanned[path.parent].values()
+                if isinstance(first, BandGroupRef)
+                and path in first.bands.values()
             ]
             raise FileNotFoundError(
                 f"{path} names no logical image"
@@ -263,7 +250,7 @@ def resolve_image_paths(
                     else ""
                 )
             )
-        return refuse_incomplete_band_group(_identity(entries))
+        return refuse_incomplete_band_group(entries[0])
 
     return [named(p) for p in named_paths]
 

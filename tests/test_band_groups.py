@@ -8,7 +8,7 @@ duplicate band identity and a sensor with no embedded metadata.
 
 from __future__ import annotations
 
-import json
+import re
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -18,8 +18,11 @@ import pytest
 import tifffile
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
+from tcip_mcp.pipelines.data.band_groups import _EMBEDDED_METADATA_STRATEGIES
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from tcip_store import Version
 
 REAL_DJI_DIR = image_dir(
@@ -32,114 +35,63 @@ requires_real_dji_data = pytest.mark.skipif(
 )
 
 
-def _xmp(capture_uuid: str, band_name: str, wavelength: float) -> bytes:
-    """Return a minimal XMP packet in the real DJI shape.
+STRATEGY = _EMBEDDED_METADATA_STRATEGIES[0]
+"""The DJI-shaped strategy row whose tags the synthetic packets carry."""
 
-    ``drone-dji:CaptureUUID`` is an XML attribute and ``Camera:BandName``/
-    ``Camera:CentralWavelength`` are nested elements.
-    """
-    xmp = (
-        '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>\n'
-        '<x:xmpmeta xmlns:x="adobe:ns:meta/">\n'
-        ' <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n'
-        '  <rdf:Description rdf:about="" xmlns:drone-dji="http://www.dji.com/drone-dji/1.0/" '
-        'xmlns:Camera="http://pix4d.com/camera/1.0"\n'
-        f'   drone-dji:CaptureUUID="{capture_uuid}">\n'
-        f"   <Camera:BandName>{band_name}</Camera:BandName>\n"
-        f"   <Camera:CentralWavelength>{wavelength}</Camera:CentralWavelength>\n"
-        "  </rdf:Description>\n"
-        " </rdf:RDF>\n"
-        "</x:xmpmeta>\n"
-        '<?xpacket end="w"?>'
-    )
-    return xmp.encode("utf-8")
+((TIME_TAG,), POSITION_TAGS) = (tags for _, tags in STRATEGY.identity_signals)
 
 
-def _write_band_file(
-    path: Path,
-    capture_uuid: str,
-    band_name: str,
-    wavelength: float,
-    fill: int = 100,
-    shape: tuple[int, int] = (4, 4),
-) -> None:
-    arr = np.full(shape, fill, dtype=np.uint16)
-    tifffile.imwrite(
-        str(path),
-        arr,
-        extratags=[
-            (700, "B", 0, _xmp(capture_uuid, band_name, wavelength), True)
-        ],
-    )
-
-
-def _xmp_with_identity(
+def _xmp(
     capture_uuid: str,
     band_name: str,
     wavelength: float,
     *,
-    utc: str,
-    lat: float,
-    lon: float,
+    utc: str | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
 ) -> bytes:
-    """Return :func:`_xmp`'s packet plus a timestamp and a GPS fix.
+    """Return a minimal XMP description in the DJI shape, its tags those :data:`STRATEGY` names.
 
-    They are the ``drone-dji:UTCAtExposure``, ``GpsLatitude`` and ``GpsLongitude`` attributes at
-    ``utc``, ``lat`` and ``lon``; the bare :func:`_xmp` shape carries none of them.
+    The group id and each of the timestamp ``utc`` and the fix ``lat``, ``lon`` given are
+    attributes; the band name and the wavelength are child elements. ElementTree serializes it.
     """
-    xmp = (
-        '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>\n'
-        '<x:xmpmeta xmlns:x="adobe:ns:meta/">\n'
-        ' <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n'
-        '  <rdf:Description rdf:about="" xmlns:drone-dji="http://www.dji.com/drone-dji/1.0/" '
-        'xmlns:Camera="http://pix4d.com/camera/1.0"\n'
-        f'   drone-dji:CaptureUUID="{capture_uuid}"\n'
-        f'   drone-dji:UTCAtExposure="{utc}"\n'
-        f'   drone-dji:GpsLatitude="{lat}"\n'
-        f'   drone-dji:GpsLongitude="{lon}">\n'
-        f"   <Camera:BandName>{band_name}</Camera:BandName>\n"
-        f"   <Camera:CentralWavelength>{wavelength}</Camera:CentralWavelength>\n"
-        "  </rdf:Description>\n"
-        " </rdf:RDF>\n"
-        "</x:xmpmeta>\n"
-        '<?xpacket end="w"?>'
+    from xml.etree.ElementTree import Element, SubElement, tostring
+
+    namespaces = {
+        "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+        STRATEGY.group_id_tag.partition(":")[
+            0
+        ]: "http://www.dji.com/drone-dji/1.0/",
+        STRATEGY.band_id_tag.partition(":")[0]: "http://pix4d.com/camera/1.0",
+    }
+    tags = (STRATEGY.group_id_tag, TIME_TAG, *POSITION_TAGS)
+    description = Element(
+        "rdf:Description",
+        {
+            **{f"xmlns:{prefix}": uri for prefix, uri in namespaces.items()},
+            **{
+                tag: str(value)
+                for tag, value in zip(tags, (capture_uuid, utc, lat, lon))
+                if value is not None
+            },
+        },
     )
-    return xmp.encode("utf-8")
+    for tag, text in (
+        (STRATEGY.band_id_tag, band_name),
+        (STRATEGY.wavelength_tag, wavelength),
+    ):
+        SubElement(description, tag).text = str(text)
+    return tostring(description)
 
 
-def _write_band_file_with_identity(
-    path: Path,
-    capture_uuid: str,
-    band_name: str,
-    wavelength: float,
-    *,
-    utc: str,
-    lat: float,
-    lon: float,
-    fill: int = 100,
-    shape: tuple[int, int] = (4, 4),
-) -> None:
-    arr = np.full(shape, fill, dtype=np.uint16)
+def _write_packet(path: Path, packet: bytes, fill: int = 100) -> Path:
+    """Write a 4 by 4 TIFF of ``fill`` carrying ``packet`` as its XMP tag; return ``path``."""
     tifffile.imwrite(
         str(path),
-        arr,
-        extratags=[
-            (
-                700,
-                "B",
-                0,
-                _xmp_with_identity(
-                    capture_uuid,
-                    band_name,
-                    wavelength,
-                    utc=utc,
-                    lat=lat,
-                    lon=lon,
-                ),
-                True,
-            )
-        ],
+        np.full((4, 4), fill, dtype=np.uint16),
+        extratags=[(700, "B", 0, packet, True)],
     )
+    return path
 
 
 @pytest.fixture
@@ -225,8 +177,8 @@ def test_real_data_stale_manifest_recovers_by_deleting_it(
 
     result = detect_and_write_band_groups(dji_copy)
     stem = result["formed"][0]["stem"]
-    manifest_path = dji_copy / f"{stem}.bandgroup"
-    (dji_copy / f"{stem}_G.TIF").unlink()
+    manifest_path = Path(result["manifests"][0])
+    resolve_image_path(manifest_path).bands["Green"].unlink()
 
     with pytest.raises(BandGroupIncompleteError):
         resolve_image_path(manifest_path)
@@ -239,11 +191,7 @@ def test_real_data_stale_manifest_recovers_by_deleting_it(
     assert stem in reformed
     assert sorted(reformed[stem]["bands"]) == ["NIR", "Red", "RedEdge"]
     ref = resolve_image_path(manifest_path)
-    assert sorted(ref.bands) == ["NIR", "Red", "RedEdge"]
-
-
-TIME_TAG = "drone-dji:UTCAtExposure"
-POSITION_TAGS = ("drone-dji:GpsLatitude", "drone-dji:GpsLongitude")
+    assert sorted(ref.manifest.bands) == ["NIR", "Red", "RedEdge"]
 
 
 def _expected_tolerances(images_dir: Path) -> dict[str, tuple[float, float]]:
@@ -263,7 +211,7 @@ def _expected_tolerances(images_dir: Path) -> dict[str, tuple[float, float]]:
     tags = [
         _read_xmp_tags(p) for p in sorted(images_dir.glob("*.[tT][iI][fF]"))
     ]
-    gids = np.array([t["drone-dji:CaptureUUID"] for t in tags])
+    gids = np.array([t[STRATEGY.group_id_tag] for t in tags])
     times = np.array(
         [datetime.fromisoformat(t[TIME_TAG]).timestamp() for t in tags]
     )
@@ -289,23 +237,26 @@ def _expected_tolerances(images_dir: Path) -> dict[str, tuple[float, float]]:
     }
 
 
-def _recorded_tolerances(images_dir: Path) -> list[dict]:
-    """Return every manifest's recorded identity tolerance in ``images_dir``."""
+def _recorded_tolerances(detected: dict) -> list[dict]:
+    """Return the recorded identity tolerance of each manifest a detection pass answered."""
+    from tcip_mcp.pipelines.data.band_groups import read_band_group_manifest
+
     return [
-        json.loads(p.read_text(encoding="utf-8"))["identity_tolerance"]
-        for p in sorted(images_dir.glob("*.bandgroup"))
+        read_band_group_manifest(Path(p)).manifest.identity_tolerance
+        for p in detected["manifests"]
     ]
 
 
-def _assert_tolerances_agree(images_dir: Path) -> None:
+def _assert_tolerances_agree(images_dir: Path, detected: dict) -> None:
     """Assert every capture's spread sits below its signal's gap, which every manifest records.
 
-    The gap recorded is the one :func:`_expected_tolerances` recomputes.
+    The gap recorded in each manifest of the detection answer ``detected`` is the one
+    :func:`_expected_tolerances` recomputes over ``images_dir``.
     """
     expected = _expected_tolerances(images_dir)
     for gap, within in expected.values():
         assert within < gap
-    for recorded in _recorded_tolerances(images_dir):
+    for recorded in _recorded_tolerances(detected):
         assert recorded.keys() == expected.keys()
         for key, (gap, _within) in expected.items():
             assert recorded[key]["value"] == pytest.approx(gap, rel=1e-4)
@@ -322,7 +273,7 @@ def test_real_data_tolerance_agrees_with_the_samples_own_gap(
     result = detect_and_write_band_groups(dji_copy)
 
     assert len(result["formed"]) == 16
-    _assert_tolerances_agree(dji_copy)
+    _assert_tolerances_agree(dji_copy, result)
 
 
 def test_tolerance_agrees_with_a_synthetic_buckets_own_gap(
@@ -346,20 +297,22 @@ def test_tolerance_agrees_with_a_synthetic_buckets_own_gap(
     ]
     for c, (clock, lat, lon) in enumerate(captures):
         for b, (band, wavelength) in enumerate((("Green", 560), ("NIR", 860))):
-            _write_band_file_with_identity(
+            _write_packet(
                 d / f"cap{c}_{band}.tif",
-                f"uuid-{c}",
-                band,
-                wavelength,
-                utc=f"2023-05-23T{clock}{b}4",
-                lat=lat + b * 3e-7,
-                lon=lon - b * 2e-7,
+                _xmp(
+                    f"uuid-{c}",
+                    band,
+                    wavelength,
+                    utc=f"2023-05-23T{clock}{b}4",
+                    lat=lat + b * 3e-7,
+                    lon=lon - b * 2e-7,
+                ),
             )
 
     result = detect_and_write_band_groups(d)
 
     assert len(result["formed"]) == 3
-    _assert_tolerances_agree(d)
+    _assert_tolerances_agree(d, result)
 
 
 def test_a_lone_capture_forms_recording_that_its_identity_had_no_reference(
@@ -372,24 +325,151 @@ def test_a_lone_capture_forms_recording_that_its_identity_had_no_reference(
     d = image_root(tmp_path)
     d.mkdir()
     for band, wavelength in (("Green", 560), ("NIR", 860)):
-        _write_band_file_with_identity(
+        _write_packet(
             d / f"solo_{band}.tif",
-            "only-capture",
-            band,
-            wavelength,
-            utc="2023-05-23T17:06:28.931664",
-            lat=43.196946355,
-            lon=-90.058003633,
+            _xmp(
+                "only-capture",
+                band,
+                wavelength,
+                utc="2023-05-23T17:06:28.931664",
+                lat=43.196946355,
+                lon=-90.058003633,
+            ),
         )
 
     result = detect_and_write_band_groups(d)
 
     assert [g["stem"] for g in result["formed"]] == ["solo"]
-    (recorded,) = _recorded_tolerances(d)
+    (recorded,) = _recorded_tolerances(result)
     assert set(recorded) == {TIME_TAG, ",".join(POSITION_TAGS)}
     for entry in recorded.values():
         assert entry["value"] is None
         assert "no other capture group" in entry["source"]
+
+
+# ── XMP packet reading ──────────────────────────────────────────────────────────────────
+
+XMP_PACKET = (
+    '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>\n'
+    '<x:xmpmeta xmlns:x="adobe:ns:meta/">\n'
+    ' <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n'
+    '  <rdf:Description rdf:about="" xmlns:drone-dji="http://www.dji.com/drone-dji/1.0/"\n'
+    "   xmlns:Camera='http://pix4d.com/camera/1.0'\n"
+    '   drone-dji:CaptureUUID="cap &amp; one"\n'
+    "   drone-dji:UTCAtExposure='2023-05-23T17:06:28.931664'>\n"
+    "   <Camera:BandName>Red &amp; Green</Camera:BandName>\n"
+    "   <Camera:CentralWavelength>650</Camera:CentralWavelength>\n"
+    "   <Camera:CentralWavelength>560</Camera:CentralWavelength>\n"
+    "  </rdf:Description>\n"
+    " </rdf:RDF>\n"
+    "</x:xmpmeta>\n"
+    "                                \n"
+    '<?xpacket end="w"?>'
+)
+"""An XMP packet holding an entity in an attribute and in an element, a single-quoted
+attribute, an element-form and an attribute-form tag, and a repeated element."""
+
+XMP_TAGS = {
+    "rdf:about": "",
+    "drone-dji:CaptureUUID": "cap & one",
+    "drone-dji:UTCAtExposure": "2023-05-23T17:06:28.931664",
+    "Camera:BandName": "Red & Green",
+    "Camera:CentralWavelength": "650",
+}
+"""The tags :data:`XMP_PACKET` decodes to, known in advance: entities decoded, the repeated
+element's first value kept."""
+
+
+def _regex_reference(text: str) -> dict[str, str]:
+    """Return the tags two regular expressions find in ``text``, the first value of each kept.
+
+    They are an attribute pattern over double-quoted values and an element pattern over
+    childless elements.
+    """
+    tags: dict[str, str] = {}
+    for pattern in (
+        r'([A-Za-z_][\w.-]*:[A-Za-z_][\w.-]*)="([^"]*)"',
+        r"<([A-Za-z_][\w.-]*:[A-Za-z_][\w.-]*)>([^<]*)</\1>",
+    ):
+        for name, value in re.findall(pattern, text):
+            tags.setdefault(name, value)
+    return tags
+
+
+@pytest.mark.parametrize(
+    "terminator",
+    [b"", b"\0", b"\0\0\0"],
+    ids=["bare", "one NUL", "three NULs"],
+)
+def test_an_xmp_packet_reads_as_the_xml_it_is(
+    tmp_path: Path, terminator: bytes
+) -> None:
+    """An XMP packet's tags are the XML's own decoded attributes and element texts.
+
+    The packet reads the same followed by the NUL bytes that terminate a TIFF byte tag.
+    """
+    from tcip_mcp.pipelines.data.band_groups import _read_xmp_tags
+
+    path = _write_packet(
+        tmp_path / "packet.tif", XMP_PACKET.encode("utf-8") + terminator
+    )
+
+    assert _read_xmp_tags(path) == XMP_TAGS
+    reference = _regex_reference(XMP_PACKET)
+    assert reference["drone-dji:CaptureUUID"] == "cap &amp; one"
+    assert reference["Camera:BandName"] == "Red &amp; Green"
+    assert "drone-dji:UTCAtExposure" not in reference
+
+
+def test_an_xmp_packet_that_is_not_xml_offers_no_metadata(
+    tmp_path: Path,
+) -> None:
+    """A packet naming a prefix it never declares is not XML, and offers no tags."""
+    from tcip_mcp.pipelines.data.band_groups import _read_xmp_tags
+
+    packet = XMP_PACKET.replace(" xmlns:drone-dji=", " xmlns:undeclared=")
+    path = _write_packet(tmp_path / "packet.tif", packet.encode("utf-8"))
+
+    assert _read_xmp_tags(path) is None
+
+
+def test_a_prefix_declared_again_names_only_the_tags_in_its_scope(
+    tmp_path: Path,
+) -> None:
+    """A namespace declared under a second prefix inside an element names that element's tags.
+
+    A tag outside the inner declaration keeps the prefix in scope where it sits.
+    """
+    from tcip_mcp.pipelines.data.band_groups import _read_xmp_tags
+
+    packet = (
+        '<root xmlns:c="urn:test">\n'
+        "  <c:Band>first</c:Band>\n"
+        '  <child xmlns:d="urn:test"><d:Band>second</d:Band></child>\n'
+        "</root>"
+    )
+    path = _write_packet(tmp_path / "packet.tif", packet.encode("utf-8"))
+
+    assert _read_xmp_tags(path) == {"c:Band": "first", "d:Band": "second"}
+
+
+def test_a_prefix_bound_again_names_only_its_namespace_where_it_is_bound(
+    tmp_path: Path,
+) -> None:
+    """A prefix bound to another namespace on an element no longer names its former one there."""
+    from tcip_mcp.pipelines.data.band_groups import _read_xmp_tags
+
+    packet = (
+        '<root xmlns:d="urn:a" xmlns:c="urn:a">\n'
+        '  <child xmlns:c="urn:b">\n'
+        "    <d:Band>old-uri</d:Band>\n"
+        "    <c:Other>new-uri</c:Other>\n"
+        "  </child>\n"
+        "</root>"
+    )
+    path = _write_packet(tmp_path / "packet.tif", packet.encode())
+
+    assert _read_xmp_tags(path) == {"d:Band": "old-uri", "c:Other": "new-uri"}
 
 
 # ── duplicate-band-identity guard (synthetic, the real sample never hits this case) ──────
@@ -410,36 +490,16 @@ def test_duplicate_band_identity_is_refused_not_silently_overwritten(
     d = image_root(tmp_path)
     d.mkdir()
     utc, lat, lon = "2023-05-23T17:06:28.931664", 43.196946355, -90.058003633
-    _write_band_file_with_identity(
-        d / "cap_G1.tif",
-        "capA",
-        "Green",
-        560,
-        utc=utc,
-        lat=lat,
-        lon=lon,
-        fill=10,
-    )
-    _write_band_file_with_identity(
-        d / "cap_G2.tif",
-        "capA",
-        "Green",
-        560,
-        utc=utc,
-        lat=lat,
-        lon=lon,
-        fill=20,
-    )  # same band, same capture
-    _write_band_file_with_identity(
-        d / "cap_R.tif",
-        "capA",
-        "Red",
-        650,
-        utc=utc,
-        lat=lat,
-        lon=lon,
-        fill=30,
-    )
+    for name, band, wavelength, fill in (
+        ("cap_G1.tif", "Green", 560, 10),
+        ("cap_G2.tif", "Green", 560, 20),  # same band, same capture
+        ("cap_R.tif", "Red", 650, 30),
+    ):
+        _write_packet(
+            d / name,
+            _xmp("capA", band, wavelength, utc=utc, lat=lat, lon=lon),
+            fill,
+        )
 
     result = detect_and_write_band_groups(d)
     assert (
@@ -471,54 +531,75 @@ def test_two_unrelated_captures_sharing_a_group_id_are_refused_not_spliced(
     d = image_root(tmp_path)
     d.mkdir()
     same_gid = "collided-group-id"
-    # Capture A: one place/time.
-    _write_band_file_with_identity(
-        d / "A_G.tif",
-        same_gid,
-        "Green",
-        560,
-        utc="2023-05-23T17:06:28.931664",
-        lat=43.196946355,
-        lon=-90.058003633,
-    )
-    _write_band_file_with_identity(
-        d / "A_NIR.tif",
-        same_gid,
-        "NIR",
-        860,
-        utc="2023-05-23T17:06:28.931804",
-        lat=43.196946275,
-        lon=-90.058003629,
-    )
-    # Capture B: a different place and time entirely, but the same (colliding/reused) group id.
-    _write_band_file_with_identity(
-        d / "B_R.tif",
-        same_gid,
-        "Red",
-        650,
-        utc="2023-05-23T17:08:17.691590",
-        lat=43.197026713,
-        lon=-90.051619588,
-    )
-    _write_band_file_with_identity(
-        d / "B_RE.tif",
-        same_gid,
-        "RedEdge",
-        730,
-        utc="2023-05-23T17:08:17.691682",
-        lat=43.197026632,
-        lon=-90.051619582,
-    )
-    # Capture C: a genuine capture of its own id taken between the two.
-    for band, wavelength in (("Green", 560), ("NIR", 860)):
-        _write_band_file_with_identity(
-            d / f"C_{band}.tif",
+    for name, gid, band, wavelength, utc, lat, lon in (
+        # Capture A: one place/time.
+        (
+            "A_G",
+            same_gid,
+            "Green",
+            560,
+            "17:06:28.931664",
+            43.196946355,
+            -90.058003633,
+        ),
+        (
+            "A_NIR",
+            same_gid,
+            "NIR",
+            860,
+            "17:06:28.931804",
+            43.196946275,
+            -90.058003629,
+        ),
+        # Capture B: a different place and time entirely, but the same (reused) group id.
+        (
+            "B_R",
+            same_gid,
+            "Red",
+            650,
+            "17:08:17.691590",
+            43.197026713,
+            -90.051619588,
+        ),
+        (
+            "B_RE",
+            same_gid,
+            "RedEdge",
+            730,
+            "17:08:17.691682",
+            43.197026632,
+            -90.051619582,
+        ),
+        # Capture C: a genuine capture of its own id taken between the two.
+        (
+            "C_Green",
             "genuine-capture",
-            band,
-            wavelength,
-            utc="2023-05-23T17:07:20.000000",
-            lat=43.196990000,
-            lon=-90.054800000,
+            "Green",
+            560,
+            "17:07:20.000000",
+            43.19699,
+            -90.0548,
+        ),
+        (
+            "C_NIR",
+            "genuine-capture",
+            "NIR",
+            860,
+            "17:07:20.000000",
+            43.19699,
+            -90.0548,
+        ),
+    ):
+        _write_packet(
+            d / f"{name}.tif",
+            _xmp(
+                gid,
+                band,
+                wavelength,
+                utc=f"2023-05-23T{utc}",
+                lat=lat,
+                lon=lon,
+            ),
         )
 
     result = detect_and_write_band_groups(d)
@@ -553,10 +634,10 @@ def test_a_colliding_group_id_with_no_identity_signal_at_all_is_refused(
     d = image_root(tmp_path)
     d.mkdir()
     same_gid = "no-identity-tags-at-all"
-    _write_band_file(d / "A_G.tif", same_gid, "Green", 560)
-    _write_band_file(d / "A_NIR.tif", same_gid, "NIR", 860)
-    _write_band_file(d / "B_R.tif", same_gid, "Red", 650)
-    _write_band_file(d / "B_RE.tif", same_gid, "RedEdge", 730)
+    _write_packet(d / "A_G.tif", _xmp(same_gid, "Green", 560))
+    _write_packet(d / "A_NIR.tif", _xmp(same_gid, "NIR", 860))
+    _write_packet(d / "B_R.tif", _xmp(same_gid, "Red", 650))
+    _write_packet(d / "B_RE.tif", _xmp(same_gid, "RedEdge", 730))
 
     result = detect_and_write_band_groups(d)
     assert result["formed"] == []
@@ -585,15 +666,16 @@ def test_a_genuine_capture_with_identity_tags_still_forms_normally(
         ("RedEdge", 730, "cap_RE.tif"),
     ]
     for band_name, wl, filename in bands:
-        _write_band_file_with_identity(
+        _write_packet(
             d / filename,
-            gid,
-            band_name,
-            wl,
-            # Sub-millisecond/sub-meter jitter across the 4 siblings, matching the real sample.
-            utc="2023-05-23T17:06:28.931664",
-            lat=43.196946355,
-            lon=-90.058003633,
+            _xmp(
+                gid,
+                band_name,
+                wl,
+                utc="2023-05-23T17:06:28.931664",
+                lat=43.196946355,
+                lon=-90.058003633,
+            ),
         )
 
     result = detect_and_write_band_groups(d)
@@ -636,7 +718,7 @@ def test_a_lone_file_with_a_group_id_forms_no_group(tmp_path: Path) -> None:
 
     d = image_root(tmp_path)
     d.mkdir()
-    _write_band_file(d / "solo_G.tif", "capSolo", "Green", 560)
+    _write_packet(d / "solo_G.tif", _xmp("capSolo", "Green", 560))
 
     result = detect_and_write_band_groups(d)
     assert result["formed"] == []
@@ -659,45 +741,25 @@ def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(
     src = tmp_path / "raw"
     src.mkdir()
     utc, lat, lon = "2023-05-23T17:06:28.931664", 43.196946355, -90.058003633
-    _write_band_file_with_identity(
-        src / "capA_G.tif",
-        "gidA",
-        "Green",
-        560,
-        utc=utc,
-        lat=lat,
-        lon=lon,
-    )
-    _write_band_file_with_identity(
-        src / "capA_R.tif",
-        "gidA",
-        "Red",
-        650,
-        utc=utc,
-        lat=lat,
-        lon=lon,
-    )
+    later_utc, later_lat = "2023-05-23T17:06:30.931664", 43.196956355
+    for capture, at, north in (("A", utc, lat), ("B", later_utc, later_lat)):
+        for suffix, band, wavelength in (
+            ("G", "Green", 560),
+            ("R", "Red", 650),
+        ):
+            _write_packet(
+                src / f"cap{capture}_{suffix}.tif",
+                _xmp(
+                    f"gid{capture}",
+                    band,
+                    wavelength,
+                    utc=at,
+                    lat=north,
+                    lon=lon,
+                ),
+            )
     # A standalone raw file whose stem is exactly capA's own canonical stem.
     tifffile.imwrite(str(src / "capA.tif"), np.zeros((4, 4), dtype=np.uint16))
-    later_utc, later_lat = "2023-05-23T17:06:30.931664", 43.196956355
-    _write_band_file_with_identity(
-        src / "capB_G.tif",
-        "gidB",
-        "Green",
-        560,
-        utc=later_utc,
-        lat=later_lat,
-        lon=lon,
-    )
-    _write_band_file_with_identity(
-        src / "capB_R.tif",
-        "gidB",
-        "Red",
-        650,
-        utc=later_utc,
-        lat=later_lat,
-        lon=lon,
-    )
 
     project = tmp_path / "proj_bandcollide_case"
     manifest = ingest_images(project, source=str(src), actor=None)
@@ -808,6 +870,7 @@ def test_explicit_manifest_groups_a_sensor_with_no_embedded_metadata(
 ) -> None:
     from tcip_mcp.pipelines.data.band_groups import (
         detect_and_write_band_groups,
+        read_band_group_manifest,
     )
 
     d = image_root(tmp_path)
@@ -829,10 +892,33 @@ def test_explicit_manifest_groups_a_sensor_with_no_embedded_metadata(
     assert sorted(g["bands"]) == ["Blue", "Green", "Red"]
     # No identity signal was checked and no wavelength stated on an explicit group, facts its
     # record states.
-    assert _recorded_tolerances(d) == [{}]
-    (manifest,) = d.glob("*.bandgroup")
-    recorded = json.loads(manifest.read_text(encoding="utf-8"))
-    assert recorded["central_wavelength_nm"] is None
+    (manifest,) = result["manifests"]
+    ref = read_band_group_manifest(Path(manifest))
+    assert ref.manifest.identity_tolerance == {}
+    assert ref.manifest.central_wavelength_nm is None
+
+
+@pytest.mark.parametrize(
+    "named", ["./cap.tif", "sub/cap_G.tif", "sub/../cap.tif"]
+)
+def test_an_explicit_group_naming_a_file_through_a_directory_refuses(
+    tmp_path: Path, named: str
+) -> None:
+    """An explicit group naming a file through a directory part refuses, recording nothing."""
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
+
+    d = image_root(tmp_path)
+    (d / "sub").mkdir(parents=True)
+    for name in ("cap.tif", "other.tif", "sub/cap_G.tif"):
+        tifffile.imwrite(str(d / name), np.zeros((4, 4), dtype=np.uint16))
+
+    with pytest.raises(ValueError, match="pattern"):
+        detect_and_write_band_groups(
+            d, explicit_groups={"cap": {"G": named, "R": "other.tif"}}
+        )
+    assert not list(d.glob("*.bandgroup"))
 
 
 def test_explicit_manifest_drops_a_group_missing_files(tmp_path: Path) -> None:
@@ -846,21 +932,18 @@ def test_explicit_manifest_drops_a_group_missing_files(tmp_path: Path) -> None:
         str(d / "only_one.tif"), np.zeros((4, 4), dtype=np.uint16)
     )
 
-    groups, used = groups_from_explicit_mapping(
+    groups = groups_from_explicit_mapping(
         d, {"capX": {"Blue": "only_one.tif", "Green": "missing.tif"}}
     )
     assert groups == []  # fewer than 2 resolvable bands
-    assert used == set()
 
 
 # ── manifest read/write round trip ─────────────────────────────────────────────────────
 
 
 def test_manifest_round_trip(tmp_path: Path) -> None:
-    from tcip_mcp.pipelines.data.band_groups import (
-        read_band_group_manifest,
-        write_band_group_manifest,
-    )
+    from tcip_mcp.pipelines.data.band_groups import read_band_group_manifest
+    from tests._producer_fixtures import write_band_group
 
     d = image_root(tmp_path)
     d.mkdir()
@@ -869,13 +952,11 @@ def test_manifest_round_trip(tmp_path: Path) -> None:
     band_a.write_bytes(b"x")
     band_b.write_bytes(b"y")
 
-    manifest_path = write_band_group_manifest(
+    manifest_path = write_band_group(
         d,
         "cap42",
         {"Red": band_a, "Blue": band_b},
         central_wavelength_nm={"Red": 650.0, "Blue": 470.0},
-        source="explicit-manifest",
-        identity_tolerance={},
     )
     assert manifest_path == d / "cap42.bandgroup"
     # Path.stem recovers the canonical stem directly: the whole reason .bandgroup was chosen
@@ -889,13 +970,62 @@ def test_manifest_round_trip(tmp_path: Path) -> None:
     assert ref.central_wavelength_nm == {"Red": 650.0, "Blue": 470.0}
 
 
-def test_manifest_with_missing_bands_key_is_rejected(tmp_path: Path) -> None:
-    from tcip_mcp.pipelines.data.band_groups import read_band_group_manifest
+@pytest.mark.parametrize(
+    "malform",
+    [
+        pytest.param(lambda doc: doc.pop("bands"), id="no bands"),
+        pytest.param(lambda doc: doc.update(bands={}), id="empty bands"),
+        pytest.param(
+            lambda doc: doc.update(bands=list(doc["bands"].values())),
+            id="bands not a mapping",
+        ),
+        pytest.param(
+            lambda doc: doc.pop("central_wavelength_nm"),
+            id="no central wavelength",
+        ),
+        pytest.param(
+            lambda doc: doc["bands"].update(Green="sub/cap_G.tif"),
+            id="a band in a subdirectory",
+        ),
+    ],
+)
+def test_a_malformed_manifest_refuses_and_is_no_identity(
+    tmp_path: Path, malform: Callable[[dict], object]
+) -> None:
+    """A manifest its record's fields refuse raises ``ValueError`` and claims nothing.
 
-    bad = tmp_path / "bad.bandgroup"
-    bad.write_text('{"source": "embedded-metadata"}', encoding="utf-8")
+    The manifest is the writer's, one field then removed or replaced; the scan lists no identity
+    under its stem and each band file as its own.
+    """
+    from tcip_mcp.pipelines.data.band_groups import read_band_group_manifest
+    from tcip_mcp.pipelines.image_utils import (
+        scan_identities,
+        stem_collision_key,
+    )
+    from tcip_store import decode_value, encode_record
+    from tests._producer_fixtures import write_band_group
+
+    d = image_root(tmp_path)
+    d.mkdir()
+    bands = {"Green": d / "cap_G.tif", "Red": d / "cap_R.tif"}
+    for band in bands.values():
+        tifffile.imwrite(str(band), np.zeros((4, 4), dtype=np.uint16))
+    manifest = write_band_group(
+        d,
+        "cap",
+        bands,
+        central_wavelength_nm={"Green": 560.0, "Red": 650.0},
+    )
+    document = decode_value(manifest.read_bytes())
+    malform(document)
+    manifest.write_bytes(encode_record(document))
+
     with pytest.raises(ValueError):
-        read_band_group_manifest(bad)
+        read_band_group_manifest(manifest)
+    identities = scan_identities(d)
+    assert stem_collision_key("cap") not in identities
+    for band in bands.values():
+        assert identities[stem_collision_key(band.stem)] == [band]
 
 
 # ── ingest_images ──────────────────────────────────────────────────────────────────────
@@ -934,14 +1064,16 @@ def test_an_ingest_of_per_band_captures_forms_their_groups(
     src.mkdir()
     for capture, utc in (("capA", "17:06:28.931664"), ("capB", "17:06:30.1")):
         for band, wavelength in (("Green", 560), ("Red", 650)):
-            _write_band_file_with_identity(
+            _write_packet(
                 src / f"{capture}_{band}.tif",
-                f"gid-{capture}",
-                band,
-                wavelength,
-                utc=f"2023-05-23T{utc}",
-                lat=43.196946355,
-                lon=-90.058003633 if capture == "capA" else -90.057990000,
+                _xmp(
+                    f"gid-{capture}",
+                    band,
+                    wavelength,
+                    utc=f"2023-05-23T{utc}",
+                    lat=43.196946355,
+                    lon=-90.058003633 if capture == "capA" else -90.057990000,
+                ),
             )
 
     manifest = ingest_images(tmp_path / "proj", source=str(src), actor=None)
@@ -968,25 +1100,27 @@ def test_a_manifest_recorded_mid_detection_is_kept_rather_than_overwritten(
     (images / "a.tif").write_bytes(b"a")
     (images / "b.tif").write_bytes(b"b")
     (images / "c.tif").write_bytes(b"c")
-    recorded = (
-        b'{"bands": {"Red": "b.tif", "Blue": "c.tif"}, "source": "explicit-manifest", '
-        b'"identity_tolerance": {}, "central_wavelength_nm": null}\n'
-    )
 
-    manifest_path = band_groups.band_group_manifest_path(images, "cap")
     original = band_groups.write_band_group_manifest
-    raced: list[str] = []
+    raced: list[tuple[Path, bytes]] = []
 
     def racing_writer(
-        images_dir: Path,
-        stem: str,
-        bands: dict[str, Path],
-        **kwargs: dict[str, float] | str | dict[str, dict] | Version | None,
+        group: band_groups.BandGroupRef, *, expect: Version | None = None
     ) -> Path:
         if not raced:
-            raced.append(stem)
-            manifest_path.write_bytes(recorded)
-        return original(images_dir, stem, bands, **kwargs)
+            competing = band_groups.BandGroupRef(
+                group.manifest_path,
+                band_groups.BandGroupManifest(
+                    bands={"Red": "b.tif", "Blue": "c.tif"},
+                    source="explicit-manifest",
+                    identity_tolerance={},
+                    central_wavelength_nm=None,
+                ),
+            )
+            raced.append(
+                (original(competing), competing.manifest_path.read_bytes())
+            )
+        return original(group, expect=expect)
 
     monkeypatch.setattr(
         band_groups, "write_band_group_manifest", racing_writer
@@ -997,7 +1131,8 @@ def test_a_manifest_recorded_mid_detection_is_kept_rather_than_overwritten(
         explicit_groups={"cap": {"Green": "a.tif", "Red": "b.tif"}},
     )
 
-    assert raced == ["cap"]
+    ((manifest_path, recorded),) = raced
+    assert manifest_path.stem == "cap"
     assert manifest_path.read_bytes() == recorded
     assert result["formed"] == []
     assert result["manifests"] == []
