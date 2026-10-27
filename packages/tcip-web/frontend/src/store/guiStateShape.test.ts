@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { useStore } from "@/store";
 import type { GuiState } from "@/store/types";
-import { stateEnvelope, TEST_PROJECT } from "@/test/store";
+import { GROUPED_SELECTION, selected, stateEnvelope, TEST_PROJECT } from "@/test/store";
 
 // Captured before any test runs, so the opening shape is read from the store itself and not
 // from whatever an earlier test left behind.
@@ -18,15 +18,7 @@ describe("the GUI state the browser opens with", () => {
   it("carries every field of the backend state, at the values the backend also starts from", () => {
     expect(OPENING_GUI).toEqual({
       active_tab: "annotate",
-      dataset: {
-        dataset_root: null,
-        subject: null,
-        date: null,
-        image_list: [],
-        current_image_index: 0,
-        images_dir: null,
-        bucket: null,
-      },
+      dataset: null,
       view: { scale: 1, offset_x: 0, offset_y: 0 },
       mode: "box",
       active_subject: null,
@@ -48,15 +40,12 @@ describe("adopting a different dataset selection", () => {
     useStore.setState({
       gui: {
         active_tab: "results",
-        dataset: {
-          dataset_root: "/proj/alpha/ds",
+        dataset: selected({
           subject: "leaf",
-          date: "2026-03-01",
-          image_list: ["l1.jpg", "l2.jpg"],
+          count: 2,
           current_image_index: 1,
-          images_dir: "/proj/alpha/ds/images/2026-03-01",
-          bucket: "m1/2026-03-01",
-        },
+          bucket: "m1/2026-01-01",
+        }),
         view: { scale: 2, offset_x: 30, offset_y: 70 },
         mode: "polygon",
         active_subject: "leaf",
@@ -67,15 +56,7 @@ describe("adopting a different dataset selection", () => {
 
     const incoming: GuiState = {
       active_tab: "annotate",
-      dataset: {
-        dataset_root: "/proj/alpha/ds2",
-        subject: "bud",
-        date: "2026-04-02",
-        image_list: ["b1.jpg", "b2.jpg", "b3.jpg"],
-        current_image_index: 2,
-        images_dir: "/proj/alpha/ds2/images/2026-04-02",
-        bucket: "m2/2026-04-02",
-      },
+      dataset: selected({ subject: "bud", bucket: "m2/2026-01-02" }, GROUPED_SELECTION),
       view: { scale: 1, offset_x: 0, offset_y: 0 },
       mode: "box",
       active_subject: "bud",

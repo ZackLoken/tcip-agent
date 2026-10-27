@@ -173,8 +173,7 @@ def test_focus_annotate_index_matches_frontend_listing_ignoring_non_files(
     tmp_path: Path,
     bound: BoundProject,
 ) -> None:
-    # A directory named like an image must not shift the index (the frontend's image_list uses
-    # is_file()); the tool must match that so it doesn't land one frame off.
+    """A directory named like an image is no image, so it shifts no index."""
     root = tmp_path / "proj"
     date = "2026-03-02"
     idir = image_dir(root, date)
@@ -236,33 +235,32 @@ def test_focus_annotate_accepts_an_explicit_point_mode(
     assert res["mode"] == "point"  # honored over the frame's own box geometry
 
 
-def test_focus_annotate_still_rejects_a_mode_the_gui_has_no_tool_for(
-    tmp_path: Path, bound: BoundProject
-) -> None:
-    root = tmp_path / "proj"
-    date = "2026-03-02"
-    stub_images(image_dir(root, date), ["IMG_0000.JPG"])
-    _label(root, "bud", date, "detect", "IMG_0000", 1)
-
-    res = focus_human_attention(bound, str(root), "bud", date, mode="lasso")
-    assert "error" in res and "lasso" in res["error"]
-
-
-def test_focus_annotate_rejects_a_mode_the_gui_has_no_tool_for_naming_the_real_vocabulary(
+def test_focus_annotate_refuses_a_mode_the_gui_has_no_tool_for_naming_its_modes(
     tmp_path: Path,
     bound: BoundProject,
 ) -> None:
+    """A mode outside the canvas's modes is refused by the tool's own schema, naming each."""
     from tcip_mcp.web_client import ANNOTATE_MODES
+    from tests._server_calls import called_through_the_server
 
     root = tmp_path / "proj"
     date = "2026-03-02"
     stub_images(image_dir(root, date), ["IMG_0000.JPG"])
     _label(root, "bud", date, "detect", "IMG_0000", 1)
 
-    res = focus_human_attention(bound, str(root), "bud", date, mode="lasso")
-    assert "error" in res
+    refusal = called_through_the_server(
+        "focus_human_attention",
+        {
+            "dataset_root": str(root),
+            "subject": "bud",
+            "date": date,
+            "mode": "lasso",
+        },
+        bound=bound,
+    )
+    assert isinstance(refusal, str) and "lasso" in refusal
     for name in ANNOTATE_MODES:
-        assert name in res["error"]
+        assert name in refusal
 
 
 def test_focus_annotate_empty_label_is_not_a_focus_target(

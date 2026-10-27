@@ -155,7 +155,7 @@ def _scan_dataset(root: str) -> dict:
     """Take a dataset's census of images and label documents.
 
     The census holds ``images``, every logical image of every capture
-    (:func:`~tcip_mcp.dataset_layout.list_dates`, each listed through
+    (:func:`~tcip_mcp.pipelines.image_utils.scan_captures`, each listed through
     :func:`~tcip_mcp.pipelines.image_utils.list_logical_images`, a grouped capture once as its
     manifest) mapped to the key of its own label document
     (:func:`~tcip_mcp.dataset_layout.label_key_of`); and ``labels``, the key of every label
@@ -163,28 +163,21 @@ def _scan_dataset(root: str) -> dict:
     :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStemError`.
     """
     import tcip_store
-    from tcip_mcp.dataset_layout import (
-        LABEL_DOCUMENTS,
-        image_dir,
-        label_key_of,
-        list_dates,
-    )
+    from tcip_mcp.dataset_layout import LABEL_DOCUMENTS, label_key_of
     from tcip_mcp.pipelines.image_utils import (
         list_logical_images,
+        scan_captures,
         source_path_of,
     )
 
-    root_path = Path(root)
     images = [
         source_path_of(source)
-        for capture in list_dates(root_path)
-        for source in list_logical_images(
-            image_dir(root_path, capture)
-        ).values()
+        for logical in scan_captures(root, list_logical_images).values()
+        for source in logical.values()
     ]
     return {
         "images": {image: label_key_of(image) for image in images},
-        "labels": tcip_store.keys(LABEL_DOCUMENTS, str(root_path)),
+        "labels": tcip_store.keys(LABEL_DOCUMENTS, str(Path(root))),
     }
 
 

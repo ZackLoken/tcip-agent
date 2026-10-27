@@ -155,20 +155,17 @@ def test_web_inference_worker_refuses_an_unregistered_checkpoint(
 ) -> None:
     pytest.importorskip("fastapi")
     from tcip_mcp.pipelines.execution import Stated
-    from tcip_web.routes.inference import InferenceJob, _worker
+    from tcip_web.routes.inference import _worker
     from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
+    from tests._web_fixtures import inference_job
 
     ckpt = secondary_checkpoint(tmp_path)
     images_dir = _images(tmp_path)
 
-    job = InferenceJob(
-        job_id="rail1",
-        actor="user:tester",
+    job = inference_job(
+        images_dir,
+        tmp_path,
         checkpoint_path=ckpt,
-        images_dir=str(images_dir),
-        dataset_root=str(tmp_path),
-        bucket="out",
-        project=str(tmp_path),
         stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS),
     )
     _worker(job)

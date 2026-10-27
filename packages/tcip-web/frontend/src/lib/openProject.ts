@@ -4,7 +4,6 @@
  */
 
 import { api, type ProjectSummary } from "@/api/client";
-import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
 import { toastLabelProblem } from "@/lib/labelProblemToast";
 import { recordRecentProject } from "@/lib/recentProjects";
 import { settleVisits } from "@/lib/sessionLifecycle";
@@ -77,7 +76,7 @@ async function performOpen(
         date,
         bucket: bucket || null,
       })
-    : { selection: GUI_STATE_DEFAULTS.dataset, label_problem: null };
+    : { selection: null, label_problem: null };
   if (!heldOpen(requestId)) return;
   try {
     recordRecentProject(project.id);

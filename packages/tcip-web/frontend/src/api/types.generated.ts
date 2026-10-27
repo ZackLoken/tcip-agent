@@ -76,6 +76,8 @@ export type VerdictAction = "accepted" | "rejected";
 
 export type TerminalFrame = TerminalInputFrame | TerminalResizeFrame;
 
+export type InferenceFrame = InferenceJobFrame | MissingJobFrame;
+
 export type TensorboardLaunch = TensorboardServing | TensorboardFailure;
 
 export type Launched = RunLaunched | SweepLaunched;
@@ -712,6 +714,88 @@ export interface Stated {
   rationale?: string | null;
 }
 
+export interface CaptureChoice {
+  dataset_root: string;
+  subject?: string | null;
+  date: string;
+  bucket?: string | null;
+}
+
+export interface AnnotateFocus {
+  dataset_root: string;
+  subject: string;
+  date: string;
+  bucket: string | null;
+  image_index: number;
+  mode: "box" | "polygon" | "point";
+  proposal: number | null;
+}
+
+export interface DatasetTree {
+  dataset_root: string;
+  dates_with_images: string[];
+  subjects: string[];
+  subjects_by_date: Record<string, string[]>;
+  buckets_by_date: Record<string, string[]>;
+  label_problem: string | null;
+}
+
+export interface SelectAnswer {
+  selection: DatasetSelection;
+  annotations_present: boolean;
+  predictions_present: boolean;
+  label_problem: string | null;
+}
+
+export interface NavRequest {
+  current_image_index: number;
+}
+
+export interface LaunchInferencePayload {
+  checkpoint_path: string;
+  dataset_root: string;
+  date: string;
+  bucket: string;
+  stated: Stated;
+  assessment_id?: string | null;
+  user: string;
+}
+
+export interface InferenceJob {
+  job_id: string;
+  project: string;
+  checkpoint_path: string;
+  images_dir: string;
+  bucket: string;
+  actor: string;
+  stated: Stated;
+  assessment_id: string | null;
+  total: number;
+  done: number;
+  status: "pending" | "running" | "completed" | "failed" | "canceled";
+  error: string | null;
+}
+
+export interface InferenceJobs {
+  jobs: InferenceJob[];
+}
+
+export interface BucketExistsRefusal {
+  kind: "bucket_exists";
+  message: string;
+  job: InferenceJob;
+}
+
+export interface InferenceJobFrame {
+  type: "progress" | "final";
+  job: InferenceJob;
+}
+
+export interface MissingJobFrame {
+  type: "final";
+  error: string;
+}
+
 export interface MemoryPage_FrictionReport_ {
   entries: MemoryEntry_FrictionReport_[];
   total_available: number;
@@ -773,6 +857,11 @@ export interface CanvasUnderStroke {
   color: string;
   opacity: number;
   width_factor: number;
+}
+
+export interface CaptureImage {
+  path: string;
+  name: string;
 }
 
 export interface FrictionReport {
@@ -871,17 +960,16 @@ export interface GuiState {
   view: ViewState;
   mode: "box" | "polygon" | "point";
   active_subject: string | null;
-  dataset: DatasetSelection;
+  dataset: DatasetSelection | null;
 }
 
 export interface DatasetSelection {
-  dataset_root: string | null;
+  dataset_root: string;
   subject: string | null;
-  date: string | null;
-  image_list: string[];
-  current_image_index: number;
-  images_dir: string | null;
+  date: string;
   bucket: string | null;
+  current_image_index: number;
+  images: CaptureImage[];
 }
 
 export interface ViewState {
@@ -895,13 +983,5 @@ export const GUI_STATE_DEFAULTS: GuiState = {
   view: { scale: 1.0, offset_x: 0.0, offset_y: 0.0 },
   mode: "box",
   active_subject: null,
-  dataset: {
-    dataset_root: null,
-    subject: null,
-    date: null,
-    image_list: [],
-    current_image_index: 0,
-    images_dir: null,
-    bucket: null,
-  },
+  dataset: null,
 };

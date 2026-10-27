@@ -8,7 +8,7 @@ import App from "@/App";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { useStore } from "@/store";
 import { INVARIANCES } from "@/test/projectRecords";
-import { openAnswer, stateEnvelope } from "@/test/store";
+import { changeSelection, openAnswer, selectAnswer, selected, stateEnvelope } from "@/test/store";
 
 // The state socket and the active-tab sync stand in for App's network effects.
 const stateSocket = vi.hoisted(() => ({
@@ -242,19 +242,7 @@ describe("App visit attribution across a change of person", () => {
     display_name: "Ridge farm",
     path: "/ws/ridge",
   };
-  const selectionOf = (root: string) => ({
-    status: "ok",
-    label_problem: null,
-    selection: {
-      dataset_root: root,
-      subject: "subject_a",
-      date: "2026-03-01",
-      image_list: ["img1.jpg", "img2.jpg"],
-      current_image_index: 0,
-      images_dir: `${root}/images/2026-03-01`,
-      bucket: null,
-    },
-  });
+  const answer = selectAnswer(selected({ subject: "subject_a", count: 2 }));
   it("attributes the outgoing visit to the first person and project, the next to the second", async () => {
     vi.spyOn(api.annotate, "load").mockImplementation((path) =>
       Promise.resolve({
@@ -285,9 +273,7 @@ describe("App visit attribution across a change of person", () => {
     vi.mocked(api.projects.open)
       .mockResolvedValueOnce(VALLEY_OPENED)
       .mockResolvedValueOnce(openedAs(RIDGE));
-    vi.mocked(api.dataset.select)
-      .mockResolvedValueOnce(selectionOf("/ws/valley"))
-      .mockResolvedValueOnce(selectionOf("/ws/ridge"));
+    vi.mocked(api.dataset.select).mockResolvedValueOnce(answer).mockResolvedValueOnce(answer);
     act(() => useStore.getState().setUser(""));
     render(<App />);
 
@@ -314,10 +300,7 @@ describe("App visit attribution across a change of person", () => {
       project_id: VALLEY.id,
     });
     expect(useStore.getState().heldContributions).toEqual([]);
-    act(() => {
-      const s = useStore.getState();
-      s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
-    });
+    act(() => changeSelection({ current_image_index: 1 }));
     await waitFor(() => expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(2));
     expect(vi.mocked(sessionsApi.imageEvent).mock.calls[1][0]).toMatchObject({
       image_name: "img1.jpg",

@@ -6,14 +6,14 @@ checked against a mapping built by ``build_plant_mapping``.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from tcip_mcp.dataset_layout import image_dir
 from tests import _trait_fixtures as fx
-from tests._mapping_fixtures import write_plant_csv
+from tests._mapping_fixtures import PLOTS, write_plots_csv
 
 torch = pytest.importorskip("torch")
 
@@ -34,8 +34,7 @@ def _scene(
         register_dataset,
     )
     from tcip_mcp.traits import registered_crops
-    from tests._image_fixtures import write_geo_image
-    from tests._mapping_fixtures import PHOTO_POSITION_ERROR_M
+    from tests._mapping_fixtures import PHOTO_POSITION_ERROR_M, write_photos
     from tests._web_fixtures import INVARIANCES
 
     assert "error" not in initialize_project(
@@ -46,14 +45,15 @@ def _scene(
         actor=None,
     )
     dataset_root, date = tmp_path / "ds", "2026-02-11"
-    for i, (plant, (lat, lon)) in enumerate(plants.items()):
-        write_geo_image(
-            image_dir(dataset_root, date) / f"{plant}.jpg",
-            lat,
-            lon,
-            datetime(2026, 2, 11, 9, 30 + 5 * i),
-            h_pos_err=PHOTO_POSITION_ERROR_M,
-        )
+    write_photos(
+        image_dir(dataset_root, date),
+        {
+            f"{plant}.jpg": (lat, lon, PHOTO_POSITION_ERROR_M)
+            for plant, (lat, lon) in plants.items()
+        },
+        datetime(2026, 2, 11, 9, 30),
+        timedelta(minutes=5),
+    )
     result = register_dataset(
         tmp_path,
         str(dataset_root),
@@ -61,18 +61,7 @@ def _scene(
         actor=None,
     )
     assert "error" not in result, result
-    plant_csv = write_plant_csv(
-        tmp_path / "plants.csv",
-        [
-            {
-                "plot": plant,
-                "accession": f"acc-{plant}",
-                "lat": lat,
-                "lon": lon,
-            }
-            for plant, (lat, lon) in plants.items()
-        ],
-    )
+    plant_csv = write_plots_csv(tmp_path / "plants.csv", plants)
     return dataset_root, plant_csv, date
 
 
@@ -282,7 +271,6 @@ def test_a_mapping_with_no_capture_at_all_for_a_delivered_date_refuses(
 
     The mapping is recorded with no capture at all for that date.
     """
-    from tests.test_plant_mapping_binding import PLANTS
     from tests.test_ungeoreferenced_capture_refusal import (
         DATE,
         _delivery_scene,
@@ -290,7 +278,7 @@ def test_a_mapping_with_no_capture_at_all_for_a_delivered_date_refuses(
     )
 
     _, dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
-    plant_csv = write_plant_csv(tmp_path / "plants.csv", PLANTS)
+    plant_csv = write_plots_csv(tmp_path / "plants.csv")
     _persist_synthetic_mapping(
         tmp_path,
         dataset_root,
@@ -299,7 +287,7 @@ def test_a_mapping_with_no_capture_at_all_for_a_delivered_date_refuses(
             {
                 "path": str(plant_csv),
                 "sha256": "0" * 64,
-                "n_plants": len(PLANTS),
+                "n_plants": len(PLOTS),
             }
         ],
         assignments={DATE: []},

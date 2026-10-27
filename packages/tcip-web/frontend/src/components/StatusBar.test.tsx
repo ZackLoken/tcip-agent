@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { StatusBar } from "@/components/StatusBar";
 import { useStore } from "@/store";
+import { GROUPED_SELECTION, RAW_SELECTION } from "@/test/store";
 
 const initialStoreState = useStore.getState();
 
@@ -33,19 +34,20 @@ describe("StatusBar agent activity footer", () => {
   });
 });
 
+const SELECTED_CAPTURE = RAW_SELECTION;
+const IN_VIEW = RAW_SELECTION.images[0].path;
+
 describe("StatusBar canvas facts", () => {
   beforeEach(() => {
     useStore.getState().setActiveTab("annotate");
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, images_dir: "/data/images/2026-01-01" } },
-    }));
+    useStore.setState((s) => ({ gui: { ...s.gui, dataset: SELECTED_CAPTURE } }));
   });
 
   it("shows the image size and shape counts for a canvas loaded from the open dataset", () => {
     useStore.setState((s) => ({
       canvas: {
         ...s.canvas,
-        loadedImagePath: "/data/images/2026-01-01/img1.jpg",
+        loadedImagePath: IN_VIEW,
         imgWidth: 800,
         imgHeight: 600,
         boxes: [{ x1: 0, y1: 0, x2: 10, y2: 10, subject: "fruit", attributes: {} }],
@@ -62,7 +64,7 @@ describe("StatusBar canvas facts", () => {
     useStore.setState((s) => ({
       canvas: {
         ...s.canvas,
-        loadedImagePath: "/data/images/2026-01-01/img1.jpg",
+        loadedImagePath: IN_VIEW,
         imgWidth: 800,
         imgHeight: 600,
         boxes: [{ x1: 0, y1: 0, x2: 10, y2: 10, subject: "fruit", attributes: {} }],
@@ -79,7 +81,7 @@ describe("StatusBar canvas facts", () => {
     useStore.setState((s) => ({
       canvas: {
         ...s.canvas,
-        loadedImagePath: "/data/images/2025-11-02/img1.jpg",
+        loadedImagePath: GROUPED_SELECTION.images[0].path,
         imgWidth: 800,
         imgHeight: 600,
         boxes: [{ x1: 0, y1: 0, x2: 10, y2: 10, subject: "fruit", attributes: {} }],
@@ -96,8 +98,8 @@ describe("StatusBar shape counts (stored records only, never a derived box)", ()
   beforeEach(() => {
     useStore.getState().setActiveTab("annotate");
     useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: { ...s.gui.dataset, images_dir: "/data/images/2026-01-01" } },
-      canvas: { ...s.canvas, loadedImagePath: "/data/images/2026-01-01/img1.jpg" },
+      gui: { ...s.gui, dataset: SELECTED_CAPTURE },
+      canvas: { ...s.canvas, loadedImagePath: IN_VIEW },
     }));
   });
 

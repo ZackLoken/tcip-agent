@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { serializeCanvas } from "@/lib/labelSerde";
 import { useStore } from "@/store";
 import { CONTENT_EDITS } from "@/store/slices/canvas";
-import type { Box, CanvasContent, ImageLabels } from "@/store/types";
+import type { Box, CanvasContent, DatasetSelection, ImageLabels } from "@/store/types";
+import { changeSelection, GROUPED_SELECTION, RAW_SELECTION, selected } from "@/test/store";
 
 const canvasToAnnotations = (labels: CanvasContent) => serializeCanvas(labels).annotations;
 
@@ -363,28 +364,22 @@ describe("canvas store points", () => {
 });
 
 describe("focus follows the image and the bucket", () => {
-  const select = (over: Partial<ReturnType<typeof s>["gui"]["dataset"]>) =>
-    useStore.setState((st) => ({
-      gui: { ...st.gui, dataset: { ...st.gui.dataset, ...over } },
-    }));
+  const select = changeSelection;
+  const hold = (dataset: DatasetSelection) =>
+    useStore.setState((st) => ({ gui: { ...st.gui, dataset } }));
 
   beforeEach(() => {
     s().clearCanvas();
-    select({
-      images_dir: "/d/a",
-      image_list: ["1.jpg", "2.jpg"],
-      current_image_index: 0,
-      bucket: "b1",
-    });
+    hold(selected({ count: 2, bucket: "b1" }));
   });
 
-  it("clears when the image changes, by index or by directory", () => {
+  it("clears when the image changes, by index or by capture", () => {
     s().setFocus({ kind: "proposal", index: 2 });
     select({ current_image_index: 1 });
     expect(s().canvas.focus).toBeNull();
 
     s().setFocus({ kind: "box", index: 0 });
-    select({ images_dir: "/d/b" });
+    hold(selected({ bucket: "b1" }, GROUPED_SELECTION));
     expect(s().canvas.focus).toBeNull();
   });
 
@@ -398,7 +393,7 @@ describe("focus follows the image and the bucket", () => {
     s().setFocus({ kind: "proposal", index: 2 });
     select({ subject: "other" });
     s().loadLabelsIntoCanvas({
-      image_path: "/d/a/1.jpg",
+      image_path: RAW_SELECTION.images[0].path,
       img_width: 10,
       img_height: 10,
       boxes: [],
@@ -418,8 +413,8 @@ describe("focus follows the image and the bucket", () => {
   });
 
   describe("history restoration after the image changed", () => {
-    const loaded = (name: string, boxes: Box[]): ImageLabels => ({
-      image_path: `/d/a/${name}`,
+    const loaded = (index: number, boxes: Box[]): ImageLabels => ({
+      image_path: RAW_SELECTION.images[index].path,
       img_width: 100,
       img_height: 100,
       boxes,
@@ -432,7 +427,7 @@ describe("focus follows the image and the bucket", () => {
     const first = { x1: 10, y1: 10, x2: 50, y2: 50, subject: "subject_a", attributes: {} };
 
     function focusedBoxWithSnapshot() {
-      s().loadLabelsIntoCanvas(loaded("1.jpg", [first]));
+      s().loadLabelsIntoCanvas(loaded(0, [first]));
       s().setFocus({ kind: "box", index: 0 });
       s().pushUndo();
       s().drag("boxes", 0, { ...first, x2: 11, y2: 11 });
@@ -443,7 +438,7 @@ describe("focus follows the image and the bucket", () => {
       select({ current_image_index: 1 });
       s().rollbackLast();
       expect(s().canvas.boxes[0]).toEqual(first);
-      s().loadLabelsIntoCanvas(loaded("2.jpg", [{ ...first, subject: "other" }]));
+      s().loadLabelsIntoCanvas(loaded(1, [{ ...first, subject: "other" }]));
       expect(s().canvas.focus).toBeNull();
     });
 

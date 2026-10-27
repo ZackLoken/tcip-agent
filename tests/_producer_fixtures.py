@@ -823,7 +823,6 @@ def mapping_of(
         date: [
             Assignment(
                 image=image,
-                stem=Path(image).stem,
                 date_folder=date,
                 plant_id=None if plant is None else plant[0],
                 accession_name=None if plant is None else plant[1],

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tcip_mcp import workspace
-from tcip_mcp.dataset_layout import image_dir, image_root
+from tcip_mcp.dataset_layout import image_dir
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import write_image
@@ -209,19 +209,14 @@ def test_a_live_run_refuses_the_removal_and_writes_nothing_then_a_finished_one_a
 def test_an_unfinished_inference_job_refuses_the_removal(
     client: TestClient, tmp_path: Path
 ) -> None:
-    from tcip_mcp.pipelines.execution import Stated
     from tcip_web.routes import inference
+    from tests._web_fixtures import inference_job
 
     made = _project(tmp_path.parent, "valley_block", "Valley block")
-    job = inference.InferenceJob(
+    job = inference_job(
+        image_dir("ds", "2026-01-01"),
+        made.root,
         job_id="job-live",
-        actor="user:tester",
-        project=str(made.root),
-        checkpoint_path="m.pt",
-        dataset_root="ds",
-        images_dir=str(image_root("ds")),
-        bucket="out/2026-01-01",
-        stated=Stated(),
         status="running",
     )
     inference._registry.register(job)

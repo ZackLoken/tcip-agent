@@ -186,8 +186,9 @@ export function AnnotateTab() {
   const [conflict, setConflict] = useState(false);
   const agentActivity = useStore((s) => s.agentActivity);
 
-  const imgPath = currentImage(dataset).path;
-  const currentImageName = dataset.image_list[dataset.current_image_index] ?? null;
+  const imageInView = currentImage(dataset);
+  const imgPath = imageInView?.path ?? null;
+  const currentImageName = imageInView?.name ?? null;
   const saveDisabled = !imgPath || saveBlocked;
 
   const bandsInfo = useImageBands(imgPath);
@@ -235,7 +236,7 @@ export function AnnotateTab() {
 
   // ── Proposals: the selected bucket's and every staging of the image, paired and decided
   // server-side, each carrying its bucket ──
-  const bucket = dataset.bucket;
+  const bucket = dataset?.bucket ?? null;
   // Hiding either while annotating is recorded on the mark the person then makes.
   const [shown, setShown] = useState<AnnotateView>({ proposals: true, predictions: true });
   const predictionsShown = !!bucket && shown.predictions;
@@ -309,8 +310,8 @@ export function AnnotateTab() {
    *  sent from, the staged proposals are served with the first focused; otherwise a toast names
    *  the bucket and the view stays. */
   async function sendPrompt(prompt: ProposePayload["prompt"]) {
-    const { dataset_root, date, subject } = dataset;
-    if (proposing || !imgPath || !dataset_root || !date || !requireSubject()) return;
+    if (proposing || !imgPath || !dataset || !requireSubject()) return;
+    const subject = dataset.subject;
     const [sentFrom, sentName] = [imgPath, currentImageName];
     setProposing(true);
     try {
@@ -328,11 +329,7 @@ export function AnnotateTab() {
       const count = `${answer.proposal_count} ${answer.proposal_count === 1 ? "proposal" : "proposals"} for ${sentName}`;
       const now = useStore.getState().gui.dataset;
       const inView =
-        mountedRef.current &&
-        now.dataset_root === dataset_root &&
-        now.date === date &&
-        now.subject === subject &&
-        currentImage(now).path === sentFrom;
+        mountedRef.current && now?.subject === subject && currentImage(now)?.path === sentFrom;
       if (inView) {
         focusOnServeRef.current = answer.bucket;
         setShown((v) => ({ ...v, proposals: true }));
@@ -368,7 +365,7 @@ export function AnnotateTab() {
         phrase,
         user: useStore.getState().user,
       });
-      if (!mountedRef.current || currentImage(useStore.getState().gui.dataset).path !== sentFrom) {
+      if (!mountedRef.current || currentImage(useStore.getState().gui.dataset)?.path !== sentFrom) {
         useStore.getState().pushToast(`${answer.boxes.length} found on ${sentName}, not held.`);
         return;
       }
@@ -579,7 +576,7 @@ export function AnnotateTab() {
   }
 
   async function markComplete(next: boolean) {
-    const subject = dataset.subject;
+    const subject = dataset?.subject;
     if (!subject) return;
     const stateOf = () => useStore.getState().canvas.completion[subject];
     const before = stateOf();
@@ -845,7 +842,7 @@ export function AnnotateTab() {
     // Dropped: an answer without its hold (loaded over or canceled), for an unmounted editor, or
     // for an image no longer owning the canvas or selected.
     if (!owned || !mountedRef.current || loadedPathsRef.current !== paths) return null;
-    if (currentImage(useStore.getState().gui.dataset).path !== paths.image) return null;
+    if (currentImage(useStore.getState().gui.dataset)?.path !== paths.image) return null;
 
     // The canvas was locked in flight, so the answer replaces the content it was built from:
     // document, token, authorship and indices adopted together, as a load adopts them.
@@ -900,7 +897,7 @@ export function AnnotateTab() {
    *  subject on the image in view for the image filter. */
   function adoptLabels(labels: LoadedLabels) {
     loadLabels(labels);
-    const subject = dataset.subject;
+    const subject = dataset?.subject;
     if (currentImageName && subject) {
       setImageState(currentImageName, labels.completion[subject] ?? "unannotated");
     }
@@ -908,8 +905,8 @@ export function AnnotateTab() {
 
   // The states of every image of the selection, read once per selection for the image filter.
   useEffect(() => {
-    const subject = dataset.subject;
-    if (!subject || !dataset.images_dir) {
+    const subject = dataset?.subject;
+    if (!subject) {
       setImageStates({});
       return;
     }
@@ -931,7 +928,7 @@ export function AnnotateTab() {
       canceled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataset.dataset_root, dataset.date, dataset.subject, dataset.image_list]);
+  }, [dataset?.dataset_root, dataset?.date, dataset?.subject, dataset?.images]);
 
   // The one load: an image the canvas does not hold yet, or a reload of the one it holds that
   // `requestReload` asked for.
@@ -1061,7 +1058,7 @@ export function AnnotateTab() {
   }
 
   const subjectState: SubjectState | null = canvas.loadedImagePath
-    ? (canvas.completion[dataset.subject ?? ""] ?? "unannotated")
+    ? (canvas.completion[dataset?.subject ?? ""] ?? "unannotated")
     : null;
   const subjectFinished = isFinished(subjectState);
 
@@ -1089,7 +1086,7 @@ export function AnnotateTab() {
     {
       keys: K.complete.keys,
       action: () => void markComplete(!subjectFinished),
-      when: () => !!dataset.subject && subjectState !== null,
+      when: () => !!dataset?.subject && subjectState !== null,
     },
     {
       keys: K.hideProposals.keys,

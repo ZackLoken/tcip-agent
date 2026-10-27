@@ -20,10 +20,12 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.image_utils import BandGroupRef
     from tcip_web.routes.inference import InferenceJob
 
+from tcip_mcp.pipelines.execution import Stated
 from tests._audit_fixtures import audit_rows
 from tests._predictor_fixtures import StubPredictor, install
 from tests._training_values import RATIONALE
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
+from tests._web_fixtures import inference_job
 
 DATE = "2025-06-01"
 
@@ -36,25 +38,8 @@ def _two_images(images_dir: Path) -> Path:
     return images_dir
 
 
-def _job(
-    job_id: str, images_dir: Path, bucket: str, ckpt: str, project: Path
-) -> InferenceJob:
-    from tcip_mcp.dataset_layout import dataset_root_of
-    from tcip_mcp.pipelines.execution import Stated
-    from tcip_web.routes.inference import InferenceJob
-
-    return InferenceJob(
-        job_id=job_id,
-        actor="user:tester",
-        project=str(project),
-        checkpoint_path=str(ckpt),
-        dataset_root=str(dataset_root_of(images_dir)),
-        images_dir=str(images_dir),
-        bucket=bucket,
-        stated=Stated(
-            tile=False, conf=0.25, postprocess="nms", rationale=RATIONALE
-        ),
-    )
+STATED = Stated(tile=False, conf=0.25, postprocess="nms", rationale=RATIONALE)
+"""What every job built here states of its execution record."""
 
 
 def _launch_through_the_route(
@@ -130,7 +115,13 @@ def test_the_gui_worker_and_the_mcp_door_publish_the_same_bucket_record(
     images_dir = _two_images(image_dir(tmp_path, DATE))
     ckpt = registered_checkpoint(tmp_path)
     install(monkeypatch, StubPredictor())
-    job = _job("prepared", images_dir, f"gui/{DATE}", ckpt, tmp_path)
+    job = inference_job(
+        images_dir,
+        tmp_path,
+        bucket=f"gui/{DATE}",
+        checkpoint_path=str(ckpt),
+        stated=STATED,
+    )
     _worker(job)
     assert job.status == "completed", job.error
     mcp = run_inference(
@@ -265,7 +256,13 @@ def test_a_canceled_gui_pass_publishes_what_it_predicted(
     dataset = tmp_path / "orchard"
     images_dir = _two_images(image_dir(dataset, DATE))
     ckpt = registered_checkpoint(tmp_path)
-    job = _job("canceled-after-one", images_dir, f"run/{DATE}", ckpt, tmp_path)
+    job = inference_job(
+        images_dir,
+        tmp_path,
+        bucket=f"run/{DATE}",
+        checkpoint_path=str(ckpt),
+        stated=STATED,
+    )
 
     class CancelAfterFirstImage(StubPredictor):
         def predict_batch(
@@ -315,7 +312,7 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.model_registry import Producer
-    from tcip_web.routes.inference import _summary, _worker
+    from tcip_web.routes.inference import _worker
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     images_dir = _two_images(image_dir(tmp_path, DATE))
@@ -334,7 +331,13 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(
 
     monkeypatch.setattr(export, "encode_predictions", recording_encode)
 
-    job = _job("full-pass", images_dir, f"run/{DATE}", ckpt, tmp_path)
+    job = inference_job(
+        images_dir,
+        tmp_path,
+        bucket=f"run/{DATE}",
+        checkpoint_path=str(ckpt),
+        stated=STATED,
+    )
     _worker(job)
 
     assert job.status == "completed"
@@ -354,18 +357,6 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(
     assert bucket.producer.checkpoint_sha256
     assert record["assessment_id"] is None
     assert record["documents"] == {"a": "a.jpg", "b": "b.jpg"}
-
-    assert set(_summary(job)) == {
-        "job_id",
-        "status",
-        "done",
-        "total",
-        "images_dir",
-        "dataset_root",
-        "bucket",
-        "error",
-        "dropped_boxes",
-    }
     assert [Path(p).stem for p in written] == ["a", "b"]
 
 
@@ -395,7 +386,15 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(
         bucket = f"{door}/{DATE}"
         before = len(audit_rows(dataset))
         if door == "gui":
-            _worker(_job(door, images_dir, bucket, ckpt, tmp_path))
+            _worker(
+                inference_job(
+                    images_dir,
+                    tmp_path,
+                    bucket=bucket,
+                    checkpoint_path=str(ckpt),
+                    stated=STATED,
+                )
+            )
         else:
             result = run_inference(
                 tmp_path,

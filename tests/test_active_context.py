@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 def _persist_a_selection(project: OpenProject) -> None:
     """Open ``project``, select a date's second image and persist, by the backend's own producer."""
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.web_client import selection_for
+    from tcip_mcp.web_client import DatasetChoice, selection_for
     from tcip_web.state import StateStore
 
     images = image_dir(project.root, "2026-02-11")
@@ -30,10 +30,15 @@ def _persist_a_selection(project: OpenProject) -> None:
     asyncio.run(store.open_project(project))
     asyncio.run(
         store.mutate(
-            {
+            lambda _held: {
                 "active_tab": "annotate",
                 "dataset": selection_for(
-                    project.root, "bud", "2026-02-11", None, 1
+                    DatasetChoice(
+                        dataset_root=str(project.root),
+                        subject="bud",
+                        date="2026-02-11",
+                        current_image_index=1,
+                    )
                 ),
             },
             project=project,
@@ -52,14 +57,16 @@ def test_view_gui_state_reads_what_the_backend_persisted_and_reopens(
     reopened = StateStore()
     asyncio.run(reopened.open_project(made))
 
+    assert reopened.state.dataset is not None
     assert ctx["dataset"] == reopened.state.dataset.model_dump(mode="json")
     assert (
         ctx["dataset"]["subject"] == "bud"
         and ctx["dataset"]["date"] == "2026-02-11"
     )
     assert ctx["active_tab"] == "annotate"
-    assert Path(ctx["current_image"]).name == "IMG_0133.JPG"
-    assert "2026-02-11" in ctx["current_image"]
+    in_view = ctx["dataset"]["images"][ctx["dataset"]["current_image_index"]]
+    assert Path(in_view["path"]).name == "IMG_0133.JPG"
+    assert "2026-02-11" in in_view["path"]
 
 
 def test_view_gui_state_with_no_snapshot_carries_a_note(project: Path) -> None:

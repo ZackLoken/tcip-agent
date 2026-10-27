@@ -113,6 +113,21 @@ def test_scan_dataset_image_census_refuses_a_stem_collision(
         _scan_dataset(str(project_root))
 
 
+def test_the_image_count_counts_both_images_of_a_stem_the_census_refuses(
+    tmp_path: Path,
+) -> None:
+    """The image count counts each of two images of one stem; the census over them refuses."""
+    from tcip_mcp.pipelines.image_utils import logical_image_counts
+    from tcip_mcp.tools.data_tools import _scan_dataset
+
+    project_root, bucket = _ingested_bucket(tmp_path)
+    write_image(bucket / "shoot_001.png", (16, 16))
+
+    assert logical_image_counts(project_root) == {UNDATED_BUCKET: 2}
+    with pytest.raises(AmbiguousImageStemError):
+        _scan_dataset(str(project_root))
+
+
 def _diagnosed_collision(tmp_path: Path) -> list[list[str]]:
     """Return the findings ``tcip diagnose-project`` prints over a project holding a collision.
 

@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type ProjectSummary } from "@/api/client";
-import { GUI_STATE_DEFAULTS, type OpenAnswer, type SessionWrite } from "@/api/types.generated";
+import type { OpenAnswer, SessionWrite } from "@/api/types.generated";
 import { openWithDefaults, startOpen } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { INVARIANCES } from "@/test/projectRecords";
-import { openAnswer, stateEnvelope } from "@/test/store";
+import {
+  openAnswer,
+  RAW_SELECT_ANSWER,
+  RAW_SELECTION,
+  selectAnswer,
+  stateEnvelope,
+} from "@/test/store";
 
 vi.mock("@/api/client", () => ({
   api: {
@@ -36,10 +42,7 @@ function project(overrides: Partial<ProjectSummary> & { id: string }): ProjectSu
 }
 
 beforeEach(() => {
-  vi.mocked(api.dataset.select).mockResolvedValue({
-    status: "ok",
-    selection: GUI_STATE_DEFAULTS.dataset,
-  });
+  vi.mocked(api.dataset.select).mockResolvedValue(RAW_SELECT_ANSWER);
   useStore.getState().setUser("grower");
   vi.mocked(api.projects.open).mockImplementation(({ id }) => Promise.resolve(openedAs(id)));
 });
@@ -101,7 +104,7 @@ describe("openWithDefaults", () => {
 
     expect(api.projects.open).toHaveBeenCalledWith({ id: "empty", user: "grower" });
     expect(api.dataset.select).not.toHaveBeenCalled();
-    expect(useStore.getState().gui.dataset.dataset_root).toBeNull();
+    expect(useStore.getState().gui.dataset).toBeNull();
     expect(useStore.getState().openProject).toEqual(openedAs("empty").project);
   });
 });
@@ -183,11 +186,12 @@ describe("a switch this page starts", () => {
 
 describe("startOpen", () => {
   it("pushes a toast naming the label document when the selection carries a label_problem", async () => {
-    vi.mocked(api.dataset.select).mockResolvedValue({
-      status: "ok",
-      selection: GUI_STATE_DEFAULTS.dataset,
-      label_problem: "label_documents['2026-02-11', 'IMG_0000'] under C:/data: is a list",
-    });
+    vi.mocked(api.dataset.select).mockResolvedValue(
+      selectAnswer(
+        RAW_SELECTION,
+        "label_documents['2026-02-11', 'IMG_0000'] under C:/data: is a list",
+      ),
+    );
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
 
     await startOpen(

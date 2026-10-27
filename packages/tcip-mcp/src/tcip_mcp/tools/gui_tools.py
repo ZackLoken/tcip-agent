@@ -8,8 +8,6 @@ has open otherwise, saying it has none open, or when no backend is serving the w
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from tcip_annotation import Annotation, BBox
 from tcip_annotation.json_io import (
     UnreadableLabelDocumentError,
@@ -18,25 +16,8 @@ from tcip_annotation.json_io import (
 )
 from tcip_annotation.state import polygonal
 from tcip_mcp.server import tool
-from tcip_mcp.web_client import Panel
+from tcip_mcp.web_client import AnnotateMode, Panel
 from tcip_mcp.workspace import BoundProject
-
-
-def _logical_image_names(images_dir: Path) -> list[str]:
-    """Return every logical image's on-disk display name under ``images_dir``.
-
-    The name is a plain file's own name, or (for a ``.bandgroup``-grouped capture) its manifest's
-    filename.
-    """
-    from tcip_mcp.pipelines.image_utils import (
-        list_logical_images,
-        logical_image_name,
-    )
-
-    return [
-        logical_image_name(src)
-        for src in list_logical_images(images_dir).values()
-    ]
 
 
 @tool()
@@ -78,7 +59,7 @@ def focus_human_attention(
     subject: str,
     date: str,
     image_index: int | None = None,
-    mode: str | None = None,
+    mode: AnnotateMode | None = None,
     bucket: str | None = None,
     proposal: int | None = None,
 ) -> dict:
@@ -112,10 +93,11 @@ def focus_human_attention(
     from tcip_annotation.json_io import annotations_hold_subject
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import image_dir, label_key
+    from tcip_mcp.pipelines.image_utils import logical_images_by_name, stem_of
     from tcip_mcp.registry_paths import located
     from tcip_mcp.web_client import (
-        ANNOTATE_MODES,
         PANEL_EVENT_ANNOTATE_FOCUS,
+        AnnotateFocus,
         post_panel_event,
     )
 
@@ -126,7 +108,8 @@ def focus_human_attention(
         return {"error": str(exc)}
     if not idir.is_dir():
         return {"error": f"no images for date {date} under {dataset_root}"}
-    images = sorted(_logical_image_names(idir))
+    sources = logical_images_by_name(idir)
+    images = list(sources)
     if not images:
         return {"error": f"no images on {date}"}
     try:
@@ -136,8 +119,8 @@ def focus_human_attention(
 
     held: dict[str, list[Annotation]] = {}
     unreadable: dict[str, str] = {}
-    for name in images:
-        stem = Path(name).stem
+    for name, source in sources.items():
+        stem = stem_of(source)
         try:
             if found is None:
                 held[name] = read_document_versioned(
@@ -168,32 +151,23 @@ def focus_human_attention(
     target_name = images[image_index]
     if target_name in unreadable:
         return {"error": unreadable[target_name]}
-    if mode is None:
-        mode = _TASK_MODE.get(
+    focus = AnnotateFocus(
+        dataset_root=dataset_root,
+        subject=subject,
+        date=date,
+        bucket=bucket,
+        image_index=image_index,
+        mode=mode
+        or _TASK_MODE.get(
             _subject_task(held[target_name], subject) or "", "box"
-        )
-    if mode not in ANNOTATE_MODES:
-        vocabulary = ", ".join(repr(m) for m in ANNOTATE_MODES)
-        return {"error": f"mode must be one of {vocabulary}, got {mode!r}"}
-
-    payload = {
-        "dataset_root": dataset_root,
-        "subject": subject,
-        "date": date,
-        "image_index": image_index,
-        "mode": mode,
-        "active_subject": subject,
-        "bucket": bucket,
-        "proposal": proposal,
-    }
+        ),
+        proposal=proposal,
+    )
     return {
-        **post_panel_event(bound, "app", PANEL_EVENT_ANNOTATE_FOCUS, payload),
-        "subject": subject,
-        "date": date,
-        "image_index": image_index,
-        "mode": mode,
-        "bucket": bucket,
-        "proposal": proposal,
+        **post_panel_event(
+            bound, "app", PANEL_EVENT_ANNOTATE_FOCUS, focus.model_dump()
+        ),
+        **focus.model_dump(exclude={"dataset_root"}),
         "n_images": len(images),
         "n_holding_subject": len(holding),
         "image": target_name,
@@ -219,6 +193,9 @@ def _subject_task(anns: list[Annotation], subject: str) -> str | None:
     return None
 
 
-# The GUI drawing mode each resolved task is edited in, the frontend's own Mode union ("box" |
-# "polygon" | "point", store/types.ts); a point-only frame lands in point mode, never box mode.
-_TASK_MODE = {"segment": "polygon", "detect": "box", "point": "point"}
+# A point-only frame lands in point mode, never box mode.
+_TASK_MODE: dict[str, AnnotateMode] = {
+    "segment": "polygon",
+    "detect": "box",
+    "point": "point",
+}

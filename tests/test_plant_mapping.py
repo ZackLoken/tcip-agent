@@ -10,15 +10,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 import tcip_store
-from tcip_mcp.dataset_layout import image_root, list_dates
+from tcip_mcp.dataset_layout import image_dir, image_root, list_dates
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     MappingBuild,
     PlantRecord,
-    PlantRegistryReference,
     StatedRadius,
     _segment_runs,
     assign_plants,
-    build_mapping,
     date_match_radius,
     load_mapping,
     nearest_plant,
@@ -28,7 +26,13 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     read_plant_csvs,
 )
 from tests._image_fixtures import write_geo_image
-from tests._mapping_fixtures import PLOTS, map_captures
+from tests._mapping_fixtures import (
+    PLOTS,
+    geolocated_captures,
+    map_captures,
+    mapping_over,
+    write_plots_csv,
+)
 from tests._producer_fixtures import write_image
 from tests._web_fixtures import named_project
 
@@ -124,6 +128,64 @@ def test_the_row_break_is_the_midpoint_of_the_one_outstanding_jump() -> None:
 
     assert _derive_row_break_threshold([20.0, 1.0, 1.0, 1.0]) == 10.5
     assert _derive_row_break_threshold([2.0, 2.0, 2.0, 2.0]) is None
+
+
+def _textbook_row_break(gaps: list[float]) -> float | None:
+    """Return the row break Iglewicz and Hoaglin's modified z-score finds in ``gaps``.
+
+    The score is their 0.6745 times the largest log-space jump's distance from the other
+    jumps' median over scipy's unscaled median absolute deviation, a break past 3.5; with no
+    deviation, a jump strictly past the median breaks.
+    """
+    import math
+    import statistics
+    from itertools import pairwise
+
+    from scipy.stats import median_abs_deviation
+
+    jumps = [
+        (math.log(hi / lo), lo, hi)
+        for lo, hi in pairwise(sorted(gaps))
+        if lo > 1e-9
+    ]
+    if len(jumps) < 2:
+        return None
+    best = max(jumps, key=lambda jump: jump[0])
+    others = [jump[0] for jump in jumps if jump is not best]
+    median = statistics.median(others)
+    mad = median_abs_deviation(others)
+    breaks = (
+        0.6745 * (best[0] - median) / mad >= 3.5
+        if mad > 0
+        else best[0] > median
+    )
+    return best[1] + (best[2] - best[1]) / 2 if breaks else None
+
+
+@pytest.mark.parametrize(
+    "gaps",
+    [
+        [],
+        [4.0],
+        [2.0, 2.0, 2.0, 2.0],
+        [0.0, 1.0, 1.0, 1.0, 20.0],
+        [20.0, 1.0, 1.0, 1.0],
+        [1.0, 1.1, 0.9, 1.0, 1.05, 1.2, 30.0],
+        # The largest jump scores about 3.0 with the 0.6745 scaling and 4.45 without it.
+        [1.0, 1.0513, 1.2214, 1.5683, 2.2255, 3.4903, 7.0287],
+    ],
+)
+def test_the_row_break_agrees_with_the_modified_z_score_over_scipys_deviation(
+    gaps: list[float],
+) -> None:
+    """The row break derived from a date's gaps is the textbook modified z-score's break."""
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        _derive_row_break_threshold,
+    )
+
+    assert _derive_row_break_threshold(gaps) == pytest.approx(
+        _textbook_row_break(gaps)
+    )
 
 
 def test_segment_runs_splits_on_large_jumps(
@@ -318,16 +380,7 @@ def test_build_mapping_empty_dir_refuses_naming_no_capture(
 ) -> None:
     """``build_mapping`` over no capture refuses with ``UngeoreferencedCaptureError``, saying so."""
     with pytest.raises(Exception, match="no capture under") as exc:
-        build_mapping(
-            tmp_path / "ds",
-            [],
-            name="mapping",
-            dataset_id="ds-1",
-            project=tmp_path,
-            plant_registry=PlantRegistryReference(
-                name="unregistered", digest="0" * 64
-            ),
-        )
+        mapping_over(tmp_path / "ds", [], tmp_path)
     assert type(exc.value).__name__ == "UngeoreferencedCaptureError"
 
 
@@ -346,6 +399,30 @@ def test_a_mapping_walks_the_captures_its_dataset_lists(
 
     built = load_mapping(tmp_path, "mapping")
     assert built.dates == list_dates(dataset_root) == [DATE]
+
+
+def test_a_mapping_of_named_dates_maps_them_past_an_ambiguous_capture(
+    tmp_path: Path,
+) -> None:
+    """A mapping naming its dates maps them whatever a capture it does not name holds.
+
+    The unnamed capture holds two images of one stem, which a walk scanning it refuses.
+    """
+    dataset_root = tmp_path / "ds"
+    geolocated_captures(dataset_root, [DATE])
+    ambiguous = image_dir(dataset_root, "2026-02-18")
+    write_image(ambiguous / "P1_again.jpg", (8, 8))
+    write_image(ambiguous / "P1_again.png", (8, 8))
+
+    built = mapping_over(
+        dataset_root,
+        [write_plots_csv(tmp_path / "plants.csv")],
+        tmp_path,
+        dates=[DATE],
+    )
+
+    assert built.dates == [DATE]
+    assert {a.plant_id for a in built.assignments[DATE]} == set(PLOTS)
 
 
 def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lands(

@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 
 from pydantic import BaseModel
-from pydantic.json_schema import models_json_schema
+from pydantic.json_schema import JsonSchemaMode, models_json_schema
 
 from tests import FRONTEND_SRC, formatted, write_generated
 
@@ -94,6 +94,7 @@ def declared_models() -> list[type[BaseModel]]:
         TraitEntry,
         TraitRevision,
     )
+    from tcip_mcp.web_client import AnnotateFocus, CaptureChoice
     from tcip_web.routes.annotate import (
         FindAnswer,
         FindPayload,
@@ -106,7 +107,16 @@ def declared_models() -> list[type[BaseModel]]:
         SegmenterPrompt,
     )
     from tcip_web.routes.canvas import CanvasStatePayload
+    from tcip_web.routes.dataset import DatasetTree, NavRequest, SelectAnswer
     from tcip_web.routes.images import ServingCell, ViewReads
+    from tcip_web.routes.inference import (
+        BucketExistsRefusal,
+        InferenceJob,
+        InferenceJobFrame,
+        InferenceJobs,
+        LaunchInferencePayload,
+        MissingJobFrame,
+    )
     from tcip_web.routes.projects import (
         InvariancesRequest,
         OpenAnswer,
@@ -234,6 +244,17 @@ def declared_models() -> list[type[BaseModel]]:
         ConfirmRevisionPayload,
         MaskCut,
         Stated,
+        CaptureChoice,
+        AnnotateFocus,
+        DatasetTree,
+        SelectAnswer,
+        NavRequest,
+        LaunchInferencePayload,
+        InferenceJob,
+        InferenceJobs,
+        BucketExistsRefusal,
+        InferenceJobFrame,
+        MissingJobFrame,
         *(MemoryPage[kind.record] for kind in MemoryKind),  # type: ignore[name-defined]
     ]
 
@@ -356,11 +377,13 @@ def model_unions() -> dict[str, tuple[str, ...]]:
         TensorboardLaunch,
     )
     from tcip_mcp.tools.training_tools import Launched
+    from tcip_web.routes.inference import InferenceFrame
     from tcip_web.routes.terminal import TerminalFrame
 
     (union, _) = get_args(TerminalFrame)
     return {
         "TerminalFrame": tuple(m.__name__ for m in get_args(union)),
+        "InferenceFrame": tuple(m.__name__ for m in get_args(InferenceFrame)),
         "TensorboardLaunch": tuple(
             m.__name__ for m in get_args(TensorboardLaunch)
         ),
@@ -455,15 +478,22 @@ def render() -> str:
     from tcip_mcp.web_client import GUI_STATE_DEFAULTS
     from tcip_web.state import StateSnapshotMessage
 
-    models = declared_models()
+    # A model declaring its schema mode (an answer nesting computed fields) renders in it.
+    modes: list[tuple[type[BaseModel], JsonSchemaMode]] = [
+        (
+            m,
+            "serialization"
+            if getattr(m, "model_config", {}).get("json_schema_mode_override")
+            == "serialization"
+            else "validation",
+        )
+        for m in declared_models()
+    ]
     refs, combined = models_json_schema(
-        [(m, "validation") for m in models]
-        + [(StateSnapshotMessage, "serialization")]
+        [*modes, (StateSnapshotMessage, "serialization")]
     )
     defs = combined["$defs"]
-    names = [
-        refs[(m, "validation")]["$ref"].rsplit("/", 1)[-1] for m in models
-    ]
+    names = [refs[pair]["$ref"].rsplit("/", 1)[-1] for pair in modes]
     listed = names + list(TRANSPORT_MODELS)
     nested = [n for n in defs if n not in listed and n != "JsonValue"]
     body = "\n".join(_interface(name, defs[name]) for name in names)

@@ -7,13 +7,13 @@ import { ATTR_TYPES } from "@/api/types.generated";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
 import type { ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
-import { openTestProject } from "@/test/store";
+import { openTestProject, selected } from "@/test/store";
 
 const initialStoreState = useStore.getState();
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
-  openTestProject({ dataset_root: "C:/data", date: "undated" });
+  openTestProject(selected({ count: 0 }));
   act(() => useStore.getState().setActiveSubject("bud"));
 });
 

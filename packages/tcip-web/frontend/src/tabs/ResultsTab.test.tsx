@@ -9,7 +9,7 @@ import { useStore } from "@/store";
 import { ResultsTab } from "@/tabs/ResultsTab";
 import { mockDatasetTree } from "@/test/datasetTree";
 import { DELIVERY_RECORDS } from "@/test/deliveryRecords";
-import { openTestProject } from "@/test/store";
+import { openTestProject, RAW_SELECTION } from "@/test/store";
 import { TRAIT_LISTINGS } from "@/test/traitRecords";
 
 const initialStoreState = useStore.getState();
@@ -32,7 +32,7 @@ const VALIDATED = {
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
-  openTestProject({ dataset_root: "C:/data" });
+  openTestProject(RAW_SELECTION);
   // One trait whose confirmed revision declares milestone fractions, which is what the
   // curve/milestone panels render for.
   vi.spyOn(resultsApi, "traits").mockResolvedValue(TRAIT_LISTINGS.results);
@@ -59,7 +59,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     });
 
     render(<ResultsTab />);
-    await waitFor(() => expect(api.dataset.tree).toHaveBeenCalledWith("C:/data"));
+    await waitFor(() => expect(api.dataset.tree).toHaveBeenCalledWith(RAW_SELECTION.dataset_root));
     // The trait resolves from the project's registered traits asynchronously; wait for it before
     // computing, or the compute click races the fetch and refuses (no trait resolved yet).
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
@@ -79,7 +79,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     await waitFor(() => expect(measurementSpy).toHaveBeenCalled());
     // The name is the one the tree response supplied.
     expect(measurementSpy.mock.calls[0][0].buckets).toEqual(["v2/2026-01-01"]);
-    expect(measurementSpy.mock.calls[0][0].dataset_root).toBe("C:/data");
+    expect(measurementSpy.mock.calls[0][0].dataset_root).toBe(RAW_SELECTION.dataset_root);
   });
 
   it("shows the tree's label_problem beside the date list without blocking it", async () => {
@@ -762,7 +762,7 @@ describe("ResultsTab count export", () => {
     expect(downloadCountCsv.mock.calls[0][0]).toMatchObject({
       delivery: {
         kind: "per_image_count",
-        dataset_root: "C:/data",
+        dataset_root: RAW_SELECTION.dataset_root,
         bucket: "baseline/2026-01-01",
         trait: "subject_a",
       },
@@ -803,7 +803,7 @@ describe("ResultsTab count export", () => {
     expect(downloadCountCsv.mock.calls[0][0]).toMatchObject({
       delivery: {
         kind: "orthomosaic_plant_counts",
-        dataset_root: "C:/data",
+        dataset_root: RAW_SELECTION.dataset_root,
         bucket: "baseline/2026-01-01",
         plant_registry: "reg",
         delivered_phenotype: "stem_count",

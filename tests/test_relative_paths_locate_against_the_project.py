@@ -86,10 +86,9 @@ def _write_subject_registry(project: Path) -> Path:
 def _register_plant_registry(project: Path) -> Path:
     from tcip_mcp.pipelines.postprocessing import plant_mapping
     from tcip_mcp.tools.phenology_tools import register_plant_registry
-    from tests._mapping_fixtures import write_plant_csv
-    from tests.test_plant_mapping_binding import PLANTS
+    from tests._mapping_fixtures import write_plots_csv
 
-    write_plant_csv(project / "plants.csv", PLANTS)
+    write_plots_csv(project / "plants.csv")
     result = register_plant_registry(
         project,
         name="plants",

@@ -32,7 +32,7 @@ from tcip_mcp.pipelines.active_learning import ScorerSpec
 from tcip_store import Key, Version, VersionConflictError
 from tcip_web import jobstore
 from tcip_web.paths import allowed_file, allowed_image, allowed_path
-from tcip_web.state import store
+from tcip_web.state import selected, store
 
 router = APIRouter(prefix="/api/annotate", tags=["annotate"])
 logger = logging.getLogger(__name__)
@@ -352,22 +352,18 @@ def image_states(subject: str) -> ImageStates:
     """Read what every image of the selected capture's label document says about ``subject``.
 
     The state is :meth:`~tcip_annotation.json_io.LabelDocument.state`'s, keyed by the image's
-    name in the selection's list. No project open answers 409; no capture selected answers 400;
-    a document that will not read answers 400.
+    name in the selection's list. No project open answers 409; no capture selected
+    (:func:`~tcip_web.state.selected`) answers 400; a document that will not read answers 400.
     """
     from tcip_mcp.dataset_layout import label_key_of
 
-    _project, held = store.held_state()
-    selection = held.dataset
-    if selection.images_dir is None:
-        raise HTTPException(400, "no capture is selected")
     states: dict[str, SubjectState] = {}
-    for name in selection.image_list:
+    for image in selected(store.held_state()[1]).images:
         try:
-            key = label_key_of(Path(selection.images_dir) / name)
+            key = label_key_of(image.path)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        states[name] = _read(key)[0].state(subject)
+        states[image.name] = _read(key)[0].state(subject)
     return ImageStates(states=states)
 
 

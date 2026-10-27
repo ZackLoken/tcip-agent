@@ -7,10 +7,13 @@ import { getJson, postJson, StructuredRefusalError } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import {
   RENDER_CACHE_VERSION,
+  type CaptureChoice,
+  type DatasetTree,
   type InvariancesCorrection,
   type InvariancesRequest,
   type JobStatus,
   type LaunchPriorityQueuePayload,
+  type NavRequest,
   type OpenRequest,
   type ProjectSummary,
   type FindAnswer,
@@ -23,6 +26,7 @@ import {
   type PriorityQueueJob,
   type RenameRequest,
   type OpenAnswer,
+  type SelectAnswer,
   type ViewReads,
 } from "@/api/types.generated";
 import { stateSocket } from "@/api/ws";
@@ -32,7 +36,6 @@ import type { PixelRect } from "@/lib/viewGeometry";
 import type {
   Annotation,
   AnnotationPayload,
-  DatasetSelection,
   Flag,
   FlagRequest,
   ImageLabels,
@@ -203,42 +206,14 @@ export const api = {
 
   dataset: {
     tree: (dataset_root: string) =>
-      getJson<{
-        dataset_root: string;
-        dates_with_images: string[];
-        subjects: string[];
-        subjects_by_date: Record<string, string[]>;
-        // date -> the name of each bucket published under the dataset root for it.
-        buckets_by_date: Record<string, string[]>;
-        // The first date's labels that would not read, naming the document; the tree still
-        // lists every other date.
-        label_problem: string | null;
-      }>(`${ROUTES.getDatasetTree}?${q({ dataset_root })}`),
+      getJson<DatasetTree>(`${ROUTES.getDatasetTree}?${q({ dataset_root })}`),
 
-    select: (body: {
-      dataset_root: string;
-      subject?: string | null;
-      date: string;
-      bucket?: string | null;
-    }) =>
-      postJson<{
-        status: string;
-        selection: DatasetSelection;
-        // Advisory: whether the resolved (subject,date) has labels / the bucket has
-        // predictions. False → the canvas will start empty (not an error).
-        annotations_present?: boolean;
-        predictions_present?: boolean;
-        // Set when annotations_present read false because a label document would not read,
-        // naming it; the selection still succeeds.
-        label_problem?: string | null;
-      }>(ROUTES.postDatasetSelect, body),
+    select: (body: CaptureChoice) => postJson<SelectAnswer>(ROUTES.postDatasetSelect, body),
 
     // Persist the current image position so the agent (view_gui_state) sees the last
     // image the human looked at. Debounced by the caller; fire-and-forget on the FE side.
     nav: (current_image_index: number) =>
-      postJson<{ status: string; current_image_index: number }>(ROUTES.postDatasetNav, {
-        current_image_index,
-      }),
+      postJson<NavRequest>(ROUTES.postDatasetNav, { current_image_index }),
   },
 
   fs: {

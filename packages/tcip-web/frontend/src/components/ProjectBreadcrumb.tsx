@@ -20,7 +20,7 @@ import {
 } from "@/lib/openProject";
 import { loadRecentProjectIds } from "@/lib/recentProjects";
 import { useStore } from "@/store";
-import type { TabName } from "@/store/types";
+import type { DatasetSelection, TabName } from "@/store/types";
 
 const DATASET_TABS: ReadonlySet<TabName> = new Set(["annotate", "results"]);
 
@@ -80,14 +80,20 @@ export function ProjectBreadcrumb() {
     await openWithDefaults(project);
   }
 
-  async function switchDate(newDate: string, current: ProjectSummary & { id: string }) {
+  async function switchDate(
+    newDate: string,
+    current: ProjectSummary & { id: string },
+    selected: DatasetSelection,
+  ) {
     setMenu(null);
-    if (newDate === dataset.date) return;
+    if (newDate === selected.date) return;
     // Keep the current subject when the new date has it, else fall to that date's first; a
     // bucket states one capture date, so the new date opens on its own first bucket.
     const subjects = subjectsForDate(current, newDate);
     const subject =
-      dataset.subject && subjects.includes(dataset.subject) ? dataset.subject : (subjects[0] ?? "");
+      selected.subject !== null && subjects.includes(selected.subject)
+        ? selected.subject
+        : (subjects[0] ?? "");
     await startOpen(current, newDate, subject, bucketsForDate(current, newDate)[0] ?? "");
   }
 
@@ -127,7 +133,7 @@ export function ProjectBreadcrumb() {
         {projectName || "Loading…"}
       </button>
       <span className="mx-1.5 text-tcip-border">|</span>
-      {dataset.date ? (
+      {dataset ? (
         <button
           onClick={() => setMenu((m) => (m === "date" ? null : "date"))}
           disabled={busy}
@@ -171,7 +177,7 @@ export function ProjectBreadcrumb() {
         </Dropdown>
       )}
 
-      {menu === "date" && (
+      {menu === "date" && dataset && (
         <Dropdown title="Switch date">
           {!current ? (
             <EmptyRow text="Loading…" />
@@ -179,7 +185,7 @@ export function ProjectBreadcrumb() {
             current.dates.map((d) => (
               <MenuButton
                 key={d}
-                onClick={() => void switchDate(d, current)}
+                onClick={() => void switchDate(d, current, dataset)}
                 label={d}
                 active={d === dataset.date}
               />

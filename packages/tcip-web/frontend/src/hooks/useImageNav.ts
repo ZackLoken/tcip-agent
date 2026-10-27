@@ -1,7 +1,4 @@
-/**
- * Single source of truth for image navigation: arrow keys and the toolbar's stepper all step
- * through the images the filter keeps, in the dataset's own order, through this hook.
- */
+/** Image navigation through the images the filter keeps, in the selection's own order. */
 
 import { useCallback, useMemo } from "react";
 
@@ -38,49 +35,52 @@ export function jumpTarget(indices: number[], oneBased: number): number | null {
   return indices[Math.max(1, Math.min(indices.length, oneBased)) - 1];
 }
 
+/** Navigation over the selection's images the filter keeps; with no selection, none to step. */
 export function useImageNav() {
-  const imageList = useStore((s) => s.gui.dataset.image_list);
-  const currentIndex = useStore((s) => s.gui.dataset.current_image_index);
+  const dataset = useStore((s) => s.gui.dataset);
   const states = useStore((s) => s.annotateUi.imageStates);
   const filter = useStore((s) => s.annotateUi.imageFilter);
   const patchGui = useStore((s) => s.patchGui);
+  const images = dataset?.images;
   const indices = useMemo(
-    () => filteredIndices(imageList, states, filter),
-    [imageList, states, filter],
+    () => (images === undefined ? [] : filteredIndices(images, states, filter)),
+    [images, states, filter],
   );
 
+  // The freshest selection is read at the step, so a rapid sequence of steps never lays a
+  // stale render's selection over another field of it.
   const goTo = useCallback(
-    (index: number | null) => {
-      if (index === null || index === currentIndex) return;
-      // Read the freshest dataset so a rapid sequence of navigations can't clobber
-      // other dataset fields with a stale render closure.
-      const state = useStore.getState();
-      patchGui({ dataset: { ...state.gui.dataset, current_image_index: index } });
+    (target: (current: number) => number | null) => {
+      const held = useStore.getState().gui.dataset;
+      if (held === null) return;
+      const index = target(held.current_image_index);
+      if (index === null || index === held.current_image_index) return;
+      patchGui({ dataset: { ...held, current_image_index: index } });
       syncNavIndex(index);
     },
-    [currentIndex, patchGui],
+    [patchGui],
   );
 
   const stepImage = useCallback(
-    (delta: number) => goTo(stepTarget(indices, currentIndex, delta)),
-    [indices, currentIndex, goTo],
-  );
-
-  const jumpToPosition = useCallback(
-    (oneBased: number) => goTo(jumpTarget(indices, oneBased)),
+    (delta: number) => goTo((current) => stepTarget(indices, current, delta)),
     [indices, goTo],
   );
 
-  const total = indices.length;
-  // 0 when the image in view is one the filter drops.
-  const position = indices.indexOf(currentIndex) + 1;
+  const jumpToPosition = useCallback(
+    (oneBased: number) => goTo(() => jumpTarget(indices, oneBased)),
+    [indices, goTo],
+  );
 
+  const current = dataset?.current_image_index;
+  const kept = (delta: number) =>
+    current !== undefined && stepTarget(indices, current, delta) !== null;
   return {
-    total,
-    position,
+    total: indices.length,
+    // 0 when the image in view is one the filter drops, or no capture is selected.
+    position: current === undefined ? 0 : indices.indexOf(current) + 1,
     stepImage,
     jumpToPosition,
-    canPrev: stepTarget(indices, currentIndex, -1) !== null,
-    canNext: stepTarget(indices, currentIndex, 1) !== null,
+    canPrev: kept(-1),
+    canNext: kept(1),
   };
 }

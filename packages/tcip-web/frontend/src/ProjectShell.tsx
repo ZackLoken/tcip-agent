@@ -5,6 +5,7 @@ import {
   PANEL_EVENT_ANNOTATE_FOCUS,
   PANEL_EVENT_CANVAS_STATE_REQUEST,
   TAB_NAMES,
+  type AnnotateFocus,
 } from "@/api/types.generated";
 import { stateSocket } from "@/api/ws";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -15,14 +16,14 @@ import { TabBanner } from "@/components/TabBanner";
 import { TerminalRail } from "@/components/TerminalRail";
 import { TopBar, tabButtonId, tabPanelId } from "@/components/TopBar";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
-import { applyAnnotateFocus, type AnnotateFocusData } from "@/lib/annotateFocus";
+import { applyAnnotateFocus } from "@/lib/annotateFocus";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { attachCtrlWheelGuard } from "@/lib/ctrlWheelGuard";
 import { endRecordedSession } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
 import { declaredClient } from "@/store/slices/agentActivity";
 import { selectProjectRoot } from "@/store/slices/gui";
-import type { TabName } from "@/store/types";
+import type { DatasetSelection, TabName } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
 import { MetaTab } from "@/tabs/MetaTab";
 
@@ -51,6 +52,13 @@ function takeBanner(ev: PanelEvent): boolean {
   return true;
 }
 
+/** The capture whose subject registry the shell hydrates, as one comparable value: its root, date
+ *  and subject; null with no selection or one holding no images. */
+function registryCaptureOf(dataset: DatasetSelection | null): string | null {
+  if (dataset === null || dataset.images.length === 0) return null;
+  return JSON.stringify([dataset.dataset_root, dataset.date, dataset.subject]);
+}
+
 function TabFallback() {
   return (
     <div className="flex-1 flex items-center justify-center bg-tcip-canvas text-xs text-tcip-muted">
@@ -66,18 +74,11 @@ function TabFallback() {
  */
 export function ProjectShell() {
   const activeTab = useStore((s) => s.gui.active_tab);
-  // A dataset with a date is selected: the canvas tabs this gates need an image directory, so an
-  // open project with no dated images still shows the picker here.
-  const datasetReady = useStore((s) => !!s.gui.dataset.dataset_root && !!s.gui.dataset.date);
+  // A capture is selected: the canvas tabs this gates need one, so an open project with no
+  // dated images still shows the picker here.
+  const datasetReady = useStore((s) => s.gui.dataset !== null);
   const projectRoot = useStore(selectProjectRoot);
-  const datasetKey = useStore(
-    (s) =>
-      `${s.gui.dataset.dataset_root ?? ""}::${s.gui.dataset.subject ?? ""}::${s.gui.dataset.date ?? ""}`,
-  );
-  const imageList = useStore((s) => s.gui.dataset.image_list);
-  const date = useStore((s) => s.gui.dataset.date);
-  const subject = useStore((s) => s.gui.dataset.subject);
-  const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
+  const registryCapture = useStore((s) => registryCaptureOf(s.gui.dataset));
   const setRegistry = useStore((s) => s.setRegistry);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -119,7 +120,7 @@ export function ProjectShell() {
 
       // Agent → GUI "focus the Annotate tab" through local setters (see applyAnnotateFocus).
       if (ev.event_type === PANEL_EVENT_ANNOTATE_FOCUS) {
-        void applyAnnotateFocus(ev.data as unknown as AnnotateFocusData, () => true).catch(() => {
+        void applyAnnotateFocus(ev.data as unknown as AnnotateFocus, () => true).catch(() => {
           useStore
             .getState()
             .pushToast("Agent tried to focus the Annotate tab, but it couldn't be applied.");
@@ -159,7 +160,9 @@ export function ProjectShell() {
 
   // Hydrate the subject registry whenever the dataset selection changes.
   useEffect(() => {
-    if (!projectRoot || !datasetRoot || !date || imageList.length === 0) return;
+    const held = useStore.getState().gui.dataset;
+    if (!projectRoot || registryCapture === null || held === null) return;
+    const { dataset_root: datasetRoot, date, subject } = held;
     void (async () => {
       try {
         const reg = await subjectsApi.load(datasetRoot, date);
@@ -186,7 +189,7 @@ export function ProjectShell() {
         useStore.getState().pushToast("Could not load the registry for this project.");
       }
     })();
-  }, [projectRoot, datasetKey, imageList, subject, datasetRoot, date, setRegistry]);
+  }, [projectRoot, registryCapture, setRegistry]);
 
   // Only Annotate / Results need an imagery dataset+date and show the picker until one is set;
   // Setup needs an open project. Keyed by TabName, so an added tab with no entry fails the typecheck.

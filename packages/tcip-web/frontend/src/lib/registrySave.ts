@@ -8,9 +8,9 @@ import { selectProjectRoot } from "@/store/slices/gui";
  *  whether the save landed; a refusal toasts `failure` with the server's reason. */
 export async function saveRegistry(next: Registry, failure: string): Promise<boolean> {
   const { registry, setRegistry, pushToast, gui, user } = useStore.getState();
-  const { dataset_root: root, date } = gui.dataset;
   setRegistry(next, registry.version, registry.discovered);
-  if (!selectProjectRoot(useStore.getState()) || !root || !date) return false;
+  if (!selectProjectRoot(useStore.getState()) || !gui.dataset) return false;
+  const { dataset_root: root, date } = gui.dataset;
   try {
     const saved = await subjectsApi.save(next, root, registry.version, user);
     setRegistry(next, saved.version, registry.discovered);

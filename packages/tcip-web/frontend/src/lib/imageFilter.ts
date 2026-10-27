@@ -1,6 +1,7 @@
 /** The image stepper's filter by what each image's label document says about the dataset
  *  subject: every image, the unannotated ones, the ones in progress, or the complete ones. */
 
+import type { CaptureImage } from "@/api/types.generated";
 import { isFinished, type SubjectState } from "@/store/types";
 
 export const IMAGE_FILTERS = ["all", "unannotated", "in_progress", "complete"] as const;
@@ -23,14 +24,14 @@ export function imageFilterKeeps(filter: ImageFilter, state: SubjectState | unde
   return state === "unannotated";
 }
 
-/** The indices into `imageList` of the images `filter` keeps, in list order. */
+/** The indices into `images` of the images `filter` keeps, in list order. */
 export function filteredIndices(
-  imageList: string[],
+  images: CaptureImage[],
   states: Record<string, SubjectState>,
   filter: ImageFilter,
 ): number[] {
   const kept: number[] = [];
-  imageList.forEach((name, i) => {
+  images.forEach(({ name }, i) => {
     if (imageFilterKeeps(filter, states[name])) kept.push(i);
   });
   return kept;

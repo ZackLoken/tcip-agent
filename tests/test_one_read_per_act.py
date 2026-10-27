@@ -575,3 +575,81 @@ def test_a_failure_render_reads_each_document_and_its_bucket_once(
     assert len(result["case_images"]) == len(frames)
     assert len(counts) == 2 * len(frames) + 1, counts
     assert set(counts.values()) == {1}, counts
+
+
+def test_each_whole_dataset_reader_scans_each_capture_once_in_the_one_walk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each whole-dataset reader lists the captures once and scans each once, inside one walk.
+
+    The readers are the census, the image counts, the project summary and status and the plant
+    mapping; a scan made outside ``image_utils.scan_captures`` is counted apart.
+    """
+    from tcip_mcp import dataset_layout
+    from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.pipelines import image_utils
+    from tcip_mcp.project_record import record_fields
+    from tcip_mcp.tools.data_tools import _scan_dataset
+    from tcip_mcp.tools.project_tools import inspect_project
+    from tcip_web.routes.projects import _summarize
+    from tests._mapping_fixtures import (
+        geolocated_captures,
+        mapping_over,
+        write_plots_csv,
+    )
+
+    root = tmp_path / "ds"
+    dates = ["2026-02-11", "2026-02-18"]
+    geolocated_captures(root, dates)
+    plants = write_plots_csv(tmp_path / "plants.csv")
+    walked: Counter = Counter()
+    outside: Counter = Counter()
+    walking: list[bool] = []
+    listings: list[str | Path] = []
+    real_scan, real_list = (
+        image_utils._scan_identities,
+        dataset_layout.list_dates,
+    )
+
+    def counted_list(dataset_root: str | Path) -> list[str]:
+        listings.append(dataset_root)
+        return real_list(dataset_root)
+
+    def counted_scan(
+        directory: Path,
+    ) -> dict[str, list[tuple[Path, BandGroupRef | None]]]:
+        (walked if walking else outside)[str(directory)] += 1
+        return real_scan(directory)
+
+    def walked_inside[**P, R](walk: Callable[P, R]) -> Callable[P, R]:
+        def counted(*args: P.args, **kwargs: P.kwargs) -> R:
+            walking.append(True)
+            try:
+                return walk(*args, **kwargs)
+            finally:
+                walking.pop()
+
+        return counted
+
+    monkeypatch.setattr(image_utils, "_scan_identities", counted_scan)
+    monkeypatch.setattr(dataset_layout, "list_dates", counted_list)
+    monkeypatch.setattr(
+        image_utils, "scan_captures", walked_inside(image_utils.scan_captures)
+    )
+    reads: list[Callable[[], object]] = [
+        lambda: _scan_dataset(str(root)),
+        lambda: image_utils.logical_image_counts(root),
+        lambda: inspect_project(root),
+        lambda: _summarize(root, record_fields(root)),
+        lambda: mapping_over(root, [plants], tmp_path),
+    ]
+    for read in reads:
+        walked.clear()
+        outside.clear()
+        listings.clear()
+        read()
+        assert len(listings) == 1, listings
+        assert outside == Counter(), outside
+        assert walked == Counter(
+            {str(image_dir(root, date)): 1 for date in dates}
+        ), walked

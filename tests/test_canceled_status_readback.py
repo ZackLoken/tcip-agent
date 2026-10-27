@@ -27,19 +27,17 @@ def test_a_canceled_inference_job_reads_as_canceled(
     from tests._producer_fixtures import write_image
     from tests._training_values import RATIONALE
     from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._web_fixtures import inference_job
 
     images_dir = image_dir(tmp_path, "2026-01-01")
     write_image(images_dir / "img.jpg", (16, 16))
     ckpt = registered_checkpoint(tmp_path)
 
-    job = inference.InferenceJob(
+    job = inference_job(
+        images_dir,
+        tmp_path,
         job_id="canceled-job",
-        actor="user:tester",
         checkpoint_path=ckpt,
-        images_dir=str(images_dir),
-        dataset_root=str(tmp_path),
-        bucket="out",
-        project=str(tmp_path),
         stated=Stated(
             tile=False,
             conf=0.25,
@@ -48,7 +46,7 @@ def test_a_canceled_inference_job_reads_as_canceled(
             rationale=RATIONALE,
         ),
     )
-    inference._register(job)
+    inference._registry.register(job)
     job.cancel_event.set()
     try:
         inference._worker(job)
