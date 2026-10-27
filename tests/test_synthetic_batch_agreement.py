@@ -91,19 +91,15 @@ def _real_detection_item(tmp_path: Path) -> tuple[torch.Tensor, dict]:
     """Return one ``(image, target)`` from a real ``DetectionDataset``.
 
     It writes a 96 by 48 image labeled with one ``bud`` box ``(4, 6, 40, 19)`` under a registry
-    listing ``bush`` then ``bud``, and returns the first item of the detection dataset over it.
+    declaring ``bud``, and returns the first item of the detection dataset over it.
     """
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import label_image, write_image
+    from tests._producer_fixtures import label_image, registry_of, write_image
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
-    registry_over(
-        tmp_path, SubjectRegistry((Subject("bush", ""), Subject("bud", "")))
-    )
-    write_image(images_dir / "a.png", (96, 48))
+    registry_over(tmp_path, registry_of("bud"))
     label_image(
-        images_dir / "a.png",
+        write_image(images_dir / "a.png", (96, 48)),
         [Annotation(subject="bud", geometry=BBox(4, 6, 40, 19))],
         96,
         48,

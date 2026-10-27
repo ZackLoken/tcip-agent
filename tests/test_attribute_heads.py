@@ -36,6 +36,7 @@ from tests._chain_fixtures import (  # noqa: E402
     VALUES,
     attributed_series,
 )
+from tests._producer_fixtures import registry_of  # noqa: E402
 from tests._training_values import (  # noqa: E402
     DISPERSION_QUANTILE,
     EQUIVALENCE_Z,
@@ -49,11 +50,7 @@ UNFILTERED = Stated(tile=False, conf=0.0, rationale=RATIONALE)
 SUBJECT = "object"
 COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
 GRADE = cr.Attribute("grade", "ordinal", ("low", "mid", "high"))
-REGISTRY = cr.SubjectRegistry(
-    subjects=(
-        cr.Subject(name=SUBJECT, description="", attributes=(COLOR, GRADE)),
-    )
-)
+REGISTRY = registry_of(SUBJECT, COLOR, GRADE)
 OPENING = cr.Attribute(ATTRIBUTE, "ordinal", VALUES)
 """The series' opening attribute declared ordinal, the one its crossing trait's state names."""
 
@@ -457,11 +454,7 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
             "normalization": FRAME_STATISTICS,
         },
         data={"num_channels": 3, "scope": {"subject": SUBJECT}},
-        registry=cr.SubjectRegistry(
-            subjects=(
-                cr.Subject(name=SUBJECT, description="", attributes=(WHOLE,)),
-            )
-        ),
+        registry=registry_of(SUBJECT, WHOLE),
     )
     source = tmp_path / "frame.png"
     painted_frame(

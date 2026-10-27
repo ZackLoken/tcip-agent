@@ -37,7 +37,7 @@ from tests._mapping_fixtures import (
     register_plant_registry_for,
     write_plant_csv,
 )
-from tests._producer_fixtures import write_image
+from tests._producer_fixtures import mapping_of, write_image
 from tests.test_plant_mapping_binding import (
     PLANTS,
     _dataset,
@@ -252,18 +252,6 @@ def _persist_synthetic_mapping(
     return build
 
 
-def _unmapped_row(stem: str, distance_m: float | None) -> Assignment:
-    return Assignment(
-        image=f"{stem}.jpg",
-        stem=stem,
-        date_folder=DATE,
-        plant_id=None,
-        accession_name=None,
-        source="unmapped",
-        distance_m=distance_m,
-    )
-
-
 def _delivery_scene(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -374,7 +362,7 @@ def test_delivery_refuses_naming_the_plant_csvs_when_none_parsed_a_plant(
         dataset_root,
         "valley",
         plant_csvs=[],
-        assignments={DATE: [_unmapped_row("P1_20260211", None)]},
+        assignments=mapping_of({DATE: [("P1_20260211.jpg", None, None)]}),
     )
 
     _assert_all_doors_refuse(
@@ -405,7 +393,7 @@ def test_delivery_refuses_with_the_ungeoreferenced_sentence_when_every_distance_
         dataset_root,
         "valley",
         plant_csvs=plant_csvs,
-        assignments={DATE: [_unmapped_row("P1_20260211", None)]},
+        assignments=mapping_of({DATE: [("P1_20260211.jpg", None, None)]}),
     )
 
     _assert_all_doors_refuse(
@@ -436,7 +424,7 @@ def test_delivery_refuses_naming_the_match_distance_when_every_position_is_too_f
         dataset_root,
         "valley",
         plant_csvs=plant_csvs,
-        assignments={DATE: [_unmapped_row("P1_20260211", 5_000.0)]},
+        assignments=mapping_of({DATE: [("P1_20260211.jpg", None, 5_000.0)]}),
     )
 
     _assert_all_doors_refuse(
@@ -461,24 +449,10 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(
     )
     from tcip_mcp.traits import PositiveState
 
-    blank = Assignment(
-        image="a.jpg",
-        stem="a",
-        date_folder=DATE,
-        plant_id="",
-        accession_name=None,
-        source="unmapped",
-        distance_m=None,
-    )
-    named = Assignment(
-        image="b.jpg",
-        stem="b",
-        date_folder=DATE,
-        plant_id="P1",
-        accession_name="acc-9",
-        source="sequence",
-        distance_m=1.0,
-    )
+    # A blank plant name is a plant CSV's own empty column, matched by sequence.
+    ((blank, named),) = mapping_of(
+        {DATE: [("a.jpg", ("", ""), 1.0), ("b.jpg", ("P1", "acc-9"), 1.0)]}
+    ).values()
     assert assignment_is_attributed(blank) is False
     assert assignment_is_attributed(named) is True
 

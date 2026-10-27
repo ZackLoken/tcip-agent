@@ -11,28 +11,29 @@ from pathlib import Path
 
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import image_dir
-from tcip_mcp.subject_registry import Subject, SubjectRegistry
 from tcip_mcp.tools.project_tools import (
     DatasetEntry,
     read_datasets,
     register_dataset,
 )
 from tests._cli_fixtures import run_tcip
-from tests._producer_fixtures import label_image, registry_over, write_image
+from tests._producer_fixtures import (
+    label_image,
+    registry_of,
+    registry_over,
+    write_image,
+)
 
 
 def _make_dataset(root: Path) -> None:
     """Write a minimal nested-schema dataset: one image, its label and a registry."""
-    write_image(image_dir(root, "2-11-26") / "img_000.jpg", (32, 32))
     label_image(
-        image_dir(root, "2-11-26") / "img_000.jpg",
+        write_image(image_dir(root, "2-11-26") / "img_000.jpg", (32, 32)),
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
         32,
         32,
     )
-    registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
-    )
+    registry_over(root, registry_of("bud"))
 
 
 # ── the writer: stores "." for the project's own tree ──────────────────────────

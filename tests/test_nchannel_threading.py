@@ -461,9 +461,8 @@ def test_build_dataset_sets_expected_channels(tmp_path: Path) -> None:
     from tests._producer_fixtures import label_image, write_image
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
-    write_image(images_dir / "a.png", (16, 16))
     label_image(
-        images_dir / "a.png",
+        write_image(images_dir / "a.png", (16, 16)),
         [Annotation(subject="bud", geometry=BBox(6.4, 6.4, 9.6, 9.6))],
         16,
         16,
@@ -600,14 +599,14 @@ def test_a_source_whose_band_count_cannot_be_read_refuses_rather_than_defaulting
     from tests._producer_fixtures import label_image, write_image
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
-    write_image(images_dir / "a.png", (16, 16))
+    image = write_image(images_dir / "a.png", (16, 16))
     label_image(
-        images_dir / "a.png",
+        image,
         [Annotation(subject="bud", geometry=BBox(6.4, 6.4, 9.6, 9.6))],
         16,
         16,
     )
-    (images_dir / "a.png").write_bytes(b"not an image")
+    image.write_bytes(b"not an image")
 
     with pytest.raises(ValueError, match="band count"):
         dataset_over("detection", str(images_dir), subject="bud")

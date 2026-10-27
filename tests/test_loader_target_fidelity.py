@@ -22,27 +22,17 @@ from tests._producer_fixtures import (  # noqa: E402
     dataset_over,
     label_image,
     run_over,
-    write_image,
+    write_jpegs,
 )
 
 BUD = "bud"
 
 
-def _make_images(
-    images_dir: Path, stems: list[str], size: tuple[int, int]
-) -> None:
-    for stem in stems:
-        write_image(images_dir / f"{stem}.jpg", size)
-
-
 def _write(
-    images_dir: Path,
-    stem: str,
-    boxes: list[tuple[int, int, int, int]],
-    size: tuple[int, int],
+    image: Path, boxes: list[tuple[int, int, int, int]], size: tuple[int, int]
 ) -> None:
     label_image(
-        images_dir / f"{stem}.jpg",
+        image,
         [Annotation(subject=BUD, geometry=BBox(*b)) for b in boxes],
         size[0],
         size[1],
@@ -59,8 +49,8 @@ def test_a_boxs_width_and_height_reach_the_loader_unswapped(
     """
     size = (120, 80)
     images = image_dir(tmp_path, UNDATED_BUCKET)
-    _make_images(images, ["img0"], size)
-    _write(images, "img0", [(10, 20, 70, 40), (80, 5, 95, 75)], size)
+    (image,) = write_jpegs(images, ["img0"], size)
+    _write(image, [(10, 20, 70, 40), (80, 5, 95, 75)], size)
 
     ds = dataset_over("detection", str(images), subject=BUD)
     _img, target = ds[0]
@@ -106,8 +96,8 @@ def test_a_seam_fragment_is_not_indexed_as_a_whole_object(
 
     size = (320, 256)
     images = image_dir(tmp_path, UNDATED_BUCKET)
-    _make_images(images, ["img0"], size)
-    _write(images, "img0", SEAM_BOXES, size)
+    (image,) = write_jpegs(images, ["img0"], size)
+    _write(image, SEAM_BOXES, size)
 
     base = dataset_over("detection", str(images), subject=BUD)
     ds = TiledDetectionDataset(
@@ -139,12 +129,9 @@ def test_each_detection_sample_carries_its_own_index_as_image_id(
     """Each detection sample carries its own index as its image id, beside its own boxes."""
     size = (120, 80)
     images = image_dir(tmp_path, UNDATED_BUCKET)
-    stems = ["a", "b", "c"]
-    _make_images(images, stems, size)
-    for i, stem in enumerate(stems):
+    for i, image in enumerate(write_jpegs(images, ["a", "b", "c"], size)):
         _write(
-            images,
-            stem,
+            image,
             [(5 + 20 * k, 6, 25 + 20 * k, 44) for k in range(i + 1)],
             size,
         )
@@ -165,7 +152,7 @@ def test_an_ordinal_sample_carries_the_rank_count_its_head_decodes_with(
     its own rank.
     """
     images = image_dir(tmp_path, UNDATED_BUCKET)
-    _make_images(images, ["s0", "s1", "s2"], (48, 32))
+    write_jpegs(images, ["s0", "s1", "s2"], (48, 32))
     csv_path = tmp_path / "ranks.csv"
     csv_path.write_text("stem,rank\ns0,0\ns1,2\ns2,5\n", encoding="utf-8")
 

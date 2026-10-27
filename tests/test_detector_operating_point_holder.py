@@ -211,10 +211,12 @@ def _assessed(tmp_path: Path, builder: str) -> dict:
     root = tmp_path / "ds"
     images_dir = image_dir(root, "2-11-26")
     for i, size in enumerate(range(32, 96, 8)):
-        write_image(images_dir / f"img{i}.png", (size, size), (100, 100, 100))
+        image = write_image(
+            images_dir / f"img{i}.png", (size, size), (100, 100, 100)
+        )
         box = BBox(size * 0.25, size * 0.25, size * 0.75, size * 0.75)
         label_image(
-            images_dir / f"img{i}.png",
+            image,
             [Annotation(subject="bud", geometry=box)],
             size,
             size,

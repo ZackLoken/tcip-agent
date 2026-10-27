@@ -234,16 +234,18 @@ def test_resolve_group_key_fn_named_policy_still_works() -> None:
 
 
 def _kept_tiles(
-    split: SpatialStripSplit, width: int, height: int
+    split: SpatialStripSplit,
 ) -> dict[str, list[tuple[int, int, int, int]]]:
     """Return the lattice tiles each side's regions contain, keyed by side name.
 
-    The tiles are ``slice_lattice(height, width, split.tile_size, split.overlap)``; a tile is
-    listed under every side one of whose rects contains it.
+    The tiles are the lattice of ``split``'s own frame, tile size and overlap
+    (``slice_lattice``); a tile is listed under every side one of whose rects contains it.
     """
     from tcip_mcp.pipelines.raster_source import rect_contains_rect
 
-    lattice = slice_lattice(height, width, split.tile_size, split.overlap)
+    lattice = slice_lattice(
+        split.height, split.width, split.tile_size, split.overlap
+    )
     by_name: dict[str, list[tuple[int, int, int, int]]] = {
         name: [] for name in split.regions
     }
@@ -264,23 +266,26 @@ def test_spatial_strip_split_admits_valid_work() -> None:
 
 
 def test_spatial_strip_split_accounts_for_every_tile() -> None:
+    """A spatial strip split's counts partition the frame's own tile lattice.
+
+    The kept counts and the count dropped outside every region total the lattice
+    ``slice_lattice`` enumerates.
+    """
     split = spatial_strip_split(
         4000, 3000, 320, 0.2, fractions=(0.7, 0.3, 0.0), split_names=SIDES
     )
-    total = (
-        sum(split.kept_tiles.values())
-        + split.tiles_dropped_past_extent
-        + split.tiles_dropped_outside_regions
-    )
-    assert total == split.total_tiles
+    lattice = slice_lattice(3000, 4000, 320, 0.2)
+
+    assert sum(split.kept_tiles.values()) + (
+        split.tiles_dropped_outside_regions
+    ) == len(lattice)
 
 
 def test_spatial_strip_split_no_tile_shared_and_buffer_respected() -> None:
-    width, height = 4000, 3000
     split = spatial_strip_split(
-        width, height, 320, 0.2, fractions=(0.7, 0.3, 0.0), split_names=SIDES
+        4000, 3000, 320, 0.2, fractions=(0.7, 0.3, 0.0), split_names=SIDES
     )
-    by_name = _kept_tiles(split, width, height)
+    by_name = _kept_tiles(split)
     train, val = by_name["train"], by_name["val"]
     assert train and val
     for tx0, ty0, tx1, ty1 in train:
@@ -306,6 +311,35 @@ def test_center_out_order_ties_resolve_in_declared_order() -> None:
 
     assert [name for name, _ in forward] == ["val", "train", "test"]
     assert [name for name, _ in reversed_input] == ["test", "train", "val"]
+
+
+@pytest.mark.parametrize(
+    "slots",
+    [
+        [("val", 0.25), ("train", 0.25), ("test", 0.25), ("holdout", 0.25)],
+        [("val", 0.2), ("train", 0.4), ("test", 0.2), ("calibration", 0.2)],
+        [("val", 0.1), ("train", 0.6), ("test", 0.3)],
+    ],
+    ids=["equal", "mixed-tie", "unequal"],
+)
+def test_center_out_order_matches_the_index_tied_sort(
+    slots: list[tuple[str, float]],
+) -> None:
+    """``_center_out_order`` places the slots as a sort by share, ties by index, places them.
+
+    The reference sorts each slot by descending share and then by its position in ``slots``,
+    and puts the even-ranked slots right of center and the odd-ranked ones left, nearest first.
+    """
+    from tcip_mcp.pipelines.data.splits import _center_out_order
+
+    ranked = [
+        slot
+        for _, slot in sorted(
+            enumerate(slots), key=lambda pair: (-pair[1][1], pair[0])
+        )
+    ]
+
+    assert _center_out_order(slots) == ranked[1::2][::-1] + ranked[0::2]
 
 
 def test_spatial_strip_split_tied_shares_place_by_declared_order() -> None:
@@ -369,11 +403,39 @@ def test_spatial_strip_split_explicit_buffer_below_tile_size_refuses() -> None:
         )
 
 
-def test_spatial_strip_split_refuses_when_no_tile_fits_extent() -> None:
+@pytest.mark.parametrize(
+    ("width", "height"), [(100, 100), (4000, 319), (319, 4000)]
+)
+def test_spatial_strip_split_refuses_a_frame_shorter_than_the_tile_on_an_axis(
+    width: int, height: int
+) -> None:
+    """A frame shorter than the tile on either axis, or both, refuses the split."""
     with pytest.raises(ValueError, match="no tile fits"):
         spatial_strip_split(
-            100, 100, 320, 0.2, fractions=(0.8, 0.2, 0.0), split_names=SIDES
+            width,
+            height,
+            320,
+            0.2,
+            fractions=(0.8, 0.2, 0.0),
+            split_names=SIDES,
         )
+
+
+@pytest.mark.parametrize(
+    ("width", "height"), [(4000, 3000), (4160, 3000), (4000, 320), (320, 4000)]
+)
+def test_a_returned_spatial_strip_splits_lattice_holds_only_full_slices(
+    width: int, height: int
+) -> None:
+    """Every slice of a returned split's lattice spans the whole tile on both axes."""
+    from tcip_mcp.pipelines.slicing import is_full_slice
+
+    split = spatial_strip_split(
+        width, height, 320, 0.2, fractions=(0.7, 0.3, 0.0), split_names=SIDES
+    )
+    lattice = slice_lattice(height, width, split.tile_size, split.overlap)
+
+    assert all(is_full_slice(box, split.tile_size) for box in lattice)
 
 
 def test_spatial_strip_split_refuses_when_geometry_is_too_tight() -> None:
@@ -461,6 +523,24 @@ def test_stem_of_spatial_identity_passes_through_a_non_spatial_string() -> (
     assert stem_of_spatial_identity("plain_stem_0_0") == "plain_stem_0_0"
 
 
+@pytest.mark.parametrize(
+    ("identity", "stem"),
+    [
+        ("plain", "plain"),
+        ("::strip_x_0", ""),
+        ("plain::", "plain"),
+        ("a::b::strip_x_0", "a::b"),
+        ("a::::strip_x_0", "a::"),
+    ],
+    ids=["absent", "leading", "trailing", "repeated", "doubled"],
+)
+def test_stem_of_spatial_identity_cuts_at_the_last_separator(
+    identity: str, stem: str
+) -> None:
+    """The stem is everything before the last separator, the whole string when there is none."""
+    assert stem_of_spatial_identity(identity) == stem
+
+
 def test_label_document_extent_reads_the_frame_off_the_document_it_is_handed(
     tmp_path: Path,
 ) -> None:
@@ -503,30 +583,22 @@ def test_count_label_lines_counts_every_instance_of_the_subject_assessed_or_not(
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp import subject_registry as cr
-    from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.data.splits import count_label_lines
     from tests._producer_fixtures import (
         image_label_key,
         label_image,
-        registry_over,
+        registry_of,
+        scope_over,
     )
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
-    registry_over(
+    scope = scope_over(
         tmp_path,
-        cr.SubjectRegistry(
-            subjects=(
-                cr.Subject(
-                    name="leaf",
-                    description="",
-                    attributes=(
-                        cr.Attribute(
-                            "condition", "categorical", ("healthy", "damaged")
-                        ),
-                    ),
-                ),
-            )
+        registry_of(
+            "leaf",
+            cr.Attribute("condition", "categorical", ("healthy", "damaged")),
         ),
+        "leaf",
     )
     label_image(
         images_dir / "a.png",
@@ -544,4 +616,4 @@ def test_count_label_lines_counts_every_instance_of_the_subject_assessed_or_not(
     )
     stored = json_io.read_label_document(image_label_key(images_dir / "a.png"))
 
-    assert count_label_lines(stored, registry_scope(images_dir, "leaf")) == 2
+    assert count_label_lines(stored, scope) == 2

@@ -23,7 +23,7 @@ from tcip_mcp import subject_registry as cr  # noqa: E402
 from tcip_mcp.dataset_layout import image_dir  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._predictor_fixtures import BOX, StubPredictor, install  # noqa: E402
-from tests._producer_fixtures import write_image  # noqa: E402
+from tests._producer_fixtures import registry_of, write_image  # noqa: E402
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS  # noqa: E402
 
 SUBJECT = "bud"
@@ -41,13 +41,7 @@ def _checkpoint(tmp_path: Path, *attributes: cr.Attribute) -> str:
     return registered_checkpoint(
         tmp_path,
         data={"num_channels": 3, "scope": {"subject": SUBJECT}},
-        registry=cr.SubjectRegistry(
-            subjects=(
-                cr.Subject(
-                    name=SUBJECT, description="", attributes=attributes
-                ),
-            )
-        ),
+        registry=registry_of(SUBJECT, *attributes),
     )
 
 

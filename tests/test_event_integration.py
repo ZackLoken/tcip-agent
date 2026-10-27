@@ -19,6 +19,7 @@ from tcip_mcp.web_client import Panel
 if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
     from tcip_web.state import OpenProject
+    from tests._producer_fixtures import WrittenDataset
 
 
 @pytest.fixture
@@ -403,7 +404,7 @@ class TestPostPanelEventRoute:
     def test_the_focus_tool_answers_the_event_channels_refusal_whole(
         self,
         opened: OpenProject,
-        data_dir: Path,
+        data_dir: WrittenDataset,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The focus tool answers the event channel's refusal whole.
@@ -427,7 +428,7 @@ class TestPostPanelEventRoute:
 
         res = focus_human_attention(
             bound_to(opened),
-            str(data_dir),
+            str(data_dir.root),
             "bud",
             "2-11-26",
             mode="point",
@@ -441,7 +442,7 @@ class TestPostPanelEventRoute:
         self,
         opened_client: TestClient,
         opened: OpenProject,
-        data_dir: Path,
+        data_dir: WrittenDataset,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The event ``focus_human_attention`` posts sets the advisory state it names."""
@@ -465,7 +466,7 @@ class TestPostPanelEventRoute:
         monkeypatch.setattr(web_client, "post_panel_event", _capture)
         res = focus_human_attention(
             bound_to(opened),
-            str(data_dir),
+            str(data_dir.root),
             "bud",
             "2-11-26",
             mode="point",

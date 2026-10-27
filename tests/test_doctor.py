@@ -21,6 +21,7 @@ from tests._producer_fixtures import (
     image_label_key,
     label_image,
     mark_complete,
+    registry_of,
     registry_over,
     write_image,
 )
@@ -82,21 +83,18 @@ def _project(tmp_path: Path) -> Path:
     images.mkdir(parents=True)
     new_project(root)
     (root / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
-    registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
-    )
-    for name in ("IMG_A", "IMG_B", "IMG_C"):
+    registry_over(root, registry_of("bud"))
+    a, b, c = (
         write_image(images / f"{name}.JPG", (32, 32))
-    # A: confirmed negative (empty + a mark). B: empty with no mark. C: holds an object.
-    label_image(images / "IMG_A.JPG", [], 32, 32, keep_empty=True)
-    label_image(images / "IMG_B.JPG", [], 32, 32, keep_empty=True)
-    label_image(
-        images / "IMG_C.JPG",
-        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
-        32,
-        32,
+        for name in ("IMG_A", "IMG_B", "IMG_C")
     )
-    mark_complete(images / "IMG_A.JPG", "bud", project=root)
+    # A: confirmed negative (empty + a mark). B: empty with no mark. C: holds an object.
+    label_image(a, [], 32, 32, keep_empty=True)
+    label_image(b, [], 32, 32, keep_empty=True)
+    label_image(
+        c, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32
+    )
+    mark_complete(a, "bud", project=root)
     return root
 
 
@@ -159,12 +157,10 @@ def test_doctor_reports_a_stem_collision_and_completes(tmp_path: Path) -> None:
     images = image_dir(root, "2026-02-11")
     images.mkdir(parents=True)
     new_project(root)
-    registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
-    )
-    write_image(images / "foo.jpg", (32, 32))
+    registry_over(root, registry_of("bud"))
+    jpeg = write_image(images / "foo.jpg", (32, 32))
     write_image(images / "foo.png", (32, 32))
-    label_image(images / "foo.jpg", [], 32, 32, keep_empty=True)
+    label_image(jpeg, [], 32, 32, keep_empty=True)
 
     found = _diagnosed(root)
 
@@ -202,12 +198,9 @@ def _clean_project(tmp_path: Path) -> Path:
     images = image_dir(root, "d")
     images.mkdir(parents=True)
     new_project(root)
-    registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
-    )
-    write_image(images / "IMG_A.JPG", (32, 32))
+    registry_over(root, registry_of("bud"))
     label_image(
-        images / "IMG_A.JPG",
+        write_image(images / "IMG_A.JPG", (32, 32)),
         [
             Annotation(
                 subject="bud",
@@ -227,10 +220,14 @@ def test_doctor_finds_nothing_on_a_clean_project(tmp_path: Path) -> None:
 
 def _layout_project(
     tmp_path: Path, date: str | None, name: str = "resolved"
-) -> Path:
-    """Make a project whose image tree for capture ``date`` is placed by the layout resolver."""
+) -> tuple[Path, Path]:
+    """Make a project whose image tree for capture ``date`` is placed by the layout resolver.
+
+    Returns the project root and the capture directory made under it.
+    """
     root = tmp_path / name
-    image_dir(root, date).mkdir(parents=True)
+    images = image_dir(root, date)
+    images.mkdir(parents=True)
     new_project(root)
     (root / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
     registry_over(
@@ -242,7 +239,7 @@ def _layout_project(
             )
         ),
     )
-    return root
+    return root, images
 
 
 def test_the_tool_through_a_handshake_answers_the_functions_findings_and_leaves_no_line(
@@ -255,12 +252,12 @@ def test_the_tool_through_a_handshake_answers_the_functions_findings_and_leaves_
     function returns them, and the project's audit log is left as it was.
     """
     date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
-    for name in ("IMG_E", "IMG_U"):
-        write_image(image_dir(root, date) / f"{name}.JPG", (32, 32))
-    label_image(
-        image_dir(root, date) / "IMG_E.JPG", [], 32, 32, keep_empty=True
+    root, images = _layout_project(tmp_path, date)
+    labeled, _unlabeled = (
+        write_image(images / f"{name}.JPG", (32, 32))
+        for name in ("IMG_E", "IMG_U")
     )
+    label_image(labeled, [], 32, 32, keep_empty=True)
     fx.propose(root, fx.entry("leaf", ("leaf_length",)))
     before = audit_rows(root)
 
@@ -289,10 +286,13 @@ def test_diagnosing_a_rollback_journal_database_changes_and_locks_nothing(
     from tests.test_store_contract import _journal_mode
 
     date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
-    write_image(image_dir(root, date) / "IMG_E.JPG", (32, 32))
+    root, images = _layout_project(tmp_path, date)
     label_image(
-        image_dir(root, date) / "IMG_E.JPG", [], 32, 32, keep_empty=True
+        write_image(images / "IMG_E.JPG", (32, 32)),
+        [],
+        32,
+        32,
+        keep_empty=True,
     )
     bound = binding_for(root)
     ts.release_root(root)
@@ -332,9 +332,8 @@ def test_an_unmarked_empty_label_is_named_by_its_capture_and_stem(
     tmp_path: Path,
 ) -> None:
     date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
-    image = image_dir(root, date) / "IMG_R.JPG"
-    write_image(image, (48, 32))
+    root, images = _layout_project(tmp_path, date)
+    image = write_image(images / "IMG_R.JPG", (48, 32))
     label_image(image, [], 48, 32, keep_empty=True)
 
     found = _diagnosed(root)
@@ -351,13 +350,11 @@ def test_a_mark_for_any_subject_finishes_an_empty_label_on_a_dateless_dataset(
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
     root = tmp_path / "dateless"
-    image_dir(root, UNDATED_BUCKET).mkdir(parents=True)
+    images = image_dir(root, UNDATED_BUCKET)
+    images.mkdir(parents=True)
     new_project(root)
-    registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
-    )
-    image = image_dir(root, UNDATED_BUCKET) / "IMG_F.JPG"
-    write_image(image, (40, 24))
+    registry_over(root, registry_of("bud"))
+    image = write_image(images / "IMG_F.JPG", (40, 24))
     label_image(image, [], 40, 24, keep_empty=True)
     mark_complete(image, "bud", project=root)
 
@@ -374,7 +371,7 @@ def test_registry_findings_are_read_through_the_registrys_own_entry_shape(
     Two entries written by ModelRegistry whose checkpoints are gone are each named, as an error,
     with their own name and path.
     """
-    root = _layout_project(tmp_path, "2026-03-04")
+    root, _images = _layout_project(tmp_path, "2026-03-04")
     ckpt_dir = tmp_path / "checkpoints"
     ckpt_dir.mkdir()
     from tests._verified_checkpoint_fixtures import produced_checkpoint
@@ -412,7 +409,7 @@ def test_a_missing_checkpoint_and_a_test_checkpoint_are_distinct_registry_findin
     as missing, and an entry whose checkpoint is absent inside the project is reported as
     missing and not as pollution, each as an error.
     """
-    root = _layout_project(tmp_path, "2026-03-04")
+    root, _images = _layout_project(tmp_path, "2026-03-04")
     # Inside the project, so never pollution; outside it under pytest's own temp tree, pollution.
     ghost = root / ".tcip" / "models" / "orchard.pt"
     scratch = tmp_path / "scratch" / "run" / "last.pt"
@@ -440,7 +437,7 @@ def test_a_checkpoint_under_a_temp_rooted_project_is_not_pollution(
     ``tmp_path`` itself sits under a temp tree (pytest's own fixture), and a checkpoint resolving
     inside the project is reported neither as pollution nor as missing.
     """
-    root = _layout_project(tmp_path, "2026-03-04")
+    root, _images = _layout_project(tmp_path, "2026-03-04")
     from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     ckpt_dir = root / ".tcip" / "models"
@@ -486,12 +483,13 @@ def test_one_stem_in_two_captures_is_two_images_each_paired_with_its_own_label(
     """
     from tcip_mcp.tools.data_tools import scan_dataset
 
-    root = _layout_project(tmp_path, "2026-03-04")
-    image_dir(root, "2026-03-05").mkdir(parents=True)
-    for date in ("2026-03-04", "2026-03-05"):
-        write_image(image_dir(root, date) / "same.png", (32, 32))
+    root, first = _layout_project(tmp_path, "2026-03-04")
+    labeled, _unlabeled = (
+        write_image(images / "same.png", (32, 32))
+        for images in (first, image_dir(root, "2026-03-05"))
+    )
     label_image(
-        image_dir(root, "2026-03-04") / "same.png",
+        labeled,
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
         32,
         32,
@@ -521,7 +519,7 @@ def test_only_the_unreadable_trait_record_is_reported(tmp_path: Path) -> None:
     """
     import tcip_store as ts
 
-    root = _layout_project(tmp_path, "2026-03-04")
+    root, _images = _layout_project(tmp_path, "2026-03-04")
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
     ts.replace(
         traits.trait_key(root, "burr_size"),
@@ -540,7 +538,7 @@ def test_only_the_unreadable_trait_record_is_reported(tmp_path: Path) -> None:
 def test_doctor_is_silent_on_a_confirmed_latest_revision(
     tmp_path: Path,
 ) -> None:
-    root = _layout_project(tmp_path, "2026-03-04")
+    root, _images = _layout_project(tmp_path, "2026-03-04")
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
 
     found = _diagnosed(root)
@@ -556,7 +554,7 @@ def test_doctor_warns_on_an_unconfirmed_latest_revision(
     The warning holds for a trait whose latest revision the breeder has not confirmed, a
     confirmed earlier one notwithstanding.
     """
-    root = _layout_project(tmp_path, "2026-03-04")
+    root, _images = _layout_project(tmp_path, "2026-03-04")
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
     fx.propose(
         root, fx.entry("leaf", ("leaf_length",), notes="a second reading")
@@ -576,7 +574,7 @@ def test_doctor_reports_an_undecodable_trait_record_without_aborting(
 ) -> None:
     from tests._record_damage_fixtures import damage_record
 
-    root = _layout_project(tmp_path, "2026-03-04")
+    root, _images = _layout_project(tmp_path, "2026-03-04")
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
     damage_record(traits.trait_key(root, "leaf"), b"{not valid json")
 
@@ -597,7 +595,7 @@ def test_doctor_reports_a_trait_record_holding_no_revision_without_aborting(
     """
     import tcip_store as ts
 
-    root = _layout_project(tmp_path, "2026-03-04")
+    root, _images = _layout_project(tmp_path, "2026-03-04")
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
     ts.replace(
         traits.trait_key(root, "stem"),
@@ -615,22 +613,21 @@ def test_doctor_reports_a_trait_record_holding_no_revision_without_aborting(
 
 def _published_bucket(
     root: Path,
+    images_dir: Path,
     name: str,
     stems: tuple[str, ...],
     producer: Producer | Proposed,
 ) -> list[Path]:
     """Publish the bucket ``name`` by ``producer`` over a new image of each of ``stems``.
 
-    The images lie under capture ``2026-03-04`` of ``root``; the bucket holds one ``bud`` box per
-    image, its documents encoded as the proposal door encodes them. Returns the images.
+    The images are written into the capture ``images_dir`` of ``root``; the bucket holds one
+    ``bud`` box per image, its documents encoded as the proposal door encodes them. Returns the
+    images.
     """
     from tcip_mcp.buckets import Document, publish, source_root
     from tcip_mcp.pipelines.data.selection import ClassScope
 
-    images = [
-        write_image(image_dir(root, "2026-03-04") / f"{s}.JPG", (32, 32))
-        for s in stems
-    ]
+    images = [write_image(images_dir / f"{s}.JPG", (32, 32)) for s in stems]
     box = Annotation(
         subject="bud", geometry=BBox(1, 1, 9, 9), score=0.9, created_by="agent"
     )
@@ -653,7 +650,9 @@ def _published_bucket(
     return images
 
 
-def _reviewed_bucket(root: Path, stems: tuple[str, ...]) -> str:
+def _reviewed_bucket(
+    root: Path, images_dir: Path, stems: tuple[str, ...]
+) -> str:
     """Publish the proposal bucket ``proposals`` (:func:`_published_bucket`) and review each image.
 
     A save of each image rejecting its box writes the image's verdict shard. Returns the bucket's
@@ -664,7 +663,7 @@ def _reviewed_bucket(root: Path, stems: tuple[str, ...]) -> str:
 
     name = "proposals"
     images = _published_bucket(
-        root, name, stems, Proposed(proposed_by="agent")
+        root, images_dir, name, stems, Proposed(proposed_by="agent")
     )
     for image in images:
         save_label_document(
@@ -699,8 +698,8 @@ def test_a_diagnosis_reads_a_bucket_reviewed_on_two_images_once(
     from tcip_mcp.dataset_layout import PREDICTION_BUCKETS
     from tcip_store.sqlite_backend import SqliteBackend
 
-    root = _layout_project(tmp_path, "2026-03-04")
-    name = _reviewed_bucket(root, ("IMG_A", "IMG_B"))
+    root, images = _layout_project(tmp_path, "2026-03-04")
+    name = _reviewed_bucket(root, images, ("IMG_A", "IMG_B"))
     reads: list[tuple[str, ...]] = []
     real_read = SqliteBackend.read_versioned
 
@@ -726,8 +725,8 @@ def test_a_verdict_shard_naming_an_image_its_bucket_names_no_document_for_is_a_w
     The bucket's record is rewritten after both shards were written to name the first image's
     document alone; the first image's shard stays silent.
     """
-    root = _layout_project(tmp_path, "2026-03-04")
-    name = _reviewed_bucket(root, ("IMG_A", "IMG_B"))
+    root, images = _layout_project(tmp_path, "2026-03-04")
+    name = _reviewed_bucket(root, images, ("IMG_A", "IMG_B"))
     _replace_documents(root, name, {"IMG_A": "IMG_A.JPG"})
 
     found = _diagnosed(root)
@@ -746,8 +745,8 @@ def test_doctor_names_a_bucket_whose_record_will_not_read_without_aborting(
     documents that are not a mapping; the call is answered rather than refused, and the image's
     verdict shard is one warning that its bucket has no readable record.
     """
-    root = _layout_project(tmp_path, "2026-03-04")
-    name = _reviewed_bucket(root, ("IMG_P",))
+    root, images = _layout_project(tmp_path, "2026-03-04")
+    name = _reviewed_bucket(root, images, ("IMG_P",))
     _replace_documents(root, name, "not a mapping")
 
     found = _diagnosed(root)
@@ -774,14 +773,15 @@ def test_a_registry_that_will_not_read_hides_no_bucket_that_will_not(
     )
     from tests._record_damage_fixtures import damage_record
 
-    root = _layout_project(tmp_path, "2026-03-04")
-    damaged = _reviewed_bucket(root, ("IMG_P",))
+    root, images = _layout_project(tmp_path, "2026-03-04")
+    damaged = _reviewed_bucket(root, images, ("IMG_P",))
     _replace_documents(root, damaged, "not a mapping")
     checkpoint = _register_checkpoint(
         root, "orchard_detector_v2", root / ".tcip" / "models" / "orchard.pt"
     )
     _published_bucket(
         root,
+        images,
         "predictions",
         ("IMG_Q",),
         load_registered_checkpoint(checkpoint, project=root).producer,
@@ -805,7 +805,7 @@ def test_doctor_errors_on_a_project_whose_record_does_not_decode(
     from tcip_mcp.project_record import project_record_key
     from tests._record_damage_fixtures import damage_record
 
-    root = _layout_project(tmp_path, "2026-03-04")
+    root, _images = _layout_project(tmp_path, "2026-03-04")
     bound = binding_for(root)
     damage_record(project_record_key(str(root)), b"{not valid json")
 
@@ -829,11 +829,8 @@ def test_doctor_flags_an_unreadable_label(tmp_path: Path) -> None:
 
     A corrupt label document is named, as an error, as not reading.
     """
-    date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
-    image = image_dir(root, date) / "IMG_S.JPG"
-    write_image(image, (32, 32))
-    _unreadable_label(image)
+    root, images = _layout_project(tmp_path, "2026-03-04")
+    _unreadable_label(write_image(images / "IMG_S.JPG", (32, 32)))
 
     found = _diagnosed(root)
 
@@ -852,10 +849,8 @@ def test_a_marked_empty_label_is_clean_to_the_data_quality_check(
     An empty label marked complete leaves the data-quality check over the census with no
     finding.
     """
-    date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
-    image = image_dir(root, date) / "IMG_S.JPG"
-    write_image(image, (32, 32))
+    root, images = _layout_project(tmp_path, "2026-03-04")
+    image = write_image(images / "IMG_S.JPG", (32, 32))
     label_image(image, [], 32, 32, keep_empty=True)
     mark_complete(image, "bud", project=root)
 
@@ -875,13 +870,10 @@ def test_a_doctor_run_reads_each_label_once_and_reports_an_unreadable_one_once(
     Over a census and its data-quality and provenance checks, each label document is read once
     and the unreadable one is reported once.
     """
-    date = "2026-03-04"
-    root = _layout_project(tmp_path, date)
-    write_image(image_dir(root, date) / "IMG_U.JPG", (32, 32))
-    _unreadable_label(image_dir(root, date) / "IMG_U.JPG")
-    write_image(image_dir(root, date) / "IMG_A.JPG", (32, 32))
+    root, images = _layout_project(tmp_path, "2026-03-04")
+    _unreadable_label(write_image(images / "IMG_U.JPG", (32, 32)))
     label_image(
-        image_dir(root, date) / "IMG_A.JPG",
+        write_image(images / "IMG_A.JPG", (32, 32)),
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
         32,
         32,

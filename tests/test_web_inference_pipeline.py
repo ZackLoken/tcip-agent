@@ -191,17 +191,14 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_scope(
     from tcip_mcp import subject_registry as cr
     from tcip_mcp.buckets import read_bucket
     from tcip_web.routes.inference import _worker
+    from tests._producer_fixtures import registry_of
 
     opening = cr.Attribute("opening", "categorical", ("closed", "open"))
     images_dir = _one_image(tmp_path)
     ckpt = _checkpoint(
         tmp_path,
         data={"num_channels": 3, "scope": {"subject": "bud"}},
-        registry=cr.SubjectRegistry(
-            subjects=(
-                cr.Subject(name="bud", description="", attributes=(opening,)),
-            )
-        ),
+        registry=registry_of("bud", opening),
     )
 
     install(monkeypatch, StubPredictor(attributes=[[1]]))

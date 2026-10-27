@@ -16,43 +16,39 @@ import pytest
 import tcip_store
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Polygon
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
-from tcip_mcp.pipelines.data.label_queries import registry_scope
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.subject_registry import Subject, SubjectRegistry
 from tests._producer_fixtures import (  # noqa: E402
+    admit_over,
     dataset_over,
     image_label_key,
     label_image,
+    registry_of,
     registry_over,
     saved_annotations,
+    scope_over,
     write_image,
+    write_jpegs,
 )
 
 if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
 
 
-def _write_image(images_dir: Path, stem: str) -> Path:
-    """Write the 640 by 480 image ``<stem>.jpg`` of ``images_dir`` and return its path."""
-    return write_image(images_dir / f"{stem}.jpg", (640, 480))
-
-
-def _write_registry(root: Path, *subjects: Subject) -> SubjectRegistry:
-    registry = SubjectRegistry(subjects=tuple(subjects))
-    registry_over(root, registry)
-    return registry
+SIZE = (640, 480)
+"""The frame size every image here is written and labeled at."""
 
 
 # (a) a registry decodes its own labels after the flip.
 def test_registry_decodes_its_own_labels(tmp_path: Path) -> None:
-    registry = _write_registry(tmp_path, Subject(name="bud", description=""))
+    registry = registry_of("bud")
+    registry_over(tmp_path, registry)
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
-    image = _write_image(images_dir, "img_001")
+    (image,) = write_jpegs(images_dir, ["img_001"], SIZE)
     label_image(
         image,
         [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))],
-        640,
-        480,
+        *SIZE,
     )
 
     ds = dataset_over("detection", str(images_dir), subject="bud")
@@ -71,12 +67,10 @@ def test_registry_decodes_its_own_labels(tmp_path: Path) -> None:
 def test_geometryless_annotation_roundtrips_and_marks_image_annotated(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.pipelines.data.label_queries import admit
-
-    _write_registry(tmp_path, Subject(name="bud", description=""))
+    registry_over(tmp_path, registry_of("bud"))
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
-    image = _write_image(images_dir, "img_001")
-    label_image(image, [Annotation(subject="bud")], 640, 480)
+    (image,) = write_jpegs(images_dir, ["img_001"], SIZE)
+    label_image(image, [Annotation(subject="bud")], *SIZE)
 
     # Round-trips losslessly: subject preserved, geometry None.
     back = saved_annotations(image)
@@ -88,7 +82,7 @@ def test_geometryless_annotation_roundtrips_and_marks_image_annotated(
 
     # The image carries a subject annotation, so the admission counts it as annotated rather than
     # as an empty one nobody confirmed; which geometries answer for a measurement is the loader's.
-    admitted = admit(images_dir, scope=registry_scope(images_dir, "bud"))
+    admitted = admit_over(images_dir, subject="bud")
     assert [record.member for record in admitted.records] == ["img_001"]
     assert admitted.tallies == {"partial": 1}
 
@@ -99,24 +93,18 @@ def test_the_admitted_scope_carries_the_registrys_attributes(
 ) -> None:
     from tcip_mcp.subject_registry import Attribute
 
-    registry = _write_registry(
-        tmp_path,
-        Subject(
-            name="bud",
-            description="",
-            attributes=(
-                Attribute("color", "categorical", ("red", "blue")),
-                Attribute("grade", "ordinal", ("low", "high")),
-            ),
-        ),
+    registry = registry_of(
+        "bud",
+        Attribute("color", "categorical", ("red", "blue")),
+        Attribute("grade", "ordinal", ("low", "high")),
     )
+    registry_over(tmp_path, registry)
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
-    for stem in ("a", "b"):
+    for image in write_jpegs(images_dir, ["a", "b"], SIZE):
         label_image(
-            _write_image(images_dir, stem),
+            image,
             [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))],
-            640,
-            480,
+            *SIZE,
         )
 
     ds = dataset_over("detection", str(images_dir), subject="bud")
@@ -130,8 +118,8 @@ def test_a_confirmed_negative_is_its_own_subjects_alone(
 ) -> None:
     from tests._producer_fixtures import mark_complete
 
-    image = _write_image(image_dir(tmp_path, "2-11-26"), "img_009")
-    label_image(image, [], 640, 480, keep_empty=True)
+    (image,) = write_jpegs(image_dir(tmp_path, "2-11-26"), ["img_009"], SIZE)
+    label_image(image, [], *SIZE, keep_empty=True)
     # A human confirmed img_009 an empty negative for bud on this date.
     mark_complete(image, "bud", project=tmp_path)
 
@@ -145,14 +133,19 @@ def test_a_confirmed_negative_is_its_own_subjects_alone(
 def test_loader_filters_by_subject_and_geometry(tmp_path: Path) -> None:
     import torch
 
-    _write_registry(
+    registry_over(
         tmp_path,
-        Subject(name="bud", description=""),
-        Subject(name="bush", description=""),
+        SubjectRegistry(
+            subjects=(
+                Subject(name="bud", description=""),
+                Subject(name="bush", description=""),
+            )
+        ),
     )
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+    (image,) = write_jpegs(images_dir, ["img_001"], SIZE)
     label_image(
-        _write_image(images_dir, "img_001"),
+        image,
         [
             Annotation(
                 subject="bud", geometry=BBox(10, 10, 40, 40)
@@ -162,8 +155,7 @@ def test_loader_filters_by_subject_and_geometry(tmp_path: Path) -> None:
             ),  # wrong subject -> drop
             Annotation(subject="bud"),  # geometry-less -> drop
         ],
-        640,
-        480,
+        *SIZE,
     )
 
     ds = dataset_over("detection", str(images_dir), subject="bud")
@@ -181,15 +173,11 @@ def test_decode_inverts_the_recorded_scope(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
     from tcip_mcp.subject_registry import Attribute
 
-    _write_registry(
+    scope = scope_over(
         tmp_path,
-        Subject(
-            name="bud",
-            description="",
-            attributes=(Attribute("color", "categorical", ("red", "blue")),),
-        ),
+        registry_of("bud", Attribute("color", "categorical", ("red", "blue"))),
+        "bud",
     )
-    scope = registry_scope(image_root(tmp_path), "bud")
 
     data, _dropped = encode_predictions(
         {
@@ -217,7 +205,9 @@ def test_save_annotations_refuses_missing_subject(
 ) -> None:
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    image = _write_image(image_dir(tmp_path, UNDATED_BUCKET), "img_001")
+    (image,) = write_jpegs(
+        image_dir(tmp_path, UNDATED_BUCKET), ["img_001"], SIZE
+    )
 
     res = save_annotations(
         bound, str(image), annotations=[{"bbox": [10, 10, 40, 40]}], actor=None
@@ -245,7 +235,9 @@ def test_save_annotations_prefers_points_over_bbox(
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    image = _write_image(image_dir(tmp_path, UNDATED_BUCKET), "img_001")
+    (image,) = write_jpegs(
+        image_dir(tmp_path, UNDATED_BUCKET), ["img_001"], SIZE
+    )
 
     res = save_annotations(
         bound,
@@ -292,7 +284,9 @@ def test_save_annotations_refuses_a_polygon_that_is_no_shape(
     """``save_annotations`` refuses an empty or one-vertex polygon by name and writes nothing."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    image = _write_image(image_dir(tmp_path, UNDATED_BUCKET), "img_001")
+    (image,) = write_jpegs(
+        image_dir(tmp_path, UNDATED_BUCKET), ["img_001"], SIZE
+    )
 
     res = save_annotations(
         bound,
@@ -315,7 +309,9 @@ def test_save_annotations_accepts_rings(
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    image = _write_image(image_dir(tmp_path, UNDATED_BUCKET), "img_001")
+    (image,) = write_jpegs(
+        image_dir(tmp_path, UNDATED_BUCKET), ["img_001"], SIZE
+    )
 
     res = save_annotations(
         bound,
@@ -398,25 +394,18 @@ def test_geometryless_only_image_is_refused_by_the_loader_that_reads_no_target_f
     Admission keeps the image, the detection loader refuses it by name, and the boxed image
     alone still loads.
     """
-    from tcip_mcp.pipelines.data.label_queries import admit
-
-    _write_registry(tmp_path, Subject(name="bud", description=""))
+    registry_over(tmp_path, registry_of("bud"))
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+    boxed, geomless = write_jpegs(images_dir, ["boxed", "geomless"], SIZE)
     label_image(
-        _write_image(images_dir, "boxed"),
+        boxed,
         [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))],
-        640,
-        480,
+        *SIZE,
     )
     # geomless: a bud annotation with NO geometry (an image-level label, not a box).
-    label_image(
-        _write_image(images_dir, "geomless"),
-        [Annotation(subject="bud")],
-        640,
-        480,
-    )
+    label_image(geomless, [Annotation(subject="bud")], *SIZE)
 
-    admitted = admit(images_dir, scope=registry_scope(images_dir, "bud"))
+    admitted = admit_over(images_dir, subject="bud")
     assert [record.member for record in admitted.records] == [
         "boxed",
         "geomless",
@@ -460,14 +449,12 @@ def test_uppercase_extension_image_still_yields_boxes(tmp_path: Path) -> None:
 
     A labeled ``IMG_1.JPG`` loads as one sample carrying its one box.
     """
-    _write_registry(tmp_path, Subject(name="bud", description=""))
+    registry_over(tmp_path, registry_of("bud"))
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
-    write_image(images_dir / "IMG_1.JPG", (640, 480))
     label_image(
-        images_dir / "IMG_1.JPG",
+        write_image(images_dir / "IMG_1.JPG", SIZE),
         [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))],
-        640,
-        480,
+        *SIZE,
     )
 
     ds = dataset_over("detection", str(images_dir), subject="bud")

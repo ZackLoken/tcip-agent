@@ -247,13 +247,10 @@ def test_golden_per_plant_phenology_series_and_milestones(
 ) -> None:
     from tcip_mcp import subject_registry as cr
     from tests._chain_fixtures import predicted, published
+    from tests._producer_fixtures import mapping_of, registry_of
 
     opening = cr.Attribute("opening", "categorical", ("closed", "open"))
-    registry = cr.SubjectRegistry(
-        subjects=(
-            cr.Subject(name="bud", description="", attributes=(opening,)),
-        )
-    )
+    registry = registry_of("bud", opening)
 
     def bucket(date: str, stem: str, values: list[str]) -> Bucket:
         image = image_dir(tmp_path / "ds", date) / f"{stem}.png"
@@ -273,22 +270,12 @@ def test_golden_per_plant_phenology_series_and_milestones(
             "2026-03-09", "P1_b", ["open", "open", "open", "closed"]
         ),
     }
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import Assignment
-
-    mapping = {
-        date: [
-            Assignment(
-                image=f"{stem}.png",
-                stem=stem,
-                date_folder=date,
-                plant_id="P1",
-                accession_name="acc-9",
-                source="sequence",
-                distance_m=0.0,
-            )
-        ]
-        for date, stem in (("2026-02-11", "P1_a"), ("2026-03-09", "P1_b"))
-    }
+    mapping = mapping_of(
+        {
+            date: [(f"{stem}.png", ("P1", "acc-9"), 0.0)]
+            for date, stem in (("2026-02-11", "P1_a"), ("2026-03-09", "P1_b"))
+        }
+    )
     res = phenology_mod.per_plant_phenology(
         mapping, buckets, BUD_OPENING, ["P1"]
     )
@@ -462,9 +449,8 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
 
     def _dataset(root: Path) -> Path:
         images_dir = image_dir(root, UNDATED_BUCKET)
-        write_image(images_dir / "a.png", (64, 64), (120, 120, 120))
         label_image(
-            images_dir / "a.png",
+            write_image(images_dir / "a.png", (64, 64), (120, 120, 120)),
             [Annotation(subject="bud", geometry=BBox(5, 5, 20, 20))],
             64,
             64,

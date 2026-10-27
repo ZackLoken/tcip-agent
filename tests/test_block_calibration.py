@@ -1118,33 +1118,18 @@ def _build_attribute_scoped_experiment(
     and both reserved regions are attested complete. Returns what the experiment left.
     """
     from tcip_mcp.experiments import run_resolution
-    from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
-    from tests._producer_fixtures import registry_over
-
-    def _write_registry(values: tuple[str, ...]) -> None:
-        registry_over(
-            root,
-            SubjectRegistry(
-                subjects=(
-                    Subject(
-                        name="bud",
-                        description="",
-                        attributes=(
-                            Attribute(
-                                name="stage", type="categorical", values=values
-                            ),
-                        ),
-                    ),
-                )
-            ),
-        )
+    from tcip_mcp.subject_registry import Attribute
+    from tests._producer_fixtures import registry_of, registry_over
 
     root = tmp_path / "ds_attribute"
     images_dir = image_dir(root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
     _write_mosaic(images_dir / f"{stem}.tif")
-    _write_registry(trained_values)
+    registry_over(
+        root,
+        registry_of("bud", Attribute("stage", "categorical", trained_values)),
+    )
 
     boxes = [
         Annotation(
@@ -1176,7 +1161,12 @@ def _build_attribute_scoped_experiment(
     ).data.recorded_scope
     assert recorded_scope.subject and recorded_scope.attributes
 
-    _write_registry(reordered_values)
+    registry_over(
+        root,
+        registry_of(
+            "bud", Attribute("stage", "categorical", reordered_values)
+        ),
+    )
     manifest = completed["spatial_manifest"]
     _attest_regions_complete(
         root,

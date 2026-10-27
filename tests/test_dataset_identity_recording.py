@@ -31,8 +31,11 @@ def _make_dataset(root: Path, *, shade: int = 0) -> Path:
     Image ``i`` is a ``labeled_frame`` on the ground ``(shade, 10 * i, 0)``.
     """
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import labeled_frame, registry_over
+    from tests._producer_fixtures import (
+        labeled_frame,
+        registry_of,
+        registry_over,
+    )
 
     images_dir = image_dir(root, "2-11-26")
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -44,10 +47,7 @@ def _make_dataset(root: Path, *, shade: int = 0) -> Path:
             64,
             (shade, 10 * i, 0),
         )
-    registry_over(
-        root,
-        SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
-    )
+    registry_over(root, registry_of(SUBJECT))
     return images_dir
 
 

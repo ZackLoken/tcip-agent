@@ -640,8 +640,8 @@ class SpatialManifest(BaseModel):
 
     The split is ``split_construction.spatial_single_source_split``'s, recorded in its resolved
     partition: each side's half-open pixel regions, the region identities its train and val tiles
-    carry, the buffer it was drawn at (the lattice is the run's ``data.tiling``), what it
-    requested and realized, and the raster it was drawn over
+    carry, the buffer it was drawn at (the lattice is the run's ``data.tiling``), the fractions
+    it requested, the tiles each side kept and dropped, and the raster it was drawn over
     (``split_construction.raster_identity``).
     """
 
@@ -662,9 +662,6 @@ class SpatialManifest(BaseModel):
     axis: str
     buffer: int
     requested_fractions: dict[str, float]
-    realized_fractions: dict[str, float]
-    realized_discard_fraction: float
-    tiles_dropped_past_extent: int
     tiles_dropped_outside_regions: int
     raster_content_identity: RasterIdentity
 

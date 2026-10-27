@@ -20,23 +20,30 @@ from fastapi.testclient import TestClient
 import tcip_store
 from tcip_annotation import json_io
 from tcip_annotation.matching import pair_proposals
-from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
+from tcip_annotation.state import (
+    Annotation,
+    Attribute,
+    BBox,
+    Point,
+    Polygon,
+    bbox_of,
+)
 from tcip_mcp.dataset_layout import (
     UNDATED_BUCKET,
     image_dir,
-    image_root,
     label_key,
 )
 from tests._producer_fixtures import (
-    blank_image,
     image_label_key,
     label_image,
+    registry_of,
     saved_annotations,
+    scope_over,
+    write_image,
 )
 from tests._training_values import TRIAGE_WEIGHTS
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.workspace import BoundProject
 
 BOX = BBox(10.0, 10.0, 30.0, 30.0)
@@ -100,29 +107,6 @@ def test_a_point_alongside_a_box_and_a_polygon_all_survive_one_document(
 # ── target membership (the one shared decision) ──────────────────────────────
 
 
-def _scope(root: Path, *values: str) -> ClassScope:
-    """Return the registry scope of ``bud`` over a dataset at ``root``.
-
-    The dataset declares ``opening`` over ``values`` on it, or no attribute for no values.
-    """
-    from tcip_mcp import subject_registry as cr
-    from tcip_mcp.pipelines.data.label_queries import registry_scope
-    from tests._producer_fixtures import registry_over
-
-    attributes = (
-        (cr.Attribute("opening", "categorical", values),) if values else ()
-    )
-    registry_over(
-        root,
-        cr.SubjectRegistry(
-            subjects=(
-                cr.Subject(name="bud", description="", attributes=attributes),
-            )
-        ),
-    )
-    return registry_scope(image_root(root), "bud")
-
-
 def test_attribute_ids_still_give_a_box_its_row() -> None:
     a = Annotation(subject="bud", geometry=BOX)
     assert json_io.attribute_ids(a, "bud", ()) == []
@@ -141,12 +125,21 @@ def test_json_det_targets_yields_no_box_for_a_point(tmp_path: Path) -> None:
     key = label_key(tmp_path, UNDATED_BUCKET, "IMG_0001")
     json_io.write_label_document(key, annotations, 100, 80)
     stored = json_io.read_label_document(key).annotations
-    target = json_det_targets(stored, _scope(tmp_path / "plain"))
+    target = json_det_targets(
+        stored, scope_over(tmp_path / "plain", registry_of("bud"), "bud")
+    )
     assert target["boxes"] == [[10.0, 10.0, 30.0, 30.0]]
     assert target["labels"] == [1]
     # An attribute scope must not turn the point into a decode failure either: it is simply not a
     # target, and the box, never assessed, is one row marked unassessed.
-    target = json_det_targets(stored, _scope(tmp_path / "attributed", "open"))
+    target = json_det_targets(
+        stored,
+        scope_over(
+            tmp_path / "attributed",
+            registry_of("bud", Attribute("opening", "categorical", ("open",))),
+            "bud",
+        ),
+    )
     assert target["boxes"] == [[10.0, 10.0, 30.0, 30.0]]
     assert target["attributes"].tolist() == [[json_io.UNASSESSED]]
 
@@ -160,28 +153,23 @@ def test_a_point_only_document_carries_the_subject_and_the_detection_loader_refu
     one, saying its subject lies only in geometries a detection loader does not read, and the
     loader admits the box-bearing document alone as its one sample.
     """
-    from tests._producer_fixtures import dataset_over, write_image
+    from tests._producer_fixtures import dataset_over
 
     images = image_dir(tmp_path, UNDATED_BUCKET)
-    for stem in ("IMG_0001", "IMG_0002"):
+    pointed, boxed = (
         write_image(images / f"{stem}.png")
+        for stem in ("IMG_0001", "IMG_0002")
+    )
     label_image(
-        images / "IMG_0001.png",
+        pointed,
         [Annotation(subject="bud", geometry=Point(20.0, 20.0))],
         100,
         80,
     )
-    label_image(
-        images / "IMG_0002.png",
-        [Annotation(subject="bud", geometry=BOX)],
-        100,
-        80,
-    )
+    label_image(boxed, [Annotation(subject="bud", geometry=BOX)], 100, 80)
 
-    for stem in ("IMG_0001", "IMG_0002"):
-        doc = json_io.read_label_document(
-            image_label_key(images / f"{stem}.png")
-        )
+    for image in (pointed, boxed):
+        doc = json_io.read_label_document(image_label_key(image))
         assert doc.state("bud") == "partial"
 
     with pytest.raises(
@@ -252,7 +240,7 @@ def test_worst_predictions_does_not_count_a_point_as_a_detection(
     from tcip_mcp.tools.vision_tools import get_worst_predictions
     from tests._chain_fixtures import published
 
-    image = blank_image(tmp_path, "IMG_0001.jpg")
+    image = write_image(image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0001.jpg")
     label_image(image, [Annotation(subject="bud", geometry=BOX)], 100, 80)
     bucket = published(
         tmp_path,
@@ -317,7 +305,13 @@ def test_phenology_detection_counts_exclude_a_point(tmp_path: Path) -> None:
     total, positive, unclassified = count_by_class(
         path,
         PositiveState(attribute="opening", value="open"),
-        scope=_scope(tmp_path, "open", "closed"),
+        scope=scope_over(
+            tmp_path,
+            registry_of(
+                "bud", Attribute("opening", "categorical", ("open", "closed"))
+            ),
+            "bud",
+        ),
     )
     assert (total, positive, unclassified) == (1, 1, 0)
 
@@ -344,7 +338,9 @@ def test_visualize_annotations_renders_the_box_and_reports_the_point(
 ) -> None:
     from tcip_mcp.tools.vision_tools import _viz_annotations
 
-    img = blank_image(tmp_path / "ds", "IMG_0001.JPG")
+    img = write_image(
+        image_dir(tmp_path / "ds", UNDATED_BUCKET) / "IMG_0001.JPG"
+    )
     label_image(
         img,
         [
@@ -379,7 +375,9 @@ def test_mcp_read_annotations_tool_returns_a_point(tmp_path: Path) -> None:
         read_annotations as read_annotations_tool,
     )
 
-    img = blank_image(tmp_path / "ds", "IMG_0001.JPG")
+    img = write_image(
+        image_dir(tmp_path / "ds", UNDATED_BUCKET) / "IMG_0001.JPG"
+    )
     label_image(
         img, [Annotation(subject="bud", geometry=Point(12.0, 34.0))], 100, 80
     )
@@ -419,7 +417,7 @@ def test_save_annotations_tool_writes_an_incoming_point(
 ) -> None:
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    img = blank_image(tmp_path)
+    img = write_image(image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0001.JPG")
     res = save_annotations(
         bound,
         str(img),
@@ -442,7 +440,7 @@ def test_save_annotations_tool_keeps_points_and_point_distinct(
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    img = blank_image(tmp_path)
+    img = write_image(image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0001.JPG")
     save_annotations(
         bound,
         str(img),
@@ -462,7 +460,9 @@ def test_save_annotations_tool_keeps_points_and_point_distinct(
 def test_annotate_route_round_trips_a_point(
     client: TestClient, opened_project: Path
 ) -> None:
-    img = blank_image(opened_project)
+    img = write_image(
+        image_dir(opened_project, UNDATED_BUCKET) / "IMG_0001.JPG"
+    )
 
     resp = client.post(
         "/api/annotate/labels",
@@ -489,7 +489,9 @@ def test_annotate_route_round_trips_a_point(
 def test_annotate_route_round_trips_mixed_point_and_box_geometry(
     client: TestClient, opened_project: Path
 ) -> None:
-    img = blank_image(opened_project)
+    img = write_image(
+        image_dir(opened_project, UNDATED_BUCKET) / "IMG_0001.JPG"
+    )
     resp = client.post(
         "/api/annotate/labels",
         json={
@@ -514,7 +516,7 @@ def test_the_proposals_route_pairs_no_proposal_with_a_point(
     from tests._web_fixtures import open_new_project
 
     tmp_path = open_new_project(tmp_path / "proj").root
-    img = blank_image(tmp_path)
+    img = write_image(image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0001.JPG")
     label_image(
         img, [Annotation(subject="bud", geometry=Point(20.0, 20.0))], 100, 80
     )

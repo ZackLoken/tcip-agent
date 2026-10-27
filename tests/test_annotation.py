@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tcip_annotation import Annotation, BBox
 from tcip_annotation.json_io import (
@@ -11,6 +12,9 @@ from tcip_annotation.json_io import (
     write_label_document,
 )
 from tcip_annotation.matching import iou_matrix, pair_proposals
+
+if TYPE_CHECKING:
+    from tests._producer_fixtures import WrittenDataset
 
 
 def test_bbox_creation() -> None:
@@ -82,14 +86,12 @@ def test_pair_proposals() -> None:
     ).pairs == [(0, 0)]
 
 
-def test_score_predictions_single_image(data_dir: Path) -> None:
-    from tcip_mcp.dataset_layout import image_dir
+def test_score_predictions_single_image(data_dir: WrittenDataset) -> None:
     from tcip_mcp.tools.annotation_tools import score_predictions
 
-    img = image_dir(data_dir, "2-11-26") / "img_001.jpg"
     result = score_predictions(
-        data_dir,
-        str(img),
+        data_dir.root,
+        str(data_dir.images[0]),
         "live/2-11-26",
         iou_threshold=0.5,
         conf_threshold=0.25,

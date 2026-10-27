@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests._producer_fixtures import blank_image
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+from tests._producer_fixtures import write_image
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,7 +39,7 @@ def test_save_annotations_takes_no_producer_and_names_itself(
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     assert "created_by" not in inspect.signature(save_annotations).parameters
-    img = blank_image(tmp_path)
+    img = write_image(image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0001.JPG")
     save_annotations(
         bound,
         str(img),
@@ -56,7 +57,7 @@ def test_save_annotations_never_reads_provenance_off_a_shape(
     """A shape's own ``created_by`` is not an author: both new shapes carry the door's."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    img = blank_image(tmp_path)
+    img = write_image(image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0001.JPG")
     save_annotations(
         bound,
         str(img),

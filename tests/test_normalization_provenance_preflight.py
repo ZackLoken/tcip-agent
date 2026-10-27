@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, parse_image_path
 from tests._chain_fixtures import (
     BESPOKE_CLASSIFIER,
     BESPOKE_DETECTION,
@@ -404,7 +404,7 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(
     assert len({s.member for s in bound}) < len(bound), (
         "the fixture must hold one member name on two dates for this to bite"
     )
-    assert {Path(s.source).parent.name for s in bound} == set(DATES)
+    assert {parse_image_path(s.source)[1] for s in bound} == set(DATES)
 
     model_source = {
         "builder": BESPOKE_DETECTION,
@@ -683,9 +683,8 @@ def test_own_statistics_refuses_a_config_whose_frames_carry_none(
 
     imgs = image_dir(tmp_path, UNDATED_BUCKET)
     for stem in ("a", "b"):
-        write_image(imgs / f"{stem}.png", (16, 16), (90, 90, 90))
         label_image(
-            imgs / f"{stem}.png",
+            write_image(imgs / f"{stem}.png", (16, 16), (90, 90, 90)),
             [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))],
             16,
             16,

@@ -1,4 +1,4 @@
-"""Synthetic images a test writes to disk."""
+"""Synthetic images a test writes to disk, and the pixels a test reads off a render."""
 
 from __future__ import annotations
 
@@ -17,6 +17,12 @@ def _deg_to_dms(value: float) -> tuple[float, float, float]:
     m_full = (v - d) * 60
     m = int(m_full)
     return (float(d), float(m), round((m_full - m) * 60, 4))
+
+
+def red_over_green(render: Image.Image, xy: tuple[int, int]) -> int:
+    """Return how far the RGB ``render``'s red exceeds its green at the pixel ``xy``."""
+    r, g, _b = render.getpixel(xy)
+    return r - g
 
 
 def capture_exif(when: datetime) -> Image.Exif:

@@ -24,28 +24,22 @@ def _canonical_dataset(root: Path, date: str = "2-11-26") -> Path:
     """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import (
-        BRIGHT,
-        label_image,
-        painted_frame,
+        labeled_frame,
+        registry_of,
         registry_over,
     )
 
     images_dir = image_dir(root, date)
     images_dir.mkdir(parents=True)
-    registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
-    )
+    registry_over(root, registry_of("bud"))
     for i in range(2):
-        painted_frame(
-            96, 64, (110, 120, 130), [((8, 6, 40, 22), BRIGHT)]
-        ).save(images_dir / f"img_{i}.png")
-        label_image(
+        labeled_frame(
             images_dir / f"img_{i}.png",
             [Annotation(subject="bud", geometry=BBox(8, 6, 40, 22))],
             96,
             64,
+            (110, 120, 130),
         )
     return images_dir
 

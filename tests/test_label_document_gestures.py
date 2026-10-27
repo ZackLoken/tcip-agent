@@ -21,7 +21,13 @@ from tcip_mcp.dataset_layout import (
     verdict_key_of,
 )
 from tcip_mcp.pipelines.proposal import Proposal
-from tests._producer_fixtures import image_label_key, write_image
+from tests._producer_fixtures import (
+    image_label_key,
+    registry_of,
+    save_labels,
+    staged_box,
+    write_image,
+)
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -36,34 +42,6 @@ BOX = [40.0, 30.0, 60.0, 50.0]
 RING = [[10.0, 10.0], [30.0, 10.0], [30.0, 25.0], [10.0, 25.0]]
 
 
-def _image(root: Path, stem: str = "a") -> Path:
-    return write_image(
-        image_dir(root, DATE) / f"{stem}.jpg", (WIDTH, HEIGHT), (90, 110, 70)
-    )
-
-
-def _save(
-    root: Path,
-    image: Path,
-    payloads: list[dict],
-    *,
-    author: str = "user:breeder",
-    expect: ts.Version | None = None,
-    gestures: Gestures = Gestures(),
-) -> tuple[ts.Version, json_io.LabelDocument, dict[int, int]]:
-    return save_label_document(
-        root,
-        image_label_key(image),
-        payloads,
-        width=WIDTH,
-        height=HEIGHT,
-        author=author,
-        actor=author,
-        expect=expect,
-        gestures=gestures,
-    )
-
-
 def _stored(root: Path, image: Path) -> json_io.LabelDocument:
     return json_io.read_label_document(image_label_key(image))
 
@@ -75,48 +53,20 @@ def _as_loaded(root: Path, image: Path) -> list[dict]:
     ]
 
 
-def _bucket(root: Path, image: Path) -> str:
-    """Stage a proposal bucket for ``image`` holding one ``bud`` box and return its name.
-
-    The box lies over :data:`BOX`, staged through the platform's own door.
-    """
-    from tcip_mcp.tools.proposal_tools import stage_proposals
-
-    x1, y1, x2, y2 = BOX
-    staged = stage_proposals(
-        root,
-        str(image),
-        model_name="detector",
-        actor=None,
-        boxes=[
-            {
-                "subject": "bud",
-                "conf": 0.9,
-                "cx": (x1 + x2) / 2 / WIDTH,
-                "cy": (y1 + y2) / 2 / HEIGHT,
-                "w": (x2 - x1) / WIDTH,
-                "h": (y2 - y1) / HEIGHT,
-            }
-        ],
-    )
-    assert "error" not in staged, staged
-    return staged["bucket"]
-
-
 # ── corrections keep what they do not correct ──────────────────────────────
 
 
 def test_correcting_a_value_keeps_the_geometry(tmp_path: Path) -> None:
-    image = _image(tmp_path)
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     drawn = {
         "subject": "bud",
         "rings": [RING],
         "attributes": {"stage": "open"},
     }
-    _save(tmp_path, image, [drawn], author="user:first")
+    save_labels(tmp_path, image, [drawn], author="user:first")
 
     (loaded,) = _as_loaded(tmp_path, image)
-    _save(
+    save_labels(
         tmp_path,
         image,
         [{**loaded, "attributes": {"stage": "closed"}}],
@@ -132,15 +82,17 @@ def test_correcting_a_value_keeps_the_geometry(tmp_path: Path) -> None:
 def test_correcting_the_geometry_keeps_the_confirmed_value(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
-    _save(
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    save_labels(
         tmp_path,
         image,
         [{"subject": "bud", "bbox": BOX, "attributes": {"stage": "open"}}],
     )
 
     (loaded,) = _as_loaded(tmp_path, image)
-    _save(tmp_path, image, [{**loaded, "bbox": [41.0, 31.0, 61.0, 51.0]}])
+    save_labels(
+        tmp_path, image, [{**loaded, "bbox": [41.0, 31.0, 61.0, 51.0]}]
+    )
 
     (after,) = _stored(tmp_path, image).annotations
     assert after.attributes == {"stage": "open"}
@@ -150,10 +102,10 @@ def test_correcting_the_geometry_keeps_the_confirmed_value(
 def test_adding_a_missed_object_writes_it_with_its_value(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
-    _save(tmp_path, image, [{"subject": "bud", "bbox": BOX}])
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    save_labels(tmp_path, image, [{"subject": "bud", "bbox": BOX}])
 
-    _save(
+    save_labels(
         tmp_path,
         image,
         [
@@ -178,11 +130,11 @@ def test_adding_a_missed_object_writes_it_with_its_value(
 def test_accepting_a_paired_proposal_confirms_the_annotation_without_a_second_one(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
-    bucket = _bucket(tmp_path, image)
-    _save(tmp_path, image, [{"subject": "bud", "bbox": BOX}])
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(tmp_path, image, BOX)
+    save_labels(tmp_path, image, [{"subject": "bud", "bbox": BOX}])
 
-    _save(
+    save_labels(
         tmp_path,
         image,
         _as_loaded(tmp_path, image),
@@ -195,10 +147,10 @@ def test_accepting_a_paired_proposal_confirms_the_annotation_without_a_second_on
 def test_accepting_an_unpaired_proposal_adds_it_authored_by_its_producer(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
-    bucket = _bucket(tmp_path, image)
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(tmp_path, image, BOX)
 
-    _save(
+    save_labels(
         tmp_path,
         image,
         [],
@@ -225,11 +177,9 @@ def test_accepting_a_model_proposal_carries_no_attribute_value_into_the_document
     from tcip_mcp import subject_registry as cr
     from tests._chain_fixtures import predicted, published
 
-    image = _image(tmp_path)
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     color = cr.Attribute("color", "categorical", ("red", "blue"))
-    registry = cr.SubjectRegistry(
-        subjects=(cr.Subject(name="bud", description="", attributes=(color,)),)
-    )
+    registry = registry_of("bud", color)
     result = {
         **predicted(image, ["blue"], (color,)),
         "width": WIDTH,
@@ -247,7 +197,7 @@ def test_accepting_a_model_proposal_carries_no_attribute_value_into_the_document
     ).annotations
     assert proposal.attributes == {"color": "blue"}
 
-    _save(
+    save_labels(
         tmp_path,
         image,
         [],
@@ -262,10 +212,10 @@ def test_accepting_a_model_proposal_carries_no_attribute_value_into_the_document
 def test_the_shard_records_each_decision_once_and_refuses_an_entry_it_cannot_read(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
-    bucket = _bucket(tmp_path, image)
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(tmp_path, image, BOX)
 
-    _save(
+    save_labels(
         tmp_path,
         image,
         [],
@@ -303,9 +253,9 @@ def test_a_decision_or_a_completion_mark_by_no_person_does_not_read(
 
     from tcip_annotation.verdicts import decode_verdict, encode_verdict
 
-    image = _image(tmp_path)
-    bucket = _bucket(tmp_path, image)
-    _save(
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(tmp_path, image, BOX)
+    save_labels(
         tmp_path,
         image,
         [],
@@ -345,9 +295,9 @@ def test_rejecting_a_paired_proposal_records_the_rejection_and_keeps_the_annotat
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj").root
-    image = _image(root)
-    bucket = _bucket(root, image)
-    _save(root, image, [{"subject": "bud", "bbox": BOX}])
+    image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(root, image, BOX)
+    save_labels(root, image, [{"subject": "bud", "bbox": BOX}])
     body = {
         "image_path": str(image),
         "user": "breeder",
@@ -373,13 +323,13 @@ def test_rejecting_a_paired_proposal_records_the_rejection_and_keeps_the_annotat
 def test_accepting_a_paired_proposal_signs_the_tools_annotation_off(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
-    bucket = _bucket(tmp_path, image)
-    _save(
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(tmp_path, image, BOX)
+    save_labels(
         tmp_path, image, [{"subject": "bud", "bbox": BOX}], author="detector"
     )
 
-    _save(
+    save_labels(
         tmp_path,
         image,
         _as_loaded(tmp_path, image),
@@ -397,13 +347,13 @@ def test_accepting_a_paired_proposal_signs_the_tools_annotation_off(
 
 
 def test_rejecting_a_paired_proposal_signs_nothing_off(tmp_path: Path) -> None:
-    image = _image(tmp_path)
-    bucket = _bucket(tmp_path, image)
-    _save(
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(tmp_path, image, BOX)
+    save_labels(
         tmp_path, image, [{"subject": "bud", "bbox": BOX}], author="detector"
     )
 
-    _save(
+    save_labels(
         tmp_path,
         image,
         _as_loaded(tmp_path, image),
@@ -439,14 +389,14 @@ def test_authorship_counts_only_a_persons_hand_as_standing_behind_a_record() -> 
 def test_confirming_a_tools_annotation_signs_it_off_without_changing_it(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
-    _save(
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    save_labels(
         tmp_path, image, [{"subject": "bud", "bbox": BOX}], author="detector"
     )
     (before,) = _stored(tmp_path, image).annotations
     assert json_io.authorship_of(before) == "tool"
 
-    _save(
+    save_labels(
         tmp_path,
         image,
         _as_loaded(tmp_path, image),
@@ -465,10 +415,10 @@ def test_confirming_a_tools_annotation_signs_it_off_without_changing_it(
 def test_confirming_a_position_the_save_writes_nothing_at_refuses_before_any_write(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
 
     with pytest.raises(ValueError, match="none at position 1 to confirm"):
-        _save(
+        save_labels(
             tmp_path,
             image,
             [{"subject": "bud", "bbox": BOX}],
@@ -484,8 +434,10 @@ def test_the_save_route_confirms_an_annotation_once_and_refuses_it_named_twice(
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj").root
-    image = _image(root)
-    _save(root, image, [{"subject": "bud", "bbox": BOX}], author="detector")
+    image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    save_labels(
+        root, image, [{"subject": "bud", "bbox": BOX}], author="detector"
+    )
     body = {
         "image_path": str(image),
         "user": "breeder",
@@ -520,13 +472,14 @@ def test_an_accepted_proposal_answers_the_annotation_it_resolved_to(
     appends nothing; one that pairs with none is appended. The answer maps each proposal to its
     annotation's index.
     """
-    image = _image(tmp_path)
-    bucket = _bucket(tmp_path, image)
+    images = image_dir(tmp_path, DATE)
+    image = write_image(images / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(tmp_path, image, BOX)
     drawn = {"subject": "leaf", "bbox": [5.0, 5.0, 15.0, 15.0]}
     boxed = {"subject": "bud", "bbox": BOX}
 
     later = {"subject": "leaf", "bbox": [60.0, 60.0, 70.0, 70.0]}
-    _, paired_doc, paired = _save(
+    _, paired_doc, paired = save_labels(
         tmp_path,
         image,
         [drawn, boxed, later],
@@ -534,9 +487,9 @@ def test_an_accepted_proposal_answers_the_annotation_it_resolved_to(
     )
     assert paired == {0: 1} and len(paired_doc.annotations) == 3
 
-    other = _image(tmp_path, "b")
-    other_bucket = _bucket(tmp_path, other)
-    _, appended_doc, appended = _save(
+    other = write_image(images / "b.jpg", (WIDTH, HEIGHT))
+    other_bucket = staged_box(tmp_path, other, BOX)
+    _, appended_doc, appended = save_labels(
         tmp_path,
         other,
         [drawn],
@@ -551,8 +504,8 @@ def test_the_save_route_answers_the_annotation_an_accepted_proposal_resolved_to(
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj").root
-    image = _image(root)
-    bucket = _bucket(root, image)
+    image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(root, image, BOX)
     resp = client.post(
         "/api/annotate/labels",
         json={
@@ -583,7 +536,7 @@ def test_the_save_answers_the_document_it_stored(
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj").root
-    image = _image(root)
+    image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
     body = {"image_path": str(image), "user": "breeder"}
     first = client.post(
         "/api/annotate/labels",
@@ -619,14 +572,14 @@ def test_the_save_answers_the_document_it_stored(
 def test_a_save_from_a_stale_read_conflicts_and_writes_nothing(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
-    first, _document, _accepted = _save(
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    first, _document, _accepted = save_labels(
         tmp_path, image, [{"subject": "bud", "bbox": BOX}]
     )
-    _save(tmp_path, image, [], author="user:second", expect=first)
+    save_labels(tmp_path, image, [], author="user:second", expect=first)
 
     with pytest.raises(ts.VersionConflictError):
-        _save(
+        save_labels(
             tmp_path,
             image,
             [{"subject": "bud", "bbox": [1.0, 1.0, 9.0, 9.0]}],
@@ -647,13 +600,13 @@ def _nothing_written(image: Path, bucket: str) -> bool:
 def test_a_proposal_both_accepted_and_rejected_refuses_before_any_write(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
-    bucket = _bucket(tmp_path, image)
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(tmp_path, image, BOX)
 
     with pytest.raises(
         ValueError, match=r"\[0\] are both accepted and rejected"
     ):
-        _save(
+        save_labels(
             tmp_path,
             image,
             [],
@@ -671,8 +624,8 @@ def test_a_proposal_named_twice_refuses_at_the_save_route_before_any_write(
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj").root
-    image = _image(root)
-    bucket = _bucket(root, image)
+    image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(root, image, BOX)
     body = {
         "image_path": str(image),
         "user": "breeder",
@@ -701,8 +654,8 @@ def test_a_bucket_document_that_will_not_read_answers_400_at_the_proposals_route
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj").root
-    image = _image(root)
-    bucket = _bucket(root, image)
+    image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(root, image, BOX)
     params = {"image_path": str(image), "bucket": bucket}
     assert (
         client.get("/api/annotate/proposals", params=params).status_code == 200
@@ -729,15 +682,16 @@ def test_the_queue_refuses_a_label_document_that_will_not_read_by_name(
 ) -> None:
     from tcip_mcp.tools.feedback_tools import _prepare_queue_sources
 
-    image = _image(tmp_path)
-    _save(tmp_path, image, [], gestures=Gestures(complete={"bud": True}))
-    queued = _prepare_queue_sources(str(image.parent), "bud")
+    images = image_dir(tmp_path, DATE)
+    image = write_image(images / "a.jpg", (WIDTH, HEIGHT))
+    save_labels(tmp_path, image, [], gestures=Gestures(complete={"bud": True}))
+    queued = _prepare_queue_sources(str(images), "bud")
     assert not isinstance(queued, dict), queued
     assert queued[1] == 1
 
     ts.replace(image_label_key(image), {"annotations": {}})
 
-    refused = _prepare_queue_sources(str(image.parent), "bud")
+    refused = _prepare_queue_sources(str(images), "bud")
     assert isinstance(refused, dict) and "annotations" in refused["error"]
 
 
@@ -747,9 +701,9 @@ def test_the_proposals_payload_carries_what_the_editor_reads_and_no_more(
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj").root
-    image = _image(root)
-    bucket = _bucket(root, image)
-    _save(root, image, [], gestures=Gestures(complete={"bud": True}))
+    image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(root, image, BOX)
+    save_labels(root, image, [], gestures=Gestures(complete={"bud": True}))
 
     proposals = client.get(
         "/api/annotate/proposals",
@@ -776,8 +730,8 @@ def test_a_staged_bucket_serves_no_operating_point_and_says_why(
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj").root
-    image = _image(root)
-    bucket = _bucket(root, image)
+    image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(root, image, BOX)
 
     served = client.get(
         "/api/annotate/proposals",
@@ -799,9 +753,9 @@ def test_the_loaded_annotations_carry_the_index_a_pairing_names(
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj").root
-    image = _image(root)
-    bucket = _bucket(root, image)
-    _save(
+    image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(root, image, BOX)
+    save_labels(
         root,
         image,
         [{"subject": "leaf", "points": RING}, {"subject": "bud", "bbox": BOX}],
@@ -827,8 +781,8 @@ def test_the_loaded_annotations_carry_the_index_a_pairing_names(
 def test_an_edit_invalidates_the_marks_of_its_own_subject_only(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
-    _save(
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    save_labels(
         tmp_path,
         image,
         [{"subject": "bud", "bbox": BOX}],
@@ -837,7 +791,7 @@ def test_an_edit_invalidates_the_marks_of_its_own_subject_only(
     assert _stored(tmp_path, image).state("bud") == "complete"
     assert _stored(tmp_path, image).state("leaf") == "negative"
 
-    _save(
+    save_labels(
         tmp_path,
         image,
         [
@@ -848,7 +802,7 @@ def test_an_edit_invalidates_the_marks_of_its_own_subject_only(
     assert _stored(tmp_path, image).state("bud") == "partial"
     assert _stored(tmp_path, image).state("leaf") == "negative"
 
-    _save(
+    save_labels(
         tmp_path,
         image,
         [
@@ -860,15 +814,17 @@ def test_an_edit_invalidates_the_marks_of_its_own_subject_only(
 
 
 def test_a_mark_made_with_proposals_hidden_says_so(tmp_path: Path) -> None:
-    image = _image(tmp_path)
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
 
-    _save(
+    save_labels(
         tmp_path,
         image,
         [],
         gestures=Gestures(complete={"bud": True}, proposals_hidden=True),
     )
-    _save(tmp_path, image, [], gestures=Gestures(complete={"leaf": True}))
+    save_labels(
+        tmp_path, image, [], gestures=Gestures(complete={"leaf": True})
+    )
 
     marks = _stored(tmp_path, image).marks
     assert [m.proposals_hidden for m in marks["bud"]] == [True]
@@ -888,16 +844,17 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj").root
-    image = _image(root)
-    _save(root, image, [])
+    images = image_dir(root, DATE)
+    image = write_image(images / "a.jpg", (WIDTH, HEIGHT))
+    save_labels(root, image, [])
 
     def readers() -> tuple[int, int, str]:
         counts = admit(
-            image.parent,
+            images,
             members=[image.stem],
-            scope=registry_scope(image.parent, "bud"),
+            scope=registry_scope(images, "bud"),
         ).tallies
-        queued = _prepare_queue_sources(str(image.parent), "bud")
+        queued = _prepare_queue_sources(str(images), "bud")
         assert not isinstance(queued, dict), queued
         listed = client.get(
             "/api/annotate/labels", params={"image_path": str(image)}
@@ -910,7 +867,7 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(
 
     assert readers() == (0, 0, "unannotated")
 
-    _save(root, image, [], gestures=Gestures(complete={"bud": True}))
+    save_labels(root, image, [], gestures=Gestures(complete={"bud": True}))
 
     assert readers() == (1, 1, "negative")
 
@@ -921,7 +878,7 @@ def test_saved_provenance_is_the_requests_actor_whatever_the_browser_sends(
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj").root
-    image = _image(root)
+    image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
 
     resp = client.post(
         "/api/annotate/labels",
@@ -989,8 +946,8 @@ def test_the_assessment_count_and_the_editor_pairing_agree_under_a_crowd_region(
     from tcip_mcp.pipelines.training.evaluation import comparability_criterion
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
-    image = _image(tmp_path)
-    _save(
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    save_labels(
         tmp_path,
         image,
         [
@@ -1147,7 +1104,7 @@ def test_propose_annotations_refuses_an_unnamed_proposer_and_runs_a_dotted_one(
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
     register_proposal_engine("registered_here", DottedProposer())
-    image = _image(tmp_path)
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
 
     refused = propose_annotations(tmp_path, str(image), engine="", actor=None)
     assert "registered_here" in refused["error"]

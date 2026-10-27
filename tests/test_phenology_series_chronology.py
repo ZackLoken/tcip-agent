@@ -16,23 +16,15 @@ import pytest
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import subject_registry as cr
-from tcip_mcp.dataset_layout import image_dir, image_root
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.postprocessing import phenology
 from tests import csv_rows
+from tests._producer_fixtures import mapping_of, registry_of, scope_over
 from tests._trait_fixtures import BUD_OPENING
 
 # An attribute whose positive value sits at id 2 with no record ever carrying id 1.
 SPARSE = cr.Attribute("opening", "categorical", ("closed", "partial", "open"))
-REGISTRY = cr.SubjectRegistry(
-    subjects=(cr.Subject(name="bud", description="", attributes=(SPARSE,)),)
-)
-
-
-class _Assignment:
-    def __init__(self, stem: str, plant_id: str, accession_name: str) -> None:
-        self.stem = stem
-        self.plant_id = plant_id
-        self.accession_name = accession_name
+REGISTRY = registry_of("bud", SPARSE)
 
 
 def _states(n_positive: int, n_negative: int) -> list[str]:
@@ -158,13 +150,15 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
         )
         for d in dates
     }
-    mapping = {
-        d: [
-            _Assignment(f"P1_{d}", "P1", "acc-noisy"),
-            _Assignment(f"P2_{d}", "P2", "acc-steady"),
-        ]
-        for d in ["2026-03-09", "2026-03-01", "2026-03-13", "2026-03-05"]
-    }
+    mapping = mapping_of(
+        {
+            d: [
+                (f"P1_{d}.jpg", ("P1", "acc-noisy"), 0.0),
+                (f"P2_{d}.jpg", ("P2", "acc-steady"), 0.0),
+            ]
+            for d in ["2026-03-09", "2026-03-01", "2026-03-13", "2026-03-05"]
+        }
+    )
 
     out = phenology.per_plant_phenology(
         mapping, buckets, BUD_OPENING, ["P1", "P2"]
@@ -197,8 +191,6 @@ def test_positive_detections_are_the_named_value_not_a_fixed_position(
     detections of three, none unclassified.
     """
     from tcip_mcp.dataset_layout import prediction_key
-    from tcip_mcp.pipelines.data.label_queries import registry_scope
-    from tests._producer_fixtures import registry_over
 
     p = prediction_key(tmp_path, "run/2026-03-05", "img")
     json_io.write_label_document(
@@ -227,8 +219,7 @@ def test_positive_detections_are_the_named_value_not_a_fixed_position(
         24,
     )
 
-    registry_over(tmp_path, REGISTRY)
-    scope = registry_scope(image_root(tmp_path), "bud")
+    scope = scope_over(tmp_path, REGISTRY, "bud")
     total, positive, unclassified = phenology.count_by_class(
         p, BUD_OPENING.positive_state, scope=scope
     )

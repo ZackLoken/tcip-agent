@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
     from tcip_mcp.pipelines.schemas import DataSpec
     from tcip_mcp.pipelines.training.envelope import TrainContext
+    from tcip_mcp.subject_registry import Attribute
 
 
 def _config(project: Path, data: dict | None = None, **keys: object) -> dict:
@@ -53,53 +54,28 @@ def _config(project: Path, data: dict | None = None, **keys: object) -> dict:
 # ── persist the training run's class space ───────────────────────────
 
 
-def _write_classes_json(
-    dataset_root: Path,
-    subject: str = "bud",
-    attribute: str | None = None,
-    values: list[str] | None = None,
-) -> None:
-    from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
-    from tests._producer_fixtures import registry_over
-
-    attrs = ()
-    if attribute:
-        attrs = (
-            Attribute(
-                name=attribute, type="categorical", values=tuple(values)
-            ),
-        )
-    registry_over(
-        dataset_root,
-        SubjectRegistry((Subject(subject, "", attributes=attrs),)),
-    )
-
-
 def _document_dataset(
-    root: Path,
-    subject: str = "bud",
-    attribute: str | None = None,
-    values: list[str] | None = None,
+    root: Path, subject: str, *attributes: Attribute
 ) -> Path:
     """Write two images and their own label documents under a registry naming ``subject``.
 
-    Returns the images directory.
+    The registry declares ``attributes`` on ``subject``, and each image's one annotation carries
+    each attribute's first value. Returns the images directory.
     """
-    from pathlib import Path
-
     from tcip_annotation.state import Annotation, BBox
-    from tests._producer_fixtures import label_image, write_image
-
-    root = Path(root)
-    images_dir = image_dir(root, UNDATED_BUCKET)
-    _write_classes_json(
-        root, subject=subject, attribute=attribute, values=values
+    from tests._producer_fixtures import (
+        label_image,
+        registry_of,
+        registry_over,
+        write_image,
     )
-    attrs = {attribute: values[0]} if attribute else {}
+
+    images_dir = image_dir(root, UNDATED_BUCKET)
+    registry_over(root, registry_of(subject, *attributes))
+    attrs = {a.name: a.values[0] for a in attributes}
     for stem in ("a", "b"):
-        write_image(images_dir / f"{stem}.png", (32, 32), (10, 20, 30))
         label_image(
-            images_dir / f"{stem}.png",
+            write_image(images_dir / f"{stem}.png", (32, 32), (10, 20, 30)),
             [
                 Annotation(
                     subject=subject,
@@ -133,7 +109,7 @@ def test_the_class_space_recorded_is_the_one_the_run_admitted(
     rewritten to declare an attribute.
     """
     root = tmp_path / "plain"
-    images_dir = _document_dataset(root, subject="bud")
+    images_dir = _document_dataset(root, "bud")
     resolved = _resolved_data(
         tmp_path,
         "detection",
@@ -146,8 +122,14 @@ def test_the_class_space_recorded_is_the_one_the_run_admitted(
 
     assert resolved.recorded_scope == ClassScope("bud", ())
 
-    _write_classes_json(
-        root, subject="bud", attribute="opening", values=["open", "closed"]
+    from tcip_mcp.subject_registry import Attribute
+    from tests._producer_fixtures import registry_of, registry_over
+
+    registry_over(
+        root,
+        registry_of(
+            "bud", Attribute("opening", "categorical", ("open", "closed"))
+        ),
     )
     assert resolved.recorded_scope == ClassScope("bud", ())
 
@@ -162,12 +144,8 @@ def test_a_run_over_an_attributed_subject_records_its_attributes_in_declared_ord
     """
     from tcip_mcp.subject_registry import Attribute
 
-    images_dir = _document_dataset(
-        tmp_path / "scoped",
-        subject="bud",
-        attribute="opening",
-        values=["closed", "open"],
-    )
+    opening = Attribute("opening", "categorical", ("closed", "open"))
+    images_dir = _document_dataset(tmp_path / "scoped", "bud", opening)
     resolved = _resolved_data(
         tmp_path,
         "detection",
@@ -178,9 +156,7 @@ def test_a_run_over_an_attributed_subject_records_its_attributes_in_declared_ord
         },
     )
 
-    assert resolved.recorded_scope == ClassScope(
-        "bud", (Attribute("opening", "categorical", ("closed", "open")),)
-    )
+    assert resolved.recorded_scope == ClassScope("bud", (opening,))
 
 
 def test_a_run_whose_ground_truth_carries_its_own_classes_records_the_empty_scope(

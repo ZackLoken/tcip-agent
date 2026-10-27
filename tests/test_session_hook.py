@@ -20,7 +20,6 @@ import tomllib
 
 from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
 from tcip_mcp.dataset_layout import image_dir
-from tcip_mcp.subject_registry import Subject, SubjectRegistry
 from tcip_mcp.tools.doctor_tools import diagnose_project
 from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
 from tcip_mcp.tools.meta_tools import report_friction, write_retrospective
@@ -29,7 +28,12 @@ from tcip_web.app import app
 from tcip_web.cli import session_hook
 from tcip_web.cli.session_hook import session_start_url
 from tcip_web.routes import terminal as terminal_routes
-from tests._producer_fixtures import label_image, registry_over, write_image
+from tests._producer_fixtures import (
+    label_image,
+    registry_of,
+    registry_over,
+    write_image,
+)
 from tools.smoke_terminal_e2e import served
 
 if TYPE_CHECKING:
@@ -111,9 +115,7 @@ def remembered(opened: OpenProject) -> OpenProject:
         "nothing",
         actor=None,
     )
-    registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
-    )
+    registry_over(root, registry_of("bud"))
     image = write_image(image_dir(root, "2026-03-04") / "IMG_E.JPG", (32, 32))
     label_image(image, [], 32, 32, keep_empty=True)
     return opened
@@ -321,9 +323,7 @@ def test_more_findings_than_fit_name_the_tool_answering_all_of_them(
     Each finding is an empty label document no mark finishes, written by the label producer.
     """
     root = opened.root
-    registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
-    )
+    registry_over(root, registry_of("bud"))
     images = image_dir(root, "2026-03-04")
     for n in range(160):
         image = write_image(images / f"IMG_{n:03d}.JPG", (8, 8))
@@ -354,9 +354,7 @@ def test_the_orientation_lists_the_first_findings_the_tool_answers(
     from tests.test_agent_identity_records import call_through_handshake
 
     root = opened.root
-    registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
-    )
+    registry_over(root, registry_of("bud"))
     write_image(image_dir(root, "2026-03-04") / "IMG_U.JPG", (8, 8))
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
     damage_record(traits.trait_key(root, "leaf"), b"{not valid json")

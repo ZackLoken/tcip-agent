@@ -232,6 +232,7 @@ def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(
     and each detection carries one id per attribute.
     """
     from tcip_mcp import subject_registry as cr
+    from tests._producer_fixtures import registry_of
     from tests._verified_checkpoint_fixtures import (
         predicted_over,
         registered_checkpoint,
@@ -250,11 +251,7 @@ def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(
             "normalization": FRAME_STATISTICS,
         },
         data={"num_channels": 3, "scope": {"subject": "bud"}},
-        registry=cr.SubjectRegistry(
-            subjects=(
-                cr.Subject(name="bud", description="", attributes=attributes),
-            )
-        ),
+        registry=registry_of("bud", *attributes),
     )
 
     gray_frame(tmp_path)

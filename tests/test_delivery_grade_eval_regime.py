@@ -560,11 +560,11 @@ def test_the_gate_refuses_an_images_tree_with_no_ground_truth(
     from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation,
     )
-    from tests._producer_fixtures import blank_image
+    from tests._producer_fixtures import write_image
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
-    blank_image(tmp_path, "a.png", (128, 128))
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+    write_image(images_dir / "a.png", (128, 128))
     checkpoint = verified_checkpoint(tmp_path)
     _detector(monkeypatch)
     with pytest.raises(ValueError, match="no trainable samples"):

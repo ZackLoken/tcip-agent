@@ -757,35 +757,6 @@ def blob_frame(values: list[str], index: int) -> Image.Image:
     )
 
 
-def write_attributed_registry(
-    *roots: Path, attributes: tuple | None = None
-) -> None:
-    """Declare :data:`SUBJECT` with ``attributes`` in each root's subject registry.
-
-    ``attributes`` is by default :data:`ATTRIBUTE`, categorical over :data:`VALUES`.
-    """
-    from tcip_mcp import subject_registry as cr
-    from tests._producer_fixtures import registry_over
-
-    registry = cr.SubjectRegistry(
-        subjects=(
-            cr.Subject(
-                name=SUBJECT,
-                description="",
-                attributes=attributes
-                or (
-                    cr.Attribute(
-                        name=ATTRIBUTE, type="categorical", values=VALUES
-                    ),
-                ),
-            ),
-        )
-    )
-    for root in roots:
-        root.mkdir(parents=True, exist_ok=True)
-        registry_over(root, registry)
-
-
 def confirm_crossing_trait(
     project_root: Path, **fields: object
 ) -> TraitRevision:
@@ -888,7 +859,8 @@ def attributed_series(
     assessment when there is one, :func:`chain_pass` when neither is given), builds the plant
     mapping, and opens ``project`` in the web backend.
 
-    The registry declares ``attributes`` on :data:`SUBJECT` (:func:`write_attributed_registry`).
+    The project's and the dataset's registries declare ``attributes`` on :data:`SUBJECT`, by
+    default :data:`ATTRIBUTE` categorical over :data:`VALUES`.
     Series and reference frames are :func:`blob_frame` images over values built from
     ``fractions`` and ``detections``, and each reference frame is labeled with its
     :func:`blob_boxes`.
@@ -908,7 +880,11 @@ def attributed_series(
         register_plant_registry_for,
         write_plant_csv,
     )
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import (
+        label_image,
+        registry_of,
+        registry_over,
+    )
     from tests._verified_checkpoint_fixtures import worker_run
     from tests._web_fixtures import open_new_project
 
@@ -916,7 +892,8 @@ def attributed_series(
     attributes = attributes or (
         cr.Attribute(name=ATTRIBUTE, type="categorical", values=VALUES),
     )
-    write_attributed_registry(project, root, attributes=attributes)
+    for declared in (project, root):
+        registry_over(declared, registry_of(SUBJECT, *attributes))
     raw = project.parent / f"{project.name}-raw"
     dates = SERIES_DATES[: len(fractions)]
     per_date = 40 // len(dates)

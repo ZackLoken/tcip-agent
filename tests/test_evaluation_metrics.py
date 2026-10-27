@@ -67,6 +67,7 @@ from tests import _trait_fixtures as fx  # noqa: E402
 from tests._dense_op_fixtures import gt_only, toy_records  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import (  # noqa: E402
+    WrittenDataset,
     checkpoint_admission,
     write_image,
 )
@@ -1112,9 +1113,8 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(
     )
 
     images_dir = image_dir(tmp_path / "ff", UNDATED_BUCKET)
-    write_image(images_dir / "a.png", (32, 32))
     label_image(
-        images_dir / "a.png",
+        write_image(images_dir / "a.png", (32, 32)),
         [Annotation(subject="bud", geometry=BBox(4, 4, 12, 12))],
         32,
         32,
@@ -1190,9 +1190,8 @@ def test_a_full_frame_evaluation_merges_at_the_threshold_its_ground_truth_derive
         registered_checkpoint(tmp_path), project=tmp_path
     )
     images_dir = image_dir(tmp_path / "ff", UNDATED_BUCKET)
-    write_image(images_dir / "a.png", (32, 32))
     label_image(
-        images_dir / "a.png",
+        write_image(images_dir / "a.png", (32, 32)),
         [Annotation(subject="bud", geometry=BBox(*b)) for b in boxes],
         32,
         32,
@@ -1518,14 +1517,14 @@ def test_validate_classification_metrics(tmp_path: Path) -> None:
 
 
 def test_score_predictions_folder_counts_every_image_through_the_matcher(
-    data_dir: Path,
+    data_dir: WrittenDataset,
 ) -> None:
     from tcip_mcp.tools.annotation_tools import score_predictions
     from tests.conftest import DATA_DIR_BUCKET
 
     r = score_predictions(
-        data_dir,
-        str(image_dir(data_dir, "2-11-26")),
+        data_dir.root,
+        str(data_dir.images_dir),
         DATA_DIR_BUCKET,
         iou_threshold=0.5,
         conf_threshold=0.25,

@@ -13,7 +13,7 @@ from PIL import Image
 from tcip_annotation.matching import REVIEW_CONF_FLOOR
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
 from tcip_mcp.pipelines.raster_source import SourceHeader
-from tests._producer_fixtures import kept, write_image
+from tests._producer_fixtures import WrittenDataset, kept, write_image
 from tests._training_values import IOU_THRESHOLD, TRIAGE_WEIGHTS
 
 if TYPE_CHECKING:
@@ -38,21 +38,23 @@ def _display(image_path: str) -> tuple[np.ndarray, tuple[int, int]]:
 
 
 @pytest.fixture
-def viz_dataset(tmp_path: Path) -> Path:
+def viz_dataset(tmp_path: Path) -> WrittenDataset:
     """Create a dataset of four labeled 640x480 JPEGs under ``images/<undated bucket>``.
 
-    Each of ``img_001`` to ``img_004`` holds one ``bud`` box and one ``nut`` box; the return is
-    the dataset root.
+    Each of ``img_001`` to ``img_004`` holds one ``bud`` box and one ``nut`` box.
     """
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
-    for name in ("img_001", "img_002", "img_003", "img_004"):
+    images = [
         write_image(images_dir / f"{name}.jpg", (640, 480), (100, 120, 80))
+        for name in ("img_001", "img_002", "img_003", "img_004")
+    ]
+    for image in images:
         # Two pixel-space boxes under two distinct subjects.
         label_image(
-            images_dir / f"{name}.jpg",
+            image,
             [
                 Annotation(subject="bud", geometry=BBox(288, 216, 352, 264)),
                 Annotation(subject="nut", geometry=BBox(176, 132, 208, 156)),
@@ -61,7 +63,7 @@ def viz_dataset(tmp_path: Path) -> Path:
             480,
         )
 
-    return tmp_path
+    return WrittenDataset(tmp_path, images_dir, images)
 
 
 PUBLISHED = "published"
@@ -69,7 +71,7 @@ PUBLISHED = "published"
 
 
 @pytest.fixture
-def viz_bucket(viz_dataset: Path) -> Path:
+def viz_bucket(viz_dataset: WrittenDataset) -> WrittenDataset:
     """Return ``viz_dataset`` with each image's two predictions published as :data:`PUBLISHED`.
 
     The bucket is published through ``_chain_fixtures.published``.
@@ -78,13 +80,11 @@ def viz_bucket(viz_dataset: Path) -> Path:
     from tests._chain_fixtures import published
 
     published(
-        viz_dataset,
+        viz_dataset.root,
         PUBLISHED,
         [
             {
-                "image": str(
-                    image_dir(viz_dataset, UNDATED_BUCKET) / f"{name}.jpg"
-                ),
+                "image": str(image),
                 "width": 640,
                 "height": 480,
                 "boxes": [[288, 216, 352, 264], [496, 372, 528, 396]],
@@ -92,7 +92,7 @@ def viz_bucket(viz_dataset: Path) -> Path:
                 "labels": [1, 1],
                 "cap": 3,
             }
-            for name in ("img_001", "img_002", "img_003", "img_004")
+            for image in viz_dataset.images
         ],
         scope={"subject": "bud"},
     )
@@ -129,17 +129,15 @@ def _prediction_key(project: Path, image: Path) -> Key:
 
 
 class TestRenderDetections:
-    def test_basic_render(self, viz_dataset: Path) -> None:
+    def test_basic_render(self, viz_dataset: WrittenDataset) -> None:
         from tcip_annotation.viz import render_detections
 
-        pixels, native = _display(
-            str(image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg")
-        )
+        pixels, native = _display(str(viz_dataset.images[0]))
         boxes = [
             {"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0},
             {"x1": 300, "y1": 300, "x2": 400, "y2": 400, "class_id": 1},
         ]
-        out = str(viz_dataset / "test_render.png")
+        out = str(viz_dataset.root / "test_render.png")
         result = render_detections(
             pixels, boxes, native_size=native, output_path=out
         )
@@ -147,14 +145,12 @@ class TestRenderDetections:
         rendered = Image.open(result)
         assert rendered.size[0] > 0
 
-    def test_with_class_names(self, viz_dataset: Path) -> None:
+    def test_with_class_names(self, viz_dataset: WrittenDataset) -> None:
         from tcip_annotation.viz import render_detections
 
-        pixels, native = _display(
-            str(image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg")
-        )
+        pixels, native = _display(str(viz_dataset.images[0]))
         boxes = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}]
-        out = str(viz_dataset / "test_names.png")
+        out = str(viz_dataset.root / "test_names.png")
         result = render_detections(
             pixels,
             boxes,
@@ -164,12 +160,10 @@ class TestRenderDetections:
         )
         assert Path(result).is_file()
 
-    def test_with_score(self, viz_dataset: Path) -> None:
+    def test_with_score(self, viz_dataset: WrittenDataset) -> None:
         from tcip_annotation.viz import render_detections
 
-        pixels, native = _display(
-            str(image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg")
-        )
+        pixels, native = _display(str(viz_dataset.images[0]))
         boxes = [
             {
                 "x1": 100,
@@ -180,7 +174,7 @@ class TestRenderDetections:
                 "score": 0.95,
             }
         ]
-        out = str(viz_dataset / "test_conf.png")
+        out = str(viz_dataset.root / "test_conf.png")
         result = render_detections(
             pixels, boxes, native_size=native, output_path=out
         )
@@ -227,18 +221,16 @@ class TestRenderDetections:
         ).is_file()
 
     def test_a_pil_frame_renders_the_same_as_its_own_pixels(
-        self, viz_dataset: Path
+        self, viz_dataset: WrittenDataset
     ) -> None:
         """A PIL frame renders byte-identically to its own pixels and is left untouched."""
         from tcip_annotation.viz import render_detections
 
-        pixels, native = _display(
-            str(image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg")
-        )
+        pixels, native = _display(str(viz_dataset.images[0]))
         boxes = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}]
         frame = Image.fromarray(pixels, mode="RGB")
-        from_array = str(viz_dataset / "from_array.png")
-        from_pil = str(viz_dataset / "from_pil.png")
+        from_array = str(viz_dataset.root / "from_array.png")
+        from_pil = str(viz_dataset.root / "from_pil.png")
         render_detections(
             pixels, boxes, native_size=native, output_path=from_array
         )
@@ -252,7 +244,7 @@ class TestRenderDetections:
         )  # the caller's frame is untouched
 
     def test_pixels_that_are_not_uint8_rgb_are_refused(
-        self, viz_dataset: Path
+        self, viz_dataset: WrittenDataset
     ) -> None:
         from tcip_annotation.viz import render_detections
 
@@ -261,7 +253,7 @@ class TestRenderDetections:
                 np.zeros((8, 8, 5), dtype=np.uint16),
                 [],
                 native_size=(8, 8),
-                output_path=str(viz_dataset / "refused.png"),
+                output_path=str(viz_dataset.root / "refused.png"),
             )
 
     def test_a_native_coordinate_lands_at_its_scaled_position(
@@ -283,46 +275,38 @@ class TestRenderDetections:
             native_size=native,
             output_path=out,
         )
+        from tests._image_fixtures import red_over_green
+
         px = Image.open(out).convert("RGB")
-
-        def red_at(xy: tuple[int, int]) -> int:
-            r, g, _b = px.getpixel(xy)
-            return r - g
-
-        assert red_at((50, 50)) > 100  # the box edge at half of its native x
-        assert (
-            red_at((100, 50)) < 20
-        )  # nothing where the unscaled coordinate would have put it
+        # The box edge at half of its native x, and nothing where the unscaled x would put it.
+        assert red_over_green(px, (50, 50)) > 100
+        assert red_over_green(px, (100, 50)) < 20
 
 
 class TestRenderSegmentations:
-    def test_basic_render(self, viz_dataset: Path) -> None:
+    def test_basic_render(self, viz_dataset: WrittenDataset) -> None:
         from tcip_annotation.viz import render_segmentations
 
-        pixels, native = _display(
-            str(image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg")
-        )
+        pixels, native = _display(str(viz_dataset.images[0]))
         polys = [
             {
                 "rings": [[(100, 100), (200, 100), (200, 200), (100, 200)]],
                 "class_id": 0,
             },
         ]
-        out = str(viz_dataset / "test_seg.png")
+        out = str(viz_dataset.root / "test_seg.png")
         result = render_segmentations(
             pixels, polys, native_size=native, output_path=out
         )
         assert Path(result).is_file()
 
     def test_renders_every_ring_of_an_occlusion_split_instance(
-        self, viz_dataset: Path
+        self, viz_dataset: WrittenDataset
     ) -> None:
         """An instance's second ring is drawn: its render differs from its first ring's alone."""
         from tcip_annotation.viz import render_segmentations
 
-        pixels, native = _display(
-            str(image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg")
-        )
+        pixels, native = _display(str(viz_dataset.images[0]))
         polys = [
             {
                 "rings": [
@@ -334,8 +318,8 @@ class TestRenderSegmentations:
         ]
         one_ring = [{"rings": [polys[0]["rings"][0]], "class_id": 0}]
 
-        both = str(viz_dataset / "seg_two_rings.png")
-        first_only = str(viz_dataset / "seg_one_ring.png")
+        both = str(viz_dataset.root / "seg_two_rings.png")
+        first_only = str(viz_dataset.root / "seg_one_ring.png")
         render_segmentations(
             pixels, polys, native_size=native, output_path=both
         )
@@ -347,15 +331,13 @@ class TestRenderSegmentations:
         assert Path(both).read_bytes() != Path(first_only).read_bytes()
 
     def test_a_polygon_stating_no_rings_refuses_and_one_with_none_drawn_admits(
-        self, viz_dataset: Path
+        self, viz_dataset: WrittenDataset
     ) -> None:
         """An entry naming no ``rings`` refuses by name; one whose ring list is empty renders."""
         from tcip_annotation.viz import render_segmentations
 
-        pixels, native = _display(
-            str(image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg")
-        )
-        out = str(viz_dataset / "seg_empty.png")
+        pixels, native = _display(str(viz_dataset.images[0]))
+        out = str(viz_dataset.root / "seg_empty.png")
         with pytest.raises(KeyError, match="rings"):
             render_segmentations(
                 pixels, [{"class_id": 0}], native_size=native, output_path=out
@@ -371,12 +353,10 @@ class TestRenderSegmentations:
 
 
 class TestRenderComparison:
-    def test_basic_comparison(self, viz_dataset: Path) -> None:
+    def test_basic_comparison(self, viz_dataset: WrittenDataset) -> None:
         from tcip_annotation.viz import render_comparison
 
-        pixels, native = _display(
-            str(image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg")
-        )
+        pixels, native = _display(str(viz_dataset.images[0]))
         gt = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}]
         pred = [
             {
@@ -388,14 +368,14 @@ class TestRenderComparison:
                 "score": 0.9,
             }
         ]
-        out = str(viz_dataset / "test_comp.png")
+        out = str(viz_dataset.root / "test_comp.png")
         result = render_comparison(
             pixels, gt, pred, native_size=native, output_path=out
         )
         assert Path(result).is_file()
 
     def test_a_tp_entry_draws_a_line_between_the_boxes_it_indexes(
-        self, viz_dataset: Path
+        self, viz_dataset: WrittenDataset
     ) -> None:
         """A true-positive entry draws a line between the boxes it indexes.
 
@@ -405,9 +385,7 @@ class TestRenderComparison:
         """
         from tcip_annotation.viz import render_comparison
 
-        pixels, native = _display(
-            str(image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg")
-        )
+        pixels, native = _display(str(viz_dataset.images[0]))
         gt = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}]
         pred = [
             {
@@ -421,7 +399,7 @@ class TestRenderComparison:
         ]
         tp = [(0, 0)]
 
-        with_line = str(viz_dataset / "test_comp_with_line.png")
+        with_line = str(viz_dataset.root / "test_comp_with_line.png")
         render_comparison(
             pixels,
             gt,
@@ -430,7 +408,7 @@ class TestRenderComparison:
             matches=tp,
             output_path=with_line,
         )
-        without_line = str(viz_dataset / "test_comp_without_line.png")
+        without_line = str(viz_dataset.root / "test_comp_without_line.png")
         render_comparison(
             pixels, gt, pred, native_size=native, output_path=without_line
         )
@@ -447,14 +425,11 @@ class TestRenderComparison:
 
 
 class TestRenderGrid:
-    def test_grid(self, viz_dataset: Path) -> None:
+    def test_grid(self, viz_dataset: WrittenDataset) -> None:
         from tcip_annotation.viz import render_grid
 
-        paths = [
-            str(image_dir(viz_dataset, UNDATED_BUCKET) / f"img_{i:03d}.jpg")
-            for i in range(1, 5)
-        ]
-        out = str(viz_dataset / "test_grid.png")
+        paths = [str(image) for image in viz_dataset.images]
+        out = str(viz_dataset.root / "test_grid.png")
         result = render_grid(
             paths, titles=["a", "b", "c", "d"], output_path=out
         )
@@ -462,10 +437,10 @@ class TestRenderGrid:
         grid = Image.open(result)
         assert grid.size[0] == 4 * 256  # 4 cols * 256 cell_size
 
-    def test_empty_grid(self, viz_dataset: Path) -> None:
+    def test_empty_grid(self, viz_dataset: WrittenDataset) -> None:
         from tcip_annotation.viz import render_grid
 
-        out = str(viz_dataset / "test_empty.png")
+        out = str(viz_dataset.root / "test_empty.png")
         result = render_grid([], output_path=out)
         assert Path(result).is_file()
 
@@ -483,10 +458,10 @@ def _render(project: Path, **stated: object) -> dict:
 
 
 class TestVisualizeAnnotations:
-    def test_detect(self, viz_dataset: Path) -> None:
-        img = str(image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg")
+    def test_detect(self, viz_dataset: WrittenDataset) -> None:
+        img = str(viz_dataset.images[0])
         result = _render(
-            viz_dataset, source="annotations", path=img, task="detect"
+            viz_dataset.root, source="annotations", path=img, task="detect"
         )
         assert "error" not in result
         assert Path(result["image_path"]).is_file()
@@ -498,31 +473,33 @@ class TestVisualizeAnnotations:
         )
         assert "error" in result
 
-    def test_no_labels(self, viz_dataset: Path) -> None:
+    def test_no_labels(self, viz_dataset: WrittenDataset) -> None:
         # Create an image with no labels
         no_label = write_image(
-            image_dir(viz_dataset, UNDATED_BUCKET) / "no_label.jpg", (100, 100)
+            viz_dataset.images_dir / "no_label.jpg", (100, 100)
         )
-        result = _render(viz_dataset, source="annotations", path=str(no_label))
+        result = _render(
+            viz_dataset.root, source="annotations", path=str(no_label)
+        )
         assert "error" in result
 
     def test_an_unreadable_label_returns_an_error_naming_the_document(
-        self, viz_dataset: Path
+        self, viz_dataset: WrittenDataset
     ) -> None:
         """An annotations render over an unreadable label returns an error naming the document."""
-        img = image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg"
+        img = viz_dataset.images[0]
         _damage(_label_key(img))
 
-        result = _render(viz_dataset, source="annotations", path=str(img))
+        result = _render(viz_dataset.root, source="annotations", path=str(img))
         assert "error" in result
         assert "img_001" in result["error"]
 
 
 class TestVisualizePredictions:
-    def test_detect(self, viz_bucket: Path) -> None:
-        img = str(image_dir(viz_bucket, UNDATED_BUCKET) / "img_001.jpg")
+    def test_detect(self, viz_bucket: WrittenDataset) -> None:
+        img = str(viz_bucket.images[0])
         result = _render(
-            viz_bucket,
+            viz_bucket.root,
             source="predictions",
             path=img,
             task="detect",
@@ -532,12 +509,12 @@ class TestVisualizePredictions:
         assert Path(result["image_path"]).is_file()
         assert result["count"] == 2
 
-    def test_missing_predictions(self, viz_bucket: Path) -> None:
+    def test_missing_predictions(self, viz_bucket: WrittenDataset) -> None:
         no_pred = write_image(
-            image_dir(viz_bucket, UNDATED_BUCKET) / "no_pred.jpg", (100, 100)
+            viz_bucket.images_dir / "no_pred.jpg", (100, 100)
         )
         result = _render(
-            viz_bucket,
+            viz_bucket.root,
             source="predictions",
             path=str(no_pred),
             bucket=PUBLISHED,
@@ -545,40 +522,41 @@ class TestVisualizePredictions:
         assert "error" in result
 
     def test_a_predictions_render_names_its_bucket_by_its_type(
-        self, viz_dataset: Path
+        self, viz_dataset: WrittenDataset
     ) -> None:
         """A predictions render stating no bucket is refused by its type, naming the field."""
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError, match="bucket"):
             _render(
-                viz_dataset,
+                viz_dataset.root,
                 source="predictions",
-                path=str(
-                    image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg"
-                ),
+                path=str(viz_dataset.images[0]),
             )
 
     def test_an_unreadable_prediction_returns_an_error_naming_the_document(
-        self, viz_bucket: Path
+        self, viz_bucket: WrittenDataset
     ) -> None:
-        img = image_dir(viz_bucket, UNDATED_BUCKET) / "img_001.jpg"
-        _damage(_prediction_key(viz_bucket, img))
+        img = viz_bucket.images[0]
+        _damage(_prediction_key(viz_bucket.root, img))
 
         result = _render(
-            viz_bucket, source="predictions", path=str(img), bucket=PUBLISHED
+            viz_bucket.root,
+            source="predictions",
+            path=str(img),
+            bucket=PUBLISHED,
         )
         assert "img_001" in result["error"]
 
     def test_an_undecodable_bucket_record_refuses(
-        self, viz_bucket: Path
+        self, viz_bucket: WrittenDataset
     ) -> None:
-        _damage_record(viz_bucket)
+        _damage_record(viz_bucket.root)
 
         result = _render(
-            viz_bucket,
+            viz_bucket.root,
             source="predictions",
-            path=str(image_dir(viz_bucket, UNDATED_BUCKET) / "img_001.jpg"),
+            path=str(viz_bucket.images[0]),
             bucket=PUBLISHED,
         )
         assert "error" in result
@@ -667,10 +645,10 @@ def test_scoring_and_the_comparison_render_state_one_count_for_one_image(
 
 
 class TestVisualizeComparison:
-    def test_basic(self, viz_bucket: Path) -> None:
-        img = str(image_dir(viz_bucket, UNDATED_BUCKET) / "img_001.jpg")
+    def test_basic(self, viz_bucket: WrittenDataset) -> None:
+        img = str(viz_bucket.images[0])
         result = _render(
-            viz_bucket,
+            viz_bucket.root,
             source="comparison",
             path=img,
             iou_threshold=IOU_THRESHOLD,
@@ -682,7 +660,7 @@ class TestVisualizeComparison:
         assert result["pred_count"] == 2
 
     def test_the_scoring_doors_refuse_an_unstated_iou_threshold_by_name(
-        self, viz_bucket: Path
+        self, viz_bucket: WrittenDataset
     ) -> None:
         """The scoring doors refuse an unstated IoU threshold by name.
 
@@ -693,29 +671,35 @@ class TestVisualizeComparison:
 
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        img = str(image_dir(viz_bucket, UNDATED_BUCKET) / "img_001.jpg")
+        img = str(viz_bucket.images[0])
         with pytest.raises(ValidationError, match="iou_threshold"):
             _render(
-                viz_bucket, source="comparison", path=img, bucket=PUBLISHED
+                viz_bucket.root,
+                source="comparison",
+                path=img,
+                bucket=PUBLISHED,
             )
         with pytest.raises(TypeError, match="iou_threshold"):
             score_predictions(  # type: ignore[call-arg]
-                viz_bucket, img, PUBLISHED, conf_threshold=REVIEW_CONF_FLOOR
+                viz_bucket.root,
+                img,
+                PUBLISHED,
+                conf_threshold=REVIEW_CONF_FLOOR,
             )
 
         scored = score_predictions(
-            viz_bucket, img, PUBLISHED, IOU_THRESHOLD, REVIEW_CONF_FLOOR
+            viz_bucket.root, img, PUBLISHED, IOU_THRESHOLD, REVIEW_CONF_FLOOR
         )
         assert "error" not in scored, scored
 
     def test_an_image_the_bucket_did_not_predict_draws_its_ground_truth_all_missed(
-        self, viz_bucket: Path
+        self, viz_bucket: WrittenDataset
     ) -> None:
         from tcip_annotation.state import Annotation, BBox
         from tests._producer_fixtures import label_image
 
         img = write_image(
-            image_dir(viz_bucket, UNDATED_BUCKET) / "img_005.jpg",
+            viz_bucket.images_dir / "img_005.jpg",
             (640, 480),
             (100, 120, 80),
         )
@@ -730,7 +714,7 @@ class TestVisualizeComparison:
         )
 
         result = _render(
-            viz_bucket,
+            viz_bucket.root,
             source="comparison",
             path=str(img),
             iou_threshold=IOU_THRESHOLD,
@@ -742,14 +726,14 @@ class TestVisualizeComparison:
         assert (result["tp"], result["fp"], result["fn"]) == (0, 0, 2)
 
     def test_an_unreadable_gt_returns_an_error_naming_the_document(
-        self, viz_bucket: Path
+        self, viz_bucket: WrittenDataset
     ) -> None:
         """A comparison render over an unreadable GT label returns an error naming the document."""
-        img = image_dir(viz_bucket, UNDATED_BUCKET) / "img_001.jpg"
+        img = viz_bucket.images[0]
         _damage(_label_key(img))
 
         result = _render(
-            viz_bucket,
+            viz_bucket.root,
             source="comparison",
             path=str(img),
             iou_threshold=IOU_THRESHOLD,
@@ -758,13 +742,13 @@ class TestVisualizeComparison:
         assert "img_001" in result["error"]
 
     def test_an_unreadable_prediction_returns_an_error_naming_the_document(
-        self, viz_bucket: Path
+        self, viz_bucket: WrittenDataset
     ) -> None:
-        img = image_dir(viz_bucket, UNDATED_BUCKET) / "img_001.jpg"
-        _damage(_prediction_key(viz_bucket, img))
+        img = viz_bucket.images[0]
+        _damage(_prediction_key(viz_bucket.root, img))
 
         result = _render(
-            viz_bucket,
+            viz_bucket.root,
             source="comparison",
             path=str(img),
             iou_threshold=IOU_THRESHOLD,
@@ -773,14 +757,14 @@ class TestVisualizeComparison:
         assert "img_001" in result["error"]
 
     def test_an_undecodable_bucket_record_refuses(
-        self, viz_bucket: Path
+        self, viz_bucket: WrittenDataset
     ) -> None:
-        _damage_record(viz_bucket)
+        _damage_record(viz_bucket.root)
 
         result = _render(
-            viz_bucket,
+            viz_bucket.root,
             source="comparison",
-            path=str(image_dir(viz_bucket, UNDATED_BUCKET) / "img_001.jpg"),
+            path=str(viz_bucket.images[0]),
             iou_threshold=IOU_THRESHOLD,
             bucket=PUBLISHED,
         )
@@ -818,15 +802,11 @@ class TestDisplayRead:
         assert (read.rect.width, read.rect.height) == read.native_size
 
     def test_a_source_within_the_bound_is_read_at_native_resolution(
-        self, viz_dataset: Path
+        self, viz_dataset: WrittenDataset
     ) -> None:
         from tcip_mcp.tools.vision_tools import _display_of
 
-        read = _display_of(
-            SourceHeader(
-                image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg"
-            )
-        )
+        read = _display_of(SourceHeader(viz_dataset.images[0]))
         assert read.pixels.shape[:2] == (480, 640)
         assert (read.rect.width, read.rect.height) == (640, 480)
 
@@ -879,9 +859,10 @@ class TestDisplayRead:
             region=(read.rect.x0, read.rect.y0, read.rect.x1, read.rect.y1),
             output_path=str(tmp_path / "skinny.png"),
         )
+        from tests._image_fixtures import red_over_green
+
         rendered = Image.open(out).convert("RGB")
-        red, green, _ = rendered.getpixel(served_point)
-        assert red - green > 40
+        assert red_over_green(rendered, served_point) > 40
 
     def test_a_three_band_raster_that_is_not_8_bit_is_stretched_to_be_visible(
         self, tmp_path: Path
@@ -907,14 +888,12 @@ class TestDisplayRead:
         assert pixels.max() == 255
 
     def test_a_region_read_reports_the_rect_it_served(
-        self, viz_dataset: Path
+        self, viz_dataset: WrittenDataset
     ) -> None:
         from tcip_mcp.tools.vision_tools import _display_of
 
         read = _display_of(
-            SourceHeader(
-                image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg"
-            ),
+            SourceHeader(viz_dataset.images[0]),
             region=(100.0, 50.0, 200.0, 150.0),
         )
         assert (read.rect.x0, read.rect.y0, read.rect.x1, read.rect.y1) == (
@@ -926,7 +905,7 @@ class TestDisplayRead:
         assert read.pixels.shape[:2] == (150, 200)
 
     def test_a_region_hanging_off_the_edge_is_clamped_into_the_raster(
-        self, viz_dataset: Path
+        self, viz_dataset: WrittenDataset
     ) -> None:
         """A viewport hanging off the raster's edge is clamped to the raster.
 
@@ -935,9 +914,7 @@ class TestDisplayRead:
         from tcip_mcp.tools.vision_tools import _display_of
 
         read = _display_of(
-            SourceHeader(
-                image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg"
-            ),
+            SourceHeader(viz_dataset.images[0]),
             region=(500.0, 400.0, 400.0, 400.0),
         )
         assert (read.rect.x1, read.rect.y1) == (640, 480)
@@ -945,9 +922,9 @@ class TestDisplayRead:
 
 
 class TestVisualizeDatasetSample:
-    def test_sample(self, viz_dataset: Path) -> None:
+    def test_sample(self, viz_dataset: WrittenDataset) -> None:
         result = _render(
-            viz_dataset, source="dataset", path=str(viz_dataset), n=4
+            viz_dataset.root, source="dataset", path=str(viz_dataset.root), n=4
         )
         assert "error" not in result
         assert Path(result["image_path"]).is_file()
@@ -955,16 +932,19 @@ class TestVisualizeDatasetSample:
         assert result["total_images"] == 4
 
     def test_only_the_images_of_a_capture_are_sampled(
-        self, viz_dataset: Path
+        self, viz_dataset: WrittenDataset
     ) -> None:
-        write_image(image_root(viz_dataset) / "loose.jpg", (64, 48))
+        write_image(image_root(viz_dataset.root) / "loose.jpg", (64, 48))
         write_image(
-            image_dir(viz_dataset, UNDATED_BUCKET) / "nested" / "deep.jpg",
+            viz_dataset.images_dir / "nested" / "deep.jpg",
             (64, 48),
         )
 
         result = _render(
-            viz_dataset, source="dataset", path=str(viz_dataset), n=16
+            viz_dataset.root,
+            source="dataset",
+            path=str(viz_dataset.root),
+            n=16,
         )
 
         assert "error" not in result, result
@@ -976,14 +956,14 @@ class TestVisualizeDatasetSample:
         assert "error" in result
 
     def test_a_corrupt_label_returns_an_error_not_an_unlabeled_render(
-        self, viz_dataset: Path
+        self, viz_dataset: WrittenDataset
     ) -> None:
         """A dataset render over a corrupt label returns an error naming the image."""
         from tcip_annotation.state import Annotation, BBox
         from tests._producer_fixtures import label_image
 
         bad = write_image(
-            image_dir(viz_dataset, UNDATED_BUCKET) / "img_bad.jpg",
+            viz_dataset.images_dir / "img_bad.jpg",
             (640, 480),
             (100, 120, 80),
         )
@@ -998,7 +978,7 @@ class TestVisualizeDatasetSample:
         # n covers every image (5, with img_bad): sampling is otherwise random, and the corrupt
         # image must be reached deterministically for this assertion.
         result = _render(
-            viz_dataset, source="dataset", path=str(viz_dataset), n=5
+            viz_dataset.root, source="dataset", path=str(viz_dataset.root), n=5
         )
         assert "error" in result
         assert "img_bad" in result["error"]
@@ -1046,11 +1026,15 @@ class TestVisualizeDatasetSample:
 
 
 class TestVisualizeWorstPredictions:
-    def test_basic(self, viz_bucket: Path) -> None:
+    def test_basic(self, viz_bucket: WrittenDataset) -> None:
         from tcip_mcp.tools.vision_tools import render_failure_cases
 
         result = render_failure_cases(
-            viz_bucket, str(viz_bucket), PUBLISHED, top_k=3, **TRIAGE_WEIGHTS
+            viz_bucket.root,
+            str(viz_bucket.root),
+            PUBLISHED,
+            top_k=3,
+            **TRIAGE_WEIGHTS,
         )
         assert "error" not in result
         # Should have rendered some cases
@@ -1079,12 +1063,10 @@ class TestVisualizeWorstPredictions:
 
 
 class TestRenderCandidates:
-    def test_basic_render(self, viz_dataset: Path) -> None:
+    def test_basic_render(self, viz_dataset: WrittenDataset) -> None:
         from tcip_annotation.viz import render_candidates
 
-        pixels, native = _display(
-            str(image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg")
-        )
+        pixels, native = _display(str(viz_dataset.images[0]))
         candidates = [
             {
                 "candidate_id": 0,
@@ -1105,21 +1087,19 @@ class TestRenderCandidates:
             pixels,
             candidates,
             native_size=native,
-            output_path=str(viz_dataset / "candidates.png"),
+            output_path=str(viz_dataset.root / "candidates.png"),
         )
         assert Path(out).is_file()
 
-    def test_empty_candidates(self, viz_dataset: Path) -> None:
+    def test_empty_candidates(self, viz_dataset: WrittenDataset) -> None:
         from tcip_annotation.viz import render_candidates
 
-        pixels, native = _display(
-            str(image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg")
-        )
+        pixels, native = _display(str(viz_dataset.images[0]))
         out = render_candidates(
             pixels,
             [],
             native_size=native,
-            output_path=str(viz_dataset / "no_candidates.png"),
+            output_path=str(viz_dataset.root / "no_candidates.png"),
         )
         assert Path(out).is_file()
 
@@ -1132,46 +1112,42 @@ def _uniform_cells(width: int, height: int, tile: int) -> list:
 
 
 class TestRenderGridOverlay:
-    def test_basic(self, viz_dataset: Path) -> None:
+    def test_basic(self, viz_dataset: WrittenDataset) -> None:
         from tcip_annotation.viz import render_grid_overlay
 
-        pixels, native = _display(
-            str(image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg")
-        )
+        pixels, native = _display(str(viz_dataset.images[0]))
         out = render_grid_overlay(
             pixels,
             _uniform_cells(*native, 80),
             native_size=native,
-            output_path=str(viz_dataset / "grid.png"),
+            output_path=str(viz_dataset.root / "grid.png"),
         )
         assert Path(out).is_file()
 
-    def test_grid_wider_than_alphabet(self, viz_dataset: Path) -> None:
+    def test_grid_wider_than_alphabet(
+        self, viz_dataset: WrittenDataset
+    ) -> None:
         from tcip_annotation.viz import render_grid_overlay
 
-        pixels, _native = _display(
-            str(image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg")
-        )
+        pixels, _native = _display(str(viz_dataset.images[0]))
         out = render_grid_overlay(
             pixels,
             _uniform_cells(3300, 400, 100),
             native_size=(3300, 400),
-            output_path=str(viz_dataset / "grid_wide.png"),
+            output_path=str(viz_dataset.root / "grid_wide.png"),
         )
         assert Path(out).is_file()
 
-    def test_empty_cells_refused(self, viz_dataset: Path) -> None:
+    def test_empty_cells_refused(self, viz_dataset: WrittenDataset) -> None:
         from tcip_annotation.viz import render_grid_overlay
 
-        pixels, native = _display(
-            str(image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg")
-        )
+        pixels, native = _display(str(viz_dataset.images[0]))
         with pytest.raises(ValueError, match="empty"):
             render_grid_overlay(
                 pixels,
                 [],
                 native_size=native,
-                output_path=str(viz_dataset / "grid_empty.png"),
+                output_path=str(viz_dataset.root / "grid_empty.png"),
             )
 
     def test_lines_land_on_supplied_cell_boundaries(
@@ -1317,7 +1293,9 @@ class TestColumnLabels:
 
 
 class TestVisualizeGridOverlayTool:
-    def test_derived_default_echoes_geometry(self, viz_dataset: Path) -> None:
+    def test_derived_default_echoes_geometry(
+        self, viz_dataset: WrittenDataset
+    ) -> None:
         """With no tile_size the grid overlay derives the pointing grain and echoes the geometry.
 
         The answer carries the width, height, derived tile size, overlap, columns and rows.
@@ -1326,10 +1304,8 @@ class TestVisualizeGridOverlayTool:
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
         result = overlay_reference_grid(
-            viz_dataset,
-            image_path=str(
-                image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg"
-            ),
+            viz_dataset.root,
+            image_path=str(viz_dataset.images[0]),
             overlap=0.0,
         )
         assert "error" not in result
@@ -1340,14 +1316,14 @@ class TestVisualizeGridOverlayTool:
         assert result["overlap"] == 0.0
         assert result["cols"] >= 1 and result["rows"] >= 1
 
-    def test_explicit_tile_size_echoes_back(self, viz_dataset: Path) -> None:
+    def test_explicit_tile_size_echoes_back(
+        self, viz_dataset: WrittenDataset
+    ) -> None:
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
         result = overlay_reference_grid(
-            viz_dataset,
-            image_path=str(
-                image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg"
-            ),
+            viz_dataset.root,
+            image_path=str(viz_dataset.images[0]),
             tile_size=80,
             overlap=0.0,
         )
@@ -1364,28 +1340,28 @@ class TestVisualizeGridOverlayTool:
         )
         assert "error" in result
 
-    def test_invalid_tile_size_is_an_error(self, viz_dataset: Path) -> None:
+    def test_invalid_tile_size_is_an_error(
+        self, viz_dataset: WrittenDataset
+    ) -> None:
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
         result = overlay_reference_grid(
-            viz_dataset,
-            image_path=str(
-                image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg"
-            ),
+            viz_dataset.root,
+            image_path=str(viz_dataset.images[0]),
             tile_size=0,
             overlap=0.0,
         )
         assert "error" in result
         assert "tile_size" in result["error"]
 
-    def test_wide_grid_summary_labels(self, viz_dataset: Path) -> None:
+    def test_wide_grid_summary_labels(
+        self, viz_dataset: WrittenDataset
+    ) -> None:
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
         result = overlay_reference_grid(
-            viz_dataset,
-            image_path=str(
-                image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg"
-            ),
+            viz_dataset.root,
+            image_path=str(viz_dataset.images[0]),
             tile_size=20,
             overlap=0.0,
         )
@@ -1405,14 +1381,12 @@ class TestProposeAnnotationsTool:
         )
         assert "error" in result
 
-    def test_unknown_engine(self, viz_dataset: Path) -> None:
+    def test_unknown_engine(self, viz_dataset: WrittenDataset) -> None:
         from tcip_mcp.tools.proposal_tools import propose_annotations
 
         result = propose_annotations(
-            viz_dataset,
-            image_path=str(
-                image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg"
-            ),
+            viz_dataset.root,
+            image_path=str(viz_dataset.images[0]),
             engine="does_not_exist",
             actor=None,
         )
@@ -1421,14 +1395,12 @@ class TestProposeAnnotationsTool:
 
 
 class TestAcceptProposalsTool:
-    def test_no_prior_proposals(self, viz_dataset: Path) -> None:
+    def test_no_prior_proposals(self, viz_dataset: WrittenDataset) -> None:
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
         result = stage_proposals(
-            viz_dataset,
-            image_path=str(
-                image_dir(viz_dataset, UNDATED_BUCKET) / "img_003.jpg"
-            ),
+            viz_dataset.root,
+            image_path=str(viz_dataset.images[2]),
             actor=None,
             assignments=kept({"staging_id": "staging_0_000000"}, (0, "bud")),
         )
@@ -1437,13 +1409,9 @@ class TestAcceptProposalsTool:
         assert "Run propose_annotations" in result["error"]
 
     def test_with_cached_proposals(
-        self, viz_dataset: Path, monkeypatch: pytest.MonkeyPatch
+        self, viz_dataset: WrittenDataset, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools.proposal_tools import (
-            propose_annotations,
-            stage_proposals,
-        )
+        from tcip_mcp.tools.proposal_tools import stage_proposals
 
         # The candidates propose_annotations stages, in the neutral engine schema.
         candidates = [
@@ -1471,32 +1439,17 @@ class TestAcceptProposalsTool:
             },
         ]
 
-        class StubProposer:
-            def propose(
-                self, image_path: str, **params: object
-            ) -> proposal.Proposal:
-                return proposal.Proposal(candidates, None)
-
-        monkeypatch.setattr(
-            proposal, "resolve_proposer", lambda engine: StubProposer()
+        propose_result = _propose(
+            monkeypatch,
+            viz_dataset.root,
+            str(viz_dataset.images[0]),
+            candidates,
         )
-
-        propose_result = propose_annotations(
-            viz_dataset,
-            image_path=str(
-                image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg"
-            ),
-            engine="stub",
-            actor=None,
-        )
-        assert "error" not in propose_result, propose_result
         assert propose_result["staged"] is True
 
         result = stage_proposals(
-            viz_dataset,
-            image_path=str(
-                image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg"
-            ),
+            viz_dataset.root,
+            image_path=str(viz_dataset.images[0]),
             actor=None,
             assignments=kept(propose_result, (0, "bud"), (1, "nut")),
         )
@@ -1507,8 +1460,8 @@ class TestAcceptProposalsTool:
         # Masks are staged as the engine's predictions, not GT: one per-image document holding
         # both accepted objects by subject name.
         anns, objs = _staged(
-            viz_dataset,
-            image_dir(viz_dataset, UNDATED_BUCKET) / "img_001.jpg",
+            viz_dataset.root,
+            viz_dataset.images[0],
             result,
         )
         assert len(anns) == 2
@@ -1639,51 +1592,41 @@ class TestCandidateCacheRoundTrip:
         assert loaded == []
 
 
+@pytest.fixture
+def sample_dataset(tmp_path: Path) -> WrittenDataset:
+    """Create a fresh dataset of one unlabeled 640x480 ``sample.jpg``."""
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+    image = write_image(images_dir / "sample.jpg", (640, 480), (80, 120, 60))
+    return WrittenDataset(tmp_path, images_dir, [image])
+
+
+def _propose(
+    monkeypatch: pytest.MonkeyPatch,
+    project: Path,
+    image_path: str,
+    candidates: list[dict],
+) -> dict:
+    """Stage ``candidates`` for ``project`` through the real writer and return its answer.
+
+    A stub engine hands them back verbatim, driven by an actual ``propose_annotations`` call.
+    """
+    from tcip_mcp.tools.proposal_tools import propose_annotations
+    from tests._producer_fixtures import install_stub_proposer
+
+    install_stub_proposer(monkeypatch, candidates)
+    result = propose_annotations(
+        project, image_path=image_path, engine="stub", actor=None
+    )
+    assert "error" not in result, result
+    return result
+
+
 class TestFullPipelineIntegration:
     """Tests of staging mocked engine candidates as predictions and checking what was staged."""
 
-    @pytest.fixture
-    def pipeline_dataset(self, tmp_path: Path) -> Path:
-        """Create a fresh dataset of one image with no labels; return its root."""
-        write_image(
-            image_dir(tmp_path, UNDATED_BUCKET) / "sample.jpg",
-            (640, 480),
-            (80, 120, 60),
-        )
-        return tmp_path
-
-    def _propose(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        project: Path,
-        image_path: str,
-        candidates: list[dict],
-    ) -> dict:
-        """Stage ``candidates`` for ``project`` through the real writer and return its answer.
-
-        A stub engine hands them back verbatim, driven by an actual ``propose_annotations`` call.
-        """
-        from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools.proposal_tools import propose_annotations
-
-        class StubProposer:
-            def propose(
-                self, image_path: str, **params: object
-            ) -> proposal.Proposal:
-                return proposal.Proposal(candidates, None)
-
-        monkeypatch.setattr(
-            proposal, "resolve_proposer", lambda engine: StubProposer()
-        )
-        result = propose_annotations(
-            project, image_path=image_path, engine="stub", actor=None
-        )
-        assert "error" not in result, result
-        return result
-
     def test_accept_writes_json_detect(
         self,
-        pipeline_dataset: Path,
+        sample_dataset: WrittenDataset,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Engine proposals are staged as predictions.
@@ -1694,15 +1637,13 @@ class TestFullPipelineIntegration:
         from tcip_annotation import bbox_of
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
-        img_path = str(
-            image_dir(pipeline_dataset, UNDATED_BUCKET) / "sample.jpg"
-        )
-        proposed = self._propose(
-            monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES
+        img_path = str(sample_dataset.images[0])
+        proposed = _propose(
+            monkeypatch, sample_dataset.root, img_path, MOCK_CANDIDATES
         )
 
         result = stage_proposals(
-            pipeline_dataset,
+            sample_dataset.root,
             image_path=img_path,
             actor=None,
             assignments=kept(proposed, (0, "bud"), (1, "nut")),
@@ -1710,7 +1651,7 @@ class TestFullPipelineIntegration:
         assert "error" not in result
         assert result["proposal_count"] == 2
 
-        anns, objs = _staged(pipeline_dataset, Path(img_path), result)
+        anns, objs = _staged(sample_dataset.root, Path(img_path), result)
         assert len(anns) == 2
         assert {a.subject for a in anns} == {"bud", "nut"}
         # Pixel coords within the 640x480 image; staged as the engine's (created_by="stub").
@@ -1723,21 +1664,19 @@ class TestFullPipelineIntegration:
 
     def test_accept_writes_json_segment(
         self,
-        pipeline_dataset: Path,
+        sample_dataset: WrittenDataset,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Engine proposals are staged as prediction polygons: pixel vertices, subject, score."""
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
-        img_path = str(
-            image_dir(pipeline_dataset, UNDATED_BUCKET) / "sample.jpg"
-        )
-        proposed = self._propose(
-            monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES
+        img_path = str(sample_dataset.images[0])
+        proposed = _propose(
+            monkeypatch, sample_dataset.root, img_path, MOCK_CANDIDATES
         )
 
         result = stage_proposals(
-            pipeline_dataset,
+            sample_dataset.root,
             image_path=img_path,
             actor=None,
             assignments=kept(proposed, (0, "bud")),
@@ -1745,7 +1684,7 @@ class TestFullPipelineIntegration:
         assert "error" not in result
         assert result["proposal_count"] == 1
 
-        anns, objs = _staged(pipeline_dataset, Path(img_path), result)
+        anns, objs = _staged(sample_dataset.root, Path(img_path), result)
         assert len(anns) == 1
         assert {a.subject for a in anns} == {"bud"}
         rings = anns[0].geometry.rings
@@ -1758,29 +1697,27 @@ class TestFullPipelineIntegration:
 
     def test_detect_and_segment_consistent(
         self,
-        pipeline_dataset: Path,
+        sample_dataset: WrittenDataset,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Box and mask views of the staged predictions cover the same objects (one document)."""
         from tcip_annotation import bbox_of
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
-        img_path = str(
-            image_dir(pipeline_dataset, UNDATED_BUCKET) / "sample.jpg"
-        )
-        proposed = self._propose(
-            monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES
+        img_path = str(sample_dataset.images[0])
+        proposed = _propose(
+            monkeypatch, sample_dataset.root, img_path, MOCK_CANDIDATES
         )
 
         result = stage_proposals(
-            pipeline_dataset,
+            sample_dataset.root,
             image_path=img_path,
             actor=None,
             assignments=kept(proposed, (0, "bud"), (2, "nut")),
         )
         assert result["proposal_count"] == 2
 
-        anns, _objs = _staged(pipeline_dataset, Path(img_path), result)
+        anns, _objs = _staged(sample_dataset.root, Path(img_path), result)
         # Each object is one polygon with a derivable box under the same subject: the box and mask
         # views can never diverge because they are the same annotations.
         subjects_poly = sorted(
@@ -1793,22 +1730,20 @@ class TestFullPipelineIntegration:
 
     def test_partial_accept_skips_rejected(
         self,
-        pipeline_dataset: Path,
+        sample_dataset: WrittenDataset,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Staging one assignment out of three candidates stages one proposal."""
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
-        img_path = str(
-            image_dir(pipeline_dataset, UNDATED_BUCKET) / "sample.jpg"
-        )
-        proposed = self._propose(
-            monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES
+        img_path = str(sample_dataset.images[0])
+        proposed = _propose(
+            monkeypatch, sample_dataset.root, img_path, MOCK_CANDIDATES
         )
 
         # Accept only candidate 1 out of 3
         result = stage_proposals(
-            pipeline_dataset,
+            sample_dataset.root,
             image_path=img_path,
             actor=None,
             assignments=kept(proposed, (1, "bud")),
@@ -1817,22 +1752,20 @@ class TestFullPipelineIntegration:
 
     def test_invalid_candidate_id_silently_skipped(
         self,
-        pipeline_dataset: Path,
+        sample_dataset: WrittenDataset,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Assignments with non-existent candidate_id are ignored."""
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
-        img_path = str(
-            image_dir(pipeline_dataset, UNDATED_BUCKET) / "sample.jpg"
-        )
-        proposed = self._propose(
-            monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES
+        img_path = str(sample_dataset.images[0])
+        proposed = _propose(
+            monkeypatch, sample_dataset.root, img_path, MOCK_CANDIDATES
         )
 
         # Candidate 999 does not exist; candidate 0 does.
         result = stage_proposals(
-            pipeline_dataset,
+            sample_dataset.root,
             image_path=img_path,
             actor=None,
             assignments=kept(proposed, (999, "bud"), (0, "nut")),
@@ -1841,16 +1774,14 @@ class TestFullPipelineIntegration:
 
     def test_render_then_accept_pipeline(
         self,
-        pipeline_dataset: Path,
+        sample_dataset: WrittenDataset,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Candidate and grid renders are written, and three assignments stage with a QA render."""
         from tcip_annotation.viz import render_candidates, render_grid_overlay
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
-        img_path = str(
-            image_dir(pipeline_dataset, UNDATED_BUCKET) / "sample.jpg"
-        )
+        img_path = str(sample_dataset.images[0])
         pixels, native = _display(img_path)
 
         # Step 1: Render candidates
@@ -1858,7 +1789,7 @@ class TestFullPipelineIntegration:
             pixels,
             MOCK_CANDIDATES,
             native_size=native,
-            output_path=str(pipeline_dataset / "candidates.png"),
+            output_path=str(sample_dataset.root / "candidates.png"),
         )
         assert Path(candidate_render).is_file()
 
@@ -1867,18 +1798,18 @@ class TestFullPipelineIntegration:
             pixels,
             _uniform_cells(*native, 80),
             native_size=native,
-            output_path=str(pipeline_dataset / "grid.png"),
+            output_path=str(sample_dataset.root / "grid.png"),
         )
         assert Path(grid_render).is_file()
 
         # Step 3: propose_annotations stages the candidates for real
-        proposed = self._propose(
-            monkeypatch, pipeline_dataset, img_path, MOCK_CANDIDATES
+        proposed = _propose(
+            monkeypatch, sample_dataset.root, img_path, MOCK_CANDIDATES
         )
 
         # Step 4: Accept with subject assignments
         result = stage_proposals(
-            pipeline_dataset,
+            sample_dataset.root,
             image_path=img_path,
             actor=None,
             assignments=kept(proposed, (0, "bud"), (1, "nut"), (2, "bud")),
@@ -1893,54 +1824,20 @@ class TestFullPipelineIntegration:
 class TestEnginePredictionStaging:
     """stage_proposals stages engine masks as predictions in a bucket of the engine's."""
 
-    @pytest.fixture
-    def format_dataset(self, tmp_path: Path) -> Path:
-        write_image(
-            image_dir(tmp_path, UNDATED_BUCKET) / "fmt_test.jpg",
-            (640, 480),
-            (100, 100, 100),
-        )
-        return tmp_path
-
-    def _propose(
-        self, monkeypatch: pytest.MonkeyPatch, project: Path, image_path: str
-    ) -> dict:
-        """Stage MOCK_CANDIDATES for ``project`` through the real writer and return its answer.
-
-        A stub engine hands them back verbatim, driven by an actual ``propose_annotations`` call.
-        """
-        from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools.proposal_tools import propose_annotations
-
-        class StubProposer:
-            def propose(
-                self, image_path: str, **params: object
-            ) -> proposal.Proposal:
-                return proposal.Proposal(MOCK_CANDIDATES, None)
-
-        monkeypatch.setattr(
-            proposal, "resolve_proposer", lambda engine: StubProposer()
-        )
-        result = propose_annotations(
-            project, image_path=image_path, engine="stub", actor=None
-        )
-        assert "error" not in result, result
-        return result
-
     def test_json_detect_and_segment_written(
         self,
-        format_dataset: Path,
+        sample_dataset: WrittenDataset,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from tcip_annotation import bbox_of
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
-        img_path = str(
-            image_dir(format_dataset, UNDATED_BUCKET) / "fmt_test.jpg"
+        img_path = str(sample_dataset.images[0])
+        proposed = _propose(
+            monkeypatch, sample_dataset.root, img_path, MOCK_CANDIDATES
         )
-        proposed = self._propose(monkeypatch, format_dataset, img_path)
         result = stage_proposals(
-            format_dataset,
+            sample_dataset.root,
             image_path=img_path,
             actor=None,
             assignments=kept(proposed, (0, "bud")),
@@ -1949,7 +1846,7 @@ class TestEnginePredictionStaging:
         assert "format" not in result
         assert result["proposal_count"] == 1
 
-        anns, _objs = _staged(format_dataset, Path(img_path), result)
+        anns, _objs = _staged(sample_dataset.root, Path(img_path), result)
         assert len(anns) == 1 and {a.subject for a in anns} == {"bud"}
         # The staged object carries a polygon (mask) with a derivable box: both views of one object.
         assert anns[0].geometry is not None
@@ -1957,23 +1854,23 @@ class TestEnginePredictionStaging:
 
     def test_prediction_carries_the_engine_score(
         self,
-        format_dataset: Path,
+        sample_dataset: WrittenDataset,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Staged engine output carries ``created_by="stub"`` and a float ``score``."""
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
-        img_path = str(
-            image_dir(format_dataset, UNDATED_BUCKET) / "fmt_test.jpg"
+        img_path = str(sample_dataset.images[0])
+        proposed = _propose(
+            monkeypatch, sample_dataset.root, img_path, MOCK_CANDIDATES
         )
-        proposed = self._propose(monkeypatch, format_dataset, img_path)
         staged = stage_proposals(
-            format_dataset,
+            sample_dataset.root,
             image_path=img_path,
             actor=None,
             assignments=kept(proposed, (0, "bud")),
         )
-        _anns, objs = _staged(format_dataset, Path(img_path), staged)
+        _anns, objs = _staged(sample_dataset.root, Path(img_path), staged)
         assert objs
         assert all(o["created_by"] == "stub" for o in objs)
         assert all(isinstance(o["score"], float) for o in objs)

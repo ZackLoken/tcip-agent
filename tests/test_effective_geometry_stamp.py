@@ -132,15 +132,13 @@ def _detection_dataset(
 ) -> Dataset:
     """Return a real DetectionDataset over tiny images, one per (width, height) in ``sizes``."""
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import label_image, write_image
+    from tests._producer_fixtures import label_image, registry_of, write_image
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
-    registry_over(tmp_path, SubjectRegistry((Subject("bud", ""),)))
+    registry_over(tmp_path, registry_of("bud"))
     for i, (w, h) in enumerate(sizes):
-        write_image(images_dir / f"img{i}.png", (w, h))
         label_image(
-            images_dir / f"img{i}.png",
+            write_image(images_dir / f"img{i}.png", (w, h)),
             [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
             w,
             h,

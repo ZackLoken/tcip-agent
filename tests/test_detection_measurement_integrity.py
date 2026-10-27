@@ -564,9 +564,10 @@ def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
     root = tmp_path / "ds"
     images_dir = image_dir(root, UNDATED_BUCKET)
     for i, size in enumerate(range(48, 112, 8)):
-        write_image(images_dir / f"img{i}.png", (size, size), (100, 100, 100))
         label_image(
-            images_dir / f"img{i}.png",
+            write_image(
+                images_dir / f"img{i}.png", (size, size), (100, 100, 100)
+            ),
             [Annotation(subject="bud", geometry=BBox(8, 8, 24, 24))],
             size,
             size,
@@ -722,12 +723,11 @@ def _full_frame(
     from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation,
     )
-    from tests._producer_fixtures import blank_image
     from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
 
-    image = blank_image(tmp_path, "a.png", (128, 128))
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+    image = write_image(images_dir / "a.png", (128, 128))
     label_image(image, annotations, 128, 128, keep_empty=True)
-    images_dir = image.parent
     install(monkeypatch, stub)
     checkpoint = checkpoint or verified_checkpoint(tmp_path)
     return run_full_frame_evaluation(

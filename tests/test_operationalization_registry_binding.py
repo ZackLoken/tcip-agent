@@ -24,7 +24,7 @@ from tcip_mcp.traits import (
     PositiveState,
 )
 from tests import _trait_fixtures as fx
-from tests._producer_fixtures import registry_over
+from tests._producer_fixtures import registry_of, registry_over
 
 _CROSSING = fx.with_operationalization(
     fx.CROSSING_SPEC,
@@ -32,18 +32,9 @@ _CROSSING = fx.with_operationalization(
     measured_subject="flower",
     delivered_phenotypes=fx.CROSSING_SPEC.delivers,
 )
-_WITHOUT_OPEN = cr.SubjectRegistry(
-    subjects=(
-        cr.Subject(
-            name="flower",
-            description="",
-            attributes=(
-                cr.Attribute(
-                    name="state", type="categorical", values=("closed",)
-                ),
-            ),
-        ),
-    )
+_WITHOUT_OPEN = registry_of(
+    "flower",
+    cr.Attribute(name="state", type="categorical", values=("closed",)),
 )
 
 
@@ -90,10 +81,7 @@ def test_positive_state_problem_names_an_unknown_subject(
 def test_positive_state_problem_names_a_subject_declaring_no_such_attribute() -> (
     None
 ):
-    registry = cr.SubjectRegistry(
-        subjects=(cr.Subject(name="bush", description=""),)
-    )
-    problem = cr.positive_state_problem(registry, "bush", OPEN)
+    problem = cr.positive_state_problem(registry_of("bush"), "bush", OPEN)
     assert problem is not None and "declares no attribute 'state'" in problem
 
 
@@ -282,20 +270,11 @@ def test_a_crossing_delivery_reads_the_registry_of_its_buckets_dataset_root(
 
     registry_over(
         series.root,
-        cr.SubjectRegistry(
-            subjects=(
-                cr.Subject(
-                    name=SUBJECT,
-                    description="",
-                    attributes=(
-                        cr.Attribute(
-                            name=ATTRIBUTE,
-                            type="categorical",
-                            values=("closed",),
-                        ),
-                    ),
-                ),
-            )
+        registry_of(
+            SUBJECT,
+            cr.Attribute(
+                name=ATTRIBUTE, type="categorical", values=("closed",)
+            ),
         ),
     )
     refused = deliver("out2.csv")

@@ -364,17 +364,15 @@ def test_a_reserved_regions_assessment_reads_its_mosaic_document_once(
     assert set(counts.values()) == {1}, counts
 
 
-def _published_frames(root: Path) -> list[Path]:
-    """Return the image paths of two labeled frames of one capture under ``root``.
+def _published_frames(project: Path, images_dir: Path) -> list[Path]:
+    """Return the image paths of two labeled frames written into the capture ``images_dir``.
 
-    Each frame has its predictions published as the bucket ``published``.
+    Each frame has its predictions published as ``project``'s bucket ``published``.
     """
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
     from tests._chain_fixtures import published
     from tests._producer_fixtures import label_image, write_image
 
-    images_dir = image_dir(root, UNDATED_BUCKET)
     frames = []
     for name in ("leaf_a", "leaf_b"):
         frame = write_image(
@@ -388,7 +386,7 @@ def _published_frames(root: Path) -> list[Path]:
         )
         frames.append(frame)
     published(
-        root,
+        project,
         "published",
         [
             {
@@ -497,9 +495,11 @@ def test_a_comparison_render_reads_its_documents_and_bucket_once(
 ) -> None:
     from PIL import Image
 
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
     from tcip_mcp.tools.vision_tools import ComparisonRender, visualize
 
-    frame, _other = _published_frames(tmp_path)
+    images = image_dir(tmp_path, UNDATED_BUCKET)
+    frame, _other = _published_frames(tmp_path, images)
     counts = _counting_reads(monkeypatch)
     scans = _counting_scans(monkeypatch)
     opened: list = []
@@ -531,21 +531,23 @@ def test_a_comparison_render_reads_its_documents_and_bucket_once(
     assert (result["tp"], result["fp"], result["fn"]) == (1, 1, 0)
     assert len(counts) == 3, counts
     assert set(counts.values()) == {1}, counts
-    assert scans == Counter({str(frame.parent): 1}), scans
+    assert scans == Counter({str(images): 1}), scans
     assert len(opened) == 1, opened
 
 
 def test_a_folder_scoring_resolves_its_images_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
     from tcip_mcp.tools.annotation_tools import score_predictions
 
-    frames = _published_frames(tmp_path)
+    images = image_dir(tmp_path, UNDATED_BUCKET)
+    frames = _published_frames(tmp_path, images)
     scans = _counting_scans(monkeypatch)
 
     result = score_predictions(
         tmp_path,
-        str(frames[0].parent),
+        str(images),
         "published",
         IOU_THRESHOLD,
         conf_threshold=0.0,
@@ -553,15 +555,16 @@ def test_a_folder_scoring_resolves_its_images_once(
 
     assert "error" not in result, result
     assert result["image_count"] == len(frames)
-    assert scans == Counter({str(frames[0].parent): 1}), scans
+    assert scans == Counter({str(images): 1}), scans
 
 
 def test_a_failure_render_reads_each_document_and_its_bucket_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
     from tcip_mcp.tools.vision_tools import render_failure_cases
 
-    frames = _published_frames(tmp_path)
+    frames = _published_frames(tmp_path, image_dir(tmp_path, UNDATED_BUCKET))
     counts = _counting_reads(monkeypatch)
 
     result = render_failure_cases(

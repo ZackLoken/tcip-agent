@@ -58,14 +58,13 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
     Beside a dated directory under ``images/``, a hidden one adds no date to either.
     """
     from tcip_mcp.project_record import record_fields
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tcip_web.routes.projects import _summarize
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import registry_of, registry_over
 
     root = tmp_path / "Valley_Farm"
     image_dir(root, "2026-03-02").mkdir(parents=True)
     image_dir(root, ".hidden").mkdir(parents=True)
-    registry_over(root, SubjectRegistry((Subject("leaf", ""),)))
+    registry_over(root, registry_of("leaf"))
 
     tree = client.get(
         "/api/dataset/tree", params={"dataset_root": str(root)}

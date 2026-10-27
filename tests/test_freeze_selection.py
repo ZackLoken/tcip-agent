@@ -20,6 +20,8 @@ from tcip_mcp.dataset_layout import (  # noqa: E402
     capture_label_keys,
     image_dir,
     label_key,
+    parse_capture_dir,
+    parse_image_path,
 )
 from tcip_mcp.experiments import (  # noqa: E402
     RUN_FILE,
@@ -140,7 +142,7 @@ def test_freeze_selection_round_trips_through_a_real_bind(
     assert (frozen.stratify_foreground, frozen.rationale) == (True, RATIONALE)
     assert {s.ground_truth.parts[-1] for s in frozen.samples} <= set("abcdef")
     for sample in frozen.samples:
-        assert Path(sample.source).parent == image_dir(root, DATES[0])
+        assert parse_image_path(sample.source)[:2] == (root, DATES[0])
         assert ts.exists(sample.ground_truth)
 
     second = train_config(
@@ -196,7 +198,9 @@ def test_freeze_selection_names_the_sources_the_run_read_not_the_launch_input(
     frozen = read_selection(tmp_path / "frozen", project=tmp_path)
     assert frozen.samples
     for sample in frozen.samples:
-        assert Path(sample.source).parent == trained_images
+        assert parse_image_path(sample.source)[:2] == parse_capture_dir(
+            trained_images
+        )
 
 
 def test_freeze_selection_keeps_two_scopes_same_named_members_apart(

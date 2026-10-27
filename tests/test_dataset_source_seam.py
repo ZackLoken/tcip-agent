@@ -208,29 +208,22 @@ def _admitted_samples(root: Path) -> list[Sample]:
     Each frame holds its object bright on a dim ground.
     """
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import (
-        BRIGHT,
-        label_image,
-        painted_frame,
+        labeled_frame,
+        registry_of,
         registry_over,
         samples_over,
     )
 
     images_dir = image_dir(root, UNDATED_BUCKET)
-    images_dir.mkdir(parents=True, exist_ok=True)
-    registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="leaf", description=""),))
-    )
+    registry_over(root, registry_of("leaf"))
     for stem in ("s0", "s1"):
-        painted_frame(16, 16, (40, 60, 80), [((2, 2, 8, 8), BRIGHT)]).save(
-            images_dir / f"{stem}.png"
-        )
-        label_image(
+        labeled_frame(
             images_dir / f"{stem}.png",
             [Annotation(subject="leaf", geometry=BBox(2, 2, 8, 8))],
             16,
             16,
+            (40, 60, 80),
             keep_empty=True,
         )
     return samples_over(images_dir, subject="leaf")

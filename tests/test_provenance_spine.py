@@ -16,6 +16,8 @@ from tcip_mcp.dataset_layout import image_dir
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from tests._producer_fixtures import WrittenDataset
+
 # ── capture_env records code + library fingerprint ────────────────────────────
 
 
@@ -102,7 +104,7 @@ def test_a_payloads_own_experiment_id_names_no_producer(
 
 
 def test_draw_splits_selection_embeds_digests_and_seed(
-    data_dir: Path, tmp_path: Path
+    data_dir: WrittenDataset, tmp_path: Path
 ) -> None:
     # A draw's floor is four foreground groups; the fixture's three (img_001..003) need one more.
     from tcip_annotation.state import Annotation, BBox
@@ -111,10 +113,10 @@ def test_draw_splits_selection_embeds_digests_and_seed(
     from tests._producer_fixtures import label_image, write_image
     from tests._training_values import drawn_split
 
-    images_dir = image_dir(data_dir, "2-11-26")
-    write_image(images_dir / "img_004.jpg", (640, 480), (128, 128, 128))
     label_image(
-        images_dir / "img_004.jpg",
+        write_image(
+            data_dir.images_dir / "img_004.jpg", (640, 480), (128, 128, 128)
+        ),
         [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))],
         640,
         480,
@@ -123,7 +125,7 @@ def test_draw_splits_selection_embeds_digests_and_seed(
     out = tmp_path / "splits"
     result = draw_splits(
         tmp_path,
-        str(data_dir),
+        str(data_dir.root),
         output_path=str(out),
         subject="bud",
         **drawn_split(

@@ -368,18 +368,9 @@ def test_a_positive_state_its_registry_does_not_declare_refuses_at_proposal(
     registry: a value the attribute does not list refuses, an attribute the subject does not
     declare refuses, and a value of the subject's second attribute is admitted.
     """
-    from tests._producer_fixtures import registry_over
+    from tests._producer_fixtures import registry_of, registry_over
 
-    registry_over(
-        tmp_path,
-        cr.SubjectRegistry(
-            subjects=(
-                cr.Subject(
-                    name="bud", description="", attributes=(OPENING, GRADE)
-                ),
-            )
-        ),
-    )
+    registry_over(tmp_path, registry_of("bud", OPENING, GRADE))
 
     with pytest.raises(
         ValueError,
@@ -461,12 +452,8 @@ def _bucket(
     pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import image_dir
     from tests._chain_fixtures import published
+    from tests._producer_fixtures import registry_of
 
-    registry = cr.SubjectRegistry(
-        subjects=(
-            cr.Subject(name="bud", description="", attributes=attributes),
-        )
-    )
     return published(
         project,
         f"run/{date}",
@@ -488,7 +475,7 @@ def _bucket(
             for image in images or [image_dir(project / "ds", date) / "P1.png"]
         ],
         scope={"subject": "bud"},
-        registry=registry,
+        registry=registry_of("bud", *attributes),
     )
 
 

@@ -140,9 +140,8 @@ def test_the_instance_loader_carries_each_polygons_crowd_flag(
     tmp_path: Path,
 ) -> None:
     images = image_dir(tmp_path, UNDATED_BUCKET)
-    write_image(images / "p0.png", (IMG, IMG), (40, 40, 40))
     label_image(
-        images / "p0.png",
+        write_image(images / "p0.png", (IMG, IMG), (40, 40, 40)),
         [
             Annotation(
                 subject=SUBJECT,
@@ -176,9 +175,8 @@ def test_the_instance_loader_takes_each_polygons_class_from_the_one_target_decis
     from tests._producer_fixtures import dataset_over
 
     images = image_dir(tmp_path, UNDATED_BUCKET)
-    write_image(images / "p0.png", (IMG, IMG), (40, 40, 40))
     label_image(
-        images / "p0.png",
+        write_image(images / "p0.png", (IMG, IMG), (40, 40, 40)),
         [
             Annotation(
                 subject=SUBJECT,
@@ -635,14 +633,16 @@ def test_the_worst_predictions_triage_counts_objects_not_crowd_regions(
     from tests._chain_fixtures import published
 
     images = image_dir(tmp_path, UNDATED_BUCKET)
-    for stem in ("a", "b"):
+    a, b = (
         write_image(images / f"{stem}.png", (IMG, IMG), (40, 40, 40))
+        for stem in ("a", "b")
+    )
     bucket = published(
         tmp_path,
         "preds",
         [
             {
-                "image": str(images / "a.png"),
+                "image": str(a),
                 "width": IMG,
                 "height": IMG,
                 "boxes": [[OBJECT.x1, OBJECT.y1, OBJECT.x2, OBJECT.y2]],
@@ -669,14 +669,9 @@ def test_the_worst_predictions_triage_counts_objects_not_crowd_regions(
         IMG,
         IMG,
     )
+    label_image(a, [Annotation(subject=SUBJECT, geometry=OBJECT)], IMG, IMG)
     label_image(
-        images / "a.png",
-        [Annotation(subject=SUBJECT, geometry=OBJECT)],
-        IMG,
-        IMG,
-    )
-    label_image(
-        images / "b.png",
+        b,
         [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)],
         IMG,
         IMG,

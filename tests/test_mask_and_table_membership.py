@@ -89,47 +89,61 @@ def _resolved(
     )
 
 
-def _mask_dataset(root: Path) -> tuple[Path, Path]:
-    """Write a dataset whose ground truth is one ``<stem>.png`` mask per image.
+def _stem_images(
+    images_dir: Path, stems: tuple[str, ...] = STEMS
+) -> dict[str, Path]:
+    """Write the 16 px ``<stem>.png`` of each of ``stems`` into ``images_dir``.
 
-    For the nth of :data:`STEMS`, the 16 px image goes under ``root``'s undated bucket and the
-    mask, painted 1 over a square of side n + 1 at its origin, under ``root / "masks"``.
+    The nth is colored ``(10 * n, 20 + n, 30 + n)``. Returns the images by stem.
     """
-    images_dir, masks_dir = image_dir(root, UNDATED_BUCKET), root / "masks"
-    images_dir.mkdir(parents=True, exist_ok=True)
-    masks_dir.mkdir(parents=True, exist_ok=True)
-    for index, stem in enumerate(STEMS):
-        write_image(
+    return {
+        stem: write_image(
             images_dir / f"{stem}.png",
             (16, 16),
             (10 * index, 20 + index, 30 + index),
         )
+        for index, stem in enumerate(stems)
+    }
+
+
+def _mask_dataset(
+    root: Path,
+) -> tuple[Path, Path, dict[str, Path], dict[str, Path]]:
+    """Write a dataset whose ground truth is one ``<stem>.png`` mask per image.
+
+    The images are :func:`_stem_images` under ``root``'s undated bucket, and the nth stem's
+    mask, painted 1 over a square of side n + 1 at its origin, goes under ``root / "masks"``.
+    Returns the images directory, the masks directory, the images by stem and the masks by stem.
+    """
+    images_dir, masks_dir = image_dir(root, UNDATED_BUCKET), root / "masks"
+    masks_dir.mkdir(parents=True, exist_ok=True)
+    images = _stem_images(images_dir)
+    masks = {stem: masks_dir / f"{stem}.png" for stem in STEMS}
+    for index, mask in enumerate(masks.values()):
         painted_frame(
             16, 16, 0, [((0, 0, index + 1, index + 1), 1)], mode="L"
-        ).save(masks_dir / f"{stem}.png")
-    return images_dir, masks_dir
+        ).save(mask)
+    return images_dir, masks_dir, images, masks
 
 
-def _table_dataset(root: Path) -> tuple[Path, Path]:
-    """Write a dataset whose ground truth is one table row per image, labels cycling 0, 1, 2."""
+def _table_dataset(
+    root: Path,
+) -> tuple[Path, Path, dict[str, Path], dict[str, Path]]:
+    """Write a dataset whose ground truth is one table row per image, labels cycling 0, 1, 2.
+
+    The images are :func:`_stem_images` under ``root``'s undated bucket. Returns the images
+    directory, the table, the images by stem and an empty mapping, since it writes no mask.
+    """
     images_dir, csv_path = (
         image_dir(root, UNDATED_BUCKET),
         root / "labels.csv",
     )
-    images_dir.mkdir(parents=True, exist_ok=True)
-    rows = []
-    for index, stem in enumerate(STEMS):
-        write_image(
-            images_dir / f"{stem}.png",
-            (16, 16),
-            (10 * index, 20 + index, 30 + index),
-        )
-        rows.append((stem, index % 3))
+    images = _stem_images(images_dir)
     with open(csv_path, "w", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(("stem", "label"))
-        writer.writerows(rows)
-    return images_dir, csv_path
+        writer.writerows((stem, index % 3) for index, stem in enumerate(STEMS))
+    return images_dir, csv_path, images, {}
 
 
 def _drawn(
@@ -164,7 +178,7 @@ def test_a_bound_semantic_seg_run_trains_over_exactly_its_selections_samples(
     none from the calibration side, and the partition records the training side.
     """
     root = tmp_path / "ds"
-    _images_dir, masks_dir = _mask_dataset(root)
+    _images_dir, masks_dir, _images, _masks = _mask_dataset(root)
     out = tmp_path / "m"
     drawn = _drawn(root, masks_dir, out)
 
@@ -189,7 +203,7 @@ def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(
 ) -> None:
     """A bound classification run's sides hold the table rows its selection put on them."""
     root = tmp_path / "ds"
-    _images_dir, csv_path = _table_dataset(root)
+    _images_dir, csv_path, _images, _masks = _table_dataset(root)
     out = tmp_path / "m"
     drawn = _drawn(root, csv_path, out)
 
@@ -207,36 +221,42 @@ def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(
     assert {s.ground_truth for s in partition.samples} == {str(csv_path)}
 
 
-def _document_dataset(root: Path) -> tuple[Path, None]:
+def _document_dataset(
+    root: Path,
+) -> tuple[Path, None, dict[str, Path], dict[str, Path]]:
     """Write a dataset whose ground truth is one label document per image, each holding a ``bud``.
 
-    Return its images directory and ``None`` for the ground-truth place.
+    The images are :func:`_stem_images` under ``root``'s undated bucket. Returns the images
+    directory, ``None`` for the ground-truth place, the images by stem and an empty mapping,
+    since it writes no mask.
     """
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
     images_dir = image_dir(root, UNDATED_BUCKET)
-    images_dir.mkdir(parents=True, exist_ok=True)
-    for stem in STEMS:
-        write_image(images_dir / f"{stem}.png", (16, 16), (10, 20, 30))
+    images = _stem_images(images_dir)
+    for image in images.values():
         label_image(
-            images_dir / f"{stem}.png",
+            image,
             [Annotation(subject="bud", geometry=BBox(1, 1, 8, 8))],
             16,
             16,
         )
-    return images_dir, None
+    return images_dir, None, images, {}
 
 
 def _drop_ground_truth_of_a(
-    images_dir: Path, ground_truth: Path | None
+    image: Path, ground_truth: Path | None, masks: dict[str, Path]
 ) -> None:
-    """Remove member ``a``'s label document, table row or mask, by ``ground_truth``'s form."""
+    """Remove member ``a``'s label document, table row or mask, by ``ground_truth``'s form.
+
+    ``image`` is member ``a``'s image and ``masks`` the dataset's masks by stem.
+    """
     import tcip_store
     from tests._producer_fixtures import image_label_key
 
     if ground_truth is None:
-        tcip_store.delete(image_label_key(images_dir / "a.png"))
+        tcip_store.delete(image_label_key(image))
     elif ground_truth.suffix == ".csv":
         rows = [
             r for r in csv.reader(ground_truth.open(newline="")) if r[0] != "a"
@@ -244,16 +264,16 @@ def _drop_ground_truth_of_a(
         with open(ground_truth, "w", newline="") as handle:
             csv.writer(handle).writerows(rows)
     else:
-        next(p for p in ground_truth.iterdir() if p.stem == "a").unlink()
+        masks["a"].unlink()
 
 
-def _drop_image_of_a(images_dir: Path, ground_truth: Path | None) -> None:
-    """Remove member ``a``'s image, and empty its label document when it has one."""
+def _drop_image_of_a(image: Path, ground_truth: Path | None) -> None:
+    """Remove member ``a``'s ``image``, and empty its label document when it has one."""
     from tests._producer_fixtures import label_image
 
-    (images_dir / "a.png").unlink()
+    image.unlink()
     if ground_truth is None:
-        label_image(images_dir / "a.png", [], 16, 16, keep_empty=True)
+        label_image(image, [], 16, 16, keep_empty=True)
 
 
 @pytest.mark.parametrize(
@@ -264,7 +284,9 @@ def _drop_image_of_a(images_dir: Path, ground_truth: Path | None) -> None:
 @pytest.mark.parametrize("drop", ["ground_truth", "image"])
 def test_a_recorded_sample_is_tallied_as_a_fresh_admission_tallies_it(
     tmp_path: Path,
-    dataset: Callable[[Path], tuple[Path, Path | None]],
+    dataset: Callable[
+        [Path], tuple[Path, Path | None, dict[str, Path], dict[str, Path]]
+    ],
     drop: str,
 ) -> None:
     """A recorded sample is tallied as a fresh admission tallies it.
@@ -278,7 +300,7 @@ def test_a_recorded_sample_is_tallied_as_a_fresh_admission_tallies_it(
         readmitted_samples,
     )
 
-    images_dir, ground_truth = dataset(tmp_path / "ds")
+    images_dir, ground_truth, images, masks = dataset(tmp_path / "ds")
     scope = (
         ClassScope(subject="bud", attributes=())
         if dataset is _document_dataset
@@ -287,9 +309,9 @@ def test_a_recorded_sample_is_tallied_as_a_fresh_admission_tallies_it(
     admission = admit(images_dir, ground_truth, scope=scope)
     samples = admission.every_sample()
     if drop == "image":
-        _drop_image_of_a(images_dir, ground_truth)
+        _drop_image_of_a(images["a"], ground_truth)
     else:
-        _drop_ground_truth_of_a(images_dir, ground_truth)
+        _drop_ground_truth_of_a(images["a"], ground_truth, masks)
 
     fresh = admit(
         images_dir,
@@ -352,7 +374,7 @@ def test_a_mask_sample_reaches_its_own_mask(tmp_path: Path) -> None:
     names.
     """
     root = tmp_path / "ds"
-    _images_dir, masks_dir = _mask_dataset(root)
+    _images_dir, masks_dir, _images, masks = _mask_dataset(root)
     out = tmp_path / "m"
     drawn = _drawn(root, masks_dir, out)
 
@@ -368,7 +390,7 @@ def test_a_mask_sample_reaches_its_own_mask(tmp_path: Path) -> None:
         expected = STEMS.index(sample.member) + 1
         _image, target = train_ds[index]
         assert int(target["masks"].sum()) == expected * expected
-        assert Path(sample.ground_truth) == masks_dir / f"{sample.member}.png"
+        assert Path(sample.ground_truth) == masks[sample.member]
 
 
 def test_a_row_key_sample_reaches_the_row_it_names(tmp_path: Path) -> None:
@@ -377,7 +399,7 @@ def test_a_row_key_sample_reaches_the_row_it_names(tmp_path: Path) -> None:
     Each training sample's label is the one its ``row_key`` names in the table it names.
     """
     root = tmp_path / "ds"
-    _images_dir, csv_path = _table_dataset(root)
+    _images_dir, csv_path, _images, _masks = _table_dataset(root)
     out = tmp_path / "m"
     drawn = _drawn(root, csv_path, out)
 
@@ -408,7 +430,7 @@ def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(
     and each sample holds its own source and mask.
     """
     root = tmp_path / "ds"
-    images_dir, masks_dir = _mask_dataset(root)
+    images_dir, masks_dir, images, masks = _mask_dataset(root)
     data = DataSpec.model_validate(
         {
             "images_dir": str(images_dir),
@@ -440,10 +462,8 @@ def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(
             assert sample.source == key, (
                 "a sample is indexed by its own source"
             )
-            assert Path(sample.source) == images_dir / f"{sample.member}.png"
-            assert (
-                Path(sample.ground_truth) == masks_dir / f"{sample.member}.png"
-            )
+            assert Path(sample.source) == images[sample.member]
+            assert Path(sample.ground_truth) == masks[sample.member]
 
 
 def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(
@@ -455,7 +475,7 @@ def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(
     sample is indexed by its own image path and names the run's table as its ground truth.
     """
     root = tmp_path / "ds"
-    images_dir, csv_path = _table_dataset(root)
+    images_dir, csv_path, images, _masks = _table_dataset(root)
     data = DataSpec.model_validate(
         {
             "images_dir": str(images_dir),
@@ -486,7 +506,7 @@ def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(
                 "a sample is indexed by its own source"
             )
             assert Path(sample.ground_truth) == csv_path
-            assert Path(key) == images_dir / f"{sample.member}.png"
+            assert Path(key) == images[sample.member]
 
 
 # -- a member's name is its row key, dots and all ------------------------------
@@ -503,20 +523,12 @@ def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path) -> None:
         image_dir(root, UNDATED_BUCKET),
         root / "labels.csv",
     )
-    images_dir.mkdir(parents=True, exist_ok=True)
-    dotted = [f"a.{index}" for index in range(8)]
-    rows = []
-    for index, key in enumerate(dotted):
-        write_image(
-            images_dir / f"{key}.png",
-            (16, 16),
-            (10 * index, 20 + index, 30 + index),
-        )
-        rows.append((key, index % 3))
+    dotted = tuple(f"a.{index}" for index in range(8))
+    _stem_images(images_dir, dotted)
     with open(csv_path, "w", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(("stem", "label"))
-        writer.writerows(rows)
+        writer.writerows((key, index % 3) for index, key in enumerate(dotted))
 
     data_cfg = {
         "images_dir": str(images_dir),
@@ -562,7 +574,7 @@ def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(
     side.
     """
     root = tmp_path / "ds"
-    images_dir, masks_dir = _mask_dataset(root)
+    images_dir, masks_dir, _images, masks = _mask_dataset(root)
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(masks_dir),
@@ -574,10 +586,8 @@ def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(
     assert "error" not in result, result
     frozen = read_selection(result["selection_dir"], project=tmp_path)
     assert frozen.scope == ClassScope()
-    assert {Path(s.ground_truth).suffix for s in frozen.samples} == {".png"}
     for sample in frozen.samples:
-        assert Path(sample.ground_truth).parent == masks_dir
-        assert Path(sample.ground_truth).is_file()
+        assert Path(sample.ground_truth) == masks[sample.member]
 
     train_ds, val_ds, partition, _data = _train_val(
         tmp_path,
@@ -605,7 +615,7 @@ def test_a_table_run_freezes_into_a_selection_its_bind_accepts(
     selection builds a training dataset holding the frozen training side and a validation one.
     """
     root = tmp_path / "ds"
-    images_dir, csv_path = _table_dataset(root)
+    images_dir, csv_path, _images, _masks = _table_dataset(root)
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(csv_path),
@@ -640,7 +650,7 @@ def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(
     A member's mask replaced after the run refuses the freeze, naming the member.
     """
     root = tmp_path / "ds"
-    images_dir, masks_dir = _mask_dataset(root)
+    images_dir, masks_dir, _images, masks = _mask_dataset(root)
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(masks_dir),
@@ -651,7 +661,7 @@ def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(
     _resolved(tmp_path, "exp-mask-moved", "semantic_seg", data_cfg)
 
     painted_frame(16, 16, 0, [((0, 0, 12, 12), 1)], mode="L").save(
-        masks_dir / f"{STEMS[0]}.png"
+        masks[STEMS[0]]
     )
 
     result = freeze_selection(tmp_path, "exp-mask-moved", actor=None)
@@ -660,24 +670,21 @@ def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(
     assert STEMS[0] in result["error"]
 
 
-def _three_class_masks(root: Path) -> tuple[Path, Path]:
-    """Write four images and masks painted 1 over (0, 0, 8, 8), the first 2 over (8, 8, 16, 16)."""
+def _three_class_masks(root: Path) -> tuple[Path, Path, dict[str, Path]]:
+    """Write four images and masks painted 1 over (0, 0, 8, 8), the first 2 over (8, 8, 16, 16).
+
+    Returns the images directory, the masks directory and the masks by stem.
+    """
     images_dir, masks_dir = image_dir(root, UNDATED_BUCKET), root / "masks"
-    images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
-    for index, stem in enumerate(STEMS[:4]):
-        write_image(
-            images_dir / f"{stem}.png",
-            (16, 16),
-            (10 * index, 20 + index, 30 + index),
-        )
+    _stem_images(images_dir, STEMS[:4])
+    masks = {stem: masks_dir / f"{stem}.png" for stem in STEMS[:4]}
+    for index, mask in enumerate(masks.values()):
         extents = [((0, 0, 8, 8), 1)] + (
             [((8, 8, 16, 16), 2)] if index == 0 else []
         )
-        painted_frame(16, 16, 0, extents, mode="L").save(
-            masks_dir / f"{stem}.png"
-        )
-    return images_dir, masks_dir
+        painted_frame(16, 16, 0, extents, mode="L").save(mask)
+    return images_dir, masks_dir, masks
 
 
 def test_a_stated_class_count_refuses_on_the_run_path_whatever_its_value(
@@ -688,7 +695,7 @@ def test_a_stated_class_count_refuses_on_the_run_path_whatever_its_value(
     A config stating a class count of 2, 3 or 9 refuses naming ``num_classes``, and a config
     stating none records the derived count of three.
     """
-    images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
+    images_dir, masks_dir, _masks = _three_class_masks(tmp_path / "ds")
     base = {
         "images_dir": str(images_dir),
         "labels_dir": str(masks_dir),
@@ -718,7 +725,7 @@ def test_a_table_run_stating_a_count_refuses(tmp_path: Path) -> None:
     """
     from tests._producer_fixtures import run_over
 
-    images_dir, csv_path = _table_dataset(tmp_path / "table")
+    images_dir, csv_path, _images, _masks = _table_dataset(tmp_path / "table")
     with open(csv_path, "w", newline="") as handle:
         csv.writer(handle).writerows(
             [("stem", "label"), *((s, i % 2) for i, s in enumerate(STEMS))]
@@ -742,7 +749,7 @@ def test_a_runs_unstated_class_count_is_read_once_over_every_sample(
 
     With the one mask reaching class 2 on the validation side, the run records three classes.
     """
-    images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
+    images_dir, masks_dir, _masks = _three_class_masks(tmp_path / "ds")
     data = DataSpec.model_validate(
         {
             "images_dir": str(images_dir),
@@ -778,7 +785,7 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(
     from tcip_mcp.pipelines.training.evaluation import evaluate
     from tests import bespoke_models
 
-    images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
+    images_dir, masks_dir, masks = _three_class_masks(tmp_path / "ds")
     data = DataSpec.model_validate(
         {
             "images_dir": str(images_dir),
@@ -791,8 +798,7 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(
         tmp_path, "semantic_seg", data
     )
     held = {
-        int(np.array(Image.open(masks_dir / f"{stem}.png")).max())
-        for stem in STEMS[1:4]
+        int(np.array(Image.open(masks[stem])).max()) for stem in STEMS[1:4]
     }
     assert held == {1}, (
         "the training half reaches only class 1, which is what this measures"
@@ -841,13 +847,15 @@ def test_the_place_and_the_record_read_one_ground_truth_shape(
     from tests._producer_fixtures import image_label_key
 
     root = tmp_path / "ds"
-    images_dir, masks_dir = _mask_dataset(root)
-    _table_images, csv_path = _table_dataset(tmp_path / "table")
+    _images_dir, masks_dir, images, masks = _mask_dataset(root)
+    _table_images, csv_path, _table_by_stem, _no_masks = _table_dataset(
+        tmp_path / "table"
+    )
 
     for place, member in (
         (str(csv_path), str(csv_path)),
-        (str(masks_dir), str(masks_dir / f"{STEMS[0]}.png")),
-        (None, image_label_key(images_dir / f"{STEMS[0]}.png")),
+        (str(masks_dir), str(masks[STEMS[0]])),
+        (None, image_label_key(images[STEMS[0]])),
     ):
         assert ground_truth_shape(place) == shape_of(member, None), place
 
@@ -860,7 +868,7 @@ def test_a_mask_run_refuses_a_stated_class_space_and_admits_the_empty_one(
     A mask raster carries its own classes, so a scope naming a subject over it refuses by name;
     the explicit empty scope admits and is what the run records.
     """
-    images_dir, masks_dir = _mask_dataset(tmp_path / "ds")
+    images_dir, masks_dir, _images, _masks = _mask_dataset(tmp_path / "ds")
 
     def data(scope: dict) -> DataSpec:
         return DataSpec.model_validate(
@@ -893,7 +901,7 @@ def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(
     mask directory.
     """
     root = tmp_path / "ds"
-    images_dir, masks_dir = _mask_dataset(root)
+    images_dir, masks_dir, _images, _masks = _mask_dataset(root)
     out = tmp_path / "m"
     _drawn(root, masks_dir, out)
 
@@ -945,21 +953,19 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(
     and sources, and each records the ground truth and source its loaders served.
     """
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import (
         image_label_key,
         label_image,
+        registry_of,
         registry_over,
     )
 
     root = tmp_path / "ds"
-    images_dir, masks_dir = _mask_dataset(root)
-    registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="leaf", description=""),))
-    )
-    for stem in STEMS:
+    images_dir, masks_dir, images, _masks = _mask_dataset(root)
+    registry_over(root, registry_of("leaf"))
+    for image in images.values():
         label_image(
-            images_dir / f"{stem}.png",
+            image,
             [Annotation(subject="leaf", geometry=BBox(2, 2, 8, 8))],
             16,
             16,
@@ -1013,7 +1019,7 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(
         by_member(mask_run),
     )
     assert {m: s.ground_truth for m, s in document_samples.items()} == {
-        m: image_label_key(images_dir / f"{m}.png") for m in STEMS
+        m: image_label_key(image) for m, image in images.items()
     }
     assert {Path(s.ground_truth).parent for s in mask_samples.values()} == {
         masks_dir

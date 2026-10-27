@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
     from tcip_mcp.workspace import BoundProject
     from tcip_web.state import OpenProject
+    from tests._producer_fixtures import WrittenDataset
 
 from tests.hung_test_watchdog import pytest_timeout_set_timer
 from tests.ray_cluster_lock import pytest_configure, pytest_runtest_protocol
@@ -300,7 +301,7 @@ DATA_DIR_BUCKET = "live/2-11-26"
 
 
 @pytest.fixture
-def data_dir(tmp_path: Path) -> Path:
+def data_dir(tmp_path: Path) -> WrittenDataset:
     """Write three labeled images of capture ``2-11-26``, a registry and a published bucket.
 
     The registry declares the one subject ``bud``. Each image is 640x480 gray, its label
@@ -310,9 +311,10 @@ def data_dir(tmp_path: Path) -> Path:
     """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import (
+        WrittenDataset,
         label_image,
+        registry_of,
         registry_over,
         write_image,
     )
@@ -323,18 +325,16 @@ def data_dir(tmp_path: Path) -> Path:
     images_dir.mkdir(parents=True)
 
     # One nested registry traveling with the labels: a single detection subject, no attributes.
-    registry_over(
-        tmp_path,
-        SubjectRegistry(
-            subjects=(Subject(name=subject, description="a bud"),)
-        ),
-    )
+    registry_over(tmp_path, registry_of(subject))
 
-    for name in ("img_001", "img_002", "img_003"):
+    images = [
         write_image(images_dir / f"{name}.jpg", (640, 480), (128, 128, 128))
+        for name in ("img_001", "img_002", "img_003")
+    ]
+    for image in images:
         # GT: 2 boxes per image (pixel xyxy), by subject name.
         label_image(
-            images_dir / f"{name}.jpg",
+            image,
             [
                 Annotation(subject=subject, geometry=BBox(288, 216, 352, 264)),
                 Annotation(subject=subject, geometry=BBox(176, 132, 208, 156)),
@@ -351,7 +351,7 @@ def data_dir(tmp_path: Path) -> Path:
         DATA_DIR_BUCKET,
         [
             {
-                "image": str(images_dir / f"{name}.jpg"),
+                "image": str(image),
                 "width": 640,
                 "height": 480,
                 "boxes": [[288, 216, 352, 264], [496, 372, 528, 396]],
@@ -359,8 +359,8 @@ def data_dir(tmp_path: Path) -> Path:
                 "labels": [1, 1],
                 "cap": 3,
             }
-            for name in ("img_001", "img_002", "img_003")
+            for image in images
         ],
         scope={"subject": subject},
     )
-    return tmp_path
+    return WrittenDataset(tmp_path, images_dir, images)

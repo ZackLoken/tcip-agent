@@ -21,9 +21,10 @@ from tests._web_fixtures import new_project
 
 
 def _real_dataset(root: Path) -> None:
-    images = image_dir(root, "2024-01-01")
-    write_image(images / "a.png", (10, 10), (1, 2, 3))
-    label_image(images / "a.png", [], 10, 10, keep_empty=True)
+    image = write_image(
+        image_dir(root, "2024-01-01") / "a.png", (10, 10), (1, 2, 3)
+    )
+    label_image(image, [], 10, 10, keep_empty=True)
 
 
 def _registered(
@@ -77,10 +78,10 @@ def test_content_carrying_no_identity_reports_unregistered(
 
 def test_a_real_content_change_still_reports_changed(tmp_path: Path) -> None:
     project, root, _ = _registered(tmp_path)
-    write_image(image_dir(root, "2024-01-01") / "b.png", (10, 10), (4, 5, 6))
-    label_image(
-        image_dir(root, "2024-01-01") / "b.png", [], 10, 10, keep_empty=True
+    image = write_image(
+        image_dir(root, "2024-01-01") / "b.png", (10, 10), (4, 5, 6)
     )
+    label_image(image, [], 10, 10, keep_empty=True)
 
     verdict = _check(root, project)
 

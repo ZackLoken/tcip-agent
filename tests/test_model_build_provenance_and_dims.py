@@ -26,7 +26,6 @@ torch = pytest.importorskip("torch")
 from torch import nn
 
 from tcip_mcp import subject_registry  # noqa: E402
-from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
     CONFIG_KEY,
     GEOMETRY_KEY,
@@ -50,7 +49,7 @@ from tests._chain_fixtures import (
     training_config,
     weights_statistics,
 )
-from tests._producer_fixtures import registry_over  # noqa: E402
+from tests._producer_fixtures import registry_over, scope_over  # noqa: E402
 from tests._training_values import (  # noqa: E402
     drawn_split,
     evaluation_block,
@@ -107,41 +106,35 @@ def _param_shapes(model: nn.Module) -> dict:
     return {name: tuple(t.shape) for name, t in model.state_dict().items()}
 
 
-def _write_registry(dataset_root: Path) -> None:
-    """Write a registry with three subjects of different shape.
-
-    'leaf' carries a three-value ordinal axis, 'bush' a two-value categorical one, and 'bud'
-    none at all.
-    """
-    registry = subject_registry.SubjectRegistry(
-        subjects=(
-            subject_registry.Subject(
-                name="leaf",
-                description="",
-                attributes=(
-                    subject_registry.Attribute(
-                        name="condition",
-                        type="ordinal",
-                        values=("healthy", "mild", "severe"),
-                    ),
+REGISTRY = subject_registry.SubjectRegistry(
+    subjects=(
+        subject_registry.Subject(
+            name="leaf",
+            description="",
+            attributes=(
+                subject_registry.Attribute(
+                    name="condition",
+                    type="ordinal",
+                    values=("healthy", "mild", "severe"),
                 ),
             ),
-            subject_registry.Subject(
-                name="bush",
-                description="",
-                attributes=(
-                    subject_registry.Attribute(
-                        name="vigor",
-                        type="categorical",
-                        values=("low", "high"),
-                    ),
+        ),
+        subject_registry.Subject(
+            name="bush",
+            description="",
+            attributes=(
+                subject_registry.Attribute(
+                    name="vigor",
+                    type="categorical",
+                    values=("low", "high"),
                 ),
             ),
-            subject_registry.Subject(name="bud", description=""),
-        )
+        ),
+        subject_registry.Subject(name="bud", description=""),
     )
-    dataset_root.mkdir(parents=True, exist_ok=True)
-    registry_over(dataset_root, registry)
+)
+"""A registry of three subjects of different shape: ``leaf`` carries a three-value ordinal axis,
+``bush`` a two-value categorical one, and ``bud`` none at all."""
 
 
 def _agent_package(root: Path, name: str, modules: dict) -> Path:
@@ -165,33 +158,28 @@ def test_contract_dims_take_the_admitted_attributes_without_the_loader_backgroun
     condition value.
     """
     from tcip_annotation.state import Annotation, BBox
-    from tests._producer_fixtures import admit_over, label_image, write_image
+    from tests._producer_fixtures import (
+        admit_over,
+        label_image,
+        registry_of,
+        write_image,
+    )
 
     dataset_root = tmp_path / "currant_2026"
     images_dir = image_dir(dataset_root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
     registry_over(
         dataset_root,
-        subject_registry.SubjectRegistry(
-            subjects=(
-                subject_registry.Subject(
-                    name="leaf",
-                    description="",
-                    attributes=(
-                        subject_registry.Attribute(
-                            name="condition",
-                            type="ordinal",
-                            values=("healthy", "mild"),
-                        ),
-                    ),
-                ),
-            )
+        registry_of(
+            "leaf",
+            subject_registry.Attribute(
+                name="condition", type="ordinal", values=("healthy", "mild")
+            ),
         ),
     )
     for stem, condition in (("leaf_a", "healthy"), ("leaf_b", "mild")):
-        write_image(images_dir / f"{stem}.png", (64, 64))
         label_image(
-            images_dir / f"{stem}.png",
+            write_image(images_dir / f"{stem}.png", (64, 64)),
             [
                 Annotation(
                     subject="leaf",
@@ -226,8 +214,8 @@ def test_contract_dims_take_the_admitted_attributes_without_the_loader_backgroun
         )
     )
 
-    _write_registry(dataset_root)  # a third condition value declared since
-    assert len(registry_scope(images_dir, "leaf").attributes[0].values) == 3
+    grown = scope_over(dataset_root, REGISTRY, "leaf")  # a third value since
+    assert len(grown.attributes[0].values) == 3
 
     dims = resolve_contract_dims(spec, recorded_model_dims(spec), UNSHARED)
 
@@ -250,7 +238,7 @@ def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attribute
     dataset_root = tmp_path / "subject_2026"
     images_dir = image_dir(dataset_root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
-    _write_registry(dataset_root)
+    scope = scope_over(dataset_root, REGISTRY, "bud")
 
     spec = train_config(
         training_config(
@@ -262,7 +250,7 @@ def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attribute
                 "normalization": WEIGHTS_NORMALIZATION,
             },
             {
-                "scope": asdict(registry_scope(images_dir, "bud")),
+                "scope": asdict(scope),
                 "num_channels": 3,
                 "images_dir": str(images_dir),
                 "split": drawn_split(),
@@ -549,15 +537,16 @@ def test_a_run_builds_at_the_width_and_heads_its_admitted_data_records(
     dataset_root = tmp_path / "hazel_2026"
     images_dir = image_dir(dataset_root, UNDATED_BUCKET)
     images_dir.mkdir(parents=True)
-    _write_registry(dataset_root)
+    registry_over(dataset_root, REGISTRY)
     for stem, condition in (
         ("leaf_a", "healthy"),
         ("leaf_b", "mild"),
         ("leaf_c", "severe"),
     ):
-        Image.new("L", (64, 64)).save(images_dir / f"{stem}.png")
+        image = images_dir / f"{stem}.png"
+        Image.new("L", (64, 64)).save(image)
         label_image(
-            images_dir / f"{stem}.png",
+            image,
             [
                 Annotation(
                     subject="leaf",

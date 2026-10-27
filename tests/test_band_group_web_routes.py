@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from tcip_mcp.dataset_layout import image_dir
-from tests._producer_fixtures import write_image
+from tests._producer_fixtures import GroupedDataset, write_image
 from tests._training_values import RATIONALE
 
 if TYPE_CHECKING:
@@ -27,11 +27,12 @@ if TYPE_CHECKING:
 
 def _write_group(
     images_dir: Path, stem: str, base: tuple[int, int, int] = (111, 222, 333)
-) -> None:
-    """Write band TIFFs for group ``stem`` into ``images_dir`` and pass them to the manifest writer.
+) -> tuple[Path, dict[str, Path]]:
+    """Write band TIFFs for group ``stem`` into ``images_dir`` and their manifest beside them.
 
     For each pair of ``zip(("Green", "Red", "NIR"), base)`` a 20 by 24 uint16 TIFF is written
-    from the ``base`` entry and one horizontal gradient.
+    from the ``base`` entry and one horizontal gradient. Returns the manifest written and the
+    band paths by name.
     """
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
@@ -44,23 +45,24 @@ def _write_group(
         ).astype(np.uint16)
         tifffile.imwrite(str(p), arr)
         band_paths[name] = p
-    write_band_group_manifest(
+    manifest = write_band_group_manifest(
         images_dir,
         stem,
         band_paths,
         central_wavelength_nm={"Green": 560.0, "Red": 650.0, "NIR": 860.0},
         identity_tolerance={},
     )
+    return manifest, band_paths
 
 
 @pytest.fixture
-def grouped_dataset(tmp_path: Path) -> Path:
+def grouped_dataset(tmp_path: Path) -> GroupedDataset:
     root = tmp_path / "MS_Farm"
     date_dir = image_dir(root, "2026-05-01")
     date_dir.mkdir(parents=True)
-    _write_group(date_dir, "cap_001")
-    write_image(date_dir / "plain_002.jpg", (24, 20), (5, 5, 5))
-    return root
+    manifest, bands = _write_group(date_dir, "cap_001")
+    plain = write_image(date_dir / "plain_002.jpg", (24, 20), (5, 5, 5))
+    return GroupedDataset(root, date_dir, manifest, bands, plain)
 
 
 # ── routes/dataset.py ────────────────────────────────────────────────────────────────────
@@ -68,13 +70,13 @@ def grouped_dataset(tmp_path: Path) -> Path:
 
 def test_dataset_select_route_folds_the_group(
     client: TestClient,
-    grouped_dataset: Path,
+    grouped_dataset: GroupedDataset,
     opened_project: Path,
 ) -> None:
     resp = client.post(
         "/api/dataset/select",
         json={
-            "dataset_root": str(grouped_dataset),
+            "dataset_root": str(grouped_dataset.root),
             "date": "2026-05-01",
         },
     )
@@ -88,11 +90,11 @@ def test_dataset_select_route_folds_the_group(
 
 def test_annotate_labels_route_measures_a_grouped_captures_real_frame(
     client: TestClient,
-    grouped_dataset: Path,
+    grouped_dataset: GroupedDataset,
 ) -> None:
-    manifest = image_dir(grouped_dataset, "2026-05-01") / "cap_001.bandgroup"
     resp = client.get(
-        "/api/annotate/labels", params={"image_path": str(manifest)}
+        "/api/annotate/labels",
+        params={"image_path": str(grouped_dataset.manifest)},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -108,10 +110,10 @@ def _view(path: Path, **params: str | int) -> dict:
 
 
 def test_serve_image_plain_photo_unaffected_by_new_params(
-    client: TestClient, grouped_dataset: Path
+    client: TestClient, grouped_dataset: GroupedDataset
 ) -> None:
     """The band params at their defaults serve a plain photo exactly as omitting them does."""
-    plain = image_dir(grouped_dataset, "2026-05-01") / "plain_002.jpg"
+    plain = grouped_dataset.plain
     baseline = client.get("/api/images", params=_view(plain))
     with_defaults = client.get(
         "/api/images", params=_view(plain, stretch="minmax", level=0)
@@ -122,23 +124,23 @@ def test_serve_image_plain_photo_unaffected_by_new_params(
 
 
 def test_serve_image_refuses_a_band_members_own_path_naming_its_manifest(
-    client: TestClient, grouped_dataset: Path
+    client: TestClient, grouped_dataset: GroupedDataset
 ) -> None:
     """The serve door answers a band member's own path with a 404 naming its manifest.
 
     A band of a grouped capture is no image of its own: its path answers 404 naming the
     manifest, not a single-band render.
     """
-    member = image_dir(grouped_dataset, "2026-05-01") / "cap_001_NIR.tif"
+    member = grouped_dataset.bands["NIR"]
     resp = client.get("/api/images", params=_view(member))
     assert resp.status_code == 404
-    assert "cap_001.bandgroup" in resp.json()["detail"]
+    assert grouped_dataset.manifest.name in resp.json()["detail"]
 
 
 def test_serve_image_composites_a_band_group_by_default(
-    client: TestClient, grouped_dataset: Path
+    client: TestClient, grouped_dataset: GroupedDataset
 ) -> None:
-    manifest = image_dir(grouped_dataset, "2026-05-01") / "cap_001.bandgroup"
+    manifest = grouped_dataset.manifest
     resp = client.get("/api/images", params=_view(manifest))
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/jpeg"
@@ -148,9 +150,9 @@ def test_serve_image_composites_a_band_group_by_default(
 
 
 def test_serve_image_bands_param_changes_the_composite(
-    client: TestClient, grouped_dataset: Path
+    client: TestClient, grouped_dataset: GroupedDataset
 ) -> None:
-    manifest = image_dir(grouped_dataset, "2026-05-01") / "cap_001.bandgroup"
+    manifest = grouped_dataset.manifest
     # stretch="none" (absolute, by dtype max) so each band's distinct base level survives:
     # min-max stretch would remove it entirely (every band shares the same gradient shape),
     # canceling the very difference this test means to detect.
@@ -170,34 +172,34 @@ def test_serve_image_bands_param_changes_the_composite(
 
 
 def test_serve_image_stretch_param_changes_the_cache_key(
-    client: TestClient, grouped_dataset: Path
+    client: TestClient, grouped_dataset: GroupedDataset
 ) -> None:
-    manifest = image_dir(grouped_dataset, "2026-05-01") / "cap_001.bandgroup"
+    manifest = grouped_dataset.manifest
     r1 = client.get("/api/images", params=_view(manifest, stretch="minmax"))
     r2 = client.get("/api/images", params=_view(manifest, stretch="none"))
     assert r1.headers["etag"] != r2.headers["etag"]
 
 
 def test_serve_image_rejects_an_unknown_stretch(
-    client: TestClient, grouped_dataset: Path
+    client: TestClient, grouped_dataset: GroupedDataset
 ) -> None:
-    manifest = image_dir(grouped_dataset, "2026-05-01") / "cap_001.bandgroup"
+    manifest = grouped_dataset.manifest
     resp = client.get("/api/images", params=_view(manifest, stretch="bogus"))
     assert resp.status_code == 400
 
 
 def test_serve_image_rejects_a_band_count_other_than_3(
-    client: TestClient, grouped_dataset: Path
+    client: TestClient, grouped_dataset: GroupedDataset
 ) -> None:
-    manifest = image_dir(grouped_dataset, "2026-05-01") / "cap_001.bandgroup"
+    manifest = grouped_dataset.manifest
     resp = client.get("/api/images", params=_view(manifest, bands="Green,Red"))
     assert resp.status_code == 400
 
 
 def test_serve_image_rejects_an_undeclared_band_name(
-    client: TestClient, grouped_dataset: Path
+    client: TestClient, grouped_dataset: GroupedDataset
 ) -> None:
-    manifest = image_dir(grouped_dataset, "2026-05-01") / "cap_001.bandgroup"
+    manifest = grouped_dataset.manifest
     resp = client.get(
         "/api/images", params=_view(manifest, bands="Green,Red,Blue")
     )
@@ -205,9 +207,9 @@ def test_serve_image_rejects_an_undeclared_band_name(
 
 
 def test_get_bands_endpoint_reports_the_group(
-    client: TestClient, grouped_dataset: Path
+    client: TestClient, grouped_dataset: GroupedDataset
 ) -> None:
-    manifest = image_dir(grouped_dataset, "2026-05-01") / "cap_001.bandgroup"
+    manifest = grouped_dataset.manifest
     resp = client.get("/api/images/bands", params={"path": str(manifest)})
     assert resp.status_code == 200
     body = resp.json()
@@ -220,9 +222,9 @@ def test_get_bands_endpoint_reports_the_group(
 
 
 def test_get_bands_endpoint_reports_3_for_a_plain_rgb_photo(
-    client: TestClient, grouped_dataset: Path
+    client: TestClient, grouped_dataset: GroupedDataset
 ) -> None:
-    plain = image_dir(grouped_dataset, "2026-05-01") / "plain_002.jpg"
+    plain = grouped_dataset.plain
     resp = client.get("/api/images/bands", params={"path": str(plain)})
     assert resp.status_code == 200
     assert resp.json()["band_count"] == 3
@@ -230,7 +232,7 @@ def test_get_bands_endpoint_reports_3_for_a_plain_rgb_photo(
 
 def test_get_bands_endpoint_never_decodes_pixels_for_a_plain_rgb_photo(
     client: TestClient,
-    grouped_dataset: Path,
+    grouped_dataset: GroupedDataset,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``/api/images/bands`` opens no raster for a plain RGB photo.
@@ -250,7 +252,7 @@ def test_get_bands_endpoint_never_decodes_pixels_for_a_plain_rgb_photo(
 
     monkeypatch.setattr(raster_source.SourceHeader, "open", _fail_if_called)
 
-    plain = image_dir(grouped_dataset, "2026-05-01") / "plain_002.jpg"
+    plain = grouped_dataset.plain
     resp = client.get("/api/images/bands", params={"path": str(plain)})
     assert resp.status_code == 200
     assert resp.json() == {"band_count": 3, "bands": []}
@@ -258,12 +260,10 @@ def test_get_bands_endpoint_never_decodes_pixels_for_a_plain_rgb_photo(
 
 
 def test_serve_image_stale_group_returns_409(
-    client: TestClient, grouped_dataset: Path
+    client: TestClient, grouped_dataset: GroupedDataset
 ) -> None:
-    date_dir = image_dir(grouped_dataset, "2026-05-01")
-    manifest = date_dir / "cap_001.bandgroup"
-    (date_dir / "cap_001_NIR.tif").unlink()
-    resp = client.get("/api/images", params=_view(manifest))
+    grouped_dataset.bands["NIR"].unlink()
+    resp = client.get("/api/images", params=_view(grouped_dataset.manifest))
     assert resp.status_code == 409
 
 

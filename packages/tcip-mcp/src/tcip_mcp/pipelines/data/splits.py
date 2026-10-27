@@ -13,10 +13,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
-from pathlib import Path
 from typing import TYPE_CHECKING
-
-from tcip_store import canonical_path
 
 if TYPE_CHECKING:
     from tcip_annotation.json_io import LabelDocument
@@ -287,18 +284,6 @@ def recorded_group_key_fn(
     return lambda stem: key_fn(member_identity(date, stem))
 
 
-def same_directory(a: str | Path | None, b: str | Path | None) -> bool:
-    """Return whether ``a`` and ``b`` name one path.
-
-    They are compared through ``tcip_store.canonical_path`` so a trailing separator, forward
-    slashes, a relative spelling, a link or a case variant reads as the same path. ``False``
-    when either side is empty.
-    """
-    if not a or not b:
-        return False
-    return canonical_path(a) == canonical_path(b)
-
-
 # -- spatial (within-image) strip split ---------------------------------------
 
 _SPATIAL_IDENTITY_SEP = "::"
@@ -318,8 +303,7 @@ def stem_of_spatial_identity(identity: str) -> str:
 
     An identity with no separator (not one this module produced) is returned unchanged.
     """
-    idx = identity.rfind(_SPATIAL_IDENTITY_SEP)
-    return identity[:idx] if idx != -1 else identity
+    return identity.rsplit(_SPATIAL_IDENTITY_SEP, 1)[0]
 
 
 @dataclass(frozen=True)
@@ -335,10 +319,9 @@ class SpatialStripSplit:
     (enough on its own to guarantee ``>= buffer`` separation), so the image-edge-facing side of
     the outermost two regions is never shrunk.
 
-    ``regions`` maps each split name to one half-open pixel rect per side, as a one-entry list
-    (buffer-shrunk on any side bordering a different-split neighbor).
-    ``realized_fractions`` is each side's kept tile count over the total kept across every side
-    (post-buffer), not the requested fractions.
+    ``region_bounds`` holds each side's ``(name, start, end)`` along ``axis`` (buffer-shrunk on
+    any side bordering a different-split neighbor), and ``kept_tiles`` each side's kept tile
+    count (post-buffer).
     """
 
     width: int
@@ -349,14 +332,33 @@ class SpatialStripSplit:
     buffer: int
     split_names: tuple[str, ...]
     requested_fractions: tuple[float, ...]
-    regions: dict[str, list[tuple[int, int, int, int]]]
     region_bounds: list[tuple[str, int, int]]
-    total_tiles: int
-    tiles_dropped_past_extent: int
     tiles_dropped_outside_regions: int
     kept_tiles: dict[str, int]
-    realized_fractions: dict[str, float]
-    realized_discard_fraction: float
+
+    @property
+    def regions(self) -> dict[str, list[tuple[int, int, int, int]]]:
+        """Each side's half-open pixel rect across the image, as a one-entry list."""
+        return {
+            name: [
+                (start, 0, end, self.height)
+                if self.axis == "x"
+                else (0, start, self.width, end)
+            ]
+            for name, start, end in self.region_bounds
+        }
+
+    @property
+    def realized_fractions(self) -> dict[str, float]:
+        """Each side's kept tile count over the total kept, not the requested fraction."""
+        total = sum(self.kept_tiles.values())
+        return {name: kept / total for name, kept in self.kept_tiles.items()}
+
+    @property
+    def realized_discard_fraction(self) -> float:
+        """The share of the lattice's tiles that fall outside every region."""
+        outside = self.tiles_dropped_outside_regions
+        return outside / (sum(self.kept_tiles.values()) + outside)
 
     def identity_for(
         self, stem: str, box: tuple[int, int, int, int]
@@ -398,12 +400,9 @@ def _center_out_order(
     arrangement, so every slot but the largest faces at most one differently-assigned neighbor.
     A tie among equal shares resolves in the order the slots were given, never by a seed.
     """
-    indexed = list(enumerate(slots))
-    indexed.sort(key=lambda p: (-p[1][1], p[0]))
-    ordered = [item for _, item in indexed]
     left: list[tuple[str, float]] = []
     right: list[tuple[str, float]] = []
-    for i, item in enumerate(ordered):
+    for i, item in enumerate(sorted(slots, key=lambda slot: -slot[1])):
         (right if i % 2 == 0 else left).append(item)
     return list(reversed(left)) + right
 
@@ -475,7 +474,7 @@ def spatial_strip_split(
     ``tile_size``, or when the derived strip layout leaves any requested, non-zero-fraction side
     with zero kept tiles.
     """
-    from tcip_mcp.pipelines.slicing import is_full_slice, slice_lattice
+    from tcip_mcp.pipelines.slicing import slice_lattice
 
     if len(fractions) != len(split_names):
         raise ValueError(
@@ -506,19 +505,16 @@ def spatial_strip_split(
             f"at least two non-zero fractions are needed for a spatial split, got {fractions}."
         )
 
-    lattice = slice_lattice(height, width, tile_size, overlap)
-    total_tiles = len(lattice)
-    in_extent = [box for box in lattice if is_full_slice(box, tile_size)]
-    tiles_dropped_past_extent = total_tiles - len(in_extent)
-    if not in_extent:
+    if min(width, height) < tile_size:
         raise ValueError(
             f"no tile fits fully inside the {width}x{height} image extent at tile_size="
             f"{tile_size} (the frame is shorter than the tile on an axis); a spatial split needs "
             "at least one full tile to assign."
         )
 
-    x_spans = sorted({(x0, x1) for x0, _y0, x1, _y1 in in_extent})
-    y_spans = sorted({(y0, y1) for _x0, y0, _x1, y1 in in_extent})
+    lattice = slice_lattice(height, width, tile_size, overlap)
+    x_spans = sorted({(x0, x1) for x0, _y0, x1, _y1 in lattice})
+    y_spans = sorted({(y0, y1) for _x0, y0, _x1, y1 in lattice})
     axis = "x" if len(x_spans) >= len(y_spans) else "y"
 
     region_bounds = _strip_regions(
@@ -536,7 +532,7 @@ def spatial_strip_split(
 
     kept: dict[str, int] = {name: 0 for name in active_names}
     dropped_outside = 0
-    for box in in_extent:
+    for box in lattice:
         idx = _region_index(region_bounds, axis, box)
         if idx is None:
             dropped_outside += 1
@@ -550,17 +546,6 @@ def spatial_strip_split(
             f"kept={kept}. Try a smaller buffer, fewer splits, or a larger image."
         )
 
-    regions: dict[str, list[tuple[int, int, int, int]]] = {
-        name: [] for name in active_names
-    }
-    for name, start, end in region_bounds:
-        rect = (
-            (start, 0, end, height) if axis == "x" else (0, start, width, end)
-        )
-        regions[name].append(rect)
-
-    total_kept = sum(kept.values()) or 1
-    tiles_within_extent = len(in_extent)
     return SpatialStripSplit(
         width=width,
         height=height,
@@ -570,12 +555,7 @@ def spatial_strip_split(
         buffer=buffer,
         split_names=split_names,
         requested_fractions=fractions,
-        regions=regions,
         region_bounds=region_bounds,
-        total_tiles=total_tiles,
-        tiles_dropped_past_extent=tiles_dropped_past_extent,
         tiles_dropped_outside_regions=dropped_outside,
         kept_tiles=kept,
-        realized_fractions={n: kept[n] / total_kept for n in active_names},
-        realized_discard_fraction=dropped_outside / tiles_within_extent,
     )

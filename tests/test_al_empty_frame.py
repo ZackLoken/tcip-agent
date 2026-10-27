@@ -39,10 +39,8 @@ def test_empty_frame_ranks_low_not_max(tmp_path: Path) -> None:
 def test_a_detection_output_with_no_scores_refuses_rather_than_ranking_as_certain(
     tmp_path: Path,
 ) -> None:
-    write_image(tmp_path / "a.png", (64, 64), (100, 100, 100))
+    image = write_image(tmp_path / "a.png", (64, 64), (100, 100, 100))
 
     predictor = predictor_for(tmp_path, "build_scoreless", "detection")
     with pytest.raises(KeyError, match="scores"):
-        UncertaintyScorer(task="detection").score(
-            [tmp_path / "a.png"], predictor
-        )
+        UncertaintyScorer(task="detection").score([image], predictor)

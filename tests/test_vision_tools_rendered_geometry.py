@@ -12,6 +12,8 @@ import pytest
 from PIL import Image
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+from tests._image_fixtures import red_over_green
+from tests._producer_fixtures import WrittenDataset
 from tests._training_values import TRIAGE_WEIGHTS
 
 #: Plain gray so a drawn color's dominance over the background is unambiguous in either channel.
@@ -38,25 +40,19 @@ PRED_INSIDE_HIGH = (255, 35)
 OUTSIDE_EVERY_RING = (150, 90)
 
 
-def _red_over_gray(px: Image.Image, xy: tuple[int, int]) -> int:
-    """Return how strongly the first palette color (red) covers the gray ground at one pixel."""
-    r, g, _b = px.getpixel(xy)
-    return r - g
-
-
 @pytest.fixture
-def split_instance_dataset(tmp_path: Path) -> Path:
-    """Return a dataset of one 320x180 image labeled with one two-ring ``leaf`` polygon.
+def split_instance_dataset(tmp_path: Path) -> WrittenDataset:
+    """Write a dataset of one 320x180 image labeled with one two-ring ``leaf`` polygon.
 
     The rings are ``GT_RING_LEFT`` and ``GT_RING_RIGHT``.
     """
     from tcip_annotation.state import Annotation, Polygon
     from tests._producer_fixtures import label_image, write_image
 
-    images = image_dir(tmp_path, UNDATED_BUCKET)
-    write_image(images / "split.png", (320, 180), BACKGROUND)
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+    image = write_image(images_dir / "split.png", (320, 180), BACKGROUND)
     label_image(
-        images / "split.png",
+        image,
         [
             Annotation(
                 subject="leaf",
@@ -66,7 +62,7 @@ def split_instance_dataset(tmp_path: Path) -> Path:
         320,
         180,
     )
-    return tmp_path
+    return WrittenDataset(tmp_path, images_dir, [image])
 
 
 def _flat(ring: list[tuple[float, float]]) -> list[float]:
@@ -74,7 +70,7 @@ def _flat(ring: list[tuple[float, float]]) -> list[float]:
 
 
 def test_every_region_of_a_split_annotation_is_drawn_on_the_mask_render(
-    split_instance_dataset: Path,
+    split_instance_dataset: WrittenDataset,
 ) -> None:
     """A mask render covers both rings the stored annotation holds.
 
@@ -84,12 +80,10 @@ def test_every_region_of_a_split_annotation_is_drawn_on_the_mask_render(
     from tcip_mcp.tools.vision_tools import AnnotationsRender, visualize
 
     result = visualize(
-        split_instance_dataset,
+        split_instance_dataset.root,
         AnnotationsRender(
             source="annotations",
-            path=str(
-                image_dir(split_instance_dataset, UNDATED_BUCKET) / "split.png"
-            ),
+            path=str(split_instance_dataset.images[0]),
             task="segment",
         ),
     )
@@ -98,13 +92,13 @@ def test_every_region_of_a_split_annotation_is_drawn_on_the_mask_render(
 
     px = Image.open(result["image_path"]).convert("RGB")
     assert px.size == (320, 180)
-    assert _red_over_gray(px, GT_INSIDE_LEFT) > 40
-    assert _red_over_gray(px, GT_INSIDE_RIGHT) > 40
-    assert _red_over_gray(px, OUTSIDE_EVERY_RING) < 15
+    assert red_over_green(px, GT_INSIDE_LEFT) > 40
+    assert red_over_green(px, GT_INSIDE_RIGHT) > 40
+    assert red_over_green(px, OUTSIDE_EVERY_RING) < 15
 
 
 def test_every_region_of_a_split_prediction_is_drawn_on_the_mask_render(
-    split_instance_dataset: Path,
+    split_instance_dataset: WrittenDataset,
 ) -> None:
     """A prediction render covers both rings of a split predicted mask.
 
@@ -113,8 +107,7 @@ def test_every_region_of_a_split_prediction_is_drawn_on_the_mask_render(
     from tcip_mcp.tools.vision_tools import PredictionsRender, visualize
     from tests._chain_fixtures import published
 
-    root = split_instance_dataset
-    image = image_dir(root, UNDATED_BUCKET) / "split.png"
+    root, _images_dir, (image,) = split_instance_dataset
     published(
         root,
         "split-masks",
@@ -153,9 +146,9 @@ def test_every_region_of_a_split_prediction_is_drawn_on_the_mask_render(
     assert result["count"] == 1
 
     px = Image.open(result["image_path"]).convert("RGB")
-    assert _red_over_gray(px, PRED_INSIDE_LOW) > 40
-    assert _red_over_gray(px, PRED_INSIDE_HIGH) > 40
-    assert _red_over_gray(px, OUTSIDE_EVERY_RING) < 15
+    assert red_over_green(px, PRED_INSIDE_LOW) > 40
+    assert red_over_green(px, PRED_INSIDE_HIGH) > 40
+    assert red_over_green(px, OUTSIDE_EVERY_RING) < 15
 
 
 #: Ground truth and prediction placed far apart, so a render that sourced both layers from one
@@ -186,9 +179,9 @@ def mislocalized_prediction_dataset(tmp_path: Path) -> Path:
     from tests._producer_fixtures import label_image, write_image
 
     images = image_dir(tmp_path, UNDATED_BUCKET)
-    write_image(images / "miss.png", (300, 200), BACKGROUND)
+    image = write_image(images / "miss.png", (300, 200), BACKGROUND)
     label_image(
-        images / "miss.png",
+        image,
         [Annotation(subject="bud", geometry=BBox(*GT_BOX))],
         300,
         200,
@@ -202,7 +195,7 @@ def mislocalized_prediction_dataset(tmp_path: Path) -> Path:
         "live",
         [
             {
-                "image": str(images / "miss.png"),
+                "image": str(image),
                 "width": 300,
                 "height": 200,
                 "boxes": [list(PRED_BOX)],

@@ -18,6 +18,7 @@ import pytest
 import tifffile
 
 from tcip_mcp.dataset_layout import image_dir, image_root
+from tests._producer_fixtures import GroupedDataset
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -33,46 +34,46 @@ requires_real_dji_data = pytest.mark.skipif(
 
 
 @pytest.fixture
-def grouped_dir(tmp_path: Path) -> Path:
-    """Return a directory of a two-band group, a plain image and an unclaimed loose raster.
+def grouped_dir(tmp_path: Path) -> GroupedDataset:
+    """Write a directory of a two-band group and a plain image; return what was written.
 
-    The group is two sibling single-band files sharing a manifest.
+    The group is two sibling single-band files sharing a manifest, valued 111 and 222.
     """
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tests._producer_fixtures import write_image
 
     d = image_root(tmp_path)
     d.mkdir()
-    band_a = d / "cap_G.tif"
-    band_b = d / "cap_R.tif"
-    tifffile.imwrite(str(band_a), np.full((8, 8), 111, dtype=np.uint16))
-    tifffile.imwrite(str(band_b), np.full((8, 8), 222, dtype=np.uint16))
-    write_band_group_manifest(
-        d,
-        "cap",
-        {"Green": band_a, "Red": band_b},
-        central_wavelength_nm=None,
-        identity_tolerance={},
+    bands = {"Green": d / "cap_G.tif", "Red": d / "cap_R.tif"}
+    for band, value in zip(bands.values(), (111, 222), strict=True):
+        tifffile.imwrite(str(band), np.full((8, 8), value, dtype=np.uint16))
+    manifest = write_band_group_manifest(
+        d, "cap", bands, central_wavelength_nm=None, identity_tolerance={}
     )
+    plain = write_image(d / "plain.jpg", (8, 8), (10, 20, 30))
+    return GroupedDataset(tmp_path, d, manifest, bands, plain)
 
-    from tests._producer_fixtures import write_image
 
-    write_image(d / "plain.jpg", (8, 8), (10, 20, 30))
-    tifffile.imwrite(str(d / "loose.tif"), np.zeros((8, 8), dtype=np.uint16))
-    return d
+@pytest.fixture
+def loose_raster(grouped_dir: GroupedDataset) -> Path:
+    """Write an unclaimed single-band ``loose.tif`` beside ``grouped_dir``'s; return it."""
+    loose = grouped_dir.images_dir / "loose.tif"
+    tifffile.imwrite(str(loose), np.zeros((8, 8), dtype=np.uint16))
+    return loose
 
 
 # ── list_logical_images / resolve_image_path ───────────────────────────────────────────
 
 
 def test_list_logical_images_folds_a_group_and_keeps_the_rest(
-    grouped_dir: Path,
+    grouped_dir: GroupedDataset, loose_raster: Path
 ) -> None:
     from tcip_mcp.pipelines.image_utils import (
         BandGroupRef,
         list_logical_images,
     )
 
-    logical = list_logical_images(grouped_dir)
+    logical = list_logical_images(grouped_dir.images_dir)
     assert set(logical) == {"cap", "plain", "loose"}
     assert isinstance(logical["cap"], BandGroupRef)
     assert isinstance(logical["plain"], Path)
@@ -82,7 +83,7 @@ def test_list_logical_images_folds_a_group_and_keeps_the_rest(
 
 
 def test_resolve_image_path_answers_what_the_listing_names(
-    grouped_dir: Path,
+    grouped_dir: GroupedDataset,
 ) -> None:
     from tcip_mcp.pipelines.image_utils import (
         list_logical_images,
@@ -90,14 +91,14 @@ def test_resolve_image_path_answers_what_the_listing_names(
         source_path_of,
     )
 
-    logical = list_logical_images(grouped_dir)
+    logical = list_logical_images(grouped_dir.images_dir)
     assert resolve_image_paths(
         source_path_of(src) for src in logical.values()
     ) == list(logical.values())
 
 
 def test_resolve_image_path_refuses_a_band_member_naming_its_manifest(
-    grouped_dir: Path,
+    grouped_dir: GroupedDataset,
 ) -> None:
     """``resolve_image_path`` refuses a band member naming its manifest, and admits the manifest.
 
@@ -106,33 +107,31 @@ def test_resolve_image_path_refuses_a_band_member_naming_its_manifest(
     """
     from tcip_mcp.pipelines.image_utils import BandGroupRef, resolve_image_path
 
-    with pytest.raises(FileNotFoundError, match="cap.bandgroup"):
-        resolve_image_path(grouped_dir / "cap_R.tif")
-    assert isinstance(
-        resolve_image_path(grouped_dir / "cap.bandgroup"), BandGroupRef
-    )
+    with pytest.raises(FileNotFoundError, match=grouped_dir.manifest.name):
+        resolve_image_path(grouped_dir.bands["Red"])
+    assert isinstance(resolve_image_path(grouped_dir.manifest), BandGroupRef)
 
 
 def test_resolve_image_path_unknown_path_raises_file_not_found(
-    grouped_dir: Path,
+    grouped_dir: GroupedDataset,
 ) -> None:
     from tcip_mcp.pipelines.image_utils import resolve_image_path
 
     with pytest.raises(FileNotFoundError):
-        resolve_image_path(grouped_dir / "does_not_exist.jpg")
+        resolve_image_path(grouped_dir.images_dir / "does_not_exist.jpg")
 
 
 def test_resolve_image_path_stale_group_raises_band_group_incomplete(
-    grouped_dir: Path,
+    grouped_dir: GroupedDataset,
 ) -> None:
     from tcip_mcp.pipelines.image_utils import (
         BandGroupIncompleteError,
         resolve_image_path,
     )
 
-    (grouped_dir / "cap_R.tif").unlink()
+    grouped_dir.bands["Red"].unlink()
     with pytest.raises(BandGroupIncompleteError):
-        resolve_image_path(grouped_dir / "cap.bandgroup")
+        resolve_image_path(grouped_dir.manifest)
 
 
 def test_list_logical_images_skips_a_corrupt_manifest_without_raising(
@@ -190,15 +189,16 @@ def test_list_logical_images_refuses_a_stem_collision_between_a_group_and_a_stan
 
 
 def test_bucket_logical_identities_over_the_grouped_fixture(
-    grouped_dir: Path,
+    grouped_dir: GroupedDataset, loose_raster: Path
 ) -> None:
     from tcip_mcp.pipelines.image_utils import bucket_logical_identities
 
-    identities = bucket_logical_identities(grouped_dir)
-    assert set(identities) == {"cap", "plain", "loose"}
-    assert identities["cap"] == [grouped_dir / "cap.bandgroup"]
-    assert identities["plain"] == [grouped_dir / "plain.jpg"]
-    assert identities["loose"] == [grouped_dir / "loose.tif"]
+    identities = bucket_logical_identities(grouped_dir.images_dir)
+    assert identities == {
+        "cap": [grouped_dir.manifest],
+        "plain": [grouped_dir.plain],
+        "loose": [loose_raster],
+    }
 
 
 def test_bucket_logical_identities_on_missing_dir_returns_empty(
@@ -261,15 +261,15 @@ def test_list_logical_images_with_a_corrupt_manifest_beside_a_same_stem_raw_file
     d = image_root(tmp_path)
     d.mkdir()
     (d / "broken.bandgroup").write_text("not json", encoding="utf-8")
-    write_image(d / "broken.jpg", (4, 4))
+    raw = write_image(d / "broken.jpg", (4, 4))
 
     logical = list_logical_images(d)
     assert set(logical) == {"broken"}
-    assert logical["broken"] == d / "broken.jpg"
+    assert logical["broken"] == raw
 
 
 def test_list_logical_images_does_not_raise_when_stems_are_all_distinct(
-    grouped_dir: Path,
+    grouped_dir: GroupedDataset, loose_raster: Path
 ) -> None:
     """``list_logical_images`` lists every stem when the stems are all distinct.
 
@@ -277,7 +277,7 @@ def test_list_logical_images_does_not_raise_when_stems_are_all_distinct(
     """
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
-    logical = list_logical_images(grouped_dir)
+    logical = list_logical_images(grouped_dir.images_dir)
     assert set(logical) == {"cap", "plain", "loose"}
 
 
@@ -288,16 +288,18 @@ def test_image_exts_recognizes_npy_npz_and_bandgroup() -> None:
         assert ext in IMAGE_EXTS
 
 
-def test_stem_of_a_plain_path_and_a_band_group(grouped_dir: Path) -> None:
+def test_stem_of_a_plain_path_and_a_band_group(
+    grouped_dir: GroupedDataset,
+) -> None:
     from tcip_mcp.pipelines.image_utils import resolve_image_path, stem_of
 
-    assert stem_of(str(grouped_dir / "plain.jpg")) == "plain"
-    assert stem_of(grouped_dir / "plain.jpg") == "plain"
-    assert stem_of(resolve_image_path(grouped_dir / "cap.bandgroup")) == "cap"
+    assert stem_of(str(grouped_dir.plain)) == "plain"
+    assert stem_of(grouped_dir.plain) == "plain"
+    assert stem_of(resolve_image_path(grouped_dir.manifest)) == "cap"
 
 
 def test_logical_image_name_agrees_with_source_paths_basename(
-    grouped_dir: Path,
+    grouped_dir: GroupedDataset,
 ) -> None:
     """``logical_image_name`` is the basename of the path an image is recorded under.
 
@@ -309,19 +311,19 @@ def test_logical_image_name_agrees_with_source_paths_basename(
         source_path_of,
     )
 
-    plain = grouped_dir / "plain.jpg"
+    plain = grouped_dir.plain
     assert (
         Path(source_path_of(plain)).name
         == logical_image_name(plain)
         == "plain.jpg"
     )
 
-    ref = resolve_image_path(grouped_dir / "cap.bandgroup")
+    ref = resolve_image_path(grouped_dir.manifest)
     assert Path(source_path_of(ref)).name == logical_image_name(ref)
 
 
 def test_probe_channels_of_a_plain_tif_does_not_decode_pixels(
-    grouped_dir: Path, monkeypatch: pytest.MonkeyPatch
+    loose_raster: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``probe_channels`` reads a TIFF's band count off its header without decoding a pixel.
 
@@ -336,28 +338,30 @@ def test_probe_channels_of_a_plain_tif_does_not_decode_pixels(
 
     monkeypatch.setattr(_tifffile.TiffFile, "asarray", no_decode)
     monkeypatch.setattr(_tifffile.TiffPage, "asarray", no_decode)
-    assert probe_channels(grouped_dir / "loose.tif") == 1
+    assert probe_channels(loose_raster) == 1
 
 
 # ── BandGroupRef-accepting decode overloads (synthetic) ────────────────────────────────
 
 
-def test_the_frame_of_a_band_group_at_its_own_count(grouped_dir: Path) -> None:
+def test_the_frame_of_a_band_group_at_its_own_count(
+    grouped_dir: GroupedDataset,
+) -> None:
     from tcip_mcp.pipelines.image_utils import (
         image_dimensions,
         resolve_image_path,
     )
 
-    ref = resolve_image_path(grouped_dir / "cap.bandgroup")
+    ref = resolve_image_path(grouped_dir.manifest)
     assert image_dimensions(ref, 2) == (8, 8)
 
 
 def test_load_image_stacks_siblings_in_declared_order(
-    grouped_dir: Path,
+    grouped_dir: GroupedDataset,
 ) -> None:
     from tcip_mcp.pipelines.image_utils import load_image, resolve_image_path
 
-    ref = resolve_image_path(grouped_dir / "cap.bandgroup")
+    ref = resolve_image_path(grouped_dir.manifest)
     arr = load_image(ref, 2)
     assert arr.shape == (8, 8, 2)
     # Declared order is {"Green": band_a (111), "Red": band_b (222)}.
@@ -365,17 +369,19 @@ def test_load_image_stacks_siblings_in_declared_order(
     assert int(arr[0, 0, 1]) == 222
 
 
-def test_load_image_of_a_band_group_is_an_array(grouped_dir: Path) -> None:
+def test_load_image_of_a_band_group_is_an_array(
+    grouped_dir: GroupedDataset,
+) -> None:
     from tcip_mcp.pipelines.image_utils import load_image, resolve_image_path
 
-    ref = resolve_image_path(grouped_dir / "cap.bandgroup")
+    ref = resolve_image_path(grouped_dir.manifest)
     arr = load_image(ref, 2)
     assert isinstance(arr, np.ndarray)
     assert arr.shape == (8, 8, 2)
 
 
 def test_a_band_groups_header_and_reader_state_one_band_per_member(
-    grouped_dir: Path,
+    grouped_dir: GroupedDataset,
 ) -> None:
     """A band group's header and reader state one band per member.
 
@@ -386,7 +392,7 @@ def test_a_band_groups_header_and_reader_state_one_band_per_member(
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.pipelines.raster_source import Rect, SourceHeader
 
-    ref = resolve_image_path(grouped_dir / "cap.bandgroup")
+    ref = resolve_image_path(grouped_dir.manifest)
     header = SourceHeader(ref)
     assert probe_channels(ref) == header.channels == 2
     with header.open(header.channels) as reader:
@@ -477,17 +483,20 @@ def test_a_band_group_naming_a_multi_band_member_is_refused_at_its_header(
 
     d = image_root(tmp_path)
     d.mkdir()
-    write_image(d / "cap_rgb.png", (8, 8), (255, 0, 0))
-    Image.new("L", (8, 8), 123).save(d / "cap_gray.png")
-    write_band_group_manifest(
+    gray = d / "cap_gray.png"
+    Image.new("L", (8, 8), 123).save(gray)
+    manifest = write_band_group_manifest(
         d,
         "cap",
-        {"Red": d / "cap_rgb.png", "Gray": d / "cap_gray.png"},
+        {
+            "Red": write_image(d / "cap_rgb.png", (8, 8), (255, 0, 0)),
+            "Gray": gray,
+        },
         central_wavelength_nm=None,
         identity_tolerance={},
     )
 
-    header = SourceHeader(resolve_image_path(d / "cap.bandgroup"))
+    header = SourceHeader(resolve_image_path(manifest))
     with pytest.raises(ValueError, match="'Red'.*cap_rgb.png.*holds 3 bands"):
         _ = header.channels
     with pytest.raises(ValueError, match="holds 3 bands"):

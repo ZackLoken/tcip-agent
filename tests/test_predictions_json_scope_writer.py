@@ -13,29 +13,12 @@ import pytest
 
 from tcip_annotation.json_io import label_document
 from tcip_mcp import subject_registry as cr
-from tcip_mcp.dataset_layout import image_dir, image_root
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+from tests._producer_fixtures import registry_of, scope_over
 
 SUBJECT = "object"
-
-
-def _scope(tmp_path: Path, *attributes: cr.Attribute) -> ClassScope:
-    """Return the registry scope of :data:`SUBJECT` over a dataset declaring ``attributes``."""
-    from tcip_mcp.pipelines.data.label_queries import registry_scope
-    from tests._producer_fixtures import registry_over
-
-    registry_over(
-        tmp_path,
-        cr.SubjectRegistry(
-            subjects=(
-                cr.Subject(
-                    name=SUBJECT, description="", attributes=attributes
-                ),
-            )
-        ),
-    )
-    return registry_scope(image_root(tmp_path), SUBJECT)
 
 
 COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
@@ -73,7 +56,7 @@ def _decoded(result: dict, scope: ClassScope) -> list:
 def test_an_attributed_run_writes_every_attributes_value_on_every_box(
     tmp_path: Path,
 ) -> None:
-    scope = _scope(tmp_path, COLOR, GRADE)
+    scope = scope_over(tmp_path, registry_of(SUBJECT, COLOR, GRADE), SUBJECT)
     first, second = _decoded(
         _result(
             boxes=[[1, 1, 5, 5], [10, 10, 20, 20]],
@@ -109,7 +92,7 @@ def test_a_detector_run_declaring_no_attributes_writes_the_subject_alone(
 ) -> None:
     (written,) = _decoded(
         _result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1]),
-        _scope(tmp_path),
+        scope_over(tmp_path, registry_of(SUBJECT), SUBJECT),
     )
     assert written.subject == SUBJECT
     assert written.attributes == {}
@@ -124,7 +107,7 @@ def test_a_result_missing_a_field_a_document_holds_refuses_naming_it(
     A result without its source image, scores, labels or frame size refuses naming the missing
     key, and the same result with every field encodes one prediction.
     """
-    scope = _scope(tmp_path, COLOR)
+    scope = scope_over(tmp_path, registry_of(SUBJECT, COLOR), SUBJECT)
     result = _result(
         boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1], attributes=[[0]]
     )

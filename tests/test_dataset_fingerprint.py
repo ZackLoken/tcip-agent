@@ -24,8 +24,13 @@ from tcip_mcp.pipelines.data import (
 )
 from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
-from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
-from tests._producer_fixtures import label_image, registry_over, write_image
+from tcip_mcp.subject_registry import Attribute
+from tests._producer_fixtures import (
+    label_image,
+    registry_of,
+    registry_over,
+    write_image,
+)
 
 if TYPE_CHECKING:
     import pytest
@@ -39,20 +44,19 @@ def _make_dataset(
     pixel: tuple[int, int, int] = (120, 120, 120),
     bud_box: tuple[int, int, int, int] = (10, 10, 40, 40),
     ext: str = "jpg",
-) -> None:
-    """Write a minimal nested-schema dataset: one dated image + its bud label + a registry."""
-    date = "2026-02-11"
-    write_image(image_dir(root, date) / f"IMG_1.{ext}", (64, 64), pixel)
+) -> Path:
+    """Write a minimal nested-schema dataset: one dated image, its bud label and a registry.
+
+    Returns the image written.
+    """
+    image = write_image(
+        image_dir(root, "2026-02-11") / f"IMG_1.{ext}", (64, 64), pixel
+    )
     label_image(
-        image_dir(root, date) / f"IMG_1.{ext}",
-        [Annotation(subject="bud", geometry=BBox(*bud_box))],
-        64,
-        64,
+        image, [Annotation(subject="bud", geometry=BBox(*bud_box))], 64, 64
     )
-    registry_over(
-        root,
-        SubjectRegistry(subjects=(Subject(name="bud", description="a bud"),)),
-    )
+    registry_over(root, registry_of("bud"))
+    return image
 
 
 def test_fingerprint_reuses_ground_truth_digest_for_labels(
@@ -75,11 +79,11 @@ def test_fingerprint_reuses_ground_truth_digest_for_labels(
 
 
 def test_a_label_edit_changes_the_fingerprint(tmp_path: Path) -> None:
-    _make_dataset(tmp_path)
+    image = _make_dataset(tmp_path)
     before = dataset_fingerprint(tmp_path)
     # move the box -> label bytes change
-    json_io.write_label_document(
-        label_key(tmp_path, "2026-02-11", "IMG_1"),
+    label_image(
+        image,
         [Annotation(subject="bud", geometry=BBox(11, 11, 41, 41))],
         64,
         64,
@@ -95,10 +99,9 @@ def test_pixel_reencode_under_same_filename_changes_the_fingerprint(
     A BMP re-encoded with other pixels at the same file name and byte size, its labels
     untouched, changes the fingerprint and not the labels term.
     """
-    _make_dataset(tmp_path, pixel=(120, 120, 120), ext="bmp")
+    img_path = _make_dataset(tmp_path, pixel=(120, 120, 120), ext="bmp")
     before_fp = dataset_fingerprint(tmp_path)
     before_labels = fingerprint_mod._labels_term(tmp_path, {})
-    img_path = image_dir(tmp_path, "2026-02-11") / "IMG_1.bmp"
     size_before = img_path.stat().st_size
     # re-encode the image with different pixels, same filename, labels untouched
     write_image(img_path, (64, 64), (0, 200, 0))
@@ -121,8 +124,7 @@ def test_an_image_rewritten_at_its_size_and_mtime_changes_the_fingerprint(
     """
     import os
 
-    _make_dataset(tmp_path, pixel=(120, 120, 120), ext="bmp")
-    img_path = image_dir(tmp_path, "2026-02-11") / "IMG_1.bmp"
+    img_path = _make_dataset(tmp_path, pixel=(120, 120, 120), ext="bmp")
     before = dataset_fingerprint(tmp_path)
     stat = img_path.stat()
 
@@ -141,20 +143,11 @@ def test_registry_value_order_matters_but_whitespace_does_not(
 ) -> None:
     _make_dataset(tmp_path)
     # add an ordered attribute -> registry (and thus fingerprint) changes
-    reg2 = SubjectRegistry(
-        subjects=(
-            Subject(
-                name="bud",
-                description="a currant bud",
-                attributes=(
-                    Attribute(
-                        name="opening",
-                        type="categorical",
-                        values=("closed", "open"),
-                    ),
-                ),
-            ),
-        )
+    reg2 = registry_of(
+        "bud",
+        Attribute(
+            name="opening", type="categorical", values=("closed", "open")
+        ),
     )
     registry_over(tmp_path, reg2)
     with_attr = dataset_fingerprint(tmp_path)
@@ -163,22 +156,7 @@ def test_registry_value_order_matters_but_whitespace_does_not(
 
     # a whitespace-only reformat of subjects.json must not change identity (canonical
     # re-serialization)
-    reg2_again = SubjectRegistry(
-        subjects=(
-            Subject(
-                name="bud",
-                description="a currant bud",
-                attributes=(
-                    Attribute(
-                        name="opening",
-                        type="categorical",
-                        values=("closed", "open"),
-                    ),
-                ),
-            ),
-        )
-    )
-    registry_over(tmp_path, reg2_again)
+    registry_over(tmp_path, reg2)
     fp_a = dataset_fingerprint(tmp_path)
     cp = tmp_path / "subjects.json"
     # reformat
@@ -259,23 +237,18 @@ def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_
 
     The dataset holds fixed image bytes, one label document and a registry.
     """
-    date = "2026-02-11"
-    image_dir(tmp_path, date).mkdir(parents=True)
-    (image_dir(tmp_path, date) / "IMG_1.jpg").write_bytes(
-        b"fixed-jpeg-bytes-for-fingerprint-test"
-    )
+    image = image_dir(tmp_path, "2026-02-11") / "IMG_1.jpg"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"fixed-jpeg-bytes-for-fingerprint-test")
     label_image(
-        image_dir(tmp_path, date) / "IMG_1.jpg",
+        image,
         [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))],
         64,
         64,
     )
-    registry_over(
-        tmp_path,
-        SubjectRegistry(subjects=(Subject(name="bud", description="a bud"),)),
-    )
+    registry_over(tmp_path, registry_of("bud"))
 
-    assert dataset_fingerprint(tmp_path) == "107a8fbb2dddc690"
+    assert dataset_fingerprint(tmp_path) == "d18c7b3b874d2025"
 
 
 def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(
@@ -306,10 +279,7 @@ def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(
         16,
         16,
     )
-    registry_over(
-        tmp_path,
-        SubjectRegistry(subjects=(Subject(name="bud", description=""),)),
-    )
+    registry_over(tmp_path, registry_of("bud"))
 
     fp1 = dataset_fingerprint(tmp_path)
     assert fp1 is not None

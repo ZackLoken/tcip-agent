@@ -188,16 +188,13 @@ def _proposed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
     Returns the image, the candidate and the run's answer.
     """
     from tcip_mcp.tools.proposal_tools import propose_annotations
-    from tests.test_proposal_staging_record import (
-        _candidate,
-        _install_stub,
-        _make_image,
-    )
+    from tests._producer_fixtures import install_stub_proposer
+    from tests.test_proposal_staging_record import _candidate, _make_image
 
     image = image_dir(tmp_path, "2026-04-01") / "leaf.jpg"
     _make_image(image)
     candidate = _candidate(0, 5.0)
-    _install_stub(monkeypatch, [candidate])
+    install_stub_proposer(monkeypatch, [candidate])
     result = propose_annotations(
         tmp_path, image_path=str(image), engine="stub", actor=None
     )

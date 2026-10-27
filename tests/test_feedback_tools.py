@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, parse_image_path
 from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
 from tcip_mcp.tools.feedback_tools import prioritize_review_queue
 from tests._training_values import COMBINED_SCORER, RATIONALE, drawn_split
@@ -45,10 +45,10 @@ def _dataset(tmp_path: Path, *, marked: tuple[str, ...]) -> Path:
     root = tmp_path / "dataset"
     images = image_dir(root, DATE)
     for stem in ("imgA", "imgB"):
-        write_image(images / f"{stem}.png", (64, 64), (120, 120, 120))
-        label_image(images / f"{stem}.png", [], 64, 64, keep_empty=True)
+        image = write_image(images / f"{stem}.png", (64, 64), (120, 120, 120))
+        label_image(image, [], 64, 64, keep_empty=True)
         if stem in marked:
-            mark_complete(images / f"{stem}.png", "bud", project=tmp_path)
+            mark_complete(image, "bud", project=tmp_path)
     return images
 
 
@@ -393,9 +393,16 @@ def _stub_scorer(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def _reference_samples(drawn: Selection) -> list:
-    """Return the samples a drawn selection holds on its calibration and holdout sides."""
-    return [s for side in REFERENCE_SIDES for s in drawn.on(side)]
+def _reference_stems(drawn: Selection, capture: str) -> set[str]:
+    """Return the stems of ``drawn``'s calibration and holdout samples imaged in ``capture``."""
+    return {
+        stem
+        for side in REFERENCE_SIDES
+        for _root, sample_capture, stem in (
+            parse_image_path(s.source) for s in drawn.on(side)
+        )
+        if sample_capture == capture
+    }
 
 
 def test_prioritize_review_queue_marks_a_bound_runs_reference_sides(
@@ -412,15 +419,12 @@ def test_prioritize_review_queue_marks_a_bound_runs_reference_sides(
         _draw,
     )
 
-    root = _dataset(tmp_path / "data")
+    root = tmp_path / "data"
+    captures = _dataset(root)
     manifest_dir = tmp_path / "manifest"
     drawn = _draw(tmp_path, root, manifest_dir)
     date = DATES[0]
-    reference_stems = {
-        Path(s.source).stem
-        for s in _reference_samples(drawn)
-        if Path(s.source).parent.name == date
-    }
+    reference_stems = _reference_stems(drawn, date)
     assert (
         reference_stems
     )  # the fixture's own three-way ratio gives this date some
@@ -433,7 +437,7 @@ def test_prioritize_review_queue_marks_a_bound_runs_reference_sides(
     r = prioritize_review_queue(
         tmp_path,
         checkpoint_path=ckpt_path,
-        images_dir=str(image_dir(root, date)),
+        images_dir=str(captures[date].images_dir),
         **QUEUE,
     )
     assert "error" not in r, r
@@ -463,15 +467,12 @@ def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selec
         _draw,
     )
 
-    root = _dataset(tmp_path / "data")
+    root = tmp_path / "data"
+    captures = _dataset(root)
     manifest_dir = tmp_path / "manifest"
     drawn = _draw(tmp_path, root, manifest_dir)
     date = DATES[0]
-    reference_stems = {
-        Path(s.source).stem
-        for s in _reference_samples(drawn)
-        if Path(s.source).parent.name == date
-    }
+    reference_stems = _reference_stems(drawn, date)
     assert reference_stems
 
     _run_dir, ckpt_path = _bound_checkpoint(
@@ -490,7 +491,7 @@ def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selec
     r = prioritize_review_queue(
         tmp_path,
         checkpoint_path=ckpt_path,
-        images_dir=str(image_dir(root, date)),
+        images_dir=str(captures[date].images_dir),
         **QUEUE,
     )
     assert "error" not in r, r
@@ -608,30 +609,30 @@ _FLAT_IMG = 32
 _FLAT_STEMS = ("a", "b", "c", "d", "e", "f")
 
 
-def _labeled_flat_image(path: Path) -> None:
-    """Write a gray image at ``path`` holding one bright ``leaf`` box its label document names."""
-    from tcip_annotation.state import Annotation, BBox
-    from tests._producer_fixtures import BRIGHT, label_image, painted_frame
+def _labeled_flat_capture(images_dir: Path, stems: tuple[str, ...]) -> Path:
+    """Write a gray :func:`labeled_frame` of one ``leaf`` box per stem into ``images_dir``.
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    painted_frame(
-        _FLAT_IMG, _FLAT_IMG, (128, 128, 128), [((2, 2, 10, 10), BRIGHT)]
-    ).save(path)
-    label_image(
-        path,
-        [Annotation(subject=_FLAT_SUBJECT, geometry=BBox(2, 2, 10, 10))],
-        _FLAT_IMG,
-        _FLAT_IMG,
-    )
+    Returns ``images_dir``.
+    """
+    from tcip_annotation.state import Annotation, BBox
+    from tests._producer_fixtures import labeled_frame
+
+    for stem in stems:
+        labeled_frame(
+            images_dir / f"{stem}.jpg",
+            [Annotation(subject=_FLAT_SUBJECT, geometry=BBox(2, 2, 10, 10))],
+            _FLAT_IMG,
+            _FLAT_IMG,
+            (128, 128, 128),
+        )
+    return images_dir
 
 
 def _flat_images_dataset(
     root: Path, stems: tuple[str, ...] = _FLAT_STEMS
 ) -> Path:
-    """Write labeled images in the undated capture alone and return the dataset root."""
-    for stem in stems:
-        _labeled_flat_image(image_dir(root, UNDATED_BUCKET) / f"{stem}.jpg")
-    return root
+    """Write labeled images into ``root``'s undated capture alone; return that capture."""
+    return _labeled_flat_capture(image_dir(root, UNDATED_BUCKET), stems)
 
 
 def _mixed_dated_and_flat_dataset(
@@ -639,12 +640,10 @@ def _mixed_dated_and_flat_dataset(
 ) -> Path:
     """Write labeled images under ``images/<date>/`` and the same stems in the undated capture.
 
-    Return the dataset root.
+    Returns the undated capture.
     """
-    for stem in stems:
-        _labeled_flat_image(image_dir(root, date) / f"{stem}.jpg")
-    _flat_images_dataset(root, stems)
-    return root
+    _labeled_flat_capture(image_dir(root, date), stems)
+    return _flat_images_dataset(root, stems)
 
 
 def _draw_flat(
@@ -679,10 +678,11 @@ def test_prioritize_review_queue_marks_an_undated_capture_correctly(
     Over a dataset whose images are its undated capture alone, the queue marks exactly the stems
     of the drawn selection's calibration and holdout samples.
     """
-    root = _flat_images_dataset(tmp_path / "data")
+    root = tmp_path / "data"
+    undated = _flat_images_dataset(root)
     manifest_dir = tmp_path / "manifest"
     drawn = _draw_flat(tmp_path, root, manifest_dir)
-    reference_stems = {Path(s.source).stem for s in _reference_samples(drawn)}
+    reference_stems = _reference_stems(drawn, UNDATED_BUCKET)
     assert reference_stems  # the fixture's own three-way ratio gives it some
 
     _run_dir, ckpt_path = _bound_checkpoint(
@@ -693,7 +693,7 @@ def test_prioritize_review_queue_marks_an_undated_capture_correctly(
     r = prioritize_review_queue(
         tmp_path,
         checkpoint_path=ckpt_path,
-        images_dir=str(image_dir(root, UNDATED_BUCKET)),
+        images_dir=str(undated),
         **QUEUE,
     )
     assert "error" not in r, r
@@ -714,21 +714,14 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
     whose source sits in the queue's images directory, and no stem that is a calibration sample
     under the dated capture alone.
     """
-    root = _mixed_dated_and_flat_dataset(tmp_path / "data", "2026-03-01")
+    dated = "2026-03-01"
+    root = tmp_path / "data"
+    undated = _mixed_dated_and_flat_dataset(root, dated)
     manifest_dir = tmp_path / "manifest"
     # A seed whose draw puts calibration samples under both dates, a stem among them under one only.
     drawn = _draw_flat(tmp_path, root, manifest_dir, seed=3)
-    here = image_dir(root, UNDATED_BUCKET).resolve()
-    bound_stems = {
-        Path(s.source).stem
-        for s in _reference_samples(drawn)
-        if Path(s.source).parent.resolve() == here
-    }
-    other_stems = {
-        Path(s.source).stem
-        for s in _reference_samples(drawn)
-        if Path(s.source).parent.resolve() != here
-    }
+    bound_stems = _reference_stems(drawn, UNDATED_BUCKET)
+    other_stems = _reference_stems(drawn, dated)
     assert bound_stems and other_stems
     leaked = other_stems - bound_stems
     assert leaked  # a stem calibration-only under the other date; the case that must not leak
@@ -741,7 +734,7 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
     r = prioritize_review_queue(
         tmp_path,
         checkpoint_path=ckpt_path,
-        images_dir=str(image_dir(root, UNDATED_BUCKET)),
+        images_dir=str(undated),
         **QUEUE,
     )
     assert "error" not in r, r
