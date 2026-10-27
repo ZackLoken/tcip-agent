@@ -354,30 +354,22 @@ def _annotated_dataset(root: Path, n: int) -> None:
     Each image holds one bright ``bud`` box that its label document names.
     """
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import (
-        BRIGHT,
-        label_image,
-        painted_frame,
+        labeled_frame,
+        registry_of,
         registry_over,
     )
 
     images_dir = image_dir(root, "2026-03-04")
-    images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n):
-        stem = f"img_{i:03d}"
-        painted_frame(
-            640, 480, (128, 128, 128), [((288, 216, 352, 264), BRIGHT)]
-        ).save(images_dir / f"{stem}.jpg")
-        label_image(
-            images_dir / f"{stem}.jpg",
+        labeled_frame(
+            images_dir / f"img_{i:03d}.jpg",
             [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))],
             640,
             480,
+            (128, 128, 128),
         )
-    registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
-    )
+    registry_over(root, registry_of("bud"))
 
 
 def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_trips(

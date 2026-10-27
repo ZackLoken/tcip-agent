@@ -24,35 +24,15 @@ def _staged(
 ) -> json_io.LabelDocument:
     """Stage ``box`` for an image of ``size`` and return the staged document.
 
-    The box is staged through ``stage_proposals`` under ``project``'s dataset ``ds``; the
-    document is returned as its bucket records it.
+    The box is staged by ``staged_box`` under ``project``'s dataset ``ds``; the document is
+    returned as its bucket records it.
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.tools.proposal_tools import stage_proposals
-    from tests._producer_fixtures import write_image
+    from tests._producer_fixtures import staged_box, write_image
 
     image = write_image(image_dir(project / "ds", DATE) / "IMG_0007.jpg", size)
-    w, h = size
-    x1, y1, x2, y2 = box
-    staged = stage_proposals(
-        project,
-        str(image),
-        model_name="detector",
-        actor=None,
-        boxes=[
-            {
-                "subject": "bud",
-                "conf": 0.72,
-                "cx": (x1 + x2) / 2 / w,
-                "cy": (y1 + y2) / 2 / h,
-                "w": (x2 - x1) / w,
-                "h": (y2 - y1) / h,
-            }
-        ],
-    )
-    assert "error" not in staged, staged
-    bucket = read_bucket(project / "ds", staged["bucket"])
+    bucket = read_bucket(project / "ds", staged_box(project, image, list(box)))
     return json_io.read_label_document(bucket.document_key(image.stem))
 
 

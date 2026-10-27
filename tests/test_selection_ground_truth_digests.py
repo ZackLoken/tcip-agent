@@ -14,7 +14,12 @@ import pytest
 
 import tcip_store
 from tcip_mcp.dataset_layout import image_dir
-from tests._producer_fixtures import BRIGHT, label_image, painted_frame
+from tests._producer_fixtures import (
+    WrittenDataset,
+    image_label_key,
+    label_image,
+    labeled_frame,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -34,26 +39,29 @@ DATES = ("2026-02-11", "2026-02-25")
 _STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
 
 
-def _dataset(root: Path, stems: tuple[str, ...] = _STEMS) -> Path:
-    """Write a dataset of two capture dates holding ``stems`` each, and return its root.
+def _dataset(
+    root: Path, stems: tuple[str, ...] = _STEMS
+) -> dict[str, WrittenDataset]:
+    """Write a dataset of two capture dates holding ``stems`` each; return each capture by date.
 
-    Each stem's image is a painted frame written with a label document of one ``leaf`` box;
-    ``stems`` defaults to eight.
+    Each stem's image is a :func:`labeled_frame` holding one ``leaf`` box; ``stems`` defaults to
+    eight.
     """
+    written = {}
     for date in DATES:
         images_dir = image_dir(root, date)
-        images_dir.mkdir(parents=True, exist_ok=True)
-        for stem in stems:
-            painted_frame(
-                IMG, IMG, (90, 90, 90), [((2, 2, 10, 10), BRIGHT)]
-            ).save(images_dir / f"{stem}.jpg")
-            label_image(
+        images = [
+            labeled_frame(
                 images_dir / f"{stem}.jpg",
                 [Annotation(subject=SUBJECT, geometry=BBox(2, 2, 10, 10))],
                 IMG,
                 IMG,
+                (90, 90, 90),
             )
-    return root
+            for stem in stems
+        ]
+        written[date] = WrittenDataset(root, images_dir, images)
+    return written
 
 
 def _draw(project: Path, root: Path, out: Path, *, seed: int = 2) -> Selection:
@@ -106,16 +114,17 @@ def _manifest_sha256(out: Path) -> str:
 def test_every_drawn_sample_carries_its_own_documents_version_as_its_digest(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.dataset_layout import label_key
-
-    root = _dataset(tmp_path / "ds")
+    root = tmp_path / "ds"
+    documents = {
+        image_label_key(image)
+        for capture in _dataset(root).values()
+        for image in capture.images
+    }
     drawn = _draw(tmp_path, root, tmp_path / "m")
 
     assert len(drawn.samples) == len(DATES) * len(_STEMS)
     for sample in drawn.samples:
-        assert sample.ground_truth in {
-            label_key(root, date, sample.member) for date in DATES
-        }
+        assert sample.ground_truth in documents
         assert (
             sample.ground_truth_digest
             == tcip_store.read_versioned(sample.ground_truth).version.token
@@ -154,7 +163,8 @@ def test_the_run_binding_records_the_selection_digest_once_never_on_a_sample(
         selection_digest,
     )
 
-    root = _dataset(tmp_path / "ds")
+    root = tmp_path / "ds"
+    _dataset(root)
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
     resolved = run_resolution(
@@ -186,8 +196,7 @@ def test_a_document_emptied_after_its_admission_never_trains_as_empty(
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
-    root = _dataset(tmp_path / "ds")
-    images_dir = image_dir(root, DATES[0])
+    _root, images_dir, (first, *_rest) = _dataset(tmp_path / "ds")[DATES[0]]
     real_samples = label_queries.Admission.samples
 
     def emptied_first(
@@ -195,7 +204,7 @@ def test_a_document_emptied_after_its_admission_never_trains_as_empty(
         assignment: dict[str, str],
         group_of: Callable[[str], str],
     ) -> list[Sample]:
-        label_image(images_dir / "a.jpg", [], IMG, IMG, keep_empty=True)
+        label_image(first, [], IMG, IMG, keep_empty=True)
         return real_samples(self, assignment, group_of)
 
     monkeypatch.setattr(label_queries.Admission, "samples", emptied_first)
@@ -233,7 +242,8 @@ def test_the_partition_alone_carries_the_per_sample_digests(
     """
     from tcip_mcp.experiments import run_resolution
 
-    root = _dataset(tmp_path / "ds")
+    root = tmp_path / "ds"
+    _dataset(root)
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
 

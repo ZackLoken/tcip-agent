@@ -75,30 +75,27 @@ def _reference(
     The frames sit in a registered dataset, beside their breeder CSV (each physical extent
     ``extents_mm[i]``, else the fixed scale's) and a selection drawn over them.
     """
-    from tcip_mcp import subject_registry as cr
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
-    from tests._producer_fixtures import registry_over, write_image
+    from tests._producer_fixtures import (
+        registry_of,
+        registry_over,
+        write_image,
+    )
 
     root = project / "ds"
     images = image_dir(root, DATE)
     images.mkdir(parents=True)
-    registry_over(
-        root,
-        cr.SubjectRegistry(
-            subjects=(cr.Subject(name=SUBJECT, description=""),)
-        ),
-    )
+    registry_over(root, registry_of(SUBJECT))
     assert "error" not in register_dataset(
         project, str(root), crop=sorted(registered_crops())[0], actor=None
     )
     rows = []
     for i in range(n):
         stem = f"r{i}"
-        write_image(images / f"{stem}.png", (120, 120), (20 + i, 20, 20))
         label_image(
-            images / f"{stem}.png",
+            write_image(images / f"{stem}.png", (120, 120), (20 + i, 20, 20)),
             [
                 Annotation(
                     subject=SUBJECT,

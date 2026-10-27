@@ -20,16 +20,18 @@ from tcip_annotation.verdicts import read_verdicts
 from tcip_mcp.dataset_layout import (
     Gestures,
     image_dir,
+    parse_capture_dir,
     prediction_key,
-    save_label_document,
     verdict_key_of,
 )
-from tcip_mcp.subject_registry import Subject, SubjectRegistry
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import (
     image_label_key,
     label_image,
+    registry_of,
     registry_over,
+    save_labels,
+    staged_box,
     write_image,
 )
 from tests._training_values import RATIONALE, VERTEX_SPACING
@@ -43,41 +45,19 @@ STEMS = ("a", "b", "c")
 BUD = "bud"
 
 
-def _capture(root: Path) -> list[Path]:
-    """Write three frames of capture :data:`DATE` under ``root``'s image tree and return them.
+def _capture(images_dir: Path) -> list[Path]:
+    """Write three frames into the capture ``images_dir`` and return them.
 
-    The root's registry declares :data:`BUD`.
+    The registry of its dataset root (``dataset_layout.parse_capture_dir``) declares
+    :data:`BUD`.
     """
-    registry_over(
-        root,
-        SubjectRegistry(subjects=(Subject(name=BUD, description="a bud"),)),
-    )
+    registry_over(parse_capture_dir(images_dir)[0], registry_of(BUD))
     return [
         write_image(
-            image_dir(root, DATE) / f"{stem}.png",
-            (SIZE, SIZE),
-            (40 + 30 * i, 60, 60),
+            images_dir / f"{stem}.png", (SIZE, SIZE), (40 + 30 * i, 60, 60)
         )
         for i, stem in enumerate(STEMS)
     ]
-
-
-def _save(
-    root: Path,
-    image: Path,
-    payloads: list[dict],
-    **kwargs: ts.Version | Gestures | None,
-) -> ts.Version:
-    return save_label_document(
-        root,
-        image_label_key(image),
-        payloads,
-        width=SIZE,
-        height=SIZE,
-        author="user:breeder",
-        actor="user:breeder",
-        **kwargs,
-    )[0]
 
 
 # ── the save door ──────────────────────────────────────────────────────────
@@ -86,38 +66,17 @@ def _save(
 def test_a_save_commits_its_verdicts_and_its_document_together_or_neither(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.tools.proposal_tools import stage_proposals
-
-    image = _capture(tmp_path)[0]
-    staged = stage_proposals(
-        tmp_path,
-        str(image),
-        model_name="detector",
-        actor=None,
-        boxes=[
-            {
-                "subject": BUD,
-                "conf": 0.9,
-                "cx": 0.5,
-                "cy": 0.5,
-                "w": 0.25,
-                "h": 0.25,
-            }
-        ],
-    )
-    assert "error" not in staged, staged
-    bucket, shard = (
-        staged["bucket"],
-        verdict_key_of(image_label_key(image), staged["bucket"]),
-    )
-    first = _save(
+    image = _capture(image_dir(tmp_path, DATE))[0]
+    bucket = staged_box(tmp_path, image, [24.0, 24.0, 40.0, 40.0])
+    shard = verdict_key_of(image_label_key(image), bucket)
+    first = save_labels(
         tmp_path, image, [{"subject": BUD, "bbox": [1.0, 1.0, 9.0, 9.0]}]
-    )
-    _save(tmp_path, image, [], expect=first)
+    )[0]
+    save_labels(tmp_path, image, [], expect=first)
     saves = len(audit_rows(tmp_path, "save_label_document"))
 
     with pytest.raises(ts.VersionConflictError):
-        _save(
+        save_labels(
             tmp_path,
             image,
             [],
@@ -132,7 +91,7 @@ def test_a_save_commits_its_verdicts_and_its_document_together_or_neither(
     assert len(audit_rows(tmp_path, "save_label_document")) == saves
 
     current = ts.read_versioned(image_label_key(image)).version
-    _save(
+    save_labels(
         tmp_path,
         image,
         [],
@@ -195,7 +154,7 @@ def test_a_coco_import_writes_every_document_or_none(
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
     root = tmp_path / "ds"
-    images = _capture(root)
+    images = _capture(image_dir(root, DATE))
     document = _coco(tmp_path, images)
     real_entry = audit.audit_entry
     monkeypatch.setattr(
@@ -239,7 +198,7 @@ def test_an_import_refuses_over_a_present_record_whatever_it_holds(
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
     root = tmp_path / "ds"
-    images = _capture(root)
+    images = _capture(image_dir(root, DATE))
     ts.replace(image_label_key(images[-1]), None)
 
     with pytest.raises(
@@ -278,7 +237,7 @@ def test_a_document_its_bucket_names_is_required(tmp_path: Path) -> None:
     from tests._chain_fixtures import predicted, published
 
     root = tmp_path / "ds"
-    images = _capture(root)
+    images = _capture(image_dir(root, DATE))
     bucket = published(
         tmp_path,
         f"m/{DATE}",
@@ -326,7 +285,7 @@ def test_a_publication_commits_whole_and_a_second_of_one_name_writes_nothing(
     from tests._chain_fixtures import predicted, published
 
     root = tmp_path / "ds"
-    images = _capture(root)
+    images = _capture(image_dir(root, DATE))
     unwritable = replace(
         raster_identity(images[0]), pixel_fraction=float("nan")
     )
@@ -391,7 +350,7 @@ def test_a_publication_writes_each_document_under_its_own_stems_key(
     from tcip_mcp.buckets import detection_rows
     from tests._chain_fixtures import predicted, published
 
-    images = _capture(tmp_path / "ds")
+    images = _capture(image_dir(tmp_path / "ds", DATE))
     bucket = published(
         tmp_path,
         f"m/{DATE}",
@@ -414,7 +373,8 @@ def test_training_reads_each_document_of_the_capture_by_its_key(
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
     from tests._producer_fixtures import dataset_over
 
-    images = _capture(tmp_path)
+    images_dir = image_dir(tmp_path, DATE)
+    images = _capture(images_dir)
     written = {
         p.stem: [
             Annotation(subject=BUD, geometry=BBox(2 + i, 2, 12 + 2 * i, 14))
@@ -425,7 +385,7 @@ def test_training_reads_each_document_of_the_capture_by_its_key(
     for p in images:
         label_image(p, written[p.stem], SIZE, SIZE)
 
-    dataset = dataset_over("detection", images[0].parent, subject=BUD)
+    dataset = dataset_over("detection", images_dir, subject=BUD)
 
     assert sorted(Path(location).stem for location in dataset.stems) == list(
         STEMS
@@ -446,34 +406,19 @@ def test_the_dump_decodes_to_the_documents_the_platform_reads(
     tmp_path: Path,
 ) -> None:
     from tcip_mcp.cli.dump_store import dump_store, spelled
-    from tcip_mcp.tools.proposal_tools import stage_proposals
 
     root = tmp_path / "ds"
-    images = _capture(root)
-    _save(
+    images = _capture(image_dir(root, DATE))
+    save_labels(
         tmp_path, images[0], [{"subject": BUD, "bbox": [1.0, 1.0, 9.0, 9.0]}]
     )
-    _save(tmp_path, images[1], [], gestures=Gestures(complete={BUD: True}))
-    staged = stage_proposals(
-        tmp_path,
-        str(images[2]),
-        model_name="detector",
-        actor=None,
-        boxes=[
-            {
-                "subject": BUD,
-                "conf": 0.8,
-                "cx": 0.5,
-                "cy": 0.5,
-                "w": 0.25,
-                "h": 0.25,
-            }
-        ],
+    save_labels(
+        tmp_path, images[1], [], gestures=Gestures(complete={BUD: True})
     )
-    assert "error" not in staged, staged
+    bucket = staged_box(tmp_path, images[2], [24.0, 24.0, 40.0, 40.0])
     keys = [
         *(image_label_key(p) for p in images[:2]),
-        prediction_key(root, staged["bucket"], images[2].stem),
+        prediction_key(root, bucket, images[2].stem),
     ]
 
     dump_store(tmp_path, tmp_path.parent / "dump")

@@ -87,7 +87,11 @@ def _checkpoint(
     from tcip_mcp import subject_registry as cr
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tests._chain_fixtures import BLOB_BUILDER
-    from tests._producer_fixtures import label_image, registry_over
+    from tests._producer_fixtures import (
+        label_image,
+        registry_of,
+        registry_over,
+    )
     from tests._verified_checkpoint_fixtures import (
         fixture_data_dir,
         registered_checkpoint,
@@ -97,16 +101,7 @@ def _checkpoint(
     dataset = fixture_data_dir(tmp_path, "blobs")
     if by_band:
         color = cr.Attribute("color", "categorical", ("red", "green", "blue"))
-        registry_over(
-            dataset,
-            cr.SubjectRegistry(
-                subjects=(
-                    cr.Subject(
-                        name="bud", description="", attributes=(color,)
-                    ),
-                )
-            ),
-        )
+        registry_over(dataset, registry_of("bud", color))
     images = image_dir(dataset, UNDATED_BUCKET)
     images.mkdir(parents=True)
     annotations = [

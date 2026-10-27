@@ -266,7 +266,6 @@ def test_a_selection_spanning_two_dataset_roots_refuses_naming_both(
     holdout frames of a second dataset; writing that selection refuses naming both roots and
     draw_splits, and the drawn selection stays as it was written.
     """
-    from tcip_mcp import subject_registry as cr
     from tcip_mcp.pipelines.data.label_queries import admit
     from tcip_mcp.pipelines.data.selection import (
         REFERENCE_SIDES,
@@ -277,6 +276,7 @@ def test_a_selection_spanning_two_dataset_roots_refuses_naming_both(
     from tcip_mcp.pipelines.data.splits import recorded_group_key_fn
     from tests._producer_fixtures import (
         label_image,
+        registry_of,
         registry_over,
         write_image,
     )
@@ -292,14 +292,10 @@ def test_a_selection_spanning_two_dataset_roots_refuses_naming_both(
     other = tmp_path / "ds2"
     images = image_dir(other, SCALE_DATE)
     images.mkdir(parents=True)
-    registry_over(
-        other,
-        cr.SubjectRegistry(subjects=(cr.Subject(name=BAR, description=""),)),
-    )
+    registry_over(other, registry_of(BAR))
     for i in range(2):
-        write_image(images / f"s{i}.png", (120, 120), (200, 20 + i, 20))
         label_image(
-            images / f"s{i}.png",
+            write_image(images / f"s{i}.png", (120, 120), (200, 20 + i, 20)),
             [Annotation(subject=BAR, geometry=Polygon(rings=[_rect(100.0)]))],
             120,
             120,
@@ -718,11 +714,11 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(
         execution=execution_record(checkpoint, Stated(), None, None),
         tile_batch_size=1,
     )
-    write_image(tmp_path / "a.png", (8, 8))
+    image = write_image(tmp_path / "a.png", (8, 8))
     (tmp_path / "t.csv").write_text("image,value\na,1.0\n", encoding="utf-8")
     sample = Sample(
         member="a",
-        source=str(tmp_path / "a.png"),
+        source=str(image),
         ground_truth=str(tmp_path / "t.csv"),
         group="a",
         side="holdout",
@@ -760,9 +756,8 @@ def test_a_polygon_that_fails_to_rasterize_refuses_rather_than_training_an_empty
     from tests._producer_fixtures import dataset_over, label_image, write_image
 
     images_dir = image_dir(tmp_path, UNDATED_BUCKET)
-    write_image(images_dir / "a.png", (IMG, IMG))
     label_image(
-        images_dir / "a.png",
+        write_image(images_dir / "a.png", (IMG, IMG)),
         [
             Annotation(
                 subject=SUBJECT,

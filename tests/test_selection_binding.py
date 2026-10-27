@@ -23,7 +23,7 @@ pytest.importorskip("torchvision")
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.dataset_layout import image_dir
+from tcip_mcp.dataset_layout import image_dir, parse_image_path
 from tcip_mcp.pipelines.data.datasets import BaseDataset
 from tcip_mcp.pipelines.data.selection import ClassScope, read_selection
 from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
@@ -37,9 +37,12 @@ from tests._chain_fixtures import (
     weights_statistics,
 )
 from tests._producer_fixtures import (
+    attribute_scoped_dataset,
     label_image,
     labeled_frame,
+    registry_of,
     registry_over,
+    scope_over,
     train_val as _train_val,
     write_image,
 )
@@ -53,8 +56,9 @@ DATES = ("2-11-26", "2-12-01")
 
 def _write_stem(
     images_dir: Path, stem: str, annotations: list[Annotation]
-) -> None:
-    labeled_frame(
+) -> Path:
+    """Write the 64 px labeled frame ``<stem>.jpg`` into ``images_dir``; return its path."""
+    return labeled_frame(
         images_dir / f"{stem}.jpg",
         annotations,
         64,
@@ -109,12 +113,11 @@ def test_every_sample_groups_each_member_the_way_the_stem_policy_records_it(
     On a dated tree the ``stem`` policy's group key names the capture date, so each member's
     group is the key ``recorded_group_key_fn`` gives it, never its bare member name.
     """
-    from tcip_mcp.pipelines.data.label_queries import admit, registry_scope
     from tcip_mcp.pipelines.data.splits import recorded_group_key_fn
+    from tests._producer_fixtures import admit_over
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    images = image_dir(root, DATES[0])
-    admitted = admit(images, scope=registry_scope(images, SUBJECT))
+    admitted = admit_over(image_dir(root, DATES[0]), subject=SUBJECT)
     key = recorded_group_key_fn("stem", date=admitted.date)
     samples = admitted.every_sample()
 
@@ -125,66 +128,13 @@ def test_every_sample_groups_each_member_the_way_the_stem_policy_records_it(
     assert all(s.group != s.member for s in samples)
 
 
-def _attribute_scoped_dataset(root: Path) -> Path:
-    """Write a dataset of one date, five stems of a subject declaring ``condition``, and return it.
-
-    Four stems have their instance assessed for it, and the fifth carries an instance not
-    assessed for it.
-    """
-    registry_over(
-        root,
-        SubjectRegistry(
-            subjects=(
-                Subject(
-                    name=SUBJECT,
-                    description="",
-                    attributes=(
-                        Attribute(
-                            name="condition",
-                            type="categorical",
-                            values=("healthy", "damaged"),
-                        ),
-                    ),
-                ),
-            )
-        ),
-    )
-    images_dir = image_dir(root, DATES[0])
-    for stem, condition in (
-        ("assessed_a", "healthy"),
-        ("assessed_b", "damaged"),
-        ("assessed_c", "healthy"),
-        ("assessed_d", "damaged"),
-    ):
-        _write_stem(
-            images_dir,
-            stem,
-            [
-                Annotation(
-                    subject=SUBJECT,
-                    geometry=BBox(4, 4, 20, 20),
-                    attributes={"condition": condition},
-                )
-            ],
-        )
-    _write_stem(
-        images_dir,
-        "unassessed",
-        [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))],
-    )
-    return root
-
-
 def _dataset_with_a_confirmed_negative(root: Path) -> Path:
     """Write a dataset of four annotated stems and one empty one, and return it.
 
     The first date holds stems ``a`` to ``d``, each with one box of the subject, and ``n``,
     whose label document is empty.
     """
-    registry_over(
-        root,
-        SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
-    )
+    registry_over(root, registry_of(SUBJECT))
     images_dir = image_dir(root, DATES[0])
     for stem in ("a", "b", "c", "d"):
         _write_stem(
@@ -202,10 +152,7 @@ def _tiled_dataset(root: Path) -> Path:
     The crops of parents ``srcA`` to ``srcD`` are named ``<parent>_<x>_0`` for x of 0, 1 and 2,
     each with one box of the subject, in the first date.
     """
-    registry_over(
-        root,
-        SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
-    )
+    registry_over(root, registry_of(SUBJECT))
     images_dir = image_dir(root, DATES[0])
     for parent in ("srcA", "srcB", "srcC", "srcD"):
         for x in range(3):
@@ -341,11 +288,9 @@ def test_auto_train_val_binds_the_selections_own_partition(
     assert held_out and not held_out & set(train_ds.stems + val_ds.stems)
     # The sources the two loaders will open, not a record written beside them.
     read_from = {
-        Path(train_ds.sample_of(key).source).parent.name
-        for key in train_ds.stems
-    }
-    read_from |= {
-        Path(val_ds.sample_of(key).source).parent.name for key in val_ds.stems
+        parse_image_path(ds.sample_of(key).source)[1]
+        for ds in (train_ds, val_ds)
+        for key in ds.stems
     }
     assert read_from == set(DATES)
 
@@ -439,7 +384,7 @@ def test_a_bound_run_keeps_its_selections_attributes_when_the_registry_is_reorde
     from tcip_mcp.pipelines.training.subprocess_worker import run_directory
     from tests._verified_checkpoint_fixtures import opened_run
 
-    root = _attribute_scoped_dataset(tmp_path / "ds")
+    root = attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out, seed=1)
     assert [a.values for a in drawn.scope.attributes] == [
@@ -450,20 +395,13 @@ def test_a_bound_run_keeps_its_selections_attributes_when_the_registry_is_reorde
     # give each value the other's id, a different class space than the samples were admitted in.
     registry_over(
         root,
-        SubjectRegistry(
-            subjects=(
-                Subject(
-                    name=SUBJECT,
-                    description="",
-                    attributes=(
-                        Attribute(
-                            name="condition",
-                            type="categorical",
-                            values=("damaged", "healthy"),
-                        ),
-                    ),
-                ),
-            )
+        registry_of(
+            SUBJECT,
+            Attribute(
+                name="condition",
+                type="categorical",
+                values=("damaged", "healthy"),
+            ),
         ),
     )
 
@@ -638,13 +576,10 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
 
     root = tmp_path / "ds"
     images_dir = image_dir(root, DATES[0])
-    write_image(images_dir / "a.jpg", (64, 64), (100, 120, 90))
-    registry_over(
-        root,
-        SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
-    )
+    image = write_image(images_dir / "a.jpg", (64, 64), (100, 120, 90))
+    scope = scope_over(root, registry_of(SUBJECT), SUBJECT)
     label_image(
-        images_dir / "a.jpg",
+        image,
         [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))],
         64,
         64,
@@ -661,10 +596,10 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
                 samples=(
                     Sample(
                         member=row_key or "a",
-                        source=str(images_dir / "a.jpg"),
+                        source=str(image),
                         ground_truth=str(table)
                         if row_key
-                        else image_label_key(images_dir / "a.jpg"),
+                        else image_label_key(image),
                         group="g",
                         side="train",
                         row_key=row_key,
@@ -681,9 +616,6 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
         )
         return read_selection(out, project=tmp_path)
 
-    from tcip_mcp.pipelines.data.label_queries import registry_scope
-
-    scope = registry_scope(images_dir, SUBJECT)
     with pytest.raises(ValueError, match="a detection loader does not read"):
         resolve_sizes("detection", {}, _selection("a.jpg").samples)
 
@@ -694,7 +626,7 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
         scope=scope,
         sizes=resolve_sizes("detection", {}, whole),
     )
-    assert list(admitted.stems) == [str(images_dir / "a.jpg")]
+    assert list(admitted.stems) == [str(image)]
 
 
 def test_crops_of_one_parent_cannot_cross_sides(tmp_path: Path) -> None:
@@ -790,7 +722,7 @@ def test_a_bound_run_reads_attribute_ids_from_the_selections_own_scope(
     The selection records the attributes its admission read, the bound train loader carries that
     scope, and the stem not assessed for the attribute stays among the selection's samples.
     """
-    root = _attribute_scoped_dataset(tmp_path / "ds")
+    root = attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
     assert [a.values for a in drawn.scope.attributes] == [
@@ -894,7 +826,7 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(
     bound_here = [
         s
         for s in handed(bound_train, bound_val)
-        if Path(s[0]).parent.name == DATES[0]
+        if parse_image_path(s[0])[1] == DATES[0]
     ]
     unbound_here = handed(unbound_train, unbound_val)
     held_out = {
@@ -1229,10 +1161,7 @@ def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_mem
             stem,
             [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))],
         )
-    registry_over(
-        root,
-        SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
-    )
+    registry_over(root, registry_of(SUBJECT))
     out = tmp_path / "m"
     explicit = draw_splits(
         tmp_path,
@@ -1271,7 +1200,6 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
     ``tmp_path / "m"``, places ``fg`` on train, ``neg`` on val and ``held_a`` and ``held_b`` on
     calibration, each its own group. Returns ``(root, selection_dir)``.
     """
-    from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.data.selection import (
         Sample,
         Selection,
@@ -1280,26 +1208,25 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
     from tests._producer_fixtures import image_label_key, mark_complete
 
     root = tmp_path / "ds"
-    registry_over(
-        root,
-        SubjectRegistry(subjects=(Subject(name=SUBJECT, description=""),)),
-    )
+    scope = scope_over(root, registry_of(SUBJECT), SUBJECT)
     images_dir = image_dir(root, DATES[0])
-    for stem in ("fg", "neg", "held_a", "held_b"):
-        _write_stem(
+    frames = {
+        stem: _write_stem(
             images_dir,
             stem,
             []
             if stem == "neg"
             else [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))],
         )
-    mark_complete(images_dir / "neg.jpg", SUBJECT, project=root)
+        for stem in ("fg", "neg", "held_a", "held_b")
+    }
+    mark_complete(frames["neg"], SUBJECT, project=root)
 
     def _sample(stem: str, side: str) -> Sample:
         return Sample(
             member=stem,
-            source=str(images_dir / f"{stem}.jpg"),
-            ground_truth=image_label_key(images_dir / f"{stem}.jpg"),
+            source=str(frames[stem]),
+            ground_truth=image_label_key(frames[stem]),
             group=stem,
             side=side,
         )
@@ -1314,7 +1241,7 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
                 _sample("held_a", "calibration"),
                 _sample("held_b", "calibration"),
             ),
-            scope=registry_scope(images_dir, SUBJECT),
+            scope=scope,
             seed=1,
             group_by="explicit_map",
             ratios={"train": 0.25, "val": 0.25, "calibration": 0.5},

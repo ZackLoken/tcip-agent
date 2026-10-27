@@ -254,16 +254,14 @@ def test_dataset_tree_per_date_reflects_actual_labels(
     opened_project: Path,
 ) -> None:
     root = tmp_path / "ds"
-    write_image(image_dir(root, "2026-02-11") / "IMG_1.JPG", (8, 8))
+    labeled = write_image(image_dir(root, "2026-02-11") / "IMG_1.JPG", (8, 8))
     write_image(image_dir(root, "2026-03-24") / "IMG_2.JPG", (8, 8))
     # bud labeled + a bucket published over 02-11; nothing on 03-24.
-    _write_gt(
-        image_dir(root, "2026-02-11") / "IMG_1.JPG", [(1, 1, 3, 3)], w=8, h=8
-    )
+    _write_gt(labeled, [(1, 1, 3, 3)], w=8, h=8)
     name = _published_bucket(
         opened_project,
         "baseline/2026-02-11",
-        image_dir(root, "2026-02-11") / "IMG_1.JPG",
+        labeled,
         [1],
         scope={"subject": "bud"},
     )

@@ -33,10 +33,10 @@ if TYPE_CHECKING:
 
 
 def test_probe_channels_from_raster(tmp_path: Path) -> None:
-    write_image(tmp_path / "rgb.png", (8, 8))
-    Image.new("L", (8, 8)).save(tmp_path / "gray.png")
-    assert probe_channels(tmp_path / "rgb.png") == 3
-    assert probe_channels(tmp_path / "gray.png") == 1
+    gray = tmp_path / "gray.png"
+    Image.new("L", (8, 8)).save(gray)
+    assert probe_channels(write_image(tmp_path / "rgb.png", (8, 8))) == 3
+    assert probe_channels(gray) == 1
     np.save(tmp_path / "ms.npy", np.zeros((8, 8, 5), dtype=np.float32))
     assert probe_channels(tmp_path / "ms.npy") == 5
 

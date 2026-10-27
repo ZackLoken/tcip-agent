@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.dataset_layout import image_dir
+from tcip_mcp.dataset_layout import image_dir, parse_image_path
 from tests._producer_fixtures import image_label_key, label_image, write_image
 from tests._training_values import RATIONALE, drawn_split
 
@@ -144,5 +144,5 @@ def test_draw_splits_selection_document_golden(tmp_path: Path) -> None:
     assert drawn.ratios == GOLDEN_REQUESTED_RATIOS
     assert (drawn.stratify_foreground, drawn.rationale) == (True, RATIONALE)
     for sample in drawn.samples:
-        assert Path(sample.source).parent == image_dir(root, "2-11-26")
+        assert parse_image_path(sample.source)[:2] == (root, "2-11-26")
         assert sample.ground_truth == image_label_key(sample.source)

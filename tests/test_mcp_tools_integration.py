@@ -19,9 +19,7 @@ from tests.conftest import DATA_DIR_BUCKET
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.augmentations import Compose
-
-DATE = "2-11-26"
-"""The capture date conftest's ``data_dir`` lays its images and its published bucket under."""
+    from tests._producer_fixtures import WrittenDataset
 
 
 def _empty_bucket(project: Path, *images: Path) -> str:
@@ -70,10 +68,11 @@ class TestReadAnnotations:
         from tcip_mcp.tools.annotation_tools import read_annotations
         from tests._producer_fixtures import label_image
 
-        images_dir = image_dir(tmp_path, UNDATED_BUCKET)
-        write_image(images_dir / "a.jpg", (100, 100))
+        image = write_image(
+            image_dir(tmp_path, UNDATED_BUCKET) / "a.jpg", (100, 100)
+        )
         label_image(
-            images_dir / "a.jpg",
+            image,
             [
                 Annotation(
                     subject="bud",
@@ -89,7 +88,7 @@ class TestReadAnnotations:
             100,
         )
 
-        result = read_annotations(tmp_path, str(images_dir / "a.jpg"))
+        result = read_annotations(tmp_path, str(image))
         (ann,) = result["labels"]["annotations"]
         assert "points" not in ann
         assert ann["rings"] == [
@@ -104,13 +103,12 @@ class TestReadAnnotations:
 class TestEvaluatePredictions:
     """Tests of score_predictions over files on disk."""
 
-    def test_evaluate_single_image(self, data_dir: Path) -> None:
+    def test_evaluate_single_image(self, data_dir: WrittenDataset) -> None:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        img = str(image_dir(data_dir, DATE) / "img_001.jpg")
         result = score_predictions(
-            data_dir,
-            img,
+            data_dir.root,
+            str(data_dir.images[0]),
             DATA_DIR_BUCKET,
             iou_threshold=0.5,
             conf_threshold=0.25,
@@ -122,12 +120,12 @@ class TestEvaluatePredictions:
         assert 0.0 <= result["precision"] <= 1.0
         assert 0.0 <= result["recall"] <= 1.0
 
-    def test_evaluate_folder(self, data_dir: Path) -> None:
+    def test_evaluate_folder(self, data_dir: WrittenDataset) -> None:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
         result = score_predictions(
-            data_dir,
-            str(image_dir(data_dir, DATE)),
+            data_dir.root,
+            str(data_dir.images_dir),
             DATA_DIR_BUCKET,
             iou_threshold=0.5,
             conf_threshold=0.25,
@@ -143,13 +141,12 @@ class TestEvaluatePredictions:
 class TestEvaluatePredictionsDetail:
     """Tests of score_predictions(detail=True)'s per-detection breakdown over files on disk."""
 
-    def test_detail_breakdown(self, data_dir: Path) -> None:
+    def test_detail_breakdown(self, data_dir: WrittenDataset) -> None:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        img = str(image_dir(data_dir, DATE) / "img_001.jpg")
         result = score_predictions(
-            data_dir,
-            img,
+            data_dir.root,
+            str(data_dir.images[0]),
             DATA_DIR_BUCKET,
             iou_threshold=0.5,
             conf_threshold=0.25,

@@ -6,11 +6,12 @@ held to frozen values.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import image_dir
+if TYPE_CHECKING:
+    from tests._producer_fixtures import WrittenDataset
 
 pytest.importorskip("tcip_mcp.tools.annotation_tools")
 
@@ -91,13 +92,13 @@ GOLDEN_DATASET = {
 }
 
 
-def test_evaluate_single_image_golden(data_dir: Path) -> None:
+def test_evaluate_single_image_golden(data_dir: WrittenDataset) -> None:
     from tcip_mcp.tools.annotation_tools import score_predictions
     from tests.conftest import DATA_DIR_BUCKET
 
-    img = image_dir(data_dir, "2-11-26") / "img_001.jpg"
+    img = data_dir.images[0]
     result = score_predictions(
-        data_dir,
+        data_dir.root,
         str(img),
         DATA_DIR_BUCKET,
         iou_threshold=0.5,
@@ -117,13 +118,13 @@ def test_evaluate_single_image_golden(data_dir: Path) -> None:
     assert result == GOLDEN_DETECTIONS
 
 
-def test_evaluate_folder_golden(data_dir: Path) -> None:
+def test_evaluate_folder_golden(data_dir: WrittenDataset) -> None:
     from tcip_mcp.tools.annotation_tools import score_predictions
     from tests.conftest import DATA_DIR_BUCKET
 
-    images_dir = str(image_dir(data_dir, "2-11-26"))
+    images_dir = str(data_dir.images_dir)
     result = score_predictions(
-        data_dir,
+        data_dir.root,
         images_dir,
         DATA_DIR_BUCKET,
         iou_threshold=0.5,

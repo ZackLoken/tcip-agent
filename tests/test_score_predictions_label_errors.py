@@ -66,8 +66,7 @@ def test_score_predictions_single_image_reports_an_unreadable_gt(
 ) -> None:
     from tests._record_damage_fixtures import damage_record
 
-    img = image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0000.jpg"
-    write_image(img)
+    img = write_image(image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0000.jpg")
     label_image(img, ONE_BUD, 100, 80)
     damage_record(image_label_key(img), b"{not json")
     _published(tmp_path, "baseline", img)
@@ -84,9 +83,9 @@ def test_score_predictions_folder_reports_an_unreadable_prediction(
     from tests._record_damage_fixtures import damage_record
 
     images = image_dir(tmp_path / "ds", UNDATED_BUCKET)
-    write_image(images / "IMG_0000.jpg")
-    label_image(images / "IMG_0000.jpg", ONE_BUD, 100, 80)
-    bucket = _published(tmp_path, "baseline", images / "IMG_0000.jpg")
+    image = write_image(images / "IMG_0000.jpg")
+    label_image(image, ONE_BUD, 100, 80)
+    bucket = _published(tmp_path, "baseline", image)
     damage_record(bucket.document_key("IMG_0000"), b"{not json")
 
     res = score_predictions(tmp_path, str(images), "baseline", *SCORED_AT)
@@ -104,26 +103,16 @@ def test_score_predictions_over_attributed_documents_scores_the_object_class(
     over it is one true positive with no error.
     """
     from tcip_mcp import subject_registry as cr
+    from tests._producer_fixtures import registry_of
 
-    img = image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0000.jpg"
-    write_image(img)
+    img = write_image(image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0000.jpg")
     label_image(img, ONE_BUD, 100, 80)
     _published(
         tmp_path,
         "classifier",
         img,
-        cr.SubjectRegistry(
-            subjects=(
-                cr.Subject(
-                    name="bud",
-                    description="",
-                    attributes=(
-                        cr.Attribute(
-                            "opening", "categorical", ("closed", "open")
-                        ),
-                    ),
-                ),
-            )
+        registry_of(
+            "bud", cr.Attribute("opening", "categorical", ("closed", "open"))
         ),
     )
 
@@ -144,8 +133,7 @@ def test_a_predicted_image_with_no_label_document_is_refused_as_a_reference(
     from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.tools.vision_tools import get_worst_predictions
 
-    img = image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0000.jpg"
-    write_image(img)
+    img = write_image(image_dir(tmp_path, UNDATED_BUCKET) / "IMG_0000.jpg")
     bucket = _published(tmp_path, "baseline", img)
 
     res = score_predictions(tmp_path, str(img), "baseline", *SCORED_AT)
@@ -168,10 +156,13 @@ def test_an_image_the_bucket_names_no_document_for_is_unknown_never_a_miss(
     from tcip_mcp.tools.vision_tools import get_worst_predictions
 
     images = image_dir(tmp_path / "ds", UNDATED_BUCKET)
-    for stem in ("IMG_0000", "IMG_0001"):
+    predicted, unpredicted = (
         write_image(images / f"{stem}.jpg")
-        label_image(images / f"{stem}.jpg", ONE_BUD, 100, 80)
-    bucket = _published(tmp_path, "baseline", images / "IMG_0000.jpg")
+        for stem in ("IMG_0000", "IMG_0001")
+    )
+    for image in (predicted, unpredicted):
+        label_image(image, ONE_BUD, 100, 80)
+    bucket = _published(tmp_path, "baseline", predicted)
 
     scored = score_predictions(tmp_path, str(images), "baseline", *SCORED_AT)
     triaged = get_worst_predictions(bucket, 8, **TRIAGE_WEIGHTS)
@@ -182,12 +173,12 @@ def test_an_image_the_bucket_names_no_document_for_is_unknown_never_a_miss(
         0,
         1,
     )
-    assert scored["not_predicted"] == [str(images / "IMG_0001.jpg")]
+    assert scored["not_predicted"] == [str(unpredicted)]
     assert [w["stem"] for w in triaged["worst_images"]] == ["IMG_0000"]
     assert triaged["not_predicted"] == ["IMG_0001"]
     assert (
         "not predicted"
         in score_predictions(
-            tmp_path, str(images / "IMG_0001.jpg"), "baseline", *SCORED_AT
+            tmp_path, str(unpredicted), "baseline", *SCORED_AT
         )["error"]
     )

@@ -32,13 +32,10 @@ def test_an_attributed_bucket_delivers_its_object_count_not_its_value_count(
         deliver_per_image_counts_csv,
     )
     from tests._chain_fixtures import acknowledged, predicted, published
+    from tests._producer_fixtures import registry_of
 
     posture = cr.Attribute("posture", "categorical", ("upright", "lodged"))
-    registry = cr.SubjectRegistry(
-        subjects=(
-            cr.Subject(name=SUBJECT, description="", attributes=(posture,)),
-        )
-    )
+    registry = registry_of(SUBJECT, posture)
     image = image_dir(tmp_path / "ds", "2026-05-20") / "img1.jpg"
     bucket = published(
         tmp_path,

@@ -14,8 +14,10 @@ import pytest
 import tifffile
 
 from tests._producer_fixtures import (  # noqa: E402
+    GroupedDataset,
     dataset_over,
     label_image,
+    registry_of,
     registry_over,
     write_image,
 )
@@ -25,82 +27,76 @@ if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
 
 
-def _write_group(
-    images_dir: Path, stem: str, fill: tuple[int, int] = (111, 222)
-) -> None:
+def _write_group(images_dir: Path, stem: str) -> tuple[Path, dict[str, Path]]:
+    """Write ``stem``'s two-band group into ``images_dir``; return its manifest and its bands."""
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
-    band_a = images_dir / f"{stem}_G.tif"
-    band_b = images_dir / f"{stem}_R.tif"
-    tifffile.imwrite(str(band_a), np.full((16, 16), fill[0], dtype=np.uint16))
-    tifffile.imwrite(str(band_b), np.full((16, 16), fill[1], dtype=np.uint16))
-    write_band_group_manifest(
+    bands = {
+        "Green": images_dir / f"{stem}_G.tif",
+        "Red": images_dir / f"{stem}_R.tif",
+    }
+    for band, fill in zip(bands.values(), (111, 222), strict=True):
+        tifffile.imwrite(str(band), np.full((16, 16), fill, dtype=np.uint16))
+    manifest = write_band_group_manifest(
         images_dir,
         stem,
-        {"Green": band_a, "Red": band_b},
+        bands,
         central_wavelength_nm=None,
         identity_tolerance={},
     )
+    return manifest, bands
 
 
 @pytest.fixture
-def grouped_dataset(tmp_path: Path) -> Path:
-    """Return a minimal dataset root holding one grouped capture and one plain photo.
+def grouped_dataset(tmp_path: Path) -> GroupedDataset:
+    """Write one grouped capture and one plain photo into ``images/2026-04-01/``.
 
-    Each has a detection GT label document, under ``images/2026-04-01/``.
+    Each has a detection GT label document, and the registry declares ``bud``.
     """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
 
     root = tmp_path / "proj"
-    date = "2026-04-01"
-    images_dir = image_dir(root, date)
+    images_dir = image_dir(root, "2026-04-01")
     images_dir.mkdir(parents=True)
+    registry_over(root, registry_of("bud"))
 
-    registry_over(
-        root,
-        SubjectRegistry(subjects=(Subject(name="bud", description="a bud"),)),
-    )
-
-    _write_group(images_dir, "capture_001")
-    write_image(images_dir / "plain_002.jpg", (16, 16), (5, 5, 5))
-
-    for source in ("capture_001.bandgroup", "plain_002.jpg"):
+    manifest, bands = _write_group(images_dir, "capture_001")
+    plain = write_image(images_dir / "plain_002.jpg", (16, 16), (5, 5, 5))
+    for source in (manifest, plain):
         label_image(
-            images_dir / source,
+            source,
             [Annotation(subject="bud", geometry=BBox(2, 2, 6, 6))],
             16,
             16,
         )
-    return root
+    return GroupedDataset(root, images_dir, manifest, bands, plain)
 
 
 # ── datasets.py ─────────────────────────────────────────────────────────────────────────
 
 
 def test_a_group_is_named_by_its_manifest_wherever_a_name_is_read(
-    grouped_dataset: Path,
+    grouped_dataset: GroupedDataset,
 ) -> None:
     """A grouped capture is named by its manifest filename, a plain photo by its own file.
 
     ``logical_image_name`` answers a grouped capture with its own manifest filename, the file a
     name store holds it by, not one of its sibling band files.
     """
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.image_utils import (
         list_logical_images,
         logical_image_name,
     )
 
-    sources = list_logical_images(image_dir(grouped_dataset, "2026-04-01"))
+    sources = list_logical_images(grouped_dataset.images_dir)
     names = {stem: logical_image_name(src) for stem, src in sources.items()}
     assert names["capture_001"] == "capture_001.bandgroup"
     assert names["plain_002"] == "plain_002.jpg"
 
 
 def test_detection_dataset_trains_on_a_grouped_capture(
-    grouped_dataset: Path,
+    grouped_dataset: GroupedDataset,
 ) -> None:
     """A detection loader over the grouped capture alone reads its two bands stacked.
 
@@ -108,11 +104,10 @@ def test_detection_dataset_trains_on_a_grouped_capture(
     it expects two channels, the group's band count.
     """
     torch = pytest.importorskip("torch")
-    from tcip_mcp.dataset_layout import image_dir
 
     ds = dataset_over(
         "detection",
-        str(image_dir(grouped_dataset, "2026-04-01")),
+        str(grouped_dataset.images_dir),
         subject="bud",
         members=["capture_001"],
     )
@@ -129,14 +124,13 @@ def test_detection_dataset_trains_on_a_grouped_capture(
 
 
 def test_the_channel_probe_derives_2_for_the_grouped_sample(
-    grouped_dataset: Path,
+    grouped_dataset: GroupedDataset,
 ) -> None:
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.data.datasets import _band_count
     from tests._producer_fixtures import samples_over
 
     samples = samples_over(
-        str(image_dir(grouped_dataset, "2026-04-01")),
+        str(grouped_dataset.images_dir),
         subject="bud",
         members=["capture_001"],
     )
@@ -185,24 +179,20 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
 
 
 def test_image_path_dimensions_of_a_grouped_capture_path(
-    grouped_dataset: Path,
+    grouped_dataset: GroupedDataset,
 ) -> None:
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.image_utils import image_path_dimensions
 
-    manifest = (
-        image_dir(grouped_dataset, "2026-04-01") / "capture_001.bandgroup"
-    )
-    assert image_path_dimensions(str(manifest)) == (16, 16)
+    assert image_path_dimensions(str(grouped_dataset.manifest)) == (16, 16)
 
 
 def test_focus_annotate_lands_on_the_grouped_capture_by_manifest_name(
-    grouped_dataset: Path, bound: BoundProject
+    grouped_dataset: GroupedDataset, bound: BoundProject
 ) -> None:
     from tcip_mcp.tools.gui_tools import focus_human_attention
 
     res = focus_human_attention(
-        bound, str(grouped_dataset), "bud", "2026-04-01"
+        bound, str(grouped_dataset.root), "bud", "2026-04-01"
     )
     assert "error" not in res
     assert res["n_images"] == 2
@@ -215,24 +205,22 @@ def test_focus_annotate_lands_on_the_grouped_capture_by_manifest_name(
 
 
 def test_display_read_composites_a_group_into_rgb_pixels(
-    grouped_dataset: Path,
+    grouped_dataset: GroupedDataset,
 ) -> None:
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.tools.vision_tools import _display_of
 
-    manifest = (
-        image_dir(grouped_dataset, "2026-04-01") / "capture_001.bandgroup"
+    read = _display_of(
+        SourceHeader(resolve_image_path(grouped_dataset.manifest))
     )
-    read = _display_of(SourceHeader(resolve_image_path(manifest)))
     assert read.pixels.shape == (16, 16, 3)
     assert read.pixels.dtype == np.uint8
     assert read.native_size == (16, 16)
 
 
 def test_display_read_of_a_plain_photo_is_the_files_own_pixels(
-    grouped_dataset: Path,
+    grouped_dataset: GroupedDataset,
 ) -> None:
     """A plain photo's display read is the file's own pixels.
 
@@ -241,11 +229,10 @@ def test_display_read_of_a_plain_photo_is_the_files_own_pixels(
     """
     from PIL import Image
 
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.tools.vision_tools import _display_of
 
-    plain = image_dir(grouped_dataset, "2026-04-01") / "plain_002.jpg"
+    plain = grouped_dataset.plain
     read = _display_of(SourceHeader(plain))
     assert np.array_equal(
         read.pixels, np.asarray(Image.open(plain).convert("RGB"))
@@ -308,16 +295,15 @@ def test_display_read_still_stretches_a_genuinely_multiband_geotiff(
 
 
 def test_visualize_annotations_on_a_grouped_capture(
-    tmp_path: Path, grouped_dataset: Path
+    tmp_path: Path, grouped_dataset: GroupedDataset
 ) -> None:
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.vision_tools import AnnotationsRender, visualize
 
-    manifest = (
-        image_dir(grouped_dataset, "2026-04-01") / "capture_001.bandgroup"
-    )
     result = visualize(
-        tmp_path, AnnotationsRender(source="annotations", path=str(manifest))
+        tmp_path,
+        AnnotationsRender(
+            source="annotations", path=str(grouped_dataset.manifest)
+        ),
     )
     assert "error" not in result
     assert result["count"] == 1
@@ -325,9 +311,8 @@ def test_visualize_annotations_on_a_grouped_capture(
 
 
 def test_visualize_annotations_on_a_band_member_answers_the_resolvers_refusal(
-    tmp_path: Path, grouped_dataset: Path
+    tmp_path: Path, grouped_dataset: GroupedDataset
 ) -> None:
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.vision_tools import (
         AnnotationsRender,
         ComparisonRender,
@@ -335,9 +320,7 @@ def test_visualize_annotations_on_a_band_member_answers_the_resolvers_refusal(
         visualize,
     )
 
-    member = str(
-        image_dir(grouped_dataset, "2026-04-01") / "capture_001_G.tif"
-    )
+    member = str(grouped_dataset.bands["Green"])
     for render in (
         AnnotationsRender(source="annotations", path=member),
         PredictionsRender(source="predictions", path=member, bucket="preds"),
@@ -354,13 +337,13 @@ def test_visualize_annotations_on_a_band_member_answers_the_resolvers_refusal(
 
 
 def test_viz_dataset_sample_folds_a_grouped_capture_into_one_entry(
-    tmp_path: Path, grouped_dataset: Path
+    tmp_path: Path, grouped_dataset: GroupedDataset
 ) -> None:
     from tcip_mcp.tools.vision_tools import DatasetRender, visualize
 
     result = visualize(
         tmp_path,
-        DatasetRender(source="dataset", path=str(grouped_dataset), n=16),
+        DatasetRender(source="dataset", path=str(grouped_dataset.root), n=16),
     )
     assert "error" not in result
     assert (
@@ -372,7 +355,7 @@ def test_viz_dataset_sample_folds_a_grouped_capture_into_one_entry(
 
 
 def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(
-    tmp_path: Path, grouped_dataset: Path
+    tmp_path: Path, grouped_dataset: GroupedDataset
 ) -> None:
     """A drawn selection records a grouped capture by its own manifest path.
 
@@ -380,27 +363,26 @@ def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(
     resolves to a ``BandGroupRef`` whose band files exist.
     """
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.tools.data_tools import draw_splits
 
     # The fixture's two groups (capture_001, plain_002) need two more to clear a draw's floor.
-    images_dir = image_dir(grouped_dataset, "2026-04-01")
     for stem in ("plain_003", "plain_004"):
-        write_image(images_dir / f"{stem}.jpg", (16, 16), (5, 5, 5))
         label_image(
-            images_dir / f"{stem}.jpg",
+            write_image(
+                grouped_dataset.images_dir / f"{stem}.jpg", (16, 16), (5, 5, 5)
+            ),
             [Annotation(subject="bud", geometry=BBox(2, 2, 6, 6))],
             16,
             16,
         )
 
-    out = grouped_dataset / "splits"
+    out = grouped_dataset.root / "splits"
     result = draw_splits(
         tmp_path,
-        str(grouped_dataset),
+        str(grouped_dataset.root),
         output_path=str(out),
         subject="bud",
         **drawn_split(
@@ -416,21 +398,19 @@ def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(
 
     drawn = read_selection(out, project=tmp_path)
     grouped = next(
-        s for s in drawn.samples if Path(s.source).stem == "capture_001"
+        s
+        for s in drawn.samples
+        if Path(s.source).stem == grouped_dataset.manifest.stem
     )
-    assert (
-        Path(grouped.source).parent == images_dir
-    )  # read in place, never copied
-    assert (
-        Path(grouped.source).suffix == ".bandgroup"
-    )  # the admission records the manifest
+    # The admission records the manifest itself, read in place, never copied.
+    assert Path(grouped.source) == grouped_dataset.manifest
     resolved = resolve_image_path(grouped.source)
     assert isinstance(resolved, BandGroupRef)
     assert all(p.is_file() for p in resolved.bands.values())
 
 
 def test_scan_dataset_counts_a_grouped_capture_once_not_once_per_band_file(
-    grouped_dataset: Path,
+    grouped_dataset: GroupedDataset,
 ) -> None:
     """``_scan_dataset`` counts a grouped capture once, never once per band file.
 
@@ -439,7 +419,7 @@ def test_scan_dataset_counts_a_grouped_capture_once_not_once_per_band_file(
     """
     from tcip_mcp.tools.data_tools import _scan_dataset
 
-    scan = _scan_dataset(str(grouped_dataset))
+    scan = _scan_dataset(str(grouped_dataset.root))
     stems = {Path(p).stem for p in scan["images"]}
     assert stems == {"capture_001", "plain_002"}
     assert len(scan["images"]) == 2

@@ -17,17 +17,14 @@ from typing import TYPE_CHECKING
 from fastapi.testclient import TestClient
 
 from tcip_mcp import subject_registry as cr
+from tests._producer_fixtures import registry_of
 
 if TYPE_CHECKING:
     from httpx import Response
 
 BLOOM_STATE = cr.Attribute("bloom_state", "categorical", ("closed", "open"))
 """The attribute of ``flower`` the second trait's positive state names."""
-FLOWERS = cr.SubjectRegistry(
-    subjects=(
-        cr.Subject(name="flower", description="", attributes=(BLOOM_STATE,)),
-    )
-)
+FLOWERS = registry_of("flower", BLOOM_STATE)
 
 
 def _seed_currant_bloom_trait(tmp_path: Path) -> None:

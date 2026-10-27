@@ -12,12 +12,12 @@ import pytest
 
 import tcip_store as ts
 from tcip_annotation import json_io
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._producer_fixtures import (
-    blank_image,
     box_annotation,
     image_label_key,
     label_image,
+    write_image,
 )
 
 if TYPE_CHECKING:
@@ -35,7 +35,7 @@ def test_mcp_save_annotations_empty_writes_the_empty_document_the_route_writes(
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    img = blank_image(bound.root)
+    img = write_image(image_dir(bound.root, UNDATED_BUCKET) / "IMG_0001.JPG")
     label_image(img, [box_annotation(1, 1, 9, 9)], 100, 80)
     res = save_annotations(bound, str(img), annotations=[], actor=None)
     assert res == {
@@ -62,7 +62,7 @@ def test_mcp_save_annotations_refuses_by_index_through_the_decoders_checks(
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    img = blank_image(bound.root)
+    img = write_image(image_dir(bound.root, UNDATED_BUCKET) / "IMG_0001.JPG")
     res = save_annotations(
         bound,
         str(img),
@@ -106,7 +106,8 @@ def test_draw_splits_counts_json_objects_not_lines(tmp_path: Path) -> None:
     from tests._producer_fixtures import mark_complete
     from tests._training_values import RATIONALE
 
-    images = [blank_image(tmp_path, name=f"img_{i}.JPG") for i in range(4)]
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+    images = [write_image(images_dir / f"img_{i}.JPG") for i in range(4)]
 
     box = box_annotation(1, 1, 9, 9)
     label_image(images[0], [box, box, box], 100, 80)

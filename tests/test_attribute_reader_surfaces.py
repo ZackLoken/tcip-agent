@@ -15,10 +15,10 @@ import pytest
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import subject_registry as cr
-from tcip_mcp.dataset_layout import image_dir, image_root
-from tcip_mcp.pipelines.data.selection import ClassScope
+from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.postprocessing import phenology
 from tcip_mcp.traits import PositiveState
+from tests._producer_fixtures import registry_of, scope_over
 from tests._training_values import VERTEX_SPACING
 
 if TYPE_CHECKING:
@@ -27,27 +27,6 @@ if TYPE_CHECKING:
 SUBJECT = "object"
 COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
 GRADE = cr.Attribute("grade", "ordinal", ("low", "high"))
-
-
-def _scope(tmp_path: Path, *attributes: cr.Attribute) -> ClassScope:
-    """Return ``registry_scope`` for :data:`SUBJECT` over ``tmp_path``'s images.
-
-    The dataset under ``tmp_path`` is made to declare ``attributes`` on it first.
-    """
-    from tcip_mcp.pipelines.data.label_queries import registry_scope
-    from tests._producer_fixtures import registry_over
-
-    registry_over(
-        tmp_path,
-        cr.SubjectRegistry(
-            subjects=(
-                cr.Subject(
-                    name=SUBJECT, description="", attributes=attributes
-                ),
-            )
-        ),
-    )
-    return registry_scope(image_root(tmp_path), SUBJECT)
 
 
 def _document(tmp_path: Path) -> Key:
@@ -83,7 +62,7 @@ def test_count_by_class_under_a_scope_declaring_no_attribute_of_the_state_counts
     total, positive, unclassified = phenology.count_by_class(
         p,
         PositiveState(attribute="grade", value="high"),
-        scope=_scope(tmp_path, COLOR),
+        scope=scope_over(tmp_path, registry_of(SUBJECT, COLOR), SUBJECT),
     )
 
     assert (total, positive, unclassified) == (1, 0, 1)
@@ -117,7 +96,7 @@ def test_count_by_class_reads_the_states_own_attribute_among_several(
         8,
         8,
     )
-    scope = _scope(tmp_path, COLOR, GRADE)
+    scope = scope_over(tmp_path, registry_of(SUBJECT, COLOR, GRADE), SUBJECT)
 
     assert phenology.count_by_class(
         p, PositiveState(attribute="grade", value="high"), scope=scope
@@ -218,7 +197,12 @@ def test_legend_name_shows_the_subject_and_every_attribute_value_in_declared_ord
     )
 
     assert (
-        _legend_name(pred, scope=_scope(tmp_path, COLOR, GRADE))
+        _legend_name(
+            pred,
+            scope=scope_over(
+                tmp_path, registry_of(SUBJECT, COLOR, GRADE), SUBJECT
+            ),
+        )
         == "object blue high"
     )
 
@@ -231,4 +215,9 @@ def test_legend_name_falls_back_to_the_subject_under_no_scope_or_no_attributes(
     pred = Annotation(subject=SUBJECT, geometry=BBox(1, 1, 5, 5), score=0.9)
 
     assert _legend_name(pred, scope=None) == SUBJECT
-    assert _legend_name(pred, scope=_scope(tmp_path)) == SUBJECT
+    assert (
+        _legend_name(
+            pred, scope=scope_over(tmp_path, registry_of(SUBJECT), SUBJECT)
+        )
+        == SUBJECT
+    )

@@ -378,7 +378,7 @@ def test_a_semantic_seg_runs_checkpoint_lists_with_its_per_class_metrics(
     from tests._verified_checkpoint_fixtures import worker_run
     from tests.test_mask_and_table_membership import _three_class_masks
 
-    images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
+    images_dir, masks_dir, _masks = _three_class_masks(tmp_path / "ds")
     run_dir = worker_run(
         tmp_path,
         training_config(

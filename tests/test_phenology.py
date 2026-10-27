@@ -23,8 +23,8 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import subject_registry as cr
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing import phenology
+from tests._producer_fixtures import mapping_of, registry_of, scope_over
 from tests._trait_fixtures import BUD_OPENING, entry
 
 if TYPE_CHECKING:
@@ -36,24 +36,6 @@ OPENING = cr.Attribute("opening", "categorical", ("closed", "open"))
 """The attribute :data:`BUD_OPENING`'s positive state names."""
 OPENED = BUD_OPENING.positive_state
 RULE = BUD_OPENING.crossing_rule
-
-
-def _registry(*attributes: cr.Attribute) -> cr.SubjectRegistry:
-    return cr.SubjectRegistry(
-        subjects=(
-            cr.Subject(name="bud", description="", attributes=attributes),
-        )
-    )
-
-
-def _scope(root: Path, *attributes: cr.Attribute) -> ClassScope:
-    """Return the registry scope of ``bud`` over a dataset at ``root`` declaring ``attributes``."""
-    from tcip_mcp.dataset_layout import image_root
-    from tcip_mcp.pipelines.data.label_queries import registry_scope
-    from tests._producer_fixtures import registry_over
-
-    registry_over(root, _registry(*attributes))
-    return registry_scope(image_root(root), "bud")
 
 
 def _document(project: Path, annotations: list[Annotation]) -> Key:
@@ -93,7 +75,7 @@ def _bucket(
             for stem, values in (documents or {"unmapped": []}).items()
         ],
         scope={"subject": "bud"},
-        registry=_registry(*attributes),
+        registry=registry_of("bud", *attributes),
     )
 
 
@@ -272,7 +254,7 @@ def test_count_by_class_bare_detector_bucket_refuses_never_full_coverage(
         ],
     )
     total, positive, unclassified = phenology.count_by_class(
-        p, OPENED, scope=_scope(tmp_path)
+        p, OPENED, scope=scope_over(tmp_path, registry_of("bud"), "bud")
     )
     # whole bucket unclassified, not full coverage
     assert (total, positive, unclassified) == (2, 0, 2)
@@ -292,8 +274,13 @@ def test_count_by_class_wrong_axis_bucket_refuses(tmp_path: Path) -> None:
             )
         ],
     )
-    scope = _scope(
-        tmp_path, cr.Attribute("damage", "ordinal", ("none", "mild", "severe"))
+    scope = scope_over(
+        tmp_path,
+        registry_of(
+            "bud",
+            cr.Attribute("damage", "ordinal", ("none", "mild", "severe")),
+        ),
+        "bud",
     )
     total, positive, unclassified = phenology.count_by_class(
         p, OPENED, scope=scope
@@ -328,7 +315,9 @@ def test_count_by_class_attributed_bucket_splits_positive_negative(
         ],
     )
     total, positive, unclassified = phenology.count_by_class(
-        p, OPENED, scope=_scope(tmp_path, OPENING)
+        p,
+        OPENED,
+        scope=scope_over(tmp_path, registry_of("bud", OPENING), "bud"),
     )
     assert (total, positive, unclassified) == (3, 2, 0)
 
@@ -353,19 +342,14 @@ def test_count_by_class_foreign_record_within_attributed_bucket_refuses(
     with pytest.raises(
         json_io.UndeclaredValueError, match="with a value under 'opening'"
     ):
-        phenology.count_by_class(p, OPENED, scope=_scope(tmp_path, OPENING))
+        phenology.count_by_class(
+            p,
+            OPENED,
+            scope=scope_over(tmp_path, registry_of("bud", OPENING), "bud"),
+        )
 
 
 # ── per_plant_series / per_plant_phenology: bucket-level + expected-coverage ────────────────────
-
-
-class _Assignment:
-    def __init__(
-        self, stem: str, plant_id: str | None, accession_name: str | None
-    ) -> None:
-        self.stem = stem
-        self.plant_id = plant_id
-        self.accession_name = accession_name
 
 
 def test_per_plant_phenology_builds_fraction_series_over_attributed_buckets(
@@ -379,10 +363,12 @@ def test_per_plant_phenology_builds_fraction_series_over_attributed_buckets(
             tmp_path, "2024-05-15", {"P1_b": ["open", "open"]}
         ),
     }
-    mapping = {
-        "2024-05-01": [_Assignment("P1_a", "P1", "acc-9")],
-        "2024-05-15": [_Assignment("P1_b", "P1", "acc-9")],
-    }
+    mapping = mapping_of(
+        {
+            "2024-05-01": [("P1_a.jpg", ("P1", "acc-9"), 0.0)],
+            "2024-05-15": [("P1_b.jpg", ("P1", "acc-9"), 0.0)],
+        }
+    )
 
     out = phenology.per_plant_phenology(
         mapping,
@@ -410,7 +396,7 @@ def test_per_plant_phenology_bare_detector_bucket_refuses_whole_delivery(
             tmp_path, "2024-05-01", {"P1_a": ["bud"]}, attributed=False
         )
     }
-    mapping = {"2024-05-01": [_Assignment("P1_a", "P1", "acc-9")]}
+    mapping = mapping_of({"2024-05-01": [("P1_a.jpg", ("P1", "acc-9"), 0.0)]})
 
     out = phenology.per_plant_phenology(
         mapping,
@@ -431,7 +417,7 @@ def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(
     # A stem the mapping names with no prediction document must not read as an observed zero
     # (which would count as an assessed 0/0 and silently pass coverage).
     buckets = {"2024-05-01": _bucket(tmp_path, "2024-05-01", {})}
-    mapping = {"2024-05-01": [_Assignment("P1_a", "P1", "acc-9")]}
+    mapping = mapping_of({"2024-05-01": [("P1_a.jpg", ("P1", "acc-9"), 0.0)]})
 
     out = phenology.per_plant_phenology(
         mapping,
@@ -461,10 +447,12 @@ def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(
             tmp_path, "2024-05-15", {"P1_b": ["bud"]}, attributed=False
         ),
     }
-    mapping = {
-        "2024-05-01": [_Assignment("P1_a", "P1", "acc-9")],
-        "2024-05-15": [_Assignment("P1_b", "P1", "acc-9")],
-    }
+    mapping = mapping_of(
+        {
+            "2024-05-01": [("P1_a.jpg", ("P1", "acc-9"), 0.0)],
+            "2024-05-15": [("P1_b.jpg", ("P1", "acc-9"), 0.0)],
+        }
+    )
 
     out = phenology.per_plant_phenology(
         mapping,
@@ -497,13 +485,15 @@ def test_a_plant_the_mapping_captured_on_no_image_of_a_date_is_incomplete_on_it(
         ),
         "2024-05-15": _bucket(tmp_path, "2024-05-15", {"P1_b": ["open"]}),
     }
-    mapping = {
-        "2024-05-01": [
-            _Assignment("P1_a", "P1", "acc-9"),
-            _Assignment("P2_a", "P2", "acc-7"),
-        ],
-        "2024-05-15": [_Assignment("P1_b", "P1", "acc-9")],
-    }
+    mapping = mapping_of(
+        {
+            "2024-05-01": [
+                ("P1_a.jpg", ("P1", "acc-9"), 0.0),
+                ("P2_a.jpg", ("P2", "acc-7"), 0.0),
+            ],
+            "2024-05-15": [("P1_b.jpg", ("P1", "acc-9"), 0.0)],
+        }
+    )
 
     out = phenology.per_plant_phenology(
         mapping,
@@ -624,16 +614,18 @@ def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(
             tmp_path, "2026-03-09", {"GOOD": ["open", "open"]}
         ),
     }
-    mapping = {
-        "2026-02-11": [
-            _Assignment("GOOD", "GOOD", "a"),
-            _Assignment("BAD", "BAD", "b"),
-        ],
-        "2026-03-09": [
-            _Assignment("GOOD", "GOOD", "a"),
-            _Assignment("BAD", "BAD", "b"),
-        ],
-    }
+    mapping = mapping_of(
+        {
+            "2026-02-11": [
+                ("GOOD.jpg", ("GOOD", "a"), 0.0),
+                ("BAD.jpg", ("BAD", "b"), 0.0),
+            ],
+            "2026-03-09": [
+                ("GOOD.jpg", ("GOOD", "a"), 0.0),
+                ("BAD.jpg", ("BAD", "b"), 0.0),
+            ],
+        }
+    )
     res = phenology.per_plant_phenology(
         mapping,
         buckets,
@@ -661,10 +653,15 @@ def test_per_plant_series_counts_the_images_the_mapping_names(
             {f"IMG{i}": ["open", "closed"] for i in range(3)},
         )
     }
-    mapping = {
-        "2026-02-11": [_Assignment(f"IMG{i}", "P1", "a") for i in range(3)]
-        + [_Assignment("GONE", "P1", "a")]
-    }  # named, no prediction document
+    # GONE is named, with no prediction document.
+    mapping = mapping_of(
+        {
+            "2026-02-11": [
+                (f"{stem}.jpg", ("P1", "a"), 0.0)
+                for stem in ("IMG0", "IMG1", "IMG2", "GONE")
+            ]
+        }
+    )
     per_plant = phenology.per_plant_series(mapping, buckets, OPENED, ["P1"])
     (_date, total, positive, unclassified, missing, n_images) = per_plant[
         "P1"
@@ -685,14 +682,15 @@ def test_per_plant_series_excludes_unattributed_assignments_from_coverage(
     buckets = {
         "2026-02-11": _bucket(tmp_path, "2026-02-11", {"P1_a": ["open"]})
     }
-    mapping = {
-        "2026-02-11": [
-            _Assignment("P1_a", "P1", "acc-9"),
-            _Assignment(
-                "STRAY", None, None
-            ),  # no plant_id: never assigned to any plant
-        ]
-    }
+    mapping = mapping_of(
+        {
+            "2026-02-11": [
+                ("P1_a.jpg", ("P1", "acc-9"), 0.0),
+                # No plant_id: never assigned to any plant.
+                ("STRAY.jpg", None, None),
+            ]
+        }
+    )
     per_plant = phenology.per_plant_series(mapping, buckets, OPENED, ["P1"])
     assert list(per_plant) == ["P1"]
 
@@ -704,13 +702,15 @@ def test_per_plant_phenology_excludes_unattributed_assignments_from_rows(
     buckets = {
         "2026-02-11": _bucket(tmp_path, "2026-02-11", {"P1_a": ["open"]})
     }
-    mapping = {
-        "2026-02-11": [
-            _Assignment("P1_a", "P1", "acc-9"),
-            _Assignment("STRAY1", None, None),
-            _Assignment("STRAY2", "", None),
-        ]
-    }
+    mapping = mapping_of(
+        {
+            "2026-02-11": [
+                ("P1_a.jpg", ("P1", "acc-9"), 0.0),
+                ("STRAY1.jpg", None, None),
+                ("STRAY2.jpg", ("", ""), 0.0),
+            ]
+        }
+    )
     out = phenology.per_plant_phenology(
         mapping,
         buckets,

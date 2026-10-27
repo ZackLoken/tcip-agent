@@ -19,12 +19,8 @@ import pytest
 from tcip_annotation import Annotation, BBox, Polygon
 from tcip_annotation.json_io import read_label_document, write_label_document
 from tcip_annotation.matching import pair_proposals
-from tcip_mcp.dataset_layout import (
-    UNDATED_BUCKET,
-    image_root,
-    label_key,
-    prediction_key,
-)
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, prediction_key
+from tests._producer_fixtures import WrittenDataset, image_label_key
 
 if TYPE_CHECKING:
     from tcip_store import Key
@@ -40,22 +36,25 @@ def _write(key: Key, annotations: list[Annotation]) -> list[Annotation]:
 
 
 @pytest.fixture
-def img_dir(tmp_path: Path) -> Path:
-    """Write one 640x480 image under ``images/`` and return the dataset root."""
+def canvas_dataset(tmp_path: Path) -> WrittenDataset:
+    """Write one 640x480 image into the undated capture; return the dataset and the image."""
     from tests._producer_fixtures import write_image
 
-    write_image(
-        image_root(tmp_path) / "test_001.jpg", (640, 480), (100, 150, 200)
+    images_dir = image_dir(tmp_path, UNDATED_BUCKET)
+    image = write_image(
+        images_dir / "test_001.jpg", (640, 480), (100, 150, 200)
     )
-    return tmp_path
+    return WrittenDataset(tmp_path, images_dir, [image])
 
 
-def _label(root: Path) -> Key:
-    return label_key(root, UNDATED_BUCKET, "test_001")
+def _label(dataset: WrittenDataset) -> Key:
+    """Return the label document key of ``dataset``'s one image."""
+    return image_label_key(dataset.images[0])
 
 
-def _prediction(root: Path) -> Key:
-    return prediction_key(root, "m", "test_001")
+def _prediction(dataset: WrittenDataset) -> Key:
+    """Return the key of ``dataset``'s one image's document in the bucket ``m``."""
+    return prediction_key(dataset.root, "m", dataset.images[0].stem)
 
 
 # ── Box roundtrip ──
@@ -64,7 +63,7 @@ def _prediction(root: Path) -> Key:
 class TestBoxRoundtrip:
     """The box round trip: load, draw boxes, save, read back."""
 
-    def test_draw_save_reload(self, img_dir: Path) -> None:
+    def test_draw_save_reload(self, canvas_dataset: WrittenDataset) -> None:
         """Two drawn boxes come back with their subjects and corners less than 2 px off."""
         # Draw boxes (simulating canvas click-drag)
         annotations = [
@@ -76,7 +75,7 @@ class TestBoxRoundtrip:
             ),
         ]
 
-        read_back = _write(_label(img_dir), annotations)
+        read_back = _write(_label(canvas_dataset), annotations)
         assert len(read_back) == 2
         assert {a.subject for a in read_back} == {"bud", "nut"}
 
@@ -89,7 +88,7 @@ class TestBoxRoundtrip:
             assert orig.subject == loaded.subject
 
     def test_five_distinct_subjects_survive_the_round_trip(
-        self, img_dir: Path
+        self, canvas_dataset: WrittenDataset
     ) -> None:
         """Five box annotations of five distinct subjects survive the label document round trip.
 
@@ -105,7 +104,7 @@ class TestBoxRoundtrip:
             for i, subj in enumerate(subjects)
         ]
 
-        read_back = _write(_label(img_dir), annotations)
+        read_back = _write(_label(canvas_dataset), annotations)
         assert len(read_back) == 5
         assert {a.subject for a in read_back} == set(subjects)
 
@@ -116,13 +115,15 @@ class TestBoxRoundtrip:
 class TestPolygonRoundtrip:
     """The polygon round trip: load, draw polygons, save, read back."""
 
-    def test_draw_polygon_save_reload(self, img_dir: Path) -> None:
+    def test_draw_polygon_save_reload(
+        self, canvas_dataset: WrittenDataset
+    ) -> None:
         """A drawn triangle comes back as one polygon, its subject kept, vertices under 2 px off."""
         # Draw a triangle polygon (simulating canvas vertex clicks)
         poly = Polygon(rings=[[(100.0, 50.0), (250.0, 200.0), (50.0, 200.0)]])
 
         read_back = _write(
-            _label(img_dir), [Annotation(subject="bud", geometry=poly)]
+            _label(canvas_dataset), [Annotation(subject="bud", geometry=poly)]
         )
         assert len(read_back) == 1
         assert read_back[0].subject == "bud"
@@ -136,7 +137,7 @@ class TestPolygonRoundtrip:
             assert abs(ox - lx) < 2
             assert abs(oy - ly) < 2
 
-    def test_multi_class_polygon(self, img_dir: Path) -> None:
+    def test_multi_class_polygon(self, canvas_dataset: WrittenDataset) -> None:
         """Two polygons of different subjects both come back with their subjects."""
         annotations = [
             Annotation(
@@ -153,12 +154,12 @@ class TestPolygonRoundtrip:
             ),
         ]
 
-        read_back = _write(_label(img_dir), annotations)
+        read_back = _write(_label(canvas_dataset), annotations)
         assert len(read_back) == 2
         assert {a.subject for a in read_back} == {"bud", "leaf"}
 
     def test_occlusion_split_prediction_survives_the_round_trip(
-        self, img_dir: Path
+        self, canvas_dataset: WrittenDataset
     ) -> None:
         """An occlusion-split predicted mask comes back as one instance with both its rings.
 
@@ -170,7 +171,7 @@ class TestPolygonRoundtrip:
             [(300.0, 60.0), (350.0, 60.0), (350.0, 190.0), (300.0, 190.0)],
         ]
         read_back = _write(
-            _prediction(img_dir),
+            _prediction(canvas_dataset),
             [
                 Annotation(
                     subject="bud", geometry=Polygon(rings=rings), score=0.88
@@ -190,7 +191,9 @@ class TestPolygonRoundtrip:
 class TestSingleDocumentSave:
     """Boxes and polygons of different subjects saved into one per-image document."""
 
-    def test_box_and_polygon_single_document(self, img_dir: Path) -> None:
+    def test_box_and_polygon_single_document(
+        self, canvas_dataset: WrittenDataset
+    ) -> None:
         """A box and a polygon saved together both come back from one document."""
         annotations = [
             Annotation(
@@ -204,7 +207,7 @@ class TestSingleDocumentSave:
             ),
         ]
 
-        read_back = _write(_label(img_dir), annotations)
+        read_back = _write(_label(canvas_dataset), annotations)
         assert len(read_back) == 2
         box_ann = next(a for a in read_back if isinstance(a.geometry, BBox))
         poly_ann = next(
@@ -220,10 +223,12 @@ class TestSingleDocumentSave:
 class TestPredictionOverlay:
     """Proposals loaded beside annotations and paired with the one they overlap."""
 
-    def test_prediction_overlay_pairing(self, img_dir: Path) -> None:
+    def test_prediction_overlay_pairing(
+        self, canvas_dataset: WrittenDataset
+    ) -> None:
         """A loaded proposal pairs with the annotation it overlaps."""
         loaded_gt = _write(
-            _label(img_dir),
+            _label(canvas_dataset),
             [
                 Annotation(
                     subject="bud", geometry=BBox(x1=100, y1=50, x2=250, y2=200)
@@ -236,7 +241,7 @@ class TestPredictionOverlay:
         )
         # Predictions: one matching, one FP.
         loaded_preds = _write(
-            _prediction(img_dir),
+            _prediction(canvas_dataset),
             [
                 Annotation(
                     subject="bud",

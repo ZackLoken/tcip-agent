@@ -154,20 +154,12 @@ def test_a_registry_no_longer_declaring_the_positive_state_refuses_with_its_prob
     project: Path,
 ) -> None:
     from tcip_mcp import subject_registry as cr
+    from tests._producer_fixtures import registry_of
 
     _confirmed_crossing(project)
-    registry = cr.SubjectRegistry(
-        subjects=(
-            cr.Subject(
-                name="flower",
-                description="",
-                attributes=(
-                    cr.Attribute(
-                        name="state", type="categorical", values=("shed",)
-                    ),
-                ),
-            ),
-        )
+    registry = registry_of(
+        "flower",
+        cr.Attribute(name="state", type="categorical", values=("shed",)),
     )
 
     with pytest.raises(OperationalizationRefusedError) as excinfo:

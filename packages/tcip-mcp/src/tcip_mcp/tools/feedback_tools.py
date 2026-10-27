@@ -46,27 +46,28 @@ def _reference_stems(
 
     The stems are the reference-side members (``selection.REFERENCE_SIDES``) the producing run of
     ``checkpoint`` in ``project`` froze in its partition (``experiments.run_resolution``) whose own
-    image sits in ``images_dir``, or ``None`` for a checkpoint no run of this project produced
-    (``checkpoint.experiment_id``) and for a run that bound no selection. A reference sample from
-    another directory the selection also spans is not one of this queue's candidates.
+    image sits in ``images_dir``, the two directories compared through
+    ``tcip_store.canonical_path``, or ``None`` for a checkpoint no run of this project produced
+    (``checkpoint.experiment_id``) and for a run that bound no selection.
     """
     if checkpoint.experiment_id is None:
         return None
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
-    from tcip_mcp.pipelines.data.splits import same_directory
     from tcip_mcp.pipelines.image_utils import stem_of
+    from tcip_store import canonical_path
 
     partition = run_resolution(
         checkpoint.experiment_id, project=project
     ).partition
     if partition.selection is None:
         return None
+    here = canonical_path(images_dir)
     return {
         stem_of(s.source)
         for s in partition.samples
         if s.side in REFERENCE_SIDES
-        and same_directory(Path(s.source).parent, images_dir)
+        and canonical_path(Path(s.source).parent) == here
     }
 
 

@@ -141,6 +141,28 @@ def compose_tiles(ctx: TrainContext) -> None:
     ctx.save_checkpoint({STATE_DICT_KEY: model.state_dict()}, "model_final")
 
 
+def _detector_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[dict, dict]]:
+    """Record each detector output ``evaluation.records_from_detector`` scores, with its record.
+
+    Returns the list the calls append ``(output, record)`` to.
+    """
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+
+    calls: list[tuple[dict, dict]] = []
+    real = evaluation.records_from_detector
+
+    def recording(
+        target: dict, output: dict, **kwargs: int | MaskCut | None
+    ) -> dict:
+        calls.append((output, real(target, output, **kwargs)))
+        return calls[-1][1]
+
+    monkeypatch.setattr(evaluation, "records_from_detector", recording)
+    return calls
+
+
 def _in_model_caps(model: nn.Module) -> list:
     """Return the list of ``detections_per_img`` each forward of ``model`` runs under.
 
@@ -443,22 +465,20 @@ def test_an_object_as_long_as_the_derived_overlap_lies_whole_in_a_tile_at_a_stat
     from tcip_mcp.pipelines.slicing import slice_lattice
     from tests._producer_fixtures import label_image, run_over, write_image
 
-    image = write_image(
-        image_dir(tmp_path, UNDATED_BUCKET) / "frame.png", (300, 100)
-    )
+    images = image_dir(tmp_path, UNDATED_BUCKET)
     label_image(
-        image,
+        write_image(images / "frame.png", (300, 100)),
         [Annotation(subject="bud", geometry=BBox(71.5, 5, 100.5, 9))],
         300,
         100,
     )
     tiler, data = run_over(
         "detection",
-        image.parent,
+        images,
         subject="bud",
         tiling=tiling_block(tile_size=100, sliver_frac=0.5),
     )
-    (region,) = run_over("detection", image.parent, subject="bud")[0].regions
+    (region,) = run_over("detection", images, subject="bud")[0].regions
     ((x0, y0, x1, y1),) = region.boxes.tolist()
 
     assert (tiler.tile_size, data["tiling"]["tile_size"]) == (100, 100)
@@ -521,7 +541,6 @@ def test_validation_runs_every_frame_under_the_cap_its_density_gives_it(
     Each of two frames whose cap is one keeps at most one detection, though the same detector
     under a cap of two keeps more than one.
     """
-    import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tcip_mcp.pipelines.model_build import model_dims
@@ -546,16 +565,7 @@ def test_validation_runs_every_frame_under_the_cap_its_density_gives_it(
         "the built detector must keep more than one box under two"
     )
 
-    kept: list[int] = []
-    real = evaluation.records_from_detector
-
-    def counting(
-        target: dict, output: dict, **kwargs: int | MaskCut | None
-    ) -> dict:
-        kept.append(len(output["boxes"]))
-        return real(target, output, **kwargs)
-
-    monkeypatch.setattr(evaluation, "records_from_detector", counting)
+    calls = _detector_records(monkeypatch)
     validate(
         model,
         [(list(images), list(targets))],
@@ -569,6 +579,7 @@ def test_validation_runs_every_frame_under_the_cap_its_density_gives_it(
         density=1 / (128 * 128),
         mask_cut=None,
     )
+    kept = [len(output["boxes"]) for output, _record in calls]
 
     assert len(kept) == 2 and max(kept) <= 1
 
@@ -581,7 +592,6 @@ def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_flo
     A built detector holding a score threshold above every score it gives reports in each
     frame's row the count of boxes it gives with no floor under the frame's cap.
     """
-    import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.derivations import detection_cap
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
@@ -615,16 +625,7 @@ def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_flo
         detections_per_img=cap,
     )
 
-    rows: list[dict] = []
-    real = evaluation.records_from_detector
-
-    def recording(
-        target: dict, output: dict, **kwargs: int | MaskCut | None
-    ) -> dict:
-        rows.append(real(target, output, **kwargs))
-        return rows[-1]
-
-    monkeypatch.setattr(evaluation, "records_from_detector", recording)
+    calls = _detector_records(monkeypatch)
     validate(
         model,
         [(list(images), list(targets))],
@@ -639,7 +640,7 @@ def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_flo
         mask_cut=None,
     )
 
-    assert [row["count"] for row in rows] == [
+    assert [record["count"] for _output, record in calls] == [
         len(out["boxes"]) for out in unfloored
     ]
 
@@ -948,7 +949,6 @@ def test_a_bespoke_detector_under_cap_one_keeps_one_through_validation_and_a_pas
     A producer-built bespoke detector over frames holding two objects each keeps one under a cap
     of one, in a pass and in ``generic_trainer.validate`` alike, though ungoverned it finds two.
     """
-    import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.execution import prepare
@@ -1000,16 +1000,7 @@ def test_a_bespoke_detector_under_cap_one_keeps_one_through_validation_and_a_pas
     )
     assert [(r["cap"], r["count"]) for r in rows] == [(1, 1), (1, 1)]
 
-    kept: list[int] = []
-    real = evaluation.records_from_detector
-
-    def counting(
-        target: dict, output: dict, **kwargs: int | MaskCut | None
-    ) -> dict:
-        kept.append(len(output["boxes"]))
-        return real(target, output, **kwargs)
-
-    monkeypatch.setattr(evaluation, "records_from_detector", counting)
+    calls = _detector_records(monkeypatch)
     validate(
         model,
         [(list(images), list(targets))],
@@ -1023,7 +1014,7 @@ def test_a_bespoke_detector_under_cap_one_keeps_one_through_validation_and_a_pas
         density=one,
         mask_cut=None,
     )
-    assert kept == [1, 1]
+    assert [len(output["boxes"]) for output, _record in calls] == [1, 1]
 
 
 @pytest.mark.parametrize(
@@ -1124,7 +1115,8 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
         verified_checkpoint,
     )
 
-    image = Path(gray_frame(image_dir(tmp_path, UNDATED_BUCKET), 96, "a.png"))
+    images = image_dir(tmp_path, UNDATED_BUCKET)
+    image = gray_frame(images, 96, "a.png")
     label_image(
         image,
         [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))],
@@ -1134,7 +1126,7 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
     published = run_inference(
         tmp_path,
         project_checkpoint(tmp_path),
-        images_dir=str(image.parent),
+        images_dir=str(images),
         bucket="capped",
         device="cpu",
         stated=Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE),
@@ -1143,7 +1135,7 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
     assert "error" not in published, published
     staged = stage_proposals(
         tmp_path,
-        str(image),
+        image,
         model_name="detector",
         actor=None,
         boxes=[

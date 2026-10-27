@@ -1681,15 +1681,17 @@ def test_get_worst_predictions_reads_canonical_confidence(
     from tests._producer_fixtures import label_image, write_image
 
     images = image_dir(tmp_path, UNDATED_BUCKET)
-    scored = {"confident": [0.9, 0.9], "shaky": [0.1, 0.1]}
-    for stem, scores in scored.items():
-        write_image(images / f"{stem}.png", (100, 100))
+    scored = {
+        write_image(images / f"{stem}.png", (100, 100)): scores
+        for stem, scores in (("confident", [0.9, 0.9]), ("shaky", [0.1, 0.1]))
+    }
+    for image, scores in scored.items():
         # Matching GT count → missed = extra = 0, error is exactly (1 - avg_conf).
         gt_anns = [
             Annotation(subject="bud", geometry=BBox(20.0, 11.0, 40.0, 31.0))
             for _ in scores
         ]
-        label_image(images / f"{stem}.png", gt_anns, 100, 100)
+        label_image(image, gt_anns, 100, 100)
     # Confidence lives in the document's `score`; box geometry is irrelevant to this count +
     # confidence heuristic (no IoU matching), so the boxes can be anything.
     bucket = published(
@@ -1697,7 +1699,7 @@ def test_get_worst_predictions_reads_canonical_confidence(
         "preds",
         [
             {
-                "image": str(images / f"{stem}.png"),
+                "image": str(image),
                 "width": 100,
                 "height": 100,
                 "boxes": [[10.0, 10.0, 40.0, 22.0]] * len(scores),
@@ -1705,7 +1707,7 @@ def test_get_worst_predictions_reads_canonical_confidence(
                 "labels": [1] * len(scores),
                 "cap": len(scores) + 1,
             }
-            for stem, scores in scored.items()
+            for image, scores in scored.items()
         ],
         scope={"subject": "bud"},
     )

@@ -573,10 +573,12 @@ def test_a_stated_date_moves_an_undated_image_with_every_record_keyed_by_it(
     """
     import tcip_store as ts
     from tcip_annotation.flags import FlagRequest
-    from tcip_mcp.pipelines import proposal
     from tcip_mcp.tools.ingest_tools import state_capture_date
     from tcip_mcp.tools.proposal_tools import propose_annotations
-    from tests._producer_fixtures import saved_annotations
+    from tests._producer_fixtures import (
+        install_stub_proposer,
+        saved_annotations,
+    )
 
     image = _undated_labeled(project, tmp_path)
     dataset_layout.save_label_document(
@@ -590,32 +592,21 @@ def test_a_stated_date_moves_an_undated_image_with_every_record_keyed_by_it(
         gestures=dataset_layout.Gestures(flag=(FlagRequest(text="check"),)),
     )
 
-    class _Engine:
-        def propose(
-            self, image_path: str, **params: object
-        ) -> proposal.Proposal:
-            return proposal.Proposal(
-                [
-                    {
-                        "candidate_id": 0,
-                        "bbox": [4.0, 4.0, 12.0, 12.0],
-                        "area": 64,
-                        "score": 0.9,
-                        "engine_meta": {},
-                        "rings": [
-                            [
-                                (4.0, 4.0),
-                                (12.0, 4.0),
-                                (12.0, 12.0),
-                                (4.0, 12.0),
-                            ]
-                        ],
-                    }
+    install_stub_proposer(
+        monkeypatch,
+        [
+            {
+                "candidate_id": 0,
+                "bbox": [4.0, 4.0, 12.0, 12.0],
+                "area": 64,
+                "score": 0.9,
+                "engine_meta": {},
+                "rings": [
+                    [(4.0, 4.0), (12.0, 4.0), (12.0, 12.0), (4.0, 12.0)]
                 ],
-                None,
-            )
-
-    monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: _Engine())
+            }
+        ],
+    )
     runs = [
         propose_annotations(
             project, image_path=str(image), engine="stub", actor=None

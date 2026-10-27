@@ -14,18 +14,10 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 from tcip_mcp.dataset_layout import image_dir, label_key
 from tcip_mcp.tools.gui_tools import focus_human_attention
+from tests._producer_fixtures import stub_images
 
 if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
-
-
-def _scene(root: Path, date: str, images: list[str]) -> None:
-    idir = image_dir(root, date)
-    idir.mkdir(parents=True, exist_ok=True)
-    for name in images:
-        (idir / name).write_bytes(
-            b"x"
-        )  # the tool lists by suffix, never opens
 
 
 def _label(
@@ -63,7 +55,7 @@ def test_focus_annotate_lands_on_first_annotated_polygon_frame(
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(5)]  # 0000..0004
-    _scene(root, date, imgs)
+    stub_images(image_dir(root, date), imgs)
     # bush polygons (segment) on the 3rd and 4th image only.
     _label(root, "bush", date, "segment", "IMG_0002", 1)
     _label(root, "bush", date, "segment", "IMG_0003", 1)
@@ -143,7 +135,7 @@ def test_focus_annotate_scopes_annotated_to_the_requested_subject(
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
-    _scene(root, date, imgs)
+    stub_images(image_dir(root, date), imgs)
     _label(root, "bud", date, "detect", "IMG_0002", 1)
     _label(root, "leaf", date, "segment", "IMG_0001", 1)
 
@@ -165,7 +157,7 @@ def test_focus_annotate_mode_follows_the_explicit_index_not_the_first_frame(
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(8)]
-    _scene(root, date, imgs)
+    stub_images(image_dir(root, date), imgs)
     _label(root, "bush", date, "segment", "IMG_0002", 1)
     _label(root, "bush", date, "detect", "IMG_0007", 1)
 
@@ -206,7 +198,7 @@ def test_focus_annotate_infers_box_mode_from_detect_labels(
     root = tmp_path / "proj"
     date = "2026-02-11"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
-    _scene(root, date, imgs)
+    stub_images(image_dir(root, date), imgs)
     _label(root, "bud", date, "detect", "IMG_0001", 1)
 
     res = focus_human_attention(bound, str(root), "bud", date)
@@ -221,7 +213,7 @@ def test_focus_annotate_sends_a_point_only_frame_in_point_mode(
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
-    _scene(root, date, imgs)
+    stub_images(image_dir(root, date), imgs)
     _label(root, "bud", date, "point", "IMG_0001", 2)
 
     res = focus_human_attention(bound, str(root), "bud", date)
@@ -236,7 +228,7 @@ def test_focus_annotate_accepts_an_explicit_point_mode(
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-03-02"
-    _scene(root, date, ["IMG_0000.JPG"])
+    stub_images(image_dir(root, date), ["IMG_0000.JPG"])
     _label(root, "bud", date, "detect", "IMG_0000", 1)
 
     res = focus_human_attention(bound, str(root), "bud", date, mode="point")
@@ -249,7 +241,7 @@ def test_focus_annotate_still_rejects_a_mode_the_gui_has_no_tool_for(
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-03-02"
-    _scene(root, date, ["IMG_0000.JPG"])
+    stub_images(image_dir(root, date), ["IMG_0000.JPG"])
     _label(root, "bud", date, "detect", "IMG_0000", 1)
 
     res = focus_human_attention(bound, str(root), "bud", date, mode="lasso")
@@ -264,7 +256,7 @@ def test_focus_annotate_rejects_a_mode_the_gui_has_no_tool_for_naming_the_real_v
 
     root = tmp_path / "proj"
     date = "2026-03-02"
-    _scene(root, date, ["IMG_0000.JPG"])
+    stub_images(image_dir(root, date), ["IMG_0000.JPG"])
     _label(root, "bud", date, "detect", "IMG_0000", 1)
 
     res = focus_human_attention(bound, str(root), "bud", date, mode="lasso")
@@ -280,7 +272,7 @@ def test_focus_annotate_empty_label_is_not_a_focus_target(
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
-    _scene(root, date, imgs)
+    stub_images(image_dir(root, date), imgs)
     _label(
         root, "bush", date, "segment", "IMG_0000", 0
     )  # empty negative ({"annotations": []})
@@ -297,7 +289,7 @@ def test_focus_annotate_explicit_mode_and_index_override(
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(4)]
-    _scene(root, date, imgs)
+    stub_images(image_dir(root, date), imgs)
     _label(root, "bush", date, "segment", "IMG_0003", 1)
 
     res = focus_human_attention(
@@ -326,7 +318,7 @@ def test_focus_annotate_navigates_past_an_unreadable_label_on_another_frame(
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
-    _scene(root, date, imgs)
+    stub_images(image_dir(root, date), imgs)
     _unreadable(root, date, "IMG_0000")
     _label(root, "bush", date, "segment", "IMG_0002", 1)
 
@@ -344,7 +336,7 @@ def test_focus_annotate_refuses_when_the_landed_frame_itself_is_unreadable(
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
-    _scene(root, date, imgs)
+    stub_images(image_dir(root, date), imgs)
     _unreadable(root, date, "IMG_0000")
     _label(root, "bush", date, "segment", "IMG_0002", 1)
 

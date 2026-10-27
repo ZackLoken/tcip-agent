@@ -25,7 +25,6 @@ from tests._producer_fixtures import image_label_key, write_image
 
 if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
-    from tcip_store import Key
 
 # ── the shared constructor ──────────────────────────────────────────────────
 
@@ -284,22 +283,23 @@ def _seed_review_dataset(
     *,
     pred_box: tuple[float, float, float, float] = (10, 10, 20, 20),
     gt_box: tuple[float, float, float, float] | None = None,
-) -> Key:
+) -> Path:
     """Write one image's label document and a bucket ``m`` proposing ``pred_box`` on it.
 
-    Returns the label document's key.
+    Returns the image written.
     """
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import label_image, registry_over
+    from tests._producer_fixtures import (
+        label_image,
+        registry_of,
+        registry_over,
+    )
     from tests._web_fixtures import open_new_project
 
     dataset_root = open_new_project(tmp_path).root
-    img = image_dir(dataset_root, UNDATED_BUCKET) / "img_001.jpg"
-    write_image(img, (200, 150))
-    registry_over(
-        dataset_root,
-        SubjectRegistry(subjects=(Subject(name="leaf", description=""),)),
+    img = write_image(
+        image_dir(dataset_root, UNDATED_BUCKET) / "img_001.jpg", (200, 150)
     )
+    registry_over(dataset_root, registry_of("leaf"))
     gt_annotations = (
         [Annotation(subject="leaf", geometry=BBox(*gt_box))]
         if gt_box is not None
@@ -344,16 +344,12 @@ def _seed_review_dataset(
                 ],
             },
         )
-    return image_label_key(img)
+    return img
 
 
-def _save(
-    dataset_root: Path, annotations: list, **gestures: str | list[int]
-) -> dict:
+def _save(image: Path, annotations: list, **gestures: str | list[int]) -> dict:
     return {
-        "image_path": str(
-            image_dir(dataset_root, UNDATED_BUCKET) / "img_001.jpg"
-        ),
+        "image_path": str(image),
         "annotations": annotations,
         "user": "breeder",
         **gestures,
@@ -363,15 +359,17 @@ def _save(
 def test_the_save_door_refuses_an_inverted_box(
     client: TestClient, tmp_path: Path
 ) -> None:
-    gt = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
+    img = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
 
     resp = client.post(
         "/api/annotate/labels",
-        json=_save(tmp_path, [{"subject": "leaf", "bbox": [10, 10, 5, 5]}]),
+        json=_save(img, [{"subject": "leaf", "bbox": [10, 10, 5, 5]}]),
     )
 
     assert resp.status_code == 400
-    assert read_label_document(gt).annotations[0].geometry == BBox(1, 1, 3, 3)
+    assert read_label_document(image_label_key(img)).annotations[
+        0
+    ].geometry == BBox(1, 1, 3, 3)
 
 
 @pytest.mark.parametrize(
@@ -402,31 +400,33 @@ def test_a_corrected_geometry_is_checked_as_any_saved_shape_is(
     A one-vertex contour, one beside a valid box, and string coordinates in a box or a ring are
     each refused, and the document keeps its box.
     """
-    gt = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
+    img = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
 
     resp = client.post(
         "/api/annotate/labels",
-        json=_save(tmp_path, [{"subject": "leaf", **shape}]),
+        json=_save(img, [{"subject": "leaf", **shape}]),
     )
 
     assert resp.status_code == 400, resp.text
-    assert read_label_document(gt).annotations[0].geometry == BBox(1, 1, 3, 3)
+    assert read_label_document(image_label_key(img)).annotations[
+        0
+    ].geometry == BBox(1, 1, 3, 3)
 
 
 def test_the_save_door_admits_an_ordered_corrected_box(
     client: TestClient, tmp_path: Path
 ) -> None:
-    gt = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
+    img = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
 
     resp = client.post(
         "/api/annotate/labels",
-        json=_save(tmp_path, [{"subject": "leaf", "bbox": [5, 5, 10, 20]}]),
+        json=_save(img, [{"subject": "leaf", "bbox": [5, 5, 10, 20]}]),
     )
 
     assert resp.status_code == 200
-    assert read_label_document(gt).annotations[0].geometry == BBox(
-        5, 5, 10, 20
-    )
+    assert read_label_document(image_label_key(img)).annotations[
+        0
+    ].geometry == BBox(5, 5, 10, 20)
 
 
 def test_the_save_door_refuses_accepting_a_degenerate_proposal(
@@ -434,31 +434,31 @@ def test_the_save_door_refuses_accepting_a_degenerate_proposal(
 ) -> None:
     # A degenerate proposal reaching the document bypasses the publication's own drop (an
     # edit in place): accepting it still refuses.
-    gt = _seed_review_dataset(tmp_path, pred_box=(10, 10, 10, 20))
+    img = _seed_review_dataset(tmp_path, pred_box=(10, 10, 10, 20))
 
     resp = client.post(
         "/api/annotate/labels",
-        json=_save(tmp_path, [], bucket="m", accept=[0]),
+        json=_save(img, [], bucket="m", accept=[0]),
     )
 
     assert resp.status_code == 400, resp.text
-    assert read_label_document(gt).annotations == []
+    assert read_label_document(image_label_key(img)).annotations == []
 
 
 def test_the_save_door_admits_accepting_an_ordered_proposal(
     client: TestClient, tmp_path: Path
 ) -> None:
-    gt = _seed_review_dataset(tmp_path)
+    img = _seed_review_dataset(tmp_path)
 
     resp = client.post(
         "/api/annotate/labels",
-        json=_save(tmp_path, [], bucket="m", accept=[0]),
+        json=_save(img, [], bucket="m", accept=[0]),
     )
 
     assert resp.status_code == 200, resp.text
-    assert read_label_document(gt).annotations[0].geometry == BBox(
-        10, 10, 20, 20
-    )
+    assert read_label_document(image_label_key(img)).annotations[
+        0
+    ].geometry == BBox(10, 10, 20, 20)
 
 
 # ── prediction writers drop a degenerate box and report it, rather than fail ─

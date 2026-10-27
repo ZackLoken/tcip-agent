@@ -96,9 +96,8 @@ def test_the_instance_loader_builds_its_target_from_the_polygons_it_reads(
     from tests._producer_fixtures import dataset_over, write_image
 
     images = image_dir(tmp_path, UNDATED_BUCKET)
-    write_image(images / "p0.png", (IMG, IMG), (40, 40, 40))
     _stored(
-        images / "p0.png",
+        write_image(images / "p0.png", (IMG, IMG), (40, 40, 40)),
         [
             Annotation(subject=SUBJECT, geometry=BOX),
             Annotation(

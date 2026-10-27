@@ -6,11 +6,13 @@ The producers are ``label_queries.admit``, ``write_label_document`` and the one 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from tcip_mcp.dataset_layout import (
     UNDATED_BUCKET,
+    Gestures,
     image_dir,
+    image_root,
     label_key_of as image_label_key,
 )
 from tests._training_values import drawn_split
@@ -24,14 +26,15 @@ if TYPE_CHECKING:
     from torch.utils.data import Dataset
 
     from tcip_annotation.json_io import LabelDocument
-    from tcip_annotation.state import Annotation
+    from tcip_annotation.state import Annotation, Attribute
     from tcip_mcp.model_registry import VerifiedCheckpoint
     from tcip_mcp.pipelines.data.augmentations import Transforms
     from tcip_mcp.pipelines.data.datasets import BespokeSource
     from tcip_mcp.pipelines.data.label_queries import Admission
-    from tcip_mcp.pipelines.data.selection import Sample
+    from tcip_mcp.pipelines.data.selection import ClassScope, Sample
     from tcip_mcp.pipelines.data.split_construction import Partition
     from tcip_mcp.pipelines.model_build import SourceLayout
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
     from tcip_mcp.pipelines.schemas import DataSpec
     from tcip_mcp.subject_registry import SubjectRegistry
     from tcip_mcp.tools.proposal_tools import StagedAssignments
@@ -115,11 +118,48 @@ def gray_frame(where: Path, size: int = 128, name: str = "img.png") -> str:
     return str(write_image(where / name, (size, size), (120, 120, 120)))
 
 
-def blank_image(
-    root: Path, name: str = "IMG_0001.JPG", size: tuple[int, int] = (100, 80)
-) -> Path:
-    """Write ``name`` into ``root``'s undated capture with :func:`write_image`; return its path."""
-    return write_image(image_dir(root, UNDATED_BUCKET) / name, size)
+def write_jpegs(
+    images_dir: Path, stems: Sequence[str], size: tuple[int, int]
+) -> list[Path]:
+    """Write a black ``<stem>.jpg`` of ``size`` into ``images_dir`` for each of ``stems``.
+
+    Each is written by :func:`write_image`; returns their paths in ``stems``' order.
+    """
+    return [write_image(images_dir / f"{stem}.jpg", size) for stem in stems]
+
+
+class WrittenDataset(NamedTuple):
+    """A dataset root, the capture directory its images were written into and those images."""
+
+    root: Path
+    images_dir: Path
+    images: list[Path]
+
+
+class GroupedDataset(NamedTuple):
+    """A dataset holding one grouped capture and one plain photo, with the paths written.
+
+    ``root`` is the dataset root, ``images_dir`` the capture both sit in, ``manifest`` the
+    group's ``.bandgroup`` manifest, ``bands`` its band files by name and ``plain`` the photo.
+    """
+
+    root: Path
+    images_dir: Path
+    manifest: Path
+    bands: dict[str, Path]
+    plain: Path
+
+
+def stub_images(images_dir: Path, names: list[str]) -> list[Path]:
+    """Write a one-byte file at each of ``names`` in ``images_dir``, its directory made.
+
+    The files carry an image's name and no image; returns their paths in ``names``' order.
+    """
+    images_dir.mkdir(parents=True, exist_ok=True)
+    paths = [images_dir / name for name in names]
+    for path in paths:
+        path.write_bytes(b"x")
+    return paths
 
 
 def one_labeled_capture(root: Path) -> Path:
@@ -128,15 +168,11 @@ def one_labeled_capture(root: Path) -> Path:
     The stub has a kept empty label document over an 8 by 8 frame, and ``root``'s subject
     registry declares ``bud``. Returns ``root``.
     """
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
-
     image = image_dir(root, "2026-03-04") / "a_1.jpg"
     image.parent.mkdir(parents=True, exist_ok=True)
     image.write_bytes(b"\xff\xd8\xff")
     label_image(image, [], 8, 8, keep_empty=True)
-    registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
-    )
+    registry_over(root, registry_of("bud"))
     return root
 
 
@@ -325,6 +361,17 @@ def small_detection_config(
     )
 
 
+def registry_of(subject: str, *attributes: Attribute) -> SubjectRegistry:
+    """Return the subject registry declaring ``subject`` alone, with ``attributes`` on it."""
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
+
+    return SubjectRegistry(
+        subjects=(
+            Subject(name=subject, description="", attributes=attributes),
+        )
+    )
+
+
 def registry_over(dataset_root: str | Path, registry: SubjectRegistry) -> None:
     """Replace ``dataset_root``'s subject registry by ``registry``.
 
@@ -341,6 +388,59 @@ def registry_over(dataset_root: str | Path, registry: SubjectRegistry) -> None:
         allow_type_changes=True,
         actor=None,
     )
+
+
+def scope_over(
+    dataset_root: Path, registry: SubjectRegistry, subject: str
+) -> ClassScope:
+    """Return ``registry_scope`` of ``subject`` over ``dataset_root``'s image tree.
+
+    ``dataset_root``'s registry is first replaced by ``registry`` (:func:`registry_over`).
+    """
+    from tcip_mcp.pipelines.data.label_queries import registry_scope
+
+    registry_over(dataset_root, registry)
+    return registry_scope(image_root(dataset_root), subject)
+
+
+def attribute_scoped_dataset(root: Path) -> Path:
+    """Write five ``leaf`` frames into ``root``'s capture ``2-11-26`` and return ``root``.
+
+    ``root``'s registry declares ``leaf`` with a categorical ``condition`` over ``healthy`` and
+    ``damaged``. Four frames' one instance is assessed for it and ``unassessed``'s is not; each
+    is a 64 px :func:`labeled_frame`.
+    """
+    from tcip_annotation.state import Annotation, Attribute, BBox
+
+    registry_over(
+        root,
+        registry_of(
+            "leaf",
+            Attribute("condition", "categorical", ("healthy", "damaged")),
+        ),
+    )
+    images_dir = image_dir(root, "2-11-26")
+    for stem, values in (
+        ("assessed_a", {"condition": "healthy"}),
+        ("assessed_b", {"condition": "damaged"}),
+        ("assessed_c", {"condition": "healthy"}),
+        ("assessed_d", {"condition": "damaged"}),
+        ("unassessed", {}),
+    ):
+        labeled_frame(
+            images_dir / f"{stem}.jpg",
+            [
+                Annotation(
+                    subject="leaf",
+                    geometry=BBox(4, 4, 20, 20),
+                    attributes=values,
+                )
+            ],
+            64,
+            64,
+            (100, 120, 90),
+        )
+    return root
 
 
 def mark_complete(
@@ -362,25 +462,100 @@ def mark_complete(
         client_annotation,
         read_document_versioned,
     )
-    from tcip_mcp.dataset_layout import Gestures, save_label_document
-    from tcip_mcp.pipelines.image_utils import image_path_dimensions
 
-    key = image_label_key(image_path)
-    doc, _version = read_document_versioned(key)
-    width, height = image_path_dimensions(image_path)
-    return save_label_document(
+    doc, _version = read_document_versioned(image_label_key(image_path))
+    return save_labels(
         project,
-        key,
+        image_path,
         [client_annotation(a) for a in doc.annotations],
-        width=width,
-        height=height,
         author=by,
-        actor=by,
         gestures=Gestures(
             complete={subject: True},
             rect=rect,
             proposals_hidden=proposals_hidden,
         ),
+    )
+
+
+def save_labels(
+    project: Path,
+    image: str | Path,
+    payloads: list[dict],
+    *,
+    author: str = "user:breeder",
+    expect: Version | None = None,
+    gestures: Gestures = Gestures(),
+) -> tuple[Version, LabelDocument, dict[int, int]]:
+    """Save ``payloads`` as the label document of the image at ``image``, as ``author``.
+
+    The save is ``dataset_layout.save_label_document``'s at the image's own dimensions, against
+    ``expect`` and with ``gestures``. Returns its answer.
+    """
+    from tcip_mcp.dataset_layout import save_label_document
+    from tcip_mcp.pipelines.image_utils import image_path_dimensions
+
+    width, height = image_path_dimensions(image)
+    return save_label_document(
+        project,
+        image_label_key(image),
+        payloads,
+        width=width,
+        height=height,
+        author=author,
+        actor=author,
+        expect=expect,
+        gestures=gestures,
+    )
+
+
+def staged_box(project: Path, image: Path, box: list[float]) -> str:
+    """Stage one ``bud`` box over the pixel ``box`` on ``image``; return its bucket's name.
+
+    The box is proposed at 0.9 by the model ``detector`` through ``stage_proposals``, normalized
+    by the image's own dimensions.
+    """
+    from tcip_mcp.pipelines.image_utils import image_path_dimensions
+    from tcip_mcp.tools.proposal_tools import stage_proposals
+
+    width, height = image_path_dimensions(image)
+    x1, y1, x2, y2 = box
+    staged = stage_proposals(
+        project,
+        str(image),
+        model_name="detector",
+        actor=None,
+        boxes=[
+            {
+                "subject": "bud",
+                "conf": 0.9,
+                "cx": (x1 + x2) / 2 / width,
+                "cy": (y1 + y2) / 2 / height,
+                "w": (x2 - x1) / width,
+                "h": (y2 - y1) / height,
+            }
+        ],
+    )
+    assert "error" not in staged, staged
+    return staged["bucket"]
+
+
+def install_stub_proposer(
+    monkeypatch: pytest.MonkeyPatch, candidates: list[dict]
+) -> None:
+    """Install a proposal engine that hands ``candidates`` back verbatim, whatever the engine.
+
+    The engine is installed by patching ``proposal.resolve_proposer``.
+    """
+    from tcip_mcp.pipelines import proposal
+
+    class StubProposer:
+        def propose(
+            self, image_path: str, **params: object
+        ) -> proposal.Proposal:
+            return proposal.Proposal(candidates, None)
+
+    monkeypatch.setattr(
+        proposal, "resolve_proposer", lambda engine: StubProposer()
     )
 
 
@@ -630,3 +805,32 @@ def kept(proposed: dict, *assigned: tuple[int, str]) -> StagedAssignments:
             for candidate_id, subject in assigned
         ],
     )
+
+
+def mapping_of(
+    rows: dict[str, list[tuple[str, tuple[str, str] | None, float | None]]],
+) -> dict[str, list[plant_mapping.Assignment]]:
+    """Return a plant mapping's per-date assignment records.
+
+    ``rows`` maps each date to its ``(image, plant, distance_m)`` rows, ``image`` a file name of
+    that date's capture. A ``plant`` ``(plant_id, accession_name)`` is assigned by capture
+    sequence at ``distance_m``; ``None`` is an unmapped image, its ``distance_m`` the nearest
+    plant's or ``None`` when no distance was measured.
+    """
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import Assignment
+
+    return {
+        date: [
+            Assignment(
+                image=image,
+                stem=Path(image).stem,
+                date_folder=date,
+                plant_id=None if plant is None else plant[0],
+                accession_name=None if plant is None else plant[1],
+                source="unmapped" if plant is None else "sequence",
+                distance_m=distance_m,
+            )
+            for image, plant, distance_m in assigned
+        ]
+        for date, assigned in rows.items()
+    }

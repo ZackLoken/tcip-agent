@@ -18,32 +18,16 @@ import numpy as np
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
-from tests._producer_fixtures import kept, write_image
+from tests._producer_fixtures import (
+    install_stub_proposer,
+    kept,
+    write_image,
+)
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.raster_source import RasterSource
     from tcip_mcp.tools.vision_tools import DisplayRead
     from tcip_store import Key
-
-
-def _install_stub(
-    monkeypatch: pytest.MonkeyPatch, candidates: list[dict]
-) -> None:
-    """Install a proposal engine that hands ``candidates`` back verbatim.
-
-    The engine is installed by patching ``proposal.resolve_proposer``.
-    """
-    from tcip_mcp.pipelines import proposal
-
-    class StubProposer:
-        def propose(
-            self, image_path: str, **params: object
-        ) -> proposal.Proposal:
-            return proposal.Proposal(candidates, None)
-
-    monkeypatch.setattr(
-        proposal, "resolve_proposer", lambda engine: StubProposer()
-    )
 
 
 def _candidate(candidate_id: int, x0: float) -> dict:
@@ -104,14 +88,14 @@ def test_two_dated_buckets_with_the_same_stem_stage_and_read_back_independently(
     _make_image(first)
     _make_image(second)
 
-    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
     proposed_first = propose_annotations(
         tmp_path, image_path=str(first), engine="stub", actor=None
     )
     assert "error" not in proposed_first, proposed_first
     assert proposed_first["staged"] is True
 
-    _install_stub(monkeypatch, [_candidate(0, 300.0)])
+    install_stub_proposer(monkeypatch, [_candidate(0, 300.0)])
     proposed_second = propose_annotations(
         tmp_path, image_path=str(second), engine="stub", actor=None
     )
@@ -159,7 +143,9 @@ def test_an_assignment_naming_no_subject_is_refused_never_skipped(
 
     img_path = image_dir(tmp_path, "2026-01-01") / "bur.jpg"
     _make_image(img_path)
-    _install_stub(monkeypatch, [_candidate(0, 5.0), _candidate(1, 30.0)])
+    install_stub_proposer(
+        monkeypatch, [_candidate(0, 5.0), _candidate(1, 30.0)]
+    )
     proposed = propose_annotations(
         tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
@@ -195,7 +181,7 @@ def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_r
     img_path = image_dir(tmp_path, UNDATED_BUCKET) / "changed.jpg"
     _make_image(img_path, fill=(50, 50, 50))
 
-    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
     proposed = propose_annotations(
         tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
@@ -242,7 +228,7 @@ def test_the_envelope_carries_image_identity_at_the_dataset_rooted_location(
 
     img_path = image_dir(tmp_path, "2026-04-01") / "sample.jpg"
     _make_image(img_path)
-    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
 
     result = propose_annotations(
         tmp_path, image_path=str(img_path), engine="stub", actor=None
@@ -280,7 +266,7 @@ def test_propose_outside_a_dataset_tree_runs_the_engine_and_stages_nothing(
 
     img_path = tmp_path / "loose.jpg"
     _make_image(img_path)
-    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
 
     result = propose_annotations(
         tmp_path, image_path=str(img_path), engine="stub", actor=None
@@ -306,7 +292,7 @@ def test_propose_then_accept_stages_a_prediction_at_the_expected_location(
 
     img_path = image_dir(tmp_path, capture) / "sample.jpg"
     _make_image(img_path)
-    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
 
     proposed = propose_annotations(
         tmp_path, image_path=str(img_path), engine="stub", actor=None
@@ -360,7 +346,7 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
         identity_tolerance={},
     )
 
-    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
     proposed = propose_annotations(
         tmp_path, image_path=str(manifest), engine="stub", actor=None
     )
@@ -414,7 +400,7 @@ def test_propose_on_a_band_groups_member_path_refuses_naming_the_manifest(
         identity_tolerance={},
     )
 
-    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
     member_path = bands["Red"]
     proposed = propose_annotations(
         tmp_path, image_path=str(member_path), engine="stub", actor=None
@@ -445,7 +431,9 @@ def test_a_second_accept_of_the_same_staged_run_refuses_and_keeps_the_first(
 
     img_path = image_dir(tmp_path, UNDATED_BUCKET) / "twice.jpg"
     _make_image(img_path)
-    _install_stub(monkeypatch, [_candidate(0, 5.0), _candidate(1, 40.0)])
+    install_stub_proposer(
+        monkeypatch, [_candidate(0, 5.0), _candidate(1, 40.0)]
+    )
 
     proposed = propose_annotations(
         tmp_path, image_path=str(img_path), engine="stub", actor=None
@@ -489,11 +477,11 @@ def test_two_runs_on_one_image_stay_their_own_and_each_accept_stages_its_own(
     img_path = image_dir(tmp_path, UNDATED_BUCKET) / "rerun.jpg"
     _make_image(img_path)
 
-    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
     first = propose_annotations(
         tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
-    _install_stub(monkeypatch, [_candidate(0, 40.0)])
+    install_stub_proposer(monkeypatch, [_candidate(0, 40.0)])
     second = propose_annotations(
         tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
@@ -532,13 +520,13 @@ def test_a_run_finding_nothing_stages_nothing_and_leaves_an_earlier_run_staged(
     img_path = image_dir(tmp_path, UNDATED_BUCKET) / "goes_empty.jpg"
     _make_image(img_path)
 
-    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
     first = propose_annotations(
         tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
     assert first["staged"] is True, first
 
-    _install_stub(monkeypatch, [])
+    install_stub_proposer(monkeypatch, [])
     second = propose_annotations(
         tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
@@ -574,7 +562,7 @@ def test_accept_reports_an_unsampleable_image_as_an_error_dict(
     img_path = image_dir(tmp_path, UNDATED_BUCKET) / "unsampleable.jpg"
     _make_image(img_path)
 
-    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
     proposed = propose_annotations(
         tmp_path, image_path=str(img_path), engine="stub", actor=None
     )
@@ -614,7 +602,7 @@ def test_a_region_proposal_and_its_accept_each_open_the_image_once(
 
     img_path = image_dir(tmp_path, UNDATED_BUCKET) / "region.jpg"
     _make_image(img_path)
-    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
     opened: list = []
     real = raster_source.SourceHeader.open
 
@@ -671,7 +659,7 @@ def test_a_staging_is_one_publication_with_one_audit_line(
     assert "Callable" not in str(inspect.signature(publish))
     image = image_dir(tmp_path, "2026-01-01") / "leaf.jpg"
     _make_image(image)
-    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    install_stub_proposer(monkeypatch, [_candidate(0, 5.0)])
     proposed = propose_annotations(
         tmp_path, image_path=str(image), engine="stub", actor=None
     )

@@ -275,7 +275,7 @@ def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
     from tests.test_mask_and_table_membership import _table_dataset
 
     root = tmp_path / "ds"
-    images_dir, csv_path = _table_dataset(root)
+    images_dir, csv_path, _images, _masks = _table_dataset(root)
     drawn = draw_splits(
         tmp_path,
         str(root),

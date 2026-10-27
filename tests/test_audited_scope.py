@@ -16,7 +16,7 @@ import tcip_mcp.audit as audit_module
 import tcip_store as ts
 from tcip_mcp.dataset_layout import image_dir, image_root
 from tests._audit_fixtures import audit_rows
-from tests._producer_fixtures import write_image
+from tests._producer_fixtures import WrittenDataset, write_image
 
 if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
@@ -27,11 +27,12 @@ STUB_ENGINE = "tests.proposal_stub:factory"
 
 
 @pytest.fixture
-def dataset_root(tmp_path: Path) -> Path:
-    """Return a dataset carrying one capture, its own root distinct from the project's."""
+def dataset_root(tmp_path: Path) -> WrittenDataset:
+    """Write a dataset carrying one capture of one image, its root distinct from the project's."""
     root = tmp_path / "orchard_dataset"
-    write_image(image_dir(root, CAPTURE_DATE) / "IMG_0001.JPG")
-    return root
+    images_dir = image_dir(root, CAPTURE_DATE)
+    image = write_image(images_dir / "IMG_0001.JPG")
+    return WrittenDataset(root, images_dir, [image])
 
 
 def _subjects() -> dict:
@@ -49,21 +50,21 @@ def _subjects() -> dict:
 
 
 def test_registry_write_records_in_the_dataset_named_by_its_root_argument(
-    project: Path, dataset_root: Path
+    project: Path, dataset_root: WrittenDataset
 ) -> None:
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     assert "error" not in write_subject_registry(
-        project, str(dataset_root), subjects=_subjects(), actor=None
+        project, str(dataset_root.root), subjects=_subjects(), actor=None
     )
 
-    rows = audit_rows(dataset_root, "replace_registry")
-    assert len(rows) == 1, audit_rows(dataset_root)
+    rows = audit_rows(dataset_root.root, "replace_registry")
+    assert len(rows) == 1, audit_rows(dataset_root.root)
     assert audit_rows(project, "replace_registry") == []
 
 
 def test_label_write_records_in_the_dataset_holding_the_image_it_names(
-    project: Path, bound: BoundProject, dataset_root: Path
+    project: Path, bound: BoundProject, dataset_root: WrittenDataset
 ) -> None:
     """A label write records in the dataset holding its image, not in the project's log.
 
@@ -71,22 +72,21 @@ def test_label_write_records_in_the_dataset_holding_the_image_it_names(
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
-    image = image_dir(dataset_root, CAPTURE_DATE) / "IMG_0001.JPG"
     result = save_annotations(
         bound,
-        str(image),
+        str(dataset_root.images[0]),
         annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}],
         actor=None,
     )
     assert "error" not in result
 
-    rows = audit_rows(dataset_root, "save_label_document")
-    assert len(rows) == 1, audit_rows(dataset_root)
+    rows = audit_rows(dataset_root.root, "save_label_document")
+    assert len(rows) == 1, audit_rows(dataset_root.root)
     assert audit_rows(project, "save_label_document") == []
 
 
 def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_against(
-    project: Path, dataset_root: Path
+    project: Path, dataset_root: WrittenDataset
 ) -> None:
     """``propose_annotations`` records in the dataset holding the image it ran against.
 
@@ -95,14 +95,16 @@ def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_ag
     """
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
-    image = image_dir(dataset_root, CAPTURE_DATE) / "IMG_0001.JPG"
     result = propose_annotations(
-        project, image_path=str(image), engine=STUB_ENGINE, actor=None
+        project,
+        image_path=str(dataset_root.images[0]),
+        engine=STUB_ENGINE,
+        actor=None,
     )
     assert "error" not in result, result
 
-    rows = audit_rows(dataset_root, "propose_annotations")
-    assert len(rows) == 1, audit_rows(dataset_root)
+    rows = audit_rows(dataset_root.root, "propose_annotations")
+    assert len(rows) == 1, audit_rows(dataset_root.root)
     assert audit_rows(project, "propose_annotations") == []
 
 
@@ -130,7 +132,7 @@ def test_propose_annotations_staging_nothing_leaves_no_audit_line(
 
 
 def test_unscoped_mutating_tool_records_in_the_project_log_with_the_entry_shape(
-    project: Path, dataset_root: Path
+    project: Path, dataset_root: WrittenDataset
 ) -> None:
     """An unscoped mutating tool records in the project's log, its row growing no new field."""
     from tcip_mcp.tools.meta_tools import report_friction
@@ -149,7 +151,7 @@ def test_unscoped_mutating_tool_records_in_the_project_log_with_the_entry_shape(
         "duration_ms",
     }
     assert "project" not in rows[0]["arguments"]
-    assert audit_rows(dataset_root, "report_friction") == []
+    assert audit_rows(dataset_root.root, "report_friction") == []
 
 
 def test_a_label_write_of_an_image_under_no_dataset_refuses_and_records_nothing(
@@ -258,7 +260,7 @@ def test_a_scope_resolution_that_raises_refuses_rather_than_filing_the_event_in_
 
 
 def test_two_spellings_of_a_root_reach_one_log_and_a_relative_spelling_refuses(
-    dataset_root: Path,
+    dataset_root: WrittenDataset,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two spellings of a root reach one audit log, and a relative spelling is refused.
@@ -271,22 +273,23 @@ def test_two_spellings_of_a_root_reach_one_log_and_a_relative_spelling_refuses(
 
     from tcip_mcp.audit import audit_entries, record_event_or_raise
 
+    root = dataset_root.root
     record_event_or_raise(
         "curate_something",
         {"n": 1},
         actor=None,
-        scope=image_root(dataset_root) / "..",
+        scope=image_root(root) / "..",
     )
-    spellings = [dataset_root]
+    spellings = [root]
     if os.name == "nt":
-        spellings.append(Path(str(dataset_root).upper()))
+        spellings.append(Path(str(root).upper()))
     for spelling in spellings:
         entries, _cursor = audit_entries(spelling)
         assert [e["tool"] for e in entries] == ["curate_something"]
 
-    monkeypatch.chdir(dataset_root.parent)
+    monkeypatch.chdir(root.parent)
     with pytest.raises(ts.BadKeyError, match="not an absolute path"):
-        audit_entries(Path(dataset_root.name))
+        audit_entries(Path(root.name))
 
 
 def test_scope_argument_naming_no_parameter_is_refused_at_decoration() -> None:

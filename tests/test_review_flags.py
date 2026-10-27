@@ -19,16 +19,19 @@ from tcip_annotation.flags import (
     read_flags,
 )
 from tcip_annotation.json_io import read_label_document
-from tcip_mcp.dataset_layout import Gestures, image_dir, save_label_document
+from tcip_mcp.dataset_layout import Gestures, image_dir
 from tests._audit_fixtures import audit_rows
-from tests._producer_fixtures import image_label_key, write_image
+from tests._producer_fixtures import (
+    image_label_key,
+    save_labels,
+    staged_box,
+    write_image,
+)
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
     from tcip_annotation.flags import Flag
-    from tcip_annotation.json_io import LabelDocument
-    from tcip_store import Version
 
 DATE = "2026-02-11"
 WIDTH, HEIGHT = 100, 80
@@ -36,65 +39,15 @@ BOX = [40.0, 30.0, 60.0, 50.0]
 INSIDE = (50.0, 40.0)
 
 
-def _image(root: Path) -> Path:
-    return write_image(
-        image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT), (90, 110, 70)
-    )
-
-
-def _save(
-    root: Path,
-    image: Path,
-    payloads: list[dict],
-    *,
-    author: str = "user:breeder",
-    gestures: Gestures = Gestures(),
-) -> tuple[Version, LabelDocument, dict[int, int]]:
-    return save_label_document(
-        root,
-        image_label_key(image),
-        payloads,
-        width=WIDTH,
-        height=HEIGHT,
-        author=author,
-        actor=author,
-        gestures=gestures,
-    )
-
-
 def _flags(image: Path) -> list[Flag]:
     return read_flags(flag_key(image_label_key(image)))
-
-
-def _bucket(root: Path, image: Path) -> str:
-    from tcip_mcp.tools.proposal_tools import stage_proposals
-
-    x1, y1, x2, y2 = BOX
-    staged = stage_proposals(
-        root,
-        str(image),
-        model_name="detector",
-        actor=None,
-        boxes=[
-            {
-                "subject": "bud",
-                "conf": 0.9,
-                "cx": (x1 + x2) / 2 / WIDTH,
-                "cy": (y1 + y2) / 2 / HEIGHT,
-                "w": (x2 - x1) / WIDTH,
-                "h": (y2 - y1) / HEIGHT,
-            }
-        ],
-    )
-    assert "error" not in staged, staged
-    return staged["bucket"]
 
 
 def test_a_flag_on_an_annotation_is_recorded_with_who_and_when(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
-    _save(
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    save_labels(
         tmp_path,
         image,
         [{"subject": "bud", "bbox": BOX}],
@@ -121,9 +74,9 @@ def test_a_flag_on_an_annotation_is_recorded_with_who_and_when(
 def test_a_flag_on_the_image_and_one_on_a_proposal_are_each_their_own_target(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
-    bucket = _bucket(tmp_path, image)
-    _save(
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(tmp_path, image, BOX)
+    save_labels(
         tmp_path,
         image,
         [],
@@ -154,9 +107,9 @@ def test_a_malformed_flag_refuses_before_any_write(
 ) -> None:
     import tcip_store as ts
 
-    image = _image(tmp_path)
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     with pytest.raises(ValueError, match=message):
-        _save(
+        save_labels(
             tmp_path,
             image,
             [{"subject": "bud", "bbox": BOX}],
@@ -176,12 +129,12 @@ def test_a_flag_or_a_resolution_by_no_person_refuses_before_any_write(
     flag nor resolves one by removing its annotation; the document and the audit log are
     unchanged.
     """
-    image = _image(tmp_path)
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     box = [{"subject": "bud", "bbox": BOX}]
     with pytest.raises(
         ValueError, match="is not a person's recorded identity"
     ):
-        _save(
+        save_labels(
             tmp_path,
             image,
             box,
@@ -190,7 +143,7 @@ def test_a_flag_or_a_resolution_by_no_person_refuses_before_any_write(
         )
     assert _flags(image) == []
 
-    _save(
+    save_labels(
         tmp_path,
         image,
         box,
@@ -205,7 +158,7 @@ def test_a_flag_or_a_resolution_by_no_person_refuses_before_any_write(
     with pytest.raises(
         ValueError, match="is not a person's recorded identity"
     ):
-        _save(tmp_path, image, [], author="save_annotations")
+        save_labels(tmp_path, image, [], author="save_annotations")
     assert _flags(image)[0].open
     assert read_label_document(image_label_key(image)) == held
     assert audit_rows(tmp_path) == logged
@@ -214,10 +167,10 @@ def test_a_flag_or_a_resolution_by_no_person_refuses_before_any_write(
 def test_a_flag_on_a_proposal_the_bucket_does_not_hold_refuses(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
-    bucket = _bucket(tmp_path, image)
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    bucket = staged_box(tmp_path, image, BOX)
     with pytest.raises(ValueError, match="not one at index 3 to flag"):
-        _save(
+        save_labels(
             tmp_path,
             image,
             [],
@@ -231,9 +184,9 @@ def test_a_flag_on_a_proposal_the_bucket_does_not_hold_refuses(
 def test_resolving_keeps_the_flag_with_the_reply_and_refuses_a_second_resolution(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     box = [{"subject": "bud", "bbox": BOX}]
-    _save(
+    save_labels(
         tmp_path,
         image,
         box,
@@ -243,7 +196,7 @@ def test_resolving_keeps_the_flag_with_the_reply_and_refuses_a_second_resolution
     )
     (raised,) = _flags(image)
 
-    _save(
+    save_labels(
         tmp_path,
         image,
         box,
@@ -261,14 +214,14 @@ def test_resolving_keeps_the_flag_with_the_reply_and_refuses_a_second_resolution
     assert (flag.text, flag.by) == (raised.text, raised.by)
 
     with pytest.raises(ValueError, match="are not open"):
-        _save(
+        save_labels(
             tmp_path,
             image,
             box,
             gestures=Gestures(resolve={raised.id: "again"}),
         )
     with pytest.raises(ValueError, match="are not open"):
-        _save(
+        save_labels(
             tmp_path,
             image,
             box,
@@ -279,10 +232,10 @@ def test_resolving_keeps_the_flag_with_the_reply_and_refuses_a_second_resolution
 def test_removing_the_flagged_annotation_resolves_its_flag_and_no_other(
     tmp_path: Path,
 ) -> None:
-    image = _image(tmp_path)
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
     other = [5.0, 5.0, 20.0, 20.0]
     both = [{"subject": "bud", "bbox": BOX}, {"subject": "bud", "bbox": other}]
-    _save(
+    save_labels(
         tmp_path,
         image,
         both,
@@ -297,7 +250,7 @@ def test_removing_the_flagged_annotation_resolves_its_flag_and_no_other(
         ),
     )
 
-    _save(tmp_path, image, both[1:], author="user:second")
+    save_labels(tmp_path, image, both[1:], author="user:second")
 
     first, second, whole = _flags(image)
     assert (first.open, first.removed, first.resolved_by) == (
@@ -316,8 +269,8 @@ def test_moving_a_flagged_annotation_off_its_flag_resolves_it_as_removed(
     A small correction leaves the flag open, and a correction that no longer covers the flag's
     place resolves it as removed.
     """
-    image = _image(tmp_path)
-    _save(
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    save_labels(
         tmp_path,
         image,
         [{"subject": "bud", "bbox": BOX}],
@@ -326,12 +279,12 @@ def test_moving_a_flagged_annotation_off_its_flag_resolves_it_as_removed(
         ),
     )
 
-    _save(
+    save_labels(
         tmp_path, image, [{"subject": "bud", "bbox": [41.0, 31.0, 61.0, 51.0]}]
     )
     assert _flags(image)[0].open
 
-    _save(
+    save_labels(
         tmp_path, image, [{"subject": "bud", "bbox": [0.0, 0.0, 10.0, 10.0]}]
     )
     assert _flags(image)[0].removed
@@ -343,7 +296,7 @@ def test_the_editor_reads_the_flags_at_load_and_after_a_save(
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj").root
-    image = _image(root)
+    image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
     body = {
         "image_path": str(image),
         "user": "breeder",
@@ -387,8 +340,8 @@ def test_doctor_names_a_flags_record_that_will_not_read_and_passes_one_that_does
     import tcip_store as ts
     from tcip_mcp.tools.doctor_tools import _buckets, check_state
 
-    image = _image(tmp_path)
-    _save(
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    save_labels(
         tmp_path,
         image,
         [{"subject": "bud", "bbox": BOX}],
@@ -413,6 +366,6 @@ def test_a_save_that_touches_no_flag_writes_no_flags_record(
 ) -> None:
     import tcip_store as ts
 
-    image = _image(tmp_path)
-    _save(tmp_path, image, [{"subject": "bud", "bbox": BOX}])
+    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    save_labels(tmp_path, image, [{"subject": "bud", "bbox": BOX}])
     assert not ts.exists(flag_key(image_label_key(image)))

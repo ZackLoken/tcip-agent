@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, NoReturn, Unpack
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tests._chain_fixtures import (
     BESPOKE_CLASSIFIER,
     BESPOKE_MODELS,
@@ -133,15 +133,16 @@ def _bespoke_classification_dataset(
 def _admitted_tree(tmp_path: Path) -> Path:
     """Return an images directory whose label documents the platform's producer admits."""
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import labeled_frame, registry_over
+    from tests._producer_fixtures import (
+        labeled_frame,
+        registry_of,
+        registry_over,
+    )
 
     root = tmp_path / "ds"
     imgs = image_dir(root, UNDATED_BUCKET)
     imgs.mkdir(parents=True)
-    registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="leaf", description=""),))
-    )
+    registry_over(root, registry_of("leaf"))
     for stem in ("a", "b", "c", "d"):
         labeled_frame(
             imgs / f"{stem}.png",
@@ -269,24 +270,15 @@ def test_model_dims_hands_the_admitted_subject_and_every_attribute(
     tmp_path: Path,
 ) -> None:
     """A scoped run's model dimensions carry the admitted subject and every declared attribute."""
-    from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.model_build import model_dims
-    from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
-    from tests._producer_fixtures import registry_over
+    from tcip_mcp.subject_registry import Attribute
+    from tests._producer_fixtures import registry_of, scope_over
 
     attributes = (
         Attribute("color", "categorical", ("red", "blue")),
         Attribute("grade", "ordinal", ("low", "mid", "high")),
     )
-    registry_over(
-        tmp_path,
-        SubjectRegistry(
-            subjects=(
-                Subject(name="bud", description="", attributes=attributes),
-            )
-        ),
-    )
-    scope = registry_scope(image_root(tmp_path), "bud")
+    scope = scope_over(tmp_path, registry_of("bud", *attributes), "bud")
 
     assert model_dims(scope, {"num_channels": 3}) == {
         "in_chans": 3,
@@ -395,9 +387,8 @@ def test_preflight_smokes_an_untiled_run_of_mixed_frames_on_a_real_batch(
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     imgs = _admitted_tree(tmp_path)
-    write_image(imgs / "e.png", (48, 40))
     label_image(
-        imgs / "e.png",
+        write_image(imgs / "e.png", (48, 40)),
         [Annotation(subject="leaf", geometry=BBox(2, 2, 10, 10))],
         48,
         40,
@@ -464,7 +455,7 @@ def test_preflight_builds_and_smokes_at_the_count_the_run_resolved(
     from tcip_mcp.tools.training_tools import preflight_config
     from tests.test_mask_and_table_membership import _three_class_masks
 
-    images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
+    images_dir, masks_dir, _masks = _three_class_masks(tmp_path / "ds")
     cfg = training_config(
         tmp_path,
         {
@@ -498,7 +489,7 @@ def _semantic_seg_config(project: Path) -> dict:
     """
     from tests.test_mask_and_table_membership import _three_class_masks
 
-    images_dir, masks_dir = _three_class_masks(project / "ds")
+    images_dir, masks_dir, _masks = _three_class_masks(project / "ds")
     return training_config(
         project,
         {

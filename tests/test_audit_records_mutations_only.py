@@ -217,7 +217,6 @@ def test_ranking_a_review_queue_leaves_no_line(
     A successful ranking through a registered run answers a queue and leaves the project's log
     as it found it.
     """
-    from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.tools.feedback_tools import prioritize_review_queue
     from tests.test_feedback_tools import _bound_checkpoint, _stub_scorer
     from tests.test_selection_ground_truth_digests import (
@@ -226,7 +225,8 @@ def test_ranking_a_review_queue_leaves_no_line(
         _draw,
     )
 
-    root = _dataset(tmp_path / "data")
+    root = tmp_path / "data"
+    captures = _dataset(root)
     manifest_dir = tmp_path / "manifest"
     _draw(tmp_path, root, manifest_dir)
     _run_dir, ckpt_path = _bound_checkpoint(
@@ -238,7 +238,7 @@ def test_ranking_a_review_queue_leaves_no_line(
     result = prioritize_review_queue(
         tmp_path,
         checkpoint_path=ckpt_path,
-        images_dir=str(image_dir(root, DATES[0])),
+        images_dir=str(captures[DATES[0]].images_dir),
         scorer=COMBINED_SCORER,
         budget=50,
         rationale=RATIONALE,

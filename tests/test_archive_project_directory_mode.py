@@ -190,25 +190,22 @@ def _populate_project(src: Path) -> tuple[Path, Path]:
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import (
         label_image,
+        registry_of,
         registry_over,
         write_image,
     )
 
     date = "2026-03-04"
     images = image_dir(src, date)
-    write_image(images / "a_1.jpg", (32, 32))
     label_image(
-        images / "a_1.jpg",
+        write_image(images / "a_1.jpg", (32, 32)),
         [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
         32,
         32,
     )
-    registry_over(
-        src, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
-    )
+    registry_over(src, registry_of("bud"))
 
     # A multispectral capture written one file per band: the manifest beside the bands is what
     # makes those files one logical image, so a directory bundle has to carry all of them too.

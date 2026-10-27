@@ -24,11 +24,14 @@ from tcip_mcp.dataset_layout import (
 from tcip_mcp.pipelines.proposal import Proposal
 from tcip_mcp.tools.gui_tools import focus_human_attention
 from tcip_mcp.tools.proposal_tools import stage_proposals
-from tests._producer_fixtures import kept, write_image
+from tests._producer_fixtures import kept, stub_images, write_jpegs
 
 if TYPE_CHECKING:
     from tcip_mcp.tools.proposal_tools import StagedAssignments
     from tcip_mcp.workspace import BoundProject
+
+SIZE = (640, 480)
+"""The frame size a staged proposal's normalized coordinates are denormalized against."""
 
 
 @pytest.fixture(autouse=True)
@@ -41,13 +44,6 @@ def _stub_gui(monkeypatch: pytest.MonkeyPatch) -> None:
         "post_panel_event",
         lambda *a, **k: {"delivered": False, "status": "no_subscribers"},
     )
-
-
-def _images(root: Path, date: str, names: list[str]) -> None:
-    idir = image_dir(root, date)
-    idir.mkdir(parents=True, exist_ok=True)
-    for name in names:
-        (idir / name).write_bytes(b"x")
 
 
 def _staged(
@@ -68,11 +64,11 @@ def _staged(
     return key
 
 
-def _publish(root: Path, date: str, preds: dict[str, list[float]]) -> str:
+def _publish(root: Path, date: str, preds: dict[Path, list[float]]) -> str:
     """Publish the model bucket ``baseline/<date>`` under ``root`` and return its name.
 
-    The bucket holds one document per image name of ``preds``, a scored ``bud`` box per score
-    (none for an empty list).
+    The bucket holds one document per image of ``preds``, a scored ``bud`` box per score (none
+    for an empty list).
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
@@ -82,7 +78,7 @@ def _publish(root: Path, date: str, preds: dict[str, list[float]]) -> str:
         f"baseline/{date}",
         [
             {
-                "image": str(image_dir(root, date) / name),
+                "image": str(image),
                 "width": 100,
                 "height": 100,
                 "boxes": [[10.0, 10.0, 20.0, 20.0]] * len(scores),
@@ -90,21 +86,10 @@ def _publish(root: Path, date: str, preds: dict[str, list[float]]) -> str:
                 "labels": [1] * len(scores),
                 "cap": len(scores) + 1,
             }
-            for name, scores in preds.items()
+            for image, scores in preds.items()
         ],
         scope={"subject": "bud"},
     ).name
-
-
-def _image(
-    root: Path, date: str, stem: str, size: tuple[int, int] = (640, 480)
-) -> None:
-    write_image(image_dir(root, date) / f"{stem}.jpg", size, (90, 110, 70))
-
-
-def _img_path(root: Path, date: str, stem: str) -> str:
-    """Return the path ``_image`` wrote ``stem`` at, ``<stem>.jpg`` in ``root``'s ``date``."""
-    return str(image_dir(root, date) / f"{stem}.jpg")
 
 
 def _no_ground_truth(root: Path) -> bool:
@@ -124,11 +109,10 @@ def test_focus_over_a_bucket_lands_on_first_frame_with_proposals(
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    imgs = [f"IMG_{i:04d}.JPG" for i in range(5)]
-    _images(root, date, imgs)
-    bucket = _publish(
-        root, date, {"IMG_0002.JPG": [0.9], "IMG_0003.JPG": [0.8]}
+    images = stub_images(
+        image_dir(root, date), [f"IMG_{i:04d}.JPG" for i in range(5)]
     )
+    bucket = _publish(root, date, {images[2]: [0.9], images[3]: [0.8]})
 
     res = focus_human_attention(bound, str(root), "bud", date, bucket=bucket)
     assert "error" not in res
@@ -146,9 +130,11 @@ def test_focus_over_a_bucket_skips_an_empty_prediction_document(
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
+    images = stub_images(
+        image_dir(root, date), [f"IMG_{i:04d}.JPG" for i in range(3)]
+    )
     # IMG_0000's document holds no detections, so it is no target.
-    bucket = _publish(root, date, {"IMG_0000.JPG": [], "IMG_0002.JPG": [0.9]})
+    bucket = _publish(root, date, {images[0]: [], images[2]: [0.9]})
 
     res = focus_human_attention(bound, str(root), "bud", date, bucket=bucket)
     assert res["image_index"] == 2
@@ -165,10 +151,10 @@ def test_focus_over_a_bucket_navigates_past_an_unreadable_prediction_on_another_
     """
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
-    bucket = _publish(
-        root, date, {"IMG_0000.JPG": [0.7], "IMG_0002.JPG": [0.9]}
+    images = stub_images(
+        image_dir(root, date), [f"IMG_{i:04d}.JPG" for i in range(3)]
     )
+    bucket = _publish(root, date, {images[0]: [0.7], images[2]: [0.9]})
     _damage(root, bucket, "IMG_0000")
 
     res = focus_human_attention(bound, str(root), "bud", date, bucket=bucket)
@@ -183,8 +169,10 @@ def test_focus_over_a_bucket_refuses_an_explicitly_named_unreadable_frame(
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
-    bucket = _publish(root, date, {"IMG_0000.JPG": [0.7]})
+    images = stub_images(
+        image_dir(root, date), [f"IMG_{i:04d}.JPG" for i in range(3)]
+    )
+    bucket = _publish(root, date, {images[0]: [0.7]})
     _damage(root, bucket, "IMG_0000")
 
     res = focus_human_attention(
@@ -200,8 +188,10 @@ def test_focus_over_a_bucket_carries_the_explicit_index_and_proposal(
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(4)])
-    bucket = _publish(root, date, {"IMG_0000.JPG": [0.9]})
+    images = stub_images(
+        image_dir(root, date), [f"IMG_{i:04d}.JPG" for i in range(4)]
+    )
+    bucket = _publish(root, date, {images[0]: [0.9]})
 
     res = focus_human_attention(
         bound, str(root), "bud", date, bucket=bucket, image_index=3, proposal=2
@@ -214,7 +204,7 @@ def test_focus_refuses_a_name_that_is_no_bucket(
     tmp_path: Path, bound: BoundProject
 ) -> None:
     root = tmp_path / "proj"
-    _images(root, "2026-02-11", ["IMG_0000.JPG"])
+    stub_images(image_dir(root, "2026-02-11"), ["IMG_0000.JPG"])
     res = focus_human_attention(
         bound, str(root), "bud", "2026-02-11", bucket="baseline/2026-02-11"
     )
@@ -226,7 +216,8 @@ def test_stage_proposals_writes_prediction_format_not_gt(
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0001", size=(640, 480))
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
+    image_path = str(image)
     # Two distinct subject NAMES (the name-based replacement for two numeric class ids).
     boxes = [
         {
@@ -248,7 +239,7 @@ def test_stage_proposals_writes_prediction_format_not_gt(
     ]
     res = stage_proposals(
         tmp_path,
-        _img_path(root, date, "IMG_0001"),
+        image_path,
         actor=None,
         model_name="claude",
         boxes=boxes,
@@ -280,7 +271,8 @@ def test_stage_proposals_writes_prediction_format_not_gt(
 def test_stage_proposals_rejects_unnormalized_coords(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0001")
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
+    image_path = str(image)
     # pixel coords (>1) must be caught, not written off-canvas.
     boxes = [
         {
@@ -294,7 +286,7 @@ def test_stage_proposals_rejects_unnormalized_coords(tmp_path: Path) -> None:
     ]
     res = stage_proposals(
         tmp_path,
-        _img_path(root, date, "IMG_0001"),
+        image_path,
         actor=None,
         model_name="agent_proposals",
         boxes=boxes,
@@ -312,8 +304,8 @@ def test_stage_proposals_rejects_a_model_name_that_is_no_single_segment(
     """
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0001")
-    image_path = _img_path(root, date, "IMG_0001")
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
+    image_path = str(image)
     good = [
         {
             "subject": "bud",
@@ -347,7 +339,7 @@ def test_focus_rejects_path_traversal(
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _images(root, date, ["IMG_0000.JPG"])
+    stub_images(image_dir(root, date), ["IMG_0000.JPG"])
     # The focus is read-only, but a traversal date still refuses: it becomes a path segment under
     # images/, the guard stage_proposals applies.
     res = focus_human_attention(bound, str(root), "bud", "../evil")
@@ -357,13 +349,14 @@ def test_focus_rejects_path_traversal(
 def test_stage_proposals_rejects_box_missing_subject(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0001")
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
+    image_path = str(image)
     boxes = [
         {"conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}
     ]  # no subject name
     res = stage_proposals(
         tmp_path,
-        _img_path(root, date, "IMG_0001"),
+        image_path,
         actor=None,
         model_name="agent_proposals",
         boxes=boxes,
@@ -385,7 +378,8 @@ def test_stage_proposals_refuses_a_shape_naming_no_subject_by_index(
     """
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0001")
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
+    image_path = str(image)
     good = (
         {
             "subject": "bur",
@@ -407,7 +401,7 @@ def test_stage_proposals_refuses_a_shape_naming_no_subject_by_index(
         bad["subject"] = subject
     res = stage_proposals(
         tmp_path,
-        _img_path(root, date, "IMG_0001"),
+        image_path,
         actor=None,
         model_name="agent_proposals",
         **{shape: [good, bad]},
@@ -422,7 +416,8 @@ def test_stage_proposals_refuses_a_shape_naming_no_subject_by_index(
 def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0132", size=(640, 480))
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0132"], SIZE)
+    image_path = str(image)
     # A SAM-style mask staged as a prediction, with the mask-quality score carried as conf.
     polygons = [
         {
@@ -433,7 +428,7 @@ def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
     ]
     res = stage_proposals(
         tmp_path,
-        _img_path(root, date, "IMG_0132"),
+        image_path,
         actor=None,
         model_name="sam",
         polygons=polygons,
@@ -471,7 +466,8 @@ def test_stage_proposals_stages_boxes_and_polygons_together(
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0001", size=(640, 480))
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
+    image_path = str(image)
     boxes = [
         {
             "subject": "bud",
@@ -491,7 +487,7 @@ def test_stage_proposals_stages_boxes_and_polygons_together(
     ]
     res = stage_proposals(
         tmp_path,
-        _img_path(root, date, "IMG_0001"),
+        image_path,
         actor=None,
         model_name="claude",
         boxes=boxes,
@@ -521,8 +517,8 @@ def test_stage_proposals_stages_boxes_and_polygons_together(
 def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0001")
-    image_path = _img_path(root, date, "IMG_0001")
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
+    image_path = str(image)
     # A two-point ring is not a polygon.
     res = stage_proposals(
         tmp_path,
@@ -605,8 +601,8 @@ def _staged_assignments_image(
     register_proposal_engine("fake_single_box", _FakeSingleBoxEngine())
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0205", size=(640, 480))
-    image_path = _img_path(root, date, "IMG_0205")
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0205"], SIZE)
+    image_path = str(image)
     proposed = propose_annotations(
         tmp_path, image_path, actor=None, engine="fake_single_box"
     )
@@ -707,8 +703,8 @@ def test_stage_proposals_refuses_boxes_or_polygons_without_model_name(
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0206", size=(640, 480))
-    image_path = _img_path(root, date, "IMG_0206")
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0206"], SIZE)
+    image_path = str(image)
     a_box = [
         {
             "subject": "leaf",
@@ -788,7 +784,8 @@ def test_stage_proposals_admits_a_two_ring_pixel_proposal_with_pair_vertices(
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0200", size=(640, 480))
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0200"], SIZE)
+    image_path = str(image)
     rings = [
         [[10.0, 10.0], [50.0, 10.0], [50.0, 40.0], [10.0, 40.0]],
         [[100.0, 100.0], [140.0, 100.0], [120.0, 140.0]],
@@ -796,7 +793,7 @@ def test_stage_proposals_admits_a_two_ring_pixel_proposal_with_pair_vertices(
 
     res = stage_proposals(
         tmp_path,
-        _img_path(root, date, "IMG_0200"),
+        image_path,
         actor=None,
         model_name="sam",
         polygons=[{"subject": "leaf", "conf": 0.9, "rings": rings}],
@@ -831,8 +828,8 @@ def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
 
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0201_b", size=(640, 480))
-    accept_image_path = str(image_dir(root, date) / "IMG_0201_b.jpg")
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0201_b"], SIZE)
+    accept_image_path = str(image)
     proposed = propose_annotations(
         tmp_path, accept_image_path, actor=None, engine="fake_multi_ring"
     )
@@ -858,11 +855,12 @@ def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
 def test_stage_proposals_refuses_both_points_and_rings(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0202", size=(640, 480))
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0202"], SIZE)
+    image_path = str(image)
 
     res = stage_proposals(
         tmp_path,
-        _img_path(root, date, "IMG_0202"),
+        image_path,
         actor=None,
         model_name="sam",
         polygons=[
@@ -886,11 +884,12 @@ def test_stage_proposals_refuses_neither_points_nor_rings(
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0203", size=(640, 480))
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0203"], SIZE)
+    image_path = str(image)
 
     res = stage_proposals(
         tmp_path,
-        _img_path(root, date, "IMG_0203"),
+        image_path,
         actor=None,
         model_name="sam",
         polygons=[{"subject": "leaf", "conf": 0.9}],
@@ -906,11 +905,12 @@ def test_stage_proposals_refuses_a_short_ring_under_rings(
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0204", size=(640, 480))
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0204"], SIZE)
+    image_path = str(image)
 
     res = stage_proposals(
         tmp_path,
-        _img_path(root, date, "IMG_0204"),
+        image_path,
         actor=None,
         model_name="sam",
         polygons=[
@@ -931,11 +931,12 @@ def test_stage_proposals_refuses_a_pixel_vertex_outside_the_image_bounds(
 ) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0205", size=(640, 480))
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0205"], SIZE)
+    image_path = str(image)
 
     res = stage_proposals(
         tmp_path,
-        _img_path(root, date, "IMG_0205"),
+        image_path,
         actor=None,
         model_name="sam",
         polygons=[
@@ -961,11 +962,12 @@ def test_stage_proposals_refuses_an_out_of_range_coordinate_under_rings(
     """
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0206")
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0206"], SIZE)
+    image_path = str(image)
 
     res = stage_proposals(
         tmp_path,
-        _img_path(root, date, "IMG_0206"),
+        image_path,
         actor=None,
         model_name="sam",
         polygons=[
@@ -992,11 +994,12 @@ def test_stage_proposals_refuses_a_normalized_ring_handed_under_rings(
     """
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0207")
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0207"], SIZE)
+    image_path = str(image)
 
     res = stage_proposals(
         tmp_path,
-        _img_path(root, date, "IMG_0207"),
+        image_path,
         actor=None,
         model_name="sam",
         polygons=[
@@ -1029,8 +1032,8 @@ def test_a_second_stage_of_the_same_stem_publishes_a_second_bucket(
     """
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0001", size=(640, 480))
-    image_path = _img_path(root, date, "IMG_0001")
+    (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
+    image_path = str(image)
     first = stage_proposals(
         tmp_path, image_path, actor=None, model_name="claude", boxes=_BOX
     )
@@ -1060,19 +1063,23 @@ def test_stage_proposals_admits_two_stems_staged_in_turn(
     """Two stems staged in turn under one model name both land, each in its own bucket."""
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0001", size=(640, 480))
-    _image(root, date, "IMG_0002", size=(640, 480))
+    first_image, second_image = (
+        str(image)
+        for image in write_jpegs(
+            image_dir(root, date), ["IMG_0001", "IMG_0002"], SIZE
+        )
+    )
 
     first = stage_proposals(
         tmp_path,
-        _img_path(root, date, "IMG_0001"),
+        first_image,
         actor=None,
         model_name="claude",
         boxes=_BOX,
     )
     second = stage_proposals(
         tmp_path,
-        _img_path(root, date, "IMG_0002"),
+        second_image,
         actor=None,
         model_name="claude",
         boxes=_BOX,

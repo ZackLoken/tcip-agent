@@ -36,9 +36,9 @@ if TYPE_CHECKING:
 def _make_dataset(root: Path) -> None:
     """Write a minimal nested-schema dataset (image + label + registry) under ``root``."""
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import (
         label_image,
+        registry_of,
         registry_over,
         write_image,
     )
@@ -47,9 +47,7 @@ def _make_dataset(root: Path) -> None:
     label_image(
         image, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32
     )
-    registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="bud", description=""),))
-    )
+    registry_over(root, registry_of("bud"))
 
 
 def _initialized(path: Path) -> dict:
@@ -260,16 +258,15 @@ def test_export_import_roundtrip(tmp_path: Path) -> None:
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp import subject_registry
     from tcip_mcp.dataset_layout import label_key
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import (
         label_image,
+        registry_of,
         registry_over,
         write_image,
     )
 
-    write_image(images / "img_000.jpg", (64, 64))
     label_image(
-        images / "img_000.jpg",
+        write_image(images / "img_000.jpg", (64, 64)),
         [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))],
         64,
         64,
@@ -299,12 +296,7 @@ def test_export_import_roundtrip(tmp_path: Path) -> None:
     np.savez(npz_image, bands=np.zeros((2, 64, 64), dtype=np.uint16))
     # The subject registry decodes the labels' names: a self-contained bundle must carry it, or the
     # archived annotations are unreadable on the other end. One nested subjects.json at the root.
-    registry_over(
-        src,
-        SubjectRegistry(
-            subjects=(Subject(name="bud", description="a currant bud"),)
-        ),
-    )
+    registry_over(src, registry_of("bud"))
     reg = register_dataset(
         src, str(src), crop="currant", actor=None
     )  # identity travels with the data

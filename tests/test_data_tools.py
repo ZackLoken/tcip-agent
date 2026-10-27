@@ -15,6 +15,7 @@ from tcip_mcp.dataset_layout import (
     image_dir,
     image_root,
     label_key,
+    parse_image_path,
 )
 from tcip_mcp.pipelines.data.label_queries import registry_scope
 from tcip_mcp.pipelines.data.selection import (
@@ -28,7 +29,14 @@ from tcip_mcp.pipelines.data.selection import (
 from tcip_mcp.tools import doctor_tools as doctor
 from tcip_mcp.tools.data_tools import draw_splits, scan_dataset
 from tests._audit_fixtures import audit_rows
-from tests._producer_fixtures import label_image, registry_over, write_image
+from tests._producer_fixtures import (
+    WrittenDataset,
+    attribute_scoped_dataset,
+    image_label_key,
+    label_image,
+    registry_over,
+    write_image,
+)
 from tests._training_values import RATIONALE, drawn_split
 
 if TYPE_CHECKING:
@@ -67,8 +75,8 @@ def _quality_findings(root: Path) -> list[tuple[str, str]]:
     return findings
 
 
-def test_scan_dataset(data_dir: Path) -> None:
-    result = scan_dataset(data_dir, str(data_dir))
+def test_scan_dataset(data_dir: WrittenDataset) -> None:
+    result = scan_dataset(data_dir.root, str(data_dir.root))
     assert result["image_count"] == 3
     assert result["labels_count"] == 3
     assert result["paired_images"] == 3
@@ -80,13 +88,12 @@ def test_scan_dataset_not_found(tmp_path: Path) -> None:
     assert "error" in result
 
 
-def test_doctor_check_data_quality(data_dir: Path) -> None:
-    findings = _quality_findings(data_dir)
+def test_doctor_check_data_quality(data_dir: WrittenDataset) -> None:
+    findings = _quality_findings(data_dir.root)
     assert not [f for f in findings if f[0] == "error"]
 
 
 def test_doctor_check_data_quality_missing_dir(tmp_path: Path) -> None:
-    # _scan_dataset's own rglob over a nonexistent path yields nothing rather than raising.
     missing = tmp_path / "nonexistent" / "xyz123"
     findings = _quality_findings(missing)
     assert not [f for f in findings if f[0] == "error"]
@@ -123,31 +130,30 @@ def test_scan_dataset_counts_only_the_documents_a_published_bucket_names(
     assert scan_result["predictions_count"] == 1
 
 
-def _add_extra_bud_groups(data_dir: Path, count: int) -> None:
-    """Add ``count`` more single-tile foreground groups under ``data_dir``'s own date.
+def _add_extra_bud_groups(images_dir: Path, count: int) -> None:
+    """Add ``count`` more single-tile foreground groups to the capture ``images_dir``.
 
     The groups carry the fixture's own subject.
     """
-    images_dir = image_dir(data_dir, "2-11-26")
     for i in range(count):
-        stem = f"extra_{i:03d}"
-        write_image(images_dir / f"{stem}.jpg", (640, 480), (128, 128, 128))
         label_image(
-            images_dir / f"{stem}.jpg",
+            write_image(
+                images_dir / f"extra_{i:03d}.jpg", (640, 480), (128, 128, 128)
+            ),
             [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))],
             640,
             480,
         )
 
 
-def test_draw_splits_basic(data_dir: Path, tmp_path: Path) -> None:
-    _add_extra_bud_groups(data_dir, 1)
+def test_draw_splits_basic(data_dir: WrittenDataset, tmp_path: Path) -> None:
+    _add_extra_bud_groups(data_dir.images_dir, 1)
     out = tmp_path / "manifests"
     # The fixture's 4 stems (img_001..003 plus one grown group) are 4 distinct foreground
     # groups, exactly the manifest floor (one each for train/val, two for calibration).
     result = _draw(
-        data_dir,
-        str(data_dir),
+        data_dir.root,
+        str(data_dir.root),
         output_path=str(out),
         subject="bud",
         seed=1,
@@ -161,7 +167,7 @@ def test_draw_splits_basic(data_dir: Path, tmp_path: Path) -> None:
     assert sum(result["splits"].values()) == 4
     assert result["stratify_foreground"] is True
 
-    drawn = read_selection(out, project=data_dir)
+    drawn = read_selection(out, project=data_dir.root)
     assert drawn.counts() == {k: v for k, v in result["splits"].items()}
     assert all(
         drawn.counts()[side] for side in ("train", "val", "calibration")
@@ -179,16 +185,14 @@ LEAF_DATE = "2-11-26"
 
 
 def _leaf_scene(root: Path, n: int = 6) -> Path:
-    """Write ``n`` captures of one date under ``root`` and return ``root``.
+    """Write ``n`` images into ``root``'s capture :data:`LEAF_DATE` and return the capture.
 
     The ``i``-th label holds ``i + 1`` leaves and ``5 * (n - i)`` buds.
     """
     images = image_dir(root, LEAF_DATE)
-    images.mkdir(parents=True)
     for i in range(n):
-        write_image(images / f"s{i}.jpg", (100, 80), (128, 128, 128))
         label_image(
-            images / f"s{i}.jpg",
+            write_image(images / f"s{i}.jpg", (100, 80), (128, 128, 128)),
             [
                 *(
                     Annotation(subject="leaf", geometry=BBox(2, 2, 6, 6))
@@ -202,7 +206,7 @@ def _leaf_scene(root: Path, n: int = 6) -> Path:
             100,
             80,
         )
-    return root
+    return images
 
 
 def test_a_draw_without_stratification_reports_the_counted_annotations(
@@ -213,7 +217,8 @@ def test_a_draw_without_stratification_reports_the_counted_annotations(
     With balancing off the draw reports the subject's own annotation total, and the per-side
     foreground sums to that total.
     """
-    root = _leaf_scene(tmp_path / "ds")
+    root = tmp_path / "ds"
+    _leaf_scene(root)
     result = _draw(
         tmp_path, str(root), seed=1, subject="leaf", stratify_foreground=False
     )
@@ -237,7 +242,8 @@ def test_draw_splits_and_a_runs_own_draw_side_the_same_members(
     pytest.importorskip("torch")
     from tests._producer_fixtures import train_val
 
-    root = _leaf_scene(tmp_path / "ds")
+    root = tmp_path / "ds"
+    images_dir = _leaf_scene(root)
     drawn = _draw(
         tmp_path,
         str(root),
@@ -250,7 +256,7 @@ def test_draw_splits_and_a_runs_own_draw_side_the_same_members(
     )
     assert "error" not in drawn, drawn
     data_cfg = {
-        "images_dir": str(image_dir(root, LEAF_DATE)),
+        "images_dir": str(images_dir),
         "scope": {"subject": "leaf"},
         "split": drawn_split(val_ratio=0.5, seed=7),
     }
@@ -278,7 +284,8 @@ def test_every_draw_refuses_a_tree_short_of_its_floor_the_same_way(
     pytest.importorskip("torch")
     from tests._producer_fixtures import train_val
 
-    root = _leaf_scene(tmp_path / "ds", n=2)
+    root = tmp_path / "ds"
+    images_dir = _leaf_scene(root, n=2)
     one_group = {f"{LEAF_DATE}/s{i}": "plot" for i in range(2)}
     floor = "1 foreground group(s), fewer than the 2 the requested sides need"
 
@@ -294,7 +301,7 @@ def test_every_draw_refuses_a_tree_short_of_its_floor_the_same_way(
     )
     assert floor in drawn["error"]
     data_cfg = {
-        "images_dir": str(image_dir(root, LEAF_DATE)),
+        "images_dir": str(images_dir),
         "scope": {"subject": "leaf"},
         "split": drawn_split(val_ratio=0.5, seed=1, grouping=one_group),
     }
@@ -305,7 +312,7 @@ def test_every_draw_refuses_a_tree_short_of_its_floor_the_same_way(
 
 
 def test_draw_splits_stats_only_admits_a_nonzero_calibration_ratio(
-    data_dir: Path,
+    data_dir: WrittenDataset,
 ) -> None:
     """A stats-only draw admits a nonzero calibration ratio beside a zero holdout.
 
@@ -313,8 +320,8 @@ def test_draw_splits_stats_only_admits_a_nonzero_calibration_ratio(
     which it does not draw.
     """
     result = _draw(
-        data_dir,
-        str(data_dir),
+        data_dir.root,
+        str(data_dir.root),
         seed=1,
         val_ratio=0.2,
         calibration_ratio=0.1,
@@ -326,26 +333,26 @@ def test_draw_splits_stats_only_admits_a_nonzero_calibration_ratio(
     assert result["splits"]["holdout"] == 0
 
 
-def _spoil(data_dir: Path, stem: str) -> None:
-    """Replace the label document of the fixture's image ``stem`` with a non-document record.
+def _spoil(image: Path) -> None:
+    """Replace the label document of ``image`` with a non-document record.
 
     The replacement goes past the label writer.
     """
-    ts.replace(label_key(data_dir, "2-11-26", stem), ["not", "a", "document"])
+    ts.replace(image_label_key(image), ["not", "a", "document"])
 
 
 def test_draw_splits_reports_an_unreadable_label_by_name(
-    data_dir: Path, tmp_path: Path
+    data_dir: WrittenDataset, tmp_path: Path
 ) -> None:
     """``draw_splits`` reports an unreadable label among its candidates by name.
 
     A present, unreadable label among the candidates is an error naming the document.
     """
-    _spoil(data_dir, "img_001")
+    _spoil(data_dir.images[0])
 
     result = _draw(
-        data_dir,
-        str(data_dir),
+        data_dir.root,
+        str(data_dir.root),
         output_path=str(tmp_path / "manifests"),
         subject="bud",
         seed=1,
@@ -359,18 +366,18 @@ def test_draw_splits_reports_an_unreadable_label_by_name(
 
 
 def test_draw_splits_reports_an_unreadable_label_sorted_last(
-    data_dir: Path,
+    data_dir: WrittenDataset,
     tmp_path: Path,
 ) -> None:
     """``draw_splits`` reports an unreadable label sorted last by name.
 
     A corrupt label last in sort order answers an error dict naming it.
     """
-    _spoil(data_dir, "img_003")
+    _spoil(data_dir.images[2])
 
     result = _draw(
-        data_dir,
-        str(data_dir),
+        data_dir.root,
+        str(data_dir.root),
         output_path=str(tmp_path / "manifests"),
         subject="bud",
         seed=1,
@@ -384,7 +391,7 @@ def test_draw_splits_reports_an_unreadable_label_sorted_last(
 
 
 def test_draw_splits_writes_nothing_when_a_marked_document_will_not_read(
-    data_dir: Path,
+    data_dir: WrittenDataset,
     tmp_path: Path,
 ) -> None:
     """``draw_splits`` writes no selection when a document marked complete will not read.
@@ -394,15 +401,13 @@ def test_draw_splits_writes_nothing_when_a_marked_document_will_not_read(
     """
     from tests._producer_fixtures import mark_complete
 
-    mark_complete(
-        image_dir(data_dir, "2-11-26") / "img_002.jpg", "bud", project=data_dir
-    )
-    _spoil(data_dir, "img_002")
+    mark_complete(data_dir.images[1], "bud", project=data_dir.root)
+    _spoil(data_dir.images[1])
     out = tmp_path / "selection"
 
     result = _draw(
-        data_dir,
-        str(data_dir),
+        data_dir.root,
+        str(data_dir.root),
         output_path=str(out),
         subject="bud",
         seed=1,
@@ -417,32 +422,32 @@ def test_draw_splits_writes_nothing_when_a_marked_document_will_not_read(
 
 
 def test_draw_splits_stats_only_reports_an_unreadable_first_sorted_label(
-    data_dir: Path,
+    data_dir: WrittenDataset,
 ) -> None:
     """A stats-only draw reports an unreadable first-sorted label by name.
 
     In a stats-only call (no output_path), an unreadable first-sorted candidate is an error
     naming it.
     """
-    _spoil(data_dir, "img_001")
+    _spoil(data_dir.images[0])
 
-    result = _draw(data_dir, str(data_dir), seed=1, subject="bud")
+    result = _draw(data_dir.root, str(data_dir.root), seed=1, subject="bud")
 
     assert "error" in result
     assert "'img_001'" in result["error"]
 
 
 def test_draw_splits_stats_only_reports_an_unreadable_label_during_stratification(
-    data_dir: Path,
+    data_dir: WrittenDataset,
 ) -> None:
     """A stats-only draw reports a corrupt label reached after a readable one by name.
 
     In a stats-only call, a corrupt label sorted after a readable first candidate is an error
     naming the document.
     """
-    _spoil(data_dir, "img_003")
+    _spoil(data_dir.images[2])
 
-    result = _draw(data_dir, str(data_dir), seed=1, subject="bud")
+    result = _draw(data_dir.root, str(data_dir.root), seed=1, subject="bud")
 
     assert "error" in result
     assert "'img_003'" in result["error"]
@@ -566,10 +571,12 @@ def _add_extra_leaf_groups(images_dir: Path, count: int) -> None:
     """Add ``count`` more plain single-tile foreground groups of subject ``leaf`` to a directory."""
     letters = "BCDEFGH"
     for i in range(count):
-        stem = f"plot{letters[i]}"
-        write_image(images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128))
         label_image(
-            images_dir / f"{stem}.jpg",
+            write_image(
+                images_dir / f"plot{letters[i]}.jpg",
+                (100, 80),
+                (128, 128, 128),
+            ),
             [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
             100,
             80,
@@ -625,10 +632,10 @@ def test_draw_splits_refuses_an_incomplete_band_group_before_writing(
     assert not ts.exists(selection_key(out))
 
 
-def test_draw_splits_bad_ratios(data_dir: Path) -> None:
+def test_draw_splits_bad_ratios(data_dir: WrittenDataset) -> None:
     result = _draw(
-        data_dir,
-        str(data_dir),
+        data_dir.root,
+        str(data_dir.root),
         seed=1,
         val_ratio=0.5,
         calibration_ratio=0.25,
@@ -641,7 +648,7 @@ def test_shares_leaving_train_nothing_refuse_naming_every_share(
     tmp_path: Path,
 ) -> None:
     """Shares that leave ``train`` no remainder refuse naming every share they were given."""
-    root = _multi_source_dataset(tmp_path / "ds")
+    root = _multi_source_dataset(tmp_path / "ds").root
     result = _draw(
         tmp_path,
         str(root),
@@ -661,7 +668,7 @@ def test_shares_leaving_train_nothing_refuse_naming_every_share(
 def test_a_dry_draw_leaves_no_audit_line_and_a_written_selection_leaves_one(
     tmp_path: Path,
 ) -> None:
-    root = _multi_source_dataset(tmp_path / "ds")
+    root = _multi_source_dataset(tmp_path / "ds").root
 
     assert "error" not in _draw(tmp_path, str(root), seed=1, subject="bud")
     assert audit_rows(tmp_path, "draw_splits") == []
@@ -676,7 +683,7 @@ def test_a_dry_draw_leaves_no_audit_line_and_a_written_selection_leaves_one(
 
 
 def test_draw_splits_selection_carries_all_four_sides(tmp_path: Path) -> None:
-    root = _multi_source_dataset(tmp_path / "ds")
+    root = _multi_source_dataset(tmp_path / "ds").root
     out = tmp_path / "m"
 
     result = _draw(
@@ -716,7 +723,7 @@ def test_a_draw_stating_no_share_grouping_stratification_or_reason_refuses_namin
     naming it and writes no selection, and the same draw stating each writes a selection, and an
     audit line, recording the shares, the stratification and the reason.
     """
-    root = _multi_source_dataset(tmp_path / "ds")
+    root = _multi_source_dataset(tmp_path / "ds").root
     stated = drawn_split(
         seed=1,
         val_ratio=0.25,
@@ -779,7 +786,7 @@ def test_draw_splits_floor_refuses_before_any_write_regardless_of_stratify_foreg
     """
     root = _multi_source_dataset(
         tmp_path / "ds", prefixes=("srcA", "srcB", "srcC")
-    )
+    ).root
     out = tmp_path / "m"
 
     result = _draw(
@@ -807,7 +814,7 @@ def test_draw_splits_answers_one_draw_whether_or_not_it_writes(
     A zero ratio draws no side of that name and a negative one refuses, with or without
     ``output_path``: what is drawn does not depend on whether it is written.
     """
-    root = _multi_source_dataset(tmp_path / "ds")
+    root = _multi_source_dataset(tmp_path / "ds").root
     out = tmp_path / "m"
     ratios = {
         "val_ratio": 0.0,
@@ -870,22 +877,23 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
         ),
     )
     for stem in ("p1", "p2", "p3"):
-        write_image(images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128))
         label_image(
-            images_dir / f"{stem}.jpg",
+            write_image(
+                images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128)
+            ),
             [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
             100,
             80,
         )
-    write_image(images_dir / "p4.jpg", (100, 80), (128, 128, 128))
+    p4 = write_image(images_dir / "p4.jpg", (100, 80), (128, 128, 128))
     label_image(
-        images_dir / "p4.jpg",
+        p4,
         [Annotation(subject="bud", geometry=BBox(4, 4, 12, 12))],
         100,
         80,
         keep_empty=True,
     )
-    mark_complete(images_dir / "p4.jpg", "leaf", project=root)
+    mark_complete(p4, "leaf", project=root)
 
     out = tmp_path / "m"
     result = _draw(
@@ -916,19 +924,20 @@ def _leaf_dataset_with_negatives(
     images_dir = image_dir(root, date)
     images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n_foreground):
-        stem = f"{date}_fg{i}"
-        write_image(images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128))
         label_image(
-            images_dir / f"{stem}.jpg",
+            write_image(
+                images_dir / f"{date}_fg{i}.jpg", (100, 80), (128, 128, 128)
+            ),
             [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
             100,
             80,
         )
     for i in range(n_negative):
-        stem = f"{date}_bg{i}"
-        write_image(images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128))
-        label_image(images_dir / f"{stem}.jpg", [], 100, 80, keep_empty=True)
-        mark_complete(images_dir / f"{stem}.jpg", "leaf", project=root)
+        negative = write_image(
+            images_dir / f"{date}_bg{i}.jpg", (100, 80), (128, 128, 128)
+        )
+        label_image(negative, [], 100, 80, keep_empty=True)
+        mark_complete(negative, "leaf", project=root)
 
 
 def test_draw_splits_calibration_side_holds_real_foreground_regardless_of_stratify_foreground(
@@ -960,33 +969,42 @@ def test_draw_splits_calibration_side_holds_real_foreground_regardless_of_strati
         assert result["calibration_foreground_groups"] >= 2, (seed, result)
 
 
+MULTI_SOURCE_CAPTURE = "2-11-26"
+"""The capture :func:`_multi_source_dataset` writes its tiles into."""
+
+
 def _multi_source_dataset(
     root: Path,
     prefixes: tuple[str, ...] = ("srcA", "srcB", "srcC", "srcD"),
     tiles: int = 3,
-) -> Path:
-    date = "2-11-26"
-    images_dir = image_dir(root, date)
-    images_dir.mkdir(parents=True)
-    for pref in prefixes:
-        for t in range(tiles):
-            stem = f"{pref}_{t}_0"
-            write_image(images_dir / f"{stem}.jpg", (64, 64), (128, 128, 128))
-            label_image(
-                images_dir / f"{stem}.jpg",
-                [Annotation(subject="bud", geometry=BBox(19, 13, 45, 51))],
-                64,
-                64,
-            )
-    return root
+) -> WrittenDataset:
+    """Write ``tiles`` labeled 64 px tiles per source prefix into :data:`MULTI_SOURCE_CAPTURE`.
+
+    Each tile holds one ``bud`` box. Returns the dataset and its tiles.
+    """
+    images_dir = image_dir(root, MULTI_SOURCE_CAPTURE)
+    images = [
+        write_image(
+            images_dir / f"{pref}_{t}_0.jpg", (64, 64), (128, 128, 128)
+        )
+        for pref in prefixes
+        for t in range(tiles)
+    ]
+    for image in images:
+        label_image(
+            image,
+            [Annotation(subject="bud", geometry=BBox(19, 13, 45, 51))],
+            64,
+            64,
+        )
+    return WrittenDataset(root, images_dir, images)
 
 
-def _bud_membership(root: Path) -> Membership:
+def _bud_membership(dataset: WrittenDataset) -> Membership:
     from tcip_mcp.pipelines.data.split_construction import admitted_membership
 
-    date = "2-11-26"
     return admitted_membership(
-        [(date, image_dir(root, date), None)],
+        [(MULTI_SOURCE_CAPTURE, dataset.images_dir, None)],
         scope=ClassScope(subject="bud"),
         grouping="tile_prefix",
     )
@@ -1074,7 +1092,7 @@ def test_draw_sides_cuts_the_reference_under_the_balancing_it_was_given(
 def test_draw_splits_groups_tiles_together(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.splits import default_group_key
 
-    root = _multi_source_dataset(tmp_path / "ds")
+    root = _multi_source_dataset(tmp_path / "ds").root
     out = tmp_path / "m"
     result = _draw(
         tmp_path,
@@ -1106,7 +1124,7 @@ def test_draw_splits_grouping_map_never_straddles(tmp_path: Path) -> None:
     """
     root = _multi_source_dataset(
         tmp_path / "ds", prefixes=("x", "y", "z", "w", "v"), tiles=1
-    )
+    ).root
     out = tmp_path / "m"
     group_key_map = {
         "2-11-26/x_0_0": "gA",
@@ -1140,7 +1158,7 @@ def test_draw_splits_unrecognized_grouping_policy_refuses_without_writing(
     tmp_path: Path,
 ) -> None:
     """An unrecognized grouping policy refuses the draw and writes no selection."""
-    root = _multi_source_dataset(tmp_path / "ds")
+    root = _multi_source_dataset(tmp_path / "ds").root
     out = tmp_path / "m"
     result = _draw(
         tmp_path,
@@ -1161,7 +1179,7 @@ def test_draw_splits_refuses_to_write_a_selection_with_no_subject(
     tmp_path: Path,
 ) -> None:
     """``draw_splits`` given no subject refuses naming ``subject`` and writes no selection."""
-    root = _multi_source_dataset(tmp_path / "ds")
+    root = _multi_source_dataset(tmp_path / "ds").root
     out = tmp_path / "m"
     result = _draw(
         tmp_path,
@@ -1184,9 +1202,8 @@ def _two_date_collision_dataset(root: Path, subject: str) -> Path:
     for date, box_x in (("2-11-26", 4), ("2-12-01", 40)):
         images_dir = image_dir(root, date)
         images_dir.mkdir(parents=True)
-        write_image(images_dir / "shared.jpg", (100, 80), (128, 128, 128))
         label_image(
-            images_dir / "shared.jpg",
+            write_image(images_dir / "shared.jpg", (100, 80), (128, 128, 128)),
             [
                 Annotation(
                     subject=subject, geometry=BBox(box_x, 4, box_x + 8, 12)
@@ -1195,12 +1212,10 @@ def _two_date_collision_dataset(root: Path, subject: str) -> Path:
             100,
             80,
         )
-        extra_stem = f"extra_{date}"
-        write_image(
-            images_dir / f"{extra_stem}.jpg", (100, 80), (128, 128, 128)
-        )
         label_image(
-            images_dir / f"{extra_stem}.jpg",
+            write_image(
+                images_dir / f"extra_{date}.jpg", (100, 80), (128, 128, 128)
+            ),
             [Annotation(subject=subject, geometry=BBox(4, 4, 12, 12))],
             100,
             80,
@@ -1234,7 +1249,7 @@ def test_two_dates_sharing_a_filename_stay_distinct_samples(
     drawn = read_selection(out, project=tmp_path)
     shared = [s for s in drawn.samples if s.member == "shared"]
     assert len(shared) == 2
-    assert {Path(s.source).parent.name for s in shared} == {
+    assert {parse_image_path(s.source)[1] for s in shared} == {
         "2-11-26",
         "2-12-01",
     }
@@ -1275,9 +1290,10 @@ def _two_subject_dataset(root: Path) -> Path:
         ("bud_a", "bud"),
         ("bud_b", "bud"),
     ):
-        write_image(images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128))
         label_image(
-            images_dir / f"{stem}.jpg",
+            write_image(
+                images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128)
+            ),
             [Annotation(subject=subject, geometry=BBox(4, 4, 12, 12))],
             100,
             80,
@@ -1311,68 +1327,10 @@ def test_draw_splits_holds_only_the_named_subjects_admitted_samples(
     }
 
 
-def _attribute_scoped_dataset(root: Path) -> Path:
-    """Write five stems on one date of one subject declaring ``condition``.
-
-    Four have their instance assessed for it, one carries an instance never assessed for it.
-    Returns ``root``.
-    """
-    from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
-
-    date = "2-11-26"
-    images_dir = image_dir(root, date)
-    images_dir.mkdir(parents=True)
-    registry_over(
-        root,
-        SubjectRegistry(
-            subjects=(
-                Subject(
-                    name="leaf",
-                    description="",
-                    attributes=(
-                        Attribute(
-                            name="condition",
-                            type="categorical",
-                            values=("healthy", "damaged"),
-                        ),
-                    ),
-                ),
-            )
-        ),
-    )
-    for stem, condition in (
-        ("assessed_a", "healthy"),
-        ("assessed_b", "damaged"),
-        ("assessed_c", "healthy"),
-        ("assessed_d", "damaged"),
-    ):
-        write_image(images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128))
-        label_image(
-            images_dir / f"{stem}.jpg",
-            [
-                Annotation(
-                    subject="leaf",
-                    geometry=BBox(4, 4, 12, 12),
-                    attributes={"condition": condition},
-                )
-            ],
-            100,
-            80,
-        )
-    write_image(images_dir / "unassessed.jpg", (100, 80), (128, 128, 128))
-    label_image(
-        images_dir / "unassessed.jpg",
-        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
-        100,
-        80,
-    )
-    return root
-
-
 def test_draw_splits_records_every_declared_attribute_and_keeps_an_unassessed_sample(
     tmp_path: Path,
 ) -> None:
-    root = _attribute_scoped_dataset(tmp_path / "ds")
+    root = attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = _draw(
         tmp_path,
@@ -1442,9 +1400,10 @@ def test_draw_splits_draws_an_undated_capture_beside_a_dated_one(
         images = image_dir(root, capture)
         images.mkdir(parents=True)
         for stem in stems:
-            write_image(images / f"{stem}.jpg", (100, 80), (128, 128, 128))
             label_image(
-                images / f"{stem}.jpg",
+                write_image(
+                    images / f"{stem}.jpg", (100, 80), (128, 128, 128)
+                ),
                 [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
                 100,
                 80,
@@ -1491,9 +1450,10 @@ def test_draw_splits_holds_no_sample_for_a_date_that_admits_nothing(
     images_dir = image_dir(root, "2-11-26")
     images_dir.mkdir(parents=True)
     for stem in ("a", "b", "c", "d"):
-        write_image(images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128))
         label_image(
-            images_dir / f"{stem}.jpg",
+            write_image(
+                images_dir / f"{stem}.jpg", (100, 80), (128, 128, 128)
+            ),
             [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))],
             100,
             80,

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -22,38 +21,7 @@ from tcip_mcp.subject_registry import (
     registry_to_dict,
 )
 from tcip_mcp.traits import PositiveState
-from tests._producer_fixtures import registry_over
-
-if TYPE_CHECKING:
-    from tcip_mcp.pipelines.data.selection import ClassScope
-
-
-def _prefixed_attributes() -> SubjectRegistry:
-    """Return one subject carrying two attributes whose names share a prefix.
-
-    The longer name, ``opening_stage``, is declared first with four values, and ``opening``
-    second with two.
-    """
-    return SubjectRegistry(
-        subjects=(
-            Subject(
-                name="bud",
-                description="",
-                attributes=(
-                    Attribute(
-                        name="opening_stage",
-                        type="ordinal",
-                        values=("closed", "swelling", "partial", "shedding"),
-                    ),
-                    Attribute(
-                        name="opening",
-                        type="categorical",
-                        values=("open", "closed"),
-                    ),
-                ),
-            ),
-        )
-    )
+from tests._producer_fixtures import registry_of, registry_over, scope_over
 
 
 def _case_variant_subjects() -> SubjectRegistry:
@@ -89,20 +57,6 @@ def _case_variant_subjects() -> SubjectRegistry:
     )
 
 
-def _scope(
-    tmp_path: Path, registry: SubjectRegistry, subject: str
-) -> ClassScope:
-    """Return the class space the admission reads for ``subject`` over ``registry``.
-
-    The dataset under ``tmp_path`` declares ``registry``.
-    """
-    from tcip_mcp.dataset_layout import image_root
-    from tcip_mcp.pipelines.data.label_queries import registry_scope
-
-    registry_over(tmp_path, registry)
-    return registry_scope(image_root(tmp_path), subject)
-
-
 def test_attribute_lookup_resolves_the_exactly_named_attribute(
     tmp_path: Path,
 ) -> None:
@@ -111,8 +65,18 @@ def test_attribute_lookup_resolves_the_exactly_named_attribute(
     With two attributes sharing a prefix, the scope carries both under their own names and a
     positive state resolves to the vocabulary it named.
     """
-    reg = _prefixed_attributes()
-    scope = _scope(tmp_path, reg, "bud")
+    reg = registry_of(
+        "bud",
+        Attribute(
+            name="opening_stage",
+            type="ordinal",
+            values=("closed", "swelling", "partial", "shedding"),
+        ),
+        Attribute(
+            name="opening", type="categorical", values=("open", "closed")
+        ),
+    )
+    scope = scope_over(tmp_path, reg, "bud")
     assert [a.name for a in scope.attributes] == ["opening_stage", "opening"]
 
     assert scope.state_ids(
@@ -135,20 +99,13 @@ def test_an_attribute_name_that_only_prefixes_a_declared_one_refuses() -> None:
     The subject declares no attribute of the truncated name, and the positive state naming it
     is reported as naming no declared attribute.
     """
-    reg = SubjectRegistry(
-        subjects=(
-            Subject(
-                name="bud",
-                description="",
-                attributes=(
-                    Attribute(
-                        name="opening_stage",
-                        type="ordinal",
-                        values=("closed", "swelling", "partial", "shedding"),
-                    ),
-                ),
-            ),
-        )
+    reg = registry_of(
+        "bud",
+        Attribute(
+            name="opening_stage",
+            type="ordinal",
+            values=("closed", "swelling", "partial", "shedding"),
+        ),
     )
     bud = reg.subject("bud")
     assert bud is not None
@@ -169,8 +126,8 @@ def test_subject_lookup_resolves_the_exactly_named_subject(
     their own vocabularies, and a name declared by neither refuses.
     """
     reg = _case_variant_subjects()
-    lower = _scope(tmp_path, reg, "bud")
-    upper = _scope(tmp_path, reg, "Bud")
+    lower = scope_over(tmp_path, reg, "bud")
+    upper = scope_over(tmp_path, reg, "Bud")
     assert [a.type for a in lower.attributes] == ["categorical"]
     assert [a.values for a in upper.attributes] == [
         ("closed", "swelling", "partial")
@@ -179,7 +136,7 @@ def test_subject_lookup_resolves_the_exactly_named_subject(
     with pytest.raises(
         RegistryError, match=r"subject 'BUD' is not in the registry"
     ):
-        _scope(tmp_path, reg, "BUD")
+        scope_over(tmp_path, reg, "BUD")
 
 
 def test_case_variant_subjects_survive_a_file_roundtrip_as_distinct_subjects(

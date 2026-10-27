@@ -18,16 +18,17 @@ _DATE = "2026-02-11"
 
 def _dataset(root: Path) -> None:
     """Write two images of different sizes and colors under one dated capture, each labeled."""
-    write_image(image_dir(root, _DATE) / "IMG_1.png", (48, 32), (120, 90, 40))
-    write_image(image_dir(root, _DATE) / "IMG_2.png", (64, 40), (20, 160, 70))
+    images = image_dir(root, _DATE)
+    first = write_image(images / "IMG_1.png", (48, 32), (120, 90, 40))
+    second = write_image(images / "IMG_2.png", (64, 40), (20, 160, 70))
     label_image(
-        image_dir(root, _DATE) / "IMG_1.png",
+        first,
         [Annotation(subject="bud", geometry=BBox(4, 6, 22, 31))],
         48,
         32,
     )
     label_image(
-        image_dir(root, _DATE) / "IMG_2.png",
+        second,
         [Annotation(subject="bud", geometry=BBox(9, 3, 60, 28))],
         64,
         40,

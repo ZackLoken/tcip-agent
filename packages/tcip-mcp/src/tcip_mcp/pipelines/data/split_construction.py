@@ -533,11 +533,8 @@ def spatial_single_source_split(
         requested_fractions=dict(
             zip(spatial.split_names, spatial.requested_fractions)
         ),
-        realized_fractions=spatial.realized_fractions,
-        realized_discard_fraction=spatial.realized_discard_fraction,
         kept_train_tiles=spatial.kept_tiles.get("train", 0),
         kept_val_tiles=spatial.kept_tiles.get("val", 0),
-        tiles_dropped_past_extent=spatial.tiles_dropped_past_extent,
         tiles_dropped_outside_regions=spatial.tiles_dropped_outside_regions,
         raster_content_identity=raster_identity(sample.image),
     )

@@ -15,34 +15,39 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import LABEL_DOCUMENTS, image_dir, label_key
 from tcip_mcp.tools.data_tools import scan_dataset
-from tests._producer_fixtures import write_image
+from tests._producer_fixtures import (
+    WrittenDataset,
+    image_label_key,
+    write_jpegs,
+)
 
 DATE = "2-11-26"
 SUBJECT = "bud"
 
 
-def _lopsided_dataset(root: Path) -> Path:
-    """Write five images and three label documents, two of which pair with an image; return root.
+def _lopsided_dataset(root: Path) -> WrittenDataset:
+    """Write five images and three label documents, two of which pair with an image.
 
-    Three images have no label and one label has no image; each frame is 96 by 64 px.
+    Three images have no label and one label has no image; each frame is 96 by 64 px. Returns
+    the dataset and its five images in stem order.
     """
     images_dir = image_dir(root, DATE)
-    for stem in (
-        "plotA_0_0",
-        "plotA_0_1",
-        "plotB_0_0",
-        "plotB_0_1",
-        "plotC_0_0",
+    images = write_jpegs(
+        images_dir,
+        ["plotA_0_0", "plotA_0_1", "plotB_0_0", "plotB_0_1", "plotC_0_0"],
+        (96, 64),
+    )
+    for key in (
+        *(image_label_key(image) for image in images[:2]),
+        label_key(root, DATE, "plotZ_9_9"),
     ):
-        write_image(images_dir / f"{stem}.jpg", (96, 64))
-    for stem in ("plotA_0_0", "plotA_0_1", "plotZ_9_9"):
         json_io.write_label_document(
-            label_key(root, DATE, stem),
+            key,
             [Annotation(subject=SUBJECT, geometry=BBox(11, 7, 39, 51))],
             96,
             64,
         )
-    return root
+    return WrittenDataset(root, images_dir, images)
 
 
 def test_scan_reports_four_distinct_counts_over_a_lopsided_dataset(
@@ -54,7 +59,7 @@ def test_scan_reports_four_distinct_counts_over_a_lopsided_dataset(
     collection: the unlabeled remainder is the images no label pairs with, not the labels no
     image pairs with.
     """
-    root = _lopsided_dataset(tmp_path / "ds")
+    root, _images_dir, images = _lopsided_dataset(tmp_path / "ds")
 
     result = scan_dataset(tmp_path, str(root))
 
@@ -63,14 +68,7 @@ def test_scan_reports_four_distinct_counts_over_a_lopsided_dataset(
     assert result["paired_images"] == 2
     assert result["unlabeled_images"] == 3
     assert result["images_sample"] == [
-        str((image_dir(root, DATE) / f"{stem}.jpg").resolve())
-        for stem in (
-            "plotA_0_0",
-            "plotA_0_1",
-            "plotB_0_0",
-            "plotB_0_1",
-            "plotC_0_0",
-        )
+        str(image.resolve()) for image in images
     ]
 
 
@@ -86,13 +84,13 @@ def test_a_buckets_record_is_not_counted_as_a_prediction(
     from tcip_mcp.dataset_layout import bucket_key, prediction_key
     from tests._chain_fixtures import published
 
-    root = _lopsided_dataset(tmp_path / "ds")
+    root, _images_dir, images = _lopsided_dataset(tmp_path / "ds")
     published(
         tmp_path,
         f"run_a/{DATE}",
         [
             {
-                "image": str(image_dir(root, DATE) / f"{stem}.jpg"),
+                "image": str(image),
                 "width": 96,
                 "height": 64,
                 "boxes": [[12.0, 8.0, 40.0, 52.0]],
@@ -100,7 +98,7 @@ def test_a_buckets_record_is_not_counted_as_a_prediction(
                 "labels": [1],
                 "cap": 2,
             }
-            for stem in ("plotA_0_0", "plotB_0_0")
+            for image in (images[0], images[2])
         ],
         scope={"subject": SUBJECT},
     )
@@ -123,7 +121,7 @@ def test_scan_writes_nothing_into_the_dataset(tmp_path: Path) -> None:
     The files outside the store keep their names and sizes, and each label record keeps its
     version.
     """
-    root = _lopsided_dataset(tmp_path / "ds")
+    root = _lopsided_dataset(tmp_path / "ds").root
 
     def state() -> tuple[dict, dict]:
         files = {

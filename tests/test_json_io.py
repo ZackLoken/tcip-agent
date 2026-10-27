@@ -35,7 +35,7 @@ from tcip_annotation.state import (
     Polygon,
     bbox_of,
 )
-from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_root, label_key
+from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -1291,35 +1291,21 @@ def test_whole_image_rating_never_becomes_a_target(tmp_path: Path) -> None:
     attribute row.
     """
     from tcip_mcp import subject_registry as cr
-    from tcip_mcp.pipelines.data.label_queries import (
-        json_det_targets,
-        registry_scope,
-    )
-    from tests._producer_fixtures import registry_over
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets
+    from tests._producer_fixtures import registry_of, scope_over
 
     key = _key(tmp_path, "rating")
     write_label_document(
         key, [Annotation(subject="bud", attributes={"vigor": "high"})], 10, 10
     )
-    registry_over(
+    scope = scope_over(
         tmp_path,
-        cr.SubjectRegistry(
-            subjects=(
-                cr.Subject(
-                    name="bud",
-                    description="",
-                    attributes=(
-                        cr.Attribute(
-                            "opening", "categorical", ("closed", "open")
-                        ),
-                    ),
-                ),
-            )
+        registry_of(
+            "bud", cr.Attribute("opening", "categorical", ("closed", "open"))
         ),
+        "bud",
     )
-    target = json_det_targets(
-        _read(key), registry_scope(image_root(tmp_path), "bud")
-    )
+    target = json_det_targets(_read(key), scope)
     assert target["boxes"] == [] and target["attributes"].shape == (0, 1)
 
 

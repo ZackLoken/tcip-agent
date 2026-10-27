@@ -30,6 +30,7 @@ from tcip_mcp.tools.project_tools import (
     inspect_project,
 )
 from tcip_mcp.workspace import BoundProject, workspace_from_environment
+from tests._producer_fixtures import WrittenDataset
 from tests._web_fixtures import INVARIANCES
 
 # ---------------------------------------------------------------------------
@@ -38,8 +39,8 @@ from tests._web_fixtures import INVARIANCES
 
 
 @pytest.fixture()
-def project_dir(tmp_path: Path) -> Path:
-    """Return a project of five 640x480 images, two bud labels each, and a published bucket.
+def project_dataset(tmp_path: Path) -> WrittenDataset:
+    """Write a project of five 640x480 images, two bud labels each, and a published bucket.
 
     The registry declares ``bud``; each image's predictions, published as :data:`BUCKET`, are
     one box on its first label's box at 0.92 and one box away from both labels at 0.60.
@@ -50,31 +51,27 @@ def project_dir(tmp_path: Path) -> Path:
     images.mkdir(parents=True)
 
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import (
         label_image,
+        registry_of,
         registry_over,
         write_image,
     )
 
-    registry_over(
-        root,
-        SubjectRegistry(
-            subjects=(Subject(name="bud", description="a currant bud"),)
-        ),
-    )
+    registry_over(root, registry_of("bud"))
 
     # 5 synthetic images (640x480 gray) with GT labels and predictions
-    results = []
-    for i in range(5):
-        name = f"img_{i:03d}"
+    written = [
         write_image(
-            images / f"{name}.jpg", (640, 480), (100 + i * 20, 100, 100)
+            images / f"img_{i:03d}.jpg", (640, 480), (100 + i * 20, 100, 100)
         )
-
+        for i in range(5)
+    ]
+    results = []
+    for image in written:
         # GT: 2 boxes per image, name-based per-image JSON (pixel xyxy).
         label_image(
-            images / f"{name}.jpg",
+            image,
             [
                 Annotation(subject="bud", geometry=BBox(288, 216, 352, 264)),
                 Annotation(subject="bud", geometry=BBox(176, 132, 208, 156)),
@@ -85,7 +82,7 @@ def project_dir(tmp_path: Path) -> Path:
         # Predictions: 1 matching (TP) + 1 false positive (FP), the confidence in each score.
         results.append(
             {
-                "image": str(images / f"{name}.jpg"),
+                "image": str(image),
                 "width": 640,
                 "height": 480,
                 "boxes": [[288, 216, 352, 264], [499.2, 374.4, 524.8, 393.6]],
@@ -98,7 +95,7 @@ def project_dir(tmp_path: Path) -> Path:
     from tests._chain_fixtures import published
 
     published(root, BUCKET, results, scope={"subject": "bud"})
-    return root
+    return WrittenDataset(root, images, written)
 
 
 BUCKET = "live/2-11-26"
@@ -112,7 +109,10 @@ BUCKET = "live/2-11-26"
 class TestE2EPipeline:
     """The full pipeline walked through MCP tools, its state asserted at each step."""
 
-    def test_full_pipeline(self, project_dir: Path, tmp_path: Path) -> None:
+    def test_full_pipeline(
+        self, project_dataset: WrittenDataset, tmp_path: Path
+    ) -> None:
+        project_dir = project_dataset.root
         root = str(project_dir)
 
         # ── Step 1: Init project ─────────────────────────────────────
@@ -146,7 +146,7 @@ class TestE2EPipeline:
         assert not [f for f in findings if f[0] == "error"]
 
         # ── Step 5: Load annotations for one image ───────────────────
-        img_path = str(image_dir(project_dir, "2-11-26") / "img_000.jpg")
+        img_path = str(project_dataset.images[0])
         ann = read_annotations(project_dir, img_path, BUCKET)
         assert "error" not in ann
         assert ann["labels"]["count"] >= 2
@@ -207,7 +207,7 @@ class TestE2EPipeline:
         # ── Step 9: Evaluate full dataset ────────────────────────────
         dataset_eval = score_predictions(
             project_dir,
-            str(image_dir(project_dir, "2-11-26")),
+            str(project_dataset.images_dir),
             BUCKET,
             iou_threshold=0.5,
             conf_threshold=0.25,

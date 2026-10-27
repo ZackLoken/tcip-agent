@@ -17,12 +17,9 @@ from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.data.selection import ClassScope, read_selection
 from tcip_mcp.subject_registry import Attribute
 from tcip_mcp.tools.data_tools import draw_splits
+from tests._producer_fixtures import attribute_scoped_dataset
 from tests._training_values import drawn_split
-from tests.test_selection_binding import (
-    DATES,
-    SUBJECT,
-    _attribute_scoped_dataset,
-)
+from tests.test_selection_binding import DATES, SUBJECT
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.split_construction import Membership
@@ -45,7 +42,7 @@ def test_a_scope_the_admission_produced_round_trips_through_the_selection_and_th
     pytest.importorskip("torch")
     from tests._producer_fixtures import train_val
 
-    root = _attribute_scoped_dataset(tmp_path / "ds")
+    root = attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(
         tmp_path,
@@ -98,7 +95,7 @@ def run_membership(block: dict) -> Membership:
 def test_a_run_recording_its_attributes_is_admitted_under_them_not_the_registrys(
     tmp_path: Path,
 ) -> None:
-    images_dir = _images_dir(_attribute_scoped_dataset(tmp_path / "ds"))
+    images_dir = _images_dir(attribute_scoped_dataset(tmp_path / "ds"))
     membership = run_membership(
         {
             "images_dir": images_dir,
@@ -115,7 +112,7 @@ def test_a_document_scope_with_no_attributes_read_refuses_and_a_fresh_statement_
 ) -> None:
     from tcip_mcp.pipelines.data.label_queries import admit
 
-    images_dir = _images_dir(_attribute_scoped_dataset(tmp_path / "ds"))
+    images_dir = _images_dir(attribute_scoped_dataset(tmp_path / "ds"))
     with pytest.raises(ValueError, match="records no attributes"):
         admit(images_dir, scope=ClassScope(SUBJECT))
 
