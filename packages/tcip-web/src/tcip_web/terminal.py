@@ -895,16 +895,13 @@ class _WinPty:
         return self._p.read(4096)  # blocking; raises EOFError on process exit
 
     def write(self, data: bytes) -> int:
-        """Hand all of ``data`` to ConPTY's input pipe and return its length, or raise.
+        """Hand all of ``data`` to ConPTY's input pipe and return the bytes it took, or raise.
 
-        pywinpty 3.0.5's write is winpty-rs 1.0.6's (``src/pty/base.rs:688-791``): it issues an
-        overlapped ``WriteFile`` for every 8192-byte chunk, raising on any refused, waits for a
-        pending chunk before issuing the next, and leaves out of its count any chunk that
-        finished at once. Its last chunk may still be pending when it returns, and that chunk's
-        failure is raised by the next write.
+        pywinpty 3.1.1's write is winpty-rs 1.0.7's: one overlapped ``WriteFile`` of the whole
+        payload, waited on for up to ten seconds, its count the UTF-8 bytes the pipe took; a
+        write still pending at that bound is cancelled and raised.
         """
-        self._p.write(data.decode("utf-8"))
-        return len(data)
+        return self._p.write(data.decode("utf-8"))
 
     def resize(self, rows: int, cols: int) -> None:
         self._p.setwinsize(rows, cols)
