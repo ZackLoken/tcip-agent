@@ -168,7 +168,11 @@ There must be something to train on. Three paths (see
 - Human path: hand off to the GUI Annotate tab for the breeder to label a seed set.
 - Existing labels in an external dataset-level COCO: `import_coco(document, dataset_root, date, vertex_spacing, rationale)`
   converts them into per-image documents over the images `ingest_images` placed under that date.
-  Nothing trains on the COCO file itself.
+  YOLO box and polygon labels enter through `import_yolo(labels_dir, names, dataset_root, date)`,
+  one `<image stem>.txt` per image and `names` in class-id order. Both routes use the same
+  document conversion and transaction. Empty YOLO files write nothing and are listed in the
+  answer; a negative needs a person's completion mark. Nothing trains on either external format
+  itself.
 
 Never train or evaluate on an unconfirmed format: the one per-image label reader refuses any
 document of another shape rather than guessing, every training, calibration and review reader

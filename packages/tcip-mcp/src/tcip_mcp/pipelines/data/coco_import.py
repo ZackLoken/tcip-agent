@@ -93,6 +93,61 @@ def import_coco_document(
     capture, an annotation naming an unlisted image, a stated frame the image does not have, and a
     per-image document already present, checked inside the one transaction that writes them.
     """
+    from tcip_mcp.registry_paths import located
+
+    document, root = located(document, project), located(dataset_root, project)
+    coco, digest = _read_coco(document)
+    return import_coco_data(
+        coco,
+        root,
+        date=date,
+        source=str(document),
+        vertex_spacing=vertex_spacing,
+        event="coco_document_imported",
+        arguments={
+            "document": str(document),
+            "capture": date,
+            "vertex_spacing": vertex_spacing,
+            "rationale": rationale,
+        },
+        extra={"document_digest": digest},
+        actor=actor,
+    )
+
+
+def capture_images_dir(root: Path, date: str) -> Path:
+    """Return the image directory of capture ``date``, refusing a capture the dataset lacks."""
+    from tcip_mcp import dataset_layout
+
+    dates = dataset_layout.list_dates(root)
+    if date not in dates:
+        raise ValueError(
+            f"{date!r} names no capture under {dataset_layout.image_root(root)} "
+            f"(its buckets: {dates})"
+        )
+    return dataset_layout.image_dir(root, date)
+
+
+def import_coco_data(
+    coco: dict,
+    root: Path,
+    *,
+    date: str,
+    source: str,
+    vertex_spacing: float,
+    event: str,
+    arguments: dict,
+    extra: dict,
+    actor: str | None,
+) -> dict:
+    """Convert dataset-level COCO data and commit its label documents with one audit entry.
+
+    ``root`` is the located dataset, ``source`` names the input in refusals, and ``date`` names
+    its capture. The reader simplifies run-length masks at ``vertex_spacing``. Every category,
+    image and annotation is checked before writing; an existing document refuses inside the
+    transaction. Nothing written means no audit entry. Returns ``arguments`` with the written
+    stems added, recorded under ``event`` as ``actor``'s with ``extra`` beside them.
+    """
     import tcip_store
     from tcip_annotation.format_io import is_coco_id, parse_coco_annotations
     from tcip_annotation.json_io import document_payload
@@ -104,22 +159,13 @@ def import_coco_document(
         refuse_incomplete_band_group,
     )
     from tcip_mcp.pipelines.raster_source import SourceHeader
-    from tcip_mcp.registry_paths import located
     from tcip_mcp.subject_registry import registry_for_dataset_root
 
-    document, root = located(document, project), located(dataset_root, project)
-    source = str(document)
-    coco, digest = _read_coco(document)
     categories, by_image, problems = parse_coco_annotations(
         coco, decode_rle=_rle_mask, vertex_spacing=vertex_spacing
     )
 
-    dates = dataset_layout.list_dates(root)
-    if date not in dates:
-        raise ValueError(
-            f"{date!r} names no capture under {dataset_layout.image_root(root)} "
-            f"(its buckets: {dates})"
-        )
+    images_dir = capture_images_dir(root, date)
     images = coco.get("images")
     if not isinstance(images, list) or not images:
         raise ValueError(
@@ -137,7 +183,6 @@ def import_coco_document(
         f"category {name} is not a subject the registry declares"
         for name in sorted(set(map(repr, categories.values())) - declared)
     ]
-    images_dir = dataset_layout.image_dir(root, date)
     logical = list_logical_images(images_dir)
     writes: dict[tcip_store.Key, dict] = {}
     ids: set[int] = set()
@@ -201,10 +246,7 @@ def import_coco_document(
         )
 
     arguments = {
-        "document": source,
-        "capture": date,
-        "vertex_spacing": vertex_spacing,
-        "rationale": rationale,
+        **arguments,
         "written": sorted(key.parts[-1] for key in writes),
     }
     if writes:
@@ -226,11 +268,11 @@ def import_coco_document(
             txn.append(
                 audit,
                 audit_entry(
-                    "coco_document_imported",
+                    event,
                     arguments,
                     actor,
                     "ok",
-                    {"document_digest": digest},
+                    extra,
                 ),
             )
     return arguments

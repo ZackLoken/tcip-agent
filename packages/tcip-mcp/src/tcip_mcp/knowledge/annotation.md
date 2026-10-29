@@ -28,7 +28,7 @@ the loss of its marks are one write of one document; another subject's marks are
 `LabelDocument.state(subject)` is the one reading of it: `complete` (marked, annotations held),
 `negative` (marked, none held), `partial` (annotations, no mark) or `unannotated`.
 
-## Reading labels, and importing an external COCO
+## Reading labels, and importing external COCO or YOLO labels
 
 Nothing here trains or calibrates on a dataset-level COCO file (an `images` or `categories`
 key): it is never a per-image document, and the only way in is the import. An external COCO
@@ -55,6 +55,20 @@ audit event records the COCO file's path, the digest of the bytes read, the stat
 its rationale and the documents written; an import that writes no document, whether
 refused or carrying no annotations, changes nothing and leaves no line.
 
+YOLO labels enter through `import_yolo(labels_dir, names, dataset_root, date)`: one
+`<image stem>.txt` per image, whatever extension the capture holds, a `.bandgroup` by stem.
+`names` lists subject names in class-id order; each used class must be registered. A non-blank
+line is `class x_center y_center width height` for a box or `class x1 y1 x2 y2 ... xn yn`
+for a polygon of at least three points, normalized to the image's display frame. A malformed
+line, an uncovered class id, a coordinate outside [0, 1] beyond 1e-9 floating-point slack, or a
+non-positive box extent refuses naming the file and line. A file naming no capture image
+refuses too. The files become in-memory COCO data and go through the same conversion and
+transaction, with the same document refusals. Images without files are untouched. Empty files
+write nothing and their stems are listed under `empty` in the answer: they need a person's
+completion mark to become negatives. The `yolo_labels_imported` event records the label folder,
+class names, capture, empty and written stems, and `labels_digest`, a digest of the file names
+and store versions from the reads that supplied the labels. No document written means no event.
+
 A record carrying `iscrowd` is a region of unseparated objects, never one instance: the built-in
 detection and instance heads train its region as background (they read no crowd flag, so a crowd
 box handed to them would train as one object), a detection inside it is neither a true nor a
@@ -79,10 +93,10 @@ reader, `format_io.parse_coco_annotations`, names each record's subject from the
 `categories` and hands each record to that same decoder. An unreadable document is not the same
 fact as no document.
 
-A collaborator's delivery in a schema other than COCO is yours to convert: read a sample, write a
-one-off converter script that emits a COCO document, where
+A collaborator's delivery in a schema other than COCO or YOLO is yours to convert: read a
+sample, write a one-off converter script that emits a COCO document, where
 `packages/tcip-mcp/src/tcip_mcp/knowledge/project-setup.md` places your own work for a project,
-and import it. COCO is the one built-in import.
+and import it.
 
 ## Coordinate frame: the reading and its count, a photograph's EXIF applied once
 
@@ -114,6 +128,7 @@ bearing (denormalizing, cropping, drawing); read the frame and the pixels throug
 |------|---------|
 | `save_annotations` | Write an image's per-image label document |
 | `import_coco` | Convert an external dataset-level COCO into per-image label documents |
+| `import_yolo` | Convert YOLO box and polygon label files into per-image label documents |
 | `propose_annotations` | Run a named proposal engine over an image, whole-frame or over named grid cells |
 | `push_panel_event` | Push an arbitrary event to a GUI panel over the tcip-web backend for this server's project, not restricted to images/annotations; delivered only while the GUI has that project open |
 | `prioritize_review_queue` | Rank images by active-learning uncertainty/diversity for the next review batch, skipping those marked finished for a subject |

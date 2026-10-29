@@ -610,3 +610,50 @@ def import_coco(
         )
     except (ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}
+
+
+@tool()
+def import_yolo(
+    project: Path,
+    labels_dir: str,
+    names: list[str],
+    dataset_root: str,
+    date: str,
+    *,
+    actor: str | None,
+) -> dict:
+    """Convert YOLO label files into the dataset's per-image label documents as ``actor``'s.
+
+    Each non-blank line is a class id followed by normalized box coordinates (center x, center
+    y, width, height) or polygon coordinates (at least three x/y pairs). Malformed lines refuse
+    naming the file and line, as do uncovered class ids, coordinates outside [0, 1] beyond 1e-9
+    slack and non-positive box extents. Coordinates use the image's display frame.
+
+    Every used class must name a registered subject. The COCO import's conversion and transaction
+    check the images, frames and documents, refusing existing labels with nothing written. The
+    documents and audit line commit together. Empty files write nothing and are listed in the
+    answer; a negative still needs a person's completion mark. Images without files are untouched.
+
+    Args:
+        labels_dir: Folder of ``<image stem>.txt`` files, one per labeled image.
+        names: Subject names in class-id order, as YOLO's ``names`` lists them.
+        dataset_root: The dataset the images were ingested into.
+        date: The capture under ``images/`` holding the images, a band group matched by stem.
+
+    Returns ``{labels_dir, names, capture, empty, written}``, ``empty`` and ``written`` the stems
+    of empty files and written documents. A refused import returns ``{error}`` and leaves no
+    audit line; an import writing no documents leaves none either.
+    """
+    from tcip_mcp.pipelines.data.yolo_import import import_yolo_labels
+
+    try:
+        return import_yolo_labels(
+            labels_dir,
+            names,
+            dataset_root,
+            date=date,
+            project=project,
+            actor=actor,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        return {"error": str(exc)}
