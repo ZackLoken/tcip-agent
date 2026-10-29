@@ -673,13 +673,25 @@ def test_child_pythonpath_carries_sys_path_and_the_existing_env_value(
     assert entries[-1] == "/already/set/path"
 
 
-@pytest.mark.parametrize(("seen", "placed"), [(True, "cuda"), (False, "cpu")])
-def test_an_unstated_device_places_on_cuda_only_when_torch_sees_one(
-    monkeypatch: pytest.MonkeyPatch, seen: bool, placed: str
+@pytest.mark.parametrize(
+    ("cuda_seen", "mps_seen", "placed"),
+    [
+        (True, True, "cuda"),
+        (True, False, "cuda"),
+        (False, True, "mps"),
+        (False, False, "cpu"),
+    ],
+)
+def test_an_unstated_device_places_on_cuda_then_mps_then_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+    cuda_seen: bool,
+    mps_seen: bool,
+    placed: str,
 ) -> None:
     from tcip_mcp.pipelines.model_build import placement
 
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: seen)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: cuda_seen)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: mps_seen)
 
     assert placement(None) == torch.device(placed)
 

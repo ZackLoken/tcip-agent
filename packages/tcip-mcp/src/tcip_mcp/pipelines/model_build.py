@@ -655,16 +655,21 @@ def capture_env() -> Environment:
 
 
 def placement(device: str | None) -> torch.device:
-    """Return the torch device a model runs on: ``device`` as stated, else ``cuda`` or ``cpu``.
+    """Return the torch device a model runs on: ``device``, else ``cuda``, ``mps`` or ``cpu``.
 
-    An unstated ``device`` (``None``) places on ``cuda`` when torch sees one and on ``cpu``
-    otherwise. A stated one, empty included, is ``torch.device``'s as given, refused as torch
-    refuses it (``RuntimeError``).
+    An unstated ``device`` (``None``) places on ``cuda`` when torch sees one, else on ``mps``
+    when torch sees Apple's Metal backend, and on ``cpu`` otherwise. A stated one, empty
+    included, is ``torch.device``'s as given, refused as torch refuses it (``RuntimeError``).
     """
     import torch
 
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
     return torch.device(device)
 
 
