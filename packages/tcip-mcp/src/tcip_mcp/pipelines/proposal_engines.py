@@ -263,18 +263,21 @@ def box_candidate(
 def _placed(model: torch.nn.Module) -> Iterator[None]:
     """Hold ``model`` on ``placement(None)`` for the block, then on the CPU, its device freed.
 
-    The move is ``torch.nn.Module.to`` in place both ways; on leaving, CUDA's cached blocks are
-    released (``torch.cuda.empty_cache``) when torch sees CUDA.
+    The move is ``torch.nn.Module.to`` in place both ways; on leaving, the cached blocks of the
+    device it was held on are released (``torch.cuda.empty_cache`` or ``torch.mps.empty_cache``).
     """
     import torch
 
-    model.to(placement(None))
+    device = placement(None)
+    model.to(device)
     try:
         yield
     finally:
         model.to("cpu")
-        if torch.cuda.is_available():
+        if device.type == "cuda":
             torch.cuda.empty_cache()
+        elif device.type == "mps":
+            torch.mps.empty_cache()
 
 
 @functools.cache
