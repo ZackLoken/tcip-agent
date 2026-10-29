@@ -38,13 +38,21 @@ the dated folder under `images/`, or the flat `images/` root for a dataset with 
 Every declared category
 must be a subject the dataset's registry declares. An ordinary image is the capture's image with
 exactly the document's `file_name`; a `.bandgroup` capture is tied by stem. An image with no
-annotations writes nothing. Before anything is written the import reports every fault it finds
-together and refuses: a malformed, repeated or unregistered category, a record the reader or the
+annotations and no completion marks writes nothing. An image may carry `complete` in the
+per-image document's spelling: subject name to a list of marks with pixel `[x, y, w, h]` `rect`,
+`by`, `at` and boolean `proposals_hidden`. These are marks a person made elsewhere, each recording
+who made it (`user:<name>`) and when (a non-empty string); the import makes no mark of its own.
+Each subject must be registered and each rect must lie inside the image's frame with positive
+extent. The import computes the subject digest from the annotations it imports; a stated
+`digest` must equal it. A whole-image mark with no annotation of its subject makes a negative.
+Before anything is written the import reports every fault it finds together and refuses: a
+malformed, repeated or unregistered category, a record the reader or the
 writer refuses (a record's `image_id` and its content are checked independently, so one record
 can report both), an image id that is not an integer or is listed twice, an image not in the
-capture, a stated frame the image does not have, or an existing per-image document. Every
-document and the import's audit event then commit together, or none does: a label placed
-meanwhile refuses the whole import. A crowd region keeps its `iscrowd` flag, and a run-length mask
+capture, a stated frame the image does not have, a malformed completion mark, or an existing
+per-image document. Every document and the import's audit event then commit together, or none
+does: a label placed meanwhile refuses the whole import. A crowd region keeps its `iscrowd`
+flag, and a run-length mask
 becomes the rings `mask_contours.mask_to_polygon_rings` extracts from it, simplified at the
 stated `vertex_spacing`, pixels of perimeter per vertex: each ring keeps at most the vertex count
 its own perimeter implies at that spacing (the nearest integer, at least
@@ -52,8 +60,9 @@ its own perimeter implies at that spacing (the nearest integer, at least
 the least tolerance reaching it, so 0 keeps
 every contour vertex. The records keep the provenance the COCO carried and gain none. The
 audit event records the COCO file's path, the digest of the bytes read, the stated spacing with
-its rationale and the documents written; an import that writes no document, whether
-refused or carrying no annotations, changes nothing and leaves no line.
+its rationale, the documents written and the stems and subjects receiving marks; it names who
+ran the import, while each mark keeps who made it and when. An import that writes no document,
+whether refused or carrying neither annotations nor marks, changes nothing and leaves no line.
 
 A record carrying `iscrowd` is a region of unseparated objects, never one instance: the built-in
 detection and instance heads train its region as background (they read no crowd flag, so a crowd
@@ -332,8 +341,10 @@ Flow, in the order of the bullets above: a bucket from `run_inference` or `stage
   admission, the review queue and the editor's own listing all read it through
   `LabelDocument.state`. An empty document nobody marked is unannotated: you cannot manufacture
   negatives, since writing empty label documents does not create them; only the person's mark
-  does. `diagnose_project` names an empty document no mark finishes among its findings; the
-  orientation a new conversation of a session launched for a project starts with holds the first
+  does. A COCO import can bring in marks a person made elsewhere, each recorded with who made it
+  and when; its audit line names who ran the import. `diagnose_project` names an empty document
+  no mark finishes among its findings; the orientation a new conversation of a session launched
+  for a project starts with holds the first
   of them and how many there are. Never delete empty label documents without asking.
 
 ## Active Learning

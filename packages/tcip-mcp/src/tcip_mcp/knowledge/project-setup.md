@@ -168,7 +168,10 @@ There must be something to train on. Three paths (see
 - Human path: hand off to the GUI Annotate tab for the breeder to label a seed set.
 - Existing labels in an external dataset-level COCO: `import_coco(document, dataset_root, date, vertex_spacing, rationale)`
   converts them into per-image documents over the images `ingest_images` placed under that date.
-  Nothing trains on the COCO file itself.
+  It can also bring in completion marks a person made elsewhere, under each image's `complete`
+  key, each recorded with who made it and when. A person's whole-image mark with no annotation
+  of its subject makes a negative; the import makes no mark of its own, and its audit line names
+  who ran the import. Nothing trains on the COCO file itself.
 
 Never train or evaluate on an unconfirmed format: the one per-image label reader refuses any
 document of another shape rather than guessing, every training, calibration and review reader

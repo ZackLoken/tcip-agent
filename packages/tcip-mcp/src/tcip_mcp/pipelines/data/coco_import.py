@@ -74,27 +74,33 @@ def import_coco_document(
     :func:`~tcip_mcp.registry_paths.located` against ``project``), and the import is recorded, as
     ``actor``'s, on the dataset's audit log with the document's path, the digest of the one read
     of its bytes, the ``vertex_spacing`` a run-length mask's rings are simplified at and the
-    ``rationale`` for it, in one commit with the documents: an import that writes nothing
-    leaves no line. The answer is the audited arguments.
+    ``rationale`` for it, and the marked subjects by stem, in one commit with the documents: an
+    import that writes nothing leaves no line. The answer is the audited arguments.
 
     ``date`` names the capture ``images/<date>/``; one :func:`~tcip_mcp.dataset_layout.list_dates`
     does not list refuses. Each declared category must be a
     subject the dataset's registry declares, and names the subject its records carry. An ordinary
     image is the logical image whose own file name the document's ``file_name`` is; a
     ``.bandgroup`` capture is tied by stem. Each document is encoded at the frame its image decodes
-    to, and a width or height the document states must match it. An image the document gives no
-    annotation writes nothing. Records keep the provenance and the crowd flag the document carried
-    and gain none; a run-length mask becomes the rings its mask yields.
+    to, and a width or height the document states must match it. Each image's ``complete`` carries
+    a person's marks, checked against the frame and the imported subject digest. An image with
+    neither annotations nor marks writes nothing. Records keep the provenance and the crowd flag
+    the document carried and gain none; a run-length mask becomes the rings its mask yields.
 
     Every fault the reader and one pass over the listed images find is reported together, and any
     of them refuses the import with nothing written: a malformed or repeated category declaration,
     an unregistered category, a record the reader or the writer's encoder refuses, an image id
     that is not an integer or is listed twice, an image not in the capture, two records naming one
-    capture, an annotation naming an unlisted image, a stated frame the image does not have, and a
-    per-image document already present, checked inside the one transaction that writes them.
+    capture, an annotation naming an unlisted image, a stated frame the image does not have, a
+    malformed completion mark, and a per-image document already present, checked inside the one
+    transaction that writes them.
     """
     import tcip_store
-    from tcip_annotation.format_io import is_coco_id, parse_coco_annotations
+    from tcip_annotation.format_io import (
+        coco_completion_marks,
+        is_coco_id,
+        parse_coco_annotations,
+    )
     from tcip_annotation.json_io import document_payload
     from tcip_mcp import dataset_layout
     from tcip_mcp.audit import audit_entry, audit_log_key
@@ -142,6 +148,7 @@ def import_coco_document(
     writes: dict[tcip_store.Key, dict] = {}
     ids: set[int] = set()
     stems: set[str] = set()
+    marked: dict[str, list[str]] = {}
     for i, record in enumerate(images):
         if not isinstance(record, dict):
             problems.append(f"image record {i} ({record!r}) is not an object")
@@ -164,17 +171,30 @@ def import_coco_document(
         ):
             problems.append(f"image {name!r} is not in {images_dir}")
             found = None
+        frame = (
+            SourceHeader(refuse_incomplete_band_group(found)).display_frame
+            if found is not None
+            else None
+        )
+        annotations = by_image.get(image_id, []) if identified else []
+        mark_problems: list[str] = []
+        marks = coco_completion_marks(
+            record,
+            annotations,
+            subjects={s.name for s in registry.subjects},
+            frame=frame,
+            problems=mark_problems,
+        )
+        problems.extend(f"image {name!r}: {fault}" for fault in mark_problems)
         stem = found.stem if found is not None else Path(name).stem
-        if found is None:
+        if frame is None:
             continue
         if stem in stems:
             problems.append(
                 f"image {name!r} is the capture {stem!r} another record already names"
             )
         stems.add(stem)
-        width, height = SourceHeader(
-            refuse_incomplete_band_group(found)
-        ).display_frame
+        width, height = frame
         stated = (record.get("width"), record.get("height"))
         if stated != (None, None) and stated != (width, height):
             problems.append(
@@ -184,12 +204,16 @@ def import_coco_document(
         if not identified:
             continue
         try:
-            data = document_payload(by_image.get(image_id, []), width, height)
+            data = document_payload(
+                annotations, width, height, marks=marks, keep_empty=bool(marks)
+            )
         except ValueError as exc:
             problems.append(f"image {name!r}: {exc}")
             continue
         if data is not None:
             writes[dataset_layout.label_key(root, date, stem)] = data
+            if marks:
+                marked[stem] = sorted(marks)
     problems += [
         f"annotations name image id {image_id!r}, which the document does not list"
         for image_id in sorted(set(by_image) - ids)
@@ -206,6 +230,7 @@ def import_coco_document(
         "vertex_spacing": vertex_spacing,
         "rationale": rationale,
         "written": sorted(key.parts[-1] for key in writes),
+        "marked": dict(sorted(marked.items())),
     }
     if writes:
         audit = audit_log_key(root)

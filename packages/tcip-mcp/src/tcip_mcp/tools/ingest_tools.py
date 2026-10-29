@@ -579,7 +579,17 @@ def import_coco(
     line then commit as one store transaction, each document checked absent inside it, so a label
     already there refuses the whole import with nothing written; an import that writes no document
     leaves no event. A crowd region keeps its flag and a run-length mask becomes rings. An image
-    with no annotations writes nothing.
+    with neither annotations nor completion marks writes nothing.
+
+    Each image may hold ``complete`` in the per-image document's spelling: subject name to a
+    list of marks with pixel ``rect``, ``by``, ``at`` and ``proposals_hidden``. The import can
+    bring in marks a person made elsewhere, each recorded with who made it and when; it makes no
+    mark of its own. A person's whole-image mark with no annotation of its subject makes a
+    negative. An unregistered subject, a ``by`` that is not ``user:<name>``, an ``at`` that is not
+    a non-empty string, a non-boolean ``proposals_hidden`` or a rect that is not four numbers
+    inside the image's frame with positive extent refuses with the other faults. The subject
+    digest is computed from the imported annotations; a stated ``digest`` must equal it. The
+    audit line names who ran the import and the stems and subjects receiving marks.
 
     Args:
         document: Path to the COCO ``.json`` (an ``images``/``categories`` key).
@@ -592,8 +602,8 @@ def import_coco(
             vertex), recorded on the import's audit line.
         rationale: Why the import simplifies at ``vertex_spacing``, recorded beside it.
 
-    Returns ``{document, capture, vertex_spacing, rationale, written}``, ``written`` the stem of
-    every label document written.
+    Returns ``{document, capture, vertex_spacing, rationale, written, marked}``, ``written`` the
+    stems of the label documents written and ``marked`` their marked subjects by stem.
 
     """
     from tcip_mcp.pipelines.data.coco_import import import_coco_document

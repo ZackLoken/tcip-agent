@@ -450,8 +450,8 @@ def save_label_document(
         resolved_by_removal,
     )
     from tcip_annotation.json_io import (
-        CompletionMark,
         annotation_from_payload,
+        completion_mark,
         document_at,
         document_payload,
         label_document,
@@ -571,12 +571,14 @@ def save_label_document(
         }
         for subject in (s for s, made in gestures.complete.items() if made):
             marks.setdefault(subject, []).append(
-                CompletionMark(
-                    rect=gestures.rect or (0, 0, width, height),
-                    by=author,
-                    at=now,
+                completion_mark(
+                    {
+                        "rect": list(gestures.rect or (0, 0, width, height)),
+                        "by": author,
+                        "at": now,
+                        "proposals_hidden": gestures.proposals_hidden,
+                    },
                     digest=subject_digest(annotations, subject),
-                    proposals_hidden=gestures.proposals_hidden,
                 )
             )
         written = document_payload(
