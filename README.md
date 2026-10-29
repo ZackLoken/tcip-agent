@@ -101,7 +101,8 @@ npm --prefix packages/tcip-web/frontend install
 npm --prefix packages/tcip-web/frontend run build
 ```
 
-The environment installs the CUDA (cu130) torch wheel by default; it runs without a GPU too.
+The environment installs the CUDA (cu130) torch wheel on Linux and Windows and PyPI's torch on
+macOS, where it runs on Apple's GPU; it runs without a GPU too.
 
 The build writes the bundle inside the `tcip-web` package, so the environment's editable install
 serves it at once; a wheel or the Docker image carries the bundle built before it was made.
@@ -110,7 +111,8 @@ serves it at once; a wheel or the Docker image carries the bundle built before i
 --network host -e TCIP_WORKSPACE=<workspace> tcip`, builds and runs the platform as a container,
 serving the GUI on the host's loopback. The image carries no agent harness, so the GUI's agent
 terminal does not run inside it. A published port (`-p`) cannot serve the GUI, since its requests
-would arrive through a bridged address the backend's trust boundary refuses.
+would arrive through a bridged address the backend's trust boundary refuses. A container on a Mac
+has no access to Apple's GPU, so on a Mac the conda environment above is the way to use it.
 
 ## Running
 

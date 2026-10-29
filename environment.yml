@@ -7,8 +7,10 @@
 # with the dependencies and extras each declares. Run it from the
 # repository root so the editable paths resolve.
 #
-# GPU note: the CUDA build (cu130) via --extra-index-url below; it runs without a GPU too, since
-# every device placement branches on torch.cuda.is_available(). CI installs its own CPU wheel.
+# GPU note: the CUDA build (cu130) via --extra-index-url below. That index has no current macOS
+# build, so on a Mac pip takes PyPI's torch, which runs on Apple's GPU (MPS). An unstated device
+# places on CUDA, else MPS, else the CPU, so the environment runs without a GPU too. CI installs
+# its own CPU wheel.
 name: tcip-agent
 channels:
   - conda-forge
