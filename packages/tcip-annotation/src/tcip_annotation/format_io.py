@@ -6,7 +6,8 @@ Its records carry the per-image document's own field spellings (``bbox`` as ``[x
 ``segmentation`` rings, ``iscrowd``, ``attributes``, ``score``, provenance); this reader names each
 record's subject from the document's own ``categories``, turns a run-length mask into rings through
 :func:`~tcip_annotation.mask_contours.mask_to_polygon_rings`, and hands each record to the
-per-record decoder.
+per-record decoder. Each image may carry the per-image document's ``complete`` marks, read
+through its shared mark parser with the digest computed from the imported annotations.
 """
 
 from __future__ import annotations
@@ -16,8 +17,11 @@ from typing import Any
 
 from tcip_annotation.json_io import (
     ANNOTATIONS_KEY,
+    COMPLETION_KEY,
+    CompletionMark,
     annotation_object,
     annotation_of_record,
+    parse_completion_marks,
 )
 from tcip_annotation.mask_contours import mask_to_polygon_rings
 from tcip_annotation.state import Annotation
@@ -141,3 +145,28 @@ def parse_coco_annotations(
         if identified:
             by_image.setdefault(image_id, []).append(annotation)
     return categories, by_image, problems
+
+
+def coco_completion_marks(
+    image: dict,
+    annotations: list[Annotation],
+    *,
+    subjects: set[str],
+    frame: tuple[int, int] | None,
+    problems: list[str],
+) -> dict[str, list[CompletionMark]]:
+    """Return an image's completion marks, with every fault appended to ``problems``.
+
+    Each subject must be declared by ``subjects``. The shared parser checks each mark against
+    ``frame`` and the digest of its subject's imported ``annotations``.
+    """
+    raw = image.get(COMPLETION_KEY, {})
+    if isinstance(raw, dict):
+        problems.extend(
+            f"completion subject {subject!r} is not a subject the registry declares"
+            for subject in raw
+            if subject not in subjects
+        )
+    return parse_completion_marks(
+        image, problems=problems, annotations=annotations, frame=frame
+    )

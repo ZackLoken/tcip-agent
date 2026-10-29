@@ -52,10 +52,10 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from itertools import pairwise
-from typing import TYPE_CHECKING, Annotated, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from pydantic import AfterValidator
 
@@ -444,48 +444,125 @@ def _live(
     return live
 
 
+def completion_mark(
+    record: object,
+    *,
+    digest: str | None = None,
+    frame: tuple[int, int] | None = None,
+) -> CompletionMark:
+    """Return one person's completion mark from its record, or raise ``ValueError``.
+
+    Every field must have its stored type. With ``digest`` given, an absent digest takes it and
+    a stated one must equal it; otherwise the record must hold a non-empty digest. With ``frame``
+    given, the rect must have positive extent and lie inside that frame. All field faults are
+    reported together.
+    """
+    if not isinstance(record, dict):
+        raise ValueError(f"{record!r} is not a completion mark object")
+    readers: dict[str, Callable[[Any], Any]] = {
+        "rect": lambda value: _completion_rect(value, frame),
+        "by": _person,
+        "at": lambda value: _text(value, "at"),
+        "digest": lambda value: _text(value, "digest"),
+        "proposals_hidden": _flag,
+    }
+    values, problems = {}, []
+    for key, read in readers.items():
+        try:
+            value = (
+                digest
+                if key == "digest" and key not in record
+                else record[key]
+            )
+            values[key] = read(value)
+            if key == "digest" and digest is not None:
+                if values[key] != digest:
+                    raise ValueError(
+                        f"digest {value!r} does not equal the subject digest {digest!r}"
+                    )
+                values[key] = digest
+        except (KeyError, TypeError, ValueError) as exc:
+            problems.append(f"{key}: {exc!r}")
+    if problems:
+        raise ValueError("; ".join(problems))
+    return CompletionMark(**values)
+
+
+def _completion_rect(
+    value: object, frame: tuple[int, int] | None
+) -> tuple[float, float, float, float]:
+    """Return a mark's numeric rect, inside ``frame`` with positive extent when given."""
+    x, y, w, h = _numbers(value, "rect", 4)
+    if frame is not None and not (
+        all(math.isfinite(v) for v in (x, y, w, h))
+        and x >= 0
+        and y >= 0
+        and w > 0
+        and h > 0
+        and x + w <= frame[0]
+        and y + h <= frame[1]
+    ):
+        raise ValueError(
+            f"rect {value!r} is not inside the image frame {frame}"
+        )
+    return x, y, w, h
+
+
+def parse_completion_marks(
+    data: dict,
+    *,
+    problems: list[str],
+    annotations: list[Annotation] | None = None,
+    frame: tuple[int, int] | None = None,
+) -> dict[str, list[CompletionMark]]:
+    """Return a document's completion marks and append every malformed mark to ``problems``.
+
+    Each fault names its subject and mark index. With ``annotations`` given, each subject's
+    digest is computed from them and a stated digest must match; otherwise every record must
+    hold its digest. ``frame`` bounds each rect when given (:func:`completion_mark`).
+    """
+    raw = data.get(COMPLETION_KEY) or {}
+    if not isinstance(raw, dict):
+        problems.append(f"{COMPLETION_KEY!r} is {raw!r}, not marks by subject")
+        return {}
+    marks: dict[str, list[CompletionMark]] = {}
+    for subject, held in raw.items():
+        if not isinstance(held, list):
+            problems.append(
+                f"{subject!r} completion marks are {held!r}, not a list"
+            )
+            continue
+        digest = None
+        if annotations is not None:
+            try:
+                digest = subject_digest(annotations, subject)
+            except ValueError as exc:
+                problems.append(f"{subject!r} annotations: {exc}")
+        for i, record in enumerate(held):
+            try:
+                mark = completion_mark(record, digest=digest, frame=frame)
+            except ValueError as exc:
+                problems.append(
+                    f"{subject!r} completion mark {i} is not a mark: {exc}"
+                )
+            else:
+                marks.setdefault(subject, []).append(mark)
+    return marks
+
+
 def completion_marks(
     data: dict, annotations: list[Annotation]
 ) -> dict[str, list[CompletionMark]]:
     """Return the live completion marks a parsed document holds, by subject.
 
     The live ones are those whose digest still names that subject's ``annotations``. Raises
-    :class:`UnreadableLabelDocumentError` naming the subject and index of a mark that is not a rect
-    of four numbers, a person (:func:`is_person`), a time, a digest and a ``proposals_hidden``
-    flag.
+    :class:`UnreadableLabelDocumentError` naming every malformed mark's subject and index
+    (:func:`parse_completion_marks`).
     """
-    raw = data.get(COMPLETION_KEY) or {}
-    if not isinstance(raw, dict):
-        raise UnreadableLabelDocumentError(
-            f"{COMPLETION_KEY!r} is {raw!r}, not marks by subject"
-        )
-    marks: dict[str, list[CompletionMark]] = {}
-    for subject, held in raw.items():
-        if not isinstance(held, list):
-            raise UnreadableLabelDocumentError(
-                f"{subject!r} completion marks are {held!r}, not a list"
-            )
-        for i, m in enumerate(held):
-            try:
-                if not is_person(m["by"]):
-                    raise ValueError(
-                        f"by {m['by']!r} is not a person's recorded identity"
-                    )
-                marks.setdefault(subject, []).append(
-                    CompletionMark(
-                        rect=cast(
-                            tuple, tuple(_numbers(m["rect"], "rect", 4))
-                        ),
-                        by=m["by"],
-                        at=_text(m["at"], "at"),
-                        digest=_text(m["digest"], "digest"),
-                        proposals_hidden=_flag(m["proposals_hidden"]),
-                    )
-                )
-            except (KeyError, TypeError, ValueError) as exc:
-                raise UnreadableLabelDocumentError(
-                    f"{subject!r} completion mark {i} is not a mark: {exc!r}"
-                ) from exc
+    problems: list[str] = []
+    marks = parse_completion_marks(data, problems=problems)
+    if problems:
+        raise UnreadableLabelDocumentError("; ".join(problems))
     return _live(marks, annotations)
 
 
