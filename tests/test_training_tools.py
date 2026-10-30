@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 
     from torch.utils.data import DataLoader
 
+    from tcip_mcp.experiments import SweepOutcome
     from tcip_mcp.pipelines.data.label_queries import Admission
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.data.split_construction import (
@@ -1183,7 +1184,7 @@ def _complete(run: TrainRun) -> TrainRun:
     return run
 
 
-def _sweep_outcome(project: Path) -> dict:
+def _sweep_outcome(project: Path) -> SweepOutcome:
     """Return the outcome of :func:`_trial`'s sweep as the project's listing reads it."""
     from tcip_mcp.experiments import training_listing
 
@@ -1319,7 +1320,7 @@ def test_run_hpo_trial_reports_each_epoch_and_its_result_is_the_best_of_them(
     reported: list = []
     _trial({"optimizer.head_lr": 3e-4}, reported.append, base, tmp_path)
     assert reported == [50.0, 40.0, 30.0]
-    assert _sweep_outcome(tmp_path)["best_value"] == 30.0
+    assert _sweep_outcome(tmp_path).best_value == 30.0
 
 
 @pytest.mark.parametrize(
@@ -1355,7 +1356,7 @@ def test_a_sweeps_best_at_an_end_of_its_stated_range_is_reported(
     _patch_hpo_trial_machinery(monkeypatch, fake_train, base, tmp_path)
     _trial({"optimizer.head_lr": head_lr}, lambda _value: None, base, tmp_path)
 
-    assert _sweep_outcome(tmp_path)["best_at_range_end"] == at_end
+    assert _sweep_outcome(tmp_path).best_at_range_end == at_end
 
 
 def test_run_hpo_trial_that_fails_has_no_result(
@@ -1386,7 +1387,7 @@ def test_run_hpo_trial_that_fails_has_no_result(
     )
     assert reported == []
     assert observe(trial_dir).state == "failed"
-    assert _sweep_outcome(tmp_path)["best_value"] is None
+    assert _sweep_outcome(tmp_path).best_value is None
 
 
 def test_run_hpo_trial_result_is_the_highest_value_for_a_higher_is_better_metric(
@@ -1416,7 +1417,7 @@ def test_run_hpo_trial_result_is_the_highest_value_for_a_higher_is_better_metric
     reported: list = []
     _trial({"optimizer.head_lr": 3e-4}, reported.append, base, tmp_path)
     assert reported == [0.5, 0.9, 0.6]
-    assert _sweep_outcome(tmp_path)["best_value"] == 0.9
+    assert _sweep_outcome(tmp_path).best_value == 0.9
 
 
 def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
@@ -1461,7 +1462,7 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
     )
 
     outcome = _sweep_outcome(tmp_path)
-    assert (outcome["best_params"], outcome["best_value"]) == (
+    assert (outcome.best_params, outcome.best_value) == (
         {"optimizer.head_lr": 3e-4},
         0.7,
     )
@@ -1658,7 +1659,7 @@ def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(
     assert math.isfinite(
         reported[0]
     )  # epoch 1's real score, reported before the run died
-    assert _sweep_outcome(tmp_path)["best_value"] is None
+    assert _sweep_outcome(tmp_path).best_value is None
 
 
 # --------------------------------------------------------------------------
@@ -2401,5 +2402,5 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_a
         reported[0]
     )  # epoch 1's real score, reported before the cancel
     assert observe(trial_dir).state == "canceled"
-    assert _sweep_outcome(tmp_path)["best_value"] is None
+    assert _sweep_outcome(tmp_path).best_value is None
     assert read_run(trial_dir).trial_params == {}

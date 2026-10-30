@@ -71,10 +71,8 @@ def test_compare_experiments_surfaces_shared_fingerprint(
     opened_run(tmp_path, first, experiment_id="a")
     opened_run(tmp_path, first, experiment_id="b")
     assert (
-        compare_experiments(["a", "b"], project=tmp_path)[
-            "same_dataset_fingerprint"
-        ]
-        is True
+        compare_experiments(["a", "b"], project=tmp_path).dataset_fingerprints
+        == "same"
     )
     opened_run(
         tmp_path,
@@ -82,10 +80,8 @@ def test_compare_experiments_surfaces_shared_fingerprint(
         experiment_id="c",
     )
     assert (
-        compare_experiments(["a", "c"], project=tmp_path)[
-            "same_dataset_fingerprint"
-        ]
-        is False
+        compare_experiments(["a", "c"], project=tmp_path).dataset_fingerprints
+        == "different"
     )
 
 
@@ -95,7 +91,7 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(
     """Comparing a run of known fingerprint with one of none reports unknown identity, not same.
 
     The second run is over a dataset holding no label document, and the comparison's
-    ``same_dataset_fingerprint`` is ``None``.
+    ``dataset_fingerprints`` is ``unset``.
     """
     from tests._verified_checkpoint_fixtures import table_images
     from tests.tiny_trainer_fixtures import (
@@ -126,10 +122,8 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(
         experiment_id="b",
     )
     assert (
-        compare_experiments(["a", "b"], project=tmp_path)[
-            "same_dataset_fingerprint"
-        ]
-        is None
+        compare_experiments(["a", "b"], project=tmp_path).dataset_fingerprints
+        == "unset"
     )
 
 

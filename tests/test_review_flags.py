@@ -10,9 +10,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
 from tcip_annotation.flags import (
     FlagRequest,
+    PointTarget,
+    ProposalTarget,
     flag_key,
     flags_of,
     flags_record,
@@ -37,6 +40,7 @@ DATE = "2026-02-11"
 WIDTH, HEIGHT = 100, 80
 BOX = [40.0, 30.0, 60.0, 50.0]
 INSIDE = (50.0, 40.0)
+ON_BOX = PointTarget(point=INSIDE, subject="bud")
 
 
 def _flags(image: Path) -> list[Flag]:
@@ -52,20 +56,15 @@ def test_a_flag_on_an_annotation_is_recorded_with_who_and_when(
         image,
         [{"subject": "bud", "bbox": BOX}],
         gestures=Gestures(
-            flag=(
-                FlagRequest(
-                    text="  is this one open?  ", point=INSIDE, subject="bud"
-                ),
-            )
+            flag=(FlagRequest(text="  is this one open?  ", target=ON_BOX),)
         ),
     )
 
     (flag,) = _flags(image)
-    assert (flag.text, flag.by, flag.point, flag.subject) == (
+    assert (flag.request.text, flag.by, flag.request.target) == (
         "is this one open?",
         "user:breeder",
-        INSIDE,
-        "bud",
+        ON_BOX,
     )
     assert flag.open and flag.at
     assert flags_of(flags_record([flag])) == [flag]
@@ -82,42 +81,43 @@ def test_a_flag_on_the_image_and_one_on_a_proposal_are_each_their_own_target(
         [],
         gestures=Gestures(
             flag=(
-                FlagRequest(text="glare across the frame"),
-                FlagRequest(text="bud or gall?", proposal=(bucket, 0)),
+                FlagRequest(text="glare across the frame", target=None),
+                FlagRequest(
+                    text="bud or gall?",
+                    target=ProposalTarget(bucket=bucket, index=0),
+                ),
             )
         ),
     )
 
     whole, on_proposal = _flags(image)
-    assert (whole.point, whole.proposal) == (None, None)
-    assert on_proposal.proposal == (bucket, 0)
+    assert whole.request.target is None
+    assert on_proposal.request.target == ProposalTarget(bucket=bucket, index=0)
 
 
 @pytest.mark.parametrize(
-    "request_, message",
+    "fields",
     [
-        (FlagRequest(text="   "), "for Flag\ntext\n"),
-        (FlagRequest(text="where?", point=INSIDE), "is not a comment"),
-        (FlagRequest(text="which?", subject="bud"), "is not a comment"),
+        {"text": "   ", "target": None},
+        {"text": "where?", "target": {"point": INSIDE}},
+        {"text": "which?", "target": {"subject": "bud"}},
+        {
+            "text": "both?",
+            "target": {"point": INSIDE, "subject": "bud", "index": 0},
+        },
     ],
-    ids=["blank_comment", "point_without_subject", "subject_without_point"],
+    ids=[
+        "blank_comment",
+        "point_without_subject",
+        "subject_without_point",
+        "point_beside_a_proposal",
+    ],
 )
-def test_a_malformed_flag_refuses_before_any_write(
-    tmp_path: Path, request_: FlagRequest, message: str
+def test_a_malformed_flag_request_refuses_at_its_construction(
+    fields: dict,
 ) -> None:
-    import tcip_store as ts
-
-    image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (WIDTH, HEIGHT))
-    with pytest.raises(ValueError, match=message):
-        save_labels(
-            tmp_path,
-            image,
-            [{"subject": "bud", "bbox": BOX}],
-            gestures=Gestures(flag=(request_,)),
-        )
-
-    assert ts.read(image_label_key(image), default=None) is None
-    assert _flags(image) == []
+    with pytest.raises(ValidationError, match="for FlagRequest"):
+        FlagRequest(**fields)
 
 
 def test_a_flag_or_a_resolution_by_no_person_refuses_before_any_write(
@@ -139,7 +139,7 @@ def test_a_flag_or_a_resolution_by_no_person_refuses_before_any_write(
             image,
             box,
             author="save_annotations",
-            gestures=Gestures(flag=(FlagRequest(text="open?"),)),
+            gestures=Gestures(flag=(FlagRequest(text="open?", target=None),)),
         )
     assert _flags(image) == []
 
@@ -147,9 +147,7 @@ def test_a_flag_or_a_resolution_by_no_person_refuses_before_any_write(
         tmp_path,
         image,
         box,
-        gestures=Gestures(
-            flag=(FlagRequest(text="open?", point=INSIDE, subject="bud"),)
-        ),
+        gestures=Gestures(flag=(FlagRequest(text="open?", target=ON_BOX),)),
     )
     held, logged = (
         read_label_document(image_label_key(image)),
@@ -175,7 +173,11 @@ def test_a_flag_on_a_proposal_the_bucket_does_not_hold_refuses(
             image,
             [],
             gestures=Gestures(
-                flag=(FlagRequest(text="?", proposal=(bucket, 3)),)
+                flag=(
+                    FlagRequest(
+                        text="?", target=ProposalTarget(bucket=bucket, index=3)
+                    ),
+                )
             ),
         )
     assert _flags(image) == []
@@ -190,9 +192,7 @@ def test_resolving_keeps_the_flag_with_the_reply_and_refuses_a_second_resolution
         tmp_path,
         image,
         box,
-        gestures=Gestures(
-            flag=(FlagRequest(text="open?", point=INSIDE, subject="bud"),)
-        ),
+        gestures=Gestures(flag=(FlagRequest(text="open?", target=ON_BOX),)),
     )
     (raised,) = _flags(image)
 
@@ -205,13 +205,13 @@ def test_resolving_keeps_the_flag_with_the_reply_and_refuses_a_second_resolution
     )
 
     (flag,) = _flags(image)
-    assert not flag.open
-    assert (flag.resolved_by, flag.reply, flag.removed) == (
-        "user:second",
-        "yes, open",
-        False,
-    )
-    assert (flag.text, flag.by) == (raised.text, raised.by)
+    assert flag.resolution is not None
+    assert (
+        flag.resolution.by,
+        flag.resolution.reply,
+        flag.resolution.removed,
+    ) == ("user:second", "yes, open", False)
+    assert (flag.request, flag.by) == (raised.request, raised.by)
 
     with pytest.raises(ValueError, match="are not open"):
         save_labels(
@@ -241,11 +241,12 @@ def test_removing_the_flagged_annotation_resolves_its_flag_and_no_other(
         both,
         gestures=Gestures(
             flag=(
-                FlagRequest(text="on the first", point=INSIDE, subject="bud"),
+                FlagRequest(text="on the first", target=ON_BOX),
                 FlagRequest(
-                    text="on the second", point=(10.0, 10.0), subject="bud"
+                    text="on the second",
+                    target=PointTarget(point=(10.0, 10.0), subject="bud"),
                 ),
-                FlagRequest(text="on the image"),
+                FlagRequest(text="on the image", target=None),
             )
         ),
     )
@@ -253,8 +254,8 @@ def test_removing_the_flagged_annotation_resolves_its_flag_and_no_other(
     save_labels(tmp_path, image, both[1:], author="user:second")
 
     first, second, whole = _flags(image)
-    assert (first.open, first.removed, first.resolved_by) == (
-        False,
+    assert first.resolution is not None
+    assert (first.resolution.removed, first.resolution.by) == (
         True,
         "user:second",
     )
@@ -274,9 +275,7 @@ def test_moving_a_flagged_annotation_off_its_flag_resolves_it_as_removed(
         tmp_path,
         image,
         [{"subject": "bud", "bbox": BOX}],
-        gestures=Gestures(
-            flag=(FlagRequest(text="open?", point=INSIDE, subject="bud"),)
-        ),
+        gestures=Gestures(flag=(FlagRequest(text="open?", target=ON_BOX),)),
     )
 
     save_labels(
@@ -287,7 +286,8 @@ def test_moving_a_flagged_annotation_off_its_flag_resolves_it_as_removed(
     save_labels(
         tmp_path, image, [{"subject": "bud", "bbox": [0.0, 0.0, 10.0, 10.0]}]
     )
-    assert _flags(image)[0].removed
+    resolution = _flags(image)[0].resolution
+    assert resolution is not None and resolution.removed
 
 
 def test_the_editor_reads_the_flags_at_load_and_after_a_save(
@@ -307,14 +307,19 @@ def test_the_editor_reads_the_flags_at_load_and_after_a_save(
         "/api/annotate/labels",
         json={
             **body,
-            "flag": [
-                {"text": "open?", "point": list(INSIDE), "subject": "bud"}
-            ],
+            "gestures": {
+                "flag": [
+                    {
+                        "text": "open?",
+                        "target": {"point": list(INSIDE), "subject": "bud"},
+                    }
+                ]
+            },
         },
     )
     assert saved.status_code == 200, saved.text
-    (flag,) = saved.json()["flags"]
-    assert flag["text"] == "open?" and flag["resolved_by"] is None
+    (flag,) = saved.json()["document"]["flags"]
+    assert flag["request"]["text"] == "open?" and flag["resolution"] is None
 
     loaded = client.get(
         "/api/annotate/labels", params={"image_path": str(image)}
@@ -323,15 +328,70 @@ def test_the_editor_reads_the_flags_at_load_and_after_a_save(
 
     resolved = client.post(
         "/api/annotate/labels",
-        json={**body, "resolve": {flag["id"]: "confirmed open"}},
+        json={**body, "gestures": {"resolve": {flag["id"]: "confirmed open"}}},
     )
     assert resolved.status_code == 200, resolved.text
-    assert resolved.json()["flags"][0]["reply"] == "confirmed open"
+    (resolved_flag,) = resolved.json()["document"]["flags"]
+    assert resolved_flag["resolution"]["reply"] == "confirmed open"
 
     again = client.post(
-        "/api/annotate/labels", json={**body, "resolve": {flag["id"]: "x"}}
+        "/api/annotate/labels",
+        json={**body, "gestures": {"resolve": {flag["id"]: "x"}}},
     )
     assert again.status_code == 400, again.text
+
+
+def test_each_served_flag_names_the_annotation_whose_rings_hold_its_point(
+    tmp_path: Path, client: TestClient
+) -> None:
+    """A served flag names every annotation of its subject whose geometry holds its point.
+
+    Beside a box, a flag inside an L-shaped polygon's rings and a box overlapping it is served
+    on both, by their indices in the document, and one inside the polygon's bounding box but
+    outside its rings on no annotation, as is a flag on the image as a whole and one inside the
+    first box naming another subject; the save and the load answer the same flags.
+    """
+    from tests._web_fixtures import open_new_project
+
+    root = open_new_project(tmp_path / "proj").root
+    image = write_image(image_dir(root, DATE) / "a.jpg", (WIDTH, HEIGHT))
+    ring = [[10, 10], [70, 10], [70, 20], [20, 20], [20, 70], [10, 70]]
+    saved = client.post(
+        "/api/annotate/labels",
+        json={
+            "image_path": str(image),
+            "user": "breeder",
+            "annotations": [
+                {"subject": "bud", "bbox": [80.0, 5.0, 95.0, 15.0]},
+                {"subject": "bud", "rings": [ring]},
+                {"subject": "bud", "bbox": [5.0, 30.0, 25.0, 50.0]},
+            ],
+            "gestures": {
+                "flag": [
+                    {
+                        "text": "in the notch",
+                        "target": {"point": [50.0, 50.0], "subject": "bud"},
+                    },
+                    {
+                        "text": "on the arm",
+                        "target": {"point": [15.0, 40.0], "subject": "bud"},
+                    },
+                    {"text": "glare", "target": None},
+                    {
+                        "text": "a leaf here?",
+                        "target": {"point": [85.0, 10.0], "subject": "leaf"},
+                    },
+                ]
+            },
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    loaded = client.get(
+        "/api/annotate/labels", params={"image_path": str(image)}
+    ).json()
+    assert [f["covered_by"] for f in loaded["flags"]] == [[], [1, 2], [], []]
+    assert saved.json()["document"]["flags"] == loaded["flags"]
 
 
 def test_doctor_names_a_flags_record_that_will_not_read_and_passes_one_that_does(
@@ -345,9 +405,7 @@ def test_doctor_names_a_flags_record_that_will_not_read_and_passes_one_that_does
         tmp_path,
         image,
         [{"subject": "bud", "bbox": BOX}],
-        gestures=Gestures(
-            flag=(FlagRequest(text="open?", point=INSIDE, subject="bud"),)
-        ),
+        gestures=Gestures(flag=(FlagRequest(text="open?", target=ON_BOX),)),
     )
     findings: list = []
     check_state(tmp_path, findings, buckets=_buckets(tmp_path, findings))

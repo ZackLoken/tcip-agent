@@ -97,7 +97,7 @@ def import_coco_document(
     from tcip_annotation.format_io import is_coco_id, parse_coco_annotations
     from tcip_annotation.json_io import document_payload
     from tcip_mcp import dataset_layout
-    from tcip_mcp.audit import audit_entry, audit_log_key
+    from tcip_mcp.audit import audit_line, audit_log_key
     from tcip_mcp.pipelines.image_utils import (
         BandGroupRef,
         list_logical_images,
@@ -181,15 +181,14 @@ def import_coco_document(
                 f"image {name!r} is stated as {stated}, but decodes to "
                 f"{(width, height)}"
             )
-        if not identified:
+        if not identified or image_id not in by_image:
             continue
         try:
-            data = document_payload(by_image.get(image_id, []), width, height)
+            data = document_payload(by_image[image_id], width, height)
         except ValueError as exc:
             problems.append(f"image {name!r}: {exc}")
             continue
-        if data is not None:
-            writes[dataset_layout.label_key(root, date, stem)] = data
+        writes[dataset_layout.label_key(root, date, stem)] = data
     problems += [
         f"annotations name image id {image_id!r}, which the document does not list"
         for image_id in sorted(set(by_image) - ids)
@@ -225,12 +224,12 @@ def import_coco_document(
                 txn.write(key, data)
             txn.append(
                 audit,
-                audit_entry(
+                audit_line(
                     "coco_document_imported",
                     arguments,
                     actor,
                     "ok",
                     {"document_digest": digest},
-                ),
+                ).stored(),
             )
     return arguments

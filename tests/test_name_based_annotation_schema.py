@@ -170,7 +170,10 @@ def test_loader_filters_by_subject_and_geometry(tmp_path: Path) -> None:
 
 # (f) the encoder decodes a prediction's attribute ids through the scope the loader read under.
 def test_decode_inverts_the_recorded_scope(tmp_path: Path) -> None:
-    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+    from tcip_mcp.pipelines.postprocessing.export import (
+        DetectionResult,
+        encode_predictions,
+    )
     from tcip_mcp.subject_registry import Attribute
 
     scope = scope_over(
@@ -180,16 +183,15 @@ def test_decode_inverts_the_recorded_scope(tmp_path: Path) -> None:
     )
 
     data, _dropped = encode_predictions(
-        {
-            "image": "pred.jpg",
-            "boxes": [[10, 10, 40, 40]],
-            "scores": [0.9],
-            "labels": [1],
-            "attributes": [[1]],
-            "width": 640,
-            "height": 480,
-            "cap": 2,
-        },
+        DetectionResult(
+            image="pred.jpg",
+            boxes=[(10, 10, 40, 40)],
+            scores=[0.9],
+            attributes=[[1]],
+            width=640,
+            height=480,
+            cap=2,
+        ),
         created_by="model:x",
         scope=scope,
     )

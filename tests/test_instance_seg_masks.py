@@ -629,9 +629,14 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(
 def _encoded(result: dict) -> tuple[list, int]:
     """Return ``result`` encoded under :data:`LEAF` and read back, and the count it dropped."""
     from tcip_annotation.json_io import label_document
-    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+    from tcip_mcp.pipelines.postprocessing.export import (
+        DetectionResult,
+        encode_predictions,
+    )
 
-    data, dropped = encode_predictions(result, "model:fixture", scope=LEAF)
+    data, dropped = encode_predictions(
+        DetectionResult.model_validate(result), "model:fixture", scope=LEAF
+    )
     return label_document(data).annotations, dropped
 
 

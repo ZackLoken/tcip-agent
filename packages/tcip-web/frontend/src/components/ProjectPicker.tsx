@@ -10,12 +10,15 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 
-import { api, type ProjectSummary } from "@/api/client";
+import { api } from "@/api/client";
+import { messageOf } from "@/api/http";
+import type { ProjectsListing } from "@/api/types.generated";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SeasonRail } from "@/components/SeasonRail";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import {
   bucketsForDate,
+  choiceForDate,
   defaultDate,
   openable,
   type OpenableProject,
@@ -28,13 +31,8 @@ import { isAnnotatorName, selectAnnotatorNamed } from "@/store/slices/user";
 
 function selectCard(p: OpenableProject) {
   const { patchOpenChoice, patchOpenStatus } = useStore.getState();
-  const d = defaultDate(p.dates);
-  patchOpenChoice({
-    projectId: p.id,
-    date: d,
-    subject: subjectsForDate(p, d)[0] ?? "",
-    bucket: bucketsForDate(p, d)[0] ?? "",
-  });
+  const d = defaultDate(p.tree.captures);
+  patchOpenChoice({ projectId: p.record.id, date: d, ...choiceForDate(p.tree, d, null) });
   patchOpenStatus({ openError: null });
 }
 
@@ -52,28 +50,25 @@ function RemovalDialog({
   const [confirmText, setConfirmText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const name = project.display_name;
+  const { id, display_name: name } = project.record;
 
   async function confirmRemoval() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const res = await api.projects.remove({ id: project.id, confirm_name: confirmText, user });
+      const res = await api.projects.remove({ id, confirm_name: confirmText, user });
       try {
-        forgetRecentProject(project.id);
+        forgetRecentProject(id);
       } catch (e) {
         useStore
           .getState()
-          .pushToast(
-            `Removed, but the recent projects list was not updated: ${e instanceof Error ? e.message : String(e)}`,
-          );
+          .pushToast(`Removed, but the recent projects list was not updated: ${messageOf(e)}`);
       }
-      if (useStore.getState().openProject?.id === project.id) useStore.getState().clearDataset();
-      const archiveName = res.archive_path.split(/[/\\]/).filter(Boolean).pop() ?? res.archive_path;
-      useStore.getState().pushToast(`Removed ${name}. Archived as ${archiveName}.`, "success");
+      if (useStore.getState().openProject?.id === id) useStore.getState().clearDataset();
+      useStore.getState().pushToast(`Removed ${name}. Archived as ${res.archive_name}.`, "success");
       onRemoved();
     } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : String(e));
+      setSubmitError(messageOf(e));
     } finally {
       setSubmitting(false);
     }
@@ -130,18 +125,18 @@ function RenameDialog({
   const [newName, setNewName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const name = project.display_name;
+  const { id, display_name: name } = project.record;
   const canConfirm = newName.trim().length > 0 && newName.trim() !== name && !submitting;
 
   async function confirmRename() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const res = await api.projects.rename({ id: project.id, display_name: newName, user });
-      useStore.getState().pushToast(`Renamed ${name} to ${res.display_name}.`, "success");
+      const res = await api.projects.rename({ id, display_name: newName, user });
+      useStore.getState().pushToast(`Renamed ${name} to ${res.record.display_name}.`, "success");
       onRenamed();
     } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : String(e));
+      setSubmitError(messageOf(e));
     } finally {
       setSubmitting(false);
     }
@@ -209,8 +204,8 @@ export function ProjectPicker() {
   // The field is a draft: only a committed name (Enter, or Open) reaches the store.
   const [draft, setDraft] = useState(user);
   const draftNamed = isAnnotatorName(draft);
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
+  const [listing, setListing] = useState<ProjectsListing | null>(null);
+  const projects = listing?.projects ?? null;
   const [loadError, setLoadError] = useState<string | null>(null);
   const { projectId: selected, date, subject, bucket } = useStore((s) => s.openChoice);
   const opening = useStore((s) => s.opening !== null);
@@ -224,21 +219,12 @@ export function ProjectPicker() {
     setUser(draft);
   }
 
-  // Changing date re-scopes the subject/bucket choices to that date's data: keep the current
-  // pick if it's still valid there, else fall to the first available (or none).
-  function chooseDate(p: ProjectSummary, newDate: string) {
-    const subjects = subjectsForDate(p, newDate);
-    const buckets = bucketsForDate(p, newDate);
-    patchOpenChoice({
-      date: newDate,
-      subject: subjects.includes(subject) ? subject : (subjects[0] ?? ""),
-      bucket: buckets.includes(bucket) ? bucket : (buckets[0] ?? ""),
-    });
+  function chooseDate(p: OpenableProject, newDate: string | null) {
+    patchOpenChoice({ date: newDate, ...choiceForDate(p.tree, newDate, subject) });
   }
 
-  function showListing(res: Awaited<ReturnType<typeof api.projects.list>>) {
-    setProjects(res.projects);
-    setOpenId(res.open_id);
+  function showListing(res: ProjectsListing) {
+    setListing(res);
     setLoadError(null);
   }
 
@@ -247,7 +233,7 @@ export function ProjectPicker() {
       .list()
       .then(showListing)
       .catch((e) => {
-        setLoadError(e instanceof Error ? e.message : String(e));
+        setLoadError(messageOf(e));
       });
   }
 
@@ -259,11 +245,11 @@ export function ProjectPicker() {
         if (canceled) return;
         showListing(res);
         // The backend's open project is preselected; nothing opens until the person does.
-        const open = res.projects.filter(openable).find((p) => p.id === res.open_id);
+        const open = res.projects.filter(openable).find((p) => p.record.id === res.open_id);
         if (open && !useStore.getState().openChoice.projectId) selectCard(open);
       })
       .catch((e) => {
-        if (!canceled) setLoadError(String(e));
+        if (!canceled) setLoadError(messageOf(e));
       });
     const refresh = window.setInterval(() => void refetch(), LISTING_REFRESH_MS);
     return () => {
@@ -319,18 +305,22 @@ export function ProjectPicker() {
             {projects.map((p, index) => {
               if (!openable(p)) {
                 return (
-                  <div key={p.path} className="tcip-panel p-4 flex flex-col gap-1 text-[13px]">
-                    <span className="font-mono text-tcip-fg truncate" title={p.path}>
-                      {p.path}
+                  <div
+                    key={p.tree.dataset_root}
+                    className="tcip-panel p-4 flex flex-col gap-1 text-[13px]"
+                  >
+                    <span className="font-mono text-tcip-fg truncate" title={p.tree.dataset_root}>
+                      {p.tree.dataset_root}
                     </span>
                     <span className="tcip-problem">{p.record_problem}</span>
                   </div>
                 );
               }
-              const isSelected = p.id === selected;
+              const { record, tree } = p;
+              const isSelected = record.id === selected;
               return (
                 <div
-                  key={p.id}
+                  key={record.id}
                   className={`tcip-panel p-4 flex flex-col gap-2 transition-colors ${
                     isSelected ? "border-tcip-accent" : "hover:border-tcip-border-hover"
                   }`}
@@ -346,42 +336,44 @@ export function ProjectPicker() {
                     <span
                       id={`project-name-${index}`}
                       className="font-medium text-tcip-fg truncate"
-                      title={p.display_name}
+                      title={record.display_name}
                     >
-                      {p.display_name}
+                      {record.display_name}
                     </span>
                     <div id={`project-desc-${index}`} className="contents">
-                      {p.id === openId && (
+                      {record.id === listing?.open_id && (
                         <span className="tcip-badge bg-tcip-accent/20 text-tcip-accent self-start">
                           open
                         </span>
                       )}
-                      {p.site && (
-                        <span className="text-[13px] text-tcip-muted truncate" title={p.site}>
-                          {p.site}
-                        </span>
-                      )}
-                      {p.label_problem && (
-                        <span className="text-[13px] tcip-problem truncate" title={p.label_problem}>
-                          {p.label_problem}
+                      <span className="text-[13px] text-tcip-muted truncate" title={record.site}>
+                        {record.site}
+                      </span>
+                      {tree.label_problem && (
+                        <span
+                          className="text-[13px] tcip-problem truncate"
+                          title={tree.label_problem}
+                        >
+                          {tree.label_problem}
                         </span>
                       )}
                       {/* Signature: the project's captures across the season, each date labeled. */}
                       <SeasonRail
-                        dates={p.dates}
+                        captures={tree.captures}
                         showLabels
-                        active={date || null}
+                        active={date}
                         className="my-0.5"
                       />
                       <div className="text-[13px] text-tcip-muted flex flex-wrap gap-x-3 gap-y-0.5">
                         <span>{p.image_count} image(s)</span>
                         <span>
-                          {p.dates.length} date{p.dates.length === 1 ? "" : "s"}
+                          {tree.captures.length} date
+                          {tree.captures.length === 1 ? "" : "s"}
                         </span>
                         <span>
-                          {p.subjects.length} subject{p.subjects.length === 1 ? "" : "s"}
+                          {tree.subjects.length} subject{tree.subjects.length === 1 ? "" : "s"}
                         </span>
-                        <span>{Object.values(p.buckets_by_date).flat().length} bucket(s)</span>
+                        <span>{Object.values(tree.buckets_by_date).flat().length} bucket(s)</span>
                       </div>
                       <span className="text-[12px] text-tcip-muted">
                         Updated {relativeTime(p.modified)}
@@ -396,13 +388,13 @@ export function ProjectPicker() {
                           <span className="tcip-label">Date</span>
                           <select
                             className="tcip-select"
-                            value={date}
-                            onChange={(e) => chooseDate(p, e.target.value)}
+                            value={date ?? ""}
+                            onChange={(e) => chooseDate(p, e.target.value || null)}
                           >
-                            {p.dates.length === 0 && <option value="">no dates</option>}
-                            {p.dates.map((d) => (
-                              <option key={d} value={d}>
-                                {d}
+                            {tree.captures.length === 0 && <option value="">no dates</option>}
+                            {tree.captures.map(({ name }) => (
+                              <option key={name} value={name}>
+                                {name}
                               </option>
                             ))}
                           </select>
@@ -411,18 +403,18 @@ export function ProjectPicker() {
                           <span className="tcip-label">Subject</span>
                           <select
                             className="tcip-select"
-                            value={subject}
-                            onChange={(e) => patchOpenChoice({ subject: e.target.value })}
+                            value={subject ?? ""}
+                            onChange={(e) => patchOpenChoice({ subject: e.target.value || null })}
                           >
                             <option
                               value=""
                               aria-label={
-                                subjectsForDate(p, date).length ? "no subject chosen" : undefined
+                                subjectsForDate(tree, date).length ? "no subject chosen" : undefined
                               }
                             >
-                              {subjectsForDate(p, date).length ? UNSET_GLYPH : "none"}
+                              {subjectsForDate(tree, date).length ? UNSET_GLYPH : "none"}
                             </option>
-                            {subjectsForDate(p, date).map((t) => (
+                            {subjectsForDate(tree, date).map((t) => (
                               <option key={t} value={t}>
                                 {t}
                               </option>
@@ -433,18 +425,20 @@ export function ProjectPicker() {
                           <span className="tcip-label">Predictions</span>
                           <select
                             className="tcip-select"
-                            value={bucket}
-                            onChange={(e) => patchOpenChoice({ bucket: e.target.value })}
+                            value={bucket ?? ""}
+                            onChange={(e) => patchOpenChoice({ bucket: e.target.value || null })}
                           >
                             <option
                               value=""
                               aria-label={
-                                bucketsForDate(p, date).length ? "no predictions chosen" : undefined
+                                bucketsForDate(tree, date).length
+                                  ? "no predictions chosen"
+                                  : undefined
                               }
                             >
-                              {bucketsForDate(p, date).length ? UNSET_GLYPH : "none"}
+                              {bucketsForDate(tree, date).length ? UNSET_GLYPH : "none"}
                             </option>
-                            {bucketsForDate(p, date).map((name) => (
+                            {bucketsForDate(tree, date).map((name) => (
                               <option key={name} value={name}>
                                 {name}
                               </option>
@@ -452,7 +446,7 @@ export function ProjectPicker() {
                           </select>
                         </label>
                       </div>
-                      {openError?.projectId === p.id && (
+                      {openError?.projectId === record.id && (
                         <span className="text-[13px] tcip-problem">{openError.message}</span>
                       )}
                       <div className="flex items-center gap-2 flex-wrap">

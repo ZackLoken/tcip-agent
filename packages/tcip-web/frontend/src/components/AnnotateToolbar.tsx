@@ -7,8 +7,8 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 
-import type { ImageBandsResponse } from "@/api/client";
 import { subjectColor } from "@/api/subjects";
+import type { ImageBands } from "@/api/types.generated";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { EnginePrompt } from "@/components/annotate/EnginePrompt";
 import { BandPicker } from "@/components/BandPicker";
@@ -169,7 +169,7 @@ export function AnnotateToolbar({
   saveDisabled: boolean;
   dirty: boolean;
   // Band-composite picker (multispectral only): omitted/null for a standard RGB dataset.
-  bandsInfo?: ImageBandsResponse | null;
+  bandsInfo?: ImageBands | null;
   bandSelection?: BandSelection | null;
   onBandSelectionChange?: (next: BandSelection) => void;
   // The dataset subject's state on this image as the backend serves it; null until loaded.
@@ -247,9 +247,14 @@ export function AnnotateToolbar({
       setActiveSubject(trimmed);
       return;
     }
+    const description = window.prompt(`What is one ${trimmed}? (its description)`);
+    if (description === null) return;
     const previousSubject = activeSubject;
     setActiveSubject(trimmed);
-    const landed = await saveRegistry({ ...registry, [trimmed]: {} }, "Could not add the subject");
+    const landed = await saveRegistry(
+      { ...registry, [trimmed]: { description } },
+      "Could not add the subject",
+    );
     if (!landed && projectRoot && dataset) setActiveSubject(previousSubject);
   }
 
@@ -452,13 +457,9 @@ export function AnnotateToolbar({
           onBandSelectionChange &&
           showsBandPicker(bandsInfo, bandSelection) && (
             <BandPicker
-              bandCount={bandsInfo.band_count}
-              bands={bandsInfo.bands}
+              info={bandsInfo}
               selection={bandSelection}
               onChange={onBandSelectionChange}
-              sampled={bandsInfo.sampled}
-              pixelFraction={bandsInfo.pixel_fraction}
-              overviewSize={bandsInfo.overview_size}
             />
           )}
 

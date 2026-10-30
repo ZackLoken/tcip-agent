@@ -650,6 +650,62 @@ def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(
     assert _param_shapes(rebuilt) == _param_shapes(trained)
 
 
+def test_the_owning_layout_is_the_run_whose_snapshot_its_checkpoint_names(
+    tmp_path: Path,
+) -> None:
+    """Of two runs that took one source snapshot, a checkpoint builds from its own run's layout.
+
+    Both runs' snapshots share one digest; the checkpoint's config names the files in its own
+    run's snapshot directory, so that run's layout is the one answered, whichever run is read
+    first.
+    """
+    from tcip_mcp.experiments import CONFIG_PATHS, observe, read_run
+    from tcip_mcp.pipelines.model_build import (
+        SNAPSHOT_DIR,
+        owning_run_layout,
+        run_layout,
+    )
+    from tcip_mcp.pipelines.training.run_registry import observed_run
+    from tcip_mcp.registry_paths import runtime_paths
+    from tests._verified_checkpoint_fixtures import (
+        fixture_data_dir,
+        opened_run,
+        table_images,
+    )
+
+    config = training_config(
+        tmp_path,
+        {
+            "builder": PROBE_NET,
+            "source_files": PROBE_FILES,
+            "task": "classification",
+            "normalization": FRAME_STATISTICS,
+        },
+        {
+            **table_images(fixture_data_dir(tmp_path, "probe"), n=4),
+            "split": drawn_split(val_ratio=0.25, grouping="tile_prefix"),
+        },
+        evaluation=evaluation_block(selection_metric="loss"),
+    )
+    earlier = opened_run(tmp_path, config, experiment_id="exp-a")
+    owner = opened_run(tmp_path, config, experiment_id="exp-b")
+    ctx = TrainContext(run=observed_run(observe(owner)), train_loader=None)
+    path = ctx.save_checkpoint(
+        {STATE_DICT_KEY: ctx.build_model().state_dict()}, "model_best"
+    )
+
+    loaded = torch.load(path, map_location="cpu", weights_only=False)
+    assert (
+        run_layout(earlier, read_run(earlier).source).snapshot
+        == loaded[SNAPSHOT_KEY]
+    )
+    spec = train_config(
+        runtime_paths(loaded[CONFIG_KEY], CONFIG_PATHS, tmp_path)
+    )
+    layout = owning_run_layout(spec, loaded[SNAPSHOT_KEY], tmp_path)
+    assert layout.root == owner / SNAPSHOT_DIR
+
+
 def test_child_pythonpath_carries_sys_path_and_the_existing_env_value(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

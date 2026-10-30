@@ -1,8 +1,8 @@
 """Tests for the focus_human_attention MCP tool (drives the live Annotate tab).
 
 The tool resolves the first image holding the subject and the mode its labels imply, then posts an
-``annotate_focus`` event. With no GUI running, delivery is a soft miss (``delivered=False``),
-and the resolution (index + mode) is what these tests check.
+``annotate_focus`` event. Under pytest the event is suppressed (``status``
+``"suppressed_under_pytest"``), and the resolution (index + mode) is what these tests check.
 """
 
 from __future__ import annotations
@@ -71,9 +71,7 @@ def test_focus_annotate_lands_on_first_annotated_polygon_frame(
     )  # the name-based rendering identity the tool surfaces
     assert res["n_images"] == 5
     assert res["n_holding_subject"] == 2
-    # Delivery depends on whether a GUI backend happens to be listening; the resolution
-    # above is what the tool guarantees.
-    assert isinstance(res["delivered"], bool)
+    assert "pytest" in res["reason"]
 
 
 def test_a_named_bucket_sets_the_mode_from_its_own_document_not_the_label(

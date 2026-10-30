@@ -62,22 +62,10 @@ def _bud_bush() -> SubjectRegistry:
     )
 
 
-def test_a_stored_subject_stating_no_description_refuses_and_a_request_s_states_an_empty_one() -> (
-    None
-):
-    """A stored subject with no description refuses; an authoring request states an empty one.
-
-    A stored subject missing ``description`` refuses naming the field; an authoring request may
-    leave it out and reads as an empty description.
-    """
-    from tcip_mcp.subject_registry import registry_from_request
-
+def test_a_subject_stating_no_description_refuses_naming_the_field() -> None:
+    """A subject missing ``description`` refuses naming the field."""
     with pytest.raises(RegistryError, match="description"):
         registry_from_dict({"bud": {}})
-
-    assert registry_from_request({"bud": {}}) == SubjectRegistry(
-        subjects=(Subject(name="bud", description=""),)
-    )
 
 
 def test_dict_and_file_roundtrip_preserve_the_registry(tmp_path: Path) -> None:
@@ -171,7 +159,7 @@ def test_a_subject_with_no_attributes_reads_none_and_an_absent_subject_refuses(
 )
 def test_malformed_registry_refuses(bad: dict) -> None:
     with pytest.raises(RegistryError):
-        registry_from_dict(bad)
+        registry_from_dict({"bud": {**bad["bud"], "description": "one bud"}})
 
 
 def test_ordinal_file_roundtrip_preserves_type_and_rank(
@@ -335,17 +323,11 @@ def _leaf_bush() -> SubjectRegistry:
     )
 
 
-def test_replace_registry_refuses_an_empty_registry(tmp_path: Path) -> None:
-    from tcip_mcp.subject_registry import replace_registry
-    from tcip_store import Version
+def test_a_registry_declaring_no_subject_refuses_by_its_type() -> None:
+    from pydantic import ValidationError
 
-    with pytest.raises(RegistryError):
-        replace_registry(
-            tmp_path,
-            SubjectRegistry(subjects=()),
-            expect=Version.ABSENT,
-            actor=None,
-        )
+    with pytest.raises(ValidationError, match="at least 1 item"):
+        SubjectRegistry(subjects=())
 
 
 def test_replace_registry_first_write_succeeds_and_reports_the_save(
@@ -359,7 +341,7 @@ def test_replace_registry_first_write_succeeds_and_reports_the_save(
         tmp_path, _leaf_bush(), expect=Version.ABSENT, actor=None
     )
     assert read_registry(tmp_path) == _leaf_bush()
-    assert result == {
+    assert result.model_dump() == {
         "subjects_path": str(tmp_path / "subjects.json"),
         "n_subjects": 2,
         "version": _version(tmp_path).token,
@@ -608,12 +590,13 @@ def test_write_subject_registry_refuses_a_type_flip_without_the_flag(
         str(tmp_path),
         {
             "bud": {
+                "description": "one bud",
                 "attributes": {
                     "opening": {
                         "type": "categorical",
                         "values": ["closed", "open"],
                     }
-                }
+                },
             }
         },
         actor=None,
@@ -623,12 +606,13 @@ def test_write_subject_registry_refuses_a_type_flip_without_the_flag(
         str(tmp_path),
         {
             "bud": {
+                "description": "one bud",
                 "attributes": {
                     "opening": {
                         "type": "ordinal",
                         "values": ["closed", "open"],
                     }
-                }
+                },
             }
         },
         actor=None,
@@ -651,12 +635,13 @@ def test_write_subject_registry_allow_removals_alone_still_refuses_a_type_flip(
         str(tmp_path),
         {
             "bud": {
+                "description": "one bud",
                 "attributes": {
                     "opening": {
                         "type": "categorical",
                         "values": ["closed", "open"],
                     }
-                }
+                },
             }
         },
         actor=None,
@@ -666,12 +651,13 @@ def test_write_subject_registry_allow_removals_alone_still_refuses_a_type_flip(
         str(tmp_path),
         {
             "bud": {
+                "description": "one bud",
                 "attributes": {
                     "opening": {
                         "type": "ordinal",
                         "values": ["closed", "open"],
                     }
-                }
+                },
             }
         },
         allow_removals=True,
@@ -691,12 +677,13 @@ def test_write_subject_registry_admits_a_type_flip_with_allow_type_changes(
         str(tmp_path),
         {
             "bud": {
+                "description": "one bud",
                 "attributes": {
                     "opening": {
                         "type": "categorical",
                         "values": ["closed", "open"],
                     }
-                }
+                },
             }
         },
         actor=None,
@@ -706,12 +693,13 @@ def test_write_subject_registry_admits_a_type_flip_with_allow_type_changes(
         str(tmp_path),
         {
             "bud": {
+                "description": "one bud",
                 "attributes": {
                     "opening": {
                         "type": "ordinal",
                         "values": ["closed", "open"],
                     }
-                }
+                },
             }
         },
         allow_type_changes=True,
@@ -733,11 +721,11 @@ def test_write_subject_registry_refuses_dropping_a_declared_subject_without_allo
     write_subject_registry(
         tmp_path,
         str(tmp_path),
-        {"leaf": {"description": "one leaf"}, "bush": {}},
+        {"leaf": {"description": "one leaf"}, "bush": {"description": "one bush"}},
         actor=None,
     )
     result = write_subject_registry(
-        tmp_path, str(tmp_path), {"bush": {}}, actor=None
+        tmp_path, str(tmp_path), {"bush": {"description": "one bush"}}, actor=None
     )  # drops leaf
 
     assert "error" in result and "leaf" in result["error"]
@@ -752,11 +740,15 @@ def test_write_subject_registry_admits_a_removal_stated_as_deliberate(
     write_subject_registry(
         tmp_path,
         str(tmp_path),
-        {"leaf": {"description": "one leaf"}, "bush": {}},
+        {"leaf": {"description": "one leaf"}, "bush": {"description": "one bush"}},
         actor=None,
     )
     result = write_subject_registry(
-        tmp_path, str(tmp_path), {"bush": {}}, allow_removals=True, actor=None
+        tmp_path,
+        str(tmp_path),
+        {"bush": {"description": "one bush"}},
+        allow_removals=True,
+        actor=None,
     )
 
     assert "error" not in result
@@ -774,14 +766,15 @@ def test_write_subject_registry_refuses_undecodable_existing_bytes_without_allow
     )  # truncated mid-object
 
     result = write_subject_registry(
-        tmp_path, str(tmp_path), {"bush": {}}, actor=None
+        tmp_path, str(tmp_path), {"bush": {"description": "one bush"}}, actor=None
     )
 
     assert "error" in result
     assert path.read_bytes() == b'{"leaf": {"description": "one leaf"'
 
+    stated = {"bush": {"description": "one bush"}}
     repaired = write_subject_registry(
-        tmp_path, str(tmp_path), {"bush": {}}, allow_removals=True, actor=None
+        tmp_path, str(tmp_path), stated, allow_removals=True, actor=None
     )
     assert "error" not in repaired
-    assert read_registry(tmp_path) == registry_of("bush")
+    assert read_registry(tmp_path) == registry_from_dict(stated)

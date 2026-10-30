@@ -1,25 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "@/api/client";
-import { bucketRefusalOf, inferenceApi, openInferenceStream, resultsApi } from "@/api/inference";
+import { messageOf, refusalOf } from "@/api/http";
+import { inferenceApi, openInferenceStream, resultsApi } from "@/api/inference";
 import {
+  BUCKET_EXISTS,
   CROSS_TILE_MERGE_DESCRIPTIONS,
   type AssessmentSummary,
+  type Assessments,
   type BucketExistsRefusal,
+  type DatasetTree,
   type InferenceJob,
   type JobStatus,
+  type Listed,
   type MaskCut,
-  type RegisteredModel,
+  NOTHING_STATED,
+  type RegisteredModels,
   type Stated,
 } from "@/api/types.generated";
 import { TabHeading } from "@/components/TabHeading";
-import { TERMINAL_STATES } from "@/lib/runStatus";
 import { useStore } from "@/store";
 import { selectDatasetRoot, selectProjectRoot } from "@/store/slices/gui";
 
 type StatedField = "conf" | "cross_tile_nms" | keyof MaskCut;
-
-const MASK_CUT_FIELDS: ReadonlySet<StatedField> = new Set(["mask_binarize", "vertex_spacing"]);
 
 /** The execution values a run without an assessment states, one input each, their ranges the
  *  server's to refuse; the two mask cut inputs are stated together as its one ``mask_cut``. */
@@ -29,9 +32,6 @@ const STATED_INPUTS: { field: StatedField; label: string }[] = [
   { field: "vertex_spacing", label: "Ring spacing" },
   { field: "cross_tile_nms", label: "Merge threshold" },
 ];
-
-/** The assessment select's value for a run that states its own values. */
-const NO_ASSESSMENT = "";
 
 /** One date's refused launch: the facts the response carried, watching the job still writing the
  *  bucket, and a dismissal. Every accessible name below is date-qualified. */
@@ -49,8 +49,7 @@ function RefusedLaunchEntry({
   return (
     <li className="border border-tcip-border rounded p-2 flex flex-col gap-1">
       <p>
-        {date}: job {refusal.job.job_id} is still writing{" "}
-        <span className="font-mono">{refusal.job.bucket}</span>. Choose another name.
+        {date}: {refusal.message}
       </p>
       <div className="flex gap-1">
         <button
@@ -79,45 +78,49 @@ function statusBadgeClass(status: JobStatus): string {
 }
 
 /** The assessments among `assessments` that judged `model`'s checkpoint. */
-function assessmentsOf(assessments: AssessmentSummary[], model: RegisteredModel | undefined) {
-  return model ? assessments.filter((a) => a.checkpoint_sha256 === model.sha256) : [];
+function assessmentsOf(assessments: AssessmentSummary[], model: Listed | undefined) {
+  return model
+    ? assessments.filter((a) => a.assessment.producer?.checkpoint_sha256 === model.entry.sha256)
+    : [];
 }
 
 export function InferenceTab() {
   const projectRoot = useStore(selectProjectRoot);
   const datasetRoot = useStore(selectDatasetRoot);
 
-  const [models, setModels] = useState<RegisteredModel[]>([]);
+  const [registered, setRegistered] = useState<RegisteredModels | null>(null);
+  const models = registered?.models ?? [];
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [modelPath, setModelPath] = useState<string>("");
-  const [assessments, setAssessments] = useState<AssessmentSummary[]>([]);
+  const [assessed, setAssessed] = useState<Assessments | null>(null);
   const [assessmentsError, setAssessmentsError] = useState<string | null>(null);
-  const [dates, setDates] = useState<string[]>([]);
+  const [tree, setTree] = useState<DatasetTree | null>(null);
+  const dates = (tree?.captures ?? []).map((c) => c.name);
   const [datesError, setDatesError] = useState<string | null>(null);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
-  // The name the run's buckets publish under, one ``<name>/<date>`` per date; the breeder names it.
+  // The named bucket each date's own bucket is published beneath; the breeder names it.
   const [bucketName, setBucketName] = useState("");
-  // The assessment whose execution record the run takes and publishes under; NO_ASSESSMENT for a
-  // run stating its own values.
-  const [assessmentId, setAssessmentId] = useState(NO_ASSESSMENT);
+  // The assessment whose execution record the run takes and publishes under; null for a run
+  // stating its own values.
+  const [assessmentId, setAssessmentId] = useState<string | null>(null);
   const [statedInputs, setStatedInputs] = useState<Record<StatedField, string>>({
     conf: "",
     mask_binarize: "",
     vertex_spacing: "",
     cross_tile_nms: "",
   });
-  // The cross-tile merge a tiled run without an assessment states; empty for none stated.
-  const [merge, setMerge] = useState("");
-  // Whether an instance segmentation run without an assessment collects masks; empty for none
-  // stated.
-  const [masks, setMasks] = useState("");
+  // The cross-tile merge a tiled run without an assessment states, and whether an instance
+  // segmentation run without one collects masks; null for none stated.
+  const [merge, setMerge] = useState<Stated["postprocess"]>(null);
+  const [masks, setMasks] = useState<Stated["masks"]>(null);
   // Why the run states the values above, carried on its execution record.
   const [rationale, setRationale] = useState("");
-  // Each job's one record by its id: the listed jobs', and the watched one's once delisted.
+  // Each job's one record by its id: the listed jobs', each launched or watched since, and the
+  // watched one's once a poll delisted it.
   const [jobs, setJobs] = useState<Record<string, InferenceJob>>({});
-  // The ids the last poll listed, and each launched since: a delisted watched job shows its last
-  // error alone rather than a status line frozen on a job that is gone.
-  const [listed, setListed] = useState<ReadonlySet<string>>(new Set());
+  // The watched job the last poll did not list: it shows its last error alone rather than a status
+  // line frozen on a job that is gone; null while the watched job is listed.
+  const [delisted, setDelisted] = useState<string | null>(null);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   // Each bucket_exists refusal, keyed by the date it was refused for.
@@ -127,9 +130,9 @@ export function InferenceTab() {
   const launchButtonRef = useRef<HTMLButtonElement>(null);
   const prevRefusedDatesRef = useRef<string[]>([]);
   const activeJob = activeJobId === null ? undefined : jobs[activeJobId];
-  const listedJobs = Object.values(jobs).filter((j) => listed.has(j.job_id));
-  const model = models.find((m) => m.checkpoint_path === modelPath);
-  const modelAssessments = assessmentsOf(assessments, model);
+  const listedJobs = Object.values(jobs).filter((j) => j.job_id !== delisted);
+  const model = models.find((m) => m.entry.checkpoint_path === modelPath);
+  const modelAssessments = assessmentsOf(assessed?.assessments ?? [], model);
 
   // A refused entry's control can unmount while focused (Dismiss, or its action succeeding),
   // dropping focus to body; restore it to the launch button instead of stranding it there.
@@ -151,35 +154,31 @@ export function InferenceTab() {
   // The chosen model's first passed assessment answers for its run unless the person chooses
   // otherwise; a model with none states its own values.
   useEffect(() => {
-    setAssessmentId(modelAssessments.find((a) => a.passed)?.assessment_id ?? NO_ASSESSMENT);
+    setAssessmentId(modelAssessments.find((a) => a.passed)?.assessment.assessment_id ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelPath, assessments]);
+  }, [modelPath, assessed]);
 
   const refreshModels = useCallback(() => {
     if (!projectRoot) return;
     void resultsApi
       .registeredModels()
       .then((r) => {
-        setModels(r.models ?? []);
+        setRegistered(r);
         setModelsError(null);
       })
       .catch((e) => {
-        setModels([]);
-        setModelsError(
-          `Could not load registered models: ${e instanceof Error ? e.message : String(e)}`,
-        );
+        setRegistered(null);
+        setModelsError(`Could not load registered models: ${messageOf(e)}`);
       });
     void resultsApi
       .assessments()
       .then((r) => {
-        setAssessments(r.assessments);
+        setAssessed(r);
         setAssessmentsError(null);
       })
       .catch((e) => {
-        setAssessments([]);
-        setAssessmentsError(
-          `Could not load assessments: ${e instanceof Error ? e.message : String(e)}`,
-        );
+        setAssessed(null);
+        setAssessmentsError(`Could not load assessments: ${messageOf(e)}`);
       });
   }, [projectRoot]);
 
@@ -192,15 +191,13 @@ export function InferenceTab() {
     void api.dataset
       .tree(datasetRoot)
       .then((t) => {
-        setDates(t.dates_with_images);
-        setSelectedDates((prev) => prev.filter((d) => t.dates_with_images.includes(d)));
+        setTree(t);
+        setSelectedDates((prev) => prev.filter((d) => t.captures.some((c) => c.name === d)));
         setDatesError(null);
       })
       .catch((e) => {
-        setDates([]);
-        setDatesError(
-          `Could not load this dataset's dates: ${e instanceof Error ? e.message : String(e)}`,
-        );
+        setTree(null);
+        setDatesError(`Could not load this dataset's dates: ${messageOf(e)}`);
       });
   }, [datasetRoot]);
 
@@ -213,20 +210,18 @@ export function InferenceTab() {
       inferenceApi
         .listJobs()
         .then((r) => {
-          setJobs((prev) => {
-            const next = Object.fromEntries(r.jobs.map((j) => [j.job_id, j]));
-            if (activeJobId !== null && !(activeJobId in next) && activeJobId in prev) {
-              next[activeJobId] = prev[activeJobId];
-            }
-            return next;
-          });
-          setListed(new Set(r.jobs.map((j) => j.job_id)));
+          const polled = Object.fromEntries(r.jobs.map((j) => [j.job_id, j]));
+          const watchedGone = activeJobId !== null && !(activeJobId in polled);
+          setJobs((prev) =>
+            watchedGone && activeJobId in prev
+              ? { ...polled, [activeJobId]: prev[activeJobId] }
+              : polled,
+          );
+          setDelisted(watchedGone ? activeJobId : null);
           setJobsError(null);
         })
         .catch((e) => {
-          setJobsError(
-            `Could not load inference jobs: ${e instanceof Error ? e.message : String(e)}`,
-          );
+          setJobsError(`Could not load inference jobs: ${messageOf(e)}`);
         }),
     [activeJobId],
   );
@@ -263,25 +258,34 @@ export function InferenceTab() {
     });
   }
 
-  /** What the run states of its execution record: each filled value, the mask cut's filled
-   *  values as its one block, the chosen merge, and the reason; nothing under an assessment. */
+  const own = assessmentId === null;
+  const filled = (field: StatedField) => {
+    const value = statedInputs[field].trim();
+    return own && value !== "" ? Number(value) : null;
+  };
+  const maskBinarize = filled("mask_binarize");
+  const vertexSpacing = filled("vertex_spacing");
+  // A mask cut is its two values together: one typed without the other states no cut.
+  const halfCut = (maskBinarize === null) !== (vertexSpacing === null);
+
+  /** What the run states of its execution record: each filled value, the mask cut once both of
+   *  its values are, the chosen merge, and the reason; nothing under an assessment. */
   function statement(): Stated {
-    if (assessmentId !== NO_ASSESSMENT) return {};
-    const filled = Object.entries(statedInputs)
-      .filter(([, value]) => value.trim() !== "")
-      .map(([field, value]) => [field, Number(value)] as const);
-    const stated: Stated = Object.fromEntries(
-      filled.filter(([field]) => !MASK_CUT_FIELDS.has(field as StatedField)),
-    );
-    const cut = filled.filter(([field]) => MASK_CUT_FIELDS.has(field as StatedField));
-    if (cut.length) stated.mask_cut = Object.fromEntries(cut) as unknown as MaskCut;
-    if (merge) stated.postprocess = merge;
-    if (masks) stated.masks = masks === "true";
-    if (rationale.trim()) stated.rationale = rationale.trim();
-    return stated;
+    return {
+      ...NOTHING_STATED,
+      postprocess: own ? merge : null,
+      cross_tile_nms: filled("cross_tile_nms"),
+      conf: filled("conf"),
+      masks: own ? masks : null,
+      mask_cut:
+        maskBinarize !== null && vertexSpacing !== null
+          ? { mask_binarize: maskBinarize, vertex_spacing: vertexSpacing }
+          : null,
+      rationale: own && rationale.trim() ? rationale.trim() : null,
+    };
   }
 
-  // One date's launch body: its bucket is the named bucket's ``<name>/<date>``.
+  // One date's launch: the server publishes the date's own bucket beneath the named one.
   async function launchOne(checkpointPath: string, date: string) {
     if (!datasetRoot) return;
     try {
@@ -289,27 +293,22 @@ export function InferenceTab() {
         checkpoint_path: checkpointPath,
         dataset_root: datasetRoot,
         date,
-        bucket: `${bucketName.replace(/\/+$/, "")}/${date}`,
+        bucket_name: bucketName,
         stated: statement(),
-        assessment_id: assessmentId === NO_ASSESSMENT ? null : assessmentId,
+        assessment_id: assessmentId,
         user: useStore.getState().user,
       });
       setJobs((prev) => ({ [launched.job_id]: launched, ...prev }));
-      setListed((prev) => new Set(prev).add(launched.job_id));
       setActiveJobId(launched.job_id);
       dropRefusal(date);
     } catch (e) {
-      const refusal = bucketRefusalOf(e);
+      const refusal = refusalOf<BucketExistsRefusal>(e, BUCKET_EXISTS);
       if (refusal) {
         setRefusedLaunches((prev) => ({ ...prev, [date]: refusal }));
         return;
       }
       dropRefusal(date);
-      useStore
-        .getState()
-        .pushToast(
-          `Inference launch failed for ${date}: ${e instanceof Error ? e.message : String(e)}`,
-        );
+      useStore.getState().pushToast(`Inference launch failed for ${date}: ${messageOf(e)}`);
     }
   }
 
@@ -324,7 +323,7 @@ export function InferenceTab() {
     try {
       // One job per date: each date is its own prediction bucket, one job row per date.
       for (const date of selectedDates) {
-        await launchOne(model.checkpoint_path, date);
+        await launchOne(model.entry.checkpoint_path, date);
       }
     } finally {
       setLaunching(false);
@@ -344,21 +343,21 @@ export function InferenceTab() {
   async function onCancel(jobId: string) {
     setCancelRequested((prev) => new Set(prev).add(jobId));
     try {
-      await inferenceApi.cancel(jobId, useStore.getState().user);
+      await inferenceApi.cancel(jobId, { user: useStore.getState().user });
     } catch (e) {
       setCancelRequested((prev) => {
         const next = new Set(prev);
         next.delete(jobId);
         return next;
       });
-      useStore.getState().pushToast(`Cancel failed: ${e instanceof Error ? e.message : String(e)}`);
+      useStore.getState().pushToast(`Cancel failed: ${messageOf(e)}`);
     }
   }
 
   /** A job's state as the row reads it: the backend's, or "canceling" while a cancel it has
    *  not yet honored is requested. */
   function shownStatus(j: InferenceJob): string {
-    return !TERMINAL_STATES.has(j.status) && cancelRequested.has(j.job_id) ? "canceling" : j.status;
+    return j.live && cancelRequested.has(j.job_id) ? "canceling" : j.status;
   }
 
   return (
@@ -384,9 +383,9 @@ export function InferenceTab() {
             onChange={(e) => setModelPath(e.target.value)}
           >
             <option value="">Choose a model</option>
-            {models.map((m) => (
-              <option key={m.checkpoint_path} value={m.checkpoint_path}>
-                {m.name}
+            {models.map(({ entry }) => (
+              <option key={entry.checkpoint_path} value={entry.checkpoint_path}>
+                {entry.name}
               </option>
             ))}
           </select>
@@ -447,19 +446,19 @@ export function InferenceTab() {
         <select
           id="inference-assessment"
           className="tcip-select w-full mb-3"
-          value={assessmentId}
-          onChange={(e) => setAssessmentId(e.target.value)}
+          value={assessmentId ?? ""}
+          onChange={(e) => setAssessmentId(e.target.value || null)}
         >
-          <option value={NO_ASSESSMENT}>None</option>
+          <option value="">None</option>
           {modelAssessments.map((a) => (
-            <option key={a.assessment_id} value={a.assessment_id}>
-              {a.assessment_id}
+            <option key={a.assessment.assessment_id} value={a.assessment.assessment_id}>
+              {a.assessment.assessment_id}
               {a.passed ? "" : " (failed)"}
             </option>
           ))}
         </select>
 
-        {assessmentId === NO_ASSESSMENT && (
+        {own && (
           <>
             {STATED_INPUTS.map(({ field, label }) => (
               <div key={field}>
@@ -485,8 +484,8 @@ export function InferenceTab() {
             <select
               id="inference-merge"
               className="tcip-select w-full mb-3"
-              value={merge}
-              onChange={(e) => setMerge(e.target.value)}
+              value={merge ?? ""}
+              onChange={(e) => setMerge(e.target.value || null)}
             >
               <option value="">None</option>
               {Object.entries(CROSS_TILE_MERGE_DESCRIPTIONS).map(([name, description]) => (
@@ -502,8 +501,8 @@ export function InferenceTab() {
             <select
               id="inference-masks"
               className="tcip-select w-full mb-3"
-              value={masks}
-              onChange={(e) => setMasks(e.target.value)}
+              value={masks === null ? "" : String(masks)}
+              onChange={(e) => setMasks(e.target.value === "" ? null : e.target.value === "true")}
             >
               <option value="">None</option>
               <option value="true">Collect masks</option>
@@ -519,6 +518,11 @@ export function InferenceTab() {
               value={rationale}
               onChange={(e) => setRationale(e.target.value)}
             />
+            {halfCut && (
+              <p className="tcip-problem mb-3" role="status">
+                State both the mask threshold and the ring spacing, or neither.
+              </p>
+            )}
           </>
         )}
 
@@ -526,7 +530,7 @@ export function InferenceTab() {
           ref={launchButtonRef}
           className="tcip-btn-primary w-full"
           onClick={() => void onLaunch()}
-          disabled={launching || !modelPath || !bucketName || selectedDates.length === 0}
+          disabled={launching || !modelPath || !bucketName || selectedDates.length === 0 || halfCut}
         >
           Run
         </button>
@@ -596,7 +600,7 @@ export function InferenceTab() {
                       <button className="tcip-btn" onClick={() => setActiveJobId(j.job_id)}>
                         Watch
                       </button>
-                      {!TERMINAL_STATES.has(j.status) && !cancelRequested.has(j.job_id) && (
+                      {j.live && !cancelRequested.has(j.job_id) && (
                         <button className="tcip-btn" onClick={() => void onCancel(j.job_id)}>
                           Cancel
                         </button>
@@ -619,7 +623,7 @@ export function InferenceTab() {
                 Prediction set <span className="font-mono">{activeJob.bucket}</span>
               </div>
             )}
-            {listed.has(activeJob.job_id) && (
+            {activeJob.job_id !== delisted && (
               <div className="mt-1 tabular-nums">
                 {activeJob.status}, {activeJob.done} of {activeJob.total}
               </div>

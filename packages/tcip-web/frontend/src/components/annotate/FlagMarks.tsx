@@ -1,15 +1,15 @@
 import { memo } from "react";
 
+import type { ServedFlag } from "@/api/types.generated";
 import { HaloLabel } from "@/components/HaloLabel";
 import { FLAG_MARK } from "@/lib/symbology";
-import type { Flag } from "@/store/types";
 
 /** The mark of each open flag that has a place on the image, drawn at that place. */
 export const FlagMarks = memo(function FlagMarks({
   places,
   size,
 }: {
-  places: { at: [number, number]; flag: Flag }[];
+  places: { at: [number, number]; flag: ServedFlag }[];
   size: number;
 }) {
   return (

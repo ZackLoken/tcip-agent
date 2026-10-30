@@ -115,7 +115,7 @@ bearing (denormalizing, cropping, drawing); read the frame and the pixels throug
 | `save_annotations` | Write an image's per-image label document |
 | `import_coco` | Convert an external dataset-level COCO into per-image label documents |
 | `propose_annotations` | Run a named proposal engine over an image, whole-frame or over named grid cells |
-| `push_panel_event` | Push an arbitrary event to a GUI panel over the tcip-web backend for this server's project, not restricted to images/annotations; delivered only while the GUI has that project open |
+| `push_panel_event` | Push one of the four panel events (`banner`, a note shown above a tab; `labels_written`; `annotate_focus`; `canvas_state_request`) to a GUI panel over the tcip-web backend for this server's project; delivered only while the GUI has that project open |
 | `prioritize_review_queue` | Rank images by active-learning uncertainty/diversity for the next review batch, skipping those marked finished for a subject |
 | `triage_predictions` | Sort a registered checkpoint's own predictions into a needs-review queue by a stated confidence band and its rationale, beside the images whose predictions carry no confidence at all; writes nothing |
 
@@ -176,16 +176,15 @@ candidates need sorting, and the person's canvas for review.
 Full workflow, one image per call:
 
 1. `propose_annotations(image_path, engine=<name>)` → the engine proposes candidates, renders a
-   numbered overlay. `grid_cells=[...]` (with `tile_size`, `overlap` echoed by
-   `overlay_reference_grid`) restricts the pass to the named cells' bounding rect instead of the
+   numbered overlay. `region={cells: [...], tile_size, overlap}` (the grid's geometry as
+   `overlay_reference_grid` echoed it) restricts the pass to the named cells' bounding rect instead of the
    whole frame, useful on a large or crowded image; the engine itself never sees a region, only a
-   crop, and the returned candidates are already in full-frame coordinates. On a dataset image
-   this stages the run as a record of its own (`staged: true`) under a fresh `staging_id` the
-   answer carries, keyed by the dataset, capture date, stem and that id, alongside the content
-   identity of the pixels the engine ran on; an earlier run's record stays as it was. On a path
-   outside any dataset's `images/` tree the render and candidates still come back
-   (`staged: false`, `staging_id: null`, naming why), but there is nothing for
-   `stage_proposals`'s `assignments` regime to read back later
+   crop, and the returned candidates are already in full-frame coordinates. It stages the run as
+   a record of its own under a fresh `staging_id` the answer carries, keyed by the dataset,
+   capture date, stem and that id, alongside the content identity of the pixels the engine ran on;
+   an earlier run's record stays as it was. A run proposing nothing answers nothing and stages
+   nothing, and a path outside any dataset's `images/` tree refuses before the engine runs, since
+   there is nowhere to stage its run
 2. Assign each kept candidate its subject, since `stage_proposals` takes every one as
    `{candidate_id, subject}`. Where the run's subject is already known, every candidate is kept
    under it, with no overlay read. Read the numbered overlay with your own image-capable read tool
@@ -208,8 +207,8 @@ Corrective loop (for missed objects):
    spatial reference
 2. Agent reads the grid overlay with its own image-capable read tool → identifies missed regions
    by grid cell
-3. `propose_annotations(image_path, engine=<name>, grid_cells=["B3", "D5"], tile_size=<echoed>,
-   overlap=<echoed>)` → the engine proposes over those cells' bounding rect
+3. `propose_annotations(image_path, engine=<name>, region={cells: ["B3", "D5"],
+   tile_size: <echoed>, overlap: <echoed>})` → the engine proposes over those cells' bounding rect
 4. Stage the right candidates with `stage_proposals(assignments={staging_id, candidates})`, the
    `staging_id` this run answered, for the person to accept
 
@@ -220,15 +219,15 @@ Grid cell system:
   by the stated `overlap`, and echoes the full grid geometry back in every response:
   `tile_size`, `overlap`, `cols`, `rows`, `width`, `height`
 - Agent references cells like "B3" or "F5" instead of pixel coordinates
-- A cell name is meaningless without its grid, so `propose_annotations(grid_cells=...)` requires
-  the explicit `tile_size` and `overlap` the overlay echoed; it refuses rather than assume a
-  grid, and recomputes the identical cells through the shared reference-grid geometry
+- A cell name is meaningless without its grid, so a `propose_annotations` region carries the
+  `tile_size` and `overlap` the overlay echoed beside its cells, and the cells are recomputed
+  through the shared reference-grid geometry
 - `tcip_annotation.grid.grid_to_rect()` looks a cell name up in a supplied cell list and returns
   its native-pixel rect
 
 | Tool | Role | Phase |
 |------|------|-------|
-| `propose_annotations` | Propose candidate masks with a named engine, whole-frame or `grid_cells`-scoped | Discovery and correction |
+| `propose_annotations` | Propose candidate masks with a named engine, whole-frame or `region`-scoped | Discovery and correction |
 | `stage_proposals(assignments=...)` | Stage classified candidates as predictions | Classification |
 | `overlay_reference_grid` | Spatial reference for corrections | Correction |
 | Agent's own image-capable read tool | Agent visual review | All phases |
@@ -308,15 +307,17 @@ bucket and drive the human to review them:
   the live Annotate tab to a frame of `subject` on `date` under `dataset_root`; `bucket` and
   `proposal` are optional, and with them named it shows the proposals of that bucket (a published
   bucket, a proposal's included) with `proposal` selected, so the person sees exactly what you
-  flagged without hunting. The answer's `delivered` says whether the backend accepted the event,
-  never that a browser showed it: the backend accepts it only while it has this server's project
-  open, otherwise answering `delivered: false` with the id of the project it does have open, and
-  with no backend running the answer is `delivered: false` too.
+  flagged without hunting. The answer's `reason` is `null` once the backend accepted the event,
+  never a sign that a browser showed it: the backend accepts it only while it has this server's
+  project open, and otherwise the `reason` says why not: the backend's own refusal, whose
+  `open_project_id` names the project it does have open, or a sentence such as that no backend
+  answered.
 - `capture_live_canvas(refresh, crop_to_viewport, max_edge)` renders the canvas state the GUI last
   pushed for this project (its image, viewport, and shapes, unsaved or in-progress ones included)
   and returns an `image_path` you read with your own image-capable read tool. With `refresh` it
   first pings the GUI to push fresh state and waits briefly for it. The answer's `refreshed`,
-  `refresh_ping_delivered` and `state_age_seconds` describe the canvas state's metadata, which a
+  `refresh_answer` (the ping's own answer, its `reason` `null` once accepted) and `state_age_seconds`
+  describe the canvas state's metadata, which a
   heartbeat updates without shapes; whether the shapes were pushed and how old they are is
   `shapes_missing` and `shapes_age_seconds`. With no state pushed at all it refuses.
 

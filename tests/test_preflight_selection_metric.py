@@ -158,9 +158,12 @@ def test_a_body_reporting_its_own_selection_is_admitted_and_completes(
     run_dir = experiments.experiment_dir(
         launched.experiment_id, project=tmp_path
     )
-    rows = experiments.epoch_rows(
-        experiments.read_rows(run_dir / experiments.METRICS_FILE)[0]
-    )
+    rows = [
+        row.model_dump()
+        for row in experiments.epoch_rows(
+            experiments.read_rows(run_dir / experiments.METRICS_FILE)[0]
+        )
+    ]
     assert any(
         row.get("selection_metric") == "objective" and "selection" in row
         for row in rows

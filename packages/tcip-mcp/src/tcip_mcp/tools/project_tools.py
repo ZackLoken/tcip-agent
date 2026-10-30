@@ -9,11 +9,17 @@ import zipfile
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    TypeAdapter,
+)
 
 import tcip_store
 from tcip_annotation.text import Text
 from tcip_mcp.audit import audited
+from tcip_mcp.dataset_layout import DatasetRecord
 from tcip_mcp.project_record import CaptureInvariances
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
@@ -137,36 +143,34 @@ def register_dataset(
     # identity is actually changing under it and ends when this write is the one that lands.
     while True:
         stored = tcip_store.read_blob_versioned(ident_path, default=None)
-        if stored.value is None:
-            existing: dict = {}
-        else:
-            try:
-                existing = decode_dataset_identity_document(
-                    stored.value, dataset_root=root
-                )
-            except ValueError as exc:
-                return {
-                    "error": f"{exc}; minting a fresh id over it would sever every record "
-                    "that cites the old one"
-                }
+        try:
+            existing = (
+                None
+                if stored.value is None
+                else decode_dataset_identity_document(stored.value, dataset_root=root)
+            )
+        except ValueError as exc:
+            return {
+                "error": f"{exc}; minting a fresh id over it would sever every record "
+                "that cites the old one"
+            }
         entry = DatasetEntry(
-            id=existing.get("id") or mint_id(), path=stored_path(root, project)
+            id=mint_id() if existing is None else existing.id,
+            path=stored_path(root, project),
         )
-        identity: dict[str, JsonValue] = {
-            "crop": crop,
-            "id": entry.id,
-            "fingerprint": fingerprint,
-        }
+        identity = DatasetRecord(crop=crop, id=entry.id, fingerprint=fingerprint)
         try:
             tcip_store.put_blob(
-                ident_path, encode_record(identity), expect=stored.version
+                ident_path,
+                encode_record(identity.model_dump(mode="json")),
+                expect=stored.version,
             )
         except VersionConflictError:
             continue
         break
 
     upsert_dataset(project, entry)
-    return {"dataset_root": str(root), **identity}
+    return {"dataset_root": str(root), **identity.model_dump(mode="json")}
 
 
 class RegisteredPath(BaseModel):
@@ -179,7 +183,7 @@ class RegisteredPath(BaseModel):
 
     path: str
     state: Literal["in_place", "moved", "diverged", "gone"]
-    identity: dict[str, JsonValue] | None = None
+    identity: DatasetRecord | None = None
     unreadable: str | None = None
 
 
@@ -203,7 +207,7 @@ class DatasetIdentityCheck(BaseModel):
         "no_fingerprint",
     ]
     fingerprint: str | None = None
-    identity: dict[str, JsonValue] | None = None
+    identity: DatasetRecord | None = None
     reason: str | None = None
     registered: list[RegisteredPath] = []
 
@@ -241,10 +245,10 @@ def check_dataset_identity(
             fingerprint=current,
             reason=str(exc),
         )
-    recorded = identity["fingerprint"]
+    recorded = identity.fingerprint
     registered: list[RegisteredPath] = []
     for entry in read_datasets(project):
-        if entry.id != identity["id"]:
+        if entry.id != identity.id:
             continue
         entry_path = dataset_entry_path(project, entry)
         try:
@@ -293,7 +297,8 @@ def initialize_project(
 
     The project gets ``.tcip/`` with its artifacts and models directories, and its record holding
     a freshly minted id, ``display_name``, ``site`` and ``invariances``, then one
-    ``project_created`` line by ``actor`` in its own log.
+    ``project_created`` line by ``actor`` in its own log. Answers ``project_path`` and the
+    ``record`` as :func:`inspect_project` carries it.
 
     Creating a project that already records the same display name, site and invariances answers
     it as it stands; one recording a different site, display name or invariances refuses rather
@@ -318,7 +323,7 @@ def initialize_project(
         project = located(Path(project_path).expanduser(), None)
         record = create_record(
             project, display_name, site, invariances
-        ).model_dump()
+        ).model_dump(mode="json")
     except (ValueError, StoreError) as exc:
         return {"error": str(exc)}
     tcip = _project_dir(str(project))
@@ -327,7 +332,7 @@ def initialize_project(
     record_event_or_raise(
         "project_created", record, actor=actor, scope=project
     )
-    return {"project_path": str(project), **record}
+    return {"project_path": str(project), "record": record}
 
 
 @tool()
@@ -353,19 +358,23 @@ def view_gui_state(project: Path) -> dict:
 def inspect_project(project: Path) -> dict:
     """Get an overview of the project.
 
-    Carries the record's fields (``id``, ``display_name``, ``site`` and ``invariances``) beside
-    ``record_problem`` from ``tcip_mcp.project_record.record_fields``: the fields are set, or
-    ``record_problem`` names why they are not (a damaged record, or a root the store refuses to
-    read). ``plant_mappings``
+    Carries the project's ``record`` beside ``record_problem`` from
+    ``tcip_mcp.project_record.record_or_problem``: the record is set, or ``record_problem`` names
+    why it is not (a damaged record, or a root the store refuses to read). ``plant_mappings``
     carries every mapping name persisted under the project, the same shape:
     ``plant_mappings_problem`` names why the listing came back empty when the store refuses to
     read the root. ``recent_activity`` is :func:`_recent_activity`'s.
     """
-    from tcip_mcp.project_record import record_fields
+    from tcip_mcp.project_record import record_or_problem
 
     tcip = project / ".tcip"
 
-    status: dict = {"project_path": str(project), **record_fields(project)}
+    record, problem = record_or_problem(project)
+    status: dict = {
+        "project_path": str(project),
+        "record": None if record is None else record.model_dump(mode="json"),
+        "record_problem": problem,
+    }
 
     # Models
     models_dir = tcip / "models"
@@ -408,8 +417,29 @@ _ACTIVITY_TOOLS = (
 )
 
 
+class LastRetrospective(BaseModel):
+    """The last retrospective a project's log records: its ``project_id`` and when it landed."""
+
+    project_id: str
+    modified_at: AwareDatetime
+
+
+class RecentActivity(BaseModel):
+    """A project's recent memory activity, as :func:`_recent_activity` reads it from its log.
+
+    Each instant and the last retrospective are ``None`` while the log records no such act.
+    """
+
+    reports_since_last_retrospective: int = 0
+    reports_since_last_distillation: int = 0
+    retrospectives_since_last_distillation: int = 0
+    last_retrospective: LastRetrospective | None = None
+    last_distillation_at: AwareDatetime | None = None
+    last_activity: AwareDatetime | None = None
+
+
 def _recent_activity(project: Path) -> dict:
-    """Derive the project's recent memory activity from its audit log.
+    """Derive the project's recent memory activity (:class:`RecentActivity`) from its audit log.
 
     The activity is read from the log's ``report_friction``, ``write_retrospective`` and
     ``record_distillation_pass`` lines in the order they landed: the reports since the last
@@ -424,29 +454,24 @@ def _recent_activity(project: Path) -> dict:
         lines, _cursor = acts_of(project, _ACTIVITY_TOOLS)
     except ValueError as exc:
         return {"status_unavailable": str(exc)}
-    activity: dict = {
-        "reports_since_last_retrospective": 0,
-        "reports_since_last_distillation": 0,
-        "retrospectives_since_last_distillation": 0,
-    }
+    activity = RecentActivity()
     for line in lines:
-        if line["tool"] == "record_distillation_pass":
-            activity["reports_since_last_distillation"] = 0
-            activity["retrospectives_since_last_distillation"] = 0
-            activity["last_distillation_at"] = line["timestamp"]
+        if line.tool == "record_distillation_pass":
+            activity.reports_since_last_distillation = 0
+            activity.retrospectives_since_last_distillation = 0
+            activity.last_distillation_at = line.timestamp
             continue
-        if line["tool"] == "report_friction":
-            activity["reports_since_last_retrospective"] += 1
-            activity["reports_since_last_distillation"] += 1
+        if line.tool == "report_friction":
+            activity.reports_since_last_retrospective += 1
+            activity.reports_since_last_distillation += 1
         else:
-            activity["reports_since_last_retrospective"] = 0
-            activity["retrospectives_since_last_distillation"] += 1
-            activity["last_retrospective"] = {
-                "project_id": line["arguments"]["project_id"],
-                "modified_at": line["timestamp"],
-            }
-        activity["last_activity"] = line["timestamp"]
-    return activity
+            activity.reports_since_last_retrospective = 0
+            activity.retrospectives_since_last_distillation += 1
+            activity.last_retrospective = LastRetrospective.model_validate(
+                line.arguments | {"modified_at": line.timestamp}
+            )
+        activity.last_activity = line.timestamp
+    return activity.model_dump(mode="json")
 
 
 class ZipBundle(BaseModel):

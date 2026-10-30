@@ -1,9 +1,9 @@
 """GUI-driving tools: push data to a panel, or drive the live Annotate tab to a frame.
 
-Delivery goes through the tcip-web event channel (:mod:`tcip_mcp.web_client`), which delivers only
-when the backend has this server's project open, and answers ``delivered: false`` naming what it
-has open otherwise, saying it has none open, or when no backend is serving the workspace.
-``delivered: true`` means the backend accepted the event, not that a browser was listening.
+Delivery goes through the tcip-web event channel (:mod:`tcip_mcp.web_client`), which takes an
+event only when the backend has this server's project open; its answer's ``reason`` says why not
+otherwise. A ``reason`` of ``None`` means the backend accepted the event, not that a browser was
+listening.
 """
 
 from __future__ import annotations
@@ -16,40 +16,42 @@ from tcip_annotation.json_io import (
 )
 from tcip_annotation.state import polygonal
 from tcip_mcp.server import tool
-from tcip_mcp.web_client import AnnotateMode, Panel
+from tcip_mcp.web_client import (
+    AnnotateMode,
+    Panel,
+    PanelEvent,
+    PanelEventAnswer,
+)
 from tcip_mcp.workspace import BoundProject
 
 
 @tool()
 def push_panel_event(
-    bound: BoundProject, panel: Panel, event_type: str, data: dict
-) -> dict:
-    """Push structured data to a TCIP GUI panel via the tcip-web backend.
+    bound: BoundProject, panel: Panel, event: PanelEvent
+) -> PanelEventAnswer:
+    """Push one panel event to a TCIP GUI panel via the tcip-web backend.
 
-    The backend is the one serving the bound project's workspace, which delivers it only while it
+    The backend is the one serving the bound project's workspace, which takes it only while it
     has this project open.
 
     Sends an HTTP POST to the running FastAPI server (see :mod:`tcip_mcp.web_client`); the backend
-    broadcasts to any connected browsers via WebSocket, or answers ``delivered: false`` naming the
-    project it has open instead, or saying it has none open. If the backend itself is not
-    running, returns ``{"status": "no_subscribers"}``.
+    broadcasts to any connected browsers via WebSocket. The answer is
+    :class:`~tcip_mcp.web_client.PanelEventAnswer`: ``reason`` is ``None`` once the backend took
+    it, otherwise says why not (the backend's refusal naming the other project it has open, none
+    open, or no backend running).
 
     Args:
         panel: Target panel: one per GUI tab, or 'app' for app-level events like
             annotate_focus.
-        event_type: Any event type the panel understands, not confined to
-            ``web_client.PLATFORM_PANEL_EVENTS`` (the platform's own emitters). 'banner' is the one
-            example the browser renders directly: ``data['text']`` shows as a quiet note above that
-            tab.
-        data: Arbitrary JSON data payload.
+        event: One of the four panel events, told apart by its ``event_type``: ``banner`` (its
+            ``text`` shows as a quiet note above that panel's tab), ``labels_written`` (the image
+            at ``image_path`` had its labels written), ``annotate_focus`` (a focus as
+            ``focus_human_attention`` builds it) and ``canvas_state_request``.
 
     """
     from tcip_mcp.web_client import post_panel_event
 
-    result = post_panel_event(bound, panel, event_type, data)
-    result.setdefault("panel", panel)
-    result.setdefault("event_type", event_type)
-    return result
+    return post_panel_event(bound, panel, event)
 
 
 @tool()
@@ -70,9 +72,9 @@ def focus_human_attention(
 
     It lands on ``image_index``, else on the first frame holding ``subject``: in the bucket's
     document for it when a bucket is named, in its label document otherwise. The result is the
-    event channel's answer (:func:`~tcip_mcp.web_client.post_panel_event`), its refusal reason
-    and ``open_project_id`` included, with the frame landed on added: a backend with another
-    project open, or none running, answers ``delivered: false`` rather than raising. An
+    event channel's answer (:func:`~tcip_mcp.web_client.post_panel_event`), its ``reason``
+    included, with the frame landed on added: a backend with another project open, or none
+    running, answers with a ``reason`` rather than raising. An
     image elsewhere on the date whose document will not read is named by file name in the result's
     ``unreadable``; only the landed-on frame's own unreadable document refuses, naming that
     document, and an ``image_index`` outside the date's images or a ``date`` that is not one path
@@ -87,7 +89,8 @@ def focus_human_attention(
             document, the bucket's when one is named, actually carries).
         bucket: The name of the published bucket or staged proposals whose proposals the canvas
             shows.
-        proposal: The index of the proposal, in the bucket's document for the frame, to focus.
+        proposal: The index of the proposal, in the bucket's document for the frame, to focus;
+            with no ``bucket`` named it names no proposal, and the focus's type refuses it.
 
     """
     from tcip_annotation.json_io import annotations_hold_subject
@@ -95,11 +98,7 @@ def focus_human_attention(
     from tcip_mcp.dataset_layout import image_dir, label_key
     from tcip_mcp.pipelines.image_utils import logical_images_by_name, stem_of
     from tcip_mcp.registry_paths import located
-    from tcip_mcp.web_client import (
-        PANEL_EVENT_ANNOTATE_FOCUS,
-        AnnotateFocus,
-        post_panel_event,
-    )
+    from tcip_mcp.web_client import AnnotateFocus, post_panel_event
 
     dataset_root = str(located(dataset_root, bound.root))
     try:
@@ -151,23 +150,25 @@ def focus_human_attention(
     target_name = images[image_index]
     if target_name in unreadable:
         return {"error": unreadable[target_name]}
-    focus = AnnotateFocus(
-        dataset_root=dataset_root,
-        subject=subject,
-        date=date,
-        bucket=bucket,
-        image_index=image_index,
-        mode=mode
-        or _TASK_MODE.get(
-            _subject_task(held[target_name], subject) or "", "box"
-        ),
-        proposal=proposal,
+    focus = AnnotateFocus.model_validate(
+        {
+            "dataset_root": dataset_root,
+            "subject": subject,
+            "date": date,
+            "bucket": bucket,
+            "image_index": image_index,
+            "mode": mode
+            or _TASK_MODE.get(
+                _subject_task(held[target_name], subject) or "", "box"
+            ),
+            "proposal": None
+            if proposal is None
+            else {"bucket": bucket, "index": proposal},
+        }
     )
     return {
-        **post_panel_event(
-            bound, "app", PANEL_EVENT_ANNOTATE_FOCUS, focus.model_dump()
-        ),
-        **focus.model_dump(exclude={"dataset_root"}),
+        **post_panel_event(bound, "app", focus).model_dump(),
+        **focus.model_dump(exclude={"dataset_root", "event_type"}),
         "n_images": len(images),
         "n_holding_subject": len(holding),
         "image": target_name,

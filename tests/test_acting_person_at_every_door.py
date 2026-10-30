@@ -35,14 +35,18 @@ DOORS = [
             "checkpoint_path": "m.pt",
             "dataset_root": "d",
             "date": "2026-01-01",
-            "bucket": "o",
+            "bucket_name": "o",
             "stated": {},
         },
     ),
     ("/api/inference/jobs/inf-1/cancel", {}),
     (
         "/api/subjects/save",
-        {"subjects": {"bud": {}}, "dataset_root": "d", "version": None},
+        {
+            "subjects": {"bud": {"description": "one bud"}},
+            "dataset_root": "d",
+            "version": None,
+        },
     ),
     (
         "/api/results/plant_mapping/build",
@@ -95,16 +99,13 @@ DOORS = [
             "started": None,
         },
     ),
-    ("/api/annotate/labels", {"image_path": "a.jpg"}),
+    ("/api/annotate/labels", {"image_path": "a.jpg", "annotations": []}),
     (
         "/api/canvas/state",
         {
             "project_id": "p",
             "tab": "annotate",
             "image_path": "a.jpg",
-            "image": "a.jpg",
-            "img_width": 200,
-            "img_height": 100,
             "viewport": None,
             "mode": "box",
             "active_subject": None,

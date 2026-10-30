@@ -22,10 +22,9 @@ export const PointOverlay = memo(function PointOverlay({
   lineW,
   labelSize,
   label,
-  showLabel,
   focused,
 }: {
-  point: PointShape;
+  point: Pick<PointShape, "x" | "y">;
   stroke: string;
   style: LineStyle;
   coreR: number;
@@ -33,8 +32,7 @@ export const PointOverlay = memo(function PointOverlay({
   tickOuter: number;
   lineW: number;
   labelSize: number;
-  label: string;
-  showLabel?: boolean;
+  label: string | null;
   /** The focused item draws the halo as a ring under its core. */
   focused?: boolean;
 }) {
@@ -69,7 +67,7 @@ export const PointOverlay = memo(function PointOverlay({
         />
       ))}
       <Circle x={x} y={y} radius={coreR} fill={stroke} stroke="#ffffff" strokeWidth={lineW * 0.6} />
-      {showLabel && (
+      {label !== null && (
         <HaloLabel x={x + tickOuter} y={y} text={label} fill={stroke} size={labelSize} />
       )}
     </>

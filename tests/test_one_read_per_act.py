@@ -586,9 +586,10 @@ def test_each_whole_dataset_reader_scans_each_capture_once_in_the_one_walk(
     from tcip_mcp import dataset_layout
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines import image_utils
-    from tcip_mcp.project_record import record_fields
+    from tcip_mcp.project_record import record_or_problem
     from tcip_mcp.tools.data_tools import _scan_dataset
     from tcip_mcp.tools.project_tools import inspect_project
+    from tcip_mcp.workspace import ListedProject
     from tcip_web.routes.projects import _summarize
     from tests._mapping_fixtures import (
         geolocated_captures,
@@ -636,7 +637,7 @@ def test_each_whole_dataset_reader_scans_each_capture_once_in_the_one_walk(
         lambda: _scan_dataset(str(root)),
         lambda: image_utils.logical_image_counts(root),
         lambda: inspect_project(root),
-        lambda: _summarize(root, record_fields(root)),
+        lambda: _summarize(ListedProject(root, *record_or_problem(root))),
         lambda: mapping_over(root, [plants], tmp_path),
     ]
     for read in reads:

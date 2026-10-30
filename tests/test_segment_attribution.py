@@ -7,10 +7,12 @@ synthetic segments over a real registered-dataset raster (:mod:`tests._geotiff_f
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import TypeAdapter, ValidationError
 
 from tcip_annotation.json_io import LabelDocument, read_label_document
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
@@ -21,6 +23,7 @@ from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
 from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
 from tcip_mcp.pipelines.postprocessing.segment_attribution import (
     CanopySegmentError,
+    PositionError,
     assign_detections_to_segments,
     load_canopy_segments,
     tie_segments_to_plants,
@@ -44,6 +47,23 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.raster_source import RasterIdentity
 
 WIDTH = HEIGHT = 64
+
+
+@pytest.mark.parametrize("bound", [-1.0, math.inf, math.nan])
+def test_a_position_error_that_is_no_finite_nonnegative_distance_refuses(
+    bound: float,
+) -> None:
+    """The stated position error is refused by its type, wherever it is stated."""
+    with pytest.raises(ValidationError):
+        TypeAdapter(PositionError).validate_python(bound)
+
+
+def test_a_finite_nonnegative_position_error_is_admitted() -> None:
+    """The fixture's stated position error validates as itself."""
+    assert (
+        TypeAdapter(PositionError).validate_python(POSITION_ERROR_M)
+        == POSITION_ERROR_M
+    )
 
 
 def _setup(
@@ -383,8 +403,9 @@ def test_load_canopy_segments_admits_a_proposed_polygon_accepted_through_the_sav
         json={
             "image_path": str(raster_path),
             "annotations": [],
-            "bucket": staged["bucket"],
-            "accept": [0],
+            "gestures": {
+                "decide": {"bucket": staged.bucket, "verdicts": {"0": "accepted"}}
+            },
             "user": "breeder",
         },
     )
@@ -458,8 +479,7 @@ def test_tie_segments_to_plants_leaves_a_plant_within_the_position_error_untied(
     """A plant within the position error of its segment's boundary is left untied.
 
     A plant whose projected position clears its segment's boundary by less than the stated
-    position error is not tied, and a detection in its segment is attributed to no plant. A
-    negative, NaN or infinite bound refuses.
+    position error is not tied, and a detection in its segment is attributed to no plant.
     """
     _, raster_path, georef, identity = _setup(tmp_path)
     segments_data = _write_document(
@@ -518,17 +538,6 @@ def test_tie_segments_to_plants_leaves_a_plant_within_the_position_error_untied(
         "segment_plant_within_position_error",
         None,
     )
-
-    for bound in (-1.0, float("nan"), float("inf")):
-        with pytest.raises(ValueError, match="finite, nonnegative"):
-            tie_segments_to_plants(
-                segments,
-                plants,
-                georef,
-                width=WIDTH,
-                height=HEIGHT,
-                position_error_m=bound,
-            )
 
 
 def _one_segment_tie(

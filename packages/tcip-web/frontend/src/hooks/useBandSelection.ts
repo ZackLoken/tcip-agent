@@ -1,12 +1,7 @@
 import { useCallback, useMemo } from "react";
 
-import type { ImageBandsResponse } from "@/api/client";
-import {
-  bandSetSignature,
-  defaultBandSelection,
-  isPlainColorFrame,
-  type BandSelection,
-} from "@/lib/bandSelection";
+import type { ImageBands } from "@/api/types.generated";
+import { bandSetSignature, defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import { useStore } from "@/store";
 
 /** A stable no-op setter for the non-applicable case, so a consumer that puts the returned setter
@@ -21,24 +16,24 @@ function noopSetter(): void {}
  * destroys it.
  *
  * `null` (with a no-op setter) while `bandsInfo` itself is `null` (loading, path-less, a failed
- * fetch), the frame is a plain color photo with no band choice to make, or the frame has three or
- * fewer bands: nothing is read or written in any of those cases, so a tab switch, which remounts
- * this hook, neither wipes nor reseeds anything. Absent a stored selection for a set, the default
+ * fetch) or the frame displays as its own pixels (the server's `plain`), with no band choice to
+ * make: nothing is read or written in either case, so a tab switch, which remounts this hook,
+ * neither wipes nor reseeds anything. Absent a stored selection for a set, the default
  * (`defaultBandSelection`) is returned but not recorded; the first change records it.
  */
 export function useBandSelection(
-  bandsInfo: ImageBandsResponse | null,
+  bandsInfo: ImageBands | null,
 ): [BandSelection | null, (next: BandSelection) => void] {
   const byBandSet = useStore((s) => s.bandSelection.byBandSet);
   const setBandSelectionFor = useStore((s) => s.setBandSelectionFor);
 
-  const applicable = !!bandsInfo && bandsInfo.band_count > 3 && !isPlainColorFrame(bandsInfo);
+  const applicable = !!bandsInfo && !bandsInfo.plain;
   const signature = applicable ? bandSetSignature(bandsInfo.bands) : "";
 
   // Memoized so a consumer that keys a dependency array off the returned selection or setter
   // does not see a new object/function identity on every render that changes nothing.
   const defaultSelection = useMemo(
-    () => (applicable && bandsInfo ? defaultBandSelection(bandsInfo.bands) : null),
+    () => (applicable && bandsInfo ? defaultBandSelection(bandsInfo) : null),
     [applicable, signature], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const setSelection = useCallback(

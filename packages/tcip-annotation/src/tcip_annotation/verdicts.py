@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, get_args
 
 from pydantic import (
+    AwareDatetime,
     ConfigDict,
     Field,
     StrictInt,
@@ -18,7 +19,6 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
 
 import tcip_store
 from tcip_annotation.json_io import Person
-from tcip_annotation.text import Text
 from tcip_store import Key
 
 if TYPE_CHECKING:
@@ -40,7 +40,7 @@ class Verdict:
     proposal: Annotated[StrictInt, Field(ge=0)]
     action: VerdictAction
     by: Person
-    at: Text
+    at: AwareDatetime
 
 
 _VERDICT = TypeAdapter(Verdict)

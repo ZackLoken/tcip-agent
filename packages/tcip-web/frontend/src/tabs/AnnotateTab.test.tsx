@@ -2,14 +2,15 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
-import { api } from "@/api/client";
-import type { LoadedLabels, SaveResult } from "@/api/client";
-import { StructuredRefusalError } from "@/api/http";
+import { api, loadedLabels, type LoadedLabels, type LoadedSave } from "@/api/client";
 import { sessionsApi } from "@/api/sessions";
 import { subjectColor } from "@/api/subjects";
+import { type ImageBands } from "@/api/types.generated";
+import { stateSocket } from "@/api/ws";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { CUT_MISSES_REFUSAL } from "@/lib/polygonGeometry";
+import type { ReviewItem } from "@/lib/reviewItems";
 import {
   CASING,
   FLAG_MARK,
@@ -17,18 +18,37 @@ import {
   MATCH_COLORS,
   MATCH_TYPES,
   MATCH_WORDS,
+  proposalLabel,
 } from "@/lib/symbology";
 import { useStore } from "@/store";
-import type { Flag, ServedProposals } from "@/store/types";
+import type { AnnotateView } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
+import {
+  ANNOTATE_ANSWERS,
+  LANDED,
+  LOADED,
+  loadHolding,
+  loadOf,
+  POINT_SUBJECT,
+  registryOf,
+  SECOND_SUBJECT,
+} from "@/test/annotate";
+import { BAND_ANSWERS } from "@/test/bands";
+import { LABEL_ANSWERS, servedAnnotation } from "@/test/labels";
+import { PANEL_EVENTS } from "@/test/panelEvents";
+import { PROJECT_FIXTURES } from "@/test/projectRecords";
+import { thrown } from "@/test/refusals";
+import { SESSION_ANSWERS, sessionOf } from "@/test/sessions";
 import {
   changeSelection,
   openTestProject,
   RAW_SELECTION,
+  SELECTED_SUBJECT as SUBJECT,
   selected,
   TEST_PROJECT,
   testProject,
 } from "@/test/store";
+import { AGENT_CLIENT } from "@/test/training";
 
 // Konva needs a real 2D canvas; these tests exercise label I/O ordering and
 // store->canvas prop flow, not drawing. Render Konva shapes as inspectable divs
@@ -118,17 +138,17 @@ vi.mock("@/components/Canvas/CanvasStage", () => {
 });
 vi.mock("@/components/AnnotateToolbar", () => ({
   AnnotateToolbar: (props: {
-    bandsInfo?: { band_count: number } | null;
+    bandsInfo?: ImageBands | null;
     subjectState: string | null;
     onComplete: (next: boolean) => void;
     onCancelSave: () => void;
     proposing: boolean;
     onPhrase: (phrase: string) => void;
     onPropose: () => void;
-    view: { proposals: boolean; predictions: boolean };
-    onView: (next: { proposals: boolean; predictions: boolean }) => void;
+    view: AnnotateView;
+    onView: (next: AnnotateView) => void;
     predictionsAvailable: boolean;
-    focused: { kind: string; shape: string; ref: number } | null;
+    focused: ReviewItem | null;
   }) => (
     <div
       data-testid="toolbar"
@@ -139,7 +159,9 @@ vi.mock("@/components/AnnotateToolbar", () => ({
       data-view-predictions={props.view.predictions}
       data-predictions-available={props.predictionsAvailable}
       data-focused={
-        props.focused ? `${props.focused.kind} ${props.focused.shape} ${props.focused.ref}` : ""
+        props.focused?.kind === "annotation"
+          ? `annotation ${props.focused.shape} ${props.focused.ref}`
+          : (props.focused?.kind ?? "")
       }
     >
       <button onClick={() => props.onComplete(true)}>toolbar-complete</button>
@@ -161,48 +183,37 @@ const toggleProposals = () => fireEvent.keyDown(window, { key: "h" });
 
 const initialStoreState = useStore.getState();
 
-// Distinct mtime tokens per image so a save's echoed token identifies which image's load it
-// came from. Strings, since the ns value exceeds JS's exact-integer range.
+// Each photograph's produced load carries its own token, so a save's echoed token identifies
+// which image's load it came from.
 const [IMG1, IMG2] = RAW_SELECTION.images.map((image) => image.path);
-const LOAD_MTIME: Record<string, number> = { [IMG1]: 100, [IMG2]: 200 };
+const IMG1_NAME = RAW_SELECTION.images[0].name;
 
-function labelsFor(imagePath: string) {
-  return {
-    image_path: imagePath,
-    img_width: 1000,
-    img_height: 800,
-    boxes: [],
-    polygons: [],
-    points: [],
-    imageAnnotations: [],
-    completion: {},
-    flags: [] as Flag[],
-    base_mtime: String(LOAD_MTIME[imagePath] ?? 1),
-  };
-}
+/** A one-ring triangle near the frame's corner. */
+const TRIANGLE: [number, number][][] = [
+  [
+    [0, 0],
+    [10, 0],
+    [10, 10],
+  ],
+];
 
-/** A landed save: the document it answers and the token that names it. */
-const saved = (
-  base_mtime: string,
-  over: Partial<LoadedLabels> = {},
-  accepted: Record<string, number> = {},
-): SaveResult => ({
-  status: "ok",
-  labels: { ...labelsFor(IMG1), ...over, base_mtime },
-  accepted,
-});
+/** The save's refusal of a document that changed since it was loaded, as the client throws it. */
+const versionConflict = () => thrown(LABEL_ANSWERS.version_conflict);
+
+/** The sentence that refusal states, which the tab shows. */
+const CONFLICT_SENTENCE = LABEL_ANSWERS.version_conflict.body.detail.message;
 
 function setupDataset() {
-  openTestProject(selected({ subject: "subject_a", count: 2 }), {
+  openTestProject(selected({ subject: SUBJECT, count: 2 }), {
     mode: "box",
-    active_subject: "subject_a",
+    active_subject: SUBJECT,
   });
 }
 
 function addBox() {
   useStore
     .getState()
-    .add("boxes", { x1: 10, y1: 10, x2: 50, y2: 50, subject: "subject_a", attributes: {} });
+    .add("boxes", { x1: 10, y1: 10, x2: 50, y2: 50, subject: SUBJECT, attributes: {} });
 }
 
 const flush = () => act(async () => {});
@@ -213,12 +224,12 @@ const pressSave = () => fireEvent.keyDown(window, { key: "s", ctrlKey: true });
 let loadSpy: MockInstance<typeof api.annotate.load>;
 let saveSpy: MockInstance<typeof api.annotate.save>;
 
-/** Hold every save until the test answers it; each save's resolver joins the list, oldest first. */
-function heldSaves(): ((r: SaveResult) => void)[] {
-  const pending: ((r: SaveResult) => void)[] = [];
+/** Hold every save until the test answers it; each save joins the list, oldest first. */
+function heldSaves(): PromiseWithResolvers<LoadedSave>[] {
+  const pending: PromiseWithResolvers<LoadedSave>[] = [];
   saveSpy.mockImplementation(() => {
-    const save = Promise.withResolvers<SaveResult>();
-    pending.push(save.resolve);
+    const save = Promise.withResolvers<LoadedSave>();
+    pending.push(save);
     return save.promise;
   });
   return pending;
@@ -230,24 +241,14 @@ beforeEach(() => {
   setupDataset();
   loadSpy = vi
     .spyOn(api.annotate, "load")
-    .mockImplementation((imagePath) => Promise.resolve(labelsFor(imagePath)));
-  saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue(saved("1"));
+    .mockImplementation((imagePath) => Promise.resolve(loadOf(imagePath)));
+  saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue(LANDED.box);
   vi.spyOn(api.annotate, "stagings").mockResolvedValue({ buckets: [] });
   vi.spyOn(api.annotate, "states").mockResolvedValue({ states: {} });
-  vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({
-    status: "ok",
-    session: { started: "2026-10-07T14:00:00+00:00", ended: false },
-  });
+  vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue(SESSION_ANSWERS.landed);
   // Default: a standard 3-band RGB image; the band picker's own describe block overrides this
   // per-case to exercise the >3-band path.
-  vi.spyOn(api.images, "bands").mockResolvedValue({
-    band_count: 3,
-    bands: [
-      { name: "Red", wavelength_nm: null, dtype: "uint8", min: 0, max: 255 },
-      { name: "Green", wavelength_nm: null, dtype: "uint8", min: 0, max: 255 },
-      { name: "Blue", wavelength_nm: null, dtype: "uint8", min: 0, max: 255 },
-    ],
-  });
+  vi.spyOn(api.images, "bands").mockResolvedValue(BAND_ANSWERS.plain);
   // jsdom's own getBoundingClientRect is always zero; the viewport math needs a real host.
   vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 1000, h: 800 });
   vi.spyOn(api.images, "viewReads").mockResolvedValue({ reads: [] });
@@ -280,7 +281,7 @@ describe("AnnotateTab session contributions", () => {
 
     expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(1);
     expect(vi.mocked(sessionsApi.imageEvent).mock.calls[0][0]).toMatchObject({
-      image_name: "img1.jpg",
+      image_name: IMG1_NAME,
       activity: "review",
       user: "jordan",
     });
@@ -293,14 +294,14 @@ describe("AnnotateTab session contributions", () => {
 
     expect(useStore.getState().recordedSession).toEqual({
       project_id: useStore.getState().openProject!.id,
-      started: "2026-10-07T14:00:00+00:00",
+      started: sessionOf(SESSION_ANSWERS.landed).started,
       user: "jordan",
     });
   });
 
   it("records no session for a visit the backend recorded nothing of", async () => {
     useStore.setState({ user: "jordan" });
-    vi.mocked(sessionsApi.imageEvent).mockResolvedValueOnce({ status: "noop", session: null });
+    vi.mocked(sessionsApi.imageEvent).mockResolvedValueOnce(SESSION_ANSWERS.empty);
     await leaveFirstImage();
 
     expect(useStore.getState().heldContributions).toEqual([]);
@@ -332,20 +333,8 @@ describe("AnnotateTab session contributions", () => {
 
   it("retires a visit the backend committed without its line, adopting the session it answered", async () => {
     useStore.setState({ user: "jordan" });
-    vi.mocked(sessionsApi.imageEvent).mockRejectedValueOnce(
-      new StructuredRefusalError(
-        {
-          error: "audit_entry_not_written",
-          message: "unrecorded",
-          committed: {
-            status: "ok",
-            session: { started: "2026-10-07T15:00:00+00:00", ended: false },
-          },
-        },
-        409,
-        "unrecorded",
-      ),
-    );
+    const gap = SESSION_ANSWERS.audit_gap;
+    vi.mocked(sessionsApi.imageEvent).mockRejectedValueOnce(await thrown(gap));
     await leaveFirstImage();
     act(() => useStore.setState({ openProject: { ...useStore.getState().openProject! } }));
     await flush();
@@ -354,7 +343,7 @@ describe("AnnotateTab session contributions", () => {
     expect(useStore.getState().heldContributions).toEqual([]);
     expect(useStore.getState().recordedSession).toEqual({
       project_id: useStore.getState().openProject!.id,
-      started: "2026-10-07T15:00:00+00:00",
+      started: sessionOf(gap.body.detail.committed).started,
       user: "jordan",
     });
   });
@@ -366,14 +355,14 @@ describe("AnnotateTab save/load race", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    saveSpy.mockResolvedValueOnce(saved("101"));
+    saveSpy.mockResolvedValueOnce(LANDED.box);
     act(addBox);
     pressSave();
     await flush();
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
     expect(saveSpy.mock.calls[0][0].image_path).toBe(IMG1);
-    expect(saveSpy.mock.calls[0][0].base_mtime).toBe("100");
+    expect(saveSpy.mock.calls[0][0].base_mtime).toBe(loadOf(IMG1).base_mtime);
     expect(useStore.getState().canvas.dirty).toBe(false);
 
     // Second save on the same image must echo the mtime the first save returned.
@@ -381,7 +370,8 @@ describe("AnnotateTab save/load race", () => {
     pressSave();
     await flush();
     expect(saveSpy).toHaveBeenCalledTimes(2);
-    expect(saveSpy.mock.calls[1][0].base_mtime).toBe("101");
+    expect(LANDED.box.document.base_mtime).not.toBe(loadOf(IMG1).base_mtime);
+    expect(saveSpy.mock.calls[1][0].base_mtime).toBe(LANDED.box.document.base_mtime);
   });
 
   it("a flush save resolving after navigation does not rewind the loaded path or wipe dirty", async () => {
@@ -393,7 +383,7 @@ describe("AnnotateTab save/load race", () => {
     // it; hold its response so the img2 load resolves first (slow label write vs
     // cached read): this interleaving must never corrupt cross-image GT.
     act(addBox);
-    const flushSave = Promise.withResolvers<SaveResult>();
+    const flushSave = Promise.withResolvers<LoadedSave>();
     saveSpy.mockReturnValueOnce(flushSave.promise);
     act(() => {
       changeSelection({ current_image_index: 1 });
@@ -402,11 +392,11 @@ describe("AnnotateTab save/load race", () => {
     await flush();
     expect(saveSpy).toHaveBeenCalledTimes(1);
     expect(saveSpy.mock.calls[0][0].image_path).toBe(IMG1);
-    expect(saveSpy.mock.calls[0][0].base_mtime).toBe("100");
+    expect(saveSpy.mock.calls[0][0].base_mtime).toBe(loadOf(IMG1).base_mtime);
 
     // Edit img2 while the img1 save is still in flight, then let it resolve late.
     act(addBox);
-    await act(() => Promise.resolve(flushSave.resolve(saved("150"))));
+    await act(() => Promise.resolve(flushSave.resolve(LANDED.box)));
 
     // The stale result must not markClean() the img2 edits...
     expect(useStore.getState().canvas.dirty).toBe(true);
@@ -417,7 +407,8 @@ describe("AnnotateTab save/load race", () => {
     await flush();
     expect(saveSpy).toHaveBeenCalledTimes(2);
     expect(saveSpy.mock.calls[1][0].image_path).toBe(IMG2);
-    expect(saveSpy.mock.calls[1][0].base_mtime).toBe("200");
+    expect(loadOf(IMG2).base_mtime).not.toBe(loadOf(IMG1).base_mtime);
+    expect(saveSpy.mock.calls[1][0].base_mtime).toBe(loadOf(IMG2).base_mtime);
   });
 
   it("an earlier image's save settling does not release the hold of the later image's save", async () => {
@@ -438,12 +429,12 @@ describe("AnnotateTab save/load race", () => {
     expect(pending).toHaveLength(2);
     expect(useStore.getState().canvas.saving?.image).toBe(IMG2);
 
-    await act(() => Promise.resolve(pending[0](saved("150"))));
+    await act(() => Promise.resolve(pending[0].resolve(LANDED.box)));
     expect(useStore.getState().canvas.saving?.image).toBe(IMG2);
     act(addBox);
     expect(useStore.getState().canvas.boxes).toHaveLength(1);
 
-    await act(() => Promise.resolve(pending[1](saved("9", { boxes: [] }))));
+    await act(() => Promise.resolve(pending[1].resolve(LANDED.cleared)));
     expect(useStore.getState().canvas.saving).toBeNull();
     expect(useStore.getState().canvas.boxes).toHaveLength(0);
   });
@@ -454,7 +445,7 @@ describe("AnnotateTab save/load race", () => {
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
       await flush();
       act(addBox);
-      const save = Promise.withResolvers<SaveResult>();
+      const save = Promise.withResolvers<LoadedSave>();
       let signal!: AbortSignal;
       saveSpy.mockImplementationOnce((_body, s) => {
         signal = s as AbortSignal;
@@ -481,7 +472,7 @@ describe("AnnotateTab save/load race", () => {
     it("lands without adopting anything into the canvas the new editor is loading", async () => {
       const { answer } = await departing();
       const held = useStore.getState().canvas.boxes;
-      await act(() => Promise.resolve(answer(saved("150", { boxes: [] }))));
+      await act(() => Promise.resolve(answer(LANDED.cleared)));
       expect(useStore.getState().canvas.boxes).toBe(held);
       expect(useStore.getState().canvas.saving).toBeNull();
     });
@@ -492,7 +483,7 @@ describe("AnnotateTab save/load race", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
     act(addBox);
-    const save = Promise.withResolvers<SaveResult>();
+    const save = Promise.withResolvers<LoadedSave>();
     saveSpy.mockReturnValueOnce(save.promise);
     pressSave();
     await flush();
@@ -526,7 +517,7 @@ describe("AnnotateTab save/load race", () => {
     it("does not overwrite what the remounted editor has since changed", async () => {
       const pending = await remountedWithEdit();
       const edited = useStore.getState().canvas.boxes;
-      await act(() => Promise.resolve(pending[0](saved("150", { boxes: [] }))));
+      await act(() => Promise.resolve(pending[0].resolve(LANDED.cleared)));
       expect(useStore.getState().canvas.boxes).toBe(edited);
       expect(useStore.getState().canvas.dirty).toBe(true);
     });
@@ -536,7 +527,7 @@ describe("AnnotateTab save/load race", () => {
       pressSave();
       await flush();
       expect(pending).toHaveLength(2);
-      await act(() => Promise.resolve(pending[0](saved("150"))));
+      await act(() => Promise.resolve(pending[0].resolve(LANDED.box)));
       expect(useStore.getState().canvas.saving).not.toBeNull();
       act(addBox);
       expect(useStore.getState().canvas.boxes).toHaveLength(1);
@@ -548,7 +539,7 @@ describe("AnnotateTab save/load race", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
     act(addBox);
-    const late = Promise.withResolvers<SaveResult>();
+    const late = Promise.withResolvers<LoadedSave>();
     let signal: AbortSignal | undefined;
     saveSpy.mockImplementationOnce((_body, s) => {
       signal = s;
@@ -563,7 +554,7 @@ describe("AnnotateTab save/load race", () => {
     expect(useStore.getState().canvas.saving).toBeNull();
     act(addBox);
     expect(useStore.getState().canvas.boxes).toHaveLength(2);
-    await act(() => Promise.resolve(late.resolve(saved("150", { boxes: [] }))));
+    await act(() => Promise.resolve(late.resolve(LANDED.cleared)));
     expect(useStore.getState().canvas.boxes).toHaveLength(2);
     expect(useStore.getState().canvas.dirty).toBe(true);
   });
@@ -598,12 +589,39 @@ describe("AnnotateTab save/load race", () => {
     await flush();
 
     // Both the interactive save and the navigation flush save 409 late.
+    const conflict = await versionConflict();
     await act(() => {
-      for (const res of pending) res({ status: "conflict" });
+      for (const save of pending) save.reject(conflict);
       return Promise.resolve();
     });
     expect(screen.queryByText("Reload")).not.toBeInTheDocument();
-    expect(screen.queryByText(/changed elsewhere/)).not.toBeInTheDocument();
+    expect(screen.queryByText(CONFLICT_SENTENCE, { exact: false })).not.toBeInTheDocument();
+  });
+
+  it("a save failing after its own image was reloaded raises no banner over the reloaded labels", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(addBox);
+    saveSpy.mockRejectedValueOnce(await versionConflict());
+    pressSave();
+    await flush();
+
+    // A second save goes out under the conflict's banner, then its Reload re-reads the same image.
+    const pending = heldSaves();
+    pressSave();
+    await flush();
+    expect(pending).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    await flush();
+    expect(loadSpy.mock.calls[1][0]).toBe(IMG1);
+
+    await act(() => Promise.resolve(pending[0].reject(new Error("network down"))));
+    expect(screen.queryByText(/Could not save annotations/)).not.toBeInTheDocument();
+    expect(useStore.getState().toasts.at(-1)?.message).toBe(
+      `Save failed: ${IMG1_NAME}'s edits were not written.`,
+    );
   });
 
   it("names the person the app is set to on the save, and sends no provenance of its own", async () => {
@@ -626,8 +644,8 @@ describe("AnnotateTab save/load race", () => {
 
 describe("AnnotateTab subject rendering", () => {
   it("renders a box with the subject-derived color, named on selection", async () => {
-    useStore.getState().setRegistry({ tip: {} });
-    useStore.setState((s) => ({ gui: { ...s.gui, active_subject: "tip" } }));
+    useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
+    useStore.setState((s) => ({ gui: { ...s.gui, active_subject: POINT_SUBJECT } }));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -635,31 +653,22 @@ describe("AnnotateTab subject rendering", () => {
     act(() =>
       useStore
         .getState()
-        .add("boxes", { x1: 10, y1: 10, x2: 50, y2: 50, subject: "tip", attributes: {} }),
+        .add("boxes", { x1: 10, y1: 10, x2: 50, y2: 50, subject: POINT_SUBJECT, attributes: {} }),
     );
     // Color is GUI-local (name-derived); the label is the subject name, no integer id, and
     // appears on selection (labels are hover/selection-only; the legend is the standing key).
-    expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", subjectColor("tip"));
+    expect(screen.getByTestId("k-rect")).toHaveAttribute(
+      "data-stroke",
+      subjectColor(POINT_SUBJECT),
+    );
     fireEvent.mouseDown(screen.getByTestId("canvas-stage"), { clientX: 30, clientY: 30 });
-    expect(screen.getAllByTestId("k-text")[0]).toHaveAttribute("data-text", "tip");
+    expect(screen.getAllByTestId("k-text")[0]).toHaveAttribute("data-text", POINT_SUBJECT);
   });
 
   it("box mode draws an active-subject polygon's read-only derived box (no handles), never a stored box", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
-    const poly = {
-      rings: [
-        [
-          [0, 0],
-          [10, 0],
-          [10, 10],
-        ],
-      ] as [number, number][][],
-      subject: "subject_a",
-      attributes: {},
-    };
-    loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({ ...labelsFor(imagePath), polygons: [poly] }),
-    );
+    useStore.getState().setRegistry(registryOf(SUBJECT));
+    const poly = servedAnnotation({ subject: SUBJECT, rings: TRIANGLE, index: 0 });
+    loadSpy.mockImplementation((imagePath) => Promise.resolve(loadHolding(imagePath, [poly])));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -669,28 +678,16 @@ describe("AnnotateTab subject rendering", () => {
     const rects = screen.getAllByTestId("k-rect");
     expect(rects).toHaveLength(1);
     expect(rects[0]).not.toHaveAttribute("data-dash");
-    expect(rects[0]).toHaveAttribute("data-stroke", subjectColor("subject_a"));
+    expect(rects[0]).toHaveAttribute("data-stroke", subjectColor(SUBJECT));
     expect(useStore.getState().canvas.boxes).toHaveLength(0);
     expect(useStore.getState().canvas.polygons).toHaveLength(1);
   });
 
   it("a tool-authored polygon's derived box draws in the polygon's own line style, unlabeled", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
-    const poly = {
-      rings: [
-        [
-          [0, 0],
-          [10, 0],
-          [10, 10],
-        ],
-      ] as [number, number][][],
-      subject: "subject_a",
-      attributes: {},
-      authorship: "tool",
-    };
-    loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({ ...labelsFor(imagePath), polygons: [poly] }),
-    );
+    useStore.getState().setRegistry(registryOf(SUBJECT));
+    const [poly] = LOADED.tool_polygon.polygons;
+    expect(poly.authorship).toBe("tool");
+    loadSpy.mockImplementation(() => Promise.resolve(LOADED.tool_polygon));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -704,7 +701,7 @@ describe("AnnotateTab subject rendering", () => {
   });
 
   it("box mode draws a person's editable box solid and a person's polygon's derived box solid too", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
+    useStore.getState().setRegistry(registryOf(SUBJECT));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -718,16 +715,12 @@ describe("AnnotateTab subject rendering", () => {
   it("point mode draws a placed point as its reticle mark, never a box or a closed outline", async () => {
     // A point asserts a location and no extent: rendering it as a box (or letting it render as a
     // degenerate polygon) would show the annotator an extent the annotation does not claim.
-    useStore.getState().setRegistry({ tip: {} });
+    useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
     useStore.setState((s) => ({
-      gui: { ...s.gui, mode: "point" as const, active_subject: "tip" },
+      gui: { ...s.gui, mode: "point" as const, active_subject: POINT_SUBJECT },
     }));
-    loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({
-        ...labelsFor(imagePath),
-        points: [{ x: 100, y: 200, subject: "tip", attributes: {} }],
-      }),
-    );
+    const point = servedAnnotation({ subject: POINT_SUBJECT, point: [100, 200], index: 0 });
+    loadSpy.mockImplementation((imagePath) => Promise.resolve(loadHolding(imagePath, [point])));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -736,7 +729,7 @@ describe("AnnotateTab subject rendering", () => {
     const core = screen.getByTestId("k-circle");
     expect(core).toHaveAttribute("data-x", "100");
     expect(core).toHaveAttribute("data-y", "200");
-    expect(core).toHaveAttribute("data-fill", subjectColor("tip"));
+    expect(core).toHaveAttribute("data-fill", subjectColor(POINT_SUBJECT));
     // ...with four radial ticks (the mark that reads as a location, not a tiny shape)...
     expect(screen.getAllByTestId("k-line")).toHaveLength(4);
     // ...and no box of any kind. (Naming on selection/hover is covered by the label tests.)
@@ -746,9 +739,9 @@ describe("AnnotateTab subject rendering", () => {
   it("polygon mode draws every ring of an occlusion-split shape, labeled once", async () => {
     // An organ behind a branch loads as one annotation with two disjoint regions. Drawing only
     // the first would show the breeder part of the object and let them confirm it as the whole.
-    useStore.getState().setRegistry({ tip: {} });
+    useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
     useStore.setState((s) => ({
-      gui: { ...s.gui, mode: "polygon" as const, active_subject: "tip" },
+      gui: { ...s.gui, mode: "polygon" as const, active_subject: POINT_SUBJECT },
     }));
     const rings: [number, number][][] = [
       [
@@ -762,12 +755,8 @@ describe("AnnotateTab subject rendering", () => {
         [60, 60],
       ],
     ];
-    loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({
-        ...labelsFor(imagePath),
-        polygons: [{ rings, subject: "tip", attributes: {} }],
-      }),
-    );
+    const shape = servedAnnotation({ subject: POINT_SUBJECT, rings, index: 0 });
+    loadSpy.mockImplementation((imagePath) => Promise.resolve(loadHolding(imagePath, [shape])));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -779,61 +768,28 @@ describe("AnnotateTab subject rendering", () => {
       "40,40,60,40,60,60",
     ]);
     // Both parts wear the annotation's own color...
-    expect(lines.every((l) => l.getAttribute("data-stroke") === subjectColor("tip"))).toBe(true);
+    expect(lines.every((l) => l.getAttribute("data-stroke") === subjectColor(POINT_SUBJECT))).toBe(
+      true,
+    );
     // ...and selecting it names the annotation once, not once per ring (HaloLabel = halo + fill).
     fireEvent.click(screen.getByTestId("canvas-stage"), { clientX: 8, clientY: 5 });
     expect(
-      screen.getAllByTestId("k-text").filter((t) => t.getAttribute("data-text") === "tip"),
+      screen.getAllByTestId("k-text").filter((t) => t.getAttribute("data-text") === POINT_SUBJECT),
     ).toHaveLength(2);
   });
 });
 
 describe("AnnotateTab authorship symbology", () => {
   it("a tool's box and an unattributed one draw dotted, a person's and an accepted tool's solid; focus names the tool's", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
-    loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({
-        ...labelsFor(imagePath),
-        boxes: [
-          {
-            x1: 10,
-            y1: 10,
-            x2: 50,
-            y2: 50,
-            subject: "subject_a",
-            attributes: {},
-            authorship: "tool",
-          },
-          {
-            x1: 60,
-            y1: 10,
-            x2: 90,
-            y2: 50,
-            subject: "subject_a",
-            attributes: {},
-            authorship: "person",
-          },
-          {
-            x1: 10,
-            y1: 60,
-            x2: 50,
-            y2: 90,
-            subject: "subject_a",
-            attributes: {},
-            authorship: "tool_accepted",
-          },
-          {
-            x1: 60,
-            y1: 60,
-            x2: 90,
-            y2: 90,
-            subject: "subject_a",
-            attributes: {},
-            authorship: "unattributed",
-          },
-        ],
-      }),
-    );
+    useStore.getState().setRegistry(registryOf(SUBJECT));
+    const { boxes } = LOADED.authored;
+    expect(boxes.map((box) => box.authorship)).toEqual([
+      "tool",
+      "person",
+      "tool_accepted",
+      "unattributed",
+    ]);
+    loadSpy.mockImplementation(() => Promise.resolve(LOADED.authored));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -846,21 +802,22 @@ describe("AnnotateTab authorship symbology", () => {
     expect(rects[3]).toHaveAttribute("data-dash", "true"); // unattributed: no person behind it
 
     // Focusing the tool box (a press inside it) names it with the authorship it draws with.
+    const [tool] = boxes;
     fireEvent.mouseDown(screen.getByTestId("canvas-stage"), {
-      clientX: 30,
-      clientY: 30,
+      clientX: (tool.x1 + tool.x2) / 2,
+      clientY: (tool.y1 + tool.y2) / 2,
       button: 0,
     });
     await flush();
     expect(
       screen
         .getAllByTestId("k-text")
-        .some((t) => t.getAttribute("data-text") === "subject_a, tool"),
+        .some((t) => t.getAttribute("data-text") === `${SUBJECT}, tool`),
     ).toBe(true);
   });
 
   it("the legend states the dotted stroke means proposed", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
+    useStore.getState().setRegistry(registryOf(SUBJECT));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -875,16 +832,14 @@ describe("AnnotateTab point tool", () => {
   const frame = () => act(async () => void (await new Promise((r) => setTimeout(r, 25))));
 
   async function mountPointMode(points: { x: number; y: number }[] = []) {
-    useStore.getState().setRegistry({ tip: {} });
+    useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
     useStore.setState((s) => ({
-      gui: { ...s.gui, mode: "point" as const, active_subject: "tip" },
+      gui: { ...s.gui, mode: "point" as const, active_subject: POINT_SUBJECT },
     }));
-    loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({
-        ...labelsFor(imagePath),
-        points: points.map((p) => ({ ...p, subject: "tip", attributes: {} })),
-      }),
+    const placed = points.map(({ x, y }, index) =>
+      servedAnnotation({ subject: POINT_SUBJECT, point: [x, y], index }),
     );
+    loadSpy.mockImplementation((imagePath) => Promise.resolve(loadHolding(imagePath, placed)));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -897,7 +852,7 @@ describe("AnnotateTab point tool", () => {
 
     // One click is the whole gesture: no drag-out, no second click to close.
     expect(useStore.getState().canvas.points).toEqual([
-      { x: 120, y: 340, subject: "tip", attributes: {} },
+      { x: 120, y: 340, subject: POINT_SUBJECT, attributes: {}, iscrowd: false },
     ]);
     expect(useStore.getState().canvas.dirty).toBe(true);
   });
@@ -937,21 +892,17 @@ describe("AnnotateTab point tool", () => {
     fireEvent.mouseDown(stage(), { clientX: 100, clientY: 100, button: 0 });
     fireEvent.mouseMove(stage(), { clientX: 200, clientY: 200 });
     await frame();
-    const answer = Promise.withResolvers<SaveResult>();
+    const answer = Promise.withResolvers<LoadedSave>();
     saveSpy.mockReturnValueOnce(answer.promise);
     pressSave();
     await flush();
-    await act(() =>
-      Promise.resolve(
-        answer.resolve(
-          saved("5", { points: [{ x: 200, y: 200, subject: "tip", attributes: {}, index: 0 }] }),
-        ),
-      ),
-    );
+    // The save's answer holds the point where the drag left it.
+    const [moved] = LANDED.point.document.points;
+    await act(() => Promise.resolve(answer.resolve(LANDED.point)));
 
     fireEvent.mouseMove(stage(), { clientX: 400, clientY: 400 });
     await frame();
-    expect(useStore.getState().canvas.points[0]).toMatchObject({ x: 200, y: 200 });
+    expect(useStore.getState().canvas.points[0]).toMatchObject({ x: moved.x, y: moved.y });
     expect(useStore.getState().canvas.undoStack).toHaveLength(0);
   });
 
@@ -980,28 +931,19 @@ describe("AnnotateTab point tool", () => {
     });
 
     it("a move queued before the hold does nothing when its frame fires", async () => {
-      useStore.getState().setRegistry({ tip: {} });
+      useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
       useStore.setState((s) => ({
-        gui: { ...s.gui, mode: "polygon" as const, active_subject: "tip" },
+        gui: { ...s.gui, mode: "polygon" as const, active_subject: POINT_SUBJECT },
       }));
-      loadSpy.mockImplementation((imagePath) =>
-        Promise.resolve({
-          ...labelsFor(imagePath),
-          polygons: [
-            {
-              rings: [
-                [
-                  [100, 100],
-                  [200, 100],
-                  [200, 200],
-                ],
-              ] as [number, number][][],
-              subject: "tip",
-              attributes: {},
-            },
-          ],
-        }),
-      );
+      const rings: [number, number][][] = [
+        [
+          [100, 100],
+          [200, 100],
+          [200, 200],
+        ],
+      ];
+      const shape = servedAnnotation({ subject: POINT_SUBJECT, rings, index: 0 });
+      loadSpy.mockImplementation((imagePath) => Promise.resolve(loadHolding(imagePath, [shape])));
       render(<AnnotateTab />);
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
       await flush();
@@ -1021,9 +963,9 @@ describe("AnnotateTab point tool", () => {
     });
 
     it("a double-click leaves a freehand stream running", async () => {
-      useStore.getState().setRegistry({ tip: {} });
+      useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
       useStore.setState((s) => ({
-        gui: { ...s.gui, mode: "polygon" as const, active_subject: "tip" },
+        gui: { ...s.gui, mode: "polygon" as const, active_subject: POINT_SUBJECT },
       }));
       useStore.getState().setStream(true);
       render(<AnnotateTab />);
@@ -1097,7 +1039,15 @@ describe("AnnotateTab point tool", () => {
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
     expect(saveSpy.mock.calls[0][0].annotations).toEqual([
-      { subject: "tip", point: [12, 34], attributes: {} },
+      {
+        subject: POINT_SUBJECT,
+        bbox: null,
+        points: null,
+        rings: null,
+        point: [12, 34],
+        attributes: {},
+        iscrowd: false,
+      },
     ]);
   });
 
@@ -1119,7 +1069,7 @@ describe("AnnotateTab casing", () => {
     fireEvent.mouseDown(screen.getByTestId("canvas-stage"), { clientX: 30, clientY: 30 });
     const rects = screen.getAllByTestId("k-rect");
     const cased = rects.filter((r) => r.getAttribute("data-shadow") === CASING.color);
-    expect(cased.map((r) => r.getAttribute("data-stroke"))).toEqual([subjectColor("subject_a")]);
+    expect(cased.map((r) => r.getAttribute("data-stroke"))).toEqual([subjectColor(SUBJECT)]);
     expect(
       rects.find((r) => r.getAttribute("data-stroke") === FOCUS_HALO.color),
     ).not.toHaveAttribute("data-shadow");
@@ -1128,30 +1078,32 @@ describe("AnnotateTab casing", () => {
 
 describe("AnnotateTab image states", () => {
   it("reads every image's state for the selection, then follows each load and save", async () => {
-    const statesSpy = vi.spyOn(api.annotate, "states").mockResolvedValue({
-      states: { "img1.jpg": "unannotated", "img2.jpg": "partial" },
-    });
+    const { states, complete } = ANNOTATE_ANSWERS;
+    const statesSpy = vi.spyOn(api.annotate, "states").mockResolvedValue(states);
     loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({ ...labelsFor(imagePath), completion: { subject_a: "complete" } }),
+      Promise.resolve(imagePath === IMG1 ? loadedLabels(complete) : loadOf(imagePath)),
     );
     await mountTab();
-    expect(statesSpy).toHaveBeenCalledWith("subject_a");
+    expect(statesSpy).toHaveBeenCalledWith(SUBJECT);
     // The read says unannotated; the document the load answered says complete.
+    expect(states.states[IMG1_NAME]).toBe("unannotated");
     expect(useStore.getState().annotateUi.imageStates).toEqual({
-      "img1.jpg": "complete",
-      "img2.jpg": "partial",
+      ...states.states,
+      [IMG1_NAME]: complete.completion[SUBJECT],
     });
 
-    saveSpy.mockResolvedValueOnce(saved("2", { completion: { subject_a: "negative" } }));
+    saveSpy.mockResolvedValueOnce(LANDED.negative);
     fireEvent.click(screen.getByText("toolbar-complete"));
     await flush();
-    expect(useStore.getState().annotateUi.imageStates["img1.jpg"]).toBe("negative");
+    expect(useStore.getState().annotateUi.imageStates[IMG1_NAME]).toBe(
+      LANDED.negative.document.completion[SUBJECT],
+    );
   });
 });
 
 describe("AnnotateTab focused item", () => {
   it("hands the focused box to the toolbar, whose subject menu edits its attributes", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
+    useStore.getState().setRegistry(registryOf(SUBJECT));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1166,7 +1118,7 @@ describe("AnnotateTab focused item", () => {
 
 describe("AnnotateTab legend keyboard access", () => {
   it("opens the legend by keyboard and reaches a subject row on the following Tab", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
+    useStore.getState().setRegistry(registryOf(SUBJECT));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1176,7 +1128,7 @@ describe("AnnotateTab legend keyboard access", () => {
     fireEvent.click(legendButton);
     expect(legendButton).toHaveAttribute("aria-expanded", "true");
 
-    const subjectRow = screen.getByRole("button", { name: "subject_a" });
+    const subjectRow = screen.getByRole("button", { name: SUBJECT });
     expect(subjectRow).toBeInTheDocument();
     // DOM order: the panel follows the button, so a forward Tab from it reaches the row.
     expect(
@@ -1185,32 +1137,49 @@ describe("AnnotateTab legend keyboard access", () => {
   });
 
   it("opens the color picker as a labeled dialog with a named hex input", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
+    useStore.getState().setRegistry(registryOf(SUBJECT));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
     fireEvent.click(screen.getByRole("button", { name: "Legend" }));
-    fireEvent.click(screen.getByRole("button", { name: "subject_a" }));
+    fireEvent.click(screen.getByRole("button", { name: SUBJECT }));
 
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(dialog).toHaveAccessibleName("subject_a color");
+    expect(dialog).toHaveAccessibleName(`${SUBJECT} color`);
     expect(screen.getByRole("textbox", { name: "hex color" })).toBeInTheDocument();
   });
 });
 
 describe("AnnotateTab ioError banner", () => {
+  const unreadable = ANNOTATE_ANSWERS.unreadable;
+
   it("names why the labels failed to load", async () => {
-    loadSpy.mockRejectedValueOnce(new Error("label document will not decode"));
+    loadSpy.mockRejectedValueOnce(await thrown(unreadable));
 
     render(<AnnotateTab />);
 
     expect(
       await screen.findByText(
-        "Could not load this image's labels: label document will not decode. Saving is off.",
+        `Could not load this image's labels: ${unreadable.body.detail}. Saving is off.`,
       ),
     ).toBeInTheDocument();
+  });
+
+  it("reads a failed image once, stepping back to it before the next image lands", async () => {
+    loadSpy.mockRejectedValueOnce(await thrown(unreadable));
+    render(<AnnotateTab />);
+    await screen.findByText(/Saving is off/);
+
+    loadSpy.mockImplementation(() => new Promise(() => {}));
+    act(() => changeSelection({ current_image_index: 1 }));
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    act(() => changeSelection({ current_image_index: 0 }));
+    await flush();
+
+    expect(loadSpy).toHaveBeenCalledTimes(2);
+    expect(useStore.getState().canvas.failedLoad).toBe(IMG1);
   });
 
   it("can be dismissed manually, independent of the conditional Reload button", async () => {
@@ -1219,13 +1188,13 @@ describe("AnnotateTab ioError banner", () => {
     await flush();
 
     act(addBox);
-    saveSpy.mockResolvedValueOnce({ status: "conflict" });
+    saveSpy.mockRejectedValueOnce(await versionConflict());
     pressSave();
     await flush();
 
-    expect(screen.getByText(/changed elsewhere/)).toBeInTheDocument();
+    expect(screen.getByText(CONFLICT_SENTENCE, { exact: false })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByText(/changed elsewhere/)).not.toBeInTheDocument();
+    expect(screen.queryByText(CONFLICT_SENTENCE, { exact: false })).not.toBeInTheDocument();
     expect(screen.queryByText("Reload")).not.toBeInTheDocument();
   });
 
@@ -1235,11 +1204,11 @@ describe("AnnotateTab ioError banner", () => {
     await flush();
 
     act(addBox);
-    saveSpy.mockResolvedValueOnce({ status: "conflict" });
+    saveSpy.mockRejectedValueOnce(await versionConflict());
     pressSave();
     await flush();
 
-    const banner = screen.getByText(/changed elsewhere/).closest("div");
+    const banner = screen.getByText(CONFLICT_SENTENCE, { exact: false }).closest("div");
     const fit = screen.getByRole("button", { name: "Fit" });
     expect(banner).toHaveClass("top-12");
     expect(fit).toHaveClass("top-3");
@@ -1247,26 +1216,23 @@ describe("AnnotateTab ioError banner", () => {
 });
 
 describe("AnnotateTab labels-written conflict sentence", () => {
+  // The produced event, naming the first photograph of the produced capture, the image in view.
+  const written = PANEL_EVENTS.labels_written.event;
+
   it("names the declared harness that wrote the current image's labels", async () => {
+    expect(written.image_path).toBe(IMG1);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
     act(addBox);
     act(() => {
-      useStore
-        .getState()
-        .pushAgentActivity(
-          "annotate",
-          "labels_written",
-          { image_path: IMG1 },
-          "claude-code 2.1.238",
-        );
+      useStore.getState().pushAgentActivity("annotate", written, AGENT_CLIENT);
     });
 
     expect(
       screen.getByText(
-        "claude-code 2.1.238 just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.",
+        `${AGENT_CLIENT} just updated this image's labels. Reload to load them (discards your unsaved edits), or keep editing.`,
       ),
     ).toBeInTheDocument();
   });
@@ -1278,9 +1244,7 @@ describe("AnnotateTab labels-written conflict sentence", () => {
 
     act(addBox);
     act(() => {
-      useStore
-        .getState()
-        .pushAgentActivity("annotate", "labels_written", { image_path: IMG1 }, null);
+      useStore.getState().pushAgentActivity("annotate", written, null);
     });
 
     expect(
@@ -1293,7 +1257,7 @@ describe("AnnotateTab labels-written conflict sentence", () => {
 
 describe("AnnotateTab legend", () => {
   it("lists the subjects until proposals are shown, then the match types", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
+    useStore.getState().setRegistry(registryOf(SUBJECT));
     const proposalsSpy = withBucket();
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -1306,78 +1270,88 @@ describe("AnnotateTab legend", () => {
     for (const match of MATCH_TYPES) {
       expect(legend.getByText(MATCH_WORDS[match])).toBeInTheDocument();
     }
-    expect(legend.queryByRole("button", { name: "subject_a" })).not.toBeInTheDocument();
+    expect(legend.queryByRole("button", { name: SUBJECT })).not.toBeInTheDocument();
 
     toggleProposals();
     await flush();
-    expect(legend.getByRole("button", { name: "subject_a" })).toBeInTheDocument();
+    expect(legend.getByRole("button", { name: SUBJECT })).toBeInTheDocument();
     expect(legend.queryByText(MATCH_WORDS.matched)).not.toBeInTheDocument();
   });
 
   it("a recolored subject's box stroke and the pushed canvas_meta swatch both follow", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
+    useStore.getState().setRegistry(registryOf(SUBJECT));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
     act(addBox);
-    expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", subjectColor("subject_a"));
+    expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", subjectColor(SUBJECT));
 
-    fireEvent.click(screen.getByRole("button", { name: "subject_a" }));
+    fireEvent.click(screen.getByRole("button", { name: SUBJECT }));
     const hexInput = screen.getByRole("textbox", { name: "hex color" });
     fireEvent.change(hexInput, { target: { value: "#123456" } });
     fireEvent.keyDown(hexInput, { key: "Enter" });
     fireEvent.click(screen.getByRole("button", { name: "OK" }));
     await flush();
 
-    expect(subjectColor("subject_a")).toBe("#123456");
+    expect(subjectColor(SUBJECT)).toBe("#123456");
     expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", "#123456");
 
-    const pushSpy = vi
-      .spyOn(api.canvas, "pushState")
-      .mockResolvedValue({ status: "ok", shapes_written: true });
+    const pushSpy = vi.spyOn(api.canvas, "pushState").mockResolvedValue(null);
     act(() => notifyCanvasStateRequest());
     await flush();
     const pushed = pushSpy.mock.calls.at(-1)?.[0];
-    expect(pushed?.classes).toEqual(
-      expect.arrayContaining([{ name: "subject_a", color: "#123456" }]),
+    expect(pushed?.classes).toEqual(expect.arrayContaining([{ name: SUBJECT, color: "#123456" }]));
+  });
+});
+
+describe("AnnotateTab canvas push refused", () => {
+  it("resyncs to the backend's open project when it holds another one open", async () => {
+    vi.spyOn(api.canvas, "pushState").mockRejectedValue(
+      await thrown(PROJECT_FIXTURES.project_not_open),
     );
+    const resync = vi.spyOn(stateSocket, "resync").mockImplementation(() => {});
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(() => notifyCanvasStateRequest());
+    await flush();
+    expect(resync).toHaveBeenCalled();
   });
 });
 
 describe("AnnotateTab band-composite wiring", () => {
-  it("passes the standard 3-band dataset's own bandsInfo down to the toolbar untouched", async () => {
+  it("passes a plain photograph's own bandsInfo down to the toolbar untouched", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
-    expect(screen.getByTestId("toolbar")).toHaveAttribute("data-band-count", "3");
-    // No bands/stretch param for a plain RGB dataset: the canvas URL is unaffected.
+    expect(screen.getByTestId("toolbar")).toHaveAttribute(
+      "data-band-count",
+      String(BAND_ANSWERS.plain.band_count),
+    );
+    // No bands/stretch param for a frame the server displays plain: the canvas URL is unaffected.
     const url = screen.getByTestId("canvas-stage").getAttribute("data-image-url") ?? "";
     expect(url).not.toContain("bands=");
     expect(url).not.toContain("stretch=");
   });
 
   it("carries a >3-band dataset's picked bands/stretch into the canvas image URL", async () => {
-    vi.spyOn(api.images, "bands").mockResolvedValue({
-      band_count: 4,
-      bands: [
-        { name: "Blue", wavelength_nm: 475, dtype: "uint16", min: 0, max: 65535 },
-        { name: "Green", wavelength_nm: 560, dtype: "uint16", min: 0, max: 65535 },
-        { name: "Red", wavelength_nm: 650, dtype: "uint16", min: 0, max: 65535 },
-        { name: "NIR", wavelength_nm: 840, dtype: "uint16", min: 0, max: 65535 },
-      ],
-    });
+    vi.spyOn(api.images, "bands").mockResolvedValue(BAND_ANSWERS.four_spectral);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
     await waitFor(() =>
-      expect(screen.getByTestId("toolbar")).toHaveAttribute("data-band-count", "4"),
+      expect(screen.getByTestId("toolbar")).toHaveAttribute(
+        "data-band-count",
+        String(BAND_ANSWERS.four_spectral.band_count),
+      ),
     );
     const url = screen.getByTestId("canvas-stage").getAttribute("data-image-url") ?? "";
-    // Defaulted to the first three reported bands (Blue, Green, Red) and the Min-Max stretch.
-    expect(url).toContain(`bands=${encodeURIComponent("Blue,Green,Red")}`);
-    expect(url).toContain("stretch=minmax");
+    const params = new URLSearchParams(url.split("?")[1]);
+    // Defaulted to the server's default bands and its default stretch.
+    expect(params.getAll("bands")).toEqual(BAND_ANSWERS.four_spectral.default_bands);
+    expect(params.get("stretch")).toBe(BAND_ANSWERS.four_spectral.default_stretch);
   });
 });
 
@@ -1392,8 +1366,9 @@ const POLY_A = {
       [10, 200],
     ] as [number, number][],
   ],
-  subject: "subject_a",
+  subject: SUBJECT,
   attributes: {},
+  iscrowd: false,
 };
 const POLY_B = {
   rings: [
@@ -1404,22 +1379,18 @@ const POLY_B = {
       [300, 400],
     ] as [number, number][],
   ],
-  subject: "subject_a",
+  subject: SUBJECT,
   attributes: {},
+  iscrowd: false,
 };
 
 function seedPolygons(polygons: (typeof POLY_A)[]) {
-  useStore.getState().loadLabelsIntoCanvas({
-    image_path: IMG1,
-    img_width: 1000,
-    img_height: 800,
-    boxes: [],
-    polygons,
-    points: [],
-    imageAnnotations: [],
-    completion: {},
-    flags: [],
-  });
+  useStore.getState().loadLabelsIntoCanvas(
+    loadHolding(
+      IMG1,
+      polygons.map(({ subject, rings }, index) => servedAnnotation({ subject, rings, index })),
+    ),
+  );
 }
 
 const nextFrame = () =>
@@ -1479,12 +1450,17 @@ describe("click-selection parity across the Snap/Stream toggles", () => {
 });
 
 describe("a polygon gesture is one undo step", () => {
-  const healthy = { ...POLY_A, attributes: { health: "good" } };
   const undo = () => act(() => useStore.getState().undo());
   const polygons = () => useStore.getState().canvas.polygons;
+  /** The loaded polygon, and it with a value set on it. */
+  const seededAndHealthy = () => {
+    const [seeded] = polygons();
+    return [seeded, { ...seeded, attributes: { health: "good" } }] as const;
+  };
 
   it("one undo restores a right-click-deleted vertex, the next reaches the edit before it", async () => {
     const stage = await renderPolygonCanvas([POLY_A]);
+    const [seeded, healthy] = seededAndHealthy();
     act(() => useStore.getState().update("polygons", 0, healthy));
     act(() => useStore.getState().setFocus({ kind: "polygon", index: 0 }));
     fireEvent.contextMenu(stage, { clientX: 10, clientY: 10 });
@@ -1493,11 +1469,12 @@ describe("a polygon gesture is one undo step", () => {
     undo();
     expect(polygons()[0]).toEqual(healthy);
     undo();
-    expect(polygons()[0]).toEqual(POLY_A);
+    expect(polygons()[0]).toEqual(seeded);
   });
 
   it("one undo removes a streamed polygon, the next reaches the edit before it", async () => {
     const stage = await renderPolygonCanvas([POLY_A]);
+    const [seeded, healthy] = seededAndHealthy();
     act(() => {
       useStore.getState().update("polygons", 0, healthy);
       useStore.getState().setStream(true);
@@ -1516,7 +1493,7 @@ describe("a polygon gesture is one undo step", () => {
     undo();
     expect(polygons()).toEqual([healthy]);
     undo();
-    expect(polygons()).toEqual([POLY_A]);
+    expect(polygons()).toEqual([seeded]);
   });
 });
 
@@ -1539,9 +1516,7 @@ describe("Cut tool arming", () => {
 
   it("arming and disarming each schedule a push carrying the current cut_armed value", async () => {
     await renderPolygonCanvas();
-    const pushSpy = vi
-      .spyOn(api.canvas, "pushState")
-      .mockResolvedValue({ status: "ok", shapes_written: true });
+    const pushSpy = vi.spyOn(api.canvas, "pushState").mockResolvedValue(null);
     pushSpy.mockClear();
 
     vi.useFakeTimers();
@@ -1805,22 +1780,29 @@ describe("clicks outside the image extent are inert", () => {
 describe("AnnotateTab authoring writes what the annotator meant", () => {
   it("bounds a new point by the image's own height on a taller-than-wide frame", async () => {
     // Only a portrait frame separates the bounds: a y past the width but inside the height.
-    useStore.getState().setRegistry({ tip: {} });
-    useStore.setState((s) => ({
-      gui: { ...s.gui, mode: "point" as const, active_subject: "tip" },
-    }));
-    loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({ ...labelsFor(imagePath), img_width: 600, img_height: 900 }),
-    );
+    useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
+    const portrait = RAW_SELECTION.images.findIndex(({ path }) => {
+      const { img_width: width, img_height: height } = loadOf(path);
+      return height > width;
+    });
+    openTestProject(selected({ subject: SUBJECT, current_image_index: portrait }), {
+      mode: "point",
+      active_subject: POINT_SUBJECT,
+    });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
+    const { img_width: width, img_height: height } = loadOf(RAW_SELECTION.images[portrait].path);
+    // A point below the frame's width and within its height, so only a portrait frame holds it.
+    const y = Math.round((width + height) / 2);
+    expect(y).toBeGreaterThan(width);
+    expect(y).toBeLessThan(height);
 
-    fireEvent.click(screen.getByTestId("canvas-stage"), { clientX: 420, clientY: 730 });
+    fireEvent.click(screen.getByTestId("canvas-stage"), { clientX: 420, clientY: y });
     await flush();
 
     expect(useStore.getState().canvas.points).toEqual([
-      { x: 420, y: 730, subject: "tip", attributes: {} },
+      { x: 420, y, subject: POINT_SUBJECT, attributes: {}, iscrowd: false },
     ]);
   });
 
@@ -1839,27 +1821,27 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
   });
 
   it("commits a drawn box under the subject the drag started on, not the one active at release", async () => {
-    useStore.getState().setRegistry({ subject_a: {}, subject_b: {} });
+    useStore.getState().setRegistry(registryOf(SUBJECT, SECOND_SUBJECT));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
-    act(() => useStore.getState().setActiveSubject("subject_a"));
+    act(() => useStore.getState().setActiveSubject(SUBJECT));
     const stage = screen.getByTestId("canvas-stage");
 
     fireEvent.mouseDown(stage, { clientX: 120, clientY: 60, button: 0 });
-    act(() => useStore.getState().setActiveSubject("subject_b"));
+    act(() => useStore.getState().setActiveSubject(SECOND_SUBJECT));
     fireEvent.mouseMove(stage, { clientX: 470, clientY: 330 });
     await nextFrame();
     fireEvent.mouseUp(stage, { clientX: 470, clientY: 330 });
     await flush();
 
     expect(useStore.getState().canvas.boxes).toEqual([
-      { x1: 120, y1: 60, x2: 470, y2: 330, subject: "subject_a", attributes: {} },
+      { x1: 120, y1: 60, x2: 470, y2: 330, subject: SUBJECT, attributes: {}, iscrowd: false },
     ]);
   });
 
   it("keeps a freshly drawn box exactly at the minimum side", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
+    useStore.getState().setRegistry(registryOf(SUBJECT));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1872,13 +1854,13 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
     await flush();
 
     expect(useStore.getState().canvas.boxes).toEqual([
-      { x1: 100, y1: 100, x2: 103, y2: 103, subject: "subject_a", attributes: {} },
+      { x1: 100, y1: 100, x2: 103, y2: 103, subject: SUBJECT, attributes: {}, iscrowd: false },
     ]);
     expect(useStore.getState().toasts).toHaveLength(0);
   });
 
   it("refuses a freshly drawn box smaller than the minimum, with a toast", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
+    useStore.getState().setRegistry(registryOf(SUBJECT));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1895,7 +1877,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
   });
 
   it("undoes a resize that shrinks a box below the minimum, with a toast", async () => {
-    useStore.getState().setRegistry({ subject_a: {} });
+    useStore.getState().setRegistry(registryOf(SUBJECT));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1913,14 +1895,14 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
     await flush();
 
     expect(useStore.getState().canvas.boxes).toEqual([
-      { x1: 10, y1: 10, x2: 50, y2: 50, subject: "subject_a", attributes: {} },
+      { x1: 10, y1: 10, x2: 50, y2: 50, subject: SUBJECT, attributes: {}, iscrowd: false },
     ]);
     expect(useStore.getState().toasts.at(-1)?.message).toMatch(/too small/i);
   });
 
   describe("a save pressed while a box resize is still being dragged", () => {
     async function dragCornerTo(x: number, y: number) {
-      useStore.getState().setRegistry({ subject_a: {} });
+      useStore.getState().setRegistry(registryOf(SUBJECT));
       render(<AnnotateTab />);
       await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
       await flush();
@@ -1953,7 +1935,7 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
       let draftWhenSent: unknown;
       saveSpy.mockImplementationOnce(() => {
         draftWhenSent = useStore.getState().canvas.currentPolygon;
-        return Promise.resolve(saved("1"));
+        return Promise.resolve(LANDED.box);
       });
       pressSave();
       await flush();
@@ -1964,14 +1946,8 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
     it("is settled before the image changes, and the next image inherits no focus from it", async () => {
       await dragCornerTo(11, 11);
       expect(useStore.getState().canvas.focus).toEqual({ kind: "box", index: 0 });
-      loadSpy.mockImplementation((imagePath) =>
-        Promise.resolve({
-          ...labelsFor(imagePath),
-          boxes: [
-            { x1: 300, y1: 300, x2: 340, y2: 340, subject: "other", attributes: {}, index: 0 },
-          ],
-        }),
-      );
+      const other = servedAnnotation({ subject: "other", bbox: [300, 300, 340, 340], index: 0 });
+      loadSpy.mockImplementation((imagePath) => Promise.resolve(loadHolding(imagePath, [other])));
       act(() => {
         changeSelection({ current_image_index: 1 });
       });
@@ -1996,9 +1972,9 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
 
     act(() => {
       const s = useStore.getState();
-      s.add("imageAnnotations", { subject: "subject_a", attributes: {}, iscrowd: false });
+      s.add("imageAnnotations", { subject: SUBJECT, attributes: {} });
       s.update("imageAnnotations", 0, {
-        subject: "subject_a",
+        subject: SUBJECT,
         attributes: { canopy_cover: "sparse" },
         iscrowd: false,
       });
@@ -2008,7 +1984,15 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
     expect(saveSpy.mock.calls[0][0].annotations).toEqual([
-      { subject: "subject_a", attributes: { canopy_cover: "sparse" }, iscrowd: false },
+      {
+        subject: SUBJECT,
+        bbox: null,
+        points: null,
+        rings: null,
+        point: null,
+        attributes: { canopy_cover: "sparse" },
+        iscrowd: false,
+      },
     ]);
   });
 });
@@ -2022,8 +2006,8 @@ describe("AnnotateTab labels show on the focused item only", () => {
     screen.queryAllByTestId("k-text").filter((t) => t.getAttribute("data-text") === name);
 
   function setupSubject(mode: "box" | "polygon" | "point") {
-    useStore.getState().setRegistry({ tip: {} });
-    useStore.setState((s) => ({ gui: { ...s.gui, mode, active_subject: "tip" } }));
+    useStore.getState().setRegistry(registryOf(POINT_SUBJECT));
+    useStore.setState((s) => ({ gui: { ...s.gui, mode, active_subject: POINT_SUBJECT } }));
   }
 
   it("a box is unlabeled at rest and under the cursor, labeled while focused", async () => {
@@ -2034,86 +2018,76 @@ describe("AnnotateTab labels show on the focused item only", () => {
     act(() =>
       useStore
         .getState()
-        .add("boxes", { x1: 10, y1: 10, x2: 50, y2: 50, subject: "tip", attributes: {} }),
+        .add("boxes", { x1: 10, y1: 10, x2: 50, y2: 50, subject: POINT_SUBJECT, attributes: {} }),
     );
 
-    expect(labelsNamed("tip")).toHaveLength(0);
+    expect(labelsNamed(POINT_SUBJECT)).toHaveLength(0);
 
     fireEvent.mouseMove(stage(), { clientX: 30, clientY: 30 });
     await frame();
-    expect(labelsNamed("tip")).toHaveLength(0);
+    expect(labelsNamed(POINT_SUBJECT)).toHaveLength(0);
 
     fireEvent.mouseDown(stage(), { clientX: 30, clientY: 30, button: 0 }); // press inside focuses
     await flush();
-    expect(labelsNamed("tip").length).toBeGreaterThan(0);
+    expect(labelsNamed(POINT_SUBJECT).length).toBeGreaterThan(0);
   });
 
   it("a polygon is unlabeled at rest and under the cursor, labeled while focused", async () => {
     setupSubject("polygon");
-    loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({
-        ...labelsFor(imagePath),
-        polygons: [
-          {
-            rings: [
-              [
-                [100, 100],
-                [300, 100],
-                [300, 300],
-                [100, 300],
-              ],
-            ] as [number, number][][],
-            subject: "tip",
-            attributes: {},
-          },
-        ],
-      }),
-    );
+    const rings: [number, number][][] = [
+      [
+        [100, 100],
+        [300, 100],
+        [300, 300],
+        [100, 300],
+      ],
+    ];
+    const shape = servedAnnotation({ subject: POINT_SUBJECT, rings, index: 0 });
+    loadSpy.mockImplementation((imagePath) => Promise.resolve(loadHolding(imagePath, [shape])));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    expect(labelsNamed("tip")).toHaveLength(0);
+    expect(labelsNamed(POINT_SUBJECT)).toHaveLength(0);
 
     fireEvent.mouseMove(stage(), { clientX: 200, clientY: 200 });
     await frame();
-    expect(labelsNamed("tip")).toHaveLength(0);
+    expect(labelsNamed(POINT_SUBJECT)).toHaveLength(0);
 
     fireEvent.click(stage(), { clientX: 200, clientY: 200 }); // click inside focuses
     await flush();
-    expect(labelsNamed("tip").length).toBeGreaterThan(0);
+    expect(labelsNamed(POINT_SUBJECT).length).toBeGreaterThan(0);
   });
 
   it("a point is unlabeled at rest and under the cursor, labeled while focused", async () => {
     setupSubject("point");
     loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({
-        ...labelsFor(imagePath),
-        points: [{ x: 100, y: 100, subject: "tip", attributes: {} }],
-      }),
+      Promise.resolve(
+        loadHolding(imagePath, [
+          servedAnnotation({ subject: POINT_SUBJECT, point: [100, 100], index: 0 }),
+        ]),
+      ),
     );
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    expect(labelsNamed("tip")).toHaveLength(0);
+    expect(labelsNamed(POINT_SUBJECT)).toHaveLength(0);
 
     fireEvent.mouseMove(stage(), { clientX: 102, clientY: 101 });
     await frame();
-    expect(labelsNamed("tip")).toHaveLength(0);
+    expect(labelsNamed(POINT_SUBJECT)).toHaveLength(0);
 
     fireEvent.mouseDown(stage(), { clientX: 100, clientY: 100, button: 0 }); // press focuses
     fireEvent.mouseUp(stage(), { clientX: 100, clientY: 100 });
     await flush();
-    expect(labelsNamed("tip").length).toBeGreaterThan(0);
+    expect(labelsNamed(POINT_SUBJECT).length).toBeGreaterThan(0);
   });
 });
 
 describe("AnnotateTab canvas push names its project", () => {
   it("pushes nothing while the backend has no project open", async () => {
-    const pushSpy = vi
-      .spyOn(api.canvas, "pushState")
-      .mockResolvedValue({ status: "ok", shapes_written: true });
+    const pushSpy = vi.spyOn(api.canvas, "pushState").mockResolvedValue(null);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -2126,9 +2100,7 @@ describe("AnnotateTab canvas push names its project", () => {
   });
 
   it("pushes carrying the open project's id", async () => {
-    const pushSpy = vi
-      .spyOn(api.canvas, "pushState")
-      .mockResolvedValue({ status: "ok", shapes_written: true });
+    const pushSpy = vi.spyOn(api.canvas, "pushState").mockResolvedValue(null);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -2141,27 +2113,10 @@ describe("AnnotateTab canvas push names its project", () => {
   });
 });
 
-const BUCKET = "m1/2026-01-01";
-const PROPOSALS: ServedProposals = {
-  bucket: BUCKET,
-  operating_point: { conf: 0.5, reason: "" },
-  proposals: [
-    {
-      subject: "subject_a",
-      bbox: [10, 10, 50, 50] as [number, number, number, number],
-      attributes: {},
-      iscrowd: false,
-      score: 0.9,
-      index: 0,
-      paired: null,
-      decision: null,
-    },
-  ],
-};
-
+/** The selected bucket of one undecided proposal, over a document holding nothing. */
 function withBucket() {
-  changeSelection({ bucket: BUCKET });
-  return vi.spyOn(api.annotate, "proposals").mockResolvedValue(PROPOSALS);
+  changeSelection({ bucket: ANNOTATE_ANSWERS.buckets.single });
+  return vi.spyOn(api.annotate, "proposals").mockResolvedValue(ANNOTATE_ANSWERS.single_proposals);
 }
 
 async function mountTab() {
@@ -2176,18 +2131,19 @@ const dottedRects = () =>
 describe("AnnotateTab completion marks", () => {
   it("marks the subject through the save door and shows the state the answered document derives", async () => {
     await mountTab();
-    saveSpy.mockResolvedValueOnce(saved("1", { completion: { subject_a: "negative" } }));
+    saveSpy.mockResolvedValueOnce(LANDED.negative);
 
     fireEvent.click(screen.getByText("toolbar-complete"));
     await flush();
 
     expect(saveSpy.mock.calls[0][0]).toMatchObject({
-      complete: { subject_a: true },
-      rect: null,
-      proposals_hidden: false,
+      gestures: { complete: { [SUBJECT]: true }, rect: null, proposals_hidden: false },
     });
     await waitFor(() =>
-      expect(screen.getByTestId("toolbar")).toHaveAttribute("data-subject-state", "negative"),
+      expect(screen.getByTestId("toolbar")).toHaveAttribute(
+        "data-subject-state",
+        LANDED.negative.document.completion[SUBJECT],
+      ),
     );
   });
 
@@ -2200,7 +2156,7 @@ describe("AnnotateTab completion marks", () => {
     fireEvent.click(screen.getByText("toolbar-complete"));
     await flush();
 
-    expect(saveSpy.mock.calls[0][0].proposals_hidden).toBe(true);
+    expect(saveSpy.mock.calls[0][0].gestures.proposals_hidden).toBe(true);
   });
 });
 
@@ -2209,7 +2165,7 @@ describe("AnnotateTab proposals", () => {
     const proposalsSpy = withBucket();
     await mountTab();
     await waitFor(() => expect(dottedRects()).toHaveLength(1));
-    expect(proposalsSpy).toHaveBeenCalledWith(IMG1, BUCKET);
+    expect(proposalsSpy).toHaveBeenCalledWith(IMG1, ANNOTATE_ANSWERS.buckets.single);
 
     toggleProposals();
     await flush();
@@ -2222,11 +2178,11 @@ describe("AnnotateTab proposals", () => {
   });
 
   it.each([
-    ["a", "accept"],
-    ["r", "reject"],
+    ["a", "accepted"],
+    ["r", "rejected"],
   ] as const)(
     "%s adjudicates the selected proposal through the save door and adopts its answer",
-    async (key, field) => {
+    async (key, verdict) => {
       withBucket();
       await mountTab();
       await waitFor(() => expect(dottedRects()).toHaveLength(1));
@@ -2234,59 +2190,44 @@ describe("AnnotateTab proposals", () => {
       fireEvent.keyDown(window, { key });
       await flush();
 
-      expect(saveSpy.mock.calls[0][0]).toMatchObject({ bucket: BUCKET, [field]: [0] });
+      expect(saveSpy.mock.calls[0][0]).toMatchObject({
+        gestures: {
+          decide: { bucket: ANNOTATE_ANSWERS.buckets.single, verdicts: { 0: verdict } },
+        },
+      });
       expect(loadSpy).toHaveBeenCalledTimes(1);
     },
   );
 });
 
 describe("AnnotateTab review symbology", () => {
-  // Box 0 pairs with an accepted proposal, box 1 with an undecided one, box 2 with none.
-  const boxes = () => [
-    { x1: 10, y1: 10, x2: 50, y2: 50, subject: "subject_a", attributes: {}, index: 0 },
-    { x1: 300, y1: 300, x2: 340, y2: 340, subject: "subject_a", attributes: {}, index: 1 },
-    { x1: 500, y1: 50, x2: 540, y2: 90, subject: "subject_a", attributes: {}, index: 2 },
+  // The review bucket's proposals: one accepted and one undecided each pairing with a box, and two
+  // undecided pairing with nothing, one scored below the rest; it validates no operating point.
+  const BUCKET = ANNOTATE_ANSWERS.buckets.review;
+  const served = () => ANNOTATE_ANSWERS.review_proposals;
+  const boxes = () => LOADED.review.boxes;
+  // What the review's items count, read off the produced document and proposals: its shapes,
+  // each with the proposal paired with it, and every undecided proposal no shape pairs with.
+  const SHAPES = ANNOTATE_ANSWERS.review.annotations.length;
+  const UNDECIDED = served().proposals.filter((p) => p.decision === null);
+  const LOOSE = UNDECIDED.filter((p) => p.paired === null);
+  // The unpaired proposal scored below the rest, which the review path reaches fourth, as the
+  // strip names it.
+  const [unpaired] = [...LOOSE].sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
+  const UNPAIRED_PROPOSAL = proposalLabel(unpaired, true)!;
+  const PAIRED = new Set(
+    served()
+      .proposals.map((p) => p.paired)
+      .filter((i) => i !== null),
+  );
+  const PAIRED_SHAPES = PAIRED.size;
+  const [UNDECIDED_PAIRED] = UNDECIDED.filter((p) => p.paired !== null);
+  const atLeast = (floor: number) => (p: { score: number | null }) => (p.score ?? 0) >= floor;
+  const scoped = (all: number, unreviewed: number) => [
+    `all (${all})`,
+    `unreviewed (${unreviewed})`,
+    "flagged (0)",
   ];
-  const polygon = () => ({
-    rings: [
-      [
-        [800, 600],
-        [900, 600],
-        [900, 700],
-      ],
-    ] as [number, number][][],
-    subject: "subject_a",
-    attributes: {},
-    index: 3,
-  });
-  const at = (x: number, y: number, score: number) => ({
-    ...PROPOSALS.proposals[0],
-    bbox: [x, y, x + 40, y + 40] as [number, number, number, number],
-    score,
-  });
-  const served = (): ServedProposals => ({
-    bucket: BUCKET,
-    operating_point: { conf: 0.5, reason: "" },
-    proposals: [
-      { ...at(10, 10, 0.9), index: 0, paired: 0, decision: "accepted" },
-      { ...at(600, 600, 0.9), index: 1 },
-      { ...at(700, 100, 0.2), index: 2 },
-      { ...at(300, 300, 0.8), index: 3, paired: 1 },
-    ],
-  });
-  const onBoxZero: Flag = {
-    id: "f1",
-    text: "open?",
-    by: "user:first",
-    at: "2026-01-01T00:00:00+00:00",
-    point: [30, 30],
-    subject: "subject_a",
-    proposal: null,
-    resolved_by: null,
-    resolved_at: null,
-    reply: "",
-    removed: false,
-  };
   const strokes = () => screen.getAllByTestId("k-rect").map((r) => r.getAttribute("data-stroke"));
   const position = () => screen.getByRole("textbox", { name: "Item position" });
   const scopes = () =>
@@ -2299,10 +2240,11 @@ describe("AnnotateTab review symbology", () => {
     await flush();
   };
 
-  async function mountReviewing(flags: Flag[] = []) {
-    loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({ ...labelsFor(imagePath), boxes: boxes(), polygons: [polygon()], flags }),
-    );
+  /** Mount over the review document, flagged on its first box when `flagged`, its bucket's
+   *  proposals served. */
+  async function mountReviewing(flagged = false) {
+    const loaded = flagged ? LOADED.review_flagged : LOADED.review;
+    loadSpy.mockImplementation(() => Promise.resolve(loaded));
     changeSelection({ bucket: BUCKET });
     const proposalsSpy = vi.spyOn(api.annotate, "proposals").mockResolvedValue(served());
     await mountTab();
@@ -2313,34 +2255,35 @@ describe("AnnotateTab review symbology", () => {
 
   it("outline color says match type while proposals are shown and subject otherwise", async () => {
     await mountReviewing();
-    // The two undecided proposals above the floor draw first, then the three boxes, then the
-    // polygon's derived box, which nothing proposes.
+    // The undecided proposals draw first, the unpaired then the paired, then each annotation's
+    // box in its order, matched where a proposal pairs with it.
     expect(strokes()).toEqual([
-      MATCH_COLORS.proposal_only,
-      MATCH_COLORS.matched,
-      MATCH_COLORS.matched,
-      MATCH_COLORS.matched,
-      MATCH_COLORS.annotation_only,
-      MATCH_COLORS.annotation_only,
+      ...LOOSE.map(() => MATCH_COLORS.proposal_only),
+      ...UNDECIDED.filter((p) => p.paired !== null).map(() => MATCH_COLORS.matched),
+      ...ANNOTATE_ANSWERS.review.annotations.map((a) =>
+        PAIRED.has(a.index) ? MATCH_COLORS.matched : MATCH_COLORS.annotation_only,
+      ),
     ]);
 
     toggleProposals();
     await flush();
-    expect(strokes()).toEqual(Array(4).fill(subjectColor("subject_a")));
+    expect(strokes()).toEqual(Array(SHAPES).fill(subjectColor(SUBJECT)));
   });
 
   it("the confidence floor starts at the operating point and the person moves it", async () => {
     await mountReviewing();
     const floor = screen.getByRole("spinbutton", { name: "Confidence floor" });
-    expect(floor).toHaveValue(0.5);
-    // Three boxes, the polygon and one unpaired proposal; box 1, with its undecided paired
-    // proposal, and that unpaired proposal await a decision.
-    expect(scopes()).toEqual(["all (5)", "unreviewed (2)", "flagged (0)"]);
+    expect(served().operating_point.conf).toBeNull();
+    expect(floor).toHaveValue(null);
+    // The shapes and the unpaired proposals; a shape with its undecided paired proposal, and the
+    // unpaired proposals, await a decision.
+    expect(scopes()).toEqual(scoped(SHAPES + LOOSE.length, UNDECIDED.length));
 
-    fireEvent.change(floor, { target: { value: "0.1" } });
+    fireEvent.change(floor, { target: { value: "0.5" } });
     await flush();
-    expect(scopes()).toEqual(["all (6)", "unreviewed (3)", "flagged (0)"]);
-    expect(dottedRects()).toHaveLength(3);
+    const held = UNDECIDED.filter(atLeast(0.5));
+    expect(scopes()).toEqual(scoped(SHAPES + LOOSE.filter(atLeast(0.5)).length, held.length));
+    expect(dottedRects()).toHaveLength(held.length);
   });
 
   it("a floor the person moved belongs to its bucket; another bucket starts at its own", async () => {
@@ -2350,9 +2293,9 @@ describe("AnnotateTab review symbology", () => {
     await flush();
     expect(floor()).toHaveValue(0.1);
 
-    act(() => changeSelection({ bucket: "other/2026-01-01" }));
+    act(() => changeSelection({ bucket: ANNOTATE_ANSWERS.buckets.shaped }));
     await flush();
-    expect(floor()).toHaveValue(0.5);
+    expect(floor()).toHaveValue(null);
   });
 
   it("the match filter keeps one match type on the canvas and in the path", async () => {
@@ -2361,13 +2304,13 @@ describe("AnnotateTab review symbology", () => {
 
     fireEvent.change(filter, { target: { value: "annotation_only" } });
     await flush();
-    expect(scopes()).toEqual(["all (2)", "unreviewed (0)", "flagged (0)"]);
+    expect(scopes()).toEqual(scoped(SHAPES - PAIRED_SHAPES, 0));
     expect(dottedRects()).toHaveLength(0);
 
     fireEvent.change(filter, { target: { value: "proposal_only" } });
     await flush();
-    expect(scopes()).toEqual(["all (1)", "unreviewed (1)", "flagged (0)"]);
-    expect(dottedRects()).toHaveLength(1);
+    expect(scopes()).toEqual(scoped(LOOSE.length, LOOSE.length));
+    expect(dottedRects()).toHaveLength(LOOSE.length);
   });
 
   it("a match filter applies only while proposals are shown", async () => {
@@ -2376,11 +2319,11 @@ describe("AnnotateTab review symbology", () => {
       target: { value: "annotation_only" },
     });
     await flush();
-    expect(scopes()).toEqual(["all (2)", "unreviewed (0)", "flagged (0)"]);
+    expect(scopes()).toEqual(scoped(SHAPES - PAIRED_SHAPES, 0));
 
     toggleProposals();
     await flush();
-    expect(scopes()).toEqual(["all (4)", "unreviewed (0)", "flagged (0)"]);
+    expect(scopes()).toEqual(scoped(SHAPES, 0));
   });
 
   it("the items span every shape, and the tool follows the focused item", async () => {
@@ -2392,7 +2335,7 @@ describe("AnnotateTab review symbology", () => {
     act(() => useStore.getState().setMode("polygon"));
     await flush();
     // The path keeps every item whatever the tool; a tool change drops the focus as before.
-    expect(scopes()).toEqual(["all (5)", "unreviewed (2)", "flagged (0)"]);
+    expect(scopes()).toEqual(scoped(SHAPES + LOOSE.length, UNDECIDED.length));
     expect(position()).toHaveValue("");
 
     await down();
@@ -2401,10 +2344,10 @@ describe("AnnotateTab review symbology", () => {
 
     const jump = position();
     fireEvent.focus(jump);
-    fireEvent.change(jump, { target: { value: "5" } });
+    fireEvent.change(jump, { target: { value: String(SHAPES + LOOSE.length) } });
     fireEvent.keyDown(jump, { key: "Enter" });
     await flush();
-    expect(screen.getByText("subject_a polygon")).toBeInTheDocument();
+    expect(screen.getByText(`${SUBJECT} polygon`)).toBeInTheDocument();
     expect(useStore.getState().gui.mode).toBe("polygon");
   });
 
@@ -2434,8 +2377,8 @@ describe("AnnotateTab review symbology", () => {
     // on it (zoomed in past the fitted view).
     await down();
     expect(position()).toHaveValue("1");
-    expect(screen.getByText("subject_a box")).toBeInTheDocument();
-    expect(useStore.getState().gui.active_subject).toBe("subject_a");
+    expect(screen.getByText(`${SUBJECT} box`)).toBeInTheDocument();
+    expect(useStore.getState().gui.active_subject).toBe(SUBJECT);
     expect(useStore.getState().gui.view.scale).toBeGreaterThan(before.scale);
 
     await down();
@@ -2443,7 +2386,7 @@ describe("AnnotateTab review symbology", () => {
     expect(position()).toHaveValue("3");
     await down();
     expect(position()).toHaveValue("4");
-    expect(screen.getByText("subject_a proposal 0.90")).toBeInTheDocument();
+    expect(screen.getByText(UNPAIRED_PROPOSAL)).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "ArrowUp" });
     await flush();
@@ -2455,7 +2398,7 @@ describe("AnnotateTab review symbology", () => {
       target: { value: "unreviewed" },
     });
     await flush();
-    expect(screen.getByText("/ 2")).toBeInTheDocument();
+    expect(screen.getByText(`/ ${UNDECIDED.length}`)).toBeInTheDocument();
   });
 
   it("a decides the focused matched annotation's own proposal", async () => {
@@ -2466,12 +2409,16 @@ describe("AnnotateTab review symbology", () => {
 
     fireEvent.keyDown(window, { key: "a" });
     await flush();
-    expect(saveSpy.mock.calls[0][0]).toMatchObject({ bucket: BUCKET, accept: [3] });
+    expect(saveSpy.mock.calls[0][0]).toMatchObject({
+      gestures: {
+        decide: { bucket: BUCKET, verdicts: { [UNDECIDED_PAIRED.index]: "accepted" } },
+      },
+    });
   });
 
   it("a on a focused item decides it and steps to the next item in the order", async () => {
     await mountReviewing();
-    saveSpy.mockResolvedValueOnce(saved("101", { boxes: boxes(), polygons: [polygon()] }));
+    saveSpy.mockResolvedValueOnce(LANDED.accept_paired);
     await down();
     await down();
     expect(position()).toHaveValue("2");
@@ -2485,12 +2432,18 @@ describe("AnnotateTab review symbology", () => {
 
   it("Accept all accepts every undecided proposal the canvas shows in one save", async () => {
     await mountReviewing();
+    // No floor is in force, so the canvas draws every undecided proposal.
+    expect(screen.getByRole("spinbutton", { name: "Confidence floor" })).toHaveValue(null);
+    expect(dottedRects()).toHaveLength(UNDECIDED.length);
 
     fireEvent.click(screen.getByRole("button", { name: /^Accept all/ }));
     await flush();
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
-    expect(saveSpy.mock.calls[0][0]).toMatchObject({ bucket: BUCKET, accept: [1, 3] });
+    expect(saveSpy.mock.calls[0][0].gestures.decide).toEqual({
+      bucket: BUCKET,
+      verdicts: Object.fromEntries(UNDECIDED.map((p) => [p.index, "accepted"])),
+    });
   });
 
   it("a with nothing focused decides the first unreviewed item and focuses nothing", async () => {
@@ -2506,58 +2459,76 @@ describe("AnnotateTab review symbology", () => {
   it("e accepts the focused unpaired proposal so it can be corrected as an annotation", async () => {
     await mountReviewing();
     for (let i = 0; i < 4; i++) await down();
-    expect(screen.getByText("subject_a proposal 0.90")).toBeInTheDocument();
+    expect(screen.getByText(UNPAIRED_PROPOSAL)).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "e" });
     await flush();
-    expect(saveSpy.mock.calls[0][0]).toMatchObject({ bucket: BUCKET, accept: [1] });
-  });
-
-  it("a confirms a focused annotation no proposal pairs with when a tool left it unconfirmed", async () => {
-    loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({
-        ...labelsFor(imagePath),
-        boxes: boxes().map((b) => (b.index === 2 ? { ...b, authorship: "tool" } : b)),
-        polygons: [polygon()],
-        flags: [],
-      }),
-    );
-    changeSelection({ bucket: BUCKET });
-    vi.spyOn(api.annotate, "proposals").mockResolvedValue(served());
-    await mountTab();
-    await flush();
-    expect(scopes()).toEqual(["all (5)", "unreviewed (3)", "flagged (0)"]);
-
-    fireEvent.mouseDown(screen.getByTestId("canvas-stage"), {
-      clientX: 520,
-      clientY: 70,
-      button: 0,
+    expect(saveSpy.mock.calls[0][0]).toMatchObject({
+      gestures: { decide: { bucket: BUCKET, verdicts: { [unpaired.index]: "accepted" } } },
     });
-    await flush();
-    fireEvent.keyDown(window, { key: "a" });
-    await flush();
-
-    expect(saveSpy.mock.calls[0][0]).toMatchObject({ confirm: [2] });
-    expect(saveSpy.mock.calls[0][0].accept).toBeUndefined();
   });
 
-  const toolBoxTwo = () => boxes().map((b) => (b.index === 2 ? { ...b, authorship: "tool" } : b));
-  const pressBoxTwo = async () => {
+  /** The focus of the shape a landed save says `proposal` resolved to, among the `kind` shapes of
+   *  the document it wrote. */
+  const resolvedFocus = (landed: LoadedSave, proposal: number, kind: "box" | "polygon") => ({
+    kind,
+    index: landed.document[kind === "box" ? "boxes" : "polygons"].findIndex(
+      (shape) => shape.index === landed.accepted[proposal],
+    ),
+  });
+
+  /** The one proposal `landed` says it accepted, by its index in its bucket's document. */
+  const acceptedProposal = (landed: LoadedSave) => {
+    const accepted = Object.keys(landed.accepted).map(Number);
+    if (accepted.length !== 1) throw new Error("the landed save accepted no one proposal");
+    return accepted[0];
+  };
+
+  /** The tool document's box a tool wrote, and its position among the canvas's boxes. */
+  const TOOL_REF = LOADED.tool_two.boxes.findIndex((b) => b.authorship === "tool");
+  const TOOL_BOX = LOADED.tool_two.boxes[TOOL_REF];
+  /** Press the middle of the box a tool wrote. */
+  const pressToolBox = async () => {
+    const { x1, y1, x2, y2 } = TOOL_BOX;
     fireEvent.mouseDown(screen.getByTestId("canvas-stage"), {
-      clientX: 520,
-      clientY: 70,
+      clientX: (x1 + x2) / 2,
+      clientY: (y1 + y2) / 2,
       button: 0,
     });
     await flush();
   };
 
-  it("a confirms an unconfirmed annotation with no bucket selected", async () => {
-    loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({ ...labelsFor(imagePath), boxes: toolBoxTwo() }),
-    );
+  it("a confirms a focused annotation no proposal pairs with when a tool left it unconfirmed", async () => {
+    // The tool's document holds the review document's boxes, so the review's pairings stand, and
+    // keeps the flag the review raised on its first box.
+    loadSpy.mockImplementation(() => Promise.resolve(LOADED.tool_two));
+    changeSelection({ bucket: BUCKET });
+    vi.spyOn(api.annotate, "proposals").mockResolvedValue(served());
     await mountTab();
     await flush();
-    await pressBoxTwo();
+    const { annotations, flags } = ANNOTATE_ANSWERS.tool_two;
+    const unconfirmed = annotations.filter((a) => a.authorship === "tool");
+    expect(scopes()).toEqual([
+      `all (${annotations.length + LOOSE.length})`,
+      `unreviewed (${UNDECIDED.length + unconfirmed.length})`,
+      `flagged (${flags.length})`,
+    ]);
+
+    await pressToolBox();
+    fireEvent.keyDown(window, { key: "a" });
+    await flush();
+
+    expect(saveSpy.mock.calls[0][0]).toMatchObject({
+      gestures: { confirm: [TOOL_BOX.index] },
+    });
+    expect(saveSpy.mock.calls[0][0].gestures.decide).toBeNull();
+  });
+
+  it("a confirms an unconfirmed annotation with no bucket selected", async () => {
+    loadSpy.mockImplementation(() => Promise.resolve(LOADED.tool_two));
+    await mountTab();
+    await flush();
+    await pressToolBox();
     expect(screen.getByRole("button", { name: "Accept" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
 
@@ -2567,12 +2538,16 @@ describe("AnnotateTab review symbology", () => {
 
     fireEvent.keyDown(window, { key: "a" });
     await flush();
-    expect(saveSpy.mock.calls[0][0]).toMatchObject({ confirm: [2] });
+    expect(saveSpy.mock.calls[0][0]).toMatchObject({
+      gestures: { confirm: [TOOL_BOX.index] },
+    });
   });
 
   it("a reject on a focused annotation with no proposal never reaches another item's proposal", async () => {
     await mountReviewing();
-    act(() => useStore.getState().setFocus({ kind: "box", index: 2 }));
+    const unpairedBox = boxes().findIndex((b) => b.index === undefined || !PAIRED.has(b.index));
+    expect(unpairedBox).not.toBe(-1);
+    act(() => useStore.getState().setFocus({ kind: "box", index: unpairedBox }));
     await flush();
     fireEvent.keyDown(window, { key: "r" });
     await flush();
@@ -2581,13 +2556,18 @@ describe("AnnotateTab review symbology", () => {
 
   it("the pointer handlers act on the item the canvas draws handles on, a paired proposal's annotation", async () => {
     await mountReviewing();
-    act(() => useStore.getState().setFocus({ kind: "proposal", index: 3 }));
+    act(() =>
+      useStore
+        .getState()
+        .setFocus({ kind: "proposal", index: UNDECIDED_PAIRED.index, bucket: BUCKET }),
+    );
     await flush();
     expect(useStore.getState().canvas.undoStack).toHaveLength(0);
 
+    const handle = boxes().find((b) => b.index === UNDECIDED_PAIRED.paired)!;
     fireEvent.mouseDown(screen.getByTestId("canvas-stage"), {
-      clientX: 300,
-      clientY: 300,
+      clientX: handle.x1,
+      clientY: handle.y1,
       button: 0,
     });
     // A press on a handle of the focused annotation picks it up, one undo snapshot per drag.
@@ -2595,39 +2575,45 @@ describe("AnnotateTab review symbology", () => {
   });
 
   it("a gesture's answer is adopted whole: its document and the token that names it together", async () => {
-    loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({ ...labelsFor(imagePath), boxes: toolBoxTwo() }),
-    );
-    saveSpy.mockResolvedValueOnce(
-      saved("500", { boxes: boxes().map((b) => ({ ...b, authorship: "tool_accepted" })) }),
-    );
+    loadSpy.mockImplementation(() => Promise.resolve(LOADED.tool_two));
+    saveSpy.mockResolvedValueOnce(LANDED.confirmed);
     await mountTab();
     await flush();
-    await pressBoxTwo();
+    await pressToolBox();
     fireEvent.keyDown(window, { key: "a" });
     await flush();
 
-    expect(useStore.getState().canvas.boxes[2].authorship).toBe("tool_accepted");
+    expect(useStore.getState().canvas.boxes[TOOL_REF].authorship).toBe("tool_accepted");
     expect(loadSpy).toHaveBeenCalledTimes(1);
     addBox();
     pressSave();
     await flush();
-    expect(saveSpy.mock.calls[1][0].base_mtime).toBe("500");
+    expect(saveSpy.mock.calls[1][0].base_mtime).toBe(LANDED.confirmed.document.base_mtime);
   });
 
   it("e on a proposal whose save the canvas did not adopt focuses no annotation", async () => {
+    const [loose] = LOOSE;
     await mountReviewing();
-    act(() => useStore.getState().setFocus({ kind: "proposal", index: 1 }));
-    saveSpy.mockResolvedValueOnce({ status: "conflict" });
+    act(() =>
+      useStore.getState().setFocus({ kind: "proposal", index: loose.index, bucket: BUCKET }),
+    );
+    saveSpy.mockRejectedValueOnce(await versionConflict());
     fireEvent.keyDown(window, { key: "e" });
     await flush();
-    expect(useStore.getState().canvas.focus).toEqual({ kind: "proposal", index: 1 });
+    expect(useStore.getState().canvas.focus).toEqual({
+      kind: "proposal",
+      index: loose.index,
+      bucket: BUCKET,
+    });
   });
 
   it("e whose answer arrives after another image was selected focuses nothing there", async () => {
+    const [loose] = LOOSE;
     await mountReviewing();
-    act(() => useStore.getState().setFocus({ kind: "proposal", index: 1 }));
-    const answer = Promise.withResolvers<SaveResult>();
+    act(() =>
+      useStore.getState().setFocus({ kind: "proposal", index: loose.index, bucket: BUCKET }),
+    );
+    const answer = Promise.withResolvers<LoadedSave>();
     saveSpy.mockReturnValueOnce(answer.promise);
     fireEvent.keyDown(window, { key: "e" });
     await flush();
@@ -2637,26 +2623,41 @@ describe("AnnotateTab review symbology", () => {
       changeSelection({ current_image_index: 1 });
     });
     await flush();
-    await act(() => Promise.resolve(answer.resolve(saved("9", { boxes: boxes() }))));
+    await act(() => Promise.resolve(answer.resolve(LANDED.accept_unpaired)));
 
     expect(useStore.getState().canvas.focus).toBeNull();
   });
 
-  it("e focuses the annotation the answer says the proposal resolved to, one already drawn included", async () => {
+  it("e focuses the annotation the answer says the proposal resolved to, a new one", async () => {
+    const proposal = acceptedProposal(LANDED.accept_unpaired);
     await mountReviewing();
-    act(() => useStore.getState().setFocus({ kind: "proposal", index: 1 }));
-    saveSpy.mockResolvedValueOnce(
-      saved("8", { boxes: boxes(), polygons: [polygon()] }, { "1": 0 }),
-    );
+    act(() => useStore.getState().setFocus({ kind: "proposal", index: proposal, bucket: BUCKET }));
+    saveSpy.mockResolvedValueOnce(LANDED.accept_unpaired);
     fireEvent.keyDown(window, { key: "e" });
     await flush();
-    expect(useStore.getState().canvas.focus).toEqual({ kind: "box", index: 0 });
+    expect(useStore.getState().canvas.focus).toEqual(
+      resolvedFocus(LANDED.accept_unpaired, proposal, "box"),
+    );
+  });
+
+  it("e focuses the annotation the answer says the proposal resolved to, one already drawn", async () => {
+    const proposal = acceptedProposal(LANDED.accept_drawn);
+    await mountReviewing();
+    act(() => useStore.getState().setFocus({ kind: "proposal", index: proposal, bucket: BUCKET }));
+    saveSpy.mockResolvedValueOnce(LANDED.accept_drawn);
+    fireEvent.keyDown(window, { key: "e" });
+    await flush();
+    // The save drew a box over the proposal first, so the proposal resolved to that box.
+    expect(useStore.getState().canvas.focus).toEqual(
+      resolvedFocus(LANDED.accept_drawn, proposal, "box"),
+    );
   });
 
   it("e's focus is cleared by a navigation that follows its adoption, and the next image keeps none", async () => {
+    const proposal = acceptedProposal(LANDED.accept_unpaired);
     await mountReviewing();
-    act(() => useStore.getState().setFocus({ kind: "proposal", index: 1 }));
-    const answer = Promise.withResolvers<SaveResult>();
+    act(() => useStore.getState().setFocus({ kind: "proposal", index: proposal, bucket: BUCKET }));
+    const answer = Promise.withResolvers<LoadedSave>();
     saveSpy.mockReturnValueOnce(answer.promise);
     fireEvent.keyDown(window, { key: "e" });
     await flush();
@@ -2669,102 +2670,104 @@ describe("AnnotateTab review symbology", () => {
       });
     });
     loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({
-        ...labelsFor(imagePath),
-        boxes: [{ ...boxes()[0], subject: "other", index: 0 }],
-      }),
-    );
-    await act(() =>
       Promise.resolve(
-        answer.resolve(saved("8", { boxes: boxes(), polygons: [polygon()] }, { "1": 0 })),
+        loadHolding(imagePath, [servedAnnotation({ subject: "other", bbox: [10, 10, 50, 50] })]),
       ),
     );
+    await act(() => Promise.resolve(answer.resolve(LANDED.accept_unpaired)));
     stop();
     await waitFor(() => expect(useStore.getState().canvas.boxes[0]?.subject).toBe("other"));
     expect(useStore.getState().canvas.focus).toBeNull();
   });
 
   it("e sets the tool from the tool in use when the answer lands, not when e was pressed", async () => {
+    const proposal = acceptedProposal(LANDED.accept_unpaired);
     await mountReviewing();
-    act(() => useStore.getState().setFocus({ kind: "proposal", index: 1 }));
-    const answer = Promise.withResolvers<SaveResult>();
+    act(() => useStore.getState().setFocus({ kind: "proposal", index: proposal, bucket: BUCKET }));
+    const answer = Promise.withResolvers<LoadedSave>();
     saveSpy.mockReturnValueOnce(answer.promise);
     fireEvent.keyDown(window, { key: "e" });
     await flush();
     act(() => useStore.getState().setMode("polygon"));
-    await act(() =>
-      Promise.resolve(
-        answer.resolve(saved("8", { boxes: boxes(), polygons: [polygon()] }, { "1": 0 })),
-      ),
-    );
+    await act(() => Promise.resolve(answer.resolve(LANDED.accept_unpaired)));
     expect(useStore.getState().gui.mode).toBe("box");
-    expect(useStore.getState().canvas.focus).toEqual({ kind: "box", index: 0 });
+    expect(useStore.getState().canvas.focus).toEqual(
+      resolvedFocus(LANDED.accept_unpaired, proposal, "box"),
+    );
   });
 
   it("e focuses a polygon the proposal resolved to, switching to its tool", async () => {
-    await mountReviewing();
-    act(() => useStore.getState().setFocus({ kind: "proposal", index: 1 }));
-    saveSpy.mockResolvedValueOnce(
-      saved("8", { boxes: boxes(), polygons: [polygon()] }, { "1": 3 }),
+    const shaped = ANNOTATE_ANSWERS.buckets.shaped;
+    const accepted = acceptedProposal(LANDED.accept_polygon);
+    const polygon = ANNOTATE_ANSWERS.shaped_proposals.proposals.find((p) => p.index === accepted);
+    if (polygon === undefined) throw new Error("the shaped bucket served no accepted proposal");
+    // The second bucket's proposals were served over the document the unpaired acceptance wrote.
+    loadSpy.mockImplementation(() => Promise.resolve(LANDED.accept_unpaired.document));
+    changeSelection({ bucket: shaped });
+    vi.spyOn(api.annotate, "proposals").mockResolvedValue(ANNOTATE_ANSWERS.shaped_proposals);
+    await mountTab();
+    await flush();
+    act(() =>
+      useStore.getState().setFocus({ kind: "proposal", index: polygon.index, bucket: shaped }),
     );
+    saveSpy.mockResolvedValueOnce(LANDED.accept_polygon);
     fireEvent.keyDown(window, { key: "e" });
     await flush();
     expect(useStore.getState().gui.mode).toBe("polygon");
-    expect(useStore.getState().canvas.focus).toEqual({ kind: "polygon", index: 0 });
+    expect(useStore.getState().canvas.focus).toEqual(
+      resolvedFocus(LANDED.accept_polygon, polygon.index, "polygon"),
+    );
   });
 
   describe("an adopted save, ordinary or gesture", () => {
-    const editedTwo = async () => {
-      loadSpy.mockImplementation((imagePath) =>
-        Promise.resolve({ ...labelsFor(imagePath), boxes: toolBoxTwo() }),
-      );
+    const editedToolBox = async () => {
+      loadSpy.mockImplementation(() => Promise.resolve(LOADED.tool_two));
       await mountTab();
       await flush();
-      act(() => useStore.getState().update("boxes", 2, { ...toolBoxTwo()[2], x2: 541 }));
+      act(() => useStore.getState().update("boxes", TOOL_REF, { ...TOOL_BOX, x2: 541 }));
       expect(useStore.getState().canvas.undoStack).toHaveLength(1);
     };
-    const personBoxes = () => boxes().map((b) => ({ ...b, authorship: "person" }));
 
     it("gives the canvas the answer's authorship and drops the undo history", async () => {
-      await editedTwo();
-      saveSpy.mockResolvedValueOnce(saved("7", { boxes: personBoxes() }));
+      await editedToolBox();
+      saveSpy.mockResolvedValueOnce(LANDED.person_boxes);
       pressSave();
       await flush();
       const { canvas } = useStore.getState();
-      expect(canvas.boxes[2].authorship).toBe("person");
+      expect(canvas.boxes[TOOL_REF].authorship).toBe("person");
       expect([canvas.dirty, canvas.undoStack.length]).toEqual([false, 0]);
     });
 
     it("does the same for a gesture's answer", async () => {
-      await editedTwo();
-      await pressBoxTwo();
-      saveSpy.mockResolvedValueOnce(saved("7", { boxes: personBoxes() }));
+      await editedToolBox();
+      await pressToolBox();
+      saveSpy.mockResolvedValueOnce(LANDED.confirmed);
       fireEvent.keyDown(window, { key: "a" });
       await flush();
       const { canvas } = useStore.getState();
-      expect(canvas.boxes[2].authorship).toBe("person");
+      expect(canvas.boxes[TOOL_REF].authorship).toBe("tool_accepted");
       expect([canvas.dirty, canvas.undoStack.length]).toEqual([false, 0]);
     });
 
     it("serves the bucket's proposals again, dropping the pairings the old document gave", async () => {
       const proposalsSpy = await mountReviewing();
       act(() => useStore.getState().update("boxes", 0, { ...boxes()[0], x2: 51 }));
-      saveSpy.mockResolvedValueOnce(saved("7", { boxes: boxes(), polygons: [polygon()] }));
+      saveSpy.mockResolvedValueOnce(LANDED.review_saved);
       pressSave();
       await flush();
       expect(proposalsSpy).toHaveBeenCalledTimes(2);
     });
 
     it("refuses an edit made while it is in flight, then adopts the answer whole", async () => {
-      await editedTwo();
-      const answer = Promise.withResolvers<SaveResult>();
+      await editedToolBox();
+      const answer = Promise.withResolvers<LoadedSave>();
       saveSpy.mockReturnValueOnce(answer.promise);
       pressSave();
       await flush();
       expect(useStore.getState().canvas.saving).not.toBeNull();
 
       act(() => useStore.getState().add("boxes", { ...boxes()[0], index: undefined }));
-      await pressBoxTwo();
+      await pressToolBox();
       const rectsBefore = screen.getAllByTestId("k-rect").length;
       fireEvent.mouseDown(screen.getByTestId("canvas-stage"), {
         clientX: 100,
@@ -2773,18 +2776,18 @@ describe("AnnotateTab review symbology", () => {
       });
       await flush();
       expect(screen.getAllByTestId("k-rect")).toHaveLength(rectsBefore);
-      expect(useStore.getState().canvas.boxes).toHaveLength(3);
+      expect(useStore.getState().canvas.boxes).toHaveLength(LOADED.tool_two.boxes.length);
       expect(useStore.getState().canvas.focus).toBeNull();
 
-      await act(() => Promise.resolve(answer.resolve(saved("7", { boxes: personBoxes() }))));
+      await act(() => Promise.resolve(answer.resolve(LANDED.person_boxes)));
       const { canvas } = useStore.getState();
       expect(canvas.saving).toBeNull();
-      expect(canvas.boxes[2].authorship).toBe("person");
+      expect(canvas.boxes[TOOL_REF].authorship).toBe("person");
       expect(canvas.dirty).toBe(false);
     });
 
     it("cancels a box being drawn when it starts, and counts no box it did not take", async () => {
-      await editedTwo();
+      await editedToolBox();
       const baseline = () => useStore.getState().sessionTracking.annotationsAddedDelta;
       const added = baseline();
       const rectsBefore = screen.getAllByTestId("k-rect").length;
@@ -2794,13 +2797,13 @@ describe("AnnotateTab review symbology", () => {
       await act(async () => void (await new Promise((r) => setTimeout(r, 25))));
       expect(screen.getAllByTestId("k-rect").length).toBe(rectsBefore + 1);
 
-      saveSpy.mockImplementationOnce(() => new Promise<SaveResult>(() => {}));
+      saveSpy.mockImplementationOnce(() => new Promise<LoadedSave>(() => {}));
       pressSave();
       await flush();
       expect(screen.getAllByTestId("k-rect")).toHaveLength(rectsBefore);
       fireEvent.mouseUp(stage, { clientX: 200, clientY: 200 });
       await flush();
-      expect(useStore.getState().canvas.boxes).toHaveLength(3);
+      expect(useStore.getState().canvas.boxes).toHaveLength(LOADED.tool_two.boxes.length);
       expect(baseline()).toBe(added);
     });
 
@@ -2809,7 +2812,7 @@ describe("AnnotateTab review symbology", () => {
       expect(strokes()).toContain(MATCH_COLORS.proposal_only);
       act(() => useStore.getState().update("boxes", 0, { ...boxes()[0], x2: 51 }));
       proposalsSpy.mockImplementation(() => new Promise(() => {}));
-      saveSpy.mockResolvedValueOnce(saved("7", { boxes: boxes(), polygons: [polygon()] }));
+      saveSpy.mockResolvedValueOnce(LANDED.review_saved);
       pressSave();
       await flush();
       expect(strokes()).not.toContain(MATCH_COLORS.proposal_only);
@@ -2817,10 +2820,8 @@ describe("AnnotateTab review symbology", () => {
   });
 
   it("the agent's mirror and the canvas state the same colors and the same focus", async () => {
-    const pushSpy = vi
-      .spyOn(api.canvas, "pushState")
-      .mockResolvedValue({ status: "ok", shapes_written: true });
-    await mountReviewing([onBoxZero]);
+    const pushSpy = vi.spyOn(api.canvas, "pushState").mockResolvedValue(null);
+    await mountReviewing(true);
     await down();
     act(() => notifyCanvasStateRequest());
     await flush();
@@ -2836,7 +2837,9 @@ describe("AnnotateTab review symbology", () => {
     // The flag is one mark on each side: the glyph on the canvas, the glyph and comment mirrored.
     const flagged = pushed.filter((s) => s.tag === "flag");
     expect(flagged).toHaveLength(1);
-    expect(flagged[0]).toMatchObject({ color: FLAG_MARK.color, points: [[30, 30]] });
+    const [{ target }] = ANNOTATE_ANSWERS.review_flagged.flags.map((f) => f.request);
+    const point = target && "point" in target ? target.point : undefined;
+    expect(flagged[0]).toMatchObject({ color: FLAG_MARK.color, points: [point] });
     const canvasLabels = screen.getAllByTestId("k-text").map((t) => t.getAttribute("data-text"));
     expect(canvasLabels).toContain(FLAG_MARK.glyph);
     expect(distinct(pushed.filter((s) => s.label && s.tag !== "flag").map((s) => s.label))).toEqual(
@@ -2846,32 +2849,15 @@ describe("AnnotateTab review symbology", () => {
 });
 
 describe("AnnotateTab flags", () => {
-  const box = { x1: 10, y1: 10, x2: 50, y2: 50, subject: "subject_a", attributes: {}, index: 0 };
-  const flag = (over: Partial<Flag>): Flag => ({
-    id: "f1",
-    text: "open?",
-    by: "user:first",
-    at: "2026-01-01T00:00:00+00:00",
-    point: [30, 30],
-    subject: "subject_a",
-    proposal: null,
-    resolved_by: null,
-    resolved_at: null,
-    reply: "",
-    removed: false,
-    ...over,
-  });
-
-  async function mountWith(flags: Flag[]) {
-    loadSpy.mockImplementation((imagePath) =>
-      Promise.resolve({ ...labelsFor(imagePath), boxes: [box], flags }),
-    );
+  /** Mount over `loaded`, a produced document holding one box, unflagged when omitted. */
+  async function mountWith(loaded: LoadedLabels = LANDED.box.document) {
+    loadSpy.mockImplementation(() => Promise.resolve(loaded));
     await mountTab();
   }
   const comment = () => screen.getByRole("textbox", { name: "New flag comment" });
 
   it("f flags the image as a whole when nothing is focused", async () => {
-    await mountWith([]);
+    await mountWith();
     fireEvent.keyDown(window, { key: "f" });
     await flush();
     expect(screen.getByRole("dialog", { name: "Flags on this image" })).toBeInTheDocument();
@@ -2879,30 +2865,30 @@ describe("AnnotateTab flags", () => {
     fireEvent.change(comment(), { target: { value: "glare" } });
     fireEvent.keyDown(comment(), { key: "Enter" });
     await flush();
-    expect(saveSpy.mock.calls[0][0].flag).toEqual([{ text: "glare" }]);
+    expect(saveSpy.mock.calls[0][0].gestures.flag).toEqual([{ text: "glare", target: null }]);
     expect(comment()).toHaveValue("");
   });
 
   it("keeps what was typed after a flag was submitted, when that submission lands", async () => {
-    await mountWith([]);
+    await mountWith();
     fireEvent.keyDown(window, { key: "f" });
     await flush();
-    const answer = Promise.withResolvers<SaveResult>();
+    const answer = Promise.withResolvers<LoadedSave>();
     saveSpy.mockReturnValueOnce(answer.promise);
     fireEvent.change(comment(), { target: { value: "first" } });
     fireEvent.keyDown(comment(), { key: "Enter" });
     await flush();
     fireEvent.change(comment(), { target: { value: "second, not submitted" } });
-    await act(() => Promise.resolve(answer.resolve(saved("5"))));
+    await act(() => Promise.resolve(answer.resolve(LANDED.flag_raised)));
     expect(comment()).toHaveValue("second, not submitted");
   });
 
   it("keeps the typed comment when its save was not taken, and clears it once one is", async () => {
-    await mountWith([]);
+    await mountWith();
     fireEvent.keyDown(window, { key: "f" });
     await flush();
     fireEvent.change(comment(), { target: { value: "glare" } });
-    saveSpy.mockResolvedValueOnce({ status: "conflict" });
+    saveSpy.mockRejectedValueOnce(await versionConflict());
     fireEvent.keyDown(comment(), { key: "Enter" });
     await flush();
     expect(comment()).toHaveValue("glare");
@@ -2913,25 +2899,37 @@ describe("AnnotateTab flags", () => {
   });
 
   it("flags the focused annotation at a place inside it, through the save door", async () => {
-    await mountWith([]);
+    const [{ x1, y1, x2, y2 }] = LANDED.box.document.boxes;
+    await mountWith();
     fireEvent.keyDown(window, { key: "ArrowDown" });
     await flush();
     fireEvent.click(screen.getByRole("button", { name: /Flag/ }));
-    expect(screen.getByRole("dialog", { name: "Flags on subject_a box" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: `Flags on ${SUBJECT} box` })).toBeInTheDocument();
 
     fireEvent.change(comment(), { target: { value: "open or closed?" } });
     fireEvent.keyDown(comment(), { key: "Enter" });
     await flush();
     expect(saveSpy.mock.calls[0][0]).toMatchObject({
       image_path: IMG1,
-      flag: [{ text: "open or closed?", point: [30, 30], subject: "subject_a" }],
+      gestures: { flag: [{ text: "open or closed?", target: { subject: SUBJECT } }] },
     });
+    const { target } = saveSpy.mock.calls[0][0].gestures.flag[0];
+    if (target === null || !("point" in target)) throw new Error("the flag targets no point");
+    const [px, py] = target.point;
+    expect(px).toBeGreaterThanOrEqual(x1);
+    expect(px).toBeLessThanOrEqual(x2);
+    expect(py).toBeGreaterThanOrEqual(y1);
+    expect(py).toBeLessThanOrEqual(y2);
     expect(loadSpy).toHaveBeenCalledTimes(1);
   });
 
   it("counts open flags, marks them on the canvas and steps to the flagged items", async () => {
-    await mountWith([flag({}), flag({ id: "f2", resolved_by: "user:second" })]);
-    expect(screen.getByRole("button", { name: /Flag \(1\)/ })).toBeInTheDocument();
+    // Two flags removed with their boxes, one open and one resolved.
+    await mountWith(LOADED.flags_mixed);
+    const open = LOADED.flags_mixed.flags.filter((f) => f.resolution === null).length;
+    expect(
+      screen.getByRole("button", { name: new RegExp(`Flag \\(${open}\\)`) }),
+    ).toBeInTheDocument();
     expect(
       screen
         .getAllByTestId("k-text")
@@ -2942,30 +2940,30 @@ describe("AnnotateTab flags", () => {
       target: { value: "flagged" },
     });
     await flush();
-    expect(screen.getByText("/ 1")).toBeInTheDocument();
+    expect(screen.getByText(`/ ${open}`)).toBeInTheDocument();
   });
 
   it("resolves the focused item's flag with a reply, through the save door", async () => {
-    await mountWith([flag({})]);
+    await mountWith(LOADED.flagged);
+    const [open] = LOADED.flagged.flags.filter((f) => f.resolution === null);
+    const { text } = open.request;
     fireEvent.keyDown(window, { key: "ArrowDown" });
     await flush();
     fireEvent.keyDown(window, { key: "f" });
     await flush();
-    expect(screen.getByText("open?")).toBeInTheDocument();
+    expect(screen.getByText(text)).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("textbox", { name: 'Reply to "open?"' }), {
+    fireEvent.change(screen.getByRole("textbox", { name: `Reply to "${text}"` }), {
       target: { value: "open" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Resolve" }));
     await flush();
-    expect(saveSpy.mock.calls[0][0].resolve).toEqual({ f1: "open" });
+    expect(saveSpy.mock.calls[0][0].gestures?.resolve).toEqual({ [open.id]: "open" });
   });
 
   it("adopts the flags a plain save answers, so a removal's resolution shows at once", async () => {
-    await mountWith([flag({})]);
-    saveSpy.mockResolvedValue(
-      saved("2", { flags: [flag({ resolved_by: "user:second", removed: true })] }),
-    );
+    await mountWith(LOADED.flagged);
+    saveSpy.mockResolvedValue(LANDED.flag_removed);
     act(() => useStore.getState().remove("boxes", 0));
     pressSave();
     await flush();
@@ -2975,20 +2973,19 @@ describe("AnnotateTab flags", () => {
 
 describe("AnnotateTab engine prompt", () => {
   const stage = () => screen.getByTestId("canvas-stage");
-  const BUCKET = "sam/2026-01-01/img1/staging_1_abcdef";
+  const STAGED = ANNOTATE_ANSWERS.staged;
+  const BUCKET = STAGED.bucket;
 
   async function mountArmed(mode: "point" | "box") {
     useStore.setState((s) => ({ gui: { ...s.gui, mode } }));
     useStore.getState().setPrompt(true);
-    const propose = vi
-      .spyOn(api.annotate, "propose")
-      .mockResolvedValue({ bucket: BUCKET, proposal_count: 2 });
-    const stagings = vi.spyOn(api.annotate, "stagings").mockResolvedValue({ buckets: [] });
-    const proposals = vi.spyOn(api.annotate, "proposals").mockResolvedValue({
-      bucket: BUCKET,
-      operating_point: { conf: null, reason: "" },
-      proposals: [],
-    });
+    const propose = vi.spyOn(api.annotate, "propose").mockResolvedValue(STAGED);
+    const stagings = vi
+      .spyOn(api.annotate, "stagings")
+      .mockResolvedValue(ANNOTATE_ANSWERS.no_stagings);
+    const proposals = vi
+      .spyOn(api.annotate, "proposals")
+      .mockResolvedValue(ANNOTATE_ANSWERS.staged_proposals);
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -3013,7 +3010,7 @@ describe("AnnotateTab engine prompt", () => {
 
     expect(propose).toHaveBeenCalledWith({
       image_path: IMG1,
-      subject: "subject_a",
+      subject: SUBJECT,
       user: "grower",
       prompt: {
         points: [
@@ -3040,7 +3037,7 @@ describe("AnnotateTab engine prompt", () => {
 
     expect(propose).toHaveBeenCalledWith({
       image_path: IMG1,
-      subject: "subject_a",
+      subject: SUBJECT,
       user: "grower",
       prompt: { points: [], boxes: [[10, 20, 90, 80]] },
     });
@@ -3071,12 +3068,7 @@ describe("AnnotateTab engine prompt", () => {
 
   it("Find holds the detector's boxes as prompts, stages nothing, and a right-click drops one", async () => {
     const { propose } = await mountArmed("box");
-    const find = vi.spyOn(api.annotate, "find").mockResolvedValue({
-      boxes: [
-        [10, 10, 40, 40],
-        [100, 100, 300, 300],
-      ],
-    });
+    const find = vi.spyOn(api.annotate, "find").mockResolvedValue(ANNOTATE_ANSWERS.found);
     fireEvent.click(screen.getByRole("button", { name: "toolbar-phrase" }));
     await flush();
 
@@ -3086,22 +3078,20 @@ describe("AnnotateTab engine prompt", () => {
       user: "grower",
     });
     expect(propose).not.toHaveBeenCalled();
-    expect(useStore.getState().annotateUi.pendingPrompts.found).toEqual([
-      [10, 10, 40, 40],
-      [100, 100, 300, 300],
-    ]);
+    const [dropped, kept] = ANNOTATE_ANSWERS.found.boxes;
+    expect(useStore.getState().annotateUi.pendingPrompts.found).toEqual([dropped, kept]);
     expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      '2 found for "open bud". Add or drop boxes, then propose.',
+      `${ANNOTATE_ANSWERS.found.boxes.length} found for "open bud". Add or drop boxes, then propose.`,
     );
 
-    fireEvent.contextMenu(stage(), { clientX: 20, clientY: 20 });
+    fireEvent.contextMenu(stage(), { clientX: dropped[0] + 10, clientY: dropped[1] + 10 });
     await flush();
 
-    expect(useStore.getState().annotateUi.pendingPrompts.found).toEqual([[100, 100, 300, 300]]);
+    expect(useStore.getState().annotateUi.pendingPrompts.found).toEqual([kept]);
     fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
     expect(propose).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: { points: [], boxes: [[100, 100, 300, 300]] } }),
+      expect.objectContaining({ prompt: { points: [], boxes: [kept] } }),
     );
   });
 
@@ -3110,38 +3100,30 @@ describe("AnnotateTab engine prompt", () => {
     fireEvent.mouseDown(stage(), { clientX: 10, clientY: 20, button: 0 });
     fireEvent.mouseUp(stage(), { clientX: 90, clientY: 80 });
     await flush();
-    const find = vi
-      .spyOn(api.annotate, "find")
-      .mockResolvedValueOnce({ boxes: [[10, 10, 40, 40]] });
+    const find = vi.spyOn(api.annotate, "find").mockResolvedValueOnce(ANNOTATE_ANSWERS.found);
     fireEvent.click(screen.getByRole("button", { name: "toolbar-phrase" }));
     await flush();
-    find.mockResolvedValueOnce({ boxes: [[200, 200, 260, 260]] });
+    find.mockResolvedValueOnce(ANNOTATE_ANSWERS.found_other);
     fireEvent.click(screen.getByRole("button", { name: "toolbar-phrase" }));
     await flush();
 
     expect(useStore.getState().annotateUi.pendingPrompts).toEqual({
       points: [],
       boxes: [[10, 20, 90, 80]],
-      found: [[200, 200, 260, 260]],
+      found: ANNOTATE_ANSWERS.found_other.boxes,
     });
     fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
     expect(propose).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: {
-          points: [],
-          boxes: [
-            [10, 20, 90, 80],
-            [200, 200, 260, 260],
-          ],
-        },
+        prompt: { points: [], boxes: [[10, 20, 90, 80], ...ANNOTATE_ANSWERS.found_other.boxes] },
       }),
     );
   });
 
   it("Find with nothing found says so and holds nothing", async () => {
     await mountArmed("box");
-    vi.spyOn(api.annotate, "find").mockResolvedValue({ boxes: [] });
+    vi.spyOn(api.annotate, "find").mockResolvedValue(ANNOTATE_ANSWERS.found_none);
     fireEvent.click(screen.getByRole("button", { name: "toolbar-phrase" }));
     await flush();
 
@@ -3151,23 +3133,7 @@ describe("AnnotateTab engine prompt", () => {
 
   it("shows the answered proposals under their shape's tool and focuses the first, the bucket unselected", async () => {
     const { stagings, proposals } = await mountArmed("point");
-    stagings.mockResolvedValue({ buckets: [BUCKET] });
-    proposals.mockResolvedValue({
-      bucket: BUCKET,
-      operating_point: { conf: null, reason: "" },
-      proposals: [
-        {
-          subject: "subject_a",
-          bbox: [10, 10, 50, 50],
-          attributes: {},
-          iscrowd: false,
-          score: 0.9,
-          index: 0,
-          paired: null,
-          decision: null,
-        },
-      ],
-    });
+    stagings.mockResolvedValue(ANNOTATE_ANSWERS.stagings);
     fireEvent.click(stage(), { clientX: 120, clientY: 340 });
     fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
@@ -3176,7 +3142,9 @@ describe("AnnotateTab engine prompt", () => {
     await waitFor(() => expect(proposals).toHaveBeenCalledWith(IMG1, BUCKET));
     expect(useStore.getState().gui.dataset?.bucket).toBeNull();
     expect(screen.getByTestId("toolbar")).toHaveAttribute("data-view-proposals", "true");
-    expect(useStore.getState().toasts.at(-1)?.message).toBe("2 proposals for img1.jpg");
+    expect(useStore.getState().toasts.at(-1)?.message).toBe(
+      `${STAGED.proposal_count} proposals for ${IMG1_NAME}`,
+    );
     await waitFor(() =>
       expect(useStore.getState().canvas.focus).toEqual({
         kind: "proposal",
@@ -3184,35 +3152,25 @@ describe("AnnotateTab engine prompt", () => {
         bucket: BUCKET,
       }),
     );
-    expect(useStore.getState().gui.mode).toBe("box");
+    // The engine staged each candidate's outline, so its proposals are polygons.
+    expect(useStore.getState().gui.mode).toBe("polygon");
   });
 
   it("serves a staging beside the selected bucket's proposals, each decided in its own bucket", async () => {
     const { stagings, proposals } = await mountArmed("box");
-    changeSelection({ bucket: "m1/2026-01-01" });
-    stagings.mockResolvedValue({ buckets: [BUCKET] });
-    const one = (index: number, x: number) => ({
-      subject: "subject_a",
-      bbox: [x, 10, x + 40, 50] as [number, number, number, number],
-      attributes: {},
-      iscrowd: false,
-      score: 0.9,
-      index,
-      paired: null,
-      decision: null,
-    });
+    const selected = ANNOTATE_ANSWERS.buckets.single;
+    changeSelection({ bucket: selected });
+    stagings.mockResolvedValue(ANNOTATE_ANSWERS.stagings);
     proposals.mockImplementation((_image, bucket) =>
-      Promise.resolve({
-        bucket,
-        operating_point: { conf: null, reason: "" },
-        proposals: bucket === BUCKET ? [one(0, 600)] : [one(0, 10)],
-      }),
+      Promise.resolve(
+        bucket === BUCKET ? ANNOTATE_ANSWERS.staged_proposals : ANNOTATE_ANSWERS.single_proposals,
+      ),
     );
     await waitFor(() => expect(proposals).toHaveBeenCalledWith(expect.any(String), BUCKET));
     await flush();
 
-    expect(dottedRects()).toHaveLength(2);
-    fireEvent.keyDown(window, { key: "ArrowDown" });
+    // The selected bucket's box proposal draws as a dotted box, the staging's as polygons.
+    expect(dottedRects()).toHaveLength(1);
     fireEvent.keyDown(window, { key: "ArrowDown" });
     await flush();
     expect(useStore.getState().canvas.focus).toEqual({
@@ -3222,7 +3180,9 @@ describe("AnnotateTab engine prompt", () => {
     });
     fireEvent.keyDown(window, { key: "a" });
     await flush();
-    expect(saveSpy.mock.calls[0][0]).toMatchObject({ bucket: BUCKET, accept: [0] });
+    expect(saveSpy.mock.calls[0][0]).toMatchObject({
+      gestures: { decide: { bucket: BUCKET, verdicts: { 0: "accepted" } } },
+    });
   });
 
   it("refuses a second send while one is in flight", async () => {
@@ -3250,24 +3210,36 @@ describe("AnnotateTab engine prompt", () => {
       changeSelection({ current_image_index: 1 });
     });
     await flush();
-    act(() => answer.resolve({ bucket: BUCKET, proposal_count: 2 }));
+    act(() => answer.resolve(STAGED));
     await flush();
 
     expect(useStore.getState().gui.dataset?.current_image_index).toBe(1);
     expect(proposals).not.toHaveBeenCalledWith(expect.any(String), BUCKET);
     expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      `2 proposals for img1.jpg, staged under ${BUCKET}.`,
+      `${STAGED.proposal_count} proposals for ${IMG1_NAME}, staged under ${BUCKET}.`,
     );
   });
 
   it("a refused prompt reaches the person as a toast carrying the route's text", async () => {
     const { propose } = await mountArmed("point");
-    propose.mockRejectedValue(new Error("no checkpoint at the stated name"));
+    const refusal = ANNOTATE_ANSWERS.engine_refusal;
+    propose.mockRejectedValue(await thrown(refusal));
     fireEvent.click(stage(), { clientX: 120, clientY: 340 });
     fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
     await flush();
 
-    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/no checkpoint at the stated name/);
+    expect(useStore.getState().toasts.at(-1)?.message).toContain(refusal.body.detail);
+  });
+
+  it("a prompt the engine answers with nothing serves nothing and says so", async () => {
+    const { propose, proposals } = await mountArmed("point");
+    propose.mockResolvedValue(ANNOTATE_ANSWERS.nothing_proposed);
+    fireEvent.click(stage(), { clientX: 120, clientY: 340 });
+    fireEvent.click(screen.getByRole("button", { name: "toolbar-propose" }));
+    await flush();
+
+    expect(proposals).not.toHaveBeenCalled();
+    expect(useStore.getState().toasts.at(-1)?.message).toBe(`No proposal for ${IMG1_NAME}.`);
   });
 
   it("disarmed, a click in point mode places a point and sends no prompt", async () => {
@@ -3278,7 +3250,7 @@ describe("AnnotateTab engine prompt", () => {
 
     expect(propose).not.toHaveBeenCalled();
     expect(useStore.getState().canvas.points).toEqual([
-      { x: 120, y: 340, subject: "subject_a", attributes: {} },
+      { x: 120, y: 340, subject: SUBJECT, attributes: {}, iscrowd: false },
     ]);
   });
 });

@@ -2,6 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { openInferenceStream } from "@/api/inference";
 import { openTrainingStream } from "@/api/training";
+import { INFERENCE_ANSWERS } from "@/test/inference";
+import { METRIC_FRAMES, STATUS_FRAME, UNKNOWN_RUN_FRAME } from "@/test/training";
+
+const { progress: PROGRESS, final: FINAL, unknown_job: UNKNOWN_JOB } = INFERENCE_ANSWERS;
+const [METRIC] = METRIC_FRAMES;
 
 /** Minimal WebSocket stand-in: records instances, lets tests drive events. */
 class FakeWebSocket {
@@ -72,15 +77,15 @@ describe("openInferenceStream", () => {
     lastSocket().message("not json");
     expect(onMessage).not.toHaveBeenCalled();
 
-    lastSocket().message(JSON.stringify({ type: "progress", done: 3, total: 10 }));
+    lastSocket().message(JSON.stringify(PROGRESS));
     expect(onMessage).toHaveBeenCalledTimes(1);
-    expect(onMessage).toHaveBeenCalledWith({ type: "progress", done: 3, total: 10 });
+    expect(onMessage).toHaveBeenCalledWith(PROGRESS);
   });
 
   it("reconnects after a mid-run drop so progress does not silently stop", () => {
     openInferenceStream("j1", vi.fn());
     lastSocket().open();
-    lastSocket().message(JSON.stringify({ type: "progress", done: 3, total: 10 }));
+    lastSocket().message(JSON.stringify(PROGRESS));
 
     lastSocket().drop();
     vi.advanceTimersByTime(499);
@@ -109,8 +114,8 @@ describe("openInferenceStream", () => {
     const onMessage = vi.fn();
     openInferenceStream("j1", onMessage);
     lastSocket().open();
-    lastSocket().message(JSON.stringify({ type: "final", status: "completed" }));
-    expect(onMessage).toHaveBeenCalledWith({ type: "final", status: "completed" });
+    lastSocket().message(JSON.stringify(FINAL));
+    expect(onMessage).toHaveBeenCalledWith(FINAL);
 
     lastSocket().drop();
     vi.advanceTimersByTime(60_000);
@@ -121,8 +126,8 @@ describe("openInferenceStream", () => {
     const onMessage = vi.fn();
     openInferenceStream("j1", onMessage);
     lastSocket().open();
-    lastSocket().message(JSON.stringify({ type: "final", error: "job not found" }));
-    expect(onMessage).toHaveBeenCalledWith({ type: "final", error: "job not found" });
+    lastSocket().message(JSON.stringify(UNKNOWN_JOB));
+    expect(onMessage).toHaveBeenCalledWith(UNKNOWN_JOB);
 
     lastSocket().drop();
     vi.advanceTimersByTime(60_000);
@@ -141,7 +146,7 @@ describe("openInferenceStream", () => {
     openInferenceStream("j1", vi.fn());
     lastSocket().open();
     const parseSpy = vi.spyOn(JSON, "parse");
-    lastSocket().message(JSON.stringify({ type: "progress", done: 1, total: 4 }));
+    lastSocket().message(JSON.stringify(PROGRESS));
     expect(parseSpy).toHaveBeenCalledTimes(1);
   });
 });
@@ -157,7 +162,7 @@ describe("openTrainingStream", () => {
   it("reconnects after a mid-run drop so metric rows resume", () => {
     openTrainingStream("r1", vi.fn());
     lastSocket().open();
-    lastSocket().message(JSON.stringify({ type: "row", experiment_id: "r1", row: { epoch: 2 } }));
+    lastSocket().message(JSON.stringify(METRIC));
 
     lastSocket().drop();
     vi.advanceTimersByTime(499);
@@ -184,9 +189,7 @@ describe("openTrainingStream", () => {
   it("stops reconnecting once a terminal status frame has arrived", () => {
     openTrainingStream("r1", vi.fn());
     lastSocket().open();
-    lastSocket().message(
-      JSON.stringify({ type: "status", experiment_id: "r1", status: { status: "completed" } }),
-    );
+    lastSocket().message(JSON.stringify(STATUS_FRAME));
 
     lastSocket().drop();
     vi.advanceTimersByTime(60_000);
@@ -197,24 +200,15 @@ describe("openTrainingStream", () => {
     const onMessage = vi.fn();
     openTrainingStream("r1", onMessage);
     lastSocket().open();
-    lastSocket().message(
-      JSON.stringify({ type: "status", experiment_id: "r1", status: null, error: "unknown run" }),
-    );
-    expect(onMessage).toHaveBeenCalledWith({
-      type: "status",
-      experiment_id: "r1",
-      status: null,
-      error: "unknown run",
-    });
+    lastSocket().message(JSON.stringify(UNKNOWN_RUN_FRAME));
+    expect(onMessage).toHaveBeenCalledWith(UNKNOWN_RUN_FRAME);
 
     lastSocket().drop();
     vi.advanceTimersByTime(500);
     expect(FakeWebSocket.instances).toHaveLength(2);
 
     lastSocket().open();
-    lastSocket().message(
-      JSON.stringify({ type: "status", experiment_id: "r1", status: { status: "running" } }),
-    );
+    lastSocket().message(JSON.stringify(STATUS_FRAME));
     lastSocket().drop();
     vi.advanceTimersByTime(60_000);
     expect(FakeWebSocket.instances).toHaveLength(2);
@@ -225,9 +219,7 @@ describe("openTrainingStream", () => {
 
     for (const delay of [499, 999, 1999]) {
       lastSocket().open();
-      lastSocket().message(
-        JSON.stringify({ type: "status", experiment_id: "r1", status: null, error: "unknown run" }),
-      );
+      lastSocket().message(JSON.stringify(UNKNOWN_RUN_FRAME));
       lastSocket().drop();
       const before = FakeWebSocket.instances.length;
       vi.advanceTimersByTime(delay);
@@ -237,9 +229,7 @@ describe("openTrainingStream", () => {
     }
 
     lastSocket().open();
-    lastSocket().message(
-      JSON.stringify({ type: "metric", experiment_id: "r1", row: { epoch: 1 } }),
-    );
+    lastSocket().message(JSON.stringify(METRIC));
     lastSocket().drop();
     const before = FakeWebSocket.instances.length;
     vi.advanceTimersByTime(499);
@@ -260,7 +250,7 @@ describe("openTrainingStream", () => {
     openTrainingStream("r1", vi.fn());
     lastSocket().open();
     const parseSpy = vi.spyOn(JSON, "parse");
-    lastSocket().message(JSON.stringify({ type: "row", experiment_id: "r1", row: { epoch: 2 } }));
+    lastSocket().message(JSON.stringify(METRIC));
     expect(parseSpy).toHaveBeenCalledTimes(1);
   });
 });

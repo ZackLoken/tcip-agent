@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
 import { useImageBands } from "@/hooks/useImageBands";
+import { BAND_ANSWERS } from "@/test/bands";
 
 describe("useImageBands", () => {
   it("returns null and fetches nothing for a null path", () => {
@@ -13,15 +14,7 @@ describe("useImageBands", () => {
   });
 
   it("resolves the reported band contract for a given path", async () => {
-    vi.spyOn(api.images, "bands").mockResolvedValue({
-      band_count: 4,
-      bands: [
-        { name: "Blue", wavelength_nm: 475, dtype: "uint16", min: 0, max: 65535 },
-        { name: "Green", wavelength_nm: 560, dtype: "uint16", min: 0, max: 65535 },
-        { name: "Red", wavelength_nm: 650, dtype: "uint16", min: 0, max: 65535 },
-        { name: "NIR", wavelength_nm: 840, dtype: "uint16", min: 0, max: 65535 },
-      ],
-    });
+    vi.spyOn(api.images, "bands").mockResolvedValue(BAND_ANSWERS.four_spectral);
     const { result } = renderHook(() =>
       useImageBands("C:/data/images/2026-01-01/DJI_0001.bandgroup"),
     );

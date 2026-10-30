@@ -2,18 +2,32 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Auto-cleanup needs vitest globals (not enabled here), so clean up explicitly.
 
-import type { ImageBandsResponse } from "@/api/client";
 import { api } from "@/api/client";
-import { StructuredRefusalError } from "@/api/http";
 import { subjectsApi } from "@/api/subjects";
+import type { ImageBands } from "@/api/types.generated";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
-import type { ReviewItem } from "@/lib/reviewItems";
+import { NO_MATCHES, reviewItems, type ReviewItem } from "@/lib/reviewItems";
 import { useStore } from "@/store";
 import type { AnnotateView, SubjectState } from "@/store/types";
-import { openTestProject, selected } from "@/test/store";
+import { ANNOTATE_ANSWERS, registryOf, SECOND_SUBJECT } from "@/test/annotate";
+import { BAND_ANSWERS } from "@/test/bands";
+import { LABEL_ANSWERS, SERVED_ATTRIBUTES } from "@/test/labels";
+import { thrown } from "@/test/refusals";
+import { openTestProject, SELECTED_SUBJECT, selected } from "@/test/store";
 
 const initialStoreState = useStore.getState();
+
+const { registry_saved: REGISTRY_SAVED, registry_loaded: REGISTRY_LOADED } = LABEL_ANSWERS;
+const LOADED_VERSION = REGISTRY_LOADED.version;
+
+/** The subjects the load route served, and the one subject they declare, by name. */
+const SERVED = REGISTRY_LOADED.subjects ?? {};
+const [SERVED_NAME] = Object.keys(SERVED);
+
+/** The subject menu's entry of the served subject, and the pill naming it or nothing. */
+const SERVED_PILL = new RegExp(`^${SERVED_NAME}`);
+const SUBJECT_PILL = new RegExp(`${SERVED_NAME}|select subject`);
 
 const modeButton = (name: "Box" | "Polygon" | "Point") =>
   screen.getByRole("button", { name: new RegExp(`^${name}$`) });
@@ -21,13 +35,13 @@ const modeButton = (name: "Box" | "Polygon" | "Point") =>
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
   // The toolbar's nav hook persists the settled index; nothing here should reach the backend.
-  vi.spyOn(api.dataset, "nav").mockResolvedValue({ status: "ok" } as never);
+  vi.spyOn(api.dataset, "nav").mockResolvedValue(null);
 });
 
 afterEach(cleanup);
 
 function renderToolbar(
-  bandsInfo?: ImageBandsResponse | null,
+  bandsInfo?: ImageBands | null,
   bandSelection?: BandSelection | null,
   extra?: {
     subjectState?: SubjectState | null;
@@ -69,27 +83,9 @@ function openEdit() {
   if (btn.getAttribute("aria-expanded") !== "true") fireEvent.click(btn);
 }
 
-const FOUR_BANDS: ImageBandsResponse = {
-  band_count: 4,
-  bands: [
-    { name: "Blue", wavelength_nm: 475, dtype: "uint16", min: 0, max: 65535 },
-    { name: "Green", wavelength_nm: 560, dtype: "uint16", min: 0, max: 65535 },
-    { name: "Red", wavelength_nm: 650, dtype: "uint16", min: 0, max: 65535 },
-    { name: "NIR", wavelength_nm: 840, dtype: "uint16", min: 0, max: 65535 },
-  ],
-  sampled: false,
-  pixel_fraction: 1.0,
-  seed: 0,
-};
+const FOUR_BANDS = BAND_ANSWERS.four_spectral;
 
-const THREE_BANDS: ImageBandsResponse = {
-  band_count: 3,
-  bands: [
-    { name: "Red", wavelength_nm: null, dtype: "uint8", min: 0, max: 255 },
-    { name: "Green", wavelength_nm: null, dtype: "uint8", min: 0, max: 255 },
-    { name: "Blue", wavelength_nm: null, dtype: "uint8", min: 0, max: 255 },
-  ],
-};
+const PLAIN = BAND_ANSWERS.plain;
 
 describe("AnnotateToolbar save state", () => {
   it("shows a save in flight, and the button then cancels it rather than saving again", () => {
@@ -320,174 +316,152 @@ describe("AnnotateToolbar subject authoring", () => {
     fireEvent.click(screen.getByRole("button", { name: /select subject/ }));
   }
 
-  function answerPrompt(answer: string | null) {
-    return vi.spyOn(window, "prompt").mockReturnValue(answer);
+  /** Answer the name prompt, then the description prompt, each with the next of `answers`. */
+  function answerPrompt(...answers: (string | null)[]) {
+    const spy = vi.spyOn(window, "prompt");
+    for (const answer of answers) spy.mockReturnValueOnce(answer);
+    return spy;
   }
 
-  it("registers a typed name with its surrounding whitespace stripped", async () => {
+  it("registers a typed name with its surrounding whitespace stripped and its description", async () => {
     // An untrimmed registry key would open a second subject that reads as the first.
     seedDataset();
-    act(() => useStore.getState().setRegistry({ leaf: {} }));
-    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue({
-      status: "ok",
-      n_subjects: 2,
-      subjects_path: "C:/data/subjects.json",
-      version: "v1",
-    });
-    answerPrompt("  husk  ");
+    act(() => useStore.getState().setRegistry(SERVED));
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(REGISTRY_SAVED);
+    answerPrompt("  husk  ", "one husk");
     renderToolbar();
 
     openSubjectMenu();
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
-    expect(Object.keys(useStore.getState().registry.subjects)).toEqual(["leaf", "husk"]);
+    expect(Object.keys(useStore.getState().registry.subjects)).toEqual([SERVED_NAME, "husk"]);
     expect(useStore.getState().gui.active_subject).toBe("husk");
     expect(saveSpy).toHaveBeenCalledTimes(1);
-    expect(saveSpy.mock.calls[0][0]).toEqual({ leaf: {}, husk: {} });
+    expect(saveSpy.mock.calls[0][0].subjects).toEqual({
+      ...SERVED,
+      husk: { description: "one husk" },
+    });
+  });
+
+  it("adds nothing when the description prompt is dismissed", async () => {
+    seedDataset();
+    act(() => useStore.getState().setRegistry(SERVED));
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(REGISTRY_SAVED);
+    answerPrompt("husk", null);
+    renderToolbar();
+
+    openSubjectMenu();
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
+
+    expect(Object.keys(useStore.getState().registry.subjects)).toEqual([SERVED_NAME]);
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it("selects an existing subject rather than resetting its attribute definitions", async () => {
     seedDataset();
-    const leafDef = {
-      attributes: { stage: { type: "ordinal" as const, values: ["early", "late"] } },
-    };
-    act(() => useStore.getState().setRegistry({ leaf: leafDef, husk: {} }));
-    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue({
-      status: "ok",
-      n_subjects: 2,
-      subjects_path: "C:/data/subjects.json",
-      version: "v1",
-    });
-    answerPrompt("leaf");
+    const both = { ...SERVED, ...registryOf(SECOND_SUBJECT) };
+    act(() => useStore.getState().setRegistry(both));
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(REGISTRY_SAVED);
+    answerPrompt(SERVED_NAME);
     renderToolbar();
 
     openSubjectMenu();
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
-    expect(useStore.getState().registry.subjects).toEqual({ leaf: leafDef, husk: {} });
-    expect(useStore.getState().gui.active_subject).toBe("leaf");
+    expect(useStore.getState().registry.subjects).toEqual(both);
+    expect(useStore.getState().gui.active_subject).toBe(SERVED_NAME);
     expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it("adds nothing when the prompt is dismissed or answered with only whitespace", async () => {
     seedDataset();
-    act(() => useStore.getState().setRegistry({ leaf: {} }));
-    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue({
-      status: "ok",
-      n_subjects: 1,
-      subjects_path: "C:/data/subjects.json",
-      version: "v1",
-    });
+    act(() => useStore.getState().setRegistry(SERVED));
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(REGISTRY_SAVED);
     const promptSpy = answerPrompt(null);
     renderToolbar();
 
     openSubjectMenu();
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
-    expect(Object.keys(useStore.getState().registry.subjects)).toEqual(["leaf"]);
+    expect(Object.keys(useStore.getState().registry.subjects)).toEqual([SERVED_NAME]);
 
     promptSpy.mockReturnValue("   ");
     openSubjectMenu();
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
-    expect(Object.keys(useStore.getState().registry.subjects)).toEqual(["leaf"]);
+    expect(Object.keys(useStore.getState().registry.subjects)).toEqual([SERVED_NAME]);
     expect(useStore.getState().gui.active_subject).toBeNull();
     expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it("posts the loaded registry version and stores the version the save returns", async () => {
     seedDataset();
-    act(() => useStore.getState().setRegistry({ leaf: {} }, "v1"));
-    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue({
-      status: "ok",
-      n_subjects: 2,
-      subjects_path: "C:/data/subjects.json",
-      version: "v2",
-    });
-    answerPrompt("husk");
+    act(() => useStore.getState().setRegistry(SERVED, LOADED_VERSION));
+    const saveSpy = vi.spyOn(subjectsApi, "save").mockResolvedValue(REGISTRY_SAVED);
+    answerPrompt("husk", "one husk");
     renderToolbar();
 
     openSubjectMenu();
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
-    expect(saveSpy.mock.calls[0][2]).toBe("v1");
-    expect(useStore.getState().registry.version).toBe("v2");
+    expect(saveSpy.mock.calls[0][0].version).toBe(LOADED_VERSION);
+    expect(useStore.getState().registry.version).toBe(REGISTRY_SAVED.version);
   });
 
   it("reloads the registry from the server when the save is refused", async () => {
     seedDataset();
-    act(() => useStore.getState().setRegistry({ leaf: {} }, "v1"));
-    vi.spyOn(subjectsApi, "save").mockRejectedValue(new Error("409 stale version"));
-    vi.spyOn(subjectsApi, "load").mockResolvedValue({
-      subjects: { leaf: {} },
-      discovered: [],
-      version: "v3",
-      unreadable: [],
-    });
-    answerPrompt("husk");
+    act(() => useStore.getState().setRegistry(SERVED, LOADED_VERSION));
+    vi.spyOn(subjectsApi, "save").mockRejectedValue(await thrown(LABEL_ANSWERS.registry_stale));
+    vi.spyOn(subjectsApi, "load").mockResolvedValue(REGISTRY_LOADED);
+    answerPrompt("husk", "one husk");
     renderToolbar();
 
     openSubjectMenu();
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
     // The refused optimistic add is discarded in favor of what the server actually holds.
-    expect(useStore.getState().registry.subjects).toEqual({ leaf: {} });
-    expect(useStore.getState().registry.version).toBe("v3");
+    expect(useStore.getState().registry.subjects).toEqual(REGISTRY_LOADED.subjects);
+    expect(useStore.getState().registry.version).toBe(REGISTRY_LOADED.version);
   });
 
   it("reverts the optimistically set active subject when the save is refused", async () => {
     seedDataset();
     act(() => {
-      useStore.getState().setRegistry({ leaf: {} }, "v1");
-      useStore.getState().setActiveSubject("leaf");
+      useStore.getState().setRegistry(SERVED, LOADED_VERSION);
+      useStore.getState().setActiveSubject(SERVED_NAME);
     });
-    vi.spyOn(subjectsApi, "save").mockRejectedValue(new Error("409 stale version"));
-    vi.spyOn(subjectsApi, "load").mockResolvedValue({
-      subjects: { leaf: {} },
-      discovered: [],
-      version: "v3",
-      unreadable: [],
-    });
-    answerPrompt("husk");
+    vi.spyOn(subjectsApi, "save").mockRejectedValue(await thrown(LABEL_ANSWERS.registry_stale));
+    vi.spyOn(subjectsApi, "load").mockResolvedValue(REGISTRY_LOADED);
+    answerPrompt("husk", "one husk");
     renderToolbar();
 
-    // "leaf" is already active, so the pill reads its name rather than the default placeholder.
-    fireEvent.click(screen.getByRole("button", { name: /leaf|select subject/ }));
+    // The served subject is already active, so the pill reads its name rather than the default
+    // placeholder.
+    fireEvent.click(screen.getByRole("button", { name: SUBJECT_PILL }));
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
     // "husk" was set optimistically as active; the refusal must not leave it active.
-    expect(useStore.getState().gui.active_subject).toBe("leaf");
+    expect(useStore.getState().gui.active_subject).toBe(SERVED_NAME);
   });
 
   it("adopts the committed registry and keeps the active subject when the save's audit line is lost", async () => {
     seedDataset();
     act(() => {
-      useStore.getState().setRegistry({ leaf: {} }, "v1");
-      useStore.getState().setActiveSubject("leaf");
+      useStore.getState().setRegistry(SERVED, LOADED_VERSION);
+      useStore.getState().setActiveSubject(SERVED_NAME);
     });
-    const committed = {
-      status: "ok",
-      n_subjects: 2,
-      subjects_path: "C:/data/subjects.json",
-      version: "v2",
-    };
-    const message = "replace_registry completed and its audit entry could not be written";
-    vi.spyOn(subjectsApi, "save").mockRejectedValue(
-      new StructuredRefusalError(
-        { error: "audit_entry_not_written", message, committed },
-        409,
-        message,
-      ),
-    );
-    answerPrompt("husk");
+    const gap = LABEL_ANSWERS.registry_audit_gap;
+    vi.spyOn(subjectsApi, "save").mockRejectedValue(await thrown(gap));
+    answerPrompt("husk", "one husk");
     renderToolbar();
 
-    // "leaf" is already active, so the pill reads its name rather than the default placeholder.
-    fireEvent.click(screen.getByRole("button", { name: /leaf|select subject/ }));
+    // The served subject is already active, so the pill reads its name rather than the default
+    // placeholder.
+    fireEvent.click(screen.getByRole("button", { name: SUBJECT_PILL }));
     await act(() => Promise.resolve(fireEvent.click(screen.getByText("New subject"))));
 
     // The committed body is adopted as though the save had answered 200, and the optimistic
     // active subject is kept rather than reverted (unlike an ordinary refusal above).
-    expect(useStore.getState().registry.version).toBe("v2");
+    expect(useStore.getState().registry.version).toBe(gap.body.detail.committed.version);
     expect(useStore.getState().gui.active_subject).toBe("husk");
   });
 });
@@ -495,48 +469,42 @@ describe("AnnotateToolbar subject authoring", () => {
 describe("AnnotateToolbar subject menu attributes", () => {
   it("holds the active subject's attributes under the subject list, absent with no subject", () => {
     openTestProject(selected({ count: 0 }));
-    act(() => useStore.getState().setRegistry({ leaf: {} }));
+    act(() => useStore.getState().setRegistry(SERVED));
     renderToolbar();
     fireEvent.click(screen.getByRole("button", { name: /select subject/ }));
     expect(screen.queryByTestId("subject-attributes")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /^leaf/ }));
-    fireEvent.click(screen.getByRole("button", { name: /^leaf/ }));
+    fireEvent.click(screen.getByRole("button", { name: SERVED_PILL }));
+    fireEvent.click(screen.getByRole("button", { name: SERVED_PILL }));
     expect(screen.getByTestId("subject-attributes")).toBeInTheDocument();
-    expect(screen.getByText("leaf attributes")).toBeInTheDocument();
+    expect(screen.getByText(`${SERVED_NAME} attributes`)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add attribute" })).toBeInTheDocument();
   });
 
   it("edits the focused box's attributes inside the menu", () => {
+    const [[declared, { values }]] = Object.entries(SERVED_ATTRIBUTES);
     openTestProject(selected({ count: 0 }));
     act(() => {
+      useStore.getState().setRegistry(SERVED);
+      useStore.getState().setActiveSubject(SERVED_NAME);
       useStore
         .getState()
-        .setRegistry({ leaf: { attributes: { stage: { type: "ordinal", values: ["early"] } } } });
-      useStore.getState().setActiveSubject("leaf");
-      useStore
-        .getState()
-        .add("boxes", { x1: 0, y1: 0, x2: 5, y2: 5, subject: "leaf", attributes: {} });
+        .add("boxes", { x1: 0, y1: 0, x2: 5, y2: 5, subject: SERVED_NAME, attributes: {} });
     });
-    renderToolbar(null, null, {
-      focused: {
-        kind: "annotation",
-        shape: "box",
-        ref: 0,
-        subject: "leaf",
-        bbox: [0, 0, 5, 5],
-        match: null,
-        reviewed: false,
-        score: null,
-        at: [2, 2],
-        flags: [],
-      },
+    const { canvas } = useStore.getState();
+    const [focused] = reviewItems({
+      canvas,
+      proposals: [],
+      matches: NO_MATCHES,
+      reviewing: false,
+      flags: canvas.flags,
     });
-    fireEvent.click(screen.getByRole("button", { name: /^leaf/ }));
-    fireEvent.change(screen.getByRole("combobox", { name: "stage" }), {
-      target: { value: "early" },
+    renderToolbar(null, null, { focused });
+    fireEvent.click(screen.getByRole("button", { name: SERVED_PILL }));
+    fireEvent.change(screen.getByRole("combobox", { name: declared }), {
+      target: { value: values[0] },
     });
-    expect(useStore.getState().canvas.boxes[0].attributes).toEqual({ stage: "early" });
+    expect(useStore.getState().canvas.boxes[0].attributes).toEqual({ [declared]: values[0] });
   });
 });
 
@@ -546,14 +514,14 @@ describe("AnnotateToolbar band picker (progressive disclosure)", () => {
     expect(screen.queryByLabelText("R band")).not.toBeInTheDocument();
   });
 
-  it("is hidden for a standard 3-band RGB dataset", () => {
-    renderToolbar(THREE_BANDS, defaultBandSelection(THREE_BANDS.bands));
+  it("is hidden for a frame the server displays plain", () => {
+    renderToolbar(PLAIN, defaultBandSelection(PLAIN));
     expect(screen.queryByLabelText("R band")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Band")).not.toBeInTheDocument();
   });
 
   it("is shown for a >3-band (multispectral) dataset", () => {
-    renderToolbar(FOUR_BANDS, defaultBandSelection(FOUR_BANDS.bands));
+    renderToolbar(FOUR_BANDS, defaultBandSelection(FOUR_BANDS));
     expect(screen.getByLabelText("R band")).toBeInTheDocument();
     expect(screen.getByLabelText("G band")).toBeInTheDocument();
     expect(screen.getByLabelText("B band")).toBeInTheDocument();
@@ -567,7 +535,9 @@ function seedSubject(subject: string) {
 describe("AnnotateToolbar image stepping", () => {
   it("leaves the focused item behind on the image it left", () => {
     openTestProject(selected({ count: 2 }));
-    useStore.getState().setFocus({ kind: "proposal", index: 3 });
+    useStore
+      .getState()
+      .setFocus({ kind: "proposal", index: 3, bucket: ANNOTATE_ANSWERS.buckets.review });
     expect(useStore.getState().canvas.focus).not.toBeNull();
     renderToolbar();
 
@@ -580,34 +550,33 @@ describe("AnnotateToolbar image stepping", () => {
 
 describe("AnnotateToolbar image filter", () => {
   it("names each filter with its count and steps through the kept images only", () => {
-    openTestProject(selected({ subject: "leaf", count: 3 }));
-    act(() =>
-      useStore.getState().setImageStates({
-        "img1.jpg": "unannotated",
-        "img2.jpg": "complete",
-        "img3.jpg": "unannotated",
-      }),
-    );
+    // The produced states: the first negative, the second partial, the fifth complete.
+    const { states } = ANNOTATE_ANSWERS.marked_states;
+    const held = Object.values(states);
+    const counted = (kept: (state: SubjectState) => boolean) => held.filter(kept).length;
+    openTestProject(selected({ subject: SELECTED_SUBJECT }));
+    act(() => useStore.getState().setImageStates(states));
     renderToolbar();
     const filter = screen.getByRole("combobox", { name: "Images" });
     expect(Array.from(filter.querySelectorAll("option"), (o) => o.textContent)).toEqual([
-      "all (3)",
-      "unannotated (2)",
-      "in progress (0)",
-      "complete (1)",
+      `all (${held.length})`,
+      `unannotated (${counted((s) => s === "unannotated")})`,
+      `in progress (${counted((s) => s === "partial")})`,
+      `complete (${counted((s) => s === "complete" || s === "negative")})`,
     ]);
 
-    fireEvent.change(filter, { target: { value: "unannotated" } });
+    const kept = held.flatMap((s, i) => (s === "complete" || s === "negative" ? [i] : []));
+    fireEvent.change(filter, { target: { value: "complete" } });
     expect(screen.getByRole("textbox", { name: "Image position" })).toHaveValue("1");
     fireEvent.click(screen.getByRole("button", { name: "Next image" }));
-    expect(useStore.getState().gui.dataset?.current_image_index).toBe(2);
+    expect(useStore.getState().gui.dataset?.current_image_index).toBe(kept[1]);
     expect(screen.getByRole("button", { name: "Next image" })).toBeDisabled();
   });
 });
 
 describe("AnnotateToolbar Complete toggle", () => {
   it("reads checked from the served state, with or without annotations", () => {
-    seedSubject("subject_a");
+    seedSubject(SELECTED_SUBJECT);
     renderToolbar(null, null, { subjectState: "negative" });
     expect(screen.getByRole("checkbox", { name: /Complete/ })).toBeChecked();
     cleanup();
@@ -616,7 +585,7 @@ describe("AnnotateToolbar Complete toggle", () => {
   });
 
   it("asks the tab to mark or withdraw, and is disabled until the document loads", () => {
-    seedSubject("subject_a");
+    seedSubject(SELECTED_SUBJECT);
     const onComplete = vi.fn();
     renderToolbar(null, null, { subjectState: "partial", onComplete });
     fireEvent.click(screen.getByRole("checkbox", { name: /Complete/ }));

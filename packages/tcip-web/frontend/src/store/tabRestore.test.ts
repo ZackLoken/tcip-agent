@@ -4,14 +4,14 @@ import { TAB_NAMES } from "@/api/types.generated";
 import { datasetKey, loadLastTab, recordLastTab, saveDatasetUi } from "@/lib/datasetUiState";
 import { useStore } from "@/store";
 import type { TabName } from "@/store/types";
-import { selected, type SelectionChange, TEST_PROJECT } from "@/test/store";
+import { selected, type SelectionChange, SUBJECT_SELECT_ANSWER, TEST_PROJECT } from "@/test/store";
 
 const s = () => useStore.getState();
 
 const PROJECT = TEST_PROJECT;
 
 const selection = (change: SelectionChange = {}) =>
-  selected({ subject: "subject_a", count: 1, ...change });
+  selected({ count: 1, ...change }, SUBJECT_SELECT_ANSWER.selection);
 
 describe("per-project last-used tab", () => {
   beforeEach(() => {

@@ -243,7 +243,7 @@ def test_a_registry_index_missing_a_field_refuses_naming_it(
     (entry,) = read_registry_index(tmp_path)
     ts.replace(
         registry_index_key(tmp_path),
-        {"entries": [entry.model_dump(exclude={"sha256"})]},
+        {"entries": [entry.model_dump(mode="json", exclude={"sha256"})]},
     )
 
     with pytest.raises(
@@ -368,12 +368,17 @@ def test_a_bucket_record_missing_a_field_refuses_naming_it(
 
 def test_a_final_status_reads_back_as_it_was_written(tmp_path: Path) -> None:
     """A run's final status reads back with its state, error and checkpoint."""
+    from tcip_mcp.audit import now
     from tcip_mcp.experiments import RunCheckpoint, observe, write_final_status
 
     run_dir = _sweep_dir(tmp_path, "run_a")
     path = str(run_dir / "model_final.pt")
     write_final_status(
-        run_dir, "completed", None, checkpoint={"path": path, "sha256": "ab"}
+        run_dir,
+        "completed",
+        None,
+        ended=now(),
+        checkpoint=RunCheckpoint(path=path, sha256="ab"),
     )
 
     final = observe(run_dir).final
@@ -384,13 +389,16 @@ def test_a_final_status_reads_back_as_it_was_written(tmp_path: Path) -> None:
         RunCheckpoint(path=path, sha256="ab"),
     )
     with pytest.raises(ValidationError, match="state"):
-        write_final_status(_sweep_dir(tmp_path, "run_b"), "running", None)
+        write_final_status(
+            _sweep_dir(tmp_path, "run_b"), "running", None, ended=now()
+        )
 
 
 def test_a_final_status_missing_a_field_refuses_naming_it(
     tmp_path: Path,
 ) -> None:
     """A final status stored without its ``ended`` refuses where the run is observed."""
+    from tcip_mcp.audit import now
     from tcip_mcp.experiments import (
         FINAL_STATUS_FILE,
         observe,
@@ -398,7 +406,7 @@ def test_a_final_status_missing_a_field_refuses_naming_it(
     )
 
     run_dir = _sweep_dir(tmp_path, "run_a")
-    write_final_status(run_dir, "failed", "stopped")
+    write_final_status(run_dir, "failed", "stopped", ended=now())
     path = run_dir / FINAL_STATUS_FILE
     stored = json.loads(path.read_text(encoding="utf-8"))
     del stored["ended"]
@@ -433,12 +441,15 @@ def test_a_raised_flag_reads_back_as_raised_and_one_missing_a_field_refuses(
     """A flag raised through the save reads back as raised; one stored without ``by`` refuses."""
     from tcip_annotation.flags import (
         FlagRequest,
-        encode_flag,
+        PointTarget,
         flag_key,
+        flags_record,
         read_flags,
     )
     from tcip_mcp.dataset_layout import Gestures, save_label_document
     from tests._producer_fixtures import image_label_key, write_image
+
+    target = PointTarget(point=(50.0, 40.0), subject="bud")
 
     image = write_image(image_dir(tmp_path, DATE) / "a.jpg", (100, 80))
     key = image_label_key(image)
@@ -450,22 +461,19 @@ def test_a_raised_flag_reads_back_as_raised_and_one_missing_a_field_refuses(
         height=80,
         author="user:breeder",
         actor="user:breeder",
-        gestures=Gestures(
-            flag=(
-                FlagRequest(text=" open? ", point=(50.0, 40.0), subject="bud"),
-            )
-        ),
+        gestures=Gestures(flag=(FlagRequest(text=" open? ", target=target),)),
     )
 
     (flag,) = read_flags(flag_key(key))
-    assert (flag.text, flag.by, flag.point, flag.subject, flag.open) == (
+    assert (flag.request.text, flag.by, flag.request.target, flag.open) == (
         "open?",
         "user:breeder",
-        (50.0, 40.0),
-        "bud",
+        target,
         True,
     )
-    entry = encode_flag(flag)
+    entries = flags_record([flag])["flags"]
+    assert isinstance(entries, list) and isinstance(entries[0], dict)
+    entry = entries[0]
     del entry["by"]
     ts.replace(flag_key(key), {"flags": [entry]})
     with pytest.raises(
@@ -542,17 +550,17 @@ def test_a_scale_assessment_reads_back_as_its_producer_answered_it(
     assert len(assessment.reference.samples) == n_samples
     identity = read_dataset_identity(tmp_path / "ds")
     assert identity is not None
-    assert assessment.reference.dataset_id == identity["id"]
+    assert assessment.reference.dataset_id == identity.id
     other_date = "2026-02-01"
     assert {
         (dataset_id, date): assessment.reference.covers(
             dataset_id=dataset_id, date=date, raster_identity=None
         )
-        for dataset_id in (identity["id"], None)
+        for dataset_id in (identity.id, None)
         for date in (SCALE_DATE, other_date)
     } == {
-        (identity["id"], SCALE_DATE): True,
-        (identity["id"], other_date): False,
+        (identity.id, SCALE_DATE): True,
+        (identity.id, other_date): False,
         (None, SCALE_DATE): False,
         (None, other_date): False,
     }
@@ -571,7 +579,7 @@ def test_a_scale_assessment_reads_back_as_its_producer_answered_it(
                 **stored,
                 "reference": {
                     **stored["reference"],
-                    "captures": [[identity["id"], SCALE_DATE]],
+                    "captures": [[identity.id, SCALE_DATE]],
                 },
             },
             r"reference\.captures\s+Unexpected keyword argument",

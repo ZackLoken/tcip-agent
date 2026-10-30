@@ -12,11 +12,11 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 import tcip_store as ts
 from tcip_annotation.text import Text
-from tcip_mcp.audit import now_iso
+from tcip_mcp.audit import append_or_raise, audit_line
 from tcip_mcp.pipelines.schemas import TraitRevisionRef
 from tcip_store import Key
 
@@ -254,8 +254,8 @@ class TraitEntry(BaseModel):
 
     name: Text
     """The trait's name in this project; its record is keyed by it."""
-    delivers: tuple[str, ...]
-    """The crops.yml phenotype names this trait delivers."""
+    delivers: tuple[str, ...] = Field(min_length=1)
+    """The crops.yml phenotype names this trait delivers, at least one."""
     positive_state: PositiveState | None
     """The state a fraction counts, or null for a trait that counts none."""
     milestone_fractions: tuple[float, ...]
@@ -407,16 +407,16 @@ def authored(entry: TraitEntry, names: tuple[str, ...]) -> None:
 def check_proposed_entry(entry: TraitEntry) -> None:
     """Refuse (``ValueError``) an entry a proposal may not append.
 
-    Refused are ``delivers`` empty or naming anything outside crops.yml, or an operationalization
-    that leaves a spec field its kind rests on (:func:`criterion_fields`) unauthored
+    Refused are ``delivers`` naming anything outside crops.yml, or an operationalization that
+    leaves a spec field its kind rests on (:func:`criterion_fields`) unauthored
     (:func:`authored`, asking the breeder), covers a phenotype the entry does not deliver, or
     names phenotypes or value keys where its kind carries none (or none where it carries them).
     """
     vocab = {t["name"] for t in _crops_traits()}
     off_vocab = [d for d in entry.delivers if d not in vocab]
-    if not entry.delivers or off_vocab:
+    if off_vocab:
         raise ValueError(
-            f"delivers must name at least one crops.yml phenotype and nothing else "
+            f"delivers must name crops.yml phenotypes and nothing else "
             f"(off-vocabulary: {off_vocab})"
         )
     for kind, stated in entry.operationalizations.items():
@@ -482,11 +482,11 @@ class TraitRevision(BaseModel):
     """The agent's account of why it proposed this entry, from the breeder's own words."""
     relayed_note: str
     """What the breeder said away from the GUI, relayed by the agent; never a confirmation."""
-    proposed_at: str
+    proposed_at: AwareDatetime
     confirmed_by: str | None
-    confirmed_at: str | None
+    confirmed_at: AwareDatetime | None
     withdrawn_by: str | None
-    withdrawn_at: str | None
+    withdrawn_at: AwareDatetime | None
 
     @property
     def confirmed(self) -> bool:
@@ -648,7 +648,6 @@ def propose_trait(
     list. A rationale that says nothing refuses. Returns the revision as written; an audit line
     that cannot be written raises ``AuditEntryNotWrittenError`` with the revision already appended.
     """
-    from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.subject_registry import positive_state_problem
 
     check_proposed_entry(entry)
@@ -674,13 +673,20 @@ def propose_trait(
             if stored is None
             else _record(entry.name, project, stored).revisions
         )
+        number, sha256 = len(revisions) + 1, entry_sha256(entry)
+        line = audit_line(
+            "propose_trait",
+            {"trait": entry.name, "revision": number, "entry_sha256": sha256},
+            actor,
+            "ok",
+        )
         revision = TraitRevision(
-            number=len(revisions) + 1,
+            number=number,
             entry=entry,
-            entry_sha256=entry_sha256(entry),
+            entry_sha256=sha256,
             rationale=rationale,
             relayed_note=relayed_note,
-            proposed_at=now_iso(),
+            proposed_at=line.timestamp,
             confirmed_by=None,
             confirmed_at=None,
             withdrawn_by=None,
@@ -692,16 +698,7 @@ def propose_trait(
                 mode="json"
             ),
         )
-    record_event_or_raise(
-        "propose_trait",
-        {
-            "trait": entry.name,
-            "revision": revision.number,
-            "entry_sha256": revision.entry_sha256,
-        },
-        actor=actor,
-        scope=project,
-    )
+    append_or_raise(line, scope=project)
     return revision
 
 
@@ -731,8 +728,6 @@ def confirm_revision(
     ``AuditEntryNotWrittenError`` with the record already written. Returns the revision as
     written.
     """
-    from tcip_mcp.audit import record_event_or_raise
-
     key = trait_key(project, trait)
     with ts.transaction(key) as txn:
         record = _record(trait, project, txn.read(key, default=None))
@@ -746,25 +741,26 @@ def confirm_revision(
             raise ValueError(
                 f"revision {number} of {trait!r} holds no confirmation to withdraw"
             )
+        line = audit_line(
+            "confirm_trait_revision",
+            {
+                "trait": trait,
+                "revision": number,
+                "entry_sha256": entry_sha256,
+                "confirmed": confirmed,
+            },
+            actor,
+            "ok",
+        )
         stamp = (
-            {"confirmed_by": actor, "confirmed_at": now_iso()}
+            {"confirmed_by": actor, "confirmed_at": line.timestamp}
             if confirmed
-            else {"withdrawn_by": actor, "withdrawn_at": now_iso()}
+            else {"withdrawn_by": actor, "withdrawn_at": line.timestamp}
         )
         revisions[number - 1] = revision.model_copy(update=stamp)
         txn.write(
             key,
             TraitRecord(revisions=tuple(revisions)).model_dump(mode="json"),
         )
-    record_event_or_raise(
-        "confirm_trait_revision",
-        {
-            "trait": trait,
-            "revision": number,
-            "entry_sha256": entry_sha256,
-            "confirmed": confirmed,
-        },
-        actor=actor,
-        scope=project,
-    )
+    append_or_raise(line, scope=project)
     return revisions[number - 1]

@@ -15,7 +15,10 @@ from tcip_annotation.json_io import label_document
 from tcip_mcp import subject_registry as cr
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.data.selection import ClassScope
-from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+from tcip_mcp.pipelines.postprocessing.export import (
+    DetectionResult,
+    encode_predictions,
+)
 from tests._producer_fixtures import registry_of, scope_over
 
 SUBJECT = "object"
@@ -27,28 +30,22 @@ GRADE = cr.Attribute("grade", "ordinal", ("low", "mid", "high"))
 
 def _result(
     *,
-    boxes: list[list[int]],
+    boxes: list[tuple[float, float, float, float]],
     scores: list[float],
-    labels: list[int],
     attributes: list[list[int]] | None = None,
-    width: int = 100,
-    height: int = 80,
-) -> dict:
-    result = {
-        "image": "img1.jpg",
-        "boxes": boxes,
-        "scores": scores,
-        "labels": labels,
-        "width": width,
-        "height": height,
-        "cap": len(boxes) + 1,
-    }
-    if attributes is not None:
-        result["attributes"] = attributes
-    return result
+) -> DetectionResult:
+    return DetectionResult(
+        image="img1.jpg",
+        boxes=boxes,
+        scores=scores,
+        attributes=attributes,
+        width=100,
+        height=80,
+        cap=len(boxes) + 1,
+    )
 
 
-def _decoded(result: dict, scope: ClassScope) -> list:
+def _decoded(result: DetectionResult, scope: ClassScope) -> list:
     data, _dropped = encode_predictions(result, "model:fixture", scope=scope)
     return label_document(data).annotations
 
@@ -59,9 +56,8 @@ def test_an_attributed_run_writes_every_attributes_value_on_every_box(
     scope = scope_over(tmp_path, registry_of(SUBJECT, COLOR, GRADE), SUBJECT)
     first, second = _decoded(
         _result(
-            boxes=[[1, 1, 5, 5], [10, 10, 20, 20]],
+            boxes=[(1, 1, 5, 5), (10, 10, 20, 20)],
             scores=[0.9, 0.8],
-            labels=[1, 1],
             attributes=[[1, 2], [0, 0]],
         ),
         scope,
@@ -81,7 +77,7 @@ def test_an_empty_scope_publishes_no_name_it_cannot_decode() -> None:
     """An empty scope refuses to encode, saying it records no subject to publish under."""
     with pytest.raises(ValueError, match="records no subject"):
         encode_predictions(
-            _result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1]),
+            _result(boxes=[(1, 1, 5, 5)], scores=[0.9]),
             "model:fixture",
             scope=ClassScope(),
         )
@@ -91,45 +87,39 @@ def test_a_detector_run_declaring_no_attributes_writes_the_subject_alone(
     tmp_path: Path,
 ) -> None:
     (written,) = _decoded(
-        _result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1]),
+        _result(boxes=[(1, 1, 5, 5)], scores=[0.9]),
         scope_over(tmp_path, registry_of(SUBJECT), SUBJECT),
     )
     assert written.subject == SUBJECT
     assert written.attributes == {}
 
 
-@pytest.mark.parametrize("dropped", ["image", "scores", "labels", "width"])
-def test_a_result_missing_a_field_a_document_holds_refuses_naming_it(
+@pytest.mark.parametrize("dropped", ["width", "height", "boxes", "scores", "cap"])
+def test_a_pass_result_missing_a_field_a_document_holds_refuses_naming_it(
     tmp_path: Path, dropped: str
 ) -> None:
-    """A result missing a field a document holds refuses, naming it.
+    """A detector's result missing a field its document holds refuses at the pass, naming it.
 
-    A result without its source image, scores, labels or frame size refuses naming the missing
-    key, and the same result with every field encodes one prediction.
+    The predictor's result for one image, without that field, refuses as the pass publishes it;
+    the same result whole publishes one document.
     """
-    scope = scope_over(tmp_path, registry_of(SUBJECT, COLOR), SUBJECT)
-    result = _result(
-        boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1], attributes=[[0]]
-    )
-    del result[dropped]
+    pytest.importorskip("torch")
+    from pydantic import ValidationError
 
-    with pytest.raises(ValueError, match=f"carries no \\['{dropped}'\\]"):
-        encode_predictions(result, "model:fixture", scope=scope)
+    from tests._chain_fixtures import predicted, published
+    from tests._producer_fixtures import write_image
 
-    assert (
-        len(
-            _decoded(
-                _result(
-                    boxes=[[1, 1, 5, 5]],
-                    scores=[0.9],
-                    labels=[1],
-                    attributes=[[0]],
-                ),
-                scope,
-            )
-        )
-        == 1
+    image = write_image(image_dir(tmp_path / "ds", "2026-01-01") / "a.jpg")
+    damaged = predicted(image, [SUBJECT])
+    del damaged[dropped]
+
+    with pytest.raises(ValidationError, match=dropped):
+        published(tmp_path, "damaged", [damaged], scope={"subject": SUBJECT})
+
+    whole = published(
+        tmp_path, "whole", [predicted(image, [SUBJECT])], scope={"subject": SUBJECT}
     )
+    assert len(whole.documents) == 1
 
 
 def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(

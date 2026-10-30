@@ -25,9 +25,8 @@ if TYPE_CHECKING:
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.experiments import (  # noqa: E402
-    EPOCH_KEY,
     METRICS_FILE,
-    STEP_KEY,
+    MetricsRow,
     best_selection,
     epoch_rows,
     observe,
@@ -52,7 +51,7 @@ TRAIT_SCOPED = evaluation_block(
 """A regression run's evaluation block scoring under the confirmed bud-opening trait."""
 
 
-def batch_rows(rows: list[dict]) -> list[dict]:
+def batch_rows(rows: list[MetricsRow]) -> list[MetricsRow]:
     """Return the per-batch rows among ``rows`` (``experiments.partition_rows``)."""
     return partition_rows(rows)[1]
 
@@ -250,18 +249,23 @@ def test_the_trainer_logs_a_batch_row_at_the_stated_cadence_and_no_reader_takes_
 
     rows = read_rows(ctx.run_dir / METRICS_FILE)[0]
     batches = batch_rows(rows)
-    assert [(row[STEP_KEY], row[EPOCH_KEY]) for row in batches] == [
+    assert [(row.step, row.epoch) for row in batches] == [
         (2, 1),
         (4, 2),
         (6, 2),
     ]
-    assert all(isinstance(row["batch_loss"], float) for row in batches)
+    assert all(
+        isinstance(row.model_dump()["batch_loss"], float) for row in batches
+    )
 
     epochs = epoch_rows(rows)
-    assert [row[EPOCH_KEY] for row in epochs] == [1, 2]
-    assert not any(STEP_KEY in row or "batch_loss" in row for row in epochs)
+    assert [row.epoch for row in epochs] == [1, 2]
+    assert not any(
+        row.step is not None or "batch_loss" in row.model_dump()
+        for row in epochs
+    )
     assert hook_calls == [1, 2]
-    summary = run_summary(observe(ctx.run_dir), rows, None)
+    summary = run_summary(observe(ctx.run_dir), rows, {})
     assert summary.current_epoch == 2
 
 
@@ -279,7 +283,7 @@ def test_a_config_stating_no_cadence_logs_ten_batch_rows_every_epoch(
     assert ctx.default_train().status == "completed"
     batches = batch_rows(read_rows(ctx.run_dir / METRICS_FILE)[0])
     for epoch in (1, 2):
-        steps = [row[STEP_KEY] for row in batches if row[EPOCH_KEY] == epoch]
+        steps = [row.step for row in batches if row.epoch == epoch]
         assert len(steps) == len(set(steps)) == min(10, n_batches)
         assert all(
             (epoch - 1) * n_batches < step <= epoch * n_batches
@@ -322,11 +326,12 @@ def test_a_bespoke_loop_logs_a_batch_row_and_neither_sink_takes_the_other_s_stam
 
     rows = read_rows(ctx.run_dir / METRICS_FILE)[0]
     (batch,) = batch_rows(rows)
-    assert (batch[STEP_KEY], batch[EPOCH_KEY], batch["batch_loss"]) == (
+    assert (batch.step, batch.epoch, batch.model_dump()["batch_loss"]) == (
         5,
         1,
         0.3,
     )
     (epoch,) = epoch_rows(rows)
-    assert epoch["train_loss"] == 0.4 and "batch_loss" not in epoch
+    logged = epoch.model_dump()
+    assert logged["train_loss"] == 0.4 and "batch_loss" not in logged
     assert hook_calls == [1]

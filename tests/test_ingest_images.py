@@ -587,7 +587,9 @@ def test_a_stated_date_moves_an_undated_image_with_every_record_keyed_by_it(
         height=24,
         author="user:tester",
         actor=None,
-        gestures=dataset_layout.Gestures(flag=(FlagRequest(text="check"),)),
+        gestures=dataset_layout.Gestures(
+            flag=(FlagRequest(text="check", target=None),)
+        ),
     )
 
     install_stub_proposer(
@@ -608,7 +610,7 @@ def test_a_stated_date_moves_an_undated_image_with_every_record_keyed_by_it(
     runs = [
         propose_annotations(
             project, image_path=str(image), engine="stub", actor=None
-        )["staging_id"]
+        ).staging_id
         for _ in range(2)
     ]
     assert None not in runs, runs

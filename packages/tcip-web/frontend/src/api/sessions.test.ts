@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { sessionsApi } from "@/api/sessions";
+import { SESSION_WRITES, sessionOf } from "@/test/sessions";
+import { TEST_PROJECT } from "@/test/store";
 
-const REF = { project_id: "a1b2c3d4e5f6", started: "2026-10-07T14:00:00+00:00" };
+const REF = { project_id: TEST_PROJECT.id, started: sessionOf(SESSION_WRITES.first).started };
 
 describe("sessionsApi.endAsPageLeaves", () => {
   it("sends the session reference as one beacon when the browser accepts it", async () => {

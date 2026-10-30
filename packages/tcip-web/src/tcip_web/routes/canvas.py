@@ -19,7 +19,7 @@ from pydantic import ConfigDict
 
 import tcip_store as ts
 from tcip_annotation.viz import CanvasShape
-from tcip_mcp.audit import now_iso
+from tcip_mcp.audit import now
 from tcip_mcp.identity import actor
 from tcip_mcp.registry_paths import stored_path
 from tcip_mcp.web_client import (
@@ -48,7 +48,7 @@ class CanvasStatePayload(CanvasView):
 
 
 @router.post("/state")
-def push_canvas_state(payload: CanvasStatePayload) -> dict:
+def push_canvas_state(payload: CanvasStatePayload) -> None:
     """Store the pushed canvas for the open project, stamped with the instant it arrived.
 
     A push stating a ``user`` that names no one is refused before anything is written.
@@ -57,7 +57,7 @@ def push_canvas_state(payload: CanvasStatePayload) -> dict:
     project = store.admit(payload.project_id)
     root = str(project.root)
     image_path = stored_path(payload.image_path, project.root)
-    now = now_iso()
+    arrived = now()
 
     if payload.shapes is not None:
         # Geometry first, meta second: a reader pairing the new meta with the old geometry
@@ -66,13 +66,12 @@ def push_canvas_state(payload: CanvasStatePayload) -> dict:
             image_path=image_path,
             tab=payload.tab,
             shapes=payload.shapes,
-            received_at=now,
+            received_at=arrived,
         )
         ts.replace(canvas_geometry_key(root), geometry.model_dump(mode="json"))
 
-    view = payload.model_dump(include=set(CanvasView.model_fields))
-    meta = CanvasMeta.model_validate(
-        {**view, "image_path": image_path, "user": person, "received_at": now}
+    view = {name: getattr(payload, name) for name in CanvasView.model_fields}
+    meta = CanvasMeta(
+        **view | {"image_path": image_path, "user": person}, received_at=arrived
     )
     ts.replace(canvas_meta_key(root), meta.model_dump(mode="json"))
-    return {"status": "ok", "shapes_written": payload.shapes is not None}

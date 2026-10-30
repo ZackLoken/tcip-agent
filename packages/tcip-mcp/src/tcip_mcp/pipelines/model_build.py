@@ -329,7 +329,9 @@ def owning_run_layout(
 
     The runs are ``experiments.run_dirs``'; the one returned took the source snapshot whose digest
     is ``snapshot`` (:attr:`SourceLayout.snapshot`, a checkpoint's :data:`SNAPSHOT_KEY`) and its
-    layout holds every file ``spec`` declares. Refuses (``ValueError``) a spec declaring no file,
+    layout holds every file ``spec`` declares. The declared files lie under one run's own snapshot
+    directory, so one run at most answers, in whatever order the runs are read. Refuses
+    (``ValueError``) a spec declaring no file,
     or a snapshot and files no run of ``project`` took, naming how a checkpoint comes to have a
     run.
     """

@@ -1,38 +1,44 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { ServedFlag } from "@/api/types.generated";
 import { ReviewStrip } from "@/components/annotate/ReviewStrip";
-import { itemName, type ReviewItem } from "@/lib/reviewItems";
-import type { Flag } from "@/store/types";
+import { itemName, type AnnotationItem, type ReviewItem } from "@/lib/reviewItems";
+import { ANNOTATE_ANSWERS } from "@/test/annotate";
+import { LABEL_ANSWERS, servedFlag, servedProposal } from "@/test/labels";
 
 afterEach(cleanup);
 
+const BUCKET = ANNOTATE_ANSWERS.buckets.review;
+
 const focusedProposal: ReviewItem = {
   kind: "proposal",
+  proposal: {
+    ...servedProposal({ subject: "fruit", bbox: [0, 0, 10, 10], score: 0.9, index: 3 }),
+    bucket: BUCKET,
+  },
   shape: "box",
-  ref: 3,
-  subject: "fruit",
   bbox: [0, 0, 10, 10],
   match: "proposal_only",
-  reviewed: false,
-  score: 0.9,
   at: [5, 5],
   flags: [],
 };
 
-const openFlag: Flag = {
-  id: "f1",
-  text: "fruit or gall?",
-  by: "user:first",
-  at: "2026-01-01T00:00:00+00:00",
-  point: null,
-  subject: null,
-  proposal: ["m1/2026-01-01", 3],
-  resolved_by: null,
-  resolved_at: null,
-  reply: "",
-  removed: false,
+const focusedBox: AnnotationItem = {
+  kind: "annotation",
+  shape: "box",
+  ref: 0,
+  annotation: { subject: "fruit", attributes: {}, iscrowd: false },
+  bbox: [0, 0, 10, 10],
+  match: "annotation_only",
+  at: [5, 5],
+  flags: [],
 };
+
+const openFlag: ServedFlag = servedFlag({
+  text: "fruit or gall?",
+  target: { bucket: BUCKET, index: 3 },
+});
 
 function renderStrip(over: Partial<Parameters<typeof ReviewStrip>[0]> = {}) {
   const handlers = {
@@ -51,7 +57,7 @@ function renderStrip(over: Partial<Parameters<typeof ReviewStrip>[0]> = {}) {
   render(
     <ReviewStrip
       reviewing
-      operatingPoint={{ conf: 0.42, reason: "" }}
+      operatingPoint={{ conf: 0.42, reason: null }}
       filters={{ confidence: 0.42, match: "all" }}
       scope="all"
       canAccept
@@ -74,7 +80,7 @@ function renderStrip(over: Partial<Parameters<typeof ReviewStrip>[0]> = {}) {
 describe("ReviewStrip", () => {
   it("names the focused item for the stepper", () => {
     expect(itemName(focusedProposal)).toBe("fruit proposal 0.90");
-    expect(itemName({ ...focusedProposal, kind: "annotation", score: null })).toBe("fruit box");
+    expect(itemName(focusedBox)).toBe("fruit box");
     expect(itemName(null)).toBeNull();
   });
 
@@ -146,7 +152,7 @@ describe("ReviewStrip", () => {
   });
 
   it("offers Edit for a focused proposal only", () => {
-    renderStrip({ focused: { ...focusedProposal, kind: "annotation", score: null } });
+    renderStrip({ focused: focusedBox });
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
   });
 
@@ -166,7 +172,7 @@ describe("ReviewStrip", () => {
 
   it("says that no operating point seeds the confidence floor", () => {
     renderStrip({
-      operatingPoint: { conf: null, reason: "bucket 'm1' holds no detector's predictions" },
+      operatingPoint: LABEL_ANSWERS.proposals.operating_point,
       filters: { confidence: null, match: "all" },
     });
     expect(
@@ -204,11 +210,11 @@ describe("ReviewStrip flags", () => {
   it("lists each open flag with who raised it and resolves it with the reply", () => {
     const h = renderStrip({ flagsOpen: true, flags: [openFlag] });
     expect(screen.getByText("fruit or gall?")).toBeInTheDocument();
-    expect(screen.getByText("user:first, 2026-01-01")).toBeInTheDocument();
+    expect(screen.getByText(`${openFlag.by}, ${openFlag.at.slice(0, 10)}`)).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: 'Reply to "fruit or gall?"' }), {
       target: { value: "gall" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Resolve" }));
-    expect(h.onResolve).toHaveBeenCalledWith("f1", "gall");
+    expect(h.onResolve).toHaveBeenCalledWith(openFlag.id, "gall");
   });
 });

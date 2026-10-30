@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/api/client";
 import type { ServingCell } from "@/api/types.generated";
 import type { CanvasRegion } from "@/components/Canvas/CanvasStage";
+import type { compositeParams } from "@/lib/bandSelection";
 import { measureCanvasHost, computeViewport } from "@/lib/canvasSync";
 import type { LoadedImage } from "@/lib/imageLoader";
 import type { ViewState } from "@/store/types";
@@ -23,7 +24,7 @@ export function useRegionServes(args: {
   view: ViewState;
   displayPixels: number;
   baseFacts: LoadedImage | null;
-  composite: { bands?: string; stretch?: string };
+  composite: ReturnType<typeof compositeParams>;
 }): CanvasRegion[] {
   const [answer, setAnswer] = useState<{
     path: string;
@@ -78,10 +79,7 @@ export function useRegionServes(args: {
             url: api.images.url(imagePath, displayPixels, {
               bands,
               stretch,
-              x0: cell.x0,
-              y0: cell.y0,
-              x1: cell.x1,
-              y1: cell.y1,
+              region: [cell.x0, cell.y0, cell.x1, cell.y1],
               level: cell.level || undefined,
             }),
             x: cell.nx0,

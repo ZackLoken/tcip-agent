@@ -1,11 +1,12 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/api/client";
+import { api, loadedLabels } from "@/api/client";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
 import { currentImage } from "@/lib/paths";
 import { useStore } from "@/store";
 import { selectCanvasMatchesDataset } from "@/store/slices/canvas";
+import { LABEL_ANSWERS } from "@/test/labels";
 import { GROUPED_SELECTION, selected, SEPARATED_SELECTION } from "@/test/store";
 
 const SELECTION = selected({ count: 2 }, SEPARATED_SELECTION);
@@ -29,8 +30,10 @@ describe("the selection's image places", () => {
   });
 
   it("matches the canvas to the dataset by the places the selection carries", () => {
-    const loaded = (loadedImagePath: string) => {
-      useStore.setState((s) => ({ canvas: { ...s.canvas, loadedImagePath } }));
+    const loaded = (image_path: string) => {
+      useStore
+        .getState()
+        .loadLabelsIntoCanvas(loadedLabels({ ...LABEL_ANSWERS.loaded, image_path }));
       return selectCanvasMatchesDataset(useStore.getState());
     };
 

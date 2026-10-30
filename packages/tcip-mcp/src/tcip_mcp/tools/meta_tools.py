@@ -7,16 +7,21 @@ first by the time each record states.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from enum import StrEnum, auto
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    JsonValue,
+    ValidationError,
+)
 
 import tcip_store
-from tcip_mcp.audit import audited, now_iso
+from tcip_mcp.audit import audited, now
 from tcip_mcp.pipelines.training.hpo import Count
 from tcip_mcp.server import tool
 from tcip_store import DecodeError, Key, Version
@@ -37,7 +42,7 @@ class MemoryRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    timestamp: str
+    timestamp: AwareDatetime
 
 
 class FrictionReport(MemoryRecord):
@@ -144,20 +149,20 @@ def memory_entries[M: MemoryRecord](
     A record that will not read (:func:`read_memory`) is carried as :class:`Unreadable` and,
     stating no time, sorts after every one that does; entries stating one time keep id order.
     """
-    stated: list[tuple[str, MemoryEntry[M]]] = []
+    stated: list[tuple[datetime, MemoryEntry[M]]] = []
+    unread: list[MemoryEntry[M]] = []
     for key in tcip_store.keys(_store(record), str(project_path)):
         name = key.parts[0]
         try:
             read = read_memory(record, project_path, name)
         except (DecodeError, ValidationError) as exc:
-            unread: MemoryEntry[M] = MemoryEntry(
-                id=name, record=Unreadable(reason=str(exc))
+            unread.append(
+                MemoryEntry(id=name, record=Unreadable(reason=str(exc)))
             )
-            stated.append(("", unread))
         else:
             stated.append((read.timestamp, MemoryEntry(id=name, record=read)))
     stated.sort(key=lambda pair: pair[0], reverse=True)
-    return [entry for _, entry in stated]
+    return [*(entry for _, entry in stated), *unread]
 
 
 def memory_page[M: MemoryRecord](
@@ -192,11 +197,11 @@ def report_friction(
             disagreeing with your approach, independent of category.
 
     """
-    now = now_iso()
+    written = now()
     report_id = _write_memory(
         project,
         FrictionReport(
-            timestamp=now,
+            timestamp=written,
             category=category,
             detail=detail,
             context=context or {},
@@ -207,7 +212,7 @@ def report_friction(
     return {
         "id": report_id,
         "category": category,
-        "timestamp": now,
+        "timestamp": written,
         "user_disagreement": user_disagreement,
     }
 
@@ -254,29 +259,16 @@ def load_project_memory(
     ).model_dump(mode="json")
 
 
-def _parse_audit_bound(
-    label: str, value: str, *, end_of_day: bool = False
-) -> datetime:
-    """Parse a caller-supplied ``since``/``until`` bound, or raise naming which bound and why.
+def _bound_instant(bound: datetime | date, *, end_of_day: bool) -> datetime:
+    """Return the instant an audit-log bound names.
 
-    The bound is what ``datetime.fromisoformat`` parses, a naive value read as UTC.
-
-    A date-only bound (no ``T`` separator) names a whole day, not an instant: ``since`` already
-    starts at that day's midnight once parsed, and ``until`` with ``end_of_day=True`` is pushed
-    to the last microsecond of that day, so ``until="2026-03-02"`` includes every entry from that
-    date rather than only one landing on midnight exactly.
+    An instant names itself. A date names its whole UTC day: its first instant, or with
+    ``end_of_day`` its last, so ``until`` of a date includes every entry from that day.
     """
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        raise ValueError(
-            f"{label} {value!r} is not a parseable ISO-8601 timestamp"
-        ) from None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    if end_of_day and "T" not in value:
-        parsed = parsed + timedelta(days=1) - timedelta(microseconds=1)
-    return parsed
+    if isinstance(bound, datetime):
+        return bound
+    start = datetime.combine(bound, time(), tzinfo=timezone.utc)
+    return start + timedelta(days=1, microseconds=-1) if end_of_day else start
 
 
 @tool()
@@ -285,8 +277,8 @@ def read_audit_log(
     scope: str | None = None,
     *,
     tool: str | None = None,
-    since: str | None = None,
-    until: str | None = None,
+    since: AwareDatetime | date | None = None,
+    until: AwareDatetime | date | None = None,
     status: str | None = None,
     limit: int = 200,
 ) -> dict:
@@ -303,10 +295,9 @@ def read_audit_log(
     ``skipped`` states how many entries this call is not returning, whether filtered out or
     truncated by ``limit``.
 
-    ``since``/``until`` are ISO-8601 strings parsed with ``datetime.fromisoformat`` (a trailing
-    ``Z`` is accepted), inclusive on both ends against each entry's own parsed timestamp; a bound
-    that will not parse refuses by name. A date-only ``until`` means the end of that whole day, so
-    ``until="2026-03-02"`` includes every entry from that date.
+    ``since``/``until`` are each an ISO-8601 instant with its offset or a date, inclusive on both
+    ends against each entry's own timestamp (:func:`_bound_instant`); a date ``until`` means the
+    end of that whole UTC day, so ``until="2026-03-02"`` includes every entry from that date.
 
     A page carrying undecodable entries is refused.
 
@@ -314,14 +305,13 @@ def read_audit_log(
         scope: Dataset root, project root, a path under either, or ``None`` for the project's own
             log.
         tool: Exact tool-name filter, e.g. 'save_annotations'.
-        since: Only entries whose own timestamp is at or after this ISO-8601 string.
-        until: Only entries whose own timestamp is at or before this ISO-8601 string; a date-only
-            string means the end of that day.
+        since: Only entries whose own timestamp is at or after this instant, or this date's start.
+        until: Only entries whose own timestamp is at or before this instant, or this date's end.
         status: Exact status filter, 'ok' or 'exception'.
         limit: Maximum entries to return (default 200), newest first.
 
     """
-    from tcip_mcp.audit import audit_entries, dataset_scope_of
+    from tcip_mcp.audit import AuditLine, audit_entries, dataset_scope_of
     from tcip_mcp.registry_paths import located
 
     root = (
@@ -339,38 +329,26 @@ def read_audit_log(
 
     try:
         records, _cursor = audit_entries(root)
-        since_dt = (
-            _parse_audit_bound("since", since) if since is not None else None
-        )
-        until_dt = (
-            _parse_audit_bound("until", until, end_of_day=True)
-            if until is not None
-            else None
-        )
-        timed = [
-            (datetime.fromisoformat(entry["timestamp"]), entry)
-            for entry in records
-        ]
     except ValueError as exc:
         return {"error": str(exc), "scope_resolved": str(root)}
+    since_dt = None if since is None else _bound_instant(since, end_of_day=False)
+    until_dt = None if until is None else _bound_instant(until, end_of_day=True)
 
-    def _matches(at: datetime, entry: Mapping[str, Any]) -> bool:
+    def _matches(entry: AuditLine) -> bool:
         return (
-            (tool is None or entry["tool"] == tool)
-            and (status is None or entry["status"] == status)
-            and (since_dt is None or at >= since_dt)
-            and (until_dt is None or at <= until_dt)
+            (tool is None or entry.tool == tool)
+            and (status is None or entry.status == status)
+            and (since_dt is None or entry.timestamp >= since_dt)
+            and (until_dt is None or entry.timestamp <= until_dt)
         )
 
-    filtered = [(at, entry) for at, entry in timed if _matches(at, entry)]
-    newest_first = [
-        entry
-        for _at, entry in sorted(
-            filtered, key=lambda pair: pair[0], reverse=True
-        )
-    ]
+    filtered = [entry for entry in records if _matches(entry)]
+    newest_first = sorted(filtered, key=lambda e: e.timestamp, reverse=True)
     truncated = max(0, len(newest_first) - limit)
-    entries = newest_first[:limit]
+    entries = [
+        e.model_dump(mode="json", exclude_unset=True)
+        for e in newest_first[:limit]
+    ]
     skipped = (len(records) - len(filtered)) + truncated
 
     return {
@@ -416,11 +394,11 @@ def write_retrospective(
             your approach?
 
     """
-    now = now_iso()
+    written = now()
     retrospective_id = _write_memory(
         project,
         Retrospective(
-            timestamp=now,
+            timestamp=written,
             project_id=project_id,
             task=task,
             worked=worked,
@@ -434,7 +412,7 @@ def write_retrospective(
     return {
         "id": retrospective_id,
         "project_id": project_id,
-        "timestamp": now,
+        "timestamp": written,
     }
 
 

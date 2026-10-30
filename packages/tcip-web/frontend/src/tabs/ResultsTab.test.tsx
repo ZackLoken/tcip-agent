@@ -2,33 +2,40 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
-import { StructuredRefusalError } from "@/api/http";
-import { resultsApi } from "@/api/inference";
-import type { ServedDeliveryEvent } from "@/api/types.generated";
+import { reportedExport, resultsApi } from "@/api/inference";
+import type {
+  CountExport,
+  DeliveryEvents,
+  PhenologyAnswer,
+  SavedExport,
+} from "@/api/types.generated";
 import { useStore } from "@/store";
 import { ResultsTab } from "@/tabs/ResultsTab";
 import { mockDatasetTree } from "@/test/datasetTree";
-import { DELIVERY_RECORDS } from "@/test/deliveryRecords";
-import { openTestProject, RAW_SELECTION } from "@/test/store";
+import {
+  ACKNOWLEDGED_COUNT_EXPORT,
+  COUNT_EXPORT,
+  CURVES_EXPORT,
+  DELIVERY_LISTINGS,
+  DELIVERY_RECORDS,
+  RESULTS_ANSWERS,
+} from "@/test/deliveryRecords";
+import { fetchAnswers, thrown } from "@/test/refusals";
+import { DATASET_TREES, DS_BUCKET, DS_DATE, openTestProject, RAW_SELECTION } from "@/test/store";
 import { TRAIT_LISTINGS } from "@/test/traitRecords";
 
 const initialStoreState = useStore.getState();
 
-// The measurement door returns the delivery gate's finding beside its rows, so a mock that omits
-// it would be describing a response the server cannot produce.
-const VALIDATED = {
-  validated: true,
-  unvalidated_reason: null,
-  trait: "subject_a",
-  trait_revision: 1,
-  trait_revision_sha256: "b".repeat(64),
-  positive_class_assessed: true,
-  captures_unverified: [],
-  plant_csvs_unverified: [],
-  dates_delivered: [],
-  images_unattributed: 0,
-  result_sha256: null,
-};
+// The produced phenology measurement of two plants, shown unvalidated.
+const MEASURED = RESULTS_ANSWERS.phenology;
+
+// The produced measurement of one plant as the gate answers it once an assessment answers for
+// every bucket.
+const VALIDATED = RESULTS_ANSWERS.phenology_validated;
+const [VALIDATED_ROW] = VALIDATED.milestones;
+
+/** The trait the produced results listing confirms. */
+const [{ trait: TRAIT }] = TRAIT_LISTINGS.results.traits;
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
@@ -36,27 +43,22 @@ beforeEach(() => {
   // One trait whose confirmed revision declares milestone fractions, which is what the
   // curve/milestone panels render for.
   vi.spyOn(resultsApi, "traits").mockResolvedValue(TRAIT_LISTINGS.results);
-  vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue({ names: ["valley"] });
+  vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue(RESULTS_ANSWERS.mapping_names);
   // The delivery-events panel loads with the tab; a test about anything else has no records.
-  vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [] });
+  vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue(RESULTS_ANSWERS.no_deliveries);
 });
 
 afterEach(cleanup);
 
 describe("ResultsTab structured predictions-by-date picker", () => {
   it("delivers only the bucket the breeder picks per date, and offers none for a date with none", async () => {
-    mockDatasetTree({
-      dates_with_images: ["2026-01-01", "2026-01-08"],
-      buckets_by_date: {
-        "2026-01-01": ["baseline/2026-01-01", "v2/2026-01-01"],
-        "2026-01-08": [],
-      },
-    });
-    const measurementSpy = vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
-      curves: { rows: [], n_plants: 0 },
-      milestones: { rows: [], columns: [] },
-      ...VALIDATED,
-    });
+    mockDatasetTree();
+    const [first, second] = DATASET_TREES.ds.captures.map((c) => c.name);
+    const [, picked] = DATASET_TREES.ds.buckets_by_date[first];
+    expect(DATASET_TREES.ds.buckets_by_date[second]).toEqual([]);
+    const measurementSpy = vi
+      .spyOn(resultsApi, "phenologyMeasurement")
+      .mockResolvedValue(VALIDATED);
 
     render(<ResultsTab />);
     await waitFor(() => expect(api.dataset.tree).toHaveBeenCalledWith(RAW_SELECTION.dataset_root));
@@ -65,7 +67,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
 
     // No date starts on a bucket: a date with two published waits for the breeder's choice.
-    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(first)).toBeInTheDocument());
     const selects = screen.getAllByTitle(
       /The bucket whose predictions to use for this date|No bucket is published over this date/,
     ) as HTMLSelectElement[];
@@ -73,49 +75,41 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     expect(selects[0].value).toBe("");
     expect(selects[1]).toBeDisabled();
 
-    fireEvent.change(selects[0], { target: { value: "v2/2026-01-01" } });
+    fireEvent.change(selects[0], { target: { value: picked } });
     fireEvent.change(screen.getByLabelText("Plants"), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: "Compute" }));
     await waitFor(() => expect(measurementSpy).toHaveBeenCalled());
     // The name is the one the tree response supplied.
-    expect(measurementSpy.mock.calls[0][0].buckets).toEqual(["v2/2026-01-01"]);
+    expect(measurementSpy.mock.calls[0][0].buckets).toEqual([picked]);
     expect(measurementSpy.mock.calls[0][0].dataset_root).toBe(RAW_SELECTION.dataset_root);
   });
 
   it("shows the tree's label_problem beside the date list without blocking it", async () => {
-    mockDatasetTree({
-      label_problem: "label_documents['2026-01-08', 'IMG_0000'] under C:/data: is a list",
-    });
-    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
-      curves: { rows: [], n_plants: 0 },
-      milestones: { rows: [], columns: [] },
-      ...VALIDATED,
-    });
+    const { troubled } = DATASET_TREES;
+    mockDatasetTree(troubled);
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue(VALIDATED);
 
     render(<ResultsTab />);
 
-    expect(
-      await screen.findByText("label_documents['2026-01-08', 'IMG_0000'] under C:/data: is a list"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("2026-01-01")).toBeInTheDocument();
+    expect(troubled.label_problem).toEqual(expect.any(String));
+    expect(await screen.findByText(String(troubled.label_problem))).toBeInTheDocument();
+    expect(screen.getByText(troubled.captures[0].name)).toBeInTheDocument();
   });
 
   it("dropping a date to '(skip)' excludes it from the computed predictions map", async () => {
     mockDatasetTree();
-    const measurementSpy = vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
-      curves: { rows: [], n_plants: 0 },
-      milestones: { rows: [], columns: [] },
-      ...VALIDATED,
-    });
+    const measurementSpy = vi
+      .spyOn(resultsApi, "phenologyMeasurement")
+      .mockResolvedValue(VALIDATED);
 
     render(<ResultsTab />);
     // The trait resolves from the project's registered traits asynchronously; wait for it before
     // computing, or the compute click races the fetch and refuses (no trait resolved yet).
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
-    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(DS_DATE)).toBeInTheDocument());
 
     const select = screen.getByTitle("The bucket whose predictions to use for this date");
-    fireEvent.change(select, { target: { value: "baseline/2026-01-01" } });
+    fireEvent.change(select, { target: { value: DS_BUCKET } });
     fireEvent.change(select, { target: { value: "" } });
     fireEvent.change(screen.getByLabelText("Plants"), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: "Compute" }));
@@ -126,15 +120,14 @@ describe("ResultsTab structured predictions-by-date picker", () => {
 
 describe("ResultsTab unreadable trait visibility", () => {
   it("names an unreadable trait", async () => {
-    vi.spyOn(resultsApi, "traits").mockResolvedValue({
-      ...TRAIT_LISTINGS.results,
-      unreadable: [{ trait: "leaf_area", reason: "delivers: off-vocab ['leaf_size']" }],
-    });
+    const listing = TRAIT_LISTINGS.unreadable;
+    vi.spyOn(resultsApi, "traits").mockResolvedValue(listing);
 
     render(<ResultsTab />);
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
 
-    expect(await screen.findByText(/will not read: leaf_area/)).toBeInTheDocument();
+    const [{ trait }] = listing.unreadable;
+    expect(await screen.findByText(new RegExp(`will not read: ${trait}`))).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /setup/i })).not.toBeInTheDocument();
   });
 
@@ -146,100 +139,60 @@ describe("ResultsTab unreadable trait visibility", () => {
   });
 
   it("hides phenology while no revision is confirmed", async () => {
-    vi.spyOn(resultsApi, "traits").mockResolvedValue(TRAIT_LISTINGS.unconfirmed);
+    const listing = TRAIT_LISTINGS.unconfirmed;
+    vi.spyOn(resultsApi, "traits").mockResolvedValue(listing);
 
     render(<ResultsTab />);
 
-    expect(await screen.findByText("No revision of subject_a is confirmed.")).toBeInTheDocument();
+    expect(
+      await screen.findByText(`No revision of ${listing.traits[0].trait} is confirmed.`),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Phenology" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /setup/i })).not.toBeInTheDocument();
   });
 });
 
 describe("ResultsTab evidence gate", () => {
-  const CURVE_ROW = {
-    plant_id: "P1",
-    accession: null,
-    date: "2026-01-01",
-    n_images: 1,
-    n_total: 10,
-    n_positive: 3,
-    n_unclassified: 0,
-    n_missing: 0,
-    ratio: 0.3,
-  };
-  const ONSET_ROW = {
-    plant_id: "P1",
-    accession: null,
-    n_dates: 2,
-    n_dates_unclassified: 0,
-    n_dates_missing_images: 0,
-    n_observed_dates: 2,
-    complete: true,
-    stage_50per_date: "2026-02-01",
-  };
-  const STAGE_COLUMNS = [{ date: "stage_50per_date", bound: "stage_50per_date_bound" }];
-  const UNVALIDATED = {
-    validated: false,
-    unvalidated_reason:
-      "no assessment answers for bucket 'baseline/2026-01-01': assess best against a " +
-      "held-out reference selection and publish its predictions under that assessment.",
-    trait: "subject_a",
-    trait_revision: 1,
-    trait_revision_sha256: "b".repeat(64),
-    positive_class_assessed: true,
-    captures_unverified: [],
-    plant_csvs_unverified: [],
-    dates_delivered: [],
-    images_unattributed: 0,
-    result_sha256: { curves: "c".repeat(64), milestones: "d".repeat(64) },
-  };
-
   async function renderAndCompute() {
     render(<ResultsTab />);
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
-    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(DS_DATE)).toBeInTheDocument());
     fireEvent.change(screen.getByTitle("The bucket whose predictions to use for this date"), {
-      target: { value: "baseline/2026-01-01" },
+      target: { value: DS_BUCKET },
     });
     fireEvent.change(screen.getByLabelText("Plants"), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: "Compute" }));
   }
 
-  it("answers a delivery refusal in one sentence", async () => {
-    mockDatasetTree({ subjects: [] });
-    const message = UNVALIDATED.unvalidated_reason;
-    vi.spyOn(resultsApi, "phenologyMeasurement").mockRejectedValue(
-      new StructuredRefusalError({ kind: "delivery", message }, 400, message),
-    );
+  it("answers a delivery refusal with the gate's own sentence", async () => {
+    mockDatasetTree();
+    const refusal = RESULTS_ANSWERS.delivery_refusal;
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockRejectedValue(await thrown(refusal));
 
     await renderAndCompute();
 
-    expect(
-      await screen.findByText("No assessment answers for these predictions."),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(refusal.body.detail.message)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /show unvalidated numbers/i })).toBeInTheDocument();
-    expect(screen.queryByText(message)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /ask the agent/i })).not.toBeInTheDocument();
   });
 
   it("replaces the disabled export with an acknowledge-and-export flow while unvalidated", async () => {
     useStore.setState({ user: "breeder" });
-    mockDatasetTree({ subjects: [] });
-    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
-      curves: { rows: [CURVE_ROW], n_plants: 1 },
-      milestones: { rows: [ONSET_ROW], columns: STAGE_COLUMNS },
-      ...UNVALIDATED,
+    mockDatasetTree();
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue(MEASURED);
+    const downloadCsv = vi.spyOn(resultsApi, "downloadCsv").mockResolvedValue({
+      blob: new Blob([CURVES_EXPORT.file]),
+      exported: reportedExport<SavedExport>(new Headers(CURVES_EXPORT.headers)),
     });
-    const downloadCsv = vi.spyOn(resultsApi, "downloadCsv").mockResolvedValue(new Blob(["x"]));
 
     await renderAndCompute();
-    await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
+    const [first] = MEASURED.milestones;
+    await waitFor(() => expect(screen.getByText(first.plant_id)).toBeInTheDocument());
 
     expect(screen.queryByRole("button", { name: /curves csv/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /milestones csv/i })).not.toBeInTheDocument();
-    // The row itself has to say so too; the banner explaining it scrolls out of view.
-    expect(screen.getByText("unvalidated")).toBeInTheDocument();
+    // Each row has to say so too; the banner explaining it scrolls out of view.
+    expect(screen.getAllByText("unvalidated")).toHaveLength(MEASURED.milestones.length);
     expect(screen.queryByText("valid")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /acknowledge and export/i }));
@@ -254,20 +207,16 @@ describe("ResultsTab evidence gate", () => {
     expect(downloadCsv.mock.calls[0][0].user).toBe("breeder");
     expect(downloadCsv.mock.calls[0][0].acknowledgment).toEqual({
       reason: "calibration is not ready yet",
-      result_sha256: "c".repeat(64),
+      result_sha256: MEASURED.unvalidated?.digests.curves,
     });
   });
 
   it("opens both CSV doors once the same rows arrive on validated evidence", async () => {
-    mockDatasetTree({ subjects: [] });
-    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
-      curves: { rows: [CURVE_ROW], n_plants: 1 },
-      milestones: { rows: [ONSET_ROW], columns: STAGE_COLUMNS },
-      ...VALIDATED,
-    });
+    mockDatasetTree();
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue(VALIDATED);
 
     await renderAndCompute();
-    await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(VALIDATED_ROW.plant_id)).toBeInTheDocument());
 
     expect(screen.getByRole("button", { name: /curves csv/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /milestones csv/i })).toBeEnabled();
@@ -275,55 +224,39 @@ describe("ResultsTab evidence gate", () => {
   });
 
   it("toasts the second-delivery sentence naming the saved path when the CSV export's audit line is lost", async () => {
-    mockDatasetTree({ subjects: [] });
-    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
-      curves: { rows: [CURVE_ROW], n_plants: 1 },
-      milestones: { rows: [ONSET_ROW], columns: STAGE_COLUMNS },
-      ...VALIDATED,
-    });
-    const message = "results.export_csv completed and its audit entry could not be written";
+    mockDatasetTree();
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue(VALIDATED);
+    const gap = RESULTS_ANSWERS.export_audit_gap.body.detail;
     vi.spyOn(resultsApi, "downloadCsv").mockRejectedValue(
-      new StructuredRefusalError(
-        {
-          error: "audit_entry_not_written",
-          message,
-          committed: { saved_path: "C:/proj/results_export/x.csv" },
-        },
-        409,
-        message,
-      ),
+      await thrown(RESULTS_ANSWERS.export_audit_gap),
     );
 
     await renderAndCompute();
-    await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(VALIDATED_ROW.plant_id)).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));
 
     await waitFor(() => {
       const toast = useStore.getState().toasts.at(-1)?.message ?? "";
-      expect(toast).toContain("C:/proj/results_export/x.csv");
+      expect(toast).toContain(gap.committed.saved_path);
       expect(toast).toContain("already written");
       expect(toast).toContain("second delivery");
-      expect(toast).toContain(message);
+      expect(toast).toContain(gap.message);
     });
   });
 
   it("shows the row count only after a compute", async () => {
-    mockDatasetTree({ subjects: [] });
-    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
-      curves: { rows: [CURVE_ROW], n_plants: 1 },
-      milestones: { rows: [ONSET_ROW], columns: STAGE_COLUMNS },
-      ...VALIDATED,
-    });
+    mockDatasetTree();
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue(VALIDATED);
 
     render(<ResultsTab />);
-    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(DS_DATE)).toBeInTheDocument());
     expect(screen.getByRole("heading", { name: "Milestones" })).toBeInTheDocument();
     expect(screen.queryByText(/\d+ rows?$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Not validated:/)).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Plants"), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: "Compute" }));
-    await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(VALIDATED_ROW.plant_id)).toBeInTheDocument());
 
     expect(screen.getByRole("heading", { name: /Milestones\s*1 row/ })).toBeInTheDocument();
     expect(screen.queryByText(/positive-state fraction is the share/i)).not.toBeInTheDocument();
@@ -331,181 +264,111 @@ describe("ResultsTab evidence gate", () => {
   });
 
   it("clears the rows when a compute fails", async () => {
-    mockDatasetTree({ subjects: [] });
-    const measurement = vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
-      curves: { rows: [CURVE_ROW], n_plants: 1 },
-      milestones: { rows: [ONSET_ROW], columns: STAGE_COLUMNS },
-      ...VALIDATED,
-    });
+    mockDatasetTree();
+    const measurement = vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue(VALIDATED);
 
     await renderAndCompute();
-    await waitFor(() => expect(screen.getByRole("cell", { name: "P1" })).toBeInTheDocument());
+    const cell = { name: VALIDATED_ROW.plant_id };
+    await waitFor(() => expect(screen.getByRole("cell", cell)).toBeInTheDocument());
 
-    measurement.mockRejectedValue(new Error("the mapping's plant CSV moved"));
+    const refusal = RESULTS_ANSWERS.unknown_mapping;
+    measurement.mockRejectedValue(await thrown(refusal));
     fireEvent.click(screen.getByRole("button", { name: "Compute" }));
 
-    expect(await screen.findByText("the mapping's plant CSV moved")).toBeInTheDocument();
-    expect(screen.queryByRole("cell", { name: "P1" })).not.toBeInTheDocument();
+    expect(await screen.findByText(refusal.body.detail)).toBeInTheDocument();
+    expect(screen.queryByRole("cell", cell)).not.toBeInTheDocument();
   });
 
   it("renders the delivery-scoped unattributed count beside the measurement", async () => {
-    mockDatasetTree({ subjects: [] });
-    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
-      curves: { rows: [CURVE_ROW], n_plants: 1 },
-      milestones: { rows: [ONSET_ROW], columns: STAGE_COLUMNS },
-      ...VALIDATED,
-      dates_delivered: ["2026-01-01"],
-      images_unattributed: 3,
-    });
+    mockDatasetTree();
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue(VALIDATED);
+    const { dates_delivered: dates, images_unattributed: unattributed } = VALIDATED.plant_mapping;
+    expect(unattributed).toBeGreaterThan(0);
 
     await renderAndCompute();
-    await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(VALIDATED_ROW.plant_id)).toBeInTheDocument());
 
     expect(
-      await screen.findByText(/Delivered dates 2026-01-01: 3 attributed to no plant/),
+      await screen.findByText(
+        new RegExp(`Delivered dates ${dates.join(", ")}: ${unattributed} attributed to no plant`),
+      ),
     ).toBeInTheDocument();
   });
 });
 
 describe("ResultsTab onset table validity marker", () => {
-  async function computeWithOnsetRows(
-    rows: Awaited<ReturnType<typeof resultsApi.phenologyMeasurement>>["milestones"]["rows"],
-  ) {
+  // The produced measurements of one plant each: one missing an image, one never detected, and
+  // one past its last observation.
+  const [MISSING_IMAGE, UNOBSERVED, PAST_LAST] = RESULTS_ANSWERS.milestones;
+
+  /** Compute `answer`, a measurement of one plant; return its row. */
+  async function computeWithOnsetRow(answer: PhenologyAnswer) {
+    const [row] = answer.milestones;
     mockDatasetTree();
-    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
-      curves: {
-        rows: [
-          {
-            plant_id: "P1",
-            accession: null,
-            date: "2026-01-01",
-            n_images: 1,
-            n_total: 10,
-            n_positive: 3,
-            n_unclassified: 0,
-            n_missing: 0,
-            ratio: 0.3,
-          },
-        ],
-        n_plants: 1,
-      },
-      milestones: {
-        rows,
-        columns: Object.keys(rows[0] ?? {})
-          .filter((key) => key.endsWith("_date"))
-          .map((date) => ({ date, bound: `${date}_bound` })),
-      },
-      ...VALIDATED,
-    });
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue(answer);
 
     render(<ResultsTab />);
     // The trait resolves from the project's registered traits asynchronously; wait for it before
     // computing, or the compute click races the fetch and refuses (no trait resolved yet).
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
-    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText("Plants"), { target: { value: "P1" } });
+    await waitFor(() => expect(screen.getByText(DS_DATE)).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Plants"), { target: { value: row.plant_id } });
     fireEvent.click(screen.getByRole("button", { name: "Compute" }));
-    await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(row.plant_id)).toBeInTheDocument());
+    return row;
   }
 
   it("marks a fully-classified, fully-observed plant valid", async () => {
-    await computeWithOnsetRows([
-      {
-        plant_id: "P1",
-        accession: null,
-        n_dates: 1,
-        n_dates_unclassified: 0,
-        n_dates_missing_images: 0,
-        n_observed_dates: 1,
-        complete: true,
-        subject_a_50per_date: "2026-02-01",
-      },
-    ]);
+    await computeWithOnsetRow(VALIDATED);
     expect(screen.getByText("valid")).toBeInTheDocument();
     expect(screen.queryByText("incomplete")).not.toBeInTheDocument();
     expect(screen.queryByText("no observations")).not.toBeInTheDocument();
   });
 
   it("marks a plant with an unclassified or missing-image date incomplete, not silently blank", async () => {
-    await computeWithOnsetRows([
-      {
-        plant_id: "P1",
-        accession: null,
-        n_dates: 1,
-        n_dates_unclassified: 1,
-        n_dates_missing_images: 0,
-        n_observed_dates: 0,
-        complete: false,
-        subject_a_50per_date: null,
-      },
-    ]);
+    const row = await computeWithOnsetRow(MISSING_IMAGE);
+    expect(row.n_dates_missing_images).toBeGreaterThan(0);
     expect(screen.getByText("incomplete")).toBeInTheDocument();
     expect(screen.queryByText("valid")).not.toBeInTheDocument();
     expect(screen.queryByText("no observations")).not.toBeInTheDocument();
   });
 
   it("marks a fully-classified, fully-observed plant with zero detections as 'no observations', not 'valid'", async () => {
-    await computeWithOnsetRows([
-      {
-        plant_id: "P1",
-        accession: null,
-        n_dates: 2,
-        n_dates_unclassified: 0,
-        n_dates_missing_images: 0,
-        n_observed_dates: 0,
-        complete: true,
-        subject_a_50per_date: null,
-      },
-    ]);
+    await computeWithOnsetRow(UNOBSERVED);
     expect(screen.getByText("no observations")).toBeInTheDocument();
     expect(screen.queryByText("valid")).not.toBeInTheDocument();
     expect(screen.queryByText("incomplete")).not.toBeInTheDocument();
   });
 
   it("renders a right-censored milestone with its own marker, not the interpolated one", async () => {
-    await computeWithOnsetRows([
-      {
-        plant_id: "P1",
-        accession: null,
-        n_dates: 1,
-        n_dates_unclassified: 0,
-        n_dates_missing_images: 0,
-        n_observed_dates: 1,
-        complete: true,
-        subject_a_95per_date: "2026-03-12",
-        subject_a_95per_date_bound: "right_censored",
-      },
-    ]);
-    expect(screen.getByText("2026-03-12")).toBeInTheDocument();
-    const marker = screen.getByTitle("After last observation");
-    expect(marker).toHaveTextContent(">");
+    const row = await computeWithOnsetRow(PAST_LAST);
+    const crossings = Object.values(row.milestones).filter(
+      (crossing) => crossing?.bound === "right_censored",
+    );
+    expect(crossings).not.toHaveLength(0);
+    for (const crossing of crossings) {
+      expect(screen.getAllByText(crossing?.date ?? "")).not.toHaveLength(0);
+    }
+    const markers = screen.getAllByTitle("After last observation");
+    expect(markers).toHaveLength(crossings.length);
+    for (const marker of markers) expect(marker).toHaveTextContent(">");
     expect(screen.queryByTitle("Interpolated")).not.toBeInTheDocument();
   });
 });
 
 describe("ResultsTab meaning refusals", () => {
-  it("routes a refusal by its kind even when its text reads like the calibration one", async () => {
+  it("routes a refusal by its kind to its own panel, never the assessment flow", async () => {
     mockDatasetTree();
-    vi.spyOn(resultsApi, "phenologyMeasurement").mockRejectedValue(
-      new StructuredRefusalError(
-        {
-          kind: "operationalization",
-          message: "an unvalidated number is not what this refusal is about",
-        },
-        400,
-        "an unvalidated number is not what this refusal is about",
-      ),
-    );
+    const refusal = RESULTS_ANSWERS.operationalization_refusal;
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockRejectedValue(await thrown(refusal));
 
     render(<ResultsTab />);
-    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(DS_DATE)).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText("Plants"), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: "Compute" }));
 
-    expect(
-      await screen.findByText(/an unvalidated number is not what this refusal is about/),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("No assessment answers for these predictions.")).toBeNull();
+    expect(await screen.findByText(refusal.body.detail.message)).toBeInTheDocument();
+    expect(screen.queryByText(RESULTS_ANSWERS.delivery_refusal.body.detail.message)).toBeNull();
     expect(
       screen.queryByRole("button", { name: /show unvalidated numbers/i }),
     ).not.toBeInTheDocument();
@@ -513,51 +376,19 @@ describe("ResultsTab meaning refusals", () => {
 
   it("renders a structured refusal from the CSV download instead of stringifying it", async () => {
     mockDatasetTree();
-    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
-      curves: {
-        rows: [
-          {
-            plant_id: "P1",
-            accession: null,
-            date: "2026-01-01",
-            n_images: 1,
-            n_total: 10,
-            n_positive: 3,
-            n_unclassified: 0,
-            n_missing: 0,
-            ratio: 0.3,
-          },
-        ],
-        n_plants: 1,
-      },
-      milestones: { rows: [], columns: [] },
-      ...VALIDATED,
-    });
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue(VALIDATED);
+    const refusal = RESULTS_ANSWERS.operationalization_refusal;
     // exportCsv is left unmocked: the refusal has to survive its own blob path.
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 400,
-        statusText: "Bad Request",
-        json: () =>
-          Promise.resolve({
-            detail: {
-              kind: "operationalization",
-              message: "stated but not confirmed by the breeder",
-            },
-          }),
-      }),
-    );
+    fetchAnswers(refusal.status, refusal.body);
 
     render(<ResultsTab />);
-    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(DS_DATE)).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText("Plants"), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: "Compute" }));
     await waitFor(() => expect(screen.getByRole("button", { name: /curves csv/i })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));
 
-    expect(await screen.findByText(/stated but not confirmed by the breeder/)).toBeInTheDocument();
+    expect(await screen.findByText(refusal.body.detail.message)).toBeInTheDocument();
     expect(screen.queryByText(/\[object Object\]/)).not.toBeInTheDocument();
     // The assessment flow answers a different refusal family and must not be offered for this one.
     expect(
@@ -567,15 +398,17 @@ describe("ResultsTab meaning refusals", () => {
 });
 
 describe("ResultsTab delivery events (read-only)", () => {
-  async function servedRow(record: ServedDeliveryEvent): Promise<HTMLElement> {
-    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [record] });
+  /** Render the tab over the produced one-record `listing`; return its record's row. */
+  async function servedRow(listing: DeliveryEvents): Promise<HTMLElement> {
+    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue(listing);
     render(<ResultsTab />);
-    return screen.findByTestId(`delivery-${record.event_id}`);
+    const [served] = listing.records;
+    return screen.findByTestId(`delivery-${served.event.event_id}`);
   }
 
   it("lists what shipped, with each bucket's gate finding and no confirm/withdraw controls", async () => {
-    const record = DELIVERY_RECORDS.validated;
-    const row = await servedRow(record);
+    const record = DELIVERY_RECORDS.validated.event;
+    const row = await servedRow(DELIVERY_LISTINGS.validated);
 
     expect(within(row).getByText(record.trait)).toBeInTheDocument();
     expect(
@@ -595,8 +428,8 @@ describe("ResultsTab delivery events (read-only)", () => {
   });
 
   it("renders the acknowledging breeder's name and reason, and each bucket's missing assessment", async () => {
-    const record = DELIVERY_RECORDS.acknowledged_mapping;
-    const row = await servedRow(record);
+    const record = DELIVERY_RECORDS.acknowledged_mapping.event;
+    const row = await servedRow(DELIVERY_LISTINGS.acknowledged_mapping);
 
     expect(within(row).getByText(record.acknowledgment.acknowledged_by)).toBeInTheDocument();
     expect(within(row).getByText(record.acknowledgment.reason)).toBeInTheDocument();
@@ -608,8 +441,6 @@ describe("ResultsTab delivery events (read-only)", () => {
   });
 
   it("renders nothing extra when this project has no deliveries yet", async () => {
-    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [] });
-
     render(<ResultsTab />);
     await waitFor(() => expect(resultsApi.deliveryEvents).toHaveBeenCalled());
 
@@ -618,9 +449,7 @@ describe("ResultsTab delivery events (read-only)", () => {
 
   it("renders only the load error when the listing is refused, not the empty state", async () => {
     vi.spyOn(resultsApi, "deliveryEvents").mockRejectedValue(
-      new Error(
-        "delivery event 'old-shaped' does not validate against the current delivery_events shape",
-      ),
+      await thrown(RESULTS_ANSWERS.unreadable_deliveries),
     );
 
     render(<ResultsTab />);
@@ -632,9 +461,8 @@ describe("ResultsTab delivery events (read-only)", () => {
   });
 
   it("renders the plant mapping's dates_delivered, images_unattributed and plant_attribution", async () => {
-    const record = DELIVERY_RECORDS.acknowledged_mapping;
-    const pm = record.plant_mapping;
-    const row = await servedRow(record);
+    const pm = DELIVERY_RECORDS.acknowledged_mapping.event.plant_mapping;
+    const row = await servedRow(DELIVERY_LISTINGS.acknowledged_mapping);
 
     expect(
       within(row).getByText(
@@ -646,9 +474,8 @@ describe("ResultsTab delivery events (read-only)", () => {
   });
 
   it("renders the orthomosaic door's own registry disclosure, not the walked-mapping form", async () => {
-    const record = DELIVERY_RECORDS.registry;
-    const pm = record.plant_mapping;
-    const row = await servedRow(record);
+    const pm = DELIVERY_RECORDS.registry.event.plant_mapping;
+    const row = await servedRow(DELIVERY_LISTINGS.registry);
 
     expect(
       within(row).getByText(
@@ -664,9 +491,9 @@ describe("ResultsTab delivery events (read-only)", () => {
   });
 
   it("renders the orthomosaic door's own canopy-segment disclosure, narrowed before the registry form", async () => {
-    const record = DELIVERY_RECORDS.canopy;
+    const record = DELIVERY_RECORDS.canopy.event;
     const pm = record.plant_mapping;
-    const row = await servedRow(record);
+    const row = await servedRow(DELIVERY_LISTINGS.canopy);
 
     expect(within(row).getByTestId("canopy-disclosure")).toBeInTheDocument();
     expect(
@@ -696,11 +523,11 @@ describe("ResultsTab delivery events (read-only)", () => {
   });
 
   it("renders the archived key beside a cited mapping once a rebuild has moved past it", async () => {
-    const record = DELIVERY_RECORDS.archived_mapping;
-    const row = await servedRow(record);
+    const served = DELIVERY_RECORDS.archived_mapping;
+    const row = await servedRow(DELIVERY_LISTINGS.archived_mapping);
 
     expect(
-      within(row).getByText(new RegExp(`archived as ${record.plant_mapping.resolved_key}`)),
+      within(row).getByText(new RegExp(`archived as ${served.resolved_key}`)),
     ).toBeInTheDocument();
   });
 });
@@ -722,7 +549,7 @@ describe("ResultsTab count export", () => {
   }
 
   async function renderCountPanel(): Promise<HTMLElement> {
-    mockDatasetTree({ subjects: [] });
+    mockDatasetTree();
     render(<ResultsTab />);
     await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
     await waitFor(() => expect(api.dataset.tree).toHaveBeenCalled());
@@ -730,30 +557,34 @@ describe("ResultsTab count export", () => {
     const panel = heading.closest(".tcip-panel");
     expect(panel).toBeInstanceOf(HTMLElement);
     // The Trait and Prediction bucket selects only fill in once their own async loads resolve.
-    await within(panel as HTMLElement).findByText("subject_a");
-    await within(panel as HTMLElement).findByText("2026-01-01 (baseline/2026-01-01)");
+    await within(panel as HTMLElement).findByText(TRAIT);
+    await within(panel as HTMLElement).findByText(`${DS_DATE} (${DS_BUCKET})`);
     return panel as HTMLElement;
+  }
+
+  /** The produced download `exported`: the file the count-export door sent, the export it
+   *  reported read as the client reads it. */
+  function downloaded(exported: typeof COUNT_EXPORT) {
+    return {
+      blob: new Blob([exported.file]),
+      exported: reportedExport<CountExport>(new Headers(exported.headers)),
+    };
   }
 
   function chooseBucket(panel: HTMLElement) {
     fireEvent.change(controlFollowing(panel, "Predictions"), {
-      target: { value: "baseline/2026-01-01" },
+      target: { value: DS_BUCKET },
     });
   }
 
   it("posts a per_image_count delivery with the selected bucket and trait", async () => {
     const panel = await renderCountPanel();
-    const downloadCountCsv = vi.spyOn(resultsApi, "downloadCountCsv").mockResolvedValue({
-      blob: new Blob(["x"]),
-      headers: {
-        savedTo: "C:/proj/results_export/counts.csv",
-        validated: true,
-        acknowledgedBy: "",
-      },
-    });
+    const downloadCountCsv = vi
+      .spyOn(resultsApi, "downloadCountCsv")
+      .mockResolvedValue(downloaded(COUNT_EXPORT));
 
     chooseBucket(panel);
-    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
+    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: TRAIT } });
     fireEvent.change(controlFollowing(panel, "File name"), { target: { value: "counts.csv" } });
     fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
 
@@ -763,8 +594,8 @@ describe("ResultsTab count export", () => {
       delivery: {
         kind: "per_image_count",
         dataset_root: RAW_SELECTION.dataset_root,
-        bucket: "baseline/2026-01-01",
-        trait: "subject_a",
+        bucket: DS_BUCKET,
+        trait: TRAIT,
       },
       filename: "counts.csv",
     });
@@ -772,14 +603,9 @@ describe("ResultsTab count export", () => {
 
   it("posts an orthomosaic_plant_counts delivery with its own fields", async () => {
     const panel = await renderCountPanel();
-    const downloadCountCsv = vi.spyOn(resultsApi, "downloadCountCsv").mockResolvedValue({
-      blob: new Blob(["x"]),
-      headers: {
-        savedTo: "C:/proj/results_export/plant_counts.csv",
-        validated: true,
-        acknowledgedBy: "",
-      },
-    });
+    const downloadCountCsv = vi
+      .spyOn(resultsApi, "downloadCountCsv")
+      .mockResolvedValue(downloaded(COUNT_EXPORT));
 
     fireEvent.change(controlFollowing(panel, "Kind"), {
       target: { value: "orthomosaic_plant_counts" },
@@ -804,7 +630,7 @@ describe("ResultsTab count export", () => {
       delivery: {
         kind: "orthomosaic_plant_counts",
         dataset_root: RAW_SELECTION.dataset_root,
-        bucket: "baseline/2026-01-01",
+        bucket: DS_BUCKET,
         plant_registry: "reg",
         delivered_phenotype: "stem_count",
         plants: ["PLOT-01", "PLOT-02"],
@@ -815,14 +641,9 @@ describe("ResultsTab count export", () => {
 
   it("drops the position error with the canopy subject it belongs to", async () => {
     const panel = await renderCountPanel();
-    const downloadCountCsv = vi.spyOn(resultsApi, "downloadCountCsv").mockResolvedValue({
-      blob: new Blob(["x"]),
-      headers: {
-        savedTo: "C:/proj/results_export/plant_counts.csv",
-        validated: true,
-        acknowledgedBy: "",
-      },
-    });
+    const downloadCountCsv = vi
+      .spyOn(resultsApi, "downloadCountCsv")
+      .mockResolvedValue(downloaded(COUNT_EXPORT));
 
     fireEvent.change(controlFollowing(panel, "Kind"), {
       target: { value: "orthomosaic_plant_counts" },
@@ -850,57 +671,39 @@ describe("ResultsTab count export", () => {
 
     await waitFor(() => expect(downloadCountCsv).toHaveBeenCalled());
     const delivery = downloadCountCsv.mock.calls[0][0].delivery;
-    expect(delivery).not.toHaveProperty("position_error_m");
-    expect(delivery).not.toHaveProperty("canopy_subject");
+    expect(delivery).toMatchObject({ position_error_m: null, canopy_subject: "" });
   });
 
   it("shows the second-delivery sentence naming the saved path when the count export's audit line is lost", async () => {
     const panel = await renderCountPanel();
-    const message = "results.export_count_csv completed and its audit entry could not be written";
+    const gap = RESULTS_ANSWERS.count_export_audit_gap.body.detail;
     vi.spyOn(resultsApi, "downloadCountCsv").mockRejectedValue(
-      new StructuredRefusalError(
-        {
-          error: "audit_entry_not_written",
-          message,
-          committed: {
-            saved_path: "C:/proj/results_export/counts.csv",
-          },
-        },
-        409,
-        message,
-      ),
+      await thrown(RESULTS_ANSWERS.count_export_audit_gap),
     );
 
     chooseBucket(panel);
-    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
+    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: TRAIT } });
     fireEvent.change(controlFollowing(panel, "File name"), { target: { value: "counts.csv" } });
     fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
 
-    const errorText = await within(panel).findByText(/C:\/proj\/results_export\/counts\.csv/);
-    expect(errorText.textContent).toContain("already written");
+    const errorText = await within(panel).findByText((content) =>
+      content.startsWith(`The file is already written at ${gap.committed.saved_path},`),
+    );
     expect(errorText.textContent).toContain("second delivery");
-    expect(errorText.textContent).toContain(message);
+    expect(errorText.textContent).toContain(gap.message);
   });
 
   it("decodes a delivery refusal and offers the acknowledgment controls", async () => {
     const panel = await renderCountPanel();
-    const message =
-      "no assessment answers for bucket 'baseline/2026-01-01': assess best against a " +
-      "held-out reference selection and publish its predictions under that assessment.";
-    vi.spyOn(resultsApi, "downloadCountCsv").mockRejectedValue(
-      new StructuredRefusalError(
-        { kind: "delivery", message, result_sha256: "c".repeat(64) },
-        400,
-        message,
-      ),
-    );
+    const refusal = RESULTS_ANSWERS.count_delivery_refusal;
+    vi.spyOn(resultsApi, "downloadCountCsv").mockRejectedValue(await thrown(refusal));
 
     chooseBucket(panel);
-    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
+    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: TRAIT } });
     fireEvent.change(controlFollowing(panel, "File name"), { target: { value: "counts.csv" } });
     fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
 
-    expect(await within(panel).findByText(message)).toBeInTheDocument();
+    expect(await within(panel).findByText(refusal.body.detail.message)).toBeInTheDocument();
     expect(
       within(panel).getByPlaceholderText(/reason for delivering unvalidated/i),
     ).toBeInTheDocument();
@@ -909,27 +712,27 @@ describe("ResultsTab count export", () => {
     ).toBeInTheDocument();
   });
 
-  it("downloads with the headers and reports from them", async () => {
+  it("downloads and reports the export the door reported", async () => {
     const panel = await renderCountPanel();
-    vi.spyOn(resultsApi, "downloadCountCsv").mockResolvedValue({
-      blob: new Blob(["x"]),
-      headers: {
-        savedTo: "C:/proj/results_export/counts.csv",
-        validated: false,
-        acknowledgedBy: "user:breeder",
-      },
-    });
+    const acknowledged = downloaded(ACKNOWLEDGED_COUNT_EXPORT);
+    vi.spyOn(resultsApi, "downloadCountCsv").mockResolvedValue(acknowledged);
+    const {
+      saved_path: savedTo,
+      validated,
+      acknowledged_by: acknowledgedBy,
+    } = acknowledged.exported;
 
     chooseBucket(panel);
-    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
+    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: TRAIT } });
     fireEvent.change(controlFollowing(panel, "File name"), { target: { value: "counts.csv" } });
     fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
 
-    expect(
-      await within(panel).findByText(/Saved to C:\/proj\/results_export\/counts\.csv/),
-    ).toBeInTheDocument();
-    expect(within(panel).getByText(/Not validated\./)).toBeInTheDocument();
-    expect(within(panel).getByText(/Acknowledged by user:breeder/)).toBeInTheDocument();
+    const report = await within(panel).findByText((content) =>
+      content.startsWith(`Saved to ${savedTo}.`),
+    );
+    expect(validated).toBe(false);
+    expect(report.textContent).toContain(" Not validated.");
+    expect(report.textContent).toContain(` Acknowledged by ${acknowledgedBy}.`);
   });
 
   it("disables the Export button while a post is in flight", async () => {
@@ -939,21 +742,14 @@ describe("ResultsTab count export", () => {
     vi.spyOn(resultsApi, "downloadCountCsv").mockReturnValue(download.promise);
 
     chooseBucket(panel);
-    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
+    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: TRAIT } });
     fireEvent.change(controlFollowing(panel, "File name"), { target: { value: "counts.csv" } });
     const button = within(panel).getByRole("button", { name: /^export$/i });
     fireEvent.click(button);
 
     await waitFor(() => expect(button).toBeDisabled());
 
-    download.resolve({
-      blob: new Blob(["x"]),
-      headers: {
-        savedTo: "C:/proj/results_export/counts.csv",
-        validated: true,
-        acknowledgedBy: "",
-      },
-    });
+    download.resolve(downloaded(COUNT_EXPORT));
     await waitFor(() =>
       expect(within(panel).getByRole("button", { name: /^export$/i })).toBeEnabled(),
     );

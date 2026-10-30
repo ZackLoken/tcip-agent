@@ -7,18 +7,8 @@ import {
   SUBJECT_COLORS,
   subjectColor,
 } from "@/api/subjects";
-
-function stubFetch(body: unknown = { status: "ok" }) {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve(body),
-      text: () => Promise.resolve(JSON.stringify(body)),
-    }),
-  );
-}
+import { LABEL_ANSWERS } from "@/test/labels";
+import { fetchAnswers } from "@/test/refusals";
 
 function sentBody(): Record<string, unknown> {
   return JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string) as Record<string, unknown>;
@@ -48,10 +38,16 @@ describe("subjectColor collision-free registry slots", () => {
 
 describe("registry save", () => {
   it("carries the version it was loaded at, so a stale save is refused", async () => {
-    stubFetch({ status: "ok", n_subjects: 1, subjects_path: "s", version: "v2" });
-    await subjectsApi.save({ bush: {} }, "C:/data", "v1", "jordan");
+    fetchAnswers(200, LABEL_ANSWERS.registry_saved);
+    const subjects = { bush: { description: "one bush crown" } };
+    await subjectsApi.save({
+      subjects,
+      dataset_root: "C:/data",
+      version: "v1",
+      user: "jordan",
+    });
     expect(sentBody()).toEqual({
-      subjects: { bush: {} },
+      subjects,
       dataset_root: "C:/data",
       version: "v1",
       user: "jordan",

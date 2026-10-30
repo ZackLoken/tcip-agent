@@ -183,10 +183,12 @@ def test_compare_experiments(tmp_path: Path) -> None:
     log_epoch(x, 0, {"mAP50": 0.6})
     log_epoch(y, 0, {"mAP50": 0.7})
 
-    result = exp.compare_experiments(["exp-x", "exp-y"], project=tmp_path)
-    assert result["count"] == 2
-    exps = {e["experiment_id"]: e for e in result["experiments"]}
-    assert exps["exp-x"]["model"] == BUILT_DETECTOR["builder"]
+    result = exp.compare_experiments(
+        ["exp-x", "exp-y"], project=tmp_path
+    ).model_dump()
+    assert len(result["experiments"]) == 2
+    exps = {e["run"]["experiment_id"]: e for e in result["experiments"]}
+    assert exps["exp-x"]["run"]["builder"] == BUILT_DETECTOR["builder"]
     assert exps["exp-y"]["last_logged_metrics"]["mAP50"] == 0.7
 
 
@@ -277,9 +279,7 @@ def test_the_register_model_door_leaves_only_the_registrys_own_rows(
         _ckpt(tmp_path, "b.pt", b"second, different"),
         _ckpt(tmp_path, "c.pt", b"first"),
     ):
-        assert "error" not in register_model(
-            tmp_path, name="door", checkpoint_path=path, actor=None
-        )
+        register_model(tmp_path, name="door", checkpoint_path=path, actor=None)
 
     rows = audit_rows(tmp_path)
     assert [r["tool"] for r in rows] == [
@@ -292,11 +292,8 @@ def test_the_register_model_door_leaves_only_the_registrys_own_rows(
         False,
         True,
     ]
-    assert "error" not in register_model(
-        tmp_path,
-        name="door",
-        checkpoint_path=str(tmp_path / "c.pt"),
-        actor=None,
+    register_model(
+        tmp_path, name="door", checkpoint_path=str(tmp_path / "c.pt"), actor=None
     )
     assert (
         len(audit_rows(tmp_path)) == 3

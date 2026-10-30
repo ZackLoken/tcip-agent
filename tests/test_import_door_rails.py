@@ -545,12 +545,12 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
 
     assert read_trait(COUNT_TRAIT, dest).latest_confirmed == confirmed
 
-    run_dir = experiments.find_run("exp1", project=dest)
+    run_dir = experiments.named_directory("exp1", experiments.run_dirs(dest))
     assert run_dir is not None
     observation = experiments.observe_run(run_dir)
     assert observation.record.spec.model_source.task == "detection"
     rows = experiments.read_rows(run_dir / experiments.METRICS_FILE)[0]
-    assert rows[0]["loss"] == 0.5
+    assert rows[0].model_dump()["loss"] == 0.5
     assert observation.checkpoint is not None
 
     sweep = tt.monitor_training(dest, sweep_id)["sweep"]

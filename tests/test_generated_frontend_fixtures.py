@@ -1,28 +1,32 @@
 """The browser's fixtures are what the platform's own producers record and serve.
 
-Each fixture generator's checked-in file is held to what a regeneration serves: the delivery
-events ``tools/generate_delivery_fixture.py`` writes, each value compared but the ones a run
-mints, and the file of each generator :data:`SERVED_FIXTURES` names, value for value. The scratch
-session the generators make their scenes in (``tools/fixture_session.py``) is held to leaving
-nothing behind.
+The file of each generator :data:`SERVED_FIXTURES` names is held to what a regeneration serves,
+value for value, each value a run fills read as its stand-in by the generator itself
+(``fixture_session.normalized``). The scratch session the generators make their scenes in
+(``tools/fixture_session.py``) is held to leaving nothing behind.
 """
 
 from __future__ import annotations
 
-import copy
 import importlib
 import json
-from typing import TYPE_CHECKING, cast
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests._web_fixtures import named_project
-from tools.fixture_session import normalized, opened, scratch_session
+from tools.fixture_session import (
+    INSTANT_BASE,
+    normalized,
+    opened,
+    scratch_session,
+    served_instants,
+)
 
 if TYPE_CHECKING:
     from types import ModuleType
-
-    from pydantic import JsonValue
 
 
 def _generator(name: str) -> ModuleType:
@@ -30,157 +34,109 @@ def _generator(name: str) -> ModuleType:
     return importlib.import_module(f"tools.{name}")
 
 
-DELIVERY = _generator("generate_delivery_fixture")
-GENERATED = DELIVERY.GENERATED_PATH
+WORKSPACE = Path("scratch") / "workspace"
+"""A workspace standing where a scratch session's would, for a normalization alone."""
 
 
-PER_RUN = frozenset(
-    {
-        "event_id",
-        "acknowledgment_id",
-        "assessment_id",
-        "dataset_id",
-        "experiment_id",
-        "produced_at",
-        "recorded_at",
-        "built_at",
-        "output_sha256",
-        "result_sha256",
-        "record_sha256",
-        "checkpoint_sha256",
-        "digest",
+def test_a_numbered_value_keeps_its_sharing_and_no_more() -> None:
+    """Strings a run fills read by their first appearance, so sharing survives and only sharing.
+
+    Two keys holding one value read as one placeholder, a reminted value reads as the one it
+    replaced, a value that stopped sharing reads as a new one, and a value of another type than a
+    string is kept as served.
+    """
+    numbered = frozenset({"event_id", "cited"})
+    served = {
+        "a": {"event_id": "x1"},
+        "b": {"cited": "x1"},
+        "c": {"event_id": "y"},
     }
-)
-"""The record fields two productions of the same scenes fill differently: minted ids, the
-times things happened, and digests over what carries those or over a file the scene writes in
-the platform's own line endings (a run's weights, a written output, a record holding a time, a
-plant registry)."""
 
-
-def _normalized(fixture: dict[str, dict]) -> dict[str, JsonValue]:
-    """Return ``fixture`` with each value a run mints made what it stands for.
-
-    A walked mapping's served disclosure (``ServedPlantMappingDisclosure``, each ``records``
-    entry's ``plant_mapping`` read through the route's ``ServedDisclosure``) whose resolved key is
-    the name :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.archived_mapping_name` gives
-    the record it cites has that key read as ``<archived NAME>``; then each :data:`PER_RUN` string
-    reads as a placeholder numbered by its first appearance across the fixture and each float is
-    rounded (``fixture_session.normalized``). Other values are kept as served.
-    """
-    from pydantic import TypeAdapter
-
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        archived_mapping_name,
+    assert normalized(served, WORKSPACE, numbered=numbered) == {
+        "a": {"event_id": "<event_id n0>"},
+        "b": {"cited": "<event_id n0>"},
+        "c": {"event_id": "<event_id n1>"},
+    }
+    reminted = {
+        "a": {"event_id": "z"},
+        "b": {"cited": "z"},
+        "c": {"event_id": "w"},
+    }
+    assert normalized(reminted, WORKSPACE, numbered=numbered) == normalized(
+        served, WORKSPACE, numbered=numbered
     )
-    from tcip_web.routes.results import (
-        ServedDisclosure,
-        ServedPlantMappingDisclosure,
+    unshared = {
+        "a": {"event_id": "x1"},
+        "b": {"cited": "x2"},
+        "c": {"event_id": "y"},
+    }
+    assert normalized(unshared, WORKSPACE, numbered=numbered) != normalized(
+        served, WORKSPACE, numbered=numbered
     )
-
-    disclosure = TypeAdapter[ServedDisclosure | None](ServedDisclosure | None)
-    archived = copy.deepcopy(fixture)
-    for record in archived["records"].values():
-        pm = disclosure.validate_python(record["plant_mapping"])
-        if isinstance(
-            pm, ServedPlantMappingDisclosure
-        ) and pm.resolved_key == archived_mapping_name(
-            pm.name, pm.record_sha256
-        ):
-            record["plant_mapping"]["resolved_key"] = f"<archived {pm.name}>"
-    return normalized(archived, numbered=PER_RUN, rounded=True)
+    assert normalized({"event_id": 7}, WORKSPACE, numbered=numbered) == {
+        "event_id": 7
+    }
 
 
-def _changed(fixture: dict, name: str, *path_and_value: JsonValue) -> dict:
-    """Return a copy of ``fixture`` with one value under record ``name`` replaced.
+def test_an_instant_reads_as_an_instant_keeping_its_order_and_sharing() -> (
+    None
+):
+    """Served instants read as instants a second apart in time order, spelled as served.
 
-    The value at ``path`` under record ``name`` is set to the last argument.
+    The later instant served first still reads as the later one, two spellings of one instant
+    read as one, and epoch seconds stay epoch seconds of their own type.
     """
-    *path, value = path_and_value
-    out = copy.deepcopy(fixture)
-    target = out["records"][name]
-    for step in path[:-1]:
-        target = target[step]
-    target[path[-1]] = value
-    return out
+    instants = frozenset({"created", "modified"})
+    served = {
+        "later": {"created": "2026-03-04T12:00:05+00:00"},
+        "earlier": {"created": "2026-03-04T12:00:00.250000+00:00"},
+        "same": {"created": "2026-03-04T14:00:05+02:00"},
+        "stamp": {"modified": 1772625600.25},
+        "whole": {"modified": 1772625605},
+    }
+
+    def second(n: int) -> datetime:
+        return INSTANT_BASE + timedelta(seconds=n)
+
+    assert normalized(served, WORKSPACE, instants=instants) == {
+        "later": {"created": second(1).isoformat()},
+        "earlier": {"created": second(0).isoformat()},
+        "same": {"created": second(1).isoformat()},
+        "stamp": {"modified": second(0).timestamp()},
+        "whole": {"modified": int(second(1).timestamp())},
+    }
 
 
-def test_the_comparison_keeps_every_value_a_run_does_not_mint() -> None:
-    """The fixture comparison breaks on a changed served value and holds across a reminted id.
+def test_the_served_instants_are_the_fields_a_served_model_types_as_an_instant() -> (
+    None
+):
+    """A model's ``AwareDatetime`` field is a served instant; a string or a number one is not.
 
-    A served value (a disclosure count, an output path) changing, a
-    minted value changing its type or going absent, two records sharing a minted value no longer
-    sharing it, and an archived mapping key that is not the archive's own name each break the
-    comparison; a minted id changing its value does not.
+    ``created`` is a run record's instant, ``started`` a session's; ``modified`` is a project
+    summary's epoch seconds and ``created_at`` a label document's string stamp.
     """
-    checked = json.loads(GENERATED.read_text(encoding="utf-8"))
-    records = checked["records"]
-    count = records["canopy"]["plant_mapping"]["segments_without_plant"]
-    digest = records["archived_mapping"]["plant_mapping"]["record_sha256"]
-    broken = [
-        _changed(
-            checked,
-            "canopy",
-            "plant_mapping",
-            "segments_without_plant",
-            count + 99,
-        ),
-        _changed(
-            checked, "validated", "output_path", "/scratch/elsewhere.csv"
-        ),
-        _changed(checked, "validated", "event_id", 7),
-        _changed(checked, "validated", "output_sha256", 7),
-        _changed(checked, "registry", "producer", "experiment_id", None),
-        _changed(
-            checked,
-            "archived_mapping",
-            "producer",
-            "experiment_id",
-            "another-run",
-        ),
-        *(
-            _changed(
-                checked,
-                "archived_mapping",
-                "plant_mapping",
-                "resolved_key",
-                key,
-            )
-            for key in ("valley@", "valley@3", f"valley@{digest}")
-        ),
-    ]
+    found = served_instants()
 
-    for fixture in broken:
-        assert _normalized(fixture) != _normalized(checked)
-    reminted = _changed(checked, "validated", "event_id", "another-id")
-    assert _normalized(reminted) == _normalized(checked)
-
-
-def test_each_disclosure_normalizes_through_its_own_type() -> None:
-    """Each delivery record's disclosure normalizes as its schema type states.
-
-    A walked mapping's disclosure whose resolved key is its cited record's archive name reads as
-    archived, one still resolving to its own name keeps it, and a registry or canopy disclosure,
-    which carries no resolved key, gains none.
-    """
-    checked = json.loads(GENERATED.read_text(encoding="utf-8"))
-    normal = cast("dict[str, dict]", _normalized(checked)["records"])
-
-    assert normal["archived_mapping"]["plant_mapping"]["resolved_key"] == (
-        "<archived valley>"
-    )
-    assert normal["acknowledged_mapping"]["plant_mapping"]["resolved_key"] == (
-        "valley"
-    )
-    for name in ("registry", "canopy"):
-        assert "resolved_key" not in normal[name]["plant_mapping"]
+    assert {"created", "started"} <= found
+    assert not {"modified", "created_at"} & found
 
 
 SERVED_FIXTURES = (
+    "generate_delivery_fixture",
     "generate_trait_fixture",
     "generate_project_fixture",
     "generate_tensorboard_fixture",
     "generate_open_fixture",
     "generate_training_fixture",
+    "generate_labels_fixture",
+    "generate_bands_fixture",
+    "generate_sessions_fixture",
+    "generate_inference_fixture",
+    "generate_panel_events_fixture",
+    "generate_terminal_fixture",
+    "generate_images_fixture",
+    "generate_meta_fixture",
+    "generate_annotate_fixture",
 )
 """The fixture generators whose files hold no value a run mints, compared value for value."""
 
@@ -217,7 +173,7 @@ def test_a_tensorboard_whose_stop_is_unconfirmed_fails_the_production(
         lambda logdir: {**stop(logdir), "status": "kill_unconfirmed"},
     )
 
-    with pytest.raises(SystemExit, match="kills unconfirmed"):
+    with pytest.raises(AssertionError, match="kills unconfirmed"):
         _generator("generate_tensorboard_fixture").produce()
 
 
@@ -246,7 +202,7 @@ def test_an_unconfirmed_stop_after_a_failed_production_is_refused_over_the_failu
     )
     monkeypatch.setattr(module, "normalized", failing)
 
-    with pytest.raises(SystemExit, match="kills unconfirmed") as refused:
+    with pytest.raises(AssertionError, match="kills unconfirmed") as refused:
         module.produce()
     assert isinstance(refused.value.__context__, NormalizationFailedError)
 
@@ -254,59 +210,31 @@ def test_an_unconfirmed_stop_after_a_failed_production_is_refused_over_the_failu
 def test_a_wrong_typed_stamped_value_is_kept_for_the_staleness_comparison() -> (
     None
 ):
-    """A value of another type than the producer writes under a stamped key is kept as served.
+    """A value of another type than the producer writes under its key is kept as served.
 
-    Under the training fixture's own stamps, a ``None`` where a timestamp belongs and a string
+    Under the training fixture's own rules, a ``None`` where a timestamp belongs and a string
     or a boolean where a pid belongs survive normalization, so a regeneration carrying them
     differs from the checked-in fixture, while the producer's own types read as their
     placeholders.
     """
-    stamped = _generator("generate_training_fixture").STAMPED
+    module = _generator("generate_training_fixture")
 
-    assert normalized({"created": None, "pid": "1"}, stamped=stamped) == {
+    def under_its_rules(served: dict) -> dict:
+        return normalized(
+            served,
+            WORKSPACE,
+            stamped=module.STAMPED,
+            numbered=module.NUMBERED,
+        )
+
+    assert under_its_rules({"created": None, "pid": "1"}) == {
         "created": None,
         "pid": "1",
     }
-    assert normalized({"pid": True}, stamped=stamped) == {"pid": True}
-    assert normalized(
-        {"created": "2026-01-01T00:00:00+00:00", "pid": 7}, stamped=stamped
-    ) == {"created": "<created>", "pid": 0}
-
-
-def test_a_request_validation_refusal_is_never_recorded_as_the_routes_own() -> (
-    None
-):
-    """The training fixture's refusal refuses a refusal the request model gave, not the route.
-
-    A body the ranking route's request model refuses answers 422 listing its issues; recorded as
-    the route's own refusal at that status, it raises instead.
-    """
-    from tcip_web.routes._body_common import EmptyBodyPayload
-
-    refusal = _generator("generate_training_fixture").refusal
-    with scratch_session() as (_workspace, client):
-        with pytest.raises(AssertionError, match="Field required"):
-            refusal(
-                client,
-                "/api/training/compare/best",
-                EmptyBodyPayload(),
-                422,
-                lambda _detail: True,
-            )
-
-
-def test_the_delivery_fixture_is_what_a_regeneration_serves() -> None:
-    """The delivery fixture is what a regeneration of its scenes serves.
-
-    With both passed through :func:`_normalized`, the checked-in fixture equals what a
-    regeneration of the scenes produces.
-    """
-    pytest.importorskip("torch")
-    produced = DELIVERY.produce()
-    checked = json.loads(GENERATED.read_text(encoding="utf-8"))
-    assert _normalized(checked) == _normalized(produced), (
-        f"{GENERATED} is out of date; run python -m {DELIVERY.__name__}"
-    )
+    assert under_its_rules({"pid": True}) == {"pid": True}
+    assert under_its_rules(
+        {"created": "2026-01-01T00:00:00+00:00", "pid": 7}
+    ) == {"created": INSTANT_BASE.isoformat(), "pid": 0}
 
 
 def test_a_scratch_session_whose_body_raises_releases_store_and_directory() -> (

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from tifffile import TiffFile, TiffTags
+    from tifffile import TiffTags
 
     from tcip_mcp.pipelines.derivations import Region
     from tcip_mcp.pipelines.raster_source import _TiffHeader
@@ -470,8 +470,8 @@ def test_derive_block_scale_px_reads_the_rasters_header_once(
     reads: list = []
     real = raster_source.tiff_header
 
-    def counting(tif: TiffFile) -> _TiffHeader:
-        reads.append(tif.filehandle.path)
+    def counting(tif: Path) -> _TiffHeader:
+        reads.append(tif)
         return real(tif)
 
     monkeypatch.setattr(raster_source, "tiff_header", counting)

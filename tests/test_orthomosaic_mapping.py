@@ -629,7 +629,10 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(
     from tcip_annotation import json_io
     from tcip_annotation.state import Polygon
     from tcip_mcp.pipelines.data.label_queries import registry_scope
-    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+    from tcip_mcp.pipelines.postprocessing.export import (
+        DetectionResult,
+        encode_predictions,
+    )
 
     path = tmp_path / "mosaic.tif"
     _windowed_multiband_tiff(path, channels=3)
@@ -651,7 +654,9 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(
     }
 
     data, _dropped = encode_predictions(
-        result, "model:fixture", scope=registry_scope(tmp_path, "leaf")
+        DetectionResult.model_validate(result),
+        "model:fixture",
+        scope=registry_scope(tmp_path, "leaf"),
     )
     anns = json_io.label_document(data).annotations
     assert isinstance(anns[0].geometry, Polygon)

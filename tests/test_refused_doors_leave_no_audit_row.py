@@ -23,10 +23,11 @@ from tests._training_values import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from tcip_mcp.model_registry import Listed
     from tcip_mcp.workspace import BoundProject
 
 
-def _register_model(tmp_path: Path) -> dict:
+def _register_model(tmp_path: Path) -> Listed:
     from tcip_mcp.tools.model_tools import register_model
 
     return register_model(

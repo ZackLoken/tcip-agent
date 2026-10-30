@@ -2,11 +2,14 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EmbeddedTool } from "@/components/EmbeddedTool";
-import SERVINGS from "@/test/tensorboardServings.json";
+import { TENSORBOARD_SERVINGS } from "@/test/tensorboard";
 
 afterEach(cleanup);
 
-const BOARD = SERVINGS["train-x"].url;
+const [{ url: BOARD }] = Object.values(TENSORBOARD_SERVINGS);
+
+/** A failure sentence of this test's own: the component shows whatever its caller composed. */
+const FAILURE = "the failure this test hands the tool";
 
 describe("EmbeddedTool", () => {
   it("renders nothing until the caller has something to show", () => {
@@ -22,8 +25,8 @@ describe("EmbeddedTool", () => {
 
   it("offers a retry on a failure", () => {
     const onRetry = vi.fn();
-    render(<EmbeddedTool title="TensorBoard" url={null} error="No logs yet." onRetry={onRetry} />);
-    expect(screen.getByText("No logs yet.")).toBeInTheDocument();
+    render(<EmbeddedTool title="TensorBoard" url={null} error={FAILURE} onRetry={onRetry} />);
+    expect(screen.getByText(FAILURE)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /try again/i }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
@@ -41,12 +44,7 @@ describe("EmbeddedTool", () => {
   it("names Try again and Open in a new tab with the tool's own title", () => {
     const onRetry = vi.fn();
     const { unmount } = render(
-      <EmbeddedTool
-        title="Sweep TensorBoard"
-        url={null}
-        error="sweep not found"
-        onRetry={onRetry}
-      />,
+      <EmbeddedTool title="Sweep TensorBoard" url={null} error={FAILURE} onRetry={onRetry} />,
     );
     expect(
       screen.getByRole("button", { name: "Try again: Sweep TensorBoard" }),
@@ -65,7 +63,7 @@ describe("EmbeddedTool", () => {
   });
 
   it("puts a failure sentence in a polite status region so a keyboard user hears it", () => {
-    render(<EmbeddedTool title="TensorBoard" url={null} error="This run produced no logs." />);
-    expect(screen.getByRole("status")).toHaveTextContent("This run produced no logs.");
+    render(<EmbeddedTool title="TensorBoard" url={null} error={FAILURE} />);
+    expect(screen.getByRole("status")).toHaveTextContent(FAILURE);
   });
 });

@@ -107,7 +107,6 @@ def _trained(
 
 def _assert_trained(observation: RunObservation) -> None:
     from tcip_mcp.experiments import (
-        EPOCH_KEY,
         METRICS_FILE,
         epoch_rows,
         read_rows,
@@ -115,8 +114,8 @@ def _assert_trained(observation: RunObservation) -> None:
 
     assert observation.state == "completed", observation.final
     rows = epoch_rows(read_rows(observation.directory / METRICS_FILE)[0])
-    assert [row[EPOCH_KEY] for row in rows] == [1]
-    train_loss = rows[-1]["train_loss"]
+    assert [row.epoch for row in rows] == [1]
+    train_loss = rows[-1].model_dump()["train_loss"]
     assert math.isfinite(train_loss), f"non-finite train_loss: {train_loss}"
     assert (observation.directory / "model_best.pt").is_file()
 

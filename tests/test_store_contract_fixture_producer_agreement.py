@@ -108,7 +108,6 @@ DELIVERY_EVENT_GOLDEN: dict[str, Any] = {
         "plant_csvs_unverified": [],
         "dates_delivered": ["2026-03-04"],
         "images_unattributed": 0,
-        "images_unattributed_scope": "delivered_dates",
         "plant_attribution": "image",
     },
     "produced_at": "2026-03-04T12:00:00+00:00",

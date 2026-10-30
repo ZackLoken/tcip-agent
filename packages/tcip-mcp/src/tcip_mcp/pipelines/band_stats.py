@@ -8,7 +8,7 @@ too.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, get_args
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -22,10 +22,15 @@ if TYPE_CHECKING:
 # the display clip the band-composite route offers a viewer.
 DISPLAY_CLIP_PERCENTILES = (2.0, 98.0)
 
-# The stretches :func:`stretch_band` implements and a caller may ask for; it refuses anything else.
-# The one declaration of this vocabulary: a type annotation elsewhere uses StretchMode itself.
-StretchMode = Literal["minmax", "percent_clip", "none"]
-STRETCH_MODES = get_args(StretchMode)
+# The stretches a composite is shown through, each over the band's own values.
+CompositeStretch = Literal["minmax", "percent_clip"]
+
+# The stretches :func:`stretch_band` implements and a caller may ask for, the one declaration of
+# this vocabulary: a composite's, and ``none``, the dtype's own full scale.
+StretchMode = Literal[CompositeStretch, "none"]
+
+DEFAULT_STRETCH: CompositeStretch = "minmax"
+"""The stretch a composite is shown through unless one is asked for, a platform default."""
 
 
 @dataclass(frozen=True)
@@ -128,7 +133,7 @@ def _stretch_between(
 
 def stretch_band(
     band: np.ndarray,
-    mode: str,
+    mode: StretchMode,
     source_dtype: np.dtype,
     bounds: tuple[float, float] | None = None,
 ) -> NDArray[np.uint8]:
@@ -165,55 +170,48 @@ def stretch_band(
     elif mode == "percent_clip":
         low, high = clip_bounds(raw) if bounds is None else bounds
         out = _stretch_between(raw, low, high)
-    elif mode == "minmax":
+    else:
         low, high = (
             (float(raw.min()), float(raw.max())) if bounds is None else bounds
         )
         out = _stretch_between(raw, low, high)
-    else:
-        raise ValueError(
-            f"stretch mode must be one of {sorted(STRETCH_MODES)}, got {mode!r}"
-        )
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
 def composite_display_rgb(
     pixels: np.ndarray,
-    band_indices: Sequence[int],
-    stretch: str,
-    bounds: list[tuple[float, float]] | None = None,
+    band_indices: tuple[int, int, int],
+    stretch: StretchMode,
+    band_bounds: Sequence[tuple[float, float]] | None = None,
 ) -> NDArray[np.uint8]:
     """Stretch three of ``pixels``' bands independently and stack them into ``uint8 [H, W, 3]``.
 
-    ``pixels`` is ``[H, W, C]`` (a 2-D array reads as one band) and ``band_indices`` names exactly
-    three of its bands, in display order, repeats allowed; the stretch reads the array's own dtype,
-    so an integer array's ``none`` mode divides by that dtype's ceiling. ``bounds`` is one ``(low,
-    high)`` pair per selected band, in the same order, passed through to :func:`stretch_band`;
-    omitting it derives each band's bounds from the array in hand.
+    ``pixels`` is ``[H, W, C]`` (a 2-D array reads as one band) and ``band_indices`` names three
+    of its bands, in display order, repeats allowed; the stretch reads the array's own dtype,
+    so an integer array's ``none`` mode divides by that dtype's ceiling. ``band_bounds`` is one
+    ``(low, high)`` pair per band of the raster ``pixels`` was read from, of which each selected
+    band's is passed through to :func:`stretch_band`; omitting it derives each band's bounds from
+    the array in hand. Refuses (``ValueError``) an index no band of ``pixels`` has.
     """
     import numpy as np
 
     from tcip_mcp.pipelines.raster_source import hwc_array
 
     arr = hwc_array(pixels)
-    idxs = [int(i) for i in band_indices]
-    if len(idxs) != 3:
-        raise ValueError(f"a display composite is 3 bands, got {len(idxs)}")
-    for i in idxs:
+    for i in band_indices:
         if not 0 <= i < arr.shape[-1]:
             raise ValueError(
                 f"band index {i} is out of range for a {arr.shape[-1]}-band array"
             )
-    if bounds is not None and len(bounds) != len(idxs):
-        raise ValueError(
-            f"bounds must hold one (low, high) pair per selected band, got "
-            f"{len(bounds)} for {len(idxs)} bands"
-        )
-    per_band = [None, None, None] if bounds is None else list(bounds)
     return np.stack(
         [
-            stretch_band(arr[:, :, i], stretch, arr.dtype, b)
-            for i, b in zip(idxs, per_band)
+            stretch_band(
+                arr[:, :, i],
+                stretch,
+                arr.dtype,
+                None if band_bounds is None else band_bounds[i],
+            )
+            for i in band_indices
         ],
         axis=-1,
     )
@@ -283,11 +281,6 @@ def sampled_band_ranges(
     import numpy as np
 
     from tcip_mcp.pipelines import raster_source
-
-    if reservoir_size <= 0:
-        raise ValueError(
-            f"reservoir_size must be positive, got {reservoir_size}"
-        )
 
     windows = raster_source.sample_windows(
         src.width,

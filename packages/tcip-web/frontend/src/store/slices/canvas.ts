@@ -1,5 +1,7 @@
 import type { StateCreator } from "zustand";
 
+import type { LoadedLabels } from "@/api/client";
+import type { ServedFlag } from "@/api/types.generated";
 import { currentImage } from "@/lib/paths";
 import type { AppState } from "@/store/appState";
 import {
@@ -7,21 +9,15 @@ import {
   NO_CONTENT,
   TOOL_ARRAY,
   type CanvasContent,
-  type Flag,
-  type ImageLabels,
   type PolygonShape,
   type Mode,
   type SubjectState,
 } from "@/store/types";
 
 /** The one focused item: an annotation of a tool's geometry by its canvas index, or a proposal by
- *  its index in the bucket's document. Null focuses nothing. */
-export interface Focus {
-  kind: Mode | "proposal";
-  index: number;
-  /** A proposal's bucket, when several buckets' proposals are shown together. */
-  bucket?: string;
-}
+ *  its index in the document of its bucket. Null focuses nothing. */
+export type Focus =
+  { kind: Mode; index: number } | { kind: "proposal"; index: number; bucket: string };
 
 /** A content array's name, and the item it holds. */
 type ContentArray = keyof CanvasContent;
@@ -40,8 +36,6 @@ function focusAfterDelete(focus: Focus | null, array: ContentArray, deleted: num
  * These are not synced to the backend until the user hits save.
  */
 export interface CanvasState extends CanvasContent {
-  imgWidth: number;
-  imgHeight: number;
   currentPolygon: [number, number][];
   focus: Focus | null;
   undoStack: CanvasSnapshot[];
@@ -51,13 +45,16 @@ export interface CanvasState extends CanvasContent {
   dirty: boolean;
   /** Serialized content of the last save/load: the baseline dirty is computed against. */
   savedSignature: string;
-  /** Which image's labels the canvas holds: a save must not read shapes that still belong to the
-   *  previous image (or a failed load) mid-flip. */
-  loadedImagePath: string | null;
+  /** The loaded answer whose document the canvas holds, whole: its image, the image's size and the
+   *  token a save names it by among it; null when no load landed. A save must not read shapes
+   *  that still belong to the previous image mid-flip. */
+  loaded: LoadedLabels | null;
+  /** The image whose load last failed, the canvas holding no document since; null otherwise. */
+  failedLoad: string | null;
   /** Each subject's state as the backend last served it for the loaded image. */
   completion: Record<string, SubjectState>;
   /** The image's flags as the backend last served them. */
-  flags: Flag[];
+  flags: ServedFlag[];
   /** The save in flight, which holds the canvas against edits until its answer is adopted whole;
    *  null when none is. A load that replaces the canvas drops the hold. */
   saving: SaveHold | null;
@@ -101,8 +98,6 @@ export const focusContext = ({ gui: { dataset } }: Pick<AppState, "gui">): strin
   dataset === null ? "" : [currentImage(dataset)?.path, dataset.bucket].join("\0");
 
 const EMPTY_CANVAS: CanvasState = {
-  imgWidth: 0,
-  imgHeight: 0,
   ...NO_CONTENT,
   currentPolygon: [],
   focus: null,
@@ -110,16 +105,31 @@ const EMPTY_CANVAS: CanvasState = {
   redoStack: [],
   dirty: false,
   savedSignature: contentSignature(NO_CONTENT),
-  loadedImagePath: null,
+  loaded: null,
+  failedLoad: null,
   completion: {},
   flags: [],
   saving: null,
 };
 
+/** The loaded image's pixel width and height, both zero while no document is loaded. */
+export function imageSize({ loaded }: Pick<CanvasState, "loaded">): {
+  width: number;
+  height: number;
+} {
+  return loaded ? { width: loaded.img_width, height: loaded.img_height } : { width: 0, height: 0 };
+}
+
+/** The image the canvas answers for: the loaded document's, or the one whose load failed; null
+ *  before any load. */
+export const canvasImage = ({ loaded, failedLoad }: Pick<CanvasState, "loaded" | "failedLoad">) =>
+  loaded?.image_path ?? failedLoad;
+
 /** Whether the loaded canvas is one of the selected capture's own images; false with no
  *  selection. */
 export const selectCanvasMatchesDataset = ({ gui, canvas }: Pick<AppState, "gui" | "canvas">) =>
-  gui.dataset !== null && gui.dataset.images.some((image) => image.path === canvas.loadedImagePath);
+  gui.dataset !== null &&
+  gui.dataset.images.some((image) => image.path === canvas.loaded?.image_path);
 
 function snapshot(s: AppState): CanvasSnapshot {
   const c = s.canvas;
@@ -156,16 +166,18 @@ export interface CanvasSlice {
   canvas: CanvasState;
 
   /** Canvas helpers. */
-  loadLabelsIntoCanvas: (labels: ImageLabels) => void;
-  clearCanvas: () => void;
+  loadLabelsIntoCanvas: (labels: LoadedLabels) => void;
+  /** Empty the canvas, holding no document, `failedLoad` the image whose load failed or null. */
+  clearCanvas: (failedLoad: string | null) => void;
   pushUndo: () => void;
   undo: () => void;
   /** Restore the last history snapshot even while a polygon is being drawn, which `undo` would
    *  shorten instead; for a gesture that took its own snapshot and is reverted whole. */
   rollbackLast: () => void;
   redo: () => void;
-  /** Append `item` to `array`, one undo snapshot first. */
-  add: <A extends ContentArray>(array: A, item: ItemOf<A>) => void;
+  /** Append `item`, drawn on the canvas, to `array`, one undo snapshot first; a drawn shape is one
+   *  object, so its crowd flag is false. */
+  add: <A extends ContentArray>(array: A, item: Omit<ItemOf<A>, "iscrowd">) => void;
   /** Replace the item at `idx` of `array`, one undo snapshot first. */
   update: <A extends ContentArray>(array: A, idx: number, item: ItemOf<A>) => void;
   /** Replace the item at `idx` of `array` for a live drag: no undo snapshot (the drag takes one at
@@ -247,8 +259,6 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
     loadLabelsIntoCanvas: (labels) =>
       set((s) => ({
         canvas: {
-          imgWidth: labels.img_width,
-          imgHeight: labels.img_height,
           ...contentOf(labels),
           currentPolygon: [],
           focus: s.canvas.focus,
@@ -256,14 +266,15 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
           redoStack: [],
           dirty: false,
           savedSignature: contentSignature(labels),
-          loadedImagePath: labels.image_path || null,
+          loaded: labels,
+          failedLoad: null,
           completion: labels.completion,
           flags: labels.flags,
           saving: null,
         },
       })),
 
-    clearCanvas: () => set({ canvas: EMPTY_CANVAS }),
+    clearCanvas: (failedLoad) => set({ canvas: { ...EMPTY_CANVAS, failedLoad } }),
 
     pushUndo: () =>
       set((s) => ({
@@ -303,7 +314,7 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
         };
       }),
 
-    add: (array, item) => edit(array, (items) => [...items, item]),
+    add: (array, item) => edit(array, (items) => [...items, { ...item, iscrowd: false }]),
 
     update: (array, idx, item) => edit(array, (items) => replaceAt(items, idx, item)),
 
@@ -365,14 +376,15 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
     setCurrentPolygon: (pts) => set((s) => ({ canvas: { ...s.canvas, currentPolygon: pts } })),
 
     commitCurrentPolygon: () => {
-      const { currentPolygon: cur, imgWidth, imgHeight } = get().canvas;
+      const { currentPolygon: cur } = get().canvas;
+      const { width, height } = imageSize(get().canvas);
       const subject = get().gui.active_subject;
       set((s) => ({ canvas: { ...s.canvas, currentPolygon: [] } }));
       // No subject selected: refuse to author a subjectless shape (the backend save rejects it).
       if (cur.length < 3 || !subject) return false;
       const clamped: [number, number][] = cur.map(([x, y]) => [
-        imgWidth ? Math.max(0, Math.min(imgWidth, x)) : x,
-        imgHeight ? Math.max(0, Math.min(imgHeight, y)) : y,
+        width ? Math.max(0, Math.min(width, x)) : x,
+        height ? Math.max(0, Math.min(height, y)) : y,
       ]);
       // A hand-drawn shape is one contour: one ring (the canvas never draws a second by hand).
       get().add("polygons", { rings: [clamped], subject, attributes: {} });

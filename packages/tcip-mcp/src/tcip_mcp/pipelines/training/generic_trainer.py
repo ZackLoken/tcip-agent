@@ -40,6 +40,7 @@ from tcip_mcp.pipelines.model_build import (
 from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 from tcip_mcp.pipelines.schemas import (
     CENTER_MATCH_COMPARABILITY_KEYS,
+    VAL_METRIC_PREFIX,
     CosineSchedule,
     DataSpec,
     DetectorGeometry,
@@ -57,7 +58,6 @@ from tcip_mcp.pipelines.schemas import (
 )
 from tcip_mcp.pipelines.training.evaluation import (
     VAL_LOSS_KEY,
-    VAL_METRIC_PREFIX,
     EvaluationKeywords,
     evaluate,
 )
@@ -401,12 +401,12 @@ def checkpoint_path(run_dir: Path | str, name: str) -> Path:
     """Return the path of one checkpoint of the run whose directory is ``run_dir``.
 
     The path is ``<run_dir>/<name>.pt``, ``name`` being ``model_best``, ``model_final``, an epoch
-    checkpoint or a bespoke loop's own tag. A name that is not one file name refuses with
-    ``BadKeyError`` (``experiments.run_name``).
+    checkpoint or a bespoke loop's own tag. A name that is no
+    :data:`~tcip_mcp.workspace.PathSegment` refuses.
     """
-    from tcip_mcp.experiments import run_name
+    from tcip_mcp.workspace import path_segment
 
-    return Path(run_dir) / f"{run_name(name)}.pt"
+    return Path(run_dir) / f"{path_segment(name)}.pt"
 
 
 def write_checkpoint(payload: dict, path: Path) -> Path:

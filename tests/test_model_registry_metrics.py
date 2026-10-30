@@ -53,13 +53,13 @@ def _named(reg: ModelRegistry, name: str) -> Listed:
     return listed
 
 
-def test_a_listing_answers_each_entry_flat_with_its_checkpoints_metrics_and_source(
+def test_a_listing_and_a_ranking_answer_each_entry_with_its_checkpoints_facts(
     tmp_path: Path,
 ) -> None:
-    """A listing answers each entry's fields flat, its checkpoint's metrics and source over them.
+    """A listing answers each registered entry beside its checkpoint's facts, as the ranking does.
 
-    The listing's model and the ranked answer the training route projects are each the entry's
-    fields with the facts' ``metrics`` and ``metrics_source``, one flat mapping.
+    The listing's model is the registry's own listed entry and facts; the ranked answer carries
+    that listed entry and its facts.
     """
     from tcip_mcp.tools.model_tools import (
         ranked_registered_model,
@@ -68,13 +68,8 @@ def test_a_listing_answers_each_entry_flat_with_its_checkpoints_metrics_and_sour
 
     reg = _registered(tmp_path, ("a", {"val_map50": 0.5}))
     (listed,) = reg.list_models()
-    flat = {
-        **listed.entry.model_dump(),
-        "metrics": listed.facts.metrics,
-        "metrics_source": listed.facts.metrics_source,
-    }
 
-    assert registered_listing(tmp_path)["models"] == [flat]
+    assert registered_listing(tmp_path).models == [listed]
     ranked = ranked_registered_model(
         tmp_path,
         "val_map50",
@@ -83,8 +78,9 @@ def test_a_listing_answers_each_entry_flat_with_its_checkpoints_metrics_and_sour
         experiment_ids=None,
         tag=None,
     )
-    assert {key: ranked[key] for key in flat} == flat
-    assert (ranked["metrics_source"], ranked["metrics"]) == (
+    assert not isinstance(ranked, dict), ranked
+    assert (ranked.entry, ranked.facts) == (listed.entry, listed.facts)
+    assert (ranked.facts.metrics_source, ranked.facts.metrics) == (
         "caller",
         {"val_map50": 0.5},
     )
@@ -93,16 +89,17 @@ def test_a_listing_answers_each_entry_flat_with_its_checkpoints_metrics_and_sour
 def test_rank_registered_models_lists_rather_than_ranking_on_an_empty_metric(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.tools.model_tools import rank_registered_models
+    from tcip_mcp.tools.model_tools import (
+        RegisteredModels,
+        rank_registered_models,
+    )
 
     project = tmp_path
 
     # Empty registry, no metric: an empty listing, not a refusal.
-    assert rank_registered_models(project) == {
-        "models": [],
-        "count": 0,
-        "available_metrics": [],
-    }
+    assert rank_registered_models(project) == RegisteredModels(
+        models=[], available_metrics=[]
+    )
 
     _registered(
         tmp_path, ("a", {"val_map50": 0.70}), ("b", {"val_map50": 0.90})
@@ -110,24 +107,24 @@ def test_rank_registered_models_lists_rather_than_ranking_on_an_empty_metric(
 
     # A populated registry with no metric: the listing, not a required-metric refusal.
     res = rank_registered_models(project)
-    assert res["count"] == 2
-    assert {m["name"] for m in res["models"]} == {"a", "b"}
-    assert res["available_metrics"] == [
+    assert isinstance(res, RegisteredModels)
+    assert {m.entry.name for m in res.models} == {"a", "b"}
+    assert res.model_dump()["available_metrics"] == [
         {
             "metric": "val_map50",
             "role": "comparability_only",
-            "direction": "higher",
+            "higher_is_better": True,
             "sources": ["caller"],
         }
     ]
 
     # An explicit, legitimate metric still succeeds: a rail must admit valid work.
-    res = rank_registered_models(
+    ranked = rank_registered_models(
         project, metric="val_map50", include_unverified=True
     )
-    assert res["name"] == "b"
-    assert res["ranking_basis"] == "val_map50"
-    assert (res["higher_is_better"], res["direction_source"]) == (
+    assert not isinstance(ranked, dict), ranked
+    assert ranked.entry.name == "b"
+    assert (ranked.higher_is_better, ranked.direction_source) == (
         True,
         "declared",
     )
@@ -136,13 +133,34 @@ def test_rank_registered_models_lists_rather_than_ranking_on_an_empty_metric(
     res = rank_registered_models(
         project, metric="val_loss", include_unverified=True
     )
-    assert "No registered model has metric" in res["error"]
+    assert "No registered model is stamped with" in res["error"]
     assert res["available_metrics"][0]["metric"] == "val_map50"
     assert res["n_models"] == 2
 
     # A metric with no declared ranking direction: refused before ever looking for it.
     res = rank_registered_models(project, metric="val_map99")
     assert "no declared ranking direction" in res["error"]
+
+
+def test_a_metrics_sources_are_the_entries_stamped_with_a_number_under_it(
+    tmp_path: Path,
+) -> None:
+    """A listed metric's sources are those of the entries carrying a finite number under it.
+
+    Beside a completed run's checkpoint carrying a number under a key, a caller's entry carrying
+    a string under the same key contributes no source.
+    """
+    from tcip_mcp.tools.model_tools import registered_listing
+    from tests._verified_checkpoint_fixtures import finished_run
+
+    finished_run(tmp_path, experiment_id="exp-a", metrics={"val_map50": 0.5})
+    _registered(tmp_path, ("labeled", {"val_map50": "held-out"}))
+
+    (listed,) = registered_listing(tmp_path).available_metrics
+    assert (listed.metric, listed.sources) == (
+        "val_map50",
+        ["training_source"],
+    )
 
 
 def test_rank_registered_models_excludes_unverified_entries_by_default(
@@ -155,16 +173,47 @@ def test_rank_registered_models_excludes_unverified_entries_by_default(
 
     res = rank_registered_models(tmp_path, metric="val_map50")
     assert "unverified" in res["error"]
-    assert res["excluded_unverified"] == [
-        {"name": "asserted", "metrics_source": "caller"}
+    assert res["skipped"] == [
+        {"name": "asserted", "unverified": True, "unstamped": False}
     ]
 
-    res = rank_registered_models(
+    ranked = rank_registered_models(
         tmp_path, metric="val_map50", include_unverified=True
     )
-    assert res["name"] == "asserted"
-    assert res["unverified_included"] is True
-    assert res["excluded_unverified"] == []
+    assert not isinstance(ranked, dict), ranked
+    assert ranked.entry.name == "asserted"
+    assert ranked.skipped == []
+
+
+def test_an_entry_left_out_for_two_reasons_answers_both(
+    tmp_path: Path,
+) -> None:
+    """An unverified entry carrying no value of the ranked metric is skipped as both.
+
+    Beside an unverified entry carrying the metric, a caller's entry carrying another metric is
+    answered unverified and unstamped in one record; the refusal reads those records, so an
+    unverified entry whose value under the metric is not a number refuses as no carrier.
+    """
+    from tcip_mcp.tools.model_tools import rank_registered_models
+
+    _registered(
+        tmp_path,
+        ("asserted", {"val_map50": 0.99}),
+        ("other_metric", {"val_loss": 0.5}),
+    )
+
+    res = rank_registered_models(tmp_path, metric="val_map50")
+    assert res["all_unverified"] is True
+    assert res["skipped"] == [
+        {"name": "asserted", "unverified": True, "unstamped": False},
+        {"name": "other_metric", "unverified": True, "unstamped": True},
+    ]
+
+    labeled = tmp_path / "labeled"
+    _registered(labeled, ("labeled", {"val_map50": "held-out"}))
+    refused = rank_registered_models(labeled, metric="val_map50")
+    assert "No registered model is stamped with" in refused["error"]
+    assert "all_unverified" not in refused
 
 
 def test_rank_registered_models_refusals_name_no_argument_a_breeder_would_not_pass(
@@ -188,7 +237,7 @@ def test_rank_registered_models_refusals_name_no_argument_a_breeder_would_not_pa
         "available metrics."
     )
     assert all_unverified == (
-        "every registered model carrying 'val_map50' is unverified (metrics_source is not "
+        "every registered model stamped with 'val_map50' is unverified (metrics_source is not "
         "'trainer'); include unverified models to rank them, or register a verified run."
     )
     for text in (no_direction, all_unverified):
@@ -273,20 +322,18 @@ def test_best_model_lower_is_better_for_loss(tmp_path: Path) -> None:
         tmp_path, ("hi", {"val_loss": 0.9}), ("lo", {"val_loss": 0.2})
     ).list_models()
 
-    best = best_model(
+    best, _ = best_model(
         models, "val_loss", higher_is_better=False, include_unverified=True
     )
     assert best is not None and best.entry.name == "lo"
     # A metric no model has: None, cleanly distinguishable from "no models".
-    assert (
-        best_model(
-            models,
-            "nonexistent",
-            higher_is_better=False,
-            include_unverified=True,
-        )
-        is None
+    none, _ = best_model(
+        models,
+        "nonexistent",
+        higher_is_better=False,
+        include_unverified=True,
     )
+    assert none is None
 
 
 def test_best_model_excludes_an_entry_with_no_metrics_from_ranking(
@@ -303,7 +350,7 @@ def test_best_model_excludes_an_entry_with_no_metrics_from_ranking(
         tmp_path, ("empty", None), ("real", {"val_loss": 0.5})
     ).list_models()
 
-    best = best_model(
+    best, _ = best_model(
         models, "val_loss", higher_is_better=False, include_unverified=True
     )
     assert best is not None and best.entry.name == "real"
@@ -349,9 +396,9 @@ def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epo
     assert facts.metrics_source == "trainer"
     best = torch.load(run_dir / "model_best.pt", weights_only=False)
     (row,) = [
-        r
+        r.model_dump()
         for r in partition_rows(read_rows(run_dir / METRICS_FILE)[0])[0]
-        if r["epoch"] == best["epoch"]
+        if r.epoch == best["epoch"]
     ]
     assert facts.metrics["selection"] == row["selection"]
 
@@ -404,10 +451,12 @@ def test_a_semantic_seg_runs_checkpoint_lists_with_its_per_class_metrics(
 
     (listed,) = [
         m
-        for m in registered_listing(tmp_path)["models"]
-        if m["name"] == "exp-seg"
+        for m in registered_listing(tmp_path).models
+        if m.entry.name == "exp-seg"
     ]
-    assert set(listed["metrics"]["val_per_class_iou"]) == {"0", "1", "2"}
+    per_class = listed.facts.metrics["val_per_class_iou"]
+    assert isinstance(per_class, dict)
+    assert set(per_class) == {"0", "1", "2"}
 
 
 UNENCODABLE = "bespoke_models:save_built_weights_with_unencodable_metrics"
@@ -465,7 +514,7 @@ def test_a_bespoke_checkpoint_whose_metrics_the_registry_cannot_read_is_refused_
     assert final is not None and final.state == "failed", final
     assert named in (final.status_error or "")
     assert not checkpoint_path(run_dir, "model_final").exists()
-    assert registered_listing(tmp_path)["count"] == 0
+    assert registered_listing(tmp_path).models == []
 
 
 def test_a_bespoke_checkpoint_whose_metrics_json_holds_writes_and_lists(
@@ -482,8 +531,8 @@ def test_a_bespoke_checkpoint_whose_metrics_json_holds_writes_and_lists(
         metrics={"val_per_class_iou": {"0": 0.5}},
     )
 
-    (listed,) = registered_listing(tmp_path)["models"]
-    assert (listed["name"], listed["metrics"]) == (
+    (listed,) = registered_listing(tmp_path).models
+    assert (listed.entry.name, listed.facts.metrics) == (
         "exp-bespoke",
         {"val_per_class_iou": {"0": 0.5}},
     )
@@ -579,7 +628,7 @@ def test_an_ordinary_registry_payload_is_still_registered(
 
     assert listed.entry.name == "a"
     assert [m.entry.name for m in reg.list_models()] == ["a"]
-    best = best_model(
+    best, _ = best_model(
         reg.list_models(),
         "val_map50",
         higher_is_better=True,

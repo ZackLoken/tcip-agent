@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { StructuredRefusalError } from "@/api/http";
+import { messageOf, refusalOf } from "@/api/http";
 import { openTrainingStream, trainingApi } from "@/api/training";
-import type { MetricRow, SplitChoices } from "@/api/training";
 import {
-  EPOCH_KEY,
-  STEP_KEY,
+  type MetricsRow,
+  NO_LOGS,
+  type NoLogsRefusal,
   TENSORBOARD_RELOAD_SELECTOR,
   type RunRow,
+  type SplitChoices,
   type SweepGroup,
   type TrainingListing,
 } from "@/api/types.generated";
 import { EmbeddedTool } from "@/components/EmbeddedTool";
-import { LaunchPicker, type DataPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
+import { LaunchPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
 import { MAX_MARKED_RUNS, RunComparison, type MarkedRun } from "@/components/RunComparison";
 import { TabHeading } from "@/components/TabHeading";
 import { useEmbeddedToolRetry, type EmbeddedToolStepResult } from "@/hooks/useEmbeddedToolRetry";
@@ -33,10 +34,6 @@ import {
 
 const NO_LISTING: TrainingListing = { runs: [], sweeps: [] };
 
-function messageOf(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
 /** What a run's launch event says about who started it. */
 function launcherSentence(launch: RunRow["launch"]): string {
   if (!launch) return "no launch event recorded";
@@ -51,13 +48,10 @@ function launcherDescription(launch: RunRow["launch"]): string {
   return client ? `Launched by the agent ${client}.` : "Launched with no agent named.";
 }
 
-/** How long ago a status record's own heartbeat instant was stamped, in whole minutes; null
- * for an unparseable instant. No process id is persisted anywhere, so this is the one liveness
- * signal a "running" row has. */
-function heartbeatAge(heartbeat: string): string | null {
-  const then = Date.parse(heartbeat);
-  if (Number.isNaN(then)) return null;
-  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
+/** How long ago a status record's own heartbeat instant was stamped, in whole minutes. No
+ * process id is persisted anywhere, so this is the one liveness signal a "running" row has. */
+function heartbeatAge(heartbeat: string): string {
+  const mins = Math.max(0, Math.round((Date.now() - Date.parse(heartbeat)) / 60000));
   return mins < 1 ? "last heartbeat under a minute ago" : `last heartbeat ${mins} min ago`;
 }
 
@@ -76,42 +70,12 @@ function runRowLabel(run: RunRow): string {
   return `${base}, best ${run.best_metric_name} ${formatNumber(run.best_metric)}`;
 }
 
-/** What a sweep's trials amount to so far, under the selection metric its recorded base config
- * states (`input.base_config.evaluation.selection_metric`). */
+/** What a sweep's trials amount to so far, under the selection metric it ranks them by. */
 function sweepOutcomeLine(sweep: SweepGroup): string {
-  const base = sweep.input.base_config as { evaluation: { selection_metric: string } };
-  const best = sweep.outcome.best_value;
-  return sweep.outcome.best_params == null
+  const { best_params, best_value, best_value_state } = sweep.outcome;
+  return best_params === null
     ? "no completed trial yet"
-    : `best ${base.evaluation.selection_metric} ${typeof best === "number" ? formatNumber(best) : String(best)}`;
-}
-
-const NO_OTHER_PARTITION =
-  "this listing found no other recorded partition the config can bind to; the agent can draw one.";
-
-export function dataPickerFor(choices: SplitChoices | undefined): DataPicker | undefined {
-  if (!choices) return undefined;
-  return {
-    asRecordedLine: choices.as_recorded.line,
-    asRecordedDisabled: !choices.as_recorded.compatible,
-    asRecordedReason: choices.as_recorded.reason ?? undefined,
-    absenceMessage: NO_OTHER_PARTITION,
-    choices: choices.selections.map((s) => ({
-      selectionDir: s.selection_dir,
-      disabled: !s.enabled,
-      reason: s.reason ?? undefined,
-      replacedSplitKeys: s.replaced_split_keys,
-      label: (
-        <>
-          <span className="block font-mono">{s.selection_dir}</span>
-          <span className="block text-tcip-muted">
-            seed {s.seed ?? "unrecorded"} · {s.group_by ?? "unrecorded grouping"} · train {s.train}{" "}
-            · val {s.val} · calibration {s.calibration}
-          </span>
-        </>
-      ),
-    })),
-  };
+    : `best ${sweep.selection_metric} ${best_value === null ? best_value_state : formatNumber(best_value)}`;
 }
 
 function runLaunchRow(
@@ -140,7 +104,7 @@ function runLaunchRow(
       "A new run of this config on the data paths it names, as they are now, with the recorded seed",
     branchLineForData:
       "A new run of this config on the partition you chose, with the recorded seed",
-    data: dataPickerFor(choices),
+    data: choices,
     dataLoading,
     dataError,
     onStart,
@@ -298,11 +262,10 @@ export function TrainingTab() {
   const [listing, setListing] = useState<TrainingListing>(NO_LISTING);
   const [runsError, setRunsError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
-  const [metrics, setMetrics] = useState<MetricRow[]>([]);
-  const [latestBatch, setLatestBatch] = useState<MetricRow | null>(null);
-  // Non-null once the run's own TensorBoard refusal names no_logs; its error is the run's own
-  // recorded status_error, null when the run produced no logs but recorded no reason either.
-  const [tbNoLogs, setTbNoLogs] = useState<{ statusError: string | null } | null>(null);
+  const [metrics, setMetrics] = useState<MetricsRow[]>([]);
+  const [latestBatch, setLatestBatch] = useState<MetricsRow | null>(null);
+  // The run's own TensorBoard refusal for a board holding no logs, once one answers.
+  const [tbNoLogs, setTbNoLogs] = useState<NoLogsRefusal | null>(null);
   const [tbAttempt, setTbAttempt] = useState(0);
   const [markedExperimentIds, setMarkedExperimentIds] = useState<Set<string>>(new Set());
   // Cancel in flight, by run or sweep id: disables that row's own Cancel button with a pending
@@ -407,7 +370,11 @@ export function TrainingTab() {
   }, [pickerOpen]);
 
   async function startFrom(source: string, selectionDir: string | null) {
-    const result = await trainingApi.relaunch(source, useStore.getState().user, selectionDir);
+    const result = await trainingApi.relaunch({
+      relaunched_from: source,
+      selection_dir: selectionDir,
+      user: useStore.getState().user,
+    });
     setPickerOpen(false);
     void refreshRuns();
     setSelectedRun("sweep_id" in result ? result.sweep_id : result.experiment_id);
@@ -429,8 +396,8 @@ export function TrainingTab() {
     streamRef.current?.();
     // A run already terminal when this stream opened is a rediscovery, not a transition the
     // breeder is watching; only a run still live at open time toasts on its own terminal frame.
-    const knownAtOpen = rowsRef.current.find((r) => r.experiment_id === selectedRun)?.state;
-    const alreadyTerminal = TERMINAL_STATES.has(knownAtOpen ?? "");
+    const knownAtOpen = rowsRef.current.find((r) => r.experiment_id === selectedRun);
+    const alreadyTerminal = knownAtOpen !== undefined && TERMINAL_STATES.has(knownAtOpen.state);
     // A run selected at its launch moment can be unknown to the backend for a few reconnects;
     // the toast names that once per selection.
     let errorToasted = false;
@@ -449,9 +416,8 @@ export function TrainingTab() {
           }
           return;
         }
-        const st = msg.status?.state;
-        if (typeof st === "string" && !alreadyTerminal)
-          useStore.getState().pushToast(`Training ${selectedRun}: ${st}`, "info");
+        if (msg.status !== null && !alreadyTerminal)
+          useStore.getState().pushToast(`Training ${selectedRun}: ${msg.status.state}`, "info");
         void refreshRuns();
       }
     });
@@ -478,7 +444,7 @@ export function TrainingTab() {
 
     let url = detail.tensorboard?.url ?? null;
     let failure: string | null = null;
-    let noLogs = false;
+    let noLogs: NoLogsRefusal | null = null;
     if (!url) {
       try {
         const launched = await trainingApi.launchTensorboard(experimentId);
@@ -488,11 +454,8 @@ export function TrainingTab() {
           failure = launched.output ? `${launched.error}: ${launched.output}` : launched.error;
         }
       } catch (e) {
-        if (e instanceof StructuredRefusalError && e.detail.no_logs === true) {
-          noLogs = true;
-        } else {
-          failure = messageOf(e);
-        }
+        noLogs = refusalOf<NoLogsRefusal>(e, NO_LOGS);
+        if (!noLogs) failure = messageOf(e);
       }
     }
 
@@ -504,7 +467,7 @@ export function TrainingTab() {
     const status = (detail.run ?? detail.sweep)!;
     if (!TERMINAL_STATES.has(status.state)) return { url: null, error: null, done: false };
     if (noLogs) {
-      setTbNoLogs({ statusError: status.status_error });
+      setTbNoLogs(noLogs);
       return { url: null, error: null, done: true };
     }
     return { url: null, error: failure ?? "No TensorBoard is serving this run.", done: true };
@@ -535,7 +498,7 @@ export function TrainingTab() {
       return rest;
     });
     try {
-      await trainingApi.cancel(id, useStore.getState().user);
+      await trainingApi.cancel(id, { user: useStore.getState().user });
       void refreshRuns();
     } catch (e) {
       const message = `Cancel failed: ${messageOf(e)}`;
@@ -551,13 +514,9 @@ export function TrainingTab() {
   }
 
   const selectedRow = rows.find((r) => r.experiment_id === selectedRun);
-  const selectedTerminal = TERMINAL_STATES.has(selectedRow?.state ?? "");
+  const selectedTerminal = selectedRow !== undefined && TERMINAL_STATES.has(selectedRow.state);
 
-  const noLogsMessage = tbNoLogs
-    ? tbNoLogs.statusError
-      ? `This run failed: ${tbNoLogs.statusError}. It produced no logs.`
-      : "This run produced no logs."
-    : null;
+  const noLogsMessage = tbNoLogs?.message ?? null;
 
   const metricKeys = useMemo(() => unionMetricKeys(metrics), [metrics]);
   const batch = inProgressBatch(metrics, latestBatch);
@@ -649,9 +608,7 @@ export function TrainingTab() {
                       <tbody>
                         {metrics.map((row, i) => (
                           <tr key={i} className="border-t border-tcip-border first:border-t-0">
-                            <td className="py-1 pr-3 tabular-nums">
-                              {typeof row[EPOCH_KEY] === "number" ? row[EPOCH_KEY] : UNSET_GLYPH}
-                            </td>
+                            <td className="py-1 pr-3 tabular-nums">{row.epoch}</td>
                             {metricKeys.map((key) => (
                               <td key={key} className="pr-3 tabular-nums">
                                 {typeof row[key] === "number"
@@ -663,16 +620,12 @@ export function TrainingTab() {
                         ))}
                         {batch && (
                           <tr className="border-t border-tcip-border text-tcip-muted">
-                            <td className="py-1 pr-3 tabular-nums">
-                              {typeof batch[EPOCH_KEY] === "number"
-                                ? batch[EPOCH_KEY]
-                                : UNSET_GLYPH}
-                            </td>
+                            <td className="py-1 pr-3 tabular-nums">{batch.epoch}</td>
                             <td
                               colSpan={Math.max(1, metricKeys.length)}
                               className="pr-3 tabular-nums"
                             >
-                              {`${selectedTerminal ? "stopped at" : "in progress ·"} step ${String(batch[STEP_KEY])}`}
+                              {`${selectedTerminal ? "stopped at" : "in progress ·"} step ${String(batch.step)}`}
                               {numericMetricKeys(batch).map(
                                 (key) => ` · ${key} ${String(batch[key])}`,
                               )}

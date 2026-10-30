@@ -1,0 +1,86 @@
+{
+  "handed_off_at_once": { "undelivered": ["never given"] },
+  "status": {
+    "providers": [
+      { "id": "claude", "name": "Claude Code", "unavailable_reason": null },
+      { "id": "antigravity", "name": "Antigravity", "unavailable_reason": null },
+      { "id": "codex", "name": "Codex", "unavailable_reason": null }
+    ]
+  },
+  "launch": {
+    "session_id": "<session 1>",
+    "launched": {
+      "provider": "claude",
+      "argv": ["<python>", "-u", "<fake agent>"],
+      "version": null,
+      "confinement": null,
+      "prepared": [],
+      "resumed": null
+    }
+  },
+  "ended": { "undelivered": [] },
+  "relaunch": {
+    "session_id": "<session 2>",
+    "launched": {
+      "provider": "claude",
+      "argv": ["<python>", "-u", "<fake agent>"],
+      "version": null,
+      "confinement": null,
+      "prepared": [],
+      "resumed": null
+    }
+  },
+  "ended_undelivered": { "undelivered": ["repeat", "middle", "repeat"] },
+  "end_unknown": { "status": 404, "body": { "detail": "no such terminal session: <session 1>" } },
+  "hand_off_unknown": {
+    "status": 404,
+    "body": { "detail": "no such terminal session: <session 1>" }
+  },
+  "handed_off": null,
+  "end_audit_gap": {
+    "status": 409,
+    "body": {
+      "detail": {
+        "kind": "audit_entry_not_written",
+        "message": "agent_terminal_ended completed and its audit entry could not be written: the audit log could not be appended to. Whatever the call changed is committed and unrecorded, so do not retry it blind: repair the audit log's destination, then reconcile the trail against what the call did.",
+        "committed": { "undelivered": ["never given"] }
+      }
+    }
+  },
+  "end_survived": {
+    "status": 503,
+    "body": {
+      "detail": "The agent process could not be stopped and stays attached to this session."
+    }
+  },
+  "status_mixed": {
+    "providers": [
+      { "id": "claude", "name": "Claude Code", "unavailable_reason": null },
+      { "id": "antigravity", "name": "Antigravity", "unavailable_reason": null },
+      {
+        "id": "codex",
+        "name": "Codex",
+        "unavailable_reason": "Codex is not available: no `definitely-not-a-real-cli-xyz` executable is on PATH. Install it and sign in to enable the agent terminal."
+      }
+    ]
+  },
+  "status_absent": {
+    "providers": [
+      {
+        "id": "claude",
+        "name": "Claude Code",
+        "unavailable_reason": "Claude Code is not available: no `definitely-not-a-real-cli-xyz` executable is on PATH. Install it and sign in to enable the agent terminal."
+      },
+      {
+        "id": "antigravity",
+        "name": "Antigravity",
+        "unavailable_reason": "Antigravity is not available: no `definitely-not-a-real-cli-xyz` executable is on PATH. Install it and sign in to enable the agent terminal."
+      },
+      {
+        "id": "codex",
+        "name": "Codex",
+        "unavailable_reason": "Codex is not available: no `definitely-not-a-real-cli-xyz` executable is on PATH. Install it and sign in to enable the agent terminal."
+      }
+    ]
+  }
+}

@@ -5,10 +5,9 @@
 
 import { wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
-import type { Panel, StateSnapshotMessage } from "@/api/types.generated";
+import type { Panel, PanelEnvelope, StateSnapshotMessage } from "@/api/types.generated";
 import { createReconnectingSocket, type ReconnectingSocket } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
-import type { DeclaredIdentity } from "@/store/slices/agentActivity";
 
 export class StateSocket {
   private socket: ReconnectingSocket;
@@ -50,25 +49,12 @@ export class StateSocket {
   /** Subscribe to server-pushed events for one panel; without reconnect, panel events would
    *  silently stop for the rest of the browser session on a backend restart or a drop. The
    *  returned unsubscribe closes the live socket and cancels any pending reconnect. */
-  subscribePanel(
-    panel: Panel,
-    // The declared identity is spread at the top level by the backend's own broadcast payload.
-    handler: (
-      event: {
-        panel: Panel;
-        event_type: string;
-        data: Record<string, unknown>;
-        // Stamped per event by the backend: the ring buffer replays on every reconnect, so a
-        // handler that acts once per event (dismissing a banner) needs to tell them apart.
-        event_id: string;
-      } & DeclaredIdentity,
-    ) => void,
-  ) {
+  subscribePanel(panel: Panel, handler: (envelope: PanelEnvelope) => void) {
     const socket = createReconnectingSocket({
       url: wsUrl(ROUTES.socketWsPanelByPanel(panel)),
       onMessage: (data) => {
         try {
-          handler(JSON.parse(data) as Parameters<typeof handler>[0]);
+          handler(JSON.parse(data) as PanelEnvelope);
         } catch {
           /* ignore */
         }

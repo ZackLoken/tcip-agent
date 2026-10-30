@@ -26,13 +26,9 @@ function landingTab(project: SnapshotProject | null): TabName {
   return (project && loadLastTab(project.id)) ?? GUI_STATE_DEFAULTS.active_tab;
 }
 
-/** The incoming snapshot's GUI state, on ``project``'s landing tab, with no subject unless named. */
+/** The incoming snapshot's GUI state, on ``project``'s landing tab. */
 function adoptedGui(incoming: GuiState, project: SnapshotProject | null): GuiState {
-  return {
-    ...incoming,
-    active_tab: landingTab(project),
-    active_subject: incoming.active_subject ?? null,
-  };
+  return { ...incoming, active_tab: landingTab(project) };
 }
 
 /** The open project's directory, or null when the backend has none open. */

@@ -198,7 +198,7 @@ def _proposed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
     result = propose_annotations(
         tmp_path, image_path=str(image), engine="stub", actor=None
     )
-    assert result["staged"] is True, result
+    assert result.staging_id is not None, result
     return image, candidate, result
 
 
@@ -211,7 +211,7 @@ def test_a_staged_proposal_reads_back_as_the_engine_candidates_and_image_identit
     image, candidate, proposed = _proposed(tmp_path, monkeypatch)
 
     staging = ProposalStaging.model_validate(
-        ts.read(_staging_key_for(str(image), proposed["staging_id"]))
+        ts.read(_staging_key_for(str(image), proposed.staging_id))
     )
     with SourceHeader(image).open_at_route_count() as raster:
         identity = content_identity(raster)
@@ -228,7 +228,7 @@ def test_a_staged_proposal_missing_its_engine_is_refused_naming_it(
     from tcip_mcp.tools.proposal_tools import _staging_key_for, stage_proposals
 
     image, _candidate, proposed = _proposed(tmp_path, monkeypatch)
-    key = _staging_key_for(str(image), proposed["staging_id"])
+    key = _staging_key_for(str(image), proposed.staging_id)
     stored = dict(ts.read(key))
     del stored["engine"]
     ts.replace(key, stored)
@@ -320,9 +320,6 @@ def _pushed(
         "project_id": opened.id,
         "tab": "annotate",
         "image_path": str(image_root(opened_project) / "a.jpg"),
-        "image": "a.jpg",
-        "img_width": 200,
-        "img_height": 100,
         "viewport": {"x": 0, "y": 0, "w": 200, "h": 100, "scale": 1.0},
         "mode": "polygon",
         "active_subject": None,

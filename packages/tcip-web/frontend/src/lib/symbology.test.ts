@@ -21,11 +21,11 @@ import {
 
 describe("line style says whose shape it is", () => {
   it("a shape no person stands behind is dotted; a person's, an accepted tool's and one drawn here are solid", () => {
-    for (const authorship of ["tool", "unattributed"]) {
+    for (const authorship of ["tool", "unattributed"] as const) {
       expect(lineStyleOf(authorship)).toBe("dotted");
       expect(personBacked(authorship)).toBe(false);
     }
-    for (const authorship of ["person", "tool_accepted", null, undefined]) {
+    for (const authorship of ["person", "tool_accepted", undefined] as const) {
       expect(lineStyleOf(authorship)).toBe("solid");
       expect(personBacked(authorship)).toBe(true);
     }

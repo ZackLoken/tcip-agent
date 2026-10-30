@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StateSocket } from "@/api/ws";
 import { useStore } from "@/store";
+import { PANEL_EVENTS } from "@/test/panelEvents";
 import { PRODUCED_ENVELOPE } from "@/test/store";
 
 /** Minimal WebSocket stand-in: records instances, lets tests drive events. */
@@ -218,9 +219,9 @@ describe("StateSocket.subscribePanel", () => {
     expect(lastSocket().url).toContain("/ws/panel/annotate");
 
     lastSocket().open();
-    const event = { panel: "annotate", event_type: "labels_written", data: {} };
-    lastSocket().message(JSON.stringify(event));
-    expect(handler).toHaveBeenCalledWith(event);
+    const envelope = PANEL_EVENTS.labels_written;
+    lastSocket().message(JSON.stringify(envelope));
+    expect(handler).toHaveBeenCalledWith(envelope);
   });
 
   it("ignores malformed frames without breaking the subscription", () => {
@@ -231,7 +232,7 @@ describe("StateSocket.subscribePanel", () => {
     lastSocket().message("not json");
     expect(handler).not.toHaveBeenCalled();
 
-    lastSocket().message(JSON.stringify({ panel: "annotate", event_type: "e", data: {} }));
+    lastSocket().message(JSON.stringify(PANEL_EVENTS.labels_written));
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
@@ -254,7 +255,7 @@ describe("StateSocket.subscribePanel", () => {
 
     // Events on the reconnected socket still reach the original handler.
     lastSocket().open();
-    lastSocket().message(JSON.stringify({ panel: "annotate", event_type: "e", data: {} }));
+    lastSocket().message(JSON.stringify(PANEL_EVENTS.labels_written));
     expect(handler).toHaveBeenCalledTimes(1);
   });
 

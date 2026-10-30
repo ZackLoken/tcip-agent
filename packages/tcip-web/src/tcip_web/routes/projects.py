@@ -17,15 +17,16 @@ import anyio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from tcip_mcp import dataset_layout, workspace
-from tcip_mcp.buckets import buckets_by_date
+from tcip_mcp import workspace
 from tcip_mcp.identity import actor
 from tcip_mcp.project_record import (
     CaptureInvariances,
-    InvariancesCorrection,
+    ProjectRecord,
+    RecordCorrection,
     rename_project,
     replace_invariances,
 )
+from tcip_web.routes.dataset import DatasetTree, tree_of
 from tcip_web.state import OpenProject, SnapshotProject, store
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -36,73 +37,67 @@ project's store while its folder is being moved."""
 
 
 class ProjectSummary(BaseModel):
-    """One workspace project: its record's fields and what its data holds."""
+    """One workspace project: its record, or why the record will not read, and its data's tree.
 
-    # The record's fields, each null beside record_problem when the record will not read.
-    id: str | None
-    display_name: str | None
-    site: str | None
-    invariances: CaptureInvariances | None
+    ``record`` is ``None`` beside ``record_problem`` when the record will not read; ``tree`` is the
+    project root's :class:`~tcip_web.routes.dataset.DatasetTree`, its ``dataset_root`` the
+    project's directory, so the pickers never offer a date with nothing there.
+    """
+
+    record: ProjectRecord | None
     record_problem: str | None
-    path: str
-    created: float
     modified: float
-    dates: list[str]
-    subjects: list[str]
-    # Per-date availability: which subjects have labels / which buckets are published on each
-    # date (by name), so the pickers never offer a date with nothing there.
-    subjects_by_date: dict[str, list[str]]
-    buckets_by_date: dict[str, list[str]]
+    tree: DatasetTree
     image_count: int
-    # The first date's labels that would not read, naming the documents; the project still lists.
-    label_problem: str | None
 
 
-def _summarize(project_dir: Path, record: dict) -> ProjectSummary:
-    """Summarize ``project_dir`` with ``record``, its record's fields."""
+def _summarize(listed: workspace.ListedProject) -> ProjectSummary:
+    """Summarize the workspace project ``listed`` names."""
     from tcip_mcp.pipelines.image_utils import logical_image_counts
-    from tcip_web.routes.dataset import _subjects_by_date
 
-    st = project_dir.stat()
-    counts = logical_image_counts(project_dir)
-    dates = list(counts)
-    subjects_by_date, label_problem = _subjects_by_date(project_dir, dates)
+    counts = logical_image_counts(listed.root)
     return ProjectSummary(
-        **record,
-        path=str(project_dir),
-        created=st.st_ctime,
-        modified=st.st_mtime,
-        dates=dates,
-        subjects=dataset_layout.list_subjects(project_dir),
-        subjects_by_date=subjects_by_date,
-        buckets_by_date=buckets_by_date(project_dir, dates),
+        record=listed.record,
+        record_problem=listed.record_problem,
+        modified=listed.root.stat().st_mtime,
+        tree=tree_of(listed.root),
         image_count=sum(counts.values()),
-        label_problem=label_problem,
     )
 
 
+class ProjectsListing(BaseModel):
+    """The workspace's projects, newest first, with the id of the one the backend has open.
+
+    ``open_id`` is ``None`` while none is open.
+    """
+
+    workspace: str
+    open_id: str | None
+    projects: list[ProjectSummary]
+
+
 @router.get("")
-def list_projects() -> dict:
-    """List the workspace's projects, newest first, with the open project's id (``open_id``)."""
+def list_projects() -> ProjectsListing:
+    """List the workspace's projects (:class:`ProjectsListing`)."""
     projects: list[ProjectSummary] = []
     with _WORKSPACE_TURN:
-        for child, record in workspace.project_records(store.workspace):
+        for listed in workspace.project_records(store.workspace):
             try:
-                projects.append(_summarize(child, record))
+                projects.append(_summarize(listed))
             except OSError:
                 # A project deleted mid-listing must not 500 the whole list.
                 continue
     projects.sort(key=lambda p: p.modified, reverse=True)
     opened = store.opened
-    return {
-        "workspace": str(store.workspace),
-        "open_id": None if opened is None else opened.id,
-        "projects": [p.model_dump() for p in projects],
-    }
+    return ProjectsListing(
+        workspace=str(store.workspace),
+        open_id=None if opened is None else opened.id,
+        projects=projects,
+    )
 
 
-def workspace_project(project_id: str) -> tuple[Path, dict]:
-    """Return the directory and record fields of the workspace project with ``project_id``.
+def workspace_project(project_id: str) -> tuple[Path, ProjectRecord]:
+    """Return the directory and record of the workspace project with ``project_id``.
 
     The project is the one whose record holds that id
     (:func:`tcip_mcp.workspace.project_by_id`); 404 naming why when none, or two, do.
@@ -123,10 +118,9 @@ class OpenRequest(BaseModel):
 
 
 class OpenAnswer(BaseModel):
-    """The project an open made the backend's open one, and its record's display name."""
+    """The project an open made the backend's open one."""
 
     project: SnapshotProject
-    display_name: str
 
 
 @router.post("/open")
@@ -141,15 +135,12 @@ async def open_project(req: OpenRequest) -> OpenAnswer:
 
     actor(req.user)
     root, record = workspace_project(req.id)
-    project = OpenProject(root, record["id"])
+    project = OpenProject(root, record.id)
     try:
         await store.open_project(project)
     except (ValueError, StoreError) as exc:
         raise HTTPException(409, str(exc)) from exc
-    return OpenAnswer(
-        project=SnapshotProject.of(project),
-        display_name=record["display_name"],
-    )
+    return OpenAnswer(project=SnapshotProject.of(project))
 
 
 def _job_conflict(target: Path) -> str | None:
@@ -157,22 +148,16 @@ def _job_conflict(target: Path) -> str | None:
 
     The jobs looked through are those of this process's two in-memory job registries.
     """
-    from tcip_web.jobstore import live
     from tcip_web.routes import annotate, inference
 
-    for job in inference._registry.list(str(target)):
-        if live(job):
-            return (
-                f"inference job {job.job_id!r} is not finished; ask the agent to cancel it "
-                "or wait for it to finish"
-            )
-    for queue_job in annotate._pq_registry.list(str(target)):
-        if live(queue_job):
-            return (
-                f"a review priority-queue scoring pass ({queue_job.job_id!r}) is not finished; "
-                "wait for it to finish"
-            )
-    return None
+    unended = [
+        *inference._registry.list(str(target), unended=True),
+        *annotate._pq_registry.list(str(target), unended=True),
+    ]
+    if not unended:
+        return None
+    job = unended[0]
+    return f"{job.kind} {job.job_id!r} is not finished; wait for it to finish"
 
 
 class RemovalRequest(BaseModel):
@@ -185,17 +170,17 @@ class RemovalRequest(BaseModel):
 
 
 @router.post("/remove")
-async def remove_project(req: RemovalRequest) -> dict:
+async def remove_project(req: RemovalRequest) -> workspace.ProjectRemoval:
     """Archive the project ``req.id`` names into the workspace's ``.removed/`` and move it there.
 
     The project, when it is the open one, is closed only once the removal is admitted. 404 for
     no such project, 400 for a confirm name that is not its display name, 409 while a job or run
     of it is live, the archive refuses or another process holds the folder past the move's retry
-    budget, 400 for a request naming no one. Returns ``{archive_path, moved_to}``.
+    budget, 400 for a request naming no one.
     """
     person = actor(req.user)
-    project, fields = workspace_project(req.id)
-    display_name = fields["display_name"]
+    project, record = workspace_project(req.id)
+    display_name = record.display_name
     if req.confirm_name != display_name:
         raise HTTPException(
             400, f"type the project's name {display_name!r} to remove it"
@@ -207,7 +192,7 @@ async def remove_project(req: RemovalRequest) -> dict:
     def release() -> None:
         anyio.from_thread.run(store.close_project, req.id)
 
-    def remove() -> dict:
+    def remove() -> workspace.ProjectRemoval:
         with _WORKSPACE_TURN:
             return workspace.remove_project(
                 store.workspace, project, actor=person, release=release
@@ -235,11 +220,11 @@ class RenameRequest(BaseModel):
 
 
 @router.post("/rename")
-def rename_project_route(req: RenameRequest) -> dict:
+def rename_project_route(req: RenameRequest) -> RecordCorrection:
     """Change the display name of the project ``req.id`` names; its directory is left as it is.
 
     404 for no such project, 400 for a display name the record refuses or a request naming no
-    one. Returns ``{id, display_name, previous_display_name}``.
+    one.
     """
     person = actor(req.user)
     project, _ = workspace_project(req.id)
@@ -260,7 +245,7 @@ class InvariancesRequest(BaseModel):
 @router.post("/invariances")
 def replace_invariances_route(
     req: InvariancesRequest,
-) -> InvariancesCorrection:
+) -> RecordCorrection:
     """Correct the capture invariances the project ``req.id`` names records.
 
     404 for no such project, 400 for a request naming no one, and 422 for a block the record's

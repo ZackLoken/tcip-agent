@@ -18,6 +18,7 @@ from pyproj import Geod
 
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+    MappingVerification,
     MatchRadius,
     MatchTolerance,
     NoMatchRadiusError,
@@ -129,11 +130,34 @@ def test_the_served_build_and_its_disclosure_read_the_recorded_radius(
     assert recorded == {
         DATE: {"value": 2.5, "source": "h_pos_err", "rationale": None}
     }
-    assert build.served()["match_radius"] == recorded
-    disclosure = build.delivery_disclosure(
-        {"captures_unverified": [], "plant_csvs_unverified": []}, [DATE]
-    )
-    assert disclosure["match_radius"] == recorded
+    assert build.served().model_dump()["match_radius"] == recorded
+    disclosure = build.delivery_disclosure(MappingVerification([], []), [DATE])
+    assert disclosure.model_dump()["match_radius"] == recorded
+
+
+def test_the_served_build_counts_every_dates_unattributed_photograph(
+    tmp_path: Path,
+) -> None:
+    """Two dates, each with one stray photograph naming no plant, serve a total of two."""
+    dataset_root = tmp_path / "ds"
+    stray = _east(3 * PLANT_SPACING_M, STRAY_NORTH_M)
+    for day in (DATE, "2026-02-25"):
+        write_photos(
+            image_dir(dataset_root, day),
+            {
+                "at_P0.jpg": (PLANTS[0]["lat"], PLANTS[0]["lon"], 1.0),
+                "stray.jpg": (*stray, 1.0),
+            },
+            datetime(2026, 2, 11, 9),
+            timedelta(seconds=1),
+        )
+
+    served = mapping_over(
+        dataset_root, [write_plant_csv(tmp_path / "plants.csv", PLANTS)], tmp_path
+    ).served()
+
+    assert [d.n_unattributed for d in served.per_date.values()] == [1, 1]
+    assert served.images_unattributed == 2
 
 
 def test_a_date_whose_photographs_report_no_error_refuses_naming_the_argument(

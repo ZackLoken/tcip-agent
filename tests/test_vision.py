@@ -1396,13 +1396,20 @@ class TestProposeAnnotationsTool:
 
 class TestAcceptProposalsTool:
     def test_no_prior_proposals(self, viz_dataset: WrittenDataset) -> None:
-        from tcip_mcp.tools.proposal_tools import stage_proposals
+        from tcip_mcp.tools.proposal_tools import (
+            Assignment,
+            StagedAssignments,
+            stage_proposals,
+        )
 
         result = stage_proposals(
             viz_dataset.root,
             image_path=str(viz_dataset.images[2]),
             actor=None,
-            assignments=kept({"staging_id": "staging_0_000000"}, (0, "bud")),
+            assignments=StagedAssignments(
+                staging_id="staging_0_000000",
+                candidates=[Assignment(candidate_id=0, subject="bud")],
+            ),
         )
         assert "error" in result
         assert "staging_0_000000" in result["error"]
@@ -1445,7 +1452,7 @@ class TestAcceptProposalsTool:
             str(viz_dataset.images[0]),
             candidates,
         )
-        assert propose_result["staged"] is True
+        assert propose_result.staging_id is not None
 
         result = stage_proposals(
             viz_dataset.root,
@@ -1454,8 +1461,8 @@ class TestAcceptProposalsTool:
             assignments=kept(propose_result, (0, "bud"), (1, "nut")),
         )
         assert "error" not in result
-        assert result["proposal_count"] == 2
-        assert Path(result["image_path"]).is_file()
+        assert result.proposal_count == 2
+        assert Path(result.image_path).is_file()
 
         # Masks are staged as the engine's predictions, not GT: one per-image document holding
         # both accepted objects by subject name.
@@ -1538,7 +1545,7 @@ def _staged(
     from tcip_annotation.json_io import read_label_document
     from tcip_mcp.buckets import read_bucket
 
-    key = read_bucket(project, staged["bucket"]).document_key(image.stem)
+    key = read_bucket(project, staged.bucket).document_key(image.stem)
     assert key is not None, staged
     document = tcip_store.read(key)
     assert isinstance(document, dict)
@@ -1649,7 +1656,7 @@ class TestFullPipelineIntegration:
             assignments=kept(proposed, (0, "bud"), (1, "nut")),
         )
         assert "error" not in result
-        assert result["proposal_count"] == 2
+        assert result.proposal_count == 2
 
         anns, objs = _staged(sample_dataset.root, Path(img_path), result)
         assert len(anns) == 2
@@ -1682,7 +1689,7 @@ class TestFullPipelineIntegration:
             assignments=kept(proposed, (0, "bud")),
         )
         assert "error" not in result
-        assert result["proposal_count"] == 1
+        assert result.proposal_count == 1
 
         anns, objs = _staged(sample_dataset.root, Path(img_path), result)
         assert len(anns) == 1
@@ -1715,7 +1722,7 @@ class TestFullPipelineIntegration:
             actor=None,
             assignments=kept(proposed, (0, "bud"), (2, "nut")),
         )
-        assert result["proposal_count"] == 2
+        assert result.proposal_count == 2
 
         anns, _objs = _staged(sample_dataset.root, Path(img_path), result)
         # Each object is one polygon with a derivable box under the same subject: the box and mask
@@ -1748,29 +1755,7 @@ class TestFullPipelineIntegration:
             actor=None,
             assignments=kept(proposed, (1, "bud")),
         )
-        assert result["proposal_count"] == 1
-
-    def test_invalid_candidate_id_silently_skipped(
-        self,
-        sample_dataset: WrittenDataset,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Assignments with non-existent candidate_id are ignored."""
-        from tcip_mcp.tools.proposal_tools import stage_proposals
-
-        img_path = str(sample_dataset.images[0])
-        proposed = _propose(
-            monkeypatch, sample_dataset.root, img_path, MOCK_CANDIDATES
-        )
-
-        # Candidate 999 does not exist; candidate 0 does.
-        result = stage_proposals(
-            sample_dataset.root,
-            image_path=img_path,
-            actor=None,
-            assignments=kept(proposed, (999, "bud"), (0, "nut")),
-        )
-        assert result["proposal_count"] == 1
+        assert result.proposal_count == 1
 
     def test_render_then_accept_pipeline(
         self,
@@ -1815,10 +1800,10 @@ class TestFullPipelineIntegration:
             assignments=kept(proposed, (0, "bud"), (1, "nut"), (2, "bud")),
         )
         assert "error" not in result
-        assert result["proposal_count"] == 3
+        assert result.proposal_count == 3
 
         # Step 5: QA render was produced
-        assert Path(result["image_path"]).is_file()
+        assert Path(result.image_path).is_file()
 
 
 class TestEnginePredictionStaging:
@@ -1844,7 +1829,7 @@ class TestEnginePredictionStaging:
         )
         assert "error" not in result
         assert "format" not in result
-        assert result["proposal_count"] == 1
+        assert result.proposal_count == 1
 
         anns, _objs = _staged(sample_dataset.root, Path(img_path), result)
         assert len(anns) == 1 and {a.subject for a in anns} == {"bud"}

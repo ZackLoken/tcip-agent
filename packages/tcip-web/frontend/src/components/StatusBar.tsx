@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { PANEL_EVENT_LABELS_WRITTEN } from "@/api/types.generated";
 import { ProjectBreadcrumb } from "@/components/ProjectBreadcrumb";
 import { useStore } from "@/store";
 import { selectCanvasMatchesDataset } from "@/store/slices/canvas";
@@ -19,7 +20,7 @@ function countLabel(count: number, singular: string, plural: string): string {
 export function StatusBar() {
   const view = useStore((s) => s.gui.view);
   const canvasMatchesDataset = useStore(selectCanvasMatchesDataset);
-  const canvasDims = useStore((s) => ({ w: s.canvas.imgWidth, h: s.canvas.imgHeight }));
+  const loaded = useStore((s) => s.canvas.loaded);
   const dirty = useStore((s) => s.canvas.dirty);
   const boxCount = useStore((s) => s.canvas.boxes.length);
   const polyCount = useStore((s) => s.canvas.polygons.length);
@@ -53,8 +54,8 @@ export function StatusBar() {
     return () => window.clearTimeout(id);
   }, [agentActivity]);
 
-  const agentStem =
-    agentActivity && typeof agentActivity.data.stem === "string" ? agentActivity.data.stem : null;
+  const event = agentActivity?.event;
+  const written = event?.event_type === PANEL_EVENT_LABELS_WRITTEN ? event.name : null;
 
   return (
     <div className="h-statusbar flex items-center gap-4 px-3 border-t border-tcip-border bg-tcip-panel text-[12px] text-tcip-muted shrink-0">
@@ -64,9 +65,9 @@ export function StatusBar() {
       {activeTab === "annotate" && sessionTracking.currentImageName ? (
         <span className="tabular-nums">Image time: {fmtSeconds(imageSeconds)}</span>
       ) : null}
-      {activeTab === "annotate" && canvasDims.w && canvasMatchesDataset ? (
+      {activeTab === "annotate" && loaded && canvasMatchesDataset ? (
         <span className="tabular-nums">
-          Image: {canvasDims.w}×{canvasDims.h}
+          Image: {loaded.img_width}×{loaded.img_height}
         </span>
       ) : null}
       {activeTab === "annotate" && canvasMatchesDataset && (polyCount > 0 || boxCount > 0) && (
@@ -85,8 +86,8 @@ export function StatusBar() {
       <div className="flex-1" />
       {showAgent && agentActivity && (
         <span className="text-tcip-accent">
-          {`${agentActivity.client ?? "Process"}: ${agentActivity.eventType.replaceAll("_", " ")}`}
-          {agentStem ? ` on ${agentStem}` : ""}
+          {`${agentActivity.client ?? "Process"}: ${agentActivity.event.event_type.replaceAll("_", " ")}`}
+          {written ? ` on ${written}` : ""}
         </span>
       )}
       {/* Project breadcrumb, lower-right: project (recent) · date (switch) · Switch Project (all). */}

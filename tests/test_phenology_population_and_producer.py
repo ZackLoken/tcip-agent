@@ -123,10 +123,7 @@ def test_the_web_route_delivers_the_population_it_was_given(
     resp = client.post("/api/results/phenology_measurement", json=body)
 
     assert resp.status_code == 200, resp.text
-    assert [r["plant_id"] for r in resp.json()["milestones"]["rows"]] == [
-        "PLANT_B"
-    ]
-    assert resp.json()["curves"]["n_plants"] == 1
+    assert [r["plant_id"] for r in resp.json()["milestones"]] == ["PLANT_B"]
 
 
 def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:

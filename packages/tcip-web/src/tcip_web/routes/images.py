@@ -3,8 +3,8 @@
 Every response that decodes a raster here opens it through ``raster_source.SourceHeader.open``,
 so a photographic frame, a grouped multi-band capture and a raster far too large to decode whole are
 all read the same way: a rectangle at a requested resolution. A request with no ``bands``
-selection serves the file's own pixels as plain RGB; a selection (or a source with more bands
-than an RGB reading covers) composites three of them through the shared display primitives in
+selection serves a source ``raster_source.displays_plain`` admits as its own pixels; a selection,
+or any other source, composites three bands through the shared display primitives in
 ``band_stats``.
 
 A photographic frame is EXIF-oriented on the way out (``PhotographicSource``).
@@ -26,8 +26,13 @@ from typing import TYPE_CHECKING, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, NonNegativeInt, computed_field
 
+from tcip_mcp.pipelines.band_stats import (
+    DEFAULT_STRETCH,
+    CompositeStretch,
+    StretchMode,
+)
 from tcip_mcp.pipelines.display_bounds import (
     plan_read,
     planned_read,
@@ -37,9 +42,6 @@ from tcip_web import jobstore
 from tcip_web.paths import allowed_file, resolved_image
 
 if TYPE_CHECKING:
-    import numpy as np
-    from numpy.typing import NDArray
-
     from tcip_mcp.pipelines.band_stats import BandRange
     from tcip_mcp.pipelines.raster_source import (
         GdalSource,
@@ -81,7 +83,7 @@ class ViewReads(BaseModel):
     reads: list[ServingCell]
 
 
-RENDER_CACHE_VERSION = 6
+RENDER_CACHE_VERSION = 7
 """The render cache's shape version, part of every cache key and every image URL."""
 
 
@@ -131,6 +133,9 @@ def display_cap(
 
 IMAGE_ERROR_HEADER = "X-TCIP-Image-Error"
 """The response header a refusal here names its condition through."""
+
+SERVED_SIZE_HEADER = "X-TCIP-Served-Size"
+"""The response header a display serve reports the ``WxH`` size it served through."""
 
 OVERVIEWS_REQUIRED = "overviews_required"
 """The one condition this header carries: a read that needs a raster's overview pyramid and
@@ -207,19 +212,14 @@ class _RasterStats:
     overview_size: tuple[int, int] | None = None
     interpretations: tuple | None = None
 
-    @property
-    def sampled(self) -> bool:
-        """Whether these bounds describe part of the raster's pixels rather than all of them."""
-        return self.pixel_fraction is not None and self.pixel_fraction < 1.0
-
 
 _V = TypeVar("_V")
 _stats_cache: OrderedDict[tuple, _RasterStats] = OrderedDict()
 """Each raster's display statistics, under its :func:`_source_identity` and the band count it
 is read at."""
-_count_cache: OrderedDict[tuple, int] = OrderedDict()
-"""Each source's own band count, under its version on disk
-(:func:`~tcip_mcp.pipelines.raster_source.source_version`)."""
+_count_cache: OrderedDict[tuple, tuple[int, bool]] = OrderedDict()
+"""Each source's own band count and whether it displays plain (:func:`_described`), under its
+version on disk (:func:`~tcip_mcp.pipelines.raster_source.source_version`)."""
 _stats_lock = threading.Lock()
 
 
@@ -403,23 +403,16 @@ def get_view_reads(
     )
 
 
-def _parse_band_tokens(raw: str) -> list[str]:
-    tokens = [t.strip() for t in raw.split(",") if t.strip()]
-    if len(tokens) != 3:
-        raise HTTPException(
-            400,
-            f"bands must name exactly 3 bands (R,G,B), got {len(tokens)}: {raw!r}",
-        )
-    return tokens
+def _band_index(token: str, declared_names: list[str] | None) -> int:
+    """Return the band ``token`` names: a declared band name's position, else a 0-based index.
 
-
-def _band_index(
-    token: str, declared_names: list[str] | None, total_bands: int
-) -> int:
+    Whether the raster has that band is the composite's to refuse
+    (:func:`~tcip_mcp.pipelines.band_stats.composite_display_rgb`).
+    """
     if declared_names and token in declared_names:
         return declared_names.index(token)
     try:
-        idx = int(token)
+        return int(token)
     except ValueError:
         raise HTTPException(
             400,
@@ -427,12 +420,6 @@ def _band_index(
             + (f" ({declared_names})" if declared_names else "")
             + " and not a valid 0-based index",
         ) from None
-    if not (0 <= idx < total_bands):
-        raise HTTPException(
-            400,
-            f"band index {idx} out of range for a {total_bands}-band image",
-        )
-    return idx
 
 
 def _overviews_required(path: str, reason: str) -> HTTPException:
@@ -518,6 +505,20 @@ def _memo(
     return value
 
 
+def _described(header: SourceHeader, version: tuple) -> tuple[int, bool]:
+    """Return the source's own band count and whether it displays plain, held under ``version``.
+
+    The count is :attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.channels`, the verdict
+    :func:`~tcip_mcp.pipelines.raster_source.displays_plain`; ``version`` is the source's version
+    on disk (:func:`_source_identity`).
+    """
+    from tcip_mcp.pipelines.raster_source import displays_plain
+
+    return _memo(
+        _count_cache, version, lambda: (header.channels, displays_plain(header))
+    )
+
+
 def _stats_of(raster: RasterSource) -> _RasterStats:
     """Read the per-band display bounds of the open ``raster``, in band order.
 
@@ -572,51 +573,15 @@ def _stats_of(raster: RasterSource) -> _RasterStats:
 
 
 def _sampled_bounds(
-    stats: _RasterStats, idxs: list[int], stretch: str
+    stats: _RasterStats, stretch: StretchMode
 ) -> list[tuple[float, float]]:
-    """Return the ``(low, high)`` stretch pair of each selected band of ``stats``.
+    """Return the ``(low, high)`` stretch pair of each band of ``stats``, in band order.
 
-    The pairs are in the same order as ``idxs``: the clip cut points for ``percent_clip``, the
-    sampled range otherwise.
+    The pairs are the clip cut points for ``percent_clip``, the sampled range otherwise.
     """
     if stretch == "percent_clip":
-        return [stats.clip_bounds[i] for i in idxs]
-    return [(stats.ranges[i].minimum, stats.ranges[i].maximum) for i in idxs]
-
-
-def _plain_rgb(
-    pixels: np.ndarray, dtype: np.dtype, bounds: tuple[float, float] | None
-) -> NDArray[np.uint8]:
-    """Render a 1/3/4-band array as the plain ``uint8`` RGB the file's own pixels read as.
-
-    A single band is replicated, a fourth band dropped, and no data-range stretch applied.
-
-    A non-``uint8`` raster is scaled by ``band_stats.full_scale_denominator`` (the ``none``
-    stretch), one denominator for the whole array. ``bounds`` carries the sampled ``(minimum,
-    maximum)`` a float raster's denominator comes from when the pixels in hand are one region of
-    it. Returns the rendered pixels.
-    """
-    import numpy as np
-
-    from tcip_mcp.pipelines.band_stats import (
-        full_scale_denominator,
-        stretch_band,
-    )
-
-    arr = np.asarray(pixels)
-    if arr.shape[-1] == 1:
-        arr = np.repeat(arr, 3, axis=-1)
-    elif arr.shape[-1] == 4:
-        arr = arr[:, :, :3]
-    if arr.dtype == np.uint8:
-        return np.ascontiguousarray(arr)
-    divisor = full_scale_denominator(
-        arr,
-        dtype,
-        sampled_maximum=None if bounds is None else bounds[1],
-        sampled_minimum=None if bounds is None else bounds[0],
-    )
-    return stretch_band(arr, "none", dtype, (0.0, divisor))
+        return stats.clip_bounds
+    return [(r.minimum, r.maximum) for r in stats.ranges]
 
 
 @router.get("")
@@ -624,28 +589,23 @@ def serve_image(
     request: Request,
     path: str = Query(..., description="Absolute path to the image file"),
     area_cap: int = Depends(display_cap),
-    bands: str | None = Query(
+    bands: tuple[str, str, str] | None = Query(
         None,
-        description="3 comma-separated band names or 0-based indices, e.g. "
-        "'NIR,Red,Green' or '3,2,1'; selects a live composite instead of the "
-        "file's own pixels as-is.",
+        description="3 band names or 0-based indices in display order, each a repeat of the "
+        "parameter, e.g. NIR, Red, Green or 3, 2, 1; selects a live composite instead of "
+        "the file's own pixels as-is.",
     ),
-    stretch: str = Query(
-        "minmax",
-        description="minmax|percent_clip|none; applied only when compositing bands "
-        "(bands given, or path names a .bandgroup-grouped capture).",
+    stretch: StretchMode = Query(
+        DEFAULT_STRETCH,
+        description="The stretch a composite is shown through; a raster shown as its own "
+        "pixels is not stretched.",
     ),
-    x0: int | None = Query(
-        None, ge=0, description="Region left edge, full-resolution pixels"
-    ),
-    y0: int | None = Query(
-        None, ge=0, description="Region top edge, full-resolution pixels"
-    ),
-    x1: int | None = Query(
-        None, ge=0, description="Region right edge, exclusive"
-    ),
-    y1: int | None = Query(
-        None, ge=0, description="Region bottom edge, exclusive"
+    region: list[NonNegativeInt] | None = Query(
+        None,
+        min_length=4,
+        max_length=4,
+        description="Region x0, y0, x1, y1 (right and bottom exclusive), each a repeat of the "
+        "parameter, in the pixel grid of the overview level named",
     ),
     level: int = Query(
         0,
@@ -656,8 +616,8 @@ def serve_image(
 ) -> Response:
     """Serve a raster, whole or one region of it, within the requesting display's area cap.
 
-    ``x0/y0/x1/y1`` (all four or none) name a half-open region in the raster's own full-resolution
-    pixel grid; omitting them serves the whole frame. A region of at most the cap's pixels is
+    ``region`` (``x0, y0, x1, y1``) names a half-open region in the raster's own full-resolution
+    pixel grid; omitting it serves the whole frame. A region of at most the cap's pixels is
     served at native resolution, losslessly (:data:`_NATIVE_ENCODING`). The whole frame, and a
     region past the cap, is a display read (:data:`_DISPLAY_ENCODING`) as
     ``display_bounds.plan_read`` plans it, within the codec's edge limit. With ``level`` above 0
@@ -665,12 +625,13 @@ def serve_image(
     pixels, served at the level's resolution as a display read; a raster with no such level
     refuses it.
 
-    With no ``bands`` selection a 1/3/4-band raster serves as its own plain RGB, with no data-range
-    stretch: a single band replicated, a fourth band dropped. A ``bands`` selection, a
-    ``.bandgroup``-grouped capture, or any other band count composites three bands through the
-    shared display stretch instead. Whole-view stretch bounds come from the served pixels
+    With no ``bands`` selection a raster ``raster_source.displays_plain`` admits serves as its own
+    pixels, with no data-range stretch: a single band replicated, an alpha band dropped. A ``bands``
+    selection, or any other raster, composites three bands (by default
+    ``raster_source.display_bands``) through the shared display stretch instead, the same reading
+    the vision tools display. Whole-view stretch bounds come from the served pixels
     themselves; a region's come from the raster's seeded per-band sample, so two regions of one
-    raster render alike. The size served is reported in ``X-TCIP-Served-Size``.
+    raster render alike. The size served is reported in :data:`SERVED_SIZE_HEADER`.
 
     A display read of a GDAL raster whose window is larger than the cap, with no overview levels,
     is refused naming ``POST /api/images/overviews`` (``X-TCIP-Image-Error: overviews_required``)
@@ -684,49 +645,18 @@ def serve_image(
     from PIL import Image
 
     from tcip_mcp.pipelines import raster_source
-    from tcip_mcp.pipelines.band_stats import (
-        STRETCH_MODES,
-        band_ranges,
-        composite_display_rgb,
-    )
+    from tcip_mcp.pipelines.band_stats import composite_display_rgb
     from tcip_mcp.pipelines.overviews import overview_levels
 
-    if stretch not in STRETCH_MODES:
-        raise HTTPException(
-            400,
-            f"stretch must be one of {sorted(STRETCH_MODES)}, got {stretch!r}",
-        )
     src, source = resolved_image(path)
 
-    corners = (x0, y0, x1, y1)
-    if any(c is None for c in corners) and any(c is not None for c in corners):
-        raise HTTPException(
-            400, "a region needs all four of x0, y0, x1, y1, or none of them"
-        )
-    whole_view = corners[0] is None
-    native = False
-    if not whole_view:
-        # the all-or-none guard above already requires every corner set when not whole_view
-        assert (
-            x0 is not None
-            and y0 is not None
-            and x1 is not None
-            and y1 is not None
-        )
-        if not (x0 < x1 and y0 < y1):
-            raise HTTPException(
-                400,
-                f"region [{y0}:{y1}, {x0}:{x1}] is empty; x0 < x1 and y0 < y1 are required",
-            )
-        native = within_cap(x1 - x0, y1 - y0, area_cap)
+    asked = None if region is None else raster_source.Rect(*region)
+    native = asked is not None and within_cap(asked.width, asked.height, area_cap)
     if level and not (
-        native
-        and x0 is not None
-        and y0 is not None
-        and x1 is not None
-        and y1 is not None
+        asked is not None
+        and native
         and _DISPLAY_ENCODING.max_edge is not None
-        and max(x1 - x0, y1 - y0) <= _DISPLAY_ENCODING.max_edge
+        and max(asked.width, asked.height) <= _DISPLAY_ENCODING.max_edge
     ):
         raise HTTPException(
             400,
@@ -734,9 +664,7 @@ def serve_image(
             f"of {area_cap} pixels and no edge past {_DISPLAY_ENCODING.max_edge}",
         )
 
-    band_tokens = _parse_band_tokens(bands) if bands is not None else None
     header = raster_source.SourceHeader(source)
-    composite_requested = bands is not None or header.kind == "group"
     encoding = _NATIVE_ENCODING if native and not level else _DISPLAY_ENCODING
 
     # Requested params only: the scale a read is served at depends on the raster's own size and on
@@ -744,7 +672,7 @@ def serve_image(
     identity = _source_identity(header)
     key = hashlib.md5(
         f"{RENDER_CACHE_VERSION}:{identity}:{area_cap}:"
-        f"{encoding.pil_format}:{sorted(encoding.options.items())}:{bands}:{stretch}:{corners}:"
+        f"{encoding.pil_format}:{sorted(encoding.options.items())}:{bands}:{stretch}:{region}:"
         f"{level}".encode()
     ).hexdigest()
     etag = f'W/"{key}"'
@@ -767,17 +695,10 @@ def serve_image(
         except (OSError, ValueError):
             pass  # an unreadable cache entry is rendered again, never served as-is
 
-    try:
-        own_channels = header.channels
-    except Exception as exc:
-        # A truncated or otherwise unreadable file fails its header read here, before any
-        # raster is opened: the request's own fault, answered as one.
-        raise HTTPException(400, f"could not open this image: {exc}") from exc
-    open_channels = (
-        own_channels if composite_requested else header.route_channels
-    )
     opening = True
     try:
+        plain = bands is None and _described(header, identity[0])[1]
+        open_channels = header.route_channels if plain else header.channels
         with header.open(open_channels) as raster:
             opening = False
             dims = raster.level_dims()
@@ -790,23 +711,11 @@ def serve_image(
                 raise HTTPException(
                     400, f"this raster has no overview level {level}"
                 )
-            if whole_view:
-                rect = raster_source.Rect(0, 0, raster.width, raster.height)
-            else:
-                # the all-or-none guard above already requires every corner set when not whole_view
-                assert (
-                    x0 is not None
-                    and y0 is not None
-                    and x1 is not None
-                    and y1 is not None
-                )
-                rect = raster_source.Rect(x0, y0, x1, y1)
-            if not whole_view and (rect.x1 > grid_w or rect.y1 > grid_h):
-                raise HTTPException(
-                    400,
-                    f"region [{rect.y0}:{rect.y1}, {rect.x0}:{rect.x1}] is outside this "
-                    f"{grid_w}x{grid_h} raster",
-                )
+            rect = (
+                raster_source.Rect(0, 0, raster.width, raster.height)
+                if asked is None
+                else asked
+            )
             if level:
                 # only a GDAL raster reports overview levels, so a level read has one
                 assert isinstance(raster, raster_source.GdalSource)
@@ -837,59 +746,31 @@ def serve_image(
                     )
                 pixels, _spec = planned_read(raster, rect, plan)
                 served_size = (plan.width, plan.height)
-            channels = int(raster.num_channels)
-            dtype = raster.dtype
-            composite = composite_requested or channels not in (1, 3, 4)
+            shown = raster_source.display_bands(raster.num_channels)
             # A region's bounds come from the raster's own sample, a whole view's from the pixels
             # it served; a scale that reads no pixel statistic (a dtype ceiling) asks for neither.
-            integer = np.issubdtype(dtype, np.integer)
-            wants_bounds = (
-                (not (stretch == "none" and integer))
-                if composite
-                else not integer
+            wants_bounds = not plain and not (
+                stretch == "none" and np.issubdtype(raster.dtype, np.integer)
             )
             sampled = None
-            if wants_bounds and not whole_view:
+            if wants_bounds and asked is not None:
                 sampled = _memo(
                     _stats_cache,
                     (*identity, open_channels),
                     lambda: _stats_of(raster),
                 )
 
-        declared_names = (
-            list(header.group.bands) if header.kind == "group" else None
+        if bands is not None:
+            red, green, blue = (
+                _band_index(t, header.declared_band_names) for t in bands
+            )
+            shown = (red, green, blue)
+        rgb = composite_display_rgb(
+            pixels,
+            shown,
+            "none" if plain else stretch,
+            None if sampled is None else _sampled_bounds(sampled, stretch),
         )
-        if band_tokens is None:
-            idxs = [min(i, channels - 1) for i in range(3)]
-        else:
-            idxs = [
-                _band_index(t, declared_names, channels) for t in band_tokens
-            ]
-
-        if composite and stretch == "none" and integer:
-            rgb = composite_display_rgb(pixels, idxs, stretch, None)
-        elif composite:
-            rgb = composite_display_rgb(
-                pixels,
-                idxs,
-                stretch,
-                (
-                    None
-                    if sampled is None
-                    else _sampled_bounds(sampled, idxs, stretch)
-                ),
-            )
-        elif integer:
-            rgb = _plain_rgb(pixels, dtype, None)
-        else:
-            # Only the bands a plain serve displays: a fourth band is dropped before the viewer
-            # sees it, so its level must not set the scale the other three are divided by.
-            ranges = band_ranges(pixels) if sampled is None else sampled.ranges
-            band_bounds = (
-                min(ranges[i].minimum for i in idxs),
-                max(ranges[i].maximum for i in idxs),
-            )
-            rgb = _plain_rgb(pixels, dtype, band_bounds)
 
         buf = io.BytesIO()
         Image.fromarray(np.ascontiguousarray(rgb), mode="RGB").save(
@@ -903,14 +784,18 @@ def serve_image(
             "open this image"
             if opening
             else "read this image"
-            if whole_view
+            if asked is None
             else "read this region"
         )
         raise HTTPException(400, f"could not {what}: {exc}") from exc
     except Exception as exc:
+        # A truncated or otherwise unreadable file fails before any read: the request's own
+        # fault, answered as one.
+        if opening:
+            raise HTTPException(400, f"could not open this image: {exc}") from exc
         raise HTTPException(500, f"could not process image: {exc}") from exc
 
-    extra = {"X-TCIP-Served-Size": f"{served_size[0]}x{served_size[1]}"}
+    extra = {SERVED_SIZE_HEADER: f"{served_size[0]}x{served_size[1]}"}
 
     try:
         tmp = cache_dir / f"{key}.{threading.get_ident()}.tmp"
@@ -929,92 +814,131 @@ def serve_image(
     )
 
 
+class ImageBand(BaseModel):
+    """One band's symbology: its name, the sensor's wavelength when known, dtype and range.
+
+    The name is a declared one where the source has one, else its 0-index as a string;
+    ``interpretation`` (``red``, ``alpha``, and the rest) is what the backend reads from the file,
+    ``None`` where nothing reads one.
+    """
+
+    name: str
+    wavelength_nm: float | None
+    dtype: str
+    min: float
+    max: float
+    interpretation: str | None
+
+
+class ImageBands(BaseModel):
+    """A raster's band count and per-band symbology, with which read produced the stats.
+
+    ``plain`` is whether the raster displays as its own pixels (``raster_source.displays_plain``),
+    and ``default_bands`` names the three bands it composites through by default
+    (``raster_source.display_bands``) and ``default_stretch`` the stretch it does so through
+    (``band_stats.DEFAULT_STRETCH``). ``pixel_fraction`` and ``seed`` are stated for a native
+    sample, ``overview_size`` for an overview read, and none of them for a plain raster, which
+    reports no per-band stats; each one not stated is ``None``.
+    """
+
+    band_count: int
+    bands: list[ImageBand]
+    plain: bool
+    default_bands: list[str]
+    default_stretch: CompositeStretch = DEFAULT_STRETCH
+    pixel_fraction: float | None = None
+    seed: int | None = None
+    overview_size: tuple[int, int] | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def sampled(self) -> bool:
+        """Whether the bounds describe part of the raster's native pixels, not all of them."""
+        return self.pixel_fraction is not None and self.pixel_fraction < 1.0
+
+
 @router.get("/bands")
-def get_bands(path: str = Query(...)) -> dict:
+def get_bands(path: str = Query(...)) -> ImageBands:
     """Return the band count and per-band stats for ``path``.
 
     ``path`` may be a plain raster or a ``.bandgroup`` manifest naming a grouped multi-band
     capture. ``band_count`` comes from its header (``SourceHeader.channels``: the header for a
-    TIFF or a photograph, the loaded array for a numpy container). A plain (non-grouped) raster
-    at ``band_count <= 3`` reads nothing past that header; a ``.bandgroup``-grouped capture always
-    gets the full per-band stats, even at exactly 3 bands. The count is cached under the
+    TIFF or a photograph, the loaded array for a numpy container). A raster that displays plain
+    (``raster_source.displays_plain``, which at three bands or fewer reads nothing past the header)
+    is answered with no per-band stats; every other one gets them. The count and the verdict are
+    cached under the
     source's version on disk and the stats under its :func:`_source_identity` and that count,
     so a repeated call for an unchanged raster reads nothing.
 
     The response says which read produced the stats. A raster whose pixels fit the
-    native-sampling budget, and any raster a backend decodes whole at open, carries ``sampled``,
-    ``pixel_fraction`` and ``seed``: ``sampled`` is false exactly when the sample covered every
-    pixel (``pixel_fraction`` 1.0), where the numbers are the raster's own exact bounds. A
-    larger GDAL-served one is read once off an overview level instead and carries ``sampled``
-    false with ``overview_size``, the ``[width, height]`` it was read at; those bounds describe
-    display scale only.
+    native-sampling budget, and any raster a backend decodes whole at open, carries
+    ``pixel_fraction`` and ``seed``: a ``pixel_fraction`` of 1.0 is a sample covering every
+    pixel, where the numbers are the raster's own exact bounds. A larger GDAL-served one is read
+    once off an overview level instead and carries ``overview_size``, the ``[width, height]`` it
+    was read at; those bounds describe display scale only.
 
     A band carries ``interpretation`` (``red``, ``alpha``, and the rest) where the backend reads it
-    from the file; the key is absent where nothing knows.
+    from the file, ``None`` where nothing knows.
     """
     from tcip_mcp.pipelines import raster_source
 
     source = resolved_image(path)[1]
     header = raster_source.SourceHeader(source)
     version, sidecar = _source_identity(header)
-    n = _memo(_count_cache, version, lambda: header.channels)
-    if n <= 3 and header.kind != "group":
-        return {"band_count": n, "bands": []}
+    n, plain = _described(header, version)
+    declared = header.declared_band_names
+    names = [str(i) for i in range(n)] if declared is None else declared
+    default_bands = [names[i] for i in raster_source.display_bands(len(names))]
+    if plain:
+        return ImageBands(
+            band_count=n, bands=[], plain=True, default_bands=default_bands
+        )
 
     def read_stats() -> _RasterStats:
         with header.open(n) as raster:
             return _stats_of(raster)
 
     stats = _memo(_stats_cache, (version, sidecar, n), read_stats)
-    if header.kind == "group":
-        names = list(header.group.bands)
-        wavelengths = header.group.central_wavelength_nm or {}
-    else:
-        names = [str(i) for i in range(stats.num_channels)]
-        wavelengths = {}
-
-    bands = []
-    for i, name in enumerate(names):
-        band = {
-            "name": name,
-            "wavelength_nm": wavelengths.get(name),
-            "dtype": stats.dtype,
-            "min": stats.ranges[i].minimum,
-            "max": stats.ranges[i].maximum,
-        }
-        if stats.interpretations is not None and i < len(
-            stats.interpretations
-        ):
-            band["interpretation"] = stats.interpretations[i]
-        bands.append(band)
-    if stats.overview_size is not None:
-        return {
-            "band_count": len(names),
-            "bands": bands,
-            "sampled": False,
-            "overview_size": list(stats.overview_size),
-        }
-    return {
-        "band_count": len(names),
-        "bands": bands,
-        "sampled": stats.sampled,
-        "pixel_fraction": stats.pixel_fraction,
-        "seed": stats.seed,
-    }
+    wavelengths = (
+        {} if declared is None else header.group.manifest.central_wavelength_nm or {}
+    )
+    interpretations = stats.interpretations or ()
+    bands = [
+        ImageBand(
+            name=name,
+            wavelength_nm=wavelengths.get(name),
+            dtype=stats.dtype,
+            min=stats.ranges[i].minimum,
+            max=stats.ranges[i].maximum,
+            interpretation=interpretations[i]
+            if i < len(interpretations)
+            else None,
+        )
+        for i, name in enumerate(names)
+    ]
+    return ImageBands(
+        band_count=n,
+        bands=bands,
+        plain=plain,
+        default_bands=default_bands,
+        pixel_fraction=stats.pixel_fraction,
+        seed=stats.seed,
+        overview_size=stats.overview_size,
+    )
 
 
 # ── Overview builds ─────────────────────────────────────────────────────
 
 
-@dataclass
-class OverviewJob:
-    """One raster's overview build, running on a background thread."""
+class OverviewJob(jobstore.Job):
+    """One raster's overview build, running on a background thread.
 
-    job_id: str
+    ``bytes_written`` is what its sidecar holds as last reported, 0 until the build reports, and
+    none for a build refused over an existing pyramid.
+    """
+
     path: str
-    status: jobstore.JobStatus = "pending"
     bytes_written: int = 0
-    error: str | None = None
 
 
 _overview_registry: jobstore.JobRegistry[OverviewJob] = jobstore.JobRegistry()
@@ -1025,16 +949,6 @@ class OverviewBuildPayload(BaseModel):
     """The raster whose overview pyramid to build."""
 
     path: str
-
-
-def _overview_summary(job: OverviewJob) -> dict:
-    return {
-        "job_id": job.job_id,
-        "path": job.path,
-        "status": job.status,
-        "bytes_written": job.bytes_written,
-        "error": job.error,
-    }
 
 
 def _overview_worker(job: OverviewJob) -> None:
@@ -1065,34 +979,28 @@ def _overview_worker(job: OverviewJob) -> None:
 
 
 @router.post("/overviews")
-def build_image_overviews(payload: OverviewBuildPayload) -> dict:
-    """Start building ``path``'s reduced-resolution overview pyramid.
+def build_image_overviews(payload: OverviewBuildPayload) -> OverviewJob:
+    """Start building ``path``'s reduced-resolution overview pyramid and answer its job.
 
     One build per raster: a request naming a path a build is already running for joins that job
-    rather than starting a second one over the same sidecar.
+    rather than starting a second one over the same sidecar. The answer is the job as it stood
+    when the request found or registered it.
     """
     src = allowed_file(payload.path)
-    job, created = _overview_registry.find_or_register(
-        lambda existing: existing.path == str(src) and jobstore.live(existing),
+    job, _created = _overview_registry.find_or_launch(
+        lambda existing: existing.path == str(src) and existing.live,
         lambda: OverviewJob(
             job_id=f"ovr-{uuid.uuid4().hex[:8]}", path=str(src)
         ),
+        _overview_worker,
     )
-    if created:
-        threading.Thread(
-            target=_overview_worker, args=(job,), daemon=True
-        ).start()
-    return _overview_summary(job)
+    return job
 
 
 @router.get("/overviews/status")
-def get_overview_job(job_id: str = Query(...)) -> dict:
-    """Return an overview build's status and the bytes its sidecar holds as last reported.
-
-    The bytes are 0 until the build reports, and a build refused over an existing pyramid
-    reports none.
-    """
+def get_overview_job(job_id: str = Query(...)) -> OverviewJob:
+    """Return the overview build ``job_id``'s job; an unknown job answers 404."""
     job = _overview_registry.get(job_id)
     if job is None:
         raise HTTPException(404, f"job not found: {job_id}")
-    return _overview_summary(job)
+    return job

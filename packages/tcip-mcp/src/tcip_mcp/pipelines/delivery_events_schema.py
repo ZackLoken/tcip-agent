@@ -7,54 +7,28 @@ against at most one.
 
 from __future__ import annotations
 
-from typing import Literal
-
-from pydantic import BaseModel, ConfigDict
+from pydantic import AwareDatetime, BaseModel, ConfigDict
 
 from tcip_annotation.text import Text
 from tcip_mcp.model_registry import Producer
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-    MatchRadius,
     MatchTolerance,
+    PlantMappingDisclosure,
     PlantRegistryReference,
     UnattributedSegmentSource,
 )
+from tcip_mcp.pipelines.postprocessing.segment_attribution import PositionError
 from tcip_mcp.pipelines.raster_source import RasterIdentity
 from tcip_mcp.pipelines.schemas import TraitRevisionRef
-
-
-class PlantMappingDisclosure(BaseModel):
-    """The ``plant_mapping`` a phenology delivery attributed detections through.
-
-    It holds the mapping's own identity, ``verify_mapping_inputs``'s two unverified disclosures,
-    and this delivery's own unattributed-capture count scoped to its delivered dates. Every key is
-    required.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    dataset_id: str
-    dataset_root: str
-    built_at: str
-    record_sha256: str
-    match_radius: dict[str, MatchRadius]
-    capture_digests: dict[str, dict[str, str]]
-    captures_unverified: list[str]
-    plant_csvs_unverified: list[str]
-    dates_delivered: list[str]
-    images_unattributed: int
-    images_unattributed_scope: Literal["delivered_dates"]
-    plant_attribution: str
 
 
 class PlantRegistryDisclosure(BaseModel):
     """The ``plant_mapping`` of an orthomosaic delivery's nearest-neighbor regime.
 
     It names the plant registry the regime read, the raster identity every count in the delivery
-    is attributed through, the tolerance it matched detections under, this delivery's own
-    unattributed-detection count, and the registry plants the raster's own frame does not picture
-    at all, by name. Every key is required.
+    is attributed through, the tolerance it matched detections under, this delivery's own count
+    of detections attributed to no plant over the delivered raster, and the registry plants the
+    raster's own frame does not picture at all, by name. Every key is required.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -63,7 +37,6 @@ class PlantRegistryDisclosure(BaseModel):
     raster_identity: RasterIdentity
     nn_tolerance_m: MatchTolerance
     detections_unattributed: int
-    detections_unattributed_scope: Literal["delivered_raster"]
     plant_attribution: str
     plants_outside_raster: list[str]
 
@@ -117,7 +90,7 @@ class CanopySegmentDisclosure(BaseModel):
     raster_identity: RasterIdentity
     canopy_segments: CanopySegmentsDocument
     segment_ties: list[SegmentTieDisclosure]
-    position_error_m: float
+    position_error_m: PositionError
     """The registry positions' error bound in meters the ties were held to, the project's
     stated value."""
     segments_without_plant: int
@@ -128,8 +101,7 @@ class CanopySegmentDisclosure(BaseModel):
     detections_unattributed: int
     detections_unattributed_by_source: dict[UnattributedSegmentSource, int]
     """The unattributed detections by the segment source that left each one unattributed; their
-    sum is ``detections_unattributed``."""
-    detections_unattributed_scope: Literal["delivered_raster"]
+    sum is ``detections_unattributed``, a count over the delivered raster."""
     plant_attribution: str
 
 
@@ -162,7 +134,7 @@ class Acknowledgment(BaseModel):
     acknowledged_by: Text
     reason: Text
     result_sha256: str
-    recorded_at: str
+    recorded_at: AwareDatetime
 
 
 RasterDisclosure = PlantRegistryDisclosure | CanopySegmentDisclosure
@@ -192,4 +164,4 @@ class DeliveryEventRecord(TraitRevisionRef):
     acknowledgment: Acknowledgment | None
     population: list[str]
     plant_mapping: PlantMapping | None
-    produced_at: str
+    produced_at: AwareDatetime

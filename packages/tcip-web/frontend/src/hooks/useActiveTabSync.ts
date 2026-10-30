@@ -18,7 +18,7 @@ export function syncActiveTab(tab: TabName): void {
   if (tabSyncTimer !== null) clearTimeout(tabSyncTimer);
   tabSyncTimer = setTimeout(() => {
     tabSyncTimer = null;
-    api.state.tab(tab).catch(() => {});
+    api.state.tab({ active_tab: tab }).catch(() => {});
   }, 400);
 }
 

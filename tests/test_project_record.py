@@ -222,11 +222,7 @@ def test_replace_invariances_writes_the_block_and_records_one_correction_line(
 
     answer = replace_invariances(project, corrected, actor=actor("tester"))
 
-    assert answer.model_dump() == {
-        "id": before.id,
-        "invariances": corrected.model_dump(),
-        "previous_invariances": INVARIANCES.model_dump(),
-    }
+    assert (answer.record, answer.previous) == (read_record(project), before)
     assert read_record(project) == before.model_copy(
         update={"invariances": corrected}
     )
@@ -264,18 +260,20 @@ def test_replace_site_corrects_the_site_and_records_one_correction_line(
     tmp_path: Path,
 ) -> None:
     from tcip_mcp.identity import actor
-    from tcip_mcp.project_record import read_record, replace_site
+    from tcip_mcp.project_record import (
+        RecordCorrection,
+        read_record,
+        replace_site,
+    )
 
     project = named_project(tmp_path / "valley_block", "Valley block").root
     before = read_record(project)
 
-    assert replace_site(project, "south orchard", actor=actor("tester")) == {
-        "site": "south orchard",
-        "previous_site": "north orchard",
-    }
-    assert read_record(project) == before.model_copy(
-        update={"site": "south orchard"}
-    )
+    after = before.model_copy(update={"site": "south orchard"})
+    assert replace_site(
+        project, "south orchard", actor=actor("tester")
+    ) == RecordCorrection(record=after, previous=before)
+    assert read_record(project) == after
     (line,) = _corrections(project)
     assert line["actor"] == actor("tester")
     assert line["arguments"] == {
@@ -304,7 +302,7 @@ def test_replace_site_refuses_a_project_with_no_record(tmp_path: Path) -> None:
         replace_site(tmp_path, "south orchard", actor=actor("tester"))
 
 
-# ── read_record and record_fields ───────────────────────────────────────────────
+# ── read_record and record_or_problem ───────────────────────────────────────────
 
 
 def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no_store(
@@ -320,43 +318,40 @@ def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no
     assert not database_file(str(tmp_path.absolute())).is_file()
 
 
-def test_record_fields_reports_the_record(tmp_path: Path) -> None:
-    from tcip_mcp.project_record import create_record, record_fields
+def test_record_or_problem_reports_the_record(tmp_path: Path) -> None:
+    from tcip_mcp.project_record import create_record, record_or_problem
 
     record = create_record(
         tmp_path, "Valley block", "north orchard", INVARIANCES
     )
 
-    assert record_fields(tmp_path) == {
-        **record.model_dump(),
-        "record_problem": None,
-    }
+    assert record_or_problem(tmp_path) == (record, None)
 
 
-def test_record_fields_names_the_absent_record(tmp_path: Path) -> None:
-    from tcip_mcp.project_record import record_fields
+def test_record_or_problem_names_the_absent_record(tmp_path: Path) -> None:
+    from tcip_mcp.project_record import record_or_problem
 
-    fields = record_fields(tmp_path)
+    record, problem = record_or_problem(tmp_path)
 
-    assert fields["id"] is None and fields["site"] is None
-    assert "initialize_project" in fields["record_problem"]
+    assert record is None
+    assert problem is not None and "initialize_project" in problem
 
 
-def test_record_fields_names_an_undecodable_record(tmp_path: Path) -> None:
+def test_record_or_problem_names_an_undecodable_record(tmp_path: Path) -> None:
     from tcip_mcp.project_record import (
         create_record,
         project_record_key,
-        record_fields,
+        record_or_problem,
     )
     from tests._record_damage_fixtures import damage_record
 
     create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
     damage_record(project_record_key(tmp_path), b"{not valid json")
 
-    fields = record_fields(tmp_path)
+    record, problem = record_or_problem(tmp_path)
 
-    assert fields["display_name"] is None
-    assert "does not decode" in fields["record_problem"]
+    assert record is None
+    assert problem is not None and "does not decode" in problem
 
 
 def test_existing_project_resolves_a_project_and_refuses_a_directory_with_no_record(
@@ -373,4 +368,4 @@ def test_existing_project_resolves_a_project_and_refuses_a_directory_with_no_rec
         tmp_path, "Valley block", "north orchard", INVARIANCES
     )
     root, record = existing_project(tmp_path)
-    assert (root, record["id"]) == (tmp_path.resolve(), created.id)
+    assert (root, record.id) == (tmp_path.resolve(), created.id)

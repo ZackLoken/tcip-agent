@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.execution import Execution
     from tcip_mcp.pipelines.image_utils import BandGroupRef
+    from tcip_mcp.pipelines.postprocessing.export import DetectionResult
     from tcip_web.routes.inference import InferenceJob
 
 from tcip_mcp.pipelines.execution import Stated
@@ -43,13 +44,14 @@ STATED = Stated(tile=False, conf=0.25, postprocess="nms", rationale=RATIONALE)
 
 
 def _launch_through_the_route(
-    client: TestClient, dataset: Path, bucket: str, ckpt: str, *, tile: bool
+    client: TestClient, dataset: Path, bucket_name: str, ckpt: str, *, tile: bool
 ) -> InferenceJob | None:
-    """Launch a GUI run publishing ``bucket`` through the route and join its worker.
+    """Launch a GUI run publishing beneath ``bucket_name`` through the route and join its worker.
 
     The run is launched by ``client``, and its worker thread is joined for up to 60 s.
     """
-    from tcip_web.routes.inference import _get
+    from tcip_web.routes.inference import _registry
+    from tools.fixture_session import ended
 
     resp = client.post(
         "/api/inference/launch",
@@ -58,14 +60,12 @@ def _launch_through_the_route(
             "checkpoint_path": str(ckpt),
             "dataset_root": str(dataset),
             "date": DATE,
-            "bucket": bucket,
+            "bucket_name": bucket_name,
             "stated": {"tile": tile, **SAMPLE_DETECTOR_PASS},
         },
     )
     assert resp.status_code == 200, resp.text
-    job = _get(resp.json()["job_id"])
-    job.thread.join(60)
-    return job
+    return ended(_registry, resp.json()["job_id"])
 
 
 def _documents(root: Path, bucket: str) -> list[str]:
@@ -94,7 +94,7 @@ def _record(root: Path, bucket: str) -> dict:
     return {
         k: v
         for k, v in asdict(read_bucket(root, bucket)).items()
-        if k not in ("root", "name")
+        if k not in ("root", "name", "published_at")
     }
 
 
@@ -104,7 +104,7 @@ def test_the_gui_worker_and_the_mcp_door_publish_the_same_bucket_record(
     """The GUI worker and the MCP door publish the same bucket record.
 
     One checkpoint over one image directory with the same stated values: the two doors' own
-    bucket records agree on everything but the name each was published under.
+    bucket records agree on everything but the name and the instant each was published under.
     """
     pytest.importorskip("fastapi")
     from tcip_mcp.dataset_layout import image_dir
@@ -164,18 +164,16 @@ def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_doo
     calls: list[str] = []
 
     def failing_second_document(
-        result: dict, **kwargs: str | ClassScope
+        result: DetectionResult, **kwargs: str | ClassScope
     ) -> tuple[dict, int]:
-        calls.append(str(result["image"]))
+        calls.append(result.image)
         if len(calls) % 2 == 0:
             raise OSError("disk full")
         return real_encode(result, **kwargs)
 
     monkeypatch.setattr(export, "encode_predictions", failing_second_document)
 
-    job = _launch_through_the_route(
-        client, dataset, f"gui/{DATE}", ckpt, tile=False
-    )
+    job = _launch_through_the_route(client, dataset, "gui", ckpt, tile=False)
     assert job.status == "failed" and job.error == "disk full"
 
     with pytest.raises(OSError, match="disk full"):
@@ -188,7 +186,7 @@ def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_doo
             actor=None,
         )
 
-    for bucket in (f"gui/{DATE}", f"mcp/{DATE}"):
+    for bucket in (job.bucket, f"mcp/{DATE}"):
         assert _documents(dataset, bucket) == []
         assert not _published(dataset, bucket)
     assert audit_rows(dataset) == []
@@ -216,9 +214,7 @@ def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_publishe
     install(monkeypatch, StubPredictor())
     ckpt = registered_checkpoint(tmp_path)
 
-    job = _launch_through_the_route(
-        client, dataset, f"run/{DATE}", ckpt, tile=True
-    )
+    job = _launch_through_the_route(client, dataset, "run", ckpt, tile=True)
     mcp = run_inference(
         tmp_path,
         ckpt,
@@ -324,9 +320,9 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(
     written = []
 
     def recording_encode(
-        result: dict, **kwargs: str | ClassScope
+        result: DetectionResult, **kwargs: str | ClassScope
     ) -> tuple[dict, int]:
-        written.append(result["image"])
+        written.append(result.image)
         return real_encode(result, **kwargs)
 
     monkeypatch.setattr(export, "encode_predictions", recording_encode)

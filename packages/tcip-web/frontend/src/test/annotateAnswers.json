@@ -1,0 +1,1633 @@
+{
+  "loads": [
+    {
+      "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+      "img_width": 1000,
+      "img_height": 800,
+      "annotations": [],
+      "completion": {},
+      "flags": [],
+      "base_mtime": "<base_mtime n0>",
+      "name": "img1.jpg"
+    },
+    {
+      "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img2.jpg",
+      "img_width": 1010,
+      "img_height": 800,
+      "annotations": [],
+      "completion": {},
+      "flags": [],
+      "base_mtime": "<base_mtime n1>",
+      "name": "img2.jpg"
+    },
+    {
+      "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img3.jpg",
+      "img_width": 1020,
+      "img_height": 800,
+      "annotations": [],
+      "completion": {},
+      "flags": [],
+      "base_mtime": "<base_mtime n2>",
+      "name": "img3.jpg"
+    },
+    {
+      "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img4.jpg",
+      "img_width": 1030,
+      "img_height": 800,
+      "annotations": [],
+      "completion": {},
+      "flags": [],
+      "base_mtime": "<base_mtime n3>",
+      "name": "img4.jpg"
+    },
+    {
+      "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img5.jpg",
+      "img_width": 600,
+      "img_height": 900,
+      "annotations": [],
+      "completion": {},
+      "flags": [],
+      "base_mtime": "<base_mtime n4>",
+      "name": "img5.jpg"
+    }
+  ],
+  "states": {
+    "states": {
+      "img1.jpg": "unannotated",
+      "img2.jpg": "partial",
+      "img3.jpg": "unannotated",
+      "img4.jpg": "unannotated",
+      "img5.jpg": "unannotated"
+    }
+  },
+  "complete": {
+    "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+    "img_width": 1000,
+    "img_height": 800,
+    "annotations": [
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [10.0, 10.0, 50.0, 50.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "user:grower",
+        "created_at": "2000-01-01T00:00:02+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 0,
+        "authorship": "person"
+      }
+    ],
+    "completion": { "subject_a": "complete" },
+    "flags": [],
+    "base_mtime": "<base_mtime n5>",
+    "name": "img1.jpg"
+  },
+  "marked_states": {
+    "states": {
+      "img1.jpg": "negative",
+      "img2.jpg": "partial",
+      "img3.jpg": "unannotated",
+      "img4.jpg": "unannotated",
+      "img5.jpg": "complete"
+    }
+  },
+  "single_proposals": {
+    "operating_point": {
+      "conf": null,
+      "reason": "no assessment answers for bucket '<single bucket>': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
+    },
+    "proposals": [
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [10.0, 10.0, 50.0, 50.0],
+        "rings": null,
+        "point": null,
+        "score": 0.9,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:03+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 0,
+        "paired": null,
+        "decision": null,
+        "authorship": "tool"
+      }
+    ]
+  },
+  "review": {
+    "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+    "img_width": 1000,
+    "img_height": 800,
+    "annotations": [
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [10.0, 10.0, 50.0, 50.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:04+00:00",
+        "accepted_by": "user:grower",
+        "accepted_at": "2000-01-01T00:00:05+00:00",
+        "index": 0,
+        "authorship": "tool_accepted"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [300.0, 300.0, 340.0, 340.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "user:grower",
+        "created_at": "2000-01-01T00:00:06+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 1,
+        "authorship": "person"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [500.0, 50.0, 540.0, 90.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "user:grower",
+        "created_at": "2000-01-01T00:00:06+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 2,
+        "authorship": "person"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": null,
+        "rings": [
+          [
+            [800.0, 600.0],
+            [900.0, 600.0],
+            [900.0, 700.0]
+          ]
+        ],
+        "point": null,
+        "score": null,
+        "created_by": "user:grower",
+        "created_at": "2000-01-01T00:00:06+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 3,
+        "authorship": "person"
+      }
+    ],
+    "completion": { "subject_a": "partial" },
+    "flags": [],
+    "base_mtime": "<base_mtime n6>",
+    "name": "img1.jpg"
+  },
+  "review_proposals": {
+    "operating_point": {
+      "conf": null,
+      "reason": "no assessment answers for bucket '<review bucket>': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
+    },
+    "proposals": [
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [10.0, 10.0, 50.0, 50.0],
+        "rings": null,
+        "point": null,
+        "score": 0.9,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:04+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 0,
+        "paired": 0,
+        "decision": "accepted",
+        "authorship": "tool"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [600.0, 600.0, 640.0, 640.0],
+        "rings": null,
+        "point": null,
+        "score": 0.9,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:04+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 1,
+        "paired": null,
+        "decision": null,
+        "authorship": "tool"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [700.0, 100.0, 740.0, 140.0],
+        "rings": null,
+        "point": null,
+        "score": 0.2,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:04+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 2,
+        "paired": null,
+        "decision": null,
+        "authorship": "tool"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [300.0, 300.0, 340.0, 340.0],
+        "rings": null,
+        "point": null,
+        "score": 0.8,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:04+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 3,
+        "paired": 1,
+        "decision": null,
+        "authorship": "tool"
+      }
+    ]
+  },
+  "review_flagged": {
+    "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+    "img_width": 1000,
+    "img_height": 800,
+    "annotations": [
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [10.0, 10.0, 50.0, 50.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:04+00:00",
+        "accepted_by": "user:grower",
+        "accepted_at": "2000-01-01T00:00:05+00:00",
+        "index": 0,
+        "authorship": "tool_accepted"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [300.0, 300.0, 340.0, 340.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "user:grower",
+        "created_at": "2000-01-01T00:00:06+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 1,
+        "authorship": "person"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [500.0, 50.0, 540.0, 90.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "user:grower",
+        "created_at": "2000-01-01T00:00:06+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 2,
+        "authorship": "person"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": null,
+        "rings": [
+          [
+            [800.0, 600.0],
+            [900.0, 600.0],
+            [900.0, 700.0]
+          ]
+        ],
+        "point": null,
+        "score": null,
+        "created_by": "user:grower",
+        "created_at": "2000-01-01T00:00:06+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 3,
+        "authorship": "person"
+      }
+    ],
+    "completion": { "subject_a": "partial" },
+    "flags": [
+      {
+        "id": "<id n7>",
+        "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
+        "by": "user:first",
+        "at": "2000-01-01T00:00:07+00:00",
+        "resolution": null,
+        "covered_by": [0]
+      }
+    ],
+    "base_mtime": "<base_mtime n6>",
+    "name": "img1.jpg"
+  },
+  "shaped_proposals": {
+    "operating_point": {
+      "conf": null,
+      "reason": "no assessment answers for bucket '<shaped bucket>': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
+    },
+    "proposals": [
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [600.0, 600.0, 640.0, 640.0],
+        "rings": null,
+        "point": null,
+        "score": 0.9,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:10+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 0,
+        "paired": 4,
+        "decision": null,
+        "authorship": "tool"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": null,
+        "rings": [
+          [
+            [100.0, 500.0],
+            [200.0, 500.0],
+            [200.0, 600.0]
+          ]
+        ],
+        "point": null,
+        "score": 0.9,
+        "created_by": "detector",
+        "created_at": "2000-01-01T00:00:10+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 1,
+        "paired": null,
+        "decision": null,
+        "authorship": "tool"
+      }
+    ]
+  },
+  "buckets": {
+    "single": "<single bucket>",
+    "review": "<review bucket>",
+    "shaped": "<shaped bucket>"
+  },
+  "tool_two": {
+    "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+    "img_width": 1000,
+    "img_height": 800,
+    "annotations": [
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [10.0, 10.0, 50.0, 50.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "user:grower",
+        "created_at": null,
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 0,
+        "authorship": "person"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [300.0, 300.0, 340.0, 340.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "user:grower",
+        "created_at": null,
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 1,
+        "authorship": "person"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [500.0, 50.0, 540.0, 90.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "model:detector",
+        "created_at": null,
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 2,
+        "authorship": "tool"
+      }
+    ],
+    "completion": { "subject_a": "partial" },
+    "flags": [
+      {
+        "id": "<id n7>",
+        "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
+        "by": "user:first",
+        "at": "2000-01-01T00:00:07+00:00",
+        "resolution": null,
+        "covered_by": [0]
+      }
+    ],
+    "base_mtime": "<base_mtime n8>",
+    "name": "img1.jpg"
+  },
+  "authored": {
+    "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img2.jpg",
+    "img_width": 1010,
+    "img_height": 800,
+    "annotations": [
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [10.0, 10.0, 50.0, 50.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "model:detector",
+        "created_at": null,
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 0,
+        "authorship": "tool"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [60.0, 10.0, 90.0, 50.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "user:grower",
+        "created_at": null,
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 1,
+        "authorship": "person"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [10.0, 60.0, 50.0, 90.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "model:detector",
+        "created_at": null,
+        "accepted_by": "user:grower",
+        "accepted_at": null,
+        "index": 2,
+        "authorship": "tool_accepted"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [60.0, 60.0, 90.0, 90.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": null,
+        "created_at": null,
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 3,
+        "authorship": "unattributed"
+      }
+    ],
+    "completion": { "subject_a": "partial" },
+    "flags": [],
+    "base_mtime": "<base_mtime n9>",
+    "name": "img2.jpg"
+  },
+  "tool_polygon": {
+    "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img2.jpg",
+    "img_width": 1010,
+    "img_height": 800,
+    "annotations": [
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": null,
+        "rings": [
+          [
+            [800.0, 600.0],
+            [900.0, 600.0],
+            [900.0, 700.0]
+          ]
+        ],
+        "point": null,
+        "score": null,
+        "created_by": "model:detector",
+        "created_at": null,
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 0,
+        "authorship": "tool"
+      }
+    ],
+    "completion": { "subject_a": "partial" },
+    "flags": [],
+    "base_mtime": "<base_mtime n10>",
+    "name": "img2.jpg"
+  },
+  "flagged": {
+    "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+    "img_width": 1000,
+    "img_height": 800,
+    "annotations": [
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [10.0, 10.0, 50.0, 50.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "user:grower",
+        "created_at": "2000-01-01T00:00:15+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 0,
+        "authorship": "person"
+      }
+    ],
+    "completion": { "subject_a": "partial" },
+    "flags": [
+      {
+        "id": "<id n7>",
+        "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
+        "by": "user:first",
+        "at": "2000-01-01T00:00:07+00:00",
+        "resolution": {
+          "by": "user:grower",
+          "at": "2000-01-01T00:00:14+00:00",
+          "reply": "",
+          "removed": true
+        },
+        "covered_by": [0]
+      },
+      {
+        "id": "<id n11>",
+        "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
+        "by": "user:first",
+        "at": "2000-01-01T00:00:16+00:00",
+        "resolution": null,
+        "covered_by": [0]
+      }
+    ],
+    "base_mtime": "<base_mtime n12>",
+    "name": "img1.jpg"
+  },
+  "flags_mixed": {
+    "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+    "img_width": 1000,
+    "img_height": 800,
+    "annotations": [
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": [10.0, 10.0, 50.0, 50.0],
+        "rings": null,
+        "point": null,
+        "score": null,
+        "created_by": "user:first",
+        "created_at": "2000-01-01T00:00:18+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 0,
+        "authorship": "person"
+      }
+    ],
+    "completion": { "subject_a": "partial" },
+    "flags": [
+      {
+        "id": "<id n7>",
+        "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
+        "by": "user:first",
+        "at": "2000-01-01T00:00:07+00:00",
+        "resolution": {
+          "by": "user:grower",
+          "at": "2000-01-01T00:00:14+00:00",
+          "reply": "",
+          "removed": true
+        },
+        "covered_by": [0]
+      },
+      {
+        "id": "<id n11>",
+        "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
+        "by": "user:first",
+        "at": "2000-01-01T00:00:16+00:00",
+        "resolution": {
+          "by": "user:second",
+          "at": "2000-01-01T00:00:17+00:00",
+          "reply": "",
+          "removed": true
+        },
+        "covered_by": [0]
+      },
+      {
+        "id": "<id n13>",
+        "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
+        "by": "user:first",
+        "at": "2000-01-01T00:00:18+00:00",
+        "resolution": null,
+        "covered_by": [0]
+      },
+      {
+        "id": "<resolved flag id>",
+        "request": { "text": "open?", "target": { "point": [30.0, 30.0], "subject": "subject_a" } },
+        "by": "user:first",
+        "at": "2000-01-01T00:00:19+00:00",
+        "resolution": {
+          "by": "user:second",
+          "at": "2000-01-01T00:00:20+00:00",
+          "reply": "seen",
+          "removed": false
+        },
+        "covered_by": [0]
+      }
+    ],
+    "base_mtime": "<base_mtime n14>",
+    "name": "img1.jpg"
+  },
+  "saves": {
+    "box": {
+      "document": {
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "img_width": 1000,
+        "img_height": 800,
+        "annotations": [
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [10.0, 10.0, 50.0, 50.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:00+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 0,
+            "authorship": "person"
+          }
+        ],
+        "completion": { "subject_a": "partial" },
+        "flags": [],
+        "base_mtime": "<base_mtime n15>",
+        "name": "img1.jpg"
+      },
+      "accepted": {}
+    },
+    "cleared": {
+      "document": {
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "img_width": 1000,
+        "img_height": 800,
+        "annotations": [],
+        "completion": {},
+        "flags": [],
+        "base_mtime": "<base_mtime n0>",
+        "name": "img1.jpg"
+      },
+      "accepted": {}
+    },
+    "point": {
+      "document": {
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "img_width": 1000,
+        "img_height": 800,
+        "annotations": [
+          {
+            "subject": "tip",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": null,
+            "rings": null,
+            "point": [200.0, 200.0],
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:01+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 0,
+            "authorship": "person"
+          }
+        ],
+        "completion": { "tip": "partial" },
+        "flags": [],
+        "base_mtime": "<base_mtime n16>",
+        "name": "img1.jpg"
+      },
+      "accepted": {}
+    },
+    "negative": {
+      "document": {
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "img_width": 1000,
+        "img_height": 800,
+        "annotations": [],
+        "completion": { "subject_a": "negative" },
+        "flags": [],
+        "base_mtime": "<base_mtime n17>",
+        "name": "img1.jpg"
+      },
+      "accepted": {}
+    },
+    "review_saved": {
+      "document": {
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "img_width": 1000,
+        "img_height": 800,
+        "annotations": [
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [10.0, 10.0, 50.0, 50.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "detector",
+            "created_at": "2000-01-01T00:00:04+00:00",
+            "accepted_by": "user:grower",
+            "accepted_at": "2000-01-01T00:00:05+00:00",
+            "index": 0,
+            "authorship": "tool_accepted"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [300.0, 300.0, 340.0, 340.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:06+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 1,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [500.0, 50.0, 540.0, 90.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:06+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 2,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": null,
+            "rings": [
+              [
+                [800.0, 600.0],
+                [900.0, 600.0],
+                [900.0, 700.0]
+              ]
+            ],
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:06+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 3,
+            "authorship": "person"
+          }
+        ],
+        "completion": { "subject_a": "partial" },
+        "flags": [],
+        "base_mtime": "<base_mtime n6>",
+        "name": "img1.jpg"
+      },
+      "accepted": {}
+    },
+    "accept_paired": {
+      "document": {
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "img_width": 1000,
+        "img_height": 800,
+        "annotations": [
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [10.0, 10.0, 50.0, 50.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "detector",
+            "created_at": "2000-01-01T00:00:04+00:00",
+            "accepted_by": "user:grower",
+            "accepted_at": "2000-01-01T00:00:05+00:00",
+            "index": 0,
+            "authorship": "tool_accepted"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [300.0, 300.0, 340.0, 340.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:06+00:00",
+            "accepted_by": "user:grower",
+            "accepted_at": "2000-01-01T00:00:08+00:00",
+            "index": 1,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [500.0, 50.0, 540.0, 90.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:06+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 2,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": null,
+            "rings": [
+              [
+                [800.0, 600.0],
+                [900.0, 600.0],
+                [900.0, 700.0]
+              ]
+            ],
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:06+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 3,
+            "authorship": "person"
+          }
+        ],
+        "completion": { "subject_a": "partial" },
+        "flags": [
+          {
+            "id": "<id n7>",
+            "request": {
+              "text": "open?",
+              "target": { "point": [30.0, 30.0], "subject": "subject_a" }
+            },
+            "by": "user:first",
+            "at": "2000-01-01T00:00:07+00:00",
+            "resolution": null,
+            "covered_by": [0]
+          }
+        ],
+        "base_mtime": "<base_mtime n18>",
+        "name": "img1.jpg"
+      },
+      "accepted": { "3": 1 }
+    },
+    "accept_unpaired": {
+      "document": {
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "img_width": 1000,
+        "img_height": 800,
+        "annotations": [
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [10.0, 10.0, 50.0, 50.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "detector",
+            "created_at": "2000-01-01T00:00:04+00:00",
+            "accepted_by": "user:grower",
+            "accepted_at": "2000-01-01T00:00:05+00:00",
+            "index": 0,
+            "authorship": "tool_accepted"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [300.0, 300.0, 340.0, 340.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:06+00:00",
+            "accepted_by": "user:grower",
+            "accepted_at": "2000-01-01T00:00:08+00:00",
+            "index": 1,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [500.0, 50.0, 540.0, 90.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:06+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 2,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": null,
+            "rings": [
+              [
+                [800.0, 600.0],
+                [900.0, 600.0],
+                [900.0, 700.0]
+              ]
+            ],
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:06+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 3,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [600.0, 600.0, 640.0, 640.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "detector",
+            "created_at": "2000-01-01T00:00:04+00:00",
+            "accepted_by": "user:grower",
+            "accepted_at": "2000-01-01T00:00:09+00:00",
+            "index": 4,
+            "authorship": "tool_accepted"
+          }
+        ],
+        "completion": { "subject_a": "partial" },
+        "flags": [
+          {
+            "id": "<id n7>",
+            "request": {
+              "text": "open?",
+              "target": { "point": [30.0, 30.0], "subject": "subject_a" }
+            },
+            "by": "user:first",
+            "at": "2000-01-01T00:00:07+00:00",
+            "resolution": null,
+            "covered_by": [0]
+          }
+        ],
+        "base_mtime": "<base_mtime n19>",
+        "name": "img1.jpg"
+      },
+      "accepted": { "1": 4 }
+    },
+    "accept_polygon": {
+      "document": {
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "img_width": 1000,
+        "img_height": 800,
+        "annotations": [
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [10.0, 10.0, 50.0, 50.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "detector",
+            "created_at": "2000-01-01T00:00:04+00:00",
+            "accepted_by": "user:grower",
+            "accepted_at": "2000-01-01T00:00:05+00:00",
+            "index": 0,
+            "authorship": "tool_accepted"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [300.0, 300.0, 340.0, 340.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:06+00:00",
+            "accepted_by": "user:grower",
+            "accepted_at": "2000-01-01T00:00:08+00:00",
+            "index": 1,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [500.0, 50.0, 540.0, 90.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:06+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 2,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": null,
+            "rings": [
+              [
+                [800.0, 600.0],
+                [900.0, 600.0],
+                [900.0, 700.0]
+              ]
+            ],
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:06+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 3,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": null,
+            "rings": [
+              [
+                [100.0, 500.0],
+                [200.0, 500.0],
+                [200.0, 600.0]
+              ]
+            ],
+            "point": null,
+            "score": null,
+            "created_by": "detector",
+            "created_at": "2000-01-01T00:00:10+00:00",
+            "accepted_by": "user:grower",
+            "accepted_at": "2000-01-01T00:00:11+00:00",
+            "index": 4,
+            "authorship": "tool_accepted"
+          }
+        ],
+        "completion": { "subject_a": "partial" },
+        "flags": [
+          {
+            "id": "<id n7>",
+            "request": {
+              "text": "open?",
+              "target": { "point": [30.0, 30.0], "subject": "subject_a" }
+            },
+            "by": "user:first",
+            "at": "2000-01-01T00:00:07+00:00",
+            "resolution": null,
+            "covered_by": [0]
+          }
+        ],
+        "base_mtime": "<base_mtime n20>",
+        "name": "img1.jpg"
+      },
+      "accepted": { "1": 4 }
+    },
+    "accept_drawn": {
+      "document": {
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "img_width": 1000,
+        "img_height": 800,
+        "annotations": [
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [600.0, 600.0, 640.0, 640.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:12+00:00",
+            "accepted_by": "user:grower",
+            "accepted_at": "2000-01-01T00:00:12+00:00",
+            "index": 0,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [10.0, 10.0, 50.0, 50.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "detector",
+            "created_at": "2000-01-01T00:00:04+00:00",
+            "accepted_by": "user:grower",
+            "accepted_at": "2000-01-01T00:00:05+00:00",
+            "index": 1,
+            "authorship": "tool_accepted"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [300.0, 300.0, 340.0, 340.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:06+00:00",
+            "accepted_by": "user:grower",
+            "accepted_at": "2000-01-01T00:00:08+00:00",
+            "index": 2,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [500.0, 50.0, 540.0, 90.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:06+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 3,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": null,
+            "rings": [
+              [
+                [800.0, 600.0],
+                [900.0, 600.0],
+                [900.0, 700.0]
+              ]
+            ],
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:06+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 4,
+            "authorship": "person"
+          }
+        ],
+        "completion": { "subject_a": "partial" },
+        "flags": [
+          {
+            "id": "<id n7>",
+            "request": {
+              "text": "open?",
+              "target": { "point": [30.0, 30.0], "subject": "subject_a" }
+            },
+            "by": "user:first",
+            "at": "2000-01-01T00:00:07+00:00",
+            "resolution": null,
+            "covered_by": [1]
+          }
+        ],
+        "base_mtime": "<base_mtime n21>",
+        "name": "img1.jpg"
+      },
+      "accepted": { "1": 0 }
+    },
+    "confirmed": {
+      "document": {
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "img_width": 1000,
+        "img_height": 800,
+        "annotations": [
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [10.0, 10.0, 50.0, 50.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": null,
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 0,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [300.0, 300.0, 340.0, 340.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": null,
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 1,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [500.0, 50.0, 540.0, 90.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "model:detector",
+            "created_at": null,
+            "accepted_by": "user:grower",
+            "accepted_at": "2000-01-01T00:00:13+00:00",
+            "index": 2,
+            "authorship": "tool_accepted"
+          }
+        ],
+        "completion": { "subject_a": "partial" },
+        "flags": [
+          {
+            "id": "<id n7>",
+            "request": {
+              "text": "open?",
+              "target": { "point": [30.0, 30.0], "subject": "subject_a" }
+            },
+            "by": "user:first",
+            "at": "2000-01-01T00:00:07+00:00",
+            "resolution": null,
+            "covered_by": [0]
+          }
+        ],
+        "base_mtime": "<base_mtime n22>",
+        "name": "img1.jpg"
+      },
+      "accepted": {}
+    },
+    "person_boxes": {
+      "document": {
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "img_width": 1000,
+        "img_height": 800,
+        "annotations": [
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [10.0, 10.0, 50.0, 50.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:15+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 0,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [300.0, 300.0, 340.0, 340.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:15+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 1,
+            "authorship": "person"
+          },
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [500.0, 50.0, 540.0, 90.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:15+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 2,
+            "authorship": "person"
+          }
+        ],
+        "completion": { "subject_a": "partial" },
+        "flags": [
+          {
+            "id": "<id n7>",
+            "request": {
+              "text": "open?",
+              "target": { "point": [30.0, 30.0], "subject": "subject_a" }
+            },
+            "by": "user:first",
+            "at": "2000-01-01T00:00:07+00:00",
+            "resolution": {
+              "by": "user:grower",
+              "at": "2000-01-01T00:00:14+00:00",
+              "reply": "",
+              "removed": true
+            },
+            "covered_by": [0]
+          }
+        ],
+        "base_mtime": "<base_mtime n23>",
+        "name": "img1.jpg"
+      },
+      "accepted": {}
+    },
+    "flag_raised": {
+      "document": {
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "img_width": 1000,
+        "img_height": 800,
+        "annotations": [
+          {
+            "subject": "subject_a",
+            "attributes": {},
+            "iscrowd": false,
+            "bbox": [10.0, 10.0, 50.0, 50.0],
+            "rings": null,
+            "point": null,
+            "score": null,
+            "created_by": "user:grower",
+            "created_at": "2000-01-01T00:00:15+00:00",
+            "accepted_by": null,
+            "accepted_at": null,
+            "index": 0,
+            "authorship": "person"
+          }
+        ],
+        "completion": { "subject_a": "partial" },
+        "flags": [
+          {
+            "id": "<id n7>",
+            "request": {
+              "text": "open?",
+              "target": { "point": [30.0, 30.0], "subject": "subject_a" }
+            },
+            "by": "user:first",
+            "at": "2000-01-01T00:00:07+00:00",
+            "resolution": {
+              "by": "user:grower",
+              "at": "2000-01-01T00:00:14+00:00",
+              "reply": "",
+              "removed": true
+            },
+            "covered_by": [0]
+          },
+          {
+            "id": "<id n11>",
+            "request": {
+              "text": "open?",
+              "target": { "point": [30.0, 30.0], "subject": "subject_a" }
+            },
+            "by": "user:first",
+            "at": "2000-01-01T00:00:16+00:00",
+            "resolution": null,
+            "covered_by": [0]
+          }
+        ],
+        "base_mtime": "<base_mtime n12>",
+        "name": "img1.jpg"
+      },
+      "accepted": {}
+    },
+    "flag_removed": {
+      "document": {
+        "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+        "img_width": 1000,
+        "img_height": 800,
+        "annotations": [],
+        "completion": {},
+        "flags": [
+          {
+            "id": "<id n7>",
+            "request": {
+              "text": "open?",
+              "target": { "point": [30.0, 30.0], "subject": "subject_a" }
+            },
+            "by": "user:first",
+            "at": "2000-01-01T00:00:07+00:00",
+            "resolution": {
+              "by": "user:grower",
+              "at": "2000-01-01T00:00:14+00:00",
+              "reply": "",
+              "removed": true
+            },
+            "covered_by": []
+          },
+          {
+            "id": "<id n11>",
+            "request": {
+              "text": "open?",
+              "target": { "point": [30.0, 30.0], "subject": "subject_a" }
+            },
+            "by": "user:first",
+            "at": "2000-01-01T00:00:16+00:00",
+            "resolution": {
+              "by": "user:second",
+              "at": "2000-01-01T00:00:17+00:00",
+              "reply": "",
+              "removed": true
+            },
+            "covered_by": []
+          }
+        ],
+        "base_mtime": "<base_mtime n0>",
+        "name": "img1.jpg"
+      },
+      "accepted": {}
+    }
+  },
+  "no_stagings": { "buckets": [] },
+  "staged": {
+    "image_path": "<staged render>",
+    "bucket": "<staged bucket>",
+    "summary": "Staged 2 proposal(s) from 2 'sam' candidates as predictions (created_by='sam') for review, not ground truth.",
+    "proposal_count": 2
+  },
+  "stagings": { "buckets": ["<staged bucket>"] },
+  "staged_proposals": {
+    "operating_point": {
+      "conf": null,
+      "reason": "no assessment answers for bucket '<staged bucket>': assess its checkpoint against a held-out reference selection and publish its predictions under that assessment."
+    },
+    "proposals": [
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": null,
+        "rings": [
+          [
+            [10.0, 10.0],
+            [40.0, 10.0],
+            [40.0, 40.0],
+            [10.0, 40.0]
+          ]
+        ],
+        "point": null,
+        "score": 0.9,
+        "created_by": "sam",
+        "created_at": "2000-01-01T00:00:21+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 0,
+        "paired": null,
+        "decision": null,
+        "authorship": "tool"
+      },
+      {
+        "subject": "subject_a",
+        "attributes": {},
+        "iscrowd": false,
+        "bbox": null,
+        "rings": [
+          [
+            [100.0, 100.0],
+            [300.0, 100.0],
+            [300.0, 300.0],
+            [100.0, 300.0]
+          ]
+        ],
+        "point": null,
+        "score": 0.9,
+        "created_by": "sam",
+        "created_at": "2000-01-01T00:00:21+00:00",
+        "accepted_by": null,
+        "accepted_at": null,
+        "index": 1,
+        "paired": null,
+        "decision": null,
+        "authorship": "tool"
+      }
+    ]
+  },
+  "found": {
+    "boxes": [
+      [10.0, 10.0, 40.0, 40.0],
+      [100.0, 100.0, 300.0, 300.0]
+    ]
+  },
+  "found_other": { "boxes": [[200.0, 200.0, 260.0, 260.0]] },
+  "nothing_proposed": null,
+  "found_none": { "boxes": [] },
+  "engine_refusal": {
+    "status": 400,
+    "body": { "detail": "a sample refusal the stub engine raises as it loads" }
+  },
+  "registry": {
+    "subjects": {
+      "subject_a": { "description": "one subject_a" },
+      "tip": { "description": "one tip" },
+      "subject_b": { "description": "one subject_b" }
+    },
+    "discovered": ["subject_a"],
+    "version": "592ca4b51983d876cb4de912ad0f84ba5f510c5897628d97efb722f937a6cee9",
+    "unreadable": []
+  },
+  "unreadable": {
+    "status": 400,
+    "body": {
+      "detail": "label_documents['2026-01-01', 'img5'] under /scratch/workspace/valley/ds: is a list, not the object a label document is"
+    }
+  }
+}

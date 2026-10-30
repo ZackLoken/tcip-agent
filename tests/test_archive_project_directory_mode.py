@@ -142,7 +142,7 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
     from tcip_mcp.dataset_layout import label_key
 
     status = inspect_project(dest)
-    assert status["display_name"] == "Source project"
+    assert status["record"]["display_name"] == "Source project"
     date = "2026-03-04"
     assert read_label_document(
         label_key(dest.resolve(), date, "a_1")

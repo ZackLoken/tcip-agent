@@ -3,57 +3,60 @@
  * models and constants. Do not edit by hand.
  */
 
-export const RENDER_CACHE_VERSION = 6;
+export const PANEL_EVENT_ANNOTATE_FOCUS = "annotate_focus";
+
+export const AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written";
+
+export const PANEL_EVENT_BANNER = "banner";
+
+export const BUCKET_EXISTS = "bucket_exists";
+
+export const PANEL_EVENT_CANVAS_STATE_REQUEST = "canvas_state_request";
+
+export const DELIVERY = "delivery";
+
+export const PANEL_EVENT_LABELS_WRITTEN = "labels_written";
+
+export const NO_LOGS = "no_logs";
+
+export const OPERATIONALIZATION = "operationalization";
+
+export const PROJECT_NOT_OPEN = "project_not_open";
+
+export const REVISION_MOVED = "revision_moved";
+
+export const VERSION_CONFLICT = "version_conflict";
+
+export const RENDER_CACHE_VERSION = 7;
 
 export const TERMINAL_ENDED_CLOSE_CODE = 4000;
 
 export const IMAGE_ERROR_HEADER = "X-TCIP-Image-Error";
 
-export const SAVED_TO_HEADER = "X-TCIP-Saved-To";
+export const SERVED_SIZE_HEADER = "X-TCIP-Served-Size";
 
-export const VALIDATED_HEADER = "X-TCIP-Validated";
-
-export const ACKNOWLEDGED_BY_HEADER = "X-TCIP-Acknowledged-By";
+export const EXPORT_HEADER = "X-TCIP-Export";
 
 export const OVERVIEWS_REQUIRED = "overviews_required";
 
 export const NOT_FINITE_SUFFIX = "_state";
 
-export const VAL_METRIC_PREFIX = "val_";
-
-export const EPOCH_KEY = "epoch";
-
-export const STEP_KEY = "step";
-
-export const TIMESTAMP_KEY = "timestamp";
-
 export const PERSON_NAME_RULE =
   "^(?![ \\t\\n\\v\\f\\r\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]*user:[ \\t\\n\\v\\f\\r\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]*$)[ \\t\\n\\v\\f\\r\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]*(?:user:)?[ \\t\\n\\v\\f\\r\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]*([^ \\t\\n\\v\\f\\r\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\d\\D]*[^ \\t\\n\\v\\f\\r\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?)[ \\t\\n\\v\\f\\r\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]*$";
 
-export const TENSORBOARD_RELOAD_SELECTOR = "app-header-reload button.reload-button";
+export const UNDATED_BUCKET = "undated";
 
-export const PANEL_EVENT_LABELS_WRITTEN = "labels_written";
-export const PANEL_EVENT_ANNOTATE_FOCUS = "annotate_focus";
-export const PANEL_EVENT_CANVAS_STATE_REQUEST = "canvas_state_request";
+export const TENSORBOARD_RELOAD_SELECTOR = "app-header-reload button.reload-button";
 
 export const TAB_NAMES = ["setup", "annotate", "training", "inference", "results", "meta"] as const;
 
-export const PLATFORM_PANEL_EVENTS = [
-  "labels_written",
-  "annotate_focus",
-  "canvas_state_request",
-] as const;
+export const COMPOSITE_STRETCHES = ["minmax", "percent_clip"] as const;
 
 export const TERMINAL_STATES = ["canceled", "completed", "failed", "interrupted"] as const;
 
-export const ATTR_TYPES = ["categorical", "ordinal"] as const;
+export const METRICS_ROW_STAMPS = ["epoch", "timestamp", "step"] as const;
 
-export const AGENT_IDENTITY_FIELDS = [
-  "agent_client_name",
-  "agent_client_version",
-  "agent_session",
-  "terminal_session",
-] as const;
+export const ATTR_TYPES = ["categorical", "ordinal"] as const;
 
 export const FINISHED_STATES = ["complete", "negative"] as const;
 
@@ -64,9 +67,13 @@ export const CROSS_TILE_MERGE_DESCRIPTIONS: Record<string, string> = {
     "Join two matching boxes from neighboring tiles into one box taking both outlines, the surer box joining only boxes that match it directly",
 };
 
+export type CompositeStretch = "minmax" | "percent_clip";
+
 export type JobStatus = "pending" | "running" | "completed" | "failed" | "canceled";
 
 export type Panel = "setup" | "annotate" | "training" | "inference" | "results" | "meta" | "app";
+
+export type Projection = "curves" | "milestones";
 
 export type StretchMode = "minmax" | "percent_clip" | "none";
 
@@ -76,62 +83,177 @@ export type VerdictAction = "accepted" | "rejected";
 
 export type TerminalFrame = TerminalInputFrame | TerminalResizeFrame;
 
+export type PanelEvent = LabelsWritten | AnnotateFocus | CanvasStateRequest | Banner;
+
 export type InferenceFrame = InferenceJobFrame | MissingJobFrame;
 
 export type TensorboardLaunch = TensorboardServing | TensorboardFailure;
 
 export type Launched = RunLaunched | SweepLaunched;
 
-export interface LaunchPriorityQueuePayload {
-  checkpoint_path: string;
-  images_dir: string;
-  subject?: string | null;
-  scorer: ScorerSpec;
-  budget: number;
-  rationale: string;
+export interface DatasetTree {
+  dataset_root: string;
+  captures: Capture[];
+  subjects: string[];
+  subjects_by_date: Record<string, string[]>;
+  buckets_by_date: Record<string, string[]>;
+  label_problem: string | null;
 }
 
-export interface PriorityQueueJob {
-  job_id: string;
-  project: string;
-  checkpoint_path: string;
-  images_dir: string;
+export interface SelectAnswer {
+  selection: DatasetSelection;
+  annotations_present: boolean;
+  predictions_present: boolean;
+  label_problem: string | null;
+}
+
+export interface CaptureChoice {
+  dataset_root: string;
   subject: string | null;
-  scorer: ScorerSpec;
-  budget: number;
-  rationale: string;
+  date: string;
+  bucket: string | null;
+}
+
+export interface NavRequest {
+  current_image_index: number;
+}
+
+export interface ProjectsListing {
+  workspace: string;
+  open_id: string | null;
+  projects: ProjectSummary[];
+}
+
+export interface OpenAnswer {
+  project: SnapshotProject;
+}
+
+export interface OpenRequest {
+  id: string;
+  user: string;
+}
+
+export interface ProjectRemoval {
+  archive_path: string;
+  archive_name: string;
+}
+
+export interface RemovalRequest {
+  id: string;
+  confirm_name: string;
+  user: string;
+}
+
+export interface RecordCorrection {
+  record: ProjectRecord;
+  previous: ProjectRecord;
+}
+
+export interface RenameRequest {
+  id: string;
+  display_name: string;
+  user: string;
+}
+
+export interface InvariancesRequest {
+  id: string;
+  invariances: CaptureInvariances;
+  user: string;
+}
+
+export interface TerminalStatus {
+  providers: ProviderStatus[];
+}
+
+export interface TerminalLaunch {
+  session_id: string;
+  launched: LaunchedProgram;
+}
+
+export interface CreateSessionRequest {
+  provider: string;
+  rows: number;
+  cols: number;
+  user: string;
+}
+
+export interface TerminalEnd {
+  undelivered: string[];
+}
+
+export interface EndSessionRequest {
+  user: string;
+}
+
+export interface SessionOrientation {
+  text: string | null;
+}
+
+export interface SessionStartReport {
+  conversation: string;
+  source: "startup" | "resume" | "clear" | "compact" | "fork";
+}
+
+export interface SubmitRequest {
+  text: string;
+}
+
+export interface ViewReads {
+  reads: ServingCell[];
+}
+
+export interface ImageBands {
+  band_count: number;
+  bands: ImageBand[];
+  plain: boolean;
+  default_bands: string[];
+  default_stretch: "minmax" | "percent_clip";
+  pixel_fraction: number | null;
+  seed: number | null;
+  overview_size: [number, number] | null;
+  sampled: boolean;
+}
+
+export interface OverviewJob {
+  job_id: string;
   status: "pending" | "running" | "completed" | "failed" | "canceled";
   error: string | null;
-  queue: Record<string, unknown>[];
-  total_candidates: number;
-  reviewed_skipped: number;
+  path: string;
+  bytes_written: number;
+  live: boolean;
 }
 
-export interface ScorerSpec {
+export interface OverviewBuildPayload {
+  path: string;
+}
+
+export interface LabelDocumentAnswer {
+  image_path: string;
+  img_width: number;
+  img_height: number;
+  annotations: ServedAnnotation[];
+  completion: Record<string, "complete" | "negative" | "partial" | "unannotated">;
+  flags: ServedFlag[];
+  base_mtime: string;
   name: string;
-  [key: string]: unknown;
 }
 
-export interface SegmenterPrompt {
-  points?: [number, number][];
-  boxes?: [number, number, number, number][];
+export interface SavedLabels {
+  document: LabelDocumentAnswer;
+  accepted: Record<string, number>;
 }
 
-export interface ProposePayload {
+export interface SavePayload {
   image_path: string;
-  subject: string;
+  annotations: AnnotationPayload[];
+  base_mtime: string | null;
   user: string;
-  prompt: SegmenterPrompt;
+  gestures: Gestures;
 }
 
-export interface FindPayload {
-  image_path: string;
-  phrase: string;
-  user: string;
-}
-
-export interface FindAnswer {
-  boxes: [number, number, number, number][];
+export interface ServedProposals {
+  operating_point: OperatingPoint;
+  proposals: ServedProposal[];
 }
 
 export interface ImageStagings {
@@ -142,35 +264,275 @@ export interface ImageStates {
   states: Record<string, "complete" | "negative" | "partial" | "unannotated">;
 }
 
-export interface ProposeAnswer {
-  bucket: string | null;
+export interface Staged {
+  image_path: string;
+  bucket: string;
+  summary: string;
   proposal_count: number;
 }
 
-export interface CanvasStatePayload {
-  tab: "setup" | "annotate" | "training" | "inference" | "results" | "meta";
+export interface ProposePayload {
   image_path: string;
-  image: string;
-  img_width: number;
-  img_height: number;
-  viewport: Viewport | null;
-  mode: "box" | "polygon" | "point";
-  active_subject: string | null;
-  cut_armed: boolean;
-  dirty: boolean;
+  subject: string;
   user: string;
-  classes: Record<string, unknown>[];
-  counts: Record<string, number>;
-  project_id: string;
-  shapes: (CanvasBox | CanvasPoint | CanvasPolygon | CanvasPolyline)[] | null;
+  prompt: SegmenterPrompt;
 }
 
-export interface ImageEntry {
-  contribution_id: string;
-  image_name: string;
-  seconds: number;
-  annotations_added: number;
-  activity: "new_annotation" | "review" | "negative_confirmation";
+export interface FindAnswer {
+  boxes: [number, number, number, number][];
+}
+
+export interface FindPayload {
+  image_path: string;
+  phrase: string;
+  user: string;
+}
+
+export interface PriorityQueueJob {
+  job_id: string;
+  status: "pending" | "running" | "completed" | "failed" | "canceled";
+  error: string | null;
+  project: string;
+  checkpoint_path: string;
+  images_dir: string;
+  subject: string | null;
+  ranked: ReviewQueue | null;
+  live: boolean;
+}
+
+export interface LaunchPriorityQueuePayload {
+  checkpoint_path: string;
+  scorer: ScorerSpec;
+  budget: number;
+  rationale: string;
+}
+
+export interface SplitChoices {
+  as_recorded: AsRecordedChoice;
+  selections: SelectionChoice[];
+}
+
+export interface RunLaunched {
+  experiment_id: string;
+  output_dir: string;
+  tensorboard: TensorboardServing | TensorboardFailure;
+  pid: number;
+  overfit_check: Record<string, unknown> | null;
+  warnings: string[];
+}
+
+export interface SweepLaunched {
+  sweep_id: string;
+  warnings: string[];
+}
+
+export interface RelaunchPayload {
+  relaunched_from: string;
+  selection_dir: string | null;
+  user: string;
+}
+
+export interface TrainingListing {
+  runs: RunRow[];
+  sweeps: SweepGroup[];
+}
+
+export interface TrainingDetail {
+  run: RunRow | null;
+  sweep: SweepGroup | null;
+  tensorboard: TensorboardServing | null;
+}
+
+export interface TensorboardServing {
+  url: string;
+  port: number;
+}
+
+export interface TensorboardFailure {
+  error: string;
+  output: string | null;
+}
+
+export type EmptyBodyPayload = Record<string, never>;
+
+export interface PersonPayload {
+  user: string;
+}
+
+export interface Comparison {
+  experiments: (ComparedRun | UncomparedRun)[];
+  dataset_fingerprints: "same" | "different" | "unread" | "unset";
+  higher_is_better: Record<string, boolean | null>;
+}
+
+export interface ExperimentComparePayload {
+  experiment_ids: string[];
+}
+
+export interface Ranking {
+  entry: RegistryEntry;
+  facts: CheckpointFacts;
+  metric: string;
+  higher_is_better: boolean;
+  direction_source: "stated" | "declared";
+  unregistered: string[];
+  skipped: Skipped[];
+}
+
+export interface CompareBestPayload {
+  experiment_ids: string[];
+  metric: string;
+  higher_is_better: boolean | null;
+  include_unverified: boolean;
+}
+
+export interface InferenceJob {
+  job_id: string;
+  status: "pending" | "running" | "completed" | "failed" | "canceled";
+  error: string | null;
+  project: string;
+  checkpoint_path: string;
+  images_dir: string;
+  bucket: string;
+  actor: string;
+  stated: Stated;
+  assessment_id: string | null;
+  total: number;
+  done: number;
+  live: boolean;
+}
+
+export interface LaunchInferencePayload {
+  checkpoint_path: string;
+  dataset_root: string;
+  date: string;
+  bucket_name: string;
+  stated: Stated;
+  assessment_id: string | null;
+  user: string;
+}
+
+export interface InferenceJobs {
+  jobs: InferenceJob[];
+}
+
+export interface ServedMapping {
+  name: string;
+  per_date: Record<string, DateCounts>;
+  images_unattributed: number;
+  unreadable: Record<string, string[]>;
+  match_radius: Record<string, MatchRadius>;
+}
+
+export interface BuildMappingPayload {
+  name: string;
+  dataset_root: string;
+  plant_registry: string;
+  dates: string[] | null;
+  match_radius: StatedRadius | null;
+  supersede: boolean;
+  user: string;
+}
+
+export interface LoadMappingPayload {
+  name: string;
+}
+
+export interface MappingNames {
+  names: string[];
+}
+
+export interface PhenologyAnswer {
+  revision: TraitRevisionRef;
+  curves: CurveRow[];
+  milestones: MilestoneRow[];
+  unvalidated: PhenologyRefusal | null;
+  positive_class_assessed: boolean;
+  plant_mapping: PlantMappingDisclosure;
+}
+
+export interface PhenologyPayload {
+  mapping_name: string;
+  dataset_root: string;
+  buckets: string[];
+  trait: string;
+  plants: string[];
+  show_unvalidated: boolean;
+}
+
+export interface ExportCsvPayload {
+  mapping_name: string;
+  dataset_root: string;
+  buckets: string[];
+  trait: string;
+  plants: string[];
+  payload: "curves" | "milestones";
+  user: string;
+  acknowledgment: AcknowledgmentPayload | null;
+}
+
+export interface ExportCountCsvPayload {
+  delivery: PerImageCountDelivery | OrthomosaicPlantCountsDelivery;
+  filename: string;
+  user: string;
+  acknowledgment: AcknowledgmentPayload | null;
+}
+
+export interface DeliveryEvents {
+  records: ServedDeliveryEvent[];
+}
+
+export interface TraitsListing {
+  traits: ServedTrait[];
+  unreadable: UnreadableTrait[];
+  definitions: Record<string, string>;
+}
+
+export interface ConfirmedRevision {
+  revision: ServedRevision;
+  audit_warning: string | null;
+}
+
+export interface ConfirmRevisionPayload {
+  trait: string;
+  revision: number;
+  entry_sha256: string;
+  user: string;
+  confirmed: boolean;
+}
+
+export interface Assessments {
+  assessments: AssessmentSummary[];
+}
+
+export interface RegisteredModels {
+  models: Listed[];
+  available_metrics: AvailableMetric[];
+}
+
+export interface SubjectsLoad {
+  subjects: RegistrySubjects | null;
+  discovered: string[];
+  version: string | null;
+  unreadable: string[];
+}
+
+export interface RegistrySave {
+  subjects_path: string;
+  n_subjects: number;
+  version: string;
+}
+
+export interface SaveSubjectsPayload {
+  subjects: RegistrySubjects;
+  dataset_root: string;
+  version: string | null;
+  user: string;
+}
+
+export interface SessionWrite {
+  status: "ok" | "noop";
+  session: SessionPlace | null;
 }
 
 export interface ImageEventPayload {
@@ -189,116 +551,113 @@ export interface SessionRef {
   started: string;
 }
 
-export interface SessionPlace {
-  started: string;
-  ended: boolean;
+export interface SessionsListing {
+  sessions: SessionSummary[];
 }
 
-export interface SessionWrite {
-  status: "ok" | "noop";
-  session: SessionPlace | null;
+export interface MemoryPage_FrictionReport_ {
+  entries: MemoryEntry_FrictionReport_[];
+  total_available: number;
 }
 
-export interface SessionSummary {
+export interface MemoryPage_Retrospective_ {
+  entries: MemoryEntry_Retrospective_[];
+  total_available: number;
+}
+
+export interface CanvasStatePayload {
+  tab: "setup" | "annotate" | "training" | "inference" | "results" | "meta";
+  image_path: string;
+  viewport: Viewport | null;
+  mode: "box" | "polygon" | "point";
+  active_subject: string | null;
+  cut_armed: boolean;
+  dirty: boolean;
   user: string;
-  started: string;
-  ended: string | null;
-  entries: ImageEntry[];
-  images_annotated: number;
-  total_annotations: number;
-  total_time_seconds: number;
-  seconds_by_activity: Record<string, number>;
-  avg_seconds_per_annotation: number | null;
+  classes: CanvasClass[];
+  counts: Record<string, number>;
+  project_id: string;
+  shapes: (CanvasBox | CanvasPoint | CanvasPolygon | CanvasPolyline)[] | null;
 }
 
-export interface ServingCell {
-  name: string;
-  level: number;
-  x0: number;
-  y0: number;
-  x1: number;
-  y1: number;
-  nx0: number;
-  ny0: number;
-  nx1: number;
-  ny1: number;
+export interface GuiState {
+  active_tab: "setup" | "annotate" | "training" | "inference" | "results" | "meta";
+  view: ViewState;
+  mode: "box" | "polygon" | "point";
+  active_subject: string | null;
+  dataset: DatasetSelection | null;
 }
 
-export interface ViewReads {
-  reads: ServingCell[];
+export interface ActiveTabPayload {
+  active_tab: "setup" | "annotate" | "training" | "inference" | "results" | "meta";
 }
 
-export interface RunRow {
-  experiment_id: string;
-  state: string;
-  created: string;
-  relaunched_from: string | null;
-  sweep: string | null;
-  trial_params: Record<string, unknown> | null;
-  builder: string;
-  task: string;
-  images_dir: string | null;
-  current_epoch: number | null;
-  best_metric: number | null;
-  best_metric_name: string | null;
-  output_dir: string;
-  status_error: string | null;
-  heartbeat: string;
-  launch: Record<string, string | null> | null;
+export interface PanelPost {
+  event: LabelsWritten | AnnotateFocus | CanvasStateRequest | Banner;
+  project_id: string;
 }
 
-export interface SweepGroup {
-  sweep_id: string;
-  state: string;
-  status_error: string | null;
-  input: SweepInput;
-  cancel_requested: boolean;
-  heartbeat: string;
-  trials: RunRow[];
-  outcome: Record<string, unknown>;
+export interface VersionConflictRefusal {
+  kind: "version_conflict";
+  message: string;
 }
 
-export interface TrainingDetail {
-  run: RunRow | null;
-  sweep: SweepGroup | null;
-  tensorboard: TensorboardServing | null;
+export interface OperationalizationRefusal {
+  kind: "operationalization";
+  message: string;
 }
 
-export interface TrainingListing {
-  runs: RunRow[];
-  sweeps: SweepGroup[];
+export interface DeliveryRefusal {
+  kind: "delivery";
+  message: string;
+  result_sha256: string | null;
 }
 
-export interface TensorboardServing {
-  url: string;
-  port: number;
+export interface RevisionMovedRefusal {
+  kind: "revision_moved";
+  message: string;
+  record: ServedTrait;
 }
 
-export interface TensorboardFailure {
-  error: string;
-  output: string | null;
+export interface BucketExistsRefusal {
+  kind: "bucket_exists";
+  message: string;
+  job: InferenceJob;
 }
 
-export interface RunLaunched {
-  experiment_id: string;
-  status: "launched";
-  output_dir: string;
-  tensorboard: TensorboardServing | TensorboardFailure;
-  pid: number;
-  overfit_check: Record<string, unknown> | null;
-  warnings: string[];
+export interface AuditGapRefusal {
+  kind: "audit_entry_not_written";
+  message: string;
+  committed: unknown;
 }
 
-export interface SweepLaunched {
-  sweep_id: string;
-  status: "launched";
-  warnings: string[];
+export interface ProjectNotOpenRefusal {
+  kind: "project_not_open";
+  message: string;
+  open_project_id: string;
+}
+
+export interface NoLogsRefusal {
+  kind: "no_logs";
+  message: string;
+}
+
+export interface SavedExport {
+  saved_path: string;
+  filename: string;
+}
+
+export interface CountExport {
+  saved_path: string;
+  validated: boolean;
+  acknowledged_by: string | null;
+  filename: string;
 }
 
 export interface TrainingRowFrame {
   type: "metric" | "batch";
   experiment_id: string;
-  row: Record<string, unknown>;
+  row: MetricsRow;
 }
 
 export interface TrainingStatusFrame {
@@ -319,140 +678,55 @@ export interface TerminalResizeFrame {
   cols: number;
 }
 
-export interface CreateSessionRequest {
-  provider: string;
-  rows?: number;
-  cols?: number;
-  user: string;
+export interface InferenceJobFrame {
+  type: "progress" | "final";
+  job: InferenceJob;
 }
 
-export interface LaunchedProgram {
-  provider: string;
-  argv: string[];
-  version: string | null;
-  confinement: string | null;
-  prepared: string[];
-  resumed: string | null;
+export interface MissingJobFrame {
+  type: "final";
+  error: string;
 }
 
-export interface TerminalLaunch {
-  session_id: string;
-  launched: LaunchedProgram;
+export interface AnnotateFocus {
+  dataset_root: string;
+  subject: string;
+  date: string;
+  bucket: string | null;
+  event_type: "annotate_focus";
+  image_index: number;
+  mode: "box" | "polygon" | "point";
+  proposal: ProposalTarget | null;
 }
 
-export interface ProviderStatus {
-  id: string;
+export interface LabelsWritten {
+  event_type: "labels_written";
+  image_path: string;
   name: string;
-  unavailable_reason: string | null;
 }
 
-export interface TerminalStatus {
-  providers: ProviderStatus[];
+export interface CanvasStateRequest {
+  event_type: "canvas_state_request";
 }
 
-export interface SubmitRequest {
+export interface Banner {
+  event_type: "banner";
   text: string;
 }
 
-export interface EndSessionRequest {
-  user: string;
+export interface PanelEnvelope {
+  panel: "setup" | "annotate" | "training" | "inference" | "results" | "meta" | "app";
+  event: LabelsWritten | AnnotateFocus | CanvasStateRequest | Banner;
+  event_id: string;
+  identity: RecordedIdentity;
 }
 
-export interface TerminalEnd {
-  undelivered: string[];
-}
-
-export interface CaptureInvariances {
-  horizontal_flip: boolean;
-  vertical_flip: boolean;
-  rotation: number;
-  color: boolean;
-  intensity: boolean;
-  scale: boolean;
-}
-
-export interface ProjectSummary {
-  id: string | null;
-  display_name: string | null;
-  site: string | null;
-  invariances: CaptureInvariances | null;
-  record_problem: string | null;
-  path: string;
-  created: number;
-  modified: number;
-  dates: string[];
-  subjects: string[];
-  subjects_by_date: Record<string, string[]>;
-  buckets_by_date: Record<string, string[]>;
-  image_count: number;
-  label_problem: string | null;
-}
-
-export interface OpenRequest {
-  id: string;
-  user: string;
-}
-
-export interface OpenAnswer {
-  project: SnapshotProject;
-  display_name: string;
-}
-
-export interface RemovalRequest {
-  id: string;
-  confirm_name: string;
-  user: string;
-}
-
-export interface RenameRequest {
-  id: string;
-  display_name: string;
-  user: string;
-}
-
-export interface InvariancesRequest {
-  id: string;
-  invariances: CaptureInvariances;
-  user: string;
-}
-
-export interface InvariancesCorrection {
-  id: string;
-  invariances: CaptureInvariances;
-  previous_invariances: CaptureInvariances;
-}
-
-export interface PhenologyPayload {
-  mapping_name: string;
-  dataset_root: string;
-  buckets: string[];
-  trait: string;
-  plants: string[];
-  show_unvalidated?: boolean;
-}
-
-export interface RegisteredModel {
-  name: string;
-  checkpoint_path: string;
-  sha256: string;
-  tags: string[];
-  experiment_id: string | null;
-}
-
-export interface RegisteredModels {
-  models: RegisteredModel[];
-}
-
-export interface AssessmentSummary {
-  assessment_id: string;
-  checkpoint_sha256: string | null;
-  experiment_id: string | null;
-  delivery_kind: string | null;
-  passed: boolean;
-}
-
-export interface Assessments {
-  assessments: AssessmentSummary[];
+export interface Acknowledgment {
+  acknowledgment_id: string;
+  acknowledged_by: string;
+  reason: string;
+  result_sha256: string;
+  recorded_at: string;
 }
 
 export interface AcknowledgmentPayload {
@@ -460,99 +734,69 @@ export interface AcknowledgmentPayload {
   result_sha256: string;
 }
 
-export interface ExportCsvPayload {
-  mapping_name: string;
-  dataset_root: string;
-  buckets: string[];
-  trait: string;
-  plants: string[];
-  payload: "curves" | "milestones";
-  filename?: string | null;
-  user: string;
-  acknowledgment?: AcknowledgmentPayload | null;
-}
-
-export interface PerImageCountDelivery {
-  kind: "per_image_count";
-  dataset_root: string;
-  bucket: string;
-  trait: string;
-}
-
-export interface OrthomosaicPlantCountsDelivery {
-  kind: "orthomosaic_plant_counts";
-  dataset_root: string;
-  bucket: string;
-  plant_registry: string;
-  delivered_phenotype: string;
-  plants: string[];
-  crop?: string;
-  pipeline_version?: string;
-  canopy_subject?: string;
-  position_error_m?: number | null;
-}
-
-export interface ExportCountCsvPayload {
-  delivery: PerImageCountDelivery | OrthomosaicPlantCountsDelivery;
-  filename: string;
-  user: string;
-  acknowledgment?: AcknowledgmentPayload | null;
-}
-
-export interface MatchTolerance {
-  value: number;
-  source: "grid_pitch" | "stated" | "stated_capped";
-}
-
-export interface MatchRadius {
-  value: number;
-  source: "h_pos_err" | "stated";
-  rationale: string | null;
-}
-
-export interface StatedRadius {
-  value: number;
-  rationale: string;
-}
-
-export interface BuildMappingPayload {
-  name: string;
-  dataset_root: string;
-  plant_registry: string;
-  dates?: string[] | null;
-  match_radius?: StatedRadius | null;
-  supersede?: boolean;
-  user: string;
-}
-
-export interface PlantRegistryReference {
-  name: string;
-  digest: string;
-}
-
-export interface PlantRegistryDisclosure {
-  plant_registry: PlantRegistryReference;
-  raster_identity: RasterIdentity;
-  nn_tolerance_m: MatchTolerance;
-  detections_unattributed: number;
-  detections_unattributed_scope: "delivered_raster";
-  plant_attribution: string;
-  plants_outside_raster: string[];
-}
-
-export interface CanopySegmentsDocument {
-  capture: string;
-  stem: string;
-  sha256: string;
+export interface AnnotationPayload {
   subject: string;
-  n_segments: number;
+  bbox: unknown;
+  points: unknown;
+  rings: unknown;
+  point: unknown;
+  attributes: unknown;
+  iscrowd: unknown;
 }
 
-export interface SegmentTieDisclosure {
-  segment_index: number;
-  plant_id: string;
-  clearance_m: number;
+export interface AsRecordedChoice {
+  case: "bound" | "drawn";
+  line: string;
+  reason: string | null;
 }
+
+export interface Assessment {
+  assessment_id: string;
+  recorded_at: string;
+  delivery_kind: string | null;
+  revision: TraitRevisionRef;
+  producer: Producer | null;
+  execution: Execution | null;
+  rationale: string | null;
+  reference: Reference;
+  disjointness: Record<string, unknown>;
+  criterion: Record<string, unknown>;
+  scale: Record<string, unknown> | null;
+  failures: string[];
+}
+
+export interface AssessmentSummary {
+  assessment: Assessment;
+  passed: boolean;
+}
+
+export type Authorship = "person" | "tool_accepted" | "tool" | "unattributed";
+
+export interface AvailableMetric {
+  metric: string;
+  role: "comparability_only" | "unlabeled";
+  higher_is_better: boolean | null;
+  sources: MetricsSource[];
+}
+
+export interface BucketFinding {
+  dataset_root: string;
+  bucket: string;
+  date: string | null;
+  assessment_id: string | null;
+  validated: boolean;
+  reason: string | null;
+}
+
+export type ByName_Attribute_ = Record<
+  string,
+  { type: "categorical" | "ordinal"; values: string[] }
+>;
+
+export type ByName_Subject__MinLen_min_length_1_ = Record<
+  string,
+  { description: string; attributes?: ByName_Attribute_ }
+>;
 
 export interface CanopySegmentDisclosure {
   plant_registry: PlantRegistryReference;
@@ -567,50 +811,144 @@ export interface CanopySegmentDisclosure {
   plants_with_ambiguous_detections: string[];
   detections_unattributed: number;
   detections_unattributed_by_source: Record<string, number>;
-  detections_unattributed_scope: "delivered_raster";
   plant_attribution: string;
 }
 
-export interface Producer {
-  checkpoint_sha256: string;
-  experiment_id: string | null;
+export interface CanopySegmentsDocument {
+  capture: string;
+  stem: string;
+  sha256: string;
+  subject: string;
+  n_segments: number;
 }
 
-export interface BucketFinding {
-  dataset_root: string;
-  bucket: string;
-  date: string | null;
-  assessment_id: string | null;
-  validated: boolean;
-  reason: string | null;
+export interface CanvasBox {
+  color: string;
+  tag: string;
+  dash: [number, number] | null;
+  casing: CanvasUnderStroke | null;
+  halo: CanvasUnderStroke | null;
+  label: string | null;
+  kind: "box";
+  xyxy: [number, number, number, number];
+  fill: boolean;
 }
 
-export interface Acknowledgment {
-  acknowledgment_id: string;
-  acknowledged_by: string;
-  reason: string;
-  result_sha256: string;
-  recorded_at: string;
-}
-
-export interface ServedPlantMappingDisclosure {
+export interface CanvasClass {
   name: string;
-  dataset_id: string;
-  dataset_root: string;
-  built_at: string;
-  record_sha256: string;
-  match_radius: Record<string, MatchRadius>;
-  capture_digests: Record<string, Record<string, string>>;
-  captures_unverified: string[];
-  plant_csvs_unverified: string[];
-  dates_delivered: string[];
-  images_unattributed: number;
-  images_unattributed_scope: "delivered_dates";
-  plant_attribution: string;
-  resolved_key: string | null;
+  color: string;
 }
 
-export interface ServedDeliveryEvent {
+export interface CanvasPoint {
+  color: string;
+  tag: string;
+  dash: [number, number] | null;
+  casing: CanvasUnderStroke | null;
+  halo: CanvasUnderStroke | null;
+  label: string | null;
+  kind: "point";
+  points: [[number, number]];
+}
+
+export interface CanvasPolygon {
+  color: string;
+  tag: string;
+  dash: [number, number] | null;
+  casing: CanvasUnderStroke | null;
+  halo: CanvasUnderStroke | null;
+  label: string | null;
+  kind: "polygon";
+  points: [number, number][];
+  fill: boolean;
+}
+
+export interface CanvasPolyline {
+  color: string;
+  tag: string;
+  dash: [number, number] | null;
+  casing: CanvasUnderStroke | null;
+  halo: CanvasUnderStroke | null;
+  label: string | null;
+  kind: "polyline";
+  points: [number, number][];
+  vertices: boolean;
+}
+
+export interface CanvasUnderStroke {
+  color: string;
+  opacity: number;
+  width_factor: number;
+}
+
+export interface Capture {
+  name: string;
+  date: string | null;
+}
+
+export interface CaptureImage {
+  path: string;
+  name: string;
+}
+
+export interface CaptureInvariances {
+  horizontal_flip: boolean;
+  vertical_flip: boolean;
+  rotation: number;
+  color: boolean;
+  intensity: boolean;
+  scale: boolean;
+}
+
+export interface CheckpointFacts {
+  metrics: Record<string, unknown>;
+  metrics_source: MetricsSource | null;
+}
+
+export interface ComparedRun {
+  run: RunRow;
+  n_epochs: number;
+  last_logged_metrics: MetricsRow | null;
+  rows_after_end: number | null;
+  registry: Listed[];
+  split: SplitColumn;
+  subject: string | null;
+  dataset_id: string | null;
+  dataset_fingerprint: string | null;
+}
+
+export interface Crossing {
+  date: string;
+  bound: CrossingBound;
+  gap_days: number | null;
+}
+
+export type CrossingBound = "exact" | "left_censored" | "interpolated" | "right_censored";
+
+export interface CurveRow {
+  plant_id: string;
+  accession: string | null;
+  capture: string;
+  n_images: number;
+  n_total: number;
+  n_positive: number;
+  n_unclassified: number;
+  n_missing: number;
+  ratio: number | null;
+}
+
+export interface DateCounts {
+  n_images: number;
+  n_unattributed: number;
+  avg_distance_m: number | null;
+  n_mapped: number;
+}
+
+export interface Decisions {
+  bucket: string;
+  verdicts: Record<string, "accepted" | "rejected">;
+}
+
+export interface DeliveryEventRecord {
   trait: string;
   trait_revision: number;
   trait_revision_sha256: string;
@@ -625,13 +963,159 @@ export interface ServedDeliveryEvent {
   validated: boolean;
   acknowledgment: Acknowledgment | null;
   population: string[];
-  plant_mapping:
-    ServedPlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure | null;
+  plant_mapping: PlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure | null;
   produced_at: string;
 }
 
-export interface DeliveryEvents {
-  records: ServedDeliveryEvent[];
+export interface DrawGroup {
+  point: Record<string, unknown>;
+  block: DrawSpread;
+  eligible: boolean;
+}
+
+export interface DrawSpread {
+  seeds: (number | null)[];
+  values: number[];
+  mean: number | null;
+  std: number | null;
+  min: number | null;
+  max: number | null;
+  n: number;
+  n_complete: number;
+  seeds_complete: (number | null)[];
+}
+
+export interface Execution {
+  conf: number | null;
+  density: number | null;
+  masks: boolean;
+  mask_cut: MaskCut | null;
+  tile_size: number | null;
+  overlap: number | null;
+  tile_resize: [number, number] | null;
+  postprocess: string | null;
+  cross_tile_nms: number | null;
+  sahi_version: string | null;
+  rationale: string | null;
+  sources: Record<string, string>;
+}
+
+export interface FlagRequest {
+  text: string;
+  target: PointTarget | ProposalTarget | null;
+}
+
+export interface FrictionReport {
+  timestamp: string;
+  category:
+    | "missing_tool"
+    | "ambiguous_data"
+    | "cant_find_file"
+    | "confused_about_domain"
+    | "failed_repeatedly"
+    | "needs_human_judgment"
+    | "unexpected_behavior";
+  detail: string;
+  context: Record<string, unknown>;
+  user_disagreement: boolean;
+}
+
+export interface Gestures {
+  decide: Decisions | null;
+  confirm: number[];
+  complete: Record<string, boolean>;
+  rect: [number, number, number, number] | null;
+  proposals_hidden: boolean;
+  flag: FlagRequest[];
+  resolve: Record<string, string>;
+}
+
+export interface ImageBand {
+  name: string;
+  wavelength_nm: number | null;
+  dtype: string;
+  min: number;
+  max: number;
+  interpretation: string | null;
+}
+
+export interface ImageEntry {
+  contribution_id: string;
+  image_name: string;
+  seconds: number;
+  annotations_added: number;
+  activity: "new_annotation" | "review" | "negative_confirmation";
+}
+
+export interface Key {
+  store: string;
+  root: string;
+  parts: string[];
+}
+
+export interface LaunchedProgram {
+  provider: string;
+  argv: string[];
+  version: string | null;
+  confinement: string | null;
+  prepared: string[];
+  resumed: string | null;
+}
+
+export interface Listed {
+  entry: RegistryEntry;
+  facts: CheckpointFacts;
+}
+
+export interface MaskCut {
+  mask_binarize: number;
+  vertex_spacing: number;
+}
+
+export interface MatchRadius {
+  value: number;
+  source: "h_pos_err" | "stated";
+  rationale: string | null;
+}
+
+export interface MatchTolerance {
+  value: number;
+  source: "grid_pitch" | "stated" | "stated_capped";
+}
+
+export interface MemoryEntry_FrictionReport_ {
+  id: string;
+  record: FrictionReport | Unreadable;
+}
+
+export interface MemoryEntry_Retrospective_ {
+  id: string;
+  record: Retrospective | Unreadable;
+}
+
+export interface MetricsRow {
+  epoch: number;
+  timestamp: string;
+  step: number | null;
+  [key: string]: unknown;
+}
+
+export type MetricsSource = "trainer" | "training_source" | "caller";
+
+export interface MilestoneRow {
+  plant_id: string;
+  accession: string | null;
+  n_dates: number;
+  n_observed_dates: number;
+  n_dates_unclassified: number;
+  n_dates_missing_images: number;
+  milestones: Record<string, Crossing | null>;
+  complete: boolean;
+}
+
+export interface OperatingPoint {
+  conf: number | null;
+  reason: string | null;
 }
 
 export interface Operationalization {
@@ -642,9 +1126,418 @@ export interface Operationalization {
   delivered_value_keys: string[];
 }
 
+export interface OrthomosaicPlantCountsDelivery {
+  kind: "orthomosaic_plant_counts";
+  dataset_root: string;
+  bucket: string;
+  plant_registry: string;
+  delivered_phenotype: string;
+  plants: string[];
+  crop: string;
+  pipeline_version: string;
+  canopy_subject: string;
+  position_error_m: number | null;
+}
+
+export interface PerImageCountDelivery {
+  kind: "per_image_count";
+  dataset_root: string;
+  bucket: string;
+  trait: string;
+}
+
+export interface PhenologyRefusal {
+  message: string;
+  digests: ProjectionDigests;
+}
+
+export interface PlantMappingDisclosure {
+  name: string;
+  dataset_id: string;
+  dataset_root: string;
+  built_at: string;
+  record_sha256: string;
+  match_radius: Record<string, MatchRadius>;
+  capture_digests: Record<string, Record<string, string>>;
+  captures_unverified: string[];
+  plant_csvs_unverified: string[];
+  dates_delivered: string[];
+  images_unattributed: number;
+  plant_attribution: string;
+}
+
+export interface PlantRegistryDisclosure {
+  plant_registry: PlantRegistryReference;
+  raster_identity: RasterIdentity;
+  nn_tolerance_m: MatchTolerance;
+  detections_unattributed: number;
+  plant_attribution: string;
+  plants_outside_raster: string[];
+}
+
+export interface PlantRegistryReference {
+  name: string;
+  digest: string;
+}
+
+export interface PointTarget {
+  point: [number, number];
+  subject: string;
+}
+
 export interface PositiveState {
   attribute: string;
   value: string;
+}
+
+export interface Producer {
+  checkpoint_sha256: string;
+  experiment_id: string | null;
+}
+
+export interface ProjectRecord {
+  id: string;
+  display_name: string;
+  site: string;
+  invariances: CaptureInvariances;
+}
+
+export interface ProjectSummary {
+  record: ProjectRecord | null;
+  record_problem: string | null;
+  modified: number;
+  tree: DatasetTree;
+  image_count: number;
+}
+
+export interface ProjectionDigests {
+  curves: string;
+  milestones: string;
+}
+
+export interface ProposalTarget {
+  bucket: string;
+  index: number;
+}
+
+export interface ProviderStatus {
+  id: string;
+  name: string;
+  unavailable_reason: string | null;
+}
+
+export interface QueueEntry {
+  image: string;
+  score: number;
+  reference_member: boolean | null;
+}
+
+export interface RasterIdentity {
+  width: number;
+  height: number;
+  num_channels: number;
+  dtype: string;
+  pixel_checksum: string;
+  seed: number;
+  window_size: number;
+  max_windows: number;
+  pixel_fraction: number;
+  band_interpretations: string[] | null;
+  geotransform: Record<string, unknown> | null;
+}
+
+export interface RecordedIdentity {
+  agent_client_name: string | null;
+  agent_client_version: string | null;
+  agent_session: string | null;
+  terminal_session: string | null;
+}
+
+export interface Reference {
+  selection_dir: string | null;
+  raster_identity: RasterIdentity | null;
+  dataset_id: string | null;
+  ground_truth: RetainedFile[];
+  samples: ReferenceSample[];
+}
+
+export interface ReferenceSample {
+  sample: Sample;
+  source_digest: string;
+}
+
+export interface RegistryEntry {
+  name: string;
+  checkpoint_path: string;
+  sha256: string;
+  registered_at: string;
+  metrics: Record<string, unknown>;
+  tags: string[];
+  experiment_id: string | null;
+}
+
+export type RegistrySubjects = ByName_Subject__MinLen_min_length_1_;
+
+export interface Resolution {
+  by: string;
+  at: string;
+  reply: string;
+  removed: boolean;
+}
+
+export interface RetainedFile {
+  ground_truth: StoredLabelKey | string;
+  digest: string;
+  copy: string;
+}
+
+export interface Retrospective {
+  timestamp: string;
+  project_id: string;
+  task: string;
+  worked: string;
+  did_not_work: string;
+  assumptions_wrong: string;
+  knowledge_for_future: string;
+  missing_or_hard_tools: string;
+  would_do_differently: string;
+}
+
+export interface ReviewQueue {
+  scorer: ScorerSpec;
+  budget: number;
+  rationale: string;
+  task: string;
+  total_candidates: number;
+  reviewed_skipped: number;
+  queue: QueueEntry[];
+}
+
+export interface RunRow {
+  experiment_id: string;
+  state: string;
+  created: string;
+  relaunched_from: string | null;
+  sweep: string | null;
+  trial_params: Record<string, unknown> | null;
+  builder: string;
+  task: string;
+  images_dir: string | null;
+  current_epoch: number | null;
+  best_metric: number | null;
+  best_metric_name: string | null;
+  output_dir: string;
+  status_error: string | null;
+  heartbeat: string;
+  launch: RecordedIdentity | null;
+}
+
+export interface Sample {
+  member: string;
+  source: string;
+  ground_truth: StoredLabelKey | string;
+  group: string;
+  side: "train" | "val" | "calibration" | "holdout";
+  rect?: [number, number, number, number] | null;
+  row_key?: string | null;
+  ground_truth_digest?: string | null;
+}
+
+export interface ScorerSpec {
+  name: string;
+  [key: string]: unknown;
+}
+
+export interface SegmentTieDisclosure {
+  segment_index: number;
+  plant_id: string;
+  clearance_m: number;
+}
+
+export interface SegmenterPrompt {
+  points: [number, number][];
+  boxes: [number, number, number, number][];
+}
+
+export interface SelectionChoice {
+  selection_dir: string;
+  reason: string | null;
+  seed: number | null;
+  group_by: string | null;
+  train: number;
+  val: number;
+  calibration: number;
+  replaced_split_keys: string[];
+}
+
+export interface ServedAnnotation {
+  subject: string;
+  attributes: Record<string, string>;
+  iscrowd: boolean;
+  bbox: [number, number, number, number] | null;
+  rings: [number, number][][] | null;
+  point: [number, number] | null;
+  score: number | null;
+  created_by: string | null;
+  created_at: string | null;
+  accepted_by: string | null;
+  accepted_at: string | null;
+  index: number;
+  authorship: Authorship;
+}
+
+export interface ServedDeliveryEvent {
+  event: DeliveryEventRecord;
+  resolved_key: string | null;
+}
+
+export interface ServedFlag {
+  id: string;
+  request: FlagRequest;
+  by: string;
+  at: string;
+  resolution: Resolution | null;
+  covered_by: number[];
+}
+
+export interface ServedProposal {
+  subject: string;
+  attributes: Record<string, string>;
+  iscrowd: boolean;
+  bbox: [number, number, number, number] | null;
+  rings: [number, number][][] | null;
+  point: [number, number] | null;
+  score: number | null;
+  created_by: string | null;
+  created_at: string | null;
+  accepted_by: string | null;
+  accepted_at: string | null;
+  index: number;
+  paired: number | null;
+  decision: "accepted" | "rejected" | null;
+  authorship: Authorship;
+}
+
+export interface ServedRevision {
+  number: number;
+  entry: TraitEntry;
+  entry_sha256: string;
+  rationale: string;
+  relayed_note: string;
+  proposed_at: string;
+  confirmed_by: string | null;
+  confirmed_at: string | null;
+  withdrawn_by: string | null;
+  withdrawn_at: string | null;
+  confirmed: boolean;
+}
+
+export interface ServedTrait {
+  trait: string;
+  revisions: ServedRevision[];
+  latest_confirmed: ServedRevision | null;
+}
+
+export interface ServingCell {
+  name: string;
+  level: number;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  nx0: number;
+  ny0: number;
+  nx1: number;
+  ny1: number;
+}
+
+export interface SessionPlace {
+  started: string;
+  ended: boolean;
+}
+
+export interface SessionSummary {
+  user: string;
+  started: string;
+  ended: string | null;
+  entries: ImageEntry[];
+  images_annotated: number;
+  total_annotations: number;
+  total_time_seconds: number;
+  seconds_by_activity: Record<string, number>;
+  avg_seconds_per_annotation: number | null;
+}
+
+export interface Skipped {
+  name: string;
+  unverified: boolean;
+  unstamped: boolean;
+}
+
+export interface SplitColumn {
+  case: "bound" | "drawn" | "spatial" | "none";
+  selection_dir: string | null;
+  seed: number | null;
+  redraw: boolean | null;
+}
+
+export interface Stated {
+  tile: boolean | null;
+  tile_size: number | null;
+  overlap: number | null;
+  postprocess: string | null;
+  cross_tile_nms: number | null;
+  conf: number | null;
+  masks: boolean | null;
+  mask_cut: MaskCut | null;
+  rationale: string | null;
+}
+
+export interface StatedRadius {
+  value: number;
+  rationale: string;
+}
+
+export interface StoredLabelKey {
+  root: string;
+  capture: string;
+  stem: string;
+}
+
+export interface SweepGroup {
+  sweep_id: string;
+  state: string;
+  status_error: string | null;
+  input: SweepInput;
+  cancel_requested: boolean;
+  heartbeat: string;
+  trials: RunRow[];
+  outcome: SweepOutcome;
+  selection_metric: string;
+}
+
+export interface SweepInput {
+  n_trials: number;
+  search_alg: string;
+  scheduler: Record<string, unknown>;
+  max_concurrent: number;
+  baseline_params: Record<string, unknown> | null;
+  resources_per_trial: Record<string, unknown> | null;
+  param_space: Record<string, unknown>;
+  base_config: Record<string, unknown>;
+  relaunched_from: string | null;
+  split_draw_seeds: number[] | null;
+  search_seed: number;
+  trial_budget: number | null;
+}
+
+export interface SweepOutcome {
+  best_params: Record<string, unknown> | null;
+  best_value: number | null;
+  best_value_state: string | null;
+  best_value_spread: DrawSpread | null;
+  split_sensitivity: DrawGroup[] | null;
+  best_at_range_end: Record<string, "low" | "high">;
 }
 
 export interface TraitEntry {
@@ -676,261 +1569,23 @@ export interface TraitEntry {
   operationalizations: Record<string, Operationalization>;
 }
 
-export interface TraitRevision {
-  number: number;
-  entry: TraitEntry;
-  entry_sha256: string;
-  rationale: string;
-  relayed_note: string;
-  proposed_at: string;
-  confirmed_by: string | null;
-  confirmed_at: string | null;
-  withdrawn_by: string | null;
-  withdrawn_at: string | null;
-}
-
-export interface ConfirmRevisionPayload {
+export interface TraitRevisionRef {
   trait: string;
-  revision: number;
-  entry_sha256: string;
-  user: string;
-  confirmed: boolean;
+  trait_revision: number;
+  trait_revision_sha256: string;
 }
 
-export interface MaskCut {
-  mask_binarize: number;
-  vertex_spacing: number;
-}
-
-export interface Stated {
-  tile?: boolean | null;
-  tile_size?: number | null;
-  overlap?: number | null;
-  postprocess?: string | null;
-  cross_tile_nms?: number | null;
-  conf?: number | null;
-  masks?: boolean | null;
-  mask_cut?: MaskCut | null;
-  rationale?: string | null;
-}
-
-export interface CaptureChoice {
-  dataset_root: string;
-  subject?: string | null;
-  date: string;
-  bucket?: string | null;
-}
-
-export interface AnnotateFocus {
-  dataset_root: string;
-  subject: string;
-  date: string;
-  bucket: string | null;
-  image_index: number;
-  mode: "box" | "polygon" | "point";
-  proposal: number | null;
-}
-
-export interface DatasetTree {
-  dataset_root: string;
-  dates_with_images: string[];
-  subjects: string[];
-  subjects_by_date: Record<string, string[]>;
-  buckets_by_date: Record<string, string[]>;
-  label_problem: string | null;
-}
-
-export interface SelectAnswer {
-  selection: DatasetSelection;
-  annotations_present: boolean;
-  predictions_present: boolean;
-  label_problem: string | null;
-}
-
-export interface NavRequest {
-  current_image_index: number;
-}
-
-export interface LaunchInferencePayload {
-  checkpoint_path: string;
-  dataset_root: string;
-  date: string;
-  bucket: string;
-  stated: Stated;
-  assessment_id?: string | null;
-  user: string;
-}
-
-export interface InferenceJob {
-  job_id: string;
-  project: string;
-  checkpoint_path: string;
-  images_dir: string;
-  bucket: string;
-  actor: string;
-  stated: Stated;
-  assessment_id: string | null;
-  total: number;
-  done: number;
-  status: "pending" | "running" | "completed" | "failed" | "canceled";
-  error: string | null;
-}
-
-export interface InferenceJobs {
-  jobs: InferenceJob[];
-}
-
-export interface BucketExistsRefusal {
-  kind: "bucket_exists";
-  message: string;
-  job: InferenceJob;
-}
-
-export interface InferenceJobFrame {
-  type: "progress" | "final";
-  job: InferenceJob;
-}
-
-export interface MissingJobFrame {
-  type: "final";
+export interface UncomparedRun {
+  experiment_id: string;
   error: string;
 }
 
-export interface MemoryPage_FrictionReport_ {
-  entries: MemoryEntry_FrictionReport_[];
-  total_available: number;
-}
-
-export interface MemoryPage_Retrospective_ {
-  entries: MemoryEntry_Retrospective_[];
-  total_available: number;
-}
-
-export interface CanvasBox {
-  color: string;
-  tag: string;
-  dash?: [number, number] | null;
-  casing?: CanvasUnderStroke | null;
-  halo?: CanvasUnderStroke | null;
-  label?: string | null;
-  kind: "box";
-  xyxy: [number, number, number, number];
-  fill?: boolean;
-}
-
-export interface CanvasPoint {
-  color: string;
-  tag: string;
-  dash?: [number, number] | null;
-  casing?: CanvasUnderStroke | null;
-  halo?: CanvasUnderStroke | null;
-  label?: string | null;
-  kind: "point";
-  points: [[number, number]];
-}
-
-export interface CanvasPolygon {
-  color: string;
-  tag: string;
-  dash?: [number, number] | null;
-  casing?: CanvasUnderStroke | null;
-  halo?: CanvasUnderStroke | null;
-  label?: string | null;
-  kind: "polygon";
-  points: [number, number][];
-  fill?: boolean;
-}
-
-export interface CanvasPolyline {
-  color: string;
-  tag: string;
-  dash?: [number, number] | null;
-  casing?: CanvasUnderStroke | null;
-  halo?: CanvasUnderStroke | null;
-  label?: string | null;
-  kind: "polyline";
-  points: [number, number][];
-  vertices?: boolean;
-}
-
-export interface CanvasUnderStroke {
-  color: string;
-  opacity: number;
-  width_factor: number;
-}
-
-export interface CaptureImage {
-  path: string;
-  name: string;
-}
-
-export interface FrictionReport {
-  timestamp: string;
-  category:
-    | "missing_tool"
-    | "ambiguous_data"
-    | "cant_find_file"
-    | "confused_about_domain"
-    | "failed_repeatedly"
-    | "needs_human_judgment"
-    | "unexpected_behavior";
-  detail: string;
-  context: Record<string, unknown>;
-  user_disagreement: boolean;
-}
-
-export interface MemoryEntry_FrictionReport_ {
-  id: string;
-  record: FrictionReport | Unreadable;
-}
-
-export interface MemoryEntry_Retrospective_ {
-  id: string;
-  record: Retrospective | Unreadable;
-}
-
-export interface RasterIdentity {
-  width: number;
-  height: number;
-  num_channels: number;
-  dtype: string;
-  pixel_checksum: string;
-  seed: number;
-  window_size: number;
-  max_windows: number;
-  pixel_fraction: number;
-  band_interpretations: string[] | null;
-  geotransform: Record<string, unknown> | null;
-}
-
-export interface Retrospective {
-  timestamp: string;
-  project_id: string;
-  task: string;
-  worked: string;
-  did_not_work: string;
-  assumptions_wrong: string;
-  knowledge_for_future: string;
-  missing_or_hard_tools: string;
-  would_do_differently: string;
-}
-
-export interface SweepInput {
-  n_trials: number;
-  search_alg: string;
-  scheduler: Record<string, unknown>;
-  max_concurrent: number;
-  baseline_params: Record<string, unknown> | null;
-  resources_per_trial: Record<string, unknown> | null;
-  param_space: Record<string, unknown>;
-  base_config: Record<string, unknown>;
-  relaunched_from: string | null;
-  split_draw_seeds: number[] | null;
-  search_seed: number;
-  trial_budget: number | null;
-}
-
 export interface Unreadable {
+  reason: string;
+}
+
+export interface UnreadableTrait {
+  trait: string;
   reason: string;
 }
 
@@ -955,14 +1610,6 @@ export interface SnapshotProject {
   path: string;
 }
 
-export interface GuiState {
-  active_tab: "setup" | "annotate" | "training" | "inference" | "results" | "meta";
-  view: ViewState;
-  mode: "box" | "polygon" | "point";
-  active_subject: string | null;
-  dataset: DatasetSelection | null;
-}
-
 export interface DatasetSelection {
   dataset_root: string;
   subject: string | null;
@@ -984,4 +1631,24 @@ export const GUI_STATE_DEFAULTS: GuiState = {
   mode: "box",
   active_subject: null,
   dataset: null,
+};
+export const NO_GESTURES: Gestures = {
+  decide: null,
+  confirm: [],
+  complete: {},
+  rect: null,
+  proposals_hidden: false,
+  flag: [],
+  resolve: {},
+};
+export const NOTHING_STATED: Stated = {
+  tile: null,
+  tile_size: null,
+  overlap: null,
+  postprocess: null,
+  cross_tile_nms: null,
+  conf: null,
+  masks: null,
+  mask_cut: null,
+  rationale: null,
 };

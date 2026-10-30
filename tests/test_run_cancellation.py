@@ -42,7 +42,8 @@ def test_cancel_training_reaches_the_runs_own_poll(tmp_path: Path) -> None:
     assert not run.should_cancel()
 
     res = cancel_training(tmp_path, run.id, actor=None)
-    assert res["cancel_requested"] is True and res["experiment_id"] == run.id
+    assert not isinstance(res, dict) and res.run is not None
+    assert res.run.experiment_id == run.id
     assert run.should_cancel()
     assert "error" in cancel_training(tmp_path, "missing-run", actor=None)
 

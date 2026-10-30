@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from tcip_mcp import traits
 from tcip_mcp.operationalization import (
+    OperationalizationRefusal,
     OperationalizationRefusedError,
     bind,
     confirmed_revision,
@@ -99,10 +100,8 @@ def test_a_trait_with_no_confirmed_revision_refuses_and_names_who_confirms(
         )
 
     assert "none of its 1 revision(s) is confirmed" in str(excinfo.value)
-    assert excinfo.value.as_detail() == {
-        "kind": "operationalization",
-        "message": str(excinfo.value),
-    }
+    refusal = OperationalizationRefusal.model_validate(excinfo.value.as_detail())
+    assert refusal.message == str(excinfo.value)
 
 
 def test_a_value_key_outside_the_confirmed_set_refuses(project: Path) -> None:
@@ -299,7 +298,6 @@ def _web_refusal(
         {
             **body,
             "payload": "milestones",
-            "filename": "x.csv",
             "user": "breeder",
             **extra,
         }
@@ -362,8 +360,7 @@ def test_both_web_doors_refuse_identically_and_an_acknowledgment_does_not_clear_
 
     assert all(d == details[0] for d in details), details
     assert acknowledged == details[0]
-    assert details[0]["kind"] == "operationalization"
-    assert "bud_opening" in details[0]["message"]
+    assert "bud_opening" in OperationalizationRefusal.model_validate(details[0]).message
     assert not (tmp_path / "results_export").exists()
 
 
@@ -378,7 +375,7 @@ def test_an_acknowledgment_clears_the_gate_once_the_meaning_is_confirmed(
     resp = acknowledged_post(
         client,
         "/api/results/export_csv",
-        {**body, "payload": "milestones", "filename": "x.csv"},
+        {**body, "payload": "milestones"},
         reason="test acknowledgment",
     )
 
@@ -397,6 +394,7 @@ def test_the_tool_and_the_web_export_write_the_same_rows(
     from tcip_mcp.pipelines.postprocessing.phenology import (
         phenology_csv_columns,
     )
+    from tcip_web.routes.results import EXPORT_HEADER, SavedExport
 
     body = _series(tmp_path)
     out_csv = tmp_path / "delivered.csv"
@@ -407,7 +405,6 @@ def test_the_tool_and_the_web_export_write_the_same_rows(
         json={
             **body,
             "payload": "milestones",
-            "filename": "x.csv",
             "user": "breeder",
         },
     )
@@ -415,7 +412,8 @@ def test_the_tool_and_the_web_export_write_the_same_rows(
     assert resp.status_code == 200, resp.text
     tool_text = out_csv.read_text(encoding="utf-8")
     assert _rows(resp.text) == _rows(tool_text)
-    assert (tmp_path / "results_export" / "x.csv").read_bytes() == resp.content
+    saved = SavedExport.model_validate_json(resp.headers[EXPORT_HEADER])
+    assert Path(saved.saved_path).read_bytes() == resp.content
     header = next(csv.reader(StringIO(tool_text)))
     assert header == phenology_csv_columns(
         latest_confirmed("bud_opening", tmp_path).entry
@@ -486,8 +484,7 @@ def test_the_screen_door_still_honors_show_unvalidated_for_the_evidence_gate(
     )
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["validated"] is False
-    assert "no assessment answers" in resp.json()["unvalidated_reason"]
+    assert "no assessment answers" in resp.json()["unvalidated"]["message"]
     assert (
         client.post(
             "/api/results/phenology_measurement", json=body
@@ -506,8 +503,7 @@ def test_an_unconfirmed_and_unassessed_delivery_reports_the_meaning_alone(
 
     detail = _web_refusal(client, body, "phenology_measurement")
 
-    assert detail["kind"] == "operationalization"
-    assert "assessment" not in detail["message"]
+    assert "assessment" not in OperationalizationRefusal.model_validate(detail).message
 
 
 # ── the count and aggregate delivery doors ───────────────────────────────────

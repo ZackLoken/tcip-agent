@@ -9,6 +9,7 @@ import pytest
 from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.pipelines.active_learning import ScorerSpec
 from tcip_mcp.pipelines.execution import Stated
+from tcip_web.jobstore import JobStatus, ProjectJob
 from tests._producer_fixtures import write_image
 from tests._training_values import RATIONALE
 
@@ -21,22 +22,24 @@ STATED = Stated(
 """The execution values every inference job here states."""
 
 
-class J:
-    """A job holding a status, a project root and a job id."""
-
-    def __init__(
-        self, status: str, root: str = "root-a", job_id: str = ""
-    ) -> None:
-        self.status = status
-        self.project = root
-        self.job_id = job_id
+def _job(
+    status: JobStatus, root: str = "root-a", job_id: str = ""
+) -> ProjectJob:
+    """Return a job of ``root`` holding ``status`` under ``job_id``."""
+    return ProjectJob(
+        job_id=job_id,
+        status=status,
+        project=root,
+        checkpoint_path="model.pt",
+        images_dir="images",
+    )
 
 
 def test_evict_terminal_caps_and_keeps_running() -> None:
     from tcip_web.jobstore import evict_terminal
 
-    jobs = {f"done{i}": J("completed") for i in range(5)}
-    jobs["live"] = J("running")
+    jobs = {f"done{i}": _job("completed") for i in range(5)}
+    jobs["live"] = _job("running")
     evict_terminal(jobs, max_jobs=3)
 
     assert len(jobs) == 3
@@ -54,8 +57,8 @@ def test_evict_terminal_drops_the_oldest_terminal_jobs_whichever_root_they_belon
     """
     from tcip_web.jobstore import evict_terminal
 
-    jobs = {f"a{i}": J("completed", "root-a") for i in range(5)}
-    jobs["b_done"] = J("completed", "root-b")
+    jobs = {f"a{i}": _job("completed", "root-a") for i in range(5)}
+    jobs["b_done"] = _job("completed", "root-b")
     evict_terminal(jobs, max_jobs=3)
 
     assert "b_done" in jobs
@@ -70,45 +73,62 @@ def test_evict_terminal_bounds_the_whole_dict_across_roots() -> None:
     """
     from tcip_web.jobstore import evict_terminal
 
-    jobs: dict[str, J] = {}
+    jobs: dict[str, ProjectJob] = {}
     for i in range(7):
-        jobs[f"a{i}"] = J("completed", "root-a")
+        jobs[f"a{i}"] = _job("completed", "root-a")
         evict_terminal(jobs, max_jobs=5)
     for i in range(7):
-        jobs[f"b{i}"] = J("completed", "root-b")
+        jobs[f"b{i}"] = _job("completed", "root-b")
         evict_terminal(jobs, max_jobs=5)
 
     assert len(jobs) <= 5
     assert not any(j.project == "root-a" for j in jobs.values())
 
 
-def test_job_registry_registers_gets_lists_by_root_and_finds_or_registers() -> (
+def test_job_registry_answers_snapshots_and_hands_the_live_job_to_its_worker() -> (
     None
 ):
-    """The job registry registers, gets, lists by root, and finds or registers.
+    """The job registry launches, gets, lists by root, finds or launches, and signals.
 
-    A job registered under a root is got by id and listed under its own root and not another;
-    a find matching it answers it with nothing created, and a find matching none registers
-    the job it makes.
+    A job launched under a root is got by id and listed under its own root and not another,
+    each answer a snapshot equal to the job and never the object its worker holds; a find
+    matching it answers it with nothing created, a find matching none launches the job it makes,
+    and a signal runs over the live job and answers its snapshot after.
     """
     from tcip_web.jobstore import JobRegistry
 
-    registry = JobRegistry()
-    job = J("pending", "root-a", "j1")
-    registry.register(job)
+    registry: JobRegistry[ProjectJob] = JobRegistry()
+    worked: list[ProjectJob] = []
+    job = _job("pending", "root-a", "j1")
+    launched = registry.launch(job, worked.append)
+    assert job.thread is not None
+    job.thread.join(timeout=10)
 
-    assert registry.get("j1") is job
+    assert worked == [job] and worked[0] is job
+    assert launched.model_dump() == job.model_dump() and launched is not job
+    got = registry.get("j1")
+    assert got == job and got is not job
     assert registry.list("root-a") == [job]
     assert registry.list("root-b") == []
 
-    found, created = registry.find_or_register(
-        lambda j: j.job_id == "j1", lambda: J("pending", "root-a", "j2")
+    found, created = registry.find_or_launch(
+        lambda j: j.job_id == "j1",
+        lambda: _job("pending", "root-a", "j2"),
+        worked.append,
     )
     assert (found, created) == (job, False)
-    made, created = registry.find_or_register(
-        lambda j: j.job_id == "j3", lambda: J("pending", "root-b", "j3")
+    made, created = registry.find_or_launch(
+        lambda j: j.job_id == "j3",
+        lambda: _job("pending", "root-b", "j3"),
+        lambda _job: None,
     )
-    assert created is True and registry.get("j3") is made
+    j3 = registry.get("j3")
+    assert created is True and j3 is not None
+    assert j3.model_dump() == made.model_dump()
+
+    signaled = registry.signal("j1", lambda live: setattr(live, "error", "x"))
+    assert job.error == "x" and signaled == job and signaled is not job
+    assert registry.signal("missing", worked.append) is None
 
 
 def _fake_predictor(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -143,10 +163,10 @@ def test_inference_cancel_endpoint_and_worker(
         checkpoint_path=project_checkpoint(tmp_path),
         stated=STATED,
     )
-    _registry.register(job)
+    _registry.launch(job, lambda _job: None)
 
     res = cancel_job("j1", PersonPayload(user="Alice"))
-    assert res is job and job.cancel_event.is_set()
+    assert res == job and job.cancel_event.is_set()
     (line,) = audit_rows(tmp_path, "inference_canceled")
     assert (line["actor"], line["arguments"]["job_id"]) == ("user:Alice", "j1")
     # Canceling a job that was never registered is a client-side miss, so it has to reach the
@@ -186,16 +206,16 @@ def test_inference_cancel_reaches_a_job_launched_for_a_previously_open_project(
         opened_project,
         job_id="launched-under-a",
     )
-    _registry.register(job)
+    _registry.launch(job, lambda _job: None)
 
     try:
         open_new_project(tmp_path / "other")
 
-        assert _get("launched-under-a") is job
+        assert _get("launched-under-a") == job
         assert list_jobs().jobs == []
 
         assert (
-            cancel_job("launched-under-a", PersonPayload(user="Alice")) is job
+            cancel_job("launched-under-a", PersonPayload(user="Alice")) == job
         )
         assert job.cancel_event.is_set()
 
@@ -216,6 +236,7 @@ def test_priority_queue_by_id_reaches_a_job_launched_for_a_previously_open_proje
     """
     from fastapi import HTTPException
 
+    from tcip_mcp.tools.feedback_tools import QueueEntry, ReviewQueue
     from tcip_web.routes.annotate import (
         PriorityQueueJob,
         _pq_registry,
@@ -229,21 +250,26 @@ def test_priority_queue_by_id_reaches_a_job_launched_for_a_previously_open_proje
         checkpoint_path="c",
         images_dir="i",
         subject=None,
-        scorer=ScorerSpec(name="uncertainty"),
-        budget=50,
-        rationale=RATIONALE,
         status="completed",
         error=None,
-        queue=[{"image": "a.jpg", "score": 0.9}],
-        total_candidates=1,
-        reviewed_skipped=0,
+        ranked=ReviewQueue(
+            scorer=ScorerSpec(name="uncertainty"),
+            budget=50,
+            rationale=RATIONALE,
+            task="detection",
+            total_candidates=1,
+            reviewed_skipped=0,
+            queue=[
+                QueueEntry(image="a.jpg", score=0.9, reference_member=None)
+            ],
+        ),
     )
-    _pq_registry.register(job)
+    _pq_registry.launch(job, lambda _job: None)
 
     try:
         open_new_project(tmp_path / "other")
 
-        assert _pq_registry.get("pq-under-a") is job
+        assert _pq_registry.get("pq-under-a") == job
         assert get_priority_queue_job("pq-under-a").job_id == "pq-under-a"
 
         with pytest.raises(HTTPException) as miss:

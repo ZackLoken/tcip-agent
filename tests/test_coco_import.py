@@ -770,9 +770,9 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(
     calls: list[str] = []
 
     def failing_second_document(
-        result: dict, **kwargs: str | ClassScope
+        result: export.DetectionResult, **kwargs: str | ClassScope
     ) -> tuple[dict, int]:
-        calls.append(str(result["image"]))
+        calls.append(result.image)
         if len(calls) == 2:
             raise OSError("disk full")
         return real_encode(result, **kwargs)

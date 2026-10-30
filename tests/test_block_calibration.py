@@ -1248,8 +1248,10 @@ def test_regions_marked_through_the_editors_save_admit_the_assessment(
                 "annotations": current["annotations"],
                 "base_mtime": current["base_mtime"],
                 "user": "breeder",
-                "complete": {"bud": True},
-                "rect": [x0, y0, x1 - x0, y1 - y0],
+                "gestures": {
+                    "complete": {"bud": True},
+                    "rect": [x0, y0, x1 - x0, y1 - y0],
+                },
             },
         )
         assert resp.status_code == 200, resp.text

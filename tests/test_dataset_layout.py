@@ -191,7 +191,7 @@ def test_every_reader_of_a_dataset_root_answers_the_root_the_layout_wrote(
 
 def test_a_capture_directory_sits_under_the_image_root() -> None:
     assert image_dir("/ds", "2026-03-02") == image_root("/ds") / "2026-03-02"
-    with pytest.raises(ValueError, match="single safe path segment"):
+    with pytest.raises(ValueError, match="should match pattern"):
         image_dir("/ds", "../escape")
 
 

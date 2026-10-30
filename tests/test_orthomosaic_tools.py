@@ -235,9 +235,11 @@ def _deliver(
     bucket: Bucket,
     registry: str,
     plants: list[str],
+    *,
+    by: str = "user:breeder",
     **kwargs: str | float | None,
 ) -> dict:
-    """Ship ``orthomosaic_plant_counts`` under a breeder's acknowledgment and return its answer.
+    """Ship ``orthomosaic_plant_counts`` under ``by``'s acknowledgment and return its answer.
 
     A refusal answers ``{"error": ...}``.
     """
@@ -263,6 +265,7 @@ def _deliver(
                 actor=None,
                 **kwargs,
             ),
+            by=by,
             reason="an unassessed bucket",
         )
     except (
@@ -484,7 +487,7 @@ def test_detections_are_counted_to_their_nearest_plant_at_detection_granularity(
     assert "error" not in delivered, delivered
     assert (
         delivered["n_detections"] == 3
-        and delivered["detections_unattributed"] == 0
+        and delivered["plant_mapping"]["detections_unattributed"] == 0
     )
     assert delivered["n_plants"] == 4
     rows = _rows(tmp_path)
@@ -579,7 +582,8 @@ def test_a_far_detection_is_counted_to_no_plant(tmp_path: Path) -> None:
 
     assert "error" not in result, result
     assert (
-        result["n_detections"] == 2 and result["detections_unattributed"] == 1
+        result["n_detections"] == 2
+        and result["plant_mapping"]["detections_unattributed"] == 1
     )
     rows = _rows(tmp_path)
     assert rows["plot0"]["value"] == "1"
@@ -677,7 +681,6 @@ def test_the_delivery_event_discloses_the_registry_raster_and_tolerance_it_match
     plants = read_plant_csvs([plant_csv])
     assert pm.plant_registry.name == registry
     assert pm.detections_unattributed == 1
-    assert pm.detections_unattributed_scope == "delivered_raster"
     assert pm.plant_attribution == "detection"
     assert pm.nn_tolerance_m == MatchTolerance(
         value=grid_pitch_m(plants) / 2, source="grid_pitch"
@@ -782,8 +785,8 @@ def test_a_plant_outside_the_raster_is_named_and_an_edge_detection_is_not_given_
     )
 
     assert "error" not in result, result
-    assert result["detections_unattributed"] == 1
-    assert result["plants_outside_raster"] == ["plot_out"]
+    assert result["plant_mapping"]["detections_unattributed"] == 1
+    assert result["plant_mapping"]["plants_outside_raster"] == ["plot_out"]
     assert _rows(tmp_path)["plot_in"]["value"] == "0"
     assert (
         "plot_out" in refused["error"]
@@ -909,7 +912,7 @@ def test_canopy_segments_attribute_by_containment_and_name_every_gap(
     )
 
     assert "error" not in result, result
-    assert result["detections_unattributed"] == 2
+    assert result["plant_mapping"]["detections_unattributed"] == 2
     rows = _rows(tmp_path)
     assert {p: r["value"] for p, r in rows.items()} == {
         "plot0": "1",

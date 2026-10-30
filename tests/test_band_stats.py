@@ -8,7 +8,7 @@ module.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 
 import numpy as np
 import pytest
@@ -20,9 +20,9 @@ if TYPE_CHECKING:
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.band_stats import (
     DISPLAY_CLIP_PERCENTILES,
-    STRETCH_MODES,
     BandRange,
     SampledBandRanges,
+    StretchMode,
     band_ranges,
     clip_bounds,
     composite_display_rgb,
@@ -30,6 +30,8 @@ from tcip_mcp.pipelines.band_stats import (
     sampled_band_ranges,
     stretch_band,
 )
+
+STRETCH_MODES = get_args(StretchMode)
 
 
 def _composite_route_stretch(
@@ -133,11 +135,6 @@ def test_stretch_band_returns_uint8_display_pixels(mode: str) -> None:
     out = stretch_band(BANDS["uint16"], mode, BANDS["uint16"].dtype)
     assert out.dtype == np.uint8
     assert out.shape == BANDS["uint16"].shape
-
-
-def test_stretch_band_refuses_a_mode_it_does_not_implement() -> None:
-    with pytest.raises(ValueError, match="stretch mode"):
-        stretch_band(BANDS["uint8"], "bogus", BANDS["uint8"].dtype)
 
 
 # ── Stretching against bounds read from somewhere wider than the band in hand ────────────
@@ -327,9 +324,9 @@ def _multiband_array(channels: int = 4, dtype: str = "uint16") -> np.ndarray:
 
 
 @pytest.mark.parametrize("mode", STRETCH_MODES)
-@pytest.mark.parametrize("idxs", [[0, 1, 2], [3, 0, 1], [2, 2, 2]])
+@pytest.mark.parametrize("idxs", [(0, 1, 2), (3, 0, 1), (2, 2, 2)])
 def test_the_composite_is_each_selected_band_through_the_display_expression(
-    mode: str, idxs: list[int]
+    mode: str, idxs: tuple[int, int, int]
 ) -> None:
     arr = _multiband_array()
     expected = np.stack(
@@ -345,7 +342,7 @@ def test_the_composite_is_each_selected_band_through_the_display_expression(
 def test_the_composite_is_uint8_rgb_whatever_the_sources_dtype() -> None:
     for dtype in ("uint8", "uint16", "float32"):
         out = composite_display_rgb(
-            _multiband_array(dtype=dtype), [0, 1, 2], "minmax"
+            _multiband_array(dtype=dtype), (0, 1, 2), "minmax"
         )
         assert out.dtype == np.uint8
         assert out.shape == (6, 5, 3)
@@ -353,7 +350,7 @@ def test_the_composite_is_uint8_rgb_whatever_the_sources_dtype() -> None:
 
 def test_a_composite_of_a_2d_array_reads_it_as_one_band() -> None:
     band = BANDS["uint16"]
-    out = composite_display_rgb(band, [0, 0, 0], "minmax")
+    out = composite_display_rgb(band, (0, 0, 0), "minmax")
     assert out.shape == band.shape + (3,)
     assert np.array_equal(
         out[:, :, 0], _composite_route_stretch(band, "minmax", band.dtype)
@@ -364,19 +361,20 @@ def test_a_composite_stretches_each_band_against_the_bounds_it_is_handed() -> (
     None
 ):
     arr = _multiband_array()
-    bounds = [(100.0, 900.0), (0.0, 4095.0), (2000.0, 2100.0)]
+    band_bounds = [(0.0, 1.0), (100.0, 900.0), (0.0, 4095.0), (2000.0, 2100.0)]
     raw = arr.astype(np.float64)
     expected = np.stack(
         [
             np.clip((raw[:, :, i] - lo) / (hi - lo) * 255.0, 0, 255).astype(
                 np.uint8
             )
-            for i, (lo, hi) in zip([1, 2, 3], bounds)
+            for i, (lo, hi) in zip([1, 2, 3], band_bounds[1:])
         ],
         axis=-1,
     )
     assert np.array_equal(
-        composite_display_rgb(arr, [1, 2, 3], "percent_clip", bounds), expected
+        composite_display_rgb(arr, (1, 2, 3), "percent_clip", band_bounds),
+        expected,
     )
 
 
@@ -388,7 +386,7 @@ def test_a_none_composite_of_an_integer_source_divides_by_that_dtypes_ceiling() 
         arr[:, :, :3].astype(np.float64) / 65535.0 * 255.0, 0, 255
     ).astype(np.uint8)
     assert np.array_equal(
-        composite_display_rgb(arr, [0, 1, 2], "none"), expected
+        composite_display_rgb(arr, (0, 1, 2), "none"), expected
     )
 
 
@@ -405,22 +403,16 @@ def test_a_none_composite_of_a_float_source_divides_by_each_bands_own_maximum() 
         axis=-1,
     ).astype(np.uint8)
     assert np.array_equal(
-        composite_display_rgb(arr, [0, 1, 2], "none"), expected
+        composite_display_rgb(arr, (0, 1, 2), "none"), expected
     )
 
 
-def test_a_composite_refuses_a_selection_it_cannot_display() -> None:
+def test_a_composite_refuses_a_band_the_array_does_not_have() -> None:
     arr = _multiband_array()
-    with pytest.raises(ValueError, match="3 bands"):
-        composite_display_rgb(arr, [0, 1], "minmax")
     with pytest.raises(ValueError, match="out of range"):
-        composite_display_rgb(arr, [0, 1, 9], "minmax")
+        composite_display_rgb(arr, (0, 1, 9), "minmax")
     with pytest.raises(ValueError, match="out of range"):
-        composite_display_rgb(arr, [0, 1, -1], "minmax")
-    with pytest.raises(ValueError, match="one \\(low, high\\) pair"):
-        composite_display_rgb(arr, [0, 1, 2], "minmax", [(0.0, 1.0)])
-    with pytest.raises(ValueError, match="stretch mode"):
-        composite_display_rgb(arr, [0, 1, 2], "bogus")
+        composite_display_rgb(arr, (0, 1, -1), "minmax")
 
 
 # ── Sampled ranges: read through the windowed raster layer, never a full decode ──────────
@@ -614,22 +606,6 @@ def test_sampled_clip_bounds_repeat_exactly_for_the_same_seed(
 
     assert first == again
     assert first.clip_bounds != other.clip_bounds
-
-
-def test_sampled_band_ranges_refuses_a_reservoir_it_cannot_fill(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "mosaic.tif"
-    arr = _multiband_strip_tiff(path)
-    with pytest.raises(ValueError, match="reservoir_size must be positive"):
-        _sampled(
-            path,
-            arr.shape[-1],
-            seed=3,
-            window_size=8,
-            max_windows=999,
-            reservoir_size=0,
-        )
 
 
 # ── The window sampler the sampled statistics are drawn with ────────────────────────────

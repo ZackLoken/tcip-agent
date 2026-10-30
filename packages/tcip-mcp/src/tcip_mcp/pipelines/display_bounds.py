@@ -86,10 +86,12 @@ def plan_read(
     the window the reader opens on it (``raster_source.level_window``). The output is
     :func:`fit_within` at a scale no finer than the finest level whose window fits ``max_pixels``
     (the coarsest level when none does). The level read is the coarsest one whose window still
-    holds the output on both axes, so the plan names the level its pixels come off.
+    holds the output on both axes, so the plan names the level its pixels come off. A ``rect``
+    that is empty or leaves the raster refuses as its reader would (``ValueError``).
     """
-    from tcip_mcp.pipelines.raster_source import level_window
+    from tcip_mcp.pipelines.raster_source import check_region, level_window
 
+    check_region(rect, raster_h, raster_w)
     windows = [
         level_window(rect, raster_w, raster_h, *dims)
         for dims in [(raster_w, raster_h), *level_dims]

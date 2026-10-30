@@ -1,8 +1,5 @@
 {
-  "opened": {
-    "project": { "id": "<valley id>", "path": "<workspace>/valley" },
-    "display_name": "valley"
-  },
+  "opened": { "project": { "id": "<valley id>", "path": "/scratch/workspace/valley" } },
   "envelope": {
     "state": {
       "active_tab": "annotate",
@@ -13,22 +10,22 @@
     },
     "version": 0,
     "type": "state_snapshot",
-    "project": { "id": "<valley id>", "path": "<workspace>/valley" },
-    "epoch": "<epoch>"
+    "project": { "id": "<valley id>", "path": "/scratch/workspace/valley" },
+    "epoch": "<epoch n0>"
   },
   "raw": {
     "selection": {
-      "dataset_root": "<workspace>/valley/ds",
+      "dataset_root": "/scratch/workspace/valley/ds",
       "subject": null,
       "date": "2026-01-01",
       "bucket": null,
       "current_image_index": 0,
       "images": [
-        { "path": "<workspace>/valley/ds/images/2026-01-01/img1.jpg", "name": "img1.jpg" },
-        { "path": "<workspace>/valley/ds/images/2026-01-01/img2.jpg", "name": "img2.jpg" },
-        { "path": "<workspace>/valley/ds/images/2026-01-01/img3.jpg", "name": "img3.jpg" },
-        { "path": "<workspace>/valley/ds/images/2026-01-01/img4.jpg", "name": "img4.jpg" },
-        { "path": "<workspace>/valley/ds/images/2026-01-01/img5.jpg", "name": "img5.jpg" }
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg", "name": "img1.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img2.jpg", "name": "img2.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img3.jpg", "name": "img3.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img4.jpg", "name": "img4.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img5.jpg", "name": "img5.jpg" }
       ]
     },
     "annotations_present": false,
@@ -37,14 +34,14 @@
   },
   "grouped": {
     "selection": {
-      "dataset_root": "<workspace>/valley/grouped",
+      "dataset_root": "/scratch/workspace/valley/grouped",
       "subject": null,
       "date": "2026-01-02",
       "bucket": null,
       "current_image_index": 0,
       "images": [
         {
-          "path": "<workspace>/valley/grouped/images/2026-01-02/cap.bandgroup",
+          "path": "/scratch/workspace/valley/grouped/images/2026-01-02/cap.bandgroup",
           "name": "cap.bandgroup"
         }
       ]
@@ -53,18 +50,118 @@
     "predictions_present": false,
     "label_problem": null
   },
+  "troubled": {
+    "selection": {
+      "dataset_root": "/scratch/workspace/valley/troubled",
+      "subject": null,
+      "date": "2026-01-03",
+      "bucket": null,
+      "current_image_index": 0,
+      "images": [
+        { "path": "/scratch/workspace/valley/troubled/images/2026-01-03/a.jpg", "name": "a.jpg" }
+      ]
+    },
+    "annotations_present": false,
+    "predictions_present": false,
+    "label_problem": "capture 2026-01-03: label document(s) a will not read"
+  },
+  "navigated": null,
+  "ds_tree": {
+    "dataset_root": "/scratch/workspace/valley/ds",
+    "captures": [
+      { "name": "2026-01-01", "date": "2026-01-01" },
+      { "name": "2026-01-08", "date": "2026-01-08" }
+    ],
+    "subjects": [],
+    "subjects_by_date": { "2026-01-01": [], "2026-01-08": [] },
+    "buckets_by_date": { "2026-01-01": ["baseline/2026-01-01", "v2/2026-01-01"], "2026-01-08": [] },
+    "label_problem": null
+  },
+  "troubled_tree": {
+    "dataset_root": "/scratch/workspace/valley/troubled",
+    "captures": [{ "name": "2026-01-03", "date": "2026-01-03" }],
+    "subjects": [],
+    "subjects_by_date": { "2026-01-03": [] },
+    "buckets_by_date": { "2026-01-03": [] },
+    "label_problem": "capture 2026-01-03: label document(s) a will not read"
+  },
+  "empty_tree": {
+    "dataset_root": "/scratch/workspace/valley/empty",
+    "captures": [],
+    "subjects": [],
+    "subjects_by_date": {},
+    "buckets_by_date": {},
+    "label_problem": null
+  },
+  "raw_subject": {
+    "selection": {
+      "dataset_root": "/scratch/workspace/valley/ds",
+      "subject": "subject_a",
+      "date": "2026-01-01",
+      "bucket": null,
+      "current_image_index": 0,
+      "images": [
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg", "name": "img1.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img2.jpg", "name": "img2.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img3.jpg", "name": "img3.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img4.jpg", "name": "img4.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img5.jpg", "name": "img5.jpg" }
+      ]
+    },
+    "annotations_present": false,
+    "predictions_present": false,
+    "label_problem": null
+  },
+  "focused": {
+    "selection": {
+      "dataset_root": "/scratch/workspace/valley/ds",
+      "subject": "bud",
+      "date": "2026-01-01",
+      "bucket": null,
+      "current_image_index": 0,
+      "images": [
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg", "name": "img1.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img2.jpg", "name": "img2.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img3.jpg", "name": "img3.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img4.jpg", "name": "img4.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img5.jpg", "name": "img5.jpg" }
+      ]
+    },
+    "annotations_present": false,
+    "predictions_present": false,
+    "label_problem": null
+  },
+  "focused_bucket": {
+    "selection": {
+      "dataset_root": "/scratch/workspace/valley/ds",
+      "subject": "bud",
+      "date": "2026-01-01",
+      "bucket": "baseline/2026-01-01",
+      "current_image_index": 0,
+      "images": [
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg", "name": "img1.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img2.jpg", "name": "img2.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img3.jpg", "name": "img3.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img4.jpg", "name": "img4.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img5.jpg", "name": "img5.jpg" }
+      ]
+    },
+    "annotations_present": false,
+    "predictions_present": true,
+    "label_problem": null
+  },
   "separated": {
-    "dataset_root": "<workspace>/valley/ds/",
+    "dataset_root": "/scratch/workspace/valley/ds/",
     "subject": null,
     "date": "2026-01-01",
     "bucket": null,
     "current_image_index": 0,
     "images": [
-      { "path": "<workspace>/valley/ds/images/2026-01-01/img1.jpg", "name": "img1.jpg" },
-      { "path": "<workspace>/valley/ds/images/2026-01-01/img2.jpg", "name": "img2.jpg" },
-      { "path": "<workspace>/valley/ds/images/2026-01-01/img3.jpg", "name": "img3.jpg" },
-      { "path": "<workspace>/valley/ds/images/2026-01-01/img4.jpg", "name": "img4.jpg" },
-      { "path": "<workspace>/valley/ds/images/2026-01-01/img5.jpg", "name": "img5.jpg" }
+      { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg", "name": "img1.jpg" },
+      { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img2.jpg", "name": "img2.jpg" },
+      { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img3.jpg", "name": "img3.jpg" },
+      { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img4.jpg", "name": "img4.jpg" },
+      { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img5.jpg", "name": "img5.jpg" }
     ]
   }
 }

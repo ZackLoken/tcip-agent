@@ -520,15 +520,13 @@ def _build_sweep_stopper(sweep_root: Path) -> tuple[Any, Any]:
         def stop_all(self) -> bool:
             if not cancel_requested(sweep_root):
                 return False
-            from datetime import datetime, timezone
-
+            from tcip_mcp.audit import now
             from tcip_mcp.experiments import (
                 HEARTBEAT_STALE_SECONDS,
                 cancel_requested_at,
             )
 
-            requested = datetime.fromisoformat(cancel_requested_at(sweep_root))
-            waited = (datetime.now(timezone.utc) - requested).total_seconds()
+            waited = (now() - cancel_requested_at(sweep_root)).total_seconds()
             return (
                 waited > HEARTBEAT_STALE_SECONDS
                 or not live_trials.live_trial_ids

@@ -198,11 +198,6 @@ class BandGroupRef:
             for name, filename in self.manifest.bands.items()
         }
 
-    @property
-    def central_wavelength_nm(self) -> dict[str, float] | None:
-        """Each band's stated wavelength as the manifest records it."""
-        return self.manifest.central_wavelength_nm
-
 
 class BandGroupIncompleteError(FileNotFoundError):
     """A ``.bandgroup`` manifest references a sibling file that no longer exists on disk."""

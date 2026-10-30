@@ -2,9 +2,21 @@ import Konva from "konva";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Rect } from "react-konva";
 
-import { api, type LoadedLabels, type SaveLabelsBody, SaveResult } from "@/api/client";
+import { api, type LoadedLabels, type LoadedSave } from "@/api/client";
+import { messageOf, refusalOf } from "@/api/http";
 import { subjectColor } from "@/api/subjects";
-import type { ProposePayload } from "@/api/types.generated";
+import {
+  type Gestures,
+  NO_GESTURES,
+  PANEL_EVENT_LABELS_WRITTEN,
+  PROJECT_NOT_OPEN,
+  type ProjectNotOpenRefusal,
+  type ProposePayload,
+  type ServedProposals,
+  VERSION_CONFLICT,
+  type VersionConflictRefusal,
+} from "@/api/types.generated";
+import { stateSocket } from "@/api/ws";
 import { AnnotateLegend } from "@/components/annotate/AnnotateLegend";
 import { AnnotationShapes } from "@/components/annotate/AnnotationShapes";
 import { FlagMarks } from "@/components/annotate/FlagMarks";
@@ -27,6 +39,7 @@ import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 import { compositeParams } from "@/lib/bandSelection";
 import {
   buildAnnotateShapes,
+  canvasStateBody,
   computeViewport,
   createCanvasPusher,
   measureCanvasHost,
@@ -65,6 +78,7 @@ import {
   shownProposals,
   stepTarget,
   type ItemFilters,
+  type AnnotationItem,
   type ReviewItem,
   type StepScope,
 } from "@/lib/reviewItems";
@@ -80,27 +94,16 @@ import {
 import { nextMode } from "@/lib/toolMode";
 import { fitView, zoomToRect } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
-import { holdsCanvas } from "@/store/slices/canvas";
+import { canvasImage, holdsCanvas, imageSize } from "@/store/slices/canvas";
 import {
   isFinished,
-  NO_CONTENT,
   TOOL_ARRAY,
-  type Box,
   type DrawingBox,
   type AnnotateView,
   type PolygonShape,
   type Proposal,
-  type ServedProposals,
   type SubjectState,
 } from "@/store/types";
-
-type OkSave = Extract<SaveResult, { status: "ok" }>;
-
-/** The gestures a save adjudicates beside the canvas content (one save door, its own fields). */
-type Gestures = Pick<
-  SaveLabelsBody,
-  "bucket" | "accept" | "reject" | "complete" | "rect" | "proposals_hidden" | "flag" | "resolve"
->;
 
 const SNAP_RADIUS_CANVAS = 15;
 const EDGE_INSERT_THRESHOLD = 6;
@@ -118,6 +121,7 @@ export function AnnotateTab() {
   const registry = useStore((s) => s.registry.subjects);
 
   const canvas = useStore((s) => s.canvas);
+  const { width: imgW, height: imgH } = imageSize(canvas);
   const loadLabels = useStore((s) => s.loadLabelsIntoCanvas);
   const setImageStates = useStore((s) => s.setImageStates);
   const setImageState = useStore((s) => s.setImageState);
@@ -166,21 +170,12 @@ export function AnnotateTab() {
   const pointDragRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
 
-  // I/O safety. The canvas belongs to exactly the image last loaded from disk:
-  //  - loadedPathsRef: the image the current shapes came from. save() writes its labels, never
-  //    a since-changed dataset's current image, which could write one image's shapes onto another's.
-  //  - loadedKeyRef: gates reloads to a genuine image-identity change, so unrelated store updates
-  //    (a WS snapshot, a mode/subject toggle) don't re-read disk and clobber unsaved edits.
-  //  - saveBlocked: set when a load failed, so a blank canvas can't overwrite the labels on disk.
-  const loadedKeyRef = useRef<string | null>(null);
-  const loadedPathsRef = useRef<{
-    image: string;
-    mtime: string | null;
-  } | null>(null);
+  // I/O safety: save() writes the store's loaded document, never the dataset's current image;
+  // the image the canvas answers for gates reloads, once this mount's first load has landed.
+  const landedRef = useRef(false);
   const [reloadTick, setReloadTick] = useState(0);
   const loadedTickRef = useRef(0);
   const [ioError, setIoError] = useState<string | null>(null);
-  const [saveBlocked, setSaveBlocked] = useState(false);
   // True when a save/reload conflict is showing (file changed underneath us);
   // the banner then offers a Reload button.
   const [conflict, setConflict] = useState(false);
@@ -189,14 +184,18 @@ export function AnnotateTab() {
   const imageInView = currentImage(dataset);
   const imgPath = imageInView?.path ?? null;
   const currentImageName = imageInView?.name ?? null;
-  const saveDisabled = !imgPath || saveBlocked;
+  const saveDisabled = !imgPath || canvas.loaded === null;
 
   const bandsInfo = useImageBands(imgPath);
   const [bandSelection, setBandSelection] = useBandSelection(bandsInfo);
 
   // Every request for this view (the canvas' own and the prefetcher's warm-up) carries one set
-  // of band params, so the two never warm and read different renders of the same image.
-  const composite = compositeParams(bandsInfo, bandSelection);
+  // of band params, so the two never warm and read different renders of the same image; held per
+  // selection so its bands keep one identity across renders.
+  const composite = useMemo(
+    () => compositeParams(bandsInfo, bandSelection),
+    [bandsInfo, bandSelection],
+  );
 
   const nav = useImageNav();
   const displayPixels = useDisplayPixels();
@@ -205,8 +204,8 @@ export function AnnotateTab() {
   const [baseFacts, setBaseFacts] = useState<LoadedImage | null>(null);
   const regions = useRegionServes({
     imagePath: imgPath,
-    imgW: canvas.imgWidth,
-    imgH: canvas.imgHeight,
+    imgW,
+    imgH,
     view,
     displayPixels,
     baseFacts,
@@ -216,7 +215,7 @@ export function AnnotateTab() {
   function viewportRect(): [number, number, number, number] | null {
     const host = measureCanvasHost();
     if (!host) return null;
-    const vp = computeViewport(view, host, canvas.imgWidth, canvas.imgHeight);
+    const vp = computeViewport(view, host, imgW, imgH);
     return vp ? [vp.x, vp.y, vp.w, vp.h] : null;
   }
   // Fit is offered only while the view holds less than the whole image.
@@ -225,27 +224,26 @@ export function AnnotateTab() {
     !!viewRect &&
     (viewRect[0] > 0 ||
       viewRect[1] > 0 ||
-      viewRect[0] + viewRect[2] < canvas.imgWidth ||
-      viewRect[1] + viewRect[3] < canvas.imgHeight);
+      viewRect[0] + viewRect[2] < imgW ||
+      viewRect[1] + viewRect[3] < imgH);
 
   function fit() {
     const host = measureCanvasHost();
-    if (!host || canvas.imgWidth <= 0 || canvas.imgHeight <= 0) return;
-    setView(fitView(host, canvas.imgWidth, canvas.imgHeight));
+    if (!host || imgW <= 0 || imgH <= 0) return;
+    setView(fitView(host, imgW, imgH));
   }
 
   // ── Proposals: the selected bucket's and every staging of the image, paired and decided
   // server-side, each carrying its bucket ──
-  const bucket = dataset?.bucket ?? null;
+  const bucket = dataset === null ? null : dataset.bucket;
   // Hiding either while annotating is recorded on the mark the person then makes.
   const [shown, setShown] = useState<AnnotateView>({ proposals: true, predictions: true });
   const predictionsShown = !!bucket && shown.predictions;
   const [proposalTick, setProposalTick] = useState(0);
+  // Each bucket's proposals answer, whole, in the order the canvas draws them.
   const [served, setServed] = useState<{
     key: string;
-    buckets: string[];
-    proposals: Proposal[];
-    operatingPoint: ServedProposals["operating_point"] | null;
+    answers: { bucket: string; answer: ServedProposals }[];
   } | null>(null);
   // Proposals pair by document index, so a new document drops them until they are served again.
   const refreshProposals = () => {
@@ -267,17 +265,10 @@ export function AnnotateTab() {
         if (canceled) return;
         setServed({
           key: proposalKey,
-          buckets,
-          proposals: answers.flatMap((a, i) =>
-            a.proposals.map((p) => ({ ...p, bucket: buckets[i] })),
-          ),
-          operatingPoint: predictionsShown ? answers[0].operating_point : null,
+          answers: answers.map((answer, i) => ({ bucket: buckets[i], answer })),
         });
       } catch (e) {
-        if (!canceled)
-          useStore
-            .getState()
-            .pushToast(`Could not load proposals: ${e instanceof Error ? e.message : String(e)}`);
+        if (!canceled) useStore.getState().pushToast(`Could not load proposals: ${messageOf(e)}`);
       }
     })();
     return () => {
@@ -293,7 +284,7 @@ export function AnnotateTab() {
     const staged = focusOnServeRef.current;
     if (!served || served.key !== proposalKey || staged === null) return;
     focusOnServeRef.current = null;
-    const first = served.proposals.find((p) => p.bucket === staged);
+    const [first] = served.answers.find((a) => a.bucket === staged)?.answer.proposals ?? [];
     if (!first) return;
     // The strip and the canvas show the selected tool's shape, so the tool follows the answer.
     const shape = proposalGeometry(first)?.shape;
@@ -310,19 +301,21 @@ export function AnnotateTab() {
    *  sent from, the staged proposals are served with the first focused; otherwise a toast names
    *  the bucket and the view stays. */
   async function sendPrompt(prompt: ProposePayload["prompt"]) {
-    if (proposing || !imgPath || !dataset || !requireSubject()) return;
+    if (proposing || !imgPath || !dataset) return;
+    const authoring = requireSubject();
+    if (!authoring) return;
     const subject = dataset.subject;
     const [sentFrom, sentName] = [imgPath, currentImageName];
     setProposing(true);
     try {
       const answer = await api.annotate.propose({
         image_path: sentFrom,
-        subject: activeSubject!,
+        subject: authoring,
         user: useStore.getState().user,
         prompt,
       });
       useStore.getState().clearPrompts();
-      if (answer.bucket === null) {
+      if (answer === null) {
         useStore.getState().pushToast(`No proposal for ${sentName}.`);
         return;
       }
@@ -339,9 +332,7 @@ export function AnnotateTab() {
         useStore.getState().pushToast(`${count}, staged under ${answer.bucket}.`);
       }
     } catch (e) {
-      useStore
-        .getState()
-        .pushToast(`Could not propose: ${e instanceof Error ? e.message : String(e)}`);
+      useStore.getState().pushToast(`Could not propose: ${messageOf(e)}`);
     } finally {
       if (mountedRef.current) setProposing(false);
     }
@@ -379,17 +370,26 @@ export function AnnotateTab() {
           "success",
         );
     } catch (e) {
-      useStore
-        .getState()
-        .pushToast(`Could not find: ${e instanceof Error ? e.message : String(e)}`);
+      useStore.getState().pushToast(`Could not find: ${messageOf(e)}`);
     } finally {
       if (mountedRef.current) setProposing(false);
     }
   }
 
-  const reviewing = served?.key === proposalKey && served.buckets.length > 0;
-  const proposals = useMemo(() => (reviewing ? served.proposals : []), [reviewing, served]);
-  const operatingPoint = reviewing ? served.operatingPoint : null;
+  const reviewing = served?.key === proposalKey && served.answers.length > 0;
+  // The canvas and the strip read each proposal with the bucket it came from.
+  const proposals: Proposal[] = useMemo(
+    () =>
+      reviewing
+        ? served.answers.flatMap(({ bucket: from, answer }) =>
+            answer.proposals.map((p) => ({ ...p, bucket: from })),
+          )
+        : [],
+    [reviewing, served],
+  );
+  const operatingPoint = reviewing
+    ? (served.answers.find((a) => a.bucket === bucket)?.answer.operating_point ?? null)
+    : null;
 
   // ── The review path: items, filters, order and focus ───────────────────────
 
@@ -426,19 +426,9 @@ export function AnnotateTab() {
         matches,
         reviewing,
         flags: canvas.flags,
-        bucket: bucket ?? null,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      canvas.boxes,
-      canvas.polygons,
-      canvas.points,
-      canvas.flags,
-      proposals,
-      matches,
-      reviewing,
-      bucket,
-    ],
+    [canvas.boxes, canvas.polygons, canvas.points, canvas.flags, proposals, matches, reviewing],
   );
   const kept = useMemo(
     () => keptItems(items, filters),
@@ -464,22 +454,19 @@ export function AnnotateTab() {
    *  it, padded by its own extent (a point by a fortieth of the image's longer side). */
   function focusItem(item: ReviewItem) {
     if (useStore.getState().gui.mode !== item.shape) setMode(item.shape);
-    setFocus({
-      kind: item.kind === "proposal" ? "proposal" : item.shape,
-      index: item.ref,
-      ...(item.bucket !== undefined ? { bucket: item.bucket } : {}),
-    });
-    setActiveSubject(item.subject);
+    if (item.kind === "proposal") {
+      const { index, bucket, subject } = item.proposal;
+      setFocus({ kind: "proposal", index, bucket });
+      setActiveSubject(subject);
+    } else {
+      setFocus({ kind: item.shape, index: item.ref });
+      setActiveSubject(item.annotation.subject);
+    }
     const host = measureCanvasHost();
-    if (!host || canvas.imgWidth <= 0 || canvas.imgHeight <= 0) return;
+    if (!host || imgW <= 0 || imgH <= 0) return;
     const [x0, y0, x1, y1] = item.bbox;
-    const pad = Math.max(x1 - x0, y1 - y0, Math.max(canvas.imgWidth, canvas.imgHeight) / 40);
-    setView(
-      zoomToRect(
-        { x0, y0, x1, y1 },
-        { host, imgW: canvas.imgWidth, imgH: canvas.imgHeight, padX: pad, padY: pad },
-      ),
-    );
+    const pad = Math.max(x1 - x0, y1 - y0, Math.max(imgW, imgH) / 40);
+    setView(zoomToRect({ x0, y0, x1, y1 }, { host, imgW, imgH, padX: pad, padY: pad }));
   }
 
   function stepItem(delta: number) {
@@ -504,12 +491,13 @@ export function AnnotateTab() {
    *  nothing focused leaves the focus and the view as they are. */
   async function decide(action: "accept" | "reject") {
     const target = action === "accept" ? acceptTarget : rejectTarget;
-    const own = target?.kind === "proposal" ? (target.bucket ?? bucket) : null;
     const decided = focused;
     const next = decided ? stepTarget(order, decided, 1) : null;
-    let answer: OkSave | null = null;
-    if (target?.kind === "proposal" && own) {
-      answer = await save({ gestures: { bucket: own, [action]: [target.index] } });
+    let answer: LoadedSave | null = null;
+    if (target?.kind === "proposal") {
+      const { bucket, index } = target.proposal;
+      const verdict = action === "accept" ? "accepted" : "rejected";
+      answer = await save({ gestures: { decide: { bucket, verdicts: { [index]: verdict } } } });
     } else if (target?.kind === "confirm") {
       answer = await save({ gestures: {}, confirm: [target.item] });
     }
@@ -522,12 +510,11 @@ export function AnnotateTab() {
    *  focus nothing; a save the canvas did not adopt stops the rest. */
   async function acceptAll() {
     const byBucket = new Map<string, number[]>();
-    for (const p of drawnProposals) {
-      const own = p.bucket ?? bucket;
-      if (own) byBucket.set(own, [...(byBucket.get(own) ?? []), p.index]);
-    }
+    for (const p of drawnProposals)
+      byBucket.set(p.bucket, [...(byBucket.get(p.bucket) ?? []), p.index]);
     for (const [own, indices] of byBucket) {
-      const answer = await save({ gestures: { bucket: own, accept: indices } });
+      const verdicts = Object.fromEntries(indices.map((i) => [i, "accepted" as const]));
+      const answer = await save({ gestures: { decide: { bucket: own, verdicts } } });
       if (!answer || !mountedRef.current) return;
     }
     setFocus(null);
@@ -537,14 +524,17 @@ export function AnnotateTab() {
    *  to, a new one or one already drawn, is focused in its place. A save the canvas did not adopt
    *  focuses nothing. */
   async function edit() {
-    const own = focused?.bucket ?? bucket;
-    if (focused?.kind !== "proposal" || !own) return;
-    await save({ gestures: { bucket: own, accept: [focused.ref] }, focusAccepted: focused.ref });
+    if (focused?.kind !== "proposal") return;
+    const { bucket, index } = focused.proposal;
+    await save({
+      gestures: { decide: { bucket, verdicts: { [index]: "accepted" } } },
+      focusAccepted: index,
+    });
   }
 
   /** Focus the annotation of the adopted canvas that `proposal` resolved to, from the answer's
    *  mapping; part of the adoption itself, so a later context change clears it as any focus. */
-  function focusAccepted(answer: OkSave, proposal: number) {
+  function focusAccepted(answer: LoadedSave, proposal: number) {
     const target = answer.accepted[String(proposal)];
     if (target === undefined) return;
     const adopted = useStore.getState().canvas;
@@ -554,21 +544,20 @@ export function AnnotateTab() {
       matches: NO_MATCHES,
       reviewing: false,
       flags: adopted.flags,
-      bucket: null,
-    }).find((i) => i.index === target);
+    }).find((i) => i.kind === "annotation" && i.annotation.index === target);
     if (item) focusItem(item);
   }
 
   // ── Flags: a comment on the focused item, or on the image when nothing is focused ──
   const [flagsOpen, setFlagsOpen] = useState(false);
-  const openFlags = canvas.flags.filter((f) => f.resolved_by === null);
+  const openFlags = canvas.flags.filter((f) => f.resolution === null);
   const flagMarks = useMemo(
-    () => flagPlaces(openFlags, drawnProposals, bucket ?? null),
+    () => flagPlaces(openFlags, drawnProposals),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canvas.flags, drawnProposals, bucket],
+    [canvas.flags, drawnProposals],
   );
   async function raiseFlag(text: string): Promise<boolean> {
-    const answer = await save({ gestures: { flag: [flagRequest(text, focused, bucket ?? null)] } });
+    const answer = await save({ gestures: { flag: [flagRequest(text, focused)] } });
     return answer !== null;
   }
   function resolveFlag(id: string, reply: string) {
@@ -633,33 +622,22 @@ export function AnnotateTab() {
     });
   const buildCanvasBodyRef = useRef<CanvasBodyBuilder>(() => null);
   buildCanvasBodyRef.current = (full) => {
-    const project = useStore.getState().openProject;
-    if (!imgPath || !project) return null;
+    const { openProject: project, user } = useStore.getState();
+    if (!imageInView || !project) return null;
     // Never push mid-transition: attaching the previous image's still-live shapes to the new
     // image_path would show the agent a false canvas; wait until the loaded identity matches.
-    if (loadedPathsRef.current?.image !== imgPath) return null;
+    if (canvas.loaded?.image_path !== imageInView.path) return null;
     const host = measureCanvasHost();
-    return {
-      project_id: project.id,
-      tab: "annotate",
-      image_path: imgPath,
-      image: currentImageName ?? "",
-      img_width: canvas.imgWidth,
-      img_height: canvas.imgHeight,
-      viewport: host ? computeViewport(view, host, canvas.imgWidth, canvas.imgHeight) : null,
+    return canvasStateBody({
+      projectId: project.id,
+      image: imageInView,
+      canvas,
+      viewport: host ? computeViewport(view, host, imgW, imgH) : null,
       mode,
-      active_subject: activeSubject ?? null,
-      cut_armed: annotateUi.cut,
-      dirty: canvas.dirty,
-      user: useStore.getState().user,
+      activeSubject,
+      cutArmed: annotateUi.cut,
+      user,
       classes: subjectSwatches,
-      counts: {
-        boxes: canvas.boxes.length,
-        polygons: canvas.polygons.length,
-        points: canvas.points.length,
-        image_ratings: canvas.imageAnnotations.length,
-        drawing_points: canvas.currentPolygon.length,
-      },
       // A heartbeat sends no geometry; the backend keeps the last full push's for this image.
       shapes: full
         ? buildAnnotateShapes({
@@ -672,15 +650,23 @@ export function AnnotateTab() {
             matches,
             flagMarks,
             mode,
-            activeSubject: activeSubject ?? "",
+            activeSubject,
             visible: annotateUi.visible,
             colorFor: subjectColor,
             proposals: drawnProposals,
           })
         : null,
-    };
+    });
   };
-  const canvasPusherRef = useRef(createCanvasPusher((b) => api.canvas.pushState(b)));
+  // A push the backend refuses for holding another project open resyncs to the one it holds.
+  const canvasPusherRef = useRef(
+    createCanvasPusher((b) =>
+      api.canvas.pushState(b).catch((e: unknown) => {
+        if (refusalOf<ProjectNotOpenRefusal>(e, PROJECT_NOT_OPEN)) stateSocket.resync();
+        throw e;
+      }),
+    ),
+  );
   useEffect(() => () => canvasPusherRef.current.dispose(), []);
   // Anything that changes which shapes the canvas draws → full push (geometry travels), except
   // mid-drag/stream where committed geometry re-serializing per tick would jank dense images:
@@ -763,56 +749,76 @@ export function AnnotateTab() {
    *  Resolves the answer the canvas adopted, or null when it adopted none. */
   async function save(opts?: {
     interactive?: boolean;
-    gestures?: Gestures;
-    confirm?: ReviewItem[];
+    gestures?: Partial<Gestures>;
+    confirm?: AnnotationItem[];
     /** A proposal this save accepts, whose annotation the adoption focuses. */
     focusAccepted?: number;
-  }): Promise<OkSave | null> {
+  }): Promise<LoadedSave | null> {
     const interactive = opts?.interactive ?? true;
     const gestures = opts?.gestures;
-    const paths = loadedPathsRef.current;
-    if (!paths) return null; // no confirmed load → refuse to overwrite the stored labels
+    const { loaded } = useStore.getState().canvas;
+    if (!loaded) return null; // no confirmed load → refuse to overwrite the stored labels
+    // The canvas still holds the document this save was built from.
+    const stillLoaded = () => useStore.getState().canvas.loaded === loaded;
     if (useStore.getState().canvas.saving) return null;
     if (!useStore.getState().canvas.dirty && !gestures) return null;
     settleGestures();
     const c = useStore.getState().canvas;
     if (!c.dirty && !gestures) return null;
-    const imgFileName = paths.image.split(/[/\\]/).pop() ?? "image";
 
     const { annotations, positions } = serializeCanvas(c);
-    let result;
-    const hold = holdForSave(paths.image);
+    let result: LoadedSave;
+    const hold = holdForSave(loaded.image_path);
     let owned = false;
     try {
       result = await api.annotate.save(
         {
-          image_path: paths.image,
+          image_path: loaded.image_path,
           annotations,
-          base_mtime: paths.mtime,
+          base_mtime: loaded.base_mtime,
           user: useStore.getState().user,
-          ...gestures,
-          ...(opts?.confirm ? { confirm: opts.confirm.map((i) => positions[i.shape][i.ref]) } : {}),
+          gestures: {
+            ...NO_GESTURES,
+            ...gestures,
+            ...(opts?.confirm
+              ? { confirm: opts.confirm.map((i) => positions[i.shape][i.ref]) }
+              : {}),
+          },
         },
         hold.controller.signal,
       );
     } catch (e) {
       if (hold.controller.signal.aborted) {
-        if (interactive && loadedPathsRef.current === paths) {
+        if (interactive && stillLoaded()) {
           setIoError(
             "Save canceled. If the server had already written it, saving again reports a conflict, and Reload shows what it wrote.",
           );
         }
         return null;
       }
-      const detail = e instanceof Error ? e.message : String(e);
+      const conflict = refusalOf<VersionConflictRefusal>(e, VERSION_CONFLICT);
+      if (conflict) {
+        // Someone else wrote this file since it loaded: never clobber their work, keep the canvas
+        // dirty; the banner belongs to the image on screen, a toast reports it after leaving.
+        if (interactive && stillLoaded()) {
+          setConflict(true);
+          setIoError(
+            `${conflict.message} Reload to load the latest (discards your unsaved edits), or keep editing.`,
+          );
+        } else {
+          useStore.getState().pushToast(`Save failed for ${loaded.name}: ${conflict.message}`);
+        }
+        return null;
+      }
+      const detail = messageOf(e);
       // Identity check: a stale failure for a since-left image must not raise a
       // banner over the image now on screen.
-      if (interactive && loadedPathsRef.current === paths) {
+      if (interactive && stillLoaded()) {
         setIoError(
           `Could not save annotations (${detail}). Your edits are kept in the editor; press Save to retry.`,
         );
       } else {
-        useStore.getState().pushToast(`Save failed: ${imgFileName}'s edits were not written.`);
+        useStore.getState().pushToast(`Save failed: ${loaded.name}'s edits were not written.`);
       }
       return null;
     } finally {
@@ -820,37 +826,17 @@ export function AnnotateTab() {
       releaseSave(hold);
     }
 
-    if (result.status === "conflict") {
-      // Someone else (agent or another tab) wrote this file since we loaded it.
-      // Never clobber their work; keep the canvas dirty. The banner belongs to the
-      // image on screen; after navigating away, the loss is reported as a toast.
-      if (interactive && loadedPathsRef.current === paths) {
-        setConflict(true);
-        setIoError(
-          "These labels changed elsewhere (the agent or another tab). Reload to load the latest (discards your unsaved edits), or keep editing.",
-        );
-      } else {
-        useStore
-          .getState()
-          .pushToast(
-            `Save failed: ${imgFileName}'s labels changed elsewhere (agent or another tab) first.`,
-          );
-      }
-      return null;
-    }
-
     // Dropped: an answer without its hold (loaded over or canceled), for an unmounted editor, or
     // for an image no longer owning the canvas or selected.
-    if (!owned || !mountedRef.current || loadedPathsRef.current !== paths) return null;
-    if (currentImage(useStore.getState().gui.dataset)?.path !== paths.image) return null;
+    if (!owned || !mountedRef.current || !stillLoaded()) return null;
+    if (currentImage(useStore.getState().gui.dataset)?.path !== loaded.image_path) return null;
 
     // The canvas was locked in flight, so the answer replaces the content it was built from:
     // document, token, authorship and indices adopted together, as a load adopts them.
-    loadedPathsRef.current = { ...paths, mtime: result.labels.base_mtime };
     setIoError(null);
     setConflict(false);
     refreshProposals();
-    adoptLabels(result.labels);
+    adoptLabels(result.document);
     if (opts?.focusAccepted !== undefined) focusAccepted(result, opts.focusAccepted);
     return result;
   }
@@ -858,7 +844,7 @@ export function AnnotateTab() {
   /** Re-read the current image's labels, discarding local edits, through the one load effect,
    *  which a navigation cancels. */
   function requestReload() {
-    if (loadedPathsRef.current) setReloadTick((t) => t + 1);
+    if (useStore.getState().canvas.loaded) setReloadTick((t) => t + 1);
   }
 
   // Flush telemetry + any unsaved edits for the image being left, using the path
@@ -871,16 +857,13 @@ export function AnnotateTab() {
   // React to a panel event writing labels: reload this image on a clean canvas, or offer a
   // Reload conflict prompt when dirty; a different file leaves the StatusBar indicator alone.
   useEffect(() => {
-    if (
-      !agentActivity ||
-      agentActivity.panel !== "annotate" ||
-      agentActivity.eventType !== "labels_written"
-    )
-      return;
-    const paths = loadedPathsRef.current;
-    if (!paths) return;
-    const norm = (p: unknown) => (typeof p === "string" ? p.replace(/\\/g, "/") : "");
-    if (norm(agentActivity.data.image_path) !== norm(paths.image)) return;
+    if (!agentActivity || agentActivity.panel !== "annotate") return;
+    const { event } = agentActivity;
+    if (event.event_type !== PANEL_EVENT_LABELS_WRITTEN) return;
+    const { loaded } = useStore.getState().canvas;
+    if (!loaded) return;
+    const norm = (p: string) => p.replace(/\\/g, "/");
+    if (norm(event.image_path) !== norm(loaded.image_path)) return;
     if (useStore.getState().canvas.dirty) {
       setConflict(true);
       const client = agentActivity.client ?? "A process";
@@ -899,7 +882,7 @@ export function AnnotateTab() {
     loadLabels(labels);
     const subject = dataset?.subject;
     if (currentImageName && subject) {
-      setImageState(currentImageName, labels.completion[subject] ?? "unannotated");
+      setImageState(currentImageName, labels.completion[subject]);
     }
   }
 
@@ -917,11 +900,7 @@ export function AnnotateTab() {
       },
       (e: unknown) => {
         if (!canceled)
-          useStore
-            .getState()
-            .pushToast(
-              `Could not read the images' states: ${e instanceof Error ? e.message : String(e)}`,
-            );
+          useStore.getState().pushToast(`Could not read the images' states: ${messageOf(e)}`);
       },
     );
     return () => {
@@ -934,8 +913,7 @@ export function AnnotateTab() {
   // `requestReload` asked for.
   useEffect(() => {
     if (!imgPath || !currentImageName) return;
-    const key = imgPath;
-    const reload = loadedKeyRef.current === key;
+    const reload = landedRef.current && canvasImage(useStore.getState().canvas) === imgPath;
 
     // Already displaying this image and no reload asked for: an unrelated store change (a WS
     // snapshot, a mode or subject toggle) must not re-read the labels and discard unsaved edits.
@@ -952,32 +930,21 @@ export function AnnotateTab() {
         const labels = await api.annotate.load(imgPath);
         if (canceled) return;
         adoptLabels(labels);
-        loadedKeyRef.current = key;
-        loadedPathsRef.current = { image: imgPath, mtime: labels.base_mtime };
-        setSaveBlocked(false);
+        landedRef.current = true;
         setIoError(null);
         setConflict(false);
         if (reload) refreshProposals();
         else startImageSessionTracking(currentImageName);
       } catch (e) {
         if (canceled) return;
-        const detail = e instanceof Error ? e.message : String(e);
+        const detail = messageOf(e);
         if (reload) {
           setIoError(`Reload failed: ${detail}`);
           return;
         }
-        // A blank canvas with saving blocked: a transient load failure never overwrites the labels.
-        loadLabels({
-          image_path: "",
-          img_width: 0,
-          img_height: 0,
-          ...NO_CONTENT,
-          completion: {},
-          flags: [],
-        });
-        loadedKeyRef.current = key;
-        loadedPathsRef.current = null;
-        setSaveBlocked(true);
+        // A blank canvas holding no document: a transient load failure never overwrites the labels.
+        useStore.getState().clearCanvas(imgPath);
+        landedRef.current = true;
         setConflict(false);
         setIoError(`Could not load this image's labels: ${detail}. Saving is off.`);
         startImageSessionTracking(currentImageName);
@@ -1030,13 +997,14 @@ export function AnnotateTab() {
   // No subject selected → an authored shape has nowhere to attach and the backend save rejects
   // it. Refuse to start a drawing and say so, once (not per click).
   const noSubjectNoticeRef = useRef<string | null>(null);
-  function requireSubject(): boolean {
-    if (activeSubject) return true;
+  /** The active subject an authored shape attaches to, or null, said once per image, with none. */
+  function requireSubject(): string | null {
+    if (activeSubject) return activeSubject;
     if (noSubjectNoticeRef.current !== currentImageName) {
       noSubjectNoticeRef.current = currentImageName;
       useStore.getState().pushToast("Choose a subject first.");
     }
-    return false;
+    return null;
   }
 
   // Channeled "cut", so a repeat replaces the standing toast with a count.
@@ -1057,9 +1025,8 @@ export function AnnotateTab() {
     );
   }
 
-  const subjectState: SubjectState | null = canvas.loadedImagePath
-    ? (canvas.completion[dataset?.subject ?? ""] ?? "unannotated")
-    : null;
+  const subjectState: SubjectState | null =
+    canvas.loaded && dataset?.subject ? canvas.completion[dataset.subject] : null;
   const subjectFinished = isFinished(subjectState);
 
   const K = ANNOTATE_KEYS;
@@ -1159,8 +1126,7 @@ export function AnnotateTab() {
     excludeVertex?: [number, number, number],
   ): [number, number] {
     if (!annotateUi.snap) return [ix, iy];
-    const sc = view.scale || 1;
-    const thr = SNAP_RADIUS_CANVAS / sc; // image-space radius
+    const thr = SNAP_RADIUS_CANVAS / view.scale; // image-space radius
     let best: [number, number] | null = null;
     let bestD = thr;
     canvas.polygons.forEach((poly, pi) => {
@@ -1195,9 +1161,7 @@ export function AnnotateTab() {
   // Presses/clicks outside the image extent are inert for every tool: they author nothing
   // and change no selection. In-progress gestures still clamp to the edge on move/release.
   const outsideImage = (ix: number, iy: number) =>
-    canvas.imgWidth > 0 &&
-    canvas.imgHeight > 0 &&
-    (ix < 0 || iy < 0 || ix > canvas.imgWidth || iy > canvas.imgHeight);
+    imgW > 0 && imgH > 0 && (ix < 0 || iy < 0 || ix > imgW || iy > imgH);
 
   const onDown = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     if (ev.evt.button !== 0 || canvas.saving) return; // right-button drags must not fabricate boxes
@@ -1210,7 +1174,7 @@ export function AnnotateTab() {
       // A press on an existing point selects it and picks it up; the whole mark is the handle.
       // Missing every point does nothing here: the click (see onClick) places a new one, so a
       // single click both authors and a press-drag repositions without a mode or modifier.
-      const hit = findHitPoint([ix, iy], canvas.points, POINT_HIT_CANVAS / (view.scale || 1));
+      const hit = findHitPoint([ix, iy], canvas.points, POINT_HIT_CANVAS / view.scale);
       if (hit !== null) {
         setFocus({ kind: "point", index: hit });
         pushUndo(); // one snapshot per drag; the drag itself pushes none
@@ -1220,11 +1184,15 @@ export function AnnotateTab() {
       return;
     }
     if (mode === "box") {
-      const sc = view.scale || 1;
       // Grab a handle / body of the already-selected box to resize or move it.
       if (focusedIdx !== null && canvas.boxes[focusedIdx]) {
         const b = canvas.boxes[focusedIdx];
-        const drag = hitTestEdit({ kind: "box", box: [b.x1, b.y1, b.x2, b.y2] }, ix, iy, 8 / sc);
+        const drag = hitTestEdit(
+          { kind: "box", box: [b.x1, b.y1, b.x2, b.y2] },
+          ix,
+          iy,
+          8 / view.scale,
+        );
         if (drag) {
           pushUndo(); // one snapshot per drag; the moves themselves don't push
           boxDragRef.current = { idx: focusedIdx, drag };
@@ -1242,10 +1210,11 @@ export function AnnotateTab() {
         }
       }
       setFocus(null);
-      if (!requireSubject()) return;
-      const cx = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
-      const cy = Math.max(0, Math.min(canvas.imgHeight || iy, iy));
-      setDrawing({ x1: cx, y1: cy, x2: cx, y2: cy, subject: activeSubject! });
+      const subject = requireSubject();
+      if (!subject) return;
+      const cx = Math.max(0, Math.min(imgW || ix, ix));
+      const cy = Math.max(0, Math.min(imgH || iy, iy));
+      setDrawing({ x1: cx, y1: cy, x2: cx, y2: cy, subject });
       return;
     }
     // Polygon: button press starts either a vertex drag (if clicked within
@@ -1256,8 +1225,7 @@ export function AnnotateTab() {
       const pi = focusedIdx;
       const poly = canvas.polygons[pi];
       if (!poly) return;
-      const sc = view.scale || 1;
-      const vertThr = 8 / sc;
+      const vertThr = 8 / view.scale;
       // Try vertex grab, on any ring of the selected annotation.
       for (let ri = 0; ri < poly.rings.length; ri++) {
         const ring = poly.rings[ri];
@@ -1274,7 +1242,7 @@ export function AnnotateTab() {
         }
       }
       // Try edge insert, the nearest edge across every ring; the new vertex joins that ring.
-      const edgeThr = EDGE_INSERT_THRESHOLD / sc;
+      const edgeThr = EDGE_INSERT_THRESHOLD / view.scale;
       let bestRing = -1;
       let bestEdge = -1;
       let bestDist = edgeThr;
@@ -1324,8 +1292,8 @@ export function AnnotateTab() {
     if (pDrag !== null) {
       const p = canvas.points[pDrag];
       if (p) {
-        const x = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
-        drag("points", pDrag, { ...p, x, y: Math.max(0, Math.min(canvas.imgHeight || iy, iy)) });
+        const x = Math.max(0, Math.min(imgW || ix, ix));
+        drag("points", pDrag, { ...p, x, y: Math.max(0, Math.min(imgH || iy, iy)) });
       }
       return;
     }
@@ -1338,8 +1306,8 @@ export function AnnotateTab() {
       if (poly) {
         const [sx, sy] = snapImagePoint(ix, iy, [pi, ri, vi]);
         const clamped: [number, number] = [
-          Math.max(0, Math.min(canvas.imgWidth || sx, sx)),
-          Math.max(0, Math.min(canvas.imgHeight || sy, sy)),
+          Math.max(0, Math.min(imgW || sx, sx)),
+          Math.max(0, Math.min(imgH || sy, sy)),
         ];
         dragVertex(pi, ri, vi, clamped); // no per-move undo push (see onDown drag start)
       }
@@ -1351,15 +1319,12 @@ export function AnnotateTab() {
     if (streamingRef.current && annotateUi.stream && mode === "polygon") {
       const pts = canvas.currentPolygon;
       const last = pts[pts.length - 1];
-      const minD = STREAM_MIN_DIST_CANVAS / (view.scale || 1);
+      const minD = STREAM_MIN_DIST_CANVAS / view.scale;
       if (!last || Math.hypot(ix - last[0], iy - last[1]) >= minD) {
         const [sx, sy] = snapImagePoint(ix, iy);
         setCurrentPolygon([
           ...pts,
-          [
-            Math.max(0, Math.min(canvas.imgWidth || sx, sx)),
-            Math.max(0, Math.min(canvas.imgHeight || sy, sy)),
-          ],
+          [Math.max(0, Math.min(imgW || sx, sx)), Math.max(0, Math.min(imgH || sy, sy))],
         ]);
       }
       return;
@@ -1375,8 +1340,8 @@ export function AnnotateTab() {
           bDrag.drag,
           ix,
           iy,
-          canvas.imgWidth || ix,
-          canvas.imgHeight || iy,
+          imgW || ix,
+          imgH || iy,
         );
         boxDragRef.current = { idx: bDrag.idx, drag: r.drag };
         if (r.shape.kind === "box") {
@@ -1389,8 +1354,8 @@ export function AnnotateTab() {
 
     // Box drag (rubber-band stops at the image edge; polygons already clamp)
     if (drawing) {
-      const cx = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
-      const cy = Math.max(0, Math.min(canvas.imgHeight || iy, iy));
+      const cx = Math.max(0, Math.min(imgW || ix, ix));
+      const cy = Math.max(0, Math.min(imgH || iy, iy));
       setDrawing({ ...drawing, x2: cx, y2: cy });
       return;
     }
@@ -1442,10 +1407,10 @@ export function AnnotateTab() {
       return;
     }
     if (mode === "box" && drawing) {
-      const cx = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
-      const cy = Math.max(0, Math.min(canvas.imgHeight || iy, iy));
+      const cx = Math.max(0, Math.min(imgW || ix, ix));
+      const cy = Math.max(0, Math.min(imgH || iy, iy));
       const [x1, y1, x2, y2] = boxBounds({ ...drawing, x2: cx, y2: cy });
-      const box: Box = { x1, y1, x2, y2, subject: drawing.subject, attributes: {} };
+      const box = { x1, y1, x2, y2, subject: drawing.subject, attributes: {} };
       if (belowMinSide(x1, y1, x2, y2)) {
         useStore.getState().pushToast("Box too small to keep. Drag out a bigger area.");
       } else if (annotateUi.prompt) {
@@ -1472,16 +1437,17 @@ export function AnnotateTab() {
         setFocus(null);
         return;
       }
-      const x = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
-      const y = Math.max(0, Math.min(canvas.imgHeight || iy, iy));
+      const x = Math.max(0, Math.min(imgW || ix, ix));
+      const y = Math.max(0, Math.min(imgH || iy, iy));
       // Armed, the click is held as a prompt and never becomes a point of the labels.
       if (annotateUi.prompt) {
         if (requireSubject()) useStore.getState().addPromptPoint([x, y]);
         return;
       }
-      if (!requireSubject()) return;
+      const subject = requireSubject();
+      if (!subject) return;
       // One click commits it: a point has nothing to drag out and no second vertex to wait for.
-      counted(() => add("points", { x, y, subject: activeSubject!, attributes: {} }));
+      counted(() => add("points", { x, y, subject, attributes: {} }));
       return;
     }
     if (mode !== "polygon") return;
@@ -1610,7 +1576,7 @@ export function AnnotateTab() {
     // radius, else the smallest box holding the cursor.
     if (annotateUi.prompt) {
       const { points, boxes, found } = annotateUi.pendingPrompts;
-      const reach = POINT_HIT_CANVAS / (view.scale || 1);
+      const reach = POINT_HIT_CANVAS / view.scale;
       const pointHit = points.findIndex(([x, y]) => Math.hypot(x - ix, y - iy) <= reach);
       if (pointHit !== -1) {
         useStore.getState().removePromptPoint(pointHit);
@@ -1634,7 +1600,7 @@ export function AnnotateTab() {
     // Point mode: right-click deletes the point under the cursor (a box's right-click delete,
     // scoped to one coordinate). Nothing under the cursor just clears the selection.
     if (mode === "point") {
-      const hit = findHitPoint([ix, iy], canvas.points, POINT_HIT_CANVAS / (view.scale || 1));
+      const hit = findHitPoint([ix, iy], canvas.points, POINT_HIT_CANVAS / view.scale);
       if (hit !== null) remove("points", hit);
       else setFocus(null);
       return;
@@ -1656,8 +1622,7 @@ export function AnnotateTab() {
       const pi = focusedIdx;
       const poly = canvas.polygons[pi];
       if (poly) {
-        const sc = view.scale || 1;
-        const vertThr = 10 / sc;
+        const vertThr = 10 / view.scale;
         for (let ri = 0; ri < poly.rings.length; ri++) {
           const ring = poly.rings[ri];
           for (let vi = 0; vi < ring.length; vi++) {
@@ -1705,8 +1670,7 @@ export function AnnotateTab() {
 
   // ── Symbology (scale-dependent) ─────────────────────────────────────
 
-  const s = view.scale || 1;
-  const widths = useMemo(() => strokeWidths(s), [s]);
+  const widths = useMemo(() => strokeWidths(view.scale), [view.scale]);
   const { boxStroke, polyStroke, vertR } = widths;
 
   if (!imgPath || !currentImageName) {
@@ -1798,8 +1762,8 @@ export function AnnotateTab() {
           <CanvasStage
             imageUrl={imageUrl}
             imagePath={imgPath}
-            imgWidth={canvas.imgWidth}
-            imgHeight={canvas.imgHeight}
+            imgWidth={imgW}
+            imgHeight={imgH}
             regions={regions}
             onBaseFacts={setBaseFacts}
             onStageRef={(st) => (stageRef.current = st)}
@@ -1818,7 +1782,7 @@ export function AnnotateTab() {
                 {annotateUi.pendingPrompts.points.map(([x, y], i) => (
                   <PointOverlay
                     key={`prompt-point-${i}`}
-                    point={{ x, y, subject: activeSubject ?? "", attributes: {} }}
+                    point={{ x, y }}
                     stroke={activeSubject ? subjectColor(activeSubject) : NO_SUBJECT_DRAFT_COLOR}
                     style="dotted"
                     coreR={widths.pointCoreR}
@@ -1826,7 +1790,7 @@ export function AnnotateTab() {
                     tickOuter={widths.pointTickOuter}
                     lineW={widths.scaleLineW * 1.6}
                     labelSize={widths.labelSize}
-                    label=""
+                    label={null}
                   />
                 ))}
                 {[...annotateUi.pendingPrompts.boxes, ...annotateUi.pendingPrompts.found].map(
@@ -1862,8 +1826,8 @@ export function AnnotateTab() {
                   <SnapIndicator
                     cursor={cursor}
                     polygons={canvas.polygons}
-                    scale={s}
-                    radius={SNAP_RADIUS_CANVAS / s}
+                    scale={view.scale}
+                    radius={SNAP_RADIUS_CANVAS / view.scale}
                   />
                 )}
               </>

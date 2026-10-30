@@ -212,8 +212,8 @@ describe("polygonAt with bounding boxes (the prefiltered hover scan)", () => {
 });
 
 describe("derivedBoxFromPolygon", () => {
-  it("carries the polygon's subject onto its footprint box", () => {
-    const p: PolygonShape = { rings: [SQUARE], subject: "trunk", attributes: {} };
+  it("carries the polygon's subject and crowd flag onto its footprint box", () => {
+    const p: PolygonShape = { rings: [SQUARE], subject: "trunk", attributes: {}, iscrowd: true };
     expect(derivedBoxFromPolygon(p)).toEqual({
       x1: 0,
       y1: 0,
@@ -221,11 +221,17 @@ describe("derivedBoxFromPolygon", () => {
       y2: 10,
       subject: "trunk",
       attributes: {},
+      iscrowd: true,
     });
   });
 
   it("spans every ring, not just the first (an occlusion-split shape's whole footprint)", () => {
-    const p: PolygonShape = { rings: [SQUARE, FAR_SQUARE], subject: "trunk", attributes: {} };
+    const p: PolygonShape = {
+      rings: [SQUARE, FAR_SQUARE],
+      subject: "trunk",
+      attributes: {},
+      iscrowd: false,
+    };
     expect(derivedBoxFromPolygon(p)).toEqual({
       x1: 0,
       y1: 0,
@@ -233,6 +239,7 @@ describe("derivedBoxFromPolygon", () => {
       y2: 110,
       subject: "trunk",
       attributes: {},
+      iscrowd: false,
     });
   });
 });
@@ -243,6 +250,7 @@ describe("withRing", () => {
       rings: [SQUARE, FAR_SQUARE],
       subject: "trunk",
       attributes: { health: "good" },
+      iscrowd: false,
     };
     const replaced: [number, number][] = [
       [0, 0],

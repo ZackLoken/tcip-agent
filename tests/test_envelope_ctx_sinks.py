@@ -48,11 +48,11 @@ def _context(
 
 
 def _rows(run_dir: Path) -> list[dict]:
-    """Return the run's metrics rows without the instant each was written."""
+    """Return the run's metrics rows as logged, without the instant each was written."""
     from tcip_mcp.experiments import METRICS_FILE, read_rows
 
     return [
-        {k: v for k, v in row.items() if k != "timestamp"}
+        row.model_dump(exclude={"timestamp"})
         for row in read_rows(run_dir / METRICS_FILE)[0]
     ]
 
@@ -92,17 +92,17 @@ def test_the_sink_is_the_one_stamp_of_a_rows_epoch_and_instant(
     Metrics carrying the epoch or the instant refuse naming the key and write nothing; the
     same metrics without it record the epoch the sink was handed.
     """
-    from tcip_mcp.experiments import EPOCH_KEY, TIMESTAMP_KEY
+    from tcip_mcp.experiments import MetricsRow
 
     ctx, run_dir = _context(tmp_path)
 
-    for reserved in (EPOCH_KEY, TIMESTAMP_KEY):
+    for reserved in MetricsRow.model_fields:
         with pytest.raises(ValueError, match=reserved):
             ctx.log_metrics(2, {reserved: 99, "val_loss": 0.5})
     assert _rows(run_dir) == []
 
     ctx.log_metrics(2, {"val_loss": 0.5})
-    assert _rows(run_dir) == [{"val_loss": 0.5, EPOCH_KEY: 2}]
+    assert _rows(run_dir) == [{"val_loss": 0.5, "epoch": 2, "step": None}]
 
 
 def test_metrics_file_accumulates_one_row_per_epoch(tmp_path: Path) -> None:
@@ -131,7 +131,13 @@ def test_a_diverged_metric_is_logged_as_null_beside_the_state_that_names_it(
     ctx.log_metrics(2, {"val_loss": float("nan"), "map50": 0.0})
 
     assert _rows(run_dir) == [
-        {"epoch": 2, "val_loss": None, "val_loss_state": "nan", "map50": 0.0}
+        {
+            "epoch": 2,
+            "step": None,
+            "val_loss": None,
+            "val_loss_state": "nan",
+            "map50": 0.0,
+        }
     ]
 
 
@@ -221,11 +227,11 @@ def test_a_checkpoint_tag_cannot_walk_out_of_the_run_directory(
     tmp_path: Path,
 ) -> None:
     """A checkpoint tag spelled as a path refuses and writes nothing outside the run."""
-    from tcip_store import BadKeyError
+    from pydantic import ValidationError
 
     ctx, run_dir = _context(tmp_path)
 
-    with pytest.raises(BadKeyError):
+    with pytest.raises(ValidationError):
         ctx.save_checkpoint({STATE_DICT_KEY: {}}, "../escaped")
 
     assert not (run_dir.parent / "escaped.pt").exists()
@@ -268,13 +274,13 @@ def test_an_artifact_name_cannot_walk_out_of_the_run_directory(
     tmp_path: Path,
 ) -> None:
     """An artifact name is a name inside the run, so one spelled as a path copies nothing."""
-    from tcip_store import BadKeyError
+    from pydantic import ValidationError
 
     ctx, run_dir = _context(tmp_path)
     source = tmp_path / "stderr.txt"
     source.write_text("trace")
 
-    with pytest.raises(BadKeyError):
+    with pytest.raises(ValidationError):
         ctx.record_artifact("../../escaped", str(source))
 
     assert not (run_dir.parent / "escaped").exists()

@@ -432,7 +432,7 @@ def state_capture_date(
     Returns ``{date, moved}``, ``moved`` holding ``{source, dest}`` per file moved.
     """
     from tcip_annotation.flags import flag_key
-    from tcip_mcp.audit import audit_entry, audit_log_key
+    from tcip_mcp.audit import audit_line, audit_log_key
     from tcip_mcp.buckets import buckets_under, source_root
     from tcip_mcp.pipelines.image_utils import (
         BandGroupRef,
@@ -527,12 +527,12 @@ def state_capture_date(
                     txn.delete(old)
             txn.append(
                 audit,
-                audit_entry(
+                audit_line(
                     "state_capture_date",
                     {"images": images, "date": bucket, "rationale": rationale},
                     actor,
                     "ok",
-                ),
+                ).stored(),
             )
     except BaseException:
         for dest in copied:

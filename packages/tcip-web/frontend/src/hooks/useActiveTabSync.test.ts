@@ -16,7 +16,7 @@ afterEach(() => vi.useRealTimers());
 
 describe("useActiveTabSync", () => {
   it("a store tab change fires one debounced POST carrying the settled tab", () => {
-    const spy = vi.spyOn(api.state, "tab").mockResolvedValue({ status: "ok" });
+    const spy = vi.spyOn(api.state, "tab").mockResolvedValue(null);
     renderHook(() => useActiveTabSync());
 
     act(() => useStore.getState().setActiveTab("results"));
@@ -25,6 +25,6 @@ describe("useActiveTabSync", () => {
 
     vi.advanceTimersByTime(400);
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(spy).toHaveBeenCalledWith("training");
+    expect(spy).toHaveBeenCalledWith({ active_tab: "training" });
   });
 });

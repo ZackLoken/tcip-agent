@@ -3,9 +3,10 @@ import { Suspense, lazy, useEffect, useRef, type ReactNode } from "react";
 import { subjectsApi } from "@/api/subjects";
 import {
   PANEL_EVENT_ANNOTATE_FOCUS,
+  PANEL_EVENT_BANNER,
   PANEL_EVENT_CANVAS_STATE_REQUEST,
   TAB_NAMES,
-  type AnnotateFocus,
+  type PanelEnvelope,
 } from "@/api/types.generated";
 import { stateSocket } from "@/api/ws";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -42,13 +43,10 @@ const TrainingTab = lazy(() =>
   import("@/tabs/TrainingTab").then((m) => ({ default: m.TrainingTab })),
 );
 
-type PanelEvent = Parameters<Parameters<typeof stateSocket.subscribePanel>[1]>[0];
-
 /** Record a banner event as its tab's note; false for any other event. */
-function takeBanner(ev: PanelEvent): boolean {
-  if (ev.event_type !== "banner") return false;
-  const text = ev.data.text;
-  if (typeof text === "string") useStore.getState().pushBanner(ev.panel, ev.event_id, text);
+function takeBanner({ panel, event, event_id }: PanelEnvelope): boolean {
+  if (event.event_type !== PANEL_EVENT_BANNER) return false;
+  useStore.getState().pushBanner(panel, event_id, event.text);
   return true;
 }
 
@@ -104,9 +102,7 @@ export function ProjectShell() {
       stateSocket.subscribePanel(panel, (ev) => {
         if (takeBanner(ev)) return;
         if (ev.panel === "annotate") {
-          useStore
-            .getState()
-            .pushAgentActivity(ev.panel, ev.event_type, ev.data, declaredClient(ev));
+          useStore.getState().pushAgentActivity(ev.panel, ev.event, declaredClient(ev.identity));
         }
       }),
     );
@@ -118,9 +114,10 @@ export function ProjectShell() {
     const unsubscribe = stateSocket.subscribePanel("app", (ev) => {
       if (takeBanner(ev)) return;
 
+      const { event } = ev;
       // Agent → GUI "focus the Annotate tab" through local setters (see applyAnnotateFocus).
-      if (ev.event_type === PANEL_EVENT_ANNOTATE_FOCUS) {
-        void applyAnnotateFocus(ev.data as unknown as AnnotateFocus, () => true).catch(() => {
+      if (event.event_type === PANEL_EVENT_ANNOTATE_FOCUS) {
+        void applyAnnotateFocus(event, () => true).catch(() => {
           useStore
             .getState()
             .pushToast("Agent tried to focus the Annotate tab, but it couldn't be applied.");
@@ -129,7 +126,7 @@ export function ProjectShell() {
       }
 
       // Agent → GUI "push your canvas now": the mounted tab answers with an immediate full push.
-      if (ev.event_type === PANEL_EVENT_CANVAS_STATE_REQUEST) {
+      if (event.event_type === PANEL_EVENT_CANVAS_STATE_REQUEST) {
         notifyCanvasStateRequest();
         return;
       }

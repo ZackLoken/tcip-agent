@@ -1,0 +1,42 @@
+{
+  "reports": {
+    "entries": [
+      {
+        "id": "<report id>",
+        "record": {
+          "timestamp": "2000-01-01T00:00:00+00:00",
+          "category": "missing_tool",
+          "detail": "no lister of assessments",
+          "context": { "route": "/api/results/assessments", "attempts": 2 },
+          "user_disagreement": false
+        }
+      }
+    ],
+    "total_available": 1
+  },
+  "retrospectives": {
+    "entries": [
+      {
+        "id": "<retrospective id>",
+        "record": {
+          "timestamp": "2000-01-01T00:00:01+00:00",
+          "project_id": "sample-trial",
+          "task": "train the sample counter",
+          "worked": "tiling held",
+          "did_not_work": "dense clusters merged",
+          "assumptions_wrong": "",
+          "knowledge_for_future": "",
+          "missing_or_hard_tools": "",
+          "would_do_differently": ""
+        }
+      },
+      {
+        "id": "<damaged retrospective id>",
+        "record": {
+          "reason": "1 validation error for Retrospective\n  Input should be a valid dictionary or instance of Retrospective [type=model_type, input_value=[], input_type=list]\n    For further information visit https://errors.pydantic.dev/2.13/v/model_type"
+        }
+      }
+    ],
+    "total_available": 2
+  }
+}

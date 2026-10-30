@@ -93,16 +93,13 @@ def test_removal_archives_moves_and_records_one_line(
     )
 
     assert resp.status_code == 200, resp.text
-    archive, moved_to = (
-        Path(resp.json()["archive_path"]),
-        Path(resp.json()["moved_to"]),
-    )
+    archive = Path(resp.json()["archive_path"])
     assert (
         archive.parent == ws / workspace.REMOVED_DIRNAME and archive.is_file()
     )
-    assert (
-        moved_to.parent == ws / workspace.REMOVED_DIRNAME and moved_to.is_dir()
-    )
+    (moved_to,) = [
+        p for p in (ws / workspace.REMOVED_DIRNAME).iterdir() if p.is_dir()
+    ]
     assert not made.root.exists()
     with zipfile.ZipFile(archive) as zf:
         assert ".tcip/store.db" in zf.namelist()
@@ -112,7 +109,8 @@ def test_removal_archives_moves_and_records_one_line(
     assert line["arguments"]["archive_path"] == str(archive)
     assert line["actor"] == "user:tester"
     assert made.id not in {
-        p["id"] for p in client.get("/api/projects").json()["projects"]
+        p["record"]["id"]
+        for p in client.get("/api/projects").json()["projects"]
     }
 
 
@@ -219,7 +217,7 @@ def test_an_unfinished_inference_job_refuses_the_removal(
         job_id="job-live",
         status="running",
     )
-    inference._registry.register(job)
+    inference._registry.launch(job, lambda _job: None)
     try:
         resp = client.post(
             "/api/projects/remove",
@@ -382,7 +380,7 @@ def test_a_listing_waits_for_a_removal_whose_move_is_denied_at_first(
         assert [event for event, _ in events[since:]] == ["attempted"]
         listed = answer.result(timeout=workspace.RENAME_BUDGET_S)
 
-    assert made.id not in {p["id"] for p in listed["projects"]}
+    assert made.id not in {p["record"]["id"] for p in listed["projects"]}
 
 
 def test_a_move_denied_past_the_budget_answers_409_and_leaves_the_project(

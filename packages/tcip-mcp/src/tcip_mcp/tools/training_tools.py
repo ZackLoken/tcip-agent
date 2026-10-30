@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 from pydantic import BaseModel, JsonValue
 
 from tcip_mcp import experiments
-from tcip_mcp.audit import audited, now_iso, record_event_or_raise
+from tcip_mcp.audit import append_or_raise, audit_line, audited, now
 from tcip_mcp.experiments import SWEEP_FILE, SweepGroup, TrainingDetail
 from tcip_mcp.pipelines.data.split_construction import (
     ResolvedRun,
@@ -46,6 +46,8 @@ tool()(available_search_algs)
 tool()(available_schedulers)
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from tcip_mcp.pipelines.data.datasets import BaseDataset
     from tcip_mcp.pipelines.model_build import StagedSources
     from tcip_mcp.pipelines.schemas import DataSpec, TrainConfigSchema
@@ -112,8 +114,8 @@ def preflight_config(
             batch of the resolved train dataset is used instead; if it yields none, that also
             blocks. For a run with a validation side, the model the contract passed is then
             validated on the batch the contract proved, at the run's evaluation keywords, and
-            the row is admitted as the metrics log admits one (``experiments.metrics_row``
-            encoded by the store's ``encode_log_line``); a refusal blocks, naming the field.
+            the row is admitted as the metrics log admits one (``experiments.metrics_row``); a
+            refusal blocks, naming the field.
             For a run the default trainer's regime trains (``TrainerReads.regime``), the run's
             ``evaluation.selection_metric`` is then read from that row, or from the empty row of a
             run with no validation side, by the trainer's own ``generic_trainer.selection_value``
@@ -271,8 +273,6 @@ def _preflight(
             from tcip_mcp.pipelines.training.run_registry import (
                 evaluation_keywords,
             )
-            from tcip_store import encode_log_line
-
             resolved_spec = resolution.spec.model_copy(
                 update={"data": resolution.data}
             )
@@ -352,9 +352,11 @@ def _preflight(
                                 project=project,
                             ),
                         )
-                        row = experiments.metrics_row(validated, {})
-                        encode_log_line(row)
-                        result["smoke"]["evaluation_row_keys"] = sorted(row)
+                        # Only the row's keys are reported, so its epoch reaches no answer.
+                        row = experiments.metrics_row(validated, 1, None)
+                        result["smoke"]["evaluation_row_keys"] = sorted(
+                            row.model_dump()
+                        )
                     metric = resolved_spec.evaluation.selection_metric
                     if reads.regime is not None:
                         selection_value(
@@ -447,13 +449,14 @@ def open_run(
     sources: StagedSources,
     resolved: experiments.ResolvedInput | None,
     *,
+    created: datetime,
     relaunched_from: str | None = None,
     resume_from: str | None = None,
     max_wall_clock_seconds: float | None = None,
     model_contract: LaunchContract | None = None,
-    trial_params: dict | None = None,
+    trial_params: dict[str, JsonValue] | None = None,
 ) -> None:
-    """Open the run directory ``run_dir`` with its ``run.json``.
+    """Open the run directory ``run_dir`` with its ``run.json``, created at ``created``.
 
     The directory is opened by ``experiments.open_run_directory``, its ``run.json`` holding the
     validated launch config ``spec``, recorded as it dumps (``TrainConfigSchema.record``), as the
@@ -475,7 +478,7 @@ def open_run(
     experiments.open_run_directory(
         run_dir,
         experiments.RunRecord(
-            created=now_iso(),
+            created=created,
             config=spec.record(),
             resolved=resolved,
             environment=capture_env(),
@@ -502,7 +505,6 @@ class RunLaunched(BaseModel):
     """
 
     experiment_id: str
-    status: Literal["launched"]
     output_dir: str
     tensorboard: TensorboardLaunch
     pid: int
@@ -514,7 +516,6 @@ class SweepLaunched(BaseModel):
     """A sweep :func:`launch_sweep` relaunched: its minted id and its base preflight's warnings."""
 
     sweep_id: str
-    status: Literal["launched"]
     warnings: list[str]
 
 
@@ -605,6 +606,16 @@ def launch_training(
     )
 
     experiment_id = experiments.mint_experiment_id()
+    line = audit_line(
+        "launch_training",
+        {
+            "experiment_id": experiment_id,
+            "relaunched_from": relaunched_from,
+            "resume_from": resume,
+        },
+        actor,
+        "ok",
+    )
     try:
         run_dir = experiments.experiment_dir(experiment_id, project=project)
         open_run(
@@ -612,6 +623,7 @@ def launch_training(
             resolution.spec,
             sources,
             resolution.record,
+            created=line.timestamp,
             relaunched_from=relaunched_from,
             resume_from=resume,
             max_wall_clock_seconds=max_wall_clock_seconds,
@@ -619,16 +631,7 @@ def launch_training(
         )
     except (StoreError, ValueError, OSError) as exc:
         return {"error": f"launch_training: {exc}"}
-    record_event_or_raise(
-        "launch_training",
-        {
-            "experiment_id": experiment_id,
-            "relaunched_from": relaunched_from,
-            "resume_from": resume,
-        },
-        actor=actor,
-        scope=project,
-    )
+    append_or_raise(line, scope=project)
 
     proc = _start_worker(run_dir, _child_env_for_launch(resolution.spec))
 
@@ -641,7 +644,6 @@ def launch_training(
 
     return RunLaunched(
         experiment_id=experiment_id,
-        status="launched",
         output_dir=str(run_dir),
         tensorboard=launch_tensorboard(run_dir),
         pid=proc.pid,
@@ -727,7 +729,8 @@ def training_detail(project: Path, directory: Path) -> TrainingDetail:
             run=None,
             tensorboard=serving,
             sweep=experiments.read_sweep(
-                directory, experiments.run_rows(project)
+                experiments.observe_sweep(directory),
+                experiments.run_rows(project),
             ),
         )
     run = experiments.observe_run(directory)
@@ -737,7 +740,7 @@ def training_detail(project: Path, directory: Path) -> TrainingDetail:
         run=experiments.run_summary(
             run,
             experiments.read_rows(run.metrics_log)[0],
-            experiments.launch_declarations(project).get(run.directory.name),
+            experiments.launch_declarations(project),
         ),
     )
 
@@ -754,13 +757,52 @@ def monitor_training(project: Path, experiment_id: str) -> dict:
             sweep's id from run_hyperparameter_search.
 
     """
-    directory = experiments.named_directory(experiment_id, project=project)
+    directory = experiments.named_directory(
+        experiment_id, experiments.experiment_dirs(project)
+    )
     if directory is None:
         return {"error": f"Run not found: {experiment_id}"}
-    return training_detail(project, directory).model_dump()
+    return training_detail(project, directory).model_dump(mode="json")
 
 
-def list_split_choices(project: Path, experiment_id: str) -> dict:
+class AsRecordedChoice(BaseModel):
+    """A relaunch on the data section the run's launch stated: its case, its line and its check.
+
+    ``reason`` says why the relaunch is refused, ``None`` when it is admitted.
+    """
+
+    case: Literal["bound", "drawn"]
+    line: str
+    reason: str | None
+
+
+class SelectionChoice(BaseModel):
+    """A selection directory a relaunch can bind instead, with its check and its sides' counts.
+
+    ``reason`` says why binding it is refused, ``None`` when it is admitted; ``seed`` and
+    ``group_by`` are the selection's, and ``replaced_split_keys`` every recorded ``data.split`` key
+    other than ``selection_dir`` choosing it drops. A directory whose selection will not read is
+    offered refused with zero counts.
+    """
+
+    selection_dir: str
+    reason: str | None
+    seed: int | None
+    group_by: str | None
+    train: int
+    val: int
+    calibration: int
+    replaced_split_keys: list[str]
+
+
+class SplitChoices(BaseModel):
+    """Every data choice a relaunch of a run can take: as recorded, or a selection instead."""
+
+    as_recorded: AsRecordedChoice
+    selections: list[SelectionChoice]
+
+
+def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
     """List every data choice a relaunch of ``experiment_id`` can take.
 
     The choices are the data section its launch stated (``run.json``'s config), and every
@@ -780,25 +822,19 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
     selection. The own-binding exclusion and the candidate dedupe compare each directory by
     ``tcip_store.canonical_path``.
 
-    Returns ``{"error": ...}`` for an unknown ``experiment_id``. Otherwise: ``{"as_recorded":
-    {"case": "bound"|"drawn", "line": str, "compatible": bool, "reason": str | None}, "selections":
-    [{"selection_dir": str, "enabled": bool, "reason": str | None, "seed": int | None, "group_by":
-    str | None, "train": int, "val": int, "calibration": int, "replaced_split_keys": list[str]},
-    ...]}``. The counts are the selection's whole sides. ``replaced_split_keys`` names every
-    recorded ``data.split`` key other than ``selection_dir`` choosing any offered partition drops,
-    the same set for every candidate. A bound config anchors the search for sibling selections at
-    its own selection's first sample source; an unbound one at ``data.images_dir``. With neither
-    readable, ``selections`` is empty.
+    The counts are the selection's whole sides, and ``replaced_split_keys`` the same set for every
+    candidate. A bound config anchors the search for sibling selections at its own selection's
+    first sample source; an unbound one at ``data.images_dir``. With neither readable,
+    ``selections`` is empty. Refuses (``LookupError``) an unknown ``experiment_id``.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
     from tcip_mcp.pipelines.data.selection import read_selection_checked
 
-    runs = experiments.run_observations(project)
-    own = next(
-        (obs for obs in runs if obs.directory.name == experiment_id), None
-    )
-    if own is None:
-        return {"error": f"Experiment not found: {experiment_id}"}
+    observations = {o.directory: o for o in experiments.run_observations(project)}
+    own_dir = experiments.named_directory(experiment_id, observations)
+    if own_dir is None:
+        raise LookupError(f"Experiment not found: {experiment_id}")
+    own = observations[own_dir]
     data = own.record.spec.data
     split = data.split
     own_selection_dir = (
@@ -811,49 +847,43 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
 
     own_selection = None
     if isinstance(split, BoundSplit):
-        as_recorded = {
-            "case": "bound",
-            "line": "on the partition it bound",
-            "compatible": True,
-            "reason": None,
-        }
+        as_recorded = AsRecordedChoice(
+            case="bound",
+            line="on the partition it bound",
+            reason=None,
+        )
         own_selection, own_error = read_selection_checked(
             split.selection_dir, project=project
         )
         if own_selection is None:
-            as_recorded["compatible"] = False
-            as_recorded["reason"] = own_error or (
+            as_recorded.reason = own_error or (
                 f"no selection recorded under {split.selection_dir}; run draw_splits first."
             )
         else:
             own_issues = selection_compatibility(data, split, own_selection)
             if own_issues:
-                as_recorded["compatible"] = False
-                as_recorded["reason"] = "; ".join(own_issues)
+                as_recorded.reason = "; ".join(own_issues)
     elif own.record.resolved is None:
-        as_recorded = {
-            "case": "drawn",
-            "line": "resolved to nothing at its launch",
-            "compatible": False,
-            "reason": own.status_error,
-        }
+        as_recorded = AsRecordedChoice(
+            case="drawn",
+            line="resolved to nothing at its launch",
+            reason=own.status_error
+            or "the run resolved to no partition at its launch",
+        )
     else:
         seed = own.record.resolved.partition.seed
-        as_recorded = {
-            "case": "drawn",
-            "line": f"draws its split again with seed {seed} over the labels as they are now",
-            "compatible": True,
-            "reason": None,
-        }
+        as_recorded = AsRecordedChoice(
+            case="drawn",
+            line=f"draws its split again with seed {seed} over the labels as they are now",
+            reason=None,
+        )
 
     dir_issues = data_dir_issues(data)
     if dir_issues:
-        as_recorded["compatible"] = False
         combined_reason = list(dir_issues)
-        prior_reason = as_recorded["reason"]
-        if prior_reason:
-            combined_reason.insert(0, str(prior_reason))
-        as_recorded["reason"] = "; ".join(combined_reason)
+        if as_recorded.reason:
+            combined_reason.insert(0, as_recorded.reason)
+        as_recorded.reason = "; ".join(combined_reason)
 
     # A bound config names no locations, so its own selection's first sample source anchors the
     # sibling search the way an unbound config's images_dir does.
@@ -862,18 +892,18 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
     elif not own_selection_dir and not dir_issues:
         root_anchor = str(data.images_dir)
     else:
-        return {"as_recorded": as_recorded, "selections": []}
+        return SplitChoices(as_recorded=as_recorded, selections=[])
 
     own_norm = canonical_path(own_selection_dir) if own_selection_dir else None
     candidate_dirs: list[str] = []
     seen: set[str] = set()
-    for other in runs:
+    for other in observations.values():
         binding = (
             other.record.resolved.partition.selection
             if other.record.resolved
             else None
         )
-        if other is own or binding is None:
+        if other.directory == own.directory or binding is None:
             continue
         candidate = binding.selection_dir
         candidate_norm = canonical_path(candidate)
@@ -898,7 +928,7 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
                 seen.add(sub_norm)
                 candidate_dirs.append(str(sub))
 
-    selections: list[dict] = []
+    selections: list[SelectionChoice] = []
     for candidate_dir in candidate_dirs:
         selection, error_text = read_selection_checked(
             candidate_dir, project=project
@@ -907,17 +937,16 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
             if error_text is None:
                 continue  # nothing recorded there; not a real candidate
             selections.append(
-                {
-                    "selection_dir": candidate_dir,
-                    "enabled": False,
-                    "reason": error_text,
-                    "seed": None,
-                    "group_by": None,
-                    "train": 0,
-                    "val": 0,
-                    "calibration": 0,
-                    "replaced_split_keys": replaced_split_keys,
-                }
+                SelectionChoice(
+                    selection_dir=candidate_dir,
+                    reason=error_text,
+                    seed=None,
+                    group_by=None,
+                    train=0,
+                    val=0,
+                    calibration=0,
+                    replaced_split_keys=replaced_split_keys,
+                )
             )
             continue
         chosen = data_with_selection(data, candidate_dir, project)
@@ -925,31 +954,27 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
             chosen, cast(BoundSplit, chosen.split), selection
         )
         counts = selection.counts()
-        entry: dict = {
-            "selection_dir": candidate_dir,
-            "seed": selection.seed,
-            "group_by": selection.group_by,
-            "train": counts["train"],
-            "val": counts["val"],
-            "calibration": counts["calibration"],
-            "replaced_split_keys": replaced_split_keys,
-        }
-        if issues:
-            entry["enabled"] = False
-            entry["reason"] = "; ".join(issues)
-        else:
-            entry["enabled"] = True
-            entry["reason"] = None
-        selections.append(entry)
+        selections.append(
+            SelectionChoice(
+                selection_dir=candidate_dir,
+                reason="; ".join(issues) if issues else None,
+                seed=selection.seed,
+                group_by=selection.group_by,
+                train=counts["train"],
+                val=counts["val"],
+                calibration=counts["calibration"],
+                replaced_split_keys=replaced_split_keys,
+            )
+        )
 
-    return {"as_recorded": as_recorded, "selections": selections}
+    return SplitChoices(as_recorded=as_recorded, selections=selections)
 
 
 @tool()
 @audited
 def cancel_training(
     project: Path, experiment_id: str, *, actor: str | None
-) -> dict:
+) -> TrainingDetail | dict:
     """Request graceful cancellation of a running training run, a sweep's trial or a whole sweep.
 
     The request is ``actor``'s, the run or sweep named by its id (``experiments.named_directory``).
@@ -961,8 +986,9 @@ def cancel_training(
     training passes with no finite batch loss, checked ahead of cancellation at the same
     boundary) ends 'failed' instead, with no
     ``model_final.pt``.
-    A sweep stops each running trial at its next batch boundary and launches no more. The
-    returned ``state`` is the one read now, so it may still read 'running'.
+    A sweep stops each running trial at its next batch boundary and launches no more. The answer
+    is the run, trial or sweep as :func:`training_detail` reads it now, so its state may still
+    read 'running'.
 
     Refuses an id naming no run or sweep, and one that has already ended
     (``experiments.request_cancel``); a repeated request keeps the first one's time.
@@ -971,18 +997,16 @@ def cancel_training(
         experiment_id: The run's, trial's or sweep's id.
 
     """
-    directory = experiments.named_directory(experiment_id, project=project)
+    directory = experiments.named_directory(
+        experiment_id, experiments.experiment_dirs(project)
+    )
     if directory is None:
         return {"error": f"Run not found: {experiment_id}"}
     try:
         experiments.request_cancel(directory)
     except ValueError as exc:
         return {"error": str(exc)}
-    return {
-        "experiment_id": experiment_id,
-        "cancel_requested": True,
-        "state": experiments.observe(directory).state,
-    }
+    return training_detail(project, directory)
 
 
 @tool()
@@ -1097,10 +1121,10 @@ def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
             ).record
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution fails the trial
             status_error = str(exc)
-    open_run(trial_dir, spec, sources, resolved, trial_params=point)
+    open_run(trial_dir, spec, sources, resolved, created=now(), trial_params=point)
     if status_error is not None:
         experiments.write_final_status(
-            trial_dir, "failed", status_error, checkpoint=None
+            trial_dir, "failed", status_error, ended=now()
         )
     return trial_dir
 
@@ -1279,7 +1303,7 @@ def run_hyperparameter_search(
     return {
         **TrainingDetail(
             run=None, sweep=group, tensorboard=serving
-        ).model_dump(),
+        ).model_dump(mode="json"),
         "warnings": opened.warnings,
     }
 
@@ -1330,7 +1354,10 @@ def open_sweep(
 
     if (
         relaunched_from is not None
-        and experiments.find_sweep(relaunched_from, project=project) is None
+        and experiments.named_directory(
+            relaunched_from, experiments.sweep_dirs(project)
+        )
+        is None
     ):
         return {
             "error": f"relaunched_from names no sweep of this project: {relaunched_from!r}",
@@ -1437,8 +1464,17 @@ def open_sweep(
         return {"error": budget_refusal, "issues": []}
 
     try:
+        directory = experiments.experiment_dir(
+            experiments.mint_experiment_id("hpo"), project=project
+        )
+        line = audit_line(
+            "open_sweep",
+            {"sweep_id": directory.name, "relaunched_from": relaunched_from},
+            actor,
+            "ok",
+        )
         record = experiments.SweepRecord(
-            created=now_iso(),
+            created=line.timestamp,
             trait_revision=resolution.trait_revision,
             input=experiments.SweepInput(
                 n_trials=n_trials,
@@ -1455,20 +1491,11 @@ def open_sweep(
                 trial_budget=trial_budget,
             ),
         )
-        directory = experiments.create_run_directory(
-            experiments.experiment_dir(
-                experiments.mint_experiment_id("hpo"), project=project
-            )
-        )
+        experiments.create_run_directory(directory)
     except (StoreError, ValueError, OSError) as exc:
         return {"error": str(exc), "issues": []}
     experiments.write_record(directory / SWEEP_FILE, record)
-    record_event_or_raise(
-        "open_sweep",
-        {"sweep_id": directory.name, "relaunched_from": relaunched_from},
-        actor=actor,
-        scope=project,
-    )
+    append_or_raise(line, scope=project)
     return OpenedSweep(directory, preflight["warnings"])
 
 
@@ -1505,7 +1532,6 @@ def launch_sweep(
     _start_worker(opened.directory, _worker_env())
     return SweepLaunched(
         sweep_id=opened.directory.name,
-        status="launched",
         warnings=opened.warnings,
     )
 
@@ -1528,9 +1554,13 @@ def run_sweep(directory: Path) -> SweepGroup:
     project = experiments.project_of_run(directory)
     given = experiments.observe_sweep(directory).record.input
 
-    def end(state: str, status_error: str | None) -> SweepGroup:
-        experiments.write_final_status(directory, state, status_error)
-        return experiments.read_sweep(directory, experiments.run_rows(project))
+    def end(
+        state: experiments.FinalState, status_error: str | None
+    ) -> SweepGroup:
+        experiments.write_final_status(directory, state, status_error, ended=now())
+        return experiments.read_sweep(
+            experiments.observe_sweep(directory), experiments.run_rows(project)
+        )
 
     if experiments.cancel_requested(directory):
         return end("canceled", _CANCEL_BEFORE_START_REASON)
@@ -1978,7 +2008,9 @@ def evaluate_model(
         load_registered_checkpoint,
     )
 
-    run_dir = experiments.find_run(experiment_id_or_ckpt, project=project)
+    run_dir = experiments.named_directory(
+        experiment_id_or_ckpt, experiments.run_dirs(project)
+    )
     by_run = run_dir is not None
     try:
         if run_dir is not None:

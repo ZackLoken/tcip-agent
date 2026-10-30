@@ -6,7 +6,9 @@ from typing import TYPE_CHECKING
 
 from fastapi.testclient import TestClient
 
+from tcip_mcp.audit import now
 from tcip_web.app import ActiveTabPayload, app
+from tcip_web.routes.sessions import SessionRef
 from tcip_web.trust_boundary import EXPOSURE_REFUSAL, STATE_CHANGING_METHODS
 from tests._route_walk import state_changing_routes
 
@@ -93,15 +95,16 @@ def test_a_permitted_origin_still_reaches_the_handler(
     Origin header reaches the handler's own outcome.
     """
     body = ActiveTabPayload(active_tab="annotate").model_dump()
+    unopened = SessionRef(project_id="000000000000", started=now()).model_dump(
+        mode="json"
+    )
     for origin in ("http://127.0.0.1", "http://127.0.0.1:5173", None):
         headers = {"origin": origin} if origin else {}
         resp = client.post("/api/state/tab", json=body, headers=headers)
         assert resp.status_code == 200, (origin, resp.status_code, resp.text)
 
         resp = client.post(
-            "/api/sessions/end",
-            headers=headers,
-            json={"project_id": "000000000000", "started": "never"},
+            "/api/sessions/end", headers=headers, json=unopened
         )
         assert resp.status_code == 409, (origin, resp.status_code, resp.text)
         assert "origin not allowed" not in resp.text

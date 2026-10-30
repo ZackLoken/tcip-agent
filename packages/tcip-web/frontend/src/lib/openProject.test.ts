@@ -1,17 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, type ProjectSummary } from "@/api/client";
-import type { OpenAnswer, SessionWrite } from "@/api/types.generated";
+import { api } from "@/api/client";
+import type { SessionWrite } from "@/api/types.generated";
 import { openWithDefaults, startOpen } from "@/lib/openProject";
 import { useStore } from "@/store";
-import { INVARIANCES } from "@/test/projectRecords";
-import {
-  openAnswer,
-  RAW_SELECT_ANSWER,
-  RAW_SELECTION,
-  selectAnswer,
-  stateEnvelope,
-} from "@/test/store";
+import { openedAs, PICKER } from "@/test/projectRecords";
+import { SESSION_WRITES, sessionOf } from "@/test/sessions";
+import { RAW_SELECT_ANSWER, stateEnvelope, TROUBLED_SELECT_ANSWER } from "@/test/store";
 
 vi.mock("@/api/client", () => ({
   api: {
@@ -20,92 +15,65 @@ vi.mock("@/api/client", () => ({
   },
 }));
 
-function project(overrides: Partial<ProjectSummary> & { id: string }): ProjectSummary & {
-  id: string;
-} {
-  return {
-    display_name: `Project ${overrides.id}`,
-    site: "north orchard",
-    invariances: INVARIANCES,
-    record_problem: null,
-    path: `/ws/${overrides.id}`,
-    created: 1,
-    modified: 1,
-    dates: [],
-    subjects: [],
-    subjects_by_date: {},
-    buckets_by_date: {},
-    image_count: 0,
-    label_problem: null,
-    ...overrides,
-  };
-}
+const { valley: VALLEY, ridge: RIDGE, empty: EMPTY } = PICKER;
+const LISTED = [VALLEY, RIDGE, EMPTY];
 
 beforeEach(() => {
   vi.mocked(api.dataset.select).mockResolvedValue(RAW_SELECT_ANSWER);
   useStore.getState().setUser("grower");
-  vi.mocked(api.projects.open).mockImplementation(({ id }) => Promise.resolve(openedAs(id)));
+  vi.mocked(api.projects.open).mockImplementation(({ id }) =>
+    Promise.resolve(openedAs(LISTED.find((p) => p.record.id === id)!)),
+  );
 });
-
-/** The open route's answer for the listed project `id`: the produced answer with that project's
- *  id, directory and display name. */
-function openedAs(id: string): OpenAnswer {
-  const listed = project({ id });
-  return openAnswer({ id, path: listed.path, display_name: listed.display_name! });
-}
 
 afterEach(() => vi.clearAllMocks());
 
 describe("openWithDefaults", () => {
   it("opens on the newest LABELED date, not the newest date (which would be blank)", async () => {
-    await openWithDefaults(
-      project({
-        id: "hz",
-        // Agent just ingested a still-unlabeled 2026-03-24; labels live on 2026-02-11.
-        dates: ["2026-02-11", "2026-03-24"],
-        subjects: ["bush", "subject_a"], // flat list would pick "bush"
-        subjects_by_date: { "2026-02-11": ["subject_a"], "2026-03-24": [] },
-        buckets_by_date: { "2026-02-11": ["baseline"], "2026-03-24": [] },
-      }),
-    );
+    const { captures, subjects, subjects_by_date, buckets_by_date } = VALLEY.tree;
+    const dates = captures.map((c) => c.name);
+    const labeled = dates.filter((date) => subjects_by_date[date].length > 0).at(-1)!;
+    // The newest date holds no label, and the flat subject list would pick another subject.
+    expect(labeled).not.toBe(dates.at(-1));
+    expect(subjects[0]).not.toBe(subjects_by_date[labeled][0]);
+
+    await openWithDefaults(VALLEY);
 
     const arg = vi.mocked(api.dataset.select).mock.calls[0][0];
-    // Lands on 2026-02-11 (newest date with labels) + its subject, not the empty newest date.
-    expect(arg.date).toBe("2026-02-11");
-    expect(arg.subject).toBe("subject_a");
-    expect(arg.bucket).toBe("baseline");
+    expect(arg.date).toBe(labeled);
+    expect(arg.subject).toBe(subjects_by_date[labeled][0]);
+    expect(arg.bucket).toBe(buckets_by_date[labeled][0]);
   });
 
   it("falls back to the newest date when nothing is labeled yet (empty project)", async () => {
-    await openWithDefaults(
-      project({
-        id: "fresh",
-        dates: ["2026-02-11", "2026-03-24"],
-        subjects_by_date: { "2026-02-11": [], "2026-03-24": [] },
-        buckets_by_date: { "2026-02-11": [], "2026-03-24": [] },
-      }),
-    );
+    const { captures } = RIDGE.tree;
+    expect(captures.length).toBeGreaterThan(1);
+    expect(RIDGE.tree.subjects).toEqual([]);
+
+    await openWithDefaults(RIDGE);
 
     const arg = vi.mocked(api.dataset.select).mock.calls[0][0];
-    expect(arg.date).toBe("2026-03-24"); // newest overall (nothing labeled to prefer)
+    expect(arg.date).toBe(captures.at(-1)!.name);
     expect(arg.subject).toBeNull();
   });
 
   it("opens the project by its id and selects inside the directory the open answered", async () => {
-    await openWithDefaults(project({ id: "site-a", dates: ["2026-02-11"] }));
+    await openWithDefaults(RIDGE);
 
-    expect(api.projects.open).toHaveBeenCalledWith({ id: "site-a", user: "grower" });
-    expect(vi.mocked(api.dataset.select).mock.calls[0][0].dataset_root).toBe("/ws/site-a");
-    expect(useStore.getState().openProject).toEqual(openedAs("site-a").project);
+    expect(api.projects.open).toHaveBeenCalledWith({ id: RIDGE.record.id, user: "grower" });
+    expect(vi.mocked(api.dataset.select).mock.calls[0][0].dataset_root).toBe(
+      RIDGE.tree.dataset_root,
+    );
+    expect(useStore.getState().openProject).toEqual(openedAs(RIDGE).project);
   });
 
   it("opens a project holding no capture with no dataset selected", async () => {
-    await openWithDefaults(project({ id: "empty" }));
+    await openWithDefaults(EMPTY);
 
-    expect(api.projects.open).toHaveBeenCalledWith({ id: "empty", user: "grower" });
+    expect(api.projects.open).toHaveBeenCalledWith({ id: EMPTY.record.id, user: "grower" });
     expect(api.dataset.select).not.toHaveBeenCalled();
     expect(useStore.getState().gui.dataset).toBeNull();
-    expect(useStore.getState().openProject).toEqual(openedAs("empty").project);
+    expect(useStore.getState().openProject).toEqual(openedAs(EMPTY).project);
   });
 });
 
@@ -115,39 +83,36 @@ describe("a switch this page starts", () => {
     const order: string[] = [];
     vi.spyOn(sessionsApi, "imageEvent").mockImplementation((c) => {
       order.push(`visit ${c.project_id} ${c.started}`);
-      return Promise.resolve({
-        status: "ok",
-        session: { started: c.started ?? "s1", ended: false },
-      });
+      return Promise.resolve(SESSION_WRITES.first);
     });
-    vi.mocked(api.projects.open).mockImplementation(({ id }) => {
-      order.push(`open ${id}`);
-      return Promise.resolve(openedAs(id));
+    vi.mocked(api.projects.open).mockImplementation(() => {
+      order.push(`open ${RIDGE.record.id}`);
+      return Promise.resolve(openedAs(RIDGE));
     });
+    const { started } = sessionOf(SESSION_WRITES.first);
     useStore.setState({
-      openProject: openedAs("valley").project,
-      recordedSession: { project_id: "valley", started: "s1", user: "user:grower" },
+      openProject: openedAs(VALLEY).project,
+      recordedSession: { project_id: VALLEY.record.id, started, user: useStore.getState().user },
     });
-    useStore.setState({ user: "user:grower" });
     useStore.getState().startImageSessionTracking("a.jpg", Date.now() - 2000);
 
-    await openWithDefaults(project({ id: "ridge" }));
+    await openWithDefaults(RIDGE);
 
-    expect(order).toEqual(["visit valley s1", "open ridge"]);
+    expect(order).toEqual([`visit ${VALLEY.record.id} ${started}`, `open ${RIDGE.record.id}`]);
     expect(useStore.getState().heldContributions).toEqual([]);
   });
 
   it("asks nothing of the backend, and shows why, when the visit it leaves gets no answer", async () => {
     const { sessionsApi } = await import("@/api/sessions");
     vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(new TypeError("Failed to fetch"));
-    useStore.setState({ openProject: openedAs("valley").project, recordedSession: null });
+    useStore.setState({ openProject: openedAs(VALLEY).project, recordedSession: null });
     useStore.getState().startImageSessionTracking("a.jpg", Date.now() - 2000);
 
-    await openWithDefaults(project({ id: "ridge" }));
+    await openWithDefaults(RIDGE);
 
     expect(api.projects.open).not.toHaveBeenCalled();
     expect(useStore.getState().heldContributions).toEqual([
-      expect.objectContaining({ image_name: "a.jpg", project_id: "valley" }),
+      expect.objectContaining({ image_name: "a.jpg", project_id: VALLEY.record.id }),
     ]);
     expect(useStore.getState().openError?.message).toMatch(/could not be sent/);
 
@@ -164,20 +129,20 @@ describe("a switch this page starts", () => {
     const { sessionsApi } = await import("@/api/sessions");
     const answer = Promise.withResolvers<SessionWrite>();
     vi.spyOn(sessionsApi, "imageEvent").mockReturnValueOnce(answer.promise);
-    useStore.setState({ openProject: openedAs("valley").project, recordedSession: null });
+    useStore.setState({ openProject: openedAs(VALLEY).project, recordedSession: null });
     useStore.getState().startImageSessionTracking("a.jpg", Date.now() - 2000);
 
-    const opening = openWithDefaults(project({ id: "ridge" }));
+    const opening = openWithDefaults(RIDGE);
     await Promise.resolve();
     const s = useStore.getState();
     s.mergeSnapshot(
       stateEnvelope({
         state: s.gui,
         version: s.wsVersion,
-        project: openedAs("hill").project,
+        project: openedAs(EMPTY).project,
       }),
     );
-    answer.resolve({ status: "ok", session: { started: "s1", ended: false } });
+    answer.resolve(SESSION_WRITES.first);
     await opening;
 
     expect(api.projects.open).not.toHaveBeenCalled();
@@ -186,23 +151,12 @@ describe("a switch this page starts", () => {
 
 describe("startOpen", () => {
   it("pushes a toast naming the label document when the selection carries a label_problem", async () => {
-    vi.mocked(api.dataset.select).mockResolvedValue(
-      selectAnswer(
-        RAW_SELECTION,
-        "label_documents['2026-02-11', 'IMG_0000'] under C:/data: is a list",
-      ),
-    );
+    vi.mocked(api.dataset.select).mockResolvedValue(TROUBLED_SELECT_ANSWER);
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+    const [{ name: date }] = VALLEY.tree.captures;
 
-    await startOpen(
-      project({ id: "hz", dates: ["2026-02-11"] }),
-      "2026-02-11",
-      "subject_a",
-      "baseline",
-    );
+    await startOpen(VALLEY, date, VALLEY.tree.subjects_by_date[date][0], null);
 
-    expect(pushToast).toHaveBeenCalledWith(
-      "label_documents['2026-02-11', 'IMG_0000'] under C:/data: is a list",
-    );
+    expect(pushToast).toHaveBeenCalledWith(TROUBLED_SELECT_ANSWER.label_problem);
   });
 });

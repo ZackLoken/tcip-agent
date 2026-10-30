@@ -6,19 +6,20 @@
  */
 
 import { subjectColor } from "@/api/subjects";
+import type { Authorship, ServedProposal } from "@/api/types.generated";
 
 /** Whose shape it is: a person's (or one a person accepted) draws solid, a tool's unaccepted
  *  shape, one with no recorded producer and every proposal draw dotted. */
 export type LineStyle = "solid" | "dotted";
 
 /** Whether a person stands behind a shape: the backend classifies it a person's own or a tool's
- *  that a person signed off, or it was drawn in this editor and has no classification yet. The
- *  one reading the line style and the review status share. */
-export function personBacked(authorship: string | null | undefined): boolean {
-  return authorship == null || authorship === "person" || authorship === "tool_accepted";
+ *  that a person signed off, or it was drawn in this editor and has no classification yet
+ *  (`undefined`). The one reading the line style and the review status share. */
+export function personBacked(authorship: Authorship | undefined): boolean {
+  return authorship === undefined || authorship === "person" || authorship === "tool_accepted";
 }
 
-export function lineStyleOf(authorship: string | null | undefined): LineStyle {
+export function lineStyleOf(authorship: Authorship | undefined): LineStyle {
   return personBacked(authorship) ? "solid" : "dotted";
 }
 
@@ -107,7 +108,7 @@ export function outlineColor(subject: string, match: MatchType | null): string {
 /** The focused item's label: the subject name, with the authorship appended for a shape no person
  *  stands behind (", tool", ", unattributed") and ", accepted tool" for one a person has since
  *  accepted. */
-export function authorshipLabel(subject: string, authorship?: string | null): string {
+export function authorshipLabel(subject: string, authorship?: Authorship): string {
   if (authorship === "tool_accepted") return `${subject}, accepted tool`;
   return personBacked(authorship) ? subject : `${subject}, ${authorship}`;
 }
@@ -115,11 +116,11 @@ export function authorshipLabel(subject: string, authorship?: string | null): st
 /** The label a proposal carries, or none: the focused proposal and every unpaired one are
  *  labeled, with the subject and score, naming the pairing when there is one. */
 export function proposalLabel(
-  p: { subject: string; score?: number | null; paired: number | null },
+  p: Pick<ServedProposal, "subject" | "score" | "paired">,
   focused: boolean,
 ): string | null {
   if (!focused && p.paired !== null) return null;
-  const scored = p.score != null ? ` ${p.score.toFixed(2)}` : "";
+  const scored = p.score !== null ? ` ${p.score.toFixed(2)}` : "";
   return `${p.subject} proposal${scored}${p.paired !== null ? " (pairs with an annotation)" : ""}`;
 }
 
@@ -131,11 +132,10 @@ export const POINT_HIT_CANVAS = 11;
 
 const VERTEX_HANDLE_RADIUS = 4;
 
-/** Every stroke, handle and label size at zoom `scale`, resolved in screen pixels and then
+/** Every stroke, handle and label size at zoom scale `s`, resolved in screen pixels and then
  *  divided by the scale once, so a width grows mildly with zoom on screen and never with the
  *  image. */
-export function strokeWidths(scale: number) {
-  const s = scale || 1;
+export function strokeWidths(s: number) {
   const scaleLineW = 1 / s;
   const vertScreen = Math.max(3, Math.min(VERTEX_HANDLE_RADIUS * (1.6 - s * 0.2), 12));
   const selScreen = Math.max(vertScreen + 1, Math.min(VERTEX_HANDLE_RADIUS * (2.2 - s * 0.2), 16));

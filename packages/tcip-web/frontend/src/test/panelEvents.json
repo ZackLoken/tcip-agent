@@ -1,0 +1,79 @@
+{
+  "banner": {
+    "panel": "results",
+    "event": { "event_type": "banner", "text": "The agent is computing the counts." },
+    "event_id": "<event_id n0>",
+    "identity": {
+      "agent_client_name": null,
+      "agent_client_version": null,
+      "agent_session": null,
+      "terminal_session": null
+    }
+  },
+  "labels_written": {
+    "panel": "annotate",
+    "event": {
+      "event_type": "labels_written",
+      "image_path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg",
+      "name": "img1.jpg"
+    },
+    "event_id": "<event_id n1>",
+    "identity": {
+      "agent_client_name": null,
+      "agent_client_version": null,
+      "agent_session": null,
+      "terminal_session": null
+    }
+  },
+  "annotate_focus": {
+    "panel": "app",
+    "event": {
+      "dataset_root": "/scratch/workspace/valley/ds",
+      "subject": "bud",
+      "date": "2026-01-01",
+      "bucket": null,
+      "event_type": "annotate_focus",
+      "image_index": 0,
+      "mode": "box",
+      "proposal": null
+    },
+    "event_id": "<event_id n2>",
+    "identity": {
+      "agent_client_name": null,
+      "agent_client_version": null,
+      "agent_session": null,
+      "terminal_session": null
+    }
+  },
+  "annotate_focus_troubled": {
+    "panel": "app",
+    "event": {
+      "dataset_root": "/scratch/workspace/valley/troubled",
+      "subject": "bud",
+      "date": "2026-01-03",
+      "bucket": null,
+      "event_type": "annotate_focus",
+      "image_index": 0,
+      "mode": "box",
+      "proposal": null
+    },
+    "event_id": "<event_id n3>",
+    "identity": {
+      "agent_client_name": null,
+      "agent_client_version": null,
+      "agent_session": null,
+      "terminal_session": null
+    }
+  },
+  "canvas_state_request": {
+    "panel": "app",
+    "event": { "event_type": "canvas_state_request" },
+    "event_id": "<event_id n4>",
+    "identity": {
+      "agent_client_name": null,
+      "agent_client_version": null,
+      "agent_session": null,
+      "terminal_session": null
+    }
+  }
+}

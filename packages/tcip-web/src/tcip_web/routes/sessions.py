@@ -14,11 +14,12 @@ from pathlib import Path
 from typing import Literal, get_args
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import AwareDatetime, BaseModel, Field, JsonValue
+from pydantic_core import to_jsonable_python
 
 import tcip_store
 from tcip_mcp import audit
-from tcip_mcp.audit import now, now_iso
+from tcip_mcp.audit import now
 from tcip_mcp.identity import actor
 from tcip_mcp.web_client import annotation_stats_key
 
@@ -42,8 +43,8 @@ class Session(BaseModel):
     """One session as recorded: its person, its start and end stamps, and its contributions."""
 
     user: str
-    started: str
-    ended: str | None
+    started: AwareDatetime
+    ended: AwareDatetime | None
     entries: list[ImageEntry]
 
 
@@ -63,7 +64,7 @@ def read_stats(raw: JsonValue) -> AnnotationStats:
     return AnnotationStats.model_validate(raw)
 
 
-def _session_start(sessions: list[Session]) -> str:
+def _session_start(sessions: list[Session]) -> datetime:
     """Return the start stamp of a session opening now among ``sessions``, latest first.
 
     The stamp is this instant, or one microsecond past the latest's stamp when this instant does
@@ -71,10 +72,9 @@ def _session_start(sessions: list[Session]) -> str:
     session.
     """
     stamp = now()
-    latest = datetime.fromisoformat(sessions[0].started) if sessions else None
-    if latest is not None and stamp <= latest:
-        stamp = latest + timedelta(microseconds=1)
-    return stamp.isoformat()
+    if sessions and stamp <= sessions[0].started:
+        stamp = sessions[0].started + timedelta(microseconds=1)
+    return stamp
 
 
 class ImageEventPayload(ImageEntry):
@@ -86,7 +86,7 @@ class ImageEventPayload(ImageEntry):
 
     user: str
     project_id: str
-    started: str | None
+    started: AwareDatetime | None
 
 
 class SessionRef(BaseModel):
@@ -97,7 +97,7 @@ class SessionRef(BaseModel):
     """
 
     project_id: str
-    started: str
+    started: AwareDatetime
 
 
 class SessionPlace(BaseModel):
@@ -106,7 +106,7 @@ class SessionPlace(BaseModel):
     Whether it had ended is as of the answer; it may be ended afterwards.
     """
 
-    started: str
+    started: AwareDatetime
     ended: bool
 
 
@@ -160,8 +160,8 @@ async def image_event(payload: ImageEventPayload) -> SessionWrite:
     from tcip_web.state import store
 
     person = actor(payload.user)
-    entry = ImageEntry.model_validate(
-        payload.model_dump(exclude={"user", "project_id", "started"})
+    entry = ImageEntry(
+        **{name: getattr(payload, name) for name in ImageEntry.model_fields}
     )
     if not (
         payload.seconds
@@ -191,7 +191,7 @@ async def image_event(payload: ImageEventPayload) -> SessionWrite:
 
 
 def _land(
-    root: Path, started: str | None, entry: ImageEntry, person: str
+    root: Path, started: datetime | None, entry: ImageEntry, person: str
 ) -> SessionWrite:
     """Append ``entry`` to a session in one transaction on ``root``'s stats record.
 
@@ -247,7 +247,8 @@ def _land(
                 )
                 raise HTTPException(
                     status_code=409,
-                    detail=f"the project {why}: {started}; contribution refused",
+                    detail=f"the project {why}: {to_jsonable_python(started)}; "
+                    "contribution refused",
                 )
             session = named
         session.entries.append(entry)
@@ -259,7 +260,7 @@ def _land(
 
 
 @router.post("/end")
-def end_session(payload: SessionRef) -> SessionWrite:
+def close_session(payload: SessionRef) -> SessionWrite:
     """Mark the session ``payload`` names as ended (:func:`end_sessions`).
 
     Answers ``ok``, or ``noop`` for a session already ended, and no session either way. Answers
@@ -278,11 +279,12 @@ def end_session(payload: SessionRef) -> SessionWrite:
     return written
 
 
-def end_sessions(root: Path, started: str | None) -> list[Session]:
-    """Mark sessions ended in one transaction on ``root``'s stats record and return them.
+def end_sessions(root: Path, started: datetime | None) -> list[audit.AuditLine]:
+    """Mark sessions ended in one transaction on ``root``'s stats record.
 
     The session ended is the one ``started`` names, or every unended session (each person's)
-    when ``started`` is ``None``; each is returned as recorded. Raises ``LookupError`` for a
+    when ``started`` is ``None``. Returns each ended session's ``session_ended`` line, by its
+    person, whose instant the session records as its end. Raises ``LookupError`` for a
     ``started`` no session of the project carries.
     """
     key = annotation_stats_key(str(root))
@@ -291,29 +293,28 @@ def end_sessions(root: Path, started: str | None) -> list[Session]:
         named = [s for s in stats.sessions if started in (None, s.started)]
         if started is not None and not named:
             raise LookupError(
-                f"no session of the open project started at {started}"
+                "no session of the open project started at "
+                f"{to_jsonable_python(started)}"
             )
-        ended = [s for s in named if s.ended is None]
-        stamp = now_iso()
-        for session in ended:
-            session.ended = stamp
-        if ended:
+        lines = []
+        for session in (s for s in named if s.ended is None):
+            line = audit.audit_line(
+                "session_ended", {"started": session.started}, session.user, "ok"
+            )
+            session.ended = line.timestamp
+            lines.append(line)
+        if lines:
             txn.write(key, stats.model_dump(mode="json"))
-    return ended
+    return lines
 
 
-def record_ended(root: Path, ended: list[Session]) -> None:
-    """Write one ``session_ended`` line in ``root``'s log per session of ``ended``, by its person.
+def record_ended(root: Path, lines: list[audit.AuditLine]) -> None:
+    """Append each ``session_ended`` line of ``lines`` to ``root``'s log.
 
     Raises ``AuditEntryNotWrittenError`` when one cannot follow.
     """
-    for session in ended:
-        audit.record_event_or_raise(
-            "session_ended",
-            {"started": session.started},
-            actor=session.user,
-            scope=root,
-        )
+    for line in lines:
+        audit.append_or_raise(line, scope=root)
 
 
 def _answering(written: SessionWrite, record: Callable[[], None]) -> None:
@@ -330,9 +331,15 @@ def _answering(written: SessionWrite, record: Callable[[], None]) -> None:
         raise audit_gap_409(exc, written) from exc
 
 
+class SessionsListing(BaseModel):
+    """Every session a project records, latest first, each with its derived throughput."""
+
+    sessions: list[SessionSummary]
+
+
 @router.get("/load")
-def load_sessions() -> dict[str, list[SessionSummary]]:
-    """Return every recorded session, latest first, with its derived throughput."""
+def load_sessions() -> SessionsListing:
+    """Return every recorded session of the open project (:class:`SessionsListing`)."""
     from tcip_web.state import store
 
     stats = read_stats(
@@ -340,7 +347,7 @@ def load_sessions() -> dict[str, list[SessionSummary]]:
             annotation_stats_key(str(store.held().root)), default=None
         )
     )
-    return {"sessions": [_summary(s) for s in stats.sessions]}
+    return SessionsListing(sessions=[_summary(s) for s in stats.sessions])
 
 
 def _summary(session: Session) -> SessionSummary:
@@ -351,10 +358,7 @@ def _summary(session: Session) -> SessionSummary:
         by_activity[e.activity] += e.seconds
     added = sum(e.annotations_added for e in entries)
     return SessionSummary(
-        user=session.user,
-        started=session.started,
-        ended=session.ended,
-        entries=entries,
+        **dict(session),
         images_annotated=len(
             {e.image_name for e in entries if e.annotations_added}
         ),

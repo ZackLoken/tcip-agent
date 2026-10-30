@@ -205,7 +205,7 @@ def test_a_phenology_look_on_screen_leaves_no_line(
     resp = client.post("/api/results/phenology_measurement", json=body)
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["milestones"]["rows"]
+    assert resp.json()["milestones"]
     assert audit_rows(tmp_path) == before
 
 
@@ -217,7 +217,10 @@ def test_ranking_a_review_queue_leaves_no_line(
     A successful ranking through a registered run answers a queue and leaves the project's log
     as it found it.
     """
-    from tcip_mcp.tools.feedback_tools import prioritize_review_queue
+    from tcip_mcp.tools.feedback_tools import (
+        ReviewQueue,
+        prioritize_review_queue,
+    )
     from tests.test_feedback_tools import _bound_checkpoint, _stub_scorer
     from tests.test_selection_ground_truth_digests import (
         DATES,
@@ -244,8 +247,8 @@ def test_ranking_a_review_queue_leaves_no_line(
         rationale=RATIONALE,
     )
 
-    assert "error" not in result, result
-    assert result["queue"]
+    assert isinstance(result, ReviewQueue), result
+    assert result.queue
     assert audit_rows(tmp_path) == before
 
 

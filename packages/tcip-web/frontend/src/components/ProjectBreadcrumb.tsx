@@ -9,14 +9,15 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { api, type ProjectSummary } from "@/api/client";
+import { api } from "@/api/client";
+import { messageOf } from "@/api/http";
+import type { ProjectsListing } from "@/api/types.generated";
 import {
-  bucketsForDate,
+  choiceForDate,
   openable,
   type OpenableProject,
   openWithDefaults,
   startOpen,
-  subjectsForDate,
 } from "@/lib/openProject";
 import { loadRecentProjectIds } from "@/lib/recentProjects";
 import { useStore } from "@/store";
@@ -34,7 +35,7 @@ export function ProjectBreadcrumb() {
   const pushToast = useStore((s) => s.pushToast);
 
   const [menu, setMenu] = useState<null | "project" | "date">(null);
-  const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
+  const [listing, setListing] = useState<ProjectsListing | null>(null);
   const busy = useStore((s) => s.opening !== null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -46,7 +47,7 @@ export function ProjectBreadcrumb() {
     api.projects
       .list()
       .then((r) => {
-        if (!canceled) setProjects(r.projects);
+        if (!canceled) setListing(r);
       })
       .catch(() => {
         if (!canceled) pushToast("Could not load the project list.");
@@ -80,42 +81,31 @@ export function ProjectBreadcrumb() {
     await openWithDefaults(project);
   }
 
-  async function switchDate(
-    newDate: string,
-    current: ProjectSummary & { id: string },
-    selected: DatasetSelection,
-  ) {
+  async function switchDate(newDate: string, current: OpenableProject, selected: DatasetSelection) {
     setMenu(null);
     if (newDate === selected.date) return;
-    // Keep the current subject when the new date has it, else fall to that date's first; a
-    // bucket states one capture date, so the new date opens on its own first bucket.
-    const subjects = subjectsForDate(current, newDate);
-    const subject =
-      selected.subject !== null && subjects.includes(selected.subject)
-        ? selected.subject
-        : (subjects[0] ?? "");
-    await startOpen(current, newDate, subject, bucketsForDate(current, newDate)[0] ?? "");
+    const { subject, bucket } = choiceForDate(current.tree, newDate, selected.subject);
+    await startOpen(current, newDate, subject, bucket);
   }
 
   if (!openProject) {
     return <span>no project open</span>;
   }
 
-  const listed = projects?.find((p) => p.id === openProject.id) ?? null;
-  const current = listed && listed.id !== null ? { ...listed, id: listed.id } : null;
-  const projectName = current?.display_name ?? "";
+  const readable = listing?.projects.filter(openable) ?? [];
+  const current = readable.find((p) => p.record.id === openProject.id) ?? null;
   // Every recent project still in the listing, named by it, the open one marked as current and
   // inert (hiding it would read as broken in a one-project workspace).
-  const isCurrent = (r: { id: string }) => r.id === openProject.id;
+  const isCurrent = (r: OpenableProject) => r.record.id === openProject.id;
   let recent: OpenableProject[] = [];
   let recentProblem: string | null = null;
   try {
     recent = loadRecentProjectIds().flatMap((id) => {
-      const project = projects?.find((p) => p.id === id);
-      return project && openable(project) ? [project] : [];
+      const project = readable.find((p) => p.record.id === id);
+      return project ? [project] : [];
     });
   } catch (e) {
-    recentProblem = e instanceof Error ? e.message : String(e);
+    recentProblem = messageOf(e);
   }
 
   return (
@@ -130,7 +120,7 @@ export function ProjectBreadcrumb() {
         title="Recent projects"
         className="max-w-[16rem] truncate font-mono hover:text-tcip-fg transition-colors"
       >
-        {projectName || "Loading…"}
+        {current?.record.display_name ?? "Loading…"}
       </button>
       <span className="mx-1.5 text-tcip-border">|</span>
       {dataset ? (
@@ -164,9 +154,9 @@ export function ProjectBreadcrumb() {
           ) : (
             recent.map((r) => (
               <MenuButton
-                key={r.id}
+                key={r.record.id}
                 onClick={() => (isCurrent(r) ? setMenu(null) : void openRecent(r))}
-                label={r.display_name}
+                label={r.record.display_name}
                 active={isCurrent(r)}
               />
             ))
@@ -182,12 +172,12 @@ export function ProjectBreadcrumb() {
           {!current ? (
             <EmptyRow text="Loading…" />
           ) : (
-            current.dates.map((d) => (
+            current.tree.captures.map(({ name }) => (
               <MenuButton
-                key={d}
-                onClick={() => void switchDate(d, current, dataset)}
-                label={d}
-                active={d === dataset.date}
+                key={name}
+                onClick={() => void switchDate(name, current, dataset)}
+                label={name}
+                active={name === dataset.date}
               />
             ))
           )}

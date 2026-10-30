@@ -7,14 +7,15 @@ known.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 from PIL import Image
 from pydantic import ValidationError
 
-from tcip_mcp.web_client import Panel
+from tcip_mcp.audit import now
+from tcip_mcp.web_client import CanvasMeta, Panel, read_canvas_meta
 from tcip_mcp.workspace import BoundProject
 from tests._producer_fixtures import write_image
 
@@ -57,18 +58,16 @@ def _canvas_image(tmp_path: Path) -> str:
     )
 
 
-def _ago(seconds: float) -> str:
-    """Return the instant ``seconds`` ago, in the spelling the push route stamps."""
-    return (
-        datetime.now(timezone.utc) - timedelta(seconds=seconds)
-    ).isoformat()
+def _ago(seconds: float) -> datetime:
+    """Return the instant ``seconds`` ago."""
+    return now() - timedelta(seconds=seconds)
 
 
 def _push_state(
     tmp_path: Path,
     image: str,
     *,
-    received_at: str,
+    received_at: datetime,
     shapes: list[dict] | None = None,
 ) -> None:
     """Write the two documents the GUI pushes for the project ``tmp_path``.
@@ -82,8 +81,8 @@ def _push_state(
     from tcip_annotation.viz import CanvasShape
     from tcip_mcp.registry_paths import stored_path
     from tcip_mcp.web_client import (
+        CanvasClass,
         CanvasGeometry,
-        CanvasMeta,
         Viewport,
         canvas_geometry_key,
         canvas_meta_key,
@@ -107,17 +106,14 @@ def _push_state(
         CanvasMeta(
             received_at=received_at,
             tab="annotate",
-            image=Path(image).name,
             image_path=image_path,
-            img_width=FRAME_W,
-            img_height=FRAME_H,
             viewport=Viewport(x=0, y=0, w=FRAME_W, h=FRAME_H, scale=1.0),
             user="breeder",
             mode="polygon",
             active_subject=None,
             cut_armed=False,
             dirty=False,
-            classes=[{"id": 0, "name": "bud", "color": "#FF0000"}],
+            classes=[CanvasClass(name="bud", color="#FF0000")],
             counts={},
         ).model_dump(mode="json"),
     )
@@ -149,6 +145,9 @@ def test_canvas_shapes_are_drawn_at_the_resolution_the_pixels_were_served_at(
     )
     assert "error" not in result, result
     assert result["shapes_missing"] is False
+    assert CanvasMeta.model_validate(result["canvas"]) == read_canvas_meta(
+        str(tmp_path)
+    )
 
     px = Image.open(result["image_path"]).convert("RGB")
     assert px.size == (FRAME_W // 2, FRAME_H // 2)
@@ -175,24 +174,23 @@ def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
     image = _canvas_image(tmp_path)
     _push_state(tmp_path, image, received_at=_ago(600))
 
-    pings: list[tuple[BoundProject, str, str]] = []
+    pings: list[tuple[BoundProject, str, web_client.PanelEvent]] = []
 
     def silent_hub(
         target: BoundProject,
         panel: Panel,
-        event_type: str,
-        data: dict,
+        event: web_client.PanelEvent,
         **kwargs: object,
-    ) -> dict:
-        pings.append((target, panel, event_type))
-        return {"status": "ok", "delivered": True}
+    ) -> web_client.PanelEventAnswer:
+        pings.append((target, panel, event))
+        return web_client.PanelEventAnswer(url="u", reason=None)
 
     monkeypatch.setattr(web_client, "post_panel_event", silent_hub)
 
     result = capture_live_canvas(bound, refresh=True, crop_to_viewport=False)
     assert "error" not in result, result
-    assert pings == [(bound, "app", "canvas_state_request")]
-    assert result["refresh_ping_delivered"] is True
+    assert pings == [(bound, "app", web_client.CanvasStateRequest())]
+    assert result["refresh_answer"]["reason"] is None
     assert result["refreshed"] is False
     assert result["state_age_seconds"] > 5
     assert "last known" in result["summary"]
@@ -217,12 +215,11 @@ def test_a_capture_the_gui_answered_reports_the_state_as_live(
     def answering_hub(
         target: BoundProject,
         panel: Panel,
-        event_type: str,
-        data: dict,
+        event: web_client.PanelEvent,
         **kwargs: object,
-    ) -> dict:
+    ) -> web_client.PanelEventAnswer:
         _push_state(tmp_path, image, received_at=_ago(0))
-        return {"status": "ok", "delivered": True}
+        return web_client.PanelEventAnswer(url="u", reason=None)
 
     monkeypatch.setattr(web_client, "post_panel_event", answering_hub)
 

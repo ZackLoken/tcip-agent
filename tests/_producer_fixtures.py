@@ -37,7 +37,10 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.postprocessing import plant_mapping
     from tcip_mcp.pipelines.schemas import DataSpec
     from tcip_mcp.subject_registry import SubjectRegistry
-    from tcip_mcp.tools.proposal_tools import StagedAssignments
+    from tcip_mcp.tools.proposal_tools import (
+        ProposedCandidates,
+        StagedAssignments,
+    )
     from tcip_store import Version
 
     Color = float | tuple[int, ...]
@@ -491,7 +494,7 @@ def mark_complete(
     annotations. Returns the new version.
     """
     from tcip_annotation.json_io import (
-        client_annotation,
+        ClientAnnotation,
         read_document_versioned,
     )
 
@@ -499,7 +502,10 @@ def mark_complete(
     return save_labels(
         project,
         image_path,
-        [client_annotation(a) for a in doc.annotations],
+        [
+            ClientAnnotation.of(a).model_dump(mode="json")
+            for a in doc.annotations
+        ],
         author=by,
         gestures=Gestures(
             complete={subject: True},
@@ -547,7 +553,7 @@ def staged_box(project: Path, image: Path, box: list[float]) -> str:
     by the image's own dimensions.
     """
     from tcip_mcp.pipelines.image_utils import image_path_dimensions
-    from tcip_mcp.tools.proposal_tools import stage_proposals
+    from tcip_mcp.tools.proposal_tools import StagedShapes, stage_proposals
 
     width, height = image_path_dimensions(image)
     x1, y1, x2, y2 = box
@@ -567,8 +573,8 @@ def staged_box(project: Path, image: Path, box: list[float]) -> str:
             }
         ],
     )
-    assert "error" not in staged, staged
-    return staged["bucket"]
+    assert isinstance(staged, StagedShapes) and staged.bucket, staged
+    return staged.bucket
 
 
 def install_stub_proposer(
@@ -823,15 +829,24 @@ def no_tensorboard(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def kept(proposed: dict, *assigned: tuple[int, str]) -> StagedAssignments:
+def kept(
+    proposed: ProposedCandidates | dict, *assigned: tuple[int, str]
+) -> StagedAssignments:
     """Return the assignments keeping each ``(candidate_id, subject)`` of the run ``proposed``.
 
-    ``proposed`` is a ``propose_annotations`` answer, whose ``staging_id`` names the run.
+    ``proposed`` is a ``propose_annotations`` answer, whose ``staging_id`` names the run; a
+    refusal fails the test with its text.
     """
-    from tcip_mcp.tools.proposal_tools import Assignment, StagedAssignments
+    from tcip_mcp.tools.proposal_tools import (
+        Assignment,
+        ProposedCandidates,
+        StagedAssignments,
+    )
 
+    assert isinstance(proposed, ProposedCandidates), proposed
+    assert proposed.staging_id is not None, proposed
     return StagedAssignments(
-        staging_id=proposed["staging_id"],
+        staging_id=proposed.staging_id,
         candidates=[
             Assignment(candidate_id=candidate_id, subject=subject)
             for candidate_id, subject in assigned

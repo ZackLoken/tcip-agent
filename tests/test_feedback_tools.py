@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, parse_image_path
 from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
-from tcip_mcp.tools.feedback_tools import prioritize_review_queue
+from tcip_mcp.tools.feedback_tools import ReviewQueue, prioritize_review_queue
 from tests._training_values import COMBINED_SCORER, RATIONALE, drawn_split
 
 if TYPE_CHECKING:
@@ -75,9 +75,10 @@ def test_prioritize_review_queue_skips_the_images_marked_finished(
         subject="bud",
         **QUEUE,
     )
-    assert r["reviewed_skipped"] == 2
-    assert r["total_candidates"] == 0
-    assert r["queue"] == []
+    assert isinstance(r, ReviewQueue), r
+    assert r.reviewed_skipped == 2
+    assert r.total_candidates == 0
+    assert r.queue == []
 
 
 def test_triage_predictions_skips_only_the_images_marked_finished(
@@ -440,11 +441,11 @@ def test_prioritize_review_queue_marks_a_bound_runs_reference_sides(
         images_dir=str(captures[date].images_dir),
         **QUEUE,
     )
-    assert "error" not in r, r
-    assert r["queue"], r
-    for entry in r["queue"]:
-        stem = Path(entry["image"]).stem
-        assert entry["reference_member"] == (stem in reference_stems), entry
+    assert isinstance(r, ReviewQueue), r
+    assert r.queue, r
+    for entry in r.queue:
+        stem = Path(entry.image).stem
+        assert entry.reference_member == (stem in reference_stems), entry
 
 
 def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selection_changed(
@@ -494,10 +495,8 @@ def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selec
         images_dir=str(captures[date].images_dir),
         **QUEUE,
     )
-    assert "error" not in r, r
-    marked = {
-        Path(e["image"]).stem for e in r["queue"] if e["reference_member"]
-    }
+    assert isinstance(r, ReviewQueue), r
+    marked = {Path(e.image).stem for e in r.queue if e.reference_member}
     assert marked == reference_stems
 
 
@@ -527,9 +526,9 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(
         **QUEUE,
     )
 
-    assert "error" not in r, r
-    assert len(r["queue"]) == 2, r
-    assert all(isinstance(entry["score"], float) for entry in r["queue"])
+    assert isinstance(r, ReviewQueue), r
+    assert len(r.queue) == 2, r
+    assert all(isinstance(entry.score, float) for entry in r.queue)
 
 
 def test_prioritize_review_queue_unbound_run_carries_no_marks(
@@ -538,7 +537,7 @@ def test_prioritize_review_queue_unbound_run_carries_no_marks(
     """An unbound run's review queue carries no reference marks.
 
     A checkpoint whose registry entry names no producing run has nothing bound to check
-    against: no ``reference_member`` on any entry.
+    against: ``reference_member`` is ``None`` on every entry.
     """
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
@@ -551,9 +550,9 @@ def test_prioritize_review_queue_unbound_run_carries_no_marks(
     r = prioritize_review_queue(
         tmp_path, checkpoint_path=ckpt, images_dir=str(images), **QUEUE
     )
-    assert "error" not in r, r
-    assert r["queue"], r
-    assert all("reference_member" not in entry for entry in r["queue"])
+    assert isinstance(r, ReviewQueue), r
+    assert r.queue, r
+    assert all(entry.reference_member is None for entry in r.queue)
 
 
 def test_the_queue_operation_reads_the_locations_its_arrival_established(
@@ -592,14 +591,10 @@ def test_the_queue_operation_reads_the_locations_its_arrival_established(
         subject=None,
     )
 
-    assert "error" not in r, r
-    assert r["queue"], r
+    assert isinstance(r, ReviewQueue), r
+    assert r.queue, r
     assert located_again == []
-    assert (r["scorer"], r["budget"], r["rationale"]) == (
-        COMBINED_SCORER.model_dump(),
-        5,
-        RATIONALE,
-    )
+    assert (r.scorer, r.budget, r.rationale) == (COMBINED_SCORER, 5, RATIONALE)
 
 
 # -- rail: calibration marks are decided by each sample's own recorded source ------------------
@@ -696,11 +691,9 @@ def test_prioritize_review_queue_marks_an_undated_capture_correctly(
         images_dir=str(undated),
         **QUEUE,
     )
-    assert "error" not in r, r
-    assert r["queue"], r
-    marked_true = {
-        Path(e["image"]).stem for e in r["queue"] if e["reference_member"]
-    }
+    assert isinstance(r, ReviewQueue), r
+    assert r.queue, r
+    marked_true = {Path(e.image).stem for e in r.queue if e.reference_member}
     assert marked_true == reference_stems
 
 
@@ -737,11 +730,9 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
         images_dir=str(undated),
         **QUEUE,
     )
-    assert "error" not in r, r
-    assert r["queue"], r
-    marked_true = {
-        Path(e["image"]).stem for e in r["queue"] if e["reference_member"]
-    }
+    assert isinstance(r, ReviewQueue), r
+    assert r.queue, r
+    marked_true = {Path(e.image).stem for e in r.queue if e.reference_member}
     assert marked_true == bound_stems
     assert not (marked_true & leaked)
 

@@ -401,9 +401,10 @@ def test_the_reference_csv_is_read_by_column_name(tmp_path: Path) -> None:
         header=("unit", "image_stem", "physical_extent"),
     )
 
-    assert _read_reference_csv(path.read_bytes(), str(path)) == {
-        "r1": {"physical_extent": 10.0, "unit": "mm"},
-        "r2": {"physical_extent": 12.5, "unit": "mm"},
+    rows = _read_reference_csv(path.read_bytes(), str(path))
+    assert {stem: (r.physical_extent, r.unit) for stem, r in rows.items()} == {
+        "r1": (10.0, "mm"),
+        "r2": (12.5, "mm"),
     }
 
 
@@ -412,12 +413,12 @@ def test_the_reference_csv_is_read_by_column_name(tmp_path: Path) -> None:
     [
         (
             [("r1", "10.0", "mm"), ("r2", "not-a-number", "mm")],
-            r":3\b.*non-numeric",
+            r"(?s):3\b.*physical_extent.*valid number",
         ),
         ([("r1", "10.0", "mm"), ("r1", "11.0", "mm")], "repeats stem 'r1'"),
-        ([("r1", "10.0")], r":2\b"),
-        ([("r1", "-10.0", "mm")], r":2\b.*positive"),
-        ([("r1", "0", "mm")], r":2\b.*positive"),
+        ([("r1", "10.0")], r"(?s):2\b.*unit"),
+        ([("r1", "-10.0", "mm")], r"(?s):2\b.*greater than 0"),
+        ([("r1", "0", "mm")], r"(?s):2\b.*greater than 0"),
     ],
     ids=["non-numeric", "duplicate-stem", "short-row", "negative", "zero"],
 )

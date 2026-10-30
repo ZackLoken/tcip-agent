@@ -55,9 +55,9 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from itertools import pairwise
-from typing import TYPE_CHECKING, Annotated, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Literal, Self, cast
 
-from pydantic import AfterValidator
+from pydantic import AfterValidator, BaseModel
 
 import tcip_store
 from tcip_annotation.state import (
@@ -736,11 +736,6 @@ Person = Annotated[str, AfterValidator(_person)]
 """A person's recorded identity, as a record field validates it."""
 
 
-def is_person_signoff(a: Annotation) -> bool:
-    """Return whether ``a``'s ``accepted_by`` names a person (:func:`is_person`)."""
-    return is_person(a.accepted_by)
-
-
 def is_unadjudicated_prediction(a: Annotation) -> bool:
     """Return whether ``a`` is a model's own output that no human has taken responsibility for.
 
@@ -754,22 +749,28 @@ def is_unadjudicated_agent_authorship(a: Annotation) -> bool:
 
     That is its :func:`authorship_of` being ``"tool"``.
     """
-    return authorship_of(a) == "tool"
+    return authorship_of(a.created_by, a.accepted_by) == "tool"
 
 
-def authorship_of(a: Annotation) -> str:
-    """Return ``a``'s authorship.
+type Authorship = Literal["person", "tool_accepted", "tool", "unattributed"]
+"""Who stands behind an annotation, :func:`authorship_of`'s answer."""
+
+
+def authorship_of(
+    created_by: str | None, accepted_by: str | None
+) -> Authorship:
+    """Return the authorship of an annotation ``created_by`` produced and ``accepted_by`` signed.
 
     One of ``"person"`` (a person created it, :func:`is_person`), ``"tool_accepted"`` (a person
-    signed it off, :func:`is_person_signoff`), ``"tool"`` (a producer that is no person, such as a
-    bare name or a ``model:<checkpoint>`` stamp, with no person's sign-off) or ``"unattributed"``
-    (no producer and no person's sign-off).
+    signed it off), ``"tool"`` (a producer that is no person, such as a bare name or a
+    ``model:<checkpoint>`` stamp, with no person's sign-off) or ``"unattributed"`` (no producer
+    and no person's sign-off).
     """
-    if is_person(a.created_by):
+    if is_person(created_by):
         return "person"
-    if is_person_signoff(a):
+    if is_person(accepted_by):
         return "tool_accepted"
-    return "tool" if a.created_by else "unattributed"
+    return "tool" if created_by else "unattributed"
 
 
 @dataclass
@@ -927,29 +928,48 @@ def _held_provenance(a: Annotation) -> dict:
     return {k: getattr(a, k) for k in _PROV_KEYS if getattr(a, k) is not None}
 
 
-def client_annotation(a: Annotation) -> dict:
-    """Return ``a`` as a plain dict with its box in corner form.
+class ClientAnnotation(BaseModel):
+    """One annotation as a client reads it.
 
-    ``bbox`` in corner form ``[x1, y1, x2, y2]``; ``rings`` for a polygon, every ring; ``point``
-    for a keypoint or landmark, the stored key; ``attributes``; ``score`` for a prediction;
-    ``iscrowd`` always stated; and the provenance fields the record holds
-    (:func:`_held_provenance`).
+    It holds its subject, its attribute values by name, its crowd flag and its geometry:
+    ``bbox`` in corner form ``[x1, y1, x2, y2]``, ``rings`` for a polygon (every ring), ``point``
+    for a keypoint or landmark, the other two ``None``, or all three ``None`` for an image-level
+    label. ``score`` is a prediction's, and the provenance fields are the record's own, ``None``
+    where it holds none.
     """
-    out: dict = {
-        "subject": a.subject,
-        "attributes": dict(a.attributes),
-        "iscrowd": a.iscrowd,
-    }
-    geom = a.geometry
-    if polygonal(geom):
-        out["rings"] = [[[x, y] for x, y in ring] for ring in geom.rings]
-    elif isinstance(geom, BBox):
-        out["bbox"] = [geom.x1, geom.y1, geom.x2, geom.y2]
-    elif isinstance(geom, Point):
-        out["point"] = [geom.x, geom.y]
-    if a.score is not None:
-        out["score"] = a.score
-    return {**out, **_held_provenance(a)}
+
+    subject: str
+    attributes: dict[str, str]
+    iscrowd: bool
+    bbox: tuple[float, float, float, float] | None
+    rings: list[list[tuple[float, float]]] | None
+    point: tuple[float, float] | None
+    score: float | None
+    created_by: str | None
+    created_at: str | None
+    accepted_by: str | None
+    accepted_at: str | None
+
+    @classmethod
+    def of(cls, a: Annotation, **facts: object) -> Self:
+        """Return ``a`` as a client reads it, with ``facts``, a subclass's own fields, beside it."""
+        geom = a.geometry
+        return cls(
+            subject=a.subject,
+            attributes=a.attributes,
+            iscrowd=a.iscrowd,
+            bbox=(geom.x1, geom.y1, geom.x2, geom.y2)
+            if isinstance(geom, BBox)
+            else None,
+            rings=geom.rings if polygonal(geom) else None,
+            point=(geom.x, geom.y) if isinstance(geom, Point) else None,
+            score=a.score,
+            created_by=a.created_by,
+            created_at=a.created_at,
+            accepted_by=a.accepted_by,
+            accepted_at=a.accepted_at,
+            **facts,
+        )
 
 
 def document_payload(
@@ -957,24 +977,20 @@ def document_payload(
     width: int,
     height: int,
     *,
-    keep_empty: bool = False,
     marks: Mapping[str, list[CompletionMark]] | None = None,
     cap: int | None = None,
-) -> dict | None:
+) -> dict:
     """Return the record one image's per-image document holds.
 
     It holds its frame, its annotations, of ``marks`` each subject's whose digest still names that
     subject's annotations here, and a prediction document's detection ``cap`` when given. Refuses
-    (``ValueError``) the first geometry the stored grid collapses. ``None`` when neither a record
-    nor a mark survives and ``keep_empty`` is not set.
+    (``ValueError``) the first geometry the stored grid collapses.
     """
     annotations = list(annotations)
     records = [
         {**stored_content(a), **_held_provenance(a)} for a in annotations
     ]
     live = _live(marks or {}, annotations)
-    if not records and not live and not keep_empty:
-        return None
     payload: dict = {
         "width": width,
         "height": height,
@@ -1012,15 +1028,13 @@ def write_label_document(
     """Write all of an image's annotations as the document ``key`` names.
 
     The completion ``marks`` still live over them are written with them
-    (:func:`document_payload`). An empty list writes an empty document under ``keep_empty``, else
-    removes the document. ``expect`` (a version token) makes the write a compare-and-set raising
-    ``VersionConflictError`` with nothing written. Returns the new version, or ``None`` when the
-    document was removed.
+    (:func:`document_payload`). A document holding neither an annotation nor a live mark is
+    written empty under ``keep_empty``, else removed. ``expect`` (a version token) makes the write
+    a compare-and-set raising ``VersionConflictError`` with nothing written. Returns the new
+    version, or ``None`` when the document was removed.
     """
-    payload = document_payload(
-        annotations, width, height, keep_empty=keep_empty, marks=marks
-    )
-    if payload is None:
+    payload = document_payload(annotations, width, height, marks=marks)
+    if not (keep_empty or payload[ANNOTATIONS_KEY] or COMPLETION_KEY in payload):
         tcip_store.delete(key, expect=expect)
         return None
     return tcip_store.replace(key, payload, expect=expect)

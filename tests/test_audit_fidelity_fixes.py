@@ -75,18 +75,20 @@ def test_mcp_save_annotations_refuses_by_index_through_the_decoders_checks(
 
 def test_encode_predictions_stamps_model_provenance(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.label_queries import registry_scope
-    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+    from tcip_mcp.pipelines.postprocessing.export import (
+        DetectionResult,
+        encode_predictions,
+    )
 
     data, _dropped = encode_predictions(
-        {
-            "image": "pred.jpg",
-            "width": 100,
-            "height": 80,
-            "boxes": [[10, 10, 30, 30]],
-            "scores": [0.9],
-            "labels": [1],
-            "cap": 10,
-        },
+        DetectionResult(
+            image="pred.jpg",
+            width=100,
+            height=80,
+            boxes=[(10, 10, 30, 30)],
+            scores=[0.9],
+            cap=10,
+        ),
         created_by="model:best_bud",
         scope=registry_scope(tmp_path, "bud"),
     )

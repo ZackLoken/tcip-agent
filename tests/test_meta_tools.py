@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -29,9 +30,10 @@ from tcip_mcp.workspace import BoundProject
 def _clock(monkeypatch: pytest.MonkeyPatch, count: int) -> None:
     """Stamp the next ``count`` meta-loop writes one second apart, in order."""
     times = iter(
-        f"2026-03-04T12:00:{second:02d}+00:00" for second in range(count)
+        datetime(2026, 3, 4, 12, 0, second, tzinfo=UTC)
+        for second in range(count)
     )
-    monkeypatch.setattr(meta_tools, "now_iso", lambda: next(times))
+    monkeypatch.setattr(meta_tools, "now", lambda: next(times))
 
 
 def test_report_friction_writes_one_json_document(tmp_path: Path) -> None:
@@ -178,7 +180,7 @@ def test_two_reports_in_one_instant_under_one_category_land_under_ids_naming_nei
     Neither id carries the time or the category, which the record's own fields state.
     """
     monkeypatch.setattr(
-        meta_tools, "now_iso", lambda: "2026-03-04T12:00:00+00:00"
+        meta_tools, "now", lambda: datetime(2026, 3, 4, 12, tzinfo=UTC)
     )
     first, second = (
         report_friction(

@@ -16,6 +16,8 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from tcip_mcp.model_registry import Listed
+
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
@@ -55,14 +57,12 @@ def _register(
     *,
     name: str = "rail-model",
     tags: list[str] | None = None,
-) -> dict:
+) -> Listed:
     from tcip_mcp.tools.model_tools import register_model
 
-    result = register_model(
+    return register_model(
         tmp_path, name=name, checkpoint_path=ckpt_path, tags=tags, actor=None
     )
-    assert "error" not in result, result
-    return result
 
 
 def _infer(tmp_path: Path, ckpt: str, bucket: str = "preds") -> dict:
@@ -242,25 +242,34 @@ def test_review_priority_route_worker_fails_the_job_on_an_unregistered_checkpoin
     nothing.
     """
     pytest.importorskip("fastapi")
-    from tcip_web.routes.annotate import PriorityQueueJob, _pq_worker
+    from tcip_web.routes.annotate import (
+        LaunchPriorityQueuePayload,
+        PriorityQueueJob,
+        _pq_worker,
+    )
 
     ckpt = secondary_checkpoint(tmp_path)
     images_dir = _images(tmp_path)
 
-    job = PriorityQueueJob.launched(
+    job = PriorityQueueJob(
         job_id="rail1-pq",
         checkpoint_path=ckpt,
         images_dir=str(images_dir),
         subject=None,
-        scorer=COMBINED_SCORER,
-        budget=10,
-        rationale=RATIONALE,
         project=str(tmp_path),
     )
-    _pq_worker(job)
+    _pq_worker(
+        job,
+        LaunchPriorityQueuePayload(
+            checkpoint_path=ckpt,
+            scorer=COMBINED_SCORER,
+            budget=10,
+            rationale=RATIONALE,
+        ),
+    )
     assert job.status == "failed"
     assert "register_model" in job.error
-    assert job.queue == []
+    assert job.ranked is None
 
 
 def test_review_priority_route_worker_completes_the_job_with_a_registered_checkpoint(
@@ -272,7 +281,11 @@ def test_review_priority_route_worker_completes_the_job_with_a_registered_checkp
     from types import SimpleNamespace
 
     import tcip_mcp.pipelines.active_learning.scorer as al_scorer
-    from tcip_web.routes.annotate import PriorityQueueJob, _pq_worker
+    from tcip_web.routes.annotate import (
+        LaunchPriorityQueuePayload,
+        PriorityQueueJob,
+        _pq_worker,
+    )
 
     ckpt = registered_checkpoint(tmp_path)
     images_dir = _images(tmp_path)
@@ -285,19 +298,25 @@ def test_review_priority_route_worker_completes_the_job_with_a_registered_checkp
         ),
     )
 
-    job = PriorityQueueJob.launched(
+    job = PriorityQueueJob(
         job_id="rail7-pq",
         checkpoint_path=ckpt,
         images_dir=str(images_dir),
         subject=None,
-        scorer=COMBINED_SCORER,
-        budget=10,
-        rationale=RATIONALE,
         project=str(tmp_path),
     )
-    _pq_worker(job)
+    _pq_worker(
+        job,
+        LaunchPriorityQueuePayload(
+            checkpoint_path=ckpt,
+            scorer=COMBINED_SCORER,
+            budget=10,
+            rationale=RATIONALE,
+        ),
+    )
     assert job.status == "completed", job.error
-    assert job.queue == []
+    assert job.ranked is not None
+    assert job.ranked.queue == []
 
 
 # Rail 2: a registered checkpoint whose bytes are replaced (in place, or by rename) after
@@ -357,7 +376,7 @@ def test_a_foreign_registration_after_its_run_completed_leaves_the_run_its_one_o
         tmp_path, name="entry-untagged", checkpoint_path=str(copy), actor=None
     )
 
-    assert owner["experiment_id"] == "expA"
+    assert owner.entry.experiment_id == "expA"
     assert [e.experiment_id for e in registered_entries(tmp_path)] == ["expA"]
 
 
@@ -393,7 +412,7 @@ def test_a_foreign_registration_before_its_run_completed_leaves_the_run_its_one_
         checkpoint_path=elsewhere.path,
         actor=None,
     )
-    assert registered["experiment_id"] is None
+    assert registered.entry.experiment_id is None
 
     run = observe(
         finished_run(tmp_path, experiment_id="expA", seed=7, data=data)
@@ -423,7 +442,7 @@ def test_two_foreign_registrations_of_one_sha256_resolve_to_one_entry(
     ckpt = foreign_checkpoint(tmp_path, name="first-name")
     copy = tmp_path / "copy.pt"
     copy.write_bytes(Path(ckpt).read_bytes())
-    assert "error" not in register_model(
+    register_model(
         tmp_path, name="second-name", checkpoint_path=str(copy), actor=None
     )
 
@@ -560,7 +579,7 @@ def test_registration_digest_and_load_digest_agree(tmp_path: Path) -> None:
     from tcip_mcp.model_registry import load_registered_checkpoint
 
     checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
-    assert checkpoint.sha256 == reg["sha256"]
+    assert checkpoint.sha256 == reg.entry.sha256
 
 
 def test_a_completed_runs_final_status_and_the_load_agree_on_its_digest(
@@ -634,7 +653,7 @@ def test_doctor_lists_a_bucket_naming_an_unregistered_digest_and_stays_silent_on
     assert (
         "error" not in good and "error" not in stale and "error" not in undated
     )
-    assert good["checkpoint_sha256"] == reg["sha256"]
+    assert good["checkpoint_sha256"] == reg.entry.sha256
     for bucket, digest in (
         ("stale/2026-01-01", "a" * 64),
         ("undated-model", "b" * 64),
@@ -661,4 +680,4 @@ def test_doctor_lists_a_bucket_naming_an_unregistered_digest_and_stays_silent_on
     assert len([m for m in messages if "a" * 64 in m]) == 1, messages
     (undated_finding,) = [m for m in messages if "b" * 64 in m]
     assert "'undated-model'" in undated_finding
-    assert not any(reg["sha256"] in m for m in messages)
+    assert not any(reg.entry.sha256 in m for m in messages)

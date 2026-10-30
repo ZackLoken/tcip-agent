@@ -10,8 +10,13 @@ import {
   isPlantRegistryDisclosure,
 } from "@/api/inference";
 import type { ServedDeliveryEvent } from "@/api/types.generated";
+import { deliveredDatesLine, outsideRasterLine } from "@/lib/disclosureLines";
 
-function DeliveryEventRow({ record }: { record: ServedDeliveryEvent }) {
+function DeliveryEventRow({
+  served: { event: record, resolved_key },
+}: {
+  served: ServedDeliveryEvent;
+}) {
   return (
     <li
       className="rounded border border-tcip-border p-3"
@@ -72,7 +77,7 @@ function DeliveryEventRow({ record }: { record: ServedDeliveryEvent }) {
                   <div>{`Within the position error: ${pm.plants_within_position_error.join(", ")}`}</div>
                 )}
                 {pm.plants_outside_raster.length > 0 && (
-                  <div>{`Outside the raster: ${pm.plants_outside_raster.join(", ")}`}</div>
+                  <div>{outsideRasterLine(pm.plants_outside_raster)}</div>
                 )}
                 {pm.plants_with_ambiguous_detections.length > 0 && (
                   <div>{`Ambiguous detection: ${pm.plants_with_ambiguous_detections.join(", ")}`}</div>
@@ -91,22 +96,17 @@ function DeliveryEventRow({ record }: { record: ServedDeliveryEvent }) {
               "attribution)"}
           </div>
           {record.plant_mapping.plants_outside_raster.length > 0 && (
-            <div>
-              {`Outside the raster: ${record.plant_mapping.plants_outside_raster.join(", ")}`}
-            </div>
+            <div>{outsideRasterLine(record.plant_mapping.plants_outside_raster)}</div>
           )}
         </div>
       )}
       {record.plant_mapping && isPlantMappingDisclosure(record.plant_mapping) && (
         <div className="mt-2 text-[13px] text-tcip-muted">
-          {`Delivered dates ${record.plant_mapping.dates_delivered.join(", ")}: ` +
-            `${record.plant_mapping.images_unattributed} attributed to no plant ` +
-            `(${record.plant_mapping.plant_attribution}-level attribution)`}
-          {record.plant_mapping.resolved_key === null &&
-            " (the cited mapping record no longer resolves)"}
-          {record.plant_mapping.resolved_key !== null &&
-            record.plant_mapping.resolved_key !== record.plant_mapping.name &&
-            ` (cited record archived as ${record.plant_mapping.resolved_key})`}
+          {deliveredDatesLine(record.plant_mapping)}
+          {resolved_key === null && " (the cited mapping record no longer resolves)"}
+          {resolved_key !== null &&
+            resolved_key !== record.plant_mapping.name &&
+            ` (cited record archived as ${resolved_key})`}
         </div>
       )}
     </li>
@@ -129,8 +129,8 @@ export function DeliveryEventsPanel({
         <div className="text-tcip-muted">No deliveries.</div>
       ) : (
         <ul className="flex flex-col gap-2">
-          {records.map((record) => (
-            <DeliveryEventRow key={record.event_id} record={record} />
+          {records.map((served) => (
+            <DeliveryEventRow key={served.event.event_id} served={served} />
           ))}
         </ul>
       )}

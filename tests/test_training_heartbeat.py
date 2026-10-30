@@ -93,10 +93,9 @@ def test_a_listed_row_carries_the_heartbeat_instant(tmp_path: Path) -> None:
 
     by_id = _listed(tmp_path)
     assert by_id["beating"]["state"] == "running"
-    assert (
+    assert datetime.fromisoformat(
         by_id["beating"]["heartbeat"]
-        == datetime.fromtimestamp(instant, timezone.utc).isoformat()
-    )
+    ) == datetime.fromtimestamp(instant, timezone.utc)
 
 
 def test_configured_stale_window_agrees_across_run_list_compare_and_status(
@@ -123,8 +122,8 @@ def test_configured_stale_window_agrees_across_run_list_compare_and_status(
 
     assert _listed(tmp_path)["exp-window"]["state"] == "interrupted"
 
-    cmp = compare_tool(["exp-window"], project=tmp_path)
-    assert cmp["experiments"][0]["state"] == "interrupted"
+    cmp = compare_tool(["exp-window"], project=tmp_path).model_dump()
+    assert cmp["experiments"][0]["run"]["state"] == "interrupted"
 
     assert (
         monitor_training(tmp_path, "exp-window")["run"]["state"]

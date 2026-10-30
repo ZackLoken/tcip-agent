@@ -285,7 +285,7 @@ def source_path_of(source: str | Path | BandGroupRef) -> str:
     )
 
 
-def logical_image_name(source: Path | BandGroupRef) -> str:
+def logical_image_name(source: str | Path | BandGroupRef) -> str:
     """Return this logical image's file name: the basename of :func:`source_path_of`."""
     return Path(source_path_of(source)).name
 

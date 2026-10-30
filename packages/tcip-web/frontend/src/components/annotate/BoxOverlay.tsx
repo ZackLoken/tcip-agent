@@ -15,7 +15,6 @@ export const BoxOverlay = memo(function BoxOverlay({
   style,
   labelSize,
   label,
-  showLabel,
   focused,
   handleR,
 }: {
@@ -24,8 +23,7 @@ export const BoxOverlay = memo(function BoxOverlay({
   width: number;
   style: LineStyle;
   labelSize: number;
-  label: string;
-  showLabel?: boolean;
+  label: string | null;
   /** The focused item draws the halo under its own stroke; with `handleR`, its corner handles. */
   focused?: boolean;
   handleR?: number;
@@ -73,7 +71,9 @@ export const BoxOverlay = memo(function BoxOverlay({
             strokeWidth={width * 0.6}
           />
         ))}
-      {showLabel && <HaloLabel x={box.x1} y={box.y1} text={label} fill={stroke} size={labelSize} />}
+      {label !== null && (
+        <HaloLabel x={box.x1} y={box.y1} text={label} fill={stroke} size={labelSize} />
+      )}
     </>
   );
 });

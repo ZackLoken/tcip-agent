@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { StatusBar } from "@/components/StatusBar";
 import { useStore } from "@/store";
+import { LANDED, loadOf } from "@/test/annotate";
+import { PANEL_EVENTS } from "@/test/panelEvents";
 import { GROUPED_SELECTION, RAW_SELECTION } from "@/test/store";
+import { AGENT_CLIENT } from "@/test/training";
 
 const initialStoreState = useStore.getState();
 
@@ -15,27 +18,35 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("StatusBar agent activity footer", () => {
-  it("names the declared harness, not a generic Agent label", async () => {
-    useStore
-      .getState()
-      .pushAgentActivity("annotate", "labels_written", { stem: "IMG_1" }, "claude-code 2.1.238");
+  const { panel, event } = PANEL_EVENTS.labels_written;
+
+  it("names the declared harness and the written image, not a generic Agent label", async () => {
+    useStore.getState().pushAgentActivity(panel, event, AGENT_CLIENT);
     render(<StatusBar />);
 
     expect(
-      await screen.findByText("claude-code 2.1.238: labels written on IMG_1"),
+      await screen.findByText(`${AGENT_CLIENT}: labels written on ${event.name}`),
     ).toBeInTheDocument();
   });
 
   it("reads Process for a write the sender declared no harness on", async () => {
-    useStore.getState().pushAgentActivity("annotate", "labels_written", { stem: "IMG_1" }, null);
+    useStore.getState().pushAgentActivity(panel, event, null);
     render(<StatusBar />);
 
-    expect(await screen.findByText("Process: labels written on IMG_1")).toBeInTheDocument();
+    expect(await screen.findByText(`Process: labels written on ${event.name}`)).toBeInTheDocument();
   });
 });
 
 const SELECTED_CAPTURE = RAW_SELECTION;
 const IN_VIEW = RAW_SELECTION.images[0].path;
+
+/** The produced document of the first photograph holding one box, as the save answered it. */
+const ONE_BOX = LANDED.box.document;
+
+/** Load the produced one-box document as the document of `image_path`. */
+function loadIn(image_path: string) {
+  useStore.getState().loadLabelsIntoCanvas({ ...ONE_BOX, image_path });
+}
 
 describe("StatusBar canvas facts", () => {
   beforeEach(() => {
@@ -44,32 +55,18 @@ describe("StatusBar canvas facts", () => {
   });
 
   it("shows the image size and shape counts for a canvas loaded from the open dataset", () => {
-    useStore.setState((s) => ({
-      canvas: {
-        ...s.canvas,
-        loadedImagePath: IN_VIEW,
-        imgWidth: 800,
-        imgHeight: 600,
-        boxes: [{ x1: 0, y1: 0, x2: 10, y2: 10, subject: "fruit", attributes: {} }],
-      },
-    }));
+    loadIn(IN_VIEW);
     render(<StatusBar />);
 
-    expect(screen.getByText("Image: 800×600")).toBeInTheDocument();
+    expect(
+      screen.getByText(`Image: ${ONE_BOX.img_width}×${ONE_BOX.img_height}`),
+    ).toBeInTheDocument();
     expect(screen.getByText("1 box")).toBeInTheDocument();
   });
 
   it("shows no canvas facts off the Annotate tab", () => {
     useStore.getState().setActiveTab("inference");
-    useStore.setState((s) => ({
-      canvas: {
-        ...s.canvas,
-        loadedImagePath: IN_VIEW,
-        imgWidth: 800,
-        imgHeight: 600,
-        boxes: [{ x1: 0, y1: 0, x2: 10, y2: 10, subject: "fruit", attributes: {} }],
-      },
-    }));
+    loadIn(IN_VIEW);
     render(<StatusBar />);
 
     expect(screen.queryByText(/Zoom: /)).not.toBeInTheDocument();
@@ -78,15 +75,7 @@ describe("StatusBar canvas facts", () => {
   });
 
   it("hides the image size and shape counts for a canvas loaded from another dataset", () => {
-    useStore.setState((s) => ({
-      canvas: {
-        ...s.canvas,
-        loadedImagePath: GROUPED_SELECTION.images[0].path,
-        imgWidth: 800,
-        imgHeight: 600,
-        boxes: [{ x1: 0, y1: 0, x2: 10, y2: 10, subject: "fruit", attributes: {} }],
-      },
-    }));
+    loadIn(GROUPED_SELECTION.images[0].path);
     render(<StatusBar />);
 
     expect(screen.queryByText(/Image: /)).not.toBeInTheDocument();
@@ -97,10 +86,8 @@ describe("StatusBar canvas facts", () => {
 describe("StatusBar shape counts (stored records only, never a derived box)", () => {
   beforeEach(() => {
     useStore.getState().setActiveTab("annotate");
-    useStore.setState((s) => ({
-      gui: { ...s.gui, dataset: SELECTED_CAPTURE },
-      canvas: { ...s.canvas, loadedImagePath: IN_VIEW },
-    }));
+    useStore.setState((s) => ({ gui: { ...s.gui, dataset: SELECTED_CAPTURE } }));
+    useStore.getState().loadLabelsIntoCanvas(loadOf(IN_VIEW));
   });
 
   it("counts a cut polygon's two pieces as polygons, never as boxes", () => {
@@ -119,6 +106,7 @@ describe("StatusBar shape counts (stored records only, never a derived box)", ()
             ],
             subject: "bud",
             attributes: {},
+            iscrowd: false,
           },
           {
             rings: [
@@ -131,6 +119,7 @@ describe("StatusBar shape counts (stored records only, never a derived box)", ()
             ],
             subject: "bud",
             attributes: {},
+            iscrowd: false,
           },
         ],
       },
@@ -157,6 +146,7 @@ describe("StatusBar shape counts (stored records only, never a derived box)", ()
             ],
             subject: "bud",
             attributes: {},
+            iscrowd: false,
           },
         ],
       },
@@ -183,9 +173,10 @@ describe("StatusBar shape counts (stored records only, never a derived box)", ()
             ],
             subject: "bud",
             attributes: {},
+            iscrowd: false,
           },
         ],
-        boxes: [{ x1: 0, y1: 0, x2: 10, y2: 10, subject: "fruit", attributes: {} }],
+        boxes: [{ x1: 0, y1: 0, x2: 10, y2: 10, subject: "fruit", attributes: {}, iscrowd: false }],
       },
     }));
     render(<StatusBar />);
@@ -213,11 +204,12 @@ describe("StatusBar shape counts (stored records only, never a derived box)", ()
             ],
             subject: "bud",
             attributes: {},
+            iscrowd: false,
           },
         ],
         boxes: [
-          { x1: 0, y1: 0, x2: 10, y2: 10, subject: "fruit", attributes: {} },
-          { x1: 20, y1: 0, x2: 30, y2: 10, subject: "fruit", attributes: {} },
+          { x1: 0, y1: 0, x2: 10, y2: 10, subject: "fruit", attributes: {}, iscrowd: false },
+          { x1: 20, y1: 0, x2: 30, y2: 10, subject: "fruit", attributes: {}, iscrowd: false },
         ],
       },
     }));
@@ -233,7 +225,7 @@ describe("StatusBar shape counts (stored records only, never a derived box)", ()
     useStore.setState((s) => ({
       canvas: {
         ...s.canvas,
-        points: [{ x: 5, y: 6, subject: "tip", attributes: {} }],
+        points: [{ x: 5, y: 6, subject: "tip", attributes: {}, iscrowd: false }],
       },
     }));
     render(<StatusBar />);
@@ -246,8 +238,8 @@ describe("StatusBar shape counts (stored records only, never a derived box)", ()
       canvas: {
         ...s.canvas,
         points: [
-          { x: 5, y: 6, subject: "tip", attributes: {} },
-          { x: 8, y: 9, subject: "tip", attributes: {} },
+          { x: 5, y: 6, subject: "tip", attributes: {}, iscrowd: false },
+          { x: 8, y: 9, subject: "tip", attributes: {}, iscrowd: false },
         ],
       },
     }));

@@ -8,6 +8,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel
+
 from tcip_mcp.pipelines.active_learning import ScorerSpec
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
@@ -16,6 +18,34 @@ if TYPE_CHECKING:
     from tcip_mcp.model_registry import VerifiedCheckpoint
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.execution import Preparation, Stated
+
+
+class QueueEntry(BaseModel):
+    """One image of a review queue: its logical name, its score and its reference membership.
+
+    ``reference_member`` is whether the checkpoint's producing run froze the image on a reference
+    side of its partition, ``None`` for a checkpoint no selection-bound run of the project produced.
+    """
+
+    image: str
+    score: float
+    reference_member: bool | None
+
+
+class ReviewQueue(BaseModel):
+    """A ranked review queue: what it was ranked under, its checkpoint's task, counts and entries.
+
+    ``queue`` is the top ``budget`` of ``total_candidates`` images, highest first;
+    ``reviewed_skipped`` counts the images skipped as finished for the subject.
+    """
+
+    scorer: ScorerSpec
+    budget: int
+    rationale: str
+    task: str
+    total_candidates: int
+    reviewed_skipped: int
+    queue: list[QueueEntry]
 
 
 def _load_or_refuse(
@@ -145,17 +175,17 @@ def prioritize_review_queue(
     budget: int,
     rationale: str,
     subject: str | None = None,
-) -> dict:
+) -> ReviewQueue | dict[str, str]:
     """Rank unfinished images by active-learning informativeness into a review queue.
 
     Scores every candidate with ``scorer`` and returns the ``budget`` most uncertain/diverse frames
-    first, each ``queue`` entry naming its image by its logical name, answered beside the scorer
-    block, the budget and ``rationale``.
+    first as the :class:`ReviewQueue`, each ``queue`` entry a :class:`QueueEntry` naming its image
+    by its logical name, beside the scorer block, the budget and ``rationale``.
 
     When ``checkpoint_path`` names a checkpoint produced by a run bound to a selection, each
-    ``queue`` entry carries ``reference_member: bool``, matched against the calibration and holdout
-    samples that run's partition froze whose own source sits in ``images_dir``. An unbound run
-    carries no mark on any entry.
+    entry's ``reference_member`` is matched against the calibration and holdout samples that run's
+    partition froze whose own source sits in ``images_dir``; for an unbound run it is ``None`` on
+    every entry.
 
     Args:
         checkpoint_path: Trained model checkpoint (drives scoring).
@@ -192,15 +222,14 @@ def ranked_review_queue(
     budget: int,
     rationale: str,
     subject: str | None,
-) -> dict:
+) -> ReviewQueue | dict[str, str]:
     """Rank the unfinished images under ``images_dir`` by the scorer ``scorer`` builds.
 
     The images under the established location ``images_dir`` are ranked by the scorer
     (:func:`~tcip_mcp.pipelines.active_learning.scorer.resolve_scorer`) under the
-    registered checkpoint at the established location ``checkpoint_path``, the top ``budget`` as
-    ``queue`` (each marked ``reference_member`` for a selection-bound run) answered beside the
-    scorer block, the budget and ``rationale``, or the refusal ``{"error": ...}``; ``subject``'s
-    finished images are skipped.
+    registered checkpoint at the established location ``checkpoint_path``, answered as the
+    :class:`ReviewQueue`, or the refusal ``{"error": ...}``; ``subject``'s finished images are
+    skipped.
     """
     checkpoint = _load_or_refuse(checkpoint_path, project)
     if isinstance(checkpoint, dict):
@@ -214,20 +243,16 @@ def ranked_review_queue(
     except ValueError as exc:
         return {"error": str(exc)}
 
-    stated = {
-        "scorer": scorer.model_dump(),
-        "budget": budget,
-        "rationale": rationale,
-    }
     if not sources:
-        return {
-            **stated,
-            "task": task,
-            "total_candidates": 0,
-            "reviewed_skipped": reviewed_skipped,
-            "selected_count": 0,
-            "queue": [],
-        }
+        return ReviewQueue(
+            scorer=scorer,
+            budget=budget,
+            rationale=rationale,
+            task=task,
+            total_candidates=0,
+            reviewed_skipped=reviewed_skipped,
+            queue=[],
+        )
 
     from tcip_mcp.pipelines.execution import Stated
 
@@ -249,23 +274,24 @@ def ranked_review_queue(
         ranking.score(sources, predictor)[:budget]
     )
     reference_stems = _reference_stems(checkpoint, images_dir, project)
-    queue = []
-    for p, s in scored:
-        entry: dict[str, Any] = {
-            "image": logical_image_name(p),
-            "score": round(float(s), 6),
-        }
-        if reference_stems is not None:
-            entry["reference_member"] = stem_of(p) in reference_stems
-        queue.append(entry)
-    return {
-        **stated,
-        "task": task,
-        "total_candidates": len(sources),
-        "reviewed_skipped": reviewed_skipped,
-        "selected_count": len(scored),
-        "queue": queue,
-    }
+    return ReviewQueue(
+        scorer=scorer,
+        budget=budget,
+        rationale=rationale,
+        task=task,
+        total_candidates=len(sources),
+        reviewed_skipped=reviewed_skipped,
+        queue=[
+            QueueEntry(
+                image=logical_image_name(p),
+                score=round(float(s), 6),
+                reference_member=None
+                if reference_stems is None
+                else stem_of(p) in reference_stems,
+            )
+            for p, s in scored
+        ],
+    )
 
 
 @tool()

@@ -9,11 +9,11 @@ neighbor's canopy. A canopy boundary is one a person accepted (:func:`load_canop
 
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, Annotated, ClassVar, cast
 
+from pydantic import AllowInfNan, NonNegativeFloat
 from shapely.geometry import Point as ShapelyPoint
 
 from tcip_annotation.json_io import (
@@ -46,6 +46,9 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.raster_source import RasterIdentity
+
+PositionError = Annotated[NonNegativeFloat, AllowInfNan(False)]
+"""The error bound in meters a project states for its registry positions: finite, nonnegative."""
 
 
 class CanopySegmentError(ValueError):
@@ -142,7 +145,7 @@ def load_canopy_segments(
             )
 
     for i, a in enumerate(annotations):
-        authorship = authorship_of(a)
+        authorship = authorship_of(a.created_by, a.accepted_by)
         if authorship in ("person", "tool_accepted"):
             continue
         by = (
@@ -255,7 +258,7 @@ def tie_segments_to_plants(
     *,
     width: int,
     height: int,
-    position_error_m: float,
+    position_error_m: PositionError,
 ) -> SegmentTie:
     """Tie every one of ``segments`` to the one registry plant, if any, whose position it contains.
 
@@ -263,20 +266,15 @@ def tie_segments_to_plants(
     ``position_error_m``, the error bound in meters the project states for its registry positions;
     a segment holding a plant whose clearance is smaller is left untied naming that plant.
 
-    Refuses by name: a ``position_error_m`` that is not a finite, nonnegative distance; a raster
-    whose CRS states no meters per unit; a registry with a blank or duplicate
-    ``plant_id`` (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.require_named_plants`);
-    a plant inside more than one segment; a segment containing more than one plant; no in-frame
-    plant in the registry at all. Plants are partitioned first through
+    Refuses by name: a raster whose CRS states no meters per unit; a registry with a blank or
+    duplicate ``plant_id``
+    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.require_named_plants`); a plant
+    inside more than one segment; a segment containing more than one plant; no in-frame plant in
+    the registry at all. Plants are partitioned first through
     :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.plants_in_frame`, so a plant
     outside the raster is never tested for containment and is disclosed by name on the returned
     :class:`SegmentTie`.
     """
-    if not math.isfinite(position_error_m) or position_error_m < 0:
-        raise ValueError(
-            f"position_error_m is a distance in meters; {position_error_m} is not a "
-            "finite, nonnegative one"
-        )
     require_named_plants(plants)
 
     in_frame, outside = plants_in_frame(

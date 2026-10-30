@@ -1,6 +1,6 @@
 """A region-scoped proposal's geometry, from the engine's crop back to the full frame.
 
-``propose_annotations(grid_cells=...)`` hands the engine a crop and translates what comes back
+``propose_annotations(region=...)`` hands the engine a crop and translates what comes back
 into the source image's own coordinates: the reported bbox, the cached rings and the mask
 ``stage_proposals`` stages all sit in the full frame.
 """
@@ -8,6 +8,7 @@ into the source image's own coordinates: the reported bbox, the cached rings and
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -16,6 +17,9 @@ from PIL import Image
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.pipelines.proposal import Proposal
 from tests._producer_fixtures import kept
+
+if TYPE_CHECKING:
+    from tcip_mcp.tools.proposal_tools import ProposedCandidates
 
 #: The frame, deliberately not square so a swapped or unshifted axis cannot look plausible.
 FRAME_W, FRAME_H = 300, 160
@@ -82,20 +86,22 @@ def patched_frame(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return path
 
 
-def _propose_over_the_region(project: Path, image: Path) -> dict:
-    from tcip_mcp.tools.proposal_tools import propose_annotations
+def _propose_over_the_region(project: Path, image: Path) -> ProposedCandidates:
+    from tcip_mcp.tools.proposal_tools import (
+        GridRegion,
+        ProposedCandidates,
+        propose_annotations,
+    )
 
     result = propose_annotations(
         project,
         image_path=str(image),
         engine="patch",
-        grid_cells=REGION_CELLS,
-        tile_size=TILE_SIZE,
-        overlap=0.0,
+        region=GridRegion(cells=REGION_CELLS, tile_size=TILE_SIZE, overlap=0.0),
         actor=None,
     )
-    assert "error" not in result, result
-    assert result["candidate_count"] == 1
+    assert isinstance(result, ProposedCandidates), result
+    assert len(result.candidates) == 1
     return result
 
 
@@ -104,12 +110,19 @@ def test_accept_refuses_an_image_no_run_staged_proposals_for(
     tmp_path: Path,
 ) -> None:
     """Staging a run no proposal staged for the image is refused, naming the tool to run first."""
-    from tcip_mcp.tools.proposal_tools import stage_proposals
+    from tcip_mcp.tools.proposal_tools import (
+        Assignment,
+        StagedAssignments,
+        stage_proposals,
+    )
 
     accepted = stage_proposals(
         tmp_path,
         image_path=str(patched_frame),
-        assignments=kept({"staging_id": "staging_0_000000"}, (0, "leaf")),
+        assignments=StagedAssignments(
+            staging_id="staging_0_000000",
+            candidates=[Assignment(candidate_id=0, subject="leaf")],
+        ),
         actor=None,
     )
     assert accepted["error"] == (
@@ -141,11 +154,9 @@ def test_region_scoped_mask_rings_are_staged_at_their_full_frame_location(
         actor=None,
     )
     assert "error" not in accepted, accepted
-    assert accepted["proposal_count"] == 1
+    assert accepted.proposal_count == 1
 
-    bucket = read_bucket(
-        parse_image_path(patched_frame)[0], accepted["bucket"]
-    )
+    bucket = read_bucket(parse_image_path(patched_frame)[0], accepted.bucket)
     staged = json_io.read_label_document(
         bucket.document_key(patched_frame.stem)
     ).annotations
@@ -173,14 +184,14 @@ def test_region_scoped_bbox_and_mask_rings_describe_the_same_place(
     )
 
     result = _propose_over_the_region(tmp_path, patched_frame)
-    reported = result["candidates"][0]["bbox"]
+    reported = result.candidates[0].bbox
 
     staging = ProposalStaging.model_validate(
-        ts.read(_staging_key_for(str(patched_frame), result["staging_id"]))
+        ts.read(_staging_key_for(str(patched_frame), result.staging_id))
     )
     rings = staging.candidates[0].rings
     pts = [p for ring in rings for p in ring]
     assert pts
     xs = [float(p[0]) for p in pts]
     ys = [float(p[1]) for p in pts]
-    assert [min(xs), min(ys), max(xs), max(ys)] == reported
+    assert (min(xs), min(ys), max(xs), max(ys)) == reported

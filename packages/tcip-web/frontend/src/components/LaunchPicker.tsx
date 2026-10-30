@@ -7,30 +7,25 @@
 
 import { useState, type ReactNode } from "react";
 
-import { StructuredRefusalError } from "@/api/http";
+import { messageOf, StructuredRefusalError } from "@/api/http";
+import type { SelectionChoice, SplitChoices } from "@/api/types.generated";
 
-export interface DataChoice {
-  /** The selection directory this choice binds to; the string Start submits unchanged. */
-  selectionDir: string;
-  /** Draw seed, grouping and per-side sample counts. */
-  label: ReactNode;
-  disabled?: boolean;
-  /** Shown under a disabled choice: the compatibility reason, or an unreadable record's text. */
-  reason?: string;
-  /** The recorded data.split keys choosing this partition drops (seed, grouping, ...), shown
-   * beside the two standing disclosures; empty or absent when the config recorded none. */
-  replacedSplitKeys?: string[];
-}
+/** Shown in place of the partition choices when the listing found none. */
+export const NO_OTHER_PARTITION =
+  "this listing found no other recorded partition the config can bind to; the agent can draw one.";
 
-export interface DataPicker {
-  /** "As recorded"'s own case line, read from the snapshot: bound to a selection, or drawn. */
-  asRecordedLine: string;
-  asRecordedDisabled?: boolean;
-  asRecordedReason?: string;
-  /** One entry per offered or refused candidate selection; empty when none was found. */
-  choices: DataChoice[];
-  /** Shown in place of the choices when none were found. */
-  absenceMessage: string;
+/** A partition choice's label: its selection directory, draw seed, grouping and per-side sample
+ * counts, each as its record states it. */
+function choiceLabel(s: SelectionChoice): ReactNode {
+  return (
+    <>
+      <span className="block font-mono">{s.selection_dir}</span>
+      <span className="block text-tcip-muted">
+        seed {s.seed ?? "unrecorded"} · {s.group_by ?? "unrecorded grouping"} · train {s.train} ·
+        val {s.val} · calibration {s.calibration}
+      </span>
+    </>
+  );
 }
 
 export interface LaunchPickerRow {
@@ -41,8 +36,9 @@ export interface LaunchPickerRow {
   branchLine: string;
   /** Replaces branchLine once a partition (rather than "As recorded") is the current choice. */
   branchLineForData?: string;
-  /** Present only for a run's row: the nested "Data" choice under the branch line. */
-  data?: DataPicker;
+  /** Present only for a run's row: its data choices, the nested "Data" choice under the branch
+   * line ("As recorded" and each listed partition, each with its own compatibility). */
+  data?: SplitChoices;
   /** Set only while this row's own Data choices are still being fetched, after selection. */
   dataLoading?: boolean;
   /** Set only when the per-row Data-choices fetch itself failed: shown as text on the row
@@ -78,7 +74,7 @@ function refusalIssues(e: unknown): string[] {
     const issues = e.detail.issues.filter((i): i is string => typeof i === "string");
     if (issues.length > 0) return issues;
   }
-  return [e instanceof Error ? e.message : String(e)];
+  return [messageOf(e)];
 }
 
 export function LaunchPicker({ list, onSelect }: LaunchPickerProps) {
@@ -131,12 +127,10 @@ export function LaunchPicker({ list, onSelect }: LaunchPickerProps) {
           <ul className="space-y-1">
             {list.rows.map((row) => {
               const selected = selectedKey === row.key;
-              const selectedChoice = row.data
-                ? selectedDataDir === null
-                  ? { disabled: row.data.asRecordedDisabled, reason: row.data.asRecordedReason }
-                  : row.data.choices.find((c) => c.selectionDir === selectedDataDir)
-                : undefined;
-              const startBlocked = Boolean(selectedChoice?.disabled);
+              const asRecorded = row.data?.as_recorded;
+              const chosen = row.data?.selections.find((c) => c.selection_dir === selectedDataDir);
+              const blockedBy =
+                (asRecorded && selectedDataDir === null ? asRecorded : chosen)?.reason ?? null;
               const dataStillLoading = Boolean(row.dataLoading);
               return (
                 <li key={row.key}>
@@ -177,49 +171,46 @@ export function LaunchPicker({ list, onSelect }: LaunchPickerProps) {
                                   type="radio"
                                   name={`data-${row.key}`}
                                   checked={selectedDataDir === null}
-                                  disabled={row.data.asRecordedDisabled}
+                                  disabled={row.data.as_recorded.reason !== null}
                                   onChange={() => setSelectedDataDir(null)}
                                 />
                                 <span>
-                                  As recorded: {row.data.asRecordedLine}
-                                  {row.data.asRecordedDisabled &&
-                                    row.data.asRecordedReason &&
+                                  As recorded: {row.data.as_recorded.line}
+                                  {row.data.as_recorded.reason !== null &&
                                     selectedDataDir !== null && (
                                       <span className="block tcip-problem">
-                                        {row.data.asRecordedReason}
+                                        {row.data.as_recorded.reason}
                                       </span>
                                     )}
                                 </span>
                               </label>
                             </li>
-                            {row.data.choices.length === 0 ? (
+                            {row.data.selections.length === 0 ? (
                               <li className="text-[12px] text-tcip-muted pl-4">
-                                {row.data.absenceMessage}
+                                {NO_OTHER_PARTITION}
                               </li>
                             ) : (
                               <>
-                                {row.data.choices.map((choice) => (
-                                  <li key={choice.selectionDir}>
+                                {row.data.selections.map((choice) => (
+                                  <li key={choice.selection_dir}>
                                     <label className="flex items-start gap-1 text-[12px]">
                                       <input
                                         type="radio"
                                         name={`data-${row.key}`}
-                                        checked={selectedDataDir === choice.selectionDir}
-                                        disabled={choice.disabled}
-                                        onChange={() => setSelectedDataDir(choice.selectionDir)}
+                                        checked={selectedDataDir === choice.selection_dir}
+                                        disabled={choice.reason !== null}
+                                        onChange={() => setSelectedDataDir(choice.selection_dir)}
                                       />
                                       <span>
-                                        {choice.label}
-                                        {choice.replacedSplitKeys &&
-                                          choice.replacedSplitKeys.length > 0 && (
-                                            <span className="block text-tcip-muted">
-                                              replaces the recorded{" "}
-                                              {choice.replacedSplitKeys.join(", ")}
-                                            </span>
-                                          )}
-                                        {choice.disabled &&
-                                          choice.reason &&
-                                          choice.selectionDir !== selectedDataDir && (
+                                        {choiceLabel(choice)}
+                                        {choice.replaced_split_keys.length > 0 && (
+                                          <span className="block text-tcip-muted">
+                                            replaces the recorded{" "}
+                                            {choice.replaced_split_keys.join(", ")}
+                                          </span>
+                                        )}
+                                        {choice.reason !== null &&
+                                          choice.selection_dir !== selectedDataDir && (
                                             <span className="block tcip-problem">
                                               {choice.reason}
                                             </span>
@@ -236,7 +227,7 @@ export function LaunchPicker({ list, onSelect }: LaunchPickerProps) {
                       <button
                         type="button"
                         className="tcip-btn-primary text-[13px]"
-                        disabled={starting || startBlocked || dataStillLoading}
+                        disabled={starting || blockedBy !== null || dataStillLoading}
                         onClick={() => void start(row)}
                       >
                         Start
@@ -245,9 +236,9 @@ export function LaunchPicker({ list, onSelect }: LaunchPickerProps) {
                         <div className="mt-1 text-[12px] text-tcip-muted" role="status">
                           checking the data choice
                         </div>
-                      ) : startBlocked && selectedChoice?.reason ? (
+                      ) : blockedBy !== null ? (
                         <div className="mt-1 text-[12px] tcip-problem" role="status">
-                          {selectedChoice.reason}
+                          {blockedBy}
                         </div>
                       ) : refusal?.key === row.key ? (
                         <ul role="status" className="mt-1 text-[13px] tcip-problem list-disc pl-4">

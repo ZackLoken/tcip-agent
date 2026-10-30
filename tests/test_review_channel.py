@@ -27,7 +27,7 @@ from tcip_mcp.tools.proposal_tools import stage_proposals
 from tests._producer_fixtures import kept, stub_images, write_jpegs
 
 if TYPE_CHECKING:
-    from tcip_mcp.tools.proposal_tools import StagedAssignments
+    from tcip_mcp.tools.proposal_tools import StagedAssignments, StagedShapes
     from tcip_mcp.workspace import BoundProject
 
 SIZE = (640, 480)
@@ -42,19 +42,21 @@ def _stub_gui(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         web_client,
         "post_panel_event",
-        lambda *a, **k: {"delivered": False, "status": "no_subscribers"},
+        lambda *a, **k: web_client.PanelEventAnswer(
+            url=None, reason="no backend answered"
+        ),
     )
 
 
 def _staged(
-    root: Path, staged: dict, producer: str, date: str, stem: str
+    root: Path, staged: StagedShapes, producer: str, date: str, stem: str
 ) -> tcip_store.Key:
     """Return the key of ``stem``'s document in the bucket the staging answer ``staged`` names.
 
     The bucket's record is asserted to name ``producer`` as what proposed it and ``date`` as its
     capture, and to hold a document for ``stem``.
     """
-    bucket = read_bucket(root, staged["bucket"])
+    bucket = read_bucket(root, staged.bucket)
     assert (bucket.producer, bucket.date) == (
         Proposed(proposed_by=producer),
         date,
@@ -122,7 +124,7 @@ def test_focus_over_a_bucket_lands_on_first_frame_with_proposals(
     assert res["image"] == "IMG_0002.JPG"
     assert res["n_holding_subject"] == 2
     assert res["bucket"] == bucket
-    assert isinstance(res["delivered"], bool)
+    assert res["reason"] is not None
 
 
 def test_focus_over_a_bucket_skips_an_empty_prediction_document(
@@ -197,7 +199,7 @@ def test_focus_over_a_bucket_carries_the_explicit_index_and_proposal(
         bound, str(root), "bud", date, bucket=bucket, image_index=3, proposal=2
     )
     assert res["image_index"] == 3
-    assert res["proposal"] == 2
+    assert res["proposal"] == {"bucket": bucket, "index": 2}
 
 
 def test_focus_refuses_a_name_that_is_no_bucket(
@@ -244,7 +246,7 @@ def test_stage_proposals_writes_prediction_format_not_gt(
         model_name="claude",
         boxes=boxes,
     )
-    assert res["staged"] == 2
+    assert (res.n_detect, res.n_segment) == (2, 0)
 
     out = _staged(root, res, "claude", date, "IMG_0001")
     preds = json_io.read_label_document(out).annotations
@@ -294,44 +296,48 @@ def test_stage_proposals_rejects_unnormalized_coords(tmp_path: Path) -> None:
     assert "error" in res and "normal" in res["error"].lower()
 
 
+@pytest.mark.parametrize(
+    "bad_model", ["../annotations/bud", "..", "a/b", "D:/evil", "a\\b", " ", ""]
+)
 def test_stage_proposals_rejects_a_model_name_that_is_no_single_segment(
-    tmp_path: Path,
+    tmp_path: Path, bound: BoundProject, bad_model: str
 ) -> None:
-    """``stage_proposals`` refuses a model_name that is not one path segment.
+    """The tool's schema refuses a model_name that is not one path segment.
 
-    Each malformed model_name tried (a traversal, a nested or drive path, a backslash path, a
-    blank, an empty string) is refused, and nothing reaches ground truth.
+    Each malformed model_name (a traversal, a nested or drive path, a backslash path, a blank, an
+    empty string) is refused by the argument schema an MCP client calls through, and nothing
+    reaches ground truth.
     """
+    from tests._server_calls import called_through_the_server
+
     root = tmp_path / "proj"
-    date = "2026-02-11"
-    (image,) = write_jpegs(image_dir(root, date), ["IMG_0001"], SIZE)
-    image_path = str(image)
-    good = [
-        {
-            "subject": "bud",
-            "conf": 0.9,
-            "cx": 0.5,
-            "cy": 0.5,
-            "w": 0.1,
-            "h": 0.1,
-        }
-    ]
-    # Include a backslash segment and a whitespace/empty segment, both of which is_valid_name
-    # rejects.
-    for bad_model in (
-        "../annotations/bud",
-        "..",
-        "a/b",
-        "D:/evil",
-        "a\\b",
-        " ",
-        "",
-    ):
-        res = stage_proposals(
-            tmp_path, image_path, actor=None, model_name=bad_model, boxes=good
-        )
-        assert "error" in res
-    assert _no_ground_truth(root)  # nothing leaked into ground truth
+    (image,) = write_jpegs(image_dir(root, "2026-02-11"), ["IMG_0001"], SIZE)
+    good = [{"subject": "bud", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+    refused = called_through_the_server(
+        "stage_proposals",
+        {"image_path": str(image), "model_name": bad_model, "boxes": good},
+        bound=bound,
+    )
+    assert isinstance(refused, str) and "should match pattern" in refused, refused
+    assert _no_ground_truth(root)
+
+
+def test_stage_proposals_admits_a_model_name_of_one_segment_through_the_server(
+    tmp_path: Path, bound: BoundProject
+) -> None:
+    """A model_name of one path segment passes the same schema and stages its bucket."""
+    from tests._server_calls import called_through_the_server
+
+    (image,) = write_jpegs(
+        image_dir(tmp_path / "proj", "2026-02-11"), ["IMG_0001"], SIZE
+    )
+    good = [{"subject": "bud", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+    staged = called_through_the_server(
+        "stage_proposals",
+        {"image_path": str(image), "model_name": "agent_proposals", "boxes": good},
+        bound=bound,
+    )
+    assert isinstance(staged, dict) and "bucket" in staged, staged
 
 
 def test_focus_rejects_path_traversal(
@@ -343,7 +349,7 @@ def test_focus_rejects_path_traversal(
     # The focus is read-only, but a traversal date still refuses: it becomes a path segment under
     # images/, the guard stage_proposals applies.
     res = focus_human_attention(bound, str(root), "bud", "../evil")
-    assert "a capture must be a single safe path segment" in res["error"]
+    assert "should match pattern" in res["error"]
 
 
 def test_stage_proposals_rejects_box_missing_subject(tmp_path: Path) -> None:
@@ -433,9 +439,7 @@ def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
         model_name="sam",
         polygons=polygons,
     )
-    assert (
-        res["staged"] == 1 and res["n_segment"] == 1 and res["n_detect"] == 0
-    )
+    assert (res.n_detect, res.n_segment) == (0, 1)
 
     out = _staged(root, res, "sam", date, "IMG_0132")
     polys = json_io.read_label_document(out).annotations
@@ -493,9 +497,7 @@ def test_stage_proposals_stages_boxes_and_polygons_together(
         boxes=boxes,
         polygons=polygons,
     )
-    assert (
-        res["n_detect"] == 1 and res["n_segment"] == 1 and res["staged"] == 2
-    )
+    assert (res.n_detect, res.n_segment) == (1, 1)
     # Boxes and polygons alike land in the one per-image prediction document.
     objs = json_io.read_label_document(
         _staged(root, res, "claude", date, "IMG_0001")
@@ -606,7 +608,6 @@ def _staged_assignments_image(
     proposed = propose_annotations(
         tmp_path, image_path, actor=None, engine="fake_single_box"
     )
-    assert proposed["staged"] is True
     return image_path, kept(proposed, (1, "leaf"))
 
 
@@ -656,7 +657,7 @@ def test_stage_proposals_refuses_assignments_combined_with_boxes_or_polygons(
     admitted = stage_proposals(
         tmp_path, image_path, assignments=assignments, actor=None
     )
-    assert "error" not in admitted and admitted["proposal_count"] == 1
+    assert "error" not in admitted and admitted.proposal_count == 1
 
 
 def test_stage_proposals_treats_an_empty_boxes_list_beside_assignments_as_no_shapes_given(
@@ -671,7 +672,7 @@ def test_stage_proposals_treats_an_empty_boxes_list_beside_assignments_as_no_sha
     admitted = stage_proposals(
         tmp_path, image_path, assignments=assignments, boxes=[], actor=None
     )
-    assert "error" not in admitted and admitted["proposal_count"] == 1
+    assert "error" not in admitted and admitted.proposal_count == 1
 
 
 def test_stage_proposals_refuses_model_name_beside_assignments(
@@ -695,7 +696,7 @@ def test_stage_proposals_refuses_model_name_beside_assignments(
     admitted = stage_proposals(
         tmp_path, image_path, assignments=assignments, actor=None
     )
-    assert "error" not in admitted and admitted["proposal_count"] == 1
+    assert "error" not in admitted and admitted.proposal_count == 1
 
 
 def test_stage_proposals_refuses_boxes_or_polygons_without_model_name(
@@ -740,7 +741,13 @@ def test_stage_proposals_refuses_boxes_or_polygons_without_model_name(
     admitted = stage_proposals(
         tmp_path, image_path, actor=None, model_name="sam", boxes=a_box
     )
-    assert "error" not in admitted and admitted["staged"] == 1
+    assert "error" not in admitted and (
+        admitted.n_detect,
+        admitted.n_segment,
+    ) == (
+        1,
+        0,
+    )
 
 
 # ── Rings: the pixel-frame counterpart of points ─────────────────────────────
@@ -799,7 +806,7 @@ def test_stage_proposals_admits_a_two_ring_pixel_proposal_with_pair_vertices(
         polygons=[{"subject": "leaf", "conf": 0.9, "rings": rings}],
     )
 
-    assert res["staged"] == 1 and "error" not in res
+    assert "error" not in res and (res.n_detect, res.n_segment) == (0, 1)
     polys = json_io.read_label_document(
         _staged(root, res, "sam", date, "IMG_0200")
     ).annotations
@@ -833,7 +840,7 @@ def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
     proposed = propose_annotations(
         tmp_path, accept_image_path, actor=None, engine="fake_multi_ring"
     )
-    assert proposed["staged"] is True and proposed["candidate_count"] == 1
+    assert proposed.staging_id is not None and len(proposed.candidates) == 1
 
     accepted = stage_proposals(
         tmp_path,
@@ -843,9 +850,7 @@ def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
     )
     assert "error" not in accepted
 
-    read_back = read_annotations(
-        tmp_path, accept_image_path, accepted["bucket"]
-    )
+    read_back = read_annotations(tmp_path, accept_image_path, accepted.bucket)
     accepted_preds = read_back["predictions"]["annotations"]
     assert sorted(
         len(ring) for pred in accepted_preds for ring in pred["rings"]
@@ -1049,7 +1054,7 @@ def test_a_second_stage_of_the_same_stem_publishes_a_second_bucket(
     )
 
     assert "error" not in second, second
-    assert second["bucket"] != first["bucket"]
+    assert second.bucket != first.bucket
     (restaged,) = json_io.read_label_document(
         _staged(root, second, "claude", date, "IMG_0001")
     ).annotations

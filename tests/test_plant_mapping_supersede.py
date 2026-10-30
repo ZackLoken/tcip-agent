@@ -222,9 +222,11 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
     resp = client.get("/api/results/delivery-events")
     assert resp.status_code == 200, resp.text
     record = next(
-        r for r in resp.json()["records"] if r["plant_mapping"] is not None
+        r
+        for r in resp.json()["records"]
+        if r["event"]["plant_mapping"] is not None
     )
-    assert record["plant_mapping"]["resolved_key"] == "valley"
+    assert record["resolved_key"] == "valley"
 
     res = build_plant_mapping(
         tmp_path,
@@ -239,12 +241,11 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
     resp2 = client.get("/api/results/delivery-events")
     assert resp2.status_code == 200, resp2.text
     record2 = next(
-        r for r in resp2.json()["records"] if r["plant_mapping"] is not None
+        r
+        for r in resp2.json()["records"]
+        if r["event"]["plant_mapping"] is not None
     )
-    assert (
-        record2["plant_mapping"]["resolved_key"]
-        == f"valley@{before.record_sha256[:12]}"
-    )
+    assert record2["resolved_key"] == f"valley@{before.record_sha256[:12]}"
 
 
 def _built(tmp_path: Path) -> tuple[Path, str]:

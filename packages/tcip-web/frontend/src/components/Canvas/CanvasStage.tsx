@@ -224,8 +224,7 @@ export function CanvasStage(props: CanvasStageProps) {
 
   const toPixel = (sx: number, sy: number): [number, number] => {
     const v = liveView();
-    const s = v.scale || 1;
-    return [(sx - v.offset_x) / s, (sy - v.offset_y) / s];
+    return [(sx - v.offset_x) / v.scale, (sy - v.offset_y) / v.scale];
   };
 
   // Line-mode wheel deltas (some mice/drivers) arrive in lines, not pixels.
@@ -250,9 +249,8 @@ export function CanvasStage(props: CanvasStageProps) {
     if (!stage) return;
     const pointer = stage.getPointerPosition();
     if (!pointer) return;
-    const s = v.scale || 1;
-    const ix = (pointer.x - v.offset_x) / s;
-    const iy = (pointer.y - v.offset_y) / s;
+    const ix = (pointer.x - v.offset_x) / v.scale;
+    const iy = (pointer.y - v.offset_y) / v.scale;
     // Ctrl+wheel (and precision-touchpad pinch, which browsers deliver as ctrl+wheel):
     // continuous magnitude-proportional zoom about the pointer. A touchpad pinch arrives as
     // many small deltas, a mouse notch as one large (~100) delta, so give the small deltas a

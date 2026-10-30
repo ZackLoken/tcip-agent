@@ -86,7 +86,7 @@ export function computePolygonBboxes(polygons: { rings: [number, number][][] }[]
  *  drift. */
 export function derivedBoxFromPolygon(p: PolygonShape): Box {
   const [x1, y1, x2, y2] = ringsBbox(p.rings);
-  return { x1, y1, x2, y2, subject: p.subject, attributes: {} };
+  return { x1, y1, x2, y2, subject: p.subject, attributes: {}, iscrowd: p.iscrowd };
 }
 
 /** One ring replaced, the rest of the annotation untouched (an edit belongs to one contour). */

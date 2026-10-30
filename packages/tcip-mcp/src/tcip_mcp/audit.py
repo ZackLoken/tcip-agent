@@ -11,16 +11,17 @@ import functools
 import inspect
 import logging
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TypeVar, overload
+from typing import Annotated, Any, TypeVar, overload
 
-from pydantic import BaseModel, JsonValue
+from pydantic import AwareDatetime, BeforeValidator, ConfigDict, JsonValue
+from pydantic_core import to_jsonable_python
 
 from tcip_mcp import agent_identity
 from tcip_mcp.registry_paths import located
-from tcip_store import Key, append
+from tcip_store import FiniteJsonValue, Key, append
 
 logger = logging.getLogger(__name__)
 
@@ -77,11 +78,12 @@ def audit_log_key(scope: str | Path) -> Key:
 
 def audit_entries(
     scope: str | Path, *, after: str | None = None
-) -> tuple[list[Mapping[str, Any]], str]:
+) -> tuple[list[AuditLine], str]:
     """Return every entry of ``scope``'s log past the cursor ``after``, and the log's cursor.
 
-    Entries are in :func:`audit_entry`'s shape, in the order they landed. A log carrying
-    undecodable entries raises ``ValueError`` naming how many.
+    Entries are read as :class:`AuditLine`, in the order they landed. A log carrying undecodable
+    entries raises ``ValueError`` naming how many, and an entry that is no audit line
+    ``pydantic.ValidationError``.
     """
     from tcip_store import read_log
 
@@ -92,27 +94,20 @@ def audit_entries(
             f"the audit log at {key.root} carries {len(page.corrupt)} undecodable "
             "entries; repair the log before trusting a read of it"
         )
-    return list(page.records), page.cursor
+    return [AuditLine.model_validate(r) for r in page.records], page.cursor
 
 
 def acts_of(
     scope: str | Path, tools: tuple[str, ...], *, after: str | None = None
-) -> tuple[list[Mapping[str, Any]], str]:
+) -> tuple[list[AuditLine], str]:
     """Return the ``ok`` entries of ``tools`` among :func:`audit_entries`, and the log's cursor."""
     entries, cursor = audit_entries(scope, after=after)
-    return [
-        e for e in entries if e["status"] == "ok" and e["tool"] in tools
-    ], cursor
+    return [e for e in entries if e.status == "ok" and e.tool in tools], cursor
 
 
 def now() -> datetime:
     """Return the current instant, in UTC."""
     return datetime.now(timezone.utc)
-
-
-def now_iso() -> str:
-    """Return :func:`now` as an ISO-8601 string."""
-    return now().isoformat()
 
 
 def _redact(args: dict[str, Any]) -> dict[str, Any]:
@@ -127,35 +122,61 @@ ACTOR_KEY = "actor"
 """The entry key naming the person who performed the act, absent for an act no person made."""
 
 
-def audit_entry(
+class AuditLine(agent_identity.RecordedIdentity):
+    """One audit log entry.
+
+    ``arguments`` is held as the JSON form of what it was given
+    (``pydantic_core.to_jsonable_python``), a snapshot no later change to the given values
+    reaches; a value with no JSON form refuses. ``actor`` is absent for an act no person made,
+    the identity fields outside an agent session, and ``duration_ms`` and ``error`` for a line no
+    door call wrote. Any other key a writer adds, a caller's extra facts, is kept as an extra
+    field.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+    __pydantic_extra__: dict[str, FiniteJsonValue]
+
+    timestamp: AwareDatetime
+    tool: str
+    arguments: Annotated[
+        dict[str, FiniteJsonValue], BeforeValidator(to_jsonable_python)
+    ]
+    status: str
+    actor: str | None = None
+    duration_ms: float | None = None
+    error: str | None = None
+
+    def stored(self) -> dict[str, JsonValue]:
+        """Return the line as the log stores it, each field it does not hold absent."""
+        return self.model_dump(mode="json", exclude_none=True)
+
+
+def audit_line(
     tool: str,
     arguments: dict[str, Any] | None,
     actor: str | None,
-    status: str | None = None,
-    extra: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Return the shape every audit entry starts from.
+    status: str,
+    extra: dict[str, FiniteJsonValue] | None = None,
+) -> AuditLine:
+    """Return the audit line of one act, stamped now.
 
-    The entry holds the clock, the tool, its redacted arguments, the person who performed the act
-    when one did (``actor``, :func:`~tcip_mcp.identity.actor`'s spelling), ``status`` when given,
-    a caller's extra facts, and the agent identity this process established at its MCP
-    handshake, if it has one.
-
-    The actor and identity keys are reserved: a caller's ``extra`` cannot set one.
+    The line holds the clock, the tool, its redacted arguments, the person who performed the act
+    when one did (``actor``, :func:`~tcip_mcp.identity.actor`'s spelling), ``status``, a caller's
+    extra facts, and the agent identity this process established at its MCP handshake, if it has
+    one. A key of ``extra`` the line declares as a field of its own is no extra fact and is
+    dropped. An argument with no JSON form refuses (``pydantic.ValidationError``).
     """
-    entry: dict[str, Any] = {
-        "timestamp": now_iso(),
-        "tool": tool,
-        "arguments": _redact(arguments) if arguments else {},
-    }
-    if actor is not None:
-        entry[ACTOR_KEY] = actor
-    if status is not None:
-        entry["status"] = status
-    reserved = {ACTOR_KEY, *agent_identity.RECORD_FIELDS}
-    entry.update({k: v for k, v in (extra or {}).items() if k not in reserved})
-    entry.update(agent_identity.audit_fields())
-    return entry
+    return AuditLine.model_validate(
+        {
+            **{k: v for k, v in (extra or {}).items() if k not in AuditLine.model_fields},
+            **dict(agent_identity.current() or agent_identity.RecordedIdentity()),
+            "timestamp": now(),
+            "tool": tool,
+            "arguments": _redact(arguments) if arguments else {},
+            "status": status,
+            "actor": actor,
+        }
+    )
 
 
 def record_event_or_raise(
@@ -165,20 +186,26 @@ def record_event_or_raise(
     actor: str | None,
     status: str = "ok",
     scope: str | Path,
-    **extra: JsonValue,
+    **extra: FiniteJsonValue,
 ) -> None:
-    """Emit one audit line, performed by ``actor``, for a mutation already made.
+    """Emit one audit line (:func:`audit_line`), performed by ``actor``, for a mutation made.
 
-    The line lands in the log of the root ``scope`` names (:func:`audit_log_key`). A failed
-    append is raised as :class:`AuditEntryNotWrittenError`, naming the mutation that
-    committed unrecorded.
+    The line is appended by :func:`append_or_raise`.
     """
-    entry = audit_entry(tool, arguments, actor, status, extra)
+    append_or_raise(audit_line(tool, arguments, actor, status, extra), scope=scope)
+
+
+def append_or_raise(line: AuditLine, *, scope: str | Path) -> None:
+    """Append ``line``, the audit line of a mutation made, to the log of the root ``scope`` names.
+
+    The log is :func:`audit_log_key`'s. A failed append is raised as
+    :class:`AuditEntryNotWrittenError`, naming the mutation that committed unrecorded.
+    """
     try:
-        append(audit_log_key(scope), entry)
+        append(audit_log_key(scope), line.stored())
     except Exception as exc:
         raise AuditEntryNotWrittenError(
-            tool, exc, arguments=arguments
+            line.tool, exc, arguments=line.arguments
         ) from exc
 
 
@@ -217,11 +244,12 @@ def audited(
     that argument resolves to at call time (:func:`dataset_scope_of`; no root means the
     project's). A set ``scope_arg`` reaches the door as the location it names against ``project``
     (:func:`~tcip_mcp.registry_paths.located`), and the entry keeps the caller's spelling.
-    ``project`` and ``workspace`` are not recorded as arguments, a model argument is recorded as
-    its JSON dump, and an ``actor`` parameter is recorded as the entry's actor. A failed append
-    after a return raises :class:`MutationCommittedWithoutAuditLineError`; after a raise the
-    body's exception propagates and the failed append is logged. A declared scope that cannot be
-    resolved refuses the call.
+    ``project`` and ``workspace`` are not recorded as arguments, the rest are recorded as their
+    JSON form taken before the body runs (:class:`AuditLine`), so an argument with no JSON form
+    refuses the call unrun, and an ``actor`` parameter is recorded as the entry's actor. A
+    failed append after a return raises :class:`MutationCommittedWithoutAuditLineError`; after a
+    raise the body's exception propagates and the failed append is logged. A declared scope that
+    cannot be resolved refuses the call.
     """
 
     def decorate(func: Callable) -> Callable:
@@ -242,28 +270,34 @@ def audited(
             t0 = time.monotonic()
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
-            logged_args: dict[str, Any] = {
-                k: v.model_dump(mode="json") if isinstance(v, BaseModel) else v
-                for k, v in bound.arguments.items()
-            }
+            logged_args: dict[str, Any] = dict(bound.arguments)
             project = logged_args.pop("project")
             logged_args.pop("workspace", None)
-            entry = audit_entry(
-                tool_name, logged_args, logged_args.pop(ACTOR_KEY, None)
+            begun = audit_line(
+                tool_name,
+                logged_args,
+                logged_args.pop(ACTOR_KEY, None),
+                "exception",
             )
             where = bound.arguments.get(scope_arg) if scope_arg else None
             if scope_arg and where is not None:
                 bound.arguments[scope_arg] = where = located(where, project)
 
-            def record() -> None:
-                """Resolve the scope, stamp the duration, and append. Raises what it cannot do."""
+            def record(status: str, error: str | None = None) -> None:
+                """Resolve the scope, stamp the outcome, and append. Raises what it cannot do."""
                 # Resolved after the body, so a tool that creates the dataset it names is
                 # recorded in that dataset's own log rather than the project's.
                 scope = dataset_scope_of(where) if where is not None else None
-                entry["duration_ms"] = round((time.monotonic() - t0) * 1000, 1)
+                line = begun.model_copy(
+                    update={
+                        "status": status,
+                        "error": error,
+                        "duration_ms": round((time.monotonic() - t0) * 1000, 1),
+                    }
+                )
                 append(
                     audit_log_key(scope if scope is not None else project),
-                    entry,
+                    line.stored(),
                 )
 
             # At most one entry per call by construction: the two writing paths are exclusive,
@@ -271,10 +305,8 @@ def audited(
             try:
                 result = func(*bound.args, **bound.kwargs)
             except Exception as body_exc:
-                entry["status"] = "exception"
-                entry["error"] = str(body_exc)
                 try:
-                    record()
+                    record("exception", str(body_exc))
                 except Exception:
                     # The body's exception is the caller's answer; this one never displaces it.
                     logger.warning(
@@ -285,9 +317,8 @@ def audited(
                 raise
             if isinstance(result, dict) and result.get("error") is not None:
                 return result  # a refusal returned as the error dict every tool returns: no act
-            entry["status"] = "ok"
             try:
-                record()
+                record("ok")
             except Exception as exc:
                 logger.warning(
                     "Failed to write the audit entry for %s",

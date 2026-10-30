@@ -46,10 +46,11 @@ def test_a_canceled_inference_job_reads_as_canceled(
             rationale=RATIONALE,
         ),
     )
-    inference._registry.register(job)
     job.cancel_event.set()
     try:
-        inference._worker(job)
+        inference._registry.launch(job, inference._worker)
+        assert job.thread is not None
+        job.thread.join(timeout=60)
         assert inference._registry.get("canceled-job").status == "canceled"
     finally:
         inference._registry.jobs.clear()

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { jumpTarget, stepTarget } from "@/hooks/useImageNav";
 import { filteredIndices } from "@/lib/imageFilter";
+import { ANNOTATE_ANSWERS } from "@/test/annotate";
 import { RAW_SELECTION } from "@/test/store";
 
 describe("stepTarget (shared by arrows + Prev/Next)", () => {
@@ -38,15 +39,15 @@ describe("jumpTarget (counter box)", () => {
 describe("filteredIndices", () => {
   it("keeps the images whose state the filter names, an unknown state only under all", () => {
     const list = RAW_SELECTION.images;
-    const states = {
-      "img1.jpg": "unannotated" as const,
-      "img2.jpg": "partial" as const,
-      "img3.jpg": "complete" as const,
-      "img4.jpg": "negative" as const,
-    };
-    expect(filteredIndices(list, states, "all")).toEqual([0, 1, 2, 3, 4]);
-    expect(filteredIndices(list, states, "unannotated")).toEqual([0]);
-    expect(filteredIndices(list, states, "in_progress")).toEqual([1]);
-    expect(filteredIndices(list, states, "complete")).toEqual([2, 3]);
+    // The produced states: the first negative, the second partial, the fifth complete.
+    const { states } = ANNOTATE_ANSWERS.marked_states;
+    // The fourth photograph's state left unstated, as one the answer does not know.
+    const stated = Object.fromEntries(
+      Object.entries(states).filter(([name]) => name !== list[3].name),
+    );
+    expect(filteredIndices(list, stated, "all")).toEqual([0, 1, 2, 3, 4]);
+    expect(filteredIndices(list, stated, "unannotated")).toEqual([2]);
+    expect(filteredIndices(list, stated, "in_progress")).toEqual([1]);
+    expect(filteredIndices(list, stated, "complete")).toEqual([0, 4]);
   });
 });

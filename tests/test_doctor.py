@@ -659,7 +659,11 @@ def _reviewed_bucket(
     name.
     """
     from tcip_mcp.buckets import Proposed
-    from tcip_mcp.dataset_layout import Gestures, save_label_document
+    from tcip_mcp.dataset_layout import (
+        Decisions,
+        Gestures,
+        save_label_document,
+    )
 
     name = "proposals"
     images = _published_bucket(
@@ -674,7 +678,7 @@ def _reviewed_bucket(
             height=32,
             author="user:breeder",
             actor=None,
-            gestures=Gestures(bucket=name, reject=frozenset({0})),
+            gestures=Gestures(decide=Decisions(bucket=name, verdicts={0: "rejected"})),
         )
     return name
 

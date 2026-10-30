@@ -7,13 +7,19 @@ the position is the current image's within it.
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from tcip_mcp.buckets import buckets_by_date
-from tcip_mcp.dataset_layout import capture_subjects, list_dates, list_subjects
+from tcip_mcp.dataset_layout import (
+    capture_date,
+    capture_subjects,
+    list_dates,
+    list_subjects,
+)
 from tcip_mcp.web_client import (
     CaptureChoice,
     DatasetChoice,
@@ -32,11 +38,25 @@ router = APIRouter(prefix="/api/dataset", tags=["dataset"])
 _selected_this_session = False
 
 
+class Capture(BaseModel):
+    """One capture of a dataset root: its name and the calendar date it is.
+
+    ``date`` is :func:`~tcip_mcp.dataset_layout.capture_date`'s, ``None`` for a capture no date
+    names (the undated bucket among them).
+    """
+
+    name: str
+    date: datetime.date | None
+
+
 class DatasetTree(BaseModel):
-    """A dataset root's dates, subjects, subjects per date and buckets per date."""
+    """A dataset root's captures, subjects, subjects per capture and buckets per capture.
+
+    ``captures`` are :func:`~tcip_mcp.dataset_layout.list_dates`', in its order.
+    """
 
     dataset_root: str
-    dates_with_images: list[str]
+    captures: list[Capture]
     # Every subject the dataset's registry (``subjects.json``) declares, e.g. ["tree", "fruit"].
     subjects: list[str]
     # The subjects that have labels on each date, so the picker never opens an empty canvas.
@@ -73,15 +93,20 @@ def _subjects_by_date(
 
 @router.get("/tree")
 def get_dataset_tree(dataset_root: str) -> DatasetTree:
-    """Return the high-level tree (dates, subjects, buckets) for a dataset."""
+    """Return the high-level tree (dates, subjects, buckets) for a dataset (:func:`tree_of`)."""
     root = allowed_path(dataset_root)
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {dataset_root}")
+    return tree_of(root)
+
+
+def tree_of(root: Path) -> DatasetTree:
+    """Return the tree of the dataset root ``root``."""
     dates = list_dates(root)
     subjects_by_date, label_problem = _subjects_by_date(root, dates)
     return DatasetTree(
         dataset_root=str(root),
-        dates_with_images=dates,
+        captures=[Capture(name=d, date=capture_date(d)) for d in dates],
         subjects=list_subjects(root),
         subjects_by_date=subjects_by_date,
         buckets_by_date=buckets_by_date(root, dates),
@@ -96,8 +121,6 @@ class SelectAnswer(BaseModel):
     ``predictions_present`` whether the bucket holds a document for one of its images, and
     ``label_problem`` the line naming the label documents that will not read, if any.
     """
-
-    model_config = ConfigDict(json_schema_mode_override="serialization")
 
     selection: DatasetSelection
     annotations_present: bool
@@ -134,15 +157,17 @@ async def select_dataset(req: CaptureChoice) -> SelectAnswer:
         else 0
     )
     _selected_this_session = True
-    documents = read_bucket(root, req.bucket).documents if req.bucket else {}
+    documents = (
+        {} if req.bucket is None else read_bucket(root, req.bucket).documents
+    )
     try:
         selection = selection_for(
-            DatasetChoice.model_validate(
-                {
-                    **req.model_dump(),
-                    "dataset_root": str(root),
-                    "current_image_index": resumed,
-                }
+            DatasetChoice(
+                dataset_root=str(root),
+                subject=req.subject,
+                date=req.date,
+                bucket=req.bucket,
+                current_image_index=resumed,
             )
         )
     except ValueError as exc:
@@ -168,8 +193,8 @@ class NavRequest(BaseModel):
 
 
 @router.post("/nav")
-async def set_current_image(req: NavRequest) -> NavRequest:
-    """Persist the current image position into ``GuiState.dataset`` and answer it.
+async def set_current_image(req: NavRequest) -> None:
+    """Persist the current image position into ``GuiState.dataset``.
 
     The open project is read once (:meth:`~tcip_web.state.StateStore.held`) and the index
     replaced in the selection :meth:`~tcip_web.state.StateStore.mutate` holds once it admits
@@ -192,4 +217,3 @@ async def set_current_image(req: NavRequest) -> NavRequest:
         }
 
     await store.mutate(navigated, project=store.held())
-    return req

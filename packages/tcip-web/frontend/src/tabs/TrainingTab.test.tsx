@@ -1,42 +1,42 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { openTrainingStream, trainingApi, type SplitChoices } from "@/api/training";
+import { openTrainingStream, trainingApi } from "@/api/training";
 import {
   NOT_FINITE_SUFFIX,
   TENSORBOARD_RELOAD_SELECTOR,
-  type RunRow,
-  type SweepGroup,
+  type SplitChoices,
+  type TrainingListing,
   type TrainingRowFrame,
   type TrainingStatusFrame,
 } from "@/api/types.generated";
 import { UNSET_GLYPH } from "@/lib/glyphs";
+import { formatNumber } from "@/lib/numberFormat";
 import { useStore } from "@/store";
-import { RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
-import { TrainingTab, dataPickerFor } from "@/tabs/TrainingTab";
+import { numericMetricKeys, RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
+import { TrainingTab } from "@/tabs/TrainingTab";
+import { thrown } from "@/test/refusals";
 import { openTestProject } from "@/test/store";
-import SERVINGS from "@/test/tensorboardServings.json";
+import { servingOf } from "@/test/tensorboard";
 import {
+  AGENT_CLIENT,
+  BATCH_FRAMES,
+  CANCEL,
+  COMPARISONS,
+  LISTING_BEFORE_FAILURE,
+  METRIC_FRAMES,
   RUN_RELAUNCH,
+  RUNS,
+  SPLIT_CHOICES,
+  STATUS_FRAME,
+  STREAM,
   SWEEP_RELAUNCH,
-  SWEEP_SELECTION_METRIC,
+  SWEEPS,
+  TRAINING_LISTING,
+  TRAINING_REFUSALS,
+  TRIALS,
   UNKNOWN_RUN_FRAME,
-  asRecordedChoice,
-  batchFrame,
-  cancelAnswer,
-  compareEntry,
-  compareResult,
-  metricFrame,
-  producedRefusal,
-  refusalDetail,
-  runRow,
-  selectionChoice,
-  splitChoices,
-  statusFrame,
-  sweepGroup,
-  trainingDetail,
-  trainingListing,
-  trialRow,
+  detailOf,
 } from "@/test/training";
 
 // The live metrics stream owns a real WebSocket; only the run list and its controls are under
@@ -48,328 +48,304 @@ vi.mock("@/api/training", async (importOriginal) => {
 
 const initialStoreState = useStore.getState();
 
-/** The run list answers the produced listing holding ``runs`` and ``sweeps`` on every poll. */
-function listing(runs: RunRow[], sweeps: SweepGroup[] = []) {
-  return vi.spyOn(trainingApi, "listRuns").mockResolvedValue(trainingListing({ runs, sweeps }));
+/** The run list answers `answer`, by default the produced listing, on every poll. */
+function listing(answer: TrainingListing = TRAINING_LISTING) {
+  return vi.spyOn(trainingApi, "listRuns").mockResolvedValue(answer);
 }
 
-/** One run's produced detail, holding ``row``, with no TensorBoard serving it. */
-function detailOf(row: RunRow) {
-  vi.spyOn(trainingApi, "getRun").mockResolvedValue(trainingDetail({ run: row }));
+/** Every detail read answers the produced detail of the id it names. */
+function details() {
+  return vi
+    .spyOn(trainingApi, "getRun")
+    .mockImplementation((experimentId: string) => Promise.resolve(detailOf(experimentId)));
 }
+
+/** The row of the run `id` names in `inside`, by default the run list's own. */
+function rowFor(id: string, inside: HTMLElement = document.body): HTMLElement {
+  return within(inside).getAllByText(id)[0].closest("li") as HTMLElement;
+}
+
+/** The produced best value as a row shows it, through the frontend's own number format. */
+const BEST = `best ${RUNS.completed.best_metric_name} ${formatNumber(Number(RUNS.completed.best_metric))}`;
 
 type Frame = TrainingRowFrame | TrainingStatusFrame;
 
-/** Every stream the tab opens delivers ``frames`` at once, each under the id it was opened for. */
+/** Every stream the tab opens delivers the produced ``frames`` at once. */
 function streamFrames(...frames: Frame[]) {
-  vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
-    frames.forEach((frame) => onMessage({ ...frame, experiment_id: experimentId }));
+  vi.mocked(openTrainingStream).mockImplementation((_experimentId, onMessage) => {
+    frames.forEach(onMessage);
     return () => {};
   });
 }
 
+/** Pin the clock `minutes` after the produced heartbeat of `run`. */
+function atHeartbeat(run: { heartbeat: string }, minutes: number) {
+  vi.setSystemTime(Date.parse(run.heartbeat) + minutes * 60_000);
+}
+
+/** Every running row's own heartbeat age as it reads with the clock at the first run's heartbeat:
+ *  the produced heartbeats lie seconds apart. */
+const FRESH = "last heartbeat under a minute ago";
+
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
   useStore.setState({ user: "jordan" });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  atHeartbeat(RUNS.unlaunched, 0);
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("TrainingTab run list", () => {
+  const { unlaunched, completed, unlogged } = RUNS;
+  const cancelOf = (id: string) => ({ name: `Cancel ${id}` });
+
   it("offers a stop control for a running run, and cancels it by id", async () => {
-    listing([runRow({ experiment_id: "train-agent-1" })]);
-    const cancelSpy = vi
-      .spyOn(trainingApi, "cancel")
-      .mockResolvedValue(cancelAnswer({ experiment_id: "train-agent-1" }));
+    listing();
+    const cancelSpy = vi.spyOn(trainingApi, "cancel").mockResolvedValue(CANCEL);
 
     render(<TrainingTab />);
-    expect(await screen.findByText("train-agent-1")).toBeInTheDocument();
+    expect(await screen.findByText(unlaunched.experiment_id)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel train-agent-1" }));
-    await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("train-agent-1", "jordan"));
+    fireEvent.click(screen.getByRole("button", cancelOf(unlaunched.experiment_id)));
+    await waitFor(() =>
+      expect(cancelSpy).toHaveBeenCalledWith(unlaunched.experiment_id, { user: "jordan" }),
+    );
   });
 
   it("shows a running row's own heartbeat age, the one liveness signal a record with no process id can offer", async () => {
-    listing([
-      runRow({
-        experiment_id: "train-stale",
-        heartbeat: new Date(Date.now() - 3 * 60_000).toISOString(),
-      }),
-    ]);
+    atHeartbeat(unlaunched, 3);
+    listing();
 
     render(<TrainingTab />);
-    expect(await screen.findByText(/running, last heartbeat 3 min ago/)).toBeInTheDocument();
+    await screen.findByText(unlaunched.experiment_id);
     expect(
-      screen.getByRole("button", { name: /train-stale running, last heartbeat 3 min ago/ }),
+      within(rowFor(unlaunched.experiment_id)).getByText(/running, last heartbeat 3 min ago/),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Cancel train-stale" })).toHaveAttribute(
+    expect(
+      screen.getByRole("button", {
+        name: new RegExp(`${unlaunched.experiment_id} running, last heartbeat 3 min ago`),
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", cancelOf(unlaunched.experiment_id))).toHaveAttribute(
       "title",
       "Reaches a live process only; a stale running row keeps this control until its heartbeat window lapses.",
     );
   });
 
   it("shows a run's recorded error in its row", async () => {
-    listing([
-      runRow({
-        experiment_id: "train-crashed",
-        state: "failed",
-        status_error: "CUDA out of memory at epoch 3",
-      }),
-    ]);
+    listing();
 
     render(<TrainingTab />);
-    expect(await screen.findByText("CUDA out of memory at epoch 3")).toBeInTheDocument();
+    await screen.findByText(unlogged.experiment_id);
+    expect(
+      within(rowFor(unlogged.experiment_id)).getByText(String(unlogged.status_error)),
+    ).toBeInTheDocument();
   });
 
   it("offers no stop control for a run in a terminal state", async () => {
-    listing([
-      runRow({ experiment_id: "train-done", state: "completed" }),
-      runRow({ experiment_id: "train-done-agent", state: "failed" }),
-    ]);
+    listing();
 
     render(<TrainingTab />);
-    expect(await screen.findByText("train-done")).toBeInTheDocument();
-    expect(screen.getByText("train-done-agent")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Cancel/ })).not.toBeInTheDocument();
+    await screen.findByText(completed.experiment_id);
+    for (const { experiment_id } of [completed, unlogged]) {
+      expect(
+        within(rowFor(experiment_id)).queryByRole("button", { name: /^Cancel/ }),
+      ).not.toBeInTheDocument();
+    }
   });
 
-  it("names the best value's own metric exactly as the record carries it, and shows nothing when the row carries no name", async () => {
-    listing([
-      runRow({
-        experiment_id: "train-named",
-        state: "completed",
-        best_metric: 0.812,
-        best_metric_name: "map50",
-      }),
-      runRow({
-        experiment_id: "train-loss-only",
-        state: "completed",
-        best_metric: 0.907,
-        best_metric_name: "loss",
-      }),
-      runRow({
-        experiment_id: "train-unnamed",
-        state: "completed",
-        best_metric: 0.5,
-        best_metric_name: null,
-      }),
-    ]);
+  it("names the best value's own metric exactly as the record carries it, and shows nothing for a row carrying no best value", async () => {
+    listing();
 
     render(<TrainingTab />);
-    // The row names the metric as bare as the record does (a no-validation run's best can be the
-    // training loss).
-    expect(await screen.findByText("best map50 0.812")).toBeInTheDocument();
-    expect(await screen.findByText("best loss 0.907")).toBeInTheDocument();
+    await screen.findByText(completed.experiment_id);
+    expect(within(rowFor(completed.experiment_id)).getByText(BEST)).toBeInTheDocument();
+    expect(within(rowFor(unlaunched.experiment_id)).queryByText(/^best /)).not.toBeInTheDocument();
     expect(screen.queryByText(/val_/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/best.*0\.500/)).not.toBeInTheDocument();
   });
 
   it("says No runs. for an empty listing", async () => {
-    const listRuns = listing([]);
+    const listRuns = listing({ runs: [], sweeps: [] });
 
     render(<TrainingTab />);
     expect(await screen.findByText("No runs.")).toBeInTheDocument();
 
     cleanup();
-    listRuns.mockResolvedValue(
-      trainingListing({ runs: [runRow({ experiment_id: "train-a" })], sweeps: [] }),
-    );
+    listRuns.mockResolvedValue(TRAINING_LISTING);
     render(<TrainingTab />);
-    expect(await screen.findByText("train-a")).toBeInTheDocument();
+    expect(await screen.findByText(unlaunched.experiment_id)).toBeInTheDocument();
     expect(screen.queryByText(/sorted by experiment id/)).not.toBeInTheDocument();
   });
 
   it("names the row's own select control with the id and state", async () => {
-    listing([runRow({ experiment_id: "train-named-row" })]);
+    listing();
 
     render(<TrainingTab />);
     expect(
       await screen.findByRole("button", {
-        name: "train-named-row running, no launch event recorded",
+        name: `${unlaunched.experiment_id} running, ${FRESH}, no launch event recorded`,
       }),
     ).toBeInTheDocument();
   });
 
   it("shows the row's best value at four significant figures, with no title", async () => {
-    listing([
-      runRow({
-        experiment_id: "train-exact",
-        state: "completed",
-        best_metric: 0.4130041,
-        best_metric_name: "loss",
-      }),
-    ]);
+    listing();
 
     render(<TrainingTab />);
-    const value = await screen.findByText("best loss 0.413");
+    await screen.findByText(completed.experiment_id);
+    const value = within(rowFor(completed.experiment_id)).getByText(BEST);
     expect(value).not.toHaveAttribute("title");
   });
 
   it("names the row's accessible name with its best value and metric when the record carries one", async () => {
-    listing([
-      runRow({
-        experiment_id: "train-named-value",
-        state: "completed",
-        best_metric: 0.4130041,
-        best_metric_name: "loss",
-      }),
-    ]);
+    listing();
 
     render(<TrainingTab />);
     expect(
       await screen.findByRole("button", {
-        name: "train-named-value completed, no launch event recorded, best loss 0.413",
+        name: `${completed.experiment_id} completed, no launch event recorded, ${BEST}`,
       }),
     ).toBeInTheDocument();
   });
 
   it("shows an in-flight Cancel as a disabled, pending row control, and a failure in the row", async () => {
-    listing([runRow({ experiment_id: "train-cancel-flight" })]);
+    listing();
     const cancel = Promise.withResolvers<Awaited<ReturnType<typeof trainingApi.cancel>>>();
     vi.spyOn(trainingApi, "cancel").mockReturnValue(cancel.promise);
 
     render(<TrainingTab />);
-    const button = await screen.findByRole("button", { name: "Cancel train-cancel-flight" });
+    const button = await screen.findByRole("button", cancelOf(unlaunched.experiment_id));
     fireEvent.click(button);
 
     expect(await screen.findByText("Canceling…")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Cancel train-cancel-flight" })).toBeDisabled();
+    expect(screen.getByRole("button", cancelOf(unlaunched.experiment_id))).toBeDisabled();
 
-    cancel.resolve(cancelAnswer({ experiment_id: "train-cancel-flight" }));
+    cancel.resolve(CANCEL);
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Cancel train-cancel-flight" })).not.toBeDisabled(),
+      expect(screen.getByRole("button", cancelOf(unlaunched.experiment_id))).not.toBeDisabled(),
     );
   });
 
   it("shows a failed Cancel in the row, not only as a toast", async () => {
-    listing([runRow({ experiment_id: "train-cancel-fail" })]);
+    listing();
     vi.spyOn(trainingApi, "cancel").mockRejectedValue(new Error("network error"));
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByRole("button", { name: "Cancel train-cancel-fail" }));
+    fireEvent.click(await screen.findByRole("button", cancelOf(unlaunched.experiment_id)));
 
     expect(await screen.findByText("Cancel failed: network error")).toBeInTheDocument();
   });
 });
 
 describe("TrainingTab sweeps", () => {
-  const trialA = trialRow({
-    experiment_id: "train-x",
-    sweep: "sweep-1",
-    state: "completed",
-    trial_params: { lr: 0.01 },
-  });
-  const trialB = trialRow({ experiment_id: "sweep-1_bbbb", sweep: "sweep-1" });
+  const { searched } = SWEEPS;
+  const sweepGroupNamed = { name: `Sweep ${searched.sweep_id}` };
 
   it("groups a sweep's trial rows under the sweep, with its state and outcome", async () => {
-    const produced = sweepGroup({});
-    listing(
-      [runRow({ experiment_id: "train-solo" })],
-      [
-        sweepGroup({
-          sweep_id: "sweep-1",
-          trials: [trialA, trialB],
-          outcome: { ...produced.outcome, best_params: { lr: 0.01 }, best_value: 0.7 },
-        }),
-      ],
-    );
+    const best = searched.outcome.best_value;
+    expect(best).not.toBeNull();
+    listing();
 
     render(<TrainingTab />);
-    const group = await screen.findByRole("group", { name: "Sweep sweep-1" });
-    expect(within(group).getByText("train-x")).toBeInTheDocument();
-    expect(within(group).getByText("sweep-1_bbbb")).toBeInTheDocument();
+    const group = await screen.findByRole("group", sweepGroupNamed);
+    expect(within(group).getByText(TRIALS.completed.experiment_id)).toBeInTheDocument();
+    expect(within(group).getByText(TRIALS.running.experiment_id)).toBeInTheDocument();
     expect(
       within(group).getByText(
-        new RegExp(`sweep · ${produced.state} · best ${SWEEP_SELECTION_METRIC} 0.7`),
+        `sweep · ${searched.state}, ${FRESH} · best ${searched.selection_metric} ${formatNumber(best as number)}`,
+        { exact: false },
       ),
     ).toBeInTheDocument();
-    expect(within(group).queryByText("train-solo")).not.toBeInTheDocument();
+    expect(within(group).queryByText(RUNS.unlaunched.experiment_id)).not.toBeInTheDocument();
   });
 
   it("cancels a trial by its own id and the whole sweep by the sweep's", async () => {
-    listing([], [sweepGroup({ sweep_id: "sweep-1", trials: [trialB] })]);
-    const cancelSpy = vi.spyOn(trainingApi, "cancel").mockResolvedValue(cancelAnswer({}));
+    listing();
+    const cancelSpy = vi.spyOn(trainingApi, "cancel").mockResolvedValue(CANCEL);
+    const trial = TRIALS.running.experiment_id;
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByRole("button", { name: "Cancel sweep-1_bbbb" }));
-    await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("sweep-1_bbbb", "jordan"));
-    fireEvent.click(screen.getByRole("button", { name: "Cancel sweep-1" }));
-    await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("sweep-1", "jordan"));
+    fireEvent.click(await screen.findByRole("button", { name: `Cancel ${trial}` }));
+    await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith(trial, { user: "jordan" }));
+    fireEvent.click(screen.getByRole("button", { name: `Cancel ${searched.sweep_id}` }));
+    await waitFor(() =>
+      expect(cancelSpy).toHaveBeenCalledWith(searched.sweep_id, { user: "jordan" }),
+    );
   });
 
   it("streams a selected trial's metrics, and shows a selected sweep's board without a stream", async () => {
     openTestProject();
-    listing([], [sweepGroup({ sweep_id: "sweep-1", trials: [trialA] })]);
-    const getRun = vi
-      .spyOn(trainingApi, "getRun")
-      .mockResolvedValue(trainingDetail({ run: trialA, tensorboard: SERVINGS["train-x"] }));
+    listing();
+    const getRun = details();
+    const trial = TRIALS.completed.experiment_id;
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-x"));
+    fireEvent.click(await screen.findByText(trial));
     await waitFor(() =>
-      expect(openTrainingStream).toHaveBeenCalledWith("train-x", expect.any(Function)),
+      expect(openTrainingStream).toHaveBeenCalledWith(trial, expect.any(Function)),
     );
 
     vi.mocked(openTrainingStream).mockClear();
-    fireEvent.click(screen.getByRole("button", { name: /^sweep-1\s/ }));
-    await waitFor(() => expect(getRun).toHaveBeenCalledWith("sweep-1"));
+    const group = screen.getByRole("group", sweepGroupNamed);
+    fireEvent.click(
+      within(group).getByRole("button", { name: new RegExp(`^${searched.sweep_id}\\s`) }),
+    );
+    await waitFor(() => expect(getRun).toHaveBeenCalledWith(searched.sweep_id));
     expect(openTrainingStream).not.toHaveBeenCalled();
   });
 });
 
 describe("TrainingTab run launcher mark", () => {
+  const { agent, relaunched, unlaunched, completed } = RUNS;
+
   it("states who launched the run from its launch event alone", async () => {
-    listing([
-      runRow({
-        experiment_id: "train-agent",
-        launch: { agent_client_name: "claude-code", agent_client_version: "2.1.238" },
-      }),
-      runRow({ experiment_id: "train-undeclared", launch: {} }),
-      runRow({ experiment_id: "train-no-event", state: "completed", launch: null }),
-    ]);
+    listing();
 
     render(<TrainingTab />);
-    await screen.findByText("train-agent");
+    await screen.findByText(agent.experiment_id);
 
     expect(
-      screen.getByRole("button", { name: "train-agent running, started by the agent" }),
+      screen.getByRole("button", {
+        name: `${agent.experiment_id} running, ${FRESH}, started by the agent`,
+      }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
-        name: "train-undeclared running, started with no agent declared",
+        name: `${relaunched.experiment_id} running, ${FRESH}, started with no agent declared`,
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "train-no-event completed, no launch event recorded" }),
+      screen.getByRole("button", {
+        name: `${completed.experiment_id} completed, no launch event recorded, ${BEST}`,
+      }),
     ).toBeInTheDocument();
   });
 
   it("names the declared client in the agent row's accessible description", async () => {
-    listing([
-      runRow({
-        experiment_id: "train-agent-desc",
-        launch: { agent_client_name: "claude-code", agent_client_version: "2.1.238" },
-      }),
-    ]);
+    listing();
 
     render(<TrainingTab />);
     const button = await screen.findByRole("button", {
-      name: "train-agent-desc running, started by the agent",
+      name: `${agent.experiment_id} running, ${FRESH}, started by the agent`,
     });
 
     const describedBy = button.getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
     expect(document.getElementById(describedBy as string)).toHaveTextContent(
-      "Launched by the agent claude-code 2.1.238.",
+      `Launched by the agent ${AGENT_CLIENT}.`,
     );
   });
 
   it("describes a launch with no agent named", async () => {
-    listing([runRow({ experiment_id: "train-undeclared-desc", launch: {} })]);
+    listing();
 
     render(<TrainingTab />);
     const button = await screen.findByRole("button", {
-      name: "train-undeclared-desc running, started with no agent declared",
+      name: `${relaunched.experiment_id} running, ${FRESH}, started with no agent declared`,
     });
 
     const describedBy = button.getAttribute("aria-describedby");
@@ -379,11 +355,11 @@ describe("TrainingTab run launcher mark", () => {
   });
 
   it("makes a missing launch event's explanation reachable by assistive technology", async () => {
-    listing([runRow({ experiment_id: "train-no-launcher" })]);
+    listing();
 
     render(<TrainingTab />);
     const button = await screen.findByRole("button", {
-      name: "train-no-launcher running, no launch event recorded",
+      name: `${unlaunched.experiment_id} running, ${FRESH}, no launch event recorded`,
     });
 
     const describedBy = button.getAttribute("aria-describedby");
@@ -396,7 +372,7 @@ describe("TrainingTab run launcher mark", () => {
 
 describe("TrainingTab heading", () => {
   it("renders exactly one top-level heading naming the tab", async () => {
-    listing([]);
+    listing();
     render(<TrainingTab />);
     await waitFor(() => expect(trainingApi.listRuns).toHaveBeenCalled());
     const headings = screen.getAllByRole("heading", { level: 1 });
@@ -405,15 +381,14 @@ describe("TrainingTab heading", () => {
   });
 
   it("carries the section titles as level-2 headings under that h1", async () => {
-    const row = runRow({ experiment_id: "train-x", state: "completed" });
-    listing([row]);
-    vi.spyOn(trainingApi, "getRun").mockResolvedValue(
-      trainingDetail({ run: row, tensorboard: SERVINGS["train-x"] }),
-    );
+    const id = RUNS.unlaunched.experiment_id;
+    listing();
+    details();
+    vi.spyOn(trainingApi, "launchTensorboard").mockResolvedValue(servingOf(id));
 
     render(<TrainingTab />);
     expect(await screen.findByRole("heading", { level: 2, name: "Runs" })).toBeInTheDocument();
-    fireEvent.click(screen.getByText("train-x"));
+    fireEvent.click(await screen.findByText(id));
     expect(
       await screen.findByRole("heading", { level: 2, name: "TensorBoard" }),
     ).toBeInTheDocument();
@@ -423,97 +398,85 @@ describe("TrainingTab heading", () => {
 
 describe("TrainingTab tensorboard panel", () => {
   it("says a run produced no logs and offers no Try again, rather than a raw refusal", async () => {
-    const row = runRow({ experiment_id: "train-nologs", state: "failed" });
-    listing([row]);
-    detailOf(row);
+    const id = RUNS.empty.experiment_id;
+    listing();
+    details();
     vi.spyOn(trainingApi, "launchTensorboard").mockRejectedValue(
-      await producedRefusal("no_logs_refusal"),
+      await thrown(TRAINING_REFUSALS.no_logs_refusal),
     );
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-nologs"));
+    fireEvent.click(await screen.findByText(id));
 
-    expect(await screen.findByText("This run produced no logs.")).toBeInTheDocument();
+    expect(
+      await screen.findByText(TRAINING_REFUSALS.no_logs_refusal.body.detail.message),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   });
 
   it("keeps Try again for an ordinary failed launch", async () => {
-    const row = runRow({ experiment_id: "train-broken", state: "failed" });
-    listing([row]);
-    detailOf(row);
+    const id = RUNS.unlogged.experiment_id;
+    listing();
+    details();
     vi.spyOn(trainingApi, "launchTensorboard").mockRejectedValue(new Error("connection refused"));
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-broken"));
+    fireEvent.click(await screen.findByText(id));
 
     expect(await screen.findByText("connection refused")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again: TensorBoard" })).toBeInTheDocument();
   });
 
   it("keeps the run's own recorded crash reason for a no-logs run that failed with one", async () => {
-    const crash = refusalDetail("crashed_no_logs_refusal").message;
-    const row = runRow({
-      experiment_id: "train-nologs-crashed",
-      state: "failed",
-      status_error: crash,
-    });
-    listing([row]);
-    detailOf(row);
+    const { message } = TRAINING_REFUSALS.crashed_no_logs_refusal.body.detail;
+    const id = RUNS.unlogged.experiment_id;
+    expect(message).toContain(String(RUNS.unlogged.status_error));
+    listing();
+    details();
     vi.spyOn(trainingApi, "launchTensorboard").mockRejectedValue(
-      await producedRefusal("crashed_no_logs_refusal"),
+      await thrown(TRAINING_REFUSALS.crashed_no_logs_refusal),
     );
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-nologs-crashed"));
+    fireEvent.click(await screen.findByText(id));
 
-    expect(
-      await screen.findByText(`This run failed: ${crash}. It produced no logs.`),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(message)).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Try again: TensorBoard" }),
     ).not.toBeInTheDocument();
   });
 
   it("launches a fresh TensorBoard for the newly selected run, not the previous one's", async () => {
-    listing([
-      runRow({ experiment_id: "train-x", state: "completed" }),
-      runRow({ experiment_id: "train-y", state: "completed" }),
-    ]);
-    vi.spyOn(trainingApi, "getRun").mockImplementation((experimentId: string) =>
-      Promise.resolve(
-        trainingDetail({ run: runRow({ experiment_id: experimentId, state: "completed" }) }),
-      ),
-    );
+    const [first, second] = [RUNS.unlaunched, RUNS.streamed].map((r) => r.experiment_id);
+    listing();
+    details();
     const launchSpy = vi
       .spyOn(trainingApi, "launchTensorboard")
-      .mockImplementation((experimentId: string) =>
-        Promise.resolve(SERVINGS[experimentId as keyof typeof SERVINGS]),
-      );
+      .mockImplementation((experimentId: string) => Promise.resolve(servingOf(experimentId)));
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-x"));
-    await waitFor(() => expect(launchSpy).toHaveBeenCalledWith("train-x"));
+    fireEvent.click(await screen.findByText(first));
+    await waitFor(() => expect(launchSpy).toHaveBeenCalledWith(first));
 
-    fireEvent.click(screen.getByText("train-y"));
-    await waitFor(() => expect(launchSpy).toHaveBeenCalledWith("train-y"));
-    expect(screen.getByTitle("TensorBoard")).toHaveAttribute("src", SERVINGS["train-y"].url);
+    fireEvent.click(screen.getByText(second));
+    await waitFor(() => expect(launchSpy).toHaveBeenCalledWith(second));
+    expect(screen.getByTitle("TensorBoard")).toHaveAttribute("src", servingOf(second).url);
   });
 
   it("reloads TensorBoard in place once per new epoch row, never remounting its frame", async () => {
     openTestProject();
-    const row = runRow({ experiment_id: "train-x" });
-    listing([row]);
-    vi.spyOn(trainingApi, "getRun").mockResolvedValue(
-      trainingDetail({ run: row, tensorboard: SERVINGS["train-x"] }),
-    );
+    const id = RUNS.streamed.experiment_id;
+    listing();
+    details();
+    vi.spyOn(trainingApi, "launchTensorboard").mockResolvedValue(servingOf(id));
     let deliver: (frame: Frame) => void = () => {};
-    vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
-      deliver = (frame) => onMessage({ ...frame, experiment_id: experimentId });
+    vi.mocked(openTrainingStream).mockImplementation((_experimentId, onMessage) => {
+      deliver = onMessage;
       return () => {};
     });
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-x"));
+    fireEvent.click(await screen.findByText(id));
     const frame = (await screen.findByTitle("TensorBoard")) as HTMLIFrameElement;
     const page = frame.contentDocument as Document;
     const header = page.createElement("app-header-reload");
@@ -527,14 +490,15 @@ describe("TrainingTab tensorboard panel", () => {
       attributeFilter: ["src"],
     });
 
-    act(() => deliver(metricFrame({ epoch: 1, loss: 0.5 })));
+    const [first, second, third] = METRIC_FRAMES;
+    act(() => deliver(first));
     expect(reloads).toHaveBeenCalledTimes(1);
-    act(() => deliver(metricFrame({ epoch: 1, loss: 0.4 })));
+    act(() => deliver(first));
     expect(reloads).toHaveBeenCalledTimes(1);
-    act(() => deliver(metricFrame({ epoch: 2, loss: 0.3 })));
+    act(() => deliver(second));
     expect(reloads).toHaveBeenCalledTimes(2);
     button.disabled = true;
-    act(() => deliver(metricFrame({ epoch: 3, loss: 0.2 })));
+    act(() => deliver(third));
     expect(reloads).toHaveBeenCalledTimes(2);
 
     expect(screen.getByTitle("TensorBoard")).toBe(frame);
@@ -549,120 +513,96 @@ describe("TrainingTab epoch table", () => {
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
   });
 
+  const id = RUNS.streamed.experiment_id;
+  const [, lastBatch] = BATCH_FRAMES;
+  const unfinished = `step ${String(lastBatch.row.step)} · batch_loss ${String(lastBatch.row.batch_loss)}`;
+
+  /** The tab over `answer`, the run `RUNS.streamed` names selected, its stream sending `frames`. */
+  async function streamed(answer: TrainingListing, frames: Frame[]) {
+    listing(answer);
+    streamFrames(...frames);
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText(id));
+    return screen.findByRole("table", { name: `${id} metrics by epoch` });
+  }
+
   it("says a terminal run recorded no metrics, rather than waiting on one that will never arrive", async () => {
-    listing([runRow({ experiment_id: "train-terminal-empty", state: "interrupted" })]);
+    listing();
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-terminal-empty"));
+    fireEvent.click(await screen.findByText(RUNS.empty.experiment_id));
 
     expect(await screen.findByText("This run recorded no metrics.")).toBeInTheDocument();
     expect(screen.queryByText("Waiting for metrics…")).not.toBeInTheDocument();
   });
 
   it("marks the waiting placeholder as a live region on a run with no metrics yet", async () => {
-    listing([runRow({ experiment_id: "train-waiting-live" })]);
+    listing();
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-waiting-live"));
+    fireEvent.click(await screen.findByText(RUNS.unlaunched.experiment_id));
 
     expect(await screen.findByRole("status")).toHaveTextContent("Waiting for metrics…");
   });
 
   it("shows every streamed epoch as a table row, outright", async () => {
-    listing([runRow({ experiment_id: "train-table" })]);
-    streamFrames(metricFrame({ epoch: 1, loss: 0.5 }), metricFrame({ epoch: 2, loss: 0.3 }));
+    const table = await streamed(LISTING_BEFORE_FAILURE, METRIC_FRAMES);
 
-    render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-table"));
-
-    const table = await screen.findByRole("table", { name: "train-table metrics by epoch" });
-    expect(within(table).getAllByRole("row")).toHaveLength(3);
+    expect(within(table).getAllByRole("row")).toHaveLength(METRIC_FRAMES.length + 1);
     expect(within(table).getByRole("columnheader", { name: "epoch" })).toBeInTheDocument();
     expect(table.querySelector("thead")).toHaveClass("sticky", "top-0");
-    expect(within(table).getByText("0.5")).toBeInTheDocument();
-    expect(within(table).getByText("0.3")).toBeInTheDocument();
+    for (const { row } of METRIC_FRAMES) {
+      if (typeof row.loss === "number") {
+        expect(within(table).getByText(String(row.loss))).toBeInTheDocument();
+      }
+    }
     expect(screen.queryByRole("button", { name: "as table" })).not.toBeInTheDocument();
   });
 
-  it("renders the unset glyph for a row carrying no epoch, and for a non-finite value", async () => {
-    listing([runRow({ experiment_id: "train-unset" })]);
-    streamFrames(metricFrame({ loss: 0.5 }), metricFrame({ epoch: 2, loss: null }));
+  it("renders the unset glyph for a non-finite value", async () => {
+    const rows = within(await streamed(LISTING_BEFORE_FAILURE, METRIC_FRAMES)).getAllByRole("row");
+    const unset = METRIC_FRAMES.findIndex(({ row }) => row[`loss${NOT_FINITE_SUFFIX}`]);
+    const [, loss] = within(rows[unset + 1]).getAllByRole("cell");
 
-    render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-unset"));
-
-    const rows = within(await screen.findByRole("table")).getAllByRole("row");
-    expect(within(rows[1]).getByText(UNSET_GLYPH)).toBeInTheDocument();
-    expect(within(rows[1]).getByText("0.5")).toBeInTheDocument();
-    expect(within(rows[2]).getByText(UNSET_GLYPH)).toBeInTheDocument();
+    expect(loss).toHaveTextContent(UNSET_GLYPH);
   });
 
   it("spells a metric key's underscores as spaces and gives bookkeeping no column", async () => {
-    listing([runRow({ experiment_id: "train-bookkeeping" })]);
-    streamFrames(
-      metricFrame({
-        epoch: 1,
-        loss: 0.5,
-        val_map50: 0.4,
-        [`loss${NOT_FINITE_SUFFIX}`]: "nan",
-        timestamp: "2026-01-01T00:00:00Z",
-      }),
-    );
+    const table = await streamed(LISTING_BEFORE_FAILURE, METRIC_FRAMES);
 
-    render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-bookkeeping"));
-
-    const headers = within(await screen.findByRole("table"))
+    const headers = within(table)
       .getAllByRole("columnheader")
       .map((h) => h.textContent);
-    expect(headers).toEqual(["epoch", "loss", "val map50"]);
+    const keys = numericMetricKeys(METRIC_FRAMES[0].row);
+    expect(keys.some((k) => k.includes("_"))).toBe(true);
+    expect(headers).toEqual(["epoch", ...keys.map((k) => k.replaceAll("_", " "))]);
   });
 
   it("shows the latest batch row as the in-progress epoch's line, with no column of its own", async () => {
-    listing([runRow({ experiment_id: "train-batches" })]);
-    streamFrames(
-      metricFrame({ epoch: 1, loss: 0.5 }),
-      batchFrame({ epoch: 2, step: 7, batch_loss: 0.25 }),
-    );
+    const table = await streamed(LISTING_BEFORE_FAILURE, STREAM);
 
-    render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-batches"));
-
-    const table = await screen.findByRole("table", { name: "train-batches metrics by epoch" });
     const rows = within(table).getAllByRole("row");
-    expect(rows).toHaveLength(3);
-    expect(within(rows[2]).getByText("in progress · step 7 · batch_loss 0.25")).toBeInTheDocument();
+    expect(rows).toHaveLength(METRIC_FRAMES.length + 2);
+    expect(within(rows.at(-1)!).getByText(`in progress · ${unfinished}`)).toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: "step" })).not.toBeInTheDocument();
     expect(
-      within(table)
-        .getAllByRole("columnheader")
-        .map((h) => h.textContent),
-    ).toEqual(["epoch", "loss"]);
+      within(table).queryByRole("columnheader", { name: "batch loss" }),
+    ).not.toBeInTheDocument();
   });
 
   it("drops the in-progress line once its epoch's own row arrives", async () => {
-    listing([runRow({ experiment_id: "train-batch-done" })]);
-    streamFrames(
-      batchFrame({ epoch: 1, step: 3, batch_loss: 0.25 }),
-      metricFrame({ epoch: 1, loss: 0.5 }),
-    );
+    const [batch, epochRow] = STREAM;
+    expect([batch.type, epochRow.type]).toEqual(["batch", "metric"]);
+    const table = await streamed(LISTING_BEFORE_FAILURE, [batch, epochRow]);
 
-    render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-batch-done"));
-
-    const table = await screen.findByRole("table");
     expect(within(table).getAllByRole("row")).toHaveLength(2);
     expect(within(table).queryByText(/in progress/)).not.toBeInTheDocument();
   });
 
   it("names the last batch line of a run that ended mid-epoch as where it stopped", async () => {
-    listing([runRow({ experiment_id: "train-batch-failed", state: "failed" })]);
-    streamFrames(batchFrame({ epoch: 2, step: 5, batch_loss: 0.25 }));
+    const table = await streamed(TRAINING_LISTING, [...STREAM, STATUS_FRAME]);
 
-    render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-batch-failed"));
-
-    const table = await screen.findByRole("table");
-    expect(within(table).getByText("stopped at step 5 · batch_loss 0.25")).toBeInTheDocument();
+    expect(within(table).getByText(`stopped at ${unfinished}`)).toBeInTheDocument();
     expect(within(table).queryByText(/in progress/)).not.toBeInTheDocument();
   });
 });
@@ -673,44 +613,44 @@ describe("TrainingTab status toast", () => {
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
   });
 
-  function completedFrame(experimentId: string): Frame {
-    return statusFrame({ experiment_id: experimentId, state: "completed" });
-  }
+  const id = RUNS.streamed.experiment_id;
+  const ended = `Training ${id}: ${String(STATUS_FRAME.status?.state)}`;
 
   it("does not toast on selecting a run already known to be terminal, only rediscovering its state", async () => {
-    listing([runRow({ experiment_id: "train-old-done", state: "completed" })]);
-    streamFrames(completedFrame("train-old-done"));
+    listing();
+    streamFrames(STATUS_FRAME);
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-old-done"));
+    fireEvent.click(await screen.findByText(id));
 
     await waitFor(() => expect(trainingApi.listRuns).toHaveBeenCalled());
-    expect(pushToast).not.toHaveBeenCalledWith("Training train-old-done: completed", "info");
+    expect(pushToast).not.toHaveBeenCalledWith(ended, "info");
   });
 
   it("toasts a transition to terminal observed while watching a live run", async () => {
-    listing([runRow({ experiment_id: "train-live-done" })]);
-    streamFrames(completedFrame("train-live-done"));
+    listing(LISTING_BEFORE_FAILURE);
+    streamFrames(STATUS_FRAME);
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-live-done"));
+    fireEvent.click(await screen.findByText(id));
 
-    await waitFor(() =>
-      expect(pushToast).toHaveBeenCalledWith("Training train-live-done: completed", "info"),
-    );
+    await waitFor(() => expect(pushToast).toHaveBeenCalledWith(ended, "info"));
   });
 
   it("toasts a stream error once, then still shows a metric the reconnect delivers", async () => {
-    listing([runRow({ experiment_id: "train-just-launched" })]);
-    streamFrames(UNKNOWN_RUN_FRAME, UNKNOWN_RUN_FRAME, metricFrame({ epoch: 1, loss: 0.5 }));
+    const [first] = METRIC_FRAMES;
+    listing(LISTING_BEFORE_FAILURE);
+    streamFrames(UNKNOWN_RUN_FRAME, UNKNOWN_RUN_FRAME, first);
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
 
     render(<TrainingTab />);
-    fireEvent.click(await screen.findByText("train-just-launched"));
+    fireEvent.click(await screen.findByText(id));
 
-    expect(within(await screen.findByRole("table")).getByText("0.5")).toBeInTheDocument();
+    expect(
+      within(await screen.findByRole("table")).getByText(String(first.row.loss)),
+    ).toBeInTheDocument();
     expect(pushToast).toHaveBeenCalledWith(`Training stream error: ${UNKNOWN_RUN_FRAME.error}`);
     expect(pushToast).toHaveBeenCalledTimes(1);
   });
@@ -719,10 +659,9 @@ describe("TrainingTab status toast", () => {
 describe("TrainingTab stream lifecycle", () => {
   it("closes the stream and clears the detail panel when the selected run leaves the next poll", async () => {
     openTestProject();
+    const id = RUNS.unlaunched.experiment_id;
     const listRuns = vi.spyOn(trainingApi, "listRuns");
-    listRuns.mockResolvedValueOnce(
-      trainingListing({ runs: [runRow({ experiment_id: "train-vanishing" })], sweeps: [] }),
-    );
+    listRuns.mockResolvedValueOnce(TRAINING_LISTING);
     vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
     const stop = vi.fn();
     vi.mocked(openTrainingStream).mockImplementation(() => stop);
@@ -730,11 +669,11 @@ describe("TrainingTab stream lifecycle", () => {
     vi.useFakeTimers();
     try {
       render(<TrainingTab />);
-      await vi.waitFor(() => expect(screen.getByText("train-vanishing")).toBeInTheDocument());
-      fireEvent.click(screen.getByText("train-vanishing"));
+      await vi.waitFor(() => expect(screen.getByText(id)).toBeInTheDocument());
+      fireEvent.click(screen.getByText(id));
       await vi.waitFor(() => expect(openTrainingStream).toHaveBeenCalledTimes(1));
 
-      listRuns.mockResolvedValueOnce(trainingListing({ runs: [], sweeps: [] }));
+      listRuns.mockResolvedValueOnce({ runs: [], sweeps: [] });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(RUN_REFRESH_MS);
       });
@@ -748,17 +687,35 @@ describe("TrainingTab stream lifecycle", () => {
 });
 
 describe("TrainingTab launch picker", () => {
+  // The produced data choices are the unlaunched run's own.
+  const id = RUNS.unlaunched.experiment_id;
+
+  /** Render the tab over the produced listing and open the picker; return it. */
+  async function openPicker(shown: string = id): Promise<HTMLElement> {
+    listing();
+    render(<TrainingTab />);
+    await screen.findAllByText(shown);
+    fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
+    return screen.getByText("Runs and sweeps in this project").parentElement as HTMLElement;
+  }
+
+  it("shows a recorded run's own creation instant, read as a date", async () => {
+    const { created, state } = RUNS.unlaunched;
+    expect(Number.isNaN(Date.parse(created))).toBe(false);
+    const picker = await openPicker();
+    expect(
+      within(rowFor(id, picker)).getByText(
+        new RegExp(`${new Date(created).toLocaleString()} · ${state}`),
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("opens the picker, selects a recorded run, and starts it through the relaunch door", async () => {
-    listing([runRow({ experiment_id: "exp-pristine-1", state: "completed" })]);
-    vi.spyOn(trainingApi, "listSplitChoices").mockResolvedValue(splitChoices({}));
+    vi.spyOn(trainingApi, "listSplitChoices").mockResolvedValue(SPLIT_CHOICES);
     const relaunchSpy = vi.spyOn(trainingApi, "relaunch").mockResolvedValue(RUN_RELAUNCH);
 
-    render(<TrainingTab />);
-    await screen.findByText("exp-pristine-1");
-    fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
-    const picker = screen.getByText("Runs and sweeps in this project").parentElement as HTMLElement;
-
-    fireEvent.click(within(picker).getByText("exp-pristine-1"));
+    const picker = await openPicker();
+    fireEvent.click(within(picker).getByText(id));
     expect(
       screen.getByText(
         "A new run of this config on the data paths it names, as they are now, with the recorded seed",
@@ -766,103 +723,102 @@ describe("TrainingTab launch picker", () => {
     ).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("exp-pristine-1", "jordan", null));
+    await waitFor(() =>
+      expect(relaunchSpy).toHaveBeenCalledWith({
+        relaunched_from: id,
+        selection_dir: null,
+        user: "jordan",
+      }),
+    );
   });
 
   it("starts a recorded sweep again by its id, with no data choice to fetch", async () => {
-    listing([], [sweepGroup({ sweep_id: "sweep-1", state: "completed" })]);
+    const sweep = SWEEPS.searched.sweep_id;
     const choicesSpy = vi.spyOn(trainingApi, "listSplitChoices");
     const relaunchSpy = vi.spyOn(trainingApi, "relaunch").mockResolvedValue(SWEEP_RELAUNCH);
 
-    render(<TrainingTab />);
-    await screen.findByRole("group", { name: "Sweep sweep-1" });
-    fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
-    const picker = screen.getByText("Runs and sweeps in this project").parentElement as HTMLElement;
-
-    fireEvent.click(within(picker).getByText("sweep-1"));
+    const picker = await openPicker(sweep);
+    fireEvent.click(within(picker).getByText(sweep));
     expect(
       screen.getByText("A new sweep over this sweep's recorded config, search and seed"),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("sweep-1", "jordan", null));
+    await waitFor(() =>
+      expect(relaunchSpy).toHaveBeenCalledWith({
+        relaunched_from: sweep,
+        selection_dir: null,
+        user: "jordan",
+      }),
+    );
     expect(choicesSpy).not.toHaveBeenCalled();
   });
 
   it("shows a refused start's issues under the picked row", async () => {
-    listing([runRow({ experiment_id: "exp-refused-1", state: "completed" })]);
-    vi.spyOn(trainingApi, "listSplitChoices").mockResolvedValue(splitChoices({}));
-    vi.spyOn(trainingApi, "relaunch").mockRejectedValue(await producedRefusal("refused_relaunch"));
+    vi.spyOn(trainingApi, "listSplitChoices").mockResolvedValue(SPLIT_CHOICES);
+    vi.spyOn(trainingApi, "relaunch").mockRejectedValue(
+      await thrown(TRAINING_REFUSALS.refused_relaunch),
+    );
 
-    render(<TrainingTab />);
-    await screen.findByText("exp-refused-1");
-    fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
-    const picker = screen.getByText("Runs and sweeps in this project").parentElement as HTMLElement;
-
-    fireEvent.click(within(picker).getByText("exp-refused-1"));
+    const picker = await openPicker();
+    fireEvent.click(within(picker).getByText(id));
     await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    const [issue] = refusalDetail("refused_relaunch").issues;
+    const [issue] = TRAINING_REFUSALS.refused_relaunch.body.detail.issues;
     await waitFor(() => expect(screen.getByText(issue)).toBeInTheDocument());
   });
 
   it("opens a row's Data choices only once selected, and starts with the chosen manifest", async () => {
-    listing([runRow({ experiment_id: "exp-1", state: "completed" })]);
-    const choices = splitChoices({});
-    const [selection] = choices.selections;
+    const choices = SPLIT_CHOICES;
+    const selection = choices.selections.find((choice) => choice.reason === null)!;
     const listSplitChoicesSpy = vi
       .spyOn(trainingApi, "listSplitChoices")
       .mockResolvedValue(choices);
     const relaunchSpy = vi.spyOn(trainingApi, "relaunch").mockResolvedValue(RUN_RELAUNCH);
 
-    render(<TrainingTab />);
-    await screen.findByText("exp-1");
-    fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
-    const picker = screen.getByText("Runs and sweeps in this project").parentElement as HTMLElement;
+    const picker = await openPicker();
     expect(listSplitChoicesSpy).not.toHaveBeenCalled();
 
-    fireEvent.click(within(picker).getByText("exp-1"));
+    fireEvent.click(within(picker).getByText(id));
     expect(
       await screen.findByText((text) => text.includes(choices.as_recorded.line)),
     ).toBeInTheDocument();
-    expect(listSplitChoicesSpy).toHaveBeenCalledWith("exp-1");
+    expect(listSplitChoicesSpy).toHaveBeenCalledWith(id);
 
     fireEvent.click(
       await screen.findByRole("radio", {
-        name: (name) => name.includes(selection.selection_dir),
+        name: (name) =>
+          name.startsWith(selection.selection_dir) &&
+          !/^[/\\]/.test(name.slice(selection.selection_dir.length)),
       }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() =>
-      expect(relaunchSpy).toHaveBeenCalledWith("exp-1", "jordan", selection.selection_dir),
+      expect(relaunchSpy).toHaveBeenCalledWith({
+        relaunched_from: id,
+        selection_dir: selection.selection_dir,
+        user: "jordan",
+      }),
     );
   });
 
   it("disables Start while a selected row's data choices are still loading", async () => {
-    listing([runRow({ experiment_id: "exp-1", state: "completed" })]);
     const choices = Promise.withResolvers<SplitChoices>();
     vi.spyOn(trainingApi, "listSplitChoices").mockReturnValue(choices.promise);
 
-    render(<TrainingTab />);
-    await screen.findByText("exp-1");
-    fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
-    const picker = screen.getByText("Runs and sweeps in this project").parentElement as HTMLElement;
-    fireEvent.click(within(picker).getByText("exp-1"));
+    const picker = await openPicker();
+    fireEvent.click(within(picker).getByText(id));
 
     expect(await screen.findByRole("button", { name: "Start" })).toBeDisabled();
 
-    choices.resolve(splitChoices({}));
+    choices.resolve(SPLIT_CHOICES);
     await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled());
   });
 
   it("shows a per-row split-choices fetch failure as text on the row", async () => {
-    listing([runRow({ experiment_id: "exp-1", state: "completed" })]);
     vi.spyOn(trainingApi, "listSplitChoices").mockRejectedValue(new Error("network error"));
 
-    render(<TrainingTab />);
-    await screen.findByText("exp-1");
-    fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
-    const picker = screen.getByText("Runs and sweeps in this project").parentElement as HTMLElement;
-    fireEvent.click(within(picker).getByText("exp-1"));
+    const picker = await openPicker();
+    fireEvent.click(within(picker).getByText(id));
 
     expect(
       await screen.findByText(/Could not load its data choices: network error/),
@@ -873,7 +829,7 @@ describe("TrainingTab launch picker", () => {
     const listRuns = vi
       .spyOn(trainingApi, "listRuns")
       .mockRejectedValueOnce(new Error("network error"))
-      .mockResolvedValue(trainingListing({ runs: [], sweeps: [] }));
+      .mockResolvedValue({ runs: [], sweeps: [] });
 
     render(<TrainingTab />);
     fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
@@ -890,160 +846,84 @@ describe("TrainingTab launch picker", () => {
   });
 });
 
-describe("dataPickerFor", () => {
-  const recorded = selectionChoice({});
-  const choices = splitChoices({
-    as_recorded: asRecordedChoice({
-      compatible: false,
-      reason: "Not found: data.images_dir = '/moved'",
-    }),
-    selections: [
-      recorded,
-      selectionChoice({
-        selection_dir: "/data/other",
-        enabled: false,
-        reason: "the selection at /data/other records no subject",
-        seed: null,
-        group_by: null,
-        train: 0,
-        val: 0,
-        calibration: 0,
-      }),
-    ],
-  });
-
-  it("maps the snapshot's own compatibility into the disabled/reason pair the picker renders", () => {
-    const picker = dataPickerFor(choices);
-    expect(picker?.asRecordedLine).toBe(choices.as_recorded.line);
-    expect(picker?.asRecordedDisabled).toBe(true);
-    expect(picker?.asRecordedReason).toBe("Not found: data.images_dir = '/moved'");
-    expect(picker?.absenceMessage).toMatch(/this listing found no other recorded partition/);
-  });
-
-  it("maps each selection's own enabled flag and reason onto the choice the picker renders", () => {
-    const picker = dataPickerFor(choices);
-    expect(picker?.choices[0]).toMatchObject({
-      selectionDir: recorded.selection_dir,
-      disabled: false,
-      replacedSplitKeys: recorded.replaced_split_keys,
-    });
-    expect(picker?.choices[1]).toMatchObject({
-      selectionDir: "/data/other",
-      disabled: true,
-      reason: "the selection at /data/other records no subject",
-    });
-  });
-
-  it("renders the seed/group_by/counts line from the selection's own recorded fields", () => {
-    const picker = dataPickerFor(choices);
-    render(<div>{picker?.choices[0].label}</div>);
-    expect(
-      screen.getByText(
-        `seed ${recorded.seed} · ${recorded.group_by} · train ${recorded.train} · val ${recorded.val} · calibration ${recorded.calibration}`,
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("answers undefined for a row with no choices fetched yet", () => {
-    expect(dataPickerFor(undefined)).toBeUndefined();
-  });
-});
-
 describe("TrainingTab compare", () => {
-  // The comparison's own columns repeat a marked run's id in its detail region (table headers),
-  // and the single-run header repeats the selected one; the sidebar's own row is always first.
-  function rowFor(id: string): HTMLElement {
-    return screen.getAllByText(id)[0].closest("li") as HTMLElement;
-  }
-
-  /** The comparison answers the produced comparison with one produced column per id. */
-  function compareAnswers(ids: string[]) {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(
-      compareResult({ experiments: ids.map((experiment_id) => compareEntry({ experiment_id })) }),
-    );
-  }
+  // The produced comparison of the relaunch and the run it relaunched, both still running.
+  const compared = COMPARISONS.bound;
+  const [first, second] = [RUNS.relaunched, RUNS.unlaunched].map((r) => r.experiment_id);
+  const toggle = (id: string) => within(rowFor(id)).getByRole("button", { name: `Compare ${id}` });
 
   it("marking two runs switches the detail region and closes the single-run stream", async () => {
     openTestProject();
-    listing([runRow({ experiment_id: "run-a" }), runRow({ experiment_id: "run-b" })]);
+    listing();
     const stopSingle = vi.fn();
     vi.mocked(openTrainingStream).mockReturnValueOnce(stopSingle);
-    compareAnswers(["run-a", "run-b"]);
+    vi.spyOn(trainingApi, "compare").mockResolvedValue(compared);
 
     render(<TrainingTab />);
-    await screen.findByText("run-a");
-    fireEvent.click(within(rowFor("run-a")).getByText("run-a"));
+    await screen.findByText(first);
+    fireEvent.click(within(rowFor(first)).getByText(first));
     await waitFor(() =>
-      expect(openTrainingStream).toHaveBeenCalledWith("run-a", expect.any(Function)),
+      expect(openTrainingStream).toHaveBeenCalledWith(first, expect.any(Function)),
     );
 
-    fireEvent.click(within(rowFor("run-a")).getByRole("button", { name: "Compare run-a" }));
-    fireEvent.click(within(rowFor("run-b")).getByRole("button", { name: "Compare run-b" }));
+    fireEvent.click(toggle(first));
+    fireEvent.click(toggle(second));
 
     expect(await screen.findByText("Comparing")).toBeInTheDocument();
     expect(stopSingle).toHaveBeenCalled();
   });
 
   it("every row's Compare toggle stays live: one id, no resolution to wait on", async () => {
-    listing([runRow({ experiment_id: "run-fresh" })]);
+    listing();
 
     render(<TrainingTab />);
-    await screen.findByText("run-fresh");
+    await screen.findByText(first);
 
-    expect(
-      within(rowFor("run-fresh")).getByRole("button", { name: "Compare run-fresh" }),
-    ).not.toBeDisabled();
+    expect(toggle(first)).not.toBeDisabled();
   });
 
   it("caps the marked set and names the reason on a fifth toggle", async () => {
     openTestProject();
-    const ids = ["run-1", "run-2", "run-3", "run-4", "run-5"];
-    listing(ids.map((id) => runRow({ experiment_id: id })));
-    compareAnswers([]);
+    const ids = TRAINING_LISTING.runs.slice(0, 5).map((r) => r.experiment_id);
+    expect(ids).toHaveLength(5);
+    listing();
+    vi.spyOn(trainingApi, "compare").mockResolvedValue(compared);
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
 
     render(<TrainingTab />);
-    await screen.findByText("run-1");
-    for (const id of ["run-1", "run-2", "run-3", "run-4"]) {
-      fireEvent.click(within(rowFor(id)).getByRole("button", { name: `Compare ${id}` }));
-    }
-    fireEvent.click(within(rowFor("run-5")).getByRole("button", { name: "Compare run-5" }));
+    await screen.findByText(ids[0]);
+    for (const id of ids.slice(0, 4)) fireEvent.click(toggle(id));
+    fireEvent.click(toggle(ids[4]));
 
     expect(pushToast).toHaveBeenCalledWith(expect.stringContaining("at most 4 runs"));
     // The fifth toggle stayed off: the fourth (last accepted) row is still the marked one.
-    expect(within(rowFor("run-4")).getByRole("button", { name: "Compare run-4" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(rowFor("run-5")).getByRole("button", { name: "Compare run-5" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
+    expect(toggle(ids[3])).toHaveAttribute("aria-pressed", "true");
+    expect(toggle(ids[4])).toHaveAttribute("aria-pressed", "false");
   });
 
   it("groups Compare and Cancel as one action group", async () => {
-    listing([runRow({ experiment_id: "run-grouped" })]);
+    listing();
 
     render(<TrainingTab />);
-    await screen.findByText("run-grouped");
+    await screen.findByText(first);
 
-    const group = within(rowFor("run-grouped")).getByRole("group", { name: "Run actions" });
-    expect(within(group).getByRole("button", { name: "Compare run-grouped" })).toBeInTheDocument();
-    expect(within(group).getByRole("button", { name: "Cancel run-grouped" })).toBeInTheDocument();
+    const group = within(rowFor(first)).getByRole("group", { name: "Run actions" });
+    expect(within(group).getByRole("button", { name: `Compare ${first}` })).toBeInTheDocument();
+    expect(within(group).getByRole("button", { name: `Cancel ${first}` })).toBeInTheDocument();
   });
 
   it("selects the sole remaining run when unmarking drops the marked set to one, instead of stranding it unselected", async () => {
     openTestProject();
-    listing([runRow({ experiment_id: "run-a" }), runRow({ experiment_id: "run-b" })]);
-    compareAnswers(["run-a", "run-b"]);
+    listing();
+    vi.spyOn(trainingApi, "compare").mockResolvedValue(compared);
 
     render(<TrainingTab />);
-    await screen.findByText("run-a");
-    fireEvent.click(within(rowFor("run-a")).getByRole("button", { name: "Compare run-a" }));
-    fireEvent.click(within(rowFor("run-b")).getByRole("button", { name: "Compare run-b" }));
+    await screen.findByText(first);
+    fireEvent.click(toggle(first));
+    fireEvent.click(toggle(second));
     expect(await screen.findByText("Comparing")).toBeInTheDocument();
 
-    fireEvent.click(within(rowFor("run-a")).getByRole("button", { name: "Compare run-a" }));
+    fireEvent.click(toggle(first));
 
     expect(screen.queryByText("Comparing")).not.toBeInTheDocument();
     expect(await screen.findByText("Waiting for metrics…")).toBeInTheDocument();

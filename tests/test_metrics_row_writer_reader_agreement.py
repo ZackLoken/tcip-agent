@@ -154,21 +154,22 @@ def test_the_log_reader_refuses_the_non_finite_row_its_writer_refuses(
 ) -> None:
     """A row carrying a non-finite number is refused by the log's writer and by its reader alike.
 
-    The writer (``append_row``) refuses it naming the position; a line spelling it, which
+    The writer (``metrics_row``) refuses it naming the position; a line spelling it, which
     ``json`` decodes, is refused by ``read_rows`` naming the position too.
     """
     import pytest
 
-    from tcip_mcp.experiments import append_row, read_rows
+    from tcip_mcp.experiments import metrics_row, read_rows
     from tcip_store import DecodeError
 
-    row = {"epoch": 1, "val_per_class_iou": {"0": float("nan")}}
-    log = tmp_path / "metrics.jsonl"
-    log.write_bytes(b"")
     with pytest.raises(ValueError, match=r"val_per_class_iou\.dict\.0"):
-        append_row(log, row)
+        metrics_row({"val_per_class_iou": {"0": float("nan")}}, 1, None)
 
-    log.write_bytes(b'{"epoch": 1, "val_per_class_iou": {"0": NaN}}\n')
+    log = tmp_path / "metrics.jsonl"
+    log.write_bytes(
+        b'{"epoch": 1, "timestamp": "2026-01-01T00:00:00+00:00", '
+        b'"val_per_class_iou": {"0": NaN}}\n'
+    )
     with pytest.raises(DecodeError, match=r"val_per_class_iou\.dict\.0"):
         read_rows(log)
 

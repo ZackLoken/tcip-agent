@@ -21,6 +21,8 @@ from pydantic import BaseModel
 from starlette.types import Receive, Scope, Send
 
 from tcip_mcp.experiments import (
+    Comparison,
+    MetricsRow,
     RunRow,
     TrainingDetail,
     TrainingListing,
@@ -31,9 +33,8 @@ from tcip_mcp.pipelines.training.tensorboard_manager import (
     BOARD_PATH,
     TensorboardLaunch,
 )
-from tcip_mcp.tools.training_tools import Launched
-from tcip_store import FiniteJsonObject
-from tcip_store.errors import BadKeyError
+from tcip_mcp.tools.model_tools import Ranking
+from tcip_mcp.tools.training_tools import Launched, SplitChoices
 from tcip_web.routes._body_common import EmptyBodyPayload, PersonPayload
 from tcip_web.state import NoProjectOpenError, store
 
@@ -53,19 +54,19 @@ def _refused(result: dict) -> HTTPException:
 
 
 @router.get("/runs/{experiment_id}/splits")
-def list_split_choices_route(experiment_id: str) -> dict:
+def list_split_choices_route(experiment_id: str) -> SplitChoices:
     """List every data choice a relaunch of the run ``experiment_id`` names can take.
 
-    The choices are the data section its launch stated, and every selection directory this
-    project's own bound runs or the dataset's own splits directory hold, each
-    compatibility-checked.
+    The choices are ``training_tools.list_split_choices``'s: the data section its launch stated,
+    and every selection directory this project's own bound runs or the dataset's own splits
+    directory hold, each compatibility-checked. An unknown run answers 404.
     """
     from tcip_mcp.tools.training_tools import list_split_choices
 
-    result = list_split_choices(store.held().root, experiment_id)
-    if result.get("error"):
-        raise HTTPException(404, result["error"])
-    return result
+    try:
+        return list_split_choices(store.held().root, experiment_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 class RelaunchPayload(BaseModel):
@@ -154,15 +155,25 @@ def _named(experiment_id: str) -> Path:
 
     404 when it names none (``experiments.named_directory``).
     """
-    from tcip_mcp.experiments import named_directory
+    from tcip_mcp.experiments import experiment_dirs, named_directory
 
-    directory = named_directory(experiment_id, project=store.held().root)
+    directory = named_directory(experiment_id, experiment_dirs(store.held().root))
     if directory is None:
         raise HTTPException(404, f"Run not found: {experiment_id}")
     return directory
 
 
 _BOARD_ROUTE = BOARD_PATH.removeprefix(router.prefix)
+
+
+class NoLogsRefusal(BaseModel):
+    """A TensorBoard refused over a board holding no event file.
+
+    ``message`` says the run produced no logs, naming its own recorded error when it recorded one.
+    """
+
+    kind: Literal["no_logs"] = "no_logs"
+    message: str
 
 
 @router.post(_BOARD_ROUTE)
@@ -174,9 +185,9 @@ def launch_run_tensorboard(
     The launch is ``tensorboard_manager.launch_tensorboard``'s over the directory
     ``experiment_id`` names, its board ``experiments.board_of``'s.
 
-    A board holding no event file refuses with ``no_logs: True``, carrying the final status's
-    error when one is written; a board with events whose run or sweep ended in error refuses
-    with that error alone.
+    A board holding no event file refuses with :class:`NoLogsRefusal`, carrying the final
+    status's error when one is written; a board with events whose run or sweep ended in error
+    refuses with that error alone.
     """
     from tcip_mcp.experiments import board_of, observe
     from tcip_mcp.pipelines.training.tensorboard_manager import (
@@ -188,10 +199,11 @@ def launch_run_tensorboard(
     if not any(board_of(directory).rglob("events.out.tfevents*")):
         raise HTTPException(
             404,
-            {
-                "message": error or f"run produced no logs: {experiment_id}",
-                "no_logs": True,
-            },
+            NoLogsRefusal(
+                message=f"This run failed: {error}. It produced no logs."
+                if error
+                else "This run produced no logs."
+            ).model_dump(),
         )
     if error:
         raise HTTPException(404, error)
@@ -293,18 +305,20 @@ def _end_to_end(
 
 
 @router.post("/runs/{experiment_id}/cancel")
-def cancel_run_route(experiment_id: str, payload: PersonPayload) -> dict:
+def cancel_run_route(
+    experiment_id: str, payload: PersonPayload
+) -> TrainingDetail:
     """Request graceful cancellation of the run, trial or sweep ``experiment_id`` names.
 
-    The request goes through ``cancel_training``, by the person ``user`` names; its refusal
-    answers 404.
+    The request goes through ``cancel_training``, by the person ``user`` names, answering the
+    run, trial or sweep as it reads after the request; its refusal answers 404.
     """
     from tcip_mcp.tools.training_tools import cancel_training
 
     result = cancel_training(
         store.held().root, experiment_id, actor=actor(payload.user)
     )
-    if result.get("error"):
+    if isinstance(result, dict):
         raise HTTPException(404, result["error"])
     return result
 
@@ -316,7 +330,7 @@ class ExperimentComparePayload(BaseModel):
 
 
 @router.post("/compare")
-def compare_runs_route(payload: ExperimentComparePayload) -> dict:
+def compare_runs_route(payload: ExperimentComparePayload) -> Comparison:
     """Compare the open project's runs ``experiment_ids`` names (``compare_experiments``)."""
     from tcip_mcp.experiments import compare_experiments
 
@@ -335,15 +349,13 @@ class CompareBestPayload(BaseModel):
 
 
 @router.post("/compare/best")
-def compare_best_route(payload: CompareBestPayload) -> dict:
+def compare_best_route(payload: CompareBestPayload) -> Ranking:
     """Rank the marked comparison's own registered checkpoints by one metric.
 
     The ranking is :func:`~tcip_mcp.tools.model_tools.ranked_registered_model`'s.
 
     A registry index that will not decode answers 409 naming why; the ranking's own error dicts
-    map to 422 (``_refused``). The answer is projected to name, experiment id,
-    stamped metrics, source, the metric ranked by, the direction used and its source, and the
-    exclusions.
+    map to 422 (``_refused``).
     """
     from tcip_mcp.tools.model_tools import ranked_registered_model
     from tcip_store import DecodeError
@@ -359,27 +371,9 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
         )
     except DecodeError as exc:
         raise HTTPException(409, f"registry unreadable: {exc}") from exc
-    if "error" in result:
+    if isinstance(result, dict):
         raise _refused(result)
-
-    return {
-        "name": result["name"],
-        "experiment_id": result["experiment_id"],
-        "metrics": result["metrics"],
-        "metrics_source": result["metrics_source"],
-        "ranking_basis": result["ranking_basis"],
-        "higher_is_better": result["higher_is_better"],
-        "direction_source": result["direction_source"],
-        "excluded_unverified": result["excluded_unverified"],
-    }
-
-
-@router.get("/metric-directions")
-def metric_directions_route() -> dict:
-    """Return every metric's declared ranking direction, as ``schemas`` declares it."""
-    from tcip_mcp.pipelines.schemas import HIGHER_IS_BETTER_BY_METRIC
-
-    return {"higher_is_better": dict(HIGHER_IS_BETTER_BY_METRIC)}
+    return result
 
 
 # ── WebSocket live metrics ──────────────────────────────────────────────
@@ -394,7 +388,7 @@ class TrainingRowFrame(BaseModel):
 
     type: Literal["metric", "batch"]
     experiment_id: str
-    row: FiniteJsonObject
+    row: MetricsRow
 
 
 class TrainingStatusFrame(BaseModel):
@@ -404,7 +398,7 @@ class TrainingStatusFrame(BaseModel):
     instead when it cannot.
     """
 
-    type: Literal["status"]
+    type: Literal["status"] = "status"
     experiment_id: str
     status: RunRow | None
     error: str | None
@@ -425,11 +419,9 @@ async def _stream_metrics(
     observation, so a run the observation found in a terminal state has every row sent before its
     one status frame (``experiments.run_summary`` over the rows sent), which ends the stream.
     An id naming no run directory under ``project`` ends the stream with one status frame
-    naming it, and one that is not a single directory name raises ``BadKeyError``. Every read
-    runs off the event loop.
+    naming it. Every read runs off the event loop.
     """
     from tcip_mcp.experiments import (
-        EPOCH_KEY,
         TERMINAL_STATES,
         epoch_rows,
         find_observation,
@@ -437,25 +429,23 @@ async def _stream_metrics(
         observe_run,
         partition_rows,
         read_rows,
-        run_name,
         run_summary,
     )
 
     observation = await asyncio.to_thread(
-        find_observation, run_name(experiment_id), project=project
+        find_observation, experiment_id, project=project
     )
     if observation is None:
         await ws.send_json(
             TrainingStatusFrame(
-                type="status",
                 experiment_id=experiment_id,
                 status=None,
                 error=f"Run not found: {experiment_id}",
-            ).model_dump()
+            ).model_dump(mode="json")
         )
         return
     cursor = 0
-    sent: list[dict] = []
+    sent: list[MetricsRow] = []
 
     while True:
         rows, cursor = await asyncio.to_thread(
@@ -463,31 +453,30 @@ async def _stream_metrics(
         )
         epochs, batches = partition_rows(rows)
         sent += epochs
-        touched = [row.get(EPOCH_KEY) for row in epochs]
+        touched = {row.epoch for row in epochs}
         for row in epoch_rows(sent):
-            if row.get(EPOCH_KEY) in touched:
+            if row.epoch in touched:
                 frame = TrainingRowFrame(
                     type="metric", experiment_id=experiment_id, row=row
                 )
-                await ws.send_json(frame.model_dump())
+                await ws.send_json(frame.model_dump(mode="json"))
         if batches:
             await ws.send_json(
                 TrainingRowFrame(
                     type="batch", experiment_id=experiment_id, row=batches[-1]
-                ).model_dump()
+                ).model_dump(mode="json")
             )
         if observation.state in TERMINAL_STATES:
             launches = await asyncio.to_thread(launch_declarations, project)
             status = await asyncio.to_thread(
-                run_summary, observation, sent, launches.get(experiment_id)
+                run_summary, observation, sent, launches
             )
             await ws.send_json(
                 TrainingStatusFrame(
-                    type="status",
                     experiment_id=experiment_id,
                     status=status,
                     error=None,
-                ).model_dump()
+                ).model_dump(mode="json")
             )
             break
         await asyncio.sleep(poll_seconds)
@@ -510,8 +499,6 @@ async def training_stream_ws(websocket: WebSocket, experiment_id: str) -> None:
     await websocket.accept()
     try:
         await _stream_metrics(websocket, project, experiment_id)
-    except BadKeyError as exc:
-        await websocket.close(code=1008, reason=str(exc))
     except WebSocketDisconnect:
         pass
     except Exception:

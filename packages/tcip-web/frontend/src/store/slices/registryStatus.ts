@@ -1,16 +1,16 @@
 import type { StateCreator } from "zustand";
 
 import { setSubjectColorRegistry } from "@/api/subjects";
-import type { AttributeDef, Registry } from "@/api/subjects";
-import type { ImageEventPayload, SessionRef } from "@/api/types.generated";
+import type { AttributeDef } from "@/api/subjects";
+import type { ImageEventPayload, RegistrySubjects, SessionRef } from "@/api/types.generated";
 import type { ImageFilter } from "@/lib/imageFilter";
 import type { AppState } from "@/store/appState";
 import type { SubjectState } from "@/store/types";
 
 interface RegistryState {
-  /** The dataset's nested subject registry (subject -> {description?, attributes?}), by name:
+  /** The dataset's nested subject registry (subject -> {description, attributes?}), by name:
    *  no integer ids, no colors. */
-  subjects: Registry;
+  subjects: RegistrySubjects;
   /** Set after the first successful load for the current dataset. */
   loaded: boolean;
   /** The stored registry's compare-and-set token as of the last load or save, or null when
@@ -97,7 +97,7 @@ export interface RegistryStatusSlice {
   recordedSession: RecordedSession | null;
 
   /** Registry helpers. */
-  setRegistry: (subjects: Registry, version?: string | null, discovered?: string[]) => void;
+  setRegistry: (subjects: RegistrySubjects, version?: string | null, discovered?: string[]) => void;
   subjectNames: () => string[];
   subjectAttributes: (subject: string | null) => Record<string, AttributeDef>;
 

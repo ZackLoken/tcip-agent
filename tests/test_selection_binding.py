@@ -1398,7 +1398,10 @@ def test_a_bound_detection_run_stating_the_composite_objective_selects_by_it(
 
     assert observation.state == "completed", observation.status_error
     assert observation.record.resolution.trait_revision is None
-    rows = epoch_rows(read_rows(observation.metrics_log)[0])
+    rows = [
+        row.model_dump()
+        for row in epoch_rows(read_rows(observation.metrics_log)[0])
+    ]
     assert rows
     for row in rows:
         assert row["selection_metric"] == "objective"

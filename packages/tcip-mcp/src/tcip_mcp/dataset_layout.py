@@ -9,14 +9,18 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import BaseModel, ConfigDict
+
 import tcip_store
+from tcip_annotation.flags import FlagRequest, ProposalTarget
+from tcip_annotation.verdicts import VerdictAction
 from tcip_store import Key, decode_value
 
 if TYPE_CHECKING:
-    from tcip_annotation.flags import FlagRequest
     from tcip_annotation.json_io import LabelDocument
     from tcip_annotation.state import Annotation
     from tcip_mcp.buckets import Bucket
@@ -27,6 +31,20 @@ SUBJECTS_FILENAME = "subjects.json"
 
 UNDATED_BUCKET = "undated"
 """The capture name of a dateless capture."""
+
+
+def capture_date(capture: str) -> date | None:
+    """Return the calendar date the capture name ``capture`` is, or ``None``.
+
+    A dated capture is named by its date's ISO ``YYYY-MM-DD`` spelling; any other name (the
+    undated bucket, a folder that is no calendar date such as ``2026-13-01``) is dated by nothing.
+    """
+    try:
+        day = date.fromisoformat(capture)
+    except ValueError:
+        return None
+    return day if day.isoformat() == capture else None
+
 
 LABEL_DOCUMENTS = "label_documents"
 PREDICTION_DOCUMENTS = "prediction_documents"
@@ -54,13 +72,18 @@ def bucket_key(dataset_root: str | Path, bucket: str) -> Key:
 def is_bucket_name(name: str) -> bool:
     """Return whether ``name`` is legal as a capture bucket directory name under ``images/``.
 
-    It is legal as a single safe path segment (see ``workspace.is_valid_name``) that does not
-    start with a dot, so a hidden directory (an editor's swap file, platform cruft) is never
-    mistaken for one.
+    It is legal as a :data:`~tcip_mcp.workspace.PathSegment` that does not start with a dot, so a
+    hidden directory (an editor's swap file, platform cruft) is never mistaken for one.
     """
-    from tcip_mcp.workspace import is_valid_name
+    from pydantic import ValidationError
 
-    return is_valid_name(name) and not name.startswith(".")
+    from tcip_mcp.workspace import path_segment
+
+    try:
+        path_segment(name)
+    except ValidationError:
+        return False
+    return not name.startswith(".")
 
 
 def image_tree_root(images_root: str | Path) -> Path | None:
@@ -144,16 +167,10 @@ def image_capture(source: str | Path) -> tuple[Path | None, str | None]:
     return _capture(Path(source).parent) or (None, None)
 
 
-def capture_of(source: str | Path) -> tuple[str | None, str | None]:
-    """Return ``(dataset_id, capture)`` of an image source.
-
-    The id is the identity record's id of the dataset root whose image tree holds it (``None``
-    when the root records none); both are ``None`` for a source that is no image of a capture
-    (:func:`image_capture`).
-    """
-    root, capture = image_capture(source)
+def dataset_id_of(root: Path | None) -> str | None:
+    """Return the id ``root``'s identity record states, ``None`` for no root or no record."""
     identity = None if root is None else read_dataset_identity(root)
-    return (identity["id"] if identity is not None else None), capture
+    return None if identity is None else identity.id
 
 
 def image_root(dataset_root: str | Path) -> Path:
@@ -175,15 +192,11 @@ def dataset_root_of(directory: str | Path) -> Path | None:
 def image_dir(dataset_root: str | Path, capture: str) -> Path:
     """Return ``<dataset_root>/images/<capture>/``, where a capture's image bytes live.
 
-    Raises ``ValueError`` for a capture that is not a single safe path segment.
+    Refuses a capture that is no :data:`~tcip_mcp.workspace.PathSegment`.
     """
-    from tcip_mcp.workspace import is_valid_name
+    from tcip_mcp.workspace import path_segment
 
-    if not is_valid_name(capture):
-        raise ValueError(
-            f"a capture must be a single safe path segment (no separators/'..'), got {capture!r}"
-        )
-    return image_root(dataset_root) / capture
+    return image_root(dataset_root) / path_segment(capture)
 
 
 def image_filename(stem: str, ext: str) -> str:
@@ -198,15 +211,20 @@ def image_path(
     return image_dir(dataset_root, capture) / image_filename(stem, ext)
 
 
+def capture_order(captures: Iterable[str]) -> list[str]:
+    """Return ``captures`` in the order a dataset lists its captures, by name."""
+    return sorted(captures)
+
+
 def list_dates(dataset_root: str | Path) -> list[str]:
-    """Return the sorted capture names under ``images/``.
+    """Return the capture names under ``images/``, in :func:`capture_order`.
 
     Each is a directory whose name :func:`is_bucket_name` admits.
     """
     imgs = image_root(dataset_root)
     if not imgs.is_dir():
         return []
-    return sorted(
+    return capture_order(
         p.name for p in imgs.iterdir() if p.is_dir() and is_bucket_name(p.name)
     )
 
@@ -225,36 +243,38 @@ def dataset_identity_path(dataset_root: str | Path) -> Path:
     return Path(dataset_root, "dataset.json")
 
 
+class DatasetRecord(BaseModel):
+    """A dataset's identity document, ``dataset.json``: its crop, its minted id, its fingerprint.
+
+    ``fingerprint`` is ``None`` for a dataset that yielded none when it was registered.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    crop: str
+    id: str
+    fingerprint: str | None
+
+
 def decode_dataset_identity_document(
     data: bytes, *, dataset_root: str | Path
-) -> dict:
-    """Decode and shape-check a dataset identity document's bytes.
+) -> DatasetRecord:
+    """Decode a dataset identity document's bytes as its :class:`DatasetRecord`.
 
-    Raises ``ValueError`` for bytes that do not decode, or that decode to something other than a
-    dict; a dict lacking ``id``, ``crop`` or ``fingerprint`` raises ``KeyError``.
+    Bytes that do not decode, or decode to no :class:`DatasetRecord`, raise ``ValueError`` naming
+    the document and ``register_dataset``.
     """
     try:
-        identity = decode_value(data)
+        return DatasetRecord.model_validate(decode_value(data))
     except ValueError as exc:
         raise ValueError(
             f"{dataset_identity_path(dataset_root)} exists but does not decode as a dataset "
             f"identity ({exc}); re-register with register_dataset"
         ) from exc
-    if not isinstance(identity, dict):
-        raise ValueError(
-            f"{dataset_identity_path(dataset_root)} exists but does not decode as a dataset "
-            "identity; re-register with register_dataset"
-        )
-    _id, _crop, _fingerprint = (
-        identity["id"],
-        identity["crop"],
-        identity["fingerprint"],
-    )
-    return identity
 
 
-def read_dataset_identity(dataset_root: str | Path) -> dict | None:
-    """Return the dataset's identity record (``{crop, id, fingerprint}``), or ``None``.
+def read_dataset_identity(dataset_root: str | Path) -> DatasetRecord | None:
+    """Return the dataset's identity record, or ``None``.
 
     The record is decoded through :func:`decode_dataset_identity_document`; ``None`` is a dataset
     never registered. A record that does not decode raises ``ValueError``.
@@ -269,7 +289,7 @@ def read_dataset_identity(dataset_root: str | Path) -> dict | None:
     )
 
 
-def require_dataset_identity(dataset_root: str | Path) -> dict:
+def require_dataset_identity(dataset_root: str | Path) -> DatasetRecord:
     """Return :func:`read_dataset_identity`'s record, refusing a dataset never registered.
 
     The refusal is ``ValueError`` naming ``register_dataset``.
@@ -285,11 +305,24 @@ def require_dataset_identity(dataset_root: str | Path) -> dict:
 
 
 @dataclass(frozen=True)
+class Decisions:
+    """The proposals of one bucket a save decides.
+
+    ``bucket`` names the bucket under the image's own dataset root, and ``verdicts`` each decided
+    proposal's verdict by its index in that bucket's document for the image.
+    """
+
+    __pydantic_config__ = ConfigDict(extra="forbid")
+
+    bucket: str
+    verdicts: Mapping[int, VerdictAction]
+
+
+@dataclass(frozen=True)
 class Gestures:
     """What one save decides beyond the annotations it writes.
 
-    It names the proposals of the bucket named ``bucket``, under the image's own dataset root, it
-    accepts and rejects, each by its index in that bucket's document for the image; the
+    It holds the proposals it ``decide``s; the
     annotations it confirms as the person's own call, each by its position among the annotations
     the save writes (``confirm``); each subject of ``complete`` marked complete over ``rect``
     (pixel ``[x, y, w, h]``, the whole image when ``None``) or, mapped to ``False``, its marks
@@ -298,9 +331,9 @@ class Gestures:
     the reply given.
     """
 
-    bucket: str | None = None
-    accept: frozenset[int] = frozenset()
-    reject: frozenset[int] = frozenset()
+    __pydantic_config__ = ConfigDict(extra="forbid")
+
+    decide: Decisions | None = None
     confirm: frozenset[int] = frozenset()
     complete: Mapping[str, bool] = field(default_factory=dict)
     rect: tuple[float, float, float, float] | None = None
@@ -436,8 +469,8 @@ def save_label_document(
 
     Raises with nothing written: ``ValueError`` for a payload that does not parse, a confirmed
     position the save writes no annotation at, a removed annotation an open flag sits on when
-    ``author`` names no person, a proposal index the bucket's document does not hold or that is
-    both accepted and rejected, a flag with no comment or on a proposal its bucket does not hold,
+    ``author`` names no person, a proposal index the bucket's document does not hold, a flag
+    with no comment or on a proposal its bucket does not hold,
     or a resolved flag that is not open; ``UnreadableLabelDocumentError`` for a stored document
     that does not decode; ``VersionConflictError`` when ``expect`` is not the version the commit
     reads.
@@ -458,58 +491,46 @@ def save_label_document(
         stamped,
         subject_digest,
     )
-    from tcip_annotation.verdicts import (
-        Verdict,
-        VerdictAction,
-        record_verdicts,
-    )
-    from tcip_mcp.audit import audit_entry, audit_log_key, now_iso
+    from tcip_annotation.verdicts import Verdict, record_verdicts
+    from tcip_mcp.audit import audit_line, audit_log_key, now
 
     audit = audit_log_key(key.root)
     capture, stem = key.parts
-    now = now_iso()
+    instant = now()
+    # The label document's own stamps are strings (its reader is json_io's hand parser).
+    stamp = instant.isoformat()
     contents = []
     for i, payload in enumerate(payloads):
         try:
             contents.append(annotation_from_payload(payload))
         except ValueError as exc:
             raise ValueError(f"annotation {i} {exc}") from exc
-    decides = bool(gestures.accept or gestures.reject)
-    if decides:
-        if gestures.bucket is None:
-            raise ValueError(
-                "accepting or rejecting a proposal names the bucket it came from"
-            )
-        both = gestures.accept & gestures.reject
-        if both:
-            raise ValueError(
-                f"proposal(s) {sorted(both)} are both accepted and rejected; decide "
-                "each once"
-            )
-        bucket, proposals = image_proposals(gestures.bucket, key)
-        verdict = verdict_key_of(key, gestures.bucket)
+    decided = gestures.decide
+    if decided is not None:
+        bucket, proposals = image_proposals(decided.bucket, key)
+        verdict = verdict_key_of(key, decided.bucket)
     new_flags = [
-        raised(request, by=author, at=now) for request in gestures.flag
+        raised(request, by=author, at=instant) for request in gestures.flag
     ]
     for flag in new_flags:
-        if flag.proposal is not None:
-            named, index = flag.proposal
-            held = len(image_proposals(named, key)[1])
-            if index >= held:
+        target = flag.request.target
+        if isinstance(target, ProposalTarget):
+            held = len(image_proposals(target.bucket, key)[1])
+            if target.index >= held:
                 raise ValueError(
-                    f"bucket {named!r} holds {held} proposals for {stem}, not one "
-                    f"at index {index} to flag"
+                    f"bucket {target.bucket!r} holds {held} proposals for {stem}, not "
+                    f"one at index {target.index} to flag"
                 )
     flags_key = flag_key(key)
     with tcip_store.transaction(
-        key, audit, flags_key, *([verdict] if decides else [])
+        key, audit, flags_key, *([] if decided is None else [verdict])
     ) as txn:
         read = txn.read_versioned(key, default=None)
         stored = document_at(key, read)
         if expect is not None and expect != read.version:
             raise tcip_store.VersionConflictError(key, expect, read.version)
         annotations = stamped(
-            contents, stored.annotations, author=author, now=now
+            contents, stored.annotations, author=author, now=stamp
         )
         for i in sorted(gestures.confirm):
             if not 0 <= i < len(annotations):
@@ -517,7 +538,7 @@ def save_label_document(
                     f"the save writes {len(annotations)} annotations for {stem}, "
                     f"none at position {i} to confirm"
                 )
-            annotations[i] = signed_off(annotations[i], author, now)
+            annotations[i] = signed_off(annotations[i], author, stamp)
         held_flags = flags_of(txn.read(flags_key, default=None))
         open_ids = {flag.id for flag in held_flags if flag.open}
         unknown = sorted(set(gestures.resolve) - open_ids)
@@ -526,43 +547,40 @@ def save_label_document(
                 f"flag(s) {unknown} are not open on {stem}; resolve an open flag"
             )
         flags = [
-            flag.resolved(by=author, at=now, reply=gestures.resolve[flag.id])
+            flag.resolved(
+                by=author, at=instant, reply=gestures.resolve[flag.id]
+            )
             if flag.id in gestures.resolve
             else flag
             for flag in held_flags
         ] + new_flags
         verdicts: list[Verdict] = []
         accepted: dict[int, int] = {}
-        if decides:
+        if decided is not None:
             paired = proposal_pairs(project, bucket, annotations, proposals)
-            decided: tuple[tuple[VerdictAction, frozenset[int]], ...] = (
-                ("accepted", gestures.accept),
-                ("rejected", gestures.reject),
-            )
-            for action, indices in decided:
-                for i in sorted(indices):
-                    if not 0 <= i < len(proposals):
-                        raise ValueError(
-                            f"bucket {bucket.name!r} holds {len(proposals)} "
-                            f"proposals for {stem}, not one at index {i}"
-                        )
-                    if action == "accepted" and i in paired:
-                        annotations[paired[i]] = signed_off(
-                            annotations[paired[i]], author, now
-                        )
-                        accepted[i] = paired[i]
-                    elif action == "accepted":
-                        annotations.append(
-                            replace(
-                                signed_off(proposals[i], author, now),
-                                score=None,
-                                attributes={},
-                            )
-                        )
-                        accepted[i] = len(annotations) - 1
-                    verdicts.append(
-                        Verdict(proposal=i, action=action, by=author, at=now)
+            for i, action in sorted(decided.verdicts.items()):
+                if not 0 <= i < len(proposals):
+                    raise ValueError(
+                        f"bucket {bucket.name!r} holds {len(proposals)} "
+                        f"proposals for {stem}, not one at index {i}"
                     )
+                if action == "accepted" and i in paired:
+                    annotations[paired[i]] = signed_off(
+                        annotations[paired[i]], author, stamp
+                    )
+                    accepted[i] = paired[i]
+                elif action == "accepted":
+                    annotations.append(
+                        replace(
+                            signed_off(proposals[i], author, stamp),
+                            score=None,
+                            attributes={},
+                        )
+                    )
+                    accepted[i] = len(annotations) - 1
+                verdicts.append(
+                    Verdict(proposal=i, action=action, by=author, at=instant)
+                )
             record_verdicts(txn, verdict, verdicts)
         marks = {
             s: held
@@ -574,32 +592,29 @@ def save_label_document(
                 CompletionMark(
                     rect=gestures.rect or (0, 0, width, height),
                     by=author,
-                    at=now,
+                    at=stamp,
                     digest=subject_digest(annotations, subject),
                     proposals_hidden=gestures.proposals_hidden,
                 )
             )
-        written = document_payload(
-            annotations, width, height, keep_empty=True, marks=marks
-        )
-        assert written is not None  # keep_empty always yields a record
+        written = document_payload(annotations, width, height, marks=marks)
         version = txn.write(key, written)
         flags = resolved_by_removal(
-            flags, stored.annotations, annotations, by=author, at=now
+            flags, stored.annotations, annotations, by=author, at=instant
         )
         if flags != held_flags:
             txn.write(flags_key, flags_record(flags))
         txn.append(
             audit,
-            audit_entry(
+            audit_line(
                 "save_label_document",
                 {
                     "capture": capture,
                     "stem": stem,
                     "n_annotations": len(annotations),
                     "version": version.token,
-                    "accepted": sorted(gestures.accept),
-                    "rejected": sorted(gestures.reject),
+                    "accepted": sorted(v.proposal for v in verdicts if v.action == "accepted"),
+                    "rejected": sorted(v.proposal for v in verdicts if v.action == "rejected"),
                     "confirmed": sorted(gestures.confirm),
                     "complete": dict(gestures.complete),
                     "flagged": [flag.id for flag in new_flags],
@@ -611,7 +626,7 @@ def save_label_document(
                 },
                 actor,
                 "ok",
-            ),
+            ).stored(),
         )
     return version, label_document(written), accepted
 

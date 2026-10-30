@@ -148,7 +148,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(
 
     persisted = partition_rows(read_rows(ctx.run_dir / METRICS_FILE)[0])[0]
     assert len(persisted) == 1
-    assert persisted[0]["val_loss"] == pytest.approx(
+    assert persisted[0].model_dump()["val_loss"] == pytest.approx(
         on_holdout["loss"], abs=1e-6
     )
 

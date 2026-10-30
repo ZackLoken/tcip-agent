@@ -17,10 +17,11 @@ from typing import TYPE_CHECKING
 from fastapi.testclient import TestClient
 
 from tcip_mcp import subject_registry as cr
+from tcip_mcp.delivery import DeliveryRefusal
 from tests._producer_fixtures import registry_of
 
 if TYPE_CHECKING:
-    from httpx import Response
+    from starlette.testclient import httpx
 
 BLOOM_STATE = cr.Attribute("bloom_state", "categorical", ("closed", "open"))
 """The attribute of ``flower`` the second trait's positive state names."""
@@ -102,13 +103,12 @@ def _export(
     body: dict,
     payload: str = "milestones",
     **extra: object,
-) -> Response:
+) -> httpx.Response:
     return client.post(
         "/api/results/export_csv",
         json={
             **body,
             "payload": payload,
-            "filename": "x.csv",
             "user": "breeder",
             **extra,
         },
@@ -144,14 +144,11 @@ def test_currant_bloom_measurement_carries_its_own_milestone_columns(
 
     assert resp.status_code == 200, resp.text[:300]
     out = resp.json()
-    assert out["curves"]["rows"] and out["milestones"]["rows"]
-    assert out["milestones"]["columns"] == [
-        {"date": f"bloom_{p}per_date", "bound": f"bloom_{p}per_date_bound"}
-        for p in ("05", "50", "95")
-    ]
-    onset = out["milestones"]["rows"][0]
-    assert "bud_majority_date" not in onset
-    assert "bloom_opening_date" not in onset
+    assert out["curves"] and out["milestones"]
+    for onset in out["milestones"]:
+        assert list(onset["milestones"]) == [
+            f"{p}per" for p in ("05", "50", "95")
+        ]
 
 
 def test_currant_bloom_export_csv_delivers_its_own_schema(
@@ -164,7 +161,7 @@ def test_currant_bloom_export_csv_delivers_its_own_schema(
     resp = acknowledged_post(
         client,
         "/api/results/export_csv",
-        {**body, "payload": "milestones", "filename": "x.csv"},
+        {**body, "payload": "milestones"},
         reason="a second trait's schema",
     )
 
@@ -183,7 +180,7 @@ def test_currant_bloom_refuses_unassessed_evidence_on_every_door(
     resp = client.post("/api/results/phenology_measurement", json=body)
 
     assert resp.status_code == 400
-    assert resp.json()["detail"]["kind"] == "delivery"
-    assert "no assessment answers" in resp.json()["detail"]["message"]
+    refusal = DeliveryRefusal.model_validate(resp.json()["detail"])
+    assert "no assessment answers" in refusal.message
     for payload in ("curves", "milestones"):
         assert _export(client, body, payload).status_code == 400, payload

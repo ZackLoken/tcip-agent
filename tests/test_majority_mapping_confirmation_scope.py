@@ -7,7 +7,7 @@ entry states.
 from __future__ import annotations
 
 from tcip_mcp.pipelines.postprocessing.phenology import (
-    milestone_date_columns,
+    phenology_csv_columns,
     plant_milestones,
 )
 from tests._trait_fixtures import CROSSING_RULE, entry
@@ -53,15 +53,10 @@ def test_each_trait_carries_its_own_majority_crossing_column() -> None:
     bud = plant_milestones(SERIES, BUD)
     pistillate = plant_milestones(SERIES, PISTILLATE)
 
-    assert bud["bud_opening_date"] == bud["bud_95per_date"]
-    assert bud["bud_opening_date"] != bud["bud_50per_date"]
-    assert (
-        pistillate["pistillate_flowering_date"]
-        == pistillate["pistillate_50per_date"]
-    )
-    assert "pistillate_flowering_date" not in [
-        c["date"] for c in milestone_date_columns(BUD)
-    ]
-    assert "bud_opening_date" not in [
-        c["date"] for c in milestone_date_columns(PISTILLATE)
-    ]
+    assert bud["opening"] == bud["95per"]
+    assert bud["opening"] != bud["50per"]
+    assert pistillate["flowering"] == pistillate["50per"]
+    assert "flowering" not in bud and "opening" not in pistillate
+    assert "bud_opening_date" in phenology_csv_columns(BUD)
+    assert "pistillate_flowering_date" not in phenology_csv_columns(BUD)
+    assert "bud_opening_date" not in phenology_csv_columns(PISTILLATE)

@@ -108,13 +108,12 @@ def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_ag
     assert audit_rows(project, "propose_annotations") == []
 
 
-def test_propose_annotations_staging_nothing_leaves_no_audit_line(
+def test_propose_annotations_refused_off_a_dataset_leaves_no_audit_line(
     project: Path, tmp_path: Path
 ) -> None:
-    """``propose_annotations`` staging nothing leaves no audit line in any log.
+    """``propose_annotations`` over an image under no dataset refuses and leaves no audit line.
 
-    For an image under no dataset the call succeeds, stages nothing, and leaves no line in the
-    project's log or beside the image.
+    Nothing is staged and no line lands in the project's log or beside the image.
     """
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
@@ -124,8 +123,7 @@ def test_propose_annotations_staging_nothing_leaves_no_audit_line(
     result = propose_annotations(
         project, image_path=str(image), engine=STUB_ENGINE, actor=None
     )
-    assert "error" not in result, result
-    assert result["staged"] is False
+    assert isinstance(result, dict) and "images/ tree" in result["error"], result
 
     assert audit_rows(project, "propose_annotations") == []
     assert audit_rows(loose) == []
@@ -285,7 +283,7 @@ def test_two_spellings_of_a_root_reach_one_log_and_a_relative_spelling_refuses(
         spellings.append(Path(str(root).upper()))
     for spelling in spellings:
         entries, _cursor = audit_entries(spelling)
-        assert [e["tool"] for e in entries] == ["curate_something"]
+        assert [e.tool for e in entries] == ["curate_something"]
 
     monkeypatch.chdir(root.parent)
     with pytest.raises(ts.BadKeyError, match="not an absolute path"):

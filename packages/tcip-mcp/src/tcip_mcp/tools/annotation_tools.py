@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 import tcip_store
 from tcip_annotation import Annotation
 from tcip_annotation.json_io import (
+    ClientAnnotation,
     UnreadableLabelDocumentError,
-    client_annotation,
     read_document_versioned,
     read_predictions,
 )
@@ -30,7 +30,9 @@ def _summary(annotations: list[Annotation]) -> dict:
     return {
         "count": len(annotations),
         "subjects": sorted({a.subject for a in annotations}),
-        "annotations": [client_annotation(a) for a in annotations],
+        "annotations": [
+            ClientAnnotation.of(a).model_dump(mode="json") for a in annotations
+        ],
     }
 
 
@@ -113,10 +115,7 @@ def save_annotations(
 
     """
     from tcip_mcp.dataset_layout import save_label_document
-    from tcip_mcp.web_client import (
-        PANEL_EVENT_LABELS_WRITTEN,
-        post_panel_event,
-    )
+    from tcip_mcp.web_client import LabelsWritten, post_panel_event
 
     image_path = str(located(image_path, bound.root))
     img = Path(image_path)
@@ -138,12 +137,7 @@ def save_annotations(
     except ValueError as exc:
         return {"error": str(exc)}
 
-    post_panel_event(
-        bound,
-        "annotate",
-        PANEL_EVENT_LABELS_WRITTEN,
-        {"image_path": image_path},
-    )
+    post_panel_event(bound, "annotate", LabelsWritten(image_path=image_path))
     capture, stem = key.parts
     return {"capture": capture, "written": [stem], "count": len(annotations)}
 
@@ -165,28 +159,21 @@ def _detection_breakdown(
 ) -> list[dict]:
     """Build the per-detection records of the matching ``m``.
 
-    Each is projected through :func:`~tcip_annotation.json_io.client_annotation`, tagged ``tp``
+    Each is projected through :class:`~tcip_annotation.json_io.ClientAnnotation`, tagged ``tp``
     for a pair, ``fp`` for an unpaired detection and ``fn`` for a missed object, with its indices.
     """
-    return (
+    tagged = (
         [
-            {
-                **client_annotation(preds[p]),
-                "tag": "tp",
-                "gt_idx": g,
-                "pred_idx": p,
-            }
+            (preds[p], {"tag": "tp", "gt_idx": g, "pred_idx": p})
             for g, p in m.pairs
         ]
-        + [
-            {**client_annotation(preds[p]), "tag": "fp", "pred_idx": p}
-            for p in m.unpaired
-        ]
-        + [
-            {**client_annotation(gt[g]), "tag": "fn", "gt_idx": g}
-            for g in m.missed
-        ]
+        + [(preds[p], {"tag": "fp", "pred_idx": p}) for p in m.unpaired]
+        + [(gt[g], {"tag": "fn", "gt_idx": g}) for g in m.missed]
     )
+    return [
+        {**ClientAnnotation.of(a).model_dump(mode="json"), **tag}
+        for a, tag in tagged
+    ]
 
 
 def _rounded(totals: dict) -> dict:
@@ -214,10 +201,11 @@ def _evaluate_image(
     (``ValueError``): it was not predicted, so there is nothing to score.
     """
     from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.pipelines.training.evaluation import score_bucket
 
     (one,), metrics = score_bucket(
-        [resolve_image_path(image)],
+        [SourceHeader(resolve_image_path(image))],
         bucket,
         iou_threshold=iou_threshold,
         conf_threshold=conf_threshold,
@@ -268,13 +256,14 @@ def _evaluate_folder(
         list_logical_images,
         source_path_of,
     )
+    from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.pipelines.training.evaluation import score_bucket
 
     images = sorted(
         list_logical_images(images_dir).values(), key=source_path_of
     )
     scored, m = score_bucket(
-        images,
+        [SourceHeader(image) for image in images],
         bucket,
         iou_threshold=iou_threshold,
         conf_threshold=conf_threshold,
@@ -334,9 +323,9 @@ def score_predictions(
             ``schemas.COMPARABILITY_IOU``).
         conf_threshold: Minimum confidence to consider a prediction.
         detail: Single-image only, also return the per-detection ``detections`` breakdown: each
-            entry the annotation it names as ``client_annotation`` projects it (corner ``bbox``,
-            ``rings`` or ``point``, ``subject``, ``attributes``, ``iscrowd``, ``score`` and the
-            provenance it holds) beside its ``tag`` and indices.
+            entry the annotation it names as ``ClientAnnotation`` projects it (corner ``bbox``,
+            ``rings`` or ``point``, ``subject``, ``attributes``, ``iscrowd``, ``score`` and its
+            provenance, ``None`` where it holds none) beside its ``tag`` and indices.
         trait: A trait's name; when set, the localization criterion of its latest confirmed
             revision (:func:`~tcip_mcp.operationalization.latest_confirmed`, whose refusals
             answer as the error) governs the reported TP/FP/FN count; map50 stays a labeled
@@ -381,14 +370,14 @@ def write_subject_registry(
 
     The registry is ``subjects``, each subject's ``description`` and ``attributes`` (each
     ``categorical`` or ``ordinal`` with ordered ``values``), validated
-    (:func:`subject_registry.registry_from_request`) and written
+    (:func:`subject_registry.registry_from_dict`) and written
     (:func:`subject_registry.replace_registry`), whose refusals answer as errors: an empty
     registry; a dropped subject, attribute or value, or a stored registry that will not decode,
     without ``allow_removals``; an attribute's type changed without ``allow_type_changes``.
 
     Args:
         dataset_root: Dataset root; the registry is written to ``<dataset_root>/subjects.json``.
-        subjects: Nested ``{subject: {description?, attributes?}}`` dict.
+        subjects: Nested ``{subject: {description, attributes?}}`` dict.
         allow_removals: State a dropped name, or a stored registry that will not decode, as a
             deliberate removal/repair.
         allow_type_changes: State a same-values attribute type flip (categorical to ordinal or
@@ -400,7 +389,7 @@ def write_subject_registry(
     from tcip_store import VersionConflictError
 
     try:
-        registry = subject_registry.registry_from_request(subjects)
+        registry = subject_registry.registry_from_dict(subjects)
     except subject_registry.RegistryError as exc:
         return {"error": f"invalid registry: {exc}"}
 
@@ -420,6 +409,6 @@ def write_subject_registry(
     ) as exc:
         return {"error": str(exc)}
     return {
-        "subjects_path": result["subjects_path"],
+        "subjects_path": result.subjects_path,
         "subjects": [s.name for s in registry.subjects],
     }

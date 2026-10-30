@@ -11,6 +11,7 @@ confirmed revision until it is confirmed itself; the delivery event names the re
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,8 +26,8 @@ from tests import REFUSED_NAMES, _trait_fixtures as fx
 from tests._audit_fixtures import audit_rows
 
 if TYPE_CHECKING:
-    from httpx import Response
     from pydantic import JsonValue
+    from starlette.testclient import httpx
 
     from tcip_mcp.buckets import Bucket
     from tcip_store import Key
@@ -105,7 +106,7 @@ def _deliver_counts(root: Path, name: str) -> dict:
 
 def _confirm(
     client: TestClient, revision: traits.TraitRevision, **extra: str
-) -> Response:
+) -> httpx.Response:
     body = {
         "trait": revision.entry.name,
         "revision": revision.number,
@@ -451,7 +452,8 @@ def test_an_entry_cannot_carry_a_confirmation_and_a_confirmation_needs_a_name(
     confirmed = fx.confirm(tmp_path, revision)
     assert (
         confirmed.confirmed_by == "user:grüne"
-        and confirmed.confirmed_at.endswith("+00:00")
+        and confirmed.confirmed_at is not None
+        and confirmed.confirmed_at.utcoffset() == timedelta(0)
     )
 
 
@@ -512,7 +514,7 @@ def test_a_confirmation_with_another_hash_refuses_and_the_revisions_own_hash_con
     confirmed = _confirm(opened_client, revision, user="rosalind")
 
     assert confirmed.status_code == 200, confirmed.text
-    assert confirmed.json()["confirmed_by"] == "user:rosalind"
+    assert confirmed.json()["revision"]["confirmed_by"] == "user:rosalind"
     assert confirmed.json()["audit_warning"] is None
     assert (
         traits.read_trait(fx.COUNT_TRAIT, tmp_path).latest_confirmed.number
@@ -533,7 +535,7 @@ def test_the_traits_route_serves_every_revision_and_the_vocabulary_definitions(
     assert record["trait"] == fx.COUNT_TRAIT
     assert [r["number"] for r in record["revisions"]] == [1, 2]
     assert [r["confirmed"] for r in record["revisions"]] == [True, False]
-    assert record["latest_confirmed"] == 1
+    assert record["latest_confirmed"] == record["revisions"][0]
     assert set(body["definitions"]) == {"stem_count"}
     assert body["unreadable"] == []
 

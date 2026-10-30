@@ -35,52 +35,51 @@ def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid(
     """The prediction encoding keeps only the detection with extent on the stored grid.
 
     Of three detections, the one whose mask lies past the frame's right edge and the one whose
-    box is 0.004 px wide are dropped: the document holds the 0.8-scored one, and the result's
-    count becomes 1.
+    box is 0.004 px wide are dropped: the document holds the 0.8-scored one, two counted dropped.
     """
     from tcip_annotation.mask_contours import mask_to_polygon_rings
-    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+    from tcip_mcp.pipelines.postprocessing.export import (
+        DetectionMask,
+        DetectionResult,
+        encode_predictions,
+    )
     from tests._producer_fixtures import painted_array
     from tests._training_values import VERTEX_SPACING
 
     solid = painted_array(40, 40, [((5, 5, 30, 30), 1)])
-    blob = {
-        "segmentation": [
+    blob = DetectionMask(
+        segmentation=[
             [c for point in ring for c in point]
             for ring in mask_to_polygon_rings(
                 solid, threshold=None, vertex_spacing=VERTEX_SPACING
             )
         ]
-    }
+    )
     # A merged sliced polygon wholly past the right edge clips to one column.
-    past_the_edge = {
-        "segmentation": [[105.0, 5.0, 130.0, 5.0, 130.0, 30.0, 105.0, 30.0]]
-    }
+    past_the_edge = DetectionMask(
+        segmentation=[[105.0, 5.0, 130.0, 5.0, 130.0, 30.0, 105.0, 30.0]]
+    )
 
-    def result() -> dict:
-        return {
-            "image": "a.jpg",
-            "width": 40,
-            "height": 40,
-            "labels": [1, 1, 1],
-            "scores": [0.9, 0.8, 0.7],
-            "boxes": [
-                [5.0, 5.0, 30.0, 30.0],
-                [5.0, 5.0, 30.0, 30.0],
-                [10.0, 5.0, 10.004, 30.0],
+    data, dropped = encode_predictions(
+        DetectionResult(
+            image="a.jpg",
+            width=40,
+            height=40,
+            scores=[0.9, 0.8, 0.7],
+            boxes=[
+                (5.0, 5.0, 30.0, 30.0),
+                (5.0, 5.0, 30.0, 30.0),
+                (10.0, 5.0, 10.004, 30.0),
             ],
-            "masks": [past_the_edge, blob],
-            "count": 3,
-            "cap": 4,
-        }
-
-    written = result()
-    data, _dropped = encode_predictions(
-        written, "model:fixture", scope=registry_scope(tmp_path, "bur")
+            masks=[past_the_edge, blob],
+            cap=4,
+        ),
+        "model:fixture",
+        scope=registry_scope(tmp_path, "bur"),
     )
     (kept,) = label_document(data).annotations
-    assert written["count"] == 1
-    assert kept.score == written["scores"][0] == 0.8
+    assert dropped == 2
+    assert kept.score == 0.8
 
 
 def test_check_box_extent_refuses_an_inverted_box() -> None:
@@ -347,12 +346,12 @@ def _seed_review_dataset(
     return img
 
 
-def _save(image: Path, annotations: list, **gestures: str | list[int]) -> dict:
+def _save(image: Path, annotations: list, **gestures: dict) -> dict:
     return {
         "image_path": str(image),
         "annotations": annotations,
         "user": "breeder",
-        **gestures,
+        "gestures": gestures,
     }
 
 
@@ -438,7 +437,7 @@ def test_the_save_door_refuses_accepting_a_degenerate_proposal(
 
     resp = client.post(
         "/api/annotate/labels",
-        json=_save(img, [], bucket="m", accept=[0]),
+        json=_save(img, [], decide={"bucket": "m", "verdicts": {"0": "accepted"}}),
     )
 
     assert resp.status_code == 400, resp.text
@@ -452,7 +451,7 @@ def test_the_save_door_admits_accepting_an_ordered_proposal(
 
     resp = client.post(
         "/api/annotate/labels",
-        json=_save(img, [], bucket="m", accept=[0]),
+        json=_save(img, [], decide={"bucket": "m", "verdicts": {"0": "accepted"}}),
     )
 
     assert resp.status_code == 200, resp.text
@@ -471,20 +470,19 @@ LEAF = registry_scope(Path(__file__).parent, "leaf")
 def test_encode_predictions_drops_a_degenerate_box_and_reports_the_count() -> (
     None
 ):
-    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+    from tcip_mcp.pipelines.postprocessing.export import (
+        DetectionResult,
+        encode_predictions,
+    )
 
-    result = {
-        "image": "preds.jpg",
-        "width": 200,
-        "height": 150,
-        "boxes": [
-            [10, 10, 20, 20],
-            [30, 30, 30, 40],
-        ],  # the second collapses to zero width
-        "scores": [0.9, 0.8],
-        "labels": [1, 1],
-        "cap": 3,
-    }
+    result = DetectionResult(
+        image="preds.jpg",
+        width=200,
+        height=150,
+        boxes=[(10, 10, 20, 20), (30, 30, 30, 40)],  # the second has zero width
+        scores=[0.9, 0.8],
+        cap=3,
+    )
 
     data, dropped = encode_predictions(result, "model:fixture", scope=LEAF)
 
@@ -497,17 +495,19 @@ def test_encode_predictions_drops_a_box_that_rounds_to_zero_extent() -> None:
 
     A box 0.003 px across is dropped and counted, and the other box, 10 px across, is encoded.
     """
-    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+    from tcip_mcp.pipelines.postprocessing.export import (
+        DetectionResult,
+        encode_predictions,
+    )
 
-    result = {
-        "image": "preds.jpg",
-        "width": 200,
-        "height": 150,
-        "boxes": [[10, 10, 20, 20], [30, 30, 30.003, 30.003]],
-        "scores": [0.9, 0.8],
-        "labels": [1, 1],
-        "cap": 3,
-    }
+    result = DetectionResult(
+        image="preds.jpg",
+        width=200,
+        height=150,
+        boxes=[(10, 10, 20, 20), (30, 30, 30.003, 30.003)],
+        scores=[0.9, 0.8],
+        cap=3,
+    )
 
     data, dropped = encode_predictions(result, "model:fixture", scope=LEAF)
 
@@ -550,8 +550,37 @@ def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(
     )
 
     assert "error" not in result
-    assert result["dropped_boxes"] == 1
-    assert result["n_detect"] == 1
+    assert result.dropped_boxes == 1
+    assert result.n_detect == 1
+
+
+def test_stage_proposals_whose_every_box_drops_refuses_naming_the_count(
+    tmp_path: Path,
+) -> None:
+    """Explicit boxes that all round to no extent, with no polygon, stage nothing and refuse.
+
+    The refusal names how many boxes dropped; no bucket is published.
+    """
+    from tcip_mcp.buckets import buckets_under
+    from tcip_mcp.tools.proposal_tools import stage_proposals
+
+    image = image_dir(tmp_path, "2026-01-01") / "img_001.jpg"
+    write_image(image, (200, 150))
+
+    result = stage_proposals(
+        tmp_path,
+        str(image),
+        model_name="sam",
+        actor=None,
+        boxes=[
+            {"subject": "leaf", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.0, "h": 0.2},
+            {"subject": "leaf", "conf": 0.7, "cx": 0.3, "cy": 0.3, "w": 0.1, "h": 0.0},
+        ],
+    )
+
+    assert isinstance(result, dict)
+    assert "all 2 box(es)" in result["error"]
+    assert buckets_under(tmp_path) == []
 
 
 @pytest.mark.parametrize("shape", ["box", "polygon"])
