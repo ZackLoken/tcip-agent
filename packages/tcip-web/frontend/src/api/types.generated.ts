@@ -288,6 +288,10 @@ export interface FindPayload {
   user: string;
 }
 
+export interface ScorerCatalog {
+  scorers: ScorerEntry[];
+}
+
 export interface PriorityQueueJob {
   job_id: string;
   status: "pending" | "running" | "completed" | "failed" | "canceled";
@@ -298,6 +302,8 @@ export interface PriorityQueueJob {
   subject: string | null;
   ranked: ReviewQueue | null;
   live: boolean;
+  dataset_root: string;
+  capture: string;
 }
 
 export interface LaunchPriorityQueuePayload {
@@ -400,6 +406,8 @@ export interface InferenceJob {
   total: number;
   done: number;
   live: boolean;
+  dataset_root: string;
+  capture: string;
 }
 
 export interface LaunchInferencePayload {
@@ -1341,6 +1349,11 @@ export interface Sample {
   rect?: [number, number, number, number] | null;
   row_key?: string | null;
   ground_truth_digest?: string | null;
+}
+
+export interface ScorerEntry {
+  name: string;
+  values_schema: Record<string, unknown>;
 }
 
 export interface ScorerSpec {

@@ -56,6 +56,15 @@ class ConvBackbone(torch.nn.Module):
         self.backbone = torch.nn.Conv2d(3, 8, 3, padding=1)
 
 
+class PassThroughBackbone(torch.nn.Module):
+    """A model whose ``.backbone`` hands its input on, so a pooled feature is a band mean."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.backbone = torch.nn.Identity()
+        self.head = torch.nn.Linear(3, 1)
+
+
 class ScorelessDetector(torch.nn.Module):
     """A detector answering one box and its label and no ``scores``."""
 
@@ -84,6 +93,10 @@ def build_two_head(**_: object) -> torch.nn.Module:
 
 def build_conv_backbone(**_: object) -> torch.nn.Module:
     return ConvBackbone()
+
+
+def build_pass_through_backbone(**_: object) -> torch.nn.Module:
+    return PassThroughBackbone()
 
 
 def build_linear(**_: object) -> torch.nn.Module:

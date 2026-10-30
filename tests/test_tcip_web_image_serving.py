@@ -1980,7 +1980,7 @@ def _await_job(
         body = client.get(
             "/api/images/overviews/status", params={"job_id": job_id}
         ).json()
-        if body["status"] in ("completed", "failed"):
+        if not body["live"]:
             return body
         time.sleep(0.05)
     raise AssertionError(

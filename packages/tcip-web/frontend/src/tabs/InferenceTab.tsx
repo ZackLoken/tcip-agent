@@ -11,13 +11,12 @@ import {
   type BucketExistsRefusal,
   type DatasetTree,
   type InferenceJob,
-  type JobStatus,
   type Listed,
   type MaskCut,
   NOTHING_STATED,
-  type RegisteredModels,
   type Stated,
 } from "@/api/types.generated";
+import { ModelPicker } from "@/components/ModelPicker";
 import { TabHeading } from "@/components/TabHeading";
 import { useStore } from "@/store";
 import { selectDatasetRoot, selectProjectRoot } from "@/store/slices/gui";
@@ -71,14 +70,13 @@ function RefusedLaunchEntry({
   );
 }
 
-function statusBadgeClass(status: JobStatus): string {
-  if (status === "completed") return "bg-tcip-tp/20 text-tcip-tp";
-  if (status === "failed" || status === "canceled") return "bg-tcip-fp/20 tcip-problem";
-  return "bg-tcip-fn/20 text-tcip-fn"; // pending / running
+function statusBadgeClass(job: InferenceJob): string {
+  if (job.live) return "bg-tcip-fn/20 text-tcip-fn";
+  return job.status === "completed" ? "bg-tcip-tp/20 text-tcip-tp" : "bg-tcip-fp/20 tcip-problem";
 }
 
 /** The assessments among `assessments` that judged `model`'s checkpoint. */
-function assessmentsOf(assessments: AssessmentSummary[], model: Listed | undefined) {
+function assessmentsOf(assessments: AssessmentSummary[], model: Listed | null) {
   return model
     ? assessments.filter((a) => a.assessment.producer?.checkpoint_sha256 === model.entry.sha256)
     : [];
@@ -88,10 +86,7 @@ export function InferenceTab() {
   const projectRoot = useStore(selectProjectRoot);
   const datasetRoot = useStore(selectDatasetRoot);
 
-  const [registered, setRegistered] = useState<RegisteredModels | null>(null);
-  const models = registered?.models ?? [];
-  const [modelsError, setModelsError] = useState<string | null>(null);
-  const [modelPath, setModelPath] = useState<string>("");
+  const [model, setModel] = useState<Listed | null>(null);
   const [assessed, setAssessed] = useState<Assessments | null>(null);
   const [assessmentsError, setAssessmentsError] = useState<string | null>(null);
   const [tree, setTree] = useState<DatasetTree | null>(null);
@@ -131,7 +126,6 @@ export function InferenceTab() {
   const prevRefusedDatesRef = useRef<string[]>([]);
   const activeJob = activeJobId === null ? undefined : jobs[activeJobId];
   const listedJobs = Object.values(jobs).filter((j) => j.job_id !== delisted);
-  const model = models.find((m) => m.entry.checkpoint_path === modelPath);
   const modelAssessments = assessmentsOf(assessed?.assessments ?? [], model);
 
   // A refused entry's control can unmount while focused (Dismiss, or its action succeeding),
@@ -149,27 +143,17 @@ export function InferenceTab() {
   // change.
   useEffect(() => {
     setRefusedLaunches({});
-  }, [modelPath, datasetRoot]);
+  }, [model, datasetRoot]);
 
   // The chosen model's first passed assessment answers for its run unless the person chooses
   // otherwise; a model with none states its own values.
   useEffect(() => {
     setAssessmentId(modelAssessments.find((a) => a.passed)?.assessment.assessment_id ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelPath, assessed]);
+  }, [model, assessed]);
 
-  const refreshModels = useCallback(() => {
+  const refreshAssessments = useCallback(() => {
     if (!projectRoot) return;
-    void resultsApi
-      .registeredModels()
-      .then((r) => {
-        setRegistered(r);
-        setModelsError(null);
-      })
-      .catch((e) => {
-        setRegistered(null);
-        setModelsError(`Could not load registered models: ${messageOf(e)}`);
-      });
     void resultsApi
       .assessments()
       .then((r) => {
@@ -183,8 +167,8 @@ export function InferenceTab() {
   }, [projectRoot]);
 
   useEffect(() => {
-    refreshModels();
-  }, [refreshModels]);
+    refreshAssessments();
+  }, [refreshAssessments]);
 
   const refreshDates = useCallback(() => {
     if (!datasetRoot) return;
@@ -364,35 +348,7 @@ export function InferenceTab() {
     <div className="flex-1 grid grid-cols-[440px_1fr] overflow-hidden">
       <TabHeading tab="inference" />
       <div className="border-r border-tcip-border p-4 overflow-auto">
-        <label className="tcip-label mb-1" htmlFor="inference-model-select">
-          Model
-        </label>
-        {modelsError && (
-          <div className="tcip-problem mb-1">
-            {modelsError}{" "}
-            <button className="tcip-btn ml-1" onClick={refreshModels}>
-              Retry
-            </button>
-          </div>
-        )}
-        {models.length > 0 ? (
-          <select
-            id="inference-model-select"
-            className="tcip-select w-full mb-3"
-            value={modelPath}
-            onChange={(e) => setModelPath(e.target.value)}
-          >
-            <option value="">Choose a model</option>
-            {models.map(({ entry }) => (
-              <option key={entry.checkpoint_path} value={entry.checkpoint_path}>
-                {entry.name}
-              </option>
-            ))}
-          </select>
-        ) : (
-          !modelsError &&
-          projectRoot && <p className="text-tcip-muted mb-3">No model is registered.</p>
-        )}
+        <ModelPicker id="inference-model-select" value={model} onChange={setModel} />
 
         <div className="tcip-label mb-1">Dates</div>
         {datesError && (
@@ -438,7 +394,7 @@ export function InferenceTab() {
         {assessmentsError && (
           <div className="tcip-problem mb-1">
             {assessmentsError}{" "}
-            <button className="tcip-btn ml-1" onClick={refreshModels}>
+            <button className="tcip-btn ml-1" onClick={refreshAssessments}>
               Retry
             </button>
           </div>
@@ -530,7 +486,7 @@ export function InferenceTab() {
           ref={launchButtonRef}
           className="tcip-btn-primary w-full"
           onClick={() => void onLaunch()}
-          disabled={launching || !modelPath || !bucketName || selectedDates.length === 0 || halfCut}
+          disabled={launching || !model || !bucketName || selectedDates.length === 0 || halfCut}
         >
           Run
         </button>
@@ -580,9 +536,7 @@ export function InferenceTab() {
                 <tr key={j.job_id} className="border-t border-tcip-border">
                   <td className="py-1.5 pr-3 font-mono">{j.job_id}</td>
                   <td className="pr-3">
-                    <span className={`tcip-badge ${statusBadgeClass(j.status)}`}>
-                      {shownStatus(j)}
-                    </span>
+                    <span className={`tcip-badge ${statusBadgeClass(j)}`}>{shownStatus(j)}</span>
                   </td>
                   <td className="pr-3 tabular-nums">
                     {j.total > 0 ? `${j.done} / ${j.total}` : j.done}

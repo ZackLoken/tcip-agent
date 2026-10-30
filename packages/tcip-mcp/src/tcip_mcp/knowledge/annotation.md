@@ -116,7 +116,8 @@ bearing (denormalizing, cropping, drawing); read the frame and the pixels throug
 | `import_coco` | Convert an external dataset-level COCO into per-image label documents |
 | `propose_annotations` | Run a named proposal engine over an image, whole-frame or over named grid cells |
 | `push_panel_event` | Push one of the four panel events (`banner`, a note shown above a tab; `labels_written`; `annotate_focus`; `canvas_state_request`) to a GUI panel over the tcip-web backend for this server's project; delivered only while the GUI has that project open |
-| `prioritize_review_queue` | Rank images by active-learning uncertainty/diversity for the next review batch, skipping those marked finished for a subject |
+| `prioritize_review_queue` | Rank images by an active-learning scorer `scorer_catalog` lists for the next review batch, skipping those marked finished for a subject |
+| `scorer_catalog` | List each scorer a review queue may name, with the values its block states |
 | `triage_predictions` | Sort a registered checkpoint's own predictions into a needs-review queue by a stated confidence band and its rationale, beside the images whose predictions carry no confidence at all; writes nothing |
 
 ## Engine-assisted auto-labeling (the engine is a capability, not a fixed method)
@@ -339,12 +340,12 @@ Flow, in the order of the bullets above: a bucket from `run_inference` or `stage
 
 ## Active Learning
 
-`prioritize_review_queue` ranks images by model uncertainty/diversity:
+`prioritize_review_queue` ranks images by a scorer:
 
-- High uncertainty = model unsure = most valuable to annotate
-- The scorer is a stated block, `{"name": ..., **values}`: the built-in `uncertainty` and
-  `diversity` take no values and `combined` requires `uncertainty_weight` and
-  `diversity_weight`; the budget and the `rationale` for both are stated beside it. With a
-  `subject` named it skips the images whose label document marks that subject finished
+- The scorer is a stated block, `{"name": ..., **values}`, naming one `scorer_catalog` lists
+  with the values it lists; the budget and the `rationale` for both are stated beside it. With a
+  `subject` named it skips the images whose label document marks that subject finished and hands
+  them to the scorer as the labeled images, which a scorer measuring distance from what is
+  labeled needs
 - `prioritize_review_queue` returns a prioritized list for the annotator, beside the scorer block,
   budget and rationale it ranked under

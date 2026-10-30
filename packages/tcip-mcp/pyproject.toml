@@ -11,10 +11,11 @@ dependencies = [
     "torchvision>=0.15",
     "timm>=1.0",
     "numpy",
-    # scipy.spatial, read by the band-group identity tolerance and the nearest-neighbor spacing,
-    # and scipy.stats.median_abs_deviation, read by the row-break derivation.
+    # scipy.spatial (band-group identity tolerance, nearest-neighbor spacing, diversity scorer's
+    # cosine distance) and scipy.stats.median_abs_deviation (the row-break derivation).
     "scipy",
-    # sklearn.metrics.metric_at_thresholds (added in 1.9), read by the mask threshold derivation.
+    # sklearn.metrics.metric_at_thresholds (added in 1.9; the mask threshold derivation) and
+    # sklearn.preprocessing.minmax_scale (the combined review-queue scorer).
     "scikit-learn>=1.9",
     "pillow>=13.0",
     "tifffile>=2023.1",

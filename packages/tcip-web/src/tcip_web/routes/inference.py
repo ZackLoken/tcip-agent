@@ -18,7 +18,6 @@ from typing import ClassVar, Literal
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, PrivateAttr
 
-from tcip_mcp.dataset_layout import parse_capture_dir
 from tcip_mcp.identity import actor
 from tcip_mcp.pipelines.execution import Stated
 from tcip_web import jobstore
@@ -58,11 +57,6 @@ class InferenceJob(jobstore.ProjectJob):
     def cancel_event(self) -> threading.Event:
         """The event a cancel sets, asked before each image."""
         return self._cancel_event
-
-    @property
-    def dataset_root(self) -> Path:
-        """The dataset root of the capture ``images_dir`` (:func:`parse_capture_dir`)."""
-        return parse_capture_dir(self.images_dir)[0]
 
 
 class InferenceJobs(BaseModel):

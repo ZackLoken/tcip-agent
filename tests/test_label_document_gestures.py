@@ -730,7 +730,7 @@ def test_the_queue_refuses_a_label_document_that_will_not_read_by_name(
     save_labels(tmp_path, image, [], gestures=Gestures(complete={"bud": True}))
     queued = _prepare_queue_sources(str(images), "bud")
     assert not isinstance(queued, dict), queued
-    assert queued[1] == 1
+    assert queued == ([], [image])
 
     ts.replace(image_label_key(image), {"annotations": {}})
 
@@ -907,7 +907,7 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(
         ).json()
         return (
             counts.get("negative", 0),
-            queued[1],
+            len(queued[1]),
             listed["completion"]["bud"],
         )
 

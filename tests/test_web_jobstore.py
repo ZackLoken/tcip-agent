@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tcip_mcp.dataset_layout import image_dir
-from tcip_mcp.pipelines.active_learning import ScorerSpec
 from tcip_mcp.pipelines.execution import Stated
 from tcip_web.jobstore import JobStatus, ProjectJob
 from tests._producer_fixtures import write_image
@@ -15,6 +14,8 @@ from tests._training_values import RATIONALE
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from fastapi.testclient import TestClient
 
 STATED = Stated(
     tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2, rationale=RATIONALE
@@ -25,13 +26,13 @@ STATED = Stated(
 def _job(
     status: JobStatus, root: str = "root-a", job_id: str = ""
 ) -> ProjectJob:
-    """Return a job of ``root`` holding ``status`` under ``job_id``."""
+    """Return a job of ``root`` holding ``status`` under ``job_id``, over a capture of ``root``."""
     return ProjectJob(
         job_id=job_id,
         status=status,
         project=root,
         checkpoint_path="model.pt",
-        images_dir="images",
+        images_dir=str(image_dir(root, "2026-01-01")),
     )
 
 
@@ -229,48 +230,40 @@ def test_inference_cancel_reaches_a_job_launched_for_a_previously_open_project(
 def test_priority_queue_by_id_reaches_a_job_launched_for_a_previously_open_project(
     tmp_path: Path,
     opened_project: Path,
+    opened_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A priority queue reached by id answers a job launched for a previously open project.
 
-    After another project is opened the job is found by id, and an unknown id answers 404.
+    After another project is opened the job the launch route made is found by id, its ranking
+    held, and an unknown id answers 404.
     """
     from fastapi import HTTPException
 
-    from tcip_mcp.tools.feedback_tools import QueueEntry, ReviewQueue
-    from tcip_web.routes.annotate import (
-        PriorityQueueJob,
-        _pq_registry,
-        get_priority_queue_job,
-    )
+    from tcip_web.routes.annotate import _pq_registry, get_priority_queue_job
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
     from tests._web_fixtures import open_new_project
-
-    job = PriorityQueueJob(
-        job_id="pq-under-a",
-        project=str(opened_project),
-        checkpoint_path="c",
-        images_dir="i",
-        subject=None,
-        status="completed",
-        error=None,
-        ranked=ReviewQueue(
-            scorer=ScorerSpec(name="uncertainty"),
-            budget=50,
-            rationale=RATIONALE,
-            task="detection",
-            total_candidates=1,
-            reviewed_skipped=0,
-            queue=[
-                QueueEntry(image="a.jpg", score=0.9, reference_member=None)
-            ],
-        ),
+    from tests.test_review_priority_queue import (
+        QUEUE,
+        ended,
+        select,
+        stub_scorer,
     )
-    _pq_registry.launch(job, lambda _job: None)
+
+    ckpt = registered_checkpoint(opened_project)
+    select(opened_client, opened_project, None)
+    stub_scorer(monkeypatch)
+    launched = opened_client.post(
+        "/api/annotate/queue/launch", json={"checkpoint_path": ckpt, **QUEUE}
+    ).json()
+    job_id = launched["job_id"]
 
     try:
+        held = ended(opened_client, job_id)
         open_new_project(tmp_path / "other")
 
-        assert _pq_registry.get("pq-under-a") == job
-        assert get_priority_queue_job("pq-under-a").job_id == "pq-under-a"
+        assert get_priority_queue_job(job_id).model_dump(mode="json") == held
+        assert held["ranked"]["queue"]
 
         with pytest.raises(HTTPException) as miss:
             get_priority_queue_job("pq-never-launched")

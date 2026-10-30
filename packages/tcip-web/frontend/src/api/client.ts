@@ -33,6 +33,7 @@ import {
   type OpenAnswer,
   type SavedLabels,
   type SavePayload,
+  type ScorerCatalog,
   type SelectAnswer,
   type ServedProposals,
   type Staged,
@@ -188,7 +189,10 @@ export const api = {
     // Ask the detector for the boxes a phrase describes; they come back as prompts, unstaged.
     find: (body: FindPayload) => postJson<FindAnswer>(ROUTES.postAnnotateFind, body),
 
-    // Launch the review queue as a background job; poll its job_id via queueJob until terminal.
+    // The scorers a review queue may name, each with the values its block states.
+    scorers: () => getJson<ScorerCatalog>(ROUTES.getAnnotateScorers),
+
+    // Launch the review queue as a background job; poll its job_id via queueJob until it ends.
     launchQueue: (body: LaunchPriorityQueuePayload) =>
       postJson<PriorityQueueJob>(ROUTES.postAnnotateQueueLaunch, body),
 

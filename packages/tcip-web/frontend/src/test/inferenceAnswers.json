@@ -24,7 +24,9 @@
         "assessment_id": null,
         "total": 0,
         "done": 0,
-        "live": true
+        "live": true,
+        "dataset_root": "/scratch/workspace/inference",
+        "capture": "2026-02-11"
       }
     ]
   },
@@ -53,7 +55,9 @@
       "assessment_id": null,
       "total": 0,
       "done": 0,
-      "live": false
+      "live": false,
+      "dataset_root": "/scratch/workspace/inference",
+      "capture": "2026-02-11"
     }
   },
   "launched": {
@@ -79,7 +83,9 @@
     "assessment_id": null,
     "total": 0,
     "done": 0,
-    "live": true
+    "live": true,
+    "dataset_root": "/scratch/workspace/inference",
+    "capture": "2026-02-11"
   },
   "held_started": {
     "jobs": [
@@ -106,7 +112,9 @@
         "assessment_id": null,
         "total": 0,
         "done": 0,
-        "live": false
+        "live": false,
+        "dataset_root": "/scratch/workspace/inference",
+        "capture": "2026-02-11"
       },
       {
         "job_id": "<held job>",
@@ -131,7 +139,9 @@
         "assessment_id": null,
         "total": 0,
         "done": 0,
-        "live": true
+        "live": true,
+        "dataset_root": "/scratch/workspace/inference",
+        "capture": "2026-02-11"
       }
     ]
   },
@@ -160,7 +170,9 @@
         "assessment_id": null,
         "total": 0,
         "done": 0,
-        "live": false
+        "live": false,
+        "dataset_root": "/scratch/workspace/inference",
+        "capture": "2026-02-11"
       },
       {
         "job_id": "<held job>",
@@ -185,7 +197,9 @@
         "assessment_id": null,
         "total": 9,
         "done": 1,
-        "live": true
+        "live": true,
+        "dataset_root": "/scratch/workspace/inference",
+        "capture": "2026-02-11"
       }
     ]
   },
@@ -214,7 +228,9 @@
       "assessment_id": null,
       "total": 9,
       "done": 1,
-      "live": true
+      "live": true,
+      "dataset_root": "/scratch/workspace/inference",
+      "capture": "2026-02-11"
     }
   },
   "bucket_exists": {
@@ -246,7 +262,9 @@
           "assessment_id": null,
           "total": 9,
           "done": 1,
-          "live": true
+          "live": true,
+          "dataset_root": "/scratch/workspace/inference",
+          "capture": "2026-02-11"
         }
       }
     }
@@ -274,7 +292,9 @@
     "assessment_id": null,
     "total": 9,
     "done": 1,
-    "live": true
+    "live": true,
+    "dataset_root": "/scratch/workspace/inference",
+    "capture": "2026-02-11"
   },
   "canceled": {
     "jobs": [
@@ -301,7 +321,9 @@
         "assessment_id": null,
         "total": 0,
         "done": 0,
-        "live": false
+        "live": false,
+        "dataset_root": "/scratch/workspace/inference",
+        "capture": "2026-02-11"
       },
       {
         "job_id": "<held job>",
@@ -326,7 +348,9 @@
         "assessment_id": null,
         "total": 9,
         "done": 1,
-        "live": false
+        "live": false,
+        "dataset_root": "/scratch/workspace/inference",
+        "capture": "2026-02-11"
       }
     ]
   },
@@ -355,7 +379,9 @@
       "assessment_id": null,
       "total": 9,
       "done": 1,
-      "live": false
+      "live": false,
+      "dataset_root": "/scratch/workspace/inference",
+      "capture": "2026-02-11"
     }
   },
   "missing_checkpoint": {

@@ -137,6 +137,7 @@ SERVED_FIXTURES = (
     "generate_images_fixture",
     "generate_meta_fixture",
     "generate_annotate_fixture",
+    "generate_queue_fixture",
 )
 """The fixture generators whose files hold no value a run mints, compared value for value."""
 

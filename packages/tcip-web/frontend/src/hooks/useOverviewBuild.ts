@@ -4,10 +4,7 @@ import { api } from "@/api/client";
 import { messageOf } from "@/api/http";
 import type { OverviewJob } from "@/api/types.generated";
 import { OVERVIEWS_REQUIRED } from "@/api/types.generated";
-
-/** How often the build's progress is read back. Long enough that a minutes-long pyramid build
- *  is not polled thousands of times, short enough that the byte count moves while it runs. */
-const POLL_MS = 700;
+import { pollJob } from "@/hooks/jobPoll";
 
 /** How long the reported progress may sit at one value before the build is called stalled.
  *
@@ -39,14 +36,11 @@ export function writtenLabel(bytes: number): string {
 /**
  * Turn a refused image load into the build that makes it servable.
  *
- * A raster past the server's display bound has no resolution a whole view can be served at until
- * its reduced-resolution pyramid exists; the server refuses such a request naming that condition
- * in X-TCIP-Image-Error. `imageError` is that already-read condition from the shared image
- * loader's failed load (null while loading or served), so no second request is made here; only
- * the overviews condition starts a build.
- *
- * One build is started per image URL: a build that fails is reported, never retried in a loop, and
- * one whose reported progress stops moving for `STALL_MS` is reported too rather than polled on.
+ * `imageError` is the condition the shared image loader read from a failed load's
+ * X-TCIP-Image-Error (null while loading or served); the overviews condition starts a build of
+ * `imagePath`'s reduced-resolution pyramid, at most one per `imageUrl`. The state answers the
+ * build while it runs, its error once it fails or its progress holds for `STALL_MS`, and a bumped
+ * `reloadToken` once it completes.
  */
 export function useOverviewBuild(
   imageUrl: string | null,
@@ -66,76 +60,53 @@ export function useOverviewBuild(
     attempted.current = imageUrl;
 
     let canceled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let stop: (() => void) | null = null;
     let lastWritten = -1;
     let lastMoved = Date.now();
+    const failed = (e: unknown) =>
+      setState((s) => ({ ...s, building: false, error: messageOf(e) }));
 
-    const poll = (jobId: string) => {
-      timer = setTimeout(() => {
-        void api.images.overviewJob(jobId).then(
-          (job: OverviewJob) => {
-            if (canceled) return;
-            if (!job.live) {
-              setState((s) =>
-                job.status === "completed"
-                  ? {
-                      building: false,
-                      bytesWritten: job.bytes_written,
-                      error: null,
-                      reloadToken: s.reloadToken + 1,
-                    }
-                  : { ...s, building: false, error: job.error ?? `build ${job.status}` },
-              );
-              return;
-            }
-            if (job.bytes_written !== lastWritten) {
-              lastWritten = job.bytes_written;
-              lastMoved = Date.now();
-            } else if (Date.now() - lastMoved > STALL_MS) {
-              setState((s) => ({
-                ...s,
+    const onRead = (job: OverviewJob) => {
+      if (!job.live) {
+        setState((s) =>
+          job.status === "completed"
+            ? {
                 building: false,
-                error: `the build stopped reporting progress (held at ${writtenLabel(
-                  job.bytes_written,
-                )} for over ${Math.round(STALL_MS / 1000)}s)`,
-              }));
-              return;
-            }
-            setState((s) => ({ ...s, bytesWritten: job.bytes_written }));
-            poll(jobId);
-          },
-          (e: unknown) => {
-            if (!canceled) {
-              setState((s) => ({
-                ...s,
-                building: false,
-                error: messageOf(e),
-              }));
-            }
-          },
+                bytesWritten: job.bytes_written,
+                error: null,
+                reloadToken: s.reloadToken + 1,
+              }
+            : { ...s, building: false, error: job.error ?? `build ${job.status}` },
         );
-      }, POLL_MS);
+      } else if (job.bytes_written !== lastWritten) {
+        lastWritten = job.bytes_written;
+        lastMoved = Date.now();
+        setState((s) => ({ ...s, bytesWritten: job.bytes_written }));
+      } else if (Date.now() - lastMoved > STALL_MS) {
+        stop?.();
+        setState((s) => ({
+          ...s,
+          building: false,
+          error: `the build stopped reporting progress (held at ${writtenLabel(
+            job.bytes_written,
+          )} for over ${Math.round(STALL_MS / 1000)}s)`,
+        }));
+      }
     };
 
     setState((s) => ({ ...s, building: true, bytesWritten: 0, error: null }));
     void (async () => {
       try {
         const job = await api.images.buildOverviews({ path: imagePath });
-        if (!canceled) poll(job.job_id);
+        if (!canceled) stop = pollJob(job.job_id, api.images.overviewJob, onRead, failed);
       } catch (e) {
-        if (!canceled) {
-          setState((s) => ({
-            ...s,
-            building: false,
-            error: messageOf(e),
-          }));
-        }
+        if (!canceled) failed(e);
       }
     })();
 
     return () => {
       canceled = true;
-      if (timer != null) clearTimeout(timer);
+      stop?.();
     };
   }, [imageError, imageUrl, imagePath]);
 

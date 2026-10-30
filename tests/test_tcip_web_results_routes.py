@@ -1212,7 +1212,10 @@ def test_inference_list_row_and_stream_frame_are_one_projection(
     from tests._web_fixtures import inference_job
 
     job = inference_job(
-        "", opened_project, job_id="inf-warn-test", status="completed"
+        image_dir(opened_project / "ds", "2026-01-01"),
+        opened_project,
+        job_id="inf-warn-test",
+        status="completed",
     )
     inference_routes._registry.launch(job, lambda _job: None)
     try:
@@ -1249,7 +1252,9 @@ def test_inference_by_id_job_route_is_retired(client: TestClient) -> None:
     from tcip_web.routes import inference as inference_routes
     from tests._web_fixtures import inference_job
 
-    job = inference_job("", "", job_id="inf-retired-test")
+    job = inference_job(
+        image_dir("ds", "2026-01-01"), "", job_id="inf-retired-test"
+    )
     inference_routes._registry.launch(job, lambda _job: None)
     try:
         assert (

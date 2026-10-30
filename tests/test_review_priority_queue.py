@@ -1,12 +1,11 @@
 """The review queue routes.
 
 A launched job runs ``prioritize_review_queue``'s ranking over the open project's selected capture
-and its subject, and its status reports the ranking's result or refusal.
+and its subject, and its status reports the ranking's result or refusal and the capture it ranked.
 """
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -32,8 +31,8 @@ DATE = "2026-02-11"
 """The capture a launch here ranks."""
 
 
-def _select(client: TestClient, root: Path, subject: str | None) -> Path:
-    """Select the capture :data:`DATE` of ``root`` for ``subject`` and return its directory.
+def select(client: TestClient, root: Path, subject: str | None) -> dict:
+    """Select the capture :data:`DATE` of ``root`` for ``subject``; return the served selection.
 
     Its two images are written first; the selection is made through the select route.
     """
@@ -45,36 +44,39 @@ def _select(client: TestClient, root: Path, subject: str | None) -> Path:
         json={"dataset_root": str(root), "subject": subject, "date": DATE},
     )
     assert resp.status_code == 200, resp.text
-    return images
+    return resp.json()["selection"]
 
 
-def _ranked(
-    project: Path,
-    checkpoint_path: Path,
-    images_dir: Path,
-    **kwargs: ScorerSpec | int | str | None,
-) -> ReviewQueue:
-    """Answer the ranking's own answer over two entries, as ``ranked_review_queue`` does."""
-    from tcip_mcp.pipelines.active_learning import ScorerSpec
-    from tcip_mcp.tools.feedback_tools import QueueEntry, ReviewQueue
+def stub_scorer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Have every scorer block build a scorer ranking the candidates in reverse name order."""
+    from types import SimpleNamespace
 
-    scorer, budget, rationale = (
-        kwargs[k] for k in ("scorer", "budget", "rationale")
+    import tcip_mcp.pipelines.active_learning.scorer as al_scorer
+
+    monkeypatch.setattr(
+        al_scorer,
+        "resolve_scorer",
+        lambda block, task: SimpleNamespace(
+            score=lambda sources, labeled, predictor: [
+                (s, float(i)) for i, s in enumerate(sources)
+            ][::-1]
+        ),
     )
-    assert isinstance(scorer, ScorerSpec)
-    assert isinstance(budget, int) and isinstance(rationale, str)
-    return ReviewQueue(
-        scorer=scorer,
-        budget=budget,
-        rationale=rationale,
-        task="detection",
-        total_candidates=3,
-        reviewed_skipped=1,
-        queue=[
-            QueueEntry(image="b.jpg", score=0.9, reference_member=None),
-            QueueEntry(image="a.jpg", score=0.4, reference_member=True),
-        ],
-    )
+
+
+def ended(client: TestClient, job_id: str) -> dict:
+    """Wait for the queue job ``job_id`` to end; return its record as the status route answers.
+
+    Ended is the record's own ``live`` read false.
+    """
+    from tcip_web.routes.annotate import _pq_registry
+
+    job = _pq_registry.get(job_id)
+    assert job is not None and job.thread is not None, job_id
+    job.thread.join(timeout=60)
+    body = client.get(f"/api/annotate/queue/{job_id}").json()
+    assert body["live"] is False, body
+    return body
 
 
 @pytest.fixture(autouse=True)
@@ -85,22 +87,10 @@ def _no_queue_jobs() -> None:
     annotate_mod._pq_registry.jobs.clear()
 
 
-def _wait_for_terminal(
-    client: TestClient, job_id: str, timeout: float = 5.0
-) -> dict:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        body = client.get(f"/api/annotate/queue/{job_id}").json()
-        if body["status"] in ("completed", "failed"):
-            return body
-        time.sleep(0.02)
-    raise AssertionError(f"job {job_id} never reached a terminal status")
-
-
 def test_launch_404s_on_missing_checkpoint(
     opened_client: TestClient, opened_project: Path
 ) -> None:
-    _select(opened_client, opened_project, "bud")
+    select(opened_client, opened_project, "bud")
     resp = opened_client.post(
         "/api/annotate/queue/launch",
         json={"checkpoint_path": str(opened_project / "nope.pt"), **QUEUE},
@@ -112,7 +102,7 @@ def test_launch_404s_on_missing_checkpoint(
 def test_launch_refuses_a_queue_stating_no_scorer_budget_or_reason(
     opened_client: TestClient, opened_project: Path
 ) -> None:
-    _select(opened_client, opened_project, "bud")
+    select(opened_client, opened_project, "bud")
     for missing in QUEUE:
         resp = opened_client.post(
             "/api/annotate/queue/launch",
@@ -123,6 +113,49 @@ def test_launch_refuses_a_queue_stating_no_scorer_budget_or_reason(
         )
         assert resp.status_code == 422, (missing, resp.text)
         assert missing in resp.text
+
+
+def test_launch_refuses_a_scorer_block_its_factory_s_types_refuse_registering_no_job(
+    opened_client: TestClient,
+    opened_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A value of the wrong type, one not taken and a required one unstated each answer 422.
+
+    Each refusal names its parameter at the scorer block's place, and no job is registered. The
+    factory is the queue fixture's typed sample (a boolean, a list of floats, an optional float).
+    """
+    import tcip_mcp.pipelines.active_learning.scorer as al_scorer
+    from tcip_web.routes.annotate import _pq_registry
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tools.generate_queue_fixture import TYPED, typed_scorer
+
+    monkeypatch.setitem(al_scorer.SCORER_REGISTRY, TYPED, typed_scorer)
+    ckpt = registered_checkpoint(opened_project)
+    select(opened_client, opened_project, "bud")
+    stated = {"flag": False, "weights": [1, 2.5], "cap": 0.5}
+
+    for change, refused in (
+        ({"cap": "half"}, ("cap", "float_type")),
+        ({"unstated": 1}, ("unstated", "extra_forbidden")),
+        ({"flag": None}, ("flag", "missing")),
+    ):
+        values = {
+            k: v for k, v in {**stated, **change}.items() if v is not None
+        }
+        resp = opened_client.post(
+            "/api/annotate/queue/launch",
+            json={
+                "checkpoint_path": ckpt,
+                **QUEUE,
+                "scorer": {"name": TYPED, **values},
+            },
+        )
+        assert resp.status_code == 422, resp.text
+        assert [
+            (issue["loc"], issue["type"]) for issue in resp.json()["detail"]
+        ] == [(["body", "scorer", refused[0]], refused[1])]
+        assert _pq_registry.jobs == {}
 
 
 def test_launch_with_no_capture_selected_answers_400_naming_the_select_route(
@@ -143,30 +176,50 @@ def test_unknown_job_id_404s(opened_client: TestClient) -> None:
     assert resp.status_code == 404
 
 
-def test_job_completes_and_carries_the_tool_s_own_queue(
+def test_the_scorer_route_answers_the_catalog(
+    opened_client: TestClient,
+) -> None:
+    """``GET /api/annotate/scorers`` answers ``scorer_catalog``'s catalog."""
+    from tcip_mcp.pipelines.active_learning import scorer_catalog
+
+    resp = opened_client.get("/api/annotate/scorers")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == scorer_catalog().model_dump(mode="json")
+
+
+def test_job_completes_and_carries_the_tool_s_own_queue_and_the_capture_it_ranked(
     opened_client: TestClient,
     opened_project: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A job over the selected capture answers one record, the ranking's entries in its queue.
 
-    The launch and the status answer the same record; the ranking runs over the selected
-    capture's directory and its subject; the job's queue is the tool's own dumped answer's.
+    The launch and the status answer the same record, naming the capture the selection names;
+    the ranking runs over the selected capture's directory and its subject; the job's queue is
+    the tool's own answer over the same capture.
     """
     import pydantic_core
 
-    ckpt = opened_project / "model.pt"
-    ckpt.write_bytes(b"not a real checkpoint")
-    images = _select(opened_client, opened_project, "bud")
+    import tcip_mcp.registry_paths as registry_paths
+    import tcip_mcp.tools.feedback_tools as feedback_tools_mod
+    import tcip_web.paths as web_paths
+    from tcip_mcp.pipelines.active_learning import ScorerSpec
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
+    ckpt = registered_checkpoint(opened_project)
+    selection = select(opened_client, opened_project, "bud")
+    images = image_dir(opened_project, DATE)
+    stub_scorer(monkeypatch)
+
+    ranking = feedback_tools_mod.ranked_review_queue
     calls: list[dict] = []
 
-    def fake_ranked_review_queue(
+    def ranked_review_queue(
         project: Path,
         checkpoint_path: Path,
         images_dir: Path,
         **kwargs: ScorerSpec | int | str | None,
-    ) -> ReviewQueue:
+    ) -> ReviewQueue | dict[str, str]:
         calls.append(
             {
                 "project": project,
@@ -175,14 +228,10 @@ def test_job_completes_and_carries_the_tool_s_own_queue(
                 **kwargs,
             }
         )
-        return _ranked(project, checkpoint_path, images_dir, **kwargs)
-
-    import tcip_mcp.registry_paths as registry_paths
-    import tcip_mcp.tools.feedback_tools as feedback_tools_mod
-    import tcip_web.paths as web_paths
+        return ranking(project, checkpoint_path, images_dir, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(
-        feedback_tools_mod, "ranked_review_queue", fake_ranked_review_queue
+        feedback_tools_mod, "ranked_review_queue", ranked_review_queue
     )
     real_located = registry_paths.located
     located_paths: list = []
@@ -196,29 +245,31 @@ def test_job_completes_and_carries_the_tool_s_own_queue(
 
     resp = opened_client.post(
         "/api/annotate/queue/launch",
-        json={"checkpoint_path": str(ckpt), **QUEUE},
+        json={"checkpoint_path": ckpt, **QUEUE},
     )
     assert resp.status_code == 200, resp.text
     launched = resp.json()
-    job_id = launched["job_id"]
 
-    body = _wait_for_terminal(opened_client, job_id)
-    assert body["status"] == "completed"
+    body = ended(opened_client, launched["job_id"])
+    assert body["status"] == "completed", body
     # Both routes answer the one job record; the launch's has no ranking yet.
     assert launched.keys() == body.keys()
     assert launched["ranked"] is None
+    # The record names the capture as the selection does.
+    assert (body["dataset_root"], body["capture"]) == (
+        selection["dataset_root"],
+        selection["date"],
+    )
     ranked = body["ranked"]
     assert {name: ranked[name] for name in QUEUE} == QUEUE
-    assert ranked["total_candidates"] == 3
-    assert ranked["reviewed_skipped"] == 1
+    assert [entry["image"] for entry in ranked["queue"]] == ["b.jpg", "a.jpg"]
     # The checkpoint is located once, at the route's arrival.
-    assert located_paths == [str(ckpt)]
-    # The job's ranking is the tool's own answer, dumped as the server dumps it.
-    from tcip_mcp.pipelines.active_learning import ScorerSpec
+    assert located_paths[0] == ckpt
+    assert located_paths.count(ckpt) == 1
 
     tool_answer = feedback_tools_mod.prioritize_review_queue(
         opened_project,
-        str(ckpt),
+        ckpt,
         str(images),
         scorer=ScorerSpec.model_validate(QUEUE["scorer"]),
         budget=QUEUE["budget"],
@@ -239,45 +290,40 @@ def test_job_completes_and_carries_the_tool_s_own_queue(
         route_call["budget"],
         route_call["rationale"],
     ) == (QUEUE["scorer"], QUEUE["budget"], QUEUE["rationale"])
-    assert route_call["checkpoint_path"] == ckpt.resolve()
-    assert "strategy" not in route_call
+    assert route_call["checkpoint_path"] == Path(ckpt).resolve()
 
 
-def test_job_fails_honestly_on_the_tool_s_own_refusal(
-    opened_client: TestClient,
-    opened_project: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_job_fails_on_the_ranking_s_own_refusal(
+    opened_client: TestClient, opened_project: Path
 ) -> None:
-    """A queue job reports the operation's own refusal as its ``failed`` status.
+    """A queue job reports the ranking's own refusal as its error, ranking nothing.
 
-    The operation's soft ``{"error": ...}`` (an unresolvable scorer name, say) surfaces as the
-    job's ``failed`` status with the same message and no ranking.
+    A diversity ranking over a selection naming no subject has no labeled image to measure
+    against, and the job fails with the scorer's refusal as the ranking wrote it.
     """
-    ckpt = opened_project / "model.pt"
-    ckpt.write_bytes(b"not a real checkpoint")
-    _select(opened_client, opened_project, None)
+    from tcip_mcp.pipelines.active_learning import ScorerSpec
+    from tcip_mcp.tools.feedback_tools import prioritize_review_queue
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    def fake_ranked_review_queue(
-        project: Path,
-        checkpoint_path: Path,
-        images_dir: Path,
-        **kwargs: ScorerSpec | int | str | None,
-    ) -> dict:
-        return {"error": "no scorer registered as 'nonsense'"}
-
-    import tcip_mcp.tools.feedback_tools as feedback_tools_mod
-
-    monkeypatch.setattr(
-        feedback_tools_mod, "ranked_review_queue", fake_ranked_review_queue
-    )
+    ckpt = registered_checkpoint(opened_project)
+    select(opened_client, opened_project, None)
+    queue = {**QUEUE, "scorer": {"name": "diversity"}}
 
     resp = opened_client.post(
-        "/api/annotate/queue/launch",
-        json={"checkpoint_path": str(ckpt), **QUEUE},
+        "/api/annotate/queue/launch", json={"checkpoint_path": ckpt, **queue}
     )
-    job_id = resp.json()["job_id"]
+    body = ended(opened_client, resp.json()["job_id"])
 
-    body = _wait_for_terminal(opened_client, job_id)
+    refusal = prioritize_review_queue(
+        opened_project,
+        ckpt,
+        str(image_dir(opened_project, DATE)),
+        scorer=ScorerSpec(name="diversity"),
+        budget=QUEUE["budget"],
+        rationale=QUEUE["rationale"],
+    )
+    assert isinstance(refusal, dict), refusal
     assert body["status"] == "failed"
-    assert body["error"] == "no scorer registered as 'nonsense'"
+    assert body["error"] == refusal["error"]
+    assert "no image finished" in body["error"]
     assert body["ranked"] is None

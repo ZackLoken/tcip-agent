@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import ClassVar, Literal, Self
 
 from pydantic import BaseModel, PrivateAttr, computed_field
 
+from tcip_mcp.dataset_layout import parse_capture_dir
 from tcip_mcp.experiments import FINAL_STATES, FinalState
 
 MAX_JOBS = 100
@@ -55,13 +57,26 @@ class Job(BaseModel):
 class ProjectJob(Job):
     """A job running one checkpoint over one capture directory, for the ``project`` it serves.
 
-    ``kind`` names what the job does, for a sentence about it.
+    ``kind`` names what the job does, for a sentence about it. The capture's dataset root and
+    name are read from ``images_dir`` (:func:`~tcip_mcp.dataset_layout.parse_capture_dir`).
     """
 
     kind: ClassVar[str]
     project: str
     checkpoint_path: str
     images_dir: str
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def dataset_root(self) -> Path:
+        """The dataset root of the capture ``images_dir``."""
+        return parse_capture_dir(self.images_dir)[0]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def capture(self) -> str:
+        """The name of the capture ``images_dir`` is."""
+        return parse_capture_dir(self.images_dir)[1]
 
 
 def evict_terminal(jobs: dict, max_jobs: int = MAX_JOBS) -> None:

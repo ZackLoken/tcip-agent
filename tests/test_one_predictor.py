@@ -51,7 +51,7 @@ def test_a_checkpoint_without_kind_predicts_and_ranks(tmp_path: Path) -> None:
 
     ranked = resolve_scorer(
         ScorerSpec(name="uncertainty"), checkpoint.task
-    ).score(images, predictor)
+    ).score(images, [], predictor)
     assert sorted(str(path) for path, _score in ranked) == sorted(
         str(path) for path in images
     )

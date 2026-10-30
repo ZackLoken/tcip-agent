@@ -6,7 +6,9 @@ Each skips what the label documents mark finished.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, parse_image_path
 from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
@@ -28,6 +30,38 @@ QUEUE = {"scorer": COMBINED_SCORER, "budget": 50, "rationale": RATIONALE}
 """What a test's review queue states: its scorer block, its budget and their reason."""
 BAND = {"low": 0.3, "high": 0.8, "rationale": RATIONALE}
 """The needs-review band a test's triage states, with its reason."""
+
+
+def dotted_uncertainty(task: str) -> object:
+    """Build an uncertainty scorer for ``task``, as an agent's dotted factory would."""
+    from tcip_mcp.pipelines.active_learning.scorer import UncertaintyScorer
+
+    return UncertaintyScorer(task)
+
+
+def renamed_task(kind: str) -> object:
+    """Build an uncertainty scorer for ``kind``, a dotted factory naming its task otherwise."""
+    from tcip_mcp.pipelines.active_learning.scorer import UncertaintyScorer
+
+    return UncertaintyScorer(kind)
+
+
+class SampleOptions(BaseModel):
+    """A structured value a sample scorer factory takes."""
+
+    size: int
+
+
+RECEIVED: list[object] = []
+"""Each ``options`` value :func:`nested_scorer` was handed, in order."""
+
+
+def nested_scorer(task: str, options: SampleOptions) -> object:
+    """Build an uncertainty scorer for ``task``, recording the ``options`` it is handed."""
+    from tcip_mcp.pipelines.active_learning.scorer import UncertaintyScorer
+
+    RECEIVED.append(options)
+    return UncertaintyScorer(task)
 
 
 def _dataset(tmp_path: Path, *, marked: tuple[str, ...]) -> Path:
@@ -79,6 +113,40 @@ def test_prioritize_review_queue_skips_the_images_marked_finished(
     assert r.reviewed_skipped == 2
     assert r.total_candidates == 0
     assert r.queue == []
+
+
+def test_the_review_queue_hands_the_scorer_the_images_marked_finished_as_labeled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The scorer ranks the unfinished images against the ones marked finished for the subject."""
+    from types import SimpleNamespace
+
+    import tcip_mcp.pipelines.active_learning.scorer as al_scorer
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    images = _dataset(tmp_path, marked=("imgA",))
+    ckpt = registered_checkpoint(tmp_path)
+    handed: list[tuple[list, list]] = []
+
+    def score(sources: list, labeled: list, predictor: object) -> list:
+        handed.append((sources, labeled))
+        return [(s, 1.0) for s in sources]
+
+    monkeypatch.setattr(
+        al_scorer,
+        "resolve_scorer",
+        lambda block, task: SimpleNamespace(score=score),
+    )
+
+    r = prioritize_review_queue(
+        tmp_path, ckpt, str(images), subject="bud", **QUEUE
+    )
+    assert isinstance(r, ReviewQueue), r
+    assert [
+        ([Path(s).name for s in sources], [Path(s).name for s in labeled])
+        for sources, labeled in handed
+    ] == [(["imgB.png"], ["imgA.png"])]
+    assert r.reviewed_skipped == 1
 
 
 def test_triage_predictions_skips_only_the_images_marked_finished(
@@ -303,13 +371,15 @@ def test_unresolvable_scorer_raises_valueerror_not_an_import_error() -> None:
 def test_a_scorer_block_states_every_value_its_factory_requires_and_nothing_else() -> (
     None
 ):
-    """A scorer block refuses a missing or untaken factory value and builds at its stated ones.
+    """A scorer block refuses a missing, untaken or mistyped value and builds at its stated ones.
 
-    A ``combined`` block without its weights refuses naming each missing one, a value the
-    factory does not take refuses naming it, and a stated block builds its scorer with the values
-    it states.
+    For a registered scorer the block itself refuses, each refusal at its value's own place: a
+    ``combined`` block without its weights, one stating a weight as a string, and an
+    ``uncertainty`` block stating a value its factory does not take. A dotted factory the catalog
+    does not list is refused by its own call. A stated block builds its scorer with its values.
     """
     import pytest
+    from pydantic import ValidationError
 
     from tcip_mcp.pipelines.active_learning import ScorerSpec
     from tcip_mcp.pipelines.active_learning.scorer import (
@@ -317,25 +387,166 @@ def test_a_scorer_block_states_every_value_its_factory_requires_and_nothing_else
         resolve_scorer,
     )
 
+    def refused(block: dict) -> list[tuple]:
+        with pytest.raises(ValidationError) as caught:
+            ScorerSpec.model_validate(block)
+        return [(e["loc"], e["type"]) for e in caught.value.errors()]
+
+    assert refused({"name": "combined"}) == [
+        (("uncertainty_weight",), "missing"),
+        (("diversity_weight",), "missing"),
+    ]
+    assert refused(
+        {
+            "name": "combined",
+            "uncertainty_weight": "0.5",
+            "diversity_weight": 0.5,
+        }
+    ) == [(("uncertainty_weight",), "float_type")]
+    assert refused({"name": "uncertainty", "uncertainty_weight": 0.5}) == [
+        (("uncertainty_weight",), "extra_forbidden")
+    ]
     with pytest.raises(TypeError, match="uncertainty_weight"):
-        resolve_scorer(ScorerSpec(name="combined"), "detection")
-    with pytest.raises(TypeError, match="diversity_weight"):
         resolve_scorer(
             ScorerSpec.model_validate(
-                {"name": "combined", "uncertainty_weight": 0.5}
-            ),
-            "detection",
-        )
-    with pytest.raises(TypeError, match="uncertainty_weight"):
-        resolve_scorer(
-            ScorerSpec.model_validate(
-                {"name": "uncertainty", "uncertainty_weight": 0.5}
+                {
+                    "name": f"{__name__}:dotted_uncertainty",
+                    "uncertainty_weight": 0.5,
+                }
             ),
             "detection",
         )
     built = resolve_scorer(COMBINED_SCORER, "detection")
     assert isinstance(built, CombinedScorer)
     assert (built.uw, built.dw) == (0.6, 0.4)
+
+
+def test_the_scorer_catalog_lists_each_factory_s_own_parameters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each catalog entry's values schema names its factory's signature less the task.
+
+    Its properties are the names ``inspect.signature`` reads, required exactly where it finds no
+    default, for every registered scorer and for two registered here through
+    ``register_scorer``: one taking one required and one optional value, and one taking a
+    structured value whose schema references a definition that resolves inside the schema served.
+    """
+    import inspect
+
+    import tcip_mcp.pipelines.active_learning.scorer as al_scorer
+    from tcip_mcp.pipelines.active_learning import scorer_catalog
+
+    # Its annotations name module-level types alone, as a postponed one is read in its module.
+    def weighted(task: str, alpha: float, beta: float = 1.0) -> object:
+        return al_scorer.UncertaintyScorer(task)
+
+    monkeypatch.setattr(
+        al_scorer, "SCORER_REGISTRY", dict(al_scorer.SCORER_REGISTRY)
+    )
+    al_scorer.register_scorer("weighted", weighted)
+    al_scorer.register_scorer("nested", nested_scorer)
+
+    catalog = {e.name: e.values_schema for e in scorer_catalog().scorers}
+    assert set(catalog) == set(al_scorer.SCORER_REGISTRY)
+    for name, factory in al_scorer.SCORER_REGISTRY.items():
+        signature = {
+            n: p
+            for n, p in inspect.signature(factory).parameters.items()
+            if n not in ("self", al_scorer.TASK_PARAMETER)
+        }
+        schema = catalog[name]
+        assert list(schema["properties"]) == list(signature), name
+        assert set(schema.get("required", [])) == {
+            n for n, p in signature.items() if p.default is p.empty
+        }, name
+
+    nested: Any = catalog["nested"]
+    reference = nested["properties"]["options"]["$ref"]
+    resolved = nested
+    for part in reference.removeprefix("#/").split("/"):
+        resolved = resolved[part]
+    assert resolved["properties"]["size"]["type"] == "integer"
+
+
+def test_a_registered_factory_is_handed_its_validated_values_and_the_block_keeps_its_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A structured value reaches the factory as its model, the one value the block serializes.
+
+    The block serializes as stated, and a change to the object the factory received is the
+    change its dump shows: no second copy of the value exists to diverge.
+    """
+    import tcip_mcp.pipelines.active_learning.scorer as al_scorer
+    from tcip_mcp.pipelines.active_learning import ScorerSpec
+
+    monkeypatch.setattr(
+        al_scorer, "SCORER_REGISTRY", dict(al_scorer.SCORER_REGISTRY)
+    )
+    al_scorer.register_scorer("nested", nested_scorer)
+    stated = {"name": "nested", "options": {"size": 2}}
+    block = ScorerSpec.model_validate(stated)
+
+    al_scorer.resolve_scorer(block, "detection")
+    received = RECEIVED[-1]
+
+    assert received == SampleOptions(size=2)
+    assert block.model_dump(mode="json") == stated
+    assert isinstance(received, SampleOptions)
+    received.size = 9
+    assert block.model_dump(mode="json")["options"] == {"size": 9}
+
+
+def test_registering_a_scorer_factory_that_takes_no_task_is_refused_naming_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A factory naming its task otherwise is refused at registration and never catalogued."""
+    import tcip_mcp.pipelines.active_learning.scorer as al_scorer
+    from tcip_mcp.pipelines.active_learning import scorer_catalog
+
+    monkeypatch.setattr(
+        al_scorer, "SCORER_REGISTRY", dict(al_scorer.SCORER_REGISTRY)
+    )
+
+    try:
+        al_scorer.register_scorer("renamed", renamed_task)
+        refusal = ""
+    except TypeError as exc:
+        refusal = str(exc)
+    listed = {
+        e.name: e.values_schema.get("required")
+        for e in scorer_catalog().scorers
+    }
+
+    assert (
+        repr(al_scorer.TASK_PARAMETER) in refusal,
+        listed.get("renamed"),
+    ) == (
+        True,
+        None,
+    )
+
+
+def test_a_scorer_factory_is_handed_the_task_under_one_name_and_a_block_cannot_state_it() -> (
+    None
+):
+    """A factory naming its task otherwise, and a block stating the task, each refuse naming it.
+
+    The dotted factory's own call refuses the keyword it does not take; a block naming a
+    registered scorer refuses the task as a value its factory does not take from a block.
+    """
+    import pytest
+
+    import tcip_mcp.pipelines.active_learning.scorer as al_scorer
+    from tcip_mcp.pipelines.active_learning import ScorerSpec
+
+    with pytest.raises(TypeError, match=al_scorer.TASK_PARAMETER):
+        al_scorer.resolve_scorer(
+            ScorerSpec(name=f"{__name__}:renamed_task"), "detection"
+        )
+    with pytest.raises(ValueError, match=al_scorer.TASK_PARAMETER):
+        ScorerSpec.model_validate(
+            {"name": "uncertainty", al_scorer.TASK_PARAMETER: "detection"}
+        )
 
 
 def test_unresolvable_proposal_engine_raises_valueerror() -> None:
@@ -385,7 +596,10 @@ def _stub_scorer(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class _Scorer:
         def score(
-            self, sources: list[str], predictor: GenericPredictor
+            self,
+            sources: list[str],
+            labeled: list[str],
+            predictor: GenericPredictor,
         ) -> list[tuple[str, float]]:
             return [(s, 1.0) for s in sources]
 
@@ -503,8 +717,15 @@ def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selec
 def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(
     tmp_path: Path,
 ) -> None:
-    """The review queue scores each three-band candidate under a one-channel checkpoint."""
-    from tests._producer_fixtures import write_image
+    """The review queue scores each three-band candidate under a one-channel checkpoint.
+
+    The combined scorer reads the candidates and the one image marked finished at that width.
+    """
+    from tests._producer_fixtures import (
+        label_image,
+        mark_complete,
+        write_image,
+    )
     from tests._verified_checkpoint_fixtures import (
         BUILT_DETECTOR,
         registered_checkpoint,
@@ -516,13 +737,16 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(
         data={"num_channels": 1, "scope": {"subject": "bud"}},
     )
     images = image_dir(tmp_path, UNDATED_BUCKET)
-    for stem in ("a", "b"):
+    for stem in ("a", "b", "c"):
         write_image(images / f"{stem}.png", (64, 64), (90, 110, 70))
+    label_image(images / "c.png", [], 64, 64, keep_empty=True)
+    mark_complete(images / "c.png", "bud", project=tmp_path)
 
     r = prioritize_review_queue(
         tmp_path,
         checkpoint_path=ckpt,
         images_dir=str(images),
+        subject="bud",
         **QUEUE,
     )
 
