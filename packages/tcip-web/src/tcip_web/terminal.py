@@ -897,7 +897,7 @@ class _WinPty:
     def write(self, data: bytes) -> int:
         """Hand all of ``data`` to ConPTY's input pipe and return the bytes it took, or raise.
 
-        pywinpty 3.1.1's write is winpty-rs 1.0.7's: one overlapped ``WriteFile`` of the whole
+        pywinpty 3.1.2's write is winpty-rs 1.0.8's: one overlapped ``WriteFile`` of the whole
         payload, waited on for up to ten seconds, its count the UTF-8 bytes the pipe took; a
         write still pending at that bound is cancelled and raised.
         """
