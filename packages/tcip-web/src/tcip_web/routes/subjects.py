@@ -27,26 +27,34 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from tcip_mcp.subject_registry import RegistrySave, RegistrySubjects
 from tcip_web.paths import allowed_path
 
 router = APIRouter(prefix="/api/subjects", tags=["subjects"])
 
 
-@router.get("/load")
-def load_subjects(dataset_root: str, date: str) -> dict:
-    """Load the subject registry of the dataset at ``dataset_root``.
+class SubjectsLoad(BaseModel):
+    """A dataset's stored subject registry beside the subjects one capture's documents hold.
 
-    Returns ``{"subjects": <nested registry mapping> | None, "discovered": [names], "version":
-    <token> | None, "unreadable": [stems]}``: ``subjects`` and ``version`` (its compare-and-set
-    token) are the stored registry's, both ``None`` when none is stored; ``discovered`` and
-    ``unreadable`` are :func:`~tcip_mcp.dataset_layout.capture_subjects` of capture ``date``,
-    read whether or not a registry is stored.
+    ``subjects`` (the registry's subjects, sent as the nested mapping) and ``version`` (its
+    compare-and-set token) are the stored registry's, both ``None`` when none is stored;
+    ``discovered`` and ``unreadable`` are :func:`~tcip_mcp.dataset_layout.capture_subjects` of
+    the capture, read whether or not a registry is stored.
     """
+
+    subjects: RegistrySubjects | None
+    discovered: list[str]
+    version: str | None
+    unreadable: list[str]
+
+
+@router.get("/load")
+def load_subjects(dataset_root: str, date: str) -> SubjectsLoad:
+    """Load the subject registry of the dataset at ``dataset_root`` (:class:`SubjectsLoad`)."""
     from tcip_mcp.dataset_layout import capture_subjects
     from tcip_mcp.subject_registry import (
         RegistryError,
         read_versioned_registry,
-        registry_to_dict,
     )
 
     root = allowed_path(dataset_root)
@@ -54,27 +62,25 @@ def load_subjects(dataset_root: str, date: str) -> dict:
     subjects, token = None, None
     try:
         registry, version = read_versioned_registry(root)
-        subjects, token = registry_to_dict(registry), version.token
+        subjects, token = registry.subjects, version.token
     except FileNotFoundError:
         pass
     except (OSError, RegistryError) as exc:
         raise HTTPException(
             500, f"could not parse the subject registry: {exc}"
         ) from exc
-    return {
-        "subjects": subjects,
-        "discovered": discovered,
-        "version": token,
-        "unreadable": unreadable,
-    }
+    return SubjectsLoad(
+        subjects=subjects,
+        discovered=discovered,
+        version=token,
+        unreadable=unreadable,
+    )
 
 
 class SaveSubjectsPayload(BaseModel):
     """A subject registry save: the registry, its dataset root, its loaded version, the person."""
 
-    subjects: (
-        dict  # the nested registry mapping (subjects -> attributes -> values)
-    )
+    subjects: RegistrySubjects
     dataset_root: str
     # Required: the version load_subjects returned beside the registry this save was built from.
     # None means the registry was absent at load, asserted as Version.ABSENT, never skipped.
@@ -83,10 +89,11 @@ class SaveSubjectsPayload(BaseModel):
 
 
 @router.post("/save")
-def save_subjects(payload: SaveSubjectsPayload) -> dict:
+def save_subjects(payload: SaveSubjectsPayload) -> RegistrySave:
     """Write the dataset's subject registry by the person ``user`` names.
 
-    The write goes through :func:`subject_registry.replace_registry`.
+    The write goes through :func:`subject_registry.replace_registry`; a ``subjects`` that is no
+    registry, a subject naming no ``description`` among it, answers 422.
 
     Refuses (400) a write dropping a subject, attribute or attribute value the stored registry
     declares, naming what it would have lost. Also refuses (400) a same-values attribute type
@@ -98,17 +105,14 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
     from tcip_mcp.identity import actor
     from tcip_mcp.subject_registry import (
         RegistryError,
-        registry_from_request,
+        SubjectRegistry,
         replace_registry,
     )
     from tcip_store import Version, VersionConflictError
     from tcip_web.routes.audit_gap import audit_gap_409
 
     person = actor(payload.user)
-    try:
-        registry = registry_from_request(payload.subjects)
-    except RegistryError as exc:
-        raise HTTPException(400, f"invalid subject registry: {exc}") from exc
+    registry = SubjectRegistry(subjects=payload.subjects)
     dataset_root = allowed_path(payload.dataset_root)
     expect = (
         Version(payload.version)
@@ -124,9 +128,11 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
     except VersionConflictError as exc:
         raise HTTPException(409, str(exc)) from exc
     except AuditEntryNotWrittenError as exc:
-        raise audit_gap_409(exc, {"status": "ok", **exc.arguments}) from exc
+        raise audit_gap_409(
+            exc, RegistrySave.model_validate(exc.arguments)
+        ) from exc
     except OSError as exc:
         raise HTTPException(
             500, f"could not write {dataset_root}'s registry: {exc}"
         ) from exc
-    return {"status": "ok", **committed}
+    return committed

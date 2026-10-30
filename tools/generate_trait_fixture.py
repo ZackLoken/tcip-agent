@@ -3,8 +3,15 @@
 In projects created through ``tests._web_fixtures.named_project`` and opened through the picker's
 route in a scratch session (``tools/fixture_session.py``), each trait entry is proposed through
 ``traits.propose_trait``, confirmed through ``POST /api/results/traits/confirm`` and served by
-``GET /api/results/traits``; the served listings are written, normalized by :data:`STAMPED`
-(``fixture_session.normalized``), to :data:`GENERATED_PATH`, keyed by fixture name.
+``GET /api/results/traits``. That route's answers are recorded beside the listings: a
+confirmation naming a revision by another revision's hash refused (``revision_moved``), a
+confirmation (``confirmed``), a withdrawal (``withdrawn``) and a withdrawal whose audit line
+fails (``unrecorded``, ``tests._audit_fixtures.refuse_audit_appends``). A third project holds a
+trait record whose entry states a localization rule no entry admits, so it will not read
+(``tests._record_damage_fixtures.damage_record``). The
+listings, keyed by fixture name under ``listings``, and the answers under ``answers``, each
+refusal with its status, are written, normalized (``fixture_session.normalized``), to
+:data:`GENERATED_PATH`.
 
     python -m tools.generate_trait_fixture
 """
@@ -12,10 +19,15 @@ route in a scratch session (``tools/fixture_session.py``), each trait entry is p
 from __future__ import annotations
 
 import copy
+import json
 from typing import TYPE_CHECKING, Any
+
+import pytest
 
 from tests import FRONTEND_SRC
 from tools.fixture_session import (
+    ACTOR,
+    answered,
     normalized,
     opened,
     scratch_session,
@@ -26,8 +38,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from pydantic import JsonValue
-
-    from tools.fixture_session import Stamp
 
 GENERATED_PATH = FRONTEND_SRC / "test" / "traitListings.json"
 
@@ -69,31 +79,27 @@ _STEM_ENTRY: dict[str, Any] = {
 }
 _MILESTONE_ENTRY = {
     **_STEM_ENTRY,
-    "name": "subject_a",
+    "name": "trait_a",
     "milestone_fractions": [0.5, 0.95],
     "milestone_on": "positive_fraction",
     "operationalizations": {},
 }
 
 
-_FIXED_TIME = "1970-01-01T00:00:00+00:00"
-"""What every set revision timestamp reads as in the fixture, so a regeneration compares equal."""
-
-
-STAMPED: dict[str, Stamp] = {
-    key: (str, _FIXED_TIME)
-    for key in ("proposed_at", "confirmed_at", "withdrawn_at")
-}
-"""The revision timestamps a run sets, each read as :data:`_FIXED_TIME` once set."""
+UNKNOWN_LOCALIZATION = "anywhere"
+"""A localization rule no trait entry admits, which the unreadable record's entry states."""
 
 
 def produce() -> dict[str, JsonValue]:
-    """Propose and confirm the fixture traits in a scratch session; return the served listings.
+    """Propose and confirm the fixture traits in a scratch session; return the served answers.
 
-    The projects are created and opened in the session, the listing served at each stage, and
-    the result normalized by :data:`STAMPED`.
+    The projects are created and opened in the session, the listing served at each stage beside
+    the moved-revision refusal, and the result normalized.
     """
     from tcip_mcp import traits
+    from tcip_web.routes.results import ConfirmRevisionPayload
+    from tests._audit_fixtures import refuse_audit_appends
+    from tests._record_damage_fixtures import damage_record
     from tests._web_fixtures import named_project
 
     def propose(project: Path, entry: dict) -> traits.TraitRevision:
@@ -112,40 +118,64 @@ def produce() -> dict[str, JsonValue]:
             opened(client, project)
             return project.root
 
-        def confirm(revision: traits.TraitRevision) -> None:
-            response = client.post(
-                "/api/results/traits/confirm",
-                json={
-                    "trait": revision.entry.name,
-                    "revision": revision.number,
-                    "entry_sha256": revision.entry_sha256,
-                    "user": "grower",
-                    "confirmed": True,
-                },
+        def decided(
+            revision: traits.TraitRevision,
+            status: int = 200,
+            *,
+            entry_sha256: str | None = None,
+            confirmed: bool = True,
+        ) -> JsonValue:
+            return answered(
+                client,
+                "confirm_trait_revision",
+                status,
+                ConfirmRevisionPayload(
+                    trait=revision.entry.name,
+                    revision=revision.number,
+                    entry_sha256=entry_sha256 or revision.entry_sha256,
+                    user=ACTOR,
+                    confirmed=confirmed,
+                ),
             )
-            response.raise_for_status()
 
-        def listing() -> dict:
-            response = client.get("/api/results/traits")
-            response.raise_for_status()
-            return response.json()
+        def listing() -> JsonValue:
+            return answered(client, "list_traits", 200)
 
-        served: dict[str, dict] = {}
+        listings: dict[str, JsonValue] = {}
+        answers: dict[str, JsonValue] = {}
         setup = created("setup")
-        confirm(propose(setup, _STEM_ENTRY))
+        first = propose(setup, _STEM_ENTRY)
+        decided(first)
         second = copy.deepcopy(_STEM_ENTRY)
         second["operationalizations"]["per_image_count"]["statement"] = (
             "Only stems above the graft union."
         )
-        propose(setup, second)
-        served["setup"] = listing()
+        proposed = propose(setup, second)
+        answers["revision_moved"] = decided(
+            proposed, 409, entry_sha256=first.entry_sha256
+        )
+        listings["setup"] = listing()
+        answers["confirmed"] = decided(proposed)
+        answers["withdrawn"] = decided(first, confirmed=False)
+        with pytest.MonkeyPatch.context() as patch:
+            refuse_audit_appends(patch)
+            answers["unrecorded"] = decided(proposed, confirmed=False)
 
         results = created("results")
         revision = propose(results, _MILESTONE_ENTRY)
-        served["unconfirmed"] = listing()
-        confirm(revision)
-        served["results"] = listing()
-        return normalized(served, stamped=STAMPED)
+        listings["unconfirmed"] = listing()
+        decided(revision)
+        listings["results"] = listing()
+
+        unreadable = created("unreadable")
+        name = propose(unreadable, _STEM_ENTRY).entry.name
+        record = traits.read_trait(name, unreadable).model_dump(mode="json")
+        record["revisions"][0]["entry"]["localization"] = UNKNOWN_LOCALIZATION
+        damage_record(
+            traits.trait_key(unreadable, name), json.dumps(record).encode()
+        )
+        listings["unreadable"] = listing()
+        return normalized({"listings": listings, "answers": answers}, workspace)
 
 
 if __name__ == "__main__":

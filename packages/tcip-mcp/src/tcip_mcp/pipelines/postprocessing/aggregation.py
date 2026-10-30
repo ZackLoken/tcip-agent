@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
+    from tcip_mcp.pipelines.delivery_events_schema import PlantMapping
     from tcip_mcp.traits import PlantAggregation
 
 logger = logging.getLogger(__name__)
@@ -134,7 +135,7 @@ def deliver_per_plant_aggregate(
     crop: str = "",
     pipeline_version: str = "",
     door: str,
-    plant_mapping: dict | None = None,
+    plant_mapping: PlantMapping | None = None,
     scale_assessment_id: str | None = None,
     acknowledgment_id: str | None = None,
     actor: str | None,

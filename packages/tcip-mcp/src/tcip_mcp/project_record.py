@@ -134,19 +134,17 @@ def read_record(project_path: str | Path) -> ProjectRecord:
     )
 
 
-def existing_project(value: str | Path) -> tuple[Path, dict]:
-    """Return ``value`` resolved and its record's fields (:func:`record_fields`).
+def existing_project(value: str | Path) -> tuple[Path, ProjectRecord]:
+    """Return ``value`` resolved and its record (:func:`record_or_problem`).
 
     ``value`` must be a project whose record reads; otherwise ``ValueError`` naming the path and
     what :func:`read_record` refused.
     """
     project = Path(value).resolve()
-    fields = record_fields(project)
-    if fields["record_problem"] is not None:
-        raise ValueError(
-            f"{project} names no readable project: {fields['record_problem']}"
-        )
-    return project, fields
+    record, problem = record_or_problem(project)
+    if record is None:
+        raise ValueError(f"{project} names no readable project: {problem}")
+    return project, record
 
 
 def _checked(project_path: str | Path, raw: object) -> ProjectRecord:
@@ -216,15 +214,22 @@ def create_record(
     return existing
 
 
+class RecordCorrection(BaseModel):
+    """A correction of the project's record: the ``record`` it wrote and the ``previous`` one."""
+
+    record: ProjectRecord
+    previous: ProjectRecord
+
+
 def _update(
     project_path: str | Path, field: str, value: object, *, actor: str
-) -> tuple[ProjectRecord, ProjectRecord]:
+) -> RecordCorrection:
     """Replace ``field`` of a readable record with ``value`` under compare-and-swap.
 
     The whole replacement is validated as a :class:`ProjectRecord`, then one
     ``project_record_corrected`` line is recorded by ``actor`` in the project's log carrying the
     record's ``id``, the ``field``, the ``value`` written and the ``previous_value`` it replaced,
-    each as the record dumps it. Returns the record written and the one it replaced.
+    each as the record dumps it. Returns the :class:`RecordCorrection`.
 
     Refuses what :func:`read_record` and the model refuse, with nothing written and no line; a
     line that cannot be appended after the write raises ``AuditEntryNotWrittenError``.
@@ -255,83 +260,56 @@ def _update(
         actor=actor,
         scope=project_path,
     )
-    return updated, current
+    return RecordCorrection(record=updated, previous=current)
 
 
-def replace_site(project_path: str | Path, site: str, *, actor: str) -> dict:
+def replace_site(
+    project_path: str | Path, site: str, *, actor: str
+) -> RecordCorrection:
     """Correct the site a readable record holds, by ``actor``, through :func:`_update`.
 
-    Every other field is kept. Returns ``{"site", "previous_site"}``. Refuses what :func:`_update`
-    refuses, a site that is not :data:`RecordText` among it.
-    """
-    record, previous = _update(project_path, "site", site, actor=actor)
-    return {"site": record.site, "previous_site": previous.site}
-
-
-def rename_project(project: Path, display_name: str, *, actor: str) -> dict:
-    """Change the project's display name, by ``actor``, through :func:`_update`.
-
-    Its directory and every other record are left as they are. Returns ``{"id", "display_name",
-    "previous_display_name"}``. Refuses what :func:`_update` refuses, a display name that is not
+    Every other field is kept. Refuses what :func:`_update` refuses, a site that is not
     :data:`RecordText` among it.
     """
-    record, previous = _update(
-        project, "display_name", display_name, actor=actor
-    )
-    return {
-        "id": record.id,
-        "display_name": record.display_name,
-        "previous_display_name": previous.display_name,
-    }
+    return _update(project_path, "site", site, actor=actor)
 
 
-class InvariancesCorrection(BaseModel):
-    """What :func:`replace_invariances` wrote.
+def rename_project(
+    project: Path, display_name: str, *, actor: str
+) -> RecordCorrection:
+    """Change the project's display name, by ``actor``, through :func:`_update`.
 
-    It holds the record's ``id``, the ``invariances`` it now holds and the
-    ``previous_invariances`` they replaced.
+    Its directory and every other record are left as they are. Refuses what :func:`_update`
+    refuses, a display name that is not :data:`RecordText` among it.
     """
-
-    id: str
-    invariances: CaptureInvariances
-    previous_invariances: CaptureInvariances
+    return _update(project, "display_name", display_name, actor=actor)
 
 
 def replace_invariances(
     project_path: str | Path, invariances: CaptureInvariances, *, actor: str
-) -> InvariancesCorrection:
+) -> RecordCorrection:
     """Correct the capture invariances a readable record holds, by ``actor``.
 
     The correction goes through :func:`_update`; every other field is kept. Refuses what
     :func:`_update` refuses.
     """
-    record, previous = _update(
-        project_path, "invariances", invariances, actor=actor
-    )
-    return InvariancesCorrection(
-        id=record.id,
-        invariances=record.invariances,
-        previous_invariances=previous.invariances,
-    )
+    return _update(project_path, "invariances", invariances, actor=actor)
 
 
-def record_fields(project_path: str | Path) -> dict:
-    """Return the record's fields (:class:`ProjectRecord`) and ``record_problem``.
+def record_or_problem(
+    project_path: str | Path,
+) -> tuple[ProjectRecord | None, str | None]:
+    """Return the project's record and ``None``, or ``None`` and the text of why it will not read.
 
-    A readable record gives the fields and ``None``; a record that is missing, invalid, refused by
-    the store or unreadable from disk gives each field ``None`` beside the text of why, and raises
-    nothing.
+    A record that is missing, invalid, refused by the store or unreadable from disk is the
+    second; nothing is raised.
     """
     try:
-        record = read_record(project_path)
+        return read_record(project_path), None
     except (
         ProjectRecordMissingError,
         ProjectRecordInvalidError,
         StoreError,
         OSError,
     ) as exc:
-        return {
-            **dict.fromkeys(ProjectRecord.model_fields),
-            "record_problem": str(exc),
-        }
-    return {**record.model_dump(), "record_problem": None}
+        return None, str(exc)

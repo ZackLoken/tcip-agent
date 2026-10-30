@@ -16,7 +16,6 @@ from __future__ import annotations
 import hashlib
 import math
 import os
-import weakref
 from collections import OrderedDict
 from dataclasses import dataclass
 from fractions import Fraction
@@ -35,7 +34,6 @@ from tcip_mcp.pipelines.data.band_groups import (
 if TYPE_CHECKING:
     from PIL.Image import Image as PILImage
     from rasterio.io import DatasetReader
-    from tifffile import TiffFile
 
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         GeoreferencingError,
@@ -72,6 +70,29 @@ def faithful_pil_mode(
     if np.dtype(dtype) != np.uint8 or (channels == _ALPHA_BANDS and not alpha):
         return None
     return _PIL_MODES.get(channels)
+
+
+def displays_plain(header: SourceHeader) -> bool:
+    """Return whether the source ``header`` describes is displayed as its own pixels.
+
+    It is when it is no band group and the pixels it serves at
+    :attr:`~SourceHeader.route_channels` take a PIL mode without loss
+    (:meth:`SourceHeader.pil_mode_at`); every other source is displayed as a stretched three-band
+    composite.
+    """
+    return (
+        header.kind != "group"
+        and header.pil_mode_at(header.route_channels)[2] is not None
+    )
+
+
+def display_bands(channels: int) -> tuple[int, int, int]:
+    """Return the three bands a ``channels``-band raster is displayed through by default.
+
+    They are its first three, the last of them repeated where it holds fewer.
+    """
+    first, second, third = (min(i, channels - 1) for i in range(3))
+    return first, second, third
 
 
 # A plain, documented platform default, not derived from a measurement: the share of the host's
@@ -328,7 +349,7 @@ class _ClosableSource:
         self.close()
 
 
-def _check_region(rect: Rect, height: int, width: int) -> None:
+def check_region(rect: Rect, height: int, width: int) -> None:
     """Raise ``ValueError`` unless ``rect`` is a non-empty region inside the raster's extent.
 
     The extent is ``height`` x ``width``.
@@ -358,7 +379,7 @@ class _RegionView:
     """
 
     def __init__(self, parent: RasterSource, rect: Rect) -> None:
-        _check_region(rect, parent.height, parent.width)
+        check_region(rect, parent.height, parent.width)
         self._parent = parent
         self._rect = rect
         self.height = rect.height
@@ -374,7 +395,7 @@ class _RegionView:
         The window is translated into the parent source's coordinates by this view's own rect
         origin. Checked against this view's own declared ``height``/``width``, never the parent's.
         """
-        _check_region(Rect(x0, y0, x1, y1), self.height, self.width)
+        check_region(Rect(x0, y0, x1, y1), self.height, self.width)
         oy, ox = self._rect.y0, self._rect.x0
         return self._parent.read_window(oy + y0, oy + y1, ox + x0, ox + x1)
 
@@ -516,10 +537,10 @@ def _palette_lut(colormap: np.ndarray) -> np.ndarray:
     return (raw.astype(np.uint16) >> 8).astype(np.uint8).T
 
 
-def tiff_header(tif: TiffFile) -> _TiffHeader:
-    """Read the first-series header of the open TIFF ``tif`` without a pixel decode.
+def tiff_header(path: Path) -> _TiffHeader:
+    """Read the first-series header of the TIFF at ``path`` without a pixel decode.
 
-    The header's path is the one the file handle names. Raises ``ValueError`` naming the file when
+    The file is closed once the header is read. Raises ``ValueError`` naming the file when
     tifffile cannot read it, and for a palette image this module cannot expand: one that is not
     uint8, carries no ``ColorMap`` tag, or carries one that holds no RGB palette.
     """
@@ -530,29 +551,28 @@ def tiff_header(tif: TiffFile) -> _TiffHeader:
         geotransform_of,
     )
 
-    path = Path(tif.filehandle.path)
-
     try:
-        series = tif.series[0] if tif.series else None
-        if series is not None:
-            page = series.keyframe
-            shape, axes, dtype = (
-                tuple(int(x) for x in series.shape),
-                str(series.axes),
-                series.dtype,
-            )
-            palette = page.photometric == tifffile.PHOTOMETRIC.PALETTE
-            colormap = (
-                page.tags["ColorMap"].value
-                if "ColorMap" in page.tags
-                else None
-            )
-            try:
-                georeference: GeoTransform | GeoreferencingError = (
-                    geotransform_of(page.tags, path)
+        with tifffile.TiffFile(str(path)) as tif:
+            series = tif.series[0] if tif.series else None
+            if series is not None:
+                page = series.keyframe
+                shape, axes, dtype = (
+                    tuple(int(x) for x in series.shape),
+                    str(series.axes),
+                    series.dtype,
                 )
-            except GeoreferencingError as refusal:
-                georeference = refusal
+                palette = page.photometric == tifffile.PHOTOMETRIC.PALETTE
+                colormap = (
+                    page.tags["ColorMap"].value
+                    if "ColorMap" in page.tags
+                    else None
+                )
+                try:
+                    georeference: GeoTransform | GeoreferencingError = (
+                        geotransform_of(page.tags, path)
+                    )
+                except GeoreferencingError as refusal:
+                    georeference = refusal
     except Exception as exc:  # noqa: BLE001, tifffile raises its own kinds for a file it cannot read
         raise ValueError(
             f"cannot read the TIFF header of '{path}': {exc}"
@@ -695,7 +715,7 @@ class _ArraySource(_ClosableSource):
         assert self._array is not None, (
             "read_region called after close(): a closed source holds no array"
         )
-        _check_region(rect, self.height, self.width)
+        check_region(rect, self.height, self.width)
         region = np.array(self._array[rect.y0 : rect.y1, rect.x0 : rect.x1])
         return _serve_region(region, rect, self._backend, target_size)
 
@@ -703,18 +723,25 @@ class _ArraySource(_ClosableSource):
         self._array = None
 
 
+def _photo_facts(image: PILImage) -> tuple[int, tuple[int, int]]:
+    """Return the opened photograph ``image``'s band count and EXIF-upright ``(width, height)``."""
+    from tcip_annotation.utils import oriented_size
+
+    return len(image.getbands()), oriented_size(image)
+
+
 class PhotographicSource(_ClosableSource):
     """A whole photographic frame decoded through PIL.
 
     The frame is EXIF-oriented and converted to the mode the caller's channel count names (1 -> L,
     3 -> RGB, 4 -> RGBA). ``image`` is that PIL frame itself. The frame is fully decoded and
-    independent of the file, which is closed as soon as it has been read.
+    independent of the file its caller opened.
 
     The frame is EXIF-oriented before the mode conversion.
     """
 
     def __init__(self, opened: PILImage, num_channels: int) -> None:
-        """Decode the photograph ``opened`` and close it.
+        """Decode the photograph ``opened``, which its caller holds open and closes.
 
         ``opened`` is the photograph as ``PIL.Image.open`` answered it, its pixels not yet decoded.
         """
@@ -723,7 +750,6 @@ class PhotographicSource(_ClosableSource):
         self.image = auto_orient_image(opened).convert(
             _PIL_MODES[num_channels]
         )
-        opened.close()
         self.width, self.height = self.image.size
         self.num_channels = len(self.image.getbands())
         self.dtype = _PHOTO_DTYPE
@@ -752,7 +778,7 @@ class PhotographicSource(_ClosableSource):
         The frame is copied to an array on the first read and held until close; ``ValueError``
         for an empty or out-of-bounds ``rect`` or a distorting ``target_size``.
         """
-        _check_region(rect, self.height, self.width)
+        check_region(rect, self.height, self.width)
         if self._frame is None:
             self._frame = hwc_array(self.image)
         region = np.array(self._frame[rect.y0 : rect.y1, rect.x0 : rect.x1])
@@ -771,14 +797,16 @@ class TiffWholeSource(_ArraySource):
 
     _backend = "tiff_whole"
 
-    def __init__(self, source: SourceHeader, layout: _Layout) -> None:
-        """Decode the TIFF ``source`` already holds open, laid out in the frame ``layout`` names.
+    def __init__(self, header: _TiffHeader, layout: _Layout) -> None:
+        """Decode the TIFF ``header`` describes, laid out in the frame ``layout`` names.
 
-        A palette image is expanded through its table.
+        The file is opened for the decode and closed once it is done. A palette image is expanded
+        through its table.
         """
-        header = source.tiff
+        import tifffile
+
         self.georeference = header.georeference
-        arr = np.asarray(source.tiff_file.asarray())
+        arr = np.asarray(tifffile.imread(header.path))
         if header.palette_lut is not None:
             arr = header.palette_lut[arr]
         super().__init__(arr, layout)
@@ -925,7 +953,7 @@ class GdalSource(_ClosableSource):
         ``target_size``; ``ValueError`` otherwise, and for an out-of-bounds ``rect`` or a
         distorting ``target_size``.
         """
-        _check_region(rect, self.height, self.width)
+        check_region(rect, self.height, self.width)
         if level and target_size is None:
             raise ValueError(
                 "a read off an overview level is always resampled: name target_size"
@@ -949,7 +977,7 @@ class GdalSource(_ClosableSource):
     ) -> tuple[np.ndarray, ReadSpec]:
         """Read ``rect`` in the grid of overview ``level`` (1 the finest) at that resolution."""
         ds = self._level_dataset(level - 1)
-        _check_region(rect, int(ds.height), int(ds.width))
+        check_region(rect, int(ds.height), int(ds.width))
         pixels, _resample = self._read_window(ds, rect, None)
         return pixels, ReadSpec(self._backend)
 
@@ -1041,12 +1069,10 @@ def _pool_budget_bytes() -> int:
 class SourceHeader:
     """What ``source`` states, acquired once on first use and held.
 
-    It holds a TIFF opened through tifffile (its header read off it by :func:`tiff_header`, its
-    pixels decoded off the same handle only when the whole decode serves it), a numpy container's
-    array (a ``.npy`` memory-mapped, a ``.npz``'s first array loaded, pixels and all), a
-    photograph opened through PIL (its header parsed, its pixels decoded only by the reader
-    :meth:`open` hands it to), a band group's members' headers. A held file is closed when the
-    reader that decodes it is done with it or when the record is collected.
+    It holds a TIFF's header (read by :func:`tiff_header`), a numpy container's array (a ``.npy``
+    memory-mapped, a ``.npz``'s first array loaded, pixels and all), a photograph's PIL header
+    facts, a band group's members' headers. A TIFF or a photograph is closed once its header is
+    read; the reader :meth:`open` answers opens its own handle and closes it.
 
     ``kind`` is ``"group"`` (a band group, or the ``.bandgroup`` manifest standing in for it),
     ``"photo"`` (any other extension outside :data:`ARRAY_CONTAINER_EXTS`, decoded whole through
@@ -1066,6 +1092,7 @@ class SourceHeader:
             if ext in ARRAY_CONTAINER_EXTS
             else "photo"
         )
+        self._photo_read: tuple[int, tuple[int, int]] | None = None
 
     @property
     def path(self) -> Path:
@@ -1078,29 +1105,9 @@ class SourceHeader:
         return Path(source_path_of(self.source))
 
     @cached_property
-    def tiff_file(self) -> TiffFile:
-        """The TIFF opened through tifffile, held until this record is collected.
-
-        Raises ``ValueError`` naming the file when tifffile cannot open it.
-        """
-        import tifffile
-
-        try:
-            tif = tifffile.TiffFile(str(self.path))
-        except Exception as exc:  # noqa: BLE001, tifffile raises its own kinds for a bad file
-            raise ValueError(
-                f"cannot read the TIFF header of '{self.path}': {exc}"
-            ) from exc
-        weakref.finalize(self, tif.close)
-        return tif
-
-    @cached_property
     def tiff(self) -> _TiffHeader:
-        """The TIFF header read off :attr:`tiff_file`.
-
-        Read by :func:`tiff_header`, whose refusals propagate.
-        """
-        return tiff_header(self.tiff_file)
+        """The TIFF header, read by :func:`tiff_header`, whose refusals propagate."""
+        return tiff_header(self.path)
 
     @cached_property
     def array(self) -> np.ndarray:
@@ -1110,27 +1117,19 @@ class SourceHeader:
         with np.load(str(self.path)) as npz:
             return npz[npz.files[0]]
 
-    @cached_property
-    def _photo_image(self) -> PILImage:
-        """The photograph as ``PIL.Image.open`` answers it, its pixels not decoded.
-
-        It is closed by the reader that decodes it, or when this header is collected, whichever
-        comes first.
-        """
-        from PIL import Image
-
-        image = Image.open(self.path)
-        weakref.finalize(self, image.close)
-        return image
-
-    @cached_property
+    @property
     def _photo(self) -> tuple[int, tuple[int, int]]:
-        """A photograph's band count and EXIF-upright ``(width, height)``, from its PIL header."""
-        from tcip_annotation.utils import oriented_size
+        """A photograph's band count and EXIF-upright ``(width, height)``, from its PIL header.
 
-        return len(self._photo_image.getbands()), oriented_size(
-            self._photo_image
-        )
+        They are the ones a decode (:meth:`open`) already read off the file it opened, else read
+        off a header read of their own, the file closed once it is read.
+        """
+        if self._photo_read is None:
+            from PIL import Image
+
+            with Image.open(self.path) as image:
+                self._photo_read = _photo_facts(image)
+        return self._photo_read
 
     @cached_property
     def group(self) -> BandGroupRef:
@@ -1206,6 +1205,11 @@ class SourceHeader:
             bands,
             faithful_pil_mode(self.dtype, bands, interpretations),
         )
+
+    @property
+    def declared_band_names(self) -> list[str] | None:
+        """A band group's band names in its manifest's order, ``None`` for a source naming none."""
+        return list(self.group.manifest.bands) if self.kind == "group" else None
 
     @property
     def route_channels(self) -> int:
@@ -1310,11 +1314,11 @@ class SourceHeader:
     def open(self, num_channels: int) -> RasterSource:
         """Open the reader that serves the source at ``num_channels``.
 
-        It is :meth:`windowed`'s, else the whole decode of what this record already holds.
-        ``num_channels`` routes (which PIL mode a photograph decodes in, which axis order a
-        numpy/TIFF array carries) and is never checked against the file. A photograph at a count
-        PIL has no mode for raises ``ValueError`` naming the containers that carry band data; a
-        photograph's record opens once.
+        It is :meth:`windowed`'s, else a whole decode: of the array this record holds, or of a
+        TIFF or photograph the reader opens itself. ``num_channels`` routes (which PIL mode a
+        photograph decodes in, which axis order a numpy/TIFF array carries) and is never checked
+        against the file. A photograph at a count PIL has no mode for raises ``ValueError`` naming
+        the containers that carry band data.
         """
         reader = self.windowed(num_channels)
         if reader is not None:
@@ -1322,14 +1326,18 @@ class SourceHeader:
         if self.kind == "group":
             return BandGroupSource(self)
         if self.kind == "tif":
-            return TiffWholeSource(self, _layout(self.tiff, num_channels))
+            return TiffWholeSource(self.tiff, _layout(self.tiff, num_channels))
         if self.kind == "npz":
             return NpzSource(
                 self.array,
                 _array_layout(self.array.shape, num_channels, self.path),
             )
         self._refuse_unless_photographic(num_channels)
-        return PhotographicSource(self._photo_image, num_channels)
+        from PIL import Image
+
+        with Image.open(self.path) as image:
+            self._photo_read = _photo_facts(image)
+            return PhotographicSource(image, num_channels)
 
     def open_at_route_count(self) -> RasterSource:
         """Open the source through :meth:`open` at :attr:`route_channels`.

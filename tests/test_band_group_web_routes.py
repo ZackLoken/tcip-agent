@@ -143,7 +143,7 @@ def test_annotate_labels_route_measures_a_grouped_captures_real_frame(
 # ── routes/images.py: serve_image bands/stretch + /api/images/bands ─────────────────────
 
 
-def _view(path: Path, **params: str | int) -> dict:
+def _view(path: Path, **params: str | int | list[str]) -> dict:
     """Return the image request for ``path`` at a 3840 by 2160 display, ``params`` over it."""
     return {"path": str(path), "display_pixels": 3840 * 2160, **params}
 
@@ -197,11 +197,11 @@ def test_serve_image_bands_param_changes_the_composite(
     # canceling the very difference this test means to detect.
     r1 = client.get(
         "/api/images",
-        params=_view(manifest, bands="Green,Red,NIR", stretch="none"),
+        params=_view(manifest, bands=["Green", "Red", "NIR"], stretch="none"),
     )
     r2 = client.get(
         "/api/images",
-        params=_view(manifest, bands="NIR,Red,Green", stretch="none"),
+        params=_view(manifest, bands=["NIR", "Red", "Green"], stretch="none"),
     )
     assert r1.status_code == r2.status_code == 200
     assert (
@@ -224,15 +224,17 @@ def test_serve_image_rejects_an_unknown_stretch(
 ) -> None:
     manifest = grouped_dataset.manifest
     resp = client.get("/api/images", params=_view(manifest, stretch="bogus"))
-    assert resp.status_code == 400
+    assert resp.status_code == 422
 
 
 def test_serve_image_rejects_a_band_count_other_than_3(
     client: TestClient, grouped_dataset: GroupedDataset
 ) -> None:
     manifest = grouped_dataset.manifest
-    resp = client.get("/api/images", params=_view(manifest, bands="Green,Red"))
-    assert resp.status_code == 400
+    resp = client.get(
+        "/api/images", params=_view(manifest, bands=["Green", "Red"])
+    )
+    assert resp.status_code == 422
 
 
 def test_serve_image_rejects_an_undeclared_band_name(
@@ -240,9 +242,23 @@ def test_serve_image_rejects_an_undeclared_band_name(
 ) -> None:
     manifest = grouped_dataset.manifest
     resp = client.get(
-        "/api/images", params=_view(manifest, bands="Green,Red,Blue")
+        "/api/images", params=_view(manifest, bands=["Green", "Red", "Blue"])
     )
     assert resp.status_code == 400
+
+
+@pytest.mark.parametrize("region", [None, [0, 0, 8, 8]])
+def test_serve_image_rejects_a_band_index_the_raster_does_not_have(
+    client: TestClient, grouped_dataset: GroupedDataset, region: list[int] | None
+) -> None:
+    """An index past the group's bands is refused by the composite, whole view or region."""
+    manifest = grouped_dataset.manifest
+    view = _view(manifest, bands=["0", "1", "3"])
+    resp = client.get(
+        "/api/images", params=view if region is None else {**view, "region": region}
+    )
+    assert resp.status_code == 400
+    assert "band index 3 is out of range for a 3-band array" in resp.json()["detail"]
 
 
 def test_get_bands_endpoint_reports_the_group(
@@ -294,7 +310,7 @@ def test_get_bands_endpoint_never_decodes_pixels_for_a_plain_rgb_photo(
     plain = grouped_dataset.plain
     resp = client.get("/api/images/bands", params={"path": str(plain)})
     assert resp.status_code == 200
-    assert resp.json() == {"band_count": 3, "bands": []}
+    assert resp.json()["bands"] == []
     assert called == []
 
 

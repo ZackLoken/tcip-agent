@@ -11,9 +11,14 @@ import os
 from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, Annotated, NamedTuple
+
+from pydantic import BaseModel, StringConstraints, TypeAdapter, computed_field
 
 import tcip_store
+
+if TYPE_CHECKING:
+    from tcip_mcp.project_record import ProjectRecord
 
 logger = logging.getLogger(__name__)
 
@@ -58,14 +63,18 @@ class BoundProject(NamedTuple):
     workspace: Path
 
 
-def is_valid_name(name: str) -> bool:
-    """Return whether ``name`` is a single, safe path segment."""
-    seg = (name or "").strip()
-    return (
-        bool(seg)
-        and not any(c in seg for c in ("/", "\\", ":"))
-        and seg not in (".", "..")
-    )
+PathSegment = Annotated[
+    str, StringConstraints(pattern=r"^[^/\\:]*[^/\\:.\s][^/\\:]*$")
+]
+"""A name that addresses one directory or file inside the one it is joined to: no separator or
+drive, and something besides dots and blanks."""
+
+_SEGMENT = TypeAdapter(PathSegment)
+
+
+def path_segment(name: str) -> str:
+    """Return ``name`` once it is a :data:`PathSegment`; refuses (``ValidationError``) otherwise."""
+    return _SEGMENT.validate_python(name)
 
 
 def project_dirs(workspace: Path) -> list[Path]:
@@ -75,35 +84,43 @@ def project_dirs(workspace: Path) -> list[Path]:
     )
 
 
-def project_records(workspace: Path) -> list[tuple[Path, dict]]:
-    """Return every workspace project (:func:`project_dirs`) with its record's fields.
+class ListedProject(NamedTuple):
+    """A workspace project: its directory, and its record or why the record will not read."""
 
-    The fields are as :func:`tcip_mcp.project_record.record_fields` reads them.
+    root: Path
+    record: ProjectRecord | None
+    record_problem: str | None
+
+
+def project_records(workspace: Path) -> list[ListedProject]:
+    """Return every workspace project (:func:`project_dirs`) with its record or why not.
+
+    Each is read by :func:`tcip_mcp.project_record.record_or_problem`.
     """
-    from tcip_mcp.project_record import record_fields
+    from tcip_mcp.project_record import record_or_problem
 
     return [
-        (project, record_fields(project))
+        ListedProject(project, *record_or_problem(project))
         for project in project_dirs(workspace)
     ]
 
 
 def project_by_id(
-    records: Iterable[tuple[Path, dict]], project_id: str
-) -> tuple[Path, dict]:
-    """Return the project among ``records`` whose record holds ``project_id``, with its fields.
+    records: Iterable[ListedProject], project_id: str
+) -> tuple[Path, ProjectRecord]:
+    """Return the project among ``records`` whose record holds ``project_id``, with its record.
 
     ``records`` is as :func:`project_records` returns. Raises ``LookupError`` naming the id when
     no project holds it, with every project whose record would not read and why; and naming the
     directories when more than one holds it (a copied project).
     """
-    found: list[tuple[Path, dict]] = []
+    found: list[tuple[Path, ProjectRecord]] = []
     unreadable: list[str] = []
-    for project, fields in records:
-        if fields["record_problem"] is not None:
-            unreadable.append(f"{project}: {fields['record_problem']}")
-        elif fields["id"] == project_id:
-            found.append((project, fields))
+    for project, record, problem in records:
+        if record is None:
+            unreadable.append(f"{project}: {problem}")
+        elif record.id == project_id:
+            found.append((project, record))
     if not found:
         detail = (
             f"; these projects' records would not read: {'; '.join(unreadable)}"
@@ -121,9 +138,21 @@ def project_by_id(
     return found[0]
 
 
+class ProjectRemoval(BaseModel):
+    """A removed project's archive: its path, and its file name."""
+
+    archive_path: str
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def archive_name(self) -> str:
+        """The archive's file name, its path's basename."""
+        return Path(self.archive_path).name
+
+
 def remove_project(
     workspace: Path, project: Path, *, actor: str, release: Callable[[], None]
-) -> dict:
+) -> ProjectRemoval:
     """Archive a workspace project into the workspace's ``.removed/`` and move it there.
 
     The archive includes models; once the directory is moved, one ``project_removed`` line by
@@ -134,7 +163,7 @@ def remove_project(
     ``release`` lets the caller let go of the project, then every store connection this process
     holds on the project's tree is released before the move. A move the filesystem denies past
     :data:`RENAME_BUDGET_S` removes the archive just written and raises the ``OSError``, leaving the
-    project where it was. Returns ``{"archive_path", "moved_to"}``.
+    project where it was.
     """
     from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.experiments import live_run_conflict
@@ -169,4 +198,4 @@ def remove_project(
         actor=actor,
         scope=moved_to,
     )
-    return {"archive_path": str(archive_path), "moved_to": str(moved_to)}
+    return ProjectRemoval(archive_path=str(archive_path))

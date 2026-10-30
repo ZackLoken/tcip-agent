@@ -1,7 +1,7 @@
 """Side-by-side run comparison in the backend.
 
 Covers compare_experiments' task, subject, status_error, split and registry columns,
-same_dataset_fingerprint beside an error entry, the experiment_ids filter on best-model ranking,
+dataset_fingerprints beside an error entry, the experiment_ids filter on best-model ranking,
 and the /api/training/compare/best route.
 """
 
@@ -88,18 +88,18 @@ def _bound(
 def _compared(project: Path, *experiment_ids: str) -> list[dict]:
     from tcip_mcp.experiments import compare_experiments
 
-    return compare_experiments(list(experiment_ids), project=project)[
-        "experiments"
-    ]
+    return compare_experiments(
+        list(experiment_ids), project=project
+    ).model_dump()["experiments"]
 
 
-def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(
+def test_the_dataset_fingerprints_are_unread_not_same_when_one_id_is_an_error(
     tmp_path: Path,
 ) -> None:
-    """The dataset fingerprint comparison is None, not True, when one id is an error.
+    """The dataset fingerprint comparison is ``unread``, not ``same``, when one id is an error.
 
-    Two runs over one dataset compare as True; the same two beside one missing run compare as
-    None.
+    Two runs over one dataset compare as ``same``; the same two beside one missing run compare as
+    ``unread``.
     """
     from tcip_mcp.experiments import compare_experiments
     from tests._verified_checkpoint_fixtures import opened_run
@@ -109,15 +109,17 @@ def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(
     opened_run(tmp_path, shared, experiment_id="e1")
     opened_run(tmp_path, shared, experiment_id="e2")
     assert (
-        compare_experiments(["e1", "e2"], project=tmp_path)[
-            "same_dataset_fingerprint"
-        ]
-        is True
+        compare_experiments(
+            ["e1", "e2"], project=tmp_path
+        ).dataset_fingerprints
+        == "same"
     )
 
-    result = compare_experiments(["e1", "e2", "missing"], project=tmp_path)
+    result = compare_experiments(
+        ["e1", "e2", "missing"], project=tmp_path
+    ).model_dump()
     assert any("error" in c for c in result["experiments"])
-    assert result["same_dataset_fingerprint"] is None
+    assert result["dataset_fingerprints"] == "unread"
 
 
 def test_compare_experiments_reports_task_and_subject_from_the_runs_records(
@@ -130,7 +132,7 @@ def test_compare_experiments_reports_task_and_subject_from_the_runs_records(
     _opened(tmp_path, "exp-task-subject")
 
     (c,) = _compared(tmp_path, "exp-task-subject")
-    assert (c["task"], c["subject"]) == ("detection", "bud")
+    assert (c["run"]["task"], c["subject"]) == ("detection", "bud")
 
 
 def test_registry_lists_the_checkpoint_this_run_completed(
@@ -151,10 +153,11 @@ def test_registry_lists_the_checkpoint_this_run_completed(
     registered, unfinished = _compared(
         tmp_path, "exp-registered", "exp-unfinished"
     )
-    assert [e["name"] for e in registered["registry"]] == ["exp-registered"]
-    assert registered["registry"][0]["metrics"] == {"val_map50": 0.5}
-    assert registered["registry"][0]["metrics_source"] == "training_source"
-    assert "registered_at" in registered["registry"][0]
+    (listed,) = registered["registry"]
+    assert listed["entry"]["name"] == "exp-registered"
+    assert listed["facts"]["metrics"] == {"val_map50": 0.5}
+    assert listed["facts"]["metrics_source"] == "training_source"
+    assert listed["entry"]["registered_at"]
     assert unfinished["registry"] == []
 
 
@@ -193,7 +196,12 @@ def test_split_reports_a_drawn_seed_with_no_binding(tmp_path: Path) -> None:
     )
 
     (c,) = _compared(tmp_path, "exp-drawn-split")
-    assert c["split"] == {"case": "drawn", "seed": 99}
+    assert c["split"] == {
+        "case": "drawn",
+        "selection_dir": None,
+        "seed": 99,
+        "redraw": None,
+    }
 
 
 def test_status_error_names_a_diverged_run_reason(tmp_path: Path) -> None:
@@ -218,8 +226,10 @@ def test_status_error_names_a_diverged_run_reason(tmp_path: Path) -> None:
     diverged, healthy = _compared(
         tmp_path, "exp-diverged-cmp", "exp-healthy-cmp"
     )
-    assert "2 consecutive full training passes" in diverged["status_error"]
-    assert healthy["status_error"] is None
+    assert (
+        "2 consecutive full training passes" in diverged["run"]["status_error"]
+    )
+    assert healthy["run"]["status_error"] is None
 
 
 def _register(
@@ -241,13 +251,17 @@ def test_available_metrics_excludes_an_unmarked_experiments_metric(
     tmp_path: Path,
 ) -> None:
     """experiment_ids narrows ``available_metrics`` to the marked experiments' metrics."""
-    from tcip_mcp.tools.model_tools import rank_registered_models
+    from tcip_mcp.tools.model_tools import (
+        RegisteredModels,
+        rank_registered_models,
+    )
 
     _register(tmp_path, "exp-marked", 0.7, metric="val_map50")
     _register(tmp_path, "exp-other", 0.9, metric="val_loss")
 
     res = rank_registered_models(tmp_path, experiment_ids=["exp-marked"])
-    assert {m["metric"] for m in res["available_metrics"]} == {"val_map50"}
+    assert isinstance(res, RegisteredModels)
+    assert {m.metric for m in res.available_metrics} == {"val_map50"}
 
 
 def test_rank_registered_models_ranks_only_within_the_marked_set(
@@ -264,7 +278,31 @@ def test_rank_registered_models_ranks_only_within_the_marked_set(
         include_unverified=True,
         experiment_ids=["exp-low"],
     )
-    assert (res["name"], res["experiment_id"]) == ("exp-low", "exp-low")
+    assert not isinstance(res, dict), res
+    assert (res.entry.name, res.entry.experiment_id) == ("exp-low", "exp-low")
+
+
+def test_a_ranking_answers_each_marked_run_it_skipped_with_why(
+    tmp_path: Path,
+) -> None:
+    """A marked run with no checkpoint and one whose checkpoint lacks the metric are named."""
+    from tcip_mcp.tools.model_tools import rank_registered_models
+
+    _register(tmp_path, "exp-ranked", 0.9)
+    _register(tmp_path, "exp-loss", 0.2, metric="val_loss")
+
+    res = rank_registered_models(
+        tmp_path,
+        metric="val_map50",
+        include_unverified=True,
+        experiment_ids=["exp-ranked", "exp-loss", "exp-unregistered"],
+    )
+    assert not isinstance(res, dict), res
+    assert res.entry.name == "exp-ranked"
+    assert res.unregistered == ["exp-unregistered"]
+    assert [s.model_dump() for s in res.skipped] == [
+        {"name": "exp-loss", "unverified": False, "unstamped": True}
+    ]
 
 
 def test_rank_registered_models_names_the_marked_set_when_the_filter_empties_a_non_empty_listing(
@@ -413,7 +451,9 @@ def test_an_empty_metric_lists_through_the_listing_route_and_refuses_through_the
 
     listed = opened_client.get("/api/results/models/registered")
     assert listed.status_code == 200
-    assert [m["experiment_id"] for m in listed.json()["models"]] == ["exp-a"]
+    assert [m["entry"]["experiment_id"] for m in listed.json()["models"]] == [
+        "exp-a"
+    ]
 
     resp = opened_client.post(
         "/api/training/compare/best",
@@ -423,9 +463,12 @@ def test_an_empty_metric_lists_through_the_listing_route_and_refuses_through_the
     assert "names the metric it ranks by" in resp.json()["detail"]["message"]
 
 
-def test_compare_best_route_projects_the_answer(
+def test_compare_best_route_answers_the_ranking(
     opened_client: TestClient, tmp_path: Path
 ) -> None:
+    """The compare-best route answers the ranking ``ranked_registered_model`` produces, whole."""
+    from tcip_mcp.tools.model_tools import ranked_registered_model
+
     _register(tmp_path, "exp-a", 0.7)
 
     resp = opened_client.post(
@@ -437,13 +480,26 @@ def test_compare_best_route_projects_the_answer(
         },
     )
     assert resp.status_code == 200
-    assert resp.json() == {
-        "name": "exp-a",
-        "experiment_id": "exp-a",
-        "metrics": {"val_map50": 0.7},
-        "metrics_source": "training_source",
-        "ranking_basis": "val_map50",
-        "higher_is_better": True,
-        "direction_source": "declared",
-        "excluded_unverified": [],
-    }
+    ranked = ranked_registered_model(
+        tmp_path,
+        "val_map50",
+        higher_is_better=None,
+        include_unverified=True,
+        experiment_ids=["exp-a"],
+        tag=None,
+    )
+    assert not isinstance(ranked, dict), ranked
+    assert resp.json() == ranked.model_dump(mode="json")
+    assert (
+        ranked.entry.name,
+        ranked.facts.metrics,
+        ranked.facts.metrics_source,
+        ranked.metric,
+        ranked.direction_source,
+    ) == (
+        "exp-a",
+        {"val_map50": 0.7},
+        "training_source",
+        "val_map50",
+        "declared",
+    )

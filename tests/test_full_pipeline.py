@@ -124,8 +124,11 @@ class TestFullClassificationPipeline:
         assert (out / "model_final.pt").is_file()
         # Every epoch's row reached the log through the run's own sink, val_loss included.
         rows = epoch_rows(read_rows(out / METRICS_FILE)[0])
-        assert [row["epoch"] for row in rows] == [1, 2]
-        assert "train_loss" in rows[0] and "val_loss" in rows[-1]
+        assert [row.epoch for row in rows] == [1, 2]
+        assert (
+            "train_loss" in rows[0].model_dump()
+            and "val_loss" in rows[-1].model_dump()
+        )
 
         # Verify checkpoint has required keys
         ckpt = torch.load(

@@ -17,7 +17,15 @@ from operator import methodcaller
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from pydantic import ConfigDict, JsonValue, TypeAdapter
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    JsonValue,
+    PositiveFloat,
+    TypeAdapter,
+    ValidationError,
+)
 
 from tcip_mcp.model_registry import Producer
 from tcip_mcp.pipelines.data.selection import (
@@ -181,11 +189,13 @@ class Assessment:
     ``delivery_kind``, ``producer`` (:attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`),
     ``execution`` and ``rationale`` are ``None`` for a physical-scale assessment. ``disjointness``
     and ``criterion`` are the evidence the failures were read from, ``scale`` the scale a
-    physical-scale assessment derived. ``revision`` is the trait revision it was judged under, and
-    ``rationale`` why the assessment states the test settings it does.
+    physical-scale assessment derived. ``revision`` is the trait revision it was judged under,
+    ``rationale`` why the assessment states the test settings it does, and ``recorded_at`` the
+    instant it was written.
     """
 
     assessment_id: str
+    recorded_at: AwareDatetime
     delivery_kind: str | None
     revision: TraitRevisionRef
     producer: Producer | None
@@ -211,10 +221,10 @@ ASSESSMENT_RECORD = TypeAdapter(Assessment)
 
 
 def assessment_dir(project: Path | str, assessment_id: str) -> Path:
-    """Return one assessment's directory, refusing an id that is not a single directory name."""
-    from tcip_mcp.experiments import run_name
+    """Return one assessment's directory, refusing an id that is no ``PathSegment``."""
+    from tcip_mcp.workspace import path_segment
 
-    return Path(project) / ASSESSMENTS_DIR / run_name(assessment_id)
+    return Path(project) / ASSESSMENTS_DIR / path_segment(assessment_id)
 
 
 def read_assessment(project: Path | str, assessment_id: str) -> Assessment:
@@ -237,18 +247,21 @@ def read_assessment(project: Path | str, assessment_id: str) -> Assessment:
 
 
 def list_assessments(project: Path | str) -> list[Assessment]:
-    """Return every finished assessment recorded under ``project``, in id order.
+    """Return every finished assessment recorded under ``project``, in the order recorded.
 
     A record that does not validate raises as :func:`read_assessment` does.
     """
     root = Path(project) / ASSESSMENTS_DIR
     if not root.is_dir():
         return []
-    return [
-        read_assessment(project, run_dir.name)
-        for run_dir in sorted(root.iterdir())
-        if (run_dir / ASSESSMENT_FILE).is_file()
-    ]
+    return sorted(
+        (
+            read_assessment(project, run_dir.name)
+            for run_dir in root.iterdir()
+            if (run_dir / ASSESSMENT_FILE).is_file()
+        ),
+        key=lambda assessment: assessment.recorded_at,
+    )
 
 
 def _open_run(project: Path) -> Path:
@@ -286,11 +299,22 @@ def _finish(
     Then its one audit line, ``assessment_recorded`` by ``actor``, is written; returns it as read
     back.
     """
-    from tcip_mcp.audit import record_event_or_raise
+    from tcip_mcp.audit import append_or_raise, audit_line
     from tcip_mcp.experiments import write_once
 
+    line = audit_line(
+        "assessment_recorded",
+        {
+            "assessment_id": run_dir.name,
+            "trait": revision.entry.name,
+            "delivery_kind": delivery_kind,
+        },
+        actor,
+        "ok",
+    )
     assessment = Assessment(
         assessment_id=run_dir.name,
+        recorded_at=line.timestamp,
         delivery_kind=delivery_kind,
         revision=revision.ref,
         producer=producer,
@@ -310,17 +334,7 @@ def _finish(
             project,
         ),
     )
-    record_event_or_raise(
-        "assessment_recorded",
-        {
-            "assessment_id": run_dir.name,
-            "trait": revision.entry.name,
-            "delivery_kind": delivery_kind,
-            "passed": assessment.passed,
-        },
-        actor=actor,
-        scope=project,
-    )
+    append_or_raise(line, scope=project)
     return read_assessment(project, run_dir.name)
 
 
@@ -399,15 +413,15 @@ def _reference(
     """Return what an assessment measured.
 
     It holds where the reference came from, the identity id the one dataset root of its samples
-    records as it is measured (:func:`~tcip_mcp.dataset_layout.capture_of` of its first sample),
-    every retained file, and each sample beside its source digest (``digest_of``).
+    records as it is measured (:func:`~tcip_mcp.dataset_layout.dataset_id_of` the root of its
+    first sample), every retained file, and each sample beside its source digest (``digest_of``).
     """
-    from tcip_mcp.dataset_layout import capture_of
+    from tcip_mcp.dataset_layout import dataset_id_of, image_capture
 
     return Reference(
         selection_dir=selection_dir,
         raster_identity=raster_identity,
-        dataset_id=capture_of(samples[0].source)[0],
+        dataset_id=dataset_id_of(image_capture(samples[0].source)[0]),
         ground_truth=retained,
         samples=[
             ReferenceSample(sample=s, source_digest=digest_of[s.location])
@@ -1327,57 +1341,39 @@ def _band_records(
     return records
 
 
-def _read_reference_csv(
-    data: bytes, csv_path: str
-) -> dict[str, dict[str, Any]]:
-    """Return ``stem -> {"physical_extent": float, "unit": str}`` from a reference CSV's bytes.
+class _ReferenceRow(BaseModel):
+    """One row of a breeder's reference CSV: an image's stem, its physical extent and its unit."""
 
-    ``data`` are the bytes of the breeder's reference CSV at ``csv_path``, its ``image_stem``,
-    ``physical_extent`` and ``unit`` columns read by name. A missing column, a short row, a
-    non-numeric or non-positive extent and a repeated stem each refuse naming the line.
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    image_stem: str
+    physical_extent: PositiveFloat
+    unit: str
+
+
+def _read_reference_csv(data: bytes, csv_path: str) -> dict[str, _ReferenceRow]:
+    """Return each row of a reference CSV's bytes by its stem.
+
+    ``data`` are the bytes of the breeder's reference CSV at ``csv_path``, each row read by its
+    header's column names as a :class:`_ReferenceRow`. A row that is none (a missing column, a
+    short row, a non-numeric or non-positive extent) and a repeated stem each refuse naming the
+    line.
     """
     import csv
     import io
 
-    out: dict[str, dict[str, Any]] = {}
+    out: dict[str, _ReferenceRow] = {}
     with io.StringIO(data.decode("utf-8"), newline="") as f:
-        reader = csv.reader(f)
-        header = next(reader, None) or []
-        columns = ("image_stem", "physical_extent", "unit")
-        missing = [name for name in columns if name not in header]
-        if missing:
-            raise AssessmentRefusedError(
-                f"{csv_path} is missing column(s) {missing} in its header "
-                f"{header!r}; expected {list(columns)}."
-            )
-        index = {name: header.index(name) for name in columns}
-        for line_no, row in enumerate(reader, start=2):
-            if len(row) < len(header):
-                raise AssessmentRefusedError(
-                    f"{csv_path}:{line_no} has {len(row)} column(s), fewer "
-                    f"than the header's {len(header)}."
-                )
-            stem = row[index["image_stem"]].strip()
+        for line_no, raw in enumerate(csv.DictReader(f), start=2):
             try:
-                extent = float(row[index["physical_extent"]].strip())
-            except ValueError:
+                row = _ReferenceRow.model_validate(raw)
+            except ValidationError as exc:
+                raise AssessmentRefusedError(f"{csv_path}:{line_no}: {exc}") from exc
+            if row.image_stem in out:
                 raise AssessmentRefusedError(
-                    f"{csv_path}:{line_no} has a non-numeric "
-                    f"physical_extent for stem {stem!r}."
-                ) from None
-            if not extent > 0:
-                raise AssessmentRefusedError(
-                    f"{csv_path}:{line_no} states physical_extent {extent} "
-                    f"for stem {stem!r}: a physical length is positive."
+                    f"{csv_path}:{line_no} repeats stem {row.image_stem!r}."
                 )
-            if stem in out:
-                raise AssessmentRefusedError(
-                    f"{csv_path}:{line_no} repeats stem {stem!r}."
-                )
-            out[stem] = {
-                "physical_extent": extent,
-                "unit": row[index["unit"]].strip(),
-            }
+            out[row.image_stem] = row
     return out
 
 
@@ -1450,10 +1446,10 @@ def assess_physical_scale(
                 f"{reference_csv} names no physical extent for reference "
                 f"image {sample.member!r}."
             )
-        if row["unit"] != unit:
+        if row.unit != unit:
             raise AssessmentRefusedError(
                 f"{reference_csv} states {sample.member!r} in "
-                f"{row['unit']!r}, not {unit!r}; a reference is never "
+                f"{row.unit!r}, not {unit!r}; a reference is never "
                 "converted between units."
             )
         found = [
@@ -1476,7 +1472,7 @@ def assess_physical_scale(
                 f"{sample.member!r}'s {reference_subject!r} polygon has no "
                 "extent, so no scale is implied by it."
             )
-        implied[sample.side][sample.member] = row["physical_extent"] / pixels
+        implied[sample.side][sample.member] = row.physical_extent / pixels
     tolerance = cast(float, revision.entry.scale_tolerance_frac)
     failures += [
         f"insufficient_{side}_references"

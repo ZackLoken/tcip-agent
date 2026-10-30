@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from fastapi.testclient import TestClient
+from pydantic_core import to_jsonable_python
 
 import tcip_store
 from tcip_mcp.web_client import annotation_stats_key
-from tcip_web.routes.sessions import read_stats
+from tcip_web.routes.sessions import (
+    SessionPlace,
+    SessionRef,
+    SessionsListing,
+    SessionWrite,
+    read_stats,
+)
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 
@@ -19,7 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     import pytest
-    from httpx import Response
+    from starlette.testclient import httpx
 
     from tcip_mcp.web_client import GuiState
     from tcip_store import Key, Txn
@@ -35,9 +42,9 @@ def _event(
     added: int,
     activity: str,
     user: str = "alice",
-    started: str | None = None,
+    started: datetime | None = None,
     contribution_id: str | None = None,
-) -> Response:
+) -> httpx.Response:
     """Post one contribution to the project ``project_id`` names.
 
     The post carries ``started`` as given, and a fresh contribution id unless ``contribution_id``
@@ -53,25 +60,31 @@ def _event(
             "activity": activity,
             "user": user,
             "project_id": project_id,
-            "started": started,
+            "started": to_jsonable_python(started),
         },
     )
 
 
-def _end(client: TestClient, project_id: str, started: str) -> Response:
+def _end(
+    client: TestClient, project_id: str, started: datetime
+) -> httpx.Response:
     """End the session ``started`` names in the project ``project_id`` names."""
     return client.post(
         "/api/sessions/end",
-        json={"project_id": project_id, "started": started},
+        json=SessionRef(project_id=project_id, started=started).model_dump(
+            mode="json"
+        ),
     )
 
 
-def _stamp(resp: Response) -> str:
+def _stamp(resp: httpx.Response) -> datetime:
     """Return the start stamp of the session a contribution's answer says it is recorded in."""
-    return resp.json()["session"]["started"]
+    session = SessionWrite.model_validate(resp.json()).session
+    assert session is not None, resp.text
+    return session.started
 
 
-def _open_session(client: TestClient, project_id: str) -> str:
+def _open_session(client: TestClient, project_id: str) -> datetime:
     """Post one contribution to ``project_id`` by alice; return its session's start stamp."""
     resp = _event(client, project_id, "IMG_A", 5.0, 2, "new_annotation")
     assert resp.status_code == 200, resp.text
@@ -176,7 +189,7 @@ def test_end_marks_the_session_the_contribution_opened_ended_at_a_utc_instant(
     assert stored.started == started
     assert stored.ended is not None
     for stamp in (stored.started, stored.ended):
-        assert datetime.fromisoformat(stamp).utcoffset() is not None
+        assert stamp is not None and stamp.utcoffset() is not None
     assert _end(client, opened.id, started).json() == {
         "status": "noop",
         "session": None,
@@ -221,11 +234,13 @@ def test_an_end_naming_another_projects_session_is_refused_and_ends_nothing(
     assert valley_session.ended is not None
     assert [
         line["arguments"] for line in audit_rows(valley.root, "session_ended")
-    ] == [{"started": valley_started}]
+    ] == [{"started": to_jsonable_python(valley_started)}]
     assert audit_rows(hill.root, "session_ended") == []
 
 
-def _two_open_sessions(client: TestClient, project_id: str) -> list[str]:
+def _two_open_sessions(
+    client: TestClient, project_id: str
+) -> list[datetime]:
     """Post Alice's then Bob's contribution to ``project_id``; return their start stamps."""
     alice = _open_session(client, project_id)
     bob = _event(
@@ -235,7 +250,7 @@ def _two_open_sessions(client: TestClient, project_id: str) -> list[str]:
     return [alice, _stamp(bob)]
 
 
-def _assert_departed(project: OpenProject, started: list[str]) -> None:
+def _assert_departed(project: OpenProject, started: list[datetime]) -> None:
     """Assert the sessions ended in ``project`` are exactly the ones ``started`` names.
 
     The ``session_ended`` lines name exactly those starts, one by ``user:alice`` and one by
@@ -245,7 +260,7 @@ def _assert_departed(project: OpenProject, started: list[str]) -> None:
     assert {s.started for s in sessions if s.ended is not None} == set(started)
     lines = audit_rows(project.root, "session_ended")
     assert sorted(line["arguments"]["started"] for line in lines) == sorted(
-        started
+        to_jsonable_python(started)
     )
     assert sorted(line["actor"] for line in lines) == [
         "user:alice",
@@ -470,7 +485,10 @@ def test_a_contribution_naming_a_session_its_departure_ended_is_refused_by_name(
     )
 
     assert resp.status_code == 409, resp.text
-    assert f"ended that session: {started}" in resp.json()["detail"]
+    assert (
+        f"ended that session: {to_jsonable_python(started)}"
+        in resp.json()["detail"]
+    )
     (session,) = _sessions(valley.root)
     assert len(session.entries) == 1
 
@@ -498,10 +516,11 @@ def test_a_contribution_committed_without_its_line_answers_the_session_it_opened
 
     assert resp.status_code == 409, resp.text
     (stored,) = _sessions(opened.root)
-    assert resp.json()["detail"]["committed"] == {
-        "status": "ok",
-        "session": {"started": stored.started, "ended": False},
-    }
+    assert SessionWrite.model_validate(
+        resp.json()["detail"]["committed"]
+    ) == SessionWrite(
+        status="ok", session=SessionPlace(started=stored.started, ended=False)
+    )
     assert _end(client, opened.id, stored.started).json() == {
         "status": "ok",
         "session": None,
@@ -517,14 +536,12 @@ def test_two_sessions_of_one_project_never_share_a_start_stamp(
 
     The second stamp is one microsecond past the first, and each stamp ends its own session.
     """
-    from datetime import datetime
+    from datetime import timedelta
 
     from tcip_web.routes import sessions
 
-    frozen = "2026-10-07T14:00:00+00:00"
-    monkeypatch.setattr(
-        sessions, "now", lambda: datetime.fromisoformat(frozen)
-    )
+    frozen = datetime(2026, 10, 7, 14, tzinfo=UTC)
+    monkeypatch.setattr(sessions, "now", lambda: frozen)
     alice = _stamp(
         _event(client, opened.id, "IMG_A", 5.0, 2, "new_annotation")
     )
@@ -536,7 +553,7 @@ def test_two_sessions_of_one_project_never_share_a_start_stamp(
     monkeypatch.undo()
 
     assert alice == frozen
-    assert bob == "2026-10-07T14:00:00.000001+00:00"
+    assert bob == frozen + timedelta(microseconds=1)
     assert _end(client, opened.id, alice).json() == {
         "status": "ok",
         "session": None,
@@ -559,10 +576,11 @@ def test_an_end_naming_a_start_no_session_carries_is_refused_and_ends_nothing(
 ) -> None:
     started = _open_session(client, opened.id)
 
-    resp = _end(client, opened.id, "2000-01-01T00:00:00+00:00")
+    carried_by_none = datetime(2000, 1, 1, tzinfo=UTC)
+    resp = _end(client, opened.id, carried_by_none)
 
     assert resp.status_code == 409, resp.text
-    assert "2000-01-01T00:00:00+00:00" in resp.json()["detail"]
+    assert to_jsonable_python(carried_by_none) in resp.json()["detail"]
     (stored,) = _sessions(opened.root)
     assert (stored.started, stored.ended) == (started, None)
     assert audit_rows(opened.root, "session_ended") == []
@@ -616,10 +634,9 @@ def test_a_contribution_sent_again_after_its_answer_was_lost_is_recorded_once(
         contribution_id="c1",
     )
 
-    assert again.json() == {
-        "status": "noop",
-        "session": {"started": _stamp(first), "ended": False},
-    }
+    assert SessionWrite.model_validate(again.json()) == SessionWrite(
+        status="noop", session=SessionPlace(started=_stamp(first), ended=False)
+    )
     (session,) = _load(client)["sessions"]
     assert (session["total_annotations"], session["total_time_seconds"]) == (
         2,
@@ -661,12 +678,11 @@ def test_a_repeat_of_an_unnamed_contribution_answers_the_session_it_landed_in_an
         contribution_id="a",
     )
 
-    assert again.json() == {
-        "status": "noop",
-        "session": {"started": learned, "ended": True},
-    }
-    (session,) = _load(client)["sessions"]
-    assert (session["started"], len(session["entries"])) == (learned, 2)
+    assert SessionWrite.model_validate(again.json()) == SessionWrite(
+        status="noop", session=SessionPlace(started=learned, ended=True)
+    )
+    (session,) = SessionsListing.model_validate(_load(client)).sessions
+    assert (session.started, len(session.entries)) == (learned, 2)
 
 
 def test_each_session_write_leaves_one_line_by_the_sessions_person(
@@ -696,7 +712,7 @@ def test_each_session_write_leaves_one_line_by_the_sessions_person(
         "annotations_added": 1,
         "activity": "new_annotation",
     }
-    assert ended["arguments"] == {"started": started}
+    assert ended["arguments"] == {"started": to_jsonable_python(started)}
 
 
 def test_an_end_names_its_own_session_and_not_the_latest(

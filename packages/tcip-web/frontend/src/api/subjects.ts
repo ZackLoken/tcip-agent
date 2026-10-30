@@ -1,6 +1,6 @@
 /** Dataset subject-registry API helpers.
  *
- * The registry is one nested mapping per dataset: subject -> {description?, attributes?}. It
+ * The registry is one nested mapping per dataset: subject -> {description, attributes?}. It
  * carries no integer ids and no colors: a label references names, an id is a per-training-run
  * artifact, and a color is GUI-local (see subjectColor). It travels with the image set: a
  * name-based label is undecodable without it.
@@ -8,28 +8,20 @@
 
 import { getJson, postJson } from "@/api/http";
 import { ROUTES } from "@/api/routes";
-import type { ATTR_TYPES } from "@/api/types.generated";
+import type {
+  ATTR_TYPES,
+  ByName_Attribute_,
+  RegistrySave,
+  SaveSubjectsPayload,
+  SubjectsLoad,
+} from "@/api/types.generated";
 import { subjectColorOverride } from "@/lib/subjectColors";
 
 /** An attribute's kind, as the backend's registry declares them. */
 export type AttrType = (typeof ATTR_TYPES)[number];
 
-/** One attribute of a subject: categorical (unordered) or ordinal (ranked). ``values`` are the
- *  declared value names, in order (the rank order for an ordinal). */
-export interface AttributeDef {
-  type: AttrType;
-  values: string[];
-}
-
-/** A subject entry: a human description plus zero or more attributes. A subject with no attributes
- *  is simply detected (e.g. bush). */
-export interface SubjectDef {
-  description?: string;
-  attributes?: Record<string, AttributeDef>;
-}
-
-/** The nested registry: subject name -> its definition. Top-level keys are the subjects. */
-export type Registry = Record<string, SubjectDef>;
+/** One attribute of a subject, as the backend's registry declares it. */
+export type AttributeDef = ByName_Attribute_[string];
 
 export const subjectsApi = {
   // The registry lives in the dataset (not the project); pass dataset_root so a shared image
@@ -39,23 +31,12 @@ export const subjectsApi = {
   // documents of capture `date` hold either way, and `unreadable` the stems that would not read.
   load: (dataset_root: string, date: string) => {
     const params = new URLSearchParams({ dataset_root, date });
-    return getJson<{
-      subjects: Registry | null;
-      discovered: string[];
-      version: string | null;
-      unreadable: string[];
-    }>(`${ROUTES.getSubjectsLoad}?${params.toString()}`);
+    return getJson<SubjectsLoad>(`${ROUTES.getSubjectsLoad}?${params.toString()}`);
   },
 
   // `version`: the token `load` returned beside this registry, required on every call.
   // `null` asserts the registry was absent at load, never an unconditional write.
-  save: (subjects: Registry, dataset_root: string, version: string | null, user: string) =>
-    postJson<{
-      status: string;
-      n_subjects: number;
-      subjects_path: string;
-      version: string;
-    }>(ROUTES.postSubjectsSave, { subjects, dataset_root, version, user }),
+  save: (body: SaveSubjectsPayload) => postJson<RegistrySave>(ROUTES.postSubjectsSave, body),
 };
 
 // High-contrast palette the GUI derives subject/value colors from. Color is GUI-local (the

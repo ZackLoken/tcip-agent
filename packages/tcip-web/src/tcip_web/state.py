@@ -14,13 +14,15 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, TypeVar
 
-from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
+from pydantic import BaseModel, ValidationError
 
+from tcip_mcp.agent_identity import RecordedIdentity
 from tcip_mcp.web_client import (
     GUI_STATE_DEFAULTS,
     DatasetSelection,
     GuiState,
     Panel,
+    PanelEvent,
     read_gui_snapshot,
     write_gui_snapshot,
 )
@@ -69,18 +71,17 @@ type Subscriber = Callable[[StateNotification], Awaitable[None]]
 
 
 class PanelEnvelope(BaseModel):
-    """A panel event as retained and broadcast: its panel, type, data and id.
+    """A panel event as retained and broadcast: its panel, the event, its id and its sender.
 
-    The agent identity its sender declared
-    (:func:`tcip_mcp.agent_identity.fields_from_headers`) rides beside them as further fields.
+    ``identity`` is the agent identity its sender declared
+    (:func:`tcip_mcp.agent_identity.identity_from_headers`), each field ``None`` where nothing
+    declared it.
     """
 
-    model_config = ConfigDict(extra="allow")
-
     panel: Panel
-    event_type: str
-    data: dict[str, JsonValue]
+    event: PanelEvent
     event_id: str
+    identity: RecordedIdentity
 
 
 class GuiMutationInvalidError(ValueError):
@@ -317,10 +318,6 @@ class StateStore:
     def version(self) -> int:
         """Monotonic version, bumped on every state change."""
         return self._version
-
-    def snapshot(self) -> dict[str, Any]:
-        """Return a JSON-safe snapshot of the current state."""
-        return self._now.state.model_dump(mode="json")
 
     def notification(self) -> StateNotification:
         """Return the held state with its version."""

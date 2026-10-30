@@ -81,15 +81,15 @@ def test_save_annotations_never_reads_provenance_off_a_shape(
 
 
 def test_the_read_path_carries_authorship_out_of_the_record() -> None:
-    """``client_annotation`` carries a record's authorship out on the read path.
+    """``ClientAnnotation`` carries a record's authorship out on the read path.
 
-    ``client_annotation`` is what ``read_annotations`` returns per annotation; it carries the
-    record's created_by, accepted_by, created_at and accepted_at.
+    ``ClientAnnotation`` is what ``read_annotations`` returns per annotation, dumped; it carries
+    the record's created_by, accepted_by, created_at and accepted_at.
     """
-    from tcip_annotation.json_io import client_annotation
+    from tcip_annotation.json_io import ClientAnnotation
     from tcip_annotation.state import Annotation, BBox
 
-    d = client_annotation(
+    d = ClientAnnotation.of(
         Annotation(
             subject="bud",
             geometry=BBox(1, 2, 3, 4),
@@ -100,17 +100,19 @@ def test_the_read_path_carries_authorship_out_of_the_record() -> None:
         )
     )
 
-    assert d["created_by"] == "model:m_best@c9f632ba98b2"
-    assert d["accepted_by"] == "user:breeder"
-    assert d["created_at"] == "2026-01-01T00:00:00+00:00"
-    assert d["accepted_at"] == "2026-01-02T00:00:00+00:00"
+    assert d.created_by == "model:m_best@c9f632ba98b2"
+    assert d.accepted_by == "user:breeder"
+    assert d.created_at == "2026-01-01T00:00:00+00:00"
+    assert d.accepted_at == "2026-01-02T00:00:00+00:00"
 
 
-def test_the_read_path_omits_provenance_a_record_does_not_carry() -> None:
-    """An unattributed label reads back with no ``created_by`` or ``accepted_by`` key."""
-    from tcip_annotation.json_io import client_annotation
+def test_the_read_path_states_no_provenance_a_record_does_not_carry() -> None:
+    """An unattributed label reads back with no ``created_by`` or ``accepted_by``."""
+    from tcip_annotation.json_io import ClientAnnotation
     from tcip_annotation.state import Annotation, BBox
 
-    d = client_annotation(Annotation(subject="bud", geometry=BBox(1, 2, 3, 4)))
+    d = ClientAnnotation.of(
+        Annotation(subject="bud", geometry=BBox(1, 2, 3, 4))
+    )
 
-    assert "created_by" not in d and "accepted_by" not in d
+    assert d.created_by is None and d.accepted_by is None

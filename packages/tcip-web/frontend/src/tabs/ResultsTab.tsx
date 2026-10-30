@@ -11,34 +11,37 @@ import {
 } from "recharts";
 
 import { api } from "@/api/client";
-import { committedOf } from "@/api/http";
+import { committedOf, messageOf, refusalOf } from "@/api/http";
+import { resultsApi } from "@/api/inference";
 import {
-  deliveryRefusalOf,
-  operationalizationRefusalOf,
-  resultsApi,
+  type CountExport,
+  type DatasetTree,
+  DELIVERY,
+  type DeliveryEvents,
   type DeliveryRefusal,
-  type ExportCountCsvHeaders,
-  type MilestoneColumn,
+  type ExportCountCsvPayload,
+  type ExportCsvPayload,
+  type MappingNames,
+  OPERATIONALIZATION,
   type OperationalizationRefusal,
-  type OnsetRow,
-  type PerPlantRow,
-  type ServedTraitRecord,
-} from "@/api/inference";
-import type {
-  ExportCountCsvPayload,
-  ExportCsvPayload,
-  PhenologyPayload,
-  ServedDeliveryEvent,
+  type PhenologyAnswer,
+  type PhenologyPayload,
+  type PlantMappingDisclosure,
+  type Projection,
+  type SavedExport,
+  type TraitsListing,
 } from "@/api/types.generated";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 import { TabHeading } from "@/components/TabHeading";
+import { deliveredDatesLine } from "@/lib/disclosureLines";
 import { UNSET_GLYPH } from "@/lib/glyphs";
+import { bucketsForDate } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { selectDatasetRoot, selectProjectRoot } from "@/store/slices/gui";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 
-interface DateRow {
-  date: string;
+interface CaptureRow {
+  capture: string;
   [plantId: string]: number | string | null;
 }
 
@@ -50,14 +53,26 @@ function auditGapExportMessage(savedPath: string, detail: string): string {
   );
 }
 
-function dateKey(date: string): number {
-  const parts = date.split("-");
-  if (parts.length !== 3) return 0;
-  // Match the backend _date_key (Python int()): reject junk-suffixed parts like "15b"
-  // so the chart's date order agrees with the server-computed onset ordering.
-  if (!parts.every((p) => /^\d+$/.test(p))) return 0;
-  const [y, m, d] = parts.map((x) => parseInt(x, 10));
-  return y * 10000 + m * 100 + d;
+/** What a measurement's plant mapping disclosed: its delivered dates and what it could not verify
+ *  at delivery time. */
+function MappingDisclosureLines({ disclosure }: { disclosure: PlantMappingDisclosure }) {
+  const { dates_delivered, captures_unverified, plant_csvs_unverified } = disclosure;
+  return (
+    <>
+      {dates_delivered.length > 0 && (
+        <div className="text-tcip-muted">{deliveredDatesLine(disclosure)}</div>
+      )}
+      {(captures_unverified.length > 0 || plant_csvs_unverified.length > 0) && (
+        <div className="text-tcip-muted">
+          Not verified at delivery time:
+          {captures_unverified.length > 0 && ` ${captures_unverified.join(", ")}`}
+          {captures_unverified.length > 0 && plant_csvs_unverified.length > 0 && ";"}
+          {plant_csvs_unverified.length > 0 &&
+            ` plant CSV(s) ${plant_csvs_unverified.join(", ")} (path not found)`}
+        </div>
+      )}
+    </>
+  );
 }
 
 export function ResultsTab() {
@@ -66,18 +81,12 @@ export function ResultsTab() {
 
   // The mapping this measurement reads, picked from those built on the Setup tab.
   const [mappingName, setMappingName] = useState("");
-  const [mappingNames, setMappingNames] = useState<string[]>([]);
-  // True unless a computed run reported that its predictions carried no positive-state class.
-  const [positiveClassUnassessed, setPositiveClassUnassessed] = useState(false);
+  const [mappings, setMappings] = useState<MappingNames | null>(null);
 
   // Dataset tree (dates + the buckets published over each) drives the structured per-date picker
   // below.
-  const [dates, setDates] = useState<string[]>([]);
-  const [bucketsByDate, setBucketsByDate] = useState<Record<string, string[]>>({});
-  // The name of each bucket published over ``date`` under the dataset root.
-  const bucketsFor = (date: string): string[] => bucketsByDate[date] ?? [];
+  const [tree, setTree] = useState<DatasetTree | null>(null);
   const [datesError, setDatesError] = useState<string | null>(null);
-  const [labelProblem, setLabelProblem] = useState<string | null>(null);
   // The bucket name the breeder picked per date; a date with none picked is not delivered.
   const [dateBucket, setDateBucket] = useState<Record<string, string>>({});
   // The population, typed by the breeder: one plant id per line or comma.
@@ -87,29 +96,24 @@ export function ResultsTab() {
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
 
-  const [curves, setCurves] = useState<PerPlantRow[]>([]);
-  const [onset, setOnset] = useState<OnsetRow[]>([]);
-  // The milestone columns the trait's own entry names, as the server's producer writes them.
-  const [milestoneColumns, setMilestoneColumns] = useState<MilestoneColumn[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
-  // The exact request the displayed numbers came from, which the CSV door recomputes from.
-  const [lastRequest, setLastRequest] = useState<PhenologyPayload | null>(null);
-  // Whether an assessment answers for what is currently displayed, and the gate's sentence when
-  // not.
-  const [unvalidated, setUnvalidated] = useState(false);
-  const [unvalidatedReason, setUnvalidatedReason] = useState<string | null>(null);
-  // Each projection's digest of the unvalidated result shown, which the breeder's acknowledgment
-  // of exporting it binds to.
-  const [resultSha256, setResultSha256] = useState<Record<"curves" | "milestones", string> | null>(
+  // The measurement shown, whole, and the inputs it was computed from, which the CSV door
+  // recomputes from.
+  const [answer, setAnswer] = useState<PhenologyAnswer | null>(null);
+  const [lastInputs, setLastInputs] = useState<Omit<PhenologyPayload, "show_unvalidated"> | null>(
     null,
   );
-  // What the mapping's own delivery-time check could not verify, shown beside the numbers.
-  const [capturesUnverified, setCapturesUnverified] = useState<string[]>([]);
-  const [plantCsvsUnverified, setPlantCsvsUnverified] = useState<string[]>([]);
-  const [datesDelivered, setDatesDelivered] = useState<string[]>([]);
-  const [imagesUnattributed, setImagesUnattributed] = useState(0);
-  const [unvalidatedRefusal, setUnvalidatedRefusal] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const curves = useMemo(() => answer?.curves ?? [], [answer]);
+  // A run whose predictions carry no positive-state class is not a phenology measurement, so it
+  // carries no milestones.
+  const positiveClassUnassessed = answer !== null && !answer.positive_class_assessed;
+  const onset = answer !== null && answer.positive_class_assessed ? answer.milestones : [];
+  // The gate's refusal when no assessment answers for what is currently displayed, with each
+  // projection's digest the breeder's acknowledgment of exporting it binds to.
+  const shownUnvalidated = answer?.unvalidated ?? null;
+  const unvalidated = shownUnvalidated !== null;
+  const [unvalidatedRefusal, setUnvalidatedRefusal] = useState<DeliveryRefusal | null>(null);
   // The reason field for acknowledging and exporting an unvalidated measurement; shown once the
   // breeder opts into the acknowledged-export flow, cleared on every fresh compute.
   const [showAckExport, setShowAckExport] = useState(false);
@@ -119,14 +123,13 @@ export function ResultsTab() {
     useState<OperationalizationRefusal | null>(null);
 
   // What has shipped from this project: read-only, no confirm/withdraw state to carry.
-  const [deliveryEvents, setDeliveryEvents] = useState<ServedDeliveryEvent[]>([]);
+  const [deliveryEvents, setDeliveryEvents] = useState<DeliveryEvents | null>(null);
   const [deliveryEventsError, setDeliveryEventsError] = useState<string | null>(null);
 
   // Count export: per_image_count and orthomosaic_plant_counts, the two delivery kinds this
   // route serves; an acknowledgment of either is recorded here.
-  const [countKind, setCountKind] = useState<"per_image_count" | "orthomosaic_plant_counts">(
-    "per_image_count",
-  );
+  const [countKind, setCountKind] =
+    useState<ExportCountCsvPayload["delivery"]["kind"]>("per_image_count");
   const [countBucket, setCountBucket] = useState("");
   const [countTrait, setCountTrait] = useState("");
   const [countPlantRegistry, setCountPlantRegistry] = useState("");
@@ -143,16 +146,15 @@ export function ResultsTab() {
     useState<OperationalizationRefusal | null>(null);
   const [countAckReason, setCountAckReason] = useState("");
   const [countShowAck, setCountShowAck] = useState(false);
-  const [countResultHeaders, setCountResultHeaders] = useState<ExportCountCsvHeaders | null>(null);
+  const [countExported, setCountExported] = useState<CountExport | null>(null);
 
   // The trait a delivery is computed for, from this project's registered traits: the one when
   // there is one, none with an error when there are none, and the breeder's choice of several.
-  const [traitRecords, setTraitRecords] = useState<ServedTraitRecord[]>([]);
+  const [traitsListing, setTraitsListing] = useState<TraitsListing | null>(null);
+  const traitRecords = traitsListing?.traits ?? [];
   const availableTraits = traitRecords.map((r) => r.trait);
   const [trait, setTrait] = useState("");
   const [traitError, setTraitError] = useState<string | null>(null);
-  // Trait records that failed to load, each with the reason.
-  const [unreadableTraits, setUnreadableTraits] = useState<{ trait: string; reason: string }[]>([]);
 
   useEffect(() => {
     if (!projectRoot) return;
@@ -161,8 +163,7 @@ export function ResultsTab() {
     void resultsApi
       .traits()
       .then((res) => {
-        setTraitRecords(res.traits);
-        setUnreadableTraits(res.unreadable);
+        setTraitsListing(res);
         if (res.traits.length === 0) {
           setTraitError("No trait is registered for this project yet.");
         } else if (res.traits.length === 1) {
@@ -170,11 +171,8 @@ export function ResultsTab() {
         }
       })
       .catch((e) => {
-        setTraitRecords([]);
-        setUnreadableTraits([]);
-        setTraitError(
-          `Could not load this project's registered traits: ${e instanceof Error ? e.message : String(e)}`,
-        );
+        setTraitsListing(null);
+        setTraitError(`Could not load this project's registered traits: ${messageOf(e)}`);
       });
   }, [projectRoot]);
 
@@ -182,8 +180,8 @@ export function ResultsTab() {
     if (!projectRoot) return;
     void resultsApi
       .listPlantMappings()
-      .then((res) => setMappingNames(res.names))
-      .catch(() => setMappingNames([]));
+      .then(setMappings)
+      .catch(() => setMappings(null));
   }, [projectRoot]);
 
   useEffect(() => {
@@ -191,14 +189,12 @@ export function ResultsTab() {
     void resultsApi
       .deliveryEvents()
       .then((res) => {
-        setDeliveryEvents(res.records);
+        setDeliveryEvents(res);
         setDeliveryEventsError(null);
       })
       .catch((e) => {
-        setDeliveryEvents([]);
-        setDeliveryEventsError(
-          `Could not load what this project has shipped: ${e instanceof Error ? e.message : String(e)}`,
-        );
+        setDeliveryEvents(null);
+        setDeliveryEventsError(`Could not load what this project has shipped: ${messageOf(e)}`);
       });
   }, [projectRoot]);
 
@@ -207,16 +203,12 @@ export function ResultsTab() {
     void api.dataset
       .tree(datasetRoot)
       .then((t) => {
-        setDates(t.dates_with_images);
-        setBucketsByDate(t.buckets_by_date);
+        setTree(t);
         setDateBucket({});
         setDatesError(null);
-        setLabelProblem(t.label_problem);
       })
       .catch((e) => {
-        setDatesError(
-          `Could not load this dataset's dates: ${e instanceof Error ? e.message : String(e)}`,
-        );
+        setDatesError(`Could not load this dataset's dates: ${messageOf(e)}`);
       });
   }, [datasetRoot]);
 
@@ -240,98 +232,72 @@ export function ResultsTab() {
     setShowAckExport(false);
     setAckReason("");
     try {
-      const request: PhenologyPayload = {
+      const inputs = {
         mapping_name: mappingName,
         dataset_root: datasetRoot,
         buckets: Object.values(dateBucket).filter((name) => name),
         trait,
         plants,
-        show_unvalidated: showUnvalidated,
       };
-      setLastRequest(request);
-      const res = await resultsApi.phenologyMeasurement(request);
-      setUnvalidated(!res.validated);
-      setUnvalidatedReason(res.unvalidated_reason);
-      setResultSha256(res.result_sha256);
-      setCapturesUnverified(res.captures_unverified);
-      setPlantCsvsUnverified(res.plant_csvs_unverified);
-      setDatesDelivered(res.dates_delivered);
-      setImagesUnattributed(res.images_unattributed);
+      setLastInputs(inputs);
+      setAnswer(
+        await resultsApi.phenologyMeasurement({ ...inputs, show_unvalidated: showUnvalidated }),
+      );
       setUnvalidatedRefusal(null);
-      const unclassified = res.positive_class_assessed === false;
-      setPositiveClassUnassessed(unclassified);
-      setCurves(res.curves.rows);
-      // No positive-state class: not a phenology measurement, so it carries no milestones.
-      setOnset(unclassified ? [] : res.milestones.rows);
-      setMilestoneColumns(res.milestones.columns);
     } catch (e) {
+      setAnswer(null);
       // A refusal naming its own kind is routed by that kind, before any prose is read.
-      const refusal = operationalizationRefusalOf(e);
+      const refusal = refusalOf<OperationalizationRefusal>(e, OPERATIONALIZATION);
       if (refusal) {
         setOperationalizationRefusal(refusal);
-        setCurves([]);
-        setOnset([]);
         return;
       }
       // The server refuses an unassessed delivery by default. Surface why, plus the one-click way
       // to see the numbers anyway, marked unvalidated.
-      const delivery = deliveryRefusalOf(e);
+      const delivery = refusalOf<DeliveryRefusal>(e, DELIVERY);
       if (delivery) {
-        setUnvalidatedRefusal(delivery.message);
+        setUnvalidatedRefusal(delivery);
       } else {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(messageOf(e));
       }
-      setCurves([]);
-      setOnset([]);
     } finally {
       setLoading(false);
     }
   }
 
-  async function downloadCsv(payload: "curves" | "milestones", filename: string) {
-    if (!lastRequest) return;
-    if (unvalidated && (!ackReason.trim() || !resultSha256)) return;
+  async function downloadCsv(payload: Projection) {
+    if (!lastInputs) return;
+    if (shownUnvalidated && !ackReason.trim()) return;
     try {
       const body: ExportCsvPayload = {
-        mapping_name: lastRequest.mapping_name,
-        dataset_root: lastRequest.dataset_root,
-        buckets: lastRequest.buckets,
-        trait: lastRequest.trait,
-        plants: lastRequest.plants,
+        ...lastInputs,
         payload,
-        filename,
         user: useStore.getState().user,
-        acknowledgment:
-          unvalidated && resultSha256
-            ? { reason: ackReason.trim(), result_sha256: resultSha256[payload] }
-            : null,
+        acknowledgment: shownUnvalidated && {
+          reason: ackReason.trim(),
+          result_sha256: shownUnvalidated.digests[payload],
+        },
       };
-      const blob = await resultsApi.downloadCsv(body);
+      const { blob, exported } = await resultsApi.downloadCsv(body);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = filename;
+      a.download = exported.filename;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      const committed = committedOf<{ saved_path: string }>(e);
+      const committed = committedOf<SavedExport>(e);
       if (committed) {
-        useStore
-          .getState()
-          .pushToast(
-            auditGapExportMessage(committed.saved_path, e instanceof Error ? e.message : String(e)),
-          );
+        useStore.getState().pushToast(auditGapExportMessage(committed.saved_path, messageOf(e)));
         return;
       }
       // The download door refuses through the same structured family, so it lands in the panel.
-      const refusal = operationalizationRefusalOf(e);
+      const refusal = refusalOf<OperationalizationRefusal>(e, OPERATIONALIZATION);
       if (refusal) {
         setOperationalizationRefusal(refusal);
         return;
       }
-      useStore
-        .getState()
-        .pushToast(`CSV export failed: ${e instanceof Error ? e.message : String(e)}`);
+      useStore.getState().pushToast(`CSV export failed: ${messageOf(e)}`);
     }
   }
 
@@ -348,7 +314,7 @@ export function ResultsTab() {
     setCountExporting(true);
     setCountError(null);
     setCountOperationalizationRefusal(null);
-    setCountResultHeaders(null);
+    setCountExported(null);
     try {
       const delivery: ExportCountCsvPayload["delivery"] =
         countKind === "per_image_count"
@@ -365,15 +331,13 @@ export function ResultsTab() {
               plant_registry: countPlantRegistry,
               delivered_phenotype: countDeliveredPhenotype,
               plants,
-              crop: countCrop || undefined,
-              pipeline_version: countPipelineVersion || undefined,
-              ...(countCanopySubject
-                ? {
-                    canopy_subject: countCanopySubject,
-                    position_error_m:
-                      countPositionErrorM === "" ? undefined : Number(countPositionErrorM),
-                  }
-                : {}),
+              crop: countCrop,
+              pipeline_version: countPipelineVersion,
+              canopy_subject: countCanopySubject,
+              position_error_m:
+                countCanopySubject && countPositionErrorM !== ""
+                  ? Number(countPositionErrorM)
+                  : null,
             };
       const body: ExportCountCsvPayload = {
         delivery,
@@ -384,36 +348,34 @@ export function ResultsTab() {
             ? { reason: countAckReason.trim(), result_sha256: countGateRefusal.result_sha256 }
             : null,
       };
-      const { blob, headers } = await resultsApi.downloadCountCsv(body);
+      const { blob, exported } = await resultsApi.downloadCountCsv(body);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = countFilename.trim();
+      a.download = exported.filename;
       a.click();
       URL.revokeObjectURL(url);
-      setCountResultHeaders(headers);
+      setCountExported(exported);
       setCountShowAck(false);
       setCountGateRefusal(null);
     } catch (e) {
-      const committed = committedOf<{ saved_path: string }>(e);
+      const committed = committedOf<SavedExport>(e);
       if (committed) {
-        setCountError(
-          auditGapExportMessage(committed.saved_path, e instanceof Error ? e.message : String(e)),
-        );
+        setCountError(auditGapExportMessage(committed.saved_path, messageOf(e)));
         return;
       }
-      const opRefusal = operationalizationRefusalOf(e);
+      const opRefusal = refusalOf<OperationalizationRefusal>(e, OPERATIONALIZATION);
       if (opRefusal) {
         setCountOperationalizationRefusal(opRefusal);
         return;
       }
-      const gateRefusal = deliveryRefusalOf(e);
+      const gateRefusal = refusalOf<DeliveryRefusal>(e, DELIVERY);
       if (gateRefusal) {
         setCountGateRefusal(gateRefusal);
         setCountShowAck(gateRefusal.result_sha256 !== null);
         return;
       }
-      setCountError(e instanceof Error ? e.message : String(e));
+      setCountError(messageOf(e));
     } finally {
       setCountExporting(false);
     }
@@ -424,22 +386,23 @@ export function ResultsTab() {
   const exportBlocked = positiveClassUnassessed;
   const downloadOnsetCsv = () => {
     if (exportBlocked) return;
-    void downloadCsv("milestones", `${trait}_phenology.csv`);
+    void downloadCsv("milestones");
   };
   const downloadCurvesCsv = () => {
     if (exportBlocked) return;
     // A curve export is the same delivered phenology measurement as the milestone one, unsummarized.
-    void downloadCsv("curves", `${trait}_curves.csv`);
+    void downloadCsv("curves");
   };
 
-  const chartData: DateRow[] = useMemo(() => {
-    const byDate: Record<string, DateRow> = {};
+  const chartData: CaptureRow[] = useMemo(() => {
+    const byCapture: Record<string, CaptureRow> = {};
     for (const r of curves) {
-      byDate[r.date] ??= { date: r.date };
-      byDate[r.date][r.plant_id] = r.ratio;
+      byCapture[r.capture] ??= { capture: r.capture };
+      byCapture[r.capture][r.plant_id] = r.ratio;
     }
-    return Object.values(byDate).sort((a, b) => dateKey(a.date) - dateKey(b.date));
-  }, [curves]);
+    // In the order the tree lists its captures.
+    return (tree?.captures ?? []).flatMap((c) => byCapture[c.name] ?? []);
+  }, [curves, tree]);
 
   const plantKeys = useMemo(() => {
     const set = new Set<string>();
@@ -449,9 +412,7 @@ export function ResultsTab() {
 
   // The entry a delivery reads for the selected trait: its latest confirmed revision's, or null.
   const selectedRecord = traitRecords.find((r) => r.trait === trait);
-  const confirmedEntry =
-    selectedRecord?.revisions.find((r) => r.number === selectedRecord.latest_confirmed)?.entry ??
-    null;
+  const confirmedEntry = selectedRecord?.latest_confirmed?.entry ?? null;
   // Curves and milestones are only meaningful for a trait whose confirmed revision declares the
   // fractions they are read off. Nothing else on this tab depends on it.
   const hasMilestones = (confirmedEntry?.milestone_fractions ?? []).length > 0;
@@ -460,10 +421,10 @@ export function ResultsTab() {
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
       <TabHeading tab="results" />
       {traitError && <div className="tcip-problem">{traitError}</div>}
-      {unreadableTraits.length > 0 && (
+      {traitsListing && traitsListing.unreadable.length > 0 && (
         <div className="tcip-problem">
           These traits&apos; records will not read:{" "}
-          {unreadableTraits.map((u) => u.trait).join(", ")}.
+          {traitsListing.unreadable.map((u) => u.trait).join(", ")}.
         </div>
       )}
       {availableTraits.length > 1 && (
@@ -492,7 +453,10 @@ export function ResultsTab() {
         <div className="tcip-problem">No revision of {trait} is confirmed.</div>
       )}
 
-      <DeliveryEventsPanel records={deliveryEvents} loadError={deliveryEventsError} />
+      <DeliveryEventsPanel
+        records={deliveryEvents?.records ?? []}
+        loadError={deliveryEventsError}
+      />
 
       <div className="tcip-panel p-4">
         <h2 className="tcip-heading mb-3">Export</h2>
@@ -526,8 +490,8 @@ export function ResultsTab() {
               onChange={(e) => setCountBucket(e.target.value)}
             >
               <option value="">Choose predictions</option>
-              {dates.flatMap((d) =>
-                bucketsFor(d).map((name) => (
+              {tree?.captures.flatMap(({ name: d }) =>
+                bucketsForDate(tree, d).map((name) => (
                   <option key={name} value={name}>
                     {`${d} (${name})`}
                   </option>
@@ -658,12 +622,12 @@ export function ResultsTab() {
                 )}
               </div>
             )}
-            {countResultHeaders && (
+            {countExported && (
               <div className="text-tcip-muted">
-                Saved to {countResultHeaders.savedTo}.
-                {countResultHeaders.validated ? "" : " Not validated."}
-                {countResultHeaders.acknowledgedBy
-                  ? ` Acknowledged by ${countResultHeaders.acknowledgedBy}.`
+                Saved to {countExported.saved_path}.
+                {countExported.validated ? "" : " Not validated."}
+                {countExported.acknowledged_by
+                  ? ` Acknowledged by ${countExported.acknowledged_by}.`
                   : ""}
               </div>
             )}
@@ -699,17 +663,17 @@ export function ResultsTab() {
                     </button>
                   </div>
                 )}
-                {!datesError && labelProblem && (
-                  <div className="tcip-problem mb-1">{labelProblem}</div>
+                {!datesError && tree?.label_problem && (
+                  <div className="tcip-problem mb-1">{tree.label_problem}</div>
                 )}
-                {dates.length === 0 ? (
+                {!tree || tree.captures.length === 0 ? (
                   !datesError && <div className="text-tcip-muted">No dates with images.</div>
                 ) : (
                   <div className="max-h-40 overflow-auto rounded border border-tcip-border">
                     <table className="w-full text-[13px]">
                       <tbody>
-                        {dates.map((d) => {
-                          const opts = bucketsFor(d);
+                        {tree.captures.map(({ name: d }) => {
+                          const opts = bucketsForDate(tree, d);
                           return (
                             <tr key={d} className="border-t border-tcip-border first:border-t-0">
                               <td className="py-1 pl-2 pr-2 font-mono tabular-nums">{d}</td>
@@ -756,7 +720,7 @@ export function ResultsTab() {
                   onChange={(e) => setMappingName(e.target.value)}
                 >
                   <option value="">Choose a mapping</option>
-                  {mappingNames.map((name) => (
+                  {(mappings?.names ?? []).map((name) => (
                     <option key={name} value={name}>
                       {name}
                     </option>
@@ -779,7 +743,7 @@ export function ResultsTab() {
                 )}
                 {unvalidatedRefusal && (
                   <div className="tcip-problem flex flex-col gap-2">
-                    <div>No assessment answers for these predictions.</div>
+                    <div>{unvalidatedRefusal.message}</div>
                     <button
                       className="tcip-btn self-start"
                       onClick={() => void compute(true)}
@@ -789,23 +753,10 @@ export function ResultsTab() {
                     </button>
                   </div>
                 )}
-                {unvalidated && unvalidatedReason && (
-                  <div className="tcip-problem">Not validated: {unvalidatedReason}</div>
+                {shownUnvalidated && (
+                  <div className="tcip-problem">Not validated: {shownUnvalidated.message}</div>
                 )}
-                {datesDelivered.length > 0 && (
-                  <div className="text-tcip-muted">
-                    {`Delivered dates ${datesDelivered.join(", ")}: ${imagesUnattributed} attributed to no plant`}
-                  </div>
-                )}
-                {(capturesUnverified.length > 0 || plantCsvsUnverified.length > 0) && (
-                  <div className="text-tcip-muted">
-                    Not verified at delivery time:
-                    {capturesUnverified.length > 0 && ` ${capturesUnverified.join(", ")}`}
-                    {capturesUnverified.length > 0 && plantCsvsUnverified.length > 0 && ";"}
-                    {plantCsvsUnverified.length > 0 &&
-                      ` plant CSV(s) ${plantCsvsUnverified.join(", ")} (path not found)`}
-                  </div>
-                )}
+                {answer && <MappingDisclosureLines disclosure={answer.plant_mapping} />}
                 <button
                   className="tcip-btn-primary"
                   onClick={() => void compute()}
@@ -885,7 +836,7 @@ export function ResultsTab() {
               <ResponsiveContainer width="100%" height="90%">
                 <LineChart data={chartData}>
                   <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
-                  <XAxis dataKey="date" stroke={CHART.axis} style={{ fontSize: 11 }} />
+                  <XAxis dataKey="capture" stroke={CHART.axis} style={{ fontSize: 11 }} />
                   <YAxis stroke={CHART.axis} domain={[0, 1]} style={{ fontSize: 11 }} />
                   <Tooltip
                     contentStyle={{
@@ -920,7 +871,7 @@ export function ResultsTab() {
           <div className="tcip-panel p-4">
             <h2 className="tcip-heading mb-3">
               Milestones
-              {lastRequest && (
+              {answer && (
                 <span className="text-tcip-muted font-normal">
                   {` ${onset.length} ${onset.length === 1 ? "row" : "rows"}`}
                 </span>
@@ -935,9 +886,9 @@ export function ResultsTab() {
                       <th className="tcip-th">Accession</th>
                       <th className="tcip-th">N points</th>
                       <th className="tcip-th">Validity</th>
-                      {milestoneColumns.map((c) => (
-                        <th key={c.date} className="tcip-th">
-                          {c.date}
+                      {Object.keys(onset[0].milestones).map((key) => (
+                        <th key={key} className="tcip-th">
+                          {key}
                         </th>
                       ))}
                     </tr>
@@ -962,7 +913,7 @@ export function ResultsTab() {
                                 no observations
                               </span>
                             ) : rowValid && unvalidated ? (
-                              <span className="tcip-problem" title="No assessment answers">
+                              <span className="tcip-problem" title={shownUnvalidated?.message}>
                                 unvalidated
                               </span>
                             ) : rowValid ? (
@@ -976,9 +927,8 @@ export function ResultsTab() {
                               </span>
                             )}
                           </td>
-                          {milestoneColumns.map((c) => {
-                            const date = r[c.date] as string | null;
-                            const bound = r[c.bound] as string | null;
+                          {Object.entries(r.milestones).map(([key, crossing]) => {
+                            const bound = crossing?.bound;
                             // A censored crossing is a bound on the true date.
                             const marker =
                               bound === "left_censored"
@@ -1001,9 +951,9 @@ export function ResultsTab() {
                                       }
                                     : null;
                             return (
-                              <td key={c.date} className="pr-3 tabular-nums">
-                                {date ?? UNSET_GLYPH}
-                                {date && marker && (
+                              <td key={key} className="pr-3 tabular-nums">
+                                {crossing ? crossing.date : UNSET_GLYPH}
+                                {crossing && marker && (
                                   <span className={`ml-1 ${marker.className}`} title={marker.title}>
                                     {marker.symbol}
                                   </span>

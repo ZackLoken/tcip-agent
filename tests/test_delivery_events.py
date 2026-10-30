@@ -79,16 +79,13 @@ def _record(
     project: Path,
     revision: TraitRevision,
     bucket: Bucket | None = None,
-    **disclosed: dict | None,
 ) -> dict:
     """Run ``deliver_csv`` of an empty per-image count delivery under ``revision``.
 
     The delivery is over ``bucket`` (by default a fresh :func:`_bucket`), shipped under a
     breeder's acknowledgment.
     """
-    result = delivery.Result(
-        delivery.DELIVERY_COLUMNS, [], population=[], **disclosed
-    )
+    result = delivery.Result(delivery.DELIVERY_COLUMNS, [], population=[])
     clearance = _cleared(
         project,
         revision,
@@ -185,7 +182,6 @@ def test_a_web_route_writes_its_delivery_event_under_the_open_project_only(
         json={
             **body,
             "payload": "milestones",
-            "filename": "x.csv",
             "user": "tester",
         },
     )
@@ -255,34 +251,6 @@ def test_a_record_that_cannot_be_written_raises_before_any_audit_line(
     monkeypatch.undo()
     assert read_delivery_events(tmp_path.resolve()) == []
     assert audit_rows(tmp_path, "delivery_event") == []
-
-
-def test_a_plant_mapping_missing_a_disclosure_key_raises_and_writes_nothing(
-    tmp_path: Path,
-) -> None:
-    """A ``plant_mapping`` missing a required disclosure key raises and writes no CSV or event."""
-    from pydantic import ValidationError
-
-    bad_mapping = {
-        "name": "valley",
-        "dataset_id": "ds-1",
-        "dataset_root": "data",
-        "built_at": "2026-02-01T00:00:00+00:00",
-        "record_sha256": "0" * 64,
-        "match_radius": {},
-        "capture_digests": {},
-        "captures_unverified": [],
-        "plant_csvs_unverified": [],
-        "images_unattributed_scope": "delivered_dates",
-    }
-
-    with pytest.raises(ValidationError):
-        _record(
-            tmp_path, seed_confirmed_count(tmp_path), plant_mapping=bad_mapping
-        )
-
-    assert read_delivery_events(tmp_path) == []
-    assert not (tmp_path / "out" / "counts.csv").exists()
 
 
 def _delivered_disclosure(project: Path, deliver: Callable[[], dict]) -> dict:
@@ -412,7 +380,8 @@ def test_delivery_events_route_lists_a_recorded_event_with_its_revision(
     resp = client.get(DELIVERY_EVENTS_ROUTE)
 
     assert resp.status_code == 200
-    (record,) = resp.json()["records"]
+    (served,) = resp.json()["records"]
+    record = served["event"]
     assert record["door"] == "test_door"
     assert (
         record["trait"],
@@ -456,35 +425,10 @@ def test_delivery_events_route_serves_a_delivered_plant_mapping_disclosure_uncha
     assert resp.status_code == 200
     (record,) = resp.json()["records"]
     assert isinstance(recorded.plant_mapping, PlantMappingDisclosure)
-    assert record["plant_mapping"] == {
-        **recorded.plant_mapping.model_dump(mode="json"),
+    assert record == {
+        "event": recorded.model_dump(mode="json"),
         "resolved_key": recorded.plant_mapping.name,
     }
-    assert record["plant_mapping"]["dates_delivered"] == sorted(series.buckets)
-
-
-def test_a_served_disclosure_is_a_stored_one_its_walked_member_served() -> (
-    None
-):
-    """The served disclosure union is the stored one with the walked mapping's member served.
-
-    Every stored disclosure but the walked mapping's is served as it is stored, so a disclosure
-    the schema adds is served too.
-    """
-    from typing import get_args
-
-    from tcip_mcp.pipelines.delivery_events_schema import (
-        PlantMapping,
-        PlantMappingDisclosure,
-    )
-    from tcip_web.routes.results import (
-        ServedDisclosure,
-        ServedPlantMappingDisclosure,
-    )
-
-    assert get_args(ServedDisclosure) == tuple(
-        ServedPlantMappingDisclosure
-        if member is PlantMappingDisclosure
-        else member
-        for member in get_args(PlantMapping)
+    assert record["event"]["plant_mapping"]["dates_delivered"] == sorted(
+        series.buckets
     )

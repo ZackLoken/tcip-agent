@@ -65,10 +65,16 @@ def test_experiment_list_compare_lineage(tmp_path: Path) -> None:
 
     assert {e.experiment_id for e in run_rows(tmp_path)} == {"e1", "e2"}
 
-    cmp = compare_experiments(["e1", "e2", "missing"], project=tmp_path)
-    assert cmp["count"] == 3
-    first = next(c for c in cmp["experiments"] if c["experiment_id"] == "e1")
-    assert first["model"] == "my_models:tv_resnet50_det"
+    cmp = compare_experiments(
+        ["e1", "e2", "missing"], project=tmp_path
+    ).model_dump()
+    assert len(cmp["experiments"]) == 3
+    first = next(
+        c
+        for c in cmp["experiments"]
+        if "run" in c and c["run"]["experiment_id"] == "e1"
+    )
+    assert first["run"]["builder"] == "my_models:tv_resnet50_det"
     assert first["last_logged_metrics"]["map50"] == 0.6
     assert any(
         "error" in c for c in cmp["experiments"]
@@ -162,26 +168,31 @@ def test_compare_experiments_reports_the_last_row_and_rows_logged_after_the_end(
     Of two rows appended to a completed run, the one stamped now is counted after the end and
     the one stamped in 2000 is not, and the last row appended is the one reported.
     """
+    from tcip_mcp.audit import now
     from tcip_mcp.experiments import (
         METRICS_FILE,
+        MetricsRow,
         append_row,
         compare_experiments,
-        now_iso,
     )
     from tests._verified_checkpoint_fixtures import finished_run
 
     run_dir = finished_run(tmp_path, experiment_id="exp-ended")
     append_row(
         run_dir / METRICS_FILE,
-        {"epoch": 0, "timestamp": now_iso(), "loss": 0.5},
+        MetricsRow.model_validate({"epoch": 0, "timestamp": now(), "loss": 0.5}),
     )
     append_row(
         run_dir / METRICS_FILE,
-        {"epoch": 1, "timestamp": "2000-01-01T00:00:00+00:00", "loss": 0.4},
+        MetricsRow.model_validate(
+            {"epoch": 1, "timestamp": "2000-01-01T00:00:00+00:00", "loss": 0.4}
+        ),
     )
 
-    (c,) = compare_experiments(["exp-ended"], project=tmp_path)["experiments"]
-    assert c["state"] == "completed"
+    (c,) = compare_experiments(["exp-ended"], project=tmp_path).model_dump()[
+        "experiments"
+    ]
+    assert c["run"]["state"] == "completed"
     assert c["last_logged_metrics"]["loss"] == 0.4
     assert c["rows_after_end"] == 1  # the row stamped now, after the end
     assert c["n_epochs"] == 2
@@ -199,16 +210,14 @@ def test_compare_experiments_stale_heartbeat_compares_interrupted(
 
     _opened(tmp_path, "exp-live")
 
-    (live,) = compare_experiments(["exp-live"], project=tmp_path)[
-        "experiments"
-    ]
-    assert (live["state"], live["rows_after_end"]) == ("running", None)
+    (live,) = compare_experiments(["exp-live"], project=tmp_path).experiments
+    assert isinstance(live, experiments.ComparedRun)
+    assert (live.run.state, live.rows_after_end) == ("running", None)
 
     monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", -1.0)
-    (stale,) = compare_experiments(["exp-live"], project=tmp_path)[
-        "experiments"
-    ]
-    assert stale["state"] == "interrupted"
+    (stale,) = compare_experiments(["exp-live"], project=tmp_path).experiments
+    assert isinstance(stale, experiments.ComparedRun)
+    assert stale.run.state == "interrupted"
 
 
 def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
@@ -217,13 +226,16 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
     """``rows_after_end`` compares row timestamps as instants across UTC offsets.
 
     Of five rows stamped in three UTC offsets and a bare "Z", the two whose instants fall
-    strictly after the final status's ``ended`` are counted. A row whose timestamp does not
-    decode refuses the run's comparison, naming the row.
+    strictly after the final status's ``ended`` are counted. A row stating no timestamp refuses
+    the run's comparison, naming the row.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import timedelta, timezone
 
     from tcip_mcp.experiments import (
         METRICS_FILE,
+        ComparedRun,
+        MetricsRow,
+        UncomparedRun,
         append_row,
         compare_experiments,
         observe,
@@ -233,7 +245,7 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
     run_dir = finished_run(tmp_path, experiment_id="exp-instants")
     final = observe(run_dir).final
     assert final is not None
-    ended = datetime.fromisoformat(final.ended)
+    ended = final.ended
 
     def at(offset_s: float, zone: timezone) -> str:
         return (
@@ -264,21 +276,18 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
         {"epoch": 5, "timestamp": at(1, timezone.utc), "loss": 0.5},  # after
     ]
     for row in rows:
-        append_row(run_dir / METRICS_FILE, row)
+        append_row(run_dir / METRICS_FILE, MetricsRow.model_validate(row))
 
-    rows_after_end = compare_experiments(["exp-instants"], project=tmp_path)[
-        "experiments"
-    ][0]
-    assert rows_after_end["rows_after_end"] == 2
+    (compared,) = compare_experiments(
+        ["exp-instants"], project=tmp_path
+    ).experiments
+    assert isinstance(compared, ComparedRun)
+    assert compared.rows_after_end == 2
 
-    append_row(
-        run_dir / METRICS_FILE,
-        {"epoch": 6, "timestamp": 1704110401, "loss": 0.6},
-    )
-    (refused,) = compare_experiments(["exp-instants"], project=tmp_path)[
-        "experiments"
-    ]
-    assert (
-        "epoch': 6" in refused["error"]
-        and "no decodable timestamp" in refused["error"]
-    )
+    with (run_dir / METRICS_FILE).open("ab") as log:
+        log.write(b'{"epoch": 6, "loss": 0.6}\n')
+    (refused,) = compare_experiments(
+        ["exp-instants"], project=tmp_path
+    ).experiments
+    assert isinstance(refused, UncomparedRun)
+    assert "epoch': 6" in refused.error and "timestamp" in refused.error

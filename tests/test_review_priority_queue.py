@@ -1,7 +1,7 @@
 """The review queue routes.
 
-A launched job runs ``prioritize_review_queue`` over the open project and the subject the request
-named, and its status reports the tool's result or refusal.
+A launched job runs ``prioritize_review_queue``'s ranking over the open project's selected capture
+and its subject, and its status reports the ranking's result or refusal.
 """
 
 from __future__ import annotations
@@ -12,12 +12,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tcip_mcp.dataset_layout import image_root
+from tcip_mcp.dataset_layout import image_dir
+from tests._producer_fixtures import write_image
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
     from tcip_mcp.pipelines.active_learning import ScorerSpec
+    from tcip_mcp.tools.feedback_tools import ReviewQueue
 
 QUEUE = {
     "scorer": {"name": "uncertainty"},
@@ -25,6 +27,54 @@ QUEUE = {
     "rationale": "a sample reason the test states",
 }
 """What a launch here states: its scorer block, budget and their reason."""
+
+DATE = "2026-02-11"
+"""The capture a launch here ranks."""
+
+
+def _select(client: TestClient, root: Path, subject: str | None) -> Path:
+    """Select the capture :data:`DATE` of ``root`` for ``subject`` and return its directory.
+
+    Its two images are written first; the selection is made through the select route.
+    """
+    images = image_dir(root, DATE)
+    for name in ("a.jpg", "b.jpg"):
+        write_image(images / name, (8, 8))
+    resp = client.post(
+        "/api/dataset/select",
+        json={"dataset_root": str(root), "subject": subject, "date": DATE},
+    )
+    assert resp.status_code == 200, resp.text
+    return images
+
+
+def _ranked(
+    project: Path,
+    checkpoint_path: Path,
+    images_dir: Path,
+    **kwargs: ScorerSpec | int | str | None,
+) -> ReviewQueue:
+    """Answer the ranking's own answer over two entries, as ``ranked_review_queue`` does."""
+    from tcip_mcp.pipelines.active_learning import ScorerSpec
+    from tcip_mcp.tools.feedback_tools import QueueEntry, ReviewQueue
+
+    scorer, budget, rationale = (
+        kwargs[k] for k in ("scorer", "budget", "rationale")
+    )
+    assert isinstance(scorer, ScorerSpec)
+    assert isinstance(budget, int) and isinstance(rationale, str)
+    return ReviewQueue(
+        scorer=scorer,
+        budget=budget,
+        rationale=rationale,
+        task="detection",
+        total_candidates=3,
+        reviewed_skipped=1,
+        queue=[
+            QueueEntry(image="b.jpg", score=0.9, reference_member=None),
+            QueueEntry(image="a.jpg", score=0.4, reference_member=True),
+        ],
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -48,33 +98,26 @@ def _wait_for_terminal(
 
 
 def test_launch_404s_on_missing_checkpoint(
-    opened_client: TestClient, tmp_path: Path
+    opened_client: TestClient, opened_project: Path
 ) -> None:
-    images = image_root(tmp_path)
-    images.mkdir()
+    _select(opened_client, opened_project, "bud")
     resp = opened_client.post(
         "/api/annotate/queue/launch",
-        json={
-            "checkpoint_path": str(tmp_path / "nope.pt"),
-            "images_dir": str(images),
-            **QUEUE,
-        },
+        json={"checkpoint_path": str(opened_project / "nope.pt"), **QUEUE},
     )
     assert resp.status_code == 404
     assert "checkpoint not found" in resp.json()["detail"]
 
 
 def test_launch_refuses_a_queue_stating_no_scorer_budget_or_reason(
-    opened_client: TestClient, tmp_path: Path
+    opened_client: TestClient, opened_project: Path
 ) -> None:
-    images = image_root(tmp_path)
-    images.mkdir()
+    _select(opened_client, opened_project, "bud")
     for missing in QUEUE:
         resp = opened_client.post(
             "/api/annotate/queue/launch",
             json={
-                "checkpoint_path": str(tmp_path / "nope.pt"),
-                "images_dir": str(images),
+                "checkpoint_path": str(opened_project / "nope.pt"),
                 **{k: v for k, v in QUEUE.items() if k != missing},
             },
         )
@@ -82,21 +125,17 @@ def test_launch_refuses_a_queue_stating_no_scorer_budget_or_reason(
         assert missing in resp.text
 
 
-def test_launch_404s_on_missing_images_dir(
-    opened_client: TestClient, tmp_path: Path
+def test_launch_with_no_capture_selected_answers_400_naming_the_select_route(
+    opened_client: TestClient, opened_project: Path
 ) -> None:
-    ckpt = tmp_path / "model.pt"
+    ckpt = opened_project / "model.pt"
     ckpt.write_bytes(b"not a real checkpoint")
     resp = opened_client.post(
         "/api/annotate/queue/launch",
-        json={
-            "checkpoint_path": str(ckpt),
-            "images_dir": str(tmp_path / "nope"),
-            **QUEUE,
-        },
+        json={"checkpoint_path": str(ckpt), **QUEUE},
     )
-    assert resp.status_code == 404
-    assert "images_dir not found" in resp.json()["detail"]
+    assert resp.status_code == 400, resp.text
+    assert "/api/dataset/select" in resp.json()["detail"]
 
 
 def test_unknown_job_id_404s(opened_client: TestClient) -> None:
@@ -106,14 +145,19 @@ def test_unknown_job_id_404s(opened_client: TestClient) -> None:
 
 def test_job_completes_and_carries_the_tool_s_own_queue(
     opened_client: TestClient,
-    tmp_path: Path,
     opened_project: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    ckpt = tmp_path / "model.pt"
+    """A job over the selected capture answers one record, the ranking's entries in its queue.
+
+    The launch and the status answer the same record; the ranking runs over the selected
+    capture's directory and its subject; the job's queue is the tool's own dumped answer's.
+    """
+    import pydantic_core
+
+    ckpt = opened_project / "model.pt"
     ckpt.write_bytes(b"not a real checkpoint")
-    images = image_root(tmp_path)
-    images.mkdir()
+    images = _select(opened_client, opened_project, "bud")
 
     calls: list[dict] = []
 
@@ -122,7 +166,7 @@ def test_job_completes_and_carries_the_tool_s_own_queue(
         checkpoint_path: Path,
         images_dir: Path,
         **kwargs: ScorerSpec | int | str | None,
-    ) -> dict:
+    ) -> ReviewQueue:
         calls.append(
             {
                 "project": project,
@@ -131,18 +175,7 @@ def test_job_completes_and_carries_the_tool_s_own_queue(
                 **kwargs,
             }
         )
-        return {
-            **{k: kwargs[k] for k in ("budget", "rationale")},
-            "scorer": kwargs["scorer"].model_dump(),
-            "task": "detection",
-            "total_candidates": 3,
-            "reviewed_skipped": 1,
-            "selected_count": 2,
-            "queue": [
-                {"image": "b.jpg", "score": 0.9},
-                {"image": "a.jpg", "score": 0.4},
-            ],
-        }
+        return _ranked(project, checkpoint_path, images_dir, **kwargs)
 
     import tcip_mcp.registry_paths as registry_paths
     import tcip_mcp.tools.feedback_tools as feedback_tools_mod
@@ -163,12 +196,7 @@ def test_job_completes_and_carries_the_tool_s_own_queue(
 
     resp = opened_client.post(
         "/api/annotate/queue/launch",
-        json={
-            "checkpoint_path": str(ckpt),
-            "images_dir": str(images),
-            "subject": "bud",
-            **QUEUE,
-        },
+        json={"checkpoint_path": str(ckpt), **QUEUE},
     )
     assert resp.status_code == 200, resp.text
     launched = resp.json()
@@ -176,52 +204,58 @@ def test_job_completes_and_carries_the_tool_s_own_queue(
 
     body = _wait_for_terminal(opened_client, job_id)
     assert body["status"] == "completed"
-    # Both routes answer the one job record, what it was launched under included.
+    # Both routes answer the one job record; the launch's has no ranking yet.
     assert launched.keys() == body.keys()
-    for answer in (launched, body):
-        assert {name: answer[name] for name in QUEUE} == QUEUE
-    assert body["queue"] == [
-        {"image": "b.jpg", "score": 0.9},
-        {"image": "a.jpg", "score": 0.4},
-    ]
-    assert body["total_candidates"] == 3
-    assert body["reviewed_skipped"] == 1
+    assert launched["ranked"] is None
+    ranked = body["ranked"]
+    assert {name: ranked[name] for name in QUEUE} == QUEUE
+    assert ranked["total_candidates"] == 3
+    assert ranked["reviewed_skipped"] == 1
+    # The checkpoint is located once, at the route's arrival.
+    assert located_paths == [str(ckpt)]
+    # The job's ranking is the tool's own answer, dumped as the server dumps it.
+    from tcip_mcp.pipelines.active_learning import ScorerSpec
 
-    # The route hands over the open project and the subject the request named.
-    assert len(calls) == 1
-    assert (
-        Path(calls[0]["project"]).resolve() == Path(opened_project).resolve()
+    tool_answer = feedback_tools_mod.prioritize_review_queue(
+        opened_project,
+        str(ckpt),
+        str(images),
+        scorer=ScorerSpec.model_validate(QUEUE["scorer"]),
+        budget=QUEUE["budget"],
+        rationale=QUEUE["rationale"],
+        subject="bud",
     )
-    assert calls[0]["subject"] == "bud"
+    assert ranked == pydantic_core.to_jsonable_python(tool_answer)
+
+    # The route hands over the open project and the selected capture and its subject.
+    route_call = calls[0]
     assert (
-        calls[0]["scorer"].model_dump(),
-        calls[0]["budget"],
-        calls[0]["rationale"],
+        Path(route_call["project"]).resolve() == Path(opened_project).resolve()
+    )
+    assert route_call["subject"] == "bud"
+    assert route_call["images_dir"] == images
+    assert (
+        route_call["scorer"].model_dump(),
+        route_call["budget"],
+        route_call["rationale"],
     ) == (QUEUE["scorer"], QUEUE["budget"], QUEUE["rationale"])
-    # The operation is handed the locations the route's own arrival established, each located
-    # once, at that arrival.
-    assert (calls[0]["checkpoint_path"], calls[0]["images_dir"]) == (
-        ckpt.resolve(),
-        images.resolve(),
-    )
-    assert located_paths == [str(ckpt), str(images)]
-    assert "strategy" not in calls[0]
+    assert route_call["checkpoint_path"] == ckpt.resolve()
+    assert "strategy" not in route_call
 
 
 def test_job_fails_honestly_on_the_tool_s_own_refusal(
     opened_client: TestClient,
-    tmp_path: Path,
+    opened_project: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A queue job reports the operation's own refusal as its ``failed`` status.
 
     The operation's soft ``{"error": ...}`` (an unresolvable scorer name, say) surfaces as the
-    job's ``failed`` status with the same message and an empty queue.
+    job's ``failed`` status with the same message and no ranking.
     """
-    ckpt = tmp_path / "model.pt"
+    ckpt = opened_project / "model.pt"
     ckpt.write_bytes(b"not a real checkpoint")
-    images = image_root(tmp_path)
-    images.mkdir()
+    _select(opened_client, opened_project, None)
 
     def fake_ranked_review_queue(
         project: Path,
@@ -239,15 +273,11 @@ def test_job_fails_honestly_on_the_tool_s_own_refusal(
 
     resp = opened_client.post(
         "/api/annotate/queue/launch",
-        json={
-            "checkpoint_path": str(ckpt),
-            "images_dir": str(images),
-            **QUEUE,
-        },
+        json={"checkpoint_path": str(ckpt), **QUEUE},
     )
     job_id = resp.json()["job_id"]
 
     body = _wait_for_terminal(opened_client, job_id)
     assert body["status"] == "failed"
     assert body["error"] == "no scorer registered as 'nonsense'"
-    assert body["queue"] == []
+    assert body["ranked"] is None

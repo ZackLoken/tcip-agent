@@ -97,4 +97,4 @@ def test_inspect_project_reports_the_project_it_is_given(
 
     st = inspect_project(project)
     assert st["project_path"] == str(project)
-    assert st["display_name"] == "Test project"
+    assert st["record"]["display_name"] == "Test project"

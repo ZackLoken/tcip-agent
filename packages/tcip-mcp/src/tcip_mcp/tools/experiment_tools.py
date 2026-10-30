@@ -69,4 +69,4 @@ def list_experiments(project: Path) -> dict:
     """
     from tcip_mcp.experiments import training_listing
 
-    return training_listing(project).model_dump()
+    return training_listing(project).model_dump(mode="json")

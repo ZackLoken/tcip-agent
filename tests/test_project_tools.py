@@ -13,6 +13,7 @@ from tcip_mcp.dataset_layout import image_dir
 from tcip_mcp.registry_paths import stored_path
 from tcip_mcp.tools.project_tools import (
     DatasetEntry,
+    RecentActivity,
     ZipBundle,
     _external_dataset_paths,
     archive_project,
@@ -56,7 +57,7 @@ def _initialized(path: Path) -> dict:
         str(path), "Test project", "north orchard", INVARIANCES, actor=None
     )
     assert "error" not in result, result
-    return result
+    return result["record"]
 
 
 def test_register_dataset_writes_identity_and_registers(
@@ -152,15 +153,12 @@ def test_initialize_project(tmp_path: Path) -> None:
 
 def test_inspect_project(tmp_path: Path) -> None:
     status = inspect_project(tmp_path)
-    assert status["id"] is None
+    assert status["record"] is None
     assert "initialize_project" in status["record_problem"]
 
     record = _initialized(tmp_path)
     status = inspect_project(tmp_path)
-    assert (status["id"], status["display_name"]) == (
-        record["id"],
-        "Test project",
-    )
+    assert status["record"] == record
     assert status["record_problem"] is None
 
 
@@ -169,13 +167,8 @@ def test_inspect_project_folds_in_recent_activity(tmp_path: Path) -> None:
 
     _initialized(tmp_path)
     status = inspect_project(tmp_path)
-    assert status[
-        "recent_activity"
-    ] == {  # no history yet: counted from the log, not corrupt
-        "reports_since_last_retrospective": 0,
-        "reports_since_last_distillation": 0,
-        "retrospectives_since_last_distillation": 0,
-    }
+    # No history yet: counted from the log, not corrupt.
+    assert status["recent_activity"] == RecentActivity().model_dump(mode="json")
 
     report_friction(tmp_path, category="missing_tool", detail="a", actor=None)
     status = inspect_project(tmp_path)
@@ -308,7 +301,7 @@ def test_export_import_roundtrip(tmp_path: Path) -> None:
     assert imported["files_extracted"] == exported["files_added"]
 
     status = inspect_project(dest)
-    assert status["id"] == record["id"]
+    assert status["record"]["id"] == record["id"]
     # inspect_project counts raw image files, so the two sibling bands count separately here;
     # the logical-image count the band group folds them into is asserted below.
     assert status["image_count"] == 3
@@ -915,10 +908,10 @@ def test_initialize_project_refuses_unstated_invariances_and_one_unstated_invari
     """``initialize_project`` refuses an absent invariances block, and one lacking ``scale``.
 
     Both refusals are validation errors naming what is missing, and nothing is created; a whole
-    stated block is read back by ``inspect_project`` and ``record_fields``, a rotation stated as 5
+    stated block is read back by ``inspect_project`` and ``read_record``, a rotation stated as 5
     read back as the float 5.0.
     """
-    from tcip_mcp.project_record import record_fields
+    from tcip_mcp.project_record import read_record
 
     stated = {
         "project_path": str(tmp_path / "stated"),
@@ -944,11 +937,16 @@ def test_initialize_project_refuses_unstated_invariances_and_one_unstated_invari
         "initialize_project", {**stated, "invariances": answers}
     )
     assert isinstance(admitted, dict), admitted
-    assert admitted["display_name"] == "Test project", admitted
-    for read in (inspect_project, record_fields):
-        invariances = read(tmp_path / "stated")["invariances"]
-        assert invariances == answers, read
-        assert isinstance(invariances["rotation"], float), read
+    record = admitted["record"]
+    assert isinstance(record, dict), admitted
+    assert record["display_name"] == "Test project", admitted
+    read_back = (
+        inspect_project(tmp_path / "stated")["record"]["invariances"],
+        read_record(tmp_path / "stated").invariances.model_dump(),
+    )
+    for invariances in read_back:
+        assert invariances == answers, invariances
+        assert isinstance(invariances["rotation"], float), invariances
 
 
 @pytest.mark.parametrize(
@@ -1156,20 +1154,20 @@ def test_initialize_project_records_on_a_directory_that_gained_tcip_with_no_crea
     assert result["site"] == "north orchard"
 
 
-def test_inspect_project_reports_the_record_fields_across_project_states(
+def test_inspect_project_reports_the_record_across_project_states(
     tmp_path: Path,
 ) -> None:
-    """``inspect_project`` reports the record's fields, or its absence, across project states.
+    """``inspect_project`` reports the record, or its absence, across project states.
 
     A path with no record carries the absent-record problem text; a project with a record carries
-    its fields and no problem.
+    it and no problem.
     """
     from tcip_mcp.tools.meta_tools import report_friction
 
     bare = tmp_path / "no_tcip"
     bare.mkdir()
     status = inspect_project(bare)
-    assert status["site"] is None
+    assert status["record"] is None
     assert "initialize_project" in status["record_problem"]
 
     recordless = tmp_path / "recordless"
@@ -1178,13 +1176,13 @@ def test_inspect_project_reports_the_record_fields_across_project_states(
         recordless, category="missing_tool", detail="a", actor=None
     )
     status = inspect_project(recordless)
-    assert status["site"] is None
+    assert status["record"] is None
     assert "initialize_project" in status["record_problem"]
 
     recorded = tmp_path / "recorded"
     _initialized(recorded)
     status = inspect_project(recorded)
-    assert status["site"] == "north orchard"
+    assert status["record"]["site"] == "north orchard"
     assert status["record_problem"] is None
 
 
@@ -1198,7 +1196,7 @@ def test_inspect_project_reports_an_invalid_record(tmp_path: Path) -> None:
 
     status = inspect_project(tmp_path)
 
-    assert status["site"] is None
+    assert status["record"] is None
     assert "is not a project record" in status["record_problem"]
 
 

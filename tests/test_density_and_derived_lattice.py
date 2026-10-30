@@ -816,7 +816,9 @@ def test_a_bespoke_body_tiles_at_the_lattice_it_states_and_validates_over_its_ti
     assert observation.checkpoint is not None, observation.final
 
     (row,) = [
-        r for r in read_rows(observation.metrics_log)[0] if "tile_size" in r
+        logged
+        for r in read_rows(observation.metrics_log)[0]
+        if "tile_size" in (logged := r.model_dump())
     ]
     assert (row["tile_size"], row["overlap"]) == COMPOSED_LATTICE
     resolution = observation.record.resolution
@@ -1106,6 +1108,7 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.pipelines.derivations import detection_cap
     from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.pipelines.training.evaluation import score_bucket
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.tools.proposal_tools import stage_proposals
@@ -1164,7 +1167,7 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
 
     def row(name: str) -> dict:
         score_bucket(
-            [resolve_image_path(image)],
+            [SourceHeader(resolve_image_path(image))],
             read_bucket(tmp_path, name),
             iou_threshold=0.5,
             conf_threshold=0.0,
@@ -1174,7 +1177,7 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
 
     density = verified_checkpoint(tmp_path).geometry.object_density
     assert density is not None
-    capped, proposed = row("capped"), row(staged["bucket"])
+    capped, proposed = row("capped"), row(staged.bucket)
     assert capped["cap"] == detection_cap(density, 96 * 96)
     assert capped["count"] == len(capped["dt"]) <= capped["cap"]
     assert (proposed["cap"], proposed["count"]) == (None, 1)

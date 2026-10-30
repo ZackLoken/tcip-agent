@@ -22,7 +22,11 @@ import {
   FOCUS_HALO,
   MATCH_COLORS,
 } from "@/lib/symbology";
+import { useStore } from "@/store";
 import type { Box, PointShape, Proposal } from "@/store/types";
+import { ANNOTATE_ANSWERS } from "@/test/annotate";
+import { canvasBody } from "@/test/canvasBody";
+import { servedFlag, servedProposal } from "@/test/labels";
 
 const RED = subjectColor("subject_a");
 const OTHER = subjectColor("other");
@@ -31,11 +35,9 @@ const focusOn = (shape: ReviewItem["shape"], ref: number): ReviewItem => ({
   kind: "annotation",
   shape,
   ref,
-  subject: "",
+  annotation: { subject: "", attributes: {}, iscrowd: false },
   bbox: [0, 0, 0, 0],
   match: null,
-  reviewed: true,
-  score: null,
   at: [0, 0],
   flags: [],
 });
@@ -122,6 +124,7 @@ describe("buildAnnotateShapes", () => {
         ] as [number, number][][],
         subject: "subject_a",
         attributes: {},
+        iscrowd: false,
       },
       {
         rings: [
@@ -133,6 +136,7 @@ describe("buildAnnotateShapes", () => {
         ] as [number, number][][],
         subject: "other",
         attributes: {},
+        iscrowd: false,
       },
     ],
     mode: "polygon",
@@ -145,8 +149,8 @@ describe("buildAnnotateShapes", () => {
     const shapes = buildAnnotateShapes(base);
     expect(shapes).toHaveLength(1); // "other" filtered out (not focused)
     expect(shapes[0]).toMatchObject({ kind: "polygon", color: RED, tag: "gt" });
-    expect(shapes[0].label).toBeUndefined();
-    expect(shapes[0].halo).toBeUndefined();
+    expect(shapes[0].label).toBeNull();
+    expect(shapes[0].halo).toBeNull();
   });
 
   it("every committed shape carries the casing, focused or not", () => {
@@ -198,7 +202,7 @@ describe("buildAnnotateShapes", () => {
     });
     const [start, tail] = buildAnnotateShapes({ ...base, draft }).slice(-2);
     expect(start).toMatchObject({ label: "cut", points: [[3, 4]], color: "#123456" });
-    expect(start).not.toHaveProperty("vertices");
+    expect(start).toMatchObject({ vertices: true });
     expect(tail).toMatchObject({
       points: [
         [3, 4],
@@ -234,14 +238,22 @@ describe("buildAnnotateShapes", () => {
       mode: "box",
       polygons: [], // isolate the editable-box behavior from the derived-box overlay
       boxes: [
-        { x1: 12, y1: 7, x2: 41, y2: 23, subject: base.activeSubject, attributes: {} },
-        { x1: 60, y1: 3, x2: 71, y2: 19, subject: "other", attributes: {} },
+        {
+          x1: 12,
+          y1: 7,
+          x2: 41,
+          y2: 23,
+          subject: base.activeSubject,
+          attributes: {},
+          iscrowd: false,
+        },
+        { x1: 60, y1: 3, x2: 71, y2: 19, subject: "other", attributes: {}, iscrowd: false },
       ],
     });
     // Only the active subject's real box renders, solid (editable).
     expect(shapes).toHaveLength(1);
     expect(shapes[0]).toMatchObject({ kind: "box", xyxy: [12, 7, 41, 23] });
-    expect(shapes[0].dash).toBeUndefined();
+    expect(shapes[0].dash).toBeNull();
   });
 
   it("an editable box keeps x before y in the wire tuple its renderer reads", () => {
@@ -251,7 +263,15 @@ describe("buildAnnotateShapes", () => {
       mode: "box",
       polygons: [],
       boxes: [
-        { x1: 33.04, y1: 6.06, x2: 90.11, y2: 58.02, subject: base.activeSubject, attributes: {} },
+        {
+          x1: 33.04,
+          y1: 6.06,
+          x2: 90.11,
+          y2: 58.02,
+          subject: base.activeSubject,
+          attributes: {},
+          iscrowd: false,
+        },
       ],
     });
     expect(shapes).toHaveLength(1);
@@ -265,8 +285,8 @@ describe("buildAnnotateShapes", () => {
     const derived = shapes.filter((s) => s.kind === "box");
     expect(derived).toHaveLength(1); // only the active "subject_a" polygon; "other" is filtered out
     expect(derived[0]).toMatchObject({ xyxy: ringsBbox(base.polygons[0].rings) });
-    expect(derived[0].label).toBeUndefined();
-    expect(derived[0].dash).toBeUndefined();
+    expect(derived[0].label).toBeNull();
+    expect(derived[0].dash).toBeNull();
   });
 
   it("pushes every ring of a multi-ring polygon, sharing its color, labeled once when focused", () => {
@@ -287,6 +307,7 @@ describe("buildAnnotateShapes", () => {
       ] as [number, number][][],
       subject: "subject_a",
       attributes: {},
+      iscrowd: false,
     };
     const shapes = buildAnnotateShapes({
       ...base,
@@ -316,6 +337,7 @@ describe("buildAnnotateShapes", () => {
       ] as [number, number][][],
       subject: "subject_a",
       attributes: {},
+      iscrowd: false,
     };
     const shapes = buildAnnotateShapes({ ...base, mode: "box", boxes: [], polygons: [multi] });
     const derived = shapes.filter((s) => s.kind === "box");
@@ -331,8 +353,8 @@ describe("buildAnnotateShapes", () => {
       mode: "point",
       polygons: [],
       points: [
-        { x: 5.06, y: 7.04, subject: "subject_a", attributes: {} },
-        { x: 50, y: 60, subject: "other", attributes: {} },
+        { x: 5.06, y: 7.04, subject: "subject_a", attributes: {}, iscrowd: false },
+        { x: 50, y: 60, subject: "other", attributes: {}, iscrowd: false },
       ],
     });
     expect(shapes).toHaveLength(1); // "other" filtered out, exactly like the box/polygon rules
@@ -346,7 +368,7 @@ describe("buildAnnotateShapes", () => {
   });
 
   it("the focused point is pushed haloed in its own color, and no point draws outside point mode", () => {
-    const points = [{ x: 5, y: 7, subject: "other", attributes: {} }];
+    const points = [{ x: 5, y: 7, subject: "other", attributes: {}, iscrowd: false }];
     const focused = buildAnnotateShapes({
       ...base,
       mode: "point",
@@ -363,7 +385,7 @@ describe("buildAnnotateShapes", () => {
       mode: "box",
       boxes: [],
       polygons: [],
-      points: [...points, { x: 9, y: 9, subject: "subject_a", attributes: {} }],
+      points: [...points, { x: 9, y: 9, subject: "subject_a", attributes: {}, iscrowd: false }],
       focused: focusOn("point", 0),
     });
     expect(inBoxMode.filter((s) => s.kind === "point")).toHaveLength(0);
@@ -373,8 +395,8 @@ describe("buildAnnotateShapes", () => {
     const shapes = buildAnnotateShapes({
       ...base,
       mode: "point",
-      boxes: [{ x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {} }],
-      points: [{ x: 1, y: 1, subject: "subject_a", attributes: {} }],
+      boxes: [{ x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {}, iscrowd: false }],
+      points: [{ x: 1, y: 1, subject: "subject_a", attributes: {}, iscrowd: false }],
     });
     expect(shapes.filter((s) => s.kind === "box")).toHaveLength(0);
     expect(shapes.filter((s) => s.kind === "point")).toHaveLength(1);
@@ -386,19 +408,28 @@ describe("buildAnnotateShapes", () => {
         ...base,
         mode: "point",
         visible: false,
-        points: [{ x: 1, y: 1, subject: "subject_a", attributes: {} }],
+        points: [{ x: 1, y: 1, subject: "subject_a", attributes: {}, iscrowd: false }],
       }),
     ).toEqual([]);
   });
 
   it("a tool's box pushes dashed and, when focused, the authorship suffix in its label", () => {
     const boxes = [
-      { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {}, authorship: "tool" },
+      {
+        x1: 0,
+        y1: 0,
+        x2: 5,
+        y2: 5,
+        subject: "subject_a",
+        attributes: {},
+        iscrowd: false,
+        authorship: "tool" as const,
+      },
     ];
     const atRest = buildAnnotateShapes({ ...base, mode: "box", polygons: [], boxes });
     expect(atRest).toHaveLength(1);
     expect(atRest[0]).toMatchObject({ dash: DOTTED_DASH });
-    expect(atRest[0].label).toBeUndefined();
+    expect(atRest[0].label).toBeNull();
     const focused = buildAnnotateShapes({
       ...base,
       mode: "box",
@@ -415,10 +446,19 @@ describe("buildAnnotateShapes", () => {
       mode: "box",
       polygons: [],
       boxes: [
-        { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {}, authorship: "person" },
+        {
+          x1: 0,
+          y1: 0,
+          x2: 5,
+          y2: 5,
+          subject: "subject_a",
+          attributes: {},
+          iscrowd: false,
+          authorship: "person",
+        },
       ],
     });
-    expect(shapes[0].dash).toBeUndefined();
+    expect(shapes[0].dash).toBeNull();
   });
 
   it("a tool's polygon and a tool's point push dashed", () => {
@@ -431,7 +471,9 @@ describe("buildAnnotateShapes", () => {
       ...base,
       mode: "point",
       polygons: [],
-      points: [{ x: 1, y: 1, subject: "subject_a", attributes: {}, authorship: "tool" }],
+      points: [
+        { x: 1, y: 1, subject: "subject_a", attributes: {}, iscrowd: false, authorship: "tool" },
+      ],
     });
     expect(point[0].dash).toEqual(DOTTED_DASH);
   });
@@ -445,7 +487,7 @@ describe("buildAnnotateShapes", () => {
     });
     const derived = shapes.find((s) => s.kind === "box")!;
     expect(derived.dash).toEqual(DOTTED_DASH);
-    expect(derived.label).toBeUndefined();
+    expect(derived.label).toBeNull();
   });
 
   it("box mode draws no polygon outline, and the rubber-band box rides along", () => {
@@ -477,19 +519,10 @@ describe("buildAnnotateShapes", () => {
       flagMarks: [
         {
           at: [12.04, 30],
-          flag: {
-            id: "f1",
+          flag: servedFlag({
             text: "open?",
-            by: "user:a",
-            at: "2026-01-01T00:00:00+00:00",
-            point: [12.04, 30],
-            subject: "subject_a",
-            proposal: null,
-            resolved_by: null,
-            resolved_at: null,
-            reply: "",
-            removed: false,
-          },
+            target: { point: [12.04, 30], subject: "subject_a" },
+          }),
         },
       ],
     });
@@ -504,8 +537,26 @@ describe("buildAnnotateShapes", () => {
 
   it("colors every shape by its match type while reviewing, the subject color otherwise", () => {
     const boxes = [
-      { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {}, index: 0 },
-      { x1: 10, y1: 10, x2: 15, y2: 15, subject: "subject_a", attributes: {}, index: 1 },
+      {
+        x1: 0,
+        y1: 0,
+        x2: 5,
+        y2: 5,
+        subject: "subject_a",
+        attributes: {},
+        iscrowd: false,
+        index: 0,
+      },
+      {
+        x1: 10,
+        y1: 10,
+        x2: 15,
+        y2: 15,
+        subject: "subject_a",
+        attributes: {},
+        iscrowd: false,
+        index: 1,
+      },
     ];
     const reviewing = buildAnnotateShapes({
       ...base,
@@ -547,6 +598,7 @@ describe("the shapes the server render is fed", () => {
           ],
           subject: "subject_a",
           attributes: {},
+          iscrowd: false,
           authorship: "tool",
         },
       ],
@@ -555,7 +607,16 @@ describe("the shapes the server render is fed", () => {
       ...args,
       mode: "point",
       polygons: [],
-      points: [{ x: 700, y: 100, subject: "subject_a", attributes: {}, authorship: "tool" }],
+      points: [
+        {
+          x: 700,
+          y: 100,
+          subject: "subject_a",
+          attributes: {},
+          iscrowd: false,
+          authorship: "tool",
+        },
+      ],
     });
     const firstVertex = buildAnnotateShapes({
       ...args,
@@ -586,48 +647,41 @@ describe("buildAnnotateShapes proposals", () => {
     visible: true,
     colorFor: subjectColor,
   };
+  const BUCKET = ANNOTATE_ANSWERS.buckets.review;
   const proposal = (over: Partial<Proposal>): Proposal => ({
-    subject: "subject_a",
-    attributes: {},
-    iscrowd: false,
-    score: 0.9,
-    index: 0,
-    paired: null,
-    decision: null,
-    ...over,
+    ...servedProposal({ subject: "subject_a", score: 0.9, ...over }),
+    bucket: BUCKET,
   });
 
   it("mirrors the shown proposals dotted in their match color, every ring, the focused one haloed", () => {
+    const proposals = [
+      proposal({ index: 0, bbox: [1, 2, 11, 12] }),
+      proposal({
+        index: 1,
+        paired: 4,
+        rings: [
+          [
+            [0, 0],
+            [10, 0],
+            [10, 10],
+          ],
+          [
+            [40, 40],
+            [60, 40],
+            [60, 60],
+          ],
+        ],
+      }),
+    ];
     const shapes = buildAnnotateShapes({
       ...base,
-      proposals: [
-        proposal({ index: 0, bbox: [1, 2, 11, 12] }),
-        proposal({
-          index: 1,
-          paired: 4,
-          rings: [
-            [
-              [0, 0],
-              [10, 0],
-              [10, 10],
-            ],
-            [
-              [40, 40],
-              [60, 40],
-              [60, 60],
-            ],
-          ],
-        }),
-      ],
+      proposals,
       focused: {
         kind: "proposal",
+        proposal: proposals[1],
         shape: "polygon",
-        ref: 1,
-        subject: "subject_a",
         bbox: [0, 0, 60, 60],
         match: "proposal_only",
-        reviewed: false,
-        score: 0.9,
         at: [30, 30],
         flags: [],
       },
@@ -647,12 +701,22 @@ describe("buildAnnotateShapes proposals", () => {
     expect(shown[1].label).toContain("pairs with an annotation");
   });
 
+  it("mirrors a point proposal as one point mark, as the canvas draws it", () => {
+    const shapes = buildAnnotateShapes({
+      ...base,
+      proposals: [proposal({ point: [5, 7] })],
+    });
+    expect(shapes.filter((s) => s.tag === "proposal")).toEqual([
+      expect.objectContaining({ kind: "point", points: [[5, 7]], dash: DOTTED_DASH }),
+    ]);
+  });
+
   it("a paired proposal carries no label unless focused", () => {
     const shapes = buildAnnotateShapes({
       ...base,
       proposals: [proposal({ bbox: [1, 2, 11, 12], paired: 0 })],
     });
-    expect(shapes[0].label).toBeUndefined();
+    expect(shapes[0].label).toBeNull();
   });
 
   it("the labels toggle hides proposals too", () => {
@@ -699,26 +763,21 @@ describe("shapeVisible", () => {
 });
 
 describe("createCanvasPusher", () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
-
-  const body = (): CanvasStateBody => ({
-    project_id: "a1b2c3d4e5f6",
-    tab: "annotate",
-    image_path: "/p/img.jpg",
-    image: "img.jpg",
-    img_width: 100,
-    img_height: 80,
-    viewport: null,
-    mode: "box",
-    active_subject: null,
-    cut_armed: false,
-    dirty: false,
-    user: "grower",
-    classes: [],
-    counts: {},
-    shapes: [{ kind: "box", xyxy: [0, 0, 1, 1], color: "#fff", tag: "gt" }],
+  beforeEach(() => {
+    vi.useFakeTimers();
+    useStore.getState().setMode("box");
+    useStore.getState().setActiveSubject("subject_a");
+    useStore
+      .getState()
+      .add("boxes", { x1: 0, y1: 0, x2: 1, y2: 1, subject: "subject_a", attributes: {} });
   });
+  afterEach(() => {
+    vi.useRealTimers();
+    useStore.getState().clearCanvas(null);
+  });
+
+  /** The canvas's own full push body over the one box drawn. */
+  const body = () => canvasBody(true);
 
   it("carries cut_armed through to the post untouched (the pusher never special-cases it)", () => {
     const posts: CanvasStateBody[] = [];
@@ -798,7 +857,7 @@ describe("createCanvasPusher", () => {
       (b) => {
         if (fail) return Promise.reject(new Error("boom"));
         posts.push(b);
-        return Promise.resolve();
+        return Promise.resolve(null);
       },
       { debounceMs: 100, maxWaitMs: 1000 },
     );
@@ -806,30 +865,6 @@ describe("createCanvasPusher", () => {
     vi.advanceTimersByTime(150); // fires; the post rejects
     await Promise.resolve(); // let the rejection handler run
     fail = false;
-    p.schedule(body, false); // a mere heartbeat follows...
-    vi.advanceTimersByTime(150);
-    expect(posts).toHaveLength(1);
-    expect(posts[0].shapes).not.toBeNull(); // ...but the owed geometry ships with it
-  });
-
-  it("a conflict-resolved full post re-arms the geometry, the masquerade case", async () => {
-    // pushState resolves {status:"conflict"} on a 409 rather than rejecting; the re-arm must
-    // still fire, or a later heartbeat pairs fresh meta with the pre-conflict geometry.
-    const posts: CanvasStateBody[] = [];
-    let conflict = true;
-    const p = createCanvasPusher(
-      (b) => {
-        if (conflict) return Promise.resolve({ status: "conflict" as const });
-        posts.push(b);
-        return Promise.resolve({ status: "ok" as const, shapes_written: true });
-      },
-      { debounceMs: 100, maxWaitMs: 1000 },
-    );
-    p.schedule(body, true);
-    vi.advanceTimersByTime(150); // fires; the post resolves as a conflict
-    await Promise.resolve();
-    await Promise.resolve();
-    conflict = false;
     p.schedule(body, false); // a mere heartbeat follows...
     vi.advanceTimersByTime(150);
     expect(posts).toHaveLength(1);

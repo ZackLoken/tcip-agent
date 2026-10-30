@@ -24,6 +24,7 @@ from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.tools.phenology_tools import build_plant_mapping
 from tcip_mcp.tools.project_tools import register_dataset
 from tcip_mcp.traits import registered_crops
+from tcip_web.routes.audit_gap import AuditGapRefusal
 from tests._audit_fixtures import audit_rows, held_by_another_writer
 from tests._image_fixtures import write_geo_image
 from tests._mapping_fixtures import (
@@ -111,10 +112,11 @@ def _deliver(
     dataset_root: Path,
     buckets: Iterable[str],
     output_csv_path: str,
+    by: str = "user:breeder",
 ) -> dict:
     """Run ``deliver_phenology_milestones``'s measurement and delivery through the library.
 
-    The delivery ships under a breeder's acknowledgment; a refusal answers ``{"error": ...}``.
+    The delivery ships under ``by``'s acknowledgment; a refusal answers ``{"error": ...}``.
     """
     from tcip_mcp.pipelines.postprocessing import phenology
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
@@ -136,12 +138,13 @@ def _deliver(
             lambda ack: phenology.deliver_phenology(
                 project,
                 measurement,
-                curves=False,
+                projection="milestones",
                 output_path=Path(output_csv_path),
                 acknowledgment_id=ack,
                 door=DOOR,
                 actor=None,
             ),
+            by=by,
             reason="mapping rails, not the assessment",
         )
     except (
@@ -992,12 +995,10 @@ def test_the_web_build_route_answers_409_when_the_receipt_cannot_be_written(
             },
         )
     assert resp.status_code == 409, resp.text
-    detail = resp.json()["detail"]
-    assert isinstance(detail, dict), detail
-    assert detail.get("error") == "audit_entry_not_written"
-    assert "plant_mapping_built" in (detail.get("message") or "")
+    refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
+    assert "plant_mapping_built" in refusal.message
     # A record no receipt names is no mapping a reader loads, so nothing is offered as committed.
-    assert detail.get("committed") is None
+    assert refusal.committed is None
     with pytest.raises(ValueError, match="no plant_mapping_built receipt"):
         plant_mapping.load_mapping(tmp_path, "valley")
 
@@ -1079,9 +1080,9 @@ def test_a_supersede_whose_receipt_fails_answers_409_and_the_archive_still_loads
         },
     )
     assert resp.status_code == 409, resp.text
-    detail = resp.json()["detail"]
-    assert detail["error"] == "audit_entry_not_written"
-    assert detail["committed"] is None
+    assert (
+        AuditGapRefusal.model_validate(resp.json()["detail"]).committed is None
+    )
 
     archived_digest = plant_mapping.record_digest(old_record)
     archived = plant_mapping.load_mapping(
@@ -1153,7 +1154,7 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
         actor=None,
     )
     assert "error" not in build_res, build_res
-    assert build_res["summary"]["totals"]["n_dates"] == len(DATES)
+    assert len(build_res["per_date"]) == len(DATES)
 
     build = plant_mapping.load_mapping(tmp_path, "valley")
     assert build is not None

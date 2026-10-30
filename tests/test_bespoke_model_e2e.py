@@ -168,7 +168,9 @@ def test_bespoke_detector_end_to_end(tmp_path: Path) -> None:
 
     # ---- (b) the custom loop's metrics + the audit bracket were recorded via ctx/envelope ----
     metric_rows = read_rows(out / METRICS_FILE)[0]
-    assert metric_rows and all("train_loss" in r for r in metric_rows)
+    assert metric_rows and all(
+        "train_loss" in r.model_dump() for r in metric_rows
+    )
     events = audit_rows(tmp_path, "training_run")
     # opened + closed around the body
     assert [e["status"] for e in events] == ["running", "completed"]

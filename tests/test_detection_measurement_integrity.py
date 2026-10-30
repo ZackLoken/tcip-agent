@@ -348,7 +348,7 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(
     del payload[CONFIG_KEY]["data"]["num_channels"]
     unstated = tmp_path / "unstated.pt"
     torch.save(payload, str(unstated))
-    assert "error" not in register_model(
+    register_model(
         tmp_path,
         name="unstated-width",
         checkpoint_path=str(unstated),

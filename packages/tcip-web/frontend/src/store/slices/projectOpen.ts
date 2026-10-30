@@ -2,15 +2,21 @@ import type { StateCreator } from "zustand";
 
 import type { AppState } from "@/store/appState";
 
-/** The picker's chosen project and the capture, subject and bucket to open it on. */
+/** The picker's chosen project and the capture, subject and bucket to open it on, each null
+ *  while none is chosen. */
 export interface OpenChoice {
   projectId: string | null;
-  date: string;
-  subject: string;
-  bucket: string;
+  date: string | null;
+  subject: string | null;
+  bucket: string | null;
 }
 
-export const NO_OPEN_CHOICE: OpenChoice = { projectId: null, date: "", subject: "", bucket: "" };
+export const NO_OPEN_CHOICE: OpenChoice = {
+  projectId: null,
+  date: null,
+  subject: null,
+  bucket: null,
+};
 
 /** A failed open and the project it was started for. */
 export interface OpenFailure {

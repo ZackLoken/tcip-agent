@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { Flag } from "@/store/types";
+import type { ServedFlag } from "@/api/types.generated";
 
 /** The flags on one target (the focused item, or the image as a whole): each open flag with who
  *  raised it and a reply that resolves it, and a comment box that raises a new one. */
@@ -14,7 +14,7 @@ export function FlagPanel({
   /** What a new flag lands on, as the stepper names it ("pod box", "this image"). */
   target: string;
   /** The open flags on that target. */
-  flags: Flag[];
+  flags: ServedFlag[];
   /** Raises the flag; resolves whether it was saved, so the comment stays until it is. */
   onRaise: (text: string) => Promise<boolean>;
   onResolve: (id: string, reply: string) => void;
@@ -55,13 +55,13 @@ export function FlagPanel({
         <ul className="mb-2 space-y-2">
           {flags.map((flag) => (
             <li key={flag.id} className="rounded border border-tcip-border p-2">
-              <p className="text-tcip-fg">{flag.text}</p>
+              <p className="text-tcip-fg">{flag.request.text}</p>
               <p className="mb-1.5 text-[13px] text-tcip-muted">
                 {flag.by}, {flag.at.slice(0, 10)}
               </p>
               <div className="flex gap-1.5">
                 <input
-                  aria-label={`Reply to "${flag.text}"`}
+                  aria-label={`Reply to "${flag.request.text}"`}
                   className="tcip-input h-7 flex-1 text-[13px]"
                   placeholder="reply (optional)"
                   value={replies[flag.id] ?? ""}

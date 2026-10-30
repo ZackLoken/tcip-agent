@@ -3,7 +3,14 @@
 import { getJson, postJson, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import type {
+  CompareBestPayload,
+  Comparison,
+  ExperimentComparePayload,
   Launched,
+  PersonPayload,
+  Ranking,
+  RelaunchPayload,
+  SplitChoices,
   TensorboardLaunch,
   TrainingDetail,
   TrainingListing,
@@ -12,111 +19,13 @@ import type {
 } from "@/api/types.generated";
 import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
 
-/** A metrics mapping as the backend sends it, a metrics log row or a checkpoint's metrics: a JSON
- * object whose values are any JSON, a per-class mapping among them. */
-export type MetricRow = TrainingRowFrame["row"];
-
-export interface AsRecordedChoice {
-  case: "bound" | "drawn";
-  line: string;
-  compatible: boolean;
-  reason: string | null;
-}
-
-export interface SelectionChoice {
-  selection_dir: string;
-  enabled: boolean;
-  reason: string | null;
-  seed: number | null;
-  group_by: string | null;
-  train: number;
-  val: number;
-  calibration: number;
-  /** The recorded data.split keys choosing this partition drops (seed, grouping, ...). */
-  replaced_split_keys: string[];
-}
-
-export interface SplitChoices {
-  as_recorded: AsRecordedChoice;
-  selections: SelectionChoice[];
-}
-
-/** One entry a comparison's own experiment registered, reduced to what leaves the backend. */
-export interface CompareRegistryEntry {
-  name: string;
-  metrics: MetricRow | null;
-  metrics_source: string | null;
-  registered_at: string;
-}
-
-/** The run's own partition, from its resolved record, reduced to the four states a comparison
- * names. */
-export interface CompareSplit {
-  case: "bound" | "drawn" | "spatial" | "none";
-  selection_dir?: string;
-  seed?: number | null;
-}
-
-/** One marked experiment's own column in the comparison, every value labeled by which record
- * it came from. `error` alone (no other field) marks an id compare_experiments could not even
- * read; every other field is absent only on that entry. */
-export interface CompareExperiment {
-  experiment_id: string;
-  error?: string;
-  state?: string | null;
-  n_epochs?: number;
-  last_logged_metrics?: MetricRow;
-  rows_after_end?: number | null;
-  /** The status record's own failure reason; null for a run that never failed. */
-  status_error?: string | null;
-  /** The config's builder; null when the config names none. */
-  model?: string | null;
-  task?: string | null;
-  subject?: string | null;
-  dataset_id?: string | null;
-  dataset_fingerprint?: string | null;
-  split?: CompareSplit;
-  /** The run's own completed checkpoint as a one-entry list; empty for a run that did not
-   * complete. */
-  registry?: CompareRegistryEntry[];
-}
-
-export interface CompareResult {
-  experiments: CompareExperiment[];
-  count: number;
-  /** null when any compared id is an error entry, or a fingerprint is missing/unrecorded/mixed. */
-  same_dataset_fingerprint: boolean | null;
-}
-
-/** One entry the rank excluded for being unverified (metrics_source is not "trainer"). */
-export interface CompareBestExcluded {
-  name: string;
-  metrics_source: string | null;
-}
-
-/** The marked comparison's own best-model answer, as the ranking route projects it. */
-export interface CompareBestResult {
-  name: string;
-  experiment_id: string | null;
-  metrics: MetricRow;
-  metrics_source: string | null;
-  /** The metric the answer was ranked by. */
-  ranking_basis: string;
-  higher_is_better: boolean;
-  direction_source: string;
-  excluded_unverified: CompareBestExcluded[];
-}
-
 export const trainingApi = {
   listSplitChoices: (experiment_id: string) =>
     getJson<SplitChoices>(ROUTES.getTrainingRunsByExperimentIdSplits(experiment_id)),
 
-  /** Start a new run or sweep from the recorded one ``relaunched_from`` names. */
-  relaunch: (relaunched_from: string, user: string, selection_dir?: string | null) =>
-    postJson<Launched>(
-      ROUTES.postTrainingRuns,
-      selection_dir ? { relaunched_from, selection_dir, user } : { relaunched_from, user },
-    ),
+  /** Start a new run or sweep from the recorded one ``relaunched_from`` names, on the partition
+   *  ``selection_dir`` holds, or the recorded one for null. */
+  relaunch: (body: RelaunchPayload) => postJson<Launched>(ROUTES.postTrainingRuns, body),
 
   listRuns: () => getJson<TrainingListing>(ROUTES.getTrainingRuns),
 
@@ -129,25 +38,14 @@ export const trainingApi = {
       {},
     ),
 
-  cancel: (experiment_id: string, user: string) =>
-    postJson<{ experiment_id: string; state: string; cancel_requested: boolean }>(
-      ROUTES.postTrainingRunsByExperimentIdCancel(experiment_id),
-      { user },
-    ),
+  cancel: (experiment_id: string, body: PersonPayload) =>
+    postJson<TrainingDetail>(ROUTES.postTrainingRunsByExperimentIdCancel(experiment_id), body),
 
-  compare: (experiment_ids: string[]) =>
-    postJson<CompareResult>(ROUTES.postTrainingCompare, { experiment_ids }),
+  compare: (body: ExperimentComparePayload) =>
+    postJson<Comparison>(ROUTES.postTrainingCompare, body),
 
-  compareBest: (params: {
-    experiment_ids: string[];
-    metric: string;
-    higher_is_better?: boolean | null;
-    include_unverified?: boolean;
-  }) => postJson<CompareBestResult>(ROUTES.postTrainingCompareBest, params),
-
-  /** Every metric's declared ranking direction, unaudited. */
-  metricDirections: () =>
-    getJson<{ higher_is_better: Record<string, boolean> }>(ROUTES.getTrainingMetricDirections),
+  compareBest: (body: CompareBestPayload) =>
+    postJson<Ranking>(ROUTES.postTrainingCompareBest, body),
 };
 
 export type TrainingStreamMsg = TrainingRowFrame | TrainingStatusFrame;

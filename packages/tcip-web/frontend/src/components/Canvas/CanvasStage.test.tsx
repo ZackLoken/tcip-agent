@@ -100,7 +100,7 @@ const DISPLAY = 1920 * 1080;
 
 const REGION: CanvasRegion = {
   key: "B3",
-  url: api.images.url("m.tif", DISPLAY, { x0: 100, y0: 200, x1: 150, y1: 240 }),
+  url: api.images.url("m.tif", DISPLAY, { region: [100, 200, 150, 240] }),
   x: 100,
   y: 200,
   width: 50,
@@ -153,7 +153,7 @@ describe("CanvasStage regions", () => {
 
     const sharper = {
       ...REGION,
-      url: api.images.url("m.tif", 2 * DISPLAY, { x0: 100, y0: 200, x1: 150, y1: 240 }),
+      url: api.images.url("m.tif", 2 * DISPLAY, { region: [100, 200, 150, 240] }),
     };
     rerender(<CanvasStage {...stageProps([sharper])} />);
     // The replacement is still in flight: the previous bitmap stays, never a blank cell.
@@ -169,7 +169,7 @@ describe("CanvasStage regions", () => {
 
     const panned = {
       ...REGION,
-      url: api.images.url("m.tif", DISPLAY, { x0: 300, y0: 200, x1: 350, y1: 240 }),
+      url: api.images.url("m.tif", DISPLAY, { region: [300, 200, 350, 240] }),
       x: 300,
     };
     rerender(<CanvasStage {...stageProps([panned])} />);

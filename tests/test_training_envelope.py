@@ -106,9 +106,7 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(
     run_training_envelope(ctx)
 
     assert ctx.run.status == "completed"
-    assert [row["epoch"] for row in read_rows(run_dir / METRICS_FILE)[0]] == [
-        1
-    ]
+    assert [row.epoch for row in read_rows(run_dir / METRICS_FILE)[0]] == [1]
     from tcip_mcp.experiments import CONFIG_PATHS
     from tcip_mcp.registry_paths import runtime_paths
 
@@ -351,7 +349,7 @@ def test_report_objective_records_a_selection_row_that_reaches_the_epoch_hook(
 
     metric = ctx.spec.evaluation.selection_metric
     assert seen[-1] == (2, {"selection": 3.14, "selection_metric": metric})
-    last = read_rows(run_dir / METRICS_FILE)[0][-1]
+    last = read_rows(run_dir / METRICS_FILE)[0][-1].model_dump()
     assert (last["epoch"], last["selection"], last["selection_metric"]) == (
         2,
         3.14,

@@ -152,12 +152,10 @@ def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_
 ) -> None:
     """A delivery event names its producer and write time, and its rows repeat neither.
 
-    The delivery's one event carries the bucket's producer and an ISO write time; its one row
+    The delivery's one event carries the bucket's producer and a zoned write instant; its one row
     carries the delivery columns and no producer column.
     """
     pytest.importorskip("torch")
-    from datetime import datetime
-
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.delivery import DELIVERY_COLUMNS, read_delivery_events
     from tcip_mcp.pipelines.postprocessing.export import (
@@ -193,7 +191,7 @@ def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_
 
     (event,) = read_delivery_events(tmp_path)
     assert event.producer == read_bucket(bucket.root, bucket.name).producer
-    datetime.fromisoformat(event.produced_at)
+    assert event.produced_at.tzinfo is not None
     (row,) = csv_rows(out)
     assert set(DELIVERY_COLUMNS) <= set(row)
     assert not {

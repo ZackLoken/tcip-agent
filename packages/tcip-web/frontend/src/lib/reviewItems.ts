@@ -6,46 +6,50 @@
  * steps through a subsequence of that order.
  */
 
+import type { FlagRequest, ServedFlag, ServedProposal } from "@/api/types.generated";
 import { pointInRings, ringsBbox, type Bbox } from "@/lib/polygonGeometry";
-import { personBacked, type MatchType } from "@/lib/symbology";
+import { personBacked, proposalLabel, type MatchType } from "@/lib/symbology";
 import type { Focus } from "@/store/slices/canvas";
 import {
   NO_CONTENT,
   TOOL_ARRAY,
-  type Flag,
-  type FlagRequest,
+  type CanvasAnnotation,
   type Mode,
   type Proposal,
   type ToolContent,
 } from "@/store/types";
 
-export interface ReviewItem {
-  kind: "annotation" | "proposal";
+/** What an item of either kind carries. */
+interface ItemBase {
   /** The item's geometry, named by the tool mode that draws and edits it. */
   shape: Mode;
-  /** The index into the canvas array of its shape, or the proposal's index in its bucket. */
-  ref: number;
-  /** A proposal's bucket, when several buckets' proposals are shown together. */
-  bucket?: string;
-  subject: string;
   bbox: Bbox;
   /** Null while no bucket's proposals are shown. */
   match: MatchType | null;
-  /** Whether a person stands behind it: for an annotation, the backend's authorship says a
-   *  person made it or signed it off (`personBacked`), with or without a bucket shown; a proposal
-   *  shown is always awaiting a decision. */
-  reviewed: boolean;
-  score: number | null;
-  /** An annotation's index in the document it was loaded from; none for one drawn since. */
-  index?: number;
-  /** On a matched annotation: the undecided proposal pairing with it, if any, by its index in
-   *  its bucket. */
-  pairing?: { index: number; bucket?: string };
   /** The place a flag on this item names, inside the item. */
   at: [number, number];
   /** The open flags on it. */
-  flags: Flag[];
+  flags: ServedFlag[];
 }
+
+/** An undecided proposal pairing with no annotation. */
+export interface ProposalItem extends ItemBase {
+  kind: "proposal";
+  proposal: Proposal;
+}
+
+export interface AnnotationItem extends ItemBase {
+  kind: "annotation";
+  /** The index into the canvas array of its shape. */
+  ref: number;
+  /** The canvas annotation it is: its subject, its authorship and its index in the document it
+   *  was loaded from (none for one drawn since). */
+  annotation: CanvasAnnotation;
+  /** On a matched annotation: the undecided proposal pairing with it, if any. */
+  pairing?: Proposal;
+}
+
+export type ReviewItem = AnnotationItem | ProposalItem;
 
 /** An annotation's match under the shown bucket, by the proposals pairing with its document
  *  index. A shape drawn since the load has no index, so nothing pairs with it. */
@@ -102,7 +106,7 @@ function center(bbox: Bbox): [number, number] {
 
 /** The shape a proposal is drawn and reviewed as, with its bounding box; null for one carrying
  *  no geometry. */
-export function proposalGeometry(p: Proposal): { shape: Mode; bbox: Bbox } | null {
+export function proposalGeometry(p: ServedProposal): { shape: Mode; bbox: Bbox } | null {
   if (p.rings?.length) return { shape: "polygon", bbox: ringsBbox(p.rings) };
   if (p.bbox) return { shape: "box", bbox: p.bbox };
   if (p.point) return { shape: "point", bbox: [p.point[0], p.point[1], p.point[0], p.point[1]] };
@@ -111,51 +115,37 @@ export function proposalGeometry(p: Proposal): { shape: Mode; bbox: Bbox } | nul
 
 /** Every item of every geometry: the boxes, polygons and points in canvas order, each matched
  *  one carrying the undecided proposal pairing with it, then, while reviewing, the undecided
- *  proposals that pair with nothing. `flags` are the image's; each item holds its open ones. */
+ *  proposals that pair with nothing. `flags` are the image's; each item holds its open ones, an
+ *  annotation those the document served as on its index. */
 export function reviewItems(args: {
   canvas: ToolContent;
   proposals: Proposal[];
   /** The canvas's match types (`matchTypes`), resolved once for every consumer. */
   matches: MatchTypes;
   reviewing: boolean;
-  flags: Flag[];
-  bucket: string | null;
+  flags: ServedFlag[];
 }): ReviewItem[] {
   const { canvas, proposals, reviewing } = args;
-  const open = args.flags.filter((f) => f.resolved_by === null);
+  const open = args.flags.filter((f) => f.resolution === null);
   const annotation = (
     shape: Mode,
     ref: number,
-    of: { subject: string; index?: number; authorship?: string | null },
+    of: CanvasAnnotation,
     bbox: Bbox,
     at: [number, number],
-  ): ReviewItem => {
+  ): AnnotationItem => {
     const match = args.matches[TOOL_ARRAY[shape]][ref] ?? null;
     const pair = match === "matched" ? pairOf(of.index, proposals) : undefined;
     return {
       kind: "annotation",
       shape,
       ref,
-      subject: of.subject,
+      annotation: of,
       bbox,
       match,
-      reviewed: personBacked(of.authorship),
-      score: null,
-      index: of.index,
-      pairing:
-        pair?.decision === null
-          ? { index: pair.index, ...(pair.bucket !== undefined ? { bucket: pair.bucket } : {}) }
-          : undefined,
+      pairing: pair?.decision === null ? pair : undefined,
       at,
-      flags: open.filter(
-        (f) =>
-          f.point !== null &&
-          f.subject === of.subject &&
-          f.point[0] >= bbox[0] &&
-          f.point[0] <= bbox[2] &&
-          f.point[1] >= bbox[1] &&
-          f.point[1] <= bbox[3],
-      ),
+      flags: open.filter((f) => of.index !== undefined && f.covered_by.includes(of.index)),
     };
   };
   const annotations: ReviewItem[] = [
@@ -172,26 +162,23 @@ export function reviewItems(args: {
     ...canvas.points.map((p, i) => annotation("point", i, p, [p.x, p.y, p.x, p.y], [p.x, p.y])),
   ];
   if (!reviewing) return annotations;
-  const unpaired: ReviewItem[] = [];
+  const unpaired: ProposalItem[] = [];
   for (const p of proposals) {
     const geometry = proposalGeometry(p);
     if (p.decision !== null || p.paired !== null || !geometry) continue;
     unpaired.push({
       kind: "proposal",
+      proposal: p,
       shape: geometry.shape,
-      ref: p.index,
-      ...(p.bucket !== undefined ? { bucket: p.bucket } : {}),
-      subject: p.subject,
       bbox: geometry.bbox,
       match: "proposal_only",
-      reviewed: false,
-      score: p.score ?? null,
       at: center(geometry.bbox),
       flags: open.filter(
-        (f) =>
-          f.proposal !== null &&
-          f.proposal[0] === (p.bucket ?? args.bucket) &&
-          f.proposal[1] === p.index,
+        ({ request: { target } }) =>
+          target !== null &&
+          "bucket" in target &&
+          target.bucket === p.bucket &&
+          target.index === p.index,
       ),
     });
   }
@@ -199,19 +186,18 @@ export function reviewItems(args: {
 }
 
 /** Where each of `flags` draws its mark: at its own point, or at the center of the proposal it
- *  names when that proposal is one of `proposals` under `bucket`; a flag on the image as a whole
- *  has no place. */
+ *  names when that proposal is one of `proposals`; a flag on the image as a whole has no place. */
 export function flagPlaces(
-  flags: Flag[],
+  flags: ServedFlag[],
   proposals: Proposal[],
-  bucket: string | null,
-): { at: [number, number]; flag: Flag }[] {
-  const places: { at: [number, number]; flag: Flag }[] = [];
+): { at: [number, number]; flag: ServedFlag }[] {
+  const places: { at: [number, number]; flag: ServedFlag }[] = [];
   for (const flag of flags) {
-    if (flag.point) places.push({ at: flag.point, flag });
-    else if (flag.proposal) {
-      const [flagBucket, index] = flag.proposal;
-      const named = proposals.find((p) => p.index === index && (p.bucket ?? bucket) === flagBucket);
+    const { target } = flag.request;
+    if (target === null) continue;
+    if ("point" in target) places.push({ at: target.point, flag });
+    else {
+      const named = proposals.find((p) => p.index === target.index && p.bucket === target.bucket);
       const geometry = named ? proposalGeometry(named) : null;
       if (geometry) places.push({ at: center(geometry.bbox), flag });
     }
@@ -220,20 +206,18 @@ export function flagPlaces(
 }
 
 /** The open flags on the image as a whole. */
-export function imageFlags(flags: Flag[]): Flag[] {
-  return flags.filter((f) => f.resolved_by === null && f.point === null && f.proposal === null);
+export function imageFlags(flags: ServedFlag[]): ServedFlag[] {
+  return flags.filter((f) => f.resolution === null && f.request.target === null);
 }
 
 /** The flag a comment on `item` raises, or one on the image as a whole for no item. */
-export function flagRequest(
-  text: string,
-  item: ReviewItem | null,
-  bucket: string | null,
-): FlagRequest {
-  if (!item) return { text };
-  const own = item.bucket ?? bucket;
-  if (item.kind === "proposal" && own) return { text, proposal: [own, item.ref] };
-  return { text, point: item.at, subject: item.subject };
+export function flagRequest(text: string, item: ReviewItem | null): FlagRequest {
+  if (!item) return { text, target: null };
+  if (item.kind === "proposal") {
+    const { bucket, index } = item.proposal;
+    return { text, target: { bucket, index } };
+  }
+  return { text, target: { point: item.at, subject: item.annotation.subject } };
 }
 
 export interface ItemFilters {
@@ -250,7 +234,7 @@ export function keptItems(items: ReviewItem[], filters: ItemFilters): ReviewItem
   return items.filter(
     (item) =>
       (filters.match === "all" || item.match === filters.match) &&
-      (item.kind !== "proposal" || clearsFloor(item.score, filters)),
+      (item.kind !== "proposal" || clearsFloor(item.proposal.score, filters)),
   );
 }
 
@@ -292,7 +276,11 @@ export function nearestNeighborOrder(items: ReviewItem[]): ReviewItem[] {
 /** Whether the item awaits a decision: an undecided proposal, paired or not, or an annotation no
  *  person stands behind. A person's own annotation carries no verdict on a bucket's proposal. */
 export function awaitsDecision(item: ReviewItem): boolean {
-  return item.kind === "proposal" || item.pairing !== undefined || !item.reviewed;
+  return (
+    item.kind === "proposal" ||
+    item.pairing !== undefined ||
+    !personBacked(item.annotation.authorship)
+  );
 }
 
 /** What the stepper steps through: every kept item, the unreviewed ones, or the flagged ones. */
@@ -312,23 +300,17 @@ export function scopedOrder(order: ReviewItem[], scope: StepScope): ReviewItem[]
   return order;
 }
 
-/** The item as the stepper names it: its subject and what it is, a proposal with its score. */
+/** The item as the stepper names it: an annotation by its subject and shape, a proposal by the
+ *  label it carries when focused. */
 export function itemName(item: ReviewItem | null): string | null {
   if (!item) return null;
-  const score = item.score !== null ? ` ${item.score.toFixed(2)}` : "";
-  const what = item.kind === "proposal" ? `proposal${score}` : item.shape;
-  return `${item.subject} ${what}`;
+  if (item.kind === "annotation") return `${item.annotation.subject} ${item.shape}`;
+  return proposalLabel(item.proposal, true);
 }
 
 export function sameItem(a: ReviewItem | null, b: ReviewItem | null): boolean {
-  return (
-    !!a &&
-    !!b &&
-    a.kind === b.kind &&
-    a.shape === b.shape &&
-    a.ref === b.ref &&
-    a.bucket === b.bucket
-  );
+  if (a?.kind === "proposal") return focusesProposal(b, a.proposal.index, a.proposal.bucket);
+  return a?.kind === "annotation" && focusesAnnotation(b, a.shape, a.ref);
 }
 
 /** What an accept or a reject acts on: the focused item, or the first unreviewed one when nothing
@@ -340,22 +322,12 @@ export function decisionTarget(
   action: "accept" | "reject",
   focused: ReviewItem | null,
   unreviewed: ReviewItem[],
-):
-  | { kind: "proposal"; index: number; bucket?: string }
-  | { kind: "confirm"; item: ReviewItem }
-  | null {
+): { kind: "proposal"; proposal: Proposal } | { kind: "confirm"; item: AnnotationItem } | null {
   const item = focused ?? unreviewed[0];
   if (!item) return null;
-  const proposal =
-    item.kind === "proposal" ? { index: item.ref, bucket: item.bucket } : item.pairing;
-  if (proposal !== undefined) {
-    return {
-      kind: "proposal",
-      index: proposal.index,
-      ...(proposal.bucket !== undefined ? { bucket: proposal.bucket } : {}),
-    };
-  }
-  if (action === "accept" && !item.reviewed) {
+  if (item.kind === "proposal") return { kind: "proposal", proposal: item.proposal };
+  if (item.pairing !== undefined) return { kind: "proposal", proposal: item.pairing };
+  if (action === "accept" && !personBacked(item.annotation.authorship)) {
     return { kind: "confirm", item };
   }
   return null;
@@ -366,17 +338,16 @@ export function focusesAnnotation(focused: ReviewItem | null, shape: Mode, ref: 
   return focused?.kind === "annotation" && focused.shape === shape && focused.ref === ref;
 }
 
-/** Whether the focused item is the proposal at `index` in its bucket's document; `bucket`
- *  tells two buckets' proposals apart when both are shown. */
+/** Whether the focused item is the proposal at `index` in the document of `bucket`. */
 export function focusesProposal(
   focused: ReviewItem | null,
   index: number,
-  bucket?: string,
+  bucket: string,
 ): boolean {
   return (
     focused?.kind === "proposal" &&
-    focused.ref === index &&
-    (bucket === undefined || focused.bucket === undefined || focused.bucket === bucket)
+    focused.proposal.index === index &&
+    focused.proposal.bucket === bucket
   );
 }
 
@@ -388,15 +359,18 @@ export function focusedItem(
   focus: Focus | null,
 ): ReviewItem | null {
   if (!focus) return null;
-  const { kind, index } = focus;
-  if (kind !== "proposal") return items.find((i) => focusesAnnotation(i, kind, index)) ?? null;
-  const named = proposals.find(
-    (p) => p.index === index && (focus.bucket === undefined || p.bucket === focus.bucket),
-  );
+  if (focus.kind !== "proposal") {
+    const { kind, index } = focus;
+    return items.find((i) => focusesAnnotation(i, kind, index)) ?? null;
+  }
+  const { index } = focus;
+  const named = proposals.find((p) => p.index === index && p.bucket === focus.bucket);
   const paired = named?.paired ?? null;
   return (
     items.find((i) => focusesProposal(i, index, focus.bucket)) ??
-    items.find((i) => i.kind === "annotation" && paired !== null && i.index === paired) ??
+    items.find(
+      (i) => i.kind === "annotation" && paired !== null && i.annotation.index === paired,
+    ) ??
     null
   );
 }

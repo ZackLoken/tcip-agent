@@ -1,0 +1,366 @@
+{
+  "failing_started": {
+    "jobs": [
+      {
+        "job_id": "<failed job>",
+        "status": "running",
+        "error": null,
+        "project": "/scratch/workspace/inference",
+        "checkpoint_path": "/scratch/workspace/inference/model.pt",
+        "images_dir": "/scratch/workspace/inference/images/2026-02-11",
+        "bucket": "broken/2026-02-11",
+        "actor": "user:grower",
+        "stated": {
+          "tile": null,
+          "tile_size": null,
+          "overlap": null,
+          "postprocess": null,
+          "cross_tile_nms": null,
+          "conf": null,
+          "masks": null,
+          "mask_cut": null,
+          "rationale": null
+        },
+        "assessment_id": null,
+        "total": 0,
+        "done": 0,
+        "live": true
+      }
+    ]
+  },
+  "failing_final": {
+    "type": "final",
+    "job": {
+      "job_id": "<failed job>",
+      "status": "failed",
+      "error": "/scratch/workspace/inference/model.pt (sha256 9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c) is not named by any completed run's final status or entry in the registry at '/scratch/workspace/inference': a completed run registers its own final weights, and a foreign checkpoint, or a second checkpoint of a run (model_final beside a model_best, or a bespoke tag), is registered with register_model under a name of its own.",
+      "project": "/scratch/workspace/inference",
+      "checkpoint_path": "/scratch/workspace/inference/model.pt",
+      "images_dir": "/scratch/workspace/inference/images/2026-02-11",
+      "bucket": "broken/2026-02-11",
+      "actor": "user:grower",
+      "stated": {
+        "tile": null,
+        "tile_size": null,
+        "overlap": null,
+        "postprocess": null,
+        "cross_tile_nms": null,
+        "conf": null,
+        "masks": null,
+        "mask_cut": null,
+        "rationale": null
+      },
+      "assessment_id": null,
+      "total": 0,
+      "done": 0,
+      "live": false
+    }
+  },
+  "launched": {
+    "job_id": "<held job>",
+    "status": "pending",
+    "error": null,
+    "project": "/scratch/workspace/inference",
+    "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
+    "images_dir": "/scratch/workspace/inference/images/2026-02-11",
+    "bucket": "baseline/2026-02-11",
+    "actor": "user:grower",
+    "stated": {
+      "tile": null,
+      "tile_size": null,
+      "overlap": null,
+      "postprocess": null,
+      "cross_tile_nms": null,
+      "conf": null,
+      "masks": null,
+      "mask_cut": null,
+      "rationale": null
+    },
+    "assessment_id": null,
+    "total": 0,
+    "done": 0,
+    "live": true
+  },
+  "held_started": {
+    "jobs": [
+      {
+        "job_id": "<failed job>",
+        "status": "failed",
+        "error": "/scratch/workspace/inference/model.pt (sha256 9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c) is not named by any completed run's final status or entry in the registry at '/scratch/workspace/inference': a completed run registers its own final weights, and a foreign checkpoint, or a second checkpoint of a run (model_final beside a model_best, or a bespoke tag), is registered with register_model under a name of its own.",
+        "project": "/scratch/workspace/inference",
+        "checkpoint_path": "/scratch/workspace/inference/model.pt",
+        "images_dir": "/scratch/workspace/inference/images/2026-02-11",
+        "bucket": "broken/2026-02-11",
+        "actor": "user:grower",
+        "stated": {
+          "tile": null,
+          "tile_size": null,
+          "overlap": null,
+          "postprocess": null,
+          "cross_tile_nms": null,
+          "conf": null,
+          "masks": null,
+          "mask_cut": null,
+          "rationale": null
+        },
+        "assessment_id": null,
+        "total": 0,
+        "done": 0,
+        "live": false
+      },
+      {
+        "job_id": "<held job>",
+        "status": "running",
+        "error": null,
+        "project": "/scratch/workspace/inference",
+        "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
+        "images_dir": "/scratch/workspace/inference/images/2026-02-11",
+        "bucket": "baseline/2026-02-11",
+        "actor": "user:grower",
+        "stated": {
+          "tile": null,
+          "tile_size": null,
+          "overlap": null,
+          "postprocess": null,
+          "cross_tile_nms": null,
+          "conf": null,
+          "masks": null,
+          "mask_cut": null,
+          "rationale": null
+        },
+        "assessment_id": null,
+        "total": 0,
+        "done": 0,
+        "live": true
+      }
+    ]
+  },
+  "running": {
+    "jobs": [
+      {
+        "job_id": "<failed job>",
+        "status": "failed",
+        "error": "/scratch/workspace/inference/model.pt (sha256 9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c) is not named by any completed run's final status or entry in the registry at '/scratch/workspace/inference': a completed run registers its own final weights, and a foreign checkpoint, or a second checkpoint of a run (model_final beside a model_best, or a bespoke tag), is registered with register_model under a name of its own.",
+        "project": "/scratch/workspace/inference",
+        "checkpoint_path": "/scratch/workspace/inference/model.pt",
+        "images_dir": "/scratch/workspace/inference/images/2026-02-11",
+        "bucket": "broken/2026-02-11",
+        "actor": "user:grower",
+        "stated": {
+          "tile": null,
+          "tile_size": null,
+          "overlap": null,
+          "postprocess": null,
+          "cross_tile_nms": null,
+          "conf": null,
+          "masks": null,
+          "mask_cut": null,
+          "rationale": null
+        },
+        "assessment_id": null,
+        "total": 0,
+        "done": 0,
+        "live": false
+      },
+      {
+        "job_id": "<held job>",
+        "status": "running",
+        "error": null,
+        "project": "/scratch/workspace/inference",
+        "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
+        "images_dir": "/scratch/workspace/inference/images/2026-02-11",
+        "bucket": "baseline/2026-02-11",
+        "actor": "user:grower",
+        "stated": {
+          "tile": null,
+          "tile_size": null,
+          "overlap": null,
+          "postprocess": null,
+          "cross_tile_nms": null,
+          "conf": null,
+          "masks": null,
+          "mask_cut": null,
+          "rationale": null
+        },
+        "assessment_id": null,
+        "total": 9,
+        "done": 1,
+        "live": true
+      }
+    ]
+  },
+  "progress": {
+    "type": "progress",
+    "job": {
+      "job_id": "<held job>",
+      "status": "running",
+      "error": null,
+      "project": "/scratch/workspace/inference",
+      "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
+      "images_dir": "/scratch/workspace/inference/images/2026-02-11",
+      "bucket": "baseline/2026-02-11",
+      "actor": "user:grower",
+      "stated": {
+        "tile": null,
+        "tile_size": null,
+        "overlap": null,
+        "postprocess": null,
+        "cross_tile_nms": null,
+        "conf": null,
+        "masks": null,
+        "mask_cut": null,
+        "rationale": null
+      },
+      "assessment_id": null,
+      "total": 9,
+      "done": 1,
+      "live": true
+    }
+  },
+  "bucket_exists": {
+    "status": 409,
+    "body": {
+      "detail": {
+        "kind": "bucket_exists",
+        "message": "bucket 'baseline/2026-02-11' under /scratch/workspace/inference is the bucket job <held job> is still writing.",
+        "job": {
+          "job_id": "<held job>",
+          "status": "running",
+          "error": null,
+          "project": "/scratch/workspace/inference",
+          "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
+          "images_dir": "/scratch/workspace/inference/images/2026-02-11",
+          "bucket": "baseline/2026-02-11",
+          "actor": "user:grower",
+          "stated": {
+            "tile": null,
+            "tile_size": null,
+            "overlap": null,
+            "postprocess": null,
+            "cross_tile_nms": null,
+            "conf": null,
+            "masks": null,
+            "mask_cut": null,
+            "rationale": null
+          },
+          "assessment_id": null,
+          "total": 9,
+          "done": 1,
+          "live": true
+        }
+      }
+    }
+  },
+  "cancel": {
+    "job_id": "<held job>",
+    "status": "running",
+    "error": null,
+    "project": "/scratch/workspace/inference",
+    "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
+    "images_dir": "/scratch/workspace/inference/images/2026-02-11",
+    "bucket": "baseline/2026-02-11",
+    "actor": "user:grower",
+    "stated": {
+      "tile": null,
+      "tile_size": null,
+      "overlap": null,
+      "postprocess": null,
+      "cross_tile_nms": null,
+      "conf": null,
+      "masks": null,
+      "mask_cut": null,
+      "rationale": null
+    },
+    "assessment_id": null,
+    "total": 9,
+    "done": 1,
+    "live": true
+  },
+  "canceled": {
+    "jobs": [
+      {
+        "job_id": "<failed job>",
+        "status": "failed",
+        "error": "/scratch/workspace/inference/model.pt (sha256 9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c) is not named by any completed run's final status or entry in the registry at '/scratch/workspace/inference': a completed run registers its own final weights, and a foreign checkpoint, or a second checkpoint of a run (model_final beside a model_best, or a bespoke tag), is registered with register_model under a name of its own.",
+        "project": "/scratch/workspace/inference",
+        "checkpoint_path": "/scratch/workspace/inference/model.pt",
+        "images_dir": "/scratch/workspace/inference/images/2026-02-11",
+        "bucket": "broken/2026-02-11",
+        "actor": "user:grower",
+        "stated": {
+          "tile": null,
+          "tile_size": null,
+          "overlap": null,
+          "postprocess": null,
+          "cross_tile_nms": null,
+          "conf": null,
+          "masks": null,
+          "mask_cut": null,
+          "rationale": null
+        },
+        "assessment_id": null,
+        "total": 0,
+        "done": 0,
+        "live": false
+      },
+      {
+        "job_id": "<held job>",
+        "status": "canceled",
+        "error": null,
+        "project": "/scratch/workspace/inference",
+        "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
+        "images_dir": "/scratch/workspace/inference/images/2026-02-11",
+        "bucket": "baseline/2026-02-11",
+        "actor": "user:grower",
+        "stated": {
+          "tile": null,
+          "tile_size": null,
+          "overlap": null,
+          "postprocess": null,
+          "cross_tile_nms": null,
+          "conf": null,
+          "masks": null,
+          "mask_cut": null,
+          "rationale": null
+        },
+        "assessment_id": null,
+        "total": 9,
+        "done": 1,
+        "live": false
+      }
+    ]
+  },
+  "final": {
+    "type": "final",
+    "job": {
+      "job_id": "<held job>",
+      "status": "canceled",
+      "error": null,
+      "project": "/scratch/workspace/inference",
+      "checkpoint_path": "/scratch/workspace/inference/.tcip/experiments/<registered run>/model_final.pt",
+      "images_dir": "/scratch/workspace/inference/images/2026-02-11",
+      "bucket": "baseline/2026-02-11",
+      "actor": "user:grower",
+      "stated": {
+        "tile": null,
+        "tile_size": null,
+        "overlap": null,
+        "postprocess": null,
+        "cross_tile_nms": null,
+        "conf": null,
+        "masks": null,
+        "mask_cut": null,
+        "rationale": null
+      },
+      "assessment_id": null,
+      "total": 9,
+      "done": 1,
+      "live": false
+    }
+  },
+  "missing_checkpoint": {
+    "status": 404,
+    "body": { "detail": "checkpoint not found: /scratch/workspace/inference/absent.pt" }
+  },
+  "unknown_job": { "type": "final", "error": "job not found" }
+}

@@ -10,7 +10,7 @@ writer, and a registered trait of their own.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -56,6 +56,8 @@ if TYPE_CHECKING:
 
 DATE = "2026-02-11"
 PLANT_IDS = [p["plot"] for p in PLANTS]
+FIXTURE_INSTANT = datetime.fromisoformat(DATE).replace(tzinfo=UTC)
+"""The instant the hand-built registry and mapping state they were made, the capture date."""
 
 
 def _write_ungeoreferenced_image(path: Path) -> None:
@@ -209,7 +211,7 @@ def _persist_synthetic_mapping(
     from tcip_mcp.dataset_layout import require_dataset_identity
     from tcip_mcp.registry_paths import stored_path
 
-    dataset_id = require_dataset_identity(dataset_root)["id"]
+    dataset_id = require_dataset_identity(dataset_root).id
     registry_name, registry_digest = f"{name}-registry", "0" * 64
     ts.replace(
         plant_mapping.plant_registry_key(project_root, registry_name),
@@ -221,8 +223,9 @@ def _persist_synthetic_mapping(
                 csvs=plant_csvs,
                 n_plants=sum(e["n_plants"] for e in plant_csvs),
                 digest=registry_digest,
-                registered_at="2026-02-11T00:00:00+00:00",
-            )
+                registered_at=FIXTURE_INSTANT,
+            ),
+            mode="json",
         ),
         expect=ts.Version.ABSENT,
     )
@@ -230,7 +233,7 @@ def _persist_synthetic_mapping(
         name=name,
         dataset_root=stored_path(dataset_root, project_root),
         dataset_id=dataset_id,
-        built_at="2026-02-11T00:00:00+00:00",
+        built_at=FIXTURE_INSTANT,
         dates_requested=None,
         match_radius={
             d: MatchRadius(
@@ -305,7 +308,6 @@ def _assert_all_doors_refuse(
         json={
             **payload,
             "payload": "milestones",
-            "filename": "x.csv",
             "user": "tester",
         },
     )
@@ -459,7 +461,7 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(
         name="m",
         dataset_root="ds",
         dataset_id="ds-1",
-        built_at="2026-02-11T00:00:00+00:00",
+        built_at=FIXTURE_INSTANT,
         dates_requested=None,
         match_radius={},
         plant_registry={"name": "unregistered", "digest": "0" * 64},
@@ -537,22 +539,19 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
         actor=None,
     )
     assert "error" not in build_res, build_res
-    assert build_res["summary"]["per_date"][DATE]["n_unattributed"] == 1
-    assert build_res["summary"]["totals"]["n_unattributed"] == 1
+    assert build_res["per_date"][DATE]["n_unattributed"] == 1
 
     asyncio.run(store.open_project(project))
     load_resp = client.post(
         "/api/results/plant_mapping/load", json={"name": "valley"}
     )
     assert load_resp.status_code == 200, load_resp.text
-    loaded_summary = load_resp.json()["summary"]
-    assert loaded_summary["totals"]["n_unattributed"] == 1
+    assert load_resp.json()["per_date"] == build_res["per_date"]
 
     _seed_currant_bloom_trait(tmp_path)
     pm = _delivered_disclosure(tmp_path, dataset_root, preds_by_date)
     assert pm["images_unattributed"] == 1
     assert pm["dates_delivered"] == [DATE]
-    assert pm["images_unattributed_scope"] == "delivered_dates"
 
 
 def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
@@ -581,7 +580,9 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
         actor=None,
     )
     assert "error" not in build_res, build_res
-    assert build_res["summary"]["totals"]["n_unattributed"] == 1
+    assert (
+        sum(d["n_unattributed"] for d in build_res["per_date"].values()) == 1
+    )
 
     _seed_currant_bloom_trait(tmp_path)
     pm = _delivered_disclosure(
@@ -616,7 +617,7 @@ def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one
         actor=None,
     )
     assert "error" not in build_res, build_res
-    assert build_res["summary"]["per_date"][empty_date]["n_images"] == 0
+    assert build_res["per_date"][empty_date]["n_images"] == 0
 
     _seed_currant_bloom_trait(tmp_path)
     pm = _delivered_disclosure(tmp_path, dataset_root, preds_by_date)
@@ -639,7 +640,7 @@ def test_a_fully_positioned_scene_keeps_delivering_with_zero_unattributed(
         actor=None,
     )
     assert "error" not in build_res, build_res
-    assert build_res["summary"]["totals"]["n_unattributed"] == 0
+    assert not any(d["n_unattributed"] for d in build_res["per_date"].values())
 
     _seed_currant_bloom_trait(tmp_path)
     assert (
@@ -707,4 +708,10 @@ def test_a_capture_at_the_origin_is_admitted_as_positioned(
         actor=None,
     )
     assert "error" not in res, res
-    assert res["summary"]["totals"]["n_mapped"] == 1
+    assert (
+        sum(
+            d["n_images"] - d["n_unattributed"]
+            for d in res["per_date"].values()
+        )
+        == 1
+    )

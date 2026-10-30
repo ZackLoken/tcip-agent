@@ -63,14 +63,13 @@ def test_a_tag_naming_a_run_never_makes_that_run_a_producer(
     forged = produced_checkpoint(
         tmp_path / "forged.pt", "completed under another root"
     )
-    registered = register_model(
+    register_model(
         name="exp-rail1-forged",
         checkpoint_path=str(forged),
         project=tmp_path,
         tags=["experiment:exp-rail1"],
         actor=None,
     )
-    assert "error" not in registered, registered
 
     assert (
         load_registered_checkpoint(forged, project=tmp_path).experiment_id

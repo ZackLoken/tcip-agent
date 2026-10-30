@@ -14,9 +14,18 @@ from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
-from tcip_mcp.web_client import AnnotateFocus, AnnotateMode, Panel
+from tcip_mcp.web_client import (
+    AnnotateFocus,
+    AnnotateMode,
+    Banner,
+    Panel,
+    PanelEvent,
+    PanelPost,
+)
 
 if TYPE_CHECKING:
+    from starlette.testclient import httpx
+
     from tcip_mcp.workspace import BoundProject
     from tcip_web.state import OpenProject
     from tests._producer_fixtures import WrittenDataset
@@ -28,8 +37,8 @@ def project_id(opened: OpenProject) -> str:
     return opened.id
 
 
-def _focus(mode: AnnotateMode) -> dict:
-    """Return the event data of a focus on the first image of a dated capture, in ``mode``."""
+def _focus(mode: AnnotateMode) -> AnnotateFocus:
+    """Return a focus on the first image of a dated capture, in ``mode``."""
     return AnnotateFocus(
         dataset_root="/data",
         subject="bud",
@@ -37,7 +46,21 @@ def _focus(mode: AnnotateMode) -> dict:
         image_index=0,
         mode=mode,
         proposal=None,
-    ).model_dump()
+    )
+
+
+def _post(
+    client: TestClient, panel: str, event: PanelEvent | dict, project_id: str
+) -> httpx.Response:
+    """Post ``event`` to ``panel`` for ``project_id``; a mapping is sent as it stands."""
+    body = (
+        {"event": event, "project_id": project_id}
+        if isinstance(event, dict)
+        else PanelPost(event=event, project_id=project_id).model_dump(
+            mode="json"
+        )
+    )
+    return client.post(f"/api/events/{panel}", json=body)
 
 
 # ── HTTP event bridge ────────────────────────────────────────────────────
@@ -49,19 +72,11 @@ class TestPostPanelEventRoute:
     def test_accepts_valid_panel(
         self, opened_client: TestClient, project_id: str
     ) -> None:
-        resp = opened_client.post(
-            "/api/events/training",
-            json={
-                "project_id": project_id,
-                "event_type": "metrics_update",
-                "data": {"epoch": 5, "mAP50": 0.85},
-            },
+        resp = _post(
+            opened_client, "training", Banner(text="epoch 5"), project_id
         )
         assert resp.status_code == 200
-        body = resp.json()
-        assert body["status"] == "ok"
-        assert body["panel"] == "training"
-        assert body["event_type"] == "metrics_update"
+        assert resp.json() is None
 
     def test_a_path_naming_no_panel_is_refused_and_retained_nowhere(
         self, opened_client: TestClient, project_id: str
@@ -69,18 +84,26 @@ class TestPostPanelEventRoute:
         """An event posted to a path naming no panel answers 422 and is retained nowhere."""
         from tcip_web.state import store
 
-        resp = opened_client.post(
-            "/api/events/bogus",
-            json={
-                "project_id": project_id,
-                "event_type": "anything",
-                "data": {},
-            },
-        )
+        resp = _post(opened_client, "bogus", Banner(text="x"), project_id)
         assert resp.status_code == 422
         assert all(
             store.retained_events(panel) == [] for panel in get_args(Panel)
         )
+
+    def test_an_event_of_no_panel_event_type_is_refused_and_retained_nowhere(
+        self, opened_client: TestClient, project_id: str
+    ) -> None:
+        """An event none of the four panel events is answers 422 and is retained nowhere."""
+        from tcip_web.state import store
+
+        resp = _post(
+            opened_client,
+            "training",
+            {"event_type": "metrics_update", "epoch": 5},
+            project_id,
+        )
+        assert resp.status_code == 422, resp.text
+        assert store.retained_events("training") == []
 
     def test_a_socket_naming_no_panel_is_closed_with_1008(
         self, opened_client: TestClient
@@ -96,18 +119,8 @@ class TestPostPanelEventRoute:
         self, opened_client: TestClient, project_id: str
     ) -> None:
         for panel in get_args(Panel):
-            resp = opened_client.post(
-                f"/api/events/{panel}",
-                json={
-                    "project_id": project_id,
-                    "event_type": "test",
-                    "data": {"ok": True},
-                },
-            )
-            assert resp.status_code == 200
-            assert resp.json()["status"] == "ok", (
-                f"panel {panel} should be valid"
-            )
+            resp = _post(opened_client, panel, Banner(text="ok"), project_id)
+            assert resp.status_code == 200, f"panel {panel} should be valid"
 
     def test_events_posted_while_connected_are_delivered_live_in_order(
         self, opened_client: TestClient, project_id: str
@@ -116,26 +129,12 @@ class TestPostPanelEventRoute:
         with opened_client.websocket_connect(
             "ws://127.0.0.1/ws/panel/training"
         ) as ws:
-            opened_client.post(
-                "/api/events/training",
-                json={
-                    "project_id": project_id,
-                    "event_type": "trial_update",
-                    "data": {"trial": 1},
-                },
-            )
-            opened_client.post(
-                "/api/events/training",
-                json={
-                    "project_id": project_id,
-                    "event_type": "trial_update",
-                    "data": {"trial": 2},
-                },
-            )
+            for text in ("trial 1", "trial 2"):
+                _post(opened_client, "training", Banner(text=text), project_id)
             first = ws.receive_json()
             second = ws.receive_json()
-        assert first["data"] == {"trial": 1}
-        assert second["data"] == {"trial": 2}
+        assert first["event"] == Banner(text="trial 1").model_dump()
+        assert second["event"] == Banner(text="trial 2").model_dump()
 
     def test_each_broadcast_drops_its_dead_socket_and_raises_any_other_send_fault(
         self, opened_client: TestClient, project_id: str
@@ -209,13 +208,11 @@ class TestPostPanelEventRoute:
                     opened_client.post(
                         "/api/state/tab", json={"active_tab": "training"}
                     )
-                    opened_client.post(
-                        "/api/events/training",
-                        json={
-                            "project_id": project_id,
-                            "event_type": "trial_update",
-                            "data": {"trial": 7},
-                        },
+                    _post(
+                        opened_client,
+                        "training",
+                        Banner(text="trial 7"),
+                        project_id,
                     )
                     pushed, event = state.receive_json(), panel.receive_json()
                     registered = (
@@ -223,9 +220,8 @@ class TestPostPanelEventRoute:
                         subscriber in web_app._panel_subscribers["training"],
                     )
                 with pytest.raises(RuntimeError, match="different event loop"):
-                    opened_client.post(
-                        "/api/events/meta",
-                        json={"project_id": project_id, "event_type": "note"},
+                    _post(
+                        opened_client, "meta", Banner(text="note"), project_id
                     )
                 assert faulty in web_app._panel_subscribers["meta"]
             finally:
@@ -237,7 +233,7 @@ class TestPostPanelEventRoute:
                 )
         assert registered == (False, False)
         assert pushed["state"]["active_tab"] == "training"
-        assert event["data"] == {"trial": 7}
+        assert event["event"] == Banner(text="trial 7").model_dump()
 
     @pytest.mark.parametrize("route", ["state", "panel"])
     def test_a_socket_that_disconnects_mid_iteration_leaves_no_registration(
@@ -279,31 +275,16 @@ class TestPostPanelEventRoute:
     ) -> None:
         """A browser connecting after events landed receives them on connect, in posting order."""
         panel = "results"
-        opened_client.post(
-            "/api/events/results",
-            json={
-                "project_id": project_id,
-                "event_type": "count_ready",
-                "data": {"count": 11},
-            },
-        )
-        opened_client.post(
-            "/api/events/results",
-            json={
-                "project_id": project_id,
-                "event_type": "count_ready",
-                "data": {"count": 22},
-            },
-        )
+        for text in ("11 counted", "22 counted"):
+            _post(opened_client, panel, Banner(text=text), project_id)
 
         with opened_client.websocket_connect(
             f"ws://127.0.0.1/ws/panel/{panel}"
         ) as ws:
             first = ws.receive_json()
             second = ws.receive_json()
-        assert first["event_type"] == "count_ready"
-        assert first["data"] == {"count": 11}
-        assert second["data"] == {"count": 22}
+        assert first["event"] == Banner(text="11 counted").model_dump()
+        assert second["event"] == Banner(text="22 counted").model_dump()
 
     def test_an_event_retained_for_one_project_is_not_replayed_once_another_is_open(
         self,
@@ -319,14 +300,7 @@ class TestPostPanelEventRoute:
         from tcip_web.state import store
         from tests._web_fixtures import open_new_project
 
-        opened_client.post(
-            "/api/events/results",
-            json={
-                "project_id": project_id,
-                "event_type": "count_ready",
-                "data": {},
-            },
-        )
+        _post(opened_client, "results", Banner(text="counted"), project_id)
         assert len(store.retained_events("results")) == 1
 
         open_new_project(tmp_path.parent / "other")
@@ -341,32 +315,19 @@ class TestPostPanelEventRoute:
         """An event naming another project is refused with 409 and retained nowhere.
 
         An event for another project answers 409 naming the open one and is retained nowhere,
-        and a ``count_ready`` event naming the open project is retained.
+        and the same event naming the open project is retained.
         """
         from tcip_web.state import store
         from tests._web_fixtures import named_project
 
         other = named_project(tmp_path.parent / "other", "Other")
-        refused = opened_client.post(
-            "/api/events/results",
-            json={
-                "project_id": other.id,
-                "event_type": "count_ready",
-                "data": {},
-            },
-        )
+        counted = Banner(text="counted")
+        refused = _post(opened_client, "results", counted, other.id)
         assert refused.status_code == 409
         assert refused.json()["detail"]["open_project_id"] == project_id
         assert store.retained_events("results") == []
 
-        admitted = opened_client.post(
-            "/api/events/results",
-            json={
-                "project_id": project_id,
-                "event_type": "count_ready",
-                "data": {},
-            },
-        )
+        admitted = _post(opened_client, "results", counted, project_id)
         assert admitted.status_code == 200, admitted.text
         assert len(store.retained_events("results")) == 1
 
@@ -374,34 +335,25 @@ class TestPostPanelEventRoute:
         self, opened_client: TestClient, project_id: str
     ) -> None:
         """An annotate_focus event writes its mode, its subject as the active one and the tab."""
-        resp = opened_client.post(
-            "/api/events/app",
-            json={
-                "project_id": project_id,
-                "event_type": "annotate_focus",
-                "data": _focus(mode="polygon"),
-            },
-        )
+        resp = _post(opened_client, "app", _focus(mode="polygon"), project_id)
         assert resp.status_code == 200
         state = opened_client.get("/api/state").json()
         assert state["active_tab"] == "annotate"
         assert state["mode"] == "polygon"
         assert state["active_subject"] == "bud"
 
-    def test_annotate_focus_with_an_unknown_mode_answers_400(
+    def test_annotate_focus_with_an_unknown_mode_answers_422(
         self, opened_client: TestClient, project_id: str
     ) -> None:
         before = opened_client.get("/api/state").json()["mode"]
-        resp = opened_client.post(
-            "/api/events/app",
-            json={
-                "project_id": project_id,
-                "event_type": "annotate_focus",
-                "data": {**_focus(mode="polygon"), "mode": "lasso"},
-            },
+        resp = _post(
+            opened_client,
+            "app",
+            {**_focus(mode="polygon").model_dump(), "mode": "lasso"},
+            project_id,
         )
-        assert resp.status_code == 400
-        assert "lasso" in resp.json()["detail"]
+        assert resp.status_code == 422
+        assert "lasso" in resp.text
         assert opened_client.get("/api/state").json()["mode"] == before
 
     def test_the_panel_socket_replays_no_refused_focus(
@@ -412,13 +364,11 @@ class TestPostPanelEventRoute:
         The socket's first frame is the admitted focus, carried as its model states it.
         """
         for mode in ("lasso", "point"):
-            opened_client.post(
-                "/api/events/app",
-                json={
-                    "project_id": project_id,
-                    "event_type": "annotate_focus",
-                    "data": {**_focus(mode="polygon"), "mode": mode},
-                },
+            _post(
+                opened_client,
+                "app",
+                {**_focus(mode="polygon").model_dump(), "mode": mode},
+                project_id,
             )
 
         with opened_client.websocket_connect(
@@ -426,7 +376,7 @@ class TestPostPanelEventRoute:
         ) as ws:
             replayed = ws.receive_json()
 
-        assert replayed["data"] == _focus(mode="point")
+        assert replayed["event"] == _focus(mode="point").model_dump()
 
     def test_the_focus_tool_answers_the_event_channels_refusal_whole(
         self,
@@ -441,17 +391,17 @@ class TestPostPanelEventRoute:
         """
         from tcip_mcp import web_client
         from tcip_mcp.tools.gui_tools import focus_human_attention
+        from tcip_mcp.web_client import PanelEventAnswer, ProjectNotOpenRefusal
         from tests._web_fixtures import bound_to
 
-        refusal = {
-            "error": "the backend does not have this project open",
-            "open_project_id": "ffffffffffff",
-            "delivered": False,
-            "url": "u",
-        }
-        monkeypatch.setattr(
-            web_client, "post_panel_event", lambda *a: dict(refusal)
+        refusal = PanelEventAnswer(
+            url="u",
+            reason=ProjectNotOpenRefusal(
+                message="the backend does not have this project open",
+                open_project_id="ffffffffffff",
+            ),
         )
+        monkeypatch.setattr(web_client, "post_panel_event", lambda *a: refusal)
 
         res = focus_human_attention(
             bound_to(opened),
@@ -462,7 +412,8 @@ class TestPostPanelEventRoute:
             image_index=2,
         )
 
-        assert {k: res[k] for k in refusal} == refusal
+        answered = refusal.model_dump()
+        assert {k: res[k] for k in answered} == answered
         assert res["image_index"] == 2
 
     def test_the_focus_tools_own_annotate_event_reaches_the_advisory_state(
@@ -475,20 +426,16 @@ class TestPostPanelEventRoute:
         """The event ``focus_human_attention`` posts sets the advisory state it names."""
         from tcip_mcp import web_client
         from tcip_mcp.tools.gui_tools import focus_human_attention
+        from tcip_mcp.web_client import PanelEventAnswer
         from tests._web_fixtures import bound_to
 
         posted: dict = {}
 
         def _capture(
-            target: BoundProject, panel: Panel, event_type: str, data: dict
-        ) -> dict:
-            posted.update(
-                project_id=target.id,
-                panel=panel,
-                event_type=event_type,
-                data=data,
-            )
-            return {"delivered": True, "status": "ok"}
+            target: BoundProject, panel: Panel, event: PanelEvent
+        ) -> PanelEventAnswer:
+            posted.update(project_id=target.id, panel=panel, event=event)
+            return PanelEventAnswer(url="u", reason=None)
 
         monkeypatch.setattr(web_client, "post_panel_event", _capture)
         res = focus_human_attention(
@@ -500,18 +447,15 @@ class TestPostPanelEventRoute:
             image_index=2,
         )
         assert "error" not in res, res
-        assert posted["event_type"] == "annotate_focus"
+        assert isinstance(posted["event"], AnnotateFocus)
 
-        resp = opened_client.post(
-            f"/api/events/{posted['panel']}",
-            json={
-                "project_id": posted["project_id"],
-                "event_type": posted["event_type"],
-                "data": posted["data"],
-            },
+        resp = _post(
+            opened_client,
+            posted["panel"],
+            posted["event"],
+            posted["project_id"],
         )
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "ok"
+        assert resp.status_code == 200, resp.text
         state = opened_client.get("/api/state").json()
         assert state["active_tab"] == "annotate"
         assert state["mode"] == "point"
@@ -524,18 +468,12 @@ class TestPushPanelDataTool:
     def test_no_subscribers_when_backend_down(
         self, bound: BoundProject, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """With no backend running, ``push_panel_event`` answers naming the panel."""
+        """With no backend running, ``push_panel_event`` answers the reason it was not taken."""
         from tcip_mcp.tools.gui_tools import push_panel_event
 
         monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
-        result = push_panel_event(
-            bound, "training", "metrics_update", {"epoch": 1}
-        )
-        # Either the connection was refused (no_subscribers) or a URL error;
-        # both are acceptable. Tool must not raise.
-        assert "status" in result or "error" in result
-        # Panel name preserved in result
-        assert result["panel"] == "training"
+        result = push_panel_event(bound, "training", Banner(text="epoch 1"))
+        assert result.reason
 
     def test_the_server_refuses_a_name_outside_the_panels_and_admits_each_panel(
         self, bound: BoundProject
@@ -556,7 +494,7 @@ class TestPushPanelDataTool:
         assert listed.input_schema["properties"]["panel"]["enum"] == list(
             get_args(Panel)
         )
-        arguments = {"event_type": "test", "data": {}}
+        arguments = {"event": Banner(text="test").model_dump()}
         refused = called_through_the_server(
             "push_panel_event", {**arguments, "panel": "bogus"}, bound=bound
         )
@@ -567,7 +505,7 @@ class TestPushPanelDataTool:
                 "push_panel_event", {**arguments, "panel": panel}, bound=bound
             )
             assert isinstance(admitted, dict)
-            assert admitted["panel"] == panel
+            assert admitted["reason"] is not None
 
 
 class TestPortDiscovery:
@@ -667,7 +605,11 @@ class TestTrainingToolOutputSchema:
         pytest.importorskip("torchvision")
         monkeypatch.chdir(tmp_path)
 
-        from tcip_mcp.experiments import experiment_dir, find_run
+        from tcip_mcp.experiments import (
+            experiment_dir,
+            named_directory,
+            run_dirs,
+        )
         from tcip_mcp.tools import training_tools
         from tests._producer_fixtures import (
             fake_popen,
@@ -691,8 +633,7 @@ class TestTrainingToolOutputSchema:
         )
 
         assert isinstance(res, training_tools.RunLaunched), res
-        assert res.status == "launched"
-        assert find_run(res.experiment_id, project=tmp_path) == Path(
+        assert named_directory(res.experiment_id, run_dirs(tmp_path)) == Path(
             res.output_dir
         )
         assert Path(res.output_dir) == experiment_dir(
@@ -853,14 +794,11 @@ def test_post_panel_event_suppressed_under_pytest(
     from tcip_mcp.web_client import post_panel_event
 
     monkeypatch.delenv("TCIP_ALLOW_PANEL_EVENTS", raising=False)
-    res = post_panel_event(
-        bound, "annotate", "annotate_focus", {"stem": "IMG_X"}
+    res = post_panel_event(bound, "annotate", _focus(mode="box"))
+    assert res.url is None
+    assert (
+        isinstance(res.reason, str) and "TCIP_ALLOW_PANEL_EVENTS" in res.reason
     )
-    assert res == {
-        "status": "suppressed_under_pytest",
-        "delivered": False,
-        "url": "",
-    }
 
 
 def test_post_panel_event_opt_in_bypasses_suppression(
@@ -870,52 +808,101 @@ def test_post_panel_event_opt_in_bypasses_suppression(
 
     monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
     record_backend_port(bound.workspace, 1)  # nothing listens on port 1
-    res = post_panel_event(bound, "annotate", "annotate_focus", {})
-    assert res["delivered"] is False
-    assert (
-        res["status"] != "suppressed_under_pytest"
-    )  # it really attempted the send
+    res = post_panel_event(bound, "annotate", _focus(mode="box"))
+    assert isinstance(res.reason, str) and "no backend answered" in res.reason
 
 
 def test_post_panel_event_answers_a_malformed_answer_as_an_error(
     bound: BoundProject, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A listener answering with no HTTP status line is an error, never "no subscribers"."""
-    import socketserver
     import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
 
     from tcip_mcp.web_client import post_panel_event, record_backend_port
 
-    class _NotHttp(socketserver.BaseRequestHandler):
-        def handle(self) -> None:
-            self.request.recv(65536)
-            self.request.sendall(b"NOT AN HTTP STATUS LINE\r\n\r\n")
+    class _NotHttp(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            self.rfile.read(int(self.headers["Content-Length"]))
+            self.wfile.write(b"NOT AN HTTP STATUS LINE\r\n\r\n")
 
     monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
-    with socketserver.TCPServer(("127.0.0.1", 0), _NotHttp) as server:
+    with HTTPServer(("127.0.0.1", 0), _NotHttp) as server:
         record_backend_port(bound.workspace, server.server_address[1])
         thread = threading.Thread(target=server.handle_request, daemon=True)
         thread.start()
-        res = post_panel_event(bound, "annotate", "annotate_focus", {})
+        res = post_panel_event(bound, "annotate", _focus(mode="box"))
         thread.join(timeout=10)
 
-    assert res["delivered"] is False
-    assert res.get("status") != "no_subscribers"
-    assert res["error"]
+    assert isinstance(res.reason, str)
+    assert "no backend answered" not in res.reason
 
 
-def test_post_panel_event_returns_the_backends_response_body(
+@pytest.mark.parametrize(
+    "detail",
+    [
+        {"message": "a refusal naming no kind", "open_project_id": "p"},
+        {
+            "kind": "audit_entry_not_written",
+            "message": "a refusal of another kind",
+            "open_project_id": "p",
+        },
+        [
+            {
+                "type": "missing",
+                "loc": ["body", "event"],
+                "msg": "Field required",
+            }
+        ],
+    ],
+)
+def test_post_panel_event_reads_a_detail_as_the_not_open_refusal_only_by_its_kind(
+    bound: BoundProject, monkeypatch: pytest.MonkeyPatch, detail: object
+) -> None:
+    """A backend's detail of no kind, of another, or a validation list is answered as it was sent.
+
+    Only a detail whose ``kind`` names the not-open refusal reads as one.
+    """
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from tcip_mcp.web_client import post_panel_event, record_backend_port
+
+    body = json.dumps({"detail": detail}).encode()
+
+    class _Refusing(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            self.rfile.read(int(self.headers["Content-Length"]))
+            self.send_response(409)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
+    with HTTPServer(("127.0.0.1", 0), _Refusing) as server:
+        record_backend_port(bound.workspace, server.server_address[1])
+        thread = threading.Thread(target=server.handle_request, daemon=True)
+        thread.start()
+        res = post_panel_event(bound, "annotate", _focus(mode="box"))
+        thread.join(timeout=10)
+
+    assert res.reason == detail
+
+
+def test_post_panel_event_answers_the_delivery_and_the_backends_refusals(
     opened: OpenProject, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``post_panel_event`` answers a served backend's response body.
+    """``post_panel_event`` answers a served backend's delivery and its refusals.
 
-    Against a served backend it answers with the backend's response body; for another project
-    than the open one, with the backend's structured refusal naming the open one; and after the
-    project is closed, with the backend's own none-open refusal.
+    Against a served backend it answers no reason; for another project than the open one, with
+    the backend's structured refusal naming the open one; and after the project is closed, with
+    the backend's own none-open refusal.
     """
     import asyncio
 
-    from tcip_mcp.web_client import post_panel_event
+    from tcip_mcp.web_client import ProjectNotOpenRefusal, post_panel_event
     from tcip_web.app import app
     from tcip_web.state import store
     from tests._web_fixtures import bound_to, named_project
@@ -926,21 +913,16 @@ def test_post_panel_event_returns_the_backends_response_body(
         named_project(opened.root.parent / "hill_block", "Hill block")
     )
     monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
+    note = Banner(text="a note")
     with served(app, bound.workspace):
-        res = post_panel_event(bound, "app", "status_note", {"text": "a note"})
-        assert res["delivered"] is True
-        assert res["response"] == {
-            "status": "ok",
-            "panel": "app",
-            "event_type": "status_note",
-        }
+        res = post_panel_event(bound, "app", note)
+        assert res.reason is None
 
-        elsewhere = post_panel_event(other, "app", "status_note", {})
-        assert elsewhere["delivered"] is False
-        assert elsewhere["open_project_id"] == opened.id
-        assert elsewhere["error"]
+        elsewhere = post_panel_event(other, "app", note)
+        assert isinstance(elsewhere.reason, ProjectNotOpenRefusal)
+        assert elsewhere.reason.open_project_id == opened.id
 
         asyncio.run(store.close_project(opened.id))
-        refused = post_panel_event(bound, "app", "status_note", {})
-        assert refused["delivered"] is False
-        assert "no project is open" in refused["error"]
+        refused = post_panel_event(bound, "app", note)
+        assert isinstance(refused.reason, str)
+        assert "no project is open" in refused.reason

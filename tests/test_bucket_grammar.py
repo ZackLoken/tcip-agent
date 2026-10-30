@@ -57,7 +57,8 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
 
     Beside a dated directory under ``images/``, a hidden one adds no date to either.
     """
-    from tcip_mcp.project_record import record_fields
+    from tcip_mcp.project_record import record_or_problem
+    from tcip_mcp.workspace import ListedProject
     from tcip_web.routes.projects import _summarize
     from tests._producer_fixtures import registry_of, registry_over
 
@@ -69,10 +70,62 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
     tree = client.get(
         "/api/dataset/tree", params={"dataset_root": str(root)}
     ).json()
-    picker = _summarize(root, record_fields(root))
+    picker = _summarize(ListedProject(root, *record_or_problem(root)))
 
-    assert tree["dates_with_images"] == ["2026-03-02"]
-    assert picker.dates == ["2026-03-02"]
+    assert [c["name"] for c in tree["captures"]] == ["2026-03-02"]
+    assert picker.tree.model_dump(mode="json") == tree
+
+
+def test_the_tree_states_each_captures_date_and_none_where_no_date_names_it(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A capture named by its ISO date is that date; the undated bucket and a no-date name none."""
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
+    root = tmp_path / "Valley_Farm"
+    for capture in ("2026-03-02", "20260302", "2026-13-01", UNDATED_BUCKET):
+        image_dir(root, capture).mkdir(parents=True)
+
+    tree = client.get(
+        "/api/dataset/tree", params={"dataset_root": str(root)}
+    ).json()
+
+    assert tree["captures"] == [
+        {"name": "2026-03-02", "date": "2026-03-02"},
+        {"name": "2026-13-01", "date": None},
+        {"name": "20260302", "date": None},
+        {"name": UNDATED_BUCKET, "date": None},
+    ]
+
+
+def test_a_publication_states_the_one_capture_its_documents_are_of(
+    tmp_path: Path,
+) -> None:
+    """A bucket over one capture's images states that capture; one over two captures refuses."""
+    pytest.importorskip("torch")
+    from tcip_mcp.pipelines.postprocessing.export import DetectionResult
+    from tests._chain_fixtures import published
+    from tests._producer_fixtures import write_image
+
+    first, second = "2026-03-02", "2026-03-09"
+    results = [
+        DetectionResult(
+            image=str(
+                write_image(image_dir(tmp_path / "ds", capture) / f"{capture}.jpg", (8, 8))
+            ),
+            width=8,
+            height=8,
+            boxes=[(1.0, 1.0, 4.0, 4.0)],
+            scores=[0.9],
+            cap=2,
+        ).model_dump()
+        for capture in (first, second)
+    ]
+
+    with pytest.raises(ValueError, match="captures"):
+        published(tmp_path, "baseline/both", results, scope={"subject": "bud"})
+    bucket = published(tmp_path, "baseline/first", results[:1], scope={"subject": "bud"})
+    assert bucket.date == first
 
 
 def test_the_tree_and_the_project_summary_list_only_published_buckets_alike(
@@ -84,7 +137,8 @@ def test_the_tree_and_the_project_summary_list_only_published_buckets_alike(
     date equal the tree's.
     """
     pytest.importorskip("torch")
-    from tcip_mcp.project_record import record_fields
+    from tcip_mcp.project_record import record_or_problem
+    from tcip_mcp.workspace import ListedProject
     from tcip_web.routes.projects import _summarize
     from tests._chain_fixtures import DATE, unassessed_bucket
 
@@ -94,7 +148,7 @@ def test_the_tree_and_the_project_summary_list_only_published_buckets_alike(
     tree = client.get(
         "/api/dataset/tree", params={"dataset_root": str(root)}
     ).json()
-    picker = _summarize(root, record_fields(root))
+    picker = _summarize(ListedProject(root, *record_or_problem(root)))
 
     assert tree["buckets_by_date"][DATE] == [bucket.name]
-    assert picker.buckets_by_date == tree["buckets_by_date"]
+    assert picker.tree.model_dump(mode="json") == tree

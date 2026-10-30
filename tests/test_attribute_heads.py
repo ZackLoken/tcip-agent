@@ -160,7 +160,7 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(
         lambda ack: deliver_phenology(
             tmp_path,
             measurement,
-            curves=False,
+            projection="milestones",
             output_path=out,
             acknowledgment_id=ack,
             door="test_delivery",

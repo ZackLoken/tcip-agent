@@ -50,8 +50,9 @@ def test_the_record_the_session_routes_write_reads_back_through_its_model_unchan
     raw = tcip_store.read(annotation_stats_key(str(opened.root)))
     stats = read_stats(raw)
 
-    assert stats.model_dump(mode="json") == raw
-    assert [(s.user, s.started) for s in stats.sessions] == [
+    stored = stats.model_dump(mode="json")
+    assert stored == raw
+    assert [(s["user"], s["started"]) for s in stored["sessions"]] == [
         ("user:bob", bob["started"]),
         ("user:alice", alice["started"]),
     ]

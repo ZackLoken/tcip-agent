@@ -1,121 +1,101 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { CompareResult, MetricRow } from "@/api/training";
 import { trainingApi } from "@/api/training";
-import { RunComparison, type MarkedRun } from "@/components/RunComparison";
-import {
-  compareBestAnswer,
-  compareEntry,
-  compareResult,
-  metricDirections,
-  producedRefusal,
-  refusalDetail,
-  registryEntry,
-} from "@/test/training";
+import type { Comparison } from "@/api/types.generated";
+import { NO_MARKED_CHECKPOINT, RunComparison, type MarkedRun } from "@/components/RunComparison";
+import { formatNumber } from "@/lib/numberFormat";
+import { thrown } from "@/test/refusals";
+import { COMPARISONS, RANKINGS, readColumns, TRAINING_REFUSALS } from "@/test/training";
 
-/** The ranking the generator received, by the metric its completed run's checkpoint carries. */
-const BEST = compareBestAnswer({});
-const METRIC = BEST.ranking_basis;
+/** The ranking the generator received, by the one metric its completed run's checkpoint carries. */
+const BEST = RANKINGS.compare;
+const [METRIC] = Object.keys(BEST.facts.metrics);
 
-/** A metric the produced direction table names no direction for. */
-const UNDECLARED = "val_map99";
+/** The registered column of the produced comparison whose checkpoint carries a declared metric,
+ *  an undeclared one and a string. */
+const [RICH] = readColumns(COMPARISONS.rich).filter((c) => c.registry.length > 0);
 
-beforeEach(() => {
-  // Every render fetches the declared-direction table once on mount; a test that cares about
-  // its content overrides this default with its own mockResolvedValue.
-  vi.spyOn(trainingApi, "metricDirections").mockResolvedValue(metricDirections({}));
-});
+/** The direction the produced rich comparison serves for each metric key, `null` where none is
+ *  declared. */
+const RICH_DIRECTIONS = COMPARISONS.rich.higher_is_better;
+const [DECLARED_KEYS, UNDECLARED_KEYS] = [true, false].map((declared) =>
+  Object.keys(RICH_DIRECTIONS).filter((key) => (RICH_DIRECTIONS[key] !== null) === declared),
+);
+
+/** A metric the produced rich comparison serves with no declared direction. */
+const [UNDECLARED] = UNDECLARED_KEYS;
 
 afterEach(cleanup);
 
-const MARKED: MarkedRun[] = [{ experimentId: "exp-a" }, { experimentId: "exp-b" }];
-
-/** The produced comparison holding a produced column per marked run, with `change` laid over it. */
-function baseResult(change: Partial<CompareResult>): CompareResult {
-  return compareResult({
-    experiments: MARKED.map(({ experimentId }) => compareEntry({ experiment_id: experimentId })),
-    ...change,
-  });
+/** The id each column of `comparison` was asked for, read or not. */
+function idsOf(comparison: Comparison): string[] {
+  return comparison.experiments.map((c) => ("run" in c ? c.run.experiment_id : c.experiment_id));
 }
 
-/** The comparison in which exp-a carries the produced registered checkpoint, under its own name
- *  and carrying `metrics`, and exp-b registered nothing. */
-function oneRegisteredResult(metrics: MetricRow | null = BEST.metrics): CompareResult {
-  return baseResult({
-    experiments: [
-      compareEntry({
-        experiment_id: "exp-a",
-        registry: [registryEntry({ name: "exp-a", metrics })],
-      }),
-      compareEntry({ experiment_id: "exp-b" }),
-    ],
-  });
+/** The runs `comparison` compared, marked in its columns' order. */
+function markedOf(comparison: Comparison): MarkedRun[] {
+  return idsOf(comparison).map((experimentId) => ({ experimentId }));
 }
 
-/** The produced ranking, won by exp-a. */
-const EXP_A_BEST = compareBestAnswer({ name: "exp-a", experiment_id: "exp-a" });
+/** Render the comparison of the runs the produced `comparison` compared, which it answers. */
+function compared(comparison: Comparison) {
+  const compare = vi.spyOn(trainingApi, "compare").mockResolvedValue(comparison);
+  const view = render(<RunComparison marked={markedOf(comparison)} />);
+  return { compare, ...view };
+}
 
 describe("RunComparison data lines", () => {
   it("reads the images line as same source images when the tool says so", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(
-      baseResult({ same_dataset_fingerprint: true }),
-    );
-    render(<RunComparison marked={MARKED} />);
+    expect(COMPARISONS.same.dataset_fingerprints).toBe("same");
+    compared(COMPARISONS.same);
     expect(await screen.findByText("same source images")).toBeInTheDocument();
   });
 
   it("reads the images line as not the same when the tool says so", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(
-      baseResult({ same_dataset_fingerprint: false }),
-    );
-    render(<RunComparison marked={MARKED} />);
+    expect(COMPARISONS.compare.dataset_fingerprints).toBe("different");
+    compared(COMPARISONS.compare);
     expect(await screen.findByText("not the same source images")).toBeInTheDocument();
   });
 
-  it("names which columns carry no record when the images line reads not comparable", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(
-      baseResult({
-        experiments: [
-          compareEntry({ experiment_id: "exp-a" }),
-          compareEntry({ experiment_id: "exp-b", dataset_fingerprint: null }),
-        ],
-        same_dataset_fingerprint: null,
-      }),
-    );
-    render(<RunComparison marked={MARKED} />);
-    expect(await screen.findByText(/not comparable/)).toBeInTheDocument();
-    expect(screen.getByText(/exp-b carry no fingerprint/)).toBeInTheDocument();
+  it("names which columns it could not read when the images line reads not comparable", async () => {
+    const [, unread] = idsOf(COMPARISONS.unread);
+    expect(COMPARISONS.unread.dataset_fingerprints).toBe("unread");
+    compared(COMPARISONS.unread);
+    expect(
+      await screen.findByText(`not comparable: ${unread} could not be read`),
+    ).toBeInTheDocument();
+  });
+
+  it("names which columns carry no fingerprint when the tool says one is unset", async () => {
+    const [, loose] = idsOf(COMPARISONS.unset);
+    expect(COMPARISONS.unset.dataset_fingerprints).toBe("unset");
+    compared(COMPARISONS.unset);
+    expect(
+      await screen.findByText(`not comparable: ${loose} carry no fingerprint`),
+    ).toBeInTheDocument();
   });
 
   it("reads the partition line from each column's own split state", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(
-      baseResult({
-        experiments: [
-          compareEntry({
-            experiment_id: "exp-a",
-            split: { case: "bound", selection_dir: "splits/d1", seed: 7 },
-          }),
-          compareEntry({ experiment_id: "exp-b" }),
-        ],
-      }),
-    );
-    render(<RunComparison marked={MARKED} />);
-    expect(await screen.findByText(/bound to splits\/d1/)).toBeInTheDocument();
+    const [bound, drawn] = readColumns(COMPARISONS.bound).map((c) => c.split);
+    compared(COMPARISONS.bound);
     expect(
-      screen.getByText(new RegExp(`drawn again \\(seed ${compareEntry({}).split?.seed}\\)`)),
+      await screen.findByText(new RegExp(`bound to ${String(bound.selection_dir)}`)),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(new RegExp(`drawn again \\(seed ${String(drawn.seed)}\\)`)),
     ).toBeInTheDocument();
   });
 });
 
 describe("RunComparison on a change of the marked set", () => {
   it("reads as reading, never a stale absence claim, for a newly marked column", async () => {
-    const compare = vi.spyOn(trainingApi, "compare").mockResolvedValue(baseResult({}));
-    const { rerender } = render(<RunComparison marked={[MARKED[0]]} />);
-    await waitFor(() => expect(screen.getAllByText("exp-a").length).toBeGreaterThan(0));
+    const [only] = idsOf(COMPARISONS.one);
+    const { compare, rerender } = compared(COMPARISONS.one);
+    await waitFor(() => expect(screen.getAllByText(only).length).toBeGreaterThan(0));
 
     compare.mockImplementation(() => new Promise(() => {})); // never resolves for the new set
-    rerender(<RunComparison marked={MARKED} />);
+    rerender(<RunComparison marked={markedOf(COMPARISONS.same)} />);
 
     expect(await screen.findByText("Loading comparison...")).toBeInTheDocument();
   });
@@ -123,10 +103,9 @@ describe("RunComparison on a change of the marked set", () => {
 
 describe("RunComparison rank control", () => {
   it("shows the direction toggle as soon as an undeclared metric is chosen, before any Rank press", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult({ [UNDECLARED]: 0.7 }));
     const compareBest = vi.spyOn(trainingApi, "compareBest");
 
-    render(<RunComparison marked={MARKED} />);
+    compared(COMPARISONS.rich);
     expect(screen.queryByText("higher is better")).not.toBeInTheDocument();
 
     fireEvent.change(await screen.findByRole("combobox"), {
@@ -138,13 +117,12 @@ describe("RunComparison rank control", () => {
   });
 
   it("clears a pending rank refusal when a direction is chosen, since it answers what the refusal asked for", async () => {
-    const { message } = refusalDetail("unverified_refusal");
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult({ [UNDECLARED]: 0.7 }));
+    const { message } = TRAINING_REFUSALS.unverified_refusal.body.detail;
     vi.spyOn(trainingApi, "compareBest").mockRejectedValue(
-      await producedRefusal("unverified_refusal"),
+      await thrown(TRAINING_REFUSALS.unverified_refusal),
     );
 
-    render(<RunComparison marked={MARKED} />);
+    compared(COMPARISONS.rich);
     fireEvent.change(await screen.findByRole("combobox"), {
       target: { value: UNDECLARED },
     });
@@ -159,97 +137,99 @@ describe("RunComparison rank control", () => {
   it("shows the unverified switch only after the tool says every candidate was unverified", async () => {
     // The ranked metric's direction is declared, so Rank is reachable without first picking a
     // direction, keeping this test scoped to the unverified switch alone.
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
     vi.spyOn(trainingApi, "compareBest").mockRejectedValue(
-      await producedRefusal("unverified_refusal"),
+      await thrown(TRAINING_REFUSALS.unverified_refusal),
     );
 
-    render(<RunComparison marked={MARKED} />);
+    compared(COMPARISONS.compare);
     const select = await screen.findByRole("combobox");
     fireEvent.change(select, { target: { value: METRIC } });
-    expect(
-      screen.queryByText("include checkpoints the trainer did not stamp"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("include unverified checkpoints")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Rank" }));
-    expect(
-      await screen.findByText("include checkpoints the trainer did not stamp"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("include unverified checkpoints")).toBeInTheDocument();
   });
 
   it("renders the projected best-model answer once ranking succeeds", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
-    vi.spyOn(trainingApi, "compareBest").mockResolvedValue(EXP_A_BEST);
+    vi.spyOn(trainingApi, "compareBest").mockResolvedValue(BEST);
 
-    render(<RunComparison marked={MARKED} />);
+    compared(COMPARISONS.compare);
     const select = await screen.findByRole("combobox");
     fireEvent.change(select, { target: { value: METRIC } });
     fireEvent.click(screen.getByRole("button", { name: "Rank" }));
 
     const status = await screen.findByRole("status");
-    expect(within(status).getByText("exp-a", { selector: "span.font-mono" })).toBeInTheDocument();
+    expect(
+      within(status).getByText(BEST.entry.name, { selector: "span.font-mono" }),
+    ).toBeInTheDocument();
     expect(
       within(status).getByText(
-        new RegExp(`${BEST.metrics_source} / ${BEST.direction_source} direction`),
+        new RegExp(`${BEST.facts.metrics_source} / ${BEST.direction_source} direction`),
       ),
     ).toBeInTheDocument();
   });
 });
 
 describe("RunComparison rank exclusions", () => {
-  it("names the tool's own no-checkpoint sentence beside a disabled Rank instead of an empty chooser", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(baseResult({}));
-    render(<RunComparison marked={MARKED} />);
-    expect(
-      await screen.findByText("none of the marked experiments registered a checkpoint"),
-    ).toBeInTheDocument();
+  it("says no column carries a registered checkpoint beside a disabled Rank instead of an empty chooser", async () => {
+    expect(readColumns(COMPARISONS.same).every((c) => c.registry.length === 0)).toBe(true);
+    compared(COMPARISONS.same);
+    expect(await screen.findByText(NO_MARKED_CHECKPOINT)).toBeInTheDocument();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Rank" })).toBeDisabled();
   });
 
-  it("lists a marked run left out for having no registered checkpoint, beside excluded_unverified", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
-    vi.spyOn(trainingApi, "compareBest").mockResolvedValue(EXP_A_BEST);
+  it("says once, in its column, that a marked run the ranking answers as unregistered has no checkpoint", async () => {
+    const [unregistered] = readColumns(COMPARISONS.compare)
+      .filter((c) => c.registry.length === 0)
+      .map((c) => c.run.experiment_id);
+    expect(BEST.unregistered).toEqual([unregistered]);
+    vi.spyOn(trainingApi, "compareBest").mockResolvedValue(BEST);
 
-    render(<RunComparison marked={MARKED} />);
+    compared(COMPARISONS.compare);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
       target: { value: METRIC },
     });
     fireEvent.click(screen.getByRole("button", { name: "Rank" }));
 
-    expect(
-      await screen.findByText(/exp-b: not ranked: no registered checkpoint/),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("status")).not.toHaveTextContent("no registered checkpoint");
+    const column = idsOf(COMPARISONS.compare).indexOf(unregistered);
+    const entries = screen.getByText("Entries").closest("tr") as HTMLElement;
+    expect(within(entries).getAllByRole("cell")[column]).toHaveTextContent(
+      "no registered checkpoint",
+    );
+    expect(screen.getAllByText("no registered checkpoint")).toHaveLength(1);
   });
 });
 
 describe("RunComparison rank answer", () => {
   it("shows the winner's own value for the ranked metric, and its name once when it equals the experiment id", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
-    vi.spyOn(trainingApi, "compareBest").mockResolvedValue(
-      compareBestAnswer({ name: "exp-a", experiment_id: "exp-a", metrics: { [METRIC]: 0.71234 } }),
-    );
+    const winner = RANKINGS.rich;
+    expect(winner.entry.name).toBe(winner.entry.experiment_id);
+    vi.spyOn(trainingApi, "compareBest").mockResolvedValue(winner);
 
-    render(<RunComparison marked={MARKED} />);
+    compared(COMPARISONS.rich);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
       target: { value: METRIC },
     });
     fireEvent.click(screen.getByRole("button", { name: "Rank" }));
 
-    expect(await screen.findByText(new RegExp(`${METRIC}: 0.712`))).toBeInTheDocument();
-    expect(screen.queryByText("(exp-a)")).not.toBeInTheDocument();
+    // The winner's value carries more than four significant figures, which the answer rounds.
+    const value = winner.facts.metrics[METRIC] as number;
+    expect(
+      await screen.findByText(new RegExp(`${METRIC}: ${formatNumber(value)}`)),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(`${METRIC}: ${value}`))).not.toBeInTheDocument();
+    expect(screen.queryByText(`(${winner.entry.name})`)).not.toBeInTheDocument();
   });
 
   it("resets rankResult, rankError, the direction choice, needsUnverifiedOption and rankMetric when the marked set changes", async () => {
-    const { message } = refusalDetail("absent_metric_refusal");
-    const compare = vi
-      .spyOn(trainingApi, "compare")
-      .mockResolvedValue(oneRegisteredResult({ [UNDECLARED]: 0.7 }));
+    const { message } = TRAINING_REFUSALS.absent_metric_refusal.body.detail;
     vi.spyOn(trainingApi, "compareBest").mockRejectedValue(
-      await producedRefusal("absent_metric_refusal"),
+      await thrown(TRAINING_REFUSALS.absent_metric_refusal),
     );
 
-    const { rerender } = render(<RunComparison marked={MARKED} />);
+    const { compare, rerender } = compared(COMPARISONS.rich);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
       target: { value: UNDECLARED },
     });
@@ -260,18 +240,8 @@ describe("RunComparison rank answer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rank" }));
     expect(await screen.findByText(message)).toBeInTheDocument();
 
-    compare.mockResolvedValue(
-      baseResult({
-        experiments: [
-          compareEntry({
-            experiment_id: "exp-c",
-            registry: [registryEntry({ name: "exp-c", metrics: { [UNDECLARED]: 0.5 } })],
-          }),
-          compareEntry({ experiment_id: "exp-d" }),
-        ],
-      }),
-    );
-    rerender(<RunComparison marked={[{ experimentId: "exp-c" }, { experimentId: "exp-d" }]} />);
+    compare.mockResolvedValue(COMPARISONS.unranked);
+    rerender(<RunComparison marked={markedOf(COMPARISONS.unranked)} />);
 
     await waitFor(() => {
       expect(screen.queryByText("higher is better")).not.toBeInTheDocument();
@@ -283,40 +253,28 @@ describe("RunComparison rank answer", () => {
 
 describe("RunComparison per-column absence and loading", () => {
   it("reads 'not in the comparison answer' for a marked column the answer omits, never 'reading'", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(
-      baseResult({ experiments: [compareEntry({ experiment_id: "exp-a" })] }),
-    );
-    render(<RunComparison marked={MARKED} />);
+    // The answer of one run's comparison, for a marked set holding a second run.
+    vi.spyOn(trainingApi, "compare").mockResolvedValue(COMPARISONS.one);
+    render(<RunComparison marked={markedOf(COMPARISONS.same)} />);
     expect((await screen.findAllByText("not in the comparison answer")).length).toBeGreaterThan(0);
     expect(screen.queryByText("reading")).not.toBeInTheDocument();
   });
 
   it("renders the Images statement in one table row", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(
-      baseResult({ same_dataset_fingerprint: true }),
-    );
-    render(<RunComparison marked={MARKED} />);
+    compared(COMPARISONS.same);
     const label = await screen.findByText("Images");
     const row = label.closest("tr") as HTMLElement;
     expect(within(row).getByText("same source images")).toBeInTheDocument();
   });
 
   it("uses one wording for an absent value and four significant figures for a value", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(
-      baseResult({
-        experiments: [
-          compareEntry({
-            experiment_id: "exp-a",
-            registry: [registryEntry({ name: "exp-a", metrics: {}, metrics_source: null })],
-            last_logged_metrics: { epoch: 1, val_map50: 0.712345 },
-          }),
-          compareEntry({ experiment_id: "exp-b" }),
-        ],
-      }),
-    );
-    render(<RunComparison marked={MARKED} />);
-    expect(await screen.findByText("0.7123")).toBeInTheDocument();
-    expect(screen.queryByText("0.712345")).not.toBeInTheDocument();
+    // The unstamped column's checkpoint carries no metric while its log carries one with more
+    // than four significant figures.
+    const [unstamped] = readColumns(COMPARISONS.unstamped);
+    const logged = unstamped.last_logged_metrics?.[METRIC] as number;
+    compared(COMPARISONS.unstamped);
+    expect(await screen.findByText(formatNumber(logged))).toBeInTheDocument();
+    expect(screen.queryByText(String(logged))).not.toBeInTheDocument();
     expect((await screen.findAllByText("unrecorded")).length).toBeGreaterThan(0);
     expect(screen.queryByText("no metrics")).not.toBeInTheDocument();
   });
@@ -324,11 +282,7 @@ describe("RunComparison per-column absence and loading", () => {
 
 describe("RunComparison rank metric chooser", () => {
   it("lists declared-direction keys first, groups the rest under 'no declared direction'", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(
-      oneRegisteredResult({ [UNDECLARED]: 0.2, [METRIC]: 0.5 }),
-    );
-
-    render(<RunComparison marked={MARKED} />);
+    compared(COMPARISONS.rich);
     const rankSelect = await screen.findByRole("combobox", { name: "Rank by metric" });
     await waitFor(() =>
       expect(
@@ -338,14 +292,13 @@ describe("RunComparison rank metric chooser", () => {
     const optionTexts = within(rankSelect)
       .getAllByRole("option")
       .map((o) => o.textContent);
-    expect(optionTexts).toEqual(["Choose a metric...", METRIC, UNDECLARED]);
+    expect(optionTexts).toEqual(["Choose a metric...", ...DECLARED_KEYS, ...UNDECLARED_KEYS]);
   });
 
   it("never calls compareBest before Rank is pressed", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
     const compareBest = vi.spyOn(trainingApi, "compareBest");
 
-    render(<RunComparison marked={MARKED} />);
+    compared(COMPARISONS.compare);
     const rankSelect = await screen.findByRole("combobox", { name: "Rank by metric" });
     await waitFor(() => expect(within(rankSelect).getAllByRole("option")).toHaveLength(2));
 
@@ -355,9 +308,7 @@ describe("RunComparison rank metric chooser", () => {
 
 describe("RunComparison ranking direction control", () => {
   it("gives the direction choice the row group's own role, aria-pressed and focus-visible styling", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult({ [UNDECLARED]: 0.7 }));
-
-    render(<RunComparison marked={MARKED} />);
+    compared(COMPARISONS.rich);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
       target: { value: UNDECLARED },
     });
@@ -373,13 +324,12 @@ describe("RunComparison ranking direction control", () => {
   it("renders a rank refusal in a status region without moving focus off the Rank control", async () => {
     // The ranked metric's direction is declared, so Rank is reachable right after choosing it;
     // the refusal under test here is unrelated to direction.
-    const { message } = refusalDetail("absent_metric_refusal");
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
+    const { message } = TRAINING_REFUSALS.absent_metric_refusal.body.detail;
     vi.spyOn(trainingApi, "compareBest").mockRejectedValue(
-      await producedRefusal("absent_metric_refusal"),
+      await thrown(TRAINING_REFUSALS.absent_metric_refusal),
     );
 
-    render(<RunComparison marked={MARKED} />);
+    compared(COMPARISONS.compare);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
       target: { value: METRIC },
     });
@@ -395,55 +345,65 @@ describe("RunComparison ranking direction control", () => {
 
 describe("RunComparison rank chooser's numeric-only filter", () => {
   it("never offers a key whose stamped value is a string, such as a selection label", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(
-      oneRegisteredResult({ [METRIC]: 0.7, val_selection: "held-out" }),
-    );
-    render(<RunComparison marked={MARKED} />);
+    const [stringKey] = Object.entries(RICH.registry[0].facts.metrics)
+      .filter(([, value]) => typeof value === "string")
+      .map(([key]) => key);
+    compared(COMPARISONS.rich);
     const rankSelect = await screen.findByRole("combobox", { name: "Rank by metric" });
     const optionTexts = within(rankSelect)
       .getAllByRole("option")
       .map((o) => o.textContent);
-    expect(optionTexts).toContain(METRIC);
-    expect(optionTexts).not.toContain("val_selection");
+    expect(optionTexts.slice(1).sort()).toEqual(Object.keys(RICH_DIRECTIONS).sort());
+    expect(optionTexts).not.toContain(stringKey);
   });
 });
 
 describe("RunComparison rank answer, a stamped-value exclusion", () => {
-  it("names a marked run as not ranked when its checkpoint never stamped the ranked metric", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(
-      baseResult({
-        experiments: [
-          compareEntry({
-            experiment_id: "exp-a",
-            registry: [registryEntry({ name: "exp-a", metrics: { [UNDECLARED]: 0.2 } })],
-          }),
-          compareEntry({
-            experiment_id: "exp-b",
-            registry: [registryEntry({ name: "exp-b" })],
-          }),
-        ],
-      }),
-    );
-    vi.spyOn(trainingApi, "compareBest").mockResolvedValue(
-      compareBestAnswer({ name: "exp-b", experiment_id: "exp-b" }),
-    );
+  it("names a checkpoint the ranking skipped for never stamping the ranked metric, with why", async () => {
+    const ranking = RANKINGS.unranked;
+    const skipped = ranking.skipped.find((s) => s.unstamped);
+    if (skipped === undefined) throw new Error("the produced ranking skipped no unstamped entry");
+    expect(skipped.unverified).toBe(false);
+    vi.spyOn(trainingApi, "compareBest").mockResolvedValue(ranking);
 
-    render(<RunComparison marked={MARKED} />);
+    compared(COMPARISONS.unranked);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
-      target: { value: METRIC },
+      target: { value: ranking.metric },
     });
     fireEvent.click(screen.getByRole("button", { name: "Rank" }));
 
     expect(
-      await screen.findByText(new RegExp(`exp-a: not ranked: no ${METRIC} stamped`)),
+      await screen.findByText(
+        new RegExp(`${skipped.name}: not ranked: no ${ranking.metric} stamped`),
+      ),
     ).toBeInTheDocument();
+  });
+
+  it("names every fact a checkpoint was left out for when both hold, by the metric ranked", async () => {
+    const ranking = RANKINGS.verified;
+    const [both] = ranking.skipped.filter((s) => s.unverified && s.unstamped);
+    const directions = COMPARISONS.verified.higher_is_better;
+    // A declared metric other than the one ranked by: the sentence names the answer's metric.
+    const [chosen] = Object.keys(directions).filter(
+      (key) => directions[key] !== null && key !== ranking.metric,
+    );
+    vi.spyOn(trainingApi, "compareBest").mockResolvedValue(ranking);
+
+    compared(COMPARISONS.verified);
+    fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
+      target: { value: chosen },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rank" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      `${both.name}: not ranked: unverified, its metrics are not the trainer's; no ${ranking.metric} stamped`,
+    );
   });
 });
 
 describe("RunComparison disabled Rank's reason", () => {
   it("links the metric-not-chosen reason to the Rank control with aria-describedby", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
-    render(<RunComparison marked={MARKED} />);
+    compared(COMPARISONS.compare);
     await screen.findByRole("combobox", { name: "Rank by metric" });
 
     const rankButton = screen.getByRole("button", { name: "Rank" });
@@ -457,16 +417,8 @@ describe("RunComparison disabled Rank's reason", () => {
 });
 
 describe("RunComparison unrecorded-field wording", () => {
-  it("reads the builder cell as unrecorded, not a third wording, when the config names none", async () => {
-    vi.spyOn(trainingApi, "compare").mockResolvedValue(
-      baseResult({
-        experiments: [
-          compareEntry({ experiment_id: "exp-a", model: null }),
-          compareEntry({ experiment_id: "exp-b", model: null }),
-        ],
-      }),
-    );
-    render(<RunComparison marked={MARKED} />);
+  it("reads the builder cell as unrecorded, not a third wording, for a run it could not read", async () => {
+    compared(COMPARISONS.unread);
     const label = await screen.findByText("Builder");
     const row = label.closest("tr") as HTMLElement;
     expect(within(row).queryByText("no builder recorded")).not.toBeInTheDocument();

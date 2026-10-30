@@ -17,7 +17,7 @@ from tcip_mcp.project_record import CaptureInvariances
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
-    from httpx import Response
+    from starlette.testclient import httpx
 
     from tcip_mcp.workspace import BoundProject
     from tcip_web.routes.inference import InferenceJob
@@ -75,7 +75,7 @@ def named_project(
         str(path), display_name, "north orchard", invariances, actor=None
     )
     assert "error" not in result, result
-    return OpenProject(path, result["id"])
+    return OpenProject(path, result["record"]["id"])
 
 
 @contextmanager
@@ -150,7 +150,7 @@ def acknowledged_post(
     *,
     reason: str,
     user: str = "breeder",
-) -> Response:
+) -> httpx.Response:
     """Post ``body`` to ``url`` as ``user``, refused, then again under an acknowledgment.
 
     The first post is asserted to answer 400 naming a result hash; the second carries the

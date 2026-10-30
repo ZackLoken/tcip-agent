@@ -18,7 +18,11 @@ import numpy as np
 import torch
 
 from tcip_annotation.json_io import xywh
-from tcip_mcp.pipelines.schemas import AP_IOU_THRESHOLDS, COMPARABILITY_IOU
+from tcip_mcp.pipelines.schemas import (
+    AP_IOU_THRESHOLDS,
+    COMPARABILITY_IOU,
+    VAL_METRIC_PREFIX,
+)
 from tcip_store import stored_number, stored_numbers
 
 if TYPE_CHECKING:
@@ -28,13 +32,11 @@ if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
     from tcip_mcp.pipelines.derivations import XywhBoxes
     from tcip_mcp.pipelines.execution import MaskCut
+    from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.pipelines.schemas import ModelDims, ScoreWeights
     from tcip_mcp.traits import TraitEntry
 
 logger = logging.getLogger(__name__)
-
-VAL_METRIC_PREFIX = "val_"
-"""The prefix every validation metric key carries in a run's metrics log and registry entry."""
 
 VAL_LOSS_KEY = VAL_METRIC_PREFIX + "loss"
 """The validation loss's key in a run's metrics log."""
@@ -1015,23 +1017,25 @@ class ScoredImage(NamedTuple):
     indices into ``gt`` and ``preds`` (every object missed where unpredicted).
     """
 
-    header: Any
+    header: SourceHeader
     gt: list
     preds: list | None
     matching: Any
 
 
 def score_bucket(
-    images: Sequence[Any],
+    headers: Sequence[SourceHeader],
     bucket: Bucket,
     *,
     iou_threshold: float,
     conf_threshold: float,
     trait: TraitEntry | None,
 ) -> tuple[list[ScoredImage], dict]:
-    """Score ``bucket``'s documents for the logical ``images`` against their ground truth.
+    """Score ``bucket``'s documents for the logical images ``headers`` name against ground truth.
 
-    The scoring reads each image once (:func:`bucket_reads`) and returns
+    Each image's frame is read off its header, so a header a decode already read states it
+    without opening its file again. The scoring reads each image once (:func:`bucket_reads`) and
+    returns
     :func:`detection_metrics` at ``conf_threshold`` over the predicted images' records, one
     subject-to-id map across every image, by mask when any annotation is a polygon, under the
     criterion that governs (``trait``'s own when given, the IoU convention at ``iou_threshold``
@@ -1040,16 +1044,19 @@ def score_bucket(
     """
     from tcip_annotation.matching import Matching, merged
     from tcip_annotation.state import polygonal
-    from tcip_mcp.pipelines.raster_source import SourceHeader
 
     read = [
         (
-            SourceHeader(src),
+            header,
             gt,
             None if document is None else document.annotations,
             None if document is None else document.cap,
         )
-        for src, gt, document in bucket_reads(images, bucket)
+        for header, (_src, gt, document) in zip(
+            headers,
+            bucket_reads([h.source for h in headers], bucket),
+            strict=True,
+        )
     ]
     name_id = subject_category_ids(
         [a for _h, gt, preds, _cap in read for a in (*gt, *(preds or ()))]

@@ -23,14 +23,12 @@ export const ProposalShapes = memo(function ProposalShapes({
     <>
       {proposals.map((p) => {
         const isFocused = focusesProposal(focused, p.index, p.bucket);
-        const label = proposalLabel(p, isFocused);
-        const key = `proposal-${p.bucket ?? ""}-${p.index}`;
+        const key = `proposal-${p.bucket}-${p.index}`;
         const shared = {
           stroke: outlineColor(p.subject, proposalMatch(p)),
           style: "dotted" as const,
           labelSize: widths.labelSize,
-          label: label ?? "",
-          showLabel: label !== null,
+          label: proposalLabel(p, isFocused),
           focused: isFocused,
         };
         const { boxes, polygons, points } = annotationsToCanvas([p]);

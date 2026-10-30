@@ -15,7 +15,6 @@ export const ROUTES = {
   getAnnotateStagings: "/api/annotate/stagings",
   getAnnotateStates: "/api/annotate/states",
   getDatasetTree: "/api/dataset/tree",
-  getFsList: "/api/fs/list",
   getImages: "/api/images",
   getImagesBands: "/api/images/bands",
   getImagesOverviewsStatus: "/api/images/overviews/status",
@@ -32,7 +31,6 @@ export const ROUTES = {
   getSessionsLoad: "/api/sessions/load",
   getSubjectsLoad: "/api/subjects/load",
   getTerminalStatus: "/api/terminal/status",
-  getTrainingMetricDirections: "/api/training/metric-directions",
   getTrainingRuns: "/api/training/runs",
   getTrainingRunsByExperimentId: (experimentId: string) =>
     `/api/training/runs/${encodeURIComponent(experimentId)}`,

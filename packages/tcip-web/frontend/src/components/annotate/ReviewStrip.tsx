@@ -1,3 +1,4 @@
+import type { OperatingPoint, ServedFlag } from "@/api/types.generated";
 import { FlagPanel } from "@/components/annotate/FlagPanel";
 import { Stepper } from "@/components/Stepper";
 import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
@@ -10,7 +11,6 @@ import {
   type StepScope,
 } from "@/lib/reviewItems";
 import { MATCH_HINTS, MATCH_TYPES, MATCH_WORDS, type MatchType } from "@/lib/symbology";
-import type { Flag } from "@/store/types";
 
 /** The status strip under the toolbar: the confidence floor and the match filter while
  *  proposals are shown; the accept, edit, reject and flag controls; and the item stepper with
@@ -45,7 +45,7 @@ export function ReviewStrip({
   /** Whether proposals are on the canvas now: shown, and served for this image. */
   reviewing: boolean;
   /** The bucket's validated operating point, or the reason it has none; null until served. */
-  operatingPoint: { conf: number | null; reason: string } | null;
+  operatingPoint: OperatingPoint | null;
   filters: ItemFilters;
   onFilters: (next: ItemFilters) => void;
   scope: StepScope;
@@ -69,7 +69,7 @@ export function ReviewStrip({
   onEdit: () => void;
   onReject: () => void;
   /** The open flags on the focused item, or on the image as a whole when nothing is focused. */
-  flags: Flag[];
+  flags: ServedFlag[];
   flagsOpen: boolean;
   onFlagsOpen: (open: boolean) => void;
   onFlag: (text: string) => Promise<boolean>;

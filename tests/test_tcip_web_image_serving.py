@@ -7,6 +7,7 @@ uses, and the overview build a scaled read of an oversized raster needs first.
 from __future__ import annotations
 
 import io
+import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
@@ -22,10 +23,10 @@ from tcip_web.routes import images as images_route
 from tests._producer_fixtures import write_image
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
 
-    from httpx import Response
     from rasterio.io import DatasetReader
+    from starlette.testclient import httpx
 
     from tcip_mcp.pipelines.raster_source import (
         BandGroupRef,
@@ -116,20 +117,27 @@ def _wide_raster(
 def _wide_multiband(
     path: Path, *, width: int = 5000, height: int = 64, channels: int = 4
 ) -> np.ndarray:
-    """Write a uint8 draw at seed 11 as a TIFF at ``path``; return the array.
+    """Write a uint8 draw at seed 11 as a band-stack TIFF at ``path``; return the array.
 
     The array is ``height`` by ``width`` by ``channels``, 64 by 5000 by 4 by default, written
-    in strips of 8 rows.
+    in strips of 8 rows, no band of it named a color.
     """
     rng = np.random.default_rng(11)
     arr = rng.integers(0, 256, size=(height, width, channels)).astype(np.uint8)
-    tifffile.imwrite(str(path), arr, rowsperstrip=8)
+    tifffile.imwrite(
+        str(path), arr, rowsperstrip=8, photometric="minisblack", planarconfig="contig"
+    )
     return arr
 
 
-def _served(resp: Response) -> np.ndarray:
+def _served(resp: httpx.Response) -> np.ndarray:
     assert resp.status_code == 200, resp.text
     return np.asarray(Image.open(io.BytesIO(resp.content)))
+
+
+def _region(read: Mapping[str, int | float | str]) -> list[int | float | str]:
+    """Return a view read's (or a rect's) corners as the image route's ``region`` parameter."""
+    return [read[k] for k in ("x0", "y0", "x1", "y1")]
 
 
 DISPLAY = 3840 * 2160
@@ -149,7 +157,7 @@ ENCODINGS = {
 route, so a change to the route's policy fails these renders instead of moving both sides."""
 
 
-def _renders_as(resp: Response, owed: np.ndarray) -> None:
+def _renders_as(resp: httpx.Response, owed: np.ndarray) -> None:
     """Assert the served image is ``owed``'s pixels, encoded byte for byte.
 
     The encoding is the policy :data:`ENCODINGS` states for the response's media type.
@@ -166,13 +174,13 @@ def _composite(
     stretch: str,
     bounds: list[tuple[float, float]] | None = None,
 ) -> np.ndarray:
-    """Return ``composite_display_rgb(arr, [0, 1, 2], stretch, bounds)``.
+    """Return ``composite_display_rgb(arr, (0, 1, 2), stretch, bounds)``.
 
     ``bounds`` is per band ``(low, high)``, or ``None``.
     """
     from tcip_mcp.pipelines.band_stats import composite_display_rgb
 
-    return composite_display_rgb(arr, [0, 1, 2], stretch, bounds)
+    return composite_display_rgb(arr, (0, 1, 2), stretch, bounds)
 
 
 # ── Regions ──────────────────────────────────────────────────────────────────────────────
@@ -189,10 +197,7 @@ def test_a_region_serves_that_regions_own_pixels(
             params={
                 "path": str(path),
                 "display_pixels": DISPLAY,
-                "x0": 200,
-                "y0": 0,
-                "x1": 400,
-                "y1": 150,
+                "region": [200, 0, 400, 150],
             },
         )
     )
@@ -202,10 +207,7 @@ def test_a_region_serves_that_regions_own_pixels(
             params={
                 "path": str(path),
                 "display_pixels": DISPLAY,
-                "x0": 0,
-                "y0": 150,
-                "x1": 200,
-                "y1": 300,
+                "region": [0, 150, 200, 300],
             },
         )
     )
@@ -225,42 +227,32 @@ def test_a_region_outside_the_raster_is_refused(
         params={
             "path": str(path),
             "display_pixels": DISPLAY,
-            "x0": 0,
-            "y0": 0,
-            "x1": 401,
-            "y1": 300,
+            "region": [0, 0, 401, 300],
         },
     )
     assert resp.status_code == 400
-    assert "outside" in resp.json()["detail"]
+    assert "out of bounds for a 300x400 raster" in resp.json()["detail"]
 
 
 @pytest.mark.parametrize(
-    "corners",
-    [
-        {"x0": 10, "y0": 10, "x1": 10, "y1": 20},
-        {"x0": 10, "y0": 20, "x1": 20, "y1": 20},
-        {"x0": 20, "y0": 0, "x1": 10, "y1": 20},
-    ],
+    "region",
+    [[10, 10, 10, 20], [10, 20, 20, 20], [20, 0, 10, 20]],
 )
 def test_an_empty_region_is_refused_rather_than_raising(
-    client: TestClient, tmp_path: Path, corners: dict[str, int]
+    client: TestClient, tmp_path: Path, region: list[int]
 ) -> None:
-    """An empty or inverted rectangle is refused as a bad request.
-
-    The refusal names ``x0 < x1``.
-    """
+    """An empty or inverted rectangle is refused as a bad request by the raster's reader."""
     path = tmp_path / "quads.tif"
     _quadrant_rgb(path)
     resp = client.get(
         "/api/images",
-        params={"path": str(path), "display_pixels": DISPLAY, **corners},
+        params={"path": str(path), "display_pixels": DISPLAY, "region": region},
     )
     assert resp.status_code == 400
-    assert "x0 < x1" in resp.json()["detail"]
+    assert "out of bounds for a 300x400 raster" in resp.json()["detail"]
 
 
-def test_a_partial_region_is_refused(
+def test_a_partial_region_is_refused_by_its_type(
     client: TestClient, tmp_path: Path
 ) -> None:
     path = tmp_path / "quads.tif"
@@ -270,13 +262,24 @@ def test_a_partial_region_is_refused(
         params={
             "path": str(path),
             "display_pixels": DISPLAY,
-            "x0": 0,
-            "y0": 0,
-            "x1": 100,
+            "region": [0, 0, 100],
         },
     )
-    assert resp.status_code == 400
-    assert "all four" in resp.json()["detail"]
+    assert resp.status_code == 422
+    assert "region" in resp.text
+
+
+def test_a_selection_of_two_bands_is_refused_by_its_type(
+    client: TestClient, tmp_path: Path
+) -> None:
+    path = tmp_path / "quads.tif"
+    _quadrant_rgb(path)
+    resp = client.get(
+        "/api/images",
+        params={"path": str(path), "display_pixels": DISPLAY, "bands": ["0", "1"]},
+    )
+    assert resp.status_code == 422
+    assert "bands" in resp.text
 
 
 def test_a_view_of_an_ingested_raster_reads_its_cells_or_one_display_read(
@@ -372,7 +375,7 @@ def test_a_whole_view_over_the_area_cap_scales_to_fit_whichever_axis_limits(
     served = _served(resp)
     assert 0 < served.shape[0] * served.shape[1] <= 20_000
     assert (
-        resp.headers["x-tcip-served-size"]
+        resp.headers[images_route.SERVED_SIZE_HEADER]
         == f"{served.shape[1]}x{served.shape[0]}"
     )
     if min(size) > 1:
@@ -392,10 +395,7 @@ def test_a_region_over_the_area_cap_is_a_display_read_within_it(
         params={
             "path": str(path),
             "display_pixels": 20_000,
-            "x0": 0,
-            "y0": 0,
-            "x1": 400,
-            "y1": 300,
+            "region": [0, 0, 400, 300],
         },
     )
     served = _served(resp)
@@ -416,10 +416,7 @@ def test_a_region_within_the_area_cap_is_served_natively(
         params={
             "path": str(path),
             "display_pixels": 20_000,
-            "x0": 0,
-            "y0": 0,
-            "x1": 100,
-            "y1": 100,
+            "region": [0, 0, 100, 100],
         },
     )
     assert _served(resp).shape == (100, 100, 3)
@@ -454,10 +451,7 @@ def test_a_native_region_decodes_to_exactly_the_source_pixels(
             params={
                 "path": str(path),
                 "display_pixels": DISPLAY,
-                "x0": 30,
-                "y0": 20,
-                "x1": 30 + width,
-                "y1": 20 + height,
+                "region": [30, 20, 30 + width, 20 + height],
             },
         )
     )
@@ -507,7 +501,11 @@ def test_the_view_routes_cells_and_the_image_routes_cap_are_one_derivation(
         )
         served = client.get(
             "/api/images",
-            params={"path": str(path), "display_pixels": display, **rect},
+            params={
+                "path": str(path),
+                "display_pixels": display,
+                "region": _region(rect),
+            },
         )
         assert served.status_code == 200, served.text
         assert (
@@ -516,13 +514,12 @@ def test_the_view_routes_cells_and_the_image_routes_cap_are_one_derivation(
         ) is native
         if native:
             for read in reads:
-                cell = {k: read[k] for k in ("x0", "y0", "x1", "y1")}
                 resp = client.get(
                     "/api/images",
                     params={
                         "path": str(path),
                         "display_pixels": display,
-                        **cell,
+                        "region": _region(read),
                     },
                 )
                 assert (
@@ -530,8 +527,8 @@ def test_the_view_routes_cells_and_the_image_routes_cap_are_one_derivation(
                     == images_route._NATIVE_ENCODING.media_type
                 )
                 assert _served(resp).shape[:2] == (
-                    cell["y1"] - cell["y0"],
-                    cell["x1"] - cell["x0"],
+                    read["y1"] - read["y0"],
+                    read["x1"] - read["x0"],
                 )
 
 
@@ -584,11 +581,11 @@ def test_the_view_and_labels_routes_measure_the_frame_the_image_routes_reader_op
                 "path": str(path),
                 "display_pixels": 1_000_000,
                 "level": read["level"],
-                **{k: read[k] for k in ("x0", "y0", "x1", "y1")},
+                "region": _region(read),
             },
         )
         assert resp.status_code == 200, resp.text
-        assert resp.headers["x-tcip-served-size"] == (
+        assert resp.headers[images_route.SERVED_SIZE_HEADER] == (
             f"{read['x1'] - read['x0']}x{read['y1'] - read['y0']}"
         )
 
@@ -625,7 +622,7 @@ def test_a_display_read_comes_off_the_overview_level_it_planned(
         "/api/images", params={"path": str(path), "display_pixels": 10_000}
     )
     assert _served(coarsest).mean() == pytest.approx(200, abs=1)
-    assert coarsest.headers["x-tcip-served-size"] == "100x100"
+    assert coarsest.headers[images_route.SERVED_SIZE_HEADER] == "100x100"
 
 
 @pytest.mark.parametrize(
@@ -659,7 +656,7 @@ def test_a_planned_display_read_is_one_the_raster_reader_admits(
         "/api/images", params={"path": str(path), "display_pixels": display}
     )
     assert resp.status_code == 200, resp.text
-    assert resp.headers["x-tcip-served-size"] == served_size
+    assert resp.headers[images_route.SERVED_SIZE_HEADER] == served_size
 
 
 def test_a_one_pixel_wide_raster_reads_off_its_pyramid(
@@ -680,7 +677,7 @@ def test_a_one_pixel_wide_raster_reads_off_its_pyramid(
         "/api/images", params={"path": str(path), "display_pixels": 20_000}
     )
     assert _served(resp).mean() == pytest.approx(200, abs=1)
-    assert resp.headers["x-tcip-served-size"] == "1x12500"
+    assert resp.headers[images_route.SERVED_SIZE_HEADER] == "1x12500"
 
 
 def test_a_palette_raster_reads_its_colors_off_its_pyramid(
@@ -751,11 +748,8 @@ def test_region_statistics_do_not_depend_on_the_display_that_asked(
     def region(display: int) -> dict:
         return {
             "path": str(path),
-            "bands": "0,1,2",
-            "x0": 0,
-            "y0": 0,
-            "x1": 64,
-            "y1": 64,
+            "bands": ["0", "1", "2"],
+            "region": [0, 0, 64, 64],
             "display_pixels": display,
         }
 
@@ -837,20 +831,16 @@ def test_a_crop_is_planned_on_the_window_the_reader_opens(
     """
     path = tmp_path / "pyramid.tif"
     _poisoned_pyramid(path)
-    x0, y0, x1, y1 = crop
     resp = client.get(
         "/api/images",
         params={
             "path": str(path),
             "display_pixels": display,
-            "x0": x0,
-            "y0": y0,
-            "x1": x1,
-            "y1": y1,
+            "region": list(crop),
         },
     )
     assert _served(resp).mean() == pytest.approx(200, abs=1)
-    assert resp.headers["x-tcip-served-size"] == served_size
+    assert resp.headers[images_route.SERVED_SIZE_HEADER] == served_size
 
 
 def test_a_scaled_view_is_served_by_tiles_of_its_planned_level(
@@ -883,14 +873,14 @@ def test_a_scaled_view_is_served_by_tiles_of_its_planned_level(
         assert resp.status_code == 200, resp.text
         return resp.json()["reads"]
 
-    def fetch(tile: dict) -> Response:
+    def fetch(tile: dict) -> httpx.Response:
         return client.get(
             "/api/images",
             params={
                 "path": str(path),
                 "display_pixels": display,
                 "level": tile["level"],
-                **{k: tile[k] for k in ("x0", "y0", "x1", "y1")},
+                "region": _region(tile),
             },
         )
 
@@ -900,7 +890,7 @@ def test_a_scaled_view_is_served_by_tiles_of_its_planned_level(
     served = fetch(tile)
     assert served.headers["content-type"] == "image/jpeg"
     assert _served(served).mean() == pytest.approx(200, abs=1)
-    assert served.headers["x-tcip-served-size"] == (
+    assert served.headers[images_route.SERVED_SIZE_HEADER] == (
         f"{tile['x1'] - tile['x0']}x{tile['y1'] - tile['y0']}"
     )
     assert (tile["nx1"] - tile["nx0"]) == (tile["x1"] - tile["x0"]) * 4
@@ -955,11 +945,11 @@ def test_every_advertised_tile_of_a_skinny_raster_is_one_its_encoding_admits(
                 "path": str(path),
                 "display_pixels": 100_000,
                 "level": 1,
-                **{k: read[k] for k in ("x0", "y0", "x1", "y1")},
+                "region": _region(read),
             },
         )
         assert resp.status_code == 200, resp.text
-        assert resp.headers["x-tcip-served-size"] == (
+        assert resp.headers[images_route.SERVED_SIZE_HEADER] == (
             f"{read['x1'] - read['x0']}x{read['y1'] - read['y0']}"
         )
         assert max(read["x1"] - read["x0"], read["y1"] - read["y0"]) <= 65_500
@@ -970,10 +960,7 @@ def test_every_advertised_tile_of_a_skinny_raster_is_one_its_encoding_admits(
             "path": str(path),
             "display_pixels": 100_000,
             "level": 1,
-            "x0": 0,
-            "y0": 0,
-            "x1": max(1, width // 2),
-            "y1": max(1, height // 2),
+            "region": [0, 0, max(1, width // 2), max(1, height // 2)],
         },
     )
     assert whole_level.status_code == 400
@@ -1016,7 +1003,7 @@ def test_a_stacked_tiff_the_reader_decodes_whole_is_offered_no_overview_tiles(
         params={
             "path": str(path),
             "display_pixels": 65_536,
-            **{k: reads[0][k] for k in ("x0", "y0", "x1", "y1")},
+            "region": _region(reads[0]),
         },
     )
     assert resp.status_code == 200, resp.text
@@ -1034,10 +1021,7 @@ def test_a_tile_request_is_refused_where_the_raster_has_no_such_level(
             "path": str(path),
             "display_pixels": DISPLAY,
             "level": 1,
-            "x0": 0,
-            "y0": 0,
-            "x1": 10,
-            "y1": 10,
+            "region": [0, 0, 10, 10],
         },
     )
     assert resp.status_code == 400
@@ -1047,10 +1031,7 @@ def test_a_tile_request_is_refused_where_the_raster_has_no_such_level(
         params={
             "path": str(path),
             "display_pixels": DISPLAY,
-            "x0": 0,
-            "y0": 0,
-            "x1": 10,
-            "y1": 10,
+            "region": [0, 0, 10, 10],
         },
     )
     assert native.status_code == 200
@@ -1072,10 +1053,7 @@ def test_the_etag_varies_with_the_region(
         params={
             "path": str(path),
             "display_pixels": DISPLAY,
-            "x0": 0,
-            "y0": 0,
-            "x1": 200,
-            "y1": 300,
+            "region": [0, 0, 200, 300],
         },
     )
     right = client.get(
@@ -1083,10 +1061,7 @@ def test_the_etag_varies_with_the_region(
         params={
             "path": str(path),
             "display_pixels": DISPLAY,
-            "x0": 200,
-            "y0": 0,
-            "x1": 400,
-            "y1": 300,
+            "region": [200, 0, 400, 300],
         },
     )
     tags = {whole.headers["etag"], left.headers["etag"], right.headers["etag"]}
@@ -1139,14 +1114,15 @@ def test_a_uint8_raster_serves_its_own_pixels_with_no_stretch(
 def test_a_uint16_raster_serves_on_its_dtypes_full_scale(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A plain serve of a uint16 raster divides by the dtype's own ceiling.
+    """A serve of a uint16 raster at the ``none`` stretch divides by the dtype's own ceiling.
 
     A half-scale single-band frame reads as mid-gray.
     """
     path = tmp_path / "half.tif"
     tifffile.imwrite(str(path), np.full((32, 40), 32768, dtype=np.uint16))
     resp = client.get(
-        "/api/images", params={"path": str(path), "display_pixels": DISPLAY}
+        "/api/images",
+        params={"path": str(path), "display_pixels": DISPLAY, "stretch": "none"},
     )
     served = _served(resp)
     assert np.allclose(served.mean(axis=(0, 1)), 127.5, atol=3)
@@ -1160,7 +1136,7 @@ def test_a_multi_band_uint16_raster_serves_on_that_same_scale(
     served = _served(
         client.get(
             "/api/images",
-            params={"path": str(path), "display_pixels": DISPLAY},
+            params={"path": str(path), "display_pixels": DISPLAY, "stretch": "none"},
         )
     )
     assert np.allclose(served.mean(axis=(0, 1)), 127.5, atol=3)
@@ -1169,7 +1145,7 @@ def test_a_multi_band_uint16_raster_serves_on_that_same_scale(
 def test_a_float_regions_full_scale_is_the_rasters_own_maximum(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A float region divides by the maximum the raster's own sample found.
+    """A float region at the ``none`` stretch divides by the maximum the raster's own sample found.
 
     The left half, at 100, of a raster reaching 1000 serves at 100/1000 of full scale: a dim
     corner stays dim.
@@ -1190,10 +1166,8 @@ def test_a_float_regions_full_scale_is_the_rasters_own_maximum(
         params={
             "path": str(path),
             "display_pixels": DISPLAY,
-            "x0": 0,
-            "y0": 0,
-            "x1": 20,
-            "y1": 32,
+            "region": [0, 0, 20, 32],
+            "stretch": "none",
         },
     )
     served = _served(resp)
@@ -1205,14 +1179,15 @@ def test_a_float_regions_full_scale_is_the_rasters_own_maximum(
 def test_a_non_positive_float_band_renders_black(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A float band with no positive data renders black."""
+    """A float band with no positive data renders black at the ``none`` stretch."""
     path = tmp_path / "negative.tif"
     arr = (
         -np.abs(np.random.default_rng(0).standard_normal((32, 40))) - 1.0
     ).astype(np.float32)
     tifffile.imwrite(str(path), arr)
     resp = client.get(
-        "/api/images", params={"path": str(path), "display_pixels": DISPLAY}
+        "/api/images",
+        params={"path": str(path), "display_pixels": DISPLAY, "stretch": "none"},
     )
     served = _served(resp)
     assert np.allclose(served, 0, atol=2)
@@ -1310,7 +1285,7 @@ def test_the_served_composite_is_the_shared_display_primitives_own_pixels(
 
     path = tmp_path / "capture.tif"
     arr, owed = _pinned_stretch_raster(path)
-    composed = composite_display_rgb(arr, [3, 0, 1], "minmax")
+    composed = composite_display_rgb(arr, (3, 0, 1), "minmax")
     assert composed.tolist() == owed.tolist()
 
     resp = client.get(
@@ -1318,7 +1293,7 @@ def test_the_served_composite_is_the_shared_display_primitives_own_pixels(
         params={
             "path": str(path),
             "display_pixels": DISPLAY,
-            "bands": "3,0,1",
+            "bands": ["3", "0", "1"],
             "stretch": "minmax",
         },
     )
@@ -1347,11 +1322,8 @@ def test_two_regions_of_one_raster_stretch_against_the_same_bounds(
         params={
             "path": str(path),
             "display_pixels": DISPLAY,
-            "bands": "0,1,2",
-            "x0": 0,
-            "y0": 0,
-            "x1": 20,
-            "y1": 24,
+            "bands": ["0", "1", "2"],
+            "region": [0, 0, 20, 24],
         },
     )
     right = client.get(
@@ -1359,11 +1331,8 @@ def test_two_regions_of_one_raster_stretch_against_the_same_bounds(
         params={
             "path": str(path),
             "display_pixels": DISPLAY,
-            "bands": "0,1,2",
-            "x0": 20,
-            "y0": 0,
-            "x1": 40,
-            "y1": 24,
+            "bands": ["0", "1", "2"],
+            "region": [20, 0, 40, 24],
         },
     )
     _renders_as(left, _composite(arr[:, :20], "minmax", raster_bounds))
@@ -1380,7 +1349,7 @@ def test_a_whole_view_renders_between_the_bounds_of_the_array_it_served(
         params={
             "path": str(path),
             "display_pixels": DISPLAY,
-            "bands": "0,1,2",
+            "bands": ["0", "1", "2"],
         },
     )
     _renders_as(resp, _composite(arr, "minmax"))
@@ -1409,7 +1378,7 @@ def test_a_composited_non_positive_float_band_renders_black_beside_its_lit_bands
             params={
                 "path": str(path),
                 "display_pixels": DISPLAY,
-                "bands": "0,1,2",
+                "bands": ["0", "1", "2"],
                 "stretch": "none",
             },
         ),
@@ -1428,12 +1397,9 @@ def test_a_percent_clip_region_stretches_between_the_cached_cut_points(
         params={
             "path": str(path),
             "display_pixels": DISPLAY,
-            "bands": "0,1,2",
+            "bands": ["0", "1", "2"],
             "stretch": "percent_clip",
-            "x0": 0,
-            "y0": 0,
-            "x1": 20,
-            "y1": 24,
+            "region": [0, 0, 20, 24],
         },
     )
     stats = _cached_stats(path)
@@ -1483,7 +1449,7 @@ def test_a_nan_pixel_still_serves_the_raster(
         params={
             "path": str(path),
             "display_pixels": DISPLAY,
-            "bands": "0,1,2",
+            "bands": ["0", "1", "2"],
         },
     )
     assert _served(resp).shape == (24, 40, 3)
@@ -1685,10 +1651,7 @@ def test_one_reading_of_a_raster_is_sampled_once_whichever_route_asks_first(
         params={
             "path": str(path),
             "display_pixels": DISPLAY,
-            "x0": 0,
-            "y0": 0,
-            "x1": 20,
-            "y1": 24,
+            "region": [0, 0, 20, 24],
         },
     )
     assert resp.status_code == 200, resp.text
@@ -1766,11 +1729,8 @@ def test_a_cold_region_stretch_samples_through_the_reader_that_served_the_region
         params={
             "path": str(path),
             "display_pixels": DISPLAY,
-            "bands": "0,1,2",
-            "x0": 0,
-            "y0": 0,
-            "x1": 20,
-            "y1": 24,
+            "bands": ["0", "1", "2"],
+            "region": [0, 0, 20, 24],
         },
     )
     assert resp.status_code == 200, resp.text
@@ -1801,8 +1761,8 @@ def test_the_view_route_reads_one_header_and_opens_the_raster_once(
         raster_source.open_gdal_dataset,
     )
 
-    def header(tif: tifffile.TiffFile) -> _TiffHeader:
-        headers.append(tif.filehandle.path)
+    def header(tif: Path) -> _TiffHeader:
+        headers.append(tif)
         return real_header(tif)
 
     def gdal(
@@ -1864,13 +1824,19 @@ def test_get_bands_reads_an_oversized_rasters_stats_off_its_overviews(
     path = tmp_path / "wide_ms.tif"
     arr = _wide_multiband(path)
     build_overviews(path)
-    tifffile.imwrite(str(path), np.zeros_like(arr), rowsperstrip=8)
+    tifffile.imwrite(
+        str(path),
+        np.zeros_like(arr),
+        rowsperstrip=8,
+        photometric="minisblack",
+        planarconfig="contig",
+    )
 
     body = client.get("/api/images/bands", params={"path": str(path)}).json()
     assert body["band_count"] == 4
     assert body["sampled"] is False
     assert body["overview_size"] == [1024, 13]
-    assert "pixel_fraction" not in body and "seed" not in body
+    assert body["pixel_fraction"] is None and body["seed"] is None
     assert all(0 <= b["min"] <= b["max"] <= 255 for b in body["bands"])
     assert all(b["max"] > 0 for b in body["bands"]), (
         "the native pixels, zeroed, were read"
@@ -1916,7 +1882,7 @@ def test_a_raster_within_the_sampling_budget_keeps_reading_native_pixels(
     body = client.get("/api/images/bands", params={"path": str(path)}).json()
     assert body["sampled"] is False
     assert body["pixel_fraction"] == 1.0 and body["seed"] == 0
-    assert "overview_size" not in body
+    assert body["overview_size"] is None
     assert [b["max"] for b in body["bands"]] == [
         float(arr[:, :, i].max()) for i in range(4)
     ]
@@ -1939,11 +1905,8 @@ def test_a_region_of_an_oversized_raster_stretches_by_its_overview_bounds(
         params={
             "path": str(path),
             "display_pixels": SMALL_DISPLAY,
-            "bands": "0,1,2",
-            "x0": 0,
-            "y0": 0,
-            "x1": 256,
-            "y1": 64,
+            "bands": ["0", "1", "2"],
+            "region": [0, 0, 256, 64],
         },
     )
     stats = _cached_stats(path)
@@ -1958,12 +1921,12 @@ def test_get_bands_carries_the_band_interpretations_a_backend_reads(
 ) -> None:
     """The bands route carries the band interpretations a backend reads.
 
-    What each band holds is the fact that tells an ordinary color frame from a four-band
-    capture; it is reported where a backend reads it and absent where nothing does.
+    A composited raster's bands are reported with what each holds where a backend reads it and
+    ``None`` where nothing does: a 16-bit RGBA TIFF names its colors and its alpha.
     """
     rgba = tmp_path / "rgba.tif"
     tifffile.imwrite(
-        str(rgba), np.zeros((32, 40, 4), dtype=np.uint8), rowsperstrip=8
+        str(rgba), np.zeros((32, 40, 4), dtype=np.uint16), rowsperstrip=8
     )
     body = client.get("/api/images/bands", params={"path": str(rgba)}).json()
     assert [b["interpretation"] for b in body["bands"]] == [
@@ -1978,20 +1941,32 @@ def test_get_bands_carries_the_band_interpretations_a_backend_reads(
     images_route._stats_cache.clear()
     plain = client.get("/api/images/bands", params={"path": str(stack)}).json()
     assert plain["band_count"] == 4
-    assert all("interpretation" not in b for b in plain["bands"])
+    assert [b["interpretation"] for b in plain["bands"]] == [None] * 4
 
 
 def test_get_bands_keeps_the_three_band_early_return(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """The bands route answers an ordinary RGB frame with its band count alone.
+    """The bands route answers an ordinary RGB frame with its band count and its verdict alone.
 
-    An ordinary RGB frame has no per-band symbology to show, so the response carries no band
-    entries and no sampling facts.
+    An ordinary RGB frame displays as its own pixels and has no per-band symbology to show, so the
+    response carries no band entries and no sampling facts.
     """
+    from tcip_mcp.pipelines.band_stats import DEFAULT_STRETCH
+
     path = write_image(tmp_path / "plain.jpg", (40, 32), (5, 5, 5))
     body = client.get("/api/images/bands", params={"path": str(path)}).json()
-    assert body == {"band_count": 3, "bands": []}
+    assert body == {
+        "band_count": 3,
+        "bands": [],
+        "plain": True,
+        "default_bands": ["0", "1", "2"],
+        "default_stretch": DEFAULT_STRETCH,
+        "pixel_fraction": None,
+        "seed": None,
+        "overview_size": None,
+        "sampled": False,
+    }
 
 
 # ── Overview builds ──────────────────────────────────────────────────────────────────────
@@ -2036,6 +2011,26 @@ def test_a_scaled_read_of_an_oversized_raster_without_overviews_names_the_build_
     assert "POST /api/images/overviews" in resp.json()["detail"]
 
 
+def test_a_refused_read_of_an_oversized_raster_leaves_its_file_closed(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    """A read refused for want of overviews leaves no handle on the raster: it can be removed.
+
+    On Windows a file a reader still holds open refuses its removal.
+    """
+    path = tmp_path / "wide.tif"
+    _wide_raster(path)
+    resp = client.get(
+        "/api/images",
+        params={"path": str(path), "display_pixels": SMALL_DISPLAY},
+    )
+    assert resp.status_code == 400
+
+    os.remove(path)
+    assert not path.exists()
+
+
 def test_the_overview_job_makes_that_same_request_servable(
     client: TestClient,
     tmp_path: Path,
@@ -2073,7 +2068,7 @@ def test_a_build_request_joins_the_one_already_running_for_that_raster(
     running = images_route.OverviewJob(
         job_id="ovr-running", path=str(path), status="running"
     )
-    images_route._overview_registry.jobs[running.job_id] = running
+    images_route._overview_registry.launch(running, lambda _job: None)
     try:
         joined = client.post(
             "/api/images/overviews", json={"path": str(path)}
@@ -2125,10 +2120,7 @@ def test_a_deep_zoom_region_within_the_cap_is_served_without_overviews(
             params={
                 "path": str(path),
                 "display_pixels": SMALL_DISPLAY,
-                "x0": 0,
-                "y0": 0,
-                "x1": 256,
-                "y1": 64,
+                "region": [0, 0, 256, 64],
             },
         )
     )
@@ -2282,3 +2274,60 @@ def test_a_file_that_fails_its_header_probe_answers_400_and_a_readable_one_still
         ).status_code
         == 200
     )
+
+
+@pytest.mark.parametrize(
+    ("dtype", "channels", "photometric", "plain"),
+    [
+        ("uint16", 3, "rgb", False),
+        ("uint8", 4, "rgb", True),
+        ("uint8", 4, "minisblack", False),
+    ],
+    ids=["16-bit RGB", "8-bit RGBA", "8-bit four spectral bands"],
+)
+def test_the_image_route_and_the_vision_tools_display_a_raster_alike(
+    client: TestClient,
+    tmp_path: Path,
+    dtype: str,
+    channels: int,
+    photometric: str,
+    plain: bool,
+) -> None:
+    """The route's default render of a whole raster is the vision tools' display of it.
+
+    A 16-bit three-band raster and a four-band 8-bit one that names no alpha band are composited
+    by both; a four-band 8-bit one whose fourth band is alpha is shown as its own pixels by both,
+    and the bands route describes each as the two display it.
+    """
+    from tcip_mcp.pipelines.raster_source import SourceHeader
+    from tcip_mcp.tools.vision_tools import _display_of
+
+    path = tmp_path / f"{dtype}_{channels}_{photometric}.tif"
+    top = np.iinfo(dtype).max
+    pixels = (
+        np.random.default_rng(5).integers(0, top // 3, size=(24, 40, channels))
+        + np.arange(channels) * (top // 3)
+    ).astype(dtype)
+    tifffile.imwrite(
+        str(path),
+        pixels,
+        photometric=photometric,
+        planarconfig="contig",
+        extrasamples=["unassalpha"] if photometric == "rgb" and channels == 4 else None,
+    )
+
+    served = _served(
+        client.get(
+            "/api/images",
+            params={
+                "path": str(path),
+                "display_pixels": DISPLAY,
+                "region": [0, 0, 40, 24],
+            },
+        )
+    )
+
+    assert np.array_equal(served, _display_of(SourceHeader(path)).pixels)
+    assert np.array_equal(served, pixels[:, :, :3]) is plain
+    described = client.get("/api/images/bands", params={"path": str(path)}).json()
+    assert described["plain"] is plain

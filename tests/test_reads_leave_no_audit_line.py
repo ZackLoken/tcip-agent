@@ -48,9 +48,10 @@ def test_a_panel_push_leaves_no_audit_line(
     project: Path, bound: BoundProject
 ) -> None:
     from tcip_mcp.tools.gui_tools import push_panel_event
+    from tcip_mcp.web_client import Banner
 
     before = audit_rows(project)
 
-    push_panel_event(bound, "meta", "probe", {"n": 1})
+    push_panel_event(bound, "meta", Banner(text="probe"))
 
     assert audit_rows(project) == before

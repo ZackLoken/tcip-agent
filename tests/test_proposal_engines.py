@@ -748,8 +748,8 @@ def test_a_ringless_candidate_renders_and_stages_as_its_box(
     proposed = propose_annotations(
         tmp_path, image_path=str(image), engine=boxed_engine, actor=None
     )
-    assert proposed["staged"] is True, proposed
-    with Image.open(proposed["image_path"]) as render:
+    assert proposed.staging_id is not None, proposed
+    with Image.open(proposed.image_path) as render:
         assert render.convert("RGB").getpixel((10, 20)) == COLOR_PALETTE[0]
 
     accepted = stage_proposals(
@@ -760,10 +760,10 @@ def test_a_ringless_candidate_renders_and_stages_as_its_box(
     )
     assert "error" not in accepted, accepted
 
-    read = read_annotations(tmp_path, str(image), bucket=accepted["bucket"])
+    read = read_annotations(tmp_path, str(image), bucket=accepted.bucket)
     [staged] = read["predictions"]["annotations"]
     assert staged["bbox"] == list(BOX)
-    assert "rings" not in staged
+    assert staged["rings"] is None
 
 
 def test_a_proposals_execution_record_reaches_its_staging_and_its_bucket(
@@ -814,9 +814,9 @@ def test_a_proposals_execution_record_reaches_its_staging_and_its_bucket(
     proposed = propose_annotations(
         tmp_path, image_path=str(image), engine="recorded", actor=None
     )
-    assert proposed["staged"] is True, proposed
+    assert proposed.staging_id is not None, proposed
     staging = ProposalStaging.model_validate(
-        ts.read(_staging_key_for(str(image), proposed["staging_id"]))
+        ts.read(_staging_key_for(str(image), proposed.staging_id))
     )
     accepted = stage_proposals(
         tmp_path,
@@ -826,7 +826,7 @@ def test_a_proposals_execution_record_reaches_its_staging_and_its_bucket(
     )
 
     assert staging.execution == execution
-    assert read_bucket(tmp_path, accepted["bucket"]).execution == execution
+    assert read_bucket(tmp_path, accepted.bucket).execution == execution
 
 
 OFFLINE_PROPOSAL = """

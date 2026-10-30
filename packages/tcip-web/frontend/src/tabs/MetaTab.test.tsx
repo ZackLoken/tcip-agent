@@ -5,6 +5,9 @@ import { metaApi } from "@/api/meta";
 import { sessionsApi } from "@/api/sessions";
 import { useStore } from "@/store";
 import { MetaTab } from "@/tabs/MetaTab";
+import { META_ANSWERS } from "@/test/meta";
+import { thrown } from "@/test/refusals";
+import { SESSION_ANSWERS } from "@/test/sessions";
 import { openTestProject } from "@/test/store";
 
 const initialStoreState = useStore.getState();
@@ -43,105 +46,65 @@ describe("MetaTab before its loads answer", () => {
 
 describe("MetaTab annotation sessions", () => {
   it("shows a rejected sessions load as the tab's error, never as no sessions", async () => {
-    vi.spyOn(sessionsApi, "load").mockRejectedValue(new Error("a label document does not decode"));
+    const refused = await thrown(SESSION_ANSWERS.unopened);
+    vi.spyOn(sessionsApi, "load").mockRejectedValue(refused);
 
     render(<MetaTab />);
 
     expect(
-      await screen.findByText(/Sessions could not be loaded: .*a label document does not decode/),
+      await screen.findByText(
+        (text) =>
+          text.startsWith("Sessions could not be loaded:") && text.includes(refused.message),
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText("not loaded")).toBeInTheDocument();
     expect(screen.queryByText("No sessions.")).not.toBeInTheDocument();
   });
 
   it("lists a report's context as key and value pairs", async () => {
+    const [{ record }] = META_ANSWERS.reports.entries;
+    if ("reason" in record) throw new Error(`the produced report will not read: ${record.reason}`);
     vi.spyOn(sessionsApi, "load").mockResolvedValue({ sessions: [] });
-    vi.mocked(metaApi.reports).mockResolvedValue({
-      entries: [
-        {
-          id: "r1",
-          record: {
-            category: "missing_tool",
-            detail: "no lister of assessments",
-            timestamp: "2026-10-20T10:00:00+00:00",
-            context: { route: "/api/results/assessments", attempts: 2 },
-            user_disagreement: false,
-          },
-        },
-      ],
-      total_available: 1,
-    });
+    vi.mocked(metaApi.reports).mockResolvedValue(META_ANSWERS.reports);
 
     render(<MetaTab />);
 
-    expect(await screen.findByText("no lister of assessments")).toBeInTheDocument();
-    expect(screen.getByText("route")).toBeInTheDocument();
-    expect(screen.getByText("/api/results/assessments")).toBeInTheDocument();
-    expect(screen.getByText("attempts")).toBeInTheDocument();
-    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(await screen.findByText(record.detail)).toBeInTheDocument();
+    for (const [key, value] of Object.entries(record.context)) {
+      expect(screen.getByText(key)).toBeInTheDocument();
+      expect(screen.getByText(String(value))).toBeInTheDocument();
+    }
     expect(document.querySelector("pre")).toBeNull();
   });
 
   it("lists a retrospective's stated sections under their field names", async () => {
+    const [{ record }, { record: unread }] = META_ANSWERS.retrospectives.entries;
+    if ("reason" in record) throw new Error(`the produced one will not read: ${record.reason}`);
+    if (!("reason" in unread)) throw new Error("the produced damaged one reads");
     vi.spyOn(sessionsApi, "load").mockResolvedValue({ sessions: [] });
-    vi.mocked(metaApi.retrospectives).mockResolvedValue({
-      entries: [
-        {
-          id: "r1",
-          record: {
-            timestamp: "2026-10-20T10:00:00+00:00",
-            project_id: "valley-bloom-trial",
-            task: "train the bloom counter",
-            worked: "tiling held",
-            did_not_work: "dense clusters merged",
-            assumptions_wrong: "",
-            knowledge_for_future: "",
-            missing_or_hard_tools: "",
-            would_do_differently: "",
-          },
-        },
-        { id: "unreadable", record: { reason: "not a Retrospective" } },
-      ],
-      total_available: 2,
-    });
+    vi.mocked(metaApi.retrospectives).mockResolvedValue(META_ANSWERS.retrospectives);
 
     render(<MetaTab />);
 
-    expect(await screen.findByText("valley-bloom-trial")).toBeInTheDocument();
+    expect(await screen.findByText(record.project_id)).toBeInTheDocument();
     expect(screen.getByText("did not work")).toBeInTheDocument();
-    expect(screen.getByText("dense clusters merged")).toBeInTheDocument();
+    expect(screen.getByText(record.did_not_work)).toBeInTheDocument();
+    expect(record.assumptions_wrong).toBe("");
     expect(screen.queryByText("assumptions wrong")).not.toBeInTheDocument();
-    expect(screen.getByText("not a Retrospective")).toBeInTheDocument();
+    // The reason spans lines, compared with its whitespace collapsed as the matcher reads a node.
+    const collapsed = (text: string) => text.replace(/\s+/g, " ").trim();
+    expect(screen.getByText(collapsed(unread.reason))).toBeInTheDocument();
   });
 
   it("lists the sessions a load returns", async () => {
-    vi.spyOn(sessionsApi, "load").mockResolvedValue({
-      sessions: [
-        {
-          user: "user:alice",
-          started: "2026-02-01T10:00:00+00:00",
-          ended: null,
-          entries: [
-            {
-              contribution_id: "c1",
-              image_name: "a.jpg",
-              seconds: 9,
-              annotations_added: 2,
-              activity: "new_annotation",
-            },
-          ],
-          images_annotated: 1,
-          total_annotations: 2,
-          total_time_seconds: 9,
-          seconds_by_activity: { new_annotation: 9, review: 0, negative_confirmation: 0 },
-          avg_seconds_per_annotation: 4.5,
-        },
-      ],
-    });
+    const { listing } = SESSION_ANSWERS;
+    vi.spyOn(sessionsApi, "load").mockResolvedValue(listing);
 
     render(<MetaTab />);
 
-    expect(await screen.findByText("user:alice")).toBeInTheDocument();
-    expect(screen.getByText("1 recorded")).toBeInTheDocument();
+    expect((await screen.findAllByText(listing.sessions[0].user)).length).toBe(
+      listing.sessions.filter((s) => s.user === listing.sessions[0].user).length,
+    );
+    expect(screen.getByText(`${listing.sessions.length} recorded`)).toBeInTheDocument();
   });
 });

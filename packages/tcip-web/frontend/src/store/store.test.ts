@@ -1,41 +1,42 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import type { LoadedLabels } from "@/api/client";
 import { serializeCanvas } from "@/lib/labelSerde";
 import { useStore } from "@/store";
 import { CONTENT_EDITS } from "@/store/slices/canvas";
-import type { Box, CanvasContent, DatasetSelection, ImageLabels } from "@/store/types";
-import { changeSelection, GROUPED_SELECTION, RAW_SELECTION, selected } from "@/test/store";
+import type { Box, CanvasContent, DatasetSelection } from "@/store/types";
+import { LANDED, loadOf } from "@/test/annotate";
+import { PANEL_EVENTS } from "@/test/panelEvents";
+import {
+  changeSelection,
+  DATASET_TREES,
+  DS_DATE,
+  GROUPED_SELECTION,
+  RAW_SELECTION,
+  selected,
+  SUBJECT_SELECT_ANSWER,
+} from "@/test/store";
+import { AGENT_CLIENT } from "@/test/training";
+
+/** The two buckets published over the selected capture's date. */
+const [BUCKET, OTHER_BUCKET] = DATASET_TREES.ds.buckets_by_date[DS_DATE];
 
 const canvasToAnnotations = (labels: CanvasContent) => serializeCanvas(labels).annotations;
 
 const s = () => useStore.getState();
 
-/** A save's answer holding `boxes` and nothing else. */
-const answered = (boxes: Box[]): ImageLabels => ({
-  image_path: "x",
-  img_width: 100,
-  img_height: 100,
-  boxes,
-  polygons: [],
-  points: [],
-  imageAnnotations: [],
-  completion: {},
-  flags: [],
-});
+/** The produced load of the selected capture's first photograph, a frame wider than tall holding
+ *  nothing, as the client loads it. */
+const EMPTY: LoadedLabels = loadOf(RAW_SELECTION.images[0].path);
+
+/** The produced save of one person's box, as the client adopts its document. */
+const ONE_BOX: LoadedLabels = LANDED.box.document;
 
 function loadPolygon(rings: [number, number][][]): void {
-  const labels: ImageLabels = {
-    image_path: "x",
-    img_width: 100,
-    img_height: 100,
-    boxes: [],
-    polygons: [{ rings, subject: "subject_a", attributes: {} }],
-    points: [],
-    imageAnnotations: [],
-    completion: {},
-    flags: [],
-  };
-  s().loadLabelsIntoCanvas(labels);
+  s().loadLabelsIntoCanvas({
+    ...EMPTY,
+    polygons: [{ rings, subject: "subject_a", attributes: {}, iscrowd: false }],
+  });
 }
 
 const RING_A: [number, number][] = [
@@ -55,7 +56,7 @@ function loadOnePolygon(): void {
 
 describe("canvas store", () => {
   beforeEach(() => {
-    s().clearCanvas();
+    s().clearCanvas(null);
   });
 
   it("loadLabelsIntoCanvas resets dirty and undo/redo stacks", () => {
@@ -96,18 +97,18 @@ describe("canvas store", () => {
     expect(s().canvas.redoStack).toHaveLength(1);
   });
 
+  it("a shape drawn through add is one object, so its crowd flag is false", () => {
+    s().add("boxes", { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {} });
+    s().add("imageAnnotations", { subject: "subject_a", attributes: {} });
+    expect(serializeCanvas(s().canvas).annotations.map((a) => a.iscrowd)).toEqual([false, false]);
+  });
+
   it("drag moves a box without pushing an undo snapshot", () => {
     s().add("boxes", { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {} });
     const before = s().canvas.undoStack.length;
-    s().drag("boxes", 0, { x1: 2, y1: 3, x2: 9, y2: 11, subject: "subject_a", attributes: {} });
-    expect(s().canvas.boxes[0]).toEqual({
-      x1: 2,
-      y1: 3,
-      x2: 9,
-      y2: 11,
-      subject: "subject_a",
-      attributes: {},
-    });
+    const moved = { x1: 2, y1: 3, x2: 9, y2: 11, subject: "subject_a", attributes: {} };
+    s().drag("boxes", 0, { ...moved, iscrowd: false });
+    expect(s().canvas.boxes[0]).toEqual({ ...moved, iscrowd: false });
     // Like dragVertex: a live resize/move must not flood the undo stack.
     expect(s().canvas.undoStack.length).toBe(before);
     expect(s().canvas.dirty).toBe(true);
@@ -142,22 +143,14 @@ describe("canvas store", () => {
   });
 
   it("commitCurrentPolygon clamps each vertex to its own axis on a non-square image", () => {
-    s().loadLabelsIntoCanvas({
-      image_path: "wide.jpg",
-      img_width: 120,
-      img_height: 80,
-      boxes: [],
-      polygons: [],
-      points: [],
-      imageAnnotations: [],
-      completion: {},
-      flags: [],
-    });
+    const { img_width: w, img_height: h } = EMPTY;
+    expect(w).toBeGreaterThan(h);
+    s().loadLabelsIntoCanvas(EMPTY);
     useStore.setState((st) => ({ gui: { ...st.gui, active_subject: "subject_a" } }));
     s().setCurrentPolygon([
       [-10, 40],
-      [200, 95],
-      [30, 90],
+      [w + 80, h + 15],
+      [30, h + 10],
       [50, 20],
     ]);
 
@@ -165,8 +158,8 @@ describe("canvas store", () => {
     expect(s().canvas.polygons).toHaveLength(1);
     expect(s().canvas.polygons[0].rings[0]).toEqual([
       [0, 40],
-      [120, 80],
-      [30, 80],
+      [w, h],
+      [30, h],
       [50, 20],
     ]);
   });
@@ -174,7 +167,7 @@ describe("canvas store", () => {
 
 describe("splitPolygon", () => {
   beforeEach(() => {
-    s().clearCanvas();
+    s().clearCanvas(null);
   });
 
   const PIECE_A: [number, number][] = [
@@ -190,22 +183,16 @@ describe("splitPolygon", () => {
 
   it("replaces one polygon with two at the same index, keeping the parent's values", () => {
     s().loadLabelsIntoCanvas({
-      image_path: "x",
-      img_width: 100,
-      img_height: 100,
-      boxes: [],
+      ...EMPTY,
       polygons: [
         {
           rings: [RING_A],
           subject: "subject_a",
           attributes: { health: "good" },
+          iscrowd: false,
           authorship: "tool_accepted",
         },
       ],
-      points: [],
-      imageAnnotations: [],
-      completion: {},
-      flags: [],
     });
     // A second polygon after it, so the split's own effect on later indices is checked too.
     s().add("polygons", { rings: [RING_B], subject: "subject_a", attributes: {} });
@@ -255,7 +242,7 @@ describe("splitPolygon", () => {
     s().add("points", point);
     s().setFocus({ kind: "point", index: 0 });
     s().add("points", point);
-    s().setFocus({ kind: "proposal", index: 4 });
+    s().setFocus({ kind: "proposal", index: 4, bucket: BUCKET });
     s().add("points", point);
 
     s().undo();
@@ -269,10 +256,16 @@ describe("splitPolygon", () => {
 
 describe("canvas store points", () => {
   beforeEach(() => {
-    s().clearCanvas();
+    s().clearCanvas(null);
   });
 
-  const pt = (x: number, y: number, subject = "tip") => ({ x, y, subject, attributes: {} });
+  const pt = (x: number, y: number, subject = "tip") => ({
+    x,
+    y,
+    subject,
+    attributes: {},
+    iscrowd: false,
+  });
 
   it("adding a point pushes an undo snapshot that undo restores", () => {
     s().add("points", pt(10, 20));
@@ -317,7 +310,7 @@ describe("canvas store points", () => {
   it("removing an item of another array leaves the focus alone", () => {
     s().add("points", pt(1, 1, "a"));
     s().add("boxes", { x1: 0, y1: 0, x2: 5, y2: 5, subject: "a", attributes: {} });
-    s().add("imageAnnotations", { subject: "a", attributes: {}, iscrowd: false });
+    s().add("imageAnnotations", { subject: "a", attributes: {} });
     s().setFocus({ kind: "box", index: 0 });
     s().remove("points", 0);
     s().remove("imageAnnotations", 0);
@@ -346,17 +339,7 @@ describe("canvas store points", () => {
   it("loadLabelsIntoCanvas adopts loaded points and leaves the focus to the context rule", () => {
     s().add("points", pt(1, 1));
     s().setFocus({ kind: "point", index: 0 });
-    s().loadLabelsIntoCanvas({
-      image_path: "x",
-      img_width: 100,
-      img_height: 100,
-      boxes: [],
-      polygons: [],
-      points: [pt(5, 6, "tip")],
-      imageAnnotations: [],
-      completion: {},
-      flags: [],
-    });
+    s().loadLabelsIntoCanvas({ ...EMPTY, points: [pt(5, 6, "tip")] });
     expect(s().canvas.points).toEqual([pt(5, 6, "tip")]);
     expect(s().canvas.focus).toEqual({ kind: "point", index: 0 });
     expect(s().canvas.dirty).toBe(false);
@@ -369,62 +352,55 @@ describe("focus follows the image and the bucket", () => {
     useStore.setState((st) => ({ gui: { ...st.gui, dataset } }));
 
   beforeEach(() => {
-    s().clearCanvas();
-    hold(selected({ count: 2, bucket: "b1" }));
+    s().clearCanvas(null);
+    hold(selected({ count: 2, bucket: BUCKET }));
   });
 
   it("clears when the image changes, by index or by capture", () => {
-    s().setFocus({ kind: "proposal", index: 2 });
+    s().setFocus({ kind: "proposal", index: 2, bucket: BUCKET });
     select({ current_image_index: 1 });
     expect(s().canvas.focus).toBeNull();
 
     s().setFocus({ kind: "box", index: 0 });
-    hold(selected({ bucket: "b1" }, GROUPED_SELECTION));
+    hold(selected({ bucket: BUCKET }, GROUPED_SELECTION));
     expect(s().canvas.focus).toBeNull();
   });
 
   it("clears when the bucket changes, so an index never names another bucket's proposal", () => {
-    s().setFocus({ kind: "proposal", index: 2 });
-    select({ bucket: "b2" });
+    s().setFocus({ kind: "proposal", index: 2, bucket: BUCKET });
+    select({ bucket: OTHER_BUCKET });
     expect(s().canvas.focus).toBeNull();
   });
 
   it("survives a refresh of the same image and an unrelated change to the selection", () => {
-    s().setFocus({ kind: "proposal", index: 2 });
-    select({ subject: "other" });
-    s().loadLabelsIntoCanvas({
-      image_path: RAW_SELECTION.images[0].path,
-      img_width: 10,
-      img_height: 10,
-      boxes: [],
-      polygons: [],
-      points: [],
-      imageAnnotations: [],
-      completion: {},
-      flags: [],
-    });
-    expect(s().canvas.focus).toEqual({ kind: "proposal", index: 2 });
+    s().setFocus({ kind: "proposal", index: 2, bucket: BUCKET });
+    expect(RAW_SELECTION.subject).not.toBe(SUBJECT_SELECT_ANSWER.selection.subject);
+    select({ subject: SUBJECT_SELECT_ANSWER.selection.subject });
+    s().loadLabelsIntoCanvas(EMPTY);
+    expect(s().canvas.focus).toEqual({ kind: "proposal", index: 2, bucket: BUCKET });
   });
 
   it("holds a focus set after the change that selected its image, as the agent's is", () => {
     select({ current_image_index: 1 });
-    s().setFocus({ kind: "proposal", index: 4 });
-    expect(s().canvas.focus).toEqual({ kind: "proposal", index: 4 });
+    s().setFocus({ kind: "proposal", index: 4, bucket: BUCKET });
+    expect(s().canvas.focus).toEqual({ kind: "proposal", index: 4, bucket: BUCKET });
   });
 
   describe("history restoration after the image changed", () => {
-    const loaded = (index: number, boxes: Box[]): ImageLabels => ({
+    const loaded = (index: number, boxes: Box[]): LoadedLabels => ({
+      ...EMPTY,
       image_path: RAW_SELECTION.images[index].path,
-      img_width: 100,
-      img_height: 100,
       boxes,
-      polygons: [],
-      points: [],
-      imageAnnotations: [],
-      completion: {},
-      flags: [],
     });
-    const first = { x1: 10, y1: 10, x2: 50, y2: 50, subject: "subject_a", attributes: {} };
+    const first = {
+      x1: 10,
+      y1: 10,
+      x2: 50,
+      y2: 50,
+      subject: "subject_a",
+      attributes: {},
+      iscrowd: false,
+    };
 
     function focusedBoxWithSnapshot() {
       s().loadLabelsIntoCanvas(loaded(0, [first]));
@@ -482,10 +458,10 @@ describe("toasts", () => {
 
 describe("content-based dirty tracking", () => {
   beforeEach(() => {
-    s().clearCanvas();
+    s().clearCanvas(null);
   });
 
-  const box = { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {} };
+  const box = { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {}, iscrowd: false };
 
   it("drawing a shape and deleting it again leaves the canvas clean", () => {
     loadOnePolygon();
@@ -506,7 +482,7 @@ describe("content-based dirty tracking", () => {
 
   it("a loaded document re-baselines: deleting a loaded shape then undoing it is clean again", () => {
     s().add("boxes", box);
-    s().loadLabelsIntoCanvas(answered([{ ...box, index: 0, authorship: "person" }]));
+    s().loadLabelsIntoCanvas(ONE_BOX);
     expect(s().canvas.undoStack).toHaveLength(0);
     s().remove("boxes", 0);
     expect(s().canvas.dirty).toBe(true);
@@ -516,7 +492,7 @@ describe("content-based dirty tracking", () => {
 
   describe("while a save is in flight", () => {
     const withDocumentOneBox = () => {
-      s().loadLabelsIntoCanvas(answered([{ ...box, index: 0, authorship: "person" }]));
+      s().loadLabelsIntoCanvas(ONE_BOX);
       return s().holdForSave("/d/a/1.jpg");
     };
 
@@ -534,7 +510,7 @@ describe("content-based dirty tracking", () => {
     });
 
     const heldWithHistory = () => {
-      s().loadLabelsIntoCanvas(answered([]));
+      s().loadLabelsIntoCanvas(EMPTY);
       s().add("boxes", box);
       s().add("boxes", { ...box, x2: 9 });
       s().undo();
@@ -558,7 +534,7 @@ describe("content-based dirty tracking", () => {
 
     it("accepts edits again once the answer is adopted, which also ends the save", () => {
       withDocumentOneBox();
-      s().loadLabelsIntoCanvas(answered([{ ...box, index: 3, authorship: "person" }]));
+      s().loadLabelsIntoCanvas(ONE_BOX);
       expect(s().canvas.saving).toBeNull();
       s().add("boxes", { ...box, x2: 9 });
       expect(s().canvas.boxes).toHaveLength(2);
@@ -566,7 +542,7 @@ describe("content-based dirty tracking", () => {
 
     it("is released by the save that holds it and by no other", () => {
       const first = withDocumentOneBox();
-      s().loadLabelsIntoCanvas(answered([])); // a load of another image drops the hold
+      s().loadLabelsIntoCanvas(EMPTY); // a load of another image drops the hold
       const second = s().holdForSave("/d/a/2.jpg");
       expect(second.id).not.toBe(first.id);
       s().releaseSave(first);
@@ -598,24 +574,20 @@ describe("content-based dirty tracking", () => {
 });
 
 describe("the hold on the canvas covers every content edit", () => {
-  const polygon = { rings: [RING_A], subject: "subject_a", attributes: {} };
-  const box = { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {} };
+  const polygon = { rings: [RING_A], subject: "subject_a", attributes: {}, iscrowd: false };
+  const box = { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {}, iscrowd: false };
   const rating = { subject: "subject_a", attributes: {}, iscrowd: false };
 
   /** A canvas on which every action changes state: content of each kind, a history to undo and
    *  to redo, a polygon being drawn, and a subject to commit it under. */
   function arrange() {
-    s().clearCanvas();
+    s().clearCanvas(null);
     s().loadLabelsIntoCanvas({
-      image_path: "x",
-      img_width: 100,
-      img_height: 100,
+      ...EMPTY,
       boxes: [box],
       polygons: [polygon],
-      points: [{ x: 1, y: 1, subject: "subject_a", attributes: {} }],
+      points: [{ x: 1, y: 1, subject: "subject_a", attributes: {}, iscrowd: false }],
       imageAnnotations: [rating],
-      completion: {},
-      flags: [],
     });
     s().add("boxes", { ...box, x2: 9 });
     s().add("boxes", { ...box, x2: 8 });
@@ -624,7 +596,7 @@ describe("the hold on the canvas covers every content edit", () => {
     useStore.setState((st) => ({ gui: { ...st.gui, active_subject: "subject_a" } }));
   }
 
-  const point = { x: 2, y: 2, subject: "subject_a", attributes: {} };
+  const point = { x: 2, y: 2, subject: "subject_a", attributes: {}, iscrowd: false };
   const RUNS: [(typeof CONTENT_EDITS)[number], string, () => unknown][] = [
     ["pushUndo", "", () => s().pushUndo()],
     ["undo", "", () => s().undo()],
@@ -680,16 +652,17 @@ describe("the hold on the canvas covers every content edit", () => {
 
 describe("agent activity", () => {
   it("pushAgentActivity records the event, its client, and increments seq", () => {
-    s().pushAgentActivity("annotate", "labels_written", { stem: "IMG_1" }, "claude-code 2.1.238");
+    const { panel, event } = PANEL_EVENTS.labels_written;
+    s().pushAgentActivity(panel, event, AGENT_CLIENT);
     const first = s().agentActivity;
-    expect(first?.panel).toBe("annotate");
-    expect(first?.eventType).toBe("labels_written");
-    expect(first?.data.stem).toBe("IMG_1");
-    expect(first?.client).toBe("claude-code 2.1.238");
+    expect(first?.panel).toBe(panel);
+    expect(first?.event).toBe(event);
+    expect(first?.client).toBe(AGENT_CLIENT);
 
-    s().pushAgentActivity("annotate", "labels_written", { stem: "IMG_2" }, null);
+    const focus = PANEL_EVENTS.annotate_focus.event;
+    s().pushAgentActivity(panel, focus, null);
     expect(s().agentActivity?.seq).toBe((first?.seq ?? 0) + 1);
-    expect(s().agentActivity?.data.stem).toBe("IMG_2");
+    expect(s().agentActivity?.event).toBe(focus);
     expect(s().agentActivity?.client).toBeNull();
   });
 });

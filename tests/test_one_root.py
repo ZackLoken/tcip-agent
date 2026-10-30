@@ -257,7 +257,10 @@ def test_the_list_names_the_open_project_and_each_project_by_display_name(
 
     listing = client.get("/api/projects").json()
     assert listing["open_id"] == valley.id
-    assert {(p["id"], p["display_name"]) for p in listing["projects"]} == {
+    assert {
+        (p["record"]["id"], p["record"]["display_name"])
+        for p in listing["projects"]
+    } == {
         (valley.id, "Valley block"),
         (hill.id, "Hill block"),
     }

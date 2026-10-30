@@ -10,19 +10,24 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, get_args
+from typing import TYPE_CHECKING, Annotated, Literal, get_args
 
 from pydantic import (
+    AwareDatetime,
     BaseModel,
     ConfigDict,
+    Field,
     JsonValue,
     PositiveFloat,
+    TypeAdapter,
     computed_field,
 )
 
 import tcip_store
+from tcip_annotation.flags import ProposalTarget
 from tcip_annotation.viz import CanvasShape
 from tcip_mcp.dataset_layout import image_dir
+from tcip_mcp.pipelines.image_utils import logical_image_name
 from tcip_store import Key
 
 if TYPE_CHECKING:
@@ -118,11 +123,20 @@ class Viewport(BaseModel):
     y: float
     w: PositiveFloat
     h: PositiveFloat
-    scale: float
+    scale: PositiveFloat
+
+
+class CanvasClass(BaseModel):
+    """One subject the canvas draws and the color it draws it in, the GUI's own."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    color: str
 
 
 class CanvasView(BaseModel):
-    """What the GUI's canvas showed: tab, image, size, viewport, mode, person, classes, counts.
+    """What the GUI's canvas showed: tab, image, viewport, mode, person, classes, counts.
 
     ``viewport`` is ``None`` while the canvas shows no region, ``active_subject`` while no subject
     is active, and ``cut_armed`` is whether the Annotate cut tool is armed.
@@ -130,16 +144,13 @@ class CanvasView(BaseModel):
 
     tab: ActiveTab
     image_path: str
-    image: str
-    img_width: int
-    img_height: int
     viewport: Viewport | None
     mode: AnnotateMode
     active_subject: str | None
     cut_armed: bool
     dirty: bool
     user: str
-    classes: list[dict[str, JsonValue]]  # [{name, color}]
+    classes: list[CanvasClass]
     counts: dict[str, int]
 
 
@@ -148,7 +159,7 @@ class CanvasMeta(CanvasView):
 
     model_config = ConfigDict(extra="forbid")
 
-    received_at: str
+    received_at: AwareDatetime
 
 
 class CanvasGeometry(BaseModel):
@@ -162,7 +173,7 @@ class CanvasGeometry(BaseModel):
     image_path: str
     tab: ActiveTab
     shapes: list[CanvasShape]
-    received_at: str
+    received_at: AwareDatetime
 
 
 def read_canvas_meta(project: str) -> CanvasMeta | None:
@@ -186,10 +197,8 @@ def read_canvas_geometry(project: str) -> CanvasGeometry | None:
 class CaptureChoice(BaseModel):
     """A capture chosen to look at: its dataset root, subject, capture and the bucket reviewed.
 
-    ``subject`` and ``bucket`` are ``None`` when none is chosen; every field is sent.
+    ``subject`` and ``bucket`` are ``None`` when none is chosen.
     """
-
-    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
 
     dataset_root: str
     subject: str | None = None
@@ -213,18 +222,18 @@ class DatasetChoice(CaptureChoice):
 class AnnotateFocus(CaptureChoice):
     """Where the agent drives the Annotate tab: a capture, the image, the mode and the proposal.
 
-    ``subject`` is the one made active; ``proposal`` is the index of the proposal focused in the
-    bucket's document for the image, or ``None``.
+    It is the ``annotate_focus`` panel event. ``subject`` is the one made active; ``proposal`` is
+    the proposal focused, by its bucket and its index in that bucket's document for the image, or
+    ``None``.
     """
 
-    model_config = ConfigDict(
-        extra="forbid", json_schema_mode_override="serialization"
-    )
+    model_config = ConfigDict(extra="forbid")
 
+    event_type: Literal["annotate_focus"] = "annotate_focus"
     subject: str
     image_index: int
     mode: AnnotateMode
-    proposal: int | None
+    proposal: ProposalTarget | None
 
 
 class CaptureImage(BaseModel):
@@ -237,8 +246,8 @@ class CaptureImage(BaseModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def name(self) -> str:
-        """The image's file name, its path's basename."""
-        return Path(self.path).name
+        """The image's name (:func:`~tcip_mcp.pipelines.image_utils.logical_image_name`)."""
+        return logical_image_name(self.path)
 
 
 class DatasetSelection(DatasetChoice):
@@ -252,7 +261,7 @@ class ViewState(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    scale: float
+    scale: PositiveFloat
     offset_x: float
     offset_y: float
 
@@ -316,15 +325,9 @@ def selection_for(choice: DatasetChoice) -> DatasetSelection:
     images = [
         CaptureImage(path=source_path_of(source)) for source in found.values()
     ]
-    return DatasetSelection.model_validate(
-        {
-            **choice.model_dump(),
-            "bucket": choice.bucket or None,
-            "current_image_index": max(
-                0, min(choice.current_image_index, len(images) - 1)
-            ),
-            "images": images,
-        }
+    index = max(0, min(choice.current_image_index, len(images) - 1))
+    return DatasetSelection(
+        **dict(choice) | {"current_image_index": index}, images=images
     )
 
 
@@ -332,13 +335,16 @@ def write_gui_snapshot(project: Path, state: GuiState) -> None:
     """Persist ``state`` as ``project``'s GUI snapshot, its dataset held as the choice."""
     from tcip_mcp.registry_paths import stored_path
 
-    document = _PersistedGuiState.model_validate(
-        state.model_dump(exclude={"dataset": {"images"}})
+    selection = state.dataset
+    document = _PersistedGuiState(
+        **{name: getattr(state, name) for name in _GuiFields.model_fields},
+        dataset=None
+        if selection is None
+        else DatasetChoice(
+            **{name: getattr(selection, name) for name in DatasetChoice.model_fields}
+            | {"dataset_root": stored_path(selection.dataset_root, project)}
+        ),
     )
-    if document.dataset is not None:
-        document.dataset.dataset_root = stored_path(
-            document.dataset.dataset_root, project
-        )
     tcip_store.replace(
         gui_snapshot_key(project), document.model_dump(mode="json")
     )
@@ -358,40 +364,96 @@ def read_gui_snapshot(project: Path) -> GuiState | None:
         return None
     persisted = _PersistedGuiState.model_validate(raw)
     choice = persisted.dataset
-    return GuiState.model_validate(
-        {
-            **persisted.model_dump(exclude={"dataset"}),
-            "dataset": None
-            if choice is None
-            else selection_for(
-                choice.model_copy(
-                    update={
-                        "dataset_root": str(
-                            resolved_registry_path(
-                                project, choice.dataset_root
-                            )
-                        )
-                    }
-                )
-            ),
-        }
+    return GuiState(
+        **{name: getattr(persisted, name) for name in _GuiFields.model_fields},
+        dataset=None
+        if choice is None
+        else selection_for(
+            choice.model_copy(
+                update={
+                    "dataset_root": str(
+                        resolved_registry_path(project, choice.dataset_root)
+                    )
+                }
+            )
+        ),
     )
 
 
 Panel = Literal[ActiveTab, "app"]
 """A GUI panel: one per tab, plus ``"app"`` for steering the GUI itself."""
 
-# The event types the platform's own tool-driven emitters send; ``push_panel_event`` accepts any
-# caller-supplied type beyond this set, so this is not the full panel-event vocabulary.
-PANEL_EVENT_LABELS_WRITTEN = "labels_written"
-PANEL_EVENT_ANNOTATE_FOCUS = "annotate_focus"
-PANEL_EVENT_CANVAS_STATE_REQUEST = "canvas_state_request"
 
-PLATFORM_PANEL_EVENTS = (
-    PANEL_EVENT_LABELS_WRITTEN,
-    PANEL_EVENT_ANNOTATE_FOCUS,
-    PANEL_EVENT_CANVAS_STATE_REQUEST,
-)
+class LabelsWritten(BaseModel):
+    """The ``labels_written`` panel event: a process wrote the labels of the image at a path."""
+
+    event_type: Literal["labels_written"] = "labels_written"
+    image_path: str
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def name(self) -> str:
+        """The image's name (:func:`~tcip_mcp.pipelines.image_utils.logical_image_name`)."""
+        return logical_image_name(self.image_path)
+
+
+class CanvasStateRequest(BaseModel):
+    """The ``canvas_state_request`` panel event: the GUI pushes its canvas state now."""
+
+    event_type: Literal["canvas_state_request"] = "canvas_state_request"
+
+
+class Banner(BaseModel):
+    """The ``banner`` panel event: a note ``text`` the GUI shows above the panel's tab."""
+
+    event_type: Literal["banner"] = "banner"
+    text: str
+
+
+PanelEvent = Annotated[
+    LabelsWritten | AnnotateFocus | CanvasStateRequest | Banner,
+    Field(discriminator="event_type"),
+]
+"""One event pushed to a GUI panel, its payload told apart by its ``event_type``."""
+
+
+class PanelPost(BaseModel):
+    """A panel event as posted to the backend: the event and the project its sender acts on."""
+
+    event: PanelEvent
+    project_id: str
+
+
+class ProjectNotOpenRefusal(BaseModel):
+    """The backend refusing a request built for a project other than the one it has open.
+
+    ``open_project_id`` names the project it has open.
+    """
+
+    kind: Literal["project_not_open"] = "project_not_open"
+    message: str
+    open_project_id: str
+
+
+ProjectNotOpen = Annotated[ProjectNotOpenRefusal, Field(discriminator="kind")]
+"""A :class:`ProjectNotOpenRefusal` read only from a detail whose ``kind`` names it."""
+
+PanelEventReason = Annotated[
+    ProjectNotOpen | JsonValue, Field(union_mode="left_to_right")
+]
+"""Why a panel event was not taken: the backend's refusal by its ``kind``, else the detail as the
+backend sent it or a sentence naming the failure."""
+
+
+class PanelEventAnswer(BaseModel):
+    """What posting a panel event came to: the backend's URL it went to and why it was not taken.
+
+    ``url`` is ``None`` when no URL was resolved; ``reason`` is ``None`` once the backend accepted
+    the event (never that a browser showed it), else why not.
+    """
+
+    url: str | None
+    reason: PanelEventReason | None
 
 
 class NoBackendPortError(LookupError):
@@ -404,8 +466,6 @@ def resolve_web_port(workspace: Path) -> int:
     Refuses (:class:`NoBackendPortError`) when none is recorded, and
     (``pydantic.ValidationError``) a recorded port that does not validate as an integer.
     """
-    from pydantic import TypeAdapter
-
     recorded = tcip_store.read(backend_port_key(workspace), default=None)
     if recorded is None:
         raise NoBackendPortError(
@@ -426,88 +486,61 @@ def backend_url(workspace: Path, path: str) -> str:
 def post_panel_event(
     bound: BoundProject,
     panel: Panel,
-    event_type: str,
-    data: dict[str, Any],
+    event: PanelEvent,
     *,
     timeout: float = 2.0,
-) -> dict[str, Any]:
-    """POST a panel event for the project ``bound`` names to the backend serving its workspace.
+) -> PanelEventAnswer:
+    """POST ``event`` to ``panel`` for the project ``bound`` names, to the backend serving it.
 
-    The event is delivered only when that project is the one the backend has open. Every answer
-    carries ``delivered``: on a 2xx, ``status`` ``"ok"`` and ``response`` (the JSON body,
-    ``None`` when it does not decode); with no port recorded, the connection refused or the
-    request timed out, ``status`` ``"no_subscribers"``;
-    otherwise ``error`` naming why: with ``open_project_id`` when another project is open, the
-    backend's none-open message when none is.
+    The event is taken only when that project is the one the backend has open. Otherwise the
+    answer's ``reason`` says why not: no port recorded, nothing answering at the recorded port,
+    the backend's refusal detail as it sent it (:data:`PanelEventReason`), or the failure itself.
     """
     import httpx
 
-    # Hermetic under pytest: focus/web tests must never steer a live GUI session to ephemeral
-    # fixture paths (the browser then 404s on deleted tmp dirs). Tests that exercise real
-    # delivery opt back in with TCIP_ALLOW_PANEL_EVENTS=1.
+    # Hermetic under pytest, so a test never steers a live GUI to its fixture paths; a test
+    # exercising real delivery opts back in with TCIP_ALLOW_PANEL_EVENTS=1.
     if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get(
         "TCIP_ALLOW_PANEL_EVENTS"
     ):
-        return {
-            "status": "suppressed_under_pytest",
-            "delivered": False,
-            "url": "",
-        }
+        return PanelEventAnswer(
+            url=None,
+            reason="panel events are not posted under pytest; TCIP_ALLOW_PANEL_EVENTS=1 "
+            "posts them",
+        )
 
     from tcip_mcp import agent_identity
 
     try:
         url = backend_url(bound.workspace, f"/api/events/{panel}")
     except NoBackendPortError as exc:
-        return {
-            "status": "no_subscribers",
-            "delivered": False,
-            "url": "",
-            "error": str(exc),
-        }
+        return PanelEventAnswer(url=None, reason=str(exc))
     try:
         # The pushing harness and session, as headers, so the backend can say who steered the GUI.
         answer = httpx.post(
             url,
-            json={
-                "event_type": event_type,
-                "data": data,
-                "project_id": bound.id,
-            },
+            json=PanelPost(event=event, project_id=bound.id).model_dump(
+                mode="json"
+            ),
             headers=agent_identity.http_headers(),
             timeout=timeout,
         )
-    except (httpx.ConnectError, httpx.TimeoutException):
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
         # Refused: nothing listens on the recorded port. Timed out: nothing answered in time,
-        # which does not show that no backend serves. Any other failure is an error below.
-        return {"status": "no_subscribers", "delivered": False, "url": url}
+        # which does not show that no backend serves. Any other failure is a failure below.
+        return PanelEventAnswer(
+            url=url, reason=f"no backend answered at the recorded port: {exc}"
+        )
     except Exception as exc:
         logger.exception("post_panel_event failed")
-        return {"error": str(exc), "delivered": False, "url": url}
+        return PanelEventAnswer(url=url, reason=str(exc))
+    if answer.is_success:
+        return PanelEventAnswer(url=url, reason=None)
     try:
         body = answer.json()
     except ValueError:
-        body = None
-    if answer.is_success:
-        return {
-            "status": "ok",
-            "delivered": True,
-            "url": url,
-            "response": body,
-        }
-    # The backend's own answer, e.g. the project it has open when that is not this one.
-    detail = body.get("detail") if isinstance(body, dict) else None
-    if isinstance(detail, dict):
-        fields = {k: v for k, v in detail.items() if k != "message"}
-        return {
-            **fields,
-            "error": detail.get("message"),
-            "delivered": False,
-            "url": url,
-        }
-    error = (
-        detail
-        if isinstance(detail, str)
-        else f"backend returned HTTP {answer.status_code}"
+        body = answer.text
+    return PanelEventAnswer(
+        url=url,
+        reason=body.get("detail", body) if isinstance(body, dict) else body,
     )
-    return {"error": error, "delivered": False, "url": url}

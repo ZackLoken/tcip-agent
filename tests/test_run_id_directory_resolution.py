@@ -45,13 +45,13 @@ def test_a_custom_named_run_is_canceled_by_its_own_id(tmp_path: Path) -> None:
     )
 
     result = cancel_training(tmp_path, "exp-002-bud-det", actor=None)
-    assert result["cancel_requested"] is True
-    assert result["experiment_id"] == "exp-002-bud-det"
+    assert not isinstance(result, dict) and result.run is not None
+    assert result.run.experiment_id == "exp-002-bud-det"
     assert cancel_requested(run_dir)
 
 
 def test_an_id_naming_no_run_resolves_to_nothing(tmp_path: Path) -> None:
-    from tcip_mcp.experiments import find_run
+    from tcip_mcp.experiments import named_directory, run_dirs
     from tcip_mcp.tools.training_tools import cancel_training, monitor_training
 
     opened_run(
@@ -60,7 +60,7 @@ def test_an_id_naming_no_run_resolves_to_nothing(tmp_path: Path) -> None:
         experiment_id="exp-004-bud-det",
     )
 
-    assert find_run("exp-never-launched", project=tmp_path) is None
+    assert named_directory("exp-never-launched", run_dirs(tmp_path)) is None
     assert "error" in monitor_training(tmp_path, "exp-never-launched")
     assert "error" in cancel_training(
         tmp_path, "exp-never-launched", actor=None

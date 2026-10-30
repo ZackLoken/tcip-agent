@@ -17,7 +17,6 @@ from pathlib import Path
 
 from fastapi import (
     FastAPI,
-    HTTPException,
     Request,
     WebSocket,
     WebSocketDisconnect,
@@ -26,15 +25,18 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.websockets import WebSocketState
-from pydantic import BaseModel, JsonValue, ValidationError
+from pydantic import BaseModel
 
-from tcip_mcp.audit import now_iso
+from tcip_mcp.audit import now
 from tcip_mcp.buckets import NotABucketError
 from tcip_mcp.identity import NoActorError
 from tcip_mcp.web_client import (
-    PANEL_EVENT_ANNOTATE_FOCUS,
+    ActiveTab,
     AnnotateFocus,
+    GuiState,
     Panel,
+    PanelPost,
+    ProjectNotOpenRefusal,
 )
 from tcip_store import bind
 from tcip_web.routes import register_all as _register_routes
@@ -126,14 +128,11 @@ async def _project_not_open_handler(
     _request: Request, exc: ProjectNotOpenError
 ) -> JSONResponse:
     """Answer 409 naming the open project to a request built for another one."""
+    refusal = ProjectNotOpenRefusal(
+        message=str(exc), open_project_id=exc.open_project_id
+    )
     return JSONResponse(
-        status_code=409,
-        content={
-            "detail": {
-                "message": str(exc),
-                "open_project_id": exc.open_project_id,
-            }
-        },
+        status_code=409, content={"detail": refusal.model_dump()}
     )
 
 
@@ -178,25 +177,24 @@ _gui_store.subscribe(_broadcast_state_snapshot)
 
 
 @app.get("/api/state")
-def get_state() -> dict:
-    """Return the GUI state store's current snapshot."""
-    return _gui_store.snapshot()
+def get_state() -> GuiState:
+    """Return the GUI state the store holds."""
+    return _gui_store.state
 
 
 class ActiveTabPayload(BaseModel):
     """The active tab to record."""
 
-    active_tab: str
+    active_tab: ActiveTab
 
 
 @app.post("/api/state/tab")
-async def set_active_tab(payload: ActiveTabPayload) -> dict:
-    """Record ``active_tab`` in the GUI state and answer it."""
+async def set_active_tab(payload: ActiveTabPayload) -> None:
+    """Record ``active_tab`` in the GUI state."""
     await _gui_store.mutate(
         lambda _held: {"active_tab": payload.active_tab},
         project=_gui_store.opened,
     )
-    return {"status": "ok", "active_tab": payload.active_tab}
 
 
 @app.websocket("/ws/state")
@@ -222,14 +220,6 @@ async def state_ws(websocket: WebSocket) -> None:
 # An event id's timestamp keeps it distinct across a restart, which resets this counter.
 _event_counter = itertools.count(1)
 _panel_subscribers: dict[Panel, set[WebSocket]] = defaultdict(set)
-
-
-class PanelEvent(BaseModel):
-    """An event pushed to a panel: its type, its data and the project the sender acts on."""
-
-    event_type: str
-    data: dict[str, JsonValue] = {}
-    project_id: str
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -274,30 +264,24 @@ def index() -> Response:
 
 @app.post("/api/events/{panel}")
 async def post_panel_event(
-    panel: Panel, event: PanelEvent, request: Request
-) -> dict:
-    """Accept a pushed event and broadcast it to subscribers.
+    panel: Panel, posted: PanelPost, request: Request
+) -> None:
+    """Accept a pushed panel event (:class:`~tcip_mcp.web_client.PanelPost`) and broadcast it.
 
-    Payload shape: ``{event_type, data, project_id}``. A path naming no panel answers 422. An
+    A path naming no panel, or an event that is none of the four panel events, answers 422. An
     event naming any project but the open one answers 409 (``StateStore.admit``), naming the
     open one's ``open_project_id`` when another is open and the none-open message when none is,
-    and is neither retained nor broadcast. A focus event is admitted as :class:`AnnotateFocus`
-    (400 otherwise) and retained and broadcast as that model only once its state change is held;
-    a refused one is neither. The broadcast and replay payload, not this route's
-    response, carries every agent identity field the sender declared in its headers
-    (``agent_identity.HEADERS``, each ``None`` when not sent). Declared, not verified: any
-    sender can set the headers.
+    and is neither retained nor broadcast. A focus event is retained and broadcast only once its
+    state change is held. The broadcast and replay payload, not this route's response, carries
+    the agent identity the sender declared in its headers (``agent_identity.HEADERS``, each field
+    ``None`` when not sent). Declared, not verified: any sender can set the headers.
     """
     from tcip_mcp import agent_identity
 
-    project = _gui_store.admit(event.project_id)
-    data = event.data
+    project = _gui_store.admit(posted.project_id)
+    focus = posted.event
     # The browser applies a focus event locally and never syncs it back, so the snapshot moves here.
-    if event.event_type == PANEL_EVENT_ANNOTATE_FOCUS:
-        try:
-            focus = AnnotateFocus.model_validate(event.data)
-        except ValidationError as exc:
-            raise HTTPException(400, str(exc)) from exc
+    if isinstance(focus, AnnotateFocus):
         await _gui_store.mutate(
             lambda _held: {
                 "active_tab": "annotate",
@@ -306,17 +290,14 @@ async def post_panel_event(
             },
             project=project,
         )
-        data = focus.model_dump(mode="json")
     envelope = PanelEnvelope(
         panel=panel,
-        event_type=event.event_type,
-        data=data,
-        event_id=f"{now_iso()}#{next(_event_counter)}",
-        **agent_identity.fields_from_headers(request.headers),
+        event=posted.event,
+        event_id=f"{now().isoformat()}#{next(_event_counter)}",
+        identity=agent_identity.identity_from_headers(request.headers),
     )
     _gui_store.retain_event(envelope)
     await _send_to_each(envelope, _panel_subscribers[panel])
-    return {"status": "ok", "panel": panel, "event_type": event.event_type}
 
 
 @app.websocket("/ws/panel/{panel}")

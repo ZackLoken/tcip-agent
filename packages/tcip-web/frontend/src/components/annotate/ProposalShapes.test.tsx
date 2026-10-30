@@ -5,6 +5,8 @@ import { ProposalShapes } from "@/components/annotate/ProposalShapes";
 import type { ReviewItem } from "@/lib/reviewItems";
 import { FOCUS_HALO, MATCH_COLORS, strokeWidths } from "@/lib/symbology";
 import type { Proposal } from "@/store/types";
+import { ANNOTATE_ANSWERS } from "@/test/annotate";
+import { servedProposal } from "@/test/labels";
 
 // Konva needs a real 2D canvas; render its shapes as inspectable divs.
 vi.mock("react-konva", () => ({
@@ -25,28 +27,21 @@ afterEach(() => {
   cleanup();
 });
 
+const BUCKET = ANNOTATE_ANSWERS.buckets.review;
+
 function proposal(index: number, paired: number | null): Proposal {
   return {
-    subject: "subject_a",
-    bbox: [10, 10, 50, 50],
-    attributes: {},
-    iscrowd: false,
-    score: 0.9,
-    index,
-    paired,
-    decision: null,
+    ...servedProposal({ subject: "subject_a", bbox: [10, 10, 50, 50], score: 0.9, index, paired }),
+    bucket: BUCKET,
   };
 }
 
 const focusedOn = (index: number): ReviewItem => ({
   kind: "proposal",
+  proposal: proposal(index, null),
   shape: "box",
-  ref: index,
-  subject: "subject_a",
   bbox: [10, 10, 50, 50],
   match: "proposal_only",
-  reviewed: false,
-  score: 0.9,
   at: [30, 30],
   flags: [],
 });
@@ -87,7 +82,7 @@ describe("ProposalShapes", () => {
   });
 
   it("draws a point proposal as a point mark", () => {
-    const point: Proposal = { ...proposal(0, null), bbox: undefined, point: [30, 30] };
+    const point: Proposal = { ...proposal(0, null), bbox: null, point: [30, 30] };
     render(<ProposalShapes proposals={[point]} focused={null} widths={strokeWidths(1)} />);
     expect(screen.getAllByTestId("k-line").length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("k-circle").length).toBeGreaterThan(0);

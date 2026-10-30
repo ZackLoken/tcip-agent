@@ -1,9 +1,10 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import type { ImageBandInfo, ImageBandsResponse } from "@/api/client";
 import { useBandSelection } from "@/hooks/useBandSelection";
+import { defaultBandSelection } from "@/lib/bandSelection";
 import { useStore } from "@/store";
+import { BAND_ANSWERS } from "@/test/bands";
 
 const initialStoreState = useStore.getState();
 
@@ -11,31 +12,14 @@ beforeEach(() => {
   useStore.setState(initialStoreState, true);
 });
 
-function bandsResponse(bands: ImageBandInfo[]): ImageBandsResponse {
-  return { band_count: bands.length, bands };
-}
+const { four_spectral: SET_A, three_unlabeled: SET_B, rgba: RGBA } = BAND_ANSWERS;
+const [FIRST, SECOND, THIRD, FOURTH] = SET_A.bands.map((band) => band.name);
 
-const SET_A: ImageBandInfo[] = [
-  { name: "Blue", wavelength_nm: 475, dtype: "uint16", min: 0, max: 65535 },
-  { name: "Green", wavelength_nm: 560, dtype: "uint16", min: 0, max: 65535 },
-  { name: "Red", wavelength_nm: 650, dtype: "uint16", min: 0, max: 65535 },
-  { name: "NIR", wavelength_nm: 840, dtype: "uint16", min: 0, max: 65535 },
-];
+/** A selection over `SET_A` other than its default, its fourth band first. */
+const CHOSEN = { r: FOURTH, g: THIRD, b: SECOND, stretch: SET_A.default_stretch };
 
-const SET_B: ImageBandInfo[] = [
-  { name: "B1", wavelength_nm: 440, dtype: "uint16", min: 0, max: 65535 },
-  { name: "B2", wavelength_nm: 490, dtype: "uint16", min: 0, max: 65535 },
-  { name: "B3", wavelength_nm: 530, dtype: "uint16", min: 0, max: 65535 },
-];
-
-const RGBA: ImageBandInfo[] = ["red", "green", "blue", "alpha"].map((interpretation) => ({
-  name: interpretation,
-  wavelength_nm: null,
-  dtype: "uint8",
-  min: 0,
-  max: 255,
-  interpretation,
-}));
+/** A selection of `bandsInfo`'s default bands. */
+const ownBands = defaultBandSelection;
 
 describe("useBandSelection", () => {
   it("returns null with a no-op setter while bandsInfo itself is null", () => {
@@ -43,65 +27,58 @@ describe("useBandSelection", () => {
     const [selection, setSelection] = result.current;
     expect(selection).toBeNull();
 
-    act(() => setSelection({ r: "Red", g: "Green", b: "Blue", stretch: "minmax" }));
+    act(() => setSelection(ownBands(SET_A)));
     expect(useStore.getState().bandSelection.byBandSet).toEqual({});
   });
 
-  it("returns null for a plain color frame, and its setter writes nothing", () => {
-    const { result } = renderHook(() => useBandSelection(bandsResponse(RGBA)));
+  it("returns null for a frame the server displays plain, and its setter writes nothing", () => {
+    const { result } = renderHook(() => useBandSelection(RGBA));
     const [selection, setSelection] = result.current;
     expect(selection).toBeNull();
 
-    act(() => setSelection({ r: "red", g: "green", b: "blue", stretch: "minmax" }));
+    act(() => setSelection(ownBands(RGBA)));
     expect(useStore.getState().bandSelection.byBandSet).toEqual({});
   });
 
   it("a selection changed in one instance is the selection a second instance reads over the same band set", () => {
-    const tabA = renderHook(() => useBandSelection(bandsResponse(SET_A)));
-    const tabB = renderHook(() => useBandSelection(bandsResponse(SET_A)));
+    const tabA = renderHook(() => useBandSelection(SET_A));
+    const tabB = renderHook(() => useBandSelection(SET_A));
+    const clipped = { ...CHOSEN, stretch: "percent_clip" as const };
 
-    act(() => tabA.result.current[1]({ r: "NIR", g: "Red", b: "Green", stretch: "percent_clip" }));
+    act(() => tabA.result.current[1](clipped));
     tabB.rerender();
 
-    expect(tabB.result.current[0]).toEqual({
-      r: "NIR",
-      g: "Red",
-      b: "Green",
-      stretch: "percent_clip",
-    });
+    expect(tabB.result.current[0]).toEqual(clipped);
   });
 
   it("a composite chosen over one band set survives a detour through another and returns", () => {
     const hook = renderHook(({ bandsInfo }) => useBandSelection(bandsInfo), {
-      initialProps: { bandsInfo: bandsResponse(SET_A) },
+      initialProps: { bandsInfo: SET_A },
     });
+    expect(hook.result.current[0]).not.toEqual(CHOSEN);
+    expect(FIRST).not.toBe(CHOSEN.r);
 
-    act(() => hook.result.current[1]({ r: "NIR", g: "Red", b: "Green", stretch: "minmax" }));
-    expect(hook.result.current[0]).toEqual({ r: "NIR", g: "Red", b: "Green", stretch: "minmax" });
+    act(() => hook.result.current[1](CHOSEN));
+    expect(hook.result.current[0]).toEqual(CHOSEN);
 
     // Detour through a differently-banded image: neither read nor rewritten by this switch.
-    hook.rerender({ bandsInfo: bandsResponse(SET_B) });
-    expect(hook.result.current[0]).not.toEqual({
-      r: "NIR",
-      g: "Red",
-      b: "Green",
-      stretch: "minmax",
-    });
+    hook.rerender({ bandsInfo: SET_B });
+    expect(hook.result.current[0]).not.toEqual(CHOSEN);
 
     // Back to the original band set: the earlier choice is exactly what comes back.
-    hook.rerender({ bandsInfo: bandsResponse(SET_A) });
-    expect(hook.result.current[0]).toEqual({ r: "NIR", g: "Red", b: "Green", stretch: "minmax" });
+    hook.rerender({ bandsInfo: SET_A });
+    expect(hook.result.current[0]).toEqual(CHOSEN);
   });
 
   it("keeps the same setter and default-selection identity across a render with no signature change", () => {
     const hook = renderHook(({ bandsInfo }) => useBandSelection(bandsInfo), {
-      initialProps: { bandsInfo: bandsResponse(SET_A) },
+      initialProps: { bandsInfo: SET_A },
     });
     const [firstSelection, firstSetter] = hook.result.current;
 
     // A fresh bandsInfo object, but the same band-set signature: a dependency array keyed off
     // either the selection or the setter must not see a new identity here.
-    hook.rerender({ bandsInfo: bandsResponse(SET_A) });
+    hook.rerender({ bandsInfo: { ...SET_A } });
     const [secondSelection, secondSetter] = hook.result.current;
 
     expect(secondSetter).toBe(firstSetter);

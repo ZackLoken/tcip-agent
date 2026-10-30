@@ -518,7 +518,7 @@ def test_the_smokes_admitted_row_carries_the_validation_keys_of_the_runs_first_e
     """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import METRICS_FILE, epoch_rows, read_rows
-    from tcip_mcp.pipelines.training.evaluation import VAL_METRIC_PREFIX
+    from tcip_mcp.pipelines.schemas import VAL_METRIC_PREFIX
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._verified_checkpoint_fixtures import worker_run
 
@@ -534,7 +534,7 @@ def test_the_smokes_admitted_row_carries_the_validation_keys_of_the_runs_first_e
     def validation(keys: Sequence[str]) -> set[str]:
         return {k for k in keys if k.startswith(VAL_METRIC_PREFIX)}
 
-    assert validation(admitted) == validation(list(first))
+    assert validation(admitted) == validation(list(first.model_dump()))
     assert {"val_per_class_iou", "val_per_class_dice"} <= validation(admitted)
 
 

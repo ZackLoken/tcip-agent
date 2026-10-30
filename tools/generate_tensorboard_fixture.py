@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from tests import FRONTEND_SRC
 from tools.fixture_session import (
+    answered,
     normalized,
     opened,
     scratch_session,
@@ -42,17 +43,19 @@ STAMPED: dict[str, Stamp] = {"port": (int, 0)}
 def produce() -> dict[str, JsonValue]:
     """Open the runs, launch a TensorBoard over each through the route; return the answers.
 
-    The answers are normalized and keyed by run id. A launch the route refuses raises,
-    and so does a TensorBoard whose stop ``stop_tensorboard`` answers unconfirmed, naming its
-    board and pid, whether or not the production raised first; a production's own exception is
-    then the refusal's context.
+    The answers are normalized and keyed by run id. A launch the route refuses or answers with
+    no TensorBoard serving raises, and so does a TensorBoard whose stop ``stop_tensorboard``
+    answers unconfirmed, naming its board and pid, whether or not the production raised first;
+    a production's own exception is then the refusal's context.
     """
     from torch.utils.tensorboard import SummaryWriter
 
     from tcip_mcp.experiments import board_of
     from tcip_mcp.pipelines.training.tensorboard_manager import (
+        TensorboardServing,
         stop_tensorboard,
     )
+    from tcip_web.routes._body_common import EmptyBodyPayload
     from tests._verified_checkpoint_fixtures import (
         detection_config,
         opened_run,
@@ -75,13 +78,15 @@ def produce() -> dict[str, JsonValue]:
                 with SummaryWriter(str(board)) as writer:
                     writer.add_scalar("loss", 0.5, 1)
                 boards.append(board)
-                answer = client.post(
-                    f"/api/training/runs/{experiment_id}/tensorboard", json={}
+                served[experiment_id] = answered(
+                    client,
+                    "launch_run_tensorboard",
+                    200,
+                    EmptyBodyPayload(),
+                    path={"experiment_id": experiment_id},
                 )
-                answer.raise_for_status()
-                served[experiment_id] = normalized(
-                    answer.json(), stamped=STAMPED
-                )
+                TensorboardServing.model_validate(served[experiment_id])
+            return normalized(served, workspace, stamped=STAMPED)
         finally:
             stops = {board: stop_tensorboard(str(board)) for board in boards}
             unconfirmed = {
@@ -89,11 +94,9 @@ def produce() -> dict[str, JsonValue]:
                 for board, stop in stops.items()
                 if stop["status"] == "kill_unconfirmed"
             }
-            if unconfirmed:
-                raise SystemExit(
-                    f"TensorBoards left with their kills unconfirmed: {unconfirmed}"
-                )
-        return served
+            assert not unconfirmed, (
+                f"TensorBoards left with their kills unconfirmed: {unconfirmed}"
+            )
 
 
 if __name__ == "__main__":

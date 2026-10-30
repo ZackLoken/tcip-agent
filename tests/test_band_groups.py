@@ -132,7 +132,7 @@ def test_real_data_manifest_records_true_wavelengths(dji_copy: Path) -> None:
 
     result = detect_and_write_band_groups(dji_copy)
     ref = read_band_group_manifest(Path(result["manifests"][0]))
-    assert ref.central_wavelength_nm == {
+    assert ref.manifest.central_wavelength_nm == {
         "Green": 560.0,
         "NIR": 860.0,
         "Red": 650.0,
@@ -967,7 +967,7 @@ def test_manifest_round_trip(tmp_path: Path) -> None:
     assert ref.stem == "cap42"
     assert ref.manifest_path == manifest_path
     assert ref.bands == {"Red": band_a, "Blue": band_b}
-    assert ref.central_wavelength_nm == {"Red": 650.0, "Blue": 470.0}
+    assert ref.manifest.central_wavelength_nm == {"Red": 650.0, "Blue": 470.0}
 
 
 @pytest.mark.parametrize(

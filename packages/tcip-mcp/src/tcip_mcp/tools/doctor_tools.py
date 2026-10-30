@@ -319,9 +319,9 @@ def check_traits(root: Path, findings: list) -> None:
 
 def check_project_record(root: Path, findings: list) -> None:
     """Append an error when the project record is absent, damaged, or on an unreadable root."""
-    from tcip_mcp.project_record import record_fields
+    from tcip_mcp.project_record import record_or_problem
 
-    problem = record_fields(root)["record_problem"]
+    _, problem = record_or_problem(root)
     if problem is not None:
         findings.append(("error", problem))
 

@@ -13,10 +13,10 @@ import logging
 import threading
 import uuid
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, ConfigDict, PrivateAttr
+from pydantic import BaseModel, PrivateAttr
 
 from tcip_mcp.dataset_layout import parse_capture_dir
 from tcip_mcp.identity import actor
@@ -34,24 +34,13 @@ router = APIRouter(prefix="/api/inference", tags=["inference"])
 # ── Job registry ────────────────────────────────────────────────────────
 
 
-class InferenceJob(BaseModel):
+class InferenceJob(jobstore.ProjectJob):
     """One inference pass this process launched: what it runs over, its progress and its outcome.
 
-    Its thread and cancel event are private state, absent from every dump of it.
+    Its cancel event is private state, absent from every dump of it.
     """
 
-    # Its lifecycle values are defaulted and every field is still sent, so the schema is the
-    # answer's.
-    model_config = ConfigDict(
-        json_schema_mode_override="serialization",
-        json_schema_serialization_defaults_required=True,
-    )
-
-    job_id: str
-    # The project open when the job launched, which it runs for.
-    project: str
-    checkpoint_path: str
-    images_dir: str
+    kind: ClassVar[str] = "inference job"
     bucket: str
     # The person who launched the job, who publishes its bucket.
     actor: str
@@ -61,17 +50,9 @@ class InferenceJob(BaseModel):
     assessment_id: str | None = None
     total: int = 0
     done: int = 0
-    status: jobstore.JobStatus = "pending"
-    error: str | None = None
-    _thread: threading.Thread | None = PrivateAttr(default=None)
     _cancel_event: threading.Event = PrivateAttr(
         default_factory=threading.Event
     )
-
-    @property
-    def thread(self) -> threading.Thread | None:
-        """The thread the job runs on, ``None`` before its launch starts one."""
-        return self._thread
 
     @property
     def cancel_event(self) -> threading.Event:
@@ -93,7 +74,7 @@ class InferenceJobs(BaseModel):
 class BucketExistsRefusal(BaseModel):
     """A launch refused for naming the bucket a live job under the same root is still writing."""
 
-    kind: Literal["bucket_exists"]
+    kind: Literal["bucket_exists"] = "bucket_exists"
     message: str
     job: InferenceJob
 
@@ -185,22 +166,27 @@ class LaunchInferencePayload(BaseModel):
     dataset_root: str
     # The capture whose images the pass runs over.
     date: str
-    # The name to publish the bucket under, beneath dataset_root, as run_inference takes it.
-    bucket: str
+    # The named bucket the capture's own bucket is published beneath.
+    bucket_name: str
     # Each value the statement leaves out the pass derives as run_inference does.
     stated: Stated
     # The assessment whose execution record the pass runs, so the bucket is published under it.
     assessment_id: str | None = None
     user: str
 
+    @property
+    def bucket(self) -> str:
+        """The bucket the pass publishes, the capture's own beneath the named one."""
+        return f"{self.bucket_name}/{self.date}"
+
 
 @router.post("/launch")
 def launch_inference(payload: LaunchInferencePayload) -> InferenceJob:
     """Launch a pass over the dataset's images on a background thread, answering its record.
 
-    The person ``user`` names launches it and publishes its bucket. The record is the job's as
-    it stands before the thread starts. A bucket a live job under the same dataset root is still
-    writing refuses (409, :class:`BucketExistsRefusal`).
+    The person ``user`` names launches it and publishes its bucket (``payload.bucket``). The
+    record is the job's as it stands before the thread starts. A bucket a live job under the same
+    dataset root is still writing refuses (409, :class:`BucketExistsRefusal`).
     """
     person = actor(payload.user)
     project = store.held().root
@@ -220,10 +206,10 @@ def launch_inference(payload: LaunchInferencePayload) -> InferenceJob:
     if not images_dir.is_dir():
         raise HTTPException(404, f"images_dir not found: {images_dir}")
 
-    job, created = _registry.find_or_register(
+    job, created = _registry.find_or_launch(
         lambda j: (
             j.project == str(project)
-            and jobstore.live(j)
+            and j.live
             and j.bucket == payload.bucket
             and canonical_path(j.dataset_root) == canonical_path(dataset_root)
         ),
@@ -237,21 +223,18 @@ def launch_inference(payload: LaunchInferencePayload) -> InferenceJob:
             stated=payload.stated,
             assessment_id=payload.assessment_id,
         ),
+        _worker,
     )
     if not created:
         raise HTTPException(
             409,
             BucketExistsRefusal(
-                kind="bucket_exists",
                 message=f"bucket {payload.bucket!r} under {dataset_root} is the bucket job "
                 f"{job.job_id} is still writing.",
                 job=job,
             ).model_dump(mode="json"),
         )
-    launched = job.model_copy()
-    job._thread = threading.Thread(target=_worker, args=(job,), daemon=True)
-    job._thread.start()
-    return launched
+    return job
 
 
 @router.get("/jobs")
@@ -272,10 +255,9 @@ def cancel_job(job_id: str, payload: PersonPayload) -> InferenceJob:
     from tcip_web.routes.audit_gap import audit_gap_409
 
     person = actor(payload.user)
-    j = _get(job_id)
+    j = _registry.signal(job_id, lambda live: live.cancel_event.set())
     if j is None:
         raise HTTPException(404, f"job not found: {job_id}")
-    j.cancel_event.set()
     try:
         record_event_or_raise(
             "inference_canceled",
@@ -296,22 +278,15 @@ def cancel_job(job_id: str, payload: PersonPayload) -> InferenceJob:
 async def stream_job(websocket: WebSocket, job_id: str) -> None:
     """Stream a job's frames (:data:`InferenceFrame`) until a final frame once it ends.
 
-    A progress frame is sent whenever the done count changes. An unknown job gets one
+    Each tick reads the job's snapshot afresh, and a progress frame is sent whenever the done
+    count changes. A job the registry does not hold, unknown or evicted once ended, gets one
     :class:`MissingJobFrame` carrying ``job not found`` and the socket closes.
     """
     await websocket.accept()
-    job = _get(job_id)
-    if job is None:
-        # Typed the same as a run's own terminal frame, so the client stops reconnecting instead
-        # of retrying forever against a job that will never exist.
-        missing = MissingJobFrame(type="final", error="job not found")
-        await websocket.send_json(missing.model_dump(mode="json"))
-        await websocket.close()
-        return
     try:
         last_done = -1
-        while True:
-            ended = not jobstore.live(job)
+        while (job := _get(job_id)) is not None:
+            ended = not job.live
             if job.done != last_done:
                 last_done = job.done
                 await websocket.send_json(
@@ -327,6 +302,11 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
                 )
                 break
             await asyncio.sleep(0.5)
+        else:
+            # Typed the same as a run's own terminal frame, so the client stops reconnecting
+            # instead of retrying forever against a job that will never exist.
+            missing = MissingJobFrame(type="final", error="job not found")
+            await websocket.send_json(missing.model_dump(mode="json"))
     except WebSocketDisconnect:
         pass
     finally:

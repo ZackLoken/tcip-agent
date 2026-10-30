@@ -91,11 +91,9 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     )
 
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {
-        "id": made.id,
-        "display_name": "Valley block, north half",
-        "previous_display_name": "Valley block",
-    }
+    answer = resp.json()
+    assert answer["record"] == read_record(project).model_dump(mode="json")
+    assert answer["previous"]["display_name"] == "Valley block"
     assert read_record(project).display_name == "Valley block, north half"
     assert sorted(p.name for p in ws.iterdir() if (p / ".tcip").is_dir()) == [
         "valley_block"
@@ -114,7 +112,8 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     }
     assert line["actor"] == actor("tester")
     listed = {
-        p["id"]: p for p in client.get("/api/projects").json()["projects"]
+        p["record"]["id"]: p["record"]
+        for p in client.get("/api/projects").json()["projects"]
     }
     assert listed[made.id]["display_name"] == "Valley block, north half"
 
@@ -186,10 +185,11 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
         SweepRecord,
         create_run_directory,
         experiment_dir,
-        find_run,
-        find_sweep,
+        named_directory,
         observe_run,
         observe_sweep,
+        run_dirs,
+        sweep_dirs,
         write_record,
     )
     from tcip_mcp.model_registry import ModelRegistry
@@ -268,7 +268,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
             run_file
         )
 
-    observed = observe_run(find_run("exp-resumed", project=moved))
+    observed = observe_run(named_directory("exp-resumed", run_dirs(moved)))
     resumed = prepare_run_context(observed)
     assert (
         Path(resumed.resume_from)
@@ -287,7 +287,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
         assert Path(sample.ground_truth.root).is_relative_to(moved.resolve())
 
     moved_run_checkpoint = observe_run(
-        find_run("exp-first", project=moved)
+        named_directory("exp-first", run_dirs(moved))
     ).checkpoint
     assert moved_run_checkpoint is not None
     moved_checkpoint = Path(moved_run_checkpoint.path)
@@ -307,7 +307,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     )
 
     moved_other = str(moved.resolve() / "data" / "other")
-    swept = observe_sweep(find_sweep("study", project=moved)).record.input
+    swept = observe_sweep(named_directory("study", sweep_dirs(moved))).record.input
     swept_data = swept.base_config["data"]
     assert isinstance(swept_data, dict)
     assert swept_data["images_dir"] == str(

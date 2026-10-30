@@ -5,9 +5,9 @@ Each document and the record lie under the dataset root the source images belong
 The record states who produced the documents (a checkpoint's sha256 and the run that produced
 it, or the engine or agent that proposed them), the class scope their labels decode under, the
 execution record a model's pass ran under, the capture the source images belong to, the source
-image of every document, how many detections were dropped for a box with no extent, and the
-assessment the bucket was published under, if any. A bucket is published once, in one commit
-over its record, every document and the publication's audit line.
+image of every document, how many detections were dropped for a box with no extent, the
+assessment the bucket was published under, if any, and when it was published. A bucket is
+published once, in one commit over its record, every document and the publication's audit line.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from pydantic import BaseModel, ConfigDict, TypeAdapter
+from pydantic import AwareDatetime, BaseModel, ConfigDict, TypeAdapter
 
 import tcip_store
 from tcip_mcp.model_registry import Producer
@@ -72,12 +72,14 @@ class Bucket:
     proposed the documents (:class:`Proposed`), whose ``execution`` is the record of the inference
     pass an engine's proposal ran through (``None`` for a proposal no such pass made) and which no
     class scope decodes (``scope`` empty). ``documents`` maps each
-    document's stem to the source file name it was predicted from, and ``raster_path`` is the
-    raster as stored against the project (:meth:`raster`).
+    document's stem to the source file name it was predicted from, ``raster_path`` is the
+    raster as stored against the project (:meth:`raster`), and ``published_at`` the instant its
+    publication committed.
     """
 
     root: Path
     name: str
+    published_at: AwareDatetime
     producer: Producer | Proposed
     scope: ClassScope
     execution: Execution | None
@@ -168,8 +170,11 @@ def bucket_names(dataset_root: str | Path) -> list[str]:
 
 
 def buckets_under(dataset_root: str | Path) -> list[Bucket]:
-    """Return every bucket published under ``dataset_root``, in name order."""
-    return [read_bucket(dataset_root, n) for n in bucket_names(dataset_root)]
+    """Return every bucket published under ``dataset_root``, in publication order."""
+    return sorted(
+        (read_bucket(dataset_root, n) for n in bucket_names(dataset_root)),
+        key=lambda bucket: bucket.published_at,
+    )
 
 
 def by_recorded_date(buckets: Iterable[Bucket]) -> dict[str, Bucket]:
@@ -206,7 +211,8 @@ def buckets_by_date(
 ) -> dict[str, list[str]]:
     """Return, for each of ``dates``, the names of the buckets under ``dataset_root`` of that date.
 
-    A bucket is of a date when its record states that capture date.
+    A bucket is of a date when its record states that capture date; each date's are in
+    publication order (:func:`buckets_under`).
     """
     grouped: dict[str, list[str]] = {d: [] for d in dates}
     for bucket in buckets_under(dataset_root):
@@ -218,13 +224,16 @@ def buckets_by_date(
 def pass_documents(p: Pass, results: Iterable[dict]) -> Iterator[Document]:
     """Yield each of a pass's ``results`` encoded as the document it publishes.
 
-    A detector's (a pass whose execution record states a conf) is its prediction document under
+    A detector's (a pass whose execution record states a conf) is read as its
+    :class:`~tcip_mcp.pipelines.postprocessing.export.DetectionResult`, refusing
+    (``ValidationError``) a result that is none, and encoded as its prediction document under
     the pass's scope, carrying the cap its frame was predicted under and stamped with the
     checkpoint that predicted it
     (:func:`~tcip_mcp.pipelines.postprocessing.export.encode_predictions`); any other head's is
     its own output (:func:`~tcip_mcp.pipelines.postprocessing.export.encode_head_output`).
     """
     from tcip_mcp.pipelines.postprocessing.export import (
+        DetectionResult,
         encode_head_output,
         encode_predictions,
     )
@@ -232,14 +241,14 @@ def pass_documents(p: Pass, results: Iterable[dict]) -> Iterator[Document]:
     created_by = prediction_producer(p.checkpoint)
     detector = p.execution.conf is not None
     for r in results:
-        yield Document(
-            r["image"],
-            *(
-                encode_predictions(r, created_by=created_by, scope=p.scope)
-                if detector
-                else encode_head_output(r, task=p.checkpoint.task)
-            ),
-        )
+        if detector:
+            detected = DetectionResult.model_validate(r)
+            yield Document(
+                detected.image,
+                *encode_predictions(detected, created_by=created_by, scope=p.scope),
+            )
+        else:
+            yield Document(r["image"], *encode_head_output(r, task=p.checkpoint.task))
 
 
 def _one_root(roots: Iterable[Path], what: str) -> Path:
@@ -301,13 +310,18 @@ def publish(
     bucket as read back.
 
     The record states ``producer``, ``scope``, ``execution``, the raster and the assessment as
-    given, and the capture of the raster, else of the first document's source image
-    (:func:`~tcip_mcp.dataset_layout.capture_of`). Refuses with nothing written (``ValueError``):
-    no document, two documents of one stem, and a bucket of that name already published under
-    the root (:class:`BucketExistsError`).
+    given, and the capture of the raster, else the one capture every document's source image is
+    of (:func:`~tcip_mcp.dataset_layout.image_capture`), with its root's dataset id. Refuses
+    with nothing written
+    (``ValueError``): no document, two documents of one stem, documents of two captures, and a
+    bucket of that name already published under the root (:class:`BucketExistsError`).
     """
-    from tcip_mcp.audit import audit_entry, audit_log_key
-    from tcip_mcp.dataset_layout import bucket_key, capture_of
+    from tcip_mcp.audit import audit_line, audit_log_key
+    from tcip_mcp.dataset_layout import (
+        bucket_key,
+        dataset_id_of,
+        image_capture,
+    )
     from tcip_mcp.registry_paths import recorded_paths
 
     documents = list(documents)
@@ -321,12 +335,30 @@ def publish(
             "document is written once."
         )
     by_stem = dict(zip(stems, documents, strict=True))
-    dataset_id, date = capture_of(
-        raster_path if raster_path is not None else documents[0].source
+    captures = (
+        {image_capture(raster_path)}
+        if raster_path is not None
+        else {image_capture(d.source) for d in documents}
+    )
+    if len(captures) > 1:
+        raise ValueError(
+            f"bucket {name!r} holds documents of the captures "
+            f"{sorted(str(c) for _, c in captures)}, and a publication states the one capture "
+            "its documents are of: publish each capture's own."
+        )
+    ((captured_root, date),) = captures
+    dataset_id = dataset_id_of(captured_root)
+    dropped_boxes = sum(d.dropped for d in documents)
+    line = audit_line(
+        "prediction_bucket_published",
+        {"dataset_root": str(root), "bucket": name, "dropped_boxes": dropped_boxes},
+        actor,
+        "ok",
     )
     bucket = Bucket(
         root=root,
         name=name,
+        published_at=line.timestamp,
         producer=producer,
         scope=scope,
         execution=execution,
@@ -335,7 +367,7 @@ def publish(
         raster_path=raster_path,
         raster_identity=raster_identity,
         documents={stem: Path(d.source).name for stem, d in by_stem.items()},
-        dropped_boxes=sum(d.dropped for d in documents),
+        dropped_boxes=dropped_boxes,
         assessment_id=assessment_id,
     )
     keys = bucket.stem_keys
@@ -360,19 +392,7 @@ def publish(
                 project,
             ),
         )
-        txn.append(
-            audit,
-            audit_entry(
-                "prediction_bucket_published",
-                {
-                    "dataset_root": str(root),
-                    "bucket": name,
-                    "dropped_boxes": bucket.dropped_boxes,
-                },
-                actor,
-                "ok",
-            ),
-        )
+        txn.append(audit, line.stored())
     return read_bucket(root, name)
 
 

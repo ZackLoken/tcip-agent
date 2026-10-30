@@ -17,6 +17,7 @@ Rails pinned:
 from __future__ import annotations
 
 import inspect
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -202,17 +203,14 @@ _RULE = BUD_OPENING.crossing_rule
 def test_golden_crossing_dates_interpolated() -> None:
     # The return is a Crossing record (date + evidentiary bound), not a bare string.
     # 0.05 lies midway 0.0 to 0.10, 10 days
-    assert (
-        phenology_mod.crossing_date(_PHENO_SERIES, 0.05, _RULE).date
-        == "2026-02-15"
+    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.05, _RULE).date == date(
+        2026, 2, 15
     )
-    assert (
-        phenology_mod.crossing_date(_PHENO_SERIES, 0.50, _RULE).date
-        == "2026-03-01"
+    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.50, _RULE).date == date(
+        2026, 3, 1
     )
-    assert (
-        phenology_mod.crossing_date(_PHENO_SERIES, 0.95, _RULE).date
-        == "2026-03-12"
+    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.95, _RULE).date == date(
+        2026, 3, 12
     )
     # 0.97 observed, not 0.95 exactly
     assert (
@@ -226,7 +224,7 @@ def test_golden_crossing_dates_interpolated() -> None:
     # never reached within the observed window -> right-censored at the last observed date, not a
     # bare None: distinguishable from "no observations at all".
     c99 = phenology_mod.crossing_date(_PHENO_SERIES, 0.99, _RULE)
-    assert c99.date == "2026-03-12"
+    assert c99.date == date(2026, 3, 12)
     assert c99.bound == "right_censored"
     assert (
         phenology_mod.crossing_date([], 0.99, _RULE) is None
@@ -234,12 +232,17 @@ def test_golden_crossing_dates_interpolated() -> None:
 
 
 def test_golden_plant_milestones_shape_and_values() -> None:
-    ms = phenology_mod.plant_milestones(_PHENO_SERIES, BUD_OPENING)
-    assert ms["bud_05per_date"] == "2026-02-15"
-    assert ms["bud_50per_date"] == "2026-03-01"
-    assert ms["bud_95per_date"] == "2026-03-12"
+    ms = {
+        key: crossing.date if crossing else None
+        for key, crossing in phenology_mod.plant_milestones(
+            _PHENO_SERIES, BUD_OPENING
+        ).items()
+    }
+    assert ms["05per"] == date(2026, 2, 15)
+    assert ms["50per"] == date(2026, 3, 1)
+    assert ms["95per"] == date(2026, 3, 12)
     # crossing-unconfirmed (breeders to confirm): the majority alias == the 95% crossing
-    assert ms["bud_majority_date"] == "2026-03-12"
+    assert ms["majority"] == date(2026, 3, 12)
 
 
 def test_golden_per_plant_phenology_series_and_milestones(
@@ -281,20 +284,20 @@ def test_golden_per_plant_phenology_series_and_milestones(
     )
 
     # Both buckets carry the state's attribute on every detection, so the fraction is delivered.
-    assert res["positive_class_assessed"] is True
-    assert len(res["rows"]) == 1
-    row = res["rows"][0]
+    assert res.any_date_complete is True
+    assert len(res.milestones) == 1
+    row = res.milestones[0].model_dump()
     assert row["plant_id"] == "P1"
     assert row["accession"] == "acc-9"
     assert row["n_dates"] == 2
     assert row["n_observed_dates"] == 2
     assert row["n_dates_unclassified"] == 0
     assert row["n_dates_missing_images"] == 0
-    assert [s["n_total"] for s in row["series"]] == [4, 4]
-    assert [s["n_positive"] for s in row["series"]] == [1, 3]
-    assert [s["ratio"] for s in row["series"]] == [0.25, 0.75]
+    assert [c.n_total for c in res.curves] == [4, 4]
+    assert [c.n_positive for c in res.curves] == [1, 3]
+    assert [c.ratio for c in res.curves] == [0.25, 0.75]
     # 0.25 -> 0.75 crosses 50% at the midpoint between the two dates.
-    assert row["bud_50per_date"] == "2026-02-24"
+    assert row["milestones"]["50per"]["date"] == date(2026, 2, 24)
 
 
 # ── 3. the execution record a pass runs under: what it states, and an unstated value refused ──

@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { StructuredRefusalError } from "@/api/http";
 import { sessionsApi } from "@/api/sessions";
 import type { ImageEventPayload, SessionWrite, SnapshotProject } from "@/api/types.generated";
 import { endRecordedSession, postHeldContributions } from "@/lib/sessionLifecycle";
 import { useStore } from "@/store";
 import { textOf } from "@/store/slices/toasts";
+import { thrown } from "@/test/refusals";
+import { SESSION_ANSWERS, SESSION_WRITES, sessionOf } from "@/test/sessions";
 import { openTestProject, stateEnvelope, TEST_PROJECT, testProject } from "@/test/store";
 
 const initialStoreState = useStore.getState();
@@ -26,10 +27,13 @@ function contribution(image: string): ImageEventPayload {
   };
 }
 
-/** The answer to a contribution that landed in the unended session `started` stamps. */
-function landed(started: string): SessionWrite {
-  return { status: "ok", session: { started, ended: false } };
-}
+/** The produced answers naming the first session, open and ended, and the held one after it. */
+const { first: FIRST, firstEnded: FIRST_ENDED, held: HELD } = SESSION_WRITES;
+const S1 = sessionOf(FIRST).started;
+const S2 = sessionOf(HELD).started;
+
+/** The refusals of a contribution naming an ended session, and of one naming another person's. */
+const { ended_named: ENDED_NAMED, another_named: ANOTHER_NAMED } = SESSION_ANSWERS;
 
 /** The envelope of a snapshot naming `project`, the GUI state otherwise as the store holds it. */
 const naming = (project: SnapshotProject) =>
@@ -66,25 +70,25 @@ describe("session lifecycle", () => {
     expect(post).toHaveBeenCalledTimes(1);
     expect(post).toHaveBeenLastCalledWith(a);
 
-    first.resolve(landed("s1"));
+    first.resolve(FIRST);
     await flush();
     expect(post).toHaveBeenCalledTimes(2);
     expect(post).toHaveBeenLastCalledWith(b);
     expect(useStore.getState().heldContributions).toEqual([b]);
 
-    second.resolve(landed("s1"));
+    second.resolve(FIRST);
     await flush();
     expect(useStore.getState().heldContributions).toEqual([]);
     expect(useStore.getState().recordedSession).toEqual({
       project_id: TEST_PROJECT.id,
-      started: "s1",
+      started: S1,
       user: "jordan",
     });
   });
 
   it("posts a held visit of a project no longer open, in the order it was held", async () => {
-    const post = vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue(landed("s1"));
-    const departed = { ...contribution("a.jpg"), project_id: OTHER.id, started: "s0" };
+    const post = vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue(FIRST);
+    const departed = { ...contribution("a.jpg"), project_id: OTHER.id, started: S2 };
     const current = contribution("b.jpg");
     useStore.setState({ heldContributions: [departed, current] });
 
@@ -108,18 +112,18 @@ describe("session lifecycle", () => {
     await flush();
     expect(sessionsApi.endAsPageLeaves).not.toHaveBeenCalled();
 
-    pending.resolve(landed("s1"));
+    pending.resolve(FIRST);
     await flush();
     expect(sessionsApi.endAsPageLeaves).toHaveBeenCalledTimes(1);
     expect(sessionsApi.endAsPageLeaves).toHaveBeenCalledWith({
       project_id: TEST_PROJECT.id,
-      started: "s1",
+      started: S1,
     });
     expect(useStore.getState().recordedSession).toBeNull();
   });
 
   it("sends no end for the session of a project the backend no longer has open", async () => {
-    vi.spyOn(sessionsApi, "imageEvent").mockResolvedValueOnce(landed("s1"));
+    vi.spyOn(sessionsApi, "imageEvent").mockResolvedValueOnce(FIRST);
     useStore.setState({ heldContributions: [contribution("a.jpg")] });
     postHeldContributions();
     await flush();
@@ -150,7 +154,7 @@ describe("session lifecycle", () => {
       await flush();
 
       switchProject();
-      pending.resolve(landed("s1"));
+      pending.resolve(FIRST);
       await flush();
       endRecordedSession();
       await flush();
@@ -169,10 +173,8 @@ describe("session lifecycle", () => {
   });
 
   it("retires a contribution the backend refuses by name, says why, and never posts it again", async () => {
-    const reason = "the project ended that session: s0; contribution refused";
-    const post = vi
-      .spyOn(sessionsApi, "imageEvent")
-      .mockRejectedValue(new StructuredRefusalError({ message: reason }, 409, reason));
+    const reason = ENDED_NAMED.body.detail;
+    const post = vi.spyOn(sessionsApi, "imageEvent").mockRejectedValue(await thrown(ENDED_NAMED));
     useStore.setState({ heldContributions: [contribution("a.jpg")], toasts: [] });
 
     postHeldContributions();
@@ -219,7 +221,7 @@ describe("session lifecycle", () => {
   it("withdraws the notice of unconfirmed visits once a resend confirms them", async () => {
     vi.spyOn(sessionsApi, "imageEvent")
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-      .mockResolvedValueOnce(landed("s1"));
+      .mockResolvedValueOnce(FIRST);
     useStore.setState({ heldContributions: [contribution("a.jpg")], toasts: [] });
     postHeldContributions();
     await flush();
@@ -233,18 +235,17 @@ describe("session lifecycle", () => {
   });
 
   it("names every visit refused, under each reason, in one notice that a refusal after its dismissal starts afresh", async () => {
-    const ended = "the project ended that session: s1; contribution refused";
-    const other = "the project holds that session for another person: s1; contribution refused";
-    const refusal = (reason: string) =>
-      new StructuredRefusalError({ message: reason }, 409, reason);
+    const ended = ENDED_NAMED.body.detail;
+    const other = ANOTHER_NAMED.body.detail;
+    const refused = { [ended]: await thrown(ENDED_NAMED), [other]: await thrown(ANOTHER_NAMED) };
     const post = vi.spyOn(sessionsApi, "imageEvent");
     for (const reason of [ended, other, ended, other, ended, ended, other]) {
-      post.mockRejectedValueOnce(refusal(reason));
+      post.mockRejectedValueOnce(refused[reason]);
     }
     const images = ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg", "f.jpg"];
     useStore.setState({
       user: "jordan",
-      recordedSession: { project_id: TEST_PROJECT.id, started: "s1", user: "jordan" },
+      recordedSession: { project_id: TEST_PROJECT.id, started: S1, user: "jordan" },
       toasts: [],
     });
     const s = useStore.getState();
@@ -272,13 +273,12 @@ describe("session lifecycle", () => {
   });
 
   it("forgets a session learned from one visit when another's repeat answers that it ended, so the next opens fresh", async () => {
-    const s1 = { started: "s1", ended: false };
     const post = vi
       .spyOn(sessionsApi, "imageEvent")
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-      .mockResolvedValueOnce({ status: "ok", session: s1 })
-      .mockResolvedValueOnce({ status: "noop", session: { ...s1, ended: true } })
-      .mockResolvedValueOnce({ status: "ok", session: { started: "s2", ended: false } });
+      .mockResolvedValueOnce(FIRST)
+      .mockResolvedValueOnce(FIRST_ENDED)
+      .mockResolvedValueOnce(HELD);
     useStore.setState({ user: "jordan", recordedSession: null });
     const s = useStore.getState();
     for (const image of ["a.jpg", "b.jpg"]) {
@@ -288,7 +288,7 @@ describe("session lifecycle", () => {
     postHeldContributions();
     await flush();
     await flush();
-    expect(useStore.getState().recordedSession).toMatchObject({ started: "s1" });
+    expect(useStore.getState().recordedSession).toMatchObject({ started: S1 });
 
     postHeldContributions();
     await flush();
@@ -303,15 +303,13 @@ describe("session lifecycle", () => {
       ["a.jpg", null],
       ["c.jpg", null],
     ]);
-    expect(useStore.getState().recordedSession).toMatchObject({ started: "s2" });
+    expect(useStore.getState().recordedSession).toMatchObject({ started: S2 });
   });
 
   it("keeps a newer recorded session when a repeat answers that an older one ended", async () => {
-    vi.spyOn(sessionsApi, "imageEvent").mockResolvedValueOnce({
-      status: "noop",
-      session: { started: "s0", ended: true },
-    });
-    const recorded = { project_id: TEST_PROJECT.id, started: "s1", user: "jordan" };
+    // The first session ended; the held one, opened after it, is the recorded one.
+    vi.spyOn(sessionsApi, "imageEvent").mockResolvedValueOnce(FIRST_ENDED);
+    const recorded = { project_id: TEST_PROJECT.id, started: S2, user: "jordan" };
     useStore.setState({ recordedSession: recorded, heldContributions: [contribution("a.jpg")] });
 
     postHeldContributions();
@@ -323,11 +321,11 @@ describe("session lifecycle", () => {
   it("forgets the recorded session a repeat answers has ended, so the next visit opens a fresh one", async () => {
     const post = vi
       .spyOn(sessionsApi, "imageEvent")
-      .mockResolvedValueOnce({ status: "noop", session: { started: "s1", ended: true } })
-      .mockResolvedValueOnce(landed("s2"));
+      .mockResolvedValueOnce(FIRST_ENDED)
+      .mockResolvedValueOnce(HELD);
     useStore.setState({
       user: "jordan",
-      recordedSession: { project_id: TEST_PROJECT.id, started: "s1", user: "jordan" },
+      recordedSession: { project_id: TEST_PROJECT.id, started: S1, user: "jordan" },
     });
     const s = useStore.getState();
     s.startImageSessionTracking("a.jpg", Date.now() - 2000);
@@ -341,10 +339,10 @@ describe("session lifecycle", () => {
     await flush();
 
     expect(post.mock.calls.map(([c]) => [c.image_name, c.started])).toEqual([
-      ["a.jpg", "s1"],
+      ["a.jpg", S1],
       ["b.jpg", null],
     ]);
-    expect(useStore.getState().recordedSession).toMatchObject({ started: "s2" });
+    expect(useStore.getState().recordedSession).toMatchObject({ started: S2 });
   });
 
   it("keeps visits with no answer held, names every one in one live notice, and records no session for them", async () => {
@@ -365,15 +363,14 @@ describe("session lifecycle", () => {
   });
 
   it("forgets the recorded session a refused visit named, so the next visit opens a fresh one", async () => {
-    const reason = "the project ended that session: s1; contribution refused";
     const post = vi
       .spyOn(sessionsApi, "imageEvent")
-      .mockRejectedValueOnce(new StructuredRefusalError({ message: reason }, 409, reason))
-      .mockResolvedValueOnce(landed("s2"));
+      .mockRejectedValueOnce(await thrown(ENDED_NAMED))
+      .mockResolvedValueOnce(HELD);
     useStore.setState({
       user: "jordan",
-      recordedSession: { project_id: TEST_PROJECT.id, started: "s1", user: "jordan" },
-      heldContributions: [{ ...contribution("a.jpg"), started: "s1" }],
+      recordedSession: { project_id: TEST_PROJECT.id, started: S1, user: "jordan" },
+      heldContributions: [{ ...contribution("a.jpg"), started: S1 }],
     });
     postHeldContributions();
     await flush();
@@ -385,7 +382,7 @@ describe("session lifecycle", () => {
     await flush();
 
     expect(post.mock.calls[1][0]).toMatchObject({ image_name: "b.jpg", started: null });
-    expect(useStore.getState().recordedSession).toMatchObject({ started: "s2" });
+    expect(useStore.getState().recordedSession).toMatchObject({ started: S2 });
   });
 
   it("lets the late answer to a contribution its departure retired name no session once its project is open again", async () => {
@@ -397,7 +394,7 @@ describe("session lifecycle", () => {
 
     useStore.getState().mergeSnapshot(naming(OTHER));
     useStore.getState().mergeSnapshot(naming(TEST_PROJECT));
-    pending.resolve(landed("s-ended"));
+    pending.resolve(FIRST);
     await flush();
 
     expect(useStore.getState().recordedSession).toBeNull();

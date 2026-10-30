@@ -13,7 +13,6 @@ on it. A process that never completed a handshake has no identity, and its recor
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 import os
 import secrets
@@ -21,6 +20,8 @@ from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, unquote
+
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from mcp.server.context import (
@@ -37,26 +38,33 @@ inherited by the MCP server that agent launches. A correlation, not a credential
 set it, so a record carrying it says only what the launcher declared."""
 
 
-@dataclasses.dataclass(frozen=True)
-class AgentIdentity:
+class RecordedIdentity(BaseModel):
+    """The agent identity a record carries, each field absent where nothing declared it.
+
+    Its fields are the ones a record gains, in order.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    agent_client_name: str | None = None
+    agent_client_version: str | None = None
+    agent_session: str | None = None
+    terminal_session: str | None = None
+
+
+class AgentIdentity(RecordedIdentity):
     """One server run's declared agent identity and the session it minted.
 
-    It holds what the connecting harness declared, the session this server minted, and the
-    terminal session the launcher declared, absent when not declared. Its attributes are the
-    fields a record gains, in order.
+    It holds what the connecting harness declared and the session this server minted, each
+    required, and the terminal session the launcher declared, absent when not declared.
     """
 
     agent_client_name: str
     agent_client_version: str
     agent_session: str
-    terminal_session: str | None
-
-    def fields(self) -> dict[str, Any]:
-        """Return the identity's fields by name, in declaration order."""
-        return dataclasses.asdict(self)
 
 
-RECORD_FIELDS = tuple(f.name for f in dataclasses.fields(AgentIdentity))
+RECORD_FIELDS = tuple(RecordedIdentity.model_fields)
 """The fields a record gains, in declaration order."""
 
 HEADERS = {
@@ -105,43 +113,32 @@ def current() -> AgentIdentity | None:
     return _current
 
 
-def audit_fields() -> dict[str, Any]:
-    """Return the identity fields an audit line carries.
+def http_headers() -> dict[str, str]:
+    """Return the identity as request headers for an HTTP push; empty outside a session.
 
-    Nothing outside a session, so the entry keeps its shape; else the identity with
-    ``terminal_session`` present only when one was declared.
+    Each declared field travels, ``terminal_session`` only when one was declared. A declared name
+    or version is any string, and a header value must be ASCII without control characters, so
+    each value travels percent-encoded (letters, digits and ``-._~`` bare).
     """
-    if _current is None:
-        return {}
     return {
-        key: value
-        for key, value in _current.fields().items()
+        HEADERS[key]: quote(value, safe="")
+        for key, value in (_current or RecordedIdentity())
         if value is not None
     }
 
 
-def http_headers() -> dict[str, str]:
-    """Return the identity as request headers for an HTTP push; empty outside a session.
-
-    A declared name or version is any string, and a header value must be ASCII without control
-    characters, so each value travels percent-encoded (letters, digits and ``-._~`` bare).
-    """
-    return {
-        HEADERS[key]: quote(str(value), safe="")
-        for key, value in audit_fields().items()
-    }
-
-
-def fields_from_headers(headers: Mapping[str, str]) -> dict[str, Any]:
+def identity_from_headers(headers: Mapping[str, str]) -> RecordedIdentity:
     """Return the identity a request declared through :data:`HEADERS`.
 
     Each field is decoded from the percent-encoding :func:`http_headers` applies, and is ``None``
     when not sent or empty.
     """
-    return {
-        field: unquote(headers.get(header) or "") or None
-        for field, header in HEADERS.items()
-    }
+    return RecordedIdentity(
+        **{
+            field: unquote(headers.get(header) or "") or None
+            for field, header in HEADERS.items()
+        }
+    )
 
 
 async def record_connecting_client(

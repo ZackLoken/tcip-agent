@@ -34,6 +34,7 @@ def _route(kind: MemoryKind, default_limit: int) -> None:
     router.add_api_route(
         f"/{kind}",
         page,
+        name=f"meta_{kind}",
         methods=["GET"],
         response_model=MemoryPage[kind.record],  # type: ignore[name-defined]
     )

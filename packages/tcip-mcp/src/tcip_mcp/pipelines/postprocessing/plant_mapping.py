@@ -35,17 +35,19 @@ from typing import (
 
 from PIL import ExifTags, Image
 from pydantic import (
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
     PositiveFloat,
     TypeAdapter,
+    computed_field,
     with_config,
 )
 from pyproj import Geod
 
 import tcip_store
-from tcip_mcp.audit import now_iso
+from tcip_mcp.audit import now
 from tcip_mcp.project_paths import project_state_dir
 from tcip_store import Key, encode_record
 
@@ -172,6 +174,69 @@ class MatchRadius(BaseModel):
     rationale: str | None
 
 
+class DateCounts(BaseModel):
+    """One mapped date's counts: its images, those naming no plant, and the mean match distance.
+
+    ``avg_distance_m`` is the mean GPS match distance, ``None`` for a date with no recorded
+    distance.
+    """
+
+    n_images: int
+    n_unattributed: int
+    avg_distance_m: float | None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def n_mapped(self) -> int:
+        """The date's images naming a plant."""
+        return self.n_images - self.n_unattributed
+
+
+class ServedMapping(BaseModel):
+    """A persisted plant mapping as its build and load doors answer it.
+
+    It holds its ``name``, the counts of every date it walked, the images naming no plant over
+    all of them (:meth:`MappingBuild.unattributed`), the captures PIL could not open per date and
+    each date's recorded match radius, absent for a date no capture of which carries a position.
+    """
+
+    name: str
+    per_date: dict[str, DateCounts]
+    images_unattributed: int
+    unreadable: dict[str, list[str]]
+    match_radius: dict[str, MatchRadius]
+
+
+class MappingVerification(NamedTuple):
+    """What :func:`verify_mapping_inputs` could not re-check: captures and plant CSVs, by name."""
+
+    captures_unverified: list[str]
+    plant_csvs_unverified: list[str]
+
+
+class PlantMappingDisclosure(BaseModel):
+    """The ``plant_mapping`` a phenology delivery attributed detections through.
+
+    It holds the mapping's own identity, ``verify_mapping_inputs``'s :class:`MappingVerification`,
+    and this delivery's own count of captures naming no plant over its ``dates_delivered``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    dataset_id: str
+    dataset_root: str
+    built_at: AwareDatetime
+    record_sha256: str
+    match_radius: dict[str, MatchRadius]
+    capture_digests: dict[str, dict[str, str]]
+    captures_unverified: list[str]
+    plant_csvs_unverified: list[str]
+    dates_delivered: list[str]
+    images_unattributed: int
+    plant_attribution: str
+
+
 class PlantRegistryReference(BaseModel):
     """A registered plant registry (:class:`PlantRegistry`) by name and content digest."""
 
@@ -272,7 +337,7 @@ class MappingBuild:
     name: str
     dataset_root: str
     dataset_id: str
-    built_at: str
+    built_at: AwareDatetime
     dates_requested: list[str] | None
     match_radius: dict[str, MatchRadius]
     plant_registry: PlantRegistryReference
@@ -299,7 +364,9 @@ class MappingBuild:
 
     def to_record(self) -> dict:
         """Return the stored document: every field but ``record_sha256``."""
-        return _MAPPING_RECORD.dump_python(self, exclude={"record_sha256"})
+        return _MAPPING_RECORD.dump_python(
+            self, mode="json", exclude={"record_sha256"}
+        )
 
     @classmethod
     def from_record(
@@ -335,87 +402,52 @@ class MappingBuild:
             if not assignment_is_attributed(a)
         )
 
-    def summary(self) -> dict:
-        """Return this build's own per-date and total counts.
+    def _date_counts(self, date: str) -> DateCounts:
+        """Return ``date``'s own counts."""
+        assignments = self.assignments.get(date, [])
+        dists = [a.distance_m for a in assignments if a.distance_m is not None]
+        return DateCounts(
+            n_images=len(assignments),
+            n_unattributed=self.unattributed([date]),
+            avg_distance_m=round(sum(dists) / len(dists), 2)
+            if dists
+            else None,
+        )
 
-        The counts are images, mapped, unattributed, and per date the mean GPS match distance
-        (``None`` for a date with no recorded distance).
-        """
-        per_date: dict[str, dict] = {}
-        total_images = 0
-        total_mapped = 0
-        total_unattributed = 0
-        for date in self.dates:
-            assignments = self.assignments.get(date, [])
-            n_images = len(assignments)
-            n_unattributed = self.unattributed([date])
-            n_mapped = n_images - n_unattributed
-            dists = [
-                a.distance_m for a in assignments if a.distance_m is not None
-            ]
-            per_date[date] = {
-                "n_images": n_images,
-                "n_mapped": n_mapped,
-                "n_unattributed": n_unattributed,
-                "avg_distance_m": (
-                    round(sum(dists) / len(dists), 2) if dists else None
-                ),
-            }
-            total_images += n_images
-            total_mapped += n_mapped
-            total_unattributed += n_unattributed
-        return {
-            "per_date": per_date,
-            "totals": {
-                "n_dates": len(self.dates),
-                "n_images": total_images,
-                "n_mapped": total_mapped,
-                "n_unattributed": total_unattributed,
-            },
-        }
-
-    def served(self) -> dict:
-        """Return this build's served view.
-
-        It holds its ``name``, :meth:`summary`, the captures PIL could not open per date, and each
-        date's recorded match radius.
-        """
-        return {
-            "name": self.name,
-            "summary": self.summary(),
-            "unreadable": self.unreadable,
-            "match_radius": self.recorded_match_radius(),
-        }
-
-    def recorded_match_radius(self) -> dict[str, dict]:
-        """Return each date's match radius as the record stores it."""
-        return {d: r.model_dump() for d, r in self.match_radius.items()}
+    def served(self) -> ServedMapping:
+        """Return this build's served view, never its per-image assignments."""
+        return ServedMapping(
+            name=self.name,
+            per_date={date: self._date_counts(date) for date in self.dates},
+            images_unattributed=self.unattributed(),
+            unreadable=self.unreadable,
+            match_radius=self.match_radius,
+        )
 
     def delivery_disclosure(
-        self, verified: dict, dates: Iterable[str]
-    ) -> dict:
+        self, verified: MappingVerification, dates: Iterable[str]
+    ) -> PlantMappingDisclosure:
         """Return the ``plant_mapping`` disclosure a delivery carries.
 
         It holds this build's own identity, ``verify_mapping_inputs``'s disclosure ``verified``,
-        and the delivery's own unattributed-capture count scoped to ``dates`` (a delivery's own
+        and the delivery's own unattributed-capture count over ``dates`` (a delivery's own
         delivered dates, never the mapping's full span).
         """
         dates_delivered = sorted(dates)
-        return {
-            "name": self.name,
-            "dataset_id": self.dataset_id,
-            "dataset_root": self.dataset_root,
-            "built_at": self.built_at,
-            "record_sha256": self.record_sha256,
-            "match_radius": self.recorded_match_radius(),
-            "capture_digests": self.capture_digests,
-            "captures_unverified": verified["captures_unverified"],
-            "plant_csvs_unverified": verified["plant_csvs_unverified"],
-            "dates_delivered": dates_delivered,
-            "images_unattributed": self.unattributed(dates_delivered),
-            "images_unattributed_scope": "delivered_dates",
-            "plant_attribution": self.plant_attribution,
-        }
+        return PlantMappingDisclosure(
+            name=self.name,
+            dataset_id=self.dataset_id,
+            dataset_root=self.dataset_root,
+            built_at=self.built_at,
+            record_sha256=self.record_sha256,
+            match_radius=self.match_radius,
+            capture_digests=self.capture_digests,
+            captures_unverified=verified.captures_unverified,
+            plant_csvs_unverified=verified.plant_csvs_unverified,
+            dates_delivered=dates_delivered,
+            images_unattributed=self.unattributed(dates_delivered),
+            plant_attribution=self.plant_attribution,
+        )
 
 
 _MAPPING_RECORD = TypeAdapter(MappingBuild)
@@ -955,7 +987,7 @@ class PlantRegistry(TypedDict):
     csvs: list[RegistryCsv]
     n_plants: int
     digest: str
-    registered_at: str
+    registered_at: AwareDatetime
 
 
 _PLANT_REGISTRY = TypeAdapter(PlantRegistry)
@@ -1130,9 +1162,9 @@ def register_plant_registry_record(
             csvs=csvs_meta,
             n_plants=n_plants,
             digest=digest,
-            registered_at=now_iso(),
+            registered_at=now(),
         )
-        txn.write(key, _PLANT_REGISTRY.dump_python(record))
+        txn.write(key, _PLANT_REGISTRY.dump_python(record, mode="json"))
     return record
 
 
@@ -1484,7 +1516,7 @@ def build_mapping(
         name=name,
         dataset_root=stored_path(dataset_root, project),
         dataset_id=dataset_id,
-        built_at=now_iso(),
+        built_at=now(),
         dates_requested=list(dates) if dates is not None else None,
         match_radius=radii,
         plant_registry=plant_registry,
@@ -1560,9 +1592,6 @@ def _citing_delivery_event_ids(
     These are the events under this project whose own ``plant_mapping`` disclosure names it.
     """
     from tcip_mcp.delivery import read_delivery_events
-    from tcip_mcp.pipelines.delivery_events_schema import (
-        PlantMappingDisclosure,
-    )
 
     return sorted(
         event.event_id
@@ -1631,7 +1660,6 @@ def persist_mapping(
         {
             "name": name,
             "dataset_root": build.dataset_root,
-            "built_at": build.built_at,
             "record_sha256": record_sha256,
             "supersedes": archived_digest,
         },
@@ -1671,7 +1699,7 @@ def build_plant_mapping(
         dataset_root,
         [Path(e["path"]) for e in registry_csv_entries(registry, project)],
         name=name,
-        dataset_id=identity["id"],
+        dataset_id=identity.id,
         project=project,
         plant_registry=PlantRegistryReference(
             name=registry["name"], digest=registry["digest"]
@@ -1689,6 +1717,13 @@ _receipt_cursor: dict[str, str] = {}
 _receipt_seen: dict[str, dict[str, set[str]]] = {}
 
 
+class _MappingBuilt(BaseModel):
+    """The mapping a ``plant_mapping_built`` audit line's arguments name."""
+
+    name: str
+    record_sha256: str
+
+
 def _scan_receipts(project: Path | str, *, after: str | None) -> None:
     from tcip_mcp.audit import acts_of
 
@@ -1696,9 +1731,8 @@ def _scan_receipts(project: Path | str, *, after: str | None) -> None:
     entries, cursor = acts_of(project, ("plant_mapping_built",), after=after)
     seen = _receipt_seen.setdefault(root_key, {})
     for entry in entries:
-        seen.setdefault(entry["arguments"]["name"], set()).add(
-            entry["arguments"]["record_sha256"]
-        )
+        built = _MappingBuilt.model_validate(entry.arguments)
+        seen.setdefault(built.name, set()).add(built.record_sha256)
     _receipt_cursor[root_key] = cursor
 
 
@@ -1793,7 +1827,7 @@ def verify_mapping_inputs(
     buckets: Mapping[str, Bucket],
     *,
     project: Path | str,
-) -> dict:
+) -> MappingVerification:
     """Check a mapping's recorded inputs against what is on disk now, for the captures delivered.
 
     The mapping is ``project``'s; the check covers what a delivery can verify, for the captures it
@@ -1827,12 +1861,11 @@ def verify_mapping_inputs(
     EXIF timestamp or band-group manifest change on a read capture goes undetected when some
     other mapped capture of the same date was not read.
 
-    Returns ``{"refusal": str}`` for any of the above; otherwise
-    ``{"captures_unverified": [...], "plant_csvs_unverified": [...]}``, entries in ``build.dates``
-    order and, within a date, sorted by name. A missing plant CSV is disclosed in
-    ``plant_csvs_unverified``; a rewritten one refuses (restore the file's registered bytes, or
-    register the current file under a new registry name, rebuild the mapping against it, and
-    deliver under that name).
+    Raises :class:`MappingDeliveryError` for any of the above; otherwise returns the
+    :class:`MappingVerification`, entries in ``build.dates`` order and, within a date, sorted by
+    name. A missing plant CSV is disclosed in ``plant_csvs_unverified``; a rewritten one refuses
+    (restore the file's registered bytes, or register the current file under a new registry name,
+    rebuild the mapping against it, and deliver under that name).
     """
     from tcip_mcp.pipelines.image_utils import (
         AmbiguousImageStemError,
@@ -1848,18 +1881,16 @@ def verify_mapping_inputs(
         build, project
     )
     if registry_refusal:
-        return {"refusal": registry_refusal}
+        raise MappingDeliveryError(registry_refusal)
     plant_csvs_unverified, rewritten_fact, verified_csv_bytes = (
         verify_registry_csv_bytes(registry_entries)
     )
     if rewritten_fact:
-        return {
-            "refusal": (
-                f"{rewritten_fact}: restore the file's registered bytes, or register the current "
-                "file under a new registry name, rebuild the mapping against it, and deliver under "
-                "that name"
-            )
-        }
+        raise MappingDeliveryError(
+            f"{rewritten_fact}: restore the file's registered bytes, or register the current "
+            "file under a new registry name, rebuild the mapping against it, and deliver under "
+            "that name"
+        )
     verified_plants = [
         plant
         for entry in registry_entries
@@ -1874,7 +1905,7 @@ def verify_mapping_inputs(
             [date for date in build.dates if date in buckets],
         )
     except AmbiguousImageStemError as exc:
-        return {"refusal": str(exc)}
+        raise MappingDeliveryError(str(exc)) from exc
 
     captures_unverified: list[str] = []
     for date in build.dates:
@@ -1892,12 +1923,10 @@ def verify_mapping_inputs(
         added = enumerated_stems - recorded_stems
         if added:
             names = sorted(logical_image_name(logical[s]) for s in added)
-            return {
-                "refusal": (
-                    f"date {date} carries capture(s) {names} this mapping's assignments do not "
-                    f"name: the mapping does not cover what is on disk now; {remedy}"
-                )
-            }
+            raise MappingDeliveryError(
+                f"date {date} carries capture(s) {names} this mapping's assignments do not "
+                f"name: the mapping does not cover what is on disk now; {remedy}"
+            )
 
         missing_stems = recorded_stems - enumerated_stems
         present_stems = recorded_stems & enumerated_stems
@@ -1932,21 +1961,17 @@ def verify_mapping_inputs(
             row = recorded_by_stem[s.stem]
             if s.kind == "photo":
                 if s.name not in was_unreadable and s.readable is False:
-                    return {
-                        "refusal": (
-                            f"{s.name} (date {date}) was readable when this mapping was built and "
-                            "could not be read now: retry, or rebuild if it is gone"
-                        )
-                    }
+                    raise MappingDeliveryError(
+                        f"{s.name} (date {date}) was readable when this mapping was built and "
+                        "could not be read now: retry, or rebuild if it is gone"
+                    )
             if assignment_is_attributed(row) and row.distance_m is not None:
                 if s.position is None:
-                    return {
-                        "refusal": (
-                            f"{s.name} (date {date}) recorded a plant position when this "
-                            "mapping was built and now carries no GPS position: rebuild, "
-                            "since its assignment would differ"
-                        )
-                    }
+                    raise MappingDeliveryError(
+                        f"{s.name} (date {date}) recorded a plant position when this "
+                        "mapping was built and now carries no GPS position: rebuild, "
+                        "since its assignment would differ"
+                    )
                 lat, lon = s.position
                 distances = [
                     WGS84.inv(lon, lat, p.lon, p.lat)[2]
@@ -1959,13 +1984,11 @@ def verify_mapping_inputs(
                     unverified_names.add(s.name)
                     continue
                 if not any(abs(d - row.distance_m) <= 1e-6 for d in distances):
-                    return {
-                        "refusal": (
-                            f"{s.name} (date {date}) has moved since this mapping was built: "
-                            f"no plant named {row.plant_id!r} is {row.distance_m} m away now; "
-                            "rebuild, since its assignment would differ"
-                        )
-                    }
+                    raise MappingDeliveryError(
+                        f"{s.name} (date {date}) has moved since this mapping was built: "
+                        f"no plant named {row.plant_id!r} is {row.distance_m} m away now; "
+                        "rebuild, since its assignment would differ"
+                    )
 
         for name in sorted(unverified_names):
             captures_unverified.append(f"{date}/{name}")
@@ -1980,17 +2003,12 @@ def verify_mapping_inputs(
                 if new_digests.get(stem) != recorded_digests.get(stem)
             )
             if moved:
-                return {
-                    "refusal": (
-                        f"date {date}: {', '.join(moved)} changed since this mapping was built; "
-                        "rebuild to cover the images actually on disk"
-                    )
-                }
+                raise MappingDeliveryError(
+                    f"date {date}: {', '.join(moved)} changed since this mapping was built; "
+                    "rebuild to cover the images actually on disk"
+                )
 
-    return {
-        "captures_unverified": captures_unverified,
-        "plant_csvs_unverified": plant_csvs_unverified,
-    }
+    return MappingVerification(captures_unverified, plant_csvs_unverified)
 
 
 def ungeoreferenced_capture_message(
@@ -2044,7 +2062,7 @@ def resolve_delivery_mapping(
     project: Path | str,
     name: str,
     buckets: Mapping[str, Bucket],
-) -> tuple[MappingBuild, dict]:
+) -> tuple[MappingBuild, MappingVerification]:
     """Load the named mapping and verify it for a delivery of ``buckets``.
 
     A delivered bucket's recorded date the mapping does not cover is refused (``buckets`` keyed
@@ -2089,7 +2107,7 @@ def resolve_delivery_mapping(
         delivered_identity = require_dataset_identity(delivered_root)
     except ValueError as exc:
         raise MappingDeliveryError(str(exc)) from exc
-    if delivered_identity.get("id") != mapping_build.dataset_id:
+    if delivered_identity.id != mapping_build.dataset_id:
         raise MappingDeliveryError(
             f"the predictions under {delivered_root} belong to a different dataset than the "
             f"mapping {name!r} was built over (mapping dataset_root "
@@ -2151,12 +2169,9 @@ def resolve_delivery_mapping(
             "plant CSV names this block, or rebuild the mapping with a stated match_radius"
         )
 
-    verified = verify_mapping_inputs(
+    return mapping_build, verify_mapping_inputs(
         mapping_build, delivered_root, buckets, project=project
     )
-    if "refusal" in verified:
-        raise MappingDeliveryError(verified["refusal"])
-    return mapping_build, verified
 
 
 def plant_mapping_disclosure(
@@ -2164,7 +2179,7 @@ def plant_mapping_disclosure(
     name: str,
     buckets: Mapping[str, Bucket],
     plants: list[str],
-) -> dict:
+) -> PlantMappingDisclosure:
     """Return the ``plant_mapping`` disclosure of a per-plant delivery of the population ``plants``.
 
     The delivery's plant ids came from mapping ``name``. The mapping is resolved and verified

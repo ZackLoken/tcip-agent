@@ -7,8 +7,9 @@ import { DELIVERY_RECORDS } from "@/test/deliveryRecords";
 
 describe("DeliveryEventsPanel bucket findings", () => {
   it("names the assessment behind a validated bucket", () => {
-    const record = DELIVERY_RECORDS.validated;
-    render(<DeliveryEventsPanel records={[record]} loadError={null} />);
+    const served = DELIVERY_RECORDS.validated;
+    const record = served.event;
+    render(<DeliveryEventsPanel records={[served]} loadError={null} />);
     const row = screen.getByTestId(`delivery-${record.event_id}`);
 
     for (const bucket of record.buckets) {
@@ -20,9 +21,9 @@ describe("DeliveryEventsPanel bucket findings", () => {
   });
 
   it("names the reason behind an unvalidated bucket and the breeder who acknowledged it", () => {
-    const record = DELIVERY_RECORDS.acknowledged_mapping;
-    if (!record.acknowledgment) throw new Error("the fixture delivery was not acknowledged");
-    render(<DeliveryEventsPanel records={[record]} loadError={null} />);
+    const served = DELIVERY_RECORDS.acknowledged_mapping;
+    const record = served.event;
+    render(<DeliveryEventsPanel records={[served]} loadError={null} />);
     const row = screen.getByTestId(`delivery-${record.event_id}`);
 
     for (const bucket of record.buckets) {
@@ -35,10 +36,11 @@ describe("DeliveryEventsPanel bucket findings", () => {
   });
 
   it("counts the plants a canopy delivery delivered from its recorded population", () => {
-    const record = DELIVERY_RECORDS.canopy;
+    const served = DELIVERY_RECORDS.canopy;
+    const record = served.event;
     const pm = record.plant_mapping;
-    if (!pm || !isCanopySegmentDisclosure(pm)) throw new Error("the fixture names no segments");
-    render(<DeliveryEventsPanel records={[record]} loadError={null} />);
+    if (!isCanopySegmentDisclosure(pm)) throw new Error("the fixture names no segments");
+    render(<DeliveryEventsPanel records={[served]} loadError={null} />);
 
     expect(
       within(screen.getByTestId("canopy-disclosure")).getByText(

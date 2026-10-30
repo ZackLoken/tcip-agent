@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import random
 from collections.abc import Callable
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, NamedTuple
 
@@ -30,6 +29,7 @@ from tcip_annotation.viz import (
     render_grid_overlay,
     render_segmentations,
 )
+from tcip_mcp.audit import now
 from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE
 from tcip_mcp.pipelines.raster_source import SourceHeader
 from tcip_mcp.project_paths import viz_output_path
@@ -80,6 +80,7 @@ def _clamped_rect(
 def _read_for_display(
     raster: RasterSource,
     *,
+    plain: bool,
     max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
     region: tuple[float, float, float, float] | None = None,
 ) -> DisplayRead:
@@ -89,13 +90,18 @@ def _read_for_display(
     the whole frame) at or under ``max_edge`` through ``display_bounds.plan_read``, off the
     overview level the plan names, and nothing is ever materialized to a temp file.
 
-    An 8-bit raster at 1/3/4 bands already holds display values, so it keeps its own pixels
-    (grayscale repeated, alpha dropped) with no stretch. Every other raster has its first three
-    bands composited and independently min-max stretched, through ``composite_display_rgb``.
+    A ``plain`` raster, one the image route shows as its own pixels
+    (``raster_source.displays_plain`` of its header), keeps them (grayscale repeated, alpha
+    dropped) with no stretch; every other one has its default bands
+    (``raster_source.display_bands``) composited and independently stretched by
+    ``band_stats.DEFAULT_STRETCH``, through ``composite_display_rgb``.
     """
-    from tcip_mcp.pipelines.band_stats import composite_display_rgb
+    from tcip_mcp.pipelines.band_stats import (
+        DEFAULT_STRETCH,
+        composite_display_rgb,
+    )
     from tcip_mcp.pipelines.display_bounds import plan_read, planned_read
-    from tcip_mcp.pipelines.raster_source import Rect
+    from tcip_mcp.pipelines.raster_source import Rect, display_bands
 
     native = (int(raster.width), int(raster.height))
     rect = (
@@ -112,11 +118,12 @@ def _read_for_display(
         max_edge,
     )
     pixels, _spec = planned_read(raster, rect, plan)
-    bands = int(pixels.shape[-1])
-    idxs = [0, 1, 2] if bands >= 3 else [0, 0, 0]
-    plain = bands in (1, 3, 4) and pixels.dtype == "uint8"
     return DisplayRead(
-        composite_display_rgb(pixels, idxs, "none" if plain else "minmax"),
+        composite_display_rgb(
+            pixels,
+            display_bands(raster.num_channels),
+            "none" if plain else DEFAULT_STRETCH,
+        ),
         rect,
         native,
     )
@@ -133,8 +140,12 @@ def _display_of(
     Returns :func:`_read_for_display` of the source, opened through
     :meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.open_at_route_count`.
     """
+    from tcip_mcp.pipelines.raster_source import displays_plain
+
     with header.open_at_route_count() as raster:
-        return _read_for_display(raster, max_edge=max_edge, region=region)
+        return _read_for_display(
+            raster, plain=displays_plain(header), max_edge=max_edge, region=region
+        )
 
 
 def _subject_indexer() -> tuple[dict[str, int], Callable[[str], int]]:
@@ -544,8 +555,11 @@ def _viz_comparison(
         found = read_bucket(
             parse_image_path(source_path_of(source))[0], bucket
         )
+        header = SourceHeader(source)
+        # The render's decode states the frame the scoring reads, so the file opens once.
+        read = _display_of(header)
         (one,), _metrics = score_bucket(
-            [source],
+            [header],
             found,
             iou_threshold=iou_threshold,
             conf_threshold=conf_threshold,
@@ -578,7 +592,6 @@ def _viz_comparison(
     tp_matches = [(gpos[g], ppos[p]) for g, p in one.matching.pairs]
     tp, fp, fn = one.matching.counts
 
-    read = _display_of(one.header)
     out = render_comparison(
         read.pixels,
         gt_dicts,
@@ -907,14 +920,16 @@ def capture_live_canvas(
     A heartbeat push updates the meta record alone, and geometry pushed for another image or tab
     is not drawn, so the render carries no shapes whenever ``shapes_missing`` is true.
     Renders the region being shown at up to ``max_edge`` and returns the artifact path, plus the
-    classes schema, per-tag counts, and the state's age. A canvas document that will
+    meta record as stored (``canvas``, a :class:`~tcip_mcp.web_client.CanvasMeta`), per-tag
+    counts, and the state's age. A canvas document that will
     not read raises the store's own error.
 
     Args:
         refresh: Ping the GUI (via the panel-event hub) to push fresh state first, waiting briefly
             for it to land. The backend accepts the ping only while it has this project open.
-            Either way the last pushed state renders: ``refreshed``, ``refresh_ping_delivered``
-            and ``state_age_seconds`` describe the meta record, and the summary calls it live
+            Either way the last pushed state renders: ``refreshed``, ``refresh_answer`` (the
+            ping's :class:`~tcip_mcp.web_client.PanelEventAnswer`, ``None`` with no ping) and
+            ``state_age_seconds`` describe the meta record, and the summary calls it live
             only when a fresh meta push landed or the meta record is under five seconds old;
             whether shapes were pushed and how old they are is ``shapes_missing`` and
             ``shapes_age_seconds``.
@@ -926,7 +941,8 @@ def capture_live_canvas(
     import time as _time
 
     from tcip_mcp.web_client import (
-        PANEL_EVENT_CANVAS_STATE_REQUEST,
+        CanvasStateRequest,
+        PanelEventAnswer,
         post_panel_event,
         read_canvas_geometry,
         read_canvas_meta,
@@ -935,19 +951,15 @@ def capture_live_canvas(
     project = bound.root
     previous = read_canvas_meta(str(project))
     refreshed = False
-    ping: dict = {}
+    ping: PanelEventAnswer | None = None
     if refresh:
-        ping = post_panel_event(
-            bound, "app", PANEL_EVENT_CANVAS_STATE_REQUEST, {}
-        )
-        if ping.get("delivered"):
+        ping = post_panel_event(bound, "app", CanvasStateRequest())
+        if ping.reason is None:
             for _ in range(12):  # ~2.4s for the GUI's flush to land
                 _time.sleep(0.2)
                 cur = read_canvas_meta(str(project))
                 if cur is not None and (
-                    previous is None
-                    or datetime.fromisoformat(cur.received_at)
-                    > datetime.fromisoformat(previous.received_at)
+                    previous is None or cur.received_at > previous.received_at
                 ):
                     refreshed = True
                     break
@@ -957,12 +969,16 @@ def capture_live_canvas(
         return {
             "error": "No canvas state has been pushed for this project; the GUI pushes its "
             "canvas only while it has this project open.",
-            "refresh_answer": ping,
+            "refresh_answer": None if ping is None else ping.model_dump(),
         }
 
-    from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tcip_mcp.pipelines.image_utils import (
+        logical_image_name,
+        resolve_image_path,
+    )
     from tcip_mcp.registry_paths import resolved_registry_path
 
+    image = logical_image_name(state.image_path)
     src_image = str(resolved_registry_path(project, state.image_path))
     if not Path(src_image).is_file():
         return {
@@ -998,26 +1014,22 @@ def capture_live_canvas(
         return {
             "error": f"the pushed canvas state for {src_image} will not render: {exc}"
         }
-    ping_delivered = bool(ping.get("delivered"))
-
-    now = datetime.now(timezone.utc)
     from collections import Counter
 
+    rendered = now()
     tag_counts = dict(Counter(s.tag for s in shapes))
 
-    age = round(
-        (now - datetime.fromisoformat(state.received_at)).total_seconds(), 1
-    )
+    age = round((rendered - state.received_at).total_seconds(), 1)
     if refreshed or age < 5.0:
         summary = (
-            f"Rendered the live {state.tab} canvas for {state.image} "
+            f"Rendered the live {state.tab} canvas for {image} "
             f"({len(shapes)} shapes)."
         )
     else:
         summary = (
-            f"Rendered the last known {state.tab} canvas for {state.image} "
+            f"Rendered the last known {state.tab} canvas for {image} "
             f"({len(shapes)} shapes, {age}s old; not live: no fresh push landed for this call, "
-            "see refresh_ping_delivered and refresh_answer)."
+            "see refresh_answer)."
         )
     summary += (
         " Read image_path with your own image-capable read tool to see it."
@@ -1025,32 +1037,19 @@ def capture_live_canvas(
     return {
         "image_path": out,
         "source_image": src_image,
-        "image": state.image,
-        "tab": state.tab,
-        "mode": state.mode,
-        "cut_armed": state.cut_armed,
-        "user": state.user,
-        "dirty": state.dirty,
-        "viewport": None if viewport is None else viewport.model_dump(),
+        "image": image,
+        "canvas": state.model_dump(mode="json"),
         "cropped_to_viewport": region is not None,
-        "classes": state.classes,
-        "counts": state.counts,
         "shape_counts_by_tag": tag_counts,
         "state_age_seconds": age,
         "shapes_age_seconds": (
             None
             if geometry is None
-            else round(
-                (
-                    now - datetime.fromisoformat(geometry.received_at)
-                ).total_seconds(),
-                1,
-            )
+            else round((rendered - geometry.received_at).total_seconds(), 1)
         ),
         "shapes_missing": geometry is None,
         "refreshed": refreshed,
-        "refresh_ping_delivered": ping_delivered,
-        "refresh_answer": ping,
+        "refresh_answer": None if ping is None else ping.model_dump(),
         "summary": summary,
     }
 
@@ -1073,8 +1072,8 @@ def overlay_reference_grid(
     derives from the image dims and the artifact bound
     (``reference_grid.derive_pointing_tile_size``) so the rendered labels stay legible. Every
     response echoes the full grid geometry (``tile_size``, ``overlap``, ``cols``, ``rows``,
-    ``width``, ``height``): pass the echoed ``tile_size``/``overlap`` to
-    ``propose_annotations(grid_cells=...)`` so a cell name resolves against the grid that was
+    ``width``, ``height``): a ``propose_annotations`` region carries the echoed
+    ``tile_size``/``overlap`` beside its cells, so a cell name resolves against the grid that was
     actually rendered.
 
     Args:

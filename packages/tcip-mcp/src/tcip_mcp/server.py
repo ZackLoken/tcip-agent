@@ -76,7 +76,7 @@ def binding_for(project: str | Path) -> BoundProject:
     from tcip_mcp.project_record import existing_project
 
     root, record = existing_project(project)
-    return BoundProject(root, record["id"], workspace_from_environment())
+    return BoundProject(root, record.id, workspace_from_environment())
 
 
 # Import tool modules to declare their handlers. A tool module that needs torch imports it inside

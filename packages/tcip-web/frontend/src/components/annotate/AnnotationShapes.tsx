@@ -8,7 +8,7 @@ import { derivedBoxFromPolygon } from "@/lib/polygonGeometry";
 import { focusesAnnotation, type MatchTypes, type ReviewItem } from "@/lib/reviewItems";
 import { useSubjectColors } from "@/lib/subjectColors";
 import { authorshipLabel, lineStyleOf, outlineColor, type strokeWidths } from "@/lib/symbology";
-import type { Mode, ToolContent } from "@/store/types";
+import type { CanvasAnnotation, Mode, ToolContent } from "@/store/types";
 
 /**
  * The committed boxes, polygons and points (content layer). Memoized, and crucially, the mouse
@@ -47,13 +47,12 @@ export const AnnotationShapes = memo(function AnnotationShapes({
   if (!renderLabels) return null;
   const isFocused = (shape: ReviewItem["shape"], i: number) => focusesAnnotation(focused, shape, i);
   const visible = (kind: "box" | "derived" | "polygon" | "point", subject: string, at: boolean) =>
-    shapeVisible({ kind, mode, subject, activeSubject: activeSubject ?? "", focused: at });
+    shapeVisible({ kind, mode, subject, activeSubject, focused: at });
   // The legend carries the standing symbology; a shape is named on the canvas only while focused.
-  const named = (shape: { subject: string; authorship?: string | null }, at: boolean) => ({
+  const named = (shape: Pick<CanvasAnnotation, "subject" | "authorship">, at: boolean) => ({
     style: lineStyleOf(shape.authorship),
     labelSize: widths.labelSize,
-    label: authorshipLabel(shape.subject, shape.authorship),
-    showLabel: at,
+    label: at ? authorshipLabel(shape.subject, shape.authorship) : null,
     focused: at,
   });
   return (

@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from tcip_annotation.state import Annotation
 from tcip_mcp.dataset_layout import image_dir
+from tcip_web.routes.audit_gap import AuditGapRefusal
 from tests._audit_fixtures import (
     AUDIT_ENTRY_KEYS,
     audit_rows,
@@ -129,7 +130,7 @@ def test_save_refuses_an_empty_registry(
             "user": "tester",
         },
     )
-    assert r.status_code == 400
+    assert r.status_code == 422
     assert not (tmp_path / "subjects.json").exists()
 
 
@@ -199,7 +200,7 @@ def test_load_returns_the_version_and_save_round_trips_it(
         "/api/subjects/save",
         json={
             "dataset_root": str(tmp_path),
-            "subjects": {"leaf": {"description": "one leaf"}, "bush": {}},
+            "subjects": {"leaf": {"description": "one leaf"}, "bush": {"description": "one bush"}},
             "version": load["version"],
             "user": "tester",
         },
@@ -229,7 +230,7 @@ def test_save_refuses_a_stale_version(
         "/api/subjects/save",
         json={
             "dataset_root": str(tmp_path),
-            "subjects": {"leaf": {"description": "one leaf"}, "bush": {}},
+            "subjects": {"leaf": {"description": "one leaf"}, "bush": {"description": "one bush"}},
             "version": stale_load["version"],
             "user": "tester",
         },
@@ -241,8 +242,8 @@ def test_save_refuses_a_stale_version(
             "dataset_root": str(tmp_path),
             "subjects": {
                 "leaf": {"description": "one leaf"},
-                "bush": {},
-                "tip": {},
+                "bush": {"description": "one bush"},
+                "tip": {"description": "one tip"},
             },
             "version": stale_load["version"],
             "user": "tester",
@@ -316,12 +317,13 @@ def test_save_refuses_a_same_values_attribute_type_flip(
             "dataset_root": str(tmp_path),
             "subjects": {
                 "bud": {
+                    "description": "one bud",
                     "attributes": {
                         "opening": {
                             "type": "categorical",
                             "values": ["closed", "open"],
                         }
-                    }
+                    },
                 }
             },
             "version": None,
@@ -336,12 +338,13 @@ def test_save_refuses_a_same_values_attribute_type_flip(
             "dataset_root": str(tmp_path),
             "subjects": {
                 "bud": {
+                    "description": "one bud",
                     "attributes": {
                         "opening": {
                             "type": "ordinal",
                             "values": ["closed", "open"],
                         }
-                    }
+                    },
                 }
             },
             "version": first.json()["version"],
@@ -363,12 +366,13 @@ def test_save_refuses_the_reverse_attribute_type_flip_too(
             "dataset_root": str(tmp_path),
             "subjects": {
                 "bud": {
+                    "description": "one bud",
                     "attributes": {
                         "opening": {
                             "type": "ordinal",
                             "values": ["closed", "open"],
                         }
-                    }
+                    },
                 }
             },
             "version": None,
@@ -383,12 +387,13 @@ def test_save_refuses_the_reverse_attribute_type_flip_too(
             "dataset_root": str(tmp_path),
             "subjects": {
                 "bud": {
+                    "description": "one bud",
                     "attributes": {
                         "opening": {
                             "type": "categorical",
                             "values": ["closed", "open"],
                         }
-                    }
+                    },
                 }
             },
             "version": first.json()["version"],
@@ -404,20 +409,24 @@ def test_save_refuses_malformed_registry(
 ) -> None:
     """A malformed registry is refused, not silently written.
 
-    The registry here has an attribute with no ``values``.
+    The registry here has an attribute with no ``values``; the body's model refuses it.
     """
     r = client.post(
         "/api/subjects/save",
         json={
             "dataset_root": str(tmp_path),
             "subjects": {
-                "bud": {"attributes": {"opening": {"type": "categorical"}}}
+                "bud": {
+                    "description": "one bud",
+                    "attributes": {"opening": {"type": "categorical"}},
+                }
             },
             "version": None,
             "user": "tester",
         },
     )
-    assert r.status_code == 400
+    assert r.status_code == 422
+    assert not (tmp_path / "subjects.json").exists()
 
 
 def test_registry_holds_multiple_subjects(
@@ -667,7 +676,7 @@ def test_a_registry_save_answers_and_audits_the_location_it_wrote(
         "/api/subjects/save",
         json={
             "dataset_root": str(dataset_root),
-            "subjects": {"bud": {}},
+            "subjects": {"bud": {"description": "one bud"}},
             "version": None,
             "user": "tester",
         },
@@ -699,7 +708,7 @@ def test_a_registry_load_answers_content_and_version_from_one_read(
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     assert "error" not in write_subject_registry(
-        tmp_path, str(tmp_path), {"bud": {}}, actor=None
+        tmp_path, str(tmp_path), {"bud": {"description": "one bud"}}, actor=None
     )
     real = tcip_store.read_blob_versioned
     interleaved: list[dict] = []
@@ -711,7 +720,13 @@ def test_a_registry_load_answers_content_and_version_from_one_read(
         if not interleaved:
             interleaved.append({})
             interleaved[0] = write_subject_registry(
-                tmp_path, str(tmp_path), {"bud": {}, "bush": {}}, actor=None
+                tmp_path,
+                str(tmp_path),
+                {
+                    "bud": {"description": "one bud"},
+                    "bush": {"description": "one bush"},
+                },
+                actor=None,
             )
         return answer
 
@@ -728,7 +743,11 @@ def test_a_registry_load_answers_content_and_version_from_one_read(
         "/api/subjects/save",
         json={
             "dataset_root": str(tmp_path),
-            "subjects": {"bud": {}, "bush": {}, "tip": {}},
+            "subjects": {
+                "bud": {"description": "one bud"},
+                "bush": {"description": "one bush"},
+                "tip": {"description": "one tip"},
+            },
             "version": load["version"],
             "user": "tester",
         },
@@ -746,7 +765,7 @@ def test_save_subjects_answers_409_with_the_committed_body_on_a_lost_audit_line(
 ) -> None:
     """A lost audit line after a committed registry save answers 409 with the committed body.
 
-    With the audit append refused, an identical resave answers 409 ``audit_entry_not_written``
+    With the audit append refused, an identical resave answers 409 with an ``AuditGapRefusal``
     whose ``committed`` body equals the first save's 200 body but for the version, and the
     stored registry holds ``bud``.
     """
@@ -773,10 +792,8 @@ def test_save_subjects_answers_409_with_the_committed_body_on_a_lost_audit_line(
         },
     )
     assert resp.status_code == 409
-    detail = resp.json()["detail"]
-    assert detail["error"] == "audit_entry_not_written"
-    committed = detail["committed"]
-    assert committed["status"] == "ok"
+    committed = AuditGapRefusal.model_validate(resp.json()["detail"]).committed
+    assert isinstance(committed, dict)
     assert committed["n_subjects"] == 1
     assert committed["subjects_path"] == str(tmp_path / "subjects.json")
     assert {k: v for k, v in committed.items() if k != "version"} == {

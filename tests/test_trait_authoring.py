@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
-from tcip_mcp import subject_registry as cr, traits
+from tcip_mcp import audit, subject_registry as cr, traits
 from tcip_mcp.operationalization import latest_confirmed
 from tcip_mcp.pipelines.postprocessing import phenology
 from tcip_mcp.traits import TraitEntry, TraitUnknownError, trait_names
@@ -25,6 +25,8 @@ from tests._trait_fixtures import (
 )
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from tcip_mcp.buckets import Bucket
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
@@ -73,7 +75,7 @@ def test_an_entry_the_schema_refuses_names_why(
     "delivers, refusal",
     [
         (("unicorn_horn_length",), "unicorn_horn_length"),
-        ((), "delivers must name at least one"),
+        ((), r"delivers\s+Tuple should have at least 1 item"),
     ],
 )
 def test_a_proposal_off_the_vocabulary_refuses_and_appends_nothing(
@@ -271,7 +273,7 @@ def test_a_proposal_made_while_another_holds_the_record_lands_as_the_next_revisi
     """
     import threading
 
-    real_clock = traits.now_iso
+    real_clock = audit.now
     other_landed = threading.Event()
     other: list = []
 
@@ -284,13 +286,13 @@ def test_a_proposal_made_while_another_holds_the_record_lands_as_the_next_revisi
         )
         other_landed.set()
 
-    def clock_while_holding_the_record() -> str:
-        monkeypatch.setattr(traits, "now_iso", real_clock)
+    def clock_while_holding_the_record() -> datetime:
+        monkeypatch.setattr(audit, "now", real_clock)
         threading.Thread(target=propose_other).start()
         other_landed.wait(timeout=2)
         return real_clock()
 
-    monkeypatch.setattr(traits, "now_iso", clock_while_holding_the_record)
+    monkeypatch.setattr(audit, "now", clock_while_holding_the_record)
     mine = propose(
         tmp_path, entry("leaf", ("leaf_length",), notes="this writer")
     )
@@ -539,7 +541,7 @@ def _deliver_series(tmp_path: Path, *, attributed: bool) -> dict:
             lambda ack: phenology.deliver_phenology(
                 tmp_path,
                 measurement,
-                curves=False,
+                projection="milestones",
                 output_path=tmp_path / "out.csv",
                 acknowledgment_id=ack,
                 door="test_trait_authoring",

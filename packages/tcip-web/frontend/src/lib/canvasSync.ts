@@ -18,12 +18,13 @@
  */
 
 import type {
-  CanvasBox,
-  CanvasPoint,
-  CanvasPolygon,
-  CanvasPolyline,
+  Authorship,
+  CanvasClass,
   CanvasStatePayload,
+  CaptureImage,
+  ServedFlag,
   Viewport,
+  ViewState,
 } from "@/api/types.generated";
 import { boxDraft, type DraftStroke } from "@/lib/draftStrokes";
 import { annotationsToCanvas } from "@/lib/labelSerde";
@@ -47,21 +48,65 @@ import {
   outlineColor,
   proposalLabel,
 } from "@/lib/symbology";
-import type { DrawingBox, Flag, Proposal, TabName, ToolContent } from "@/store/types";
+import type { CanvasState } from "@/store/slices/canvas";
+import type {
+  CanvasContent,
+  DrawingBox,
+  Mode,
+  Proposal,
+  TabName,
+  ToolContent,
+} from "@/store/types";
 
 /** One drawn path. A multi-ring polygon annotation contributes one shape per ring (the render
  *  contract `render_canvas_state` reads is one path per entry), all sharing the instance's color /
  *  dash / tag, with the label on the first so the instance is still named once. A `point` carries a
  *  single coordinate in `points` and is rendered as a mark, never as a path or a derived box. */
-export type CanvasShape = CanvasBox | CanvasPoint | CanvasPolygon | CanvasPolyline;
+export type CanvasShape = NonNullable<CanvasStatePayload["shapes"]>[number];
 
 /** The push body: the backend's own model. ``classes`` carries the subjects with their GUI-local
  *  colors (the registry stores none); ``shapes`` is null for a heartbeat, where the backend keeps
  *  the last pushed geometry. */
-export type CanvasStateBody = Omit<CanvasStatePayload, "tab" | "classes"> & {
+export type CanvasStateBody = Omit<CanvasStatePayload, "tab"> & {
   tab: Extract<TabName, "annotate">;
-  classes: { name: string; color: string }[];
 };
+
+/** The push body of the Annotate canvas holding `canvas` over `image` of the project
+ *  `projectId`, its counts read off the canvas; a heartbeat when `shapes` is null. */
+export function canvasStateBody(args: {
+  projectId: string;
+  image: CaptureImage;
+  canvas: CanvasContent & Pick<CanvasState, "dirty" | "currentPolygon">;
+  viewport: Viewport | null;
+  mode: Mode;
+  activeSubject: string | null;
+  cutArmed: boolean;
+  user: string;
+  classes: CanvasClass[];
+  shapes: CanvasShape[] | null;
+}): CanvasStateBody {
+  const { canvas } = args;
+  return {
+    project_id: args.projectId,
+    tab: "annotate",
+    image_path: args.image.path,
+    viewport: args.viewport,
+    mode: args.mode,
+    active_subject: args.activeSubject,
+    cut_armed: args.cutArmed,
+    dirty: canvas.dirty,
+    user: args.user,
+    classes: args.classes,
+    counts: {
+      boxes: canvas.boxes.length,
+      polygons: canvas.polygons.length,
+      points: canvas.points.length,
+      image_ratings: canvas.imageAnnotations.length,
+      drawing_points: canvas.currentPolygon.length,
+    },
+    shapes: args.shapes,
+  };
+}
 
 /** 0.1-px precision is beyond what any render needs; rounding cuts dense payloads ~2-3×. */
 const r1 = (n: number): number => Math.round(n * 10) / 10;
@@ -69,12 +114,12 @@ const rPts = (pts: [number, number][]): [number, number][] => pts.map(([x, y]) =
 
 /** The visible image region (image coords) from the pan/zoom view + canvas host size. */
 export function computeViewport(
-  view: { scale: number; offset_x: number; offset_y: number },
+  view: ViewState,
   host: { w: number; h: number },
   imgW: number,
   imgH: number,
 ): Viewport | null {
-  const s = view.scale || 1;
+  const s = view.scale;
   if (host.w <= 1 || host.h <= 1 || !imgW || !imgH) return null;
   const x = -view.offset_x / s;
   const y = -view.offset_y / s;
@@ -102,7 +147,7 @@ export function shapeVisible(args: {
   kind: "box" | "derived" | "polygon" | "point";
   mode: string;
   subject: string;
-  activeSubject: string;
+  activeSubject: string | null;
   focused: boolean;
 }): boolean {
   const ownMode = args.kind === "derived" ? "box" : args.kind;
@@ -111,20 +156,17 @@ export function shapeVisible(args: {
 
 /** The line style, casing and focus halo a mirrored shape carries, from the symbology's own
  *  rules. */
-function strokeOf(authorship: string | null | undefined, focused: boolean) {
-  const dash = dashUnitsFor(lineStyleOf(authorship));
+function strokeOf(authorship: Authorship | undefined, focused: boolean) {
   return {
-    ...(dash ? { dash } : {}),
+    dash: dashUnitsFor(lineStyleOf(authorship)) ?? null,
     casing: { color: CASING.color, opacity: CASING.opacity, width_factor: CASING.widthFactor },
-    ...(focused
+    halo: focused
       ? {
-          halo: {
-            color: FOCUS_HALO.color,
-            opacity: FOCUS_HALO.opacity,
-            width_factor: FOCUS_HALO.widthFactor,
-          },
+          color: FOCUS_HALO.color,
+          opacity: FOCUS_HALO.opacity,
+          width_factor: FOCUS_HALO.widthFactor,
         }
-      : {}),
+      : null,
   };
 }
 
@@ -143,9 +185,9 @@ export function buildAnnotateShapes(
     /** Each array's match types (`matchTypes`); every entry null while not reviewing. */
     matches?: MatchTypes;
     /** Each open flag that has a place on the image, with that place (`flagPlaces`). */
-    flagMarks?: { at: [number, number]; flag: Flag }[];
+    flagMarks?: { at: [number, number]; flag: ServedFlag }[];
     mode: string;
-    activeSubject: string;
+    activeSubject: string | null;
     visible: boolean;
     /** A subject's color, for the box being dragged out. */
     colorFor: (subject: string) => string;
@@ -160,7 +202,10 @@ export function buildAnnotateShapes(
       points: rPts(points),
       color,
       dash: DRAFT_DASH,
-      ...(vertices ? { label } : { vertices: false }),
+      casing: null,
+      halo: null,
+      label: label ?? null,
+      vertices,
       tag: "in_progress",
     })),
     ...(d
@@ -170,6 +215,10 @@ export function buildAnnotateShapes(
             xyxy: d.bounds.map(r1) as [number, number, number, number],
             color: d.color,
             dash: DRAFT_DASH,
+            casing: null,
+            halo: null,
+            label: null,
+            fill: false,
             tag: "in_progress",
           },
         ]
@@ -199,7 +248,8 @@ export function buildAnnotateShapes(
       xyxy: [r1(b.x1), r1(b.y1), r1(b.x2), r1(b.y2)],
       color: outlineColor(b.subject, statuses.boxes[i] ?? null),
       ...strokeOf(b.authorship, boxFocused),
-      label: boxFocused ? authorshipLabel(b.subject, b.authorship) : undefined,
+      label: boxFocused ? authorshipLabel(b.subject, b.authorship) : null,
+      fill: false,
       tag: "gt",
     });
   });
@@ -212,6 +262,8 @@ export function buildAnnotateShapes(
       xyxy: [r1(x1), r1(y1), r1(x2), r1(y2)],
       color: outlineColor(p.subject, statuses.polygons[i] ?? null),
       ...strokeOf(p.authorship, false),
+      label: null,
+      fill: false,
       tag: "gt",
     });
   });
@@ -224,7 +276,8 @@ export function buildAnnotateShapes(
         points: rPts(ring),
         color: outlineColor(p.subject, statuses.polygons[i] ?? null),
         ...strokeOf(p.authorship, polygonFocused),
-        label: ri === 0 && polygonFocused ? authorshipLabel(p.subject, p.authorship) : undefined,
+        label: ri === 0 && polygonFocused ? authorshipLabel(p.subject, p.authorship) : null,
+        fill: false,
         tag: "gt",
       });
     });
@@ -239,7 +292,7 @@ export function buildAnnotateShapes(
       points: [[r1(p.x), r1(p.y)]],
       color: outlineColor(p.subject, statuses.points[i] ?? null),
       ...strokeOf(p.authorship, pointFocused),
-      label: pointFocused ? authorshipLabel(p.subject, p.authorship) : undefined,
+      label: pointFocused ? authorshipLabel(p.subject, p.authorship) : null,
       tag: "gt",
     });
   });
@@ -251,20 +304,29 @@ export function buildAnnotateShapes(
       tag: "proposal",
     };
     const label = proposalLabel(p, proposalFocused);
-    const extra = label !== null ? { label } : {};
-    const { boxes, polygons } = annotationsToCanvas([p]);
+    const { boxes, polygons, points } = annotationsToCanvas([p]);
     boxes.forEach((b) =>
       shapes.push({
         kind: "box",
         xyxy: [r1(b.x1), r1(b.y1), r1(b.x2), r1(b.y2)],
         ...base,
-        ...extra,
+        fill: false,
+        label,
       }),
     );
     polygons.forEach((poly) =>
       poly.rings.forEach((ring, i) =>
-        shapes.push({ kind: "polygon", points: rPts(ring), ...base, ...(i === 0 ? extra : {}) }),
+        shapes.push({
+          kind: "polygon",
+          points: rPts(ring),
+          ...base,
+          fill: false,
+          label: i === 0 ? label : null,
+        }),
       ),
+    );
+    points.forEach((pt) =>
+      shapes.push({ kind: "point", points: [[r1(pt.x), r1(pt.y)]], ...base, label }),
     );
   });
   (args.flagMarks ?? []).forEach(({ at, flag }) =>
@@ -272,7 +334,10 @@ export function buildAnnotateShapes(
       kind: "point",
       points: [[r1(at[0]), r1(at[1])]],
       color: FLAG_MARK.color,
-      label: `${FLAG_MARK.glyph} ${flag.text}`,
+      dash: null,
+      casing: null,
+      halo: null,
+      label: `${FLAG_MARK.glyph} ${flag.request.text}`,
       tag: "flag",
     }),
   );
@@ -307,6 +372,8 @@ export interface CanvasPusher {
   dispose(): void;
 }
 
+/** A pusher of the freshest canvas state through `post`, whose promise rejects for a push the
+ *  backend refused. */
 export function createCanvasPusher(
   post: (body: CanvasStateBody) => void | Promise<unknown>,
   opts: { debounceMs?: number; maxWaitMs?: number } = {},
@@ -331,19 +398,11 @@ export function createCanvasPusher(
     }
     try {
       const res = post(body);
-      if (res && typeof res.then === "function") {
-        // A dropped full push (rejected, or resolved as a conflict) must not let later
-        // heartbeats masquerade as fresh geometry.
-        void res.then(
-          (r) => {
-            if (r && typeof r === "object" && (r as { status?: string }).status === "conflict") {
-              fullPending = fullPending || full;
-            }
-          },
-          () => {
-            fullPending = fullPending || full;
-          },
-        );
+      if (res) {
+        // A refused full push must not let later heartbeats masquerade as fresh geometry.
+        void res.catch(() => {
+          fullPending = fullPending || full;
+        });
       }
     } catch {
       fullPending = fullPending || full;

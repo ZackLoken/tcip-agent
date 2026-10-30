@@ -9,26 +9,25 @@ from __future__ import annotations
 import csv
 from io import StringIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-from urllib.parse import unquote
+from typing import TYPE_CHECKING, Any, get_args
 
 import pytest
 from fastapi.testclient import TestClient
 
 import tcip_store
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir, image_root
+from tcip_mcp.delivery import DeliveryRefusal
+from tcip_mcp.operationalization import OperationalizationRefusal
 from tcip_mcp.pipelines.execution import Stated
-from tcip_web.routes.results import (
-    ACKNOWLEDGED_BY_HEADER,
-    SAVED_TO_HEADER,
-    VALIDATED_HEADER,
-)
+from tcip_mcp.pipelines.postprocessing import phenology
+from tcip_web.routes.audit_gap import AuditGapRefusal
+from tcip_web.routes.results import EXPORT_HEADER, CountExport, SavedExport
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import audit_rows, refuse_audit_appends
 from tests._web_fixtures import BROWSER, acknowledged_post, open_new_project
 
 if TYPE_CHECKING:
-    from httpx import Response
+    from starlette.testclient import httpx
 
     from tcip_mcp.buckets import Bucket
     from tests._chain_fixtures import Series
@@ -132,14 +131,13 @@ def _export(
     payload: str = "milestones",
     headers: dict[str, str] | None = None,
     **extra: object,
-) -> Response:
+) -> httpx.Response:
     return client.post(
         "/api/results/export_csv",
         headers=headers,
         json={
             **body,
             "payload": payload,
-            "filename": "x.csv",
             "user": "breeder",
             **extra,
         },
@@ -153,7 +151,7 @@ def test_an_assessed_series_measures_its_curves_and_milestones_validated(
     """An assessed series measures validated curves and milestones.
 
     The answer carries two plants' curves, PLANT_A's 2026-02-11 row counting four detections,
-    and each milestone column names a 2026 date and a bound in PLANT_A's row.
+    and each milestone crossing of PLANT_A's row names a 2026 date and a bound.
     """
     series = _series(tmp_path)
 
@@ -163,20 +161,18 @@ def test_an_assessed_series_measures_its_curves_and_milestones_validated(
 
     assert resp.status_code == 200, resp.text[:300]
     out = resp.json()
-    assert out["validated"] is True and out["unvalidated_reason"] is None
+    assert out["unvalidated"] is None
     assert out["positive_class_assessed"] is True
-    assert out["curves"]["n_plants"] == 2
-    by_key = {(r["plant_id"], r["date"]): r for r in out["curves"]["rows"]}
+    assert len(out["milestones"]) == 2
+    by_key = {(r["plant_id"], r["capture"]): r for r in out["curves"]}
     assert by_key[("PLANT_A", "2026-02-11")]["n_total"] == 4
     assert by_key[("PLANT_A", "2026-02-11")]["ratio"] == 0.0
     assert by_key[("PLANT_B", "2026-03-10")]["ratio"] == 0.75
-    plant_a = next(
-        r for r in out["milestones"]["rows"] if r["plant_id"] == "PLANT_A"
-    )
-    assert out["milestones"]["columns"]
-    for column in out["milestones"]["columns"]:
-        assert plant_a[column["date"]].startswith("2026-"), column
-        assert plant_a[column["bound"]], column
+    plant_a = next(r for r in out["milestones"] if r["plant_id"] == "PLANT_A")
+    assert plant_a["milestones"]
+    for key, crossing in plant_a["milestones"].items():
+        assert crossing["date"].startswith("2026-"), key
+        assert crossing["bound"], key
 
 
 def test_no_door_takes_a_switch_computing_milestones_over_incomplete_dates(
@@ -215,7 +211,7 @@ def test_the_curve_counts_every_image_of_a_plant_on_a_date(
 
     rows = client.post("/api/results/phenology_measurement", json=body).json()[
         "curves"
-    ]["rows"]
+    ]
 
     row = next(r for r in rows if r["plant_id"] == "PLANT_A")
     assert row["n_images"] == 3
@@ -240,16 +236,13 @@ def test_an_unassessed_series_refuses_until_shown_unvalidated_and_never_exports_
     )
 
     assert refused.status_code == 400
-    assert (
-        refused.json()["detail"]["message"]
-        == shown.json()["unvalidated_reason"]
-    )
+    unvalidated = shown.json()["unvalidated"]
+    assert refused.json()["detail"]["message"] == unvalidated["message"]
     assert shown.status_code == 200
-    assert shown.json()["validated"] is False
-    assert "no assessment answers" in shown.json()["unvalidated_reason"]
-    assert shown.json()["curves"]["rows"]
-    shown_digests = shown.json()["result_sha256"]
-    for payload in ("curves", "milestones"):
+    assert "no assessment answers" in unvalidated["message"]
+    assert shown.json()["curves"]
+    shown_digests = unvalidated["digests"]
+    for payload in get_args(phenology.Projection):
         export = _export(client, body, payload)
         assert export.status_code == 400, payload
         # The screen and the export name one prepared result: the digest an acknowledgment of
@@ -269,14 +262,18 @@ def test_an_acknowledged_export_ships_unvalidated_and_its_event_names_the_act(
     resp = acknowledged_post(
         client,
         "/api/results/export_csv",
-        {**body, "payload": "milestones", "filename": "x.csv"},
+        {**body, "payload": "milestones"},
         reason="a look before assessment",
     )
 
     assert resp.status_code == 200, resp.text[:300]
     assert {row["validated"] for row in _rows(resp.text)} == {"False"}
     events = client.get("/api/results/delivery-events").json()["records"]
-    (event,) = [r for r in events if r["door"] == "results.export_csv"]
+    (event,) = [
+        r["event"]
+        for r in events
+        if r["event"]["door"] == "results.export_csv"
+    ]
     assert (
         event["acknowledgment"]["acknowledged_by"],
         event["acknowledgment"]["reason"],
@@ -347,29 +344,30 @@ def test_an_export_saves_the_delivery_under_the_project_and_logs_it_with_its_dat
 ) -> None:
     """An export saves the delivery under the project and logs it with its dataset.
 
-    A filename of ``../bud_delivery.csv`` saves as ``results_export/bud_delivery.csv``, its bytes
-    the response's, under the trait's own columns; each row names the one delivery event and
-    reads validated, and the event's line lands in the log of the dataset its buckets sit in.
+    It saves under ``results_export/`` as ``phenology.export_filename`` names it, its bytes the
+    response's, under the trait's own columns, the answer reporting the file and naming its
+    attachment by it; each row names the one delivery event and reads validated, and the event's
+    line lands in the log of the dataset its buckets sit in.
     """
     from tcip_mcp.delivery import read_delivery_events
     from tcip_mcp.operationalization import latest_confirmed
     from tcip_mcp.pipelines.postprocessing import phenology
 
     series = _series(tmp_path, fractions=(0.0, 1.0))
+    body = series.body()
 
     resp = client.post(
         "/api/results/export_csv",
-        json={
-            **series.body(),
-            "payload": "milestones",
-            "filename": "../bud_delivery.csv",
-            "user": "breeder",
-        },
+        json={**body, "payload": "milestones", "user": "breeder"},
     )
 
     assert resp.status_code == 200, resp.text[:300]
-    saved = tmp_path / "results_export" / "bud_delivery.csv"
-    assert resp.headers[SAVED_TO_HEADER] == str(saved)
+    name = phenology.export_filename(body["trait"], "milestones")
+    saved = tmp_path / "results_export" / name
+    assert SavedExport.model_validate_json(
+        resp.headers[EXPORT_HEADER]
+    ) == SavedExport(saved_path=str(saved))
+    assert f'filename="{name}"' in resp.headers["content-disposition"]
     assert saved.read_bytes() == resp.content
     header = resp.text.splitlines()[0].split(",")
     assert header == phenology.phenology_csv_columns(
@@ -407,10 +405,10 @@ def test_a_walked_mapping_event_names_the_mapping_key_it_resolves_to(
     body = _series(tmp_path, fractions=(0.0, 1.0)).body()
     assert _export(client, body).status_code == 200
 
-    (event,) = client.get("/api/results/delivery-events").json()["records"]
+    (served,) = client.get("/api/results/delivery-events").json()["records"]
 
-    assert event["plant_mapping"]["name"] == "valley"
-    assert event["plant_mapping"]["resolved_key"] == "valley"
+    assert served["event"]["plant_mapping"]["name"] == "valley"
+    assert served["resolved_key"] == "valley"
 
 
 def test_export_csv_answers_409_when_the_delivery_event_audit_line_cannot_be_appended(
@@ -422,6 +420,8 @@ def test_export_csv_answers_409_when_the_delivery_event_audit_line_cannot_be_app
 
     The CSV is already on disk by the time the delivery's audit line is appended.
     """
+    from tcip_mcp.pipelines.postprocessing import phenology
+
     body = _series(tmp_path, fractions=(0.0, 1.0)).body()
     refuse_audit_appends(monkeypatch)
 
@@ -430,16 +430,20 @@ def test_export_csv_answers_409_when_the_delivery_event_audit_line_cannot_be_app
         json={
             **body,
             "payload": "milestones",
-            "filename": "unaudited.csv",
             "user": "breeder",
         },
     )
 
     assert resp.status_code == 409
-    detail = resp.json()["detail"]
-    saved = tmp_path / "results_export" / "unaudited.csv"
-    assert detail["error"] == "audit_entry_not_written"
-    assert detail["committed"] == {"saved_path": str(saved)}
+    refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
+    saved = (
+        tmp_path
+        / "results_export"
+        / phenology.export_filename(body["trait"], "milestones")
+    )
+    assert SavedExport.model_validate(refusal.committed) == SavedExport(
+        saved_path=str(saved)
+    )
     assert saved.exists()
 
 
@@ -459,7 +463,7 @@ def test_caller_composed_rows_and_validity_claims_are_refused_at_the_payload(
     """Caller-composed rows and validity claims are refused at the payload.
 
     An export carrying rows, and a phenology measurement carrying ``validated`` or
-    ``unvalidated_reason``, each answer 422.
+    ``unvalidated``, each answer 422.
     """
     inputs = {
         "mapping_name": "valley",
@@ -488,12 +492,11 @@ def test_caller_composed_rows_and_validity_claims_are_refused_at_the_payload(
             "/api/results/export_csv",
             json={
                 "rows": rows,
-                "filename": "x.csv",
                 "export_kind": "diagnostic",
             },
         )
         assert resp.status_code == 422
-    for field, value in (("validated", True), ("unvalidated_reason", None)):
+    for field, value in (("validated", True), ("unvalidated", None)):
         resp = client.post(
             "/api/results/phenology_measurement", json={**inputs, field: value}
         )
@@ -597,7 +600,7 @@ COUNT_ROUTE = "/api/results/export_count_csv"
 
 def _export_count(
     client: TestClient, body: dict, headers: dict[str, str] | None = None
-) -> Response:
+) -> httpx.Response:
     return client.post(COUNT_ROUTE, json=body, headers=headers)
 
 
@@ -615,8 +618,8 @@ def test_an_unassessed_count_bucket_refuses_with_no_acknowledgment(
     )
 
     assert resp.status_code == 400
-    assert resp.json()["detail"]["kind"] == "delivery"
-    assert "no assessment answers" in resp.json()["detail"]["message"]
+    refusal = DeliveryRefusal.model_validate(resp.json()["detail"])
+    assert "no assessment answers" in refusal.message
     assert not (tmp_path / "results_export" / "counts.csv").exists()
 
 
@@ -634,12 +637,16 @@ def test_an_unassessed_count_bucket_delivers_under_acknowledgment(
     )
 
     assert resp.status_code == 200, resp.text[:300]
-    assert resp.headers[VALIDATED_HEADER] == "false"
-    assert unquote(resp.headers[ACKNOWLEDGED_BY_HEADER]) == "user:breeder"
+    reported = CountExport.model_validate_json(resp.headers[EXPORT_HEADER])
+    assert (reported.validated, reported.acknowledged_by) == (
+        False,
+        "user:breeder",
+    )
     rows = _rows(resp.text)
     assert [r["detection_count"] for r in rows] == ["3", "3"]
     assert {r["validated"] for r in rows} == {"False"}
-    (event,) = client.get("/api/results/delivery-events").json()["records"]
+    (served,) = client.get("/api/results/delivery-events").json()["records"]
+    event = served["event"]
     assert event["door"] == "results.export_count_csv"
     assert event["acknowledgment"]["acknowledged_by"] == "user:breeder"
 
@@ -686,13 +693,18 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
 
     assert unregistered.status_code == 403, unregistered.text[:300]
     assert bare.status_code == 200, bare.text[:300]
-    assert bare.headers[VALIDATED_HEADER] == "true"
-    assert bare.headers[ACKNOWLEDGED_BY_HEADER] == ""
+    reported = CountExport.model_validate_json(bare.headers[EXPORT_HEADER])
+    assert (reported.validated, reported.acknowledged_by) == (True, None)
     assert {r["validated"] for r in _rows(bare.text)} == {"True"}
     assert posted.status_code == 200
-    assert posted.headers[ACKNOWLEDGED_BY_HEADER] == ""
+    assert (
+        CountExport.model_validate_json(
+            posted.headers[EXPORT_HEADER]
+        ).acknowledged_by
+        is None
+    )
     events = client.get("/api/results/delivery-events").json()["records"]
-    assert [e["acknowledgment"] for e in events] == [None, None]
+    assert [e["event"]["acknowledgment"] for e in events] == [None, None]
     lines = [
         e
         for root in {tmp_path, Path(chain.root)}
@@ -722,10 +734,11 @@ def test_export_count_csv_answers_409_when_the_delivery_event_audit_line_cannot_
     )
 
     assert resp.status_code == 409
-    detail = resp.json()["detail"]
+    refusal = AuditGapRefusal.model_validate(resp.json()["detail"])
     saved = tmp_path / "results_export" / "counts.csv"
-    assert detail["error"] == "audit_entry_not_written"
-    assert detail["committed"] == {"saved_path": str(saved)}
+    assert SavedExport.model_validate(refusal.committed) == SavedExport(
+        saved_path=str(saved)
+    )
     assert saved.exists()
 
 
@@ -769,7 +782,7 @@ def test_export_count_csv_refuses_a_trait_that_states_no_per_image_count(
     resp = _export_count(client, _per_image(bucket, trait="bud_opening"))
 
     assert resp.status_code == 400
-    assert resp.json()["detail"]["kind"] == "operationalization"
+    OperationalizationRefusal.model_validate(resp.json()["detail"])
 
 
 def test_export_count_csv_refuses_a_bucket_whose_scope_omits_the_confirmed_subject(
@@ -782,7 +795,7 @@ def test_export_count_csv_refuses_a_bucket_whose_scope_omits_the_confirmed_subje
     resp = _export_count(client, _per_image(bucket))
 
     assert resp.status_code == 400
-    assert resp.json()["detail"]["kind"] == "operationalization"
+    OperationalizationRefusal.model_validate(resp.json()["detail"])
 
 
 def test_export_count_csv_refuses_an_unknown_trait_with_400_not_500(
@@ -794,7 +807,7 @@ def test_export_count_csv_refuses_an_unknown_trait_with_400_not_500(
     resp = _export_count(client, _per_image(bucket, trait="no-such-trait"))
 
     assert resp.status_code == 400
-    assert resp.json()["detail"]["kind"] == "delivery"
+    DeliveryRefusal.model_validate(resp.json()["detail"])
 
 
 def test_export_count_csv_refuses_a_bucket_outside_the_project(
@@ -910,8 +923,8 @@ def test_an_unassessed_raster_bucket_refuses_with_no_acknowledgment(
     resp = _export_count(client, _per_plant(bucket, registry))
 
     assert resp.status_code == 400
-    assert resp.json()["detail"]["kind"] == "delivery"
-    assert "no assessment answers" in resp.json()["detail"]["message"]
+    refusal = DeliveryRefusal.model_validate(resp.json()["detail"])
+    assert "no assessment answers" in refusal.message
 
 
 def test_an_unassessed_raster_bucket_delivers_under_acknowledgment_with_its_registry_disclosed(
@@ -933,15 +946,20 @@ def test_an_unassessed_raster_bucket_delivers_under_acknowledgment_with_its_regi
     )
 
     assert resp.status_code == 200, resp.text[:300]
-    assert resp.headers[VALIDATED_HEADER] == "false"
-    assert unquote(resp.headers[ACKNOWLEDGED_BY_HEADER]) == "user:breeder"
+    reported = CountExport.model_validate_json(resp.headers[EXPORT_HEADER])
+    assert (reported.validated, reported.acknowledged_by) == (
+        False,
+        "user:breeder",
+    )
     rows = {r["plant_id"]: r for r in _rows(resp.text)}
     assert rows["plot0"]["value"] == "1" and rows["plot3"]["value"] == "0"
     assert {r["validated"] for r in rows.values()} == {"False"}
-    (event,) = client.get("/api/results/delivery-events").json()["records"]
-    assert event["door"] == "results.export_count_csv"
-    assert event["plant_mapping"]["plant_registry"]["name"] == registry
-    assert "resolved_key" not in event["plant_mapping"]
+    (served,) = client.get("/api/results/delivery-events").json()["records"]
+    assert served["event"]["door"] == "results.export_count_csv"
+    assert (
+        served["event"]["plant_mapping"]["plant_registry"]["name"] == registry
+    )
+    assert served["resolved_key"] is None
 
 
 def test_a_filename_with_a_directory_saves_by_its_basename(
@@ -958,9 +976,9 @@ def test_a_filename_with_a_directory_saves_by_its_basename(
     )
 
     assert resp.status_code == 200, resp.text[:300]
-    assert resp.headers[SAVED_TO_HEADER] == str(
-        tmp_path / "results_export" / "plant_counts.csv"
-    )
+    assert CountExport.model_validate_json(
+        resp.headers[EXPORT_HEADER]
+    ).saved_path == str(tmp_path / "results_export" / "plant_counts.csv")
 
 
 # ── Registered models and the inference job routes ────────────────────────
@@ -1017,17 +1035,22 @@ def test_assessments_lists_each_recorded_assessment_with_the_checkpoint_it_judge
     assert listed.status_code == 200, listed.text
     (row,) = listed.json()["assessments"]
     (model,) = [
-        m
+        m["entry"]
         for m in models.json()["models"]
-        if m["experiment_id"] == "exp-web-assessed"
+        if m["entry"]["experiment_id"] == "exp-web-assessed"
     ]
+    from tcip_mcp.assessment import ASSESSMENT_RECORD, read_assessment
+
+    recorded = read_assessment(tmp_path, chain.assessment["assessment_id"])
     assert row == {
-        "assessment_id": chain.assessment["assessment_id"],
-        "checkpoint_sha256": model["sha256"],
-        "experiment_id": "exp-web-assessed",
-        "delivery_kind": "per_image_count",
+        "assessment": ASSESSMENT_RECORD.dump_python(recorded, mode="json"),
         "passed": True,
     }
+    producer = row["assessment"]["producer"]
+    assert (producer["checkpoint_sha256"], producer["experiment_id"]) == (
+        model["sha256"],
+        "exp-web-assessed",
+    )
 
 
 def test_registered_models_answers_a_resolved_absolute_checkpoint_path(
@@ -1053,7 +1076,10 @@ def test_registered_models_answers_a_resolved_absolute_checkpoint_path(
     resp = client.get("/api/results/models/registered")
 
     assert resp.status_code == 200
-    assert Path(resp.json()["models"][0]["checkpoint_path"]) == ckpt.resolve()
+    assert (
+        Path(resp.json()["models"][0]["entry"]["checkpoint_path"])
+        == ckpt.resolve()
+    )
 
 
 def test_the_plant_mapping_list_names_each_mapping_the_project_built(
@@ -1088,7 +1114,7 @@ def test_inference_launch_missing_checkpoint(
             "dataset_root": str(opened_project),
             "date": "2026-02-11",
             "user": "tester",
-            "bucket": "baseline/2026-02-11",
+            "bucket_name": "baseline",
             "stated": {},
         },
     )
@@ -1135,7 +1161,7 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
             "checkpoint_path": str(ckpt),
             "dataset_root": str(opened_project),
             "date": "2026-02-11",
-            "bucket": "baseline/2026-02-11",
+            "bucket_name": "baseline",
             "user": "tester",
             "stated": {},
         },
@@ -1188,7 +1214,7 @@ def test_inference_list_row_and_stream_frame_are_one_projection(
     job = inference_job(
         "", opened_project, job_id="inf-warn-test", status="completed"
     )
-    inference_routes._registry.register(job)
+    inference_routes._registry.launch(job, lambda _job: None)
     try:
         row = next(
             r
@@ -1224,7 +1250,7 @@ def test_inference_by_id_job_route_is_retired(client: TestClient) -> None:
     from tests._web_fixtures import inference_job
 
     job = inference_job("", "", job_id="inf-retired-test")
-    inference_routes._registry.register(job)
+    inference_routes._registry.launch(job, lambda _job: None)
     try:
         assert (
             client.get("/api/inference/jobs/inf-retired-test").status_code

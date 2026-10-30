@@ -1,0 +1,212 @@
+{
+  "sampled": {
+    "band_count": 4,
+    "bands": [
+      {
+        "name": "0",
+        "wavelength_nm": null,
+        "dtype": "uint8",
+        "min": 0.0,
+        "max": 255.0,
+        "interpretation": null
+      },
+      {
+        "name": "1",
+        "wavelength_nm": null,
+        "dtype": "uint8",
+        "min": 0.0,
+        "max": 255.0,
+        "interpretation": null
+      },
+      {
+        "name": "2",
+        "wavelength_nm": null,
+        "dtype": "uint8",
+        "min": 0.0,
+        "max": 255.0,
+        "interpretation": null
+      },
+      {
+        "name": "3",
+        "wavelength_nm": null,
+        "dtype": "uint8",
+        "min": 0.0,
+        "max": 255.0,
+        "interpretation": null
+      }
+    ],
+    "plain": false,
+    "default_bands": ["0", "1", "2"],
+    "default_stretch": "minmax",
+    "pixel_fraction": 0.8858131487889274,
+    "seed": 0,
+    "overview_size": null,
+    "sampled": true
+  },
+  "four_spectral": {
+    "band_count": 4,
+    "bands": [
+      {
+        "name": "Blue",
+        "wavelength_nm": 475.0,
+        "dtype": "uint16",
+        "min": 0.0,
+        "max": 16383.0,
+        "interpretation": null
+      },
+      {
+        "name": "Green",
+        "wavelength_nm": 560.0,
+        "dtype": "uint16",
+        "min": 0.0,
+        "max": 32767.0,
+        "interpretation": null
+      },
+      {
+        "name": "Red",
+        "wavelength_nm": 650.0,
+        "dtype": "uint16",
+        "min": 0.0,
+        "max": 49151.0,
+        "interpretation": null
+      },
+      {
+        "name": "NIR",
+        "wavelength_nm": 840.0,
+        "dtype": "uint16",
+        "min": 0.0,
+        "max": 65535.0,
+        "interpretation": null
+      }
+    ],
+    "plain": false,
+    "default_bands": ["Blue", "Green", "Red"],
+    "default_stretch": "minmax",
+    "pixel_fraction": 1.0,
+    "seed": 0,
+    "overview_size": null,
+    "sampled": false
+  },
+  "three_unlabeled": {
+    "band_count": 3,
+    "bands": [
+      {
+        "name": "Red",
+        "wavelength_nm": null,
+        "dtype": "uint8",
+        "min": 0.0,
+        "max": 63.0,
+        "interpretation": null
+      },
+      {
+        "name": "Green",
+        "wavelength_nm": null,
+        "dtype": "uint8",
+        "min": 0.0,
+        "max": 159.0,
+        "interpretation": null
+      },
+      {
+        "name": "Blue",
+        "wavelength_nm": null,
+        "dtype": "uint8",
+        "min": 0.0,
+        "max": 255.0,
+        "interpretation": null
+      }
+    ],
+    "plain": false,
+    "default_bands": ["Red", "Green", "Blue"],
+    "default_stretch": "minmax",
+    "pixel_fraction": 1.0,
+    "seed": 0,
+    "overview_size": null,
+    "sampled": false
+  },
+  "rgba": {
+    "band_count": 4,
+    "bands": [],
+    "plain": true,
+    "default_bands": ["0", "1", "2"],
+    "default_stretch": "minmax",
+    "pixel_fraction": null,
+    "seed": null,
+    "overview_size": null,
+    "sampled": false
+  },
+  "deep_rgba": {
+    "band_count": 4,
+    "bands": [
+      {
+        "name": "0",
+        "wavelength_nm": null,
+        "dtype": "uint16",
+        "min": 0.0,
+        "max": 65535.0,
+        "interpretation": "red"
+      },
+      {
+        "name": "1",
+        "wavelength_nm": null,
+        "dtype": "uint16",
+        "min": 0.0,
+        "max": 65535.0,
+        "interpretation": "green"
+      },
+      {
+        "name": "2",
+        "wavelength_nm": null,
+        "dtype": "uint16",
+        "min": 0.0,
+        "max": 65535.0,
+        "interpretation": "blue"
+      },
+      {
+        "name": "3",
+        "wavelength_nm": null,
+        "dtype": "uint16",
+        "min": 0.0,
+        "max": 65535.0,
+        "interpretation": "alpha"
+      }
+    ],
+    "plain": false,
+    "default_bands": ["0", "1", "2"],
+    "default_stretch": "minmax",
+    "pixel_fraction": 1.0,
+    "seed": 0,
+    "overview_size": null,
+    "sampled": false
+  },
+  "plain": {
+    "band_count": 3,
+    "bands": [],
+    "plain": true,
+    "default_bands": ["0", "1", "2"],
+    "default_stretch": "minmax",
+    "pixel_fraction": null,
+    "seed": null,
+    "overview_size": null,
+    "sampled": false
+  },
+  "single": {
+    "band_count": 1,
+    "bands": [
+      {
+        "name": "NIR",
+        "wavelength_nm": null,
+        "dtype": "uint16",
+        "min": 0.0,
+        "max": 16383.0,
+        "interpretation": null
+      }
+    ],
+    "plain": false,
+    "default_bands": ["NIR", "NIR", "NIR"],
+    "default_stretch": "minmax",
+    "pixel_fraction": 1.0,
+    "seed": 0,
+    "overview_size": null,
+    "sampled": false
+  }
+}

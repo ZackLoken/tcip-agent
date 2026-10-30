@@ -351,7 +351,7 @@ def test_run_summary_reads_the_run_directory(tmp_path: Path) -> None:
 
     observation = observe_run(run_dir)
     result = run_summary(
-        observation, read_rows(observation.metrics_log)[0], None
+        observation, read_rows(observation.metrics_log)[0], {}
     ).model_dump()
     assert result["state"] == "running"
     assert result["current_epoch"] == 3
@@ -401,7 +401,7 @@ def test_the_live_summary_folds_its_rows_in_its_configs_metric_direction(
 
     observation = observe(run_dir)
     result = run_summary(
-        observation, read_rows(observation.metrics_log)[0], None
+        observation, read_rows(observation.metrics_log)[0], {}
     ).model_dump()
     assert (result["best_metric_name"], result["best_metric"]) == (
         metric,
@@ -429,7 +429,7 @@ def test_run_summary_surfaces_the_wall_clock_failure_the_child_wrote(
         wall_clock_passed=True,
     )
 
-    result = run_summary(observe(run_dir), [], None).model_dump()
+    result = run_summary(observe(run_dir), [], {}).model_dump()
     assert result["state"] == "failed"
     assert result["status_error"] == "exceeded max_wall_clock_seconds"
 

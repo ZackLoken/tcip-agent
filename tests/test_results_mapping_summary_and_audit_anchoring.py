@@ -159,29 +159,19 @@ def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answe
     distances = [r.distance_m for r in rows if r.distance_m is not None]
     assert len(distances) == 3
 
-    summary = body["summary"]["per_date"]["2026-02-11"]
+    assert list(body["per_date"]) == ["2026-02-11", "2026-02-25"]
+    summary = body["per_date"]["2026-02-11"]
     assert summary["n_images"] == 4
-    assert summary["n_mapped"] == 2
     assert summary["n_unattributed"] == 2
-    # summary() rounds to 2 places, the same as build_plant_mapping's own tool-side per_date.
+    # The mean is rounded to 2 places, the same as build_plant_mapping's own tool-side per_date.
     assert summary["avg_distance_m"] == round(
         sum(distances) / len(distances), 2
     )
-    assert len({summary["n_images"], summary["n_mapped"], len(distances)}) == 3
 
-    other = body["summary"]["per_date"]["2026-02-25"]
+    other = body["per_date"]["2026-02-25"]
     assert other["n_images"] == 1
-    assert other["n_mapped"] == 1
     assert other["n_unattributed"] == 0
     assert other["avg_distance_m"] == pytest.approx(0.0, abs=1e-6)
-
-    totals = body["summary"]["totals"]
-    assert totals == {
-        "n_dates": 2,
-        "n_images": summary["n_images"] + other["n_images"],
-        "n_mapped": summary["n_mapped"] + other["n_mapped"],
-        "n_unattributed": summary["n_unattributed"] + other["n_unattributed"],
-    }
 
     assert body["match_radius"] == {
         "2026-02-11": {
@@ -403,7 +393,6 @@ def test_every_phenology_door_refuses_a_mapping_name_that_names_no_mapping(
             json={
                 **broken,
                 "payload": "milestones",
-                "filename": "x.csv",
                 "user": "tester",
             },
         )

@@ -183,6 +183,7 @@ def opened_run(
     directory.
     """
     from tcip_mcp import experiments
+    from tcip_mcp.audit import now
     from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.schemas import train_config
@@ -194,7 +195,14 @@ def opened_run(
     spec = train_config(config)
     sources = staged_sources(spec, Path(root))
     resolution = resolve_run(spec, sources.layout, project=Path(root))
-    open_run(run_dir, resolution.spec, sources, resolution.record, **facts)
+    open_run(
+        run_dir,
+        resolution.spec,
+        sources,
+        resolution.record,
+        created=now(),
+        **facts,
+    )
     return run_dir
 
 
@@ -492,14 +500,11 @@ def register_checkpoint(
 ) -> None:
     """Register the checkpoint at ``path`` into ``project_root`` under ``name``.
 
-    The registration goes through ``register_model``'s explicit mode, asserting it admitted it.
+    The registration goes through ``register_model``'s explicit mode.
     """
     from tcip_mcp.tools.model_tools import register_model
 
-    result = register_model(
-        project_root, name=name, checkpoint_path=path, actor=None
-    )
-    assert "error" not in result, result
+    register_model(project_root, name=name, checkpoint_path=path, actor=None)
 
 
 _PROJECT_CHECKPOINTS: dict[str, str] = {}

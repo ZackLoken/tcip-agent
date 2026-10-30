@@ -18,17 +18,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import (
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
     JsonValue,
-    SerializerFunctionWrapHandler,
     ValidationError,
-    model_serializer,
 )
 
 import tcip_store
-from tcip_mcp.audit import now_iso
+from tcip_mcp.audit import now
 from tcip_mcp.pipelines.model_build import (
     CONFIG_KEY,
     GEOMETRY_KEY,
@@ -83,7 +82,7 @@ class RegistryEntry(BaseModel):
     name: str
     checkpoint_path: str
     sha256: str
-    registered_at: str
+    registered_at: AwareDatetime
     metrics: FiniteJsonObject
     tags: list[str]
     experiment_id: str | None
@@ -608,8 +607,7 @@ def _audit_entry_write(
 class Listed(BaseModel):
     """A registered ``entry`` as listed, its ``checkpoint_path`` resolved, beside its ``facts``.
 
-    ``facts`` are what its checkpoint says of it (:func:`entry_facts`). It serializes flat: the
-    entry's fields with the facts' ``metrics`` and ``metrics_source`` laid over them.
+    ``facts`` are what its checkpoint says of it (:func:`entry_facts`).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -617,14 +615,8 @@ class Listed(BaseModel):
     entry: RegistryEntry
     facts: CheckpointFacts
 
-    @model_serializer(mode="wrap")
-    def _flat(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        """Return the entry's serialized fields with the facts' laid over them."""
-        dumped = handler(self)
-        return dumped["entry"] | dumped["facts"]
 
-
-def _listed(project_path: str, entry: RegistryEntry) -> Listed:
+def listed_entry(project_path: str, entry: RegistryEntry) -> Listed:
     """Return ``entry`` as listed, its ``checkpoint_path`` resolved to an absolute path.
 
     A stored path the resolver refuses (empty, or a relative form carrying ``..``) raises its
@@ -701,7 +693,7 @@ class ModelRegistry:
                 ckpt, self._project_path
             ),
             sha256=admitted_digest(ckpt),
-            registered_at=now_iso(),
+            registered_at=now(),
             metrics={} if metrics is None else metrics,
             tags=tags or [],
             experiment_id=None,
@@ -716,7 +708,7 @@ class ModelRegistry:
             for e in registered_entries(self._project_path)
             if e.sha256 == entry.sha256
         )
-        return _listed(self._project_path, owner)
+        return listed_entry(self._project_path, owner)
 
     def list_models(self, tag: str | None = None) -> list[Listed]:
         """Return every registered checkpoint carrying ``tag``, every one when ``tag`` is ``None``.
@@ -724,7 +716,7 @@ class ModelRegistry:
         Each is listed (:func:`_listed`).
         """
         return [
-            _listed(self._project_path, m)
+            listed_entry(self._project_path, m)
             for m in registered_entries(self._project_path)
             if tag is None or tag in m.tags
         ]
@@ -735,30 +727,70 @@ def verified(entry: Listed) -> bool:
     return entry.facts.metrics_source == "trainer"
 
 
+def stamped(entry: Listed, key: str) -> float | None:
+    """Return the finite number ``entry``'s checkpoint carries under ``key``, ``None`` for none."""
+    value = entry.facts.metrics.get(key)
+    return float(value) if finite_number(value) else None
+
+
+def metric_keys(models: list[Listed]) -> list[str]:
+    """Return the keys any of ``models`` is :func:`stamped` with, sorted."""
+    return sorted(
+        {
+            k
+            for m in models
+            for k in m.facts.metrics
+            if stamped(m, k) is not None
+        }
+    )
+
+
+class Skipped(BaseModel):
+    """A registered entry a ranking left out, by name, with each fact that left it out.
+
+    ``unverified`` holds when unverified entries were not ranked and its metrics are not the
+    trainer's (:func:`verified`); ``unstamped`` when it is not :func:`stamped` with the ranked
+    metric. Both may hold.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    unverified: bool
+    unstamped: bool
+
+
 def best_model(
     models: list[Listed],
     metric_key: str,
     *,
     higher_is_better: bool,
     include_unverified: bool = False,
-) -> Listed | None:
-    """Return the one of ``models`` with the best finite ``metric_key`` value, or ``None``.
+) -> tuple[Listed | None, list[Skipped]]:
+    """Return the one of ``models`` with the best finite ``metric_key`` value, and those left out.
 
     ``models`` are :meth:`ModelRegistry.list_models`'s entries; best is in the stated direction,
-    and ``None`` is returned when none carries it. Only a :func:`verified` entry is ranked unless
-    ``include_unverified``.
+    the first of equals, and ``None`` when no entry is ranked. An entry not :func:`verified` is
+    left out unless ``include_unverified``, and one not :func:`stamped` with ``metric_key`` is
+    left out always; each is answered as its :class:`Skipped` carrying every fact that held, in
+    ``models``' order.
     """
-    best = None
-    best_val: float | None = None
+    scored: list[tuple[float, Listed]] = []
+    skipped = []
     for m in models:
-        if not (include_unverified or verified(m)):
-            continue
-        val = m.facts.metrics.get(metric_key)
-        if not finite_number(val):
-            continue
-        if best_val is None or (
-            val > best_val if higher_is_better else val < best_val
-        ):
-            best_val = float(val)
-            best = m
-    return best
+        value = stamped(m, metric_key)
+        unverified = not (include_unverified or verified(m))
+        if value is None or unverified:
+            skipped.append(
+                Skipped(
+                    name=m.entry.name,
+                    unverified=unverified,
+                    unstamped=value is None,
+                )
+            )
+        else:
+            scored.append((value, m))
+    best = (max if higher_is_better else min)(
+        scored, key=lambda s: s[0], default=None
+    )
+    return (None if best is None else best[1]), skipped

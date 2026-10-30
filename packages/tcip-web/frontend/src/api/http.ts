@@ -4,6 +4,8 @@
  * the body is read as.
  */
 
+import { AUDIT_ENTRY_NOT_WRITTEN, type AuditGapRefusal } from "@/api/types.generated";
+
 /** A refusal whose `detail` is an object, kept parsed so a caller can branch on its own fields. */
 export class StructuredRefusalError extends Error {
   readonly detail: Record<string, unknown>;
@@ -52,23 +54,26 @@ export async function asJson<T>(r: Response): Promise<T> {
   return (await r.json()) as T;
 }
 
-/** The stable marker a route answers with when a mutation it already committed could not be
- *  recorded to the audit log (`routes/audit_gap.py`'s own name for it). Carried in `detail.error`
- *  at whatever status the route answers. */
-export const AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written";
-
-/** True when `e` is a refusal carrying that marker, at any status. */
-export function isAuditEntryNotWritten(e: unknown): e is StructuredRefusalError {
-  return e instanceof StructuredRefusalError && e.detail.error === AUDIT_ENTRY_NOT_WRITTEN;
+/** The refusal `R` a thrown error carries, read by its detail's `kind` at any status, or null for
+ *  every other failure. */
+export function refusalOf<R extends { kind: string }>(e: unknown, kind: R["kind"]): R | null {
+  return e instanceof StructuredRefusalError && e.detail.kind === kind
+    ? (e.detail as unknown as R)
+    : null;
 }
 
 /** The `committed` body an audit-gap refusal carries: the response a healthy call would have
  *  returned, so a caller adopts it and reaches the state a 200 would have left it in. Null when
- *  `e` is not one of these refusals, or the route itself could not say what committed. */
+ *  `e` is not one of these refusals, or the route itself could not say what committed. The one
+ *  decode of a body the refusal carries uninterpreted. */
 export function committedOf<T>(e: unknown): T | null {
-  if (!isAuditEntryNotWritten(e)) return null;
-  const committed = e.detail.committed;
-  return committed === null || committed === undefined ? null : (committed as T);
+  const gap = refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN);
+  return (gap?.committed ?? null) as T | null;
+}
+
+/** The text a caught `e` reads as: an error's own message, anything else as it prints. */
+export function messageOf(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 /** Absolute ws:// or wss:// URL for a backend socket path, matching the page's own scheme. */

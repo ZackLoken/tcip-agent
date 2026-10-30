@@ -78,3 +78,19 @@ def test_the_audit_line_names_the_records_event_id_and_nothing_else(
         "status": "ok",
         "arguments": {"event_id": records[0].event_id},
     }
+
+
+def test_the_record_carries_its_audit_lines_instant(tmp_path: Path) -> None:
+    """A delivery's record and its audit line state one instant, the line's."""
+    from tcip_mcp.audit import AuditLine
+
+    revision = seed_confirmed_count(tmp_path / "trait_project")
+    bucket = _bucket(tmp_path)
+    dataset = tmp_path / "ds"
+    before = len(audit_rows(dataset))
+
+    _record(tmp_path, revision, bucket)
+
+    (record,) = delivery.read_delivery_events(tmp_path.resolve())
+    (line,) = audit_rows(dataset)[before:]
+    assert AuditLine.model_validate(line).timestamp == record.produced_at

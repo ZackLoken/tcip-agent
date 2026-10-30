@@ -1,13 +1,14 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 
+import { messageOf } from "@/api/http";
 import { metaApi } from "@/api/meta";
 import { sessionsApi } from "@/api/sessions";
 import type {
-  MemoryEntry_FrictionReport_,
-  MemoryEntry_Retrospective_,
+  MemoryPage_FrictionReport_,
+  MemoryPage_Retrospective_,
   Retrospective,
-  SessionSummary,
+  SessionsListing,
 } from "@/api/types.generated";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { TabHeading } from "@/components/TabHeading";
@@ -70,11 +71,11 @@ export function MetaTab() {
   const projectRoot = useStore(selectProjectRoot);
 
   // null until a load answers, so no section claims to be empty before it is known to be.
-  const [reports, setReports] = useState<MemoryEntry_FrictionReport_[] | null>(null);
-  const [retros, setRetros] = useState<MemoryEntry_Retrospective_[] | null>(null);
+  const [reports, setReports] = useState<MemoryPage_FrictionReport_ | null>(null);
+  const [retros, setRetros] = useState<MemoryPage_Retrospective_ | null>(null);
   // undefined until a load answers, null once one has failed: the panel then says so instead of
   // claiming no sessions exist.
-  const [sessions, setSessions] = useState<SessionSummary[] | null | undefined>(undefined);
+  const [sessions, setSessions] = useState<SessionsListing | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -88,12 +89,12 @@ export function MetaTab() {
         metaApi.retrospectives(),
         sessionsApi.load(),
       ]);
-      setReports(r.entries);
-      setRetros(rt.entries);
-      setSessions(sess.sessions);
+      setReports(r);
+      setRetros(rt);
+      setSessions(sess);
     } catch (e) {
       setSessions(null);
-      setError(String(e));
+      setError(messageOf(e));
     } finally {
       setLoading(false);
     }
@@ -106,7 +107,7 @@ export function MetaTab() {
   // No entries means nothing happened; zero added annotations does not, since confirming a
   // negative and reviewing a label are real effort that adds no record.
   const shownSessions = useMemo(
-    () => (sessions ?? []).filter((s) => s.entries.length > 0),
+    () => (sessions?.sessions ?? []).filter((s) => s.entries.length > 0),
     [sessions],
   );
 
@@ -123,13 +124,15 @@ export function MetaTab() {
       <CollapsibleSection
         className="tcip-panel p-4"
         title="Friction"
-        right={reports === null ? "" : `${reports.length} shown`}
+        right={
+          reports === null ? "" : `${reports.entries.length} of ${reports.total_available} shown`
+        }
         storageKey="tcip.meta.frictionOpen"
         defaultOpen
       >
-        {reports === null ? null : reports.length > 0 ? (
+        {reports === null ? null : reports.entries.length > 0 ? (
           <div className="flex flex-col gap-2">
-            {reports.map(({ id, record }) => {
+            {reports.entries.map(({ id, record }) => {
               // A report that will not read shows its id and the reason in place of its fields.
               const [category, stated, text, context] =
                 "reason" in record
@@ -169,13 +172,13 @@ export function MetaTab() {
       <CollapsibleSection
         className="tcip-panel p-4"
         title="Retrospectives"
-        right={retros === null ? "" : `${retros.length} shown`}
+        right={retros === null ? "" : `${retros.entries.length} of ${retros.total_available} shown`}
         storageKey="tcip.meta.retrospectivesOpen"
         defaultOpen
       >
-        {retros === null ? null : retros.length > 0 ? (
+        {retros === null ? null : retros.entries.length > 0 ? (
           <div className="flex flex-col gap-3">
-            {retros.map(({ id, record }) => {
+            {retros.entries.map(({ id, record }) => {
               // Each section is headed by its field's own name; one that will not read shows why.
               const [title, stated, sections] =
                 "reason" in record

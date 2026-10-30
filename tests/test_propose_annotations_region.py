@@ -1,6 +1,6 @@
 """Region-scoped `propose_annotations`: crop-and-offset, entirely on the tcip-mcp side.
 
-`propose_annotations` takes an optional `grid_cells`/`tile_size`/`overlap` region: when given, the
+`propose_annotations` takes an optional `GridRegion` (cells, tile size, overlap): when given, the
 tool crops the source image to the named cells' bounding rect, runs the engine on that crop, and
 offsets the returned candidates back to the source image's full-frame coordinates. The engine here
 reports a red patch in the pixels it is handed.
@@ -74,13 +74,18 @@ def _upright_frame() -> Image.Image:
 
 @pytest.fixture
 def exif_rotated_source(tmp_path: Path) -> Path:
-    """Write a JPEG of the upright frame rotated 90 degrees and tagged EXIF orientation 6."""
+    """Write a JPEG of the upright frame rotated 90 degrees and tagged EXIF orientation 6.
+
+    The image sits under the dataset ``tmp_path``'s ``images/`` tree, where a proposal stages.
+    """
     upright = _upright_frame()
     raw = upright.rotate(
         90, expand=True
     )  # inverse of orientation 6's "rotate 270" correction
 
-    path = tmp_path / "source_exif6.jpg"
+    images = image_dir(tmp_path, UNDATED_BUCKET)
+    images.mkdir(parents=True)
+    path = images / "source_exif6.jpg"
     exif = Image.Exif()
     exif[0x0112] = 6  # Orientation
     raw.save(path, exif=exif.tobytes())
@@ -151,27 +156,28 @@ def test_region_scoped_proposal_lands_at_the_full_frame_coordinates(
     """A region-scoped proposal lands at the full-frame coordinates.
 
     An EXIF-rotated source, cropped to a region, proposed against, and offset back, reports one
-    candidate at the patch's upright full-frame box, and no temp region crop is left. The same
-    call naming no overlap refuses naming it.
+    candidate at the patch's upright full-frame box, and no temp region crop is left. A region
+    naming no overlap refuses naming it.
     """
+    from pydantic import ValidationError
+
     from tcip_mcp.pipelines.proposal import register_proposal_engine
-    from tcip_mcp.tools.proposal_tools import propose_annotations
+    from tcip_mcp.tools.proposal_tools import GridRegion, propose_annotations
 
     register_proposal_engine("patch", PatchProposer())
 
-    region = {
-        "image_path": str(exif_rotated_source),
-        "engine": "patch",
-        "grid_cells": ["B1", "C1"],
-        "tile_size": TILE_SIZE,
-    }
-    refused = propose_annotations(tmp_path, **region, actor=None)
-    assert "overlap" in refused.get("error", ""), refused
-    result = propose_annotations(tmp_path, **region, overlap=0.0, actor=None)
+    with pytest.raises(ValidationError, match="overlap"):
+        GridRegion.model_validate({"cells": ["B1", "C1"], "tile_size": TILE_SIZE})
+    result = propose_annotations(
+        tmp_path,
+        str(exif_rotated_source),
+        "patch",
+        region=GridRegion(cells=["B1", "C1"], tile_size=TILE_SIZE, overlap=0.0),
+        actor=None,
+    )
     assert "error" not in result, result
-    assert result["candidate_count"] == 1
-    bbox = result["candidates"][0]["bbox"]
-    assert bbox == [float(v) for v in PATCH_BOX]
+    (candidate,) = result.candidates
+    assert candidate.bbox == tuple(float(v) for v in PATCH_BOX)
 
     # No leftover temp crop file: cleanup runs even on the success path.
     tmp_dir = Path(tempfile_gettempdir())
@@ -192,7 +198,7 @@ def test_region_scoped_proposal_cleans_up_temp_crop_on_engine_failure(
 ) -> None:
     """The temp region crop is deleted when the engine raises."""
     from tcip_mcp.pipelines import proposal
-    from tcip_mcp.tools.proposal_tools import propose_annotations
+    from tcip_mcp.tools.proposal_tools import GridRegion, propose_annotations
 
     class BoomProposer:
         def propose(self, image_path: str, **params: object) -> Proposal:
@@ -208,9 +214,9 @@ def test_region_scoped_proposal_cleans_up_temp_crop_on_engine_failure(
             tmp_path,
             image_path=str(exif_rotated_source),
             engine="boom",
-            grid_cells=["B1", "C1"],
-            tile_size=TILE_SIZE,
-            overlap=0.0,
+            region=GridRegion(
+                cells=["B1", "C1"], tile_size=TILE_SIZE, overlap=0.0
+            ),
             actor=None,
         )
     after = set(Path(tempfile_gettempdir()).glob("tcip_propose_crop_*"))
@@ -291,7 +297,10 @@ class TestRegionFrameIsTheResolvedImageSources:
         found at its full-frame place in that stacked frame.
         """
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools.proposal_tools import propose_annotations
+        from tcip_mcp.tools.proposal_tools import (
+            GridRegion,
+            propose_annotations,
+        )
 
         images_dir = image_dir(tmp_path, UNDATED_BUCKET)
         images_dir.mkdir(parents=True)
@@ -307,13 +316,13 @@ class TestRegionFrameIsTheResolvedImageSources:
             tmp_path,
             image_path=str(manifest),
             engine="patch",
-            grid_cells=["B1", "C1"],
-            tile_size=TILE_SIZE,
-            overlap=0.0,
+            region=GridRegion(
+                cells=["B1", "C1"], tile_size=TILE_SIZE, overlap=0.0
+            ),
             actor=None,
         )
         assert "error" not in result, result
-        assert result["candidates"][0]["bbox"] == [float(v) for v in PATCH_BOX]
+        assert result.candidates[0].bbox == tuple(float(v) for v in PATCH_BOX)
 
     def test_a_source_with_no_rgb_frame_is_refused_before_the_engine_runs(
         self,
@@ -327,7 +336,10 @@ class TestRegionFrameIsTheResolvedImageSources:
         import tifffile
 
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools.proposal_tools import propose_annotations
+        from tcip_mcp.tools.proposal_tools import (
+            GridRegion,
+            propose_annotations,
+        )
         from tests._producer_fixtures import write_band_group
 
         images_dir = image_dir(tmp_path, UNDATED_BUCKET)
@@ -358,9 +370,7 @@ class TestRegionFrameIsTheResolvedImageSources:
             tmp_path,
             image_path=str(manifest),
             engine="patch",
-            grid_cells=["B1"],
-            tile_size=TILE_SIZE,
-            overlap=0.0,
+            region=GridRegion(cells=["B1"], tile_size=TILE_SIZE, overlap=0.0),
             actor=None,
         )
         assert "2 band(s) of uint16" in result.get("error", "")
@@ -379,7 +389,10 @@ class TestRegionFrameIsTheResolvedImageSources:
         import tifffile
 
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools.proposal_tools import propose_annotations
+        from tcip_mcp.tools.proposal_tools import (
+            GridRegion,
+            propose_annotations,
+        )
 
         images_dir = image_dir(tmp_path, UNDATED_BUCKET)
         images_dir.mkdir(parents=True)
@@ -418,20 +431,18 @@ class TestRegionFrameIsTheResolvedImageSources:
             tmp_path,
             image_path=str(path),
             engine="patch",
-            grid_cells=["A1"],
-            tile_size=1024,
-            overlap=0.0,
+            region=GridRegion(cells=["A1"], tile_size=1024, overlap=0.0),
             actor=None,
         )
         assert "error" not in result, result
         assert crops == [("RGB", (1024, 1))]
-        assert result["candidates"][0]["bbox"] == [1.0, 0.0, 3.0, 1.0]
+        assert result.candidates[0].bbox == (1.0, 0.0, 3.0, 1.0)
 
 
 class TestWholeFrameDefaultIsUnaffected:
-    """Tests that ``grid_cells=None`` (the default) takes the whole-frame path, no offset step."""
+    """Tests that ``region=None`` (the default) takes the whole-frame path, no offset step."""
 
-    def test_offset_helper_is_never_called_without_grid_cells(
+    def test_offset_helper_is_never_called_without_a_region(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -465,7 +476,9 @@ class TestWholeFrameDefaultIsUnaffected:
         )
 
         img_path = write_image(
-            tmp_path / "whole_frame.jpg", (64, 64), (50, 50, 50)
+            image_dir(tmp_path, UNDATED_BUCKET) / "whole_frame.jpg",
+            (64, 64),
+            (50, 50, 50),
         )
 
         result = proposal_tools.propose_annotations(
@@ -473,9 +486,9 @@ class TestWholeFrameDefaultIsUnaffected:
         )
         assert "error" not in result, result
         assert called == []
-        assert result["candidates"][0]["bbox"] == [10.0, 10.0, 30.0, 30.0]
+        assert result.candidates[0].bbox == (10.0, 10.0, 30.0, 30.0)
 
-    def test_state_envelope_has_no_region_key_without_grid_cells(
+    def test_state_envelope_has_no_region_key_without_a_region(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -497,9 +510,7 @@ class TestWholeFrameDefaultIsUnaffected:
         assert "error" not in result, result
 
         envelope = ts.read(
-            proposal_tools._staging_key_for(
-                str(img_path), result["staging_id"]
-            )
+            proposal_tools._staging_key_for(str(img_path), result.staging_id)
         )
         assert set(envelope) == {
             "engine",
@@ -566,7 +577,7 @@ class TestWholeFrameDefaultIsUnaffected:
         envelope = proposal_tools.ProposalStaging.model_validate(
             ts.read(
                 proposal_tools._staging_key_for(
-                    str(img_path), result["staging_id"]
+                    str(img_path), result.staging_id
                 )
             )
         )

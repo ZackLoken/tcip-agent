@@ -11,10 +11,15 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from tcip_mcp.pipelines.postprocessing.segment_attribution import PositionError
 from tcip_mcp.server import tool
 
 if TYPE_CHECKING:
     from tcip_annotation.state import BBox, Polygon
+    from tcip_mcp.pipelines.delivery_events_schema import (
+        CanopySegmentDisclosure,
+        RasterDisclosure,
+    )
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         OrthomosaicGeoreference,
     )
@@ -42,7 +47,7 @@ def orthomosaic_plant_counts(
     pipeline_version: str = "",
     nn_tolerance_m: float | None = None,
     canopy_subject: str = "",
-    position_error_m: float | None = None,
+    position_error_m: PositionError | None = None,
     acknowledgment_id: str | None = None,
     *,
     door: str,
@@ -85,6 +90,9 @@ def orthomosaic_plant_counts(
     )
     from tcip_annotation.state import bbox_of
     from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.pipelines.delivery_events_schema import (
+        PlantRegistryDisclosure,
+    )
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         DetectionAssignment,
         OrthomosaicGeoreference,
@@ -173,6 +181,7 @@ def orthomosaic_plant_counts(
     )
 
     uncountable: dict[str, str] = {}
+    disclosure: RasterDisclosure
     if canopy_subject:
         counts, disclosure, uncountable = _segment_counts(
             raster_path,
@@ -186,7 +195,7 @@ def orthomosaic_plant_counts(
             registry_ref,
             cast(float, position_error_m),
         )
-        attribution = disclosure["plant_attribution"]
+        attribution = disclosure.plant_attribution
     else:
         require_named_plants(registered)
         in_frame, outside = plants_in_frame(
@@ -204,15 +213,14 @@ def orthomosaic_plant_counts(
         for a in attributed:
             counts[cast(str, a.plant_id)] += 1
         attribution = DetectionAssignment.plant_attribution
-        disclosure = {
-            "plant_registry": registry_ref,
-            "raster_identity": recorded_identity,
-            "nn_tolerance_m": tolerance,
-            "detections_unattributed": len(assignments) - len(attributed),
-            "detections_unattributed_scope": "delivered_raster",
-            "plant_attribution": attribution,
-            "plants_outside_raster": sorted(p.plant_id for p in outside),
-        }
+        disclosure = PlantRegistryDisclosure(
+            plant_registry=registry_ref,
+            raster_identity=recorded_identity,
+            nn_tolerance_m=tolerance,
+            detections_unattributed=len(assignments) - len(attributed),
+            plant_attribution=attribution,
+            plants_outside_raster=sorted(p.plant_id for p in outside),
+        )
     refused = {
         p: uncountable.get(p, "not in the registry")
         for p in wanted
@@ -253,8 +261,7 @@ def orthomosaic_plant_counts(
     return {
         **delivered,
         "n_detections": len(boxes),
-        "detections_unattributed": disclosure["detections_unattributed"],
-        "plants_outside_raster": disclosure["plants_outside_raster"],
+        "plant_mapping": disclosure.model_dump(mode="json"),
     }
 
 
@@ -268,8 +275,8 @@ def _segment_counts(
     height: int,
     boxes: list,
     registry_ref: PlantRegistryReference,
-    position_error_m: float,
-) -> tuple[dict[str, int], dict, dict[str, str]]:
+    position_error_m: PositionError,
+) -> tuple[dict[str, int], CanopySegmentDisclosure, dict[str, str]]:
     """Count detections per plant under the segment regime.
 
     Each detection is counted to the tied plant whose canopy segment contains its centroid, a tie
@@ -284,6 +291,11 @@ def _segment_counts(
         read_stored,
     )
     from tcip_mcp.dataset_layout import label_key_of
+    from tcip_mcp.pipelines.delivery_events_schema import (
+        CanopySegmentDisclosure,
+        CanopySegmentsDocument,
+        SegmentTieDisclosure,
+    )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         UNATTRIBUTED_SEGMENT_SOURCES,
     )
@@ -338,35 +350,34 @@ def _segment_counts(
         source: sum(a.source == source for a in assignments)
         for source in UNATTRIBUTED_SEGMENT_SOURCES
     }
-    disclosure = {
-        "plant_registry": registry_ref,
-        "raster_identity": recorded_identity,
-        "canopy_segments": {
-            "capture": key.parts[0],
-            "stem": stem,
-            "sha256": version.token,
-            "subject": canopy_subject,
-            "n_segments": len(segments),
-        },
-        "segment_ties": [
-            {
-                "segment_index": t.segment_index,
-                "plant_id": t.plant_id,
-                "clearance_m": t.clearance_m,
-            }
+    disclosure = CanopySegmentDisclosure(
+        plant_registry=registry_ref,
+        raster_identity=recorded_identity,
+        canopy_segments=CanopySegmentsDocument(
+            capture=key.parts[0],
+            stem=stem,
+            sha256=version.token,
+            subject=canopy_subject,
+            n_segments=len(segments),
+        ),
+        segment_ties=[
+            SegmentTieDisclosure(
+                segment_index=t.segment_index,
+                plant_id=t.plant_id,
+                clearance_m=t.clearance_m,
+            )
             for t in tie.tied
         ],
-        "position_error_m": position_error_m,
-        "segments_without_plant": tie.segments_without_plant,
-        "plants_outside_raster": tie.plants_outside_raster,
-        "plants_without_segment": tie.plants_without_segment,
-        "plants_within_position_error": tie.plants_within_position_error,
-        "plants_with_ambiguous_detections": ambiguous,
-        "detections_unattributed": sum(by_source.values()),
-        "detections_unattributed_by_source": by_source,
-        "detections_unattributed_scope": "delivered_raster",
-        "plant_attribution": SegmentAssignment.plant_attribution,
-    }
+        position_error_m=position_error_m,
+        segments_without_plant=tie.segments_without_plant,
+        plants_outside_raster=tie.plants_outside_raster,
+        plants_without_segment=tie.plants_without_segment,
+        plants_within_position_error=tie.plants_within_position_error,
+        plants_with_ambiguous_detections=ambiguous,
+        detections_unattributed=sum(by_source.values()),
+        detections_unattributed_by_source=by_source,
+        plant_attribution=SegmentAssignment.plant_attribution,
+    )
     uncountable = {
         **{p: "outside the raster's frame" for p in tie.plants_outside_raster},
         **{p: "inside no canopy segment" for p in tie.plants_without_segment},
@@ -393,7 +404,7 @@ def deliver_orthomosaic_plant_counts(
     pipeline_version: str = "",
     nn_tolerance_m: float | None = None,
     canopy_subject: str = "",
-    position_error_m: float | None = None,
+    position_error_m: PositionError | None = None,
     acknowledgment_id: str | None = None,
     *,
     actor: str | None,

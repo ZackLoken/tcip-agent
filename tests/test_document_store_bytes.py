@@ -5,6 +5,7 @@ A file's bytes are those its producer writes, and a record's those the store dum
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -65,10 +66,10 @@ BAND_GROUP_BYTES = (
     "}\n"
 ).encode()
 
-NOW = "2026-03-04T12:00:00+00:00"
+NOW = datetime(2026, 3, 4, 12, tzinfo=UTC)
 REPORT_BYTES = (
     "{\n"
-    '  "timestamp": "2026-03-04T12:00:00+00:00",\n'
+    '  "timestamp": "2026-03-04T12:00:00Z",\n'
     '  "category": "missing_tool",\n'
     '  "detail": "ein Werkzeug für ü",\n'
     '  "context": {\n'
@@ -80,7 +81,7 @@ REPORT_BYTES = (
 
 RETROSPECTIVE_BYTES = (
     "{\n"
-    '  "timestamp": "2026-03-04T12:00:00+00:00",\n'
+    '  "timestamp": "2026-03-04T12:00:00Z",\n'
     '  "project_id": "project_under_test",\n'
     '  "task": "t",\n'
     '  "worked": "was gut lief für ü",\n'
@@ -199,7 +200,7 @@ def test_a_friction_report_dumps_as_the_json_document_every_reader_of_the_corpus
     """
     from tcip_mcp.tools import meta_tools
 
-    monkeypatch.setattr(meta_tools, "now_iso", lambda: NOW)
+    monkeypatch.setattr(meta_tools, "now", lambda: NOW)
 
     meta_tools.report_friction(
         tmp_path,
@@ -222,7 +223,7 @@ def test_a_retrospective_dumps_as_the_json_document_every_reader_of_the_corpus_p
     """
     from tcip_mcp.tools import meta_tools
 
-    monkeypatch.setattr(meta_tools, "now_iso", lambda: NOW)
+    monkeypatch.setattr(meta_tools, "now", lambda: NOW)
 
     meta_tools.write_retrospective(
         tmp_path,

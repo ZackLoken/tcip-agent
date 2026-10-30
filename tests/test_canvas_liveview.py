@@ -53,16 +53,13 @@ def _payload(
         "project_id": project_id,
         "tab": "annotate",
         "image_path": image_path,
-        "image": Path(image_path).name,
-        "img_width": 200,
-        "img_height": 100,
         "viewport": {"x": 0, "y": 0, "w": 200, "h": 100, "scale": 1.0},
         "mode": "polygon",
         "active_subject": None,
         "cut_armed": False,
         "dirty": False,
         "user": "breeder",
-        "classes": [{"id": 0, "name": "bud", "color": "#FF0000"}],
+        "classes": [{"name": "bud", "color": "#FF0000"}],
         "counts": {"boxes": 0, "polygons": 1, "drawing_points": 0},
         "shapes": shapes,
     }
@@ -126,10 +123,22 @@ def test_full_push_writes_geometry_and_meta(
     r = client.post(
         "/api/canvas/state", json=_payload(opened.id, image, shapes=SHAPES)
     )
-    assert r.status_code == 200 and r.json()["shapes_written"] is True
+    assert r.status_code == 200, r.text
     assert len(_shapes_doc(opened_project).shapes) == 3
     assert _shapes_doc(opened_project).image_path == "images/a.jpg"
     assert _meta(opened_project).image_path == "images/a.jpg"
+
+
+def test_push_at_no_positive_zoom_is_refused_and_records_nothing(
+    client: TestClient, opened: OpenProject, opened_project: Path
+) -> None:
+    image = str(image_root(opened_project) / "a.jpg")
+    viewport = {"x": 0, "y": 0, "w": 200, "h": 100, "scale": 0.0}
+    r = client.post(
+        "/api/canvas/state", json=_payload(opened.id, image, viewport=viewport)
+    )
+    assert r.status_code == 422, r.text
+    assert _meta(opened_project) is None
 
 
 def test_a_push_naming_another_project_is_answered_as_a_mismatch_and_writes_nothing(
@@ -268,7 +277,7 @@ def test_heartbeat_updates_meta_without_touching_geometry(
         viewport={"x": 40, "y": 10, "w": 80, "h": 50, "scale": 2.0},
     )
     r = client.post("/api/canvas/state", json=hb)
-    assert r.json()["shapes_written"] is False
+    assert r.status_code == 200, r.text
     meta = _meta(opened_project)
     assert meta is not None and meta.viewport is not None
     assert meta.viewport.x == 40  # meta moved
@@ -828,13 +837,18 @@ def _write_state(
     Each image path is spelled against the project through ``stored_path``; the meta carries a
     200 by 100 viewport at the origin.
     """
-    from tcip_mcp.audit import now_iso
+    from tcip_mcp.audit import now as clock
     from tcip_mcp.registry_paths import stored_path
-    from tcip_mcp.web_client import CanvasGeometry, CanvasMeta, Viewport
+    from tcip_mcp.web_client import (
+        CanvasClass,
+        CanvasGeometry,
+        CanvasMeta,
+        Viewport,
+    )
 
     root = str(project)
     stored = stored_path(img, project)
-    now = now_iso()
+    now = clock()
     if shapes is not None:
         geometry = CanvasGeometry(
             image_path=stored_path(shapes_image, project)
@@ -850,17 +864,14 @@ def _write_state(
     meta = CanvasMeta(
         received_at=now,
         tab=tab,
-        image=Path(img).name,
         image_path=stored,
-        img_width=200,
-        img_height=100,
         viewport=Viewport(x=0, y=0, w=200, h=100, scale=1.0),
         user="breeder",
         mode="polygon",
         active_subject=None,
         cut_armed=cut_armed,
         dirty=False,
-        classes=[{"id": 0, "name": "bud", "color": "#FF0000"}],
+        classes=[CanvasClass(name="bud", color="#FF0000")],
         counts={},
     )
     tcip_store.replace(canvas_meta_key(root), meta.model_dump(mode="json"))
@@ -888,7 +899,7 @@ def test_capture_live_canvas_renders_pushed_state(
     assert "error" not in res
     assert Path(res["image_path"]).is_file()
     assert res["source_image"] == img
-    assert res["classes"][0]["name"] == "bud"
+    assert res["canvas"]["classes"][0]["name"] == "bud"
     assert res["shape_counts_by_tag"] == {"gt": 2, "in_progress": 1}
     assert res["state_age_seconds"] >= 0
     assert res["shapes_missing"] is False
@@ -904,7 +915,7 @@ def test_capture_live_canvas_names_the_armed_cut(
     from tcip_mcp.tools.vision_tools import capture_live_canvas
 
     res = capture_live_canvas(bound, refresh=False)
-    assert res["cut_armed"] is True
+    assert res["canvas"]["cut_armed"] is True
 
 
 def test_capture_live_canvas_renders_exactly_the_viewport_region(

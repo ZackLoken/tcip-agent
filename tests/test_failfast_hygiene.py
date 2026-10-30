@@ -1,4 +1,4 @@
-"""Fail-fast hygiene: IoU over a degenerate box, delivered flag, multi-head AL."""
+"""Fail-fast hygiene: IoU over a degenerate box, an untaken panel event's reason, multi-head AL."""
 
 from __future__ import annotations
 
@@ -21,12 +21,14 @@ def test_iou_matrix_valid_and_degenerate() -> None:
     assert iou_matrix([[0, 0, 0, 0]], [[0, 0, 0, 0]])[0, 0] == 0.0
 
 
-def test_push_panel_event_reports_delivered_flag(bound: BoundProject) -> None:
+def test_push_panel_event_reports_an_undelivered_event_as_not_ok(
+    bound: BoundProject,
+) -> None:
     from tcip_mcp.tools.gui_tools import push_panel_event
+    from tcip_mcp.web_client import Banner
 
-    res = push_panel_event(bound, "annotate", "load_labels", {"x": 1})
-    # The delivery outcome is now an explicit bool: "backend down" can't read as success.
-    assert "delivered" in res and isinstance(res["delivered"], bool)
+    res = push_panel_event(bound, "annotate", Banner(text="load the labels"))
+    assert isinstance(res.reason, str) and "pytest" in res.reason
 
 
 def test_uncertainty_scorer_averages_over_heads(tmp_path: Path) -> None:

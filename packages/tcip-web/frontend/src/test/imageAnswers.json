@@ -1,0 +1,162 @@
+{
+  "native": {
+    "reads": [
+      {
+        "name": "A1",
+        "level": 0,
+        "x0": 0,
+        "y0": 0,
+        "x1": 500,
+        "y1": 500,
+        "nx0": 0.0,
+        "ny0": 0.0,
+        "nx1": 500.0,
+        "ny1": 500.0
+      },
+      {
+        "name": "B1",
+        "level": 0,
+        "x0": 500,
+        "y0": 0,
+        "x1": 1000,
+        "y1": 500,
+        "nx0": 500.0,
+        "ny0": 0.0,
+        "nx1": 1000.0,
+        "ny1": 500.0
+      },
+      {
+        "name": "A2",
+        "level": 0,
+        "x0": 0,
+        "y0": 500,
+        "x1": 500,
+        "y1": 600,
+        "nx0": 0.0,
+        "ny0": 500.0,
+        "nx1": 500.0,
+        "ny1": 600.0
+      },
+      {
+        "name": "B2",
+        "level": 0,
+        "x0": 500,
+        "y0": 500,
+        "x1": 1000,
+        "y1": 600,
+        "nx0": 500.0,
+        "ny0": 500.0,
+        "nx1": 1000.0,
+        "ny1": 600.0
+      }
+    ]
+  },
+  "level": {
+    "reads": [
+      {
+        "name": "A1",
+        "level": 2,
+        "x0": 0,
+        "y0": 0,
+        "x1": 500,
+        "y1": 500,
+        "nx0": 0.0,
+        "ny0": 0.0,
+        "nx1": 2000.0,
+        "ny1": 2000.0
+      },
+      {
+        "name": "B1",
+        "level": 2,
+        "x0": 500,
+        "y0": 0,
+        "x1": 1000,
+        "y1": 500,
+        "nx0": 2000.0,
+        "ny0": 0.0,
+        "nx1": 4000.0,
+        "ny1": 2000.0
+      },
+      {
+        "name": "A2",
+        "level": 2,
+        "x0": 0,
+        "y0": 500,
+        "x1": 500,
+        "y1": 600,
+        "nx0": 0.0,
+        "ny0": 2000.0,
+        "nx1": 2000.0,
+        "ny1": 2400.0
+      },
+      {
+        "name": "B2",
+        "level": 2,
+        "x0": 500,
+        "y0": 500,
+        "x1": 1000,
+        "y1": 600,
+        "nx0": 2000.0,
+        "ny0": 2000.0,
+        "nx1": 4000.0,
+        "ny1": 2400.0
+      }
+    ]
+  },
+  "skinny": {
+    "reads": [
+      {
+        "name": "A1",
+        "level": 0,
+        "x0": 0,
+        "y0": 0,
+        "x1": 1,
+        "y1": 100000,
+        "nx0": 0.0,
+        "ny0": 0.0,
+        "nx1": 1.0,
+        "ny1": 100000.0
+      }
+    ]
+  },
+  "image": { "status": 200, "headers": { "X-TCIP-Served-Size": "774x464" } },
+  "image_skinny": { "status": 200, "headers": { "X-TCIP-Served-Size": "1x65500" } },
+  "image_overviews_required": {
+    "status": 400,
+    "headers": { "X-TCIP-Image-Error": "overviews_required" }
+  },
+  "image_missing": { "status": 404, "headers": {} },
+  "build": {
+    "job_id": "<built job>",
+    "status": "running",
+    "error": null,
+    "path": "/scratch/workspace/images/unbuilt.tif",
+    "bytes_written": 3278515,
+    "live": true
+  },
+  "running": {
+    "job_id": "<built job>",
+    "status": "running",
+    "error": null,
+    "path": "/scratch/workspace/images/unbuilt.tif",
+    "bytes_written": 3278515,
+    "live": true
+  },
+  "completed": {
+    "job_id": "<built job>",
+    "status": "completed",
+    "error": null,
+    "path": "/scratch/workspace/images/unbuilt.tif",
+    "bytes_written": 3278515,
+    "live": false
+  },
+  "failed": {
+    "job_id": "<failed job>",
+    "status": "failed",
+    "error": "a sample failure the scene's builder raises for this file",
+    "path": "/scratch/workspace/images/broken.tif",
+    "bytes_written": 0,
+    "live": false
+  },
+  "unknown": { "status": 404, "body": { "detail": "job not found: ovr-unknown" } }
+}

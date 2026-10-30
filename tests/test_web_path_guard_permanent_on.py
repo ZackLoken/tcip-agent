@@ -284,7 +284,7 @@ def test_the_proposals_route_confines_the_image_whose_bucket_it_reads(
     assert (
         client.get(
             "/api/annotate/proposals",
-            params={"image_path": str(stranger), "bucket": staged["bucket"]},
+            params={"image_path": str(stranger), "bucket": staged.bucket},
         ).status_code
         == 403
     )
@@ -292,7 +292,7 @@ def test_the_proposals_route_confines_the_image_whose_bucket_it_reads(
 
     resp = client.get(
         "/api/annotate/proposals",
-        params={"image_path": str(image), "bucket": staged["bucket"]},
+        params={"image_path": str(image), "bucket": staged.bucket},
     )
     assert resp.status_code == 200, resp.text
     assert len(resp.json()["proposals"]) == 1
@@ -356,7 +356,6 @@ def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
         json={
             **body,
             "payload": "milestones",
-            "filename": "x.csv",
             "user": "tester",
         },
     )
@@ -446,16 +445,3 @@ def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
     build = plant_mapping.load_mapping(tmp_path, payload["name"])
     assert build is not None
     assert set(build.assignments.keys()) == {"2026-02-11", "2026-02-25"}
-
-
-# ── the picker: the whole machine, the only arrival the backend serves ───
-
-
-def test_the_picker_browses_the_whole_machine_from_a_local_connection(
-    client: TestClient,
-    outside: Path,
-) -> None:
-    (outside / "somewhere").mkdir()
-    resp = client.get("/api/fs/list", params={"path": str(outside)})
-    assert resp.status_code == 200
-    assert "somewhere" in {e["name"] for e in resp.json()["entries"]}

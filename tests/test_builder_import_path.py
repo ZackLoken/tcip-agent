@@ -780,6 +780,7 @@ def test_the_admissions_import_reads_the_files_its_run_holds(
     import dataclasses
 
     from tcip_mcp import experiments
+    from tcip_mcp.audit import now
     from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tcip_mcp.tools.training_tools import _admitted, open_run
@@ -813,6 +814,7 @@ def test_the_admissions_import_reads_the_files_its_run_holds(
         spec,
         sources,
         resolve_run(spec, sources.layout, project=project).record,
+        created=now(),
     )
 
     def laid_out(root: Path) -> dict:

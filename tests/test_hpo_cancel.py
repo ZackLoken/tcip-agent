@@ -204,7 +204,8 @@ def test_a_sweep_cancel_reaches_only_a_sweep_of_the_project_it_is_handed(
 
     result = cancel_training(project, sweep_id, actor=None)
 
-    assert result["cancel_requested"] is True
+    assert not isinstance(result, dict) and result.sweep is not None
+    assert result.sweep.cancel_requested
     assert cancel_requested(experiment_dir(sweep_id, project=project))
     assert "error" in cancel_training(elsewhere, sweep_id, actor=None)
 

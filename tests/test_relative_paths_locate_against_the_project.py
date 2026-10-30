@@ -221,8 +221,11 @@ def _stage_proposals(project: Path) -> dict:
     )
     assert "error" not in result, result
     root = parse_image_path(located(IMAGE, project))[0]
-    published = read_bucket(root, result.pop("bucket"))
-    return {**result, "documents": published.documents}
+    published = read_bucket(root, result.bucket)
+    return {
+        **result.model_dump(exclude={"bucket"}),
+        "documents": published.documents,
+    }
 
 
 def _visualize(project: Path) -> Path:
@@ -292,9 +295,11 @@ def _register_model(project: Path) -> str:
     result = register_model(
         project, name="m", checkpoint_path=spelling, actor=None
     )
-    assert "error" not in result, result
     (entry,) = read_registry_index(project)
-    assert Path(result["checkpoint_path"]) == (project / spelling).resolve()
+    assert (
+        Path(result.entry.checkpoint_path)
+        == (project / spelling).resolve()
+    )
     return entry.name
 
 
@@ -375,7 +380,10 @@ def _evaluate_model(project: Path) -> dict:
 
 
 def _prioritize_review_queue(project: Path) -> list[str]:
-    from tcip_mcp.tools.feedback_tools import prioritize_review_queue
+    from tcip_mcp.tools.feedback_tools import (
+        ReviewQueue,
+        prioritize_review_queue,
+    )
 
     result = prioritize_review_queue(
         project,
@@ -385,8 +393,8 @@ def _prioritize_review_queue(project: Path) -> list[str]:
         budget=len(STEMS),
         rationale=RATIONALE,
     )
-    assert "error" not in result, result
-    return sorted(entry["image"] for entry in result["queue"])
+    assert isinstance(result, ReviewQueue), result
+    return sorted(entry.image for entry in result.queue)
 
 
 def _triage_predictions(project: Path) -> int:

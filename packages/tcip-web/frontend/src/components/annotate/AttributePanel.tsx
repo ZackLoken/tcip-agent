@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
-import type { AttrType, AttributeDef, Registry } from "@/api/subjects";
-import { ATTR_TYPES } from "@/api/types.generated";
+import type { AttrType, AttributeDef } from "@/api/subjects";
+import { ATTR_TYPES, type RegistrySubjects } from "@/api/types.generated";
 import { AttributeEditors } from "@/components/annotate/AttributeEditors";
 import { AddValue, ValueChips } from "@/components/annotate/ValueChips";
 import { saveRegistry } from "@/lib/registrySave";
@@ -26,11 +26,13 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
 
   // The focused annotation's own shape; a focused proposal has no attributes to set.
   const focusedShape =
-    focused?.kind !== "annotation"
-      ? undefined
-      : { boxes, polygons, points }[TOOL_ARRAY[focused.shape]][focused.ref];
+    focused?.kind === "annotation"
+      ? { boxes, polygons, points }[TOOL_ARRAY[focused.shape]][focused.ref]
+      : undefined;
   const selected =
-    focused && focusedShape ? { kind: focused.shape, idx: focused.ref, shape: focusedShape } : null;
+    focused?.kind === "annotation" && focusedShape
+      ? { kind: focused.shape, idx: focused.ref, shape: focusedShape }
+      : null;
 
   const withAttr = (attrs: Record<string, string>, attr: string, value: string) => {
     const next = { ...attrs };
@@ -48,14 +50,15 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
     });
   };
 
-  function saveGrownRegistry(next: Registry) {
+  function saveGrownRegistry(next: RegistrySubjects) {
     void saveRegistry(next, "Could not update the attributes");
   }
 
   function addAttribute(subject: string, name: string, type: AttrType, values: string[]) {
-    const current = registry[subject] ?? {};
+    const current = registry[subject];
+    if (!current) return;
     const attrDef: AttributeDef = { type, values };
-    const next: Registry = {
+    const next: RegistrySubjects = {
       ...registry,
       [subject]: { ...current, attributes: { ...(current.attributes ?? {}), [name]: attrDef } },
     };
@@ -66,7 +69,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
     const current = registry[subject];
     const def = current?.attributes?.[attrName];
     if (!def || def.values.includes(value)) return;
-    const next: Registry = {
+    const next: RegistrySubjects = {
       ...registry,
       [subject]: {
         ...current,
@@ -154,13 +157,15 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
         <div className="mb-5">
           <div className="mb-2 flex items-center justify-between">
             <span className="tcip-label">{`${activeSubject} attributes`}</span>
-            <button
-              type="button"
-              className="text-tcip-accent hover:underline"
-              onClick={() => setAddingAttribute((o) => !o)}
-            >
-              Add attribute
-            </button>
+            {activeSubject in registry && (
+              <button
+                type="button"
+                className="text-tcip-accent hover:underline"
+                onClick={() => setAddingAttribute((o) => !o)}
+              >
+                Add attribute
+              </button>
+            )}
           </div>
           {Object.entries(activeAttributes).map(([name, def]) => {
             const unassessed = activeSubjectShapes.filter((s) => !s.attributes[name]).length;
@@ -273,8 +278,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
           className="tcip-btn w-full"
           disabled={!activeSubject}
           onClick={() =>
-            activeSubject &&
-            add("imageAnnotations", { subject: activeSubject, attributes: {}, iscrowd: false })
+            activeSubject && add("imageAnnotations", { subject: activeSubject, attributes: {} })
           }
         >
           Add rating

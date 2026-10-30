@@ -1,18 +1,25 @@
 """``read_audit_log``: the one tool reading a scope's own audit log back, on the record itself.
 
-The entries read come from real ``@audited`` calls, except in the corrupt-page case, which
-damages a committed entry's bytes in the database by hand.
+The entries read come from real ``@audited`` calls or the platform's own line writer
+(``audit.record_event_or_raise``), except in the corrupt-page case, which damages a committed
+entry's bytes in the database by hand. The bounds are read as an MCP client states them, through
+the server's own argument schema.
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 import tcip_mcp.audit as audit_module
-import tcip_store as ts
 from tcip_mcp.tools.meta_tools import read_audit_log
+from tests._server_calls import called_through_the_server
+
+if TYPE_CHECKING:
+    from tcip_mcp.workspace import BoundProject
 
 
 @pytest.fixture
@@ -24,6 +31,30 @@ def dataset_root(tmp_path: Path) -> Path:
 
 def _subjects() -> dict:
     return {"bud": {"description": "a currant bud"}}
+
+
+def _lines_at(
+    scope: Path, instants: list[datetime], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Write one ``scan_dataset`` line in ``scope``'s log at each of ``instants``, in order.
+
+    Each is the platform's own line (:func:`audit.record_event_or_raise`), its clock read at the
+    instant given.
+    """
+    for instant in instants:
+        monkeypatch.setattr(audit_module, "now", lambda at=instant: at)
+        audit_module.record_event_or_raise(
+            "scan_dataset", {}, actor=None, scope=scope
+        )
+
+
+def _read(bound: BoundProject, **arguments: str) -> dict | str:
+    """Return ``read_audit_log``'s answer to ``arguments`` as a client calls it, or its refusal."""
+    answered = called_through_the_server(
+        "read_audit_log", arguments, bound=bound
+    )
+    assert isinstance(answered, dict | str), answered
+    return answered
 
 
 def test_read_audit_log_filters_by_tool_and_status_newest_first(
@@ -187,115 +218,64 @@ def test_read_audit_log_resolves_an_inner_path_to_its_dataset_root(
 
 
 def test_read_audit_log_treats_a_date_only_until_as_the_end_of_that_day(
-    project: Path,
+    bound: BoundProject,
     dataset_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    key = audit_module.audit_log_key(dataset_root)
-    ts.append(
-        key,
-        {
-            "tool": "write_subject_registry",
-            "status": "ok",
-            "timestamp": "2026-03-02T23:59:59+00:00",
-        },
-    )
-    ts.append(
-        key,
-        {
-            "tool": "write_subject_registry",
-            "status": "ok",
-            "timestamp": "2026-03-03T00:00:01+00:00",
-        },
+    last_of_the_day = datetime(2026, 3, 2, 23, 59, 59, tzinfo=UTC)
+    _lines_at(
+        dataset_root,
+        [last_of_the_day, datetime(2026, 3, 3, 0, 0, 1, tzinfo=UTC)],
+        monkeypatch,
     )
 
-    result = read_audit_log(
-        project, scope=str(dataset_root), until="2026-03-02"
-    )
+    result = _read(bound, scope=str(dataset_root), until="2026-03-02")
 
+    assert isinstance(result, dict), result
     assert result["count"] == 1
-    assert result["entries"][0]["timestamp"] == "2026-03-02T23:59:59+00:00"
+    (entry,) = result["entries"]
+    assert datetime.fromisoformat(entry["timestamp"]) == last_of_the_day
 
 
 def test_read_audit_log_accepts_a_z_suffixed_bound(
-    project: Path,
+    bound: BoundProject,
     dataset_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    key = audit_module.audit_log_key(dataset_root)
-    ts.append(
-        key,
-        {
-            "tool": "write_subject_registry",
-            "status": "ok",
-            "timestamp": "2026-03-02T10:00:00+00:00",
-        },
+    _lines_at(
+        dataset_root, [datetime(2026, 3, 2, 10, tzinfo=UTC)], monkeypatch
     )
 
-    result = read_audit_log(
-        project,
+    result = _read(
+        bound,
         scope=str(dataset_root),
         since="2026-03-02T00:00:00Z",
         until="2026-03-02T23:59:59Z",
     )
 
+    assert isinstance(result, dict), result
     assert result["count"] == 1
 
 
-def test_a_bound_reads_as_datetime_fromisoformat_reads_it() -> None:
-    """A trailing ``Z``, a naive value and a date-only ``until`` agree with the parser's own."""
-    from datetime import datetime, timedelta, timezone
-
-    from tcip_mcp.tools.meta_tools import _parse_audit_bound
-
-    assert _parse_audit_bound(
-        "since", "2026-03-02T10:00:00Z"
-    ) == datetime.fromisoformat("2026-03-02T10:00:00Z")
-    assert _parse_audit_bound(
-        "since", "2026-03-02T10:00:00"
-    ) == datetime.fromisoformat("2026-03-02T10:00:00").replace(
-        tzinfo=timezone.utc
-    )
-    midnight = datetime.fromisoformat("2026-03-02").replace(
-        tzinfo=timezone.utc
-    )
-    assert _parse_audit_bound(
-        "until", "2026-03-02", end_of_day=True
-    ) == midnight + timedelta(days=1, microseconds=-1)
-
-
 @pytest.mark.parametrize(
-    "value", ["2026-03-02Z", "2026-03-02T10Z:00:00", "not-a-timestamp"]
+    "value",
+    ["2026-03-02Z", "2026-03-02T10Z:00:00", "not-a-timestamp", "2026-03-02T10:00:00"],
 )
-def test_a_bound_datetime_fromisoformat_refuses_is_refused_by_name(
+def test_read_audit_log_refuses_a_since_bound_that_is_no_instant_or_date(
+    bound: BoundProject,
+    dataset_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
     value: str,
 ) -> None:
-    from datetime import datetime
+    """A bound that parses as neither an instant with its offset nor a date is refused by name.
 
-    from tcip_mcp.tools.meta_tools import _parse_audit_bound
-
-    with pytest.raises(ValueError):
-        datetime.fromisoformat(value)
-    with pytest.raises(ValueError, match="since"):
-        _parse_audit_bound("since", value)
-
-
-def test_read_audit_log_refuses_an_unparseable_since_bound(
-    project: Path,
-    dataset_root: Path,
-) -> None:
-    key = audit_module.audit_log_key(dataset_root)
-    ts.append(
-        key,
-        {
-            "tool": "write_subject_registry",
-            "status": "ok",
-            "timestamp": "2026-03-02T10:00:00+00:00",
-        },
+    A naive instant states no offset and is refused with the rest.
+    """
+    _lines_at(
+        dataset_root, [datetime(2026, 3, 2, 10, tzinfo=UTC)], monkeypatch
     )
 
-    result = read_audit_log(
-        project, scope=str(dataset_root), since="not-a-timestamp"
-    )
+    refused = _read(bound, scope=str(dataset_root), since=value)
 
-    assert "error" in result
-    assert "since" in result["error"]
-    assert "entries" not in result
+    assert isinstance(refused, str), refused
+    assert "validation error" in refused and "since" in refused

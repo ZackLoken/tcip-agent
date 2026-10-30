@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from fastapi.testclient import TestClient
 
+from tcip_mcp.agent_identity import RecordedIdentity
+from tcip_mcp.audit import now
 from tests._audit_fixtures import audit_rows
 from tests._training_values import fifo_search, sweep_space
 
@@ -224,7 +226,7 @@ def test_a_finite_value_logged_after_a_non_finite_one_at_one_epoch_streams_alone
     log_epoch(run_dir, 2, {"loss": float("nan")})
     log_epoch(run_dir, 2, {"loss": 0.1})
     write_final_status(
-        run_dir, "failed", "stopped after the second row", checkpoint=None
+        run_dir, "failed", "stopped after the second row", ended=now()
     )
     sent: list[dict] = []
 
@@ -245,7 +247,7 @@ def test_the_stream_sends_epoch_rows_as_epochs_and_the_latest_batch_row_as_its_o
 ) -> None:
     import asyncio
 
-    from tcip_mcp.experiments import STEP_KEY, observe, write_final_status
+    from tcip_mcp.experiments import observe, write_final_status
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tcip_web.routes.training import _stream_metrics
@@ -256,7 +258,7 @@ def test_the_stream_sends_epoch_rows_as_epochs_and_the_latest_batch_row_as_its_o
     ctx.log_batch(2, 1, {"batch_loss": 0.7})
     ctx.log_metrics(1, {"train_loss": 0.75})
     ctx.log_batch(3, 2, {"batch_loss": 0.6})
-    write_final_status(run_dir, "failed", "stopped mid-epoch", checkpoint=None)
+    write_final_status(run_dir, "failed", "stopped mid-epoch", ended=now())
     sent: list[dict] = []
 
     class _Socket:
@@ -268,12 +270,13 @@ def test_the_stream_sends_epoch_rows_as_epochs_and_the_latest_batch_row_as_its_o
     )
 
     (epoch,) = [msg["row"] for msg in sent if msg["type"] == "metric"]
-    assert (epoch["epoch"], epoch["train_loss"]) == (
+    assert (epoch["epoch"], epoch["train_loss"], epoch["step"]) == (
         1,
         0.75,
-    ) and STEP_KEY not in epoch
+        None,
+    )
     (batch,) = [msg["row"] for msg in sent if msg["type"] == "batch"]
-    assert (batch[STEP_KEY], batch["epoch"], batch["batch_loss"]) == (
+    assert (batch["step"], batch["epoch"], batch["batch_loss"]) == (
         3,
         2,
         0.6,
@@ -361,12 +364,12 @@ def test_compare_route_compares_two_runs_and_names_an_unknown_id(
 
     assert resp.status_code == 200
     left, right, gone = resp.json()["experiments"]
-    assert (left["experiment_id"], left["state"], left["n_epochs"]) == (
-        "exp-left",
-        "completed",
-        2,
-    )
-    assert (right["experiment_id"], right["state"]) == (
+    assert (
+        left["run"]["experiment_id"],
+        left["run"]["state"],
+        left["n_epochs"],
+    ) == ("exp-left", "completed", 2)
+    assert (right["run"]["experiment_id"], right["run"]["state"]) == (
         "exp-right",
         "completed",
     )
@@ -374,18 +377,43 @@ def test_compare_route_compares_two_runs_and_names_an_unknown_id(
         "experiment_id": "exp-gone",
         "error": "Experiment not found: exp-gone",
     }
-    assert resp.json()["same_dataset_fingerprint"] is None
+    assert resp.json()["dataset_fingerprints"] == "unread"
 
 
-def test_metric_directions_route_answers_the_declared_table(
-    opened_client: TestClient,
+def test_the_comparison_and_the_listing_state_one_direction_per_metric(
+    opened_project: Path, opened_client: TestClient
 ) -> None:
-    """The route answers the schema's own declared-direction table."""
-    from tcip_mcp.pipelines.schemas import HIGHER_IS_BETTER_BY_METRIC
+    """The comparison's direction of each registered metric is the one the ranking lists.
 
-    resp = opened_client.get("/api/training/metric-directions")
-    assert resp.status_code == 200
-    assert resp.json()["higher_is_better"] == HIGHER_IS_BETTER_BY_METRIC
+    A completed run's checkpoint carries a declared higher-better, a declared lower-better and an
+    undeclared metric; the compare route and the registry listing answer one direction for each.
+    """
+    from tcip_mcp.experiments import Comparison
+    from tcip_mcp.tools.model_tools import registered_listing
+    from tests._verified_checkpoint_fixtures import finished_run
+
+    run = finished_run(
+        opened_project,
+        experiment_id="directed",
+        metrics={"val_map50": 0.5, "val_loss": 0.2, "lr": 0.1},
+    )
+    resp = opened_client.post(
+        "/api/training/compare", json={"experiment_ids": [run.name]}
+    )
+    assert resp.status_code == 200, resp.text
+    compared = Comparison.model_validate(resp.json()).higher_is_better
+    listed = {
+        m.metric: m.higher_is_better
+        for m in registered_listing(
+            opened_project, experiment_ids=[run.name]
+        ).available_metrics
+    }
+    assert compared == listed
+    assert {compared["val_map50"], compared["val_loss"], compared["lr"]} == {
+        True,
+        False,
+        None,
+    }
 
 
 def test_cancel_unknown_run_returns_404(opened_client: TestClient) -> None:
@@ -835,14 +863,21 @@ def test_tensorboard_route_404s_with_no_logs_for_a_run_with_no_event_file(
     opened_client: TestClient,
     tmp_path: Path,
 ) -> None:
-    """The TensorBoard route answers 404 with ``no_logs`` for a run with no event file."""
+    """The TensorBoard route answers 404 with ``NoLogsRefusal`` for a run with no event file.
+
+    A run that recorded no error is refused saying only that it produced no logs.
+    """
+    from tcip_web.routes.training import NoLogsRefusal
+
     _opened("run-nologs", tmp_path)
 
     resp = opened_client.post(
         "/api/training/runs/run-nologs/tensorboard", json={}
     )
     assert resp.status_code == 404
-    assert resp.json()["detail"]["no_logs"] is True
+    assert NoLogsRefusal.model_validate(
+        resp.json()["detail"]
+    ) == NoLogsRefusal(message="This run produced no logs.")
 
 
 def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
@@ -872,9 +907,11 @@ def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
         f"/api/training/runs/{run_id}/tensorboard", json={}
     )
     assert resp.status_code == 404
-    detail = resp.json()["detail"]
-    assert detail["no_logs"] is True
-    assert detail["message"] == "could not open the dataset's images_dir"
+    from tcip_web.routes.training import NoLogsRefusal
+
+    message = NoLogsRefusal.model_validate(resp.json()["detail"]).message
+    assert "could not open the dataset's images_dir" in message
+    assert "produced no logs" in message
 
 
 def _fails_at_data_load(ctx: TrainContext) -> None:
@@ -908,7 +945,9 @@ def test_list_runs_route_is_a_pure_pass_through_to_the_tool(
 
     _opened("exp-route-parity", opened_project)
 
-    assert list_runs_route().model_dump() == list_experiments(opened_project)
+    assert list_runs_route().model_dump(mode="json") == list_experiments(
+        opened_project
+    )
 
 
 def test_a_route_launch_shows_its_declaration_from_its_launch_event(
@@ -957,7 +996,7 @@ def test_a_route_launch_shows_its_declaration_from_its_launch_event(
         for r in opened_client.get("/api/training/runs").json()["runs"]
         if r["experiment_id"] == minted
     )
-    assert row["launch"] == {}
+    assert RecordedIdentity.model_validate(row["launch"]) == RecordedIdentity()
 
 
 def _regression_config(tmp_path: Path) -> dict:
@@ -1086,13 +1125,16 @@ def test_a_sweep_trial_is_listed_read_canceled_and_streamed_by_its_id(
         f"/api/training/runs/{trial.name}/cancel", json={"user": "tester"}
     )
     assert canceled.status_code == 200, canceled.text
-    assert canceled.json()["cancel_requested"] is True
+    # The cancel answers the trial as its record reads after the request, and nothing beside it.
+    from tcip_mcp.tools.training_tools import training_detail
+
+    assert canceled.json() == training_detail(
+        opened_project, trial
+    ).model_dump(mode="json")
 
     from tcip_mcp.experiments import write_final_status
 
-    write_final_status(
-        trial, "canceled", "canceled by request", checkpoint=None
-    )
+    write_final_status(trial, "canceled", "canceled by request", ended=now())
     with opened_client.websocket_connect(
         f"ws://127.0.0.1/api/training/runs/{trial.name}/stream"
     ) as ws:
@@ -1117,7 +1159,7 @@ def test_a_sweep_and_its_trial_each_have_one_board_whichever_door_launches_it(
     and the trial's own directory once; the sweep's board is its own directory.
     """
     import tcip_mcp.tools.training_tools as tt
-    from tcip_mcp.experiments import board_of, find_sweep
+    from tcip_mcp.experiments import board_of, named_directory, sweep_dirs
     from tcip_store import canonical_path
 
     trials: list[Path] = []
@@ -1155,7 +1197,7 @@ def test_a_sweep_and_its_trial_each_have_one_board_whichever_door_launches_it(
         )
         assert resp.status_code == 200, resp.text
 
-    sweep_dir = find_sweep(sweep_id, project=opened_project)
+    sweep_dir = named_directory(sweep_id, sweep_dirs(opened_project))
     assert sweep_dir is not None and board_of(sweep_dir) == sweep_dir
     assert [canonical_path(directory) for directory in tb_launches] == [
         canonical_path(sweep_dir),
@@ -1218,7 +1260,7 @@ def test_a_recorded_sweep_relaunches_through_the_run_launch_door(
     request ends in ``--run-dir`` and the new sweep's directory. A relaunch also naming a
     selection directory is refused 422.
     """
-    from tcip_mcp.experiments import find_sweep, observe_sweep
+    from tcip_mcp.experiments import named_directory, observe_sweep, sweep_dirs
     from tests._producer_fixtures import fake_popen
     from tests._verified_checkpoint_fixtures import opened_sweep
 
@@ -1233,7 +1275,7 @@ def test_a_recorded_sweep_relaunches_through_the_run_launch_door(
     )
 
     assert resp.status_code == 200, resp.text
-    minted = find_sweep(resp.json()["sweep_id"], project=opened_project)
+    minted = named_directory(resp.json()["sweep_id"], sweep_dirs(opened_project))
     assert minted is not None
     assert observe_sweep(minted).record.input.relaunched_from == source
     (line,) = audit_rows(opened_project)[before:]

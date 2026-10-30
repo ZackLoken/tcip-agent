@@ -15,8 +15,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 if TYPE_CHECKING:
-    from httpx import Response
     from pydantic import JsonValue
+    from starlette.testclient import httpx
 
     from tcip_mcp.experiments import RunRecord
     from tcip_mcp.pipelines.data.selection import Selection
@@ -316,13 +316,13 @@ def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
         experiment_id="exp-table-picker",
     )
 
-    result = list_split_choices(tmp_path, "exp-table-picker")
+    result = list_split_choices(tmp_path, "exp-table-picker").model_dump()
 
     offered = {
         choice["selection_dir"]: choice for choice in result["selections"]
     }
     assert str(root / "splits" / "rows") in offered, result
-    assert offered[str(root / "splits" / "rows")]["enabled"] is True, offered
+    assert offered[str(root / "splits" / "rows")]["reason"] is None, offered
 
 
 def test_list_split_choices_route_404s_for_an_unknown_experiment(
@@ -403,29 +403,28 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     picked_cfg = _bespoke_config(tmp_path, image_dir(root, DATES[0]))
     opened_run(tmp_path, picked_cfg, experiment_id="exp-picked")
 
-    result = list_split_choices(tmp_path, "exp-picked")
+    result = list_split_choices(tmp_path, "exp-picked").model_dump()
     by_dir = {m["selection_dir"]: m for m in result["selections"]}
 
     expected = default_selection.counts()
     default_entry = by_dir[str(dataset_default)]
-    assert default_entry["enabled"] is True
+    assert default_entry["reason"] is None
     assert default_entry["train"] == expected["train"]
     assert default_entry["val"] == expected["val"]
     assert default_entry["calibration"] == expected["calibration"]
 
     elsewhere_entry = by_dir[str(elsewhere)]
-    assert elsewhere_entry["enabled"] is True
+    assert elsewhere_entry["reason"] is None
     assert elsewhere_entry["train"] > 0 and elsewhere_entry["val"] > 0
 
     # A partition drawn for another subject is a real offer: choosing it drops the stated
     # scope, since a bound run reads its scope off the selection.
     other_subject_entry = by_dir[str(other_subject_dir)]
-    assert other_subject_entry["enabled"] is True
+    assert other_subject_entry["reason"] is None
     chosen = _chosen(picked_cfg, str(other_subject_dir), tmp_path)
     assert "scope" not in chosen["data"]
 
     broken_entry = by_dir[str(broken_dir)]
-    assert broken_entry["enabled"] is False
     assert broken_entry["reason"] is not None
 
 
@@ -447,11 +446,11 @@ def test_list_split_choices_offers_a_frozen_manifest(tmp_path: Path) -> None:
     picked_cfg = _bespoke_config(tmp_path, image_dir(root, DATES[0]))
     opened_run(tmp_path, picked_cfg, experiment_id="exp-picked-frozen")
 
-    result = list_split_choices(tmp_path, "exp-picked-frozen")
+    result = list_split_choices(tmp_path, "exp-picked-frozen").model_dump()
     by_dir = {m["selection_dir"]: m for m in result["selections"]}
 
     entry = by_dir[frozen["selection_dir"]]
-    assert entry["enabled"] is True
+    assert entry["reason"] is None
 
 
 def test_list_split_choices_offers_two_frozen_manifests_under_one_splits_directory(
@@ -480,11 +479,13 @@ def test_list_split_choices_offers_two_frozen_manifests_under_one_splits_directo
     picked_cfg = _bespoke_config(tmp_path, image_dir(root, DATES[0]))
     opened_run(tmp_path, picked_cfg, experiment_id="exp-picked-both-frozen")
 
-    result = list_split_choices(tmp_path, "exp-picked-both-frozen")
+    result = list_split_choices(
+        tmp_path, "exp-picked-both-frozen"
+    ).model_dump()
     by_dir = {m["selection_dir"]: m for m in result["selections"]}
 
-    assert by_dir[first["selection_dir"]]["enabled"] is True
-    assert by_dir[second["selection_dir"]]["enabled"] is True
+    assert by_dir[first["selection_dir"]]["reason"] is None
+    assert by_dir[second["selection_dir"]]["reason"] is None
 
 
 def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight(
@@ -503,9 +504,8 @@ def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight
     opened_run(tmp_path, cfg, experiment_id="exp-moved-dirs")
     shutil.rmtree(image_dir(root, DATES[0]))
 
-    result = list_split_choices(tmp_path, "exp-moved-dirs")
+    result = list_split_choices(tmp_path, "exp-moved-dirs").model_dump()
 
-    assert result["as_recorded"]["compatible"] is False
     assert "Not found: data.images_dir" in result["as_recorded"]["reason"]
 
 
@@ -533,7 +533,7 @@ def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces
     )
     opened_run(tmp_path, cfg, experiment_id="exp-drawn-policy")
 
-    result = list_split_choices(tmp_path, "exp-drawn-policy")
+    result = list_split_choices(tmp_path, "exp-drawn-policy").model_dump()
     entry = next(
         m
         for m in result["selections"]
@@ -568,7 +568,7 @@ def test_list_split_choices_reports_the_redraw_seed_among_the_keys_a_partition_r
     cfg = _bound_config(root, own_manifest_dir, tmp_path, seed=11)
     opened_run(tmp_path, cfg, experiment_id="exp-redrawn-policy")
 
-    result = list_split_choices(tmp_path, "exp-redrawn-policy")
+    result = list_split_choices(tmp_path, "exp-redrawn-policy").model_dump()
     entry = next(
         m
         for m in result["selections"]
@@ -603,7 +603,7 @@ def test_list_split_choices_never_names_a_null_valued_split_key_as_replaced(
     cfg = _bound_config(root, own_manifest_dir, tmp_path, seed=None)
     opened_run(tmp_path, cfg, experiment_id="exp-null-policy-key")
 
-    result = list_split_choices(tmp_path, "exp-null-policy-key")
+    result = list_split_choices(tmp_path, "exp-null-policy-key").model_dump()
     entry = next(
         m
         for m in result["selections"]
@@ -674,7 +674,7 @@ def test_list_split_choices_does_not_offer_the_own_selection_under_a_different_s
     other_cfg = _bound_config(root, respelled, tmp_path)
     opened_run(tmp_path, other_cfg, experiment_id="exp-other-spelling")
 
-    result = list_split_choices(tmp_path, "exp-own-spelling")
+    result = list_split_choices(tmp_path, "exp-own-spelling").model_dump()
 
     offered = {m["selection_dir"] for m in result["selections"]}
     assert str(elsewhere) not in offered
@@ -710,7 +710,7 @@ def test_list_split_choices_offers_a_symlinked_manifest_directory_once(
     cfg = _bespoke_config(tmp_path, image_dir(root, DATES[0]))
     opened_run(tmp_path, cfg, experiment_id="exp-symlinked-splits")
 
-    result = list_split_choices(tmp_path, "exp-symlinked-splits")
+    result = list_split_choices(tmp_path, "exp-symlinked-splits").model_dump()
 
     offered = [m["selection_dir"] for m in result["selections"]]
     matches = [p for p in offered if Path(p).resolve() == real_dir.resolve()]
@@ -749,7 +749,7 @@ def test_list_split_choices_offers_a_case_respelled_duplicate_manifest_once(
     upper_cfg = _bound_config(root, str(shared_dir).upper(), tmp_path)
     opened_run(tmp_path, upper_cfg, experiment_id="exp-candidate-upper")
 
-    result = list_split_choices(tmp_path, "exp-picker")
+    result = list_split_choices(tmp_path, "exp-picker").model_dump()
 
     offered = [m["selection_dir"] for m in result["selections"]]
     matches = [p for p in offered if Path(p).resolve() == shared_dir.resolve()]
@@ -847,7 +847,7 @@ def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_
     )
 
 
-def _relaunched_config(project: Path, response: Response) -> RunRecord:
+def _relaunched_config(project: Path, response: httpx.Response) -> RunRecord:
     """Return the launch record of the new run of ``project`` a relaunch response names."""
     from tcip_mcp.experiments import experiment_dir, observe_run
 
@@ -935,9 +935,11 @@ def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_director
     cfg = _bespoke_config(tmp_path, image_dir(root, DATES[0]))
     opened_run(tmp_path, cfg, experiment_id="exp-symlink-relaunch")
 
-    choices = list_split_choices(tmp_path, "exp-symlink-relaunch")
+    choices = list_split_choices(tmp_path, "exp-symlink-relaunch").model_dump()
     offered = next(
-        m["selection_dir"] for m in choices["selections"] if m["enabled"]
+        m["selection_dir"]
+        for m in choices["selections"]
+        if m["reason"] is None
     )
     assert offered in (str(real_dir), str(link_dir))
     other_spelling = (

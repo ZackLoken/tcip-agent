@@ -55,7 +55,7 @@ export async function applyAnnotateFocus(
   // The canvas renders only shapes of the active subject, so a frame labeled for another
   // subject would show a blank canvas even in the right mode.
   store.setActiveSubject(d.subject);
-  store.setFocus(d.proposal === null ? null : { kind: "proposal", index: d.proposal });
+  store.setFocus(d.proposal === null ? null : { kind: "proposal", ...d.proposal });
   store.setActiveTab("annotate");
   return "adopted";
 }

@@ -15,13 +15,14 @@ import { Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
 
-import { committedOf, StructuredRefusalError } from "@/api/http";
+import { committedOf, messageOf, StructuredRefusalError } from "@/api/http";
 import { terminalApi, terminalWsUrl } from "@/api/terminal";
 import {
   TERMINAL_ENDED_CLOSE_CODE,
   type ProviderStatus,
   type TerminalEnd,
   type TerminalFrame,
+  type TerminalStatus,
 } from "@/api/types.generated";
 import { createReconnectingSocket, type ReconnectingSocket } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
@@ -30,9 +31,6 @@ import type { TerminalPhase } from "@/store/slices/terminalOpen";
 const MIN_WIDTH = 320;
 const DEFAULT_WIDTH = 480;
 const WIDTH_KEY = "tcip.terminal_width";
-
-/** The provider table as the backend lists it, or the reason it could not be asked. */
-type ProviderTable = { rows: ProviderStatus[]; reason: null } | { rows: null; reason: string };
 
 /** The row the rail launches: the remembered one if the table lists it and it can launch,
  * else the first row that can launch, else the first row. */
@@ -113,13 +111,15 @@ const FIELD_STATION_THEME = {
 export function TerminalRail() {
   const open = useStore((s) => s.terminalOpen);
   const setOpen = useStore((s) => s.setTerminalOpen);
-  // The provider table and the row the breeder chose from it; the chosen row's own reason says
-  // why it cannot launch, and a backend that could not be asked leaves no table and its reason.
-  const [table, setTable] = useState<ProviderTable | null>(null);
+  // The status answer and the row chosen from its providers, whose own reason says why it cannot
+  // launch; a backend that could not be asked leaves no answer and the sentence saying so.
+  const [status, setStatus] = useState<TerminalStatus | null>(null);
+  const [unreachable, setUnreachable] = useState<string | null>(null);
+  const asked = status !== null || unreachable !== null;
   const selected = useStore((s) => s.terminalProvider);
-  const row = table?.rows ? chooseRow(table.rows, selected) : null;
-  const reason = table === null ? null : (table.reason ?? row?.unavailable_reason ?? null);
-  const available = table !== null && reason === null && row !== null;
+  const row = status ? chooseRow(status.providers, selected) : null;
+  const reason = asked ? (unreachable ?? row?.unavailable_reason ?? null) : null;
+  const available = status !== null && reason === null && row !== null;
   const [error, setError] = useState<string | null>(null);
   // Live PTY link state, surfaced as a header dot (green = attached, amber = (re)connecting).
   const [conn, setConn] = useState<"connecting" | "open" | "reconnecting">("connecting");
@@ -150,7 +150,7 @@ export function TerminalRail() {
           useStore.getState().dropDeliveredTerminalMessages(1);
         }
       } catch (e) {
-        setError(String(e));
+        setError(messageOf(e));
       }
     })().finally(() => {
       submissionRef.current = null;
@@ -243,24 +243,21 @@ export function TerminalRail() {
   }
 
   useEffect(() => {
-    if (!open || table !== null) return;
+    if (!open || asked) return;
     terminalApi
       .status()
-      .then(({ providers }) => setTable({ rows: providers, reason: null }))
+      .then(setStatus)
       .catch(() =>
         // Backend unreachable is not a missing harness; say so, and keep Retry viable.
-        setTable({
-          rows: null,
-          reason: "Couldn't reach the TCIP backend. Is it running? Retry once it's up.",
-        }),
+        setUnreachable("Couldn't reach the TCIP backend. Is it running? Retry once it's up."),
       );
-  }, [open, table]);
+  }, [open, asked]);
 
   // Terminal lifecycle: build xterm, attach the PTY WebSocket while the agent runs, wire input
   // and resize. Closing the rail drops the socket; the session survives and reopening replays it.
   useEffect(() => {
-    if (!open || !available || !table.rows || !hostRef.current) return;
-    const rows = table.rows;
+    if (!open || !available || !hostRef.current) return;
+    const rows = status.providers;
     setConn("connecting");
 
     const term = new Terminal({
@@ -365,7 +362,7 @@ export function TerminalRail() {
             submitStaged();
           }
         } catch (e) {
-          setError(String(e));
+          setError(messageOf(e));
           throw e;
         }
         if (closedByClient) throw new Error("terminal rail unmounted mid-connect");
@@ -415,7 +412,7 @@ export function TerminalRail() {
       term.dispose();
       termRef.current = null;
     };
-  }, [open, available, table, submitStaged, showEnded, switchToChosen]);
+  }, [open, available, status, submitStaged, showEnded, switchToChosen]);
 
   useEffect(() => {
     if (pendingMessages.length) submitStaged();
@@ -433,29 +430,29 @@ export function TerminalRail() {
     setPhase("ending");
     socketRef.current?.stop();
     await submissionRef.current;
-    let answer: TerminalEnd | null = { undelivered: [] };
+    let answer: TerminalEnd | null = null;
     try {
       answer = await terminalApi.end(id, { user: useStore.getState().user });
     } catch (e) {
-      // A 404 says the backend no longer holds the session: it already ended.
+      // A 404 says the backend no longer holds the session: it already ended, answering nothing.
       if (!(e instanceof StructuredRefusalError && e.status === 404)) {
-        setError(String(e));
+        setError(messageOf(e));
         answer = committedOf<TerminalEnd>(e);
+        if (answer === null) {
+          resume(was);
+          return;
+        }
       }
-    }
-    if (answer === null) {
-      resume(was);
-      return;
     }
     const closesSwitch = was === "handing-off";
     settleEnd(answer, closesSwitch);
     if (!closesSwitch) showEnded();
   }
 
-  /** Stage the requests an ended session's agent was never given ahead of the others, then start
-   *  the chosen row when the end closes a switch. */
-  function settleEnd(ended: TerminalEnd, closesSwitch: boolean) {
-    useStore.getState().restageTerminalMessages(ended.undelivered);
+  /** Stage the requests an ended session's agent was never given, when its end answered them,
+   *  ahead of the others, then start the chosen row when the end closes a switch. */
+  function settleEnd(ended: TerminalEnd | null, closesSwitch: boolean) {
+    if (ended !== null) useStore.getState().restageTerminalMessages(ended.undelivered);
     if (closesSwitch) switchToChosen();
   }
 
@@ -474,7 +471,7 @@ export function TerminalRail() {
     try {
       ended = await terminalApi.handOff(id, { user });
     } catch (e) {
-      setError(String(e));
+      setError(messageOf(e));
       setTerminalProvider(ran);
       setPhase("live");
       return;
@@ -515,7 +512,7 @@ export function TerminalRail() {
       <div className="h-9 shrink-0 flex items-center justify-between px-3 border-b border-tcip-border bg-tcip-panel">
         <div className="flex items-center gap-2">
           <span className="text-[12px] font-medium text-tcip-muted">TCIP Agent</span>
-          {table?.rows && (
+          {status && (
             <select
               aria-label="Agent harness"
               title={PICKER_TITLE[phase]}
@@ -524,7 +521,7 @@ export function TerminalRail() {
               onChange={(e) => void choose(e.target.value)}
               className="h-6 max-w-[11rem] rounded border border-tcip-border bg-tcip-panel px-1 text-[13px] text-tcip-fg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70 disabled:opacity-40"
             >
-              {table.rows.map((r) => (
+              {status.providers.map((r) => (
                 <option
                   key={r.id}
                   value={r.id}
@@ -608,10 +605,16 @@ export function TerminalRail() {
         </div>
       </div>
 
-      {table !== null && reason !== null ? (
+      {reason !== null ? (
         <div className="p-4 flex flex-col gap-3">
           <p className="text-[13px] text-tcip-muted">{reason}</p>
-          <button className="tcip-btn self-start" onClick={() => setTable(null)}>
+          <button
+            className="tcip-btn self-start"
+            onClick={() => {
+              setStatus(null);
+              setUnreachable(null);
+            }}
+          >
             Retry
           </button>
         </div>

@@ -372,7 +372,7 @@ class TerminalSession:
                     )
                 _record(
                     _ENDED,
-                    self.ended.model_dump(mode="json"),
+                    self.ended.model_dump(),
                     self._project,
                     actor,
                 )
@@ -547,7 +547,7 @@ class TerminalSession:
             (write_retrospective.__name__,),
             after=hand_off.after,
         )
-        return any(line.get("terminal_session") == self.id for line in lines)
+        return any(line.terminal_session == self.id for line in lines)
 
     def _follow_hand_off(self) -> None:
         """End the session by the person who asked for its hand-off, once that hand-off landed.
@@ -716,7 +716,7 @@ def _conversation_to_resume(
     if resume is None or project is None:
         return None
     lines, _ = acts_of(project.root, (_ENDED,))
-    ends = [TerminalEnded.model_validate(line["arguments"]) for line in lines]
+    ends = [TerminalEnded.model_validate(line.arguments) for line in lines]
     newest = next(
         (e for e in reversed(ends) if e.provider == provider.id), None
     )
@@ -866,7 +866,7 @@ class SubmitRequest(BaseModel):
 
 
 @router.post("/sessions/{session_id}/submit")
-def submit_to_session(session_id: str, req: SubmitRequest) -> dict:
+def submit_to_session(session_id: str, req: SubmitRequest) -> None:
     """Queue ``req.text`` for the session's agent (:meth:`TerminalSession.deliver`).
 
     404 for a session the backend does not hold, ended or never started. The request is queued
@@ -877,7 +877,6 @@ def submit_to_session(session_id: str, req: SubmitRequest) -> dict:
         session = _require(session_id)
         session.submit(req.text)
     session.deliver()
-    return {}
 
 
 async def _pump(queue: asyncio.Queue, websocket: WebSocket) -> None:

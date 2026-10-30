@@ -245,8 +245,10 @@ def test_the_push_through_a_handshake_sends_the_identity_as_headers(
                 "push_panel_event",
                 {
                     "panel": "meta",
-                    "event_type": "identity_probe",
-                    "data": {"n": 1},
+                    "event": {
+                        "event_type": "banner",
+                        "text": "identity probe",
+                    },
                 },
             )
         ],
@@ -266,9 +268,9 @@ def test_the_push_with_no_handshake_sends_no_identity_header(
     bound: BoundProject,
 ) -> None:
     from tcip_mcp.agent_identity import HEADERS
-    from tcip_mcp.web_client import post_panel_event
+    from tcip_mcp.web_client import Banner, post_panel_event
 
-    post_panel_event(bound, "meta", "identity_probe", {"n": 1})
+    post_panel_event(bound, "meta", Banner(text="identity probe"))
 
     (req,) = captured_requests
     assert not {name.lower() for name in req.headers} & {

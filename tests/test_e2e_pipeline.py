@@ -128,7 +128,7 @@ class TestE2EPipeline:
 
         status = inspect_project(project_dir)
         assert status["record_problem"] is None
-        assert status["display_name"] == "North orchard"
+        assert status["record"]["display_name"] == "North orchard"
 
         # ── Step 3: Load dataset ─────────────────────────────────────
         ds = scan_dataset(project_dir, root)
@@ -160,7 +160,7 @@ class TestE2EPipeline:
         ]
         save_result = save_annotations(
             BoundProject(
-                project_dir, created["id"], workspace_from_environment()
+                project_dir, created["record"]["id"], workspace_from_environment()
             ),
             img_path,
             annotations=new_anns,
@@ -264,9 +264,9 @@ class TestE2EPipelineEdgeCases:
     """Edge-case scenarios for the pipeline."""
 
     def test_empty_project(self, tmp_path: Path) -> None:
-        """An uninitialized project inspects as no id, its record problem named."""
+        """An uninitialized project inspects as no record, its record problem named."""
         status = inspect_project(tmp_path)
-        assert status["id"] is None and status["record_problem"]
+        assert status["record"] is None and status["record_problem"]
 
     def test_dataset_with_missing_labels(self, tmp_path: Path) -> None:
         """scan_dataset counts three images, one label and two unlabeled images."""

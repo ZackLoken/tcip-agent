@@ -27,7 +27,7 @@ export const terminalApi = {
     postJson<TerminalEnd | null>(ROUTES.postTerminalSessionsBySessionIdHandOff(id), request),
 
   submit: (id: string, request: SubmitRequest) =>
-    postJson<Record<string, never>>(ROUTES.postTerminalSessionsBySessionIdSubmit(id), request),
+    postJson<null>(ROUTES.postTerminalSessionsBySessionIdSubmit(id), request),
 };
 
 export function terminalWsUrl(sessionId: string): string {

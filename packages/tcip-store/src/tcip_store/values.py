@@ -118,6 +118,14 @@ _FINITE_JSON: TypeAdapter[JsonValue] = TypeAdapter(
     JsonValue, config=_FINITE_JSON_RULE
 )
 
+FiniteJsonValue = Annotated[
+    JsonValue,
+    PlainValidator(
+        _FINITE_JSON.validate_python, json_schema_input_type=JsonValue
+    ),
+]
+"""A JSON value a store carries, one :func:`check_json_value` admits."""
+
 FINITE_JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(
     dict[str, JsonValue], config=_FINITE_JSON_RULE
 )

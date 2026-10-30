@@ -7,10 +7,11 @@ it; a resolved flag is kept, never removed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, TypedDict
 
 from pydantic import (
+    AwareDatetime,
     ConfigDict,
     Field,
     StrictBool,
@@ -25,111 +26,101 @@ from tcip_annotation.text import Text
 from tcip_store import Key
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from pydantic import JsonValue
 
 REVIEW_FLAGS_STORE = "review_flags"
 
+_RECORD = ConfigDict(extra="forbid", allow_inf_nan=False)
 
-@pydantic_dataclass(
-    frozen=True, config=ConfigDict(extra="forbid", allow_inf_nan=False)
-)
-class Flag:
-    """One flag: its id, comment, raiser and time, its target, and its resolution.
 
-    ``id`` names it, ``text`` is the comment, ``by`` who raised it (a person's recorded identity,
-    the label record's own spelling) and ``at`` when. Its target is one of: ``point`` (pixel
-    ``(x, y)``) with the ``subject`` of the annotation flagged there; ``proposal`` (``(bucket,
-    index)``, the index in that bucket's document for the image); or neither, the image as a
-    whole. Once resolved it carries ``resolved_by`` (a person) and ``resolved_at``, the
-    ``reply`` given, and ``removed`` when the save that resolved it did so by removing the
-    annotation it sat on. Construction validates every field (``pydantic.ValidationError``).
+@pydantic_dataclass(frozen=True, config=_RECORD)
+class PointTarget:
+    """A flag's target at a pixel: ``point`` ``(x, y)`` and the ``subject`` annotated there."""
+
+    point: tuple[float, float]
+    subject: Text
+
+
+@pydantic_dataclass(frozen=True, config=_RECORD)
+class ProposalTarget:
+    """A flag's target at a proposal: its ``bucket`` and its ``index`` in that bucket's document."""
+
+    bucket: Text
+    index: Annotated[StrictInt, Field(ge=0)]
+
+
+@pydantic_dataclass(frozen=True, config=_RECORD)
+class FlagRequest:
+    """A flag's comment, ``text``, and its ``target``, ``None`` for the image as a whole.
+
+    Construction validates every field (``pydantic.ValidationError``).
     """
 
-    id: Text
     text: Text
+    target: PointTarget | ProposalTarget | None
+
+
+@pydantic_dataclass(frozen=True, config=_RECORD)
+class Resolution:
+    """Who resolved a flag (a person) and when, the ``reply`` given, and whether by ``removed``.
+
+    ``removed`` is whether the save that resolved it did so by removing the annotation it sat on.
+    """
+
     by: Person
-    at: Text
-    point: tuple[float, float] | None
-    subject: Text | None
-    proposal: tuple[Text, Annotated[StrictInt, Field(ge=0)]] | None
-    resolved_by: Person | None
-    resolved_at: str | None
+    at: AwareDatetime
     reply: str
     removed: StrictBool
 
-    def __post_init__(self) -> None:
-        """Refuse a target or a resolution stated by halves (``ValueError``).
 
-        A point without its subject or a subject without its point, a point beside a proposal,
-        and a resolver without a time or a time without a resolver refuse.
-        """
-        if (
-            (self.point is None) != (self.subject is None)
-            or (self.point is not None and self.proposal is not None)
-            or (self.resolved_by is None) != (self.resolved_at is None)
-        ):
-            raise ValueError(
-                f"flag {self.id!r} is not a comment by a person at a time on a point with its "
-                "subject, a proposal or the image, resolved by a person at a time if at all"
-            )
+@pydantic_dataclass(frozen=True, config=_RECORD)
+class Flag:
+    """One flag: its id, its request, its raiser and time, and its resolution.
+
+    ``id`` names it, ``request`` is the comment and target it was raised with, ``by`` who raised
+    it (a person's recorded identity, the label record's own spelling) and ``at`` when;
+    ``resolution`` is ``None`` while it is open. Construction validates every field
+    (``pydantic.ValidationError``).
+    """
+
+    id: Text
+    request: FlagRequest
+    by: Person
+    at: AwareDatetime
+    resolution: Resolution | None
 
     @property
     def open(self) -> bool:
         """Whether nobody has resolved it."""
-        return self.resolved_by is None
+        return self.resolution is None
 
     def resolved(
-        self, *, by: str, at: str, reply: str = "", removed: bool = False
+        self, *, by: str, at: datetime, reply: str = "", removed: bool = False
     ) -> Flag:
         """Return this flag resolved by ``by`` at ``at``, validated as a :class:`Flag`."""
         return replace(
-            self, resolved_by=by, resolved_at=at, reply=reply, removed=removed
+            self,
+            resolution=Resolution(by=by, at=at, reply=reply, removed=removed),
         )
 
 
-@dataclass(frozen=True)
-class FlagRequest:
-    """A flag a save raises: its comment and its target, as :class:`Flag` states one."""
-
-    text: str
-    point: tuple[float, float] | None = None
-    subject: str | None = None
-    proposal: tuple[str, int] | None = None
-
-
-def raised(request: FlagRequest, *, by: str, at: str) -> Flag:
+def raised(request: FlagRequest, *, by: str, at: datetime) -> Flag:
     """Return ``request`` as a new open flag by ``by`` at ``at`` under a freshly minted id.
 
-    The comment is stripped; a flag that does not validate refuses as :class:`Flag` does.
+    A flag that does not validate refuses as :class:`Flag` does.
     """
     import uuid
 
     return Flag(
-        id=uuid.uuid4().hex,
-        text=request.text.strip(),
-        by=by,
-        at=at,
-        point=request.point,
-        subject=request.subject,
-        proposal=request.proposal,
-        resolved_by=None,
-        resolved_at=None,
-        reply="",
-        removed=False,
+        id=uuid.uuid4().hex, request=request, by=by, at=at, resolution=None
     )
 
 
 def flag_key(label_key: Key) -> Key:
     """Return the flags record key of the image whose label document ``label_key`` names."""
     return Key(REVIEW_FLAGS_STORE, label_key.root, label_key.parts)
-
-
-_FLAG = TypeAdapter(Flag)
-
-
-def encode_flag(flag: Flag) -> dict[str, JsonValue]:
-    """Return ``flag`` as the entry its record stores."""
-    return _FLAG.dump_python(flag, mode="json")
 
 
 class FlagsRecord(TypedDict):
@@ -199,7 +190,7 @@ def resolved_by_removal(
     after: list[Annotation],
     *,
     by: str,
-    at: str,
+    at: datetime,
 ) -> list[Flag]:
     """Return ``flags`` with each open one whose annotation was removed resolved as ``removed``.
 
@@ -208,12 +199,12 @@ def resolved_by_removal(
     """
 
     def removed(flag: Flag) -> bool:
-        subject, point = flag.subject, flag.point
-        if not flag.open or subject is None or point is None:
+        target = flag.request.target
+        if not flag.open or not isinstance(target, PointTarget):
             return False
-        return any(covers(a, subject, point) for a in before) and not any(
-            covers(a, subject, point) for a in after
-        )
+        return any(
+            covers(a, target.subject, target.point) for a in before
+        ) and not any(covers(a, target.subject, target.point) for a in after)
 
     return [
         flag.resolved(by=by, at=at, removed=True) if removed(flag) else flag

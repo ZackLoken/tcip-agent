@@ -7,13 +7,15 @@
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 
-import { StructuredRefusalError } from "@/api/http";
+import { messageOf, refusalOf } from "@/api/http";
+import { resultsApi } from "@/api/inference";
 import {
-  resultsApi,
-  type ServedTraitRecord,
-  type ServedTraitRevision as TraitRevision,
+  REVISION_MOVED,
+  type RevisionMovedRefusal,
+  type ServedRevision,
+  type ServedTrait,
   type TraitsListing,
-} from "@/api/inference";
+} from "@/api/types.generated";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
 import { useStore } from "@/store";
 
@@ -36,7 +38,7 @@ const words = (field: string): string => field.replaceAll("_", " ");
 
 const dayOf = (timestamp: string): string => timestamp.slice(0, 10);
 
-function revisionStateText(revision: TraitRevision): string {
+function revisionStateText(revision: ServedRevision): string {
   if (revision.withdrawn_at) {
     return `Confirmed by ${revision.confirmed_by}, withdrawn by ${revision.withdrawn_by} on ${dayOf(revision.withdrawn_at)}.`;
   }
@@ -47,7 +49,7 @@ function revisionStateText(revision: TraitRevision): string {
 }
 
 // The agent proposes, the breeder confirms; a correction is a message that proposes no meaning.
-function correctionRequest(trait: string, revision: TraitRevision): string {
+function correctionRequest(trait: string, revision: ServedRevision): string {
   return (
     `Revision ${revision.number} of the "${trait}" trait is not what I mean. Why the agent ` +
     `proposed it: ${revision.rationale} What should change: `
@@ -58,7 +60,7 @@ function RevisionEntry({
   revision,
   definitions,
 }: {
-  revision: TraitRevision;
+  revision: ServedRevision;
   definitions: Record<string, string>;
 }) {
   const { operationalizations, name: _name, ...fields } = revision.entry;
@@ -113,12 +115,12 @@ function TraitRow({
   auditWarning,
   onDecide,
 }: {
-  record: ServedTraitRecord;
+  record: ServedTrait;
   definitions: Record<string, string>;
   pending: boolean;
   note: string | null;
-  auditWarning: string | null;
-  onDecide: (revision: TraitRevision, confirmed: boolean) => void;
+  auditWarning?: string | null;
+  onDecide: (revision: ServedRevision, confirmed: boolean) => void;
 }) {
   const latest = record.revisions[record.revisions.length - 1];
   const [shownNumber, setShownNumber] = useState(latest.number);
@@ -133,7 +135,7 @@ function TraitRow({
         <span className="text-[12px] text-tcip-muted">
           {record.latest_confirmed === null
             ? "Not confirmed"
-            : `Confirmed, revision ${record.latest_confirmed}`}
+            : `Confirmed, revision ${record.latest_confirmed.number}`}
         </span>
       </div>
       {record.revisions.length > 1 && (
@@ -216,7 +218,7 @@ export function TraitRevisionPanel() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pendingTrait, setPendingTrait] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
-  const [auditWarnings, setAuditWarnings] = useState<Record<string, string | null>>({});
+  const [auditWarnings, setAuditWarnings] = useState<Partial<Record<string, string | null>>>({});
 
   const reload = useCallback(async () => {
     try {
@@ -224,7 +226,7 @@ export function TraitRevisionPanel() {
       setLoadError(null);
     } catch (e) {
       setListing(null);
-      setLoadError(`Could not load traits: ${e instanceof Error ? e.message : String(e)}`);
+      setLoadError(`Could not load traits: ${messageOf(e)}`);
     }
   }, []);
 
@@ -232,7 +234,7 @@ export function TraitRevisionPanel() {
     void reload();
   }, [reload]);
 
-  async function decide(trait: string, revision: TraitRevision, confirmed: boolean) {
+  async function decide(trait: string, revision: ServedRevision, confirmed: boolean) {
     setPendingTrait(trait);
     setNotes((prev) => ({ ...prev, [trait]: "" }));
     setAuditWarnings((prev) => ({ ...prev, [trait]: null }));
@@ -245,19 +247,31 @@ export function TraitRevisionPanel() {
         confirmed,
       });
       setAuditWarnings((prev) => ({ ...prev, [trait]: res.audit_warning }));
+      await reload();
     } catch (e) {
-      const moved = e instanceof StructuredRefusalError && e.status === 409;
-      setNotes((prev) => ({
-        ...prev,
-        [trait]: moved
-          ? "This revision is not the one shown. Read what is on file above, then decide on that."
-          : `${confirmed ? "Could not confirm" : "Could not withdraw"}: ${
-              e instanceof Error ? e.message : String(e)
-            }`,
-      }));
+      const moved = refusalOf<RevisionMovedRefusal>(e, REVISION_MOVED);
+      if (moved) {
+        // The refusal carries the trait's record as it stands: adopt it in place.
+        setListing(
+          (prev) =>
+            prev && {
+              ...prev,
+              traits: prev.traits.map((t) => (t.trait === moved.record.trait ? moved.record : t)),
+            },
+        );
+        setNotes((prev) => ({
+          ...prev,
+          [trait]: `${moved.message} Read what is on file above, then decide on that.`,
+        }));
+      } else {
+        setNotes((prev) => ({
+          ...prev,
+          [trait]: `${confirmed ? "Could not confirm" : "Could not withdraw"}: ${messageOf(e)}`,
+        }));
+        await reload();
+      }
     } finally {
       setPendingTrait(null);
-      await reload();
     }
   }
 
@@ -288,7 +302,7 @@ export function TraitRevisionPanel() {
               definitions={listing?.definitions ?? {}}
               pending={pendingTrait === record.trait}
               note={notes[record.trait] || null}
-              auditWarning={auditWarnings[record.trait] || null}
+              auditWarning={auditWarnings[record.trait]}
               onDecide={(revision, confirmed) => void decide(record.trait, revision, confirmed)}
             />
           ))}

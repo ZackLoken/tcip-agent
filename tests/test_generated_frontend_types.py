@@ -108,23 +108,6 @@ def test_a_free_form_object_renders_as_a_record_of_unknown() -> None:
     )
 
 
-def test_reordering_platform_panel_events_does_not_change_a_named_constants_value() -> (
-    None
-):
-    """A named ``PANEL_EVENT_*`` constant keeps its value when the event tuple is reordered."""
-    from tcip_mcp import web_client
-
-    generator = _generator()
-    before = generator.platform_panel_event_constants()
-    original = web_client.PLATFORM_PANEL_EVENTS
-    try:
-        web_client.PLATFORM_PANEL_EVENTS = tuple(reversed(original))
-        after = generator.platform_panel_event_constants()
-    finally:
-        web_client.PLATFORM_PANEL_EVENTS = original
-    assert before == after
-
-
 def test_an_object_with_its_own_fixed_property_set_still_refuses() -> None:
     """A fixed-shape object schema outside a ``$ref`` refuses."""
     generator = _generator()

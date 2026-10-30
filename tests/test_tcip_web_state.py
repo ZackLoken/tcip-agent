@@ -14,9 +14,11 @@ import pytest
 from pydantic import ValidationError
 
 import tcip_store
+from tcip_mcp.agent_identity import RecordedIdentity
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
 from tcip_mcp.web_client import (
     GUI_STATE_DEFAULTS,
+    Banner,
     DatasetChoice,
     gui_snapshot_key,
     read_gui_snapshot,
@@ -220,6 +222,47 @@ def test_a_held_selection_survives_a_mutation_of_another_field(
     assert set(persisted["dataset"]) == set(DatasetChoice.model_fields)
 
 
+def test_every_served_image_name_is_the_one_a_capture_scan_derives(
+    tmp_path: Path,
+) -> None:
+    """A selection's images, a labels-written event and a label load name an image alike.
+
+    Each is the name the capture scan keys its logical images by, a photograph's and a band
+    group's both.
+    """
+    import numpy as np
+    import tifffile
+
+    from tcip_mcp.pipelines.image_utils import logical_images_by_name
+    from tcip_mcp.web_client import LabelsWritten
+    from tcip_web.routes.annotate import load_labels
+    from tests._producer_fixtures import write_band_group, write_image
+
+    images = image_dir(tmp_path / "ds", "2026-01-01")
+    write_image(images / "a.jpg", (8, 8))
+    bands = {band: images / f"cap_{band}.tif" for band in ("Green", "Red")}
+    for path in bands.values():
+        tifffile.imwrite(path, np.zeros((8, 8), np.uint16))
+    write_band_group(images, "cap", bands, central_wavelength_nm=None)
+
+    selection = selection_for(
+        DatasetChoice(
+            dataset_root=str(tmp_path / "ds"),
+            date="2026-01-01",
+            current_image_index=0,
+        )
+    )
+
+    scanned = list(logical_images_by_name(images))
+    assert [image.name for image in selection.images] == scanned
+    assert [
+        LabelsWritten(image_path=image.path).name for image in selection.images
+    ] == scanned
+    assert [
+        load_labels(image.path).name for image in selection.images
+    ] == scanned
+
+
 def test_opening_a_project_with_no_snapshot_holds_a_fresh_state(
     tmp_path: Path,
 ) -> None:
@@ -289,6 +332,14 @@ def test_mutate_refuses_a_partial_nested_object_and_holds_nothing() -> None:
     assert store.state.view.scale == 1.0
 
 
+def test_mutate_refuses_a_view_at_no_positive_zoom_and_holds_nothing() -> None:
+    store = StateStore()
+    view = {"scale": 0.0, "offset_x": 0.0, "offset_y": 0.0}
+    with pytest.raises(GuiMutationInvalidError, match="scale"):
+        asyncio.run(store.mutate(lambda _held: {"view": view}, project=None))
+    assert store.version == 0
+
+
 def test_mutate_refuses_an_unknown_tab_and_holds_nothing() -> None:
     store = StateStore()
     with pytest.raises(GuiMutationInvalidError):
@@ -353,10 +404,13 @@ def test_retained_events_are_the_open_projects_and_go_when_another_opens(
     asyncio.run(store.open_project(proj_a))
     store.retain_event(
         PanelEnvelope(
-            panel="meta", event_type="for_a", data={}, event_id="for_a#1"
+            panel="meta",
+            event=Banner(text="for a"),
+            event_id="for_a#1",
+            identity=RecordedIdentity(),
         )
     )
-    assert [e.event_type for e in store.retained_events("meta")] == ["for_a"]
+    assert [e.event_id for e in store.retained_events("meta")] == ["for_a#1"]
 
     asyncio.run(store.open_project(proj_b))
     assert store.retained_events("meta") == []

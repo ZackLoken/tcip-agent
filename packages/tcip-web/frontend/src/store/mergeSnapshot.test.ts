@@ -5,8 +5,10 @@ import { recordLastTab } from "@/lib/datasetUiState";
 import { useStore } from "@/store";
 import type { DatasetSelection, GuiState } from "@/store/types";
 import {
+  DS_BUCKET,
   GROUPED_SELECTION,
   RAW_SELECTION,
+  SELECTED_SUBJECT as SUBJECT,
   selected,
   type SelectionChange,
   stateEnvelope,
@@ -21,11 +23,11 @@ const PROJECT = TEST_PROJECT;
 const OTHER = testProject({ id: "ffffffffffff", path: "/other" });
 
 function dataset(change: SelectionChange = {}): DatasetSelection {
-  return selected({ subject: "subject_a", count: 3, ...change });
+  return selected({ subject: SUBJECT, count: 3, ...change });
 }
 
 /** Another capture: the produced grouped one. */
-const OTHER_CAPTURE = selected({ subject: "subject_a" }, GROUPED_SELECTION);
+const OTHER_CAPTURE = selected({ subject: SUBJECT }, GROUPED_SELECTION);
 
 function snapshot(over: Partial<GuiState> = {}): GuiState {
   return {
@@ -33,7 +35,7 @@ function snapshot(over: Partial<GuiState> = {}): GuiState {
     dataset: dataset(),
     view: { scale: 1, offset_x: 0, offset_y: 0 },
     mode: "box",
-    active_subject: "subject_a",
+    active_subject: SUBJECT,
     ...over,
   };
 }
@@ -69,7 +71,7 @@ describe("mergeSnapshot ownership model", () => {
         state: snapshot({
           active_tab: "annotate",
           mode: "box",
-          active_subject: "subject_a",
+          active_subject: SUBJECT,
           dataset: dataset({ current_image_index: 0 }),
         }),
         version: 6,
@@ -189,14 +191,14 @@ describe("mergeSnapshot ownership model", () => {
   });
 
   it("adopts the backend's changed image list on a same-capture snapshot, at the local position", () => {
-    const incoming = dataset({ bucket: "m2/2026-01-01", count: 4 });
+    const incoming = dataset({ bucket: DS_BUCKET, count: 4 });
 
     s().mergeSnapshot(
       stateEnvelope({ state: snapshot({ dataset: incoming }), version: 6, project: PROJECT }),
     );
 
     expect(s().gui.dataset?.images).toEqual(incoming.images);
-    expect(s().gui.dataset?.bucket).toBe("m2/2026-01-01");
+    expect(s().gui.dataset?.bucket).toBe(DS_BUCKET);
     expect(s().gui.dataset?.current_image_index).toBe(2);
   });
 

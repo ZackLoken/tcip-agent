@@ -21,7 +21,6 @@ from tcip_mcp.pipelines.raster_source import Rect, TiffWholeSource, open_raster
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from PIL.ImageFile import ImageFile
     from rasterio.io import DatasetReader
 
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
@@ -237,34 +236,24 @@ def test_a_stacked_multipage_tiff_still_reads_whole(tmp_path: Path) -> None:
     assert np.array_equal(region, tifffile.imread(str(path)))
 
 
-def test_a_whole_decoded_tiff_is_opened_once_and_never_through_gdal(
+def test_a_whole_decoded_tiff_is_never_opened_through_gdal_and_left_closed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A whole-decoded TIFF is opened once and never through GDAL.
+    """A whole-decoded TIFF opens no GDAL dataset, and no handle on it outlives the read.
 
-    Opening and reading a stacked TIFF constructs one ``tifffile.TiffFile`` and opens no GDAL
-    dataset.
+    Once the reader of a stacked TIFF is closed, the file can be removed.
     """
     path, num_channels = _whole_tiff(tmp_path)
-    tiffs: list = []
-    real_init = tifffile.TiffFile.__init__
-
-    def counted(
-        self: tifffile.TiffFile, file: object, *args: object, **kwargs: object
-    ) -> None:
-        tiffs.append(file)
-        real_init(self, file, *args, **kwargs)
 
     def no_gdal(*args: object, **kwargs: object) -> None:
         raise AssertionError(f"GDAL opened {args}")
 
-    monkeypatch.setattr(tifffile.TiffFile, "__init__", counted)
     monkeypatch.setattr(raster_source, "open_gdal_dataset", no_gdal)
     with open_raster(path, num_channels) as src:
         region, _spec = src.read_region(Rect(0, 0, src.width, src.height))
     assert region.shape == (20, 14, 5)
-    assert len(tiffs) == 1
+    os.remove(path)
 
 
 def test_an_array_reader_materializes_the_layout_it_is_handed() -> None:
@@ -538,6 +527,25 @@ def test_an_unreadable_tiff_fails_naming_the_file(tmp_path: Path) -> None:
         open_raster(path, 3)
 
 
+def test_a_header_whose_georeference_refuses_holds_no_handle_on_its_file(
+    tmp_path: Path,
+) -> None:
+    """A TIFF stating no georeference holds the refusal and leaves its file closed.
+
+    While the header holding the refusal is alive, the file can be removed.
+    """
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        GeoreferencingError,
+    )
+
+    path = tmp_path / "plain.tif"
+    tifffile.imwrite(str(path), np.zeros((12, 16, 4), dtype=np.uint8))
+    header = raster_source.SourceHeader(path)
+    assert isinstance(header.georeference, GeoreferencingError)
+    os.remove(path)
+    assert isinstance(header.georeference, GeoreferencingError)
+
+
 def test_a_plain_read_serves_full_resolution(tmp_path: Path) -> None:
     """A read without a ``target_size`` is native resolution, resampled by nothing."""
     source, num_channels = _gdal_tiff(tmp_path)
@@ -651,7 +659,7 @@ def test_windowed_and_whole_decodes_of_one_tiff_agree(tmp_path: Path) -> None:
 
     header = raster_source.SourceHeader(path)
     with TiffWholeSource(
-        header, raster_source._layout(header.tiff, 3)
+        header.tiff, raster_source._layout(header.tiff, 3)
     ) as whole:
         decoded, _spec = whole.read_region(
             Rect(0, 0, whole.width, whole.height)
@@ -1444,31 +1452,21 @@ def test_the_route_count_expands_a_grayscale_photograph_to_three(
     assert (header.channels, header.route_channels) == (1, 3)
 
 
-def test_a_photographs_header_and_its_decode_share_one_open(
+def test_a_photographs_header_and_its_decode_leave_the_file_closed(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A photograph's header and its decode share one PIL open.
+    """A photograph's header and its decode agree on its frame and hold no handle on it.
 
-    Reading a photograph's frame and then opening it at the route count calls ``PIL.Image.open``
-    once.
+    After its frame is read and a reader at the route count is opened and closed, the file can be
+    removed while the header is alive.
     """
-    import PIL.Image
-
     path, _ = _photographic(tmp_path)
-    opened: list = []
-    real = PIL.Image.open
-
-    def counting(*args: object, **kwargs: object) -> ImageFile:
-        opened.append(args[0])
-        return real(*args, **kwargs)
-
-    monkeypatch.setattr(PIL.Image, "open", counting)
     header = raster_source.SourceHeader(path)
     frame = header.display_frame
     with header.open(header.route_channels) as src:
         assert (src.width, src.height) == frame
-    assert len(opened) == 1
+    os.remove(path)
+    assert header.display_frame == frame
 
 
 def test_a_grayscale_with_alpha_photograph_is_served_at_the_route_count(

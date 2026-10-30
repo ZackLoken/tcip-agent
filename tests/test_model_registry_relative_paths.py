@@ -165,14 +165,18 @@ def test_model_registry_listing_answers_resolved_absolute(
 def test_rank_registered_models_listing_view_answers_resolved_absolute(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.tools.model_tools import rank_registered_models
+    from tcip_mcp.tools.model_tools import (
+        RegisteredModels,
+        rank_registered_models,
+    )
 
     project = tmp_path / "proj"
     _, ckpt = _register_internal_checkpoint(project)
 
     result = rank_registered_models(project)
 
-    assert Path(result["models"][0]["checkpoint_path"]) == Path(ckpt).resolve()
+    assert isinstance(result, RegisteredModels)
+    assert Path(result.models[0].entry.checkpoint_path) == Path(ckpt).resolve()
 
 
 def test_rank_registered_models_tool_answers_resolved_absolute(
@@ -194,8 +198,8 @@ def test_rank_registered_models_tool_answers_resolved_absolute(
         include_unverified=True,
     )
 
-    assert "error" not in result, result
-    assert Path(result["checkpoint_path"]) == ckpt.resolve()
+    assert not isinstance(result, dict), result
+    assert Path(result.entry.checkpoint_path) == ckpt.resolve()
 
 
 def test_explicit_register_model_return_is_resolved_absolute(

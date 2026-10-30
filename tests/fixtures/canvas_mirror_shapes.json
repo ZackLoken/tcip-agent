@@ -26,6 +26,9 @@
         "opacity": 0.6,
         "width_factor": 2
       },
+      "halo": null,
+      "label": null,
+      "fill": false,
       "tag": "gt"
     }
   ],
@@ -48,6 +51,8 @@
         "opacity": 0.6,
         "width_factor": 2
       },
+      "halo": null,
+      "label": null,
       "tag": "gt"
     }
   ],
@@ -65,7 +70,10 @@
         4,
         4
       ],
+      "casing": null,
+      "halo": null,
       "label": "drawing",
+      "vertices": true,
       "tag": "in_progress"
     }
   ]

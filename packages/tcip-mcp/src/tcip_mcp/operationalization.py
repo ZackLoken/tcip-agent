@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
+
+from pydantic import BaseModel
 
 from tcip_mcp.subject_registry import SubjectRegistry, positive_state_problem
 from tcip_mcp.traits import (
@@ -27,8 +29,15 @@ class OperationalizationRefusedError(ValueError):
     """
 
     def as_detail(self) -> dict[str, Any]:
-        """Return the structured refusal body: its kind and its message."""
-        return {"kind": "operationalization", "message": str(self)}
+        """Return the structured refusal body, :class:`OperationalizationRefusal` dumped."""
+        return OperationalizationRefusal(message=str(self)).model_dump()
+
+
+class OperationalizationRefusal(BaseModel):
+    """A delivery door's refusal that a trait's delivered number has no confirmed meaning."""
+
+    kind: Literal["operationalization"] = "operationalization"
+    message: str
 
 
 def latest_confirmed(trait: str, project: str | Path) -> TraitRevision:

@@ -251,10 +251,8 @@ def seed_positive_class(
     """
     from tests._producer_fixtures import registry_over
 
-    registry = cr.registry_for_dataset_root(
-        project_root
-    ) or cr.SubjectRegistry(subjects=())
-    subjects = {s.name: s for s in registry.subjects}
+    registry = cr.registry_for_dataset_root(project_root)
+    subjects = {s.name: s for s in (registry.subjects if registry else ())}
     existing = subjects.get(subject_name)
     attrs = {a.name: a for a in (existing.attributes if existing else ())}
     if state is not None:

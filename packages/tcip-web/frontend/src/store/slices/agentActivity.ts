@@ -1,43 +1,31 @@
 import type { StateCreator } from "zustand";
 
-import type { AGENT_IDENTITY_FIELDS, Panel } from "@/api/types.generated";
+import type { Panel, PanelEvent, RecordedIdentity } from "@/api/types.generated";
 import type { AppState } from "@/store/appState";
-
-/** The identity fields a record or a push declared (tcip_mcp.agent_identity), each null or
- * absent when not declared. */
-export type DeclaredIdentity = Partial<
-  Record<(typeof AGENT_IDENTITY_FIELDS)[number], string | null>
->;
 
 export interface AgentActivity {
   /** Increments per event so effects can react to the latest one. */
   seq: number;
   panel: Panel;
-  eventType: string;
-  data: Record<string, unknown>;
+  event: PanelEvent;
   /** The harness that declared itself on this push (``agent_client_name``, its version appended
    * when declared), or null when the sender declared none: a plain process's own write. */
   client: string | null;
 }
 
 /** The client a record or a push declared: its name with its version appended when declared, or
- * null when it declared none. */
-export function declaredClient(fields: DeclaredIdentity): string | null {
-  const name = fields.agent_client_name;
+ * null when it declared none (`identity` null being a record no launch named). */
+export function declaredClient(identity: RecordedIdentity | null): string | null {
+  const name = identity?.agent_client_name;
   if (!name) return null;
-  const version = fields.agent_client_version;
+  const version = identity.agent_client_version;
   return version ? `${name} ${version}` : name;
 }
 
 export interface AgentActivitySlice {
   /** The last panel event and the client it declared, or null when none has arrived. */
   agentActivity: AgentActivity | null;
-  pushAgentActivity: (
-    panel: Panel,
-    eventType: string,
-    data: Record<string, unknown>,
-    client: string | null,
-  ) => void;
+  pushAgentActivity: (panel: Panel, event: PanelEvent, client: string | null) => void;
 }
 
 export const createAgentActivitySlice: StateCreator<AppState, [], [], AgentActivitySlice> = (
@@ -45,8 +33,8 @@ export const createAgentActivitySlice: StateCreator<AppState, [], [], AgentActiv
 ) => ({
   agentActivity: null,
 
-  pushAgentActivity: (panel, eventType, data, client) =>
+  pushAgentActivity: (panel, event, client) =>
     set((s) => ({
-      agentActivity: { seq: (s.agentActivity?.seq ?? 0) + 1, panel, eventType, data, client },
+      agentActivity: { seq: (s.agentActivity?.seq ?? 0) + 1, panel, event, client },
     })),
 });

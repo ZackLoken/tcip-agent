@@ -4,13 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 import * as client from "@/api/client";
 import { OVERVIEWS_REQUIRED } from "@/api/types.generated";
 import { STALL_MS, useOverviewBuild, writtenLabel } from "@/hooks/useOverviewBuild";
+import { IMAGE_ANSWERS } from "@/test/images";
 
-const URL = "/api/images?path=C:/data/mosaic.tif";
-const PATH = "C:/data/mosaic.tif";
-
-function job(status: client.OverviewJob["status"], bytesWritten = 0, error: string | null = null) {
-  return { job_id: "ovr-1", path: PATH, status, bytes_written: bytesWritten, error };
-}
+const { build: BUILD, running: RUNNING, completed: COMPLETED, failed: FAILED } = IMAGE_ANSWERS;
+const PATH = BUILD.path;
+const URL = `/api/images?path=${PATH}`;
 
 describe("useOverviewBuild", () => {
   it("starts nothing while the image is loading normally (no refusal condition read)", () => {
@@ -20,54 +18,40 @@ describe("useOverviewBuild", () => {
     expect(build).not.toHaveBeenCalled();
   });
 
-  it("starts nothing when the load failed under some other condition", () => {
-    const build = vi.spyOn(client.api.images, "buildOverviews");
-    const { result } = renderHook(() => useOverviewBuild(URL, PATH, "path_not_allowed"));
-    expect(build).not.toHaveBeenCalled();
-    expect(result.current.building).toBe(false);
-  });
-
   it("builds when the loader's read headers named the missing overviews, and shows the wait", async () => {
-    vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(job("running"));
-    vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(job("running", 4_200_000));
+    vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(BUILD);
+    vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(RUNNING);
 
     const { result } = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
     await waitFor(() => expect(result.current.building).toBe(true));
-    expect(client.api.images.buildOverviews).toHaveBeenCalledWith(PATH);
-    await waitFor(() => expect(result.current.bytesWritten).toBe(4_200_000));
-    expect(writtenLabel(result.current.bytesWritten)).toBe("4.2 MB written");
+    expect(client.api.images.buildOverviews).toHaveBeenCalledWith({ path: PATH });
+    await waitFor(() => expect(result.current.bytesWritten).toBe(RUNNING.bytes_written));
+  });
+
+  it("reads a sidecar's bytes in decimal megabytes", () => {
+    expect(writtenLabel(4_200_000)).toBe("4.2 MB written");
   });
 
   it("clears the wait and asks for the image again once the build completes", async () => {
-    vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(job("running"));
-    vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(job("completed", 9_000_000));
+    vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(BUILD);
+    vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(COMPLETED);
 
     const { result } = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
     await waitFor(() => expect(result.current.reloadToken).toBe(1));
-    expect(result.current.building).toBe(false);
-    expect(result.current.error).toBeNull();
-  });
-
-  it("reaches one completed state whether the build request or the poll answers completed", async () => {
-    const done = { building: false, bytesWritten: 9_000_000, error: null, reloadToken: 1 };
-    vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(job("completed", 9_000_000));
-    const fromRequest = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
-    await waitFor(() => expect(fromRequest.result.current).toEqual(done));
-
-    vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(job("running"));
-    vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(job("completed", 9_000_000));
-    const fromPoll = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
-    await waitFor(() => expect(fromPoll.result.current).toEqual(done));
+    expect(result.current).toEqual({
+      building: false,
+      bytesWritten: COMPLETED.bytes_written,
+      error: null,
+      reloadToken: 1,
+    });
   });
 
   it("reports a failed build instead of leaving the viewer waiting", async () => {
-    vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(job("running"));
-    vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(
-      job("failed", 2_000_000, "no room on the imagery volume"),
-    );
+    vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(BUILD);
+    vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(FAILED);
 
     const { result } = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
-    await waitFor(() => expect(result.current.error).toBe("no room on the imagery volume"));
+    await waitFor(() => expect(result.current.error).toBe(FAILED.error));
     expect(result.current.building).toBe(false);
     expect(result.current.reloadToken).toBe(0);
   });
@@ -75,14 +59,14 @@ describe("useOverviewBuild", () => {
   it("stops waiting on a build whose reported sidecar size never moves", async () => {
     vi.useFakeTimers();
     try {
-      vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(job("running"));
-      vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(job("running", 2_500_000));
+      vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(BUILD);
+      vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(RUNNING);
 
       const { result } = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
       await act(() => vi.advanceTimersByTimeAsync(STALL_MS * 2));
       expect(result.current.building).toBe(false);
       expect(result.current.error).toContain("stopped reporting progress");
-      expect(result.current.error).toContain("held at 2.5 MB written");
+      expect(result.current.error).toContain(`held at ${writtenLabel(RUNNING.bytes_written)}`);
       expect(result.current.reloadToken).toBe(0);
     } finally {
       vi.useRealTimers();
@@ -90,11 +74,11 @@ describe("useOverviewBuild", () => {
   });
 
   it("starts one build per image, so a build that fails is never retried in a loop", async () => {
-    const build = vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(job("running"));
-    vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(job("failed", 0, "denied"));
+    const build = vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(BUILD);
+    vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(FAILED);
 
     const { result, rerender } = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
-    await waitFor(() => expect(result.current.error).toBe("denied"));
+    await waitFor(() => expect(result.current.error).toBe(FAILED.error));
     rerender();
     rerender();
     expect(build).toHaveBeenCalledTimes(1);

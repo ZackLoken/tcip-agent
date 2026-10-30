@@ -55,20 +55,21 @@ def _annotations(
 def test_encode_predictions_roundtrip_and_negative(tmp_path: Path) -> None:
     from tcip_annotation import json_io
     from tcip_mcp.pipelines.data.label_queries import registry_scope
-    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+    from tcip_mcp.pipelines.postprocessing.export import (
+        DetectionResult,
+        encode_predictions,
+    )
 
     scope = registry_scope(tmp_path, "bud")
     encoded, _dropped = encode_predictions(
-        {
-            "image": "img.jpg",
-            "width": 100,
-            "height": 100,
-            "boxes": [[10.0, 10.0, 30.0, 30.0]],
-            "scores": [0.9],
-            "labels": [1],
-            "count": 1,
-            "cap": 2,
-        },
+        DetectionResult(
+            image="img.jpg",
+            width=100,
+            height=100,
+            boxes=[(10.0, 10.0, 30.0, 30.0)],
+            scores=[0.9],
+            cap=2,
+        ),
         "model:fixture",
         scope=scope,
     )
@@ -81,16 +82,9 @@ def test_encode_predictions_roundtrip_and_negative(tmp_path: Path) -> None:
 
     # Negative invariant: a zero-detection image still yields an {"annotations": []} record.
     empty, _dropped = encode_predictions(
-        {
-            "image": "empty.jpg",
-            "width": 100,
-            "height": 100,
-            "boxes": [],
-            "scores": [],
-            "labels": [],
-            "count": 0,
-            "cap": 1,
-        },
+        DetectionResult(
+            image="empty.jpg", width=100, height=100, boxes=[], scores=[], cap=1
+        ),
         "model:fixture",
         scope=scope,
     )

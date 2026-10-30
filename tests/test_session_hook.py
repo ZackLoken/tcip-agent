@@ -246,10 +246,8 @@ def test_the_orientation_holds_the_newest_entries_that_fit_and_how_many_there_ar
     base = datetime(2026, 3, 1, tzinfo=timezone.utc)
     minutes = {n: (n * 17) % 40 for n in range(40)}
     for n, minute in minutes.items():
-        stated = (base + timedelta(minutes=minute)).isoformat()
-        monkeypatch.setattr(
-            meta_tools, "now_iso", lambda stated=stated: stated
-        )
+        stated = base + timedelta(minutes=minute)
+        monkeypatch.setattr(meta_tools, "now", lambda stated=stated: stated)
         report_friction(
             opened.root,
             "missing_tool",

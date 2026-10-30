@@ -18,6 +18,7 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_annotation.verdicts import read_verdicts
 from tcip_mcp.dataset_layout import (
+    Decisions,
     Gestures,
     image_dir,
     parse_capture_dir,
@@ -81,7 +82,7 @@ def test_a_save_commits_its_verdicts_and_its_document_together_or_neither(
             image,
             [],
             expect=first,
-            gestures=Gestures(bucket=bucket, accept=frozenset({0})),
+            gestures=Gestures(decide=Decisions(bucket=bucket, verdicts={0: "accepted"})),
         )
 
     assert read_verdicts(shard) == []
@@ -96,7 +97,7 @@ def test_a_save_commits_its_verdicts_and_its_document_together_or_neither(
         image,
         [],
         expect=current,
-        gestures=Gestures(bucket=bucket, accept=frozenset({0})),
+        gestures=Gestures(decide=Decisions(bucket=bucket, verdicts={0: "accepted"})),
     )
 
     assert [v.action for v in read_verdicts(shard)] == ["accepted"]
@@ -156,11 +157,11 @@ def test_a_coco_import_writes_every_document_or_none(
     root = tmp_path / "ds"
     images = _capture(image_dir(root, DATE))
     document = _coco(tmp_path, images)
-    real_entry = audit.audit_entry
+    real_stored = audit.AuditLine.stored
     monkeypatch.setattr(
-        audit,
-        "audit_entry",
-        lambda *a, **k: {**real_entry(*a, **k), "unencodable": float("nan")},
+        audit.AuditLine,
+        "stored",
+        lambda line: {**real_stored(line), "unencodable": float("nan")},
     )
 
     stated = {"vertex_spacing": VERTEX_SPACING, "rationale": RATIONALE}
@@ -174,7 +175,7 @@ def test_a_coco_import_writes_every_document_or_none(
     )
     assert audit_rows(root, "coco_document_imported") == []
 
-    monkeypatch.setattr(audit, "audit_entry", real_entry)
+    monkeypatch.setattr(audit.AuditLine, "stored", real_stored)
     imported = import_coco_document(
         document, root, date=DATE, project=root, **stated, actor=None
     )
@@ -281,7 +282,10 @@ def test_a_publication_commits_whole_and_a_second_of_one_name_writes_nothing(
         read_bucket,
     )
     from tcip_mcp.pipelines.data.split_construction import raster_identity
-    from tcip_mcp.pipelines.postprocessing.export import encode_predictions
+    from tcip_mcp.pipelines.postprocessing.export import (
+        DetectionResult,
+        encode_predictions,
+    )
     from tests._chain_fixtures import predicted, published
 
     root = tmp_path / "ds"
@@ -300,7 +304,9 @@ def test_a_publication_commits_whole_and_a_second_of_one_name_writes_nothing(
         Document(
             str(p),
             *encode_predictions(
-                predicted(p, [BUD]), "detector", scope=first.scope
+                DetectionResult.model_validate(predicted(p, [BUD])),
+                "detector",
+                scope=first.scope,
             ),
         )
         for p in images[1:]

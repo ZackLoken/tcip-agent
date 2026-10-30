@@ -1,12 +1,18 @@
 /** The Training tab's side-by-side run comparison: RunComparison and its cell helpers. */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { StructuredRefusalError } from "@/api/http";
-import type { CompareExperiment, CompareResult, CompareSplit, MetricRow } from "@/api/training";
+import { messageOf, StructuredRefusalError } from "@/api/http";
 import { trainingApi } from "@/api/training";
-import { NOT_FINITE_SUFFIX } from "@/api/types.generated";
+import {
+  NOT_FINITE_SUFFIX,
+  type ComparedRun,
+  type Comparison,
+  type MetricsRow,
+  type Skipped,
+  type SplitColumn,
+} from "@/api/types.generated";
 import { formatNumber } from "@/lib/numberFormat";
-import { bareMetricName, RUN_REFRESH_MS, unionMetricKeys } from "@/tabs/trainingMetrics";
+import { RUN_REFRESH_MS, unionMetricKeys } from "@/tabs/trainingMetrics";
 
 /** One marked run: the one id it is tracked by, compared, ranked and streamed under. */
 export interface MarkedRun {
@@ -20,9 +26,8 @@ const UNRECORDED = "unrecorded";
 /** A column whose experiment id the returned answer does not carry. */
 const NOT_IN_ANSWER = "not in the comparison answer";
 const NO_REGISTERED_CHECKPOINT = "no registered checkpoint";
-/** The tool's own wording for a marked set with nothing at all to rank. */
-const NO_MARKED_CHECKPOINT = "none of the marked experiments registered a checkpoint";
-const NOT_RANKED_NO_CHECKPOINT = `not ranked: ${NO_REGISTERED_CHECKPOINT}`;
+/** What the Rank control says when no column of the comparison carries a registered checkpoint. */
+export const NO_MARKED_CHECKPOINT = "nothing to rank: no marked run has a registered checkpoint";
 const RANK_REASON_ID = "rank-disabled-reason";
 
 function cellText(value: unknown): string {
@@ -31,8 +36,31 @@ function cellText(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-function splitLine(split: CompareSplit | undefined): string {
-  if (!split) return UNRECORDED;
+/** One id's column of a comparison: its run read, or the reason it could not be. */
+type CompareEntry = Comparison["experiments"][number];
+
+/** Whether the comparison read `entry`'s run. */
+function isRead(entry: CompareEntry): entry is ComparedRun {
+  return "run" in entry;
+}
+
+/** The experiment id a comparison entry answers for. */
+function entryId(entry: CompareEntry): string {
+  return isRead(entry) ? entry.run.experiment_id : entry.experiment_id;
+}
+
+/** A marked run's column: absent from the answer, unread with the reason, or read. */
+type Column = MarkedRun &
+  ({ kind: "absent" } | { kind: "unread"; error: string } | { kind: "read"; exp: ComparedRun });
+
+/** A column's cell: the absence wording, the unrecorded wording for a run the comparison could
+ * not read, or `of` its read run. */
+function cell(column: Column, of: (exp: ComparedRun) => ReactNode): ReactNode {
+  if (column.kind === "absent") return NOT_IN_ANSWER;
+  return column.kind === "unread" ? UNRECORDED : of(column.exp);
+}
+
+function splitLine(split: SplitColumn): string {
   if (split.case === "bound") {
     return `bound to ${split.selection_dir}${split.seed != null ? ` (seed ${split.seed})` : ""}`;
   }
@@ -41,44 +69,44 @@ function splitLine(split: CompareSplit | undefined): string {
   return "no split record";
 }
 
-function fingerprintNote(experiments: CompareExperiment[]): string {
-  const unreadable = experiments.filter((e) => e.error).map((e) => e.experiment_id);
-  if (unreadable.length > 0) {
-    return `not comparable: ${unreadable.join(", ")} could not be read`;
+/** What a comparison says of its runs' source images, naming the runs that left it unknown. */
+function fingerprintNote({ dataset_fingerprints: match, experiments }: Comparison): string {
+  if (match === "same") return "same source images";
+  if (match === "different") return "not the same source images";
+  if (match === "unread") {
+    return `not comparable: ${experiments
+      .filter((e) => !isRead(e))
+      .map(entryId)
+      .join(", ")} could not be read`;
   }
-  const noRecord = experiments.filter((e) => !e.dataset_fingerprint).map((e) => e.experiment_id);
-  return noRecord.length > 0
-    ? `not comparable: ${noRecord.join(", ")} carry no fingerprint`
-    : "not comparable";
+  const unset = experiments.filter(isRead).filter((e) => e.dataset_fingerprint === null);
+  return `not comparable: ${unset.map(entryId).join(", ")} carry no fingerprint`;
 }
 
-function registryMetricKeys(experiments: CompareExperiment[]): string[] {
-  return unionMetricKeys(
-    experiments.flatMap((exp) => (exp.registry ?? []).map((entry) => entry.metrics)),
-  ).sort();
+/** What the ranking says of a checkpoint it left out ranking by `metric`: every fact it carries. */
+function skippedText(skipped: Skipped, metric: string): string {
+  const facts = [
+    skipped.unverified ? "unverified, its metrics are not the trainer's" : null,
+    skipped.unstamped ? `no ${metric} stamped` : null,
+  ];
+  return `${skipped.name}: not ranked: ${facts.filter(Boolean).join("; ")}`;
 }
 
-function loggedMetricKeys(experiments: CompareExperiment[]): string[] {
-  return unionMetricKeys(experiments.map((exp) => exp.last_logged_metrics)).sort();
+function loggedMetricKeys(experiments: CompareEntry[]): string[] {
+  return unionMetricKeys(experiments.filter(isRead).map((exp) => exp.last_logged_metrics)).sort();
 }
 
-function loggedMetricCell(row: MetricRow | undefined, key: string): string {
+function loggedMetricCell(row: MetricsRow | null, key: string): string {
   if (!row) return UNRECORDED;
   const state = row[`${key}${NOT_FINITE_SUFFIX}`];
   if (typeof state === "string") return state;
   return cellText(row[key]);
 }
 
-/** The wording for a marked run whose registered checkpoint(s) exist but carry no stamp of the
- * metric being ranked by. */
-function notRankedNoMetricStamped(metric: string): string {
-  return `not ranked: no ${metric} stamped`;
-}
-
 /** Side-by-side detail for two to four marked runs: one column per run labeled by the record it
  * came from, and one rank control over the platform's best-model derivation. */
 export function RunComparison({ marked }: { marked: MarkedRun[] }) {
-  const [result, setResult] = useState<CompareResult | null>(null);
+  const [result, setResult] = useState<Comparison | null>(null);
   const [compareError, setCompareError] = useState<string | null>(null);
 
   const [rankMetric, setRankMetric] = useState("");
@@ -88,24 +116,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
   const [rankResult, setRankResult] = useState<Awaited<
     ReturnType<typeof trainingApi.compareBest>
   > | null>(null);
-  const rankedMetric = rankResult?.ranking_basis ?? "";
   const [rankError, setRankError] = useState<string | null>(null);
-  const [higherIsBetterByMetric, setHigherIsBetterByMetric] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    let canceled = false;
-    trainingApi
-      .metricDirections()
-      .then((r) => {
-        if (!canceled) setHigherIsBetterByMetric(r.higher_is_better);
-      })
-      .catch(() => {
-        if (!canceled) setHigherIsBetterByMetric({});
-      });
-    return () => {
-      canceled = true;
-    };
-  }, []);
 
   const markedKey = marked.map((m) => m.experimentId).join(",");
 
@@ -122,13 +133,13 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
     setRankMetric("");
     async function refresh() {
       try {
-        const r = await trainingApi.compare(ids);
+        const r = await trainingApi.compare({ experiment_ids: ids });
         if (!canceled) {
           setResult(r);
           setCompareError(null);
         }
       } catch (e) {
-        if (!canceled) setCompareError(e instanceof Error ? e.message : String(e));
+        if (!canceled) setCompareError(messageOf(e));
       }
     }
     void refresh();
@@ -141,41 +152,32 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
   }, [markedKey]);
 
   const byExperimentId = useMemo(() => {
-    const map = new Map<string, CompareExperiment>();
-    (result?.experiments ?? []).forEach((e) => map.set(e.experiment_id, e));
+    const map = new Map<string, CompareEntry>();
+    (result?.experiments ?? []).forEach((e) => map.set(entryId(e), e));
     return map;
   }, [result]);
 
-  const columns = marked.map((m) => ({
-    ...m,
-    exp: byExperimentId.get(m.experimentId),
-    hasEntry: byExperimentId.has(m.experimentId),
-  }));
+  const columns = marked.map((m): Column => {
+    const entry = byExperimentId.get(m.experimentId);
+    if (entry === undefined) return { ...m, kind: "absent" };
+    return isRead(entry)
+      ? { ...m, kind: "read", exp: entry }
+      : { ...m, kind: "unread", error: entry.error };
+  });
+  const registries = columns.map((c) => (c.kind === "read" ? c.exp.registry : []));
 
   const metricRows = loggedMetricKeys(result?.experiments ?? []);
-  const rankMetricOptions = registryMetricKeys(result?.experiments ?? []);
+  const rankMetricOptions = Object.keys(result?.higher_is_better ?? {});
 
-  const registryEntriesCount = columns.reduce((sum, c) => sum + (c.exp?.registry?.length ?? 0), 0);
-  const allColumnsLoaded = columns.length > 0 && columns.every((c) => c.hasEntry);
-  const noMarkedCheckpoint = allColumnsLoaded && registryEntriesCount === 0;
-  const columnsWithNoCheckpoint = columns.filter(
-    (c) => c.hasEntry && (c.exp?.registry?.length ?? 0) === 0,
-  );
-  // A column that registered a checkpoint with no stamp of the ranked metric is named, as a
-  // column with no checkpoint at all is.
-  const columnsMissingRankedMetric = columns.filter(
-    (c) =>
-      c.hasEntry &&
-      (c.exp?.registry?.length ?? 0) > 0 &&
-      !(c.exp?.registry ?? []).some((entry) => typeof entry.metrics?.[rankedMetric] === "number"),
-  );
+  const allColumnsLoaded = columns.length > 0 && columns.every((c) => c.kind !== "absent");
+  const noMarkedCheckpoint = allColumnsLoaded && registries.every((r) => r.length === 0);
 
   function hasDeclaredDirection(metric: string): boolean {
-    return higherIsBetterByMetric[bareMetricName(metric)] !== undefined;
+    return (result?.higher_is_better[metric] ?? null) !== null;
   }
   const declaredMetricOptions = rankMetricOptions.filter(hasDeclaredDirection);
   const undeclaredMetricOptions = rankMetricOptions.filter((k) => !hasDeclaredDirection(k));
-  // Read off the declared-direction table fetched on mount, as soon as the breeder picks a metric.
+  // Read off the comparison's own directions, as soon as the breeder picks a metric.
   const needsDirection = rankMetric !== "" && !hasDeclaredDirection(rankMetric);
   const rankDisabledReason = noMarkedCheckpoint
     ? NO_MARKED_CHECKPOINT
@@ -206,14 +208,14 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
       const res = await trainingApi.compareBest({
         experiment_ids: marked.map((m) => m.experimentId),
         metric: rankMetric,
-        higher_is_better: needsDirection ? (rankDirection ?? undefined) : undefined,
+        higher_is_better: needsDirection ? rankDirection : null,
         include_unverified: includeUnverified,
       });
       setRankResult(res);
     } catch (e) {
       setRankResult(null);
       // Branches on the ranking's own refusal fields.
-      setRankError(e instanceof Error ? e.message : String(e));
+      setRankError(messageOf(e));
       if (e instanceof StructuredRefusalError && e.detail.all_unverified === true) {
         setNeedsUnverifiedOption(true);
       }
@@ -244,12 +246,12 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
             </tr>
           </thead>
           <tbody>
-            {columns.some((c) => c.exp?.error) && (
+            {columns.some((c) => c.kind === "unread") && (
               <tr className="border-b border-tcip-border">
                 <th className="tcip-th">Read error</th>
                 {columns.map((c) => (
                   <td key={c.experimentId} className="px-2 py-1 tcip-problem">
-                    {c.exp?.error ?? ""}
+                    {c.kind === "unread" && c.error}
                   </td>
                 ))}
               </tr>
@@ -258,7 +260,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
               <th className="tcip-th">Builder</th>
               {columns.map((c) => (
                 <td key={c.experimentId} className="px-2 py-1">
-                  {c.hasEntry ? (c.exp?.model ?? UNRECORDED) : NOT_IN_ANSWER}
+                  {cell(c, (exp) => exp.run.builder)}
                 </td>
               ))}
             </tr>
@@ -266,9 +268,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
               <th className="tcip-th">Task / subject</th>
               {columns.map((c) => (
                 <td key={c.experimentId} className="px-2 py-1">
-                  {c.hasEntry
-                    ? `${c.exp?.task ?? UNRECORDED} / ${c.exp?.subject ?? UNRECORDED}`
-                    : NOT_IN_ANSWER}
+                  {cell(c, (exp) => `${exp.run.task} / ${exp.subject ?? UNRECORDED}`)}
                 </td>
               ))}
             </tr>
@@ -276,10 +276,14 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
               <th className="tcip-th">State</th>
               {columns.map((c) => (
                 <td key={c.experimentId} className="px-2 py-1">
-                  {c.hasEntry ? (c.exp?.state ?? UNRECORDED) : NOT_IN_ANSWER}
-                  {c.exp?.status_error ? (
-                    <span className="block tcip-problem">{c.exp.status_error}</span>
-                  ) : null}
+                  {cell(c, (exp) => (
+                    <>
+                      {exp.run.state}
+                      {exp.run.status_error !== null && (
+                        <span className="block tcip-problem">{exp.run.status_error}</span>
+                      )}
+                    </>
+                  ))}
                 </td>
               ))}
             </tr>
@@ -287,25 +291,21 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
               <th className="tcip-th">Epochs logged</th>
               {columns.map((c) => (
                 <td key={c.experimentId} className="px-2 py-1 tabular-nums">
-                  {c.hasEntry ? (c.exp?.n_epochs ?? UNRECORDED) : NOT_IN_ANSWER}
+                  {cell(c, (exp) => exp.n_epochs)}
                 </td>
               ))}
             </tr>
             <tr className="border-b border-tcip-border">
               <th className="tcip-th">Images</th>
               <td colSpan={columns.length} className="px-2 py-1">
-                {result.same_dataset_fingerprint === true
-                  ? "same source images"
-                  : result.same_dataset_fingerprint === false
-                    ? "not the same source images"
-                    : fingerprintNote(result.experiments)}
+                {fingerprintNote(result)}
               </td>
             </tr>
             <tr className="border-b border-tcip-border">
               <th className="tcip-th">Partition</th>
               {columns.map((c) => (
                 <td key={c.experimentId} className="px-2 py-1">
-                  {c.hasEntry ? splitLine(c.exp?.split) : NOT_IN_ANSWER}
+                  {cell(c, (exp) => splitLine(exp.split))}
                 </td>
               ))}
             </tr>
@@ -339,9 +339,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
                   <th className="tcip-th">{key}</th>
                   {columns.map((c) => (
                     <td key={c.experimentId} className="px-2 py-1 tabular-nums">
-                      {c.hasEntry
-                        ? loggedMetricCell(c.exp?.last_logged_metrics, key)
-                        : NOT_IN_ANSWER}
+                      {cell(c, (exp) => loggedMetricCell(exp.last_logged_metrics, key))}
                     </td>
                   ))}
                 </tr>
@@ -367,17 +365,17 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
           <tbody>
             <tr>
               <th className="tcip-th">Entries</th>
-              {columns.map((c) => (
+              {columns.map((c, i) => (
                 <td key={c.experimentId} className="px-2 py-1 align-top">
-                  {!c.hasEntry ? (
+                  {c.kind === "absent" ? (
                     <span className="text-tcip-muted">{NOT_IN_ANSWER}</span>
-                  ) : c.exp?.registry && c.exp.registry.length > 0 ? (
+                  ) : registries[i].length > 0 ? (
                     <ul className="space-y-1">
-                      {c.exp.registry.map((entry) => (
+                      {registries[i].map(({ entry, facts }) => (
                         <li key={entry.name}>
                           <span className="block font-mono">{entry.name}</span>
                           <span className="block text-tcip-muted">
-                            {entry.metrics_source ?? UNRECORDED}
+                            {facts.metrics_source ?? UNRECORDED}
                             {` (${new Date(entry.registered_at).toLocaleString()})`}
                           </span>
                         </li>
@@ -466,7 +464,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
                 checked={includeUnverified}
                 onChange={(e) => setIncludeUnverified(e.target.checked)}
               />
-              include checkpoints the trainer did not stamp
+              include unverified checkpoints
             </label>
           )}
           <button
@@ -486,47 +484,32 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
         )}
         {rankResult && (
           <div role="status" className="mt-2 text-[13px]">
-            <span className="font-mono">{rankResult.name}</span>
-            {rankResult.experiment_id && rankResult.experiment_id !== rankResult.name && (
-              <span className="text-tcip-muted"> ({rankResult.experiment_id})</span>
-            )}
-            {rankedMetric && (
-              <span className="text-tcip-muted">
-                {" "}
-                / {rankedMetric}: {cellText(rankResult.metrics[rankedMetric])}
-              </span>
-            )}
+            <span className="font-mono">{rankResult.entry.name}</span>
+            {rankResult.entry.experiment_id !== null &&
+              rankResult.entry.experiment_id !== rankResult.entry.name && (
+                <span className="text-tcip-muted"> ({rankResult.entry.experiment_id})</span>
+              )}
+            <span className="text-tcip-muted">
+              {" "}
+              / {rankResult.metric}: {cellText(rankResult.facts.metrics[rankResult.metric])}
+            </span>
             <span className="block text-tcip-muted">
               {[
-                rankResult.metrics_source ?? UNRECORDED,
+                rankResult.facts.metrics_source ?? UNRECORDED,
                 `${rankResult.direction_source} direction`,
-                rankResult.excluded_unverified.length > 0
-                  ? `excluded: ${rankResult.excluded_unverified.map((e) => e.name).join(", ")}`
-                  : null,
-                columnsWithNoCheckpoint.length > 0
-                  ? columnsWithNoCheckpoint
-                      .map((c) => `${c.experimentId}: ${NOT_RANKED_NO_CHECKPOINT}`)
-                      .join(", ")
-                  : null,
-                columnsMissingRankedMetric.length > 0
-                  ? columnsMissingRankedMetric
-                      .map((c) => `${c.experimentId}: ${notRankedNoMetricStamped(rankedMetric)}`)
-                      .join(", ")
-                  : null,
-              ]
-                .filter(Boolean)
-                .join(" / ")}
+                ...rankResult.skipped.map((s) => skippedText(s, rankResult.metric)),
+              ].join(" / ")}
             </span>
           </div>
         )}
       </div>
 
-      {result.experiments.some((e) => e.rows_after_end) && (
+      {result.experiments.filter(isRead).some((e) => e.rows_after_end) && (
         <div className="tcip-panel p-2 text-[13px] text-tcip-muted">
-          {result.experiments.map((e) =>
+          {result.experiments.filter(isRead).map((e) =>
             e.rows_after_end ? (
-              <div key={e.experiment_id}>
-                <span className="font-mono">{e.experiment_id}</span>:{" "}
+              <div key={e.run.experiment_id}>
+                <span className="font-mono">{e.run.experiment_id}</span>:{" "}
                 {`${e.rows_after_end} row(s) logged after the run ended`}
               </div>
             ) : null,

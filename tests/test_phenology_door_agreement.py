@@ -35,7 +35,6 @@ def test_the_web_and_mcp_deliveries_agree_on_the_majority_column_and_the_revisio
         json={
             **body,
             "payload": "milestones",
-            "filename": "delivery.csv",
             "user": "breeder",
         },
     )

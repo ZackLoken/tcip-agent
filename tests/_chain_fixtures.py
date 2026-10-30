@@ -1052,19 +1052,31 @@ def attributed_series(
     )
 
 
-def run_the_chain(
-    project: Path, *, experiment_id: str, bucket_name: str = "chain"
-) -> Chain:
-    """Ingest, train, confirm, assess and publish under ``project``; the assessment must pass."""
-    from tcip_mcp.tools.inference_tools import run_inference
+def trained_detector(
+    project: Path, *, experiment_id: str
+) -> tuple[Path, Path, Path, str]:
+    """Ingest, draw, train and confirm the count trait under ``project``.
 
+    Returns the dataset root, its capture's images, the reference selection and the checkpoint.
+    """
     root = project / "ds"
     images_dir = synthetic_capture(root)
     selection_dir = project / "selection"
     draw_reference_selection(project, root, selection_dir)
     checkpoint_path = train_on(selection_dir, project, experiment_id)
     confirm_count_trait(project)
+    return root, images_dir, selection_dir, checkpoint_path
 
+
+def run_the_chain(
+    project: Path, *, experiment_id: str, bucket_name: str = "chain"
+) -> Chain:
+    """Ingest, train, confirm, assess and publish under ``project``; the assessment must pass."""
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    root, images_dir, selection_dir, checkpoint_path = trained_detector(
+        project, experiment_id=experiment_id
+    )
     assessment = assess(project, checkpoint_path, selection_dir)
     assert "error" not in assessment, assessment
     assert read_assessment(project, assessment["assessment_id"]).passed, (

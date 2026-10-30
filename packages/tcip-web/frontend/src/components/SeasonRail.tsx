@@ -6,7 +6,7 @@
  * generic dashboard). Display-only and behavior-neutral.
  */
 
-const ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
+import type { Capture } from "@/api/types.generated";
 
 // Dormant → bud → canopy → late-summer → fruit (mirrors the tcip-season-* tokens).
 const SEASON = ["#5B6B6A", "#7FA96A", "#507754", "#C9A24B", "#E6976B"];
@@ -25,20 +25,10 @@ const MONTH_ABBR = [
   "Dec",
 ];
 
-function parts(iso: string): [number, number, number] {
-  const m = ISO.exec(iso)!;
-  return [Number(m[1]), Number(m[2]), Number(m[3])];
-}
-
-/** Absolute timestamp, or null if the ISO-shaped string isn't a real calendar date
- *  (e.g. "2026-13-40" rolls over: reject it rather than mislabel it). */
-function timeOf(iso: string): number | null {
-  const [y, mo, d] = parts(iso);
-  const date = new Date(y, mo - 1, d);
-  if (date.getFullYear() !== y || date.getMonth() !== mo - 1 || date.getDate() !== d) {
-    return null;
-  }
-  return date.getTime();
+/** A dated capture: its name and the calendar day its date names, read in UTC. */
+interface Tick {
+  name: string;
+  day: Date;
 }
 
 function seasonColor(month: number): string {
@@ -49,34 +39,34 @@ function seasonColor(month: number): string {
   return SEASON[4];
 }
 
-function label(iso: string): string {
-  const [, mo, d] = parts(iso);
-  return `${MONTH_ABBR[mo - 1]} ${d}`;
+function label({ day }: Tick): string {
+  return `${MONTH_ABBR[day.getUTCMonth()]} ${day.getUTCDate()}`;
 }
 
 interface SeasonRailProps {
-  dates: string[];
+  captures: Capture[];
   active?: string | null;
   className?: string;
   /** Print each tick's date below the rail (staggered two rows to limit overlap). */
   showLabels?: boolean;
 }
 
-export function SeasonRail({ dates, active, className, showLabels }: SeasonRailProps) {
-  // Keep only real calendar dates; everything else (undated bucket, invalid folder
-  // names) is counted as undated so nothing renders a bogus tick.
-  const iso = dates.filter((d) => ISO.test(d) && timeOf(d) !== null).sort();
-  const undated = dates.length - iso.length;
+export function SeasonRail({ captures, active, className, showLabels }: SeasonRailProps) {
+  // A capture no date names (the undated bucket among them) is counted as undated, never a tick;
+  // the dated ones keep the order the tree lists them in.
+  const iso: Tick[] = captures.flatMap((c) =>
+    c.date === null ? [] : [{ name: c.name, day: new Date(c.date) }],
+  );
+  const undated = captures.length - iso.length;
   if (iso.length === 0 && undated === 0) return null;
 
   // Position by absolute timestamp (not day-of-year) so a season that crosses a year
   // boundary orders correctly.
-  const times = iso.map((d) => timeOf(d) as number);
+  const times = iso.map((t) => t.day.getTime());
   const min = times.length ? Math.min(...times) : 0;
   const max = times.length ? Math.max(...times) : 0;
   const span = max - min || 1;
-  const posOf = (d: string) =>
-    iso.length <= 1 ? 50 : (((timeOf(d) as number) - min) / span) * 100;
+  const posOf = (t: Tick) => (iso.length <= 1 ? 50 : ((t.day.getTime() - min) / span) * 100);
 
   const summary =
     iso.length > 0
@@ -103,31 +93,34 @@ export function SeasonRail({ dates, active, className, showLabels }: SeasonRailP
             className="absolute left-0 right-0 -translate-y-1/2 h-[3px] rounded-full opacity-70"
             style={{ top: railTop, background: `linear-gradient(90deg, ${SEASON.join(", ")})` }}
           />
-          {iso.map((d) => {
-            const isActive = d === active;
-            const [, mo] = parts(d);
+          {iso.map((t) => {
+            const isActive = t.name === active;
             return (
               <span
-                key={d}
+                key={t.name}
                 data-testid="season-tick"
-                title={label(d)}
+                title={label(t)}
                 className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full ${
                   isActive ? "h-3 w-3 ring-2 ring-tcip-fg/70" : "h-2 w-2"
                 }`}
-                style={{ left: `${posOf(d)}%`, top: railTop, background: seasonColor(mo) }}
+                style={{
+                  left: `${posOf(t)}%`,
+                  top: railTop,
+                  background: seasonColor(t.day.getUTCMonth() + 1),
+                }}
               />
             );
           })}
           {showLabels &&
-            iso.map((d, i) => (
+            iso.map((t, i) => (
               <span
-                key={`lbl-${d}`}
+                key={`lbl-${t.name}`}
                 className={`absolute -translate-x-1/2 text-[9px] leading-none tabular-nums whitespace-nowrap ${
-                  d === active ? "font-medium text-tcip-fg" : "text-tcip-muted"
+                  t.name === active ? "font-medium text-tcip-fg" : "text-tcip-muted"
                 }`}
-                style={{ left: `${posOf(d)}%`, top: i % 2 === 0 ? "15px" : "26px" }}
+                style={{ left: `${posOf(t)}%`, top: i % 2 === 0 ? "15px" : "26px" }}
               >
-                {label(d)}
+                {label(t)}
               </span>
             ))}
         </div>

@@ -27,9 +27,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar
 
 from pydantic import (
+    BaseModel,
     BeforeValidator,
     ConfigDict,
     Field,
+    GetJsonSchemaHandler,
     SerializerFunctionWrapHandler,
     Strict,
     TypeAdapter,
@@ -41,6 +43,8 @@ from tcip_annotation.state import Attribute
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
+    from pydantic.json_schema import JsonSchemaValue
+    from pydantic_core import CoreSchema
 
     from tcip_mcp.traits import PositiveState
     from tcip_store import Version
@@ -82,8 +86,33 @@ def _keyed(
     }
 
 
+class _KeyedSchema:
+    """The JSON schema of a :data:`ByName` field: the mapping it is stored and sent as.
+
+    The mapping's value schema is an entry's own, its ``name`` dropped, since the key names it.
+    """
+
+    def __get_pydantic_json_schema__(
+        self, schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        """Return the mapping's schema from the entry schema of the tuple ``schema`` wraps."""
+        held: Any = schema
+        while held["type"] != "tuple":
+            held = held["schema"]
+        entry = dict(handler(held["items_schema"][0]))
+        entry["properties"] = {
+            k: v for k, v in entry["properties"].items() if k != "name"
+        }
+        entry["required"] = [k for k in entry["required"] if k != "name"]
+        return {"type": "object", "additionalProperties": entry}
+
+
 type ByName[T] = Annotated[
-    tuple[T, ...], Strict(), BeforeValidator(_entries), WrapSerializer(_keyed)
+    tuple[T, ...],
+    Strict(),
+    BeforeValidator(_entries),
+    WrapSerializer(_keyed),
+    _KeyedSchema(),
 ]
 """Entries stored as one mapping from each entry's name to its other fields, in declared order;
 held as a tuple, and read from that mapping or a tuple of entries, never a list."""
@@ -107,11 +136,15 @@ class Subject:
         return named(self.attributes, name)
 
 
+type RegistrySubjects = Annotated[ByName[Subject], Field(min_length=1)]
+"""A registry's subjects: at least one, by name, in declared order."""
+
+
 @pydantic_dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class SubjectRegistry:
-    """The whole ``subjects.json``, the dataset's subjects, in declared order."""
+    """The whole ``subjects.json``, the dataset's subjects (:data:`RegistrySubjects`)."""
 
-    subjects: ByName[Subject]
+    subjects: RegistrySubjects
 
     def subject(self, name: str) -> Subject | None:
         """Return the named subject of this registry (:func:`named`), or ``None``."""
@@ -136,21 +169,6 @@ def registry_from_dict(data: object) -> SubjectRegistry:
         raise RegistryError(
             f"the subject registry does not read: {exc}"
         ) from exc
-
-
-def registry_from_request(subjects: object) -> SubjectRegistry:
-    """Parse an authoring request's subjects through :func:`registry_from_dict`.
-
-    A subject stating no ``description`` is one described by nothing yet.
-    """
-    if isinstance(subjects, dict):
-        subjects = {
-            name: {"description": "", **body}
-            if isinstance(body, dict)
-            else body
-            for name, body in subjects.items()
-        }
-    return registry_from_dict(subjects)
 
 
 def registry_to_dict(registry: SubjectRegistry) -> dict:
@@ -227,6 +245,14 @@ def _dropped_names(
     return dropped
 
 
+class RegistrySave(BaseModel):
+    """A committed registry save as its audit line records it: the file, its subjects, its token."""
+
+    subjects_path: str
+    n_subjects: int
+    version: str
+
+
 def replace_registry(
     dataset_root: str | Path,
     registry: SubjectRegistry,
@@ -235,7 +261,7 @@ def replace_registry(
     allow_removals: bool = False,
     allow_type_changes: bool = False,
     actor: str | None,
-) -> dict:
+) -> RegistrySave:
     """Write ``dataset_root``'s registry, reading what it replaces and refusing a silent drop.
 
     Refuses an empty ``registry`` outright, whether or not ``allow_removals`` is set. Reads the
@@ -255,17 +281,11 @@ def replace_registry(
 
     The write's one audit line by ``actor`` follows it in the dataset's log
     (``AuditEntryNotWrittenError`` when it cannot be appended, carrying that line's arguments).
-    Returns the committed save as its audit line records it: ``{"subjects_path", "n_subjects",
-    "version"}`` (the new token).
+    Returns the committed save, the new token its ``version``.
     """
     import tcip_store
     from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.dataset_layout import subjects_path
-
-    if not registry.subjects:
-        raise RegistryError(
-            "a subject registry write must declare at least one subject"
-        )
 
     path = subjects_path(dataset_root)
     versioned = tcip_store.read_blob_versioned(path, default=None)
@@ -312,13 +332,16 @@ def replace_registry(
         expect=versioned.version if expect is None else expect,
     )
 
-    committed = {
-        "subjects_path": str(path),
-        "n_subjects": len(registry.subjects),
-        "version": new_version.token,
-    }
+    committed = RegistrySave(
+        subjects_path=str(path),
+        n_subjects=len(registry.subjects),
+        version=new_version.token,
+    )
     record_event_or_raise(
-        "replace_registry", committed, actor=actor, scope=dataset_root
+        "replace_registry",
+        committed.model_dump(),
+        actor=actor,
+        scope=dataset_root,
     )
     return committed
 

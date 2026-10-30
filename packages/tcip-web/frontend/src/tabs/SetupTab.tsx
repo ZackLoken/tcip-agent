@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { api } from "@/api/client";
-import { StructuredRefusalError } from "@/api/http";
-import { resultsApi, type PlantMappingSummary } from "@/api/inference";
-import type { CaptureInvariances, MatchRadius } from "@/api/types.generated";
+import { messageOf, StructuredRefusalError } from "@/api/http";
+import { resultsApi } from "@/api/inference";
+import type {
+  CaptureInvariances,
+  MappingNames,
+  MatchRadius,
+  ServedMapping,
+} from "@/api/types.generated";
 import { TabHeading } from "@/components/TabHeading";
 import { TraitRevisionPanel } from "@/components/TraitRevisionPanel";
+import { answerPhrase, invarianceName } from "@/lib/invariances";
+import { openable } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { selectDatasetRoot } from "@/store/slices/gui";
 
@@ -22,22 +29,21 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
   const [mappingName, setMappingName] = useState("");
   // Every mapping name already persisted under the open project, for the picker below; a name
   // typed here that isn't in the list is a new mapping this build will create.
-  const [mappingNames, setMappingNames] = useState<string[]>([]);
+  const [mappings, setMappings] = useState<MappingNames | null>(null);
   const [plantRegistry, setPlantRegistry] = useState("");
   const [statedRadius, setStatedRadius] = useState<number | "">("");
   const [radiusRationale, setRadiusRationale] = useState("");
   // Off by default: a rebuild a delivery event still cites answers 409 unless this is sent true.
   const [supersedeMapping, setSupersedeMapping] = useState(false);
-  const [buildSummary, setBuildSummary] = useState<PlantMappingSummary | null>(null);
-  const [buildRadius, setBuildRadius] = useState<Record<string, MatchRadius>>({});
+  const [mapping, setMapping] = useState<ServedMapping | null>(null);
   const [buildMsg, setBuildMsg] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
 
   const refreshMappingNames = useCallback(() => {
     void resultsApi
       .listPlantMappings()
-      .then((res) => setMappingNames(res.names))
-      .catch(() => setMappingNames([]));
+      .then(setMappings)
+      .catch(() => setMappings(null));
   }, []);
 
   useEffect(() => {
@@ -48,13 +54,9 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
   // fresh build does.
   async function loadMapping(name: string) {
     try {
-      const res = await resultsApi.loadPlantMapping(name);
-      setBuildSummary(res.summary);
-      setBuildRadius(res.match_radius);
+      setMapping(await resultsApi.loadPlantMapping({ name }));
     } catch (e) {
-      useStore
-        .getState()
-        .pushToast(`Could not load the mapping: ${e instanceof Error ? e.message : String(e)}`);
+      useStore.getState().pushToast(`Could not load the mapping: ${messageOf(e)}`);
     }
   }
 
@@ -70,21 +72,19 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
     }
     setBuilding(true);
     setBuildMsg(null);
-    setBuildSummary(null);
-    setBuildRadius({});
+    setMapping(null);
     try {
-      const res = await resultsApi.buildPlantMapping({
+      const built = await resultsApi.buildPlantMapping({
         name: mappingName,
         dataset_root: datasetRoot,
         plant_registry: plantRegistry,
+        dates: null,
         supersede: supersedeMapping,
-        ...(statedRadius === ""
-          ? {}
-          : { match_radius: { value: statedRadius, rationale: radiusRationale } }),
+        match_radius:
+          statedRadius === "" ? null : { value: statedRadius, rationale: radiusRationale },
         user: useStore.getState().user,
       });
-      setBuildSummary(res.summary);
-      setBuildRadius(res.match_radius);
+      setMapping(built);
       setBuildMsg(`Built ${mappingName}.`);
       refreshMappingNames();
     } catch (e) {
@@ -92,17 +92,13 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
         // A rebuild cited by a delivery event, or a receipt that could not be written.
         setBuildMsg(e.message);
       } else {
-        useStore
-          .getState()
-          .pushToast(`Could not build the mapping: ${e instanceof Error ? e.message : String(e)}`);
+        useStore.getState().pushToast(`Could not build the mapping: ${messageOf(e)}`);
         setBuildMsg(null);
       }
     } finally {
       setBuilding(false);
     }
   }
-
-  const unmatched = buildSummary?.totals.n_unattributed ?? 0;
 
   return (
     <div className="tcip-panel p-5">
@@ -119,17 +115,13 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
             onChange={(e) => {
               const name = e.target.value;
               setMappingName(name);
-              if (mappingNames.includes(name)) {
-                void loadMapping(name);
-              } else {
-                setBuildSummary(null);
-                setBuildRadius({});
-              }
+              if (mappings?.names.includes(name)) void loadMapping(name);
+              else setMapping(null);
             }}
             list="plant-mapping-names"
           />
           <datalist id="plant-mapping-names">
-            {mappingNames.map((name) => (
+            {(mappings?.names ?? []).map((name) => (
               <option key={name} value={name} />
             ))}
           </datalist>
@@ -193,15 +185,15 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
         </button>
         {buildMsg && <span className="text-tcip-muted">{buildMsg}</span>}
       </div>
-      {buildSummary && (
+      {mapping && (
         <div className="mt-3 text-tcip-muted tabular-nums">
-          {Object.entries(buildSummary.per_date).map(([d, s]) => (
+          {Object.entries(mapping.per_date).map(([d, s]) => (
             <div key={d}>
-              {`${d}: ${s.n_mapped} of ${s.n_images} mapped, ${s.n_unattributed} unmatched, ${s.avg_distance_m === null ? "no distances" : `avg ${s.avg_distance_m.toFixed(1)} m`}${d in buildRadius ? `, ${radiusPhrase(buildRadius[d])}` : ""}`}
+              {`${d}: ${s.n_mapped} of ${s.n_images} mapped, ${s.n_unattributed} unmatched, ${s.avg_distance_m === null ? "no distances" : `avg ${s.avg_distance_m.toFixed(1)} m`}${d in mapping.match_radius ? `, ${radiusPhrase(mapping.match_radius[d])}` : ""}`}
             </div>
           ))}
-          {unmatched > 0 && (
-            <div className="mt-1">{`${unmatched} ${unmatched === 1 ? "capture" : "captures"} matched no plant.`}</div>
+          {mapping.images_unattributed > 0 && (
+            <div className="mt-1">{`${mapping.images_unattributed} ${mapping.images_unattributed === 1 ? "capture" : "captures"} matched no plant.`}</div>
           )}
         </div>
       )}
@@ -210,16 +202,6 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
 }
 
 type Answer = [keyof CaptureInvariances, boolean | number];
-
-// An invariance as the breeder reads it, named by its record field.
-function invarianceName(name: keyof CaptureInvariances): string {
-  return name.replaceAll("_", " ");
-}
-
-// An invariance answer as the breeder reads it: yes or no, or a rotation in degrees.
-function answerPhrase(value: boolean | number): string {
-  return typeof value === "boolean" ? (value ? "yes" : "no") : `${value} degrees`;
-}
 
 /** The capture invariances the open project's record carries, read from the project listing and
  *  corrected as one block through the record's correction door. */
@@ -234,11 +216,13 @@ function InvariancesPanel({ projectId }: { projectId: string }) {
     void api.projects
       .list()
       .then((res) => {
-        const invariances = res.projects.find((p) => p.id === projectId)?.invariances ?? null;
+        const invariances =
+          res.projects.filter(openable).find((p) => p.record.id === projectId)?.record
+            .invariances ?? null;
         setRecorded(invariances);
         setDraft(invariances);
       })
-      .catch((e: unknown) => setProblem(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => setProblem(messageOf(e)));
   }, [projectId]);
 
   if (!recorded || !draft) {
@@ -251,18 +235,22 @@ function InvariancesPanel({ projectId }: { projectId: string }) {
     setSubmitting(true);
     setProblem(null);
     try {
-      const res = await api.projects.invariances({ id: projectId, invariances, user });
-      const changed = (Object.entries(res.invariances) as Answer[])
-        .filter(([name, value]) => res.previous_invariances[name] !== value)
+      const { record, previous } = await api.projects.invariances({
+        id: projectId,
+        invariances,
+        user,
+      });
+      const changed = (Object.entries(record.invariances) as Answer[])
+        .filter(([name, value]) => previous.invariances[name] !== value)
         .map(
           ([name, value]) =>
-            `${invarianceName(name)} ${answerPhrase(res.previous_invariances[name])} to ${answerPhrase(value)}`,
+            `${invarianceName(name)} ${answerPhrase(previous.invariances[name])} to ${answerPhrase(value)}`,
         );
-      setRecorded(res.invariances);
-      setDraft(res.invariances);
+      setRecorded(record.invariances);
+      setDraft(record.invariances);
       useStore.getState().pushToast(`Saved: ${changed.join(", ")}.`, "success");
     } catch (e) {
-      setProblem(e instanceof Error ? e.message : String(e));
+      setProblem(messageOf(e));
     } finally {
       setSubmitting(false);
     }

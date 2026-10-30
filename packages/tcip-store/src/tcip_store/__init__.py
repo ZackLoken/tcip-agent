@@ -46,6 +46,7 @@ from tcip_store.store import (
 from tcip_store.values import (
     FINITE_JSON_OBJECT,
     FiniteJsonObject,
+    FiniteJsonValue,
     check_json_value,
     decode_value,
     encode_log_line,
@@ -65,6 +66,7 @@ __all__ = [
     "BadKeyError",
     "DecodeError",
     "FiniteJsonObject",
+    "FiniteJsonValue",
     "Key",
     "LogPage",
     "NotFoundError",

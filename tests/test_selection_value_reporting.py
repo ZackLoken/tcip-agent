@@ -109,7 +109,10 @@ def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(
         chosen_record["train_loss"], rel=0.2
     )
 
-    persisted = partition_rows(read_rows(out_dir / METRICS_FILE)[0])[0]
+    persisted = [
+        r.model_dump()
+        for r in partition_rows(read_rows(out_dir / METRICS_FILE)[0])[0]
+    ]
     assert [r["selection"] for r in persisted] == [
         r["selection"] for r in history
     ]

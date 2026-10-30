@@ -34,23 +34,22 @@ def test_assert_path_allowed_admits_the_workspace_and_refuses_a_sibling(
         assert_path_allowed(str(outside))  # a sibling workspace -> refused
 
 
-def test_training_stream_closes_on_run_id_traversal(
+def test_a_run_id_carrying_a_path_names_no_run_on_the_training_stream(
     opened_project: Path, client: TestClient
 ) -> None:
-    """A run_id carrying a path separator closes the training stream.
+    """A run_id carrying a path separator names no run, so the stream ends naming it.
 
-    For a run_id holding a backslash, the stream closes with code 1008 naming the run_id as not a
-    single directory name.
+    The stream looks the id up by name among the project's run directories, which no path names.
     """
-    from starlette.websockets import WebSocketDisconnect
+    from tcip_web.routes.training import TrainingStatusFrame
 
-    with pytest.raises(WebSocketDisconnect) as ei:
-        with client.websocket_connect(
-            "ws://127.0.0.1/api/training/runs/a\\b/stream"
-        ) as ws:
-            ws.receive_json()
-    assert ei.value.code == 1008
-    assert "is not a single directory name" in ei.value.reason
+    with client.websocket_connect(
+        "ws://127.0.0.1/api/training/runs/a\\b/stream"
+    ) as ws:
+        frame = TrainingStatusFrame.model_validate(ws.receive_json())
+    assert frame == TrainingStatusFrame(
+        experiment_id="a\\b", status=None, error="Run not found: a\\b"
+    )
 
 
 def test_annotate_labels_route_blocks_outside_allowed_root(
@@ -69,7 +68,7 @@ def test_annotate_labels_route_blocks_outside_allowed_root(
     )
 
     assert (
-        load_labels(str(img))["img_width"] == 8
+        load_labels(str(img)).img_width == 8
     )  # inside the workspace -> served
     with pytest.raises(HTTPException) as ei:
         load_labels(str(outside))  # a sibling workspace -> 403
@@ -95,7 +94,7 @@ def test_images_route_blocks_outside_allowed_root(
     )
 
     assert (
-        get_bands(path=str(img))["band_count"] == 3
+        get_bands(path=str(img)).band_count == 3
     )  # inside the workspace -> served
     with pytest.raises(HTTPException) as ei:
         get_bands(path=str(outside))  # a sibling workspace -> 403

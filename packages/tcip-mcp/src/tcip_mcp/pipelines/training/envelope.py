@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from torch.utils.data import DataLoader
     from torch.utils.tensorboard import SummaryWriter
 
+    from tcip_mcp.experiments import FinalState, MetricsRow, RunCheckpoint
     from tcip_mcp.pipelines.data.augmentations import Transforms
     from tcip_mcp.pipelines.data.datasets import (
         BaseDataset,
@@ -376,14 +377,17 @@ class TrainContext:
     instance_geometries = staticmethod(measurement.instance_geometries)
 
     # ---- envelope-owned sinks ----
-    def _metrics_row(self, metrics: dict, stamps: dict) -> dict:
-        """Return ``experiments.metrics_row`` of ``metrics`` and ``stamps``, refusing as it does.
+    def _metrics_row(
+        self, metrics: dict, epoch: int, step: int | None
+    ) -> MetricsRow:
+        """Return ``experiments.metrics_row`` of ``metrics``, ``epoch`` and ``step``.
 
-        The run is then checked open (``experiments.require_open``).
+        It refuses as that function does, and the run is then checked open
+        (``experiments.require_open``).
         """
         from tcip_mcp.experiments import metrics_row, require_open
 
-        row = metrics_row(metrics, stamps)
+        row = metrics_row(metrics, epoch, step)
         require_open(self.run_dir)
         return row
 
@@ -394,9 +398,9 @@ class TrainContext:
         with the metrics the body produced, not their stored form. A row JSON cannot hold raises,
         naming the field.
         """
-        from tcip_mcp.experiments import EPOCH_KEY, METRICS_FILE, append_row
+        from tcip_mcp.experiments import METRICS_FILE, append_row
 
-        row = self._metrics_row(metrics, {EPOCH_KEY: epoch})
+        row = self._metrics_row(metrics, epoch, None)
         self._epoch = epoch
         if self.epoch_hook is not None:
             self.epoch_hook(epoch, metrics)
@@ -457,16 +461,10 @@ class TrainContext:
         The log gains one per-batch row at ``step`` within ``epoch`` (:meth:`_metrics_row`), never
         an epoch row, so ``epoch_hook`` does not fire; TensorBoard gains each scalar at ``step``.
         """
-        from tcip_mcp.experiments import (
-            EPOCH_KEY,
-            METRICS_FILE,
-            STEP_KEY,
-            append_row,
-        )
+        from tcip_mcp.experiments import METRICS_FILE, append_row
 
         append_row(
-            self.run_dir / METRICS_FILE,
-            self._metrics_row(metrics, {EPOCH_KEY: epoch, STEP_KEY: step}),
+            self.run_dir / METRICS_FILE, self._metrics_row(metrics, epoch, step)
         )
         self._write_scalars(metrics, step)
 
@@ -500,14 +498,15 @@ class TrainContext:
     def record_artifact(self, name: str, path: str) -> None:
         """Copy the file at ``path`` into the run's ``artifacts/`` directory under ``name``.
 
-        Refuses (``FileExistsError``) a name already recorded and (``BadKeyError``) one that is
-        not a single file name.
+        Refuses (``FileExistsError``) a name already recorded and one that is no
+        :data:`~tcip_mcp.workspace.PathSegment`.
         """
-        from tcip_mcp.experiments import require_open, run_name
+        from tcip_mcp.experiments import require_open
+        from tcip_mcp.workspace import path_segment
 
         require_open(self.run_dir)
 
-        destination = self.run_dir / ARTIFACTS_DIR / run_name(name)
+        destination = self.run_dir / ARTIFACTS_DIR / path_segment(name)
         destination.parent.mkdir(exist_ok=True)
         if destination.exists():
             raise FileExistsError(
@@ -603,11 +602,16 @@ def run_training_envelope(ctx: TrainContext) -> None:
         run.status_error = run.status_error or str(exc)
         logger.exception("Training body failed for %s: %s", run.id, exc)
 
+    from pydantic import TypeAdapter
+
+    from tcip_mcp.experiments import FinalState
+
     checkpoint = _settle_run(ctx)
     run.status, run.status_error = close_run(
         ctx.run_dir,
         run.project,
-        run.status or "failed",
+        # The status the body left, which an agent's own loop sets, is a final state or refuses.
+        TypeAdapter(FinalState).validate_python(run.status),
         run.status_error or None,
         checkpoint=checkpoint,
         arguments={
@@ -621,39 +625,39 @@ def run_training_envelope(ctx: TrainContext) -> None:
 def close_run(
     run_dir: Path,
     project: Path,
-    state: str,
+    state: FinalState,
     status_error: str | None,
     *,
-    checkpoint: dict | None,
+    checkpoint: RunCheckpoint | None,
     arguments: dict[str, Any],
     **extra: JsonValue,
-) -> tuple[str, str | None]:
+) -> tuple[FinalState, str | None]:
     """Append the run's closing ``training_run`` line, then write its final status once.
 
-    The line goes under ``project``; the return is the state and ``status_error`` the final
-    status names. A refused append ends the run ``failed`` with no checkpoint, its reason named
-    after ``status_error`` when there is one.
+    The line goes under ``project`` and the status ends at the line's instant; the return is the
+    state and ``status_error`` the final status names. A refused append ends the run ``failed``
+    with no checkpoint, its reason named after ``status_error`` when there is one.
     """
-    from tcip_mcp.audit import AuditEntryNotWrittenError, record_event_or_raise
+    from tcip_mcp.audit import (
+        AuditEntryNotWrittenError,
+        append_or_raise,
+        audit_line,
+    )
     from tcip_mcp.experiments import write_final_status
 
+    line = audit_line("training_run", arguments, None, state, extra)
     try:
-        record_event_or_raise(
-            "training_run",
-            arguments,
-            actor=None,
-            status=state,
-            scope=project,
-            **extra,
-        )
+        append_or_raise(line, scope=project)
     except AuditEntryNotWrittenError as exc:
         state, checkpoint = "failed", None
         status_error = f"{status_error}; {exc}" if status_error else str(exc)
-    write_final_status(run_dir, state, status_error, checkpoint=checkpoint)
+    write_final_status(
+        run_dir, state, status_error, ended=line.timestamp, checkpoint=checkpoint
+    )
     return state, status_error
 
 
-def _settle_run(ctx: TrainContext) -> dict | None:
+def _settle_run(ctx: TrainContext) -> RunCheckpoint | None:
     """Settle how the run ended and return the checkpoint its final status names.
 
     For a completed run that is its deliverable (``run.deliverable``), named inside the run's
@@ -662,6 +666,7 @@ def _settle_run(ctx: TrainContext) -> dict | None:
     ``failed`` naming it; a completed run with no deliverable, or one that cannot be read or
     that the verified reader refuses, ends ``failed`` naming why.
     """
+    from tcip_mcp.experiments import RunCheckpoint
     from tcip_mcp.model_registry import admitted_digest
 
     run = ctx.run
@@ -677,10 +682,10 @@ def _settle_run(ctx: TrainContext) -> dict | None:
             run.status_error = "training completed but saved no final weights"
         else:
             try:
-                checkpoint = {
-                    "path": str(run.deliverable),
-                    "sha256": admitted_digest(run.deliverable),
-                }
+                checkpoint = RunCheckpoint(
+                    path=str(run.deliverable),
+                    sha256=admitted_digest(run.deliverable),
+                )
             except (OSError, ValueError) as exc:
                 run.status, run.status_error = (
                     "failed",

@@ -5,12 +5,12 @@ import { ROUTES } from "@/api/routes";
 import type {
   ImageEventPayload,
   SessionRef,
-  SessionSummary,
+  SessionsListing,
   SessionWrite,
 } from "@/api/types.generated";
 
 export const sessionsApi = {
-  load: () => getJson<{ sessions: SessionSummary[] }>(ROUTES.getSessionsLoad),
+  load: () => getJson<SessionsListing>(ROUTES.getSessionsLoad),
 
   imageEvent: (body: ImageEventPayload) =>
     postJson<SessionWrite>(ROUTES.postSessionsImageEvent, body),

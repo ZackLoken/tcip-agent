@@ -88,12 +88,13 @@ vi.mock("@/api/terminal", () => ({
   terminalWsUrl: (id: string) => `ws://test/api/terminal/ws/${id}`,
 }));
 
-import { StructuredRefusalError } from "@/api/http";
 import { terminalApi } from "@/api/terminal";
-import { TERMINAL_ENDED_CLOSE_CODE } from "@/api/types.generated";
+import { TERMINAL_ENDED_CLOSE_CODE, type TerminalEnd } from "@/api/types.generated";
 import { TerminalRail } from "@/components/TerminalRail";
 import { MAX_BACKOFF_MS } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
+import { thrown } from "@/test/refusals";
+import { TERMINAL_ANSWERS } from "@/test/terminal";
 
 /** The browser's WebSocket as the rail's tests stand it in, so no test opens a connection. */
 class MockWebSocket {
@@ -117,16 +118,10 @@ class MockWebSocket {
   }
 }
 
-const PROVIDER = { id: "harness", name: "A harness", unavailable_reason: null };
-const LAUNCHED = {
-  provider: "harness",
-  argv: ["/bin/harness"],
-  version: null,
-  confinement: null,
-  prepared: [],
-  resumed: null,
-};
-const LAUNCH = { session_id: "t1", launched: LAUNCHED };
+const { status: STATUS, launch: LAUNCH, relaunch: RELAUNCH, ended: ENDED } = TERMINAL_ANSWERS;
+const [PROVIDER, SECOND] = STATUS.providers;
+const FIRST_ID = LAUNCH.session_id;
+const SECOND_ID = RELAUNCH.session_id;
 
 type Globals = { IS_REACT_ACT_ENVIRONMENT?: boolean };
 
@@ -157,11 +152,11 @@ beforeEach(() => {
     terminalProvider: null,
   });
   useStore.getState().setTerminalOpen(true);
-  vi.mocked(terminalApi.status).mockResolvedValue({ providers: [PROVIDER] });
+  vi.mocked(terminalApi.status).mockResolvedValue(STATUS);
   vi.mocked(terminalApi.createSession).mockResolvedValue(LAUNCH);
-  vi.mocked(terminalApi.end).mockResolvedValue({ undelivered: [] });
-  vi.mocked(terminalApi.handOff).mockReset().mockResolvedValue(null);
-  vi.mocked(terminalApi.submit).mockReset().mockResolvedValue({});
+  vi.mocked(terminalApi.end).mockResolvedValue(ENDED);
+  vi.mocked(terminalApi.handOff).mockReset().mockResolvedValue(TERMINAL_ANSWERS.handed_off);
+  vi.mocked(terminalApi.submit).mockReset().mockResolvedValue(null);
 });
 
 /** Ask to end the agent from the header and confirm it. */
@@ -197,11 +192,12 @@ describe("TerminalRail", () => {
   });
 
   it("shows the row's own reason when its harness is unavailable", async () => {
-    vi.mocked(terminalApi.status).mockResolvedValue({
-      providers: [{ ...PROVIDER, unavailable_reason: "A harness is not available: no `h`." }],
-    });
+    const { status_absent: absent } = TERMINAL_ANSWERS;
+    vi.mocked(terminalApi.status).mockResolvedValue(absent);
     render(<TerminalRail />);
-    expect(await screen.findByText(/A harness is not available/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(absent.providers[0].unavailable_reason ?? ""),
+    ).toBeInTheDocument();
     expect(terminalApi.createSession).not.toHaveBeenCalled();
   });
 
@@ -210,7 +206,7 @@ describe("TerminalRail", () => {
     render(<TerminalRail />);
     expect(await screen.findByText(/Couldn't reach the TCIP backend/)).toBeInTheDocument();
     // Backend comes back; Retry re-probes and the terminal mounts.
-    vi.mocked(terminalApi.status).mockResolvedValue({ providers: [PROVIDER] });
+    vi.mocked(terminalApi.status).mockResolvedValue(STATUS);
     fireEvent.click(screen.getByText("Retry"));
     expect(await screen.findByTestId("terminal-host")).toBeInTheDocument();
   });
@@ -221,14 +217,14 @@ describe("TerminalRail", () => {
     expect(await screen.findByTestId("terminal-host")).toBeInTheDocument();
     await waitFor(() =>
       expect(terminalApi.createSession).toHaveBeenCalledWith({
-        provider: "harness",
+        provider: PROVIDER.id,
         rows: 30,
         cols: 100,
         user: "jordan",
       }),
     );
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
-    expect(MockWebSocket.instances[0].url).toContain("/api/terminal/ws/t1");
+    expect(MockWebSocket.instances[0].url).toContain(`/api/terminal/ws/${FIRST_ID}`);
     // The emulator was mounted into the host.
     expect(termInstances[0].open).toHaveBeenCalled();
   });
@@ -439,38 +435,31 @@ describe("TerminalRail", () => {
   });
 
   describe("the harness picker", () => {
-    const SECOND = { id: "other", name: "Another harness", unavailable_reason: null };
-    const ABSENT = {
-      id: "absent",
-      name: "An absent harness",
-      unavailable_reason: "An absent harness is not available: no `a` executable is on PATH.",
-    };
+    const { status_mixed: MIXED } = TERMINAL_ANSWERS;
 
     it("lists every row, an unavailable one disabled with its reason", async () => {
-      vi.mocked(terminalApi.status).mockResolvedValue({ providers: [PROVIDER, SECOND, ABSENT] });
+      vi.mocked(terminalApi.status).mockResolvedValue(MIXED);
       render(<TerminalRail />);
       const picker = (await screen.findByLabelText("Agent harness")) as HTMLSelectElement;
       const options = Array.from(picker.options);
-      expect(options.map((o) => [o.value, o.disabled])).toEqual([
-        ["harness", false],
-        ["other", false],
-        ["absent", true],
-      ]);
-      expect(options[2].title).toBe(ABSENT.unavailable_reason);
-      expect(picker.value).toBe("harness");
+      expect(options.map((o) => [o.value, o.disabled])).toEqual(
+        MIXED.providers.map((row) => [row.id, row.unavailable_reason !== null]),
+      );
+      const unavailable = MIXED.providers.findIndex((row) => row.unavailable_reason !== null);
+      expect(options[unavailable].title).toBe(MIXED.providers[unavailable].unavailable_reason);
+      expect(picker.value).toBe(PROVIDER.id);
     });
 
-    /** Render the rail on two rows with its agent live, and choose the second while it runs. */
+    /** Render the rail on every row with its agent live, and choose the second while it runs. */
     async function switchedWhileRunning(): Promise<{
       picker: HTMLSelectElement;
       first: MockWebSocket;
     }> {
-      vi.mocked(terminalApi.status).mockResolvedValue({ providers: [PROVIDER, SECOND] });
       render(<TerminalRail />);
       const first = await openSocket();
       const picker = (await screen.findByLabelText("Agent harness")) as HTMLSelectElement;
       expect(picker.title).toMatch(/asks the agent for its hand-off/);
-      fireEvent.change(picker, { target: { value: "other" } });
+      fireEvent.change(picker, { target: { value: SECOND.id } });
       await waitFor(() => expect(terminalApi.handOff).toHaveBeenCalledTimes(1));
       return { picker, first };
     }
@@ -478,7 +467,7 @@ describe("TerminalRail", () => {
     it("choosing another row while an agent runs shows its hand-off, then starts the chosen row", async () => {
       useStore.setState({ user: "jordan" });
       const { picker, first } = await switchedWhileRunning();
-      expect(terminalApi.handOff).toHaveBeenCalledWith("t1", { user: "jordan" });
+      expect(terminalApi.handOff).toHaveBeenCalledWith(FIRST_ID, { user: "jordan" });
       expect(picker.disabled).toBe(true);
       expect(picker.title).toMatch(/writing its hand-off/);
       expect(screen.getByLabelText("End the agent")).toBeInTheDocument();
@@ -488,11 +477,11 @@ describe("TerminalRail", () => {
       act(() => first.drop(TERMINAL_ENDED_CLOSE_CODE));
       await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalledTimes(2));
       expect(vi.mocked(terminalApi.createSession).mock.calls[1][0]).toMatchObject({
-        provider: "other",
+        provider: SECOND.id,
       });
       expect(terminalApi.end).not.toHaveBeenCalled();
       expect(screen.queryByText("Start")).not.toBeInTheDocument();
-      expect(localStorage.getItem("tcip.terminal_provider")).toBe("other");
+      expect(localStorage.getItem("tcip.terminal_provider")).toBe(SECOND.id);
     });
 
     it("End during a hand-off ends the agent at once and starts the chosen row", async () => {
@@ -500,9 +489,9 @@ describe("TerminalRail", () => {
       await switchedWhileRunning();
       exitAgent();
       await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalledTimes(2));
-      expect(terminalApi.end).toHaveBeenCalledWith("t1", { user: "jordan" });
+      expect(terminalApi.end).toHaveBeenCalledWith(FIRST_ID, { user: "jordan" });
       expect(vi.mocked(terminalApi.createSession).mock.calls[1][0]).toMatchObject({
-        provider: "other",
+        provider: SECOND.id,
       });
       expect(screen.queryByText("Start")).not.toBeInTheDocument();
     });
@@ -512,43 +501,47 @@ describe("TerminalRail", () => {
       act(() => useStore.getState().setTerminalOpen(false));
       act(() => useStore.getState().setTerminalOpen(true));
       const reopened = await openSocket(1);
-      expect(reopened.url).toContain("/api/terminal/ws/t1");
+      expect(reopened.url).toContain(`/api/terminal/ws/${FIRST_ID}`);
       act(() => reopened.drop(TERMINAL_ENDED_CLOSE_CODE));
       await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalledTimes(2));
       expect(vi.mocked(terminalApi.createSession).mock.calls[1][0]).toMatchObject({
-        provider: "other",
+        provider: SECOND.id,
       });
     });
 
     it("a switch from a session the backend ended at once starts the chosen row with its requests", async () => {
-      vi.mocked(terminalApi.handOff).mockResolvedValue({ undelivered: ["never given"] });
+      const atOnce = TERMINAL_ANSWERS.handed_off_at_once;
+      vi.mocked(terminalApi.handOff).mockResolvedValue(atOnce);
       vi.mocked(terminalApi.createSession)
         .mockResolvedValueOnce(LAUNCH)
-        .mockResolvedValueOnce({ ...LAUNCH, session_id: "t2" });
+        .mockResolvedValueOnce(RELAUNCH);
       await switchedWhileRunning();
-      await waitFor(() => expect(submitted()).toEqual([["t2", "never given"]]));
+      await waitFor(() =>
+        expect(submitted()).toEqual(atOnce.undelivered.map((text) => [SECOND_ID, text])),
+      );
       expect(vi.mocked(terminalApi.createSession).mock.calls[1][0]).toMatchObject({
-        provider: "other",
+        provider: SECOND.id,
       });
     });
 
     it("a switch whose hand-off the backend refused stays on the row still running", async () => {
-      vi.mocked(terminalApi.handOff).mockRejectedValue(
-        new StructuredRefusalError({ message: "no such session" }, 404, "no such session"),
-      );
+      const unknown = TERMINAL_ANSWERS.hand_off_unknown;
+      vi.mocked(terminalApi.handOff).mockRejectedValue(await thrown(unknown));
       const { picker } = await switchedWhileRunning();
-      expect(await screen.findByText(/no such session/)).toBeInTheDocument();
-      expect(picker.value).toBe("harness");
+      expect(
+        await screen.findByText((content) => content.includes(unknown.body.detail)),
+      ).toBeInTheDocument();
+      expect(picker.value).toBe(PROVIDER.id);
       expect(picker.disabled).toBe(false);
-      expect(useStore.getState().terminalProvider).toBe("harness");
+      expect(useStore.getState().terminalProvider).toBe(PROVIDER.id);
       expect(terminalApi.createSession).toHaveBeenCalledTimes(1);
       expect(terminalApi.end).not.toHaveBeenCalled();
     });
 
     it("while an end is pending the picker is disabled and says the agent is ending", async () => {
-      const answer = Promise.withResolvers<{ undelivered: string[] }>();
+      const answer = Promise.withResolvers<TerminalEnd>();
       vi.mocked(terminalApi.end).mockReturnValueOnce(answer.promise);
-      vi.mocked(terminalApi.status).mockResolvedValue({ providers: [PROVIDER, SECOND] });
+      vi.mocked(terminalApi.status).mockResolvedValue(STATUS);
       render(<TerminalRail />);
       await openSocket();
       const picker = (await screen.findByLabelText("Agent harness")) as HTMLSelectElement;
@@ -557,26 +550,26 @@ describe("TerminalRail", () => {
       expect(picker.disabled).toBe(true);
       expect(picker.title).toMatch(/agent is ending/);
 
-      fireEvent.change(picker, { target: { value: "other" } });
+      fireEvent.change(picker, { target: { value: SECOND.id } });
       await act(async () => {});
       expect(useStore.getState().terminalProvider).toBeNull();
       expect(localStorage.getItem("tcip.terminal_provider")).toBeNull();
       expect(terminalApi.end).toHaveBeenCalledTimes(1);
       expect(terminalApi.createSession).toHaveBeenCalledTimes(1);
 
-      await act(() => Promise.resolve(answer.resolve({ undelivered: [] })));
+      await act(() => Promise.resolve(answer.resolve(ENDED)));
       expect(picker.disabled).toBe(false);
-      expect(picker.value).toBe("harness");
+      expect(picker.value).toBe(PROVIDER.id);
       expect(terminalApi.createSession).toHaveBeenCalledTimes(1);
     });
 
     it("choosing a row after an end only chooses what Start launches", async () => {
-      vi.mocked(terminalApi.status).mockResolvedValue({ providers: [PROVIDER, SECOND] });
+      vi.mocked(terminalApi.status).mockResolvedValue(STATUS);
       render(<TerminalRail />);
       await openSocket();
       exitAgent();
       await screen.findByText("Start");
-      fireEvent.change(screen.getByLabelText("Agent harness"), { target: { value: "other" } });
+      fireEvent.change(screen.getByLabelText("Agent harness"), { target: { value: SECOND.id } });
       await act(async () => {});
       expect(terminalApi.end).toHaveBeenCalledTimes(1);
       expect(terminalApi.createSession).toHaveBeenCalledTimes(1);
@@ -584,28 +577,30 @@ describe("TerminalRail", () => {
       fireEvent.click(screen.getByText("Start"));
       await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalledTimes(2));
       expect(vi.mocked(terminalApi.createSession).mock.calls[1][0]).toMatchObject({
-        provider: "other",
+        provider: SECOND.id,
       });
     });
 
     it("launches the remembered row when the table still lists it", async () => {
-      useStore.setState({ terminalProvider: "other" });
-      vi.mocked(terminalApi.status).mockResolvedValue({ providers: [PROVIDER, SECOND] });
+      useStore.setState({ terminalProvider: SECOND.id });
+      vi.mocked(terminalApi.status).mockResolvedValue(STATUS);
       render(<TerminalRail />);
       await waitFor(() =>
         expect(terminalApi.createSession).toHaveBeenCalledWith(
-          expect.objectContaining({ provider: "other" }),
+          expect.objectContaining({ provider: SECOND.id }),
         ),
       );
     });
 
     it("launches the first row that can when the remembered one cannot", async () => {
-      useStore.setState({ terminalProvider: "absent" });
-      vi.mocked(terminalApi.status).mockResolvedValue({ providers: [ABSENT, SECOND] });
+      const absent = MIXED.providers.find((row) => row.unavailable_reason !== null)!;
+      const [able] = MIXED.providers.filter((row) => row.unavailable_reason === null);
+      useStore.setState({ terminalProvider: absent.id });
+      vi.mocked(terminalApi.status).mockResolvedValue(MIXED);
       render(<TerminalRail />);
       await waitFor(() =>
         expect(terminalApi.createSession).toHaveBeenCalledWith(
-          expect.objectContaining({ provider: "other" }),
+          expect.objectContaining({ provider: able.id }),
         ),
       );
       expect(screen.queryByText(/is not available/)).not.toBeInTheDocument();
@@ -648,7 +643,7 @@ describe("TerminalRail", () => {
       const ws = await openSocket();
       exitAgent();
       expect(await screen.findByText("Start")).toBeInTheDocument();
-      expect(terminalApi.end).toHaveBeenCalledWith("t1", { user: "jordan" });
+      expect(terminalApi.end).toHaveBeenCalledWith(FIRST_ID, { user: "jordan" });
       expect(ws.close).toHaveBeenCalled();
       expect(screen.queryByLabelText("End the agent")).not.toBeInTheDocument();
     });
@@ -670,7 +665,7 @@ describe("TerminalRail", () => {
     it("Start launches one fresh session through the socket's create", async () => {
       vi.mocked(terminalApi.createSession)
         .mockResolvedValueOnce(LAUNCH)
-        .mockResolvedValueOnce({ ...LAUNCH, session_id: "t2" });
+        .mockResolvedValueOnce(RELAUNCH);
       render(<TerminalRail />);
       await openSocket();
       exitAgent();
@@ -678,50 +673,39 @@ describe("TerminalRail", () => {
 
       await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
       expect(terminalApi.createSession).toHaveBeenCalledTimes(2);
-      expect(MockWebSocket.instances[1].url).toContain("/api/terminal/ws/t2");
+      expect(MockWebSocket.instances[1].url).toContain(`/api/terminal/ws/${SECOND_ID}`);
       expect(screen.queryByText("Start")).not.toBeInTheDocument();
     });
 
     it("an end whose line failed still stages what it answered and shows the gap", async () => {
-      vi.mocked(terminalApi.end).mockRejectedValue(
-        new StructuredRefusalError(
-          {
-            error: "audit_entry_not_written",
-            message: "the end went unrecorded",
-            committed: { undelivered: ["never given"] },
-          },
-          409,
-          "the end went unrecorded",
-        ),
-      );
+      const gap = TERMINAL_ANSWERS.end_audit_gap;
+      vi.mocked(terminalApi.end).mockRejectedValue(await thrown(gap));
+      const { message, committed } = gap.body.detail;
       render(<TerminalRail />);
       await openSocket();
       exitAgent();
-      expect(await screen.findByText(/the end went unrecorded/)).toBeInTheDocument();
+      expect(await screen.findByText((content) => content.includes(message))).toBeInTheDocument();
       expect(screen.getByText("Start")).toBeInTheDocument();
-      expect(useStore.getState().pendingTerminalMessages).toEqual(["never given"]);
+      expect(useStore.getState().pendingTerminalMessages).toEqual(committed.undelivered);
     });
 
     it("an end the backend could not carry out reattaches to the session it left running", async () => {
-      vi.mocked(terminalApi.end).mockRejectedValue(
-        new StructuredRefusalError(
-          { message: "The agent process could not be stopped." },
-          503,
-          "The agent process could not be stopped.",
-        ),
-      );
+      const survived = TERMINAL_ANSWERS.end_survived;
+      vi.mocked(terminalApi.end).mockRejectedValue(await thrown(survived));
       render(<TerminalRail />);
       await openSocket();
       exitAgent();
-      expect(await screen.findByText(/could not be stopped/)).toBeInTheDocument();
+      expect(
+        await screen.findByText((content) => content.includes(survived.body.detail)),
+      ).toBeInTheDocument();
       await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
-      expect(MockWebSocket.instances[1].url).toContain("/api/terminal/ws/t1");
+      expect(MockWebSocket.instances[1].url).toContain(`/api/terminal/ws/${FIRST_ID}`);
       expect(screen.queryByText("Start")).not.toBeInTheDocument();
       expect(terminalApi.createSession).toHaveBeenCalledTimes(1);
     });
 
     it("shows the agent ended and offers Start only once the end answers", async () => {
-      const answer = Promise.withResolvers<{ undelivered: string[] }>();
+      const answer = Promise.withResolvers<TerminalEnd>();
       vi.mocked(terminalApi.end).mockReturnValueOnce(answer.promise);
       render(<TerminalRail />);
       await openSocket();
@@ -729,23 +713,22 @@ describe("TerminalRail", () => {
       await act(async () => {});
       expect(screen.queryByText("Start")).not.toBeInTheDocument();
 
-      await act(() => Promise.resolve(answer.resolve({ undelivered: [] })));
+      await act(() => Promise.resolve(answer.resolve(ENDED)));
       expect(screen.getByText("Start")).toBeInTheDocument();
       expect(terminalApi.createSession).toHaveBeenCalledTimes(1);
     });
 
     it("ends only once the submit in flight settles, keeping equal requests in their order", async () => {
-      const taken = Promise.withResolvers<Record<string, never>>();
+      const taken = Promise.withResolvers<null>();
       vi.mocked(terminalApi.submit)
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
         .mockReturnValueOnce(taken.promise);
-      vi.mocked(terminalApi.end).mockResolvedValue({
-        undelivered: ["repeat", "middle", "repeat"],
-      });
+      const { ended_undelivered: answered } = TERMINAL_ANSWERS;
+      vi.mocked(terminalApi.end).mockResolvedValue(answered);
       render(<TerminalRail />);
       await openSocket();
-      for (const [count, text] of ["repeat", "middle", "repeat"].entries()) {
+      for (const [count, text] of answered.undelivered.entries()) {
         act(() => useStore.getState().sendToAgentTerminal(text));
         await waitFor(() => expect(submitted()).toHaveLength(count + 1));
       }
@@ -753,36 +736,34 @@ describe("TerminalRail", () => {
       exitAgent();
       await act(async () => {});
       expect(terminalApi.end).not.toHaveBeenCalled();
-      await act(() => Promise.resolve(taken.resolve({})));
+      await act(() => Promise.resolve(taken.resolve(null)));
       await screen.findByText("Start");
-      expect(useStore.getState().pendingTerminalMessages).toEqual(["repeat", "middle", "repeat"]);
+      expect(useStore.getState().pendingTerminalMessages).toEqual(answered.undelivered);
     });
 
     it("an end the backend could not carry out resumes the staged requests too", async () => {
-      const taken = Promise.withResolvers<Record<string, never>>();
+      const taken = Promise.withResolvers<null>();
       vi.mocked(terminalApi.submit).mockReturnValueOnce(taken.promise);
-      vi.mocked(terminalApi.end).mockRejectedValue(
-        new StructuredRefusalError({ message: "survived" }, 503, "survived"),
-      );
+      vi.mocked(terminalApi.end).mockRejectedValue(await thrown(TERMINAL_ANSWERS.end_survived));
       render(<TerminalRail />);
       await openSocket();
       act(() => useStore.getState().sendToAgentTerminal("first"));
-      await waitFor(() => expect(submitted()).toEqual([["t1", "first"]]));
+      await waitFor(() => expect(submitted()).toEqual([[FIRST_ID, "first"]]));
       act(() => useStore.getState().sendToAgentTerminal("second"));
 
       exitAgent();
-      await act(() => Promise.resolve(taken.resolve({})));
+      await act(() => Promise.resolve(taken.resolve(null)));
       await waitFor(() =>
         expect(submitted()).toEqual([
-          ["t1", "first"],
-          ["t1", "second"],
+          [FIRST_ID, "first"],
+          [FIRST_ID, "second"],
         ]),
       );
       expect(useStore.getState().pendingTerminalMessages).toEqual([]);
     });
 
     it("reopening the rail while an End is unanswered creates no session", async () => {
-      const answer = Promise.withResolvers<{ undelivered: string[] }>();
+      const answer = Promise.withResolvers<TerminalEnd>();
       vi.mocked(terminalApi.end).mockReturnValueOnce(answer.promise);
       render(<TerminalRail />);
       await openSocket();
@@ -796,25 +777,22 @@ describe("TerminalRail", () => {
       expect(terminalApi.createSession).toHaveBeenCalledTimes(1);
       expect(MockWebSocket.instances).toHaveLength(1);
 
-      await act(() => Promise.resolve(answer.resolve({ undelivered: [] })));
+      await act(() => Promise.resolve(answer.resolve(ENDED)));
       expect(screen.getByText("Start")).toBeInTheDocument();
       expect(terminalApi.createSession).toHaveBeenCalledTimes(1);
     });
 
     it("an end answered 404 shows the agent ended without reattaching", async () => {
-      vi.mocked(terminalApi.end).mockRejectedValue(
-        new StructuredRefusalError(
-          { message: "no such terminal session: t1" },
-          404,
-          "no such terminal session: t1",
-        ),
-      );
+      const unknown = TERMINAL_ANSWERS.end_unknown;
+      vi.mocked(terminalApi.end).mockRejectedValue(await thrown(unknown));
       render(<TerminalRail />);
       await openSocket();
       exitAgent();
       expect(await screen.findByText("Start")).toBeInTheDocument();
       await act(async () => {});
-      expect(screen.queryByText(/no such terminal session/)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText((content) => content.includes(unknown.body.detail)),
+      ).not.toBeInTheDocument();
       expect(MockWebSocket.instances).toHaveLength(1);
     });
 
@@ -859,7 +837,7 @@ describe("TerminalRail", () => {
 
       act(() => useStore.getState().sendToAgentTerminal("run a sweep over lr and batch size"));
       await waitFor(() =>
-        expect(submitted()).toEqual([["t1", "run a sweep over lr and batch size"]]),
+        expect(submitted()).toEqual([[FIRST_ID, "run a sweep over lr and batch size"]]),
       );
       expect(useStore.getState().pendingTerminalMessages).toEqual([]);
     });
@@ -871,27 +849,28 @@ describe("TerminalRail", () => {
 
       act(() => useStore.getState().sendToAgentTerminal("run a sweep"));
       expect(useStore.getState().terminalOpen).toBe(true);
-      await waitFor(() => expect(submitted()).toEqual([["t1", "run a sweep"]]));
+      await waitFor(() => expect(submitted()).toEqual([[FIRST_ID, "run a sweep"]]));
       expect(useStore.getState().pendingTerminalMessages).toEqual([]);
     });
 
     it("keeps a request staged until the backend takes it", async () => {
-      const answer = Promise.withResolvers<Record<string, never>>();
+      const answer = Promise.withResolvers<null>();
       vi.mocked(terminalApi.submit).mockReturnValueOnce(answer.promise);
       render(<TerminalRail />);
       act(() => useStore.getState().sendToAgentTerminal("after reopen"));
       await waitFor(() => expect(submitted()).toHaveLength(1));
       expect(useStore.getState().pendingTerminalMessages).toEqual(["after reopen"]);
 
-      await act(() => Promise.resolve(answer.resolve({})));
+      await act(() => Promise.resolve(answer.resolve(null)));
       expect(useStore.getState().pendingTerminalMessages).toEqual([]);
     });
 
     it("submits the requests an end answered, then those staged after it, once Start launches", async () => {
-      vi.mocked(terminalApi.end).mockResolvedValue({ undelivered: ["never given"] });
+      const { undelivered } = TERMINAL_ANSWERS.ended_undelivered;
+      vi.mocked(terminalApi.end).mockResolvedValue(TERMINAL_ANSWERS.ended_undelivered);
       vi.mocked(terminalApi.createSession)
         .mockResolvedValueOnce(LAUNCH)
-        .mockResolvedValueOnce({ ...LAUNCH, session_id: "t2" });
+        .mockResolvedValueOnce(RELAUNCH);
       render(<TerminalRail />);
       await openSocket();
       exitAgent();
@@ -899,18 +878,11 @@ describe("TerminalRail", () => {
       act(() => useStore.getState().sendToAgentTerminal("staged after the end"));
       await act(async () => {});
       expect(submitted()).toEqual([]);
-      expect(useStore.getState().pendingTerminalMessages).toEqual([
-        "never given",
-        "staged after the end",
-      ]);
+      const pending = [...undelivered, "staged after the end"];
+      expect(useStore.getState().pendingTerminalMessages).toEqual(pending);
 
       fireEvent.click(screen.getByText("Start"));
-      await waitFor(() =>
-        expect(submitted()).toEqual([
-          ["t2", "never given"],
-          ["t2", "staged after the end"],
-        ]),
-      );
+      await waitFor(() => expect(submitted()).toEqual(pending.map((text) => [SECOND_ID, text])));
     });
 
     it("submits a request once to the session two overlapping creates across a reopen share", async () => {
@@ -928,7 +900,7 @@ describe("TerminalRail", () => {
       await act(() => Promise.resolve(first.resolve(LAUNCH)));
       expect(submitted()).toEqual([]);
       await act(() => Promise.resolve(second.resolve(LAUNCH)));
-      await waitFor(() => expect(submitted()).toEqual([["t1", "tab request"]]));
+      await waitFor(() => expect(submitted()).toEqual([[FIRST_ID, "tab request"]]));
     });
   });
 
@@ -960,7 +932,7 @@ describe("TerminalRail", () => {
           await vi.advanceTimersByTimeAsync(500);
         });
         expect(MockWebSocket.instances).toHaveLength(2);
-        expect(MockWebSocket.instances[1].url).toContain("/api/terminal/ws/t1");
+        expect(MockWebSocket.instances[1].url).toContain(`/api/terminal/ws/${FIRST_ID}`);
         expect(terminalApi.createSession).toHaveBeenCalledTimes(1);
       } finally {
         vi.useRealTimers();

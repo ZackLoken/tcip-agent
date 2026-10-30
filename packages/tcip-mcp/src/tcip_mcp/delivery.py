@@ -16,12 +16,12 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 import tcip_store
-from tcip_mcp.audit import now_iso, record_event_or_raise
+from tcip_mcp.audit import append_or_raise, audit_line
 from tcip_mcp.model_registry import Producer
 from tcip_mcp.pipelines.delivery_events_schema import (
     Acknowledgment,
@@ -56,12 +56,45 @@ class DeliveryRefusedError(ValueError):
         self.result_sha256 = result_sha256
 
     def as_detail(self) -> dict[str, Any]:
-        """Return the structured refusal body: its kind, message and ``result_sha256``."""
-        return {
-            "kind": "delivery",
-            "message": str(self),
-            "result_sha256": self.result_sha256,
-        }
+        """Return the structured refusal body, :class:`DeliveryRefusal` dumped."""
+        return DeliveryRefusal(
+            message=str(self), result_sha256=self.result_sha256
+        ).model_dump()
+
+
+class DeliveryRefusal(BaseModel):
+    """A delivery door's refusal: the gate's sentence and the digest an acknowledgment ships.
+
+    ``result_sha256`` is ``None`` for a delivery no acknowledgment can ship.
+    """
+
+    kind: Literal["delivery"] = "delivery"
+    message: str
+    result_sha256: str | None
+
+
+class ProjectionDigests(BaseModel):
+    """Each phenology projection's digest a breeder's acknowledgment of exporting it binds to."""
+
+    curves: str
+    milestones: str
+
+
+class PhenologyRefusal(BaseModel):
+    """The gate's refusal of a phenology measurement shown unvalidated, with each digest."""
+
+    message: str
+    digests: ProjectionDigests
+
+
+class OperatingPoint(BaseModel):
+    """The conf a bucket's assessment admits its predictions at, or ``None`` and why not.
+
+    ``reason`` is ``None`` when ``conf`` is admitted.
+    """
+
+    conf: float | None
+    reason: str | None
 
 
 DELIVERY_COLUMNS = (
@@ -99,7 +132,7 @@ class Result:
     columns: Sequence[str]
     rows: Sequence[dict]
     population: Sequence[str]
-    plant_mapping: dict | None = None
+    plant_mapping: PlantMapping | None = None
 
     def encoded(self, cells: dict[str, Any]) -> bytes:
         """Return the CSV of the rows under the columns.
@@ -239,7 +272,7 @@ def _assessments(
     return out
 
 
-def admitted_conf(project: Path, bucket: Bucket) -> tuple[float | None, str]:
+def admitted_conf(project: Path, bucket: Bucket) -> OperatingPoint:
     """Return the conf ``bucket``'s assessment admits its predictions at, and why not when none.
 
     The conf is the bucket's execution record's conf, on its assessment's authority, when the
@@ -251,12 +284,14 @@ def admitted_conf(project: Path, bucket: Bucket) -> tuple[float | None, str]:
     )[bucket.assessment_id]
     reason = _bucket_reason(bucket, assessment, finding)
     if reason is not None:
-        return None, reason
+        return OperatingPoint(conf=None, reason=reason)
     if bucket.execution is None or bucket.execution.conf is None:
-        return None, (
-            f"bucket {bucket.name!r} holds no detector's predictions, which no conf admits."
+        return OperatingPoint(
+            conf=None,
+            reason=f"bucket {bucket.name!r} holds no detector's predictions, which no conf "
+            "admits.",
         )
-    return bucket.execution.conf, ""
+    return OperatingPoint(conf=bucket.execution.conf, reason=None)
 
 
 def result_digest(
@@ -280,8 +315,7 @@ def result_digest(
                 "rows": result.encoded({}).decode("utf-8"),
                 "population": list(result.population),
                 "plant_mapping": _DISCLOSURE.dump_python(
-                    _DISCLOSURE.validate_python(result.plant_mapping),
-                    mode="json",
+                    result.plant_mapping, mode="json"
                 ),
                 "delivery_kind": delivery_kind,
                 **revision.ref.model_dump(),
@@ -485,27 +519,26 @@ def record_acknowledgment(
     one audit line by that person, ``delivery_acknowledged``, lands in the project's log. A blank
     name or reason refuses (``ValueError``).
     """
+    acknowledgment_id = uuid.uuid4().hex
+    line = audit_line(
+        "delivery_acknowledged",
+        {"acknowledgment_id": acknowledgment_id, "result_sha256": result_sha256},
+        acknowledged_by,
+        "ok",
+    )
     acknowledgment = Acknowledgment(
-        acknowledgment_id=uuid.uuid4().hex,
+        acknowledgment_id=acknowledgment_id,
         acknowledged_by=acknowledged_by,
         reason=reason,
         result_sha256=result_sha256,
-        recorded_at=now_iso(),
+        recorded_at=line.timestamp,
     )
     tcip_store.replace(
-        _acknowledgment_key(project, acknowledgment.acknowledgment_id),
-        acknowledgment.model_dump(),
+        _acknowledgment_key(project, acknowledgment_id),
+        acknowledgment.model_dump(mode="json"),
         expect=tcip_store.Version.ABSENT,
     )
-    record_event_or_raise(
-        "delivery_acknowledged",
-        {
-            "acknowledgment_id": acknowledgment.acknowledgment_id,
-            "result_sha256": result_sha256,
-        },
-        actor=acknowledged_by,
-        scope=project,
-    )
+    append_or_raise(line, scope=project)
     return acknowledgment
 
 
@@ -579,23 +612,22 @@ def deliver_csv(
         }
     )
     path = Path(output_path)
-    event = DeliveryEventRecord.model_validate(
-        {
-            "event_id": event_id,
-            "door": door,
-            "delivery_kind": delivery_kind,
-            **revision.ref.model_dump(),
-            "output_path": str(path),
-            "output_sha256": hashlib.sha256(data).hexdigest(),
-            "producer": clearance.producer,
-            "buckets": clearance.buckets,
-            "scale_assessment_id": clearance.scale_assessment_id,
-            "validated": clearance.validated,
-            "acknowledgment": clearance.acknowledgment,
-            "population": list(result.population),
-            "plant_mapping": result.plant_mapping,
-            "produced_at": now_iso(),
-        }
+    line = audit_line("delivery_event", {"event_id": event_id}, actor, "ok")
+    event = DeliveryEventRecord(
+        **dict(revision.ref),
+        event_id=event_id,
+        door=door,
+        delivery_kind=delivery_kind,
+        output_path=str(path),
+        output_sha256=hashlib.sha256(data).hexdigest(),
+        producer=clearance.producer,
+        buckets=clearance.buckets,
+        scale_assessment_id=clearance.scale_assessment_id,
+        validated=clearance.validated,
+        acknowledgment=clearance.acknowledgment,
+        population=list(result.population),
+        plant_mapping=result.plant_mapping,
+        produced_at=line.timestamp,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
@@ -605,12 +637,7 @@ def deliver_csv(
             event.model_dump(mode="json"), DELIVERY_EVENT_PATHS, project
         ),
     )
-    record_event_or_raise(
-        "delivery_event",
-        {"event_id": event_id},
-        actor=actor,
-        scope=clearance.buckets[0].dataset_root,
-    )
+    append_or_raise(line, scope=clearance.buckets[0].dataset_root)
     ack = clearance.acknowledgment
     return {
         "csv_path": str(path),
@@ -625,12 +652,17 @@ def deliver_csv(
 def read_delivery_events(project: str | Path) -> list[DeliveryEventRecord]:
     """Return every delivery event recorded under ``project``, decoded through its declared shape.
 
-    Its paths are resolved against the project.
+    Its paths are resolved against the project; the events stand in the order produced.
     """
     scope = project_state_dir(project)
-    return [
-        DeliveryEventRecord.model_validate(
-            runtime_paths(tcip_store.read(key), DELIVERY_EVENT_PATHS, project)
-        )
-        for key in tcip_store.keys(DELIVERY_EVENTS_STORE, str(scope))
-    ]
+    return sorted(
+        (
+            DeliveryEventRecord.model_validate(
+                runtime_paths(
+                    tcip_store.read(key), DELIVERY_EVENT_PATHS, project
+                )
+            )
+            for key in tcip_store.keys(DELIVERY_EVENTS_STORE, str(scope))
+        ),
+        key=lambda event: event.produced_at,
+    )

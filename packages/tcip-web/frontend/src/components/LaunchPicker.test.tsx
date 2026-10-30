@@ -1,10 +1,28 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { StructuredRefusalError } from "@/api/http";
-import { LaunchPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
+import { LaunchPicker, NO_OTHER_PARTITION, type LaunchPickerRow } from "@/components/LaunchPicker";
+import { thrown } from "@/test/refusals";
+import { MOVED_SPLIT_CHOICES, SPLIT_CHOICES, TRAINING_REFUSALS } from "@/test/training";
 
 afterEach(cleanup);
+
+/** The issue the produced refusal of a relaunch names. */
+const [ISSUE] = TRAINING_REFUSALS.refused_relaunch.body.detail.issues;
+
+/** The produced partition offered disabled, its record unreadable, and the one offered enabled. */
+const DISABLED = SPLIT_CHOICES.selections.find((choice) => choice.reason !== null)!;
+const ENABLED = SPLIT_CHOICES.selections.find((choice) => choice.reason === null)!;
+
+/** The disabled partition's reason as the page shows it, its whitespace collapsed. */
+const DISABLED_REASON = String(DISABLED.reason).replace(/\s+/g, " ").trim();
+
+/** The radio of the partition under `dir` itself, never of one in a directory beneath it. */
+function radioOf(dir: string): HTMLElement {
+  return screen.getByRole("radio", {
+    name: (name) => name.startsWith(dir) && !/^[/\\]/.test(name.slice(dir.length)),
+  });
+}
 
 describe("LaunchPicker", () => {
   it("shows the empty message when there are no configs", () => {
@@ -32,6 +50,15 @@ describe("LaunchPicker", () => {
     };
   }
 
+  function renderRow(overrides: Partial<LaunchPickerRow>) {
+    render(
+      <LaunchPicker
+        list={{ title: "Configs in this project", emptyMessage: "none", rows: [row(overrides)] }}
+      />,
+    );
+    fireEvent.click(screen.getByText("exp-1"));
+  }
+
   it("reveals the Start action and its branch line only once a row is selected", () => {
     render(
       <LaunchPicker
@@ -45,31 +72,15 @@ describe("LaunchPicker", () => {
   });
 
   it("shows a refused start's issues under the row, in the tool's own words", async () => {
-    const onStart = vi
-      .fn()
-      .mockRejectedValue(
-        new StructuredRefusalError({ issues: ["batch_size must be positive"] }, 422, ""),
-      );
-    render(
-      <LaunchPicker
-        list={{ title: "Configs in this project", emptyMessage: "none", rows: [row({ onStart })] }}
-      />,
-    );
-    fireEvent.click(screen.getByText("exp-1"));
+    const onStart = vi.fn().mockRejectedValue(await thrown(TRAINING_REFUSALS.refused_relaunch));
+    renderRow({ onStart });
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    await waitFor(() =>
-      expect(screen.getByText("batch_size must be positive")).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText(ISSUE)).toBeInTheDocument());
   });
 
   it("a start that succeeds closes the row's own action", async () => {
     const onStart = vi.fn().mockResolvedValue(undefined);
-    render(
-      <LaunchPicker
-        list={{ title: "Configs in this project", emptyMessage: "none", rows: [row({ onStart })] }}
-      />,
-    );
-    fireEvent.click(screen.getByText("exp-1"));
+    renderRow({ onStart });
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(onStart).toHaveBeenCalledTimes(1));
     await waitFor(() =>
@@ -78,256 +89,80 @@ describe("LaunchPicker", () => {
   });
 
   it("renders no Data section for a row that carries none", () => {
-    render(
-      <LaunchPicker
-        list={{ title: "Configs in this project", emptyMessage: "none", rows: [row()] }}
-      />,
-    );
-    fireEvent.click(screen.getByText("exp-1"));
+    renderRow({});
     expect(screen.queryByText("Data")).not.toBeInTheDocument();
   });
 
   it('shows "As recorded"\'s own case line and the one-line absence with no offers', () => {
-    render(
-      <LaunchPicker
-        list={{
-          title: "Configs in this project",
-          emptyMessage: "none",
-          rows: [
-            row({
-              data: {
-                asRecordedLine:
-                  "draws its split again with seed 42 over the labels as they are now",
-                choices: [],
-                absenceMessage:
-                  "this listing found no other recorded partition the config can bind to; the agent can draw one.",
-              },
-            }),
-          ],
-        }}
-      />,
-    );
-    fireEvent.click(screen.getByText("exp-1"));
+    const { as_recorded: recorded, selections } = MOVED_SPLIT_CHOICES;
+    expect(selections).toHaveLength(0);
+    renderRow({ data: MOVED_SPLIT_CHOICES });
+    expect(screen.getByText(new RegExp(recorded.line))).toBeInTheDocument();
+    expect(screen.getByText(NO_OTHER_PARTITION)).toBeInTheDocument();
+  });
+
+  it("renders one row per offered selection, labeled by its own recorded fields", () => {
+    const offered = ENABLED;
+    renderRow({ data: SPLIT_CHOICES });
     expect(
-      screen.getByText(/draws its split again with seed 42 over the labels as they are now/),
+      screen.getByText(
+        `seed ${offered.seed} · ${offered.group_by} · train ${offered.train} · val ${offered.val} · calibration ${offered.calibration}`,
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByText(/this listing found no other recorded partition/)).toBeInTheDocument();
+    expect(screen.queryByText(NO_OTHER_PARTITION)).not.toBeInTheDocument();
   });
 
-  it("renders one row per offered manifest, with the draw-seed label, only when offers exist", () => {
-    render(
-      <LaunchPicker
-        list={{
-          title: "Configs in this project",
-          emptyMessage: "none",
-          rows: [
-            row({
-              data: {
-                asRecordedLine: "on the partition it bound",
-                absenceMessage: "unused",
-                choices: [
-                  {
-                    selectionDir: "/data/splits",
-                    label: <span>seed 7 · tile_prefix · train 4 · val 2</span>,
-                  },
-                ],
-              },
-            }),
-          ],
-        }}
-      />,
-    );
-    fireEvent.click(screen.getByText("exp-1"));
-    expect(screen.getByText(/seed 7/)).toBeInTheDocument();
-    expect(screen.queryByText("unused")).not.toBeInTheDocument();
+  it("shows a disabled candidate's own reason", () => {
+    renderRow({ data: SPLIT_CHOICES });
+    expect(screen.getByText(DISABLED_REASON)).toBeInTheDocument();
+    expect(radioOf(DISABLED.selection_dir)).toBeDisabled();
   });
 
-  it("shows a disabled candidate's own compatibility reason", () => {
-    render(
-      <LaunchPicker
-        list={{
-          title: "Configs in this project",
-          emptyMessage: "none",
-          rows: [
-            row({
-              data: {
-                asRecordedLine: "on the partition it bound",
-                absenceMessage: "unused",
-                choices: [
-                  {
-                    selectionDir: "/data/other-subject-splits",
-                    label: <span>/data/other-subject-splits</span>,
-                    disabled: true,
-                    reason:
-                      "the selection was drawn for subject='bud', but this run is subject='leaf'",
-                  },
-                ],
-              },
-            }),
-          ],
-        }}
-      />,
-    );
-    fireEvent.click(screen.getByText("exp-1"));
-    expect(screen.getByText(/drawn for subject='bud'/)).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /other-subject-splits/ })).toBeDisabled();
-  });
-
-  it("starts with the chosen manifest directory once a candidate is selected", async () => {
+  it("starts with the chosen selection directory once a candidate is selected", async () => {
+    const chosen = ENABLED.selection_dir;
     const onStart = vi.fn().mockResolvedValue(undefined);
-    render(
-      <LaunchPicker
-        list={{
-          title: "Configs in this project",
-          emptyMessage: "none",
-          rows: [
-            row({
-              onStart,
-              data: {
-                asRecordedLine:
-                  "draws its split again with seed 42 over the labels as they are now",
-                absenceMessage: "unused",
-                choices: [{ selectionDir: "/data/splits", label: <span>/data/splits</span> }],
-              },
-            }),
-          ],
-        }}
-      />,
-    );
-    fireEvent.click(screen.getByText("exp-1"));
-    fireEvent.click(screen.getByRole("radio", { name: "/data/splits" }));
+    renderRow({ onStart, data: SPLIT_CHOICES });
+    fireEvent.click(radioOf(chosen));
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    await waitFor(() => expect(onStart).toHaveBeenCalledWith("/data/splits"));
+    await waitFor(() => expect(onStart).toHaveBeenCalledWith(chosen));
   });
 
   it("starts with null for the default As recorded choice", async () => {
     const onStart = vi.fn().mockResolvedValue(undefined);
-    render(
-      <LaunchPicker
-        list={{
-          title: "Configs in this project",
-          emptyMessage: "none",
-          rows: [
-            row({
-              onStart,
-              data: {
-                asRecordedLine: "on the partition it bound",
-                absenceMessage: "unused",
-                choices: [{ selectionDir: "/data/splits", label: <span>/data/splits</span> }],
-              },
-            }),
-          ],
-        }}
-      />,
-    );
-    fireEvent.click(screen.getByText("exp-1"));
+    renderRow({ onStart, data: SPLIT_CHOICES });
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(onStart).toHaveBeenCalledWith(null));
   });
 
   it("disables Start while the checked As recorded choice is disabled, showing its reason once, in the status region", () => {
-    render(
-      <LaunchPicker
-        list={{
-          title: "Configs in this project",
-          emptyMessage: "none",
-          rows: [
-            row({
-              data: {
-                asRecordedLine: "on the partition it bound",
-                asRecordedDisabled: true,
-                asRecordedReason: "Not found: data.images_dir = '/moved'",
-                absenceMessage: "unused",
-                choices: [],
-              },
-            }),
-          ],
-        }}
-      />,
-    );
-    fireEvent.click(screen.getByText("exp-1"));
+    const reason = String(MOVED_SPLIT_CHOICES.as_recorded.reason);
+    renderRow({ data: MOVED_SPLIT_CHOICES });
     expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
-    expect(screen.getAllByText("Not found: data.images_dir = '/moved'")).toHaveLength(1);
-    expect(screen.getByRole("status")).toHaveTextContent("Not found: data.images_dir = '/moved'");
+    expect(screen.getAllByText(reason)).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent(reason);
   });
 
   it("shows a disabled candidate's own inline reason once it is no longer the checked choice, not duplicated into the status region", () => {
-    render(
-      <LaunchPicker
-        list={{
-          title: "Configs in this project",
-          emptyMessage: "none",
-          rows: [
-            row({
-              data: {
-                asRecordedLine: "on the partition it bound",
-                absenceMessage: "unused",
-                choices: [
-                  {
-                    selectionDir: "/data/other-subject-splits",
-                    label: <span>/data/other-subject-splits</span>,
-                    disabled: true,
-                    reason: "the selection was drawn for subject='bud'",
-                  },
-                ],
-              },
-            }),
-          ],
-        }}
-      />,
-    );
-    fireEvent.click(screen.getByText("exp-1"));
+    expect(SPLIT_CHOICES.as_recorded.reason).toBeNull();
+    renderRow({ data: SPLIT_CHOICES });
     // As recorded (the default checked choice) is enabled, so Start is not blocked and no
     // status region renders; the untouched, disabled candidate still names its own reason once.
     expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled();
-    expect(screen.getAllByText(/drawn for subject='bud'/)).toHaveLength(1);
+    expect(screen.getAllByText(DISABLED_REASON)).toHaveLength(1);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("renders a refused start's issues once, in the status region under Start, not the row's disabled-choice text", async () => {
-    const onStart = vi
-      .fn()
-      .mockRejectedValue(
-        new StructuredRefusalError({ issues: ["batch_size must be positive"] }, 422, ""),
-      );
-    render(
-      <LaunchPicker
-        list={{
-          title: "Configs in this project",
-          emptyMessage: "none",
-          rows: [
-            row({
-              onStart,
-              data: {
-                asRecordedLine: "on the partition it bound",
-                absenceMessage: "unused",
-                choices: [{ selectionDir: "/data/splits", label: <span>/data/splits</span> }],
-              },
-            }),
-          ],
-        }}
-      />,
-    );
-    fireEvent.click(screen.getByText("exp-1"));
+    const onStart = vi.fn().mockRejectedValue(await thrown(TRAINING_REFUSALS.refused_relaunch));
+    renderRow({ onStart, data: SPLIT_CHOICES });
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    await waitFor(() =>
-      expect(screen.getByText("batch_size must be positive")).toBeInTheDocument(),
-    );
-    expect(screen.getAllByText("batch_size must be positive")).toHaveLength(1);
-    expect(screen.getByRole("status")).toHaveTextContent("batch_size must be positive");
+    await waitFor(() => expect(screen.getByText(ISSUE)).toBeInTheDocument());
+    expect(screen.getAllByText(ISSUE)).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent(ISSUE);
   });
 
   it("disables Start and reports checking the data choice while a row's Data choices are still loading", () => {
-    render(
-      <LaunchPicker
-        list={{
-          title: "Configs in this project",
-          emptyMessage: "none",
-          rows: [row({ data: undefined, dataLoading: true })],
-        }}
-      />,
-    );
-    fireEvent.click(screen.getByText("exp-1"));
+    renderRow({ data: undefined, dataLoading: true });
     expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent("checking the data choice");
   });
@@ -363,70 +198,27 @@ describe("LaunchPicker", () => {
   });
 
   it("re-enables Start once a checked choice that is itself enabled is selected", () => {
-    render(
-      <LaunchPicker
-        list={{
-          title: "Configs in this project",
-          emptyMessage: "none",
-          rows: [
-            row({
-              data: {
-                asRecordedLine: "on the partition it bound",
-                asRecordedDisabled: true,
-                asRecordedReason: "moved",
-                absenceMessage: "unused",
-                choices: [{ selectionDir: "/data/splits", label: <span>/data/splits</span> }],
-              },
-            }),
-          ],
-        }}
-      />,
-    );
-    fireEvent.click(screen.getByText("exp-1"));
+    // The moved run's refused As recorded beside the offered partitions: no one answer pairs them.
+    renderRow({
+      data: { as_recorded: MOVED_SPLIT_CHOICES.as_recorded, selections: SPLIT_CHOICES.selections },
+    });
     expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("radio", { name: "/data/splits" }));
+    fireEvent.click(radioOf(ENABLED.selection_dir));
     expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled();
   });
 
   it("shows the recorded split keys a candidate would replace beside its own row", () => {
-    render(
-      <LaunchPicker
-        list={{
-          title: "Configs in this project",
-          emptyMessage: "none",
-          rows: [
-            row({
-              data: {
-                asRecordedLine: "draws its split again with seed 7 over the labels as they are now",
-                absenceMessage: "unused",
-                choices: [
-                  {
-                    selectionDir: "/data/splits",
-                    label: <span>/data/splits</span>,
-                    replacedSplitKeys: ["grouping", "seed"],
-                  },
-                ],
-              },
-            }),
-          ],
-        }}
-      />,
-    );
-    fireEvent.click(screen.getByText("exp-1"));
-    expect(screen.getByText(/replaces the recorded\s*grouping, seed/)).toBeInTheDocument();
+    const { replaced_split_keys: replaced } = ENABLED;
+    expect(replaced).not.toHaveLength(0);
+    renderRow({ data: SPLIT_CHOICES });
+    // Each offered candidate, the disabled one included, names the keys it would replace.
+    expect(
+      screen.getAllByText(new RegExp(`replaces the recorded\\s*${replaced.join(", ")}`)),
+    ).toHaveLength(SPLIT_CHOICES.selections.length);
   });
 
   it("shows a per-row Data-choices fetch failure as text on the row", () => {
-    render(
-      <LaunchPicker
-        list={{
-          title: "Configs in this project",
-          emptyMessage: "none",
-          rows: [row({ dataError: "Could not load its data choices: network error" })],
-        }}
-      />,
-    );
-    fireEvent.click(screen.getByText("exp-1"));
+    renderRow({ dataError: "Could not load its data choices: network error" });
     expect(screen.getByText("Could not load its data choices: network error")).toBeInTheDocument();
   });
 

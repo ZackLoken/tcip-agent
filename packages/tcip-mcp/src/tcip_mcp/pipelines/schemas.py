@@ -287,6 +287,19 @@ HIGHER_IS_BETTER_BY_METRIC: dict[str, bool] = {
 }
 """Direction of a better value for each :data:`SelectionMetric`."""
 
+VAL_METRIC_PREFIX = "val_"
+"""The prefix every validation metric key carries in a run's metrics log and registry entry."""
+
+
+def declared_higher_is_better(metric: str) -> bool | None:
+    """Return whether a higher value of the stamped ``metric`` ranks better, ``None`` if undeclared.
+
+    The declaration is :data:`HIGHER_IS_BETTER_BY_METRIC`'s for the name without
+    :data:`VAL_METRIC_PREFIX`.
+    """
+    return HIGHER_IS_BETTER_BY_METRIC.get(metric.removeprefix(VAL_METRIC_PREFIX))
+
+
 CENTER_MATCH_COMPARABILITY_KEYS: frozenset[str] = frozenset(
     {
         "map50",

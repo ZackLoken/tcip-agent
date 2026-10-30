@@ -183,12 +183,8 @@ def test_a_cancel_requested_by_id_ends_the_child_canceled(
         lambda: read_rows(run_dir / METRICS_FILE)[0],
     )
 
-    assert (
-        cancel_training(tmp_path, res.experiment_id, actor=None)[
-            "cancel_requested"
-        ]
-        is True
-    )
+    canceled = cancel_training(tmp_path, res.experiment_id, actor=None)
+    assert not isinstance(canceled, dict), canceled
     final = _wait_final(run_dir)
 
     assert final.state == "canceled", final
@@ -305,6 +301,7 @@ def test_a_reader_never_sees_a_final_status_before_its_bytes_are_whole(
     running; after the write it reads failed.
     """
     from tcip_mcp import experiments
+    from tcip_mcp.audit import now
     from tests._verified_checkpoint_fixtures import (
         detection_config,
         opened_run,
@@ -326,7 +323,9 @@ def test_a_reader_never_sees_a_final_status_before_its_bytes_are_whole(
         real_publish(path, write_after_reading)
 
     monkeypatch.setattr(experiments, "publish_once", observed_mid_write)
-    experiments.write_final_status(run_dir, "failed", "stopped by hand")
+    experiments.write_final_status(
+        run_dir, "failed", "stopped by hand", ended=now()
+    )
 
     [during] = seen
     assert (during.final, during.state) == (None, "running")
@@ -511,9 +510,10 @@ def test_a_name_is_reserved_by_the_directory_that_takes_it_first(
         RunDirectoryExistsError,
         create_run_directory,
         experiment_dir,
-        find_run,
-        find_sweep,
+        experiment_dirs,
         named_directory,
+        run_dirs,
+        sweep_dirs,
     )
     from tcip_mcp.tools.training_tools import open_trial
     from tests._verified_checkpoint_fixtures import (
@@ -538,12 +538,13 @@ def test_a_name_is_reserved_by_the_directory_that_takes_it_first(
     run = opened_run(tmp_path, config, experiment_id="a-free-name")
 
     assert (
-        find_run(run.name, project=tmp_path),
-        find_run(trial.name, project=tmp_path),
-        find_sweep(sweep.name, project=tmp_path),
+        named_directory(run.name, run_dirs(tmp_path)),
+        named_directory(trial.name, run_dirs(tmp_path)),
+        named_directory(sweep.name, sweep_dirs(tmp_path)),
     ) == (run, trial, sweep)
     assert [
-        named_directory(d.name, project=tmp_path) for d in (run, trial, sweep)
+        named_directory(d.name, experiment_dirs(tmp_path))
+        for d in (run, trial, sweep)
     ] == [run, trial, sweep]
 
 
@@ -733,7 +734,7 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.experiments import (
         METRICS_FILE,
-        find_sweep,
+        named_directory,
         observe,
         observe_run,
         observe_sweep,
@@ -742,6 +743,7 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
         run_dirs,
         run_rows,
         run_summary,
+        sweep_dirs,
     )
     from tcip_mcp.pipelines.schemas import selection_of
     from tcip_mcp.pipelines.training import subprocess_worker
@@ -772,9 +774,9 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
     )
     ctx.report_objective(0.25)
     rows = read_rows(ctx.run_dir / METRICS_FILE)[0]
-    assert rows[-1]["selection_metric"] == "mae"
+    assert rows[-1].model_dump()["selection_metric"] == "mae"
     assert (
-        run_summary(observe(ctx.run_dir), rows, None).best_metric_name == "mae"
+        run_summary(observe(ctx.run_dir), rows, {}).best_metric_name == "mae"
     )
 
     monkeypatch.setattr(
@@ -821,7 +823,9 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
         auto_tensorboard=False,
         actor=None,
     )
-    sweep_dir = find_sweep(result["sweep"]["sweep_id"], project=tmp_path)
+    sweep_dir = named_directory(
+        result["sweep"]["sweep_id"], sweep_dirs(tmp_path)
+    )
     (trial_dir,) = run_dirs(tmp_path)
     trial = observe_run(trial_dir)
     metric, higher = selection_of(
@@ -838,11 +842,13 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
     swept = sweep.trait_revision
     assert swept is not None
     assert trial.record.resolution.trait_revision == swept
-    assert run_summary(trial, [], None).best_metric_name == metric
+    assert run_summary(trial, [], {}).best_metric_name == metric
     assert modes == ["max" if higher else "min"]
     assert (
         "objective"
-        not in read_sweep(sweep_dir, run_rows(tmp_path)).model_dump()
+        not in read_sweep(
+            observe_sweep(sweep_dir), run_rows(tmp_path)
+        ).model_dump()
     )
 
 

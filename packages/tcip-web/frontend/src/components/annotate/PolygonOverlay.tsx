@@ -14,7 +14,6 @@ export const PolygonOverlay = memo(function PolygonOverlay({
   showVertices,
   labelSize,
   label,
-  showLabel,
   focused,
 }: {
   polygon: PolygonShape;
@@ -24,8 +23,7 @@ export const PolygonOverlay = memo(function PolygonOverlay({
   vertexRadius: number;
   showVertices: boolean;
   labelSize: number;
-  label: string;
-  showLabel?: boolean;
+  label: string | null;
   /** The focused item draws the halo under every ring's own stroke. */
   focused?: boolean;
 }) {
@@ -76,7 +74,7 @@ export const PolygonOverlay = memo(function PolygonOverlay({
           )),
         )}
       {/* One label per annotation, not per ring: a two-part shape is one annotation. */}
-      {showLabel && <HaloLabel x={x0} y={y0} text={label} fill={stroke} size={labelSize} />}
+      {label !== null && <HaloLabel x={x0} y={y0} text={label} fill={stroke} size={labelSize} />}
     </>
   );
 });

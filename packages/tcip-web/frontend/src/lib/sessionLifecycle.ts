@@ -5,9 +5,14 @@
  * anything acts on it and no answer arrives after the end that consumed it.
  */
 
-import { committedOf, isAuditEntryNotWritten, StructuredRefusalError } from "@/api/http";
+import { committedOf, messageOf, refusalOf, StructuredRefusalError } from "@/api/http";
 import { sessionsApi } from "@/api/sessions";
-import type { ImageEventPayload, SessionWrite } from "@/api/types.generated";
+import {
+  AUDIT_ENTRY_NOT_WRITTEN,
+  type AuditGapRefusal,
+  type ImageEventPayload,
+  type SessionWrite,
+} from "@/api/types.generated";
 import { useStore } from "@/store";
 import { holds, noticeUnconfirmed } from "@/store/slices/registryStatus";
 
@@ -66,9 +71,9 @@ function dispose(contribution: ImageEventPayload, posted: Promise<SessionWrite>)
       const committed = committedOf<SessionWrite>(e);
       if (committed !== null) {
         adopt(contribution, committed);
-        s.pushToast(e instanceof Error ? e.message : String(e));
+        s.pushToast(messageOf(e));
       } else if (
-        !isAuditEntryNotWritten(e) &&
+        !refusalOf<AuditGapRefusal>(e, AUDIT_ENTRY_NOT_WRITTEN) &&
         e instanceof StructuredRefusalError &&
         e.status < 500
       ) {

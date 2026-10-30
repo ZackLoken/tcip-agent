@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from tcip_mcp.pipelines.execution import (
     DEFAULT_IMAGE_BATCH_SIZE,
     DEFAULT_TILE_BATCH_SIZE,
 )
+from tcip_mcp.pipelines.image_utils import source_path_of
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -92,7 +93,8 @@ class StubPredictor:
         self.calls += 1
         self.executions.append(execution)
         return [
-            {"image": p, **copy.deepcopy(self.record)} for p in image_paths
+            {"image": source_path_of(p), **copy.deepcopy(self.record)}
+            for p in image_paths
         ]
 
     def predict_sliced(
@@ -107,7 +109,12 @@ class StubPredictor:
     ) -> dict:
         self.calls += 1
         self.executions.append(execution)
-        return {"image": source, **copy.deepcopy(self.record)}
+        label = (
+            source_label
+            if hasattr(source, "read_window")
+            else source_path_of(cast("str | Path | BandGroupRef", source))
+        )
+        return {"image": label, **copy.deepcopy(self.record)}
 
 
 def install(

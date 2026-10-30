@@ -5,12 +5,12 @@
  * created here is revoked once its bitmap decodes or the load is abandoned.
  */
 
-import { IMAGE_ERROR_HEADER } from "@/api/types.generated";
+import { IMAGE_ERROR_HEADER, SERVED_SIZE_HEADER } from "@/api/types.generated";
 
 export interface ImageServeFacts {
-  /** Output size of the serve, parsed from X-TCIP-Served-Size ("WxH"). */
+  /** Output size of the serve, parsed from `SERVED_SIZE_HEADER` ("WxH"). */
   servedSize: { w: number; h: number } | null;
-  /** The condition the server named when it refused the request (X-TCIP-Image-Error). */
+  /** The condition the server named when it refused the request (`IMAGE_ERROR_HEADER`). */
   imageError: string | null;
 }
 
@@ -30,9 +30,10 @@ function parseServedSize(raw: string | null): { w: number; h: number } | null {
   return m ? { w: Number(m[1]), h: Number(m[2]) } : null;
 }
 
-function readFacts(headers: Headers): ImageServeFacts {
+/** The serve facts `headers` carry. */
+export function readFacts(headers: Headers): ImageServeFacts {
   return {
-    servedSize: parseServedSize(headers.get("X-TCIP-Served-Size")),
+    servedSize: parseServedSize(headers.get(SERVED_SIZE_HEADER)),
     imageError: headers.get(IMAGE_ERROR_HEADER),
   };
 }

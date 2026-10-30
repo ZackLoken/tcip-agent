@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 
 import { api } from "@/api/client";
+import type { CompositeStretch } from "@/api/types.generated";
+import type { CompositeBands } from "@/lib/bandSelection";
 import { useStore } from "@/store";
 
 /**
@@ -15,8 +17,8 @@ import { useStore } from "@/store";
  */
 export function usePrefetchAdjacentImages(
   displayPixels: number,
-  bands?: string,
-  stretch?: string,
+  bands?: CompositeBands,
+  stretch?: CompositeStretch,
 ): void {
   const dataset = useStore((s) => s.gui.dataset);
 

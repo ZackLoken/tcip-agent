@@ -61,8 +61,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         project = bound_project(args.project)
         person = actor(args.user)
         if args.field == "site":
-            site = replace_site(project, args.site, actor=person)
-            previous, written = site["previous_site"], site["site"]
+            correction = replace_site(project, args.site, actor=person)
         else:
             block = CaptureInvariances.model_validate(
                 {
@@ -70,11 +69,12 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                     for name in CaptureInvariances.model_fields
                 }
             )
-            answer = replace_invariances(project, block, actor=person)
-            previous, written = answer.previous_invariances, answer.invariances
+            correction = replace_invariances(project, block, actor=person)
     except (SystemExit, ValueError) as exc:
         print(f"refused: {exc}")
         return 2
+    previous = getattr(correction.previous, args.field)
+    written = getattr(correction.record, args.field)
     print(
         f"written: {project} recorded {args.field} {previous!r}, now records {written!r}"
     )

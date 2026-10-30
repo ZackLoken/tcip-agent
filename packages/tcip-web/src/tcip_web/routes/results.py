@@ -22,18 +22,23 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, get_args
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from tcip_mcp.assessment import Assessment
+from tcip_mcp.delivery import PhenologyRefusal, ProjectionDigests
 from tcip_mcp.pipelines.delivery_events_schema import (
     DeliveryEventRecord,
     PlantMappingDisclosure,
-    RasterDisclosure,
 )
 from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
+from tcip_mcp.pipelines.postprocessing.segment_attribution import PositionError
+from tcip_mcp.pipelines.schemas import TraitRevisionRef
+from tcip_mcp.tools.model_tools import RegisteredModels
+from tcip_mcp.traits import TraitRevision
 from tcip_web.paths import resolved_path, within
 from tcip_web.state import store
 
@@ -41,7 +46,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.postprocessing.phenology import (
         PhenologyMeasurement,
     )
-    from tcip_mcp.traits import TraitRecord, TraitRevision
+    from tcip_mcp.traits import TraitRecord
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +108,9 @@ class BuildMappingPayload(BaseModel):
 
 
 @router.post("/plant_mapping/build")
-def build_plant_mapping(payload: BuildMappingPayload) -> dict:
+def build_plant_mapping(
+    payload: BuildMappingPayload,
+) -> plant_mapping.ServedMapping:
     """Build and persist the open project's plant mapping, answering it as served.
 
     The build is :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.build_plant_mapping`'s,
@@ -151,7 +158,9 @@ class LoadMappingPayload(BaseModel):
 
 
 @router.post("/plant_mapping/load")
-def load_plant_mapping(payload: LoadMappingPayload) -> dict:
+def load_plant_mapping(
+    payload: LoadMappingPayload,
+) -> plant_mapping.ServedMapping:
     """Load the persisted mapping under ``payload.name`` as ``MappingBuild.served`` states it.
 
     Nothing stored under the name answers 404; a name the key refuses, or a record that will not
@@ -171,11 +180,17 @@ def load_plant_mapping(payload: LoadMappingPayload) -> dict:
     return build.served()
 
 
+class MappingNames(BaseModel):
+    """Every mapping name persisted under a project."""
+
+    names: list[str]
+
+
 @router.get("/plant_mapping/list")
-def list_plant_mappings() -> dict:
+def list_plant_mappings() -> MappingNames:
     """List every mapping name persisted under the open project."""
     root = store.held().root
-    return {"names": plant_mapping.plant_mapping_names(root)}
+    return MappingNames(names=plant_mapping.plant_mapping_names(root))
 
 
 # ── Per-plant curves ───────────────────────────────────────────────────
@@ -234,16 +249,32 @@ def _measure(root: Path, payload: PhenologyInputs) -> PhenologyMeasurement:
         raise HTTPException(400, str(exc)) from exc
 
 
+class PhenologyAnswer(BaseModel):
+    """Both phenology projections of one measurement, under the trait revision it is measured by.
+
+    ``curves`` is the per-(plant, date) projection. ``unvalidated`` is the delivery gate's
+    refusal with the projections' digests when no assessment answers for every delivered bucket,
+    ``None`` when the gate cleared. ``positive_class_assessed`` is the measurement's
+    (:attr:`~tcip_mcp.pipelines.postprocessing.phenology.PhenologyMeasurement.positive_class_assessed`),
+    and ``plant_mapping`` the delivery's mapping disclosure.
+    """
+
+    revision: TraitRevisionRef
+    curves: list[phenology.CurveRow]
+    milestones: list[phenology.MilestoneRow]
+    unvalidated: PhenologyRefusal | None
+    positive_class_assessed: bool
+    plant_mapping: plant_mapping.PlantMappingDisclosure
+
+
 @router.post("/phenology_measurement")
-def phenology_measurement(payload: PhenologyPayload) -> dict:
+def phenology_measurement(payload: PhenologyPayload) -> PhenologyAnswer:
     """Return both phenology projections from one measurement, cleared through the delivery gate.
 
-    The projections are the per-(plant, date) curve and the per-plant milestone dates, with the
-    milestone columns the producer writes. The gate is the one delivery gate: its refusal
+    The projections are the per-(plant, date) curve and the per-plant milestone crossings. The
+    gate is the one delivery gate: its refusal
     answers 400 with the refusal's detail unless ``show_unvalidated``, in which case both are
-    returned with the refusal as ``unvalidated_reason`` and, as ``result_sha256``, the digest of
-    each projection's delivered result keyed ``curves`` and ``milestones``, which a breeder's
-    acknowledgment of exporting it binds to.
+    returned with the refusal and the digests (:class:`~tcip_mcp.delivery.PhenologyRefusal`).
     """
     from tcip_mcp.delivery import DeliveryRefusedError, gate
     from tcip_mcp.operationalization import OperationalizationRefusedError
@@ -252,15 +283,15 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
     root = store.held().root
     measurement = _measure(root, payload)
     reason = None
-    digests: dict[str, str] = {}
-    for projection in ("curves", "milestones"):
+    digests: dict[phenology.Projection, str] = {}
+    for projection in get_args(phenology.Projection):
         try:
             gate(
                 root,
                 list(measurement.buckets.values()),
                 delivery_kind=STATE_CROSSING_DATES,
                 revision=measurement.revision,
-                result=measurement.result(curves=projection == "curves"),
+                result=measurement.result(projection),
             )
         except OperationalizationRefusedError as exc:
             raise HTTPException(400, exc.as_detail()) from exc
@@ -268,40 +299,63 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
             if not payload.show_unvalidated or exc.result_sha256 is None:
                 raise HTTPException(400, exc.as_detail()) from exc
             reason, digests[projection] = str(exc), exc.result_sha256
-    disclosure = measurement.plant_mapping
-    return {
-        "curves": {
-            "rows": measurement.curve_rows(),
-            "n_plants": len(measurement.rows),
-        },
-        "milestones": {
-            "rows": measurement.milestone_rows(),
-            "columns": phenology.milestone_date_columns(
-                measurement.revision.entry
-            ),
-        },
-        "validated": reason is None,
-        "unvalidated_reason": reason,
-        "result_sha256": digests or None,
-        **measurement.revision.ref.model_dump(),
-        "positive_class_assessed": measurement.positive_class_assessed,
-        **{
-            key: disclosure[key]
-            for key in (
-                "captures_unverified",
-                "plant_csvs_unverified",
-                "dates_delivered",
-                "images_unattributed",
-            )
-        },
-    }
+    return PhenologyAnswer(
+        revision=measurement.revision.ref,
+        curves=measurement.phenology.curves,
+        milestones=measurement.phenology.milestones,
+        unvalidated=None
+        if reason is None
+        else PhenologyRefusal(message=reason, digests=ProjectionDigests(**digests)),
+        positive_class_assessed=measurement.positive_class_assessed,
+        plant_mapping=measurement.plant_mapping,
+    )
 
 
 # ── CSV export ───────────────────────────────────────────────────────────
 
-SAVED_TO_HEADER = "X-TCIP-Saved-To"
-VALIDATED_HEADER = "X-TCIP-Validated"
-ACKNOWLEDGED_BY_HEADER = "X-TCIP-Acknowledged-By"
+EXPORT_HEADER = "X-TCIP-Export"
+"""The header an export's CSV answer reports what it delivered in: its record's ASCII JSON
+(:func:`exported`)."""
+
+
+class SavedExport(BaseModel):
+    """Where an export wrote its CSV, as its answer and an audit-gap refusal of it carry it.
+
+    ``filename`` is the written file's own name, the one its download is named by.
+    """
+
+    saved_path: str
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def filename(self) -> str:
+        """The written file's own name."""
+        return Path(self.saved_path).name
+
+
+class CountExport(SavedExport):
+    """What a count export delivered: where, whether validated, and who acknowledged it if not.
+
+    ``acknowledged_by`` is ``None`` for a validated delivery.
+    """
+
+    validated: bool
+    acknowledged_by: str | None
+
+
+def exported(saved: SavedExport) -> Response:
+    """Answer the CSV ``saved`` names as an attachment named by its own file name, reporting it.
+
+    The report is :data:`EXPORT_HEADER`'s.
+    """
+    return Response(
+        content=Path(saved.saved_path).read_bytes(),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{saved.filename}"',
+            EXPORT_HEADER: saved.model_dump_json(ensure_ascii=True),
+        },
+    )
 
 
 class AcknowledgmentPayload(BaseModel):
@@ -368,8 +422,7 @@ class ExportCsvPayload(PhenologyInputs):
     """
 
     # Which server computation to export, a choice of producer; either answers a gated CSV.
-    payload: Literal["curves", "milestones"]
-    filename: str | None = None
+    payload: phenology.Projection
     user: str
     # The breeder's own act of shipping this delivery unvalidated, or None for an ordinary
     # validated export.
@@ -381,7 +434,9 @@ def export_csv(payload: ExportCsvPayload, request: Request) -> Response:
     """Deliver a phenology measurement this route computes itself as a CSV.
 
     The delivery is :func:`~tcip_mcp.pipelines.postprocessing.phenology.deliver_phenology`'s,
-    written to the project's ``results_export/`` and returned as the response body.
+    written to the project's ``results_export/`` under
+    :func:`~tcip_mcp.pipelines.postprocessing.phenology.export_filename` and returned as the
+    response body, its :class:`SavedExport` reported.
 
     The acknowledgment is recorded by :func:`_recorded_acknowledgment`; a delivery refusal
     answers 400 with its detail, and a delivery event its receipt could not follow answers 409.
@@ -397,31 +452,28 @@ def export_csv(payload: ExportCsvPayload, request: Request) -> Response:
     acknowledgment_id = _recorded_acknowledgment(
         root, payload, person, request
     )
-    filename = payload.filename or f"{payload.trait}_{payload.payload}.csv"
-    saved_path = root / "results_export" / Path(filename).name
+    saved_path = (
+        root / "results_export" / phenology.export_filename(payload.trait, payload.payload)
+    )
     try:
         phenology.deliver_phenology(
             root,
             measurement,
-            curves=payload.payload == "curves",
+            projection=payload.payload,
             output_path=saved_path,
             acknowledgment_id=acknowledgment_id,
             door="results.export_csv",
             actor=person,
         )
     except AuditEntryNotWrittenError as exc:
-        raise audit_gap_409(exc, {"saved_path": str(saved_path)}) from exc
+        raise audit_gap_409(
+            exc, SavedExport(saved_path=str(saved_path))
+        ) from exc
     except DeliveryRefusedError as exc:
         raise HTTPException(400, exc.as_detail()) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    headers = {
-        "Content-Disposition": f'attachment; filename="{filename}"',
-        SAVED_TO_HEADER: str(saved_path),
-    }
-    return Response(
-        content=saved_path.read_bytes(), media_type="text/csv", headers=headers
-    )
+    return exported(SavedExport(saved_path=str(saved_path)))
 
 
 # ── Count CSV export ────────────────────────────────────────────────────
@@ -456,7 +508,7 @@ class OrthomosaicPlantCountsDelivery(BaseModel):
     crop: str = ""
     pipeline_version: str = ""
     canopy_subject: str = ""
-    position_error_m: float | None = None
+    position_error_m: PositionError | None = None
 
 
 class ExportCountCsvPayload(BaseModel):
@@ -489,15 +541,13 @@ def export_count_csv(
     :func:`~tcip_mcp.pipelines.postprocessing.export.deliver_per_image_counts_csv`;
     ``orthomosaic_plant_counts`` is
     :func:`~tcip_mcp.tools.orthomosaic_tools.orthomosaic_plant_counts`.
-    A delivery refusal answers 400 with
-    ``{"kind", "message"}``, ``kind`` ``"operationalization"`` or ``"delivery"``; a delivery
-    event its receipt could not follow answers 409. The response headers name the saved path,
-    whether the delivery is validated and who acknowledged it when it is not.
+    A delivery refusal answers 400 with its detail
+    (:class:`~tcip_mcp.operationalization.OperationalizationRefusal` or
+    :class:`~tcip_mcp.delivery.DeliveryRefusal`); a delivery event its receipt could not follow
+    answers 409. The answer reports a :class:`CountExport` (:func:`exported`).
     """
-    from urllib.parse import quote
-
     from tcip_mcp.audit import AuditEntryNotWrittenError
-    from tcip_mcp.delivery import DeliveryRefusedError
+    from tcip_mcp.delivery import DeliveryRefusal, DeliveryRefusedError
     from tcip_mcp.identity import actor
     from tcip_mcp.operationalization import OperationalizationRefusedError
     from tcip_mcp.traits import TraitUnknownError
@@ -555,48 +605,39 @@ def export_count_csv(
                 actor=person,
             )
     except AuditEntryNotWrittenError as exc:
-        raise audit_gap_409(exc, {"saved_path": str(saved_path)}) from exc
+        raise audit_gap_409(
+            exc, SavedExport(saved_path=str(saved_path))
+        ) from exc
     except (OperationalizationRefusedError, DeliveryRefusedError) as exc:
         raise HTTPException(400, exc.as_detail()) from exc
     except (TraitUnknownError, ValueError) as exc:
         raise HTTPException(
-            400, {"kind": "delivery", "message": str(exc)}
+            400,
+            DeliveryRefusal(message=str(exc), result_sha256=None).model_dump(),
         ) from exc
-    headers = {
-        "Content-Disposition": f'attachment; filename="{Path(payload.filename).name}"',
-        SAVED_TO_HEADER: str(saved_path),
-        VALIDATED_HEADER: "true" if result["validated"] else "false",
-        ACKNOWLEDGED_BY_HEADER: quote(result["acknowledged_by"] or ""),
-    }
-    return Response(
-        content=saved_path.read_bytes(), media_type="text/csv", headers=headers
+    return exported(
+        CountExport(
+            saved_path=str(saved_path),
+            validated=result["validated"],
+            acknowledged_by=result["acknowledged_by"],
+        )
     )
 
 
 # ── What has shipped: the delivery-event record, read-only ─────────────
 
 
-class ServedPlantMappingDisclosure(PlantMappingDisclosure):
-    """A walked mapping's disclosure as served, with the key its cited record loads under.
+class ServedDeliveryEvent(BaseModel):
+    """A stored delivery event as served, with the key the mapping it cites loads under.
 
-    ``resolved_key`` is the name to load to see exactly the record the disclosure cites: the
-    mapping's own name while no rebuild has moved past it, the archived key a superseding rebuild
-    gave it (``plant_mapping.resolved_mapping_key_for_citation``), or ``None`` once neither name
-    holds a stored record.
+    ``resolved_key`` is the name to load to see exactly the record a walked mapping's disclosure
+    cites: the mapping's own name while no rebuild has moved past it, the archived key a
+    superseding rebuild gave it (``plant_mapping.resolved_mapping_key_for_citation``), or ``None``
+    once neither name holds a stored record, and for an event citing no walked mapping.
     """
 
+    event: DeliveryEventRecord
     resolved_key: str | None
-
-
-ServedDisclosure = ServedPlantMappingDisclosure | RasterDisclosure
-"""The disclosure a served delivery record's ``plant_mapping`` is: a walked mapping's as served or
-a raster one."""
-
-
-class ServedDeliveryEvent(DeliveryEventRecord):
-    """A stored delivery event as served, a walked mapping's disclosure with its resolved key."""
-
-    plant_mapping: ServedDisclosure | None
 
 
 class DeliveryEvents(BaseModel):
@@ -627,87 +668,102 @@ def list_delivery_events() -> DeliveryEvents:
         events = read_delivery_events(root)
     except (StoreError, ValidationError) as exc:
         raise HTTPException(400, str(exc)) from exc
-    records = []
-    for event in events:
-        pm = event.plant_mapping
-        served: ServedDisclosure | None = (
-            ServedPlantMappingDisclosure(
-                **dict(pm),
+    return DeliveryEvents(
+        records=[
+            ServedDeliveryEvent(
+                event=event,
                 resolved_key=resolved_mapping_key_for_citation(
                     root, pm.name, pm.record_sha256
-                ),
+                )
+                if isinstance(
+                    pm := event.plant_mapping, PlantMappingDisclosure
+                )
+                else None,
             )
-            if isinstance(pm, PlantMappingDisclosure)
-            else pm
-        )
-        records.append(
-            ServedDeliveryEvent(**{**dict(event), "plant_mapping": served})
-        )
-    return DeliveryEvents(records=records)
+            for event in events
+        ]
+    )
 
 
 # ── Traits and the breeder's confirmation of a revision ────────────────
 
 
-def _served_revision(revision: TraitRevision) -> dict:
-    """Return the revision with its ``confirmed`` state."""
-    return {
-        **revision.model_dump(mode="json"),
-        "confirmed": revision.confirmed,
-    }
+class ServedRevision(TraitRevision):
+    """One revision as the trait routes serve it: the stored revision and whether it stands."""
+
+    confirmed = computed_field(TraitRevision.confirmed)
 
 
-def _served(name: str, record: TraitRecord) -> dict:
-    """Return one trait's record with its revisions and latest confirmed revision.
+class ServedTrait(BaseModel):
+    """One trait's stored record, revisions oldest first, with the revision a delivery reads.
 
-    Each revision is as :func:`_served_revision` states it, and ``latest_confirmed`` is the
-    latest confirmed revision's number, or ``None``.
+    ``latest_confirmed`` is the latest confirmed revision, ``None`` while none is.
     """
-    latest_confirmed = record.latest_confirmed
-    return {
-        "trait": name,
-        "revisions": [_served_revision(r) for r in record.revisions],
-        "latest_confirmed": latest_confirmed.number
-        if latest_confirmed
-        else None,
-    }
+
+    trait: str
+    revisions: list[ServedRevision]
+    latest_confirmed: ServedRevision | None
+
+    @classmethod
+    def of(cls, name: str, record: TraitRecord) -> ServedTrait:
+        """Return the record ``name``'s trait holds as served."""
+        latest = record.latest_confirmed
+        return cls(
+            trait=name,
+            revisions=[
+                ServedRevision.model_validate(r, from_attributes=True)
+                for r in record.revisions
+            ],
+            latest_confirmed=None
+            if latest is None
+            else ServedRevision.model_validate(latest, from_attributes=True),
+        )
+
+
+class UnreadableTrait(BaseModel):
+    """A trait whose stored record its schema refuses, and why."""
+
+    trait: str
+    reason: str
+
+
+class TraitsListing(BaseModel):
+    """Every trait a project holds, each trait it cannot read, and the phenotypes' definitions.
+
+    ``definitions`` quotes crops.yml's own definition of every phenotype a revision delivers.
+    """
+
+    traits: list[ServedTrait]
+    unreadable: list[UnreadableTrait]
+    definitions: dict[str, str]
 
 
 @router.get("/traits")
-def list_traits() -> dict:
-    """List every trait the open project holds, each as :func:`_served` states it.
-
-    Revisions are oldest first.
-
-    ``definitions`` quotes crops.yml's own definition of every phenotype a revision delivers.
-    ``unreadable`` names each trait whose stored record its schema refuses, and why.
-    """
+def list_traits() -> TraitsListing:
+    """List every trait the open project holds (:class:`TraitsListing`)."""
     from pydantic import ValidationError
 
     from tcip_mcp.traits import crops_definitions, read_trait, trait_names
 
     root = store.held().root
-    records: list[dict] = []
-    unreadable: list[dict] = []
+    records: list[ServedTrait] = []
+    unreadable: list[UnreadableTrait] = []
     for name in trait_names(root):
         try:
-            records.append(_served(name, read_trait(name, root)))
+            records.append(ServedTrait.of(name, read_trait(name, root)))
         except ValidationError as exc:
-            unreadable.append({"trait": name, "reason": str(exc)})
+            unreadable.append(UnreadableTrait(trait=name, reason=str(exc)))
     definitions = crops_definitions()
     delivered = {
-        p
-        for r in records
-        for rev in r["revisions"]
-        for p in rev["entry"]["delivers"]
+        p for r in records for rev in r.revisions for p in rev.entry.delivers
     }
-    return {
-        "traits": records,
-        "unreadable": unreadable,
-        "definitions": {
+    return TraitsListing(
+        traits=records,
+        unreadable=unreadable,
+        definitions={
             p: definitions[p] for p in sorted(delivered) if p in definitions
         },
-    }
+    )
 
 
 class ConfirmRevisionPayload(BaseModel):
@@ -726,16 +782,38 @@ class ConfirmRevisionPayload(BaseModel):
     confirmed: bool
 
 
+class ConfirmedRevision(BaseModel):
+    """A confirmation's answer: the revision as it stands and the audit line's failure, if any.
+
+    ``audit_warning`` is ``None`` when the confirmation's audit line was written.
+    """
+
+    revision: ServedRevision
+    audit_warning: str | None
+
+
+class RevisionMovedRefusal(BaseModel):
+    """A confirmation refused for naming a hash that is not the revision's own.
+
+    It carries the trait's record as it stands.
+    """
+
+    kind: Literal["revision_moved"] = "revision_moved"
+    message: str
+    record: ServedTrait
+
+
 @router.post("/traits/confirm")
-def confirm_trait_revision(payload: ConfirmRevisionPayload) -> dict:
+def confirm_trait_revision(
+    payload: ConfirmRevisionPayload,
+) -> ConfirmedRevision:
     """Record the breeder's confirmation of a trait revision, or withdraw one.
 
     Both go through ``traits.confirm_revision``.
 
-    Refused with 409 when the hash is not the revision's own, the body carrying the trait's record
-    as it stands, and with 400 for every other refusal. A committed confirmation whose audit line
-    could not be written returns the revision with that failure as ``audit_warning``. Records the
-    name the request supplied, refusing a blank one; it is not authentication.
+    Refused with 409 when the hash is not the revision's own (:class:`RevisionMovedRefusal`),
+    and with 400 for every other refusal. Records the name the request supplied, refusing a
+    blank one; it is not authentication.
     """
     from tcip_mcp.audit import AuditEntryNotWrittenError
     from tcip_mcp.identity import actor
@@ -764,47 +842,34 @@ def confirm_trait_revision(payload: ConfirmRevisionPayload) -> dict:
         ]
         audit_warning = str(e)
     except RevisionMovedError as e:
-        record = _served(payload.trait, read_trait(payload.trait, root))
-        raise HTTPException(409, {"message": str(e), "record": record}) from e
+        record = ServedTrait.of(payload.trait, read_trait(payload.trait, root))
+        raise HTTPException(
+            409,
+            RevisionMovedRefusal(message=str(e), record=record).model_dump(
+                mode="json"
+            ),
+        ) from e
     except (TraitUnknownError, ValueError) as e:
         raise HTTPException(400, str(e)) from e
-    return {**_served_revision(revision), "audit_warning": audit_warning}
+    return ConfirmedRevision(
+        revision=ServedRevision.model_validate(revision, from_attributes=True),
+        audit_warning=audit_warning,
+    )
 
 
 # ── Registered models ───────────────────────────────────────────────────
 
 
-class RegisteredModel(BaseModel):
-    """One registered model.
-
-    It carries its name, its checkpoint, its tags and the run that produced it.
-    """
-
-    name: str
-    checkpoint_path: str
-    sha256: str
-    tags: list[str]
-    experiment_id: str | None
-
-
-class RegisteredModels(BaseModel):
-    """The open project's registered models."""
-
-    models: list[RegisteredModel]
-
-
 class AssessmentSummary(BaseModel):
-    """One recorded assessment: its id, the checkpoint it judged, its kind and whether it passed.
+    """One recorded assessment, whole, and whether it passed (:attr:`Assessment.passed`)."""
 
-    ``checkpoint_sha256`` and ``experiment_id`` are the producer's, ``None`` for a physical-scale
-    assessment, which judges no checkpoint.
-    """
+    assessment: Assessment
 
-    assessment_id: str
-    checkpoint_sha256: str | None
-    experiment_id: str | None
-    delivery_kind: str | None
-    passed: bool
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def passed(self) -> bool:
+        """Whether the assessment passed, its own :attr:`Assessment.passed`."""
+        return self.assessment.passed
 
 
 class Assessments(BaseModel):
@@ -823,15 +888,7 @@ def assessments() -> Assessments:
 
     return Assessments(
         assessments=[
-            AssessmentSummary(
-                assessment_id=a.assessment_id,
-                checkpoint_sha256=(
-                    a.producer.checkpoint_sha256 if a.producer else None
-                ),
-                experiment_id=a.producer.experiment_id if a.producer else None,
-                delivery_kind=a.delivery_kind,
-                passed=a.passed,
-            )
+            AssessmentSummary(assessment=a)
             for a in list_assessments(store.held().root)
         ]
     )
@@ -845,6 +902,4 @@ def registered_models(tag: str | None = None) -> RegisteredModels:
     """
     from tcip_mcp.tools.model_tools import registered_listing
 
-    return RegisteredModels.model_validate(
-        registered_listing(store.held().root, tag=tag)
-    )
+    return registered_listing(store.held().root, tag=tag)

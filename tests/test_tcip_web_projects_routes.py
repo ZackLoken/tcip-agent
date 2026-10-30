@@ -61,7 +61,7 @@ def _make_project(
 
 def _listed(client: TestClient) -> dict[str, dict]:
     return {
-        p["display_name"]: p
+        p["record"]["display_name"]: p
         for p in client.get("/api/projects").json()["projects"]
     }
 
@@ -81,13 +81,13 @@ def test_list_projects_lists_workspace_projects(
     assert resp.status_code == 200
     body = resp.json()
     assert body["workspace"] == str(workspace_dir.resolve())
-    names = {p["display_name"] for p in body["projects"]}
+    names = {p["record"]["display_name"] for p in body["projects"]}
     assert names == {"currant_bud_valley-farm", "chestnut_burr_site-b"}
 
     hz = _listed(client)["currant_bud_valley-farm"]
-    assert hz["dates"] == ["2026-02-11"]
-    assert hz["subjects"] == ["bud", "bush"]  # sorted
-    assert hz["buckets_by_date"] == {
+    assert hz["tree"]["captures"] == [{"name": "2026-02-11", "date": "2026-02-11"}]
+    assert hz["tree"]["subjects"] == ["bud", "bush"]  # sorted
+    assert hz["tree"]["buckets_by_date"] == {
         "2026-02-11": []
     }  # no bucket is published
     assert hz["image_count"] == 1
@@ -138,7 +138,7 @@ def test_projects_report_per_date_subject_model_availability(
         scope={"subject": "bud"},
     )
 
-    hz = _listed(client)["currant_bud_valley-farm"]
+    hz = _listed(client)["currant_bud_valley-farm"]["tree"]
     # Flat lists still list everything present anywhere.
     assert hz["subjects"] == ["bud", "bush"]
     # Per-date maps reflect where labels/predictions actually are.
@@ -178,7 +178,7 @@ def test_projects_report_a_label_problem_and_still_list(
 
     resp = client.get("/api/projects")
     assert resp.status_code == 200
-    hz = _listed(client)["currant_bud_valley-farm"]
+    hz = _listed(client)["currant_bud_valley-farm"]["tree"]
     assert hz["subjects_by_date"]["2026-02-11"] == []
     assert hz["subjects_by_date"]["2026-03-02"] == []
     assert hz["label_problem"] is not None
@@ -207,7 +207,7 @@ def test_list_sorted_by_modified_desc(
     os.utime(newer, (2_000_000, 2_000_000))
 
     order = [
-        p["display_name"]
+        p["record"]["display_name"]
         for p in client.get("/api/projects").json()["projects"]
     ]
     assert order == ["new_project_site", "old_project_site"]
@@ -229,7 +229,6 @@ def test_opening_a_project_by_id_marks_it_open_in_the_list(
     assert resp.status_code == 200
     assert resp.json() == {
         "project": {"id": made.id, "path": str(made.root.resolve())},
-        "display_name": "currant_bud_valley-farm",
     }
 
     assert client.get("/api/projects").json()["open_id"] == made.id
@@ -278,15 +277,15 @@ def test_opening_a_project_naming_no_one_is_refused_and_opens_nothing(
         assert client.get("/api/projects").json()["open_id"] is None
 
 
-def test_list_reports_record_fields_across_four_project_states(
+def test_list_reports_the_record_across_four_project_states(
     client: TestClient, workspace_dir: Path
 ) -> None:
-    """The listing reports each project's record fields or why they are absent.
+    """The listing reports each project's record or why it is absent.
 
     A project with a record, one with ``.tcip`` and nothing else, one whose record is
     undecodable, and one whose record decodes to something else: all four list, each with its
-    record's fields or the ``record_problem`` naming why they are absent. The recordless one gets
-    no database published under it by the listing.
+    record or the ``record_problem`` naming why it is absent. The recordless one gets no database
+    published under it by the listing.
     """
     import tcip_store
     from tcip_mcp.project_record import project_record_key
@@ -308,28 +307,24 @@ def test_list_reports_record_fields_across_four_project_states(
     tcip_store.replace(key, {"not_site": "x"}, expect=current)
 
     by_path = {
-        p["path"]: p for p in client.get("/api/projects").json()["projects"]
+        p["tree"]["dataset_root"]: p
+        for p in client.get("/api/projects").json()["projects"]
     }
     assert set(by_path) == {
         str(p.resolve()) for p in (recorded, recordless, undecodable, invalid)
     }
 
     good = by_path[str(recorded.resolve())]
-    assert (good["display_name"], good["site"], good["record_problem"]) == (
+    assert good["record_problem"] is None
+    assert (good["record"]["display_name"], good["record"]["site"]) == (
         "currant_bud_recorded",
         "north orchard",
-        None,
     )
-    assert len(good["id"]) == 12
-    assert good["invariances"] == INVARIANCES.model_dump()
+    assert len(good["record"]["id"]) == 12
+    assert good["record"]["invariances"] == INVARIANCES.model_dump()
 
     missing = by_path[str(recordless.resolve())]
-    assert (
-        missing["id"],
-        missing["display_name"],
-        missing["site"],
-        missing["invariances"],
-    ) == (None, None, None, None)
+    assert missing["record"] is None
     assert "initialize_project" in missing["record_problem"]
     assert not database_file(str(recordless)).is_file()
 
@@ -363,7 +358,7 @@ def test_the_listing_reads_a_stated_rotation_angle_back_as_degrees(
 
     (listed,) = client.get("/api/projects").json()["projects"]
 
-    rotation = listed["invariances"]["rotation"]
+    rotation = listed["record"]["invariances"]["rotation"]
     assert isinstance(rotation, float) and rotation == 5.0, listed
 
 
@@ -396,14 +391,13 @@ def test_correcting_the_invariances_answers_the_typed_correction_and_the_record_
     resp = client.post("/api/projects/invariances", json=body)
 
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {
-        "id": made.id,
-        "invariances": body["invariances"],
-        "previous_invariances": INVARIANCES.model_dump(),
-    }
+    answer = resp.json()
+    assert answer["record"]["invariances"] == body["invariances"]
+    assert answer["previous"]["invariances"] == INVARIANCES.model_dump()
+    assert answer["record"]["id"] == answer["previous"]["id"] == made.id
     written = body["invariances"]
     assert read_record(made.root).invariances.model_dump() == written
-    assert _listed(client)["valley_block"]["invariances"] == written
+    assert _listed(client)["valley_block"]["record"]["invariances"] == written
     (line,) = audit_rows(made.root, "project_record_corrected")
     assert line["actor"] == actor("tester")
 

@@ -7,8 +7,9 @@ The tools over the canonical ``pipelines.postprocessing`` modules:
     build_plant_mapping            geolocated images + a plant registry → a named mapping under
                                    the project
     deliver_phenology_milestones   that mapping + prediction buckets whose scope declares the
-                                   positive state's attribute →
-                                   <phenology_prefix>_phenology.csv
+                                   positive state's attribute → the milestones CSV at the path
+                                   the caller names (the Results tab's own export is named by
+                                   ``phenology.export_filename``)
 """
 
 from __future__ import annotations
@@ -242,16 +243,20 @@ def build_plant_mapping(
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
     try:
-        return plant_mapping.build_plant_mapping(
-            project,
-            name,
-            located(dataset_root, project),
-            plant_registry,
-            dates=dates,
-            match_radius=match_radius,
-            supersede=supersede,
-            actor=actor,
-        ).served()
+        return (
+            plant_mapping.build_plant_mapping(
+                project,
+                name,
+                located(dataset_root, project),
+                plant_registry,
+                dates=dates,
+                match_radius=match_radius,
+                supersede=supersede,
+                actor=actor,
+            )
+            .served()
+            .model_dump(mode="json")
+        )
     except plant_mapping.MappingRebuildError as exc:
         return {"error": str(exc), "citing_events": exc.event_ids}
     except (
@@ -322,7 +327,7 @@ def deliver_phenology_milestones(
         delivered = phenology.deliver_phenology(
             project,
             measurement,
-            curves=False,
+            projection="milestones",
             output_path=located(output_csv_path, project),
             acknowledgment_id=acknowledgment_id,
             door="deliver_phenology_milestones",
@@ -339,12 +344,8 @@ def deliver_phenology_milestones(
         ValueError,
     ) as exc:
         return {"error": str(exc)}
-    disclosure = measurement.plant_mapping
     return {
         **delivered,
-        "n_plants": len(measurement.rows),
-        "n_images_unattributed": disclosure["images_unattributed"],
-        "dates_delivered": disclosure["dates_delivered"],
-        "captures_unverified": disclosure["captures_unverified"],
-        "plant_csvs_unverified": disclosure["plant_csvs_unverified"],
+        "n_plants": len(measurement.plants),
+        "plant_mapping": measurement.plant_mapping.model_dump(mode="json"),
     }

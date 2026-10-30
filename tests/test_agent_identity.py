@@ -28,7 +28,6 @@ def _forget_between_tests() -> Iterator[None]:
 
 def test_no_identity_until_a_handshake_and_every_projection_says_so() -> None:
     assert agent_identity.current() is None
-    assert agent_identity.audit_fields() == {}
     assert agent_identity.http_headers() == {}
 
 
@@ -44,11 +43,6 @@ def test_a_handshake_mints_a_session_and_carries_the_declaration(
     session = identity.agent_session
     assert session.startswith("mcp_") and len(session) == len("mcp_") + 16
     assert identity.terminal_session is None
-    assert agent_identity.audit_fields() == {
-        "agent_client_name": "claude-code",
-        "agent_client_version": "2.1.238",
-        "agent_session": session,
-    }
     assert agent_identity.http_headers() == {
         "X-TCIP-Agent-Client-Name": "claude-code",
         "X-TCIP-Agent-Client-Version": "2.1.238",
@@ -62,19 +56,15 @@ def test_the_identity_fields_are_declared_once_and_carry_no_harness_export(
     """The identity's declared fields, field tuple, header map and projection agree.
 
     They name the same four fields, and a harness exporting its session and effort to the server
-    it spawns lands in neither the audit fields nor the headers.
+    it spawns lands in neither the identity nor the headers.
     """
-    import dataclasses
-
     monkeypatch.setenv(
         "CLAUDE_CODE_SESSION_ID", "0b56e764-5533-408a-bb5d-d5dd17b4e6b9"
     )
     monkeypatch.setenv("CLAUDE_EFFORT", "high")
     identity = agent_identity.begin("claude-code", "2.1.238")
 
-    declared = tuple(
-        f.name for f in dataclasses.fields(agent_identity.AgentIdentity)
-    )
+    declared = tuple(agent_identity.AgentIdentity.model_fields)
     assert declared == (
         "agent_client_name",
         "agent_client_version",
@@ -83,10 +73,7 @@ def test_the_identity_fields_are_declared_once_and_carry_no_harness_export(
     )
     assert agent_identity.RECORD_FIELDS == declared
     assert tuple(agent_identity.HEADERS) == declared
-    assert tuple(identity.fields()) == declared
-    assert not any(
-        "harness" in field for field in agent_identity.audit_fields()
-    )
+    assert tuple(identity.model_dump()) == declared
     assert not any(
         "Harness" in header for header in agent_identity.http_headers()
     )
@@ -101,7 +88,6 @@ def test_the_terminal_session_is_read_from_the_environment_as_declared(
     identity = agent_identity.begin("codex-mcp-client", "0.147.0")
 
     assert identity.terminal_session == "term_xyz"
-    assert agent_identity.audit_fields()["terminal_session"] == "term_xyz"
     assert (
         agent_identity.http_headers()["X-TCIP-Terminal-Session"] == "term_xyz"
     )
@@ -139,16 +125,16 @@ def test_the_fields_a_request_declared_are_read_through_the_same_header_map() ->
         for field, header in agent_identity.HEADERS.items()
     }
 
-    assert agent_identity.fields_from_headers(sent) == {
+    assert agent_identity.identity_from_headers(sent).model_dump() == {
         field: f"declared {field}" for field in agent_identity.RECORD_FIELDS
     }
-    assert agent_identity.fields_from_headers({}) == {
-        field: None for field in agent_identity.RECORD_FIELDS
-    }
+    assert agent_identity.identity_from_headers(
+        {}
+    ) == agent_identity.RecordedIdentity()
     assert (
-        agent_identity.fields_from_headers({"X-TCIP-Agent-Session": ""})[
-            "agent_session"
-        ]
+        agent_identity.identity_from_headers(
+            {"X-TCIP-Agent-Session": ""}
+        ).agent_session
         is None
     )
 
@@ -202,12 +188,14 @@ def test_a_declared_name_travels_as_an_ascii_header_and_comes_back_whole(
 
     for value in headers.values():
         assert value.isascii() and " " not in value and "\n" not in value
-    assert agent_identity.fields_from_headers(headers) == {
-        "agent_client_name": "harnèss/β",
-        "agent_client_version": "1.0 (dev)",
-        "agent_session": identity.agent_session,
-        "terminal_session": "term with space",
-    }
+    assert agent_identity.identity_from_headers(headers) == (
+        agent_identity.RecordedIdentity(
+            agent_client_name="harnèss/β",
+            agent_client_version="1.0 (dev)",
+            agent_session=identity.agent_session,
+            terminal_session="term with space",
+        )
+    )
 
 
 def test_a_caller_cannot_supply_an_identity_key_the_handshake_left_absent(

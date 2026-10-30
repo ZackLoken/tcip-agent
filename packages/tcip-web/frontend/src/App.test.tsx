@@ -1,20 +1,26 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, type ProjectSummary } from "@/api/client";
+import { api } from "@/api/client";
 import { sessionsApi } from "@/api/sessions";
-import type { OpenAnswer } from "@/api/types.generated";
+import type { OpenAnswer, Panel, PanelEnvelope } from "@/api/types.generated";
 import App from "@/App";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { useStore } from "@/store";
-import { INVARIANCES } from "@/test/projectRecords";
-import { changeSelection, openAnswer, selectAnswer, selected, stateEnvelope } from "@/test/store";
+import { loadOf } from "@/test/annotate";
+import { BAND_ANSWERS } from "@/test/bands";
+import { PANEL_EVENTS } from "@/test/panelEvents";
+import { openedAs, PICKER, PROJECT_FIXTURES } from "@/test/projectRecords";
+import { SESSION_ANSWERS, sessionOf } from "@/test/sessions";
+import { changeSelection, stateEnvelope, SUBJECT_SELECT_ANSWER } from "@/test/store";
 
 // The state socket and the active-tab sync stand in for App's network effects.
 const stateSocket = vi.hoisted(() => ({
   connect: vi.fn(),
   close: vi.fn(),
-  subscribePanel: vi.fn(() => () => {}),
+  subscribePanel: vi.fn<(panel: Panel, handler: (envelope: PanelEnvelope) => void) => () => void>(
+    () => () => {},
+  ),
 }));
 vi.mock("@/api/ws", () => ({ stateSocket }));
 vi.mock("@/hooks/useActiveTabSync", () => ({ useActiveTabSync: vi.fn() }));
@@ -32,16 +38,15 @@ vi.mock("@/components/Canvas/CanvasStage", () => ({
     <div data-testid="canvas-stage">{props.children}</div>
   ),
 }));
-// The Training tab lists its runs on mount, whether or not a project is open; the listing answers
-// the produced one holding no run.
+// The Training tab lists its runs on mount, whether or not a project is open; the listing holds
+// no run.
 vi.mock("@/api/training", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/training")>();
-  const { trainingListing } = await import("@/test/training");
   return {
     ...actual,
     trainingApi: {
       ...actual.trainingApi,
-      listRuns: vi.fn().mockResolvedValue(trainingListing({ runs: [], sweeps: [] })),
+      listRuns: vi.fn().mockResolvedValue({ runs: [], sweeps: [] }),
     },
   };
 });
@@ -58,43 +63,17 @@ vi.mock("@/api/client", async (importOriginal) => {
   };
 });
 
-const VALLEY: ProjectSummary = {
-  id: "a1b2c3d4e5f6",
-  display_name: "Valley farm",
-  site: null,
-  invariances: INVARIANCES,
-  record_problem: null,
-  path: "/ws/valley",
-  created: 1_700_000_000,
-  modified: 1_700_000_500,
-  dates: ["2026-03-01"],
-  subjects: ["subject_a"],
-  subjects_by_date: { "2026-03-01": ["subject_a"] },
-  buckets_by_date: { "2026-03-01": [] },
-  image_count: 3,
-  label_problem: null,
-};
-
-/** The open route's answer for the listed project `p`. */
-const openedAs = (p: ProjectSummary) =>
-  openAnswer({ id: p.id!, path: p.path, display_name: p.display_name! });
+const { valley: VALLEY, ridge: RIDGE } = PICKER;
+const VALLEY_NAME = VALLEY.record.display_name;
 
 const VALLEY_OPENED = openedAs(VALLEY);
-
-function listProjects(openId: string | null) {
-  vi.mocked(api.projects.list).mockResolvedValue({
-    workspace: "/ws",
-    open_id: openId,
-    projects: [VALLEY],
-  });
-}
 
 const initialStoreState = useStore.getState();
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
   useStore.getState().setUser("grower");
-  listProjects(null);
+  vi.mocked(api.projects.list).mockResolvedValue(PROJECT_FIXTURES.picker);
   stateSocket.connect.mockClear();
   stateSocket.subscribePanel.mockClear();
   vi.mocked(useActiveTabSync).mockClear();
@@ -123,6 +102,20 @@ describe("App tab/panel wiring", () => {
     const tab = screen.getByRole("tab", { name: /training/i });
     expect(panel.id).toBe("tabpanel-training");
     expect(panel).toHaveAttribute("aria-labelledby", tab.id);
+  });
+});
+
+describe("App panel events", () => {
+  it("shows the banner its panel's socket delivers above that panel's tab", async () => {
+    const { banner } = PANEL_EVENTS;
+    act(() => useStore.getState().setActiveTab("results"));
+    render(<App />);
+    await screen.findByRole("tabpanel");
+
+    const subscribed = stateSocket.subscribePanel.mock.calls.find(([p]) => p === banner.panel);
+    act(() => subscribed?.[1](banner));
+
+    expect(screen.getByText(banner.event.text)).toBeInTheDocument();
   });
 });
 
@@ -164,7 +157,7 @@ describe("App admission through the picker", () => {
     act(() => useStore.getState().setUser(""));
     render(<App />);
 
-    fireEvent.click(await screen.findByText("Valley farm"));
+    fireEvent.click(await screen.findByText(VALLEY_NAME));
     fireEvent.change(screen.getByLabelText("Your name"), { target: { value: "jordan" } });
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
@@ -172,22 +165,22 @@ describe("App admission through the picker", () => {
     expect(await screen.findAllByText(/backend refused/)).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Open" })).toBeEnabled();
     expect(useStore.getState().user).toBe("jordan");
-    expect(useStore.getState().openChoice.projectId).toBe("a1b2c3d4e5f6");
+    expect(useStore.getState().openChoice.projectId).toBe(VALLEY.record.id);
     expect(api.projects.open).toHaveBeenCalledTimes(1);
   });
 
   it("admits a blank first screen with Enter and preselects the open project without opening it", async () => {
-    listProjects("a1b2c3d4e5f6");
+    vi.mocked(api.projects.list).mockResolvedValue(PROJECT_FIXTURES.picker_open);
     act(() => useStore.getState().setUser(""));
     render(<App />);
 
     const field = screen.getByLabelText("Your name");
-    await screen.findByText("Valley farm");
+    await screen.findByText(VALLEY_NAME);
     fireEvent.change(field, { target: { value: "jordan" } });
     fireEvent.keyDown(field, { key: "Enter" });
 
     expect(await screen.findByRole("tablist")).toBeInTheDocument();
-    await waitFor(() => expect(useStore.getState().openChoice.projectId).toBe("a1b2c3d4e5f6"));
+    await waitFor(() => expect(useStore.getState().openChoice.projectId).toBe(VALLEY.record.id));
     expect(api.projects.open).not.toHaveBeenCalled();
     expect(useStore.getState().openProject).toBeNull();
     expect(useStore.getState().opening).toBeNull();
@@ -199,7 +192,7 @@ describe("App admission through the picker", () => {
     act(() => useStore.getState().setActiveTab("meta"));
     render(<App />);
 
-    fireEvent.click(await screen.findByText("Valley farm"));
+    fireEvent.click(await screen.findByText(VALLEY_NAME));
     fireEvent.change(screen.getByLabelText("Your name"), { target: { value: "jordan" } });
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
@@ -217,10 +210,10 @@ describe("App admission through the picker", () => {
     vi.mocked(api.projects.open).mockReturnValue(open.promise);
     act(() => useStore.getState().setUser(""));
     render(<App />);
-    fireEvent.click(await screen.findByText("Valley farm"));
+    fireEvent.click(await screen.findByText(VALLEY_NAME));
     fireEvent.change(screen.getByLabelText("Your name"), { target: { value: "jordan" } });
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
-    await waitFor(() => expect(useStore.getState().opening?.projectId).toBe("a1b2c3d4e5f6"));
+    await waitFor(() => expect(useStore.getState().opening?.projectId).toBe(VALLEY.record.id));
     act(() =>
       useStore
         .getState()
@@ -236,40 +229,14 @@ describe("App admission through the picker", () => {
 });
 
 describe("App visit attribution across a change of person", () => {
-  const RIDGE: ProjectSummary = {
-    ...VALLEY,
-    id: "0f9e8d7c6b5a",
-    display_name: "Ridge farm",
-    path: "/ws/ridge",
-  };
-  const answer = selectAnswer(selected({ subject: "subject_a", count: 2 }));
+  const answer = SUBJECT_SELECT_ANSWER;
+  const FIRST_IMAGE = answer.selection.images[0].name;
   it("attributes the outgoing visit to the first person and project, the next to the second", async () => {
-    vi.spyOn(api.annotate, "load").mockImplementation((path) =>
-      Promise.resolve({
-        image_path: path,
-        img_width: 1000,
-        img_height: 800,
-        boxes: [],
-        polygons: [],
-        points: [],
-        imageAnnotations: [],
-        completion: {},
-        flags: [],
-        base_mtime: "1",
-      }),
-    );
+    vi.spyOn(api.annotate, "load").mockImplementation((path) => Promise.resolve(loadOf(path)));
     vi.spyOn(api.annotate, "save");
-    vi.spyOn(api.images, "bands").mockResolvedValue({ band_count: 3, bands: [] });
+    vi.spyOn(api.images, "bands").mockResolvedValue(BAND_ANSWERS.plain);
     vi.spyOn(api.images, "viewReads").mockResolvedValue({ reads: [] });
-    vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({
-      status: "ok",
-      session: { started: "s1", ended: false },
-    });
-    vi.mocked(api.projects.list).mockResolvedValue({
-      workspace: "/ws",
-      open_id: null,
-      projects: [VALLEY, RIDGE],
-    });
+    vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue(SESSION_ANSWERS.landed);
     vi.mocked(api.projects.open)
       .mockResolvedValueOnce(VALLEY_OPENED)
       .mockResolvedValueOnce(openedAs(RIDGE));
@@ -283,35 +250,38 @@ describe("App visit attribution across a change of person", () => {
       fireEvent.click(screen.getByRole("button", { name: "Open" }));
       await screen.findByTestId("canvas-stage");
       await waitFor(() =>
-        expect(useStore.getState().sessionTracking.currentImageName).toBe("img1.jpg"),
+        expect(useStore.getState().sessionTracking.currentImageName).toBe(FIRST_IMAGE),
       );
     }
 
-    await admit("Valley farm", "first");
-    expect(useStore.getState().sessionTracking.projectId).toBe(VALLEY.id);
+    await admit(VALLEY_NAME, "first");
+    expect(useStore.getState().sessionTracking.projectId).toBe(VALLEY.record.id);
 
     fireEvent.click(screen.getByRole("button", { name: "Switch project" }));
     await screen.findByText("Open a project");
-    await admit("Ridge farm", "second");
+    await admit(RIDGE.record.display_name, "second");
 
     expect(vi.mocked(sessionsApi.imageEvent).mock.calls[0][0]).toMatchObject({
-      image_name: "img1.jpg",
+      image_name: FIRST_IMAGE,
       user: "first",
-      project_id: VALLEY.id,
+      project_id: VALLEY.record.id,
     });
     expect(useStore.getState().heldContributions).toEqual([]);
     act(() => changeSelection({ current_image_index: 1 }));
     await waitFor(() => expect(sessionsApi.imageEvent).toHaveBeenCalledTimes(2));
     expect(vi.mocked(sessionsApi.imageEvent).mock.calls[1][0]).toMatchObject({
-      image_name: "img1.jpg",
+      image_name: FIRST_IMAGE,
       user: "second",
-      project_id: RIDGE.id,
+      project_id: RIDGE.record.id,
     });
   });
 });
 
 describe("App session end", () => {
-  const RECORDED = { project_id: "a1b2c3d4e5f6", started: "2026-10-07T14:00:00+00:00" };
+  const RECORDED = {
+    project_id: VALLEY.record.id,
+    started: sessionOf(SESSION_ANSWERS.landed).started,
+  };
 
   it("ends the recorded session by its project and start stamp, once, when the shell goes", async () => {
     const send = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));

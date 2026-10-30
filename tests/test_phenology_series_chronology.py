@@ -9,6 +9,7 @@ not fix is delivered as a bound, by the module and by the delivery tool.
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -35,24 +36,24 @@ def _states(n_positive: int, n_negative: int) -> list[str]:
 
 
 def test_crossing_uses_the_bracket_that_exists_in_time() -> None:
-    """A crossing is read off the bracket of captures that straddles the target in calendar order.
+    """A crossing is read off the bracket of captures that straddles the target in capture order.
 
-    The crossing is read off the two neighboring captures that straddle the target in calendar
-    order, so over a series whose fraction order differs from its capture order its date lies
-    inside that bracket and the gap it reports is the bracket's four days.
+    The crossing is read off the two neighboring captures that straddle the target in the order
+    the dataset lists them, so over a series whose fraction order differs from its capture order
+    its date lies inside that bracket and the gap it reports is the bracket's four days.
     """
     series = [
-        ("2026-03-09", 0.30),
         ("2026-03-01", 0.10),
-        ("2026-03-13", 0.90),
         ("2026-03-05", 0.70),
+        ("2026-03-09", 0.30),
+        ("2026-03-13", 0.90),
     ]
 
     c = phenology.crossing_date(series, 0.50, BUD_OPENING.crossing_rule)
 
     assert c.bound == "interpolated"
-    assert c.date == "2026-03-04"
-    assert "2026-03-01" < c.date < "2026-03-05"
+    assert c.date == date(2026, 3, 4)
+    assert date(2026, 3, 1) < c.date < date(2026, 3, 5)
     assert c.gap_days == 4
 
 
@@ -69,7 +70,7 @@ def test_crossing_above_target_at_the_first_capture_stays_left_censored_when_the
     c = phenology.crossing_date(series, 0.50, BUD_OPENING.crossing_rule)
 
     assert c.bound == "left_censored"
-    assert c.date == "2026-03-01"
+    assert c.date == date(2026, 3, 1)
 
 
 def test_positive_onset_is_the_earliest_capture_with_any_positive_observation() -> (
@@ -94,7 +95,7 @@ def test_first_capture_exactly_on_the_target_is_an_upper_bound() -> None:
     c = phenology.crossing_date(series, 0.50, BUD_OPENING.crossing_rule)
 
     assert c.bound == "left_censored"
-    assert c.date == "2026-03-01"
+    assert c.date == date(2026, 3, 1)
     assert c.gap_days is None
 
 
@@ -111,7 +112,7 @@ def test_first_capture_exactly_on_the_target_keeps_its_date_when_the_curve_falls
     c = phenology.crossing_date(series, 0.50, BUD_OPENING.crossing_rule)
 
     assert c.bound == "left_censored"
-    assert c.date == "2026-03-01"
+    assert c.date == date(2026, 3, 1)
 
 
 def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture_order(
@@ -164,18 +165,18 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
         mapping, buckets, BUD_OPENING, ["P1", "P2"]
     )
 
-    rows = {r["plant_id"]: r for r in out["rows"]}
+    rows = {r.plant_id: r.csv_record(BUD_OPENING) for r in out.milestones}
     assert set(rows) == {"P1", "P2"}
     assert rows["P1"]["n_dates"] == 4
     assert rows["P1"]["n_dates_unclassified"] == 0
     # The noisy plant reaches half its buds between the first two captures, before the dip, and
     # never reaches 95 per cent inside the observed window.
-    assert rows["P1"]["bud_50per_date"] == "2026-03-04"
+    assert rows["P1"]["bud_50per_date"] == date(2026, 3, 4)
     assert rows["P1"]["bud_50per_date_bound"] == "interpolated"
     assert rows["P1"]["bud_95per_date_bound"] == "right_censored"
     # The steady plant crosses later than the noisy one despite ending higher.
-    assert rows["P2"]["bud_50per_date"] == "2026-03-07"
-    assert rows["P2"]["bud_95per_date"] == "2026-03-12"
+    assert rows["P2"]["bud_50per_date"] == date(2026, 3, 7)
+    assert rows["P2"]["bud_95per_date"] == date(2026, 3, 12)
     assert rows["P1"]["bud_50per_date"] < rows["P2"]["bud_50per_date"]
 
 

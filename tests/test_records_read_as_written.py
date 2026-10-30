@@ -32,7 +32,7 @@ def test_a_registered_entry_ranks_through_best_model(tmp_path: Path) -> None:
     )
 
     models = ModelRegistry(str(tmp_path)).list_models()
-    best = best_model(
+    best, _ = best_model(
         models, "val_map50", higher_is_better=True, include_unverified=True
     )
     assert best is not None and best.entry.name == "m"
@@ -63,7 +63,7 @@ def test_a_checkpoint_stating_no_task_refuses_naming_where_to_state_it(
     payload = torch.load(stated, weights_only=True)
     del payload[CONFIG_KEY]["model_source"]["task"]
     torch.save(payload, str(unstated))
-    assert "error" not in register_model(
+    register_model(
         name="unstated",
         checkpoint_path=str(unstated),
         project=tmp_path,

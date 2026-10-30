@@ -15,13 +15,10 @@ from typing import Any
 import pytest
 
 import tcip_store as ts
-from tcip_mcp import agent_identity
-from tcip_mcp.audit import audit_entries
+from tcip_mcp.audit import ACTOR_KEY, AuditLine, audit_entries
 
-AUDIT_ENTRY_KEYS = frozenset(
-    {"timestamp", "tool", "arguments", "status", *agent_identity.RECORD_FIELDS}
-)
-"""Every key an audit line may carry besides ``actor``."""
+AUDIT_ENTRY_KEYS = frozenset(AuditLine.model_fields) - {ACTOR_KEY}
+"""Every declared key an audit line may carry besides ``actor``."""
 
 
 def audit_rows(
@@ -29,11 +26,15 @@ def audit_rows(
 ) -> list[Mapping[str, Any]]:
     """Return the entries of ``scope``'s audit log, or ``tool``'s entries when one is named.
 
-    The entries are :func:`tcip_mcp.audit.audit_entries`'s, in the order they landed; a log
-    carrying undecodable entries raises its ``ValueError``.
+    The entries are :func:`tcip_mcp.audit.audit_entries`'s, in the order they landed, each as the
+    JSON it was stored as; a log carrying undecodable entries raises its ``ValueError``.
     """
     entries, _cursor = audit_entries(scope)
-    return [row for row in entries if tool is None or row["tool"] == tool]
+    return [
+        row.model_dump(mode="json", exclude_unset=True)
+        for row in entries
+        if tool is None or row.tool == tool
+    ]
 
 
 def refuse_audit_appends(

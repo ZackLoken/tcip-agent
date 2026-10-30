@@ -2,201 +2,136 @@ import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
-import { RENDER_CACHE_VERSION } from "@/api/types.generated";
-import { stateSocket } from "@/api/ws";
+import { refusalOf } from "@/api/http";
+import {
+  NO_GESTURES,
+  PROJECT_NOT_OPEN,
+  type ProjectNotOpenRefusal,
+  RENDER_CACHE_VERSION,
+  type SavePayload,
+  VERSION_CONFLICT,
+  type VersionConflictRefusal,
+} from "@/api/types.generated";
 import { useDisplayPixels } from "@/hooks/useDisplayPixels";
+import { BAND_ANSWERS } from "@/test/bands";
+import { canvasBody } from "@/test/canvasBody";
+import { LABEL_ANSWERS } from "@/test/labels";
+import { PROJECT_FIXTURES } from "@/test/projectRecords";
+import { fetchAnswers } from "@/test/refusals";
+
+const conflict = (e: unknown) => refusalOf<VersionConflictRefusal>(e, VERSION_CONFLICT);
+const mismatch = (e: unknown) => refusalOf<ProjectNotOpenRefusal>(e, PROJECT_NOT_OPEN);
 
 /** The display pixel count the client's own producer reads off the test screen. */
 function display(): number {
   return renderHook(() => useDisplayPixels()).result.current;
 }
 
-function stubFetch(status: number, body: unknown = {}) {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue({
-      ok: status >= 200 && status < 300,
-      status,
-      json: () => Promise.resolve(body),
-      text: () => Promise.resolve(JSON.stringify(body)),
-    }),
-  );
-}
-
 describe("annotate.save lost-update handling", () => {
-  it("returns ok + a fresh mtime token on a 200, preserved exactly at real ns magnitude", async () => {
-    // A 2026 st_mtime_ns (~1.78e18) exceeds 2**53: as a JSON number it would be rounded
-    // by JSON.parse and every echo would 409. String tokens must survive byte-for-byte.
-    stubFetch(200, {
-      status: "ok",
-      image_path: "x",
-      img_width: 10,
-      img_height: 10,
-      annotations: [{ subject: "tip", iscrowd: false, point: [1, 2], attributes: {}, index: 0 }],
-      completion: {},
-      flags: [],
-      base_mtime: "1783702599549301100",
-      accepted: { "2": 0 },
-    });
-    const res = await api.annotate.save({
-      image_path: "x",
-      annotations: [],
-      user: "breeder",
-    });
-    expect(res.status).toBe("ok");
-    if (res.status === "ok") {
-      expect(res.labels.base_mtime).toBe("1783702599549301100");
-      expect(res.labels.points).toHaveLength(1);
-      expect(res.accepted).toEqual({ "2": 0 });
-    }
+  const request: SavePayload = {
+    image_path: "x",
+    annotations: [],
+    base_mtime: "1",
+    user: "breeder",
+    gestures: NO_GESTURES,
+  };
+
+  it("returns the decoded document with its version token as the string it was served", async () => {
+    // A version token is a string: a nanosecond mtime as a JSON number would be rounded by
+    // JSON.parse and every echo would 409.
+    const { saved } = LABEL_ANSWERS;
+    fetchAnswers(200, saved);
+    const res = await api.annotate.save({ ...request, base_mtime: null });
+    expect(res.document.base_mtime).toBe(saved.document.base_mtime);
+    expect(res.document.points).toHaveLength(1);
+    expect(res.accepted).toEqual(saved.accepted);
   });
 
-  it("returns a conflict on the version-conflict 409", async () => {
-    stubFetch(409, {
-      detail: { kind: "version_conflict", message: "label document changed since it was loaded" },
-    });
-    const res = await api.annotate.save({
-      image_path: "x",
-      annotations: [],
-      base_mtime: "1",
-      user: "breeder",
-    });
-    expect(res.status).toBe("conflict");
+  it("throws the version-conflict 409, which reads as that refusal", async () => {
+    const { status, body } = LABEL_ANSWERS.version_conflict;
+    fetchAnswers(status, body);
+    const raised = await api.annotate.save(request).catch((e: unknown) => e);
+    expect(conflict(raised)).toEqual(body.detail);
+    expect(mismatch(raised)).toBeNull();
   });
 
-  it("throws an audit-gap 409 rather than reading it as a conflict", async () => {
-    stubFetch(409, {
-      detail: {
-        error: "audit_entry_not_written",
-        message: "the line was not written",
-        committed: null,
-      },
-    });
-    const save = api.annotate.save({
-      image_path: "x",
-      annotations: [],
-      base_mtime: "1",
-      user: "breeder",
-    });
-    await expect(save).rejects.toThrow("the line was not written");
-  });
-
-  it("throws on a 409 whose body carries no detail, as every JSON call does", async () => {
-    stubFetch(409, { message: "label document changed since it was loaded" });
-    const save = api.annotate.save({
-      image_path: "x",
-      annotations: [],
-      base_mtime: "1",
-      user: "breeder",
-    });
-    await expect(save).rejects.toThrow("409");
+  it("throws on a refusal whose body carries no detail, as every JSON call does", async () => {
+    // A transport-level refusal: a body no route wrote.
+    const { status } = LABEL_ANSWERS.version_conflict;
+    fetchAnswers(status, {});
+    const save = api.annotate.save(request);
+    await expect(save).rejects.toThrow(String(status));
   });
 });
 
 describe("canvas.pushState 409 recovery", () => {
-  const body = () => ({
-    project_id: "a1b2c3d4e5f6",
-    tab: "annotate" as const,
-    image_path: "/p/img.jpg",
-    image: "img.jpg",
-    img_width: 100,
-    img_height: 80,
-    viewport: null,
-    mode: "box" as const,
-    active_subject: null,
-    cut_armed: false,
-    dirty: false,
-    user: "grower",
-    classes: [],
-    counts: {},
-    shapes: null,
+  it("returns the backend's empty answer on a 200", async () => {
+    fetchAnswers(200, null);
+    const res = await api.canvas.pushState(canvasBody());
+    expect(res).toBeNull();
   });
 
-  it("returns ok + shapes_written on a 200", async () => {
-    stubFetch(200, { status: "ok", shapes_written: true });
-    const res = await api.canvas.pushState(body());
-    expect(res).toEqual({ status: "ok", shapes_written: true });
-  });
-
-  it("returns a conflict and triggers a resync on a 409", async () => {
-    const resync = vi.spyOn(stateSocket, "resync").mockImplementation(() => {});
-    // The route's real 409 body, as HTTPException(409, {...}) serializes it: nested under
-    // "detail", never the flat shape a naive stub would guess.
-    stubFetch(409, {
-      detail: {
-        message: "the backend does not have this project open",
-        open_project_id: "ffffffffffff",
-      },
-    });
-    const res = await api.canvas.pushState(body());
-    expect(res).toEqual({ status: "conflict" });
-    expect(resync).toHaveBeenCalledTimes(1);
+  it("throws the backend's project-not-open 409, which reads as that refusal", async () => {
+    const { status, body } = PROJECT_FIXTURES.project_not_open;
+    fetchAnswers(status, body);
+    const raised = await api.canvas.pushState(canvasBody()).catch((e: unknown) => e);
+    expect(mismatch(raised)).toEqual(body.detail);
+    expect(conflict(raised)).toBeNull();
   });
 });
 
 describe("annotate.load", () => {
   it("reports the raster's own width and height, each in its own field", async () => {
     // Non-square on purpose: equal dimensions would read the same whichever field they land in.
-    stubFetch(200, {
-      image_path: "C:/data/images/2026-01-01/img1.jpg",
-      img_width: 4032,
-      img_height: 3024,
-      annotations: [{ subject: "bush", bbox: [10, 20, 110, 220] }],
-      base_mtime: "1783702599549301100",
-    });
-    const labels = await api.annotate.load("C:/data/images/2026-01-01/img1.jpg");
-    expect(labels.img_width).toBe(4032);
-    expect(labels.img_height).toBe(3024);
-    expect(labels.base_mtime).toBe("1783702599549301100");
+    const { loaded } = LABEL_ANSWERS;
+    expect(loaded.img_width).not.toBe(loaded.img_height);
+    fetchAnswers(200, loaded);
+    const labels = await api.annotate.load(loaded.image_path);
+    expect(labels.img_width).toBe(loaded.img_width);
+    expect(labels.img_height).toBe(loaded.img_height);
+    expect(labels.base_mtime).toBe(loaded.base_mtime);
   });
 
   it("splits the served annotation list into the canvas buckets", async () => {
-    stubFetch(200, {
-      image_path: "C:/data/images/2026-01-01/img1.jpg",
-      img_width: 4032,
-      img_height: 3024,
-      annotations: [{ subject: "bush", bbox: [10, 20, 110, 220] }],
-      base_mtime: null,
-    });
-    const labels = await api.annotate.load("C:/data/images/2026-01-01/img1.jpg");
-    expect(labels.boxes).toHaveLength(1);
-    expect(labels.boxes[0].x1).toBe(10);
-    expect(labels.boxes[0].y1).toBe(20);
-    expect(labels.boxes[0].x2).toBe(110);
-    expect(labels.boxes[0].y2).toBe(220);
-    expect(labels.polygons).toHaveLength(0);
-    expect(labels.points).toHaveLength(0);
+    const { loaded } = LABEL_ANSWERS;
+    fetchAnswers(200, loaded);
+    const labels = await api.annotate.load(loaded.image_path);
+    const [box] = loaded.annotations;
+    expect(box.bbox).not.toBeNull();
+    expect([
+      labels.boxes[0].x1,
+      labels.boxes[0].y1,
+      labels.boxes[0].x2,
+      labels.boxes[0].y2,
+    ]).toEqual(box.bbox);
+    expect(
+      [labels.boxes, labels.polygons, labels.points, labels.imageAnnotations].map((b) => b.length),
+    ).toEqual([1, 1, 1, 1]);
   });
 });
 
 describe("query string assembly", () => {
   it("carries each named parameter, a bucket name with its separator encoded", async () => {
-    stubFetch(200, { bucket: "m/2026-01-01", proposals: [] });
+    fetchAnswers(200, LABEL_ANSWERS.proposals);
     await api.annotate.proposals("img.jpg", "m/2026-01-01");
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe(
       "/api/annotate/proposals?image_path=img.jpg&bucket=m%2F2026-01-01",
     );
   });
 
-  it("drops an omitted parameter instead of sending the text undefined", async () => {
-    stubFetch(200, { path: "", parent: null, entries: [] });
-    await api.fs.list();
-    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/fs/list?");
-  });
-
   it("keeps a parameter whose value is zero", async () => {
-    stubFetch(200, {});
+    fetchAnswers(200, BAND_ANSWERS.four_spectral);
     await api.images.bands("mosaic.tif");
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/images/bands?path=mosaic.tif");
-    expect(api.images.url("mosaic.tif", display(), { x0: 0, y0: 4067 })).toBe(
-      `/api/images?path=mosaic.tif&x0=0&y0=4067&display_pixels=${display()}&v=${RENDER_CACHE_VERSION}`,
+    expect(api.images.url("mosaic.tif", display(), { region: [0, 4067, 4067, 8134] })).toBe(
+      `/api/images?path=mosaic.tif&region=0&region=4067&region=4067&region=8134&display_pixels=${display()}&v=${RENDER_CACHE_VERSION}`,
     );
   });
 });
 
 describe("request defaults", () => {
   it("sends the JSON content type on a request that names no headers of its own", async () => {
-    stubFetch(200, { status: "ok", current_image_index: 7 });
+    fetchAnswers(200, null);
     await api.dataset.nav(7);
     const init = vi.mocked(fetch).mock.calls[0][1];
     expect(init?.headers).toEqual({ "Content-Type": "application/json" });
@@ -221,7 +156,7 @@ describe("images.url", () => {
     vi.stubGlobal("devicePixelRatio", 2);
     const pixels = display();
     expect(pixels).toBe(3840 * 2160);
-    for (const opts of [{}, { x0: 0, y0: 0, x1: 512, y1: 512 }]) {
+    for (const opts of [{}, { region: [0, 0, 512, 512] as const }]) {
       const params = parseQuery(api.images.url("C:/data/images/2026-01-01/img1.jpg", pixels, opts));
       expect(params.get("display_pixels")).toBe(String(pixels));
       for (const key of ["max_width", "width", "quality"]) expect(params.has(key)).toBe(false);
@@ -231,11 +166,11 @@ describe("images.url", () => {
   it("carries bands/stretch through to the query string when given", () => {
     const params = parseQuery(
       api.images.url("C:/data/images/2026-01-01/img1.bandgroup", display(), {
-        bands: "Red,Green,Blue",
+        bands: ["Red", "Green", "Blue"],
         stretch: "minmax",
       }),
     );
-    expect(params.get("bands")).toBe("Red,Green,Blue");
+    expect(params.getAll("bands")).toEqual(["Red", "Green", "Blue"]);
     expect(params.get("stretch")).toBe("minmax");
   });
 });
@@ -244,38 +179,24 @@ describe("images.url region params", () => {
   it("carries the native-pixel rect corners through to the query string", () => {
     const params = parseQuery(
       api.images.url("C:/data/images/2026-01-01/mosaic.tif", display(), {
-        x0: 0,
-        y0: 4067,
-        x1: 4067,
-        y1: 8134,
+        region: [0, 4067, 4067, 8134],
       }),
     );
-    expect(params.get("x0")).toBe("0");
-    expect(params.get("y0")).toBe("4067");
-    expect(params.get("x1")).toBe("4067");
-    expect(params.get("y1")).toBe("8134");
+    expect(params.getAll("region")).toEqual(["0", "4067", "4067", "8134"]);
   });
 
-  it("omits every rect param when no region is requested", () => {
+  it("omits the region when none is requested", () => {
     const params = parseQuery(api.images.url("C:/data/images/2026-01-01/img1.jpg", display()));
-    for (const key of ["x0", "y0", "x1", "y1"]) expect(params.has(key)).toBe(false);
+    expect(params.has("region")).toBe(false);
   });
 });
 
 describe("images.bands", () => {
   it("hits GET /api/images/bands with the path and returns the reported contract", async () => {
-    stubFetch(200, {
-      band_count: 4,
-      bands: [
-        { name: "Blue", wavelength_nm: 475, dtype: "uint16", min: 0, max: 65535 },
-        { name: "Green", wavelength_nm: 560, dtype: "uint16", min: 0, max: 65535 },
-        { name: "Red", wavelength_nm: 650, dtype: "uint16", min: 0, max: 65535 },
-        { name: "NIR", wavelength_nm: 840, dtype: "uint16", min: 0, max: 65535 },
-      ],
-    });
+    const produced = BAND_ANSWERS.four_spectral;
+    fetchAnswers(200, produced);
     const res = await api.images.bands("C:/data/images/2026-01-01/DJI_0001.bandgroup");
-    expect(res.band_count).toBe(4);
-    expect(res.bands.map((b) => b.name)).toEqual(["Blue", "Green", "Red", "NIR"]);
+    expect(res).toEqual(produced);
     const fetchMock = vi.mocked(fetch);
     expect(fetchMock.mock.calls[0][0]).toContain("/api/images/bands?path=");
   });

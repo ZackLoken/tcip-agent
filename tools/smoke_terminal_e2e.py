@@ -204,19 +204,20 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
         scale=True,
     )
     name = f"Terminal smoke {secrets.token_hex(4)}"
-    record = initialize_project(
+    created = initialize_project(
         project,
         name,
         "the terminal smoke's scratch workspace",
         invariances,
         actor=None,
     )
-    if "error" in record:
-        print(f"FAIL: the scratch project was refused: {record['error']}")
+    if "error" in created:
+        print(f"FAIL: the scratch project was refused: {created['error']}")
         return 1
     user = getpass.getuser()
     opened = client.post(
-        "/api/projects/open", json={"id": record["id"], "user": user}
+        "/api/projects/open",
+        json={"id": created["record"]["id"], "user": user},
     )
     if opened.status_code != 200:
         print(
@@ -301,7 +302,7 @@ def _smoke(client: TestClient, provider: str, answer_timeout_s: float) -> int:
             )
             terminal_routes.shutdown_all()
             (ended,) = end_lines()
-            print(f"    the shutdown's end line: {ended['arguments']}")
+            print(f"    the shutdown's end line: {ended.arguments}")
             print("[5] the launch after the shutdown")
             second = launched()
             passed = (

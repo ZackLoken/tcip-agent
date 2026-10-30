@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from typing import Literal, Protocol
+from typing import ClassVar, Literal, Self
+
+from pydantic import BaseModel, PrivateAttr, computed_field
 
 from tcip_mcp.experiments import FINAL_STATES, FinalState
 
@@ -20,85 +22,141 @@ JobStatus = Literal["pending", "running", FinalState]
 (``experiments.FinalState``)."""
 
 
-class Job(Protocol):
-    """A live job as the registry reads it: its id and the status it holds."""
+class Job(BaseModel):
+    """A job as the registry holds it: its id, the status it holds and the error it ended on.
+
+    The thread it runs on is private state, absent from every dump of it.
+    """
 
     job_id: str
-    status: JobStatus
+    status: JobStatus = "pending"
+    error: str | None = None
+    _thread: threading.Thread | None = PrivateAttr(default=None)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def live(self) -> bool:
+        """Whether the job has not yet ended: its status is ``pending`` or ``running``."""
+        return self.status not in FINAL_STATES
+
+    @property
+    def thread(self) -> threading.Thread | None:
+        """The thread the job runs on, ``None`` before :meth:`start` starts one."""
+        return self._thread
+
+    def start(self, target: Callable[[Self], object]) -> None:
+        """Run ``target`` over this job on its own daemon thread."""
+        self._thread = threading.Thread(
+            target=target, args=(self,), daemon=True
+        )
+        self._thread.start()
 
 
-class ProjectJob(Job, Protocol):
-    """A job that runs for one project."""
+class ProjectJob(Job):
+    """A job running one checkpoint over one capture directory, for the ``project`` it serves.
 
-    project: str
-
-
-def live(job: Job) -> bool:
-    """Return whether the job has not yet ended.
-
-    A job that has not ended has status ``pending`` or ``running``.
+    ``kind`` names what the job does, for a sentence about it.
     """
-    return job.status not in FINAL_STATES
+
+    kind: ClassVar[str]
+    project: str
+    checkpoint_path: str
+    images_dir: str
 
 
 def evict_terminal(jobs: dict, max_jobs: int = MAX_JOBS) -> None:
     """Drop the oldest ended jobs of any project from ``jobs``, in place.
 
-    Ended means not :func:`live`. Drops until ``jobs`` holds at most ``max_jobs`` or every job
+    Ended means not :attr:`Job.live`. Drops until ``jobs`` holds at most ``max_jobs`` or every job
     left is live. Relies on dict insertion order (oldest first).
     """
     overflow = len(jobs) - max_jobs
     if overflow > 0:
-        evictable = [jid for jid, job in jobs.items() if not live(job)]
+        evictable = [jid for jid, job in jobs.items() if not job.live]
         for jid in evictable[:overflow]:
             del jobs[jid]
 
 
 class JobRegistry[J: Job]:
-    """The dict-plus-lock live-job registry: register, find-or-register, get and list."""
+    """The dict-plus-lock live-job registry: launch, find-or-launch, get, list and signal.
+
+    Every job a route answers is a snapshot (``model_copy``) the registry hands out; the live
+    object goes only to the worker it starts and to an act it runs for a caller (:meth:`signal`).
+    """
 
     def __init__(self) -> None:
         """Initialize an empty registry keyed by each job's ``job_id``."""
         self.jobs: dict[str, J] = {}
         self.lock = threading.Lock()
 
-    def _insert(self, job: J) -> None:
-        """Add ``job`` under its ``job_id`` and evict overflow (:func:`evict_terminal`).
+    def _insert(self, job: J) -> J:
+        """Add ``job`` under its ``job_id``, evict overflow (:func:`evict_terminal`), snapshot it.
 
         Called under the lock.
         """
         self.jobs[job.job_id] = job
         evict_terminal(self.jobs)
+        return job.model_copy()
 
-    def register(self, job: J) -> None:
-        """Add ``job`` under its ``job_id`` (:meth:`_insert`)."""
+    def launch(self, job: J, worker: Callable[[J], object]) -> J:
+        """Add ``job`` and run ``worker`` over it on its own thread (:meth:`Job.start`).
+
+        Returns its snapshot as it stood before the thread started.
+        """
         with self.lock:
-            self._insert(job)
+            snapshot = self._insert(job)
+        job.start(worker)
+        return snapshot
 
-    def find_or_register(
+    def find_or_launch(
         self,
         match: Callable[[J], bool],
         make: Callable[[], J],
+        worker: Callable[[J], object],
     ) -> tuple[J, bool]:
-        """Return the first job ``match`` accepts, or insert and return ``make()``'s new job.
+        """Return a snapshot of the first job ``match`` accepts, or launch ``make()``'s new job.
 
-        Both happen under one lock acquisition; the new job is inserted through
-        :meth:`_insert`. Returns ``(job, created)``, ``created`` true only when ``make()`` ran.
+        The match and the insert happen under one lock acquisition; a new job is run as
+        :meth:`launch` runs it. Returns ``(snapshot, created)``, ``created`` true only when
+        ``make()`` ran.
         """
         with self.lock:
             for job in self.jobs.values():
                 if match(job):
-                    return job, False
+                    return job.model_copy(), False
             job = make()
-            self._insert(job)
-        return job, True
+            snapshot = self._insert(job)
+        job.start(worker)
+        return snapshot, True
+
+    def signal(self, job_id: str, act: Callable[[J], object]) -> J | None:
+        """Run ``act`` over the live job ``job_id`` names and return its snapshot after.
+
+        ``None``, with nothing run, for an id naming no job.
+        """
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if job is None:
+                return None
+            act(job)
+            return job.model_copy()
 
     def get(self, job_id: str) -> J | None:
-        """Return a job by id, from any project this process holds."""
+        """Return a snapshot of a job by id, from any project this process holds."""
         with self.lock:
-            return self.jobs.get(job_id)
+            job = self.jobs.get(job_id)
+            return None if job is None else job.model_copy()
 
-    def list[P: ProjectJob](self: JobRegistry[P], project: str) -> list[P]:
-        """Return every held job that runs for ``project``."""
+    def list[P: ProjectJob](
+        self: JobRegistry[P], project: str, *, unended: bool = False
+    ) -> list[P]:
+        """Return a snapshot of every held job that runs for ``project``.
+
+        With ``unended``, only the jobs that have not ended (:attr:`Job.live`).
+        """
         with self.lock:
-            return [j for j in self.jobs.values() if j.project == project]
+            return [
+                j.model_copy()
+                for j in self.jobs.values()
+                if j.project == project and (j.live or not unended)
+            ]

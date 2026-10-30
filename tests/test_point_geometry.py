@@ -362,12 +362,12 @@ def test_visualize_annotations_renders_the_box_and_reports_the_point(
 
 
 def test_the_client_projection_emits_the_point_key() -> None:
-    from tcip_annotation.json_io import client_annotation
+    from tcip_annotation.json_io import ClientAnnotation
 
-    d = client_annotation(
+    d = ClientAnnotation.of(
         Annotation(subject="bud", geometry=Point(12.0, 34.0))
     )
-    assert d["point"] == [12.0, 34.0]
+    assert d.point == (12.0, 34.0)
 
 
 def test_mcp_read_annotations_tool_returns_a_point(tmp_path: Path) -> None:

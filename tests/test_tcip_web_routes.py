@@ -18,8 +18,9 @@ from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.dataset_layout import image_dir, image_root, parse_image_path
 from tcip_mcp.pipelines.proposal import Proposal
 from tcip_mcp.subject_registry import Subject, SubjectRegistry
-from tcip_web import jobstore
 from tcip_web.paths import safe_join
+from tcip_web.routes.annotate import VersionConflictRefusal
+from tcip_web.routes.inference import BucketExistsRefusal
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import (
@@ -29,12 +30,13 @@ from tests._producer_fixtures import (
     write_image,
 )
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
+from tools.fixture_session import ended
 
 if TYPE_CHECKING:
     from types import ModuleType
 
-    from httpx import Response
     from pydantic import JsonValue
+    from starlette.testclient import httpx
 
     from tcip_mcp.buckets import Bucket
     from tcip_web.routes.inference import InferenceJob
@@ -193,8 +195,10 @@ def test_dataset_tree(opened_client: TestClient, dataset_root: Path) -> None:
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert "2-11-26" in body["dates_with_images"]
-    assert "3-2-26" in body["dates_with_images"]
+    assert body["captures"] == [
+        {"name": "2-11-26", "date": None},
+        {"name": "3-2-26", "date": None},
+    ]
     assert sorted(body["subjects"]) == ["bud", "bush"]
     # No bucket is published, so no date lists one.
     assert body["buckets_by_date"] == {"2-11-26": [], "3-2-26": []}
@@ -217,10 +221,7 @@ def test_dataset_tree_reports_a_label_problem_and_keeps_listing_other_dates(
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert (
-        "2-11-26" in body["dates_with_images"]
-        and "3-2-26" in body["dates_with_images"]
-    )
+    assert [c["name"] for c in body["captures"]] == ["2-11-26", "3-2-26"]
     assert body["subjects_by_date"]["2-11-26"] == []
     assert body["subjects_by_date"]["3-2-26"] == []
     assert body["label_problem"] is not None
@@ -494,7 +495,7 @@ def test_dataset_nav_persists_current_index(
         "/api/dataset/nav", json={"current_image_index": 2}
     )
     assert ok.status_code == 200
-    assert ok.json()["current_image_index"] == 2
+    assert ok.json() is None
     assert (
         opened_client.get("/api/state").json()["dataset"][
             "current_image_index"
@@ -630,8 +631,8 @@ def test_annotate_load_and_save_roundtrip(
     assert all(a["subject"] == "bud" for a in anns)
     # One carries a box, one a polygon (geometry kinds coexist in one file). The load side reports a
     # polygon as `rings`: a stored shape can be occlusion-split, so it is never flattened to one.
-    assert sum("bbox" in a for a in anns) == 1
-    assert sum("rings" in a for a in anns) == 1
+    assert sum(a["bbox"] is not None for a in anns) == 1
+    assert sum(a["rings"] is not None for a in anns) == 1
 
 
 def test_an_image_under_an_additive_image_root_loads_and_saves(
@@ -805,8 +806,12 @@ def test_annotate_load_authorship_tool_accepted_through_the_editor(
             "image_path": str(img_path),
             "annotations": [],
             "user": "breeder",
-            "bucket": bucket.name,
-            "accept": [0],
+            "gestures": {
+                "decide": {
+                    "bucket": bucket.name,
+                    "verdicts": {"0": "accepted"},
+                }
+            },
         },
     )
     assert resp.status_code == 200, resp.text
@@ -872,7 +877,7 @@ def test_annotate_save_of_an_image_outside_allowed_root_403(
 
 def _save_box(
     opened_client: TestClient, img_path: Path, **extra: object
-) -> Response:
+) -> httpx.Response:
     resp = opened_client.post(
         "/api/annotate/labels",
         json={
@@ -889,7 +894,7 @@ def test_annotate_save_refuses_a_token_the_document_has_moved_past(
     opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
-    base = _save_box(opened_client, img_path).json()["base_mtime"]
+    base = _save_box(opened_client, img_path).json()["document"]["base_mtime"]
 
     # A concurrent writer changes the document after our client loaded it.
     _write_gt(img_path, [], keep_empty=True)
@@ -904,20 +909,20 @@ def test_annotate_save_refuses_a_token_the_document_has_moved_past(
         },
     )
     assert resp.status_code == 409
-    assert resp.json()["detail"]["kind"] == "version_conflict"
+    VersionConflictRefusal.model_validate(resp.json()["detail"])
 
 
 def test_annotate_save_with_the_current_token_is_accepted(
     opened_client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     img_path = image_dir(dataset_root, "2-11-26") / "IMG_0000.JPG"
-    base = _save_box(opened_client, img_path).json()["base_mtime"]
+    base = _save_box(opened_client, img_path).json()["document"]["base_mtime"]
 
     # No external change → the token still names the stored document → the save is accepted and
     # returns a fresh one.
     resp = _save_box(opened_client, img_path, base_mtime=base)
     assert resp.status_code == 200
-    token = resp.json()["base_mtime"]
+    token = resp.json()["document"]["base_mtime"]
     assert token is not None
     # A string, not a number: the client only ever echoes it back, and a numeric token would be
     # rounded by the browser's JSON parse and mismatch on every save.
@@ -1216,7 +1221,7 @@ def _image_of(dataset_root: Path) -> Path:
 
 def _propose(
     client: TestClient, image: Path, prompt: dict[str, JsonValue]
-) -> Response:
+) -> httpx.Response:
     return client.post(
         "/api/annotate/propose",
         json={
@@ -1295,7 +1300,7 @@ def test_states_read_each_image_of_the_selected_capture_for_one_subject(
         json={
             "image_path": str(images / "IMG_0001.JPG"),
             "annotations": [{"subject": "bud", "bbox": [10, 20, 50, 60]}],
-            "complete": {"bud": True},
+            "gestures": {"complete": {"bud": True}},
             "user": "breeder",
         },
     )
@@ -1383,7 +1388,7 @@ def test_a_prompt_records_the_person_who_sent_it_on_both_audit_lines(
     }
 
 
-def _find(client: TestClient, image: Path, phrase: str) -> Response:
+def _find(client: TestClient, image: Path, phrase: str) -> httpx.Response:
     return client.post(
         "/api/annotate/find",
         json={"image_path": str(image), "phrase": phrase, "user": "breeder"},
@@ -1529,17 +1534,17 @@ def test_a_prompt_overtaken_by_another_stages_its_own_run(
 
     register_proposal_engine(PromptableSegmenter.name, _PromptPlacedEngine())
     image = _image_of(dataset_root)
-    real_stage = proposal_tools.stage_proposals
-    overtaking: list[annotate.ProposeAnswer] = []
+    real_stage = proposal_tools.stage_assignments
+    overtaking: list[proposal_tools.Staged | None] = []
     overtaken: list[bool] = []
 
     def stage_after_another_prompt(
         project: Path,
         image_path: str,
-        *,
         assignments: proposal_tools.StagedAssignments,
+        *,
         actor: str | None,
-    ) -> dict:
+    ) -> proposal_tools.Staged | dict:
         if not overtaken:
             overtaken.append(True)
             overtaking.append(
@@ -1554,12 +1559,10 @@ def test_a_prompt_overtaken_by_another_stages_its_own_run(
                     )
                 )
             )
-        return real_stage(
-            project, image_path, assignments=assignments, actor=actor
-        )
+        return real_stage(project, image_path, assignments, actor=actor)
 
     monkeypatch.setattr(
-        proposal_tools, "stage_proposals", stage_after_another_prompt
+        annotate, "stage_assignments", stage_after_another_prompt
     )
     first = _propose(opened_client, image, {"points": [[40, 15]]})
 
@@ -1596,7 +1599,7 @@ def test_an_engine_proposing_nothing_answers_no_bucket(
     )
 
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"bucket": None, "proposal_count": 0}
+    assert resp.json() is None
     assert buckets_under(dataset_root) == []
 
 
@@ -1657,8 +1660,8 @@ def _held_worker(
     return event
 
 
-BUCKET = "baseline/2026-02-11"
-"""The bucket every launch here names."""
+NAME = "baseline"
+"""The named bucket every launch here publishes beneath."""
 
 
 def test_a_launch_into_a_bucket_that_exists_fails_its_job_and_writes_nothing(
@@ -1673,6 +1676,7 @@ def test_a_launch_into_a_bucket_that_exists_fails_its_job_and_writes_nothing(
     """
     import tcip_store
     from tcip_mcp.dataset_layout import bucket_key
+    from tcip_mcp.pipelines.execution import Stated
     from tcip_web.routes import inference
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -1681,38 +1685,36 @@ def test_a_launch_into_a_bucket_that_exists_fails_its_job_and_writes_nothing(
         tmp_path, monkeypatch
     )
     monkeypatch.setattr(inference_routes, "_worker", real_worker)
-    ckpt = registered_checkpoint(tmp_path)
+    launch = inference.LaunchInferencePayload(
+        user="tester",
+        checkpoint_path=registered_checkpoint(tmp_path),
+        dataset_root=dataset_root,
+        date=date,
+        bucket_name=NAME,
+        stated=Stated.model_validate({"tile": False, **SAMPLE_DETECTOR_PASS}),
+    )
     _published_bucket(
         tmp_path,
-        BUCKET,
+        launch.bucket,
         image_dir(dataset_root, date) / "img.png",
         [1],
         scope={"subject": "bud"},
     )
     before = tcip_store.read_versioned(
-        bucket_key(dataset_root, BUCKET)
+        bucket_key(dataset_root, launch.bucket)
     ).version
     logged = len(audit_rows(Path(dataset_root)))
 
     resp = opened_client.post(
-        "/api/inference/launch",
-        json={
-            "user": "tester",
-            "checkpoint_path": ckpt,
-            "dataset_root": dataset_root,
-            "date": date,
-            "bucket": BUCKET,
-            "stated": {"tile": False, **SAMPLE_DETECTOR_PASS},
-        },
+        "/api/inference/launch", json=launch.model_dump(mode="json")
     )
 
     assert resp.status_code == 200, resp.text
-    job = inference_routes._get(resp.json()["job_id"])
-    job.thread.join(60)
+    job = ended(inference_routes._registry, resp.json()["job_id"])
     assert job.status == "failed"
     assert "a bucket is published once" in job.error
     assert (
-        tcip_store.read_versioned(bucket_key(dataset_root, BUCKET)).version
+        tcip_store.read_versioned(bucket_key(dataset_root, launch.bucket)).version
         == before
     )
     assert len(audit_rows(Path(dataset_root))) == logged
@@ -1737,14 +1739,14 @@ def test_inference_launch_leaves_the_bucket_for_its_publication_to_create(
             "checkpoint_path": ckpt,
             "dataset_root": dataset_root,
             "date": date,
-            "bucket": BUCKET,
+            "bucket_name": NAME,
             "stated": {},
         },
     )
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["bucket"] == BUCKET
-    assert not tcip_store.exists(bucket_key(dataset_root, BUCKET))
+    assert resp.json()["bucket"] == f"{NAME}/{date}"
+    assert not tcip_store.exists(bucket_key(dataset_root, resp.json()["bucket"]))
 
 
 def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
@@ -1757,8 +1759,6 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
     The refusal carries the first job's record, its id and bucket among it; after the first job
     completes, a third launch is admitted.
     """
-    import time
-
     ckpt, dataset_root, date, inference_routes = _launch_setup(
         tmp_path, monkeypatch
     )
@@ -1771,7 +1771,7 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
             "checkpoint_path": ckpt,
             "dataset_root": dataset_root,
             "date": date,
-            "bucket": BUCKET,
+            "bucket_name": NAME,
             "stated": {},
         },
     )
@@ -1785,30 +1785,16 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
             "checkpoint_path": ckpt,
             "dataset_root": dataset_root,
             "date": date,
-            "bucket": BUCKET,
+            "bucket_name": NAME,
             "stated": {},
         },
     )
     assert second.status_code == 409, second.text
-    detail = second.json()["detail"]
-    assert set(detail) == {"kind", "message", "job"}
-    assert (
-        detail["kind"],
-        detail["job"]["job_id"],
-        detail["job"]["bucket"],
-    ) == (
-        "bucket_exists",
-        job_id,
-        BUCKET,
-    )
+    refused = BucketExistsRefusal.model_validate(second.json()["detail"]).job
+    assert (refused.job_id, refused.bucket) == (job_id, first.json()["bucket"])
 
     event.set()
-    job = inference_routes._get(job_id)
-    for _ in range(100):
-        if not jobstore.live(job):
-            break
-        time.sleep(0.05)
-    assert job.status == "completed"
+    assert ended(inference_routes._registry, job_id).status == "completed"
 
     third = opened_client.post(
         "/api/inference/launch",
@@ -1817,7 +1803,7 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
             "checkpoint_path": ckpt,
             "dataset_root": dataset_root,
             "date": date,
-            "bucket": BUCKET,
+            "bucket_name": NAME,
             "stated": {},
         },
     )
@@ -1834,7 +1820,6 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
     A trailing-separator spelling of the same dataset root still names the first job.
     """
     import os
-    import time
 
     ckpt, dataset_root, date, inference_routes = _launch_setup(
         tmp_path, monkeypatch
@@ -1848,7 +1833,7 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
             "checkpoint_path": ckpt,
             "dataset_root": dataset_root,
             "date": date,
-            "bucket": BUCKET,
+            "bucket_name": NAME,
             "stated": {},
         },
     )
@@ -1862,33 +1847,27 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
             "checkpoint_path": ckpt,
             "dataset_root": dataset_root + os.sep,
             "date": date,
-            "bucket": BUCKET,
+            "bucket_name": NAME,
             "stated": {},
         },
     )
     assert second.status_code == 409, second.text
-    detail = second.json()["detail"]
-    assert detail["kind"] == "bucket_exists"
-    assert detail["job"]["job_id"] == job_id
+    refused = BucketExistsRefusal.model_validate(second.json()["detail"]).job
+    assert refused.job_id == job_id
 
     event.set()
-    job = inference_routes._get(job_id)
-    for _ in range(100):
-        if not jobstore.live(job):
-            break
-        time.sleep(0.05)
-    assert job.status == "completed"
+    assert ended(inference_routes._registry, job_id).status == "completed"
 
 
-def test_inference_launch_refuses_a_live_jobs_bucket_over_another_capture_of_its_root(
+def test_launches_naming_one_bucket_over_two_captures_publish_one_bucket_each(
     opened_client: TestClient,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A launch over another capture of the root a live job writes its bucket under refuses.
+    """Two captures of one root launched beneath one named bucket each publish their own.
 
     The second launch names the first's bucket over a second capture of the same dataset root
-    while the first job is live, and the refusal names the first job.
+    while the first job is live; both are admitted, each job's bucket its capture's own.
     """
     ckpt, dataset_root, date, inference_routes = _launch_setup(
         tmp_path, monkeypatch
@@ -1907,7 +1886,7 @@ def test_inference_launch_refuses_a_live_jobs_bucket_over_another_capture_of_its
                     "checkpoint_path": ckpt,
                     "dataset_root": dataset_root,
                     "date": capture,
-                    "bucket": BUCKET,
+                    "bucket_name": NAME,
                     "stated": {},
                 },
             )
@@ -1917,26 +1896,22 @@ def test_inference_launch_refuses_a_live_jobs_bucket_over_another_capture_of_its
         event.set()
 
     assert first.status_code == 200, first.text
-    assert second.status_code == 409, second.text
-    assert second.json()["detail"]["job"]["job_id"] == first.json()["job_id"]
+    assert second.status_code == 200, second.text
+    assert first.json()["bucket"] != second.json()["bucket"]
 
 
-def test_two_concurrent_launches_over_two_captures_of_one_root_admit_one(
+def test_two_concurrent_launches_naming_one_bucket_admit_one(
     opened_client: TestClient,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Two launches naming one bucket over two captures of one root, made at once, admit one.
+    """Two launches naming one bucket over one capture, made at once, admit one.
 
     Each launch that reads the registry's listing waits there for the other, so a launch whose
     check and registration are two steps lets both through; the other answers 409.
     """
     ckpt, dataset_root, date, inference_routes = _launch_setup(
         tmp_path, monkeypatch
-    )
-    other = "2026-02-12"
-    write_image(
-        image_dir(dataset_root, other) / "img.png", (100, 100), (110, 110, 110)
     )
     event = _held_worker(monkeypatch, inference_routes)
     barrier = threading.Barrier(2, timeout=2)
@@ -1949,25 +1924,24 @@ def test_two_concurrent_launches_over_two_captures_of_one_root_admit_one(
         return jobs
 
     monkeypatch.setattr(inference_routes._registry, "list", interleaved)
-    answers: dict[str, int] = {}
+    answers: list[int] = []
 
-    def launch(capture: str) -> None:
-        answers[capture] = opened_client.post(
-            "/api/inference/launch",
-            json={
-                "user": "tester",
-                "checkpoint_path": ckpt,
-                "dataset_root": dataset_root,
-                "date": capture,
-                "bucket": BUCKET,
-                "stated": {},
-            },
-        ).status_code
+    def launch() -> None:
+        answers.append(
+            opened_client.post(
+                "/api/inference/launch",
+                json={
+                    "user": "tester",
+                    "checkpoint_path": ckpt,
+                    "dataset_root": dataset_root,
+                    "date": date,
+                    "bucket_name": NAME,
+                    "stated": {},
+                },
+            ).status_code
+        )
 
-    threads = [
-        threading.Thread(target=launch, args=(capture,))
-        for capture in (date, other)
-    ]
+    threads = [threading.Thread(target=launch) for _ in range(2)]
     try:
         for thread in threads:
             thread.start()
@@ -1976,7 +1950,7 @@ def test_two_concurrent_launches_over_two_captures_of_one_root_admit_one(
     finally:
         event.set()
 
-    assert sorted(answers.values()) == [200, 409]
+    assert sorted(answers) == [200, 409]
 
 
 def test_an_inference_cancel_line_names_the_launchs_dataset_root(
@@ -1996,7 +1970,7 @@ def test_an_inference_cancel_line_names_the_launchs_dataset_root(
             "checkpoint_path": ckpt,
             "dataset_root": dataset_root,
             "date": date,
-            "bucket": BUCKET,
+            "bucket_name": NAME,
             "stated": {},
         },
     )
@@ -2033,7 +2007,7 @@ def test_inference_launch_resolves_explicit_conf_source_from_the_payload(
             "checkpoint_path": ckpt,
             "dataset_root": dataset_root,
             "date": date,
-            "bucket": BUCKET,
+            "bucket_name": NAME,
             "stated": {
                 "conf": SAMPLE_CONF,
                 "rationale": "a sample reason the test states",
@@ -2062,7 +2036,7 @@ def test_inference_launch_carries_an_omitted_conf_as_unstated(
             "checkpoint_path": ckpt,
             "dataset_root": dataset_root,
             "date": date,
-            "bucket": BUCKET,
+            "bucket_name": NAME,
             "stated": {},
         },
     )
@@ -2101,8 +2075,8 @@ def test_state_tab_push_rejects_unknown_tabs(
         resp = opened_client.post(
             "/api/state/tab", json={"active_tab": retired}
         )
-        assert resp.status_code == 400
-        assert retired in resp.json()["detail"]
+        assert resp.status_code == 422
+        assert [e["input"] for e in resp.json()["detail"]] == [retired]
     assert opened_client.get("/api/state").json()["active_tab"] == before
 
 
@@ -2128,62 +2102,6 @@ def test_state_socket_broadcasts_a_mutation_while_open(
 def test_dataset_state_route_is_retired(opened_client: TestClient) -> None:
     """``/api/dataset/state`` is not registered."""
     assert opened_client.get("/api/dataset/state").status_code == 404
-
-
-# ── /api/fs (folder browser) ───────────────────────────────────────────────
-
-
-def test_fs_list_directories(
-    opened_client: TestClient, tmp_path: Path
-) -> None:
-    (tmp_path / "alpha").mkdir()
-    image_root(tmp_path / "beta").mkdir(parents=True)
-    (tmp_path / ".hidden").mkdir()
-    (tmp_path / "afile.txt").write_text("x")
-    # Windows system/recovery folders that clutter a picker, filtered out by name.
-    (tmp_path / "$RECYCLE.BIN").mkdir()
-    (tmp_path / "System Volume Information").mkdir()
-    (tmp_path / "FOUND.000").mkdir()
-
-    resp = opened_client.get("/api/fs/list", params={"path": str(tmp_path)})
-    assert resp.status_code == 200
-    body = resp.json()
-    names = {e["name"]: e for e in body["entries"]}
-    assert "alpha" in names and "beta" in names
-    assert ".hidden" not in names  # hidden dirs skipped
-    assert "afile.txt" not in names  # files skipped, directories only
-    assert "$RECYCLE.BIN" not in names
-    assert "System Volume Information" not in names
-    assert "FOUND.000" not in names
-    assert names["beta"]["is_dataset_root"] is True
-    assert names["alpha"]["is_dataset_root"] is False
-    assert body["path"] == str(tmp_path)
-
-
-def test_fs_list_404_for_non_dir(
-    opened_client: TestClient, tmp_path: Path
-) -> None:
-    f = tmp_path / "x.txt"
-    f.write_text("x")
-    assert (
-        opened_client.get("/api/fs/list", params={"path": str(f)}).status_code
-        == 404
-    )
-
-
-def test_fs_list_is_unconfined_from_a_local_connection(
-    opened_client: TestClient, tmp_path_factory: pytest.TempPathFactory
-) -> None:
-    # The picker route is unconfined on a connection from this machine (the default TestClient);
-    # confinement on a routable arrival is covered by test_web_path_guard_permanent_on.py.
-    outside = tmp_path_factory.mktemp("outside")
-    (outside / "sub").mkdir()
-    assert (
-        opened_client.get(
-            "/api/fs/list", params={"path": str(outside)}
-        ).status_code
-        == 200
-    )
 
 
 # ── native provenance (created_by / accepted_by) ─────────────────

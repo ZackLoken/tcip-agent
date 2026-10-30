@@ -401,7 +401,7 @@ def dataset_identity(
     if root is None:
         return None, None
     record = read_dataset_identity(root)
-    return (record["id"] if record is not None else None), dataset_fingerprint(
+    return (record.id if record is not None else None), dataset_fingerprint(
         root, samples
     )
 

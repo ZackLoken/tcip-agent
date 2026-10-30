@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from tcip_mcp.experiments import RunRow
+    from tcip_mcp.experiments import RunRow, SweepOutcome
     from tcip_mcp.pipelines.data.selection import Selection
     from tcip_mcp.workspace import BoundProject
 
@@ -1661,6 +1661,7 @@ def _trial_rows(
     ``failed`` with nothing logged when ``value`` is ``None``; the rows the project's listing
     reads for them are returned in that order.
     """
+    from tcip_mcp.audit import now
     from tcip_mcp.experiments import (
         project_of_run,
         run_rows,
@@ -1681,7 +1682,7 @@ def _trial_rows(
             trial,
             "completed" if value is not None else "failed",
             None if value is not None else "boom",
-            checkpoint=None,
+            ended=now(),
         )
         names.append(trial.name)
     by_name = {
@@ -1715,7 +1716,7 @@ def _outcome(
     project: Path,
     real_hpo_base_config: dict,
     trials: list[tuple[float, int | None, float | None]],
-) -> dict:
+) -> SweepOutcome:
     """Return what ``trials`` (:func:`_trial_rows`) of a :func:`_two_draw_sweep` amount to."""
     from tcip_mcp.experiments import observe_sweep, sweep_outcome
 
@@ -1745,15 +1746,16 @@ def test_a_sweeps_outcome_groups_trials_by_point_and_picks_the_best_by_mean(
         ],
     )
 
-    assert outcome["best_params"] == {"optimizer.head_lr": 0.2}
-    assert outcome["best_value"] == pytest.approx(0.3)
-    spread = outcome["best_value_spread"]
-    assert spread["n"] == 2 and spread["n_complete"] == 2
-    assert spread["seeds_complete"] == [42, 43]
-    assert spread["values"] == [0.2, 0.4]
-    assert spread["std"] == pytest.approx(0.14142135623730951)
+    assert outcome.best_params == {"optimizer.head_lr": 0.2}
+    assert outcome.best_value == pytest.approx(0.3)
+    spread = outcome.best_value_spread
+    assert spread is not None and outcome.split_sensitivity is not None
+    assert spread.n == 2 and spread.n_complete == 2
+    assert spread.seeds_complete == [42, 43]
+    assert spread.values == [0.2, 0.4]
+    assert spread.std == pytest.approx(0.14142135623730951)
     points = {
-        tuple(sorted(g["point"].items())) for g in outcome["split_sensitivity"]
+        tuple(sorted(g.point.items())) for g in outcome.split_sensitivity
     }
     assert points == {
         (("optimizer.head_lr", 0.1),),
@@ -1777,8 +1779,8 @@ def test_a_sweeps_outcome_marks_a_group_with_a_failed_draw_ineligible(
     )
 
     # The lr=0.1 point never became eligible, so lr=0.2 wins even though 0.9 alone looked worse.
-    assert outcome["best_params"] == {"optimizer.head_lr": 0.2}
-    assert outcome["best_value"] == pytest.approx(0.45)
+    assert outcome.best_params == {"optimizer.head_lr": 0.2}
+    assert outcome.best_value == pytest.approx(0.45)
 
 
 def test_a_sweeps_outcome_never_picks_a_repeated_point_that_never_completed_every_planned_seed(
@@ -1802,8 +1804,8 @@ def test_a_sweeps_outcome_never_picks_a_repeated_point_that_never_completed_ever
         ],
     )
 
-    assert outcome["best_params"] == {"optimizer.head_lr": 0.2}
-    assert outcome["best_value"] == pytest.approx(0.85)
+    assert outcome.best_params == {"optimizer.head_lr": 0.2}
+    assert outcome.best_value == pytest.approx(0.85)
 
 
 def test_a_sweeps_outcome_is_a_null_best_when_no_point_is_eligible(
@@ -1814,9 +1816,9 @@ def test_a_sweeps_outcome_is_a_null_best_when_no_point_is_eligible(
         tmp_path, real_hpo_base_config, [(0.1, 42, 0.9), (0.1, 43, None)]
     )
 
-    assert outcome["best_params"] is None
-    assert outcome["best_value"] is None
-    assert "best_value_state" not in outcome
+    assert outcome.best_params is None
+    assert outcome.best_value is None
+    assert outcome.best_value_state is None
 
 
 # -- group_split_draws direct coverage ----------------------------------------------
@@ -1842,15 +1844,13 @@ def test_group_split_draws_with_no_planned_seeds_groups_a_sweep_without_the_axis
     groups = group_split_draws(trials, [])
 
     assert len(groups) == 3
-    by_point = {tuple(sorted(g["point"].items())): g for g in groups}
-    assert by_point[(("optimizer.head_lr", 0.1),)]["eligible"] is True
-    assert by_point[(("optimizer.head_lr", 0.1),)]["block"]["n"] == 1
-    assert by_point[(("optimizer.head_lr", 0.1),)]["block"]["n_complete"] == 1
-    assert by_point[(("optimizer.head_lr", 0.1),)]["block"][
-        "seeds_complete"
-    ] == [None]
-    assert by_point[(("optimizer.head_lr", 0.1),)]["block"]["std"] is None
-    assert by_point[(("optimizer.head_lr", 0.3),)]["eligible"] is False
+    by_point = {tuple(sorted(g.point.items())): g for g in groups}
+    first = by_point[(("optimizer.head_lr", 0.1),)]
+    assert first.eligible is True
+    assert (first.block.n, first.block.n_complete) == (1, 1)
+    assert first.block.seeds_complete == [None]
+    assert first.block.std is None
+    assert by_point[(("optimizer.head_lr", 0.3),)].eligible is False
 
 
 def test_group_split_draws_ineligible_when_a_repeated_point_never_completes_every_planned_seed(
@@ -1873,11 +1873,11 @@ def test_group_split_draws_ineligible_when_a_repeated_point_never_completes_ever
 
     assert len(groups) == 1
     group = groups[0]
-    assert group["point"] == {"optimizer.head_lr": 0.1}
-    assert group["block"]["n"] == 3
-    assert group["block"]["n_complete"] == 2
-    assert group["block"]["seeds_complete"] == [42]
-    assert group["eligible"] is False
+    assert group.point == {"optimizer.head_lr": 0.1}
+    assert group.block.n == 3
+    assert group.block.n_complete == 2
+    assert group.block.seeds_complete == [42]
+    assert group.eligible is False
 
 
 # -- end to end: a real Ray sweep ----------------------------------------------------

@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 import tcip_mcp.audit as audit_module
 from tcip_mcp.audit import audited
@@ -86,6 +87,40 @@ def test_an_ordinary_call_against_a_healthy_log_returns_its_result_and_writes_on
     assert len(rows) == 1, rows
     assert rows[0]["status"] == "ok"
     assert rows[0]["arguments"] == {"count": 3}
+
+
+def test_an_argument_the_log_cannot_hold_refuses_before_the_body_runs(
+    tmp_path: Path,
+) -> None:
+    """A door called with an argument that has no JSON form refuses unrun and leaves no entry."""
+    acted: list[object] = []
+
+    @audited
+    def stage_something(project: Path, handle: object) -> dict:
+        acted.append(handle)
+        return {"ok": True}
+
+    with pytest.raises(ValidationError, match="handle"):
+        stage_something(tmp_path, object())
+
+    assert acted == []
+    assert audit_rows(tmp_path, "stage_something") == []
+
+
+def test_a_nested_argument_the_body_changes_is_logged_as_it_was_given(
+    tmp_path: Path,
+) -> None:
+    """The entry records a nested argument as the call gave it, not as its body left it."""
+
+    @audited
+    def stage_something(project: Path, spec: dict) -> dict:
+        spec["count"] = 9
+        return {"ok": True}
+
+    stage_something(tmp_path, {"count": 3})
+
+    (row,) = audit_rows(tmp_path, "stage_something")
+    assert row["arguments"] == {"spec": {"count": 3}}
 
 
 def test_a_failing_body_against_a_healthy_log_still_records_the_call_and_re_raises(

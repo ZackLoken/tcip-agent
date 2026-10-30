@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
-import { api, type OverviewJob } from "@/api/client";
+import { api } from "@/api/client";
+import { messageOf } from "@/api/http";
+import type { OverviewJob } from "@/api/types.generated";
 import { OVERVIEWS_REQUIRED } from "@/api/types.generated";
 
 /** How often the build's progress is read back. Long enough that a minutes-long pyramid build
@@ -68,25 +70,22 @@ export function useOverviewBuild(
     let lastWritten = -1;
     let lastMoved = Date.now();
 
-    const complete = (job: OverviewJob) =>
-      setState((s) => ({
-        building: false,
-        bytesWritten: job.bytes_written,
-        error: null,
-        reloadToken: s.reloadToken + 1,
-      }));
-
     const poll = (jobId: string) => {
       timer = setTimeout(() => {
         void api.images.overviewJob(jobId).then(
-          (job) => {
+          (job: OverviewJob) => {
             if (canceled) return;
-            if (job.status === "completed") {
-              complete(job);
-              return;
-            }
-            if (job.status === "failed") {
-              setState((s) => ({ ...s, building: false, error: job.error ?? "build failed" }));
+            if (!job.live) {
+              setState((s) =>
+                job.status === "completed"
+                  ? {
+                      building: false,
+                      bytesWritten: job.bytes_written,
+                      error: null,
+                      reloadToken: s.reloadToken + 1,
+                    }
+                  : { ...s, building: false, error: job.error ?? `build ${job.status}` },
+              );
               return;
             }
             if (job.bytes_written !== lastWritten) {
@@ -110,7 +109,7 @@ export function useOverviewBuild(
               setState((s) => ({
                 ...s,
                 building: false,
-                error: e instanceof Error ? e.message : String(e),
+                error: messageOf(e),
               }));
             }
           },
@@ -121,19 +120,14 @@ export function useOverviewBuild(
     setState((s) => ({ ...s, building: true, bytesWritten: 0, error: null }));
     void (async () => {
       try {
-        const job = await api.images.buildOverviews(imagePath);
-        if (canceled) return;
-        if (job.status === "completed") {
-          complete(job);
-          return;
-        }
-        poll(job.job_id);
+        const job = await api.images.buildOverviews({ path: imagePath });
+        if (!canceled) poll(job.job_id);
       } catch (e) {
         if (!canceled) {
           setState((s) => ({
             ...s,
             building: false,
-            error: e instanceof Error ? e.message : String(e),
+            error: messageOf(e),
           }));
         }
       }
