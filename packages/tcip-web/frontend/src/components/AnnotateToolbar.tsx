@@ -2,7 +2,8 @@
  * Annotate-tab toolbar, one row in three groups: the tool mode (Point, Box, Polygon) with the
  * engine prompt; the subject picker, the Edit menu (Snap, Stream, Cut, Undo, Redo), the View menu
  * (Labels, Proposals, Predictions), Save and the band picker for a multispectral image; then the
- * image stepper with its filter by annotation status, and the Complete control.
+ * image stepper with its filter by annotation status or a review queue's rank order, whose select
+ * also opens the review queue's launch, and the Complete control.
  */
 
 import { useMemo, useState, type ReactNode } from "react";
@@ -11,9 +12,11 @@ import { subjectColor } from "@/api/subjects";
 import type { ImageBands } from "@/api/types.generated";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { EnginePrompt } from "@/components/annotate/EnginePrompt";
+import { ReviewQueueLaunch } from "@/components/annotate/ReviewQueueLaunch";
 import { BandPicker } from "@/components/BandPicker";
 import { Stepper } from "@/components/Stepper";
 import { useImageNav } from "@/hooks/useImageNav";
+import { useReviewQueuePoll } from "@/hooks/useReviewQueue";
 import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
 import { showsBandPicker, type BandSelection } from "@/lib/bandSelection";
 import {
@@ -140,6 +143,9 @@ const MODE_TITLES = {
   polygon: "Polygon: click each vertex, double-click to close",
 } as const;
 
+/** The Images select's entry opening the review queue's launch, which is no filter. */
+const RANK_QUEUE = "rank_queue";
+
 /** A thin vertical rule between the toolbar's groups. */
 function Divider() {
   return <div className="h-5 w-px shrink-0 bg-tcip-border" aria-hidden />;
@@ -228,6 +234,8 @@ export function AnnotateToolbar({
 
   const imageName = currentImage(dataset)?.name ?? null;
   const nav = useImageNav();
+  const [launching, setLaunching] = useState(false);
+  useReviewQueuePoll();
   const finished = isFinished(subjectState);
   const polygonTools = mode === "polygon";
 
@@ -480,19 +488,40 @@ export function AnnotateToolbar({
         />
 
         {dataset && (
-          <select
-            aria-label="Images"
-            className="tcip-select h-[30px]"
-            value={annotateUi.imageFilter}
-            onChange={(e) => setImageFilter(e.target.value as ImageFilter)}
-            title={`Which images the stepper steps through, by what the labels say of ${dataset.subject ?? "the subject"}`}
-          >
-            {IMAGE_FILTERS.map((f) => (
-              <option key={f} value={f}>
-                {`${IMAGE_FILTER_WORDS[f]} (${filteredIndices(dataset.images, annotateUi.imageStates, f).length})`}
+          <div className="relative">
+            <select
+              aria-label="Images"
+              className="tcip-select h-[30px]"
+              value={nav.filter}
+              onChange={(e) =>
+                e.target.value === RANK_QUEUE
+                  ? setLaunching(true)
+                  : setImageFilter(e.target.value as ImageFilter)
+              }
+              title={`Which images the stepper steps through, by what the labels say of ${dataset.subject ?? "the subject"} or in a review queue's rank order`}
+            >
+              {IMAGE_FILTERS.filter((f) => f !== "queue" || nav.ranked !== null).map((f) => (
+                <option key={f} value={f}>
+                  {`${IMAGE_FILTER_WORDS[f]} (${filteredIndices(dataset.images, annotateUi.imageStates, f, nav.ranked ?? []).length})`}
+                </option>
+              ))}
+              <option value={RANK_QUEUE} disabled={annotateUi.reviewQueue?.live ?? false}>
+                {annotateUi.reviewQueue?.live ? "ranking a review queue" : "rank a review queue"}
               </option>
-            ))}
-          </select>
+            </select>
+            {launching && (
+              <>
+                <div
+                  role="presentation"
+                  className="fixed inset-0 z-10"
+                  onClick={() => setLaunching(false)}
+                />
+                <div className="absolute right-0 top-full z-20 mt-1 rounded-md border border-tcip-border bg-tcip-panel shadow-lg">
+                  <ReviewQueueLaunch onLaunched={() => setLaunching(false)} />
+                </div>
+              </>
+            )}
+          </div>
         )}
 
         <label

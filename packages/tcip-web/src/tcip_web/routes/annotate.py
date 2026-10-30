@@ -33,7 +33,11 @@ from tcip_annotation.json_io import (
 from tcip_annotation.verdicts import VerdictAction
 from tcip_mcp.dataset_layout import Gestures, list_subjects
 from tcip_mcp.delivery import OperatingPoint
-from tcip_mcp.pipelines.active_learning import ScorerSpec
+from tcip_mcp.pipelines.active_learning import (
+    ScorerCatalog,
+    ScorerSpec,
+    scorer_catalog,
+)
 from tcip_mcp.pipelines.image_utils import logical_image_name
 from tcip_mcp.tools.feedback_tools import ReviewQueue
 from tcip_mcp.tools.proposal_tools import (
@@ -557,6 +561,12 @@ class LaunchPriorityQueuePayload(BaseModel):
     scorer: ScorerSpec
     budget: int
     rationale: str
+
+
+@router.get("/scorers")
+def list_scorers() -> ScorerCatalog:
+    """Return the scorers a review queue may name, as ``scorer_catalog`` lists them."""
+    return scorer_catalog()
 
 
 class PriorityQueueJob(jobstore.ProjectJob):

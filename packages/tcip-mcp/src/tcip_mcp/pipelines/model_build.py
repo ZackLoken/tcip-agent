@@ -45,6 +45,7 @@ from tcip_annotation.state import Attribute
 from tcip_store import canonical_path
 
 if TYPE_CHECKING:
+    import inspect
     from collections.abc import Callable
 
     import torch
@@ -166,20 +167,30 @@ def resolve_named[T](
     )
 
 
-def keyword_parameters(fn: Callable[..., object]) -> tuple[set[str], bool]:
-    """Return the keyword names ``fn``'s signature names and whether it takes any keyword.
+def signature_keywords(
+    fn: Callable[..., object], *, resolved: bool = False
+) -> tuple[list[inspect.Parameter], bool]:
+    """Return the parameters ``fn``'s signature names, in order, and whether it takes any keyword.
 
-    ``self`` and variadics are excluded from the names; any keyword is a ``**kwargs``.
+    ``self`` and variadics are excluded from the parameters; any keyword is a ``**kwargs``. With
+    ``resolved``, each annotation is the object its source names, a postponed one evaluated
+    (``inspect.signature``'s ``eval_str``, whose ``NameError`` propagates); otherwise as written.
     """
     import inspect
 
-    params = inspect.signature(fn).parameters.values()
-    named = {
-        p.name
+    params = inspect.signature(fn, eval_str=resolved).parameters.values()
+    named = [
+        p
         for p in params
         if p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD) and p.name != "self"
-    }
+    ]
     return named, any(p.kind is p.VAR_KEYWORD for p in params)
+
+
+def keyword_parameters(fn: Callable[..., object]) -> tuple[set[str], bool]:
+    """Return the names of :func:`signature_keywords`' parameters and whether ``fn`` takes any."""
+    named, takes_any = signature_keywords(fn)
+    return {p.name for p in named}, takes_any
 
 
 def _import_root(file: Path, module: str) -> Path | None:

@@ -1,6 +1,6 @@
-"""Review-queue doors: ``prioritize_review_queue`` and ``triage_predictions``.
+"""Review-queue doors: ``prioritize_review_queue``, ``triage_predictions`` and ``scorer_catalog``.
 
-Each skips the images whose label document marks the named subject finished.
+Each door ranking images skips the images whose label document marks the named subject finished.
 """
 
 from __future__ import annotations
@@ -10,9 +10,11 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from tcip_mcp.pipelines.active_learning import ScorerSpec
+from tcip_mcp.pipelines.active_learning import ScorerSpec, scorer_catalog
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
+
+tool()(scorer_catalog)
 
 if TYPE_CHECKING:
     from tcip_mcp.model_registry import VerifiedCheckpoint
@@ -103,16 +105,20 @@ def _reference_stems(
 
 def _prepare_queue_sources(
     images_dir: str, subject: str | None
-) -> tuple[list[Path | BandGroupRef], int] | dict[str, str]:
-    """List the candidate images of the absolute ``images_dir``.
+) -> (
+    tuple[list[Path | BandGroupRef], list[Path | BandGroupRef]]
+    | dict[str, str]
+):
+    """List the candidate images of the absolute ``images_dir`` and its finished ones.
 
     The steps, in order: images directory, logical image enumeration, then, with a ``subject``
-    named, dropping each image whose label document marks it finished
-    (:meth:`~tcip_annotation.json_io.LabelDocument.finished`).
+    named, separating each image whose label document marks it finished
+    (:meth:`~tcip_annotation.json_io.LabelDocument.finished`) from the candidates.
 
-    Returns ``(sources, reviewed_skipped)``, or the ready ``{"error": ...}`` dict of a step that
-    refused. With a ``subject`` named, an image outside a dataset's image tree, which cannot name
-    its label document, and a label document that will not read are that error.
+    Returns ``(candidates, finished)``, ``finished`` empty with no ``subject`` named, or the
+    ready ``{"error": ...}`` dict of a step that refused. With a ``subject`` named, an image
+    outside a dataset's image tree, which cannot name its label document, and a label document
+    that will not read are that error.
     """
     images_path = Path(images_dir)
     if not images_path.is_dir():
@@ -129,7 +135,7 @@ def _prepare_queue_sources(
     # entry.
     sources = [logical[stem] for stem in sorted(logical)]
     if subject is None:
-        return sources, 0
+        return sources, []
 
     from tcip_annotation.json_io import (
         UnreadableLabelDocumentError,
@@ -138,16 +144,16 @@ def _prepare_queue_sources(
     from tcip_mcp.dataset_layout import label_key_of
 
     try:
-        kept = [
+        finished = [
             s
             for s in sources
-            if not read_document_versioned(label_key_of(source_path_of(s)))[
+            if read_document_versioned(label_key_of(source_path_of(s)))[
                 0
             ].finished(subject)
         ]
     except (ValueError, UnreadableLabelDocumentError) as exc:
         return {"error": str(exc)}
-    return kept, len(sources) - len(kept)
+    return [s for s in sources if s not in finished], finished
 
 
 def _untiled(
@@ -190,16 +196,16 @@ def prioritize_review_queue(
     Args:
         checkpoint_path: Trained model checkpoint (drives scoring).
         images_dir: Directory of candidate images.
-        scorer: The informativeness scorer block, ``{"name": ..., **values}``: ``uncertainty``
-            and ``diversity`` take no values, ``combined`` requires ``uncertainty_weight`` and
-            ``diversity_weight``; register your own factory with ``register_scorer``, or name a
-            dotted ``module:factory`` you wrote, built from the checkpoint's own task and the
-            block's values. An unresolvable name, a required value unstated and a value the
-            factory does not take are refused.
+        scorer: The informativeness scorer block, ``{"name": ..., **values}``, naming a scorer
+            ``scorer_catalog`` lists with the values it lists, or a dotted ``module:factory``
+            you wrote, built from the checkpoint's own task and the block's values. An
+            unresolvable name, a required value unstated and a value the factory does not take
+            are refused.
         budget: Number of images to return.
         rationale: Why the queue is ranked and sized as stated.
         subject: The subject whose finished images (marked complete in their label document)
-            are skipped; omitted ranks every candidate image.
+            are skipped and handed to the scorer as the labeled images; omitted ranks every
+            candidate image against none.
 
     """
     return ranked_review_queue(
@@ -228,8 +234,8 @@ def ranked_review_queue(
     The images under the established location ``images_dir`` are ranked by the scorer
     (:func:`~tcip_mcp.pipelines.active_learning.scorer.resolve_scorer`) under the
     registered checkpoint at the established location ``checkpoint_path``, answered as the
-    :class:`ReviewQueue`, or the refusal ``{"error": ...}``; ``subject``'s finished images are
-    skipped.
+    :class:`ReviewQueue`, or the refusal ``{"error": ...}``, a scorer's own refusal among them;
+    ``subject``'s finished images are skipped and handed to the scorer as the labeled images.
     """
     checkpoint = _load_or_refuse(checkpoint_path, project)
     if isinstance(checkpoint, dict):
@@ -237,7 +243,7 @@ def ranked_review_queue(
     queued = _prepare_queue_sources(str(images_dir), subject)
     if isinstance(queued, dict):
         return queued
-    sources, reviewed_skipped = queued
+    sources, finished = queued
     try:
         task = checkpoint.task
     except ValueError as exc:
@@ -250,7 +256,7 @@ def ranked_review_queue(
             rationale=rationale,
             task=task,
             total_candidates=0,
-            reviewed_skipped=reviewed_skipped,
+            reviewed_skipped=len(finished),
             queue=[],
         )
 
@@ -261,18 +267,16 @@ def ranked_review_queue(
         return prep
     from tcip_mcp.pipelines.active_learning.scorer import resolve_scorer
 
-    predictor = prep.predictor
     try:
-        ranking = resolve_scorer(scorer, task)
+        # A scorer answers the candidates it was handed, whatever their type.
+        scored: list[tuple[Any, float]] = resolve_scorer(scorer, task).score(
+            sources, finished, prep.predictor
+        )[:budget]
     except (ValueError, TypeError) as e:
         return {"error": str(e)}
 
     from tcip_mcp.pipelines.image_utils import logical_image_name, stem_of
 
-    # A scorer answers the candidates it was handed, whatever their type.
-    scored: list[tuple[Any, float]] = list(
-        ranking.score(sources, predictor)[:budget]
-    )
     reference_stems = _reference_stems(checkpoint, images_dir, project)
     return ReviewQueue(
         scorer=scorer,
@@ -280,7 +284,7 @@ def ranked_review_queue(
         rationale=rationale,
         task=task,
         total_candidates=len(sources),
-        reviewed_skipped=reviewed_skipped,
+        reviewed_skipped=len(finished),
         queue=[
             QueueEntry(
                 image=logical_image_name(p),
@@ -332,7 +336,8 @@ def triage_predictions(
     queued = _prepare_queue_sources(str(located(images_dir, project)), subject)
     if isinstance(queued, dict):
         return queued
-    sources, reviewed_skipped = queued
+    sources, finished = queued
+    reviewed_skipped = len(finished)
 
     from tcip_mcp.pipelines.active_learning.selector import (
         review_queue,

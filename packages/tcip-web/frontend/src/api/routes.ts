@@ -12,6 +12,7 @@ export const ROUTES = {
   getAnnotateLabels: "/api/annotate/labels",
   getAnnotateProposals: "/api/annotate/proposals",
   getAnnotateQueueByJobId: (jobId: string) => `/api/annotate/queue/${encodeURIComponent(jobId)}`,
+  getAnnotateScorers: "/api/annotate/scorers",
   getAnnotateStagings: "/api/annotate/stagings",
   getAnnotateStates: "/api/annotate/states",
   getDatasetTree: "/api/dataset/tree",

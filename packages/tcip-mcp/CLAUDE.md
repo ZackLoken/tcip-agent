@@ -56,7 +56,7 @@ src/tcip_mcp/
 
 Every MCP tool is declared by `server.tool` in its area's `tools/` module: decorated `@tool()`, or,
 for a function another module defines, `tool()(fn)` (`compare_experiments`,
-`available_search_algs`, `available_schedulers`); a tool that acts on a project
+`available_search_algs`, `available_schedulers`, `scorer_catalog`); a tool that acts on a project
 takes the project the server was started for as its first parameter: `project`, its directory, or
 `bound`, the whole `workspace.BoundProject` (directory, record id, workspace) when it also names the
 project to the backend. The server supplies only those two and `actor` (`server._CONTEXT`), the

@@ -22,7 +22,7 @@ def test_empty_frame_ranks_low_not_max(tmp_path: Path) -> None:
     ]
 
     predictor = predictor_for(tmp_path, "build_empty_then_low", "detection")
-    ranked = UncertaintyScorer(task="detection").score(paths, predictor)
+    ranked = UncertaintyScorer(task="detection").score(paths, [], predictor)
     by_path = dict(ranked)
 
     assert (
@@ -43,4 +43,4 @@ def test_a_detection_output_with_no_scores_refuses_rather_than_ranking_as_certai
 
     predictor = predictor_for(tmp_path, "build_scoreless", "detection")
     with pytest.raises(KeyError, match="scores"):
-        UncertaintyScorer(task="detection").score([image], predictor)
+        UncertaintyScorer(task="detection").score([image], [], predictor)

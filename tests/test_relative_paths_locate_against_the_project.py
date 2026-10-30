@@ -296,10 +296,7 @@ def _register_model(project: Path) -> str:
         project, name="m", checkpoint_path=spelling, actor=None
     )
     (entry,) = read_registry_index(project)
-    assert (
-        Path(result.entry.checkpoint_path)
-        == (project / spelling).resolve()
-    )
+    assert Path(result.entry.checkpoint_path) == (project / spelling).resolve()
     return entry.name
 
 
@@ -380,11 +377,14 @@ def _evaluate_model(project: Path) -> dict:
 
 
 def _prioritize_review_queue(project: Path) -> list[str]:
+    """Rank the capture's images against the first, marked finished for :data:`SUBJECT`."""
     from tcip_mcp.tools.feedback_tools import (
         ReviewQueue,
         prioritize_review_queue,
     )
+    from tests._producer_fixtures import mark_complete
 
+    mark_complete(project / IMAGE, SUBJECT, project=project)
     result = prioritize_review_queue(
         project,
         _registered(project),
@@ -392,6 +392,7 @@ def _prioritize_review_queue(project: Path) -> list[str]:
         scorer=COMBINED_SCORER,
         budget=len(STEMS),
         rationale=RATIONALE,
+        subject=SUBJECT,
     )
     assert isinstance(result, ReviewQueue), result
     return sorted(entry.image for entry in result.queue)

@@ -2,7 +2,12 @@ import type { StateCreator } from "zustand";
 
 import { setSubjectColorRegistry } from "@/api/subjects";
 import type { AttributeDef } from "@/api/subjects";
-import type { ImageEventPayload, RegistrySubjects, SessionRef } from "@/api/types.generated";
+import type {
+  ImageEventPayload,
+  PriorityQueueJob,
+  RegistrySubjects,
+  SessionRef,
+} from "@/api/types.generated";
 import type { ImageFilter } from "@/lib/imageFilter";
 import type { AppState } from "@/store/appState";
 import type { SubjectState } from "@/store/types";
@@ -51,6 +56,9 @@ interface AnnotateUiState {
   imageStates: Record<string, SubjectState>;
   /** Which images the image stepper steps through. */
   imageFilter: ImageFilter;
+  /** The review queue job last launched from this page, as its last read answered; null for none.
+   *  Held in memory only, so a page reload drops it. */
+  reviewQueue: PriorityQueueJob | null;
 }
 
 interface SessionTrackingState {
@@ -123,6 +131,7 @@ export interface RegistryStatusSlice {
   /** Record one image's state as its loaded or saved document says it. */
   setImageState: (imageName: string, state: SubjectState) => void;
   setImageFilter: (filter: ImageFilter) => void;
+  setReviewQueue: (job: PriorityQueueJob | null) => void;
 
   /** Per-image session telemetry helpers. A visit opens under the current person and project;
    *  closing it holds its contribution when a project was named, naming the recorded session
@@ -231,6 +240,7 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
     draggingVertex: null,
     imageStates: {},
     imageFilter: "all",
+    reviewQueue: null,
   },
   sessionTracking: EMPTY_SESSION_TRACKING,
   heldContributions: [],
@@ -325,6 +335,7 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
       },
     })),
   setImageFilter: (imageFilter) => set((s) => ({ annotateUi: { ...s.annotateUi, imageFilter } })),
+  setReviewQueue: (reviewQueue) => set((s) => ({ annotateUi: { ...s.annotateUi, reviewQueue } })),
   setHoveredPolygon: (hoveredPolygonIdx) =>
     set((s) => ({ annotateUi: { ...s.annotateUi, hoveredPolygonIdx } })),
   setDraggingVertex: (draggingVertex) =>

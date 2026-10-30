@@ -214,6 +214,7 @@ class TestActiveLearningScoringLogic:
             def score(
                 self,
                 image_paths: list[Path | BandGroupRef],
+                labeled: list[Path | BandGroupRef],
                 predictor: GenericPredictor | None,
             ) -> list[tuple[Path | BandGroupRef, float]]:
                 """Return each candidate at its stem's table score, descending."""
@@ -229,7 +230,7 @@ class TestActiveLearningScoringLogic:
         )
         scorer.unc = _Fixed()
         scorer.div = _Fixed()
-        ranked = scorer.score(candidates, predictor=None)
+        ranked = scorer.score(candidates, [], predictor=None)
         assert [(stem_of(p), s) for p, s in ranked] == [
             ("cap", 2.0),
             ("plain", 0.0),

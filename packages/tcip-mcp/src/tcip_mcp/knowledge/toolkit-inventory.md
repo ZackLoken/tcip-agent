@@ -176,16 +176,17 @@ its `bbox`.
 ## Active learning: the scorer registry (`pipelines.active_learning.scorer`)
 
 An acquisition function is a capability, not a fixed menu; scorers resolve through a dict registry
-you can extend rather than a welded `if/elif`. Implement `BaseScorer.score(image_paths,
+you can extend rather than a welded `if/elif`. Implement `BaseScorer.score(image_paths, labeled,
 predictor) -> list[tuple[str, float]]` ((path, score) pairs sorted descending, highest = most
-valuable), reading the model, the device and the width to load an image at off the predictor you
-are handed, and register your own (margin, least-confidence, …) with `register_scorer(name,
-factory)`, the factory taking `(task, **settings)`. `resolve_scorer(block, task)` builds the
-scorer a block `{"name": ..., **values}` (`pipelines.active_learning.ScorerSpec`) names, a
-built-in, a registered one, or a dotted `module:factory` you wrote, from the block's own values;
-an unresolvable name raises `ValueError` naming the built-ins, and the factory's own signature
-refuses (`TypeError`) a value it requires that the block leaves out and one it does not take,
-rather than silently substituting one.
+valuable; `labeled` the capture's images already finished), reading the model, the device and the
+width to load an image at off the predictor you are handed, and register your own (margin,
+least-confidence, …) with `register_scorer(name, factory)`, the factory taking the checkpoint's
+task as `task` and the block's values, all as keywords. `scorer_catalog` lists the registered scorers and the values each factory
+takes. `resolve_scorer(block, task)` builds the scorer a block `{"name": ..., **values}`
+(`pipelines.active_learning.ScorerSpec`) names, a registered one or a dotted `module:factory` you
+wrote, from the block's own values; an unresolvable name raises `ValueError` naming the registered
+ones, and the factory's own signature refuses (`TypeError`) a value it requires that the block
+leaves out and one it does not take, rather than silently substituting one.
 
 ## Classical image analysis (OpenCV)
 

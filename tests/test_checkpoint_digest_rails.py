@@ -294,7 +294,7 @@ def test_review_priority_route_worker_completes_the_job_with_a_registered_checkp
         al_scorer,
         "resolve_scorer",
         lambda block, task: SimpleNamespace(
-            score=lambda sources, predictor: []
+            score=lambda sources, labeled, predictor: []
         ),
     )
 

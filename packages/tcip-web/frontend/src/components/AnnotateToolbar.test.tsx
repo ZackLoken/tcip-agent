@@ -1,10 +1,11 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Auto-cleanup needs vitest globals (not enabled here), so clean up explicitly.
 
 import { api } from "@/api/client";
+import { resultsApi } from "@/api/inference";
 import { subjectsApi } from "@/api/subjects";
-import type { ImageBands } from "@/api/types.generated";
+import type { ImageBands, ScorerEntry } from "@/api/types.generated";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import { NO_MATCHES, reviewItems, type ReviewItem } from "@/lib/reviewItems";
@@ -12,7 +13,9 @@ import { useStore } from "@/store";
 import type { AnnotateView, SubjectState } from "@/store/types";
 import { ANNOTATE_ANSWERS, registryOf, SECOND_SUBJECT } from "@/test/annotate";
 import { BAND_ANSWERS } from "@/test/bands";
+import { REGISTERED_MODELS } from "@/test/deliveryRecords";
 import { LABEL_ANSWERS, SERVED_ATTRIBUTES } from "@/test/labels";
+import { QUEUE_ANSWERS } from "@/test/queue";
 import { thrown } from "@/test/refusals";
 import { openTestProject, SELECTED_SUBJECT, selected } from "@/test/store";
 
@@ -563,6 +566,7 @@ describe("AnnotateToolbar image filter", () => {
       `unannotated (${counted((s) => s === "unannotated")})`,
       `in progress (${counted((s) => s === "partial")})`,
       `complete (${counted((s) => s === "complete" || s === "negative")})`,
+      "rank a review queue",
     ]);
 
     const kept = held.flatMap((s, i) => (s === "complete" || s === "negative" ? [i] : []));
@@ -571,6 +575,196 @@ describe("AnnotateToolbar image filter", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next image" }));
     expect(useStore.getState().gui.dataset?.current_image_index).toBe(kept[1]);
     expect(screen.getByRole("button", { name: "Next image" })).toBeDisabled();
+  });
+});
+
+describe("AnnotateToolbar review queue", () => {
+  const { completed: COMPLETED, failed: FAILED, launched: LAUNCHED } = QUEUE_ANSWERS;
+  const [MODEL] = REGISTERED_MODELS.models;
+  const RANKED = COMPLETED.ranked!;
+  const QUEUE_SELECTION = QUEUE_ANSWERS.selection.selection;
+  const imagesSelect = () => screen.getByRole("combobox", { name: "Images" });
+  const at = () => useStore.getState().gui.dataset?.current_image_index;
+  /** The value names a served scorer's values schema lists under its properties, in order. */
+  const valueNames = (scorer: ScorerEntry) =>
+    Object.keys(scorer.values_schema.properties as object);
+
+  /** Open the launch from the Images select and wait for its scorers to load. */
+  async function openLaunch() {
+    vi.spyOn(resultsApi, "registeredModels").mockResolvedValue(REGISTERED_MODELS);
+    vi.spyOn(api.annotate, "scorers").mockResolvedValue(QUEUE_ANSWERS.scorers);
+    fireEvent.change(imagesSelect(), { target: { value: "rank_queue" } });
+    await screen.findByRole("option", { name: "combined" });
+    await screen.findByRole("option", { name: MODEL.entry.name });
+  }
+
+  it("launches with the values the person states, none prefilled, and walks the completed queue in rank order", async () => {
+    openTestProject(QUEUE_SELECTION);
+    const launch = vi.spyOn(api.annotate, "launchQueue").mockResolvedValue(LAUNCHED);
+    vi.spyOn(api.annotate, "queueJob")
+      .mockResolvedValueOnce(QUEUE_ANSWERS.running)
+      .mockResolvedValue(COMPLETED);
+    renderToolbar();
+    await openLaunch();
+
+    const rank = screen.getByRole("button", { name: "Rank" });
+    expect(screen.getByLabelText("Budget")).toHaveValue(null);
+    expect(screen.getByLabelText("Reason")).toHaveValue("");
+    expect(rank).toBeDisabled();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Scorer" }), {
+      target: { value: "combined" },
+    });
+    for (const name of valueNames(
+      QUEUE_ANSWERS.scorers.scorers.find((s) => s.name === "combined")!,
+    )) {
+      expect(screen.getByLabelText(name)).toHaveValue("");
+    }
+    fireEvent.change(screen.getByRole("combobox", { name: "Model" }), {
+      target: { value: MODEL.entry.checkpoint_path },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Scorer" }), {
+      target: { value: RANKED.scorer.name },
+    });
+    fireEvent.change(screen.getByLabelText("Budget"), { target: { value: String(RANKED.budget) } });
+    expect(rank).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: RANKED.rationale } });
+    fireEvent.click(rank);
+
+    await waitFor(() => expect(launch).toHaveBeenCalledOnce());
+    expect(launch.mock.calls[0][0]).toEqual({
+      checkpoint_path: MODEL.entry.checkpoint_path,
+      scorer: RANKED.scorer,
+      budget: RANKED.budget,
+      rationale: RANKED.rationale,
+    });
+
+    await waitFor(() => expect(useStore.getState().annotateUi.reviewQueue?.ranked).toBeTruthy(), {
+      timeout: 5000,
+    });
+    const names = QUEUE_SELECTION.images.map((image) => image.name);
+    const walked: string[] = [];
+    const position = screen.getByRole("textbox", { name: "Image position" });
+    fireEvent.change(position, { target: { value: "1" } });
+    fireEvent.keyDown(position, { key: "Enter" });
+    walked.push(names[at()!]);
+    while (!screen.getByRole("button", { name: "Next image" }).hasAttribute("disabled")) {
+      fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+      walked.push(names[at()!]);
+    }
+    expect(walked).toEqual(RANKED.queue.map((entry) => entry.image));
+  });
+
+  /** Open the launch over the typed catalog, choose its model and the typed scorer, and state
+   *  `typed` for each of its parameters with the budget and reason; return the Rank button. */
+  async function stateTyped(typed: Record<string, string>) {
+    renderToolbar();
+    vi.spyOn(resultsApi, "registeredModels").mockResolvedValue(REGISTERED_MODELS);
+    vi.spyOn(api.annotate, "scorers").mockResolvedValue(QUEUE_ANSWERS.typed_scorers);
+    fireEvent.change(imagesSelect(), { target: { value: "rank_queue" } });
+    await screen.findByRole("option", { name: TYPED.name });
+    await screen.findByRole("option", { name: MODEL.entry.name });
+    fireEvent.change(screen.getByRole("combobox", { name: "Model" }), {
+      target: { value: MODEL.entry.checkpoint_path },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Scorer" }), {
+      target: { value: TYPED.name },
+    });
+    for (const [name, text] of Object.entries(typed)) {
+      fireEvent.change(screen.getByLabelText(new RegExp(`^${name}`)), { target: { value: text } });
+    }
+    fireEvent.change(screen.getByLabelText("Budget"), { target: { value: String(RANKED.budget) } });
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: RANKED.rationale } });
+    return screen.getByRole("button", { name: "Rank" });
+  }
+
+  // The typed sample factory's parameters, by the JSON type each schema admits: a boolean, an
+  // array of numbers and a number or null.
+  const TYPED = QUEUE_ANSWERS.typed_scorers.scorers.find((s) => s.name === "typed")!;
+  const [FLAG, WEIGHTS, CAP] = valueNames(TYPED);
+
+  it("states each value as the JSON type its parameter's schema admits", async () => {
+    openTestProject(QUEUE_SELECTION);
+    const launch = vi.spyOn(api.annotate, "launchQueue").mockResolvedValue(LAUNCHED);
+    vi.spyOn(api.annotate, "queueJob").mockResolvedValue(COMPLETED);
+
+    const rank = await stateTyped({ [FLAG]: "false", [WEIGHTS]: "[1, 2.5]", [CAP]: "0.5" });
+    fireEvent.click(rank);
+
+    await waitFor(() => expect(launch).toHaveBeenCalledOnce());
+    expect(launch.mock.calls[0][0].scorer).toEqual({
+      name: TYPED.name,
+      [FLAG]: false,
+      [WEIGHTS]: [1, 2.5],
+      [CAP]: 0.5,
+    });
+  });
+
+  it("shows a refused launch's refusal as the launch route wrote it, holding no job", async () => {
+    openTestProject(QUEUE_SELECTION);
+    const refused = await thrown(QUEUE_ANSWERS.refused_launch);
+    vi.spyOn(api.annotate, "launchQueue").mockRejectedValue(refused);
+
+    const rank = await stateTyped({ [CAP]: "half" });
+    fireEvent.click(rank);
+
+    expect((await screen.findByRole("alert")).textContent).toBe(refused.message);
+    expect(useStore.getState().annotateUi.reviewQueue).toBeNull();
+  });
+
+  it("walks every image of a capture the queue did not rank, though it completes there", async () => {
+    openTestProject(QUEUE_SELECTION);
+    useStore.getState().setReviewQueue(LAUNCHED);
+    useStore.getState().setImageFilter("queue");
+    let complete = () => {};
+    vi.spyOn(api.annotate, "queueJob").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = () => resolve(COMPLETED);
+        }),
+    );
+    renderToolbar();
+
+    const later = QUEUE_ANSWERS.later_selection.selection;
+    act(() => openTestProject(later));
+    await waitFor(() => expect(api.annotate.queueJob).toHaveBeenCalled(), { timeout: 5000 });
+    act(() => complete());
+    await waitFor(() => expect(useStore.getState().annotateUi.reviewQueue?.ranked).toBeTruthy());
+
+    expect(imagesSelect()).toHaveValue("all");
+    expect(screen.getByRole("textbox", { name: "Image position" })).toHaveValue("1");
+  });
+
+  it("shows a failed job's error as the backend wrote it and holds no ordering", async () => {
+    openTestProject(QUEUE_SELECTION);
+    useStore.getState().setReviewQueue(LAUNCHED);
+    vi.spyOn(api.annotate, "queueJob").mockResolvedValue(FAILED);
+    renderToolbar();
+
+    await waitFor(
+      () => expect(useStore.getState().toasts.map((t) => t.message)).toContain(FAILED.error),
+      { timeout: 5000 },
+    );
+    expect(useStore.getState().annotateUi.imageFilter).toBe("all");
+    expect(screen.queryByRole("option", { name: /^review queue/ })).toBeNull();
+  });
+
+  it("offers a held queue only on the capture it ranked", () => {
+    useStore.getState().setReviewQueue(COMPLETED);
+    useStore.getState().setImageFilter("queue");
+    openTestProject(QUEUE_ANSWERS.later_selection.selection);
+    renderToolbar();
+
+    expect(screen.queryByRole("option", { name: /^review queue/ })).toBeNull();
+    expect(imagesSelect()).toHaveValue("all");
+
+    cleanup();
+    openTestProject(QUEUE_SELECTION);
+    useStore.getState().setImageFilter("queue");
+    renderToolbar();
+    expect(
+      screen.getByRole("option", { name: `review queue (${RANKED.queue.length})` }),
+    ).toBeInTheDocument();
   });
 });
 

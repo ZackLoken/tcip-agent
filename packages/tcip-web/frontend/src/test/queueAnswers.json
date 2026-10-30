@@ -1,0 +1,220 @@
+{
+  "scorers": {
+    "scorers": [
+      {
+        "name": "uncertainty",
+        "values_schema": {
+          "additionalProperties": false,
+          "properties": {},
+          "title": "ScorerValues",
+          "type": "object"
+        }
+      },
+      {
+        "name": "diversity",
+        "values_schema": {
+          "additionalProperties": false,
+          "properties": {},
+          "title": "ScorerValues",
+          "type": "object"
+        }
+      },
+      {
+        "name": "combined",
+        "values_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "uncertainty_weight": { "title": "Uncertainty Weight", "type": "number" },
+            "diversity_weight": { "title": "Diversity Weight", "type": "number" }
+          },
+          "required": ["uncertainty_weight", "diversity_weight"],
+          "title": "ScorerValues",
+          "type": "object"
+        }
+      }
+    ]
+  },
+  "typed_scorers": {
+    "scorers": [
+      {
+        "name": "uncertainty",
+        "values_schema": {
+          "additionalProperties": false,
+          "properties": {},
+          "title": "ScorerValues",
+          "type": "object"
+        }
+      },
+      {
+        "name": "diversity",
+        "values_schema": {
+          "additionalProperties": false,
+          "properties": {},
+          "title": "ScorerValues",
+          "type": "object"
+        }
+      },
+      {
+        "name": "combined",
+        "values_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "uncertainty_weight": { "title": "Uncertainty Weight", "type": "number" },
+            "diversity_weight": { "title": "Diversity Weight", "type": "number" }
+          },
+          "required": ["uncertainty_weight", "diversity_weight"],
+          "title": "ScorerValues",
+          "type": "object"
+        }
+      },
+      {
+        "name": "typed",
+        "values_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "flag": { "title": "Flag", "type": "boolean" },
+            "weights": { "items": { "type": "number" }, "title": "Weights", "type": "array" },
+            "cap": {
+              "anyOf": [{ "type": "number" }, { "type": "null" }],
+              "default": null,
+              "title": "Cap"
+            }
+          },
+          "required": ["flag", "weights"],
+          "title": "ScorerValues",
+          "type": "object"
+        }
+      }
+    ]
+  },
+  "refused_launch": {
+    "status": 422,
+    "body": {
+      "detail": [
+        {
+          "type": "missing",
+          "loc": ["body", "scorer", "flag"],
+          "msg": "Field required",
+          "input": { "cap": "half", "unstated": 1 }
+        },
+        {
+          "type": "missing",
+          "loc": ["body", "scorer", "weights"],
+          "msg": "Field required",
+          "input": { "cap": "half", "unstated": 1 }
+        },
+        {
+          "type": "float_type",
+          "loc": ["body", "scorer", "cap"],
+          "msg": "Input should be a valid number",
+          "input": "half"
+        },
+        {
+          "type": "extra_forbidden",
+          "loc": ["body", "scorer", "unstated"],
+          "msg": "Extra inputs are not permitted",
+          "input": 1
+        }
+      ]
+    }
+  },
+  "selection": {
+    "selection": {
+      "dataset_root": "/scratch/workspace/valley/ds",
+      "subject": "bud",
+      "date": "2026-01-01",
+      "bucket": null,
+      "current_image_index": 0,
+      "images": [
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img1.jpg", "name": "img1.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img2.jpg", "name": "img2.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img3.jpg", "name": "img3.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img4.jpg", "name": "img4.jpg" },
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-01/img5.jpg", "name": "img5.jpg" }
+      ]
+    },
+    "annotations_present": false,
+    "predictions_present": false,
+    "label_problem": null
+  },
+  "launched": {
+    "job_id": "<completed job>",
+    "status": "pending",
+    "error": null,
+    "project": "/scratch/workspace/valley",
+    "checkpoint_path": "/scratch/workspace/valley/.tcip/experiments/<registered run>/model_final.pt",
+    "images_dir": "/scratch/workspace/valley/ds/images/2026-01-01",
+    "subject": "bud",
+    "ranked": null,
+    "live": true,
+    "dataset_root": "/scratch/workspace/valley/ds",
+    "capture": "2026-01-01"
+  },
+  "running": {
+    "job_id": "<completed job>",
+    "status": "running",
+    "error": null,
+    "project": "/scratch/workspace/valley",
+    "checkpoint_path": "/scratch/workspace/valley/.tcip/experiments/<registered run>/model_final.pt",
+    "images_dir": "/scratch/workspace/valley/ds/images/2026-01-01",
+    "subject": "bud",
+    "ranked": null,
+    "live": true,
+    "dataset_root": "/scratch/workspace/valley/ds",
+    "capture": "2026-01-01"
+  },
+  "completed": {
+    "job_id": "<completed job>",
+    "status": "completed",
+    "error": null,
+    "project": "/scratch/workspace/valley",
+    "checkpoint_path": "/scratch/workspace/valley/.tcip/experiments/<registered run>/model_final.pt",
+    "images_dir": "/scratch/workspace/valley/ds/images/2026-01-01",
+    "subject": "bud",
+    "ranked": {
+      "scorer": { "name": "uncertainty" },
+      "budget": 4,
+      "rationale": "a sample reason the scene states",
+      "task": "detection",
+      "total_candidates": 4,
+      "reviewed_skipped": 1,
+      "queue": [
+        { "image": "img5.jpg", "score": 0.498589, "reference_member": null },
+        { "image": "img1.jpg", "score": 0.498403, "reference_member": null },
+        { "image": "img3.jpg", "score": 0.498339, "reference_member": null },
+        { "image": "img4.jpg", "score": 0.498339, "reference_member": null }
+      ]
+    },
+    "live": false,
+    "dataset_root": "/scratch/workspace/valley/ds",
+    "capture": "2026-01-01"
+  },
+  "failed": {
+    "job_id": "<failed job>",
+    "status": "failed",
+    "error": "diversity ranks each image by its distance to the capture's labeled images, and the capture has no image finished for the subject: name the subject, and mark the images annotated complete, or rank by 'uncertainty'.",
+    "project": "/scratch/workspace/valley",
+    "checkpoint_path": "/scratch/workspace/valley/.tcip/experiments/<registered run>/model_final.pt",
+    "images_dir": "/scratch/workspace/valley/ds/images/2026-01-01",
+    "subject": "subject_a",
+    "ranked": null,
+    "live": false,
+    "dataset_root": "/scratch/workspace/valley/ds",
+    "capture": "2026-01-01"
+  },
+  "later_selection": {
+    "selection": {
+      "dataset_root": "/scratch/workspace/valley/ds",
+      "subject": "bud",
+      "date": "2026-01-08",
+      "bucket": null,
+      "current_image_index": 0,
+      "images": [
+        { "path": "/scratch/workspace/valley/ds/images/2026-01-08/img1.jpg", "name": "img1.jpg" }
+      ]
+    },
+    "annotations_present": false,
+    "predictions_present": false,
+    "label_problem": null
+  }
+}
