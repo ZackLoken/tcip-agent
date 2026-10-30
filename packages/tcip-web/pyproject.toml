@@ -19,7 +19,7 @@ dependencies = [
     "httpx",
     "werkzeug",
     # ConPTY backend for the embedded agent terminal (POSIX uses the stdlib pty).
-    "pywinpty>=3.1.1; sys_platform == 'win32'",
+    "pywinpty>=3.1.2; sys_platform == 'win32'",
     # The Windows terminal backend waits for its terminated process through psutil.
     "psutil>=5.9",
 ]
