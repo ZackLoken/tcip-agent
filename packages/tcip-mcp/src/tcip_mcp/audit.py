@@ -97,12 +97,19 @@ def audit_entries(
     return [AuditLine.model_validate(r) for r in page.records], page.cursor
 
 
+def acts_among(
+    entries: list[AuditLine], tools: tuple[str, ...]
+) -> list[AuditLine]:
+    """Return the ``ok`` entries of ``tools`` among ``entries``, in their order."""
+    return [e for e in entries if e.status == "ok" and e.tool in tools]
+
+
 def acts_of(
     scope: str | Path, tools: tuple[str, ...], *, after: str | None = None
 ) -> tuple[list[AuditLine], str]:
-    """Return the ``ok`` entries of ``tools`` among :func:`audit_entries`, and the log's cursor."""
+    """Return :func:`acts_among` the entries of :func:`audit_entries`, and the log's cursor."""
     entries, cursor = audit_entries(scope, after=after)
-    return [e for e in entries if e.status == "ok" and e.tool in tools], cursor
+    return acts_among(entries, tools), cursor
 
 
 def now() -> datetime:

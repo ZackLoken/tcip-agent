@@ -1,5 +1,10 @@
 import type { terminalApi } from "@/api/terminal";
-import type { AuditGapRefusal, TerminalEnd, TerminalStatus } from "@/api/types.generated";
+import type {
+  AuditGapRefusal,
+  TerminalEnd,
+  TerminalHeldFrame,
+  TerminalStatus,
+} from "@/api/types.generated";
 import type { Refusal } from "@/test/refusals";
 import produced from "@/test/terminal.json";
 
@@ -12,8 +17,11 @@ type Launch = Awaited<ReturnType<typeof terminalApi.createSession>>;
  * nothing (`ended`), a `relaunch` whose end answered its three requests (`ended_undelivered`),
  * and the end and hand-off of a session no longer held refused (`end_unknown`,
  * `hand_off_unknown`); a session's hand-off underway (`handed_off`); an end whose line could not be
- * written (`end_audit_gap`) and an end whose process survived (`end_survived`); and the status
- * with the third row's executable absent (`status_mixed`) and every row's (`status_absent`).
+ * written (`end_audit_gap`) and an end whose process survived (`end_survived`); the count frames
+ * a session's socket sent as it held a request until its agent took it (`held`); a row's first
+ * launch in a project, which resumed nothing (`row_launch`), and its next after the backend's
+ * shutdown, which resumed its conversation (`resumed_launch`); and the status with the third
+ * row's executable absent (`status_mixed`) and every row's (`status_absent`).
  */
 // A JSON import reads each literal as a string, which the literal unions admit only through
 // `unknown`.
@@ -29,6 +37,9 @@ export const TERMINAL_ANSWERS = produced as unknown as {
   handed_off: null;
   end_audit_gap: Refusal<AuditGapRefusal & { committed: TerminalEnd }>;
   end_survived: Refusal<string>;
+  held: TerminalHeldFrame[];
+  row_launch: Launch;
+  resumed_launch: Launch;
   status_mixed: TerminalStatus;
   status_absent: TerminalStatus;
 };

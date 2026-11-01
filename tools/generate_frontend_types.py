@@ -138,7 +138,9 @@ def unrouted_models() -> list[type[BaseModel]]:
         SavedExport,
     )
     from tcip_web.routes.terminal import (
+        TerminalHeldFrame,
         TerminalInputFrame,
+        TerminalOutputFrame,
         TerminalResizeFrame,
     )
     from tcip_web.routes.training import (
@@ -163,6 +165,8 @@ def unrouted_models() -> list[type[BaseModel]]:
         TrainingStatusFrame,
         TerminalInputFrame,
         TerminalResizeFrame,
+        TerminalOutputFrame,
+        TerminalHeldFrame,
         InferenceJobFrame,
         MissingJobFrame,
         AnnotateFocus,
@@ -331,12 +335,14 @@ def model_unions() -> dict[str, tuple[str, ...]]:
     from tcip_mcp.tools.training_tools import Launched
     from tcip_mcp.web_client import PanelEvent
     from tcip_web.routes.inference import InferenceFrame
-    from tcip_web.routes.terminal import TerminalFrame
+    from tcip_web.routes.terminal import TerminalFrame, TerminalServedFrame
 
     (union, _) = get_args(TerminalFrame)
+    (served, _) = get_args(TerminalServedFrame)
     (panel_events, _) = get_args(PanelEvent)
     return {
         "TerminalFrame": tuple(m.__name__ for m in get_args(union)),
+        "TerminalServedFrame": tuple(m.__name__ for m in get_args(served)),
         "PanelEvent": tuple(m.__name__ for m in get_args(panel_events)),
         "InferenceFrame": tuple(m.__name__ for m in get_args(InferenceFrame)),
         "TensorboardLaunch": tuple(

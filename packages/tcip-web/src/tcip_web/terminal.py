@@ -29,7 +29,7 @@ from queue import Queue, ShutDown
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 import psutil
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
 from tcip_mcp.project_paths import repo_root_from_here
@@ -92,13 +92,28 @@ class Resume:
     """How a harness continues one of its own conversations, and for how long a launch does.
 
     ``argument`` is what goes before the conversation's id on its command line;
-    ``cache_lifetime`` is the window after the conversation's last output in which a launch
-    resumes it: the prompt-cache lifetime the row requests or its harness's provider documents,
-    not a promise that the cache still holds the conversation.
+    ``cache_lifetime`` is the window after the newest line a session left in which a launch
+    resumes its conversation: the prompt-cache lifetime the row requests or its harness's
+    provider documents, not a promise that the cache still holds the conversation.
     """
 
     argument: str
     cache_lifetime: timedelta
+
+
+class Resumed(BaseModel):
+    """A launch that continues a conversation: the conversation, and the session it was in."""
+
+    kind: Literal["resumed"] = "resumed"
+    conversation: str
+    session: str
+
+
+class NotResumed(BaseModel):
+    """A launch that starts a new conversation, and why it resumed none, in words for a person."""
+
+    kind: Literal["not_resumed"] = "not_resumed"
+    why: str
 
 
 @dataclass(frozen=True)
@@ -550,7 +565,7 @@ def render_argv(
     argv: Sequence[str | Resume],
     project: OpenProject | None,
     env: dict[str, str],
-    conversation: str | None,
+    resumed: Resumed | NotResumed,
 ) -> list[str]:
     """Return ``argv`` with each placeholder argument rendered for a launch for ``project``.
 
@@ -558,8 +573,8 @@ def render_argv(
     :data:`CLAUDE_SETTINGS_ARG` by the settings :func:`write_claude_settings` writes, and each
     :data:`CODEX_CONFIG_ARG` by :func:`codex_overrides` forwarding every variable of ``env``,
     the environment the launch spawns with; a :class:`Resume` is replaced by its argument and
-    ``conversation``, or by nothing for a launch resuming none. Raises what
-    :func:`codex_overrides` raises.
+    the conversation of a :class:`Resumed` launch, or by nothing for a :class:`NotResumed` one.
+    Raises what :func:`codex_overrides` raises.
     """
     values = {
         MCP_CONFIG_ARG: lambda: [str(write_mcp_config(project))],
@@ -569,7 +584,9 @@ def render_argv(
 
     def rendered(arg: str | Resume) -> list[str]:
         if isinstance(arg, Resume):
-            return [] if conversation is None else [arg.argument, conversation]
+            if isinstance(resumed, NotResumed):
+                return []
+            return [arg.argument, resumed.conversation]
         return values[arg]() if arg in values else [arg]
 
     return [part for arg in argv for part in rendered(arg)]

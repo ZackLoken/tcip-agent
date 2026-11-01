@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 class ClaudeOrCodexStart(BaseModel):
     """The part of Claude Code's and Codex's ``SessionStart`` hook input this command reads."""
 
-    conversation: str = Field(alias="session_id", min_length=1)
+    conversation: str = Field(alias="session_id")
     source: SessionStartSource
 
     def output(self, text: str) -> dict:
@@ -44,7 +44,7 @@ class ClaudeOrCodexStart(BaseModel):
 class AntigravityStart(BaseModel):
     """The part of Antigravity's ``SessionStart`` hook input this command reads."""
 
-    conversation: str = Field(alias="conversationId", min_length=1)
+    conversation: str = Field(alias="conversationId")
 
     @property
     def source(self) -> Literal["startup"]:

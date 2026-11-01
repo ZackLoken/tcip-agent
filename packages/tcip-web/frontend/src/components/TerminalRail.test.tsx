@@ -89,7 +89,11 @@ vi.mock("@/api/terminal", () => ({
 }));
 
 import { terminalApi } from "@/api/terminal";
-import { TERMINAL_ENDED_CLOSE_CODE, type TerminalEnd } from "@/api/types.generated";
+import {
+  TERMINAL_ENDED_CLOSE_CODE,
+  type TerminalEnd,
+  type TerminalServedFrame,
+} from "@/api/types.generated";
 import { TerminalRail } from "@/components/TerminalRail";
 import { MAX_BACKOFF_MS } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
@@ -173,6 +177,11 @@ function submitted(): [string, string][] {
 function withClipboard(clipboard: Partial<Clipboard>) {
   Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
   onTestFinished(() => void Reflect.deleteProperty(navigator, "clipboard"));
+}
+
+/** Have the backend send `frame` over `ws`, as its socket sends each frame. */
+function served(ws: MockWebSocket, frame: TerminalServedFrame) {
+  act(() => ws.onmessage?.({ data: JSON.stringify(frame) }));
 }
 
 /** Wait for the rail's `index`th socket and open it the way a live connection opens. */
@@ -268,7 +277,7 @@ describe("TerminalRail", () => {
 
     /** Have the program set a DEC private mode, and wait until xterm has applied it. */
     async function programSets(ws: MockWebSocket, sequence: string, applied: () => boolean) {
-      act(() => ws.onmessage?.({ data: sequence }));
+      served(ws, { type: "output", data: sequence });
       await waitFor(() => expect(applied()).toBe(true));
     }
 
@@ -811,6 +820,41 @@ describe("TerminalRail", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe("what the launch and the backend state under the header", () => {
+    it("states why a launch resumed no conversation", async () => {
+      const { resumed } = TERMINAL_ANSWERS.row_launch.launched;
+      if (resumed.kind !== "not_resumed") throw new Error("the row launch resumed");
+      vi.mocked(terminalApi.createSession).mockResolvedValue(TERMINAL_ANSWERS.row_launch);
+      render(<TerminalRail />);
+      expect(await screen.findByText(resumed.why)).toBeInTheDocument();
+    });
+
+    it("states the conversation a launch resumed and the session it was in", async () => {
+      const { resumed } = TERMINAL_ANSWERS.resumed_launch.launched;
+      if (resumed.kind !== "resumed") throw new Error("the second row launch resumed nothing");
+      vi.mocked(terminalApi.createSession).mockResolvedValue(TERMINAL_ANSWERS.resumed_launch);
+      render(<TerminalRail />);
+      expect(
+        await screen.findByText(
+          (content) => content.includes(resumed.conversation) && content.includes(resumed.session),
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("states the requests the backend holds while its count is above zero", async () => {
+      const [, holding, taken] = TERMINAL_ANSWERS.held;
+      expect([holding.count, taken.count]).toEqual([1, 0]);
+      render(<TerminalRail />);
+      const ws = await openSocket();
+      served(ws, holding);
+      expect(
+        screen.getByText("The backend holds 1 request until the agent accepts input."),
+      ).toBeInTheDocument();
+      served(ws, taken);
+      expect(screen.queryByText(/The backend holds/)).not.toBeInTheDocument();
     });
   });
 

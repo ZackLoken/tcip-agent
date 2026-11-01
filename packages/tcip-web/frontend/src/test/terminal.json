@@ -15,7 +15,10 @@
       "version": null,
       "confinement": null,
       "prepared": [],
-      "resumed": null
+      "resumed": {
+        "kind": "not_resumed",
+        "why": "The TCIP_TERMINAL_CMD override resumes no conversation, so this launch starts a new conversation."
+      }
     }
   },
   "ended": { "undelivered": [] },
@@ -27,7 +30,10 @@
       "version": null,
       "confinement": null,
       "prepared": [],
-      "resumed": null
+      "resumed": {
+        "kind": "not_resumed",
+        "why": "The TCIP_TERMINAL_CMD override resumes no conversation, so this launch starts a new conversation."
+      }
     }
   },
   "ended_undelivered": { "undelivered": ["repeat", "middle", "repeat"] },
@@ -51,6 +57,64 @@
     "status": 503,
     "body": {
       "detail": "The agent process could not be stopped and stays attached to this session."
+    }
+  },
+  "held": [
+    { "type": "held", "count": 0 },
+    { "type": "held", "count": 1 },
+    { "type": "held", "count": 0 }
+  ],
+  "row_launch": {
+    "session_id": "<session 7>",
+    "launched": {
+      "provider": "claude",
+      "argv": [
+        "<fake executable>",
+        "--settings",
+        "<settings>",
+        "--setting-sources",
+        "project",
+        "--add-dir",
+        "<add-dir>",
+        "--permission-mode",
+        "default",
+        "--mcp-config",
+        "<mcp-config>",
+        "--strict-mcp-config"
+      ],
+      "version": "FAKE_TERMINAL_READY",
+      "confinement": "Claude Code enforces the deny and allow lists of agent_terminal.settings.json, merged with the workspace's own project settings only, the user's own settings and instruction files not loaded; a tool call neither list decides asks first.",
+      "prepared": [],
+      "resumed": {
+        "kind": "not_resumed",
+        "why": "This project records no earlier session of Claude Code, so this launch starts a new conversation."
+      }
+    }
+  },
+  "resumed_launch": {
+    "session_id": "<session 8>",
+    "launched": {
+      "provider": "claude",
+      "argv": [
+        "<fake executable>",
+        "--settings",
+        "<settings>",
+        "--setting-sources",
+        "project",
+        "--add-dir",
+        "<add-dir>",
+        "--permission-mode",
+        "default",
+        "--mcp-config",
+        "<mcp-config>",
+        "--strict-mcp-config",
+        "--resume",
+        "conv-1"
+      ],
+      "version": "FAKE_TERMINAL_READY",
+      "confinement": "Claude Code enforces the deny and allow lists of agent_terminal.settings.json, merged with the workspace's own project settings only, the user's own settings and instruction files not loaded; a tool call neither list decides asks first.",
+      "prepared": [],
+      "resumed": { "kind": "resumed", "conversation": "conv-1", "session": "<session 7>" }
     }
   },
   "status_mixed": {

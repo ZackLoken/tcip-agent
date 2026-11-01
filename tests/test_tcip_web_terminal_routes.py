@@ -27,6 +27,7 @@ import psutil
 import pytest
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.testclient import TestClient
+from pydantic import TypeAdapter
 
 from tcip_web import terminal as pty_host
 from tcip_web.app import app
@@ -55,6 +56,11 @@ _PLACEHOLDERS = (
 INTERPRETER = pty_host.backend_interpreter()
 """The interpreter this backend runs, the one every launch's MCP server and session hook name."""
 
+NO_RESUME_ARGUMENT = pty_host.NotResumed(
+    why="the arguments rendered here hold no resume argument"
+)
+"""What a rendering of arguments with no :class:`~tcip_web.terminal.Resume` among them takes."""
+
 
 def _tool_names() -> list[str]:
     """Return the sorted name of every tool a server for no project lists."""
@@ -70,16 +76,38 @@ if pty_host.os.name == "nt":
 pytestmark = pytest.mark.usefixtures("fake_terminal")
 
 
+_SERVED: TypeAdapter[terminal_routes.TerminalServedFrame] = TypeAdapter(
+    terminal_routes.TerminalServedFrame
+)
+
+
+def _frame(
+    ws: WebSocketTestSession,
+) -> terminal_routes.TerminalOutputFrame | terminal_routes.TerminalHeldFrame:
+    """Return the next frame the session's socket sent, read as the rail reads it."""
+    return _SERVED.validate_json(ws.receive_text())
+
+
+def _output(
+    frame: terminal_routes.TerminalOutputFrame
+    | terminal_routes.TerminalHeldFrame,
+) -> str:
+    """Return the output ``frame`` carries, empty for a held count."""
+    if isinstance(frame, terminal_routes.TerminalOutputFrame):
+        return frame.data
+    return ""
+
+
 def _read_until(
     ws: WebSocketTestSession, needle: str, tries: int = 200
 ) -> str:
-    """Accumulate up to ``tries`` WS text frames until ``needle`` appears; return the text.
+    """Accumulate the output of up to ``tries`` frames until ``needle`` appears; return it.
 
     Raises AssertionError naming the needle when ``tries`` frames pass without it.
     """
     acc = ""
     for _ in range(tries):
-        acc += ws.receive_text()
+        acc += _output(_frame(ws))
         if needle in acc:
             return acc
     raise AssertionError(
@@ -214,7 +242,7 @@ def test_rendering_replaces_each_placeholder_and_leaves_every_other_argument(
         ["--literal", pty_host.MCP_CONFIG_ARG],
         opened,
         pty_host.spawn_env("term_test"),
-        None,
+        NO_RESUME_ARGUMENT,
     )
 
     assert literal == "--literal"
@@ -394,7 +422,7 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
         "antigravity": None,
     }[row.id]
     assert _registered_hook(launched) == hook
-    assert created["launched"]["resumed"] is None
+    assert created["launched"]["resumed"]["kind"] == "not_resumed"
     if "--settings" in launched:
         shipped = json.loads(
             pty_host.CLAUDE_SETTINGS.read_text(encoding="utf-8")
@@ -451,9 +479,7 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     assert created["launched"]["prepared"] == expected_prepared
     assert created["launched"]["confinement"] == row.confinement
     (started,) = audit_rows(opened_project, "agent_terminal_started")
-    assert started["arguments"]["prepared"] == expected_prepared
-    assert started["arguments"]["confinement"] == row.confinement
-    assert started["arguments"]["argv"] == launched
+    assert started["arguments"] == created
 
 
 def test_a_launch_preparation_that_fails_refuses_the_launch_naming_it(
@@ -644,7 +670,6 @@ def test_the_session_hook_runs_the_console_command_under_the_mcp_servers_interpr
     ``tcip`` console script names.
     """
     import runpy
-
     import tomllib
 
     import tcip_web.cli
@@ -698,7 +723,7 @@ def test_the_session_hook_line_refuses_an_interpreter_no_shell_reads_as_one_word
             pty_host.codex_overrides(opened, {})
         assert repr(interpreter) in str(refused.value)
         (settings,) = pty_host.render_argv(
-            [pty_host.CLAUDE_SETTINGS_ARG], opened, {}, None
+            [pty_host.CLAUDE_SETTINGS_ARG], opened, {}, NO_RESUME_ARGUMENT
         )
         assert _registered_hook(["--settings", settings]) == {
             "type": "command",
@@ -736,7 +761,7 @@ def test_claudes_codexs_and_agys_hooks_run_one_session_hook_argv(
     _port_recorded()
     argv = pty_host.session_hook_argv()
     (claude_settings,) = pty_host.render_argv(
-        [pty_host.CLAUDE_SETTINGS_ARG], opened, {}, None
+        [pty_host.CLAUDE_SETTINGS_ARG], opened, {}, NO_RESUME_ARGUMENT
     )
     claude = _registered_hook(["--settings", claude_settings])
     assert claude is not None
@@ -854,7 +879,7 @@ def test_the_written_mcp_configuration_is_the_one_server_the_launch_states(
         [pty_host.MCP_CONFIG_ARG],
         opened,
         pty_host.spawn_env("term_test"),
-        None,
+        NO_RESUME_ARGUMENT,
     )
 
     written = json.loads(Path(config).read_text(encoding="utf-8"))[
@@ -895,7 +920,10 @@ def test_the_codex_overrides_name_the_one_server_and_hook_and_forward_the_spawn_
     """
     env = pty_host.spawn_env("term_test")
     rendered = pty_host.render_argv(
-        ["--literal", pty_host.CODEX_CONFIG_ARG], opened, env, None
+        ["--literal", pty_host.CODEX_CONFIG_ARG],
+        opened,
+        env,
+        NO_RESUME_ARGUMENT,
     )
 
     assert rendered[0] == "--literal"
@@ -982,6 +1010,13 @@ def _launched_session(
     session = terminal_routes.TerminalSession("term_test")
     assert session.start(24, 80, row, "user:tester") is None
     return session, pty
+
+
+def _written_through(session: terminal_routes.TerminalSession) -> None:
+    """Return once ``session``'s writer has written every input accepted before this call."""
+    written = threading.Event()
+    assert session.write("", written.set)
+    assert written.wait(timeout=30)
 
 
 @pytest.fixture
@@ -1207,8 +1242,9 @@ def test_a_request_is_pasted_at_the_read_where_the_harness_composer_goes_live(
         if startup.live_at is not None and index >= startup.live_at:
             assert pty.written(1) == [pty_host.paste("the request")]
         else:
-            assert (session._pasting, pty.writes) == (False, [])
-    assert session._ready
+            _written_through(session)
+            assert pty.writes == []
+    assert pty_host.bracketed_paste("".join(startup.reads), False)
 
 
 def test_bracketed_paste_follows_the_last_mode_change_the_agent_wrote() -> (
@@ -1304,14 +1340,14 @@ def test_a_resize_that_raises_does_not_end_the_stream(
 def _read_until_closed(
     ws: WebSocketTestSession, tries: int = 400
 ) -> tuple[str, int]:
-    """Accumulate up to ``tries`` WS text frames until the backend closes the socket.
+    """Accumulate the output of up to ``tries`` frames until the backend closes the socket.
 
-    Returns the text and the close code. Raises AssertionError when ``tries`` frames pass open.
+    Returns the output and the close code. Raises AssertionError when ``tries`` frames pass open.
     """
     acc = ""
     for _ in range(tries):
         try:
-            acc += ws.receive_text()
+            acc += _output(_frame(ws))
         except WebSocketDisconnect as closed:
             return acc, closed.code
     raise AssertionError(f"the socket stayed open; got: {acc[-500:]!r}")
@@ -1325,26 +1361,8 @@ def _end(client: TestClient, sid: str) -> httpx.Response:
 
 
 def _ended(line: dict) -> terminal_routes.TerminalEnded:
-    """Return the end ``line``'s arguments as the record the platform reads them as.
-
-    Its last output is asserted to come no later than the line itself.
-    """
-    from datetime import datetime
-
-    ended = terminal_routes.TerminalEnded.model_validate(line["arguments"])
-    if ended.last_output_at is not None:
-        assert ended.last_output_at <= datetime.fromisoformat(
-            line["timestamp"]
-        )
-    return ended
-
-
-def _ended_without_its_clock(line: dict) -> dict:
-    """Return the end ``line``'s arguments, read by :func:`_ended`, less its last output's time."""
-    _ended(line)
-    return {
-        k: v for k, v in line["arguments"].items() if k != "last_output_at"
-    }
+    """Return the end ``line``'s arguments as the record the platform reads them as."""
+    return terminal_routes.TerminalEnded.model_validate(line["arguments"])
 
 
 def test_a_process_exiting_on_its_own_ends_its_session_by_no_one(
@@ -1369,14 +1387,10 @@ def test_a_process_exiting_on_its_own_ends_its_session_by_no_one(
     assert code == terminal_routes.ENDED_CLOSE_CODE
     assert sid not in terminal_routes._SESSIONS
     (line,) = audit_rows(opened_project, "agent_terminal_ended")
-    assert _ended(line).last_output_at is not None
-    assert _ended_without_its_clock(line) == {
+    assert line["arguments"] == {
         "session_id": sid,
-        "provider": LAUNCH["provider"],
         "cause": "the agent's process exited",
         "undelivered": [],
-        "resumable": True,
-        "conversation": None,
         "handed_off": None,
     }
     assert "actor" not in line
@@ -1442,13 +1456,10 @@ def test_an_exit_ends_the_agent_by_the_person_and_a_create_after_it_is_a_fresh_l
     assert terminal_routes._SESSIONS == {}
     (line,) = audit_rows(opened_project, "agent_terminal_ended")
     assert line["actor"] == "user:tester"
-    assert _ended_without_its_clock(line) == {
+    assert line["arguments"] == {
         "session_id": sid,
-        "provider": LAUNCH["provider"],
         "cause": "the person ended it",
         "undelivered": [],
-        "resumable": False,
-        "conversation": None,
         "handed_off": None,
     }
     assert _end(client, sid).status_code == 404
@@ -1915,33 +1926,36 @@ def test_a_paste_released_before_an_end_records_stays_among_its_undelivered(
 
 
 class _OneBytePty(StubPty):
-    """A process whose ``write`` takes one byte per call, noting ``queued`` at each call."""
-
-    def __init__(self) -> None:
-        super().__init__(survives=False)
-        self.queued: list[str] = []
-        self.queued_at: list[list[str]] = []
+    """A process whose ``write`` takes one byte per call."""
 
     def write(self, data: bytes) -> int:
-        self.queued_at.append(list(self.queued))
         return super().write(data[:1])
 
 
-def test_a_paste_leaves_the_queue_only_once_all_of_it_reached_the_pty(
+def test_a_paste_leaves_the_held_count_only_once_all_of_it_reached_the_pty(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A PTY taking one byte per write is given each paste whole, in order.
 
-    The first request is still queued at every write its paste takes, and has left the queue by
-    the first write of the next request's paste.
+    Each count of held requests the session sends its subscribers is noted with how much the
+    PTY had been written by then: a request leaves the count only once every byte of its paste
+    was written, and the next paste begins after that.
     """
-    pty = _OneBytePty()
+    pty = _OneBytePty(survives=False)
     wire_stub_spawn(monkeypatch, pty)
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
     session = terminal_routes._SESSIONS[sid]
-    pty.queued = session._queued
+    noted: list[tuple[int, int]] = []
+    broadcast = session._broadcast
+
+    def noting_broadcast(item: object) -> None:
+        if isinstance(item, terminal_routes.TerminalHeldFrame):
+            noted.append((item.count, len("".join(pty.writes))))
+        broadcast(item)
+
+    monkeypatch.setattr(session, "_broadcast", noting_broadcast)
     session.submit("the request")
     session.submit("next")
 
@@ -1949,9 +1963,13 @@ def test_a_paste_leaves_the_queue_only_once_all_of_it_reached_the_pty(
 
     first, second = pty_host.paste("the request"), pty_host.paste("next")
     assert "".join(pty.written(len(first) + len(second))) == first + second
-    assert pty.queued_at == [["the request", "next"]] * len(first) + [
-        ["next"]
-    ] * len(second)
+    _written_through(session)
+    assert noted == [
+        (1, 0),
+        (2, 0),
+        (1, len(first)),
+        (0, len(first) + len(second)),
+    ]
 
 
 class _Descriptors:
@@ -2117,7 +2135,7 @@ def test_output_past_the_scrollback_cap_keeps_its_newest_characters_for_a_reconn
     with client.websocket_connect(
         f"ws://127.0.0.1/api/terminal/ws/{sid}"
     ) as ws:
-        assert ws.receive_text() == kept
+        assert _output(_frame(ws)) == kept
 
 
 def test_a_socket_opened_while_an_end_writes_its_line_closes_only_after_the_line(
@@ -2154,7 +2172,7 @@ def test_a_socket_opened_while_an_end_writes_its_line_closes_only_after_the_line
             assert release.wait(timeout=30)
         record(event, arguments, project, actor)
 
-    def noting_broadcast(item: str | tuple[int, str]) -> None:
+    def noting_broadcast(item: object) -> None:
         if isinstance(item, tuple):
             broadcast_closes.append(written())
         broadcast(item)
@@ -2171,8 +2189,9 @@ def test_a_socket_opened_while_an_end_writes_its_line_closes_only_after_the_line
         boundary.set()
         return await receive_text(self)
 
-    async def attached_queue() -> asyncio.Queue:
-        return session.attach()[1]
+    async def attached() -> list[object]:
+        _, queue = session.attach()
+        return [queue.get_nowait() for _ in range(queue.qsize())]
 
     monkeypatch.setattr(terminal_routes, "_record", held_record)
     monkeypatch.setattr(session, "_broadcast", noting_broadcast)
@@ -2183,11 +2202,11 @@ def test_a_socket_opened_while_an_end_writes_its_line_closes_only_after_the_line
             _post, f"/api/terminal/sessions/{sid}/end", {"user": "tester"}
         )
         assert recording.wait(timeout=30)
-        assert asyncio.run(attached_queue()).empty()
+        assert terminal_routes._ENDED_CLOSE not in asyncio.run(attached())
         with client.websocket_connect(
             f"ws://127.0.0.1/api/terminal/ws/{sid}"
         ) as ws:
-            assert "FAKE_TERMINAL_READY" in ws.receive_text()
+            assert "FAKE_TERMINAL_READY" in _output(_frame(ws))
             assert boundary.wait(timeout=30)
             assert socket_steps[0] == ("receive", False)
             assert broadcast_closes == []
@@ -2213,7 +2232,7 @@ def test_output_after_the_ended_close_reaches_no_socket(
     session = terminal_routes._SESSIONS[sid]
 
     async def offered() -> list[object]:
-        _, queue, _ = session.attach()
+        _, queue = session.attach()
         await asyncio.to_thread(
             session.end, "the person ended it", "user:tester", lambda: None
         )
@@ -2221,7 +2240,10 @@ def test_output_after_the_ended_close_reaches_no_socket(
         await asyncio.sleep(0)
         return [queue.get_nowait() for _ in range(queue.qsize())]
 
-    assert asyncio.run(offered()) == [terminal_routes._ENDED_CLOSE]
+    assert asyncio.run(offered()) == [
+        terminal_routes.TerminalHeldFrame(count=0),
+        terminal_routes._ENDED_CLOSE,
+    ]
 
 
 def test_a_survivor_of_an_unrecorded_start_ends_without_an_end_line(
@@ -2296,7 +2318,7 @@ def test_an_unattended_end_whose_line_fails_writes_it_to_the_stream_and_the_erro
     broadcast = session._broadcast
     seen: list[tuple[object, bool]] = []
 
-    def noting_broadcast(item: str | tuple[int, str]) -> None:
+    def noting_broadcast(item: object) -> None:
         logged = any("ended unrecorded" in r.message for r in caplog.records)
         seen.append((item, logged))
         broadcast(item)
@@ -2306,9 +2328,10 @@ def test_an_unattended_end_whose_line_fails_writes_it_to_the_stream_and_the_erro
     with caplog.at_level("ERROR"):
         assert session.end_unattended("the agent's process exited") is True
 
-    (text, _), close = seen
-    assert str(text).startswith(
-        f"\r\n{_UNRECORDED_END}agent_terminal_ended completed and its audit entry"
+    (shown, _), close = seen
+    assert isinstance(shown, terminal_routes.TerminalOutputFrame)
+    assert shown.data.startswith(
+        f"\r\n{terminal_routes.NO_END_LINE}agent_terminal_ended completed and its audit entry"
     )
     assert close == (terminal_routes._ENDED_CLOSE, True)
 
@@ -2344,7 +2367,6 @@ def test_shutdown_all_ends_every_live_session_with_one_line_by_no_one(
     assert {line["arguments"]["cause"] for line in lines} == {
         "the backend shut down"
     }
-    assert all(_ended(line).resumable for line in lines)
     assert not [line for line in lines if "actor" in line]
     assert terminal_routes._SESSIONS == {}
 
@@ -2506,8 +2528,8 @@ def test_a_harness_updated_in_place_is_seen_at_its_next_launch_without_a_backend
 
     assert relaunched["launched"]["version"] == "9.9.9 (updated)"
     first, second = audit_rows(opened_project, "agent_terminal_started")
-    assert first["arguments"]["version"] == "1.0.0"
-    assert second["arguments"]["version"] == "9.9.9 (updated)"
+    assert first["arguments"]["launched"]["version"] == "1.0.0"
+    assert second["arguments"]["launched"]["version"] == "9.9.9 (updated)"
 
 
 def test_the_spawned_process_inherits_the_terminal_session_id(
@@ -2567,11 +2589,12 @@ def test_each_launch_leaves_one_audit_line_in_the_open_projects_log(
 
     rows = audit_rows(opened_project, "agent_terminal_started")
     assert [row["arguments"]["session_id"] for row in rows] == [sid, second]
-    assert [row["arguments"]["provider"] for row in rows] == [
+    launches = [row["arguments"]["launched"] for row in rows]
+    assert [launched["provider"] for launched in launches] == [
         LAUNCH["provider"]
     ] * 2
-    assert rows[0]["arguments"]["argv"] == pty_host._override_argv()
-    assert rows[0]["arguments"]["version"] is None
+    assert launches[0]["argv"] == pty_host._override_argv()
+    assert launches[0]["version"] is None
     assert [row["actor"] for row in rows] == ["user:tester"] * 2
     assert "source" not in rows[0]
 
@@ -2810,6 +2833,31 @@ def _resumes(
     return (row.resume.argument, conversation) in pairwise(argv)
 
 
+def _not_resumed(resumed: object, session: str | None = None) -> bool:
+    """Return whether a launch's ``resumed`` resumed nothing, its sentence naming ``session``.
+
+    ``resumed`` is the launch's answer or the gate's; one that resumed a conversation refuses.
+    With no ``session`` the sentence is not read.
+    """
+    fresh = pty_host.NotResumed.model_validate(resumed)
+    return session is None or session in fresh.why
+
+
+def _left_unended(client: TestClient, row: pty_host.Provider) -> str:
+    """Return the id of a session of ``row`` its backend left with no end, as a killed one does.
+
+    Its agent wrote its banner and its hook reported ``conv-1``; then the session is forgotten
+    and its process stopped with no end line written, as a backend's death leaves them.
+    """
+    sid = _launch(client, row)["session_id"]
+    session = terminal_routes._SESSIONS[sid]
+    _wait_for(session, "FAKE_TERMINAL_READY")
+    _report(client, sid, "conv-1")
+    del terminal_routes._SESSIONS[sid]
+    assert session.terminate()
+    return sid
+
+
 def test_an_end_nobody_chose_then_a_launch_of_its_row_resumes_it_and_delivers_requests_alone(
     client: TestClient,
     opened_project: Path,
@@ -2825,11 +2873,12 @@ def test_an_end_nobody_chose_then_a_launch_of_its_row_resumes_it_and_delivers_re
     """
     row = fake_rows["claude"]
     _launch(client, row)
-    _talked_then_exited(client, "conv-1")
+    first = _talked_then_exited(client, "conv-1")
 
     resumed = _launch(client, row)
 
-    assert resumed["launched"]["resumed"] == "conv-1"
+    continued = {"kind": "resumed", "conversation": "conv-1", "session": first}
+    assert resumed["launched"]["resumed"] == continued
     argv = resumed["launched"]["argv"]
     assert _resumes(argv, row, "conv-1")
     handed = json.loads(
@@ -2837,34 +2886,45 @@ def test_an_end_nobody_chose_then_a_launch_of_its_row_resumes_it_and_delivers_re
     )
     assert handed["env"]["CLAUDE_CODE_NO_FLICKER"] == "1"
     _, start = audit_rows(opened_project, "agent_terminal_started")
-    assert start["arguments"]["resumed"] == "conv-1"
+    assert start["arguments"]["launched"]["resumed"] == continued
     sid = resumed["session_id"]
     client.post(f"/api/terminal/sessions/{sid}/submit", json={"text": "next"})
     text = _wait_for(terminal_routes._SESSIONS[sid], "echo:next")
     assert _echoes(text) == ["echo:next"]
 
 
-def test_a_launch_past_the_rows_cache_lifetime_is_fresh(
+@pytest.mark.parametrize("ended", [True, False], ids=["ended", "unended"])
+def test_a_launch_past_the_lifetime_since_the_sessions_last_line_is_fresh(
+    ended: bool,
     client: TestClient,
-    opened_project: Path,
+    opened: OpenProject,
     fake_rows: dict[str, pty_host.Provider],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A session resumes nothing once the row's lifetime passed the newest line it left.
+
+    That line is its end line when its process exited, its hook's report when its backend left
+    it unended; the launch past the lifetime since it starts a new conversation, naming it.
+    """
     from datetime import timedelta
 
     row = fake_rows["claude"]
     assert row.resume is not None
-    _launch(client, row)
-    _talked_then_exited(client, "conv-1")
-    (line,) = audit_rows(opened_project, "agent_terminal_ended")
-    last = _ended(line).last_output_at
-    assert last is not None
-    later = last + row.resume.cache_lifetime + timedelta(seconds=1)
-    monkeypatch.setattr(terminal_routes, "now", lambda: later)
+    if ended:
+        _launch(client, row)
+        sid = _talked_then_exited(client, "conv-1")
+    else:
+        sid = _left_unended(client, row)
+    recorded = terminal_routes.recorded_session(row.id, opened)
+    assert recorded is not None
+    later = recorded.last_line_at + row.resume.cache_lifetime
+    monkeypatch.setattr(
+        terminal_routes, "now", lambda: later + timedelta(seconds=1)
+    )
 
     fresh = _launch(client, row)
 
-    assert fresh["launched"]["resumed"] is None
+    assert _not_resumed(fresh["launched"]["resumed"], sid)
     assert row.resume.argument not in fresh["launched"]["argv"]
 
 
@@ -2881,7 +2941,29 @@ def test_a_launch_after_the_persons_exit_is_fresh(
 
     fresh = _launch(client, row)
 
-    assert fresh["launched"]["resumed"] is None
+    assert _not_resumed(fresh["launched"]["resumed"], sid)
+
+
+def test_an_end_during_a_hand_off_leaves_the_conversation_to_resume(
+    client: TestClient,
+    opened_project: Path,
+    fake_rows: dict[str, pty_host.Provider],
+) -> None:
+    """A person's End while the agent hands off for a switch is resumed by the row's next launch."""
+    row = fake_rows["claude"]
+    sid = _launch(client, row)["session_id"]
+    _wait_for(terminal_routes._SESSIONS[sid], "FAKE_TERMINAL_READY")
+    _report(client, sid, "conv-1")
+    assert _hand_off(client, sid).status_code == 200
+    assert _end(client, sid).status_code == 200
+
+    resumed = _launch(client, row)
+
+    assert resumed["launched"]["resumed"] == {
+        "kind": "resumed",
+        "conversation": "conv-1",
+        "session": sid,
+    }
 
 
 def test_a_launch_of_another_row_never_resumes_the_first_rows_conversation(
@@ -2894,7 +2976,7 @@ def test_a_launch_of_another_row_never_resumes_the_first_rows_conversation(
 
     other = _launch(client, fake_rows["codex"])
 
-    assert other["launched"]["resumed"] is None
+    assert _not_resumed(other["launched"]["resumed"])
 
 
 def test_a_launch_in_another_project_never_resumes_a_conversation_of_the_first(
@@ -2922,10 +3004,14 @@ def test_a_launch_in_another_project_never_resumes_a_conversation_of_the_first(
     open_in_the_gui(other)
     terminal_routes.shutdown_all()
 
-    assert _launch(client, row)["launched"]["resumed"] is None
+    assert _not_resumed(_launch(client, row)["launched"]["resumed"])
     terminal_routes.shutdown_all()
     open_in_the_gui(opened)
-    assert _launch(client, row)["launched"]["resumed"] == "conv-1"
+    assert _launch(client, row)["launched"]["resumed"] == {
+        "kind": "resumed",
+        "conversation": "conv-1",
+        "session": sid,
+    }
 
 
 _RESUMED_IN_A_FRESH_PROCESS = """
@@ -2939,23 +3025,34 @@ from tcip_web.state import OpenProject
 
 tcip_store.bind()
 (row,) = [row for row in pty_host.PROVIDERS if row.id == sys.argv[1]]
-print(routes._conversation_to_resume(row, OpenProject(Path(sys.argv[2]), sys.argv[3])))
+project = OpenProject(Path(sys.argv[2]), sys.argv[3])
+print(routes.launch_resumes(row, project, False).model_dump_json())
 """
 """What a process that has never held a session resumes for a row and a project, printed."""
 
 
-def test_after_a_backend_shutdown_a_fresh_process_resumes_from_the_log_alone(
+@pytest.mark.parametrize("ended", [True, False], ids=["shut-down", "killed"])
+def test_a_fresh_process_resumes_from_the_log_alone_whether_or_not_an_end_was_written(
+    ended: bool,
     client: TestClient,
     opened: OpenProject,
     fake_rows: dict[str, pty_host.Provider],
 ) -> None:
+    """A process that never held the session resumes the conversation its hook reported.
+
+    The session's backend either shut down, writing its end line, or died with the session
+    running and wrote none; either way the launch continues the conversation and names the
+    session it was in.
+    """
     import subprocess
 
     row = fake_rows["claude"]
     sid = _launch(client, row)["session_id"]
     _wait_for(terminal_routes._SESSIONS[sid], "FAKE_TERMINAL_READY")
     _report(client, sid, "conv-1")
-    terminal_routes.shutdown_all()
+    if ended:
+        terminal_routes.shutdown_all()
+    assert len(audit_rows(opened.root, "agent_terminal_ended")) == ended
 
     printed = subprocess.run(
         [
@@ -2972,23 +3069,44 @@ def test_after_a_backend_shutdown_a_fresh_process_resumes_from_the_log_alone(
         check=True,
     )
 
-    assert printed.stdout.strip() == "conv-1"
+    assert pty_host.Resumed.model_validate_json(
+        printed.stdout
+    ) == pty_host.Resumed(conversation="conv-1", session=sid)
 
 
-def test_a_conversation_whose_hook_never_reported_is_not_resumed_and_its_end_says_so(
+def test_a_session_this_process_holds_is_never_read_as_ended(
+    client: TestClient,
+    opened: OpenProject,
+    fake_rows: dict[str, pty_host.Provider],
+) -> None:
+    """A session running here, its start line and report written and no end, is never resumed.
+
+    A launch while it runs attaches to it, and the gate asked directly says it is held.
+    """
+    row = fake_rows["claude"]
+    sid = _launch(client, row)["session_id"]
+    _wait_for(terminal_routes._SESSIONS[sid], "FAKE_TERMINAL_READY")
+    _report(client, sid, "conv-1")
+
+    assert _launch(client, row)["session_id"] == sid
+    assert _not_resumed(
+        terminal_routes.launch_resumes(row, opened, False), sid
+    )
+
+
+def test_a_conversation_whose_hook_never_reported_is_not_resumed(
     client: TestClient,
     opened_project: Path,
     fake_rows: dict[str, pty_host.Provider],
 ) -> None:
     row = fake_rows["claude"]
     _launch(client, row)
-    _talked_then_exited(client, None)
-    (line,) = audit_rows(opened_project, "agent_terminal_ended")
-    assert _ended(line).conversation is None
+    sid = _talked_then_exited(client, None)
+    assert audit_rows(opened_project, "agent_terminal_reported") == []
 
     fresh = _launch(client, row)
 
-    assert fresh["launched"]["resumed"] is None
+    assert _not_resumed(fresh["launched"]["resumed"], sid)
 
 
 def test_antigravitys_row_is_never_resumed(
@@ -3002,7 +3120,31 @@ def test_antigravitys_row_is_never_resumed(
 
     fresh = _launch(client, row)
 
-    assert fresh["launched"]["resumed"] is None
+    assert _not_resumed(fresh["launched"]["resumed"])
+
+
+def test_an_override_launch_never_resumes_the_rows_resumable_conversation(
+    client: TestClient,
+    opened_project: Path,
+    fake_rows: dict[str, pty_host.Provider],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A launch through ``TCIP_TERMINAL_CMD`` starts a new conversation, whatever the row left.
+
+    The row's last session reported its conversation and its process exited, ended by no one,
+    so the row's own launch would resume it; the override's launch of the row does not.
+    """
+    row = fake_rows["claude"]
+    _launch(client, row)
+    _talked_then_exited(client, "conv-1")
+    monkeypatch.setenv(
+        pty_host.TERMINAL_CMD_ENV, f"{sys.executable} -u {FAKE}"
+    )
+
+    overridden = _launch(client, row)
+
+    assert _not_resumed(overridden["launched"]["resumed"])
+    assert overridden["launched"]["argv"] == pty_host._override_argv()
 
 
 def test_the_session_hook_is_one_command_across_launches_naming_no_launch(
@@ -3022,13 +3164,133 @@ def test_the_session_hook_is_one_command_across_launches_naming_no_launch(
 
 
 def test_a_report_for_a_session_the_backend_does_not_hold_answers_404(
-    client: TestClient,
+    client: TestClient, opened_project: Path
 ) -> None:
     resp = client.post(
         "/api/terminal/sessions/term_gone/session-start",
         json={"conversation": "conv-1", "source": "startup"},
     )
     assert resp.status_code == 404
+    assert audit_rows(opened_project, "agent_terminal_reported") == []
+
+
+def test_a_report_lands_as_one_line_by_no_one_and_the_newest_is_the_conversation(
+    client: TestClient, opened: OpenProject
+) -> None:
+    """Each report of a session's hook is one line in its project's log, written by no one.
+
+    The session's recorded conversation is the one its newest report names.
+    """
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+
+    _report(client, sid, "conv-1")
+    _report(client, sid, "conv-2")
+
+    lines = audit_rows(opened.root, "agent_terminal_reported")
+    assert [line["arguments"] for line in lines] == [
+        {"conversation": c, "source": "startup", "session_id": sid}
+        for c in ("conv-1", "conv-2")
+    ]
+    assert not [line for line in lines if "actor" in line]
+    recorded = terminal_routes.recorded_session(LAUNCH["provider"], opened)
+    assert recorded is not None
+    assert (recorded.session_id, recorded.conversation) == (sid, "conv-2")
+
+
+def test_a_report_whose_line_fails_answers_the_audit_gap_and_holds_nothing(
+    client: TestClient,
+    opened: OpenProject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A report whose line fails to append answers the audit-gap 409 with nothing committed.
+
+    The session's recorded conversation stays the one its last report that landed names.
+    """
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    _report(client, sid, "conv-1")
+
+    with monkeypatch.context() as refusing:
+        refuse_audit_appends(refusing)
+        resp = client.post(
+            f"/api/terminal/sessions/{sid}/session-start",
+            json={"conversation": "conv-2", "source": "compact"},
+        )
+
+    assert resp.status_code == 409, resp.text
+    assert (
+        AuditGapRefusal.model_validate(resp.json()["detail"]).committed is None
+    )
+    recorded = terminal_routes.recorded_session(LAUNCH["provider"], opened)
+    assert recorded is not None and recorded.conversation == "conv-1"
+
+
+def _held_until(ws: WebSocketTestSession, count: int) -> list[int]:
+    """Return every held count the socket sends up to and including the first equal to ``count``."""
+    counts: list[int] = []
+    while not counts or counts[-1] != count:
+        frame = _frame(ws)
+        if isinstance(frame, terminal_routes.TerminalHeldFrame):
+            counts.append(frame.count)
+    return counts
+
+
+def test_the_socket_serves_the_held_count_on_attach_and_at_each_change(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A session's socket sends how many requests it holds when attached and when that changes.
+
+    A request submitted before the agent took input is counted on the socket open then and on
+    one opened after a reconnect, and the count falls to zero once its paste is written whole,
+    the end then answering no request undelivered.
+    """
+    wire_stub_spawn(monkeypatch, StubPty(survives=False))
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+    session = terminal_routes._SESSIONS[sid]
+    session._on_output("banner")
+    url = f"ws://127.0.0.1/api/terminal/ws/{sid}"
+
+    with client.websocket_connect(url) as ws:
+        assert _output(_frame(ws)) == "banner"
+        client.post(
+            f"/api/terminal/sessions/{sid}/submit", json={"text": "held"}
+        )
+        assert _held_until(ws, 1) == [0, 1]
+    with client.websocket_connect(url) as ws:
+        assert _output(_frame(ws)) == "banner"
+        session._on_output(
+            "\x1b[?2004h" + pty_host.PROVIDERS[0].composer_ready
+        )
+        assert _held_until(ws, 0) == [1, 0]
+
+    assert _end(client, sid).json() == {"undelivered": []}
+
+
+def test_an_end_answers_undelivered_the_requests_the_socket_counted_held(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The requests an end answers undelivered are the ones the socket last counted held."""
+    wire_stub_spawn(monkeypatch, StubPty(survives=False))
+    sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
+        "session_id"
+    ]
+
+    with client.websocket_connect(
+        f"ws://127.0.0.1/api/terminal/ws/{sid}"
+    ) as ws:
+        assert _held_until(ws, 0) == [0]
+        for text in ("first", "second"):
+            client.post(
+                f"/api/terminal/sessions/{sid}/submit", json={"text": text}
+            )
+        assert _held_until(ws, 2) == [1, 2]
+
+    assert _end(client, sid).json() == {"undelivered": ["first", "second"]}
 
 
 # ── the hand-off before a switch of harness ─────────────────────────────
@@ -3075,8 +3337,8 @@ def test_a_switch_delivers_the_hand_off_request_and_ends_after_its_own_retrospec
     """A switch delivers its request and ends on the hand-off its own agent declared, after it.
 
     A retrospective declared by another terminal session ends nothing; the one this session's
-    agent declared is followed by the session's end, by the person who switched, its
-    conversation resumable and its hand-off landed.
+    agent declared is followed by the session's end, by the person who switched, its hand-off
+    landed.
     """
     pty = StubPty(survives=False)
     wire_stub_spawn(monkeypatch, pty)
@@ -3112,11 +3374,7 @@ def test_a_switch_delivers_the_hand_off_request_and_ends_after_its_own_retrospec
     (line,) = audit_rows(opened_project, "agent_terminal_ended")
     assert line["actor"] == "user:tester"
     ended = _ended(line)
-    assert (ended.resumable, ended.handed_off, ended.undelivered) == (
-        True,
-        True,
-        [],
-    )
+    assert (ended.handed_off, ended.undelivered) == (True, [])
 
 
 class _SurvivesOnceStubPty(StubPty):
@@ -3186,7 +3444,7 @@ def test_an_end_during_a_hand_off_ends_at_once_and_records_no_hand_off(
     assert sid not in terminal_routes._SESSIONS
     (line,) = audit_rows(opened_project, "agent_terminal_ended")
     assert line["actor"] == "user:tester"
-    assert (_ended(line).resumable, _ended(line).handed_off) == (True, False)
+    assert _ended(line).handed_off is False
 
 
 def test_an_end_whose_hand_off_evidence_will_not_read_leaves_the_agent_running_and_held(
@@ -3217,12 +3475,9 @@ def test_an_end_whose_hand_off_evidence_will_not_read_leaves_the_agent_running_a
     assert audit_rows(opened_project, "agent_terminal_ended") == []
 
 
-_UNRECORDED_END = "The agent ended and no end line was recorded: "
-"""What an end that writes no end line puts on its session's stream, ahead of why."""
-
 _UNREADABLE = "the audit log carries 1 undecodable entries"
 
-_UNREADABLE_END = _UNRECORDED_END + _UNREADABLE
+_UNREADABLE_END = terminal_routes.NO_END_LINE + _UNREADABLE
 
 
 def _unreadable_log(*args: object, **kwargs: object) -> None:

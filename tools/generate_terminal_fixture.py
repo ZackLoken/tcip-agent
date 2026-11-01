@@ -13,14 +13,23 @@ launched (``launch``) and ended through ``POST .../end`` (``ended``), another la
 asked for a hand-off again, each refused for a session the backend no longer holds
 (``end_unknown``, ``hand_off_unknown``); a third, asked for its hand-off, answers it is handing
 off (``handed_off``); a fourth, given a request, is ended while every audit append fails
-(``end_audit_gap``, ``tests._audit_fixtures.refuse_audit_appends``); and a fifth, whose process
+(``end_audit_gap``, ``tests._audit_fixtures.refuse_audit_appends``); a fifth, whose process
 survives its termination (``tests._terminal_fixtures.StubPty``), is refused its end
-(``end_survived``). Then, with no override, the status of rows whose executables run the fake
-(``tests._terminal_fixtures.fake_executable``) but the third, which names
-``tests._terminal_fixtures.ABSENT`` (``status_mixed``), and of rows all naming it
-(``status_absent``), are listed. The answers, each refusal with its status, are written,
-normalized (``fixture_session.normalized``) with each session id minted read as its order, the
-interpreter as ``<python>`` and the fake as ``<fake agent>``, to :data:`GENERATED_PATH`.
+(``end_survived``); and a sixth, whose fake turns paste on and writes the first row's composer
+sequence a second after it starts, is given :data:`HELD_REQUEST` once its socket sent the count it
+holds, and the count frames its socket sends until the request is pasted are kept (``held``).
+Then, with no override and every row's executable running the fake
+(``tests._terminal_fixtures.fake_executable``), a second project is opened, the first row is
+launched (``row_launch``), its hook's report of :data:`CONVERSATION` is posted through
+``POST .../session-start`` once its agent wrote its banner, the backend's sessions are ended by
+its shutdown (``shutdown_all``), and the row launched again (``resumed_launch``). Last, the
+status of those rows but the third, which names ``tests._terminal_fixtures.ABSENT``
+(``status_mixed``), and of rows all naming it (``status_absent``), are listed. The answers, each
+refusal with its status, are written, normalized (``fixture_session.normalized``) with each
+session id minted read as its order, the interpreter as ``<python>``, the fake as
+``<fake agent>``, the executable running it as ``<fake executable>`` and each path a row launch
+names after ``--settings``, ``--mcp-config`` and ``--add-dir`` as that flag's name, to
+:data:`GENERATED_PATH`.
 
     python -m tools.generate_terminal_fixture
 """
@@ -29,6 +38,7 @@ from __future__ import annotations
 
 import dataclasses
 import sys
+from itertools import pairwise
 from typing import TYPE_CHECKING
 
 import pytest
@@ -40,11 +50,15 @@ from tools.fixture_session import (
     normalized,
     opened,
     scratch_session,
+    socket_url,
     write_fixture,
 )
 
 if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
     from pydantic import JsonValue
+    from starlette.testclient import WebSocketTestSession
 
 GENERATED_PATH = FRONTEND_SRC / "test" / "terminal.json"
 
@@ -54,19 +68,34 @@ UNDELIVERED = "never given"
 REQUESTS = ("repeat", "middle", "repeat")
 """Requests a session is given in order, two equal, which its end answers in that order."""
 
+HELD_REQUEST = "held"
+"""The request a session holds until its agent takes input."""
+
+CONVERSATION = "conv-1"
+"""The conversation a row launch's hook reports, which the next launch of the row resumes."""
+
+LAUNCH_FILES = ("--settings", "--mcp-config", "--add-dir")
+"""The flags of a row launch's argv whose paths each launch or checkout names differently."""
+
 
 def produce() -> dict[str, JsonValue]:
     """Launch, end, refuse and list the terminal's sessions in a scratch session; return answers.
 
     A route refusing what it should admit, or admitting what it should refuse, raises.
     """
+    from pydantic import BaseModel, TypeAdapter
+
     from tcip_web import terminal as pty_host
     from tcip_web.routes import terminal as terminal_routes
     from tcip_web.routes.terminal import (
         CreateSessionRequest,
         EndSessionRequest,
+        SessionStartReport,
         SubmitRequest,
+        TerminalHeldFrame,
         TerminalLaunch,
+        TerminalOutputFrame,
+        TerminalServedFrame,
     )
     from tests._audit_fixtures import refuse_audit_appends
     from tests._terminal_fixtures import (
@@ -117,6 +146,23 @@ def produce() -> dict[str, JsonValue]:
                 path=session,
             )
 
+        def socket(
+            session: dict[str, str],
+        ) -> AbstractContextManager[WebSocketTestSession]:
+            url = socket_url(client, "terminal_ws", **session)
+            return client.websocket_connect(url)
+
+        sent: TypeAdapter[TerminalServedFrame] = TypeAdapter(
+            TerminalServedFrame
+        )
+
+        def frame[F: BaseModel](ws: WebSocketTestSession, kind: type[F]) -> F:
+            while not isinstance(
+                got := sent.validate_json(ws.receive_text()), kind
+            ):
+                pass
+            return got
+
         patch.setenv(pty_host.TERMINAL_CMD_ENV, f"{sys.executable} -u {FAKE}")
         _, unowned = create()
         submit(unowned, UNDELIVERED)
@@ -147,10 +193,45 @@ def produce() -> dict[str, JsonValue]:
             served["end_survived"] = acted("end_session", fifth, 503)
             survivor.exit()
             terminal_routes.shutdown_all()
+        with pytest.MonkeyPatch.context() as pasting:
+            pasting.setenv("FAKE_TERMINAL_PASTE_AFTER_S", "1")
+            pasting.setenv(
+                "FAKE_TERMINAL_COMPOSER_READY",
+                pty_host.PROVIDERS[0].composer_ready,
+            )
+            _, sixth = create()
+            with socket(sixth) as ws:
+                held = [frame(ws, TerminalHeldFrame)]
+                submit(sixth, HELD_REQUEST)
+                while held[-1].count != 0 or len(held) == 1:
+                    held.append(frame(ws, TerminalHeldFrame))
+            served["held"] = [f.model_dump() for f in held]
+            acted("end_session", sixth, 200)
 
         patch.delenv(pty_host.TERMINAL_CMD_ENV)
         fake = str(fake_executable(workspace / "bin"))
         rows = pty_host.PROVIDERS
+        patch.setattr(
+            pty_host,
+            "PROVIDERS",
+            tuple(dataclasses.replace(row, executable=fake) for row in rows),
+        )
+        opened(client, named_project(workspace / "resumed", "Resumed"))
+        served["row_launch"], first_row = create()
+        with socket(first_row) as ws:
+            banner = ""
+            while "FAKE_TERMINAL_READY" not in banner:
+                banner += frame(ws, TerminalOutputFrame).data
+        answered(
+            client,
+            "session_start",
+            200,
+            SessionStartReport(conversation=CONVERSATION, source="startup"),
+            path=first_row,
+        )
+        terminal_routes.shutdown_all()
+        served["resumed_launch"], second_row = create()
+        acted("end_session", second_row, 200)
         patch.setattr(
             pty_host,
             "PROVIDERS",
@@ -166,6 +247,14 @@ def produce() -> dict[str, JsonValue]:
             tuple(dataclasses.replace(row, executable=ABSENT) for row in rows),
         )
         served["status_absent"] = answered(client, "get_status", 200)
+        launch_files = {
+            path: f"<{flag.removeprefix('--')}>"
+            for launch in (served["row_launch"], served["resumed_launch"])
+            for flag, path in pairwise(
+                TerminalLaunch.model_validate(launch).launched.argv
+            )
+            if flag in LAUNCH_FILES
+        }
         return normalized(
             served,
             workspace,
@@ -176,6 +265,8 @@ def produce() -> dict[str, JsonValue]:
                 },
                 sys.executable: "<python>",
                 str(FAKE): "<fake agent>",
+                fake: "<fake executable>",
+                **launch_files,
             },
         )
 
