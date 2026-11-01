@@ -123,7 +123,9 @@ def test_propose_annotations_refused_off_a_dataset_leaves_no_audit_line(
     result = propose_annotations(
         project, image_path=str(image), engine=STUB_ENGINE, actor=None
     )
-    assert isinstance(result, dict) and "images/ tree" in result["error"], result
+    assert isinstance(result, dict) and "images/ tree" in result["error"], (
+        result
+    )
 
     assert audit_rows(project, "propose_annotations") == []
     assert audit_rows(loose) == []

@@ -514,7 +514,9 @@ def _described(header: SourceHeader, version: tuple) -> tuple[int, bool]:
     from tcip_mcp.pipelines.raster_source import displays_plain
 
     return _memo(
-        _count_cache, version, lambda: (header.channels, displays_plain(header))
+        _count_cache,
+        version,
+        lambda: (header.channels, displays_plain(header)),
     )
 
 
@@ -650,7 +652,9 @@ def serve_image(
     src, source = resolved_image(path)
 
     asked = None if region is None else raster_source.Rect(*region)
-    native = asked is not None and within_cap(asked.width, asked.height, area_cap)
+    native = asked is not None and within_cap(
+        asked.width, asked.height, area_cap
+    )
     if level and not (
         asked is not None
         and native
@@ -791,7 +795,9 @@ def serve_image(
         # A truncated or otherwise unreadable file fails before any read: the request's own
         # fault, answered as one.
         if opening:
-            raise HTTPException(400, f"could not open this image: {exc}") from exc
+            raise HTTPException(
+                400, f"could not open this image: {exc}"
+            ) from exc
         raise HTTPException(500, f"could not process image: {exc}") from exc
 
     extra = {SERVED_SIZE_HEADER: f"{served_size[0]}x{served_size[1]}"}
@@ -899,7 +905,9 @@ def get_bands(path: str = Query(...)) -> ImageBands:
 
     stats = _memo(_stats_cache, (version, sidecar, n), read_stats)
     wavelengths = (
-        {} if declared is None else header.group.manifest.central_wavelength_nm or {}
+        {}
+        if declared is None
+        else header.group.manifest.central_wavelength_nm or {}
     )
     interpretations = stats.interpretations or ()
     bands = [

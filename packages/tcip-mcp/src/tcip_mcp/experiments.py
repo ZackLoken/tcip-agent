@@ -496,7 +496,10 @@ def write_final_status(
     ``FileExistsError``.
     """
     status = FinalStatus(
-        state=state, ended=ended, status_error=status_error, checkpoint=checkpoint
+        state=state,
+        ended=ended,
+        status_error=status_error,
+        checkpoint=checkpoint,
     )
     write_record(directory / FINAL_STATUS_FILE, status)
 
@@ -1181,7 +1184,9 @@ def sweep_outcome(trials: list[RunRow], given: SweepInput) -> SweepOutcome:
     return SweepOutcome(
         best_params=best_params,
         best_value=finite_or_none(best_value),
-        best_value_state=None if best_value is None else non_finite_state(best_value),
+        best_value_state=None
+        if best_value is None
+        else non_finite_state(best_value),
         best_value_spread=spread,
         split_sensitivity=sensitivity,
         best_at_range_end={

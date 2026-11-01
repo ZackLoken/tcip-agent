@@ -245,10 +245,14 @@ def pass_documents(p: Pass, results: Iterable[dict]) -> Iterator[Document]:
             detected = DetectionResult.model_validate(r)
             yield Document(
                 detected.image,
-                *encode_predictions(detected, created_by=created_by, scope=p.scope),
+                *encode_predictions(
+                    detected, created_by=created_by, scope=p.scope
+                ),
             )
         else:
-            yield Document(r["image"], *encode_head_output(r, task=p.checkpoint.task))
+            yield Document(
+                r["image"], *encode_head_output(r, task=p.checkpoint.task)
+            )
 
 
 def _one_root(roots: Iterable[Path], what: str) -> Path:
@@ -351,7 +355,11 @@ def publish(
     dropped_boxes = sum(d.dropped for d in documents)
     line = audit_line(
         "prediction_bucket_published",
-        {"dataset_root": str(root), "bucket": name, "dropped_boxes": dropped_boxes},
+        {
+            "dataset_root": str(root),
+            "bucket": name,
+            "dropped_boxes": dropped_boxes,
+        },
         actor,
         "ok",
     )

@@ -175,7 +175,9 @@ def produce() -> dict[str, JsonValue]:
             traits.trait_key(unreadable, name), json.dumps(record).encode()
         )
         listings["unreadable"] = listing()
-        return normalized({"listings": listings, "answers": answers}, workspace)
+        return normalized(
+            {"listings": listings, "answers": answers}, workspace
+        )
 
 
 if __name__ == "__main__":

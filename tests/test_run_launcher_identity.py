@@ -120,7 +120,9 @@ def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_
         agent_session=identity.agent_session,
     )
     (line,) = audit_rows(tmp_path, "launch_training")
-    assert {f: line.get(f) for f in RecordedIdentity.model_fields} == launch.model_dump()
+    assert {
+        f: line.get(f) for f in RecordedIdentity.model_fields
+    } == launch.model_dump()
     assert "launched_by" not in _launch_record(tmp_path, result.experiment_id)
 
 

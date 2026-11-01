@@ -168,7 +168,9 @@ def test_inspect_project_folds_in_recent_activity(tmp_path: Path) -> None:
     _initialized(tmp_path)
     status = inspect_project(tmp_path)
     # No history yet: counted from the log, not corrupt.
-    assert status["recent_activity"] == RecentActivity().model_dump(mode="json")
+    assert status["recent_activity"] == RecentActivity().model_dump(
+        mode="json"
+    )
 
     report_friction(tmp_path, category="missing_tool", detail="a", actor=None)
     status = inspect_project(tmp_path)

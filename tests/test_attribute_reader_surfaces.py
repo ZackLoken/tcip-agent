@@ -41,9 +41,9 @@ def _published(
     The publication is :func:`~tests._producer_fixtures.published_document`'s.
     """
     image = image_dir(tmp_path, "2024-05-01") / "img.png"
-    key = published_document(tmp_path, name, image, annotations, 8, 8).document_key(
-        "img"
-    )
+    key = published_document(
+        tmp_path, name, image, annotations, 8, 8
+    ).document_key("img")
     assert key is not None
     return key
 

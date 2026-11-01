@@ -293,7 +293,10 @@ def test_the_register_model_door_leaves_only_the_registrys_own_rows(
         True,
     ]
     register_model(
-        tmp_path, name="door", checkpoint_path=str(tmp_path / "c.pt"), actor=None
+        tmp_path,
+        name="door",
+        checkpoint_path=str(tmp_path / "c.pt"),
+        actor=None,
     )
     assert (
         len(audit_rows(tmp_path)) == 3

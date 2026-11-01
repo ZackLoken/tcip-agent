@@ -72,6 +72,7 @@ def push_canvas_state(payload: CanvasStatePayload) -> None:
 
     view = {name: getattr(payload, name) for name in CanvasView.model_fields}
     meta = CanvasMeta(
-        **view | {"image_path": image_path, "user": person}, received_at=arrived
+        **view | {"image_path": image_path, "user": person},
+        received_at=arrived,
     )
     ts.replace(canvas_meta_key(root), meta.model_dump(mode="json"))

@@ -259,7 +259,12 @@ def test_read_audit_log_accepts_a_z_suffixed_bound(
 
 @pytest.mark.parametrize(
     "value",
-    ["2026-03-02Z", "2026-03-02T10Z:00:00", "not-a-timestamp", "2026-03-02T10:00:00"],
+    [
+        "2026-03-02Z",
+        "2026-03-02T10Z:00:00",
+        "not-a-timestamp",
+        "2026-03-02T10:00:00",
+    ],
 )
 def test_read_audit_log_refuses_a_since_bound_that_is_no_instant_or_date(
     bound: BoundProject,

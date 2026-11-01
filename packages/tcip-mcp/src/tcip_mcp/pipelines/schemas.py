@@ -297,7 +297,9 @@ def declared_higher_is_better(metric: str) -> bool | None:
     The declaration is :data:`HIGHER_IS_BETTER_BY_METRIC`'s for the name without
     :data:`VAL_METRIC_PREFIX`.
     """
-    return HIGHER_IS_BETTER_BY_METRIC.get(metric.removeprefix(VAL_METRIC_PREFIX))
+    return HIGHER_IS_BETTER_BY_METRIC.get(
+        metric.removeprefix(VAL_METRIC_PREFIX)
+    )
 
 
 CENTER_MATCH_COMPARABILITY_KEYS: frozenset[str] = frozenset(

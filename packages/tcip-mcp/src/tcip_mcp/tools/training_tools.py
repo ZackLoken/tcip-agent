@@ -273,6 +273,7 @@ def _preflight(
             from tcip_mcp.pipelines.training.run_registry import (
                 evaluation_keywords,
             )
+
             resolved_spec = resolution.spec.model_copy(
                 update={"data": resolution.data}
             )
@@ -830,7 +831,9 @@ def list_split_choices(project: Path, experiment_id: str) -> SplitChoices:
     from tcip_mcp.dataset_layout import dataset_root_of
     from tcip_mcp.pipelines.data.selection import read_selection_checked
 
-    observations = {o.directory: o for o in experiments.run_observations(project)}
+    observations = {
+        o.directory: o for o in experiments.run_observations(project)
+    }
     own_dir = experiments.named_directory(experiment_id, observations)
     if own_dir is None:
         raise LookupError(f"Experiment not found: {experiment_id}")
@@ -1121,7 +1124,9 @@ def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
             ).record
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution fails the trial
             status_error = str(exc)
-    open_run(trial_dir, spec, sources, resolved, created=now(), trial_params=point)
+    open_run(
+        trial_dir, spec, sources, resolved, created=now(), trial_params=point
+    )
     if status_error is not None:
         experiments.write_final_status(
             trial_dir, "failed", status_error, ended=now()
@@ -1557,7 +1562,9 @@ def run_sweep(directory: Path) -> SweepGroup:
     def end(
         state: experiments.FinalState, status_error: str | None
     ) -> SweepGroup:
-        experiments.write_final_status(directory, state, status_error, ended=now())
+        experiments.write_final_status(
+            directory, state, status_error, ended=now()
+        )
         return experiments.read_sweep(
             experiments.observe_sweep(directory), experiments.run_rows(project)
         )

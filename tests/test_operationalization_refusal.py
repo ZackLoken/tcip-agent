@@ -100,7 +100,9 @@ def test_a_trait_with_no_confirmed_revision_refuses_and_names_who_confirms(
         )
 
     assert "none of its 1 revision(s) is confirmed" in str(excinfo.value)
-    refusal = OperationalizationRefusal.model_validate(excinfo.value.as_detail())
+    refusal = OperationalizationRefusal.model_validate(
+        excinfo.value.as_detail()
+    )
     assert refusal.message == str(excinfo.value)
 
 
@@ -360,7 +362,10 @@ def test_both_web_doors_refuse_identically_and_an_acknowledgment_does_not_clear_
 
     assert all(d == details[0] for d in details), details
     assert acknowledged == details[0]
-    assert "bud_opening" in OperationalizationRefusal.model_validate(details[0]).message
+    assert (
+        "bud_opening"
+        in OperationalizationRefusal.model_validate(details[0]).message
+    )
     assert not (tmp_path / "results_export").exists()
 
 
@@ -503,7 +508,10 @@ def test_an_unconfirmed_and_unassessed_delivery_reports_the_meaning_alone(
 
     detail = _web_refusal(client, body, "phenology_measurement")
 
-    assert "assessment" not in OperationalizationRefusal.model_validate(detail).message
+    assert (
+        "assessment"
+        not in OperationalizationRefusal.model_validate(detail).message
+    )
 
 
 # ── the count and aggregate delivery doors ───────────────────────────────────

@@ -297,7 +297,8 @@ def test_stage_proposals_rejects_unnormalized_coords(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "bad_model", ["../annotations/bud", "..", "a/b", "D:/evil", "a\\b", " ", ""]
+    "bad_model",
+    ["../annotations/bud", "..", "a/b", "D:/evil", "a\\b", " ", ""],
 )
 def test_stage_proposals_rejects_a_model_name_that_is_no_single_segment(
     tmp_path: Path, bound: BoundProject, bad_model: str
@@ -312,13 +313,24 @@ def test_stage_proposals_rejects_a_model_name_that_is_no_single_segment(
 
     root = tmp_path / "proj"
     (image,) = write_jpegs(image_dir(root, "2026-02-11"), ["IMG_0001"], SIZE)
-    good = [{"subject": "bud", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+    good = [
+        {
+            "subject": "bud",
+            "conf": 0.9,
+            "cx": 0.5,
+            "cy": 0.5,
+            "w": 0.1,
+            "h": 0.1,
+        }
+    ]
     refused = called_through_the_server(
         "stage_proposals",
         {"image_path": str(image), "model_name": bad_model, "boxes": good},
         bound=bound,
     )
-    assert isinstance(refused, str) and "should match pattern" in refused, refused
+    assert isinstance(refused, str) and "should match pattern" in refused, (
+        refused
+    )
     assert _no_ground_truth(root)
 
 
@@ -331,10 +343,23 @@ def test_stage_proposals_admits_a_model_name_of_one_segment_through_the_server(
     (image,) = write_jpegs(
         image_dir(tmp_path / "proj", "2026-02-11"), ["IMG_0001"], SIZE
     )
-    good = [{"subject": "bud", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+    good = [
+        {
+            "subject": "bud",
+            "conf": 0.9,
+            "cx": 0.5,
+            "cy": 0.5,
+            "w": 0.1,
+            "h": 0.1,
+        }
+    ]
     staged = called_through_the_server(
         "stage_proposals",
-        {"image_path": str(image), "model_name": "agent_proposals", "boxes": good},
+        {
+            "image_path": str(image),
+            "model_name": "agent_proposals",
+            "boxes": good,
+        },
         bound=bound,
     )
     assert isinstance(staged, dict) and "bucket" in staged, staged

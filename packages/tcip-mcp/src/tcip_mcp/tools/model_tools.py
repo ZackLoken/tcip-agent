@@ -115,7 +115,8 @@ def _labeled_available_metrics(models: list[Listed]) -> list[AvailableMetric]:
             AvailableMetric(
                 metric=k,
                 role="comparability_only"
-                if k.removeprefix(VAL_METRIC_PREFIX) in CENTER_MATCH_COMPARABILITY_KEYS
+                if k.removeprefix(VAL_METRIC_PREFIX)
+                in CENTER_MATCH_COMPARABILITY_KEYS
                 else "unlabeled",
                 higher_is_better=declared_higher_is_better(k),
                 sources=sources,

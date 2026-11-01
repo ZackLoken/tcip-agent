@@ -167,12 +167,16 @@ def test_region_scoped_proposal_lands_at_the_full_frame_coordinates(
     register_proposal_engine("patch", PatchProposer())
 
     with pytest.raises(ValidationError, match="overlap"):
-        GridRegion.model_validate({"cells": ["B1", "C1"], "tile_size": TILE_SIZE})
+        GridRegion.model_validate(
+            {"cells": ["B1", "C1"], "tile_size": TILE_SIZE}
+        )
     result = propose_annotations(
         tmp_path,
         str(exif_rotated_source),
         "patch",
-        region=GridRegion(cells=["B1", "C1"], tile_size=TILE_SIZE, overlap=0.0),
+        region=GridRegion(
+            cells=["B1", "C1"], tile_size=TILE_SIZE, overlap=0.0
+        ),
         actor=None,
     )
     assert "error" not in result, result

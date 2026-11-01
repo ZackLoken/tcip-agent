@@ -153,7 +153,9 @@ def test_the_served_build_counts_every_dates_unattributed_photograph(
         )
 
     served = mapping_over(
-        dataset_root, [write_plant_csv(tmp_path / "plants.csv", PLANTS)], tmp_path
+        dataset_root,
+        [write_plant_csv(tmp_path / "plants.csv", PLANTS)],
+        tmp_path,
     ).served()
 
     assert [d.n_unattributed for d in served.per_date.values()] == [1, 1]

@@ -522,7 +522,10 @@ def record_acknowledgment(
     acknowledgment_id = uuid.uuid4().hex
     line = audit_line(
         "delivery_acknowledged",
-        {"acknowledgment_id": acknowledgment_id, "result_sha256": result_sha256},
+        {
+            "acknowledgment_id": acknowledgment_id,
+            "result_sha256": result_sha256,
+        },
         acknowledged_by,
         "ok",
     )

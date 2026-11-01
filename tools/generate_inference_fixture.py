@@ -94,7 +94,10 @@ def produce() -> dict[str, JsonValue]:
     def staged(project: Path, **run: object) -> dict:
         gate.pause()
         launched = served.get("launched")
-        if not isinstance(launched, dict) or run["bucket"] != launched["bucket"]:
+        if (
+            not isinstance(launched, dict)
+            or run["bucket"] != launched["bucket"]
+        ):
             return engine(project, **run)  # type: ignore[arg-type]
         progress, canceled = run["progress"], run["canceled"]
         assert callable(progress) and callable(canceled), run

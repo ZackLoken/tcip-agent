@@ -97,7 +97,9 @@ def _propose_over_the_region(project: Path, image: Path) -> ProposedCandidates:
         project,
         image_path=str(image),
         engine="patch",
-        region=GridRegion(cells=REGION_CELLS, tile_size=TILE_SIZE, overlap=0.0),
+        region=GridRegion(
+            cells=REGION_CELLS, tile_size=TILE_SIZE, overlap=0.0
+        ),
         actor=None,
     )
     assert isinstance(result, ProposedCandidates), result

@@ -103,9 +103,7 @@ def test_a_permitted_origin_still_reaches_the_handler(
         resp = client.post("/api/state/tab", json=body, headers=headers)
         assert resp.status_code == 200, (origin, resp.status_code, resp.text)
 
-        resp = client.post(
-            "/api/sessions/end", headers=headers, json=unopened
-        )
+        resp = client.post("/api/sessions/end", headers=headers, json=unopened)
         assert resp.status_code == 409, (origin, resp.status_code, resp.text)
         assert "origin not allowed" not in resp.text
 

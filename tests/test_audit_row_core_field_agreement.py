@@ -70,7 +70,8 @@ def test_a_stored_line_whose_timestamp_is_no_instant_is_refused_by_the_reader(
 ) -> None:
     line = audit_module.audit_line("scan_dataset", {}, None, "ok").stored()
     tcip_store.append(
-        audit_module.audit_log_key(tmp_path), {**line, "timestamp": "yesterday"}
+        audit_module.audit_log_key(tmp_path),
+        {**line, "timestamp": "yesterday"},
     )
 
     with pytest.raises(ValidationError) as refused:
