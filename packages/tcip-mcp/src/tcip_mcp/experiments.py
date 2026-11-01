@@ -26,7 +26,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import cached_property
 from pathlib import Path
 from typing import (
@@ -712,7 +712,7 @@ class RunObservation[R: RunRecord | SweepRecord]:
     @property
     def heartbeat(self) -> datetime:
         """Its latest sign of life, an instant in UTC."""
-        return datetime.fromtimestamp(self.alive, timezone.utc)
+        return datetime.fromtimestamp(self.alive, UTC)
 
     @property
     def status_error(self) -> str | None:

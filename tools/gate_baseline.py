@@ -1,9 +1,9 @@
 """Run the quality gate CI declares, locally.
 
-The stages are parsed from ``.github/workflows/ci.yml``: every step of the jobs
-:data:`PARSED_JOBS` names, per matrix leg, in workflow order. :data:`OUT_OF_SCOPE_JOBS` names the
-jobs left out, each with its reason. Every selected, unskipped stage runs even if an earlier one
-fails.
+The stages are parsed from ``.github/workflows/ci.yml``: every step of every job it declares, per
+matrix leg, in workflow order, except the jobs :data:`OUT_OF_SCOPE_JOBS` names, each with its
+reason. A step :func:`_skip_reason` answers for is skipped and printed with that reason. Every
+selected, unskipped stage runs even if an earlier one fails.
 
 Each step's ``run:`` text goes through bash. On a Linux or macOS host that is the bash on
 ``PATH``; on Windows it is Git's own bash.exe, derived from the ``git`` on this machine's PATH.
@@ -28,11 +28,7 @@ import yaml
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-# The one-leg pytest run; kept as history, not a comparable baseline, and never
-# overwritten by a later run.
-RECORDED_BASELINE = REPO_ROOT / "docs" / "audit" / "phase0" / "gate-baseline"
 
-PARSED_JOBS = ("mypy", "python", "typescript")
 OUT_OF_SCOPE_JOBS = {
     "environment": "it creates the conda environment this gate's own process already runs inside",
     "docker": (
@@ -48,6 +44,10 @@ OUT_OF_SCOPE_JOBS = {
         "two selected tests exercise the denied-rename branch only a Windows host reaches, so a "
         "Windows host's own suite already covers it and any other host has nothing local to run "
         "in its place"
+    ),
+    "powershell": (
+        "its one step runs PSScriptAnalyzer under pwsh, from a module the Windows runner image "
+        "ships, and this gate runs each step through bash"
     ),
 }
 
@@ -76,9 +76,9 @@ class Stage:
     skip_reason: str | None = None
 
 
-def _load_workflow() -> dict[str, Any]:
+def _load_workflow(workflow: pathlib.Path) -> dict[str, Any]:
     loaded: dict[str, Any] = yaml.safe_load(
-        CI_WORKFLOW.read_text(encoding="utf-8")
+        workflow.read_text(encoding="utf-8")
     )
     return loaded
 
@@ -135,23 +135,26 @@ def _skip_reason(step: dict[str, Any]) -> str | None:
     if "uses" in step:
         return f"uses: {step['uses']}"
     first = _first_effective_line(step.get("run", ""))
-    for prefix in _SKIP_PREFIXES:
-        if first.startswith(prefix):
-            return f"run: starts with {prefix!r}"
+    if first.startswith(_SKIP_PREFIXES):
+        return (
+            f"its first command {first!r} starts with one of {_SKIP_PREFIXES}, "
+            "which this gate leaves to its caller"
+        )
     return None
 
 
-def build_plan() -> list[Stage]:
-    """Return the full stage list, one entry per step per matrix leg, in workflow order.
+def build_plan(workflow: pathlib.Path = CI_WORKFLOW) -> list[Stage]:
+    """Return the stage list of ``workflow``, one entry per step per matrix leg, in order.
 
-    Building this never touches a subprocess. Each key is prefixed with its job
-    name and matrix leg, so the same step name in two jobs (both carry an unnamed
-    ``actions/checkout@v4``) never collides.
+    Every job the workflow declares is planned except those :data:`OUT_OF_SCOPE_JOBS` names.
+    Building this never touches a subprocess. Each key is ``job:position:name`` and the matrix
+    leg, the position being the step's place in its job counted from 1, so a key names one stage
+    even where a job carries two steps of one name.
     """
-    jobs = _load_workflow()["jobs"]
     stages: list[Stage] = []
-    for job_name in PARSED_JOBS:
-        job = jobs[job_name]
+    for job_name, job in _load_workflow(workflow)["jobs"].items():
+        if job_name in OUT_OF_SCOPE_JOBS:
+            continue
         job_env_raw = job.get("env") or {}
         for leg in _matrix_legs(job):
             leg_suffix = (
@@ -160,7 +163,7 @@ def build_plan() -> list[Stage]:
             job_env = {
                 k: _resolve_text(str(v), leg) for k, v in job_env_raw.items()
             }
-            for step in job.get("steps", []):
+            for position, step in enumerate(job.get("steps", []), start=1):
                 name = step.get("name") or step.get("uses") or "<unnamed step>"
                 run_text = step.get("run")
                 cwd = REPO_ROOT
@@ -169,24 +172,27 @@ def build_plan() -> list[Stage]:
                     cwd = (
                         REPO_ROOT / _resolve_text(working_dir, leg)
                     ).resolve()
+                skip_reason = _skip_reason(step)
+                # A skipped step's text never reaches a process, so it is never resolved.
                 step_env = {
                     k: _resolve_text(str(v), leg)
                     for k, v in (step.get("env") or {}).items()
+                    if skip_reason is None
                 }
-                if run_text is not None:
+                if run_text is not None and skip_reason is None:
                     run_text = _resolve_text(run_text, leg)
                     if job_name == "python" and name == "Run tests":
                         # -n auto scales to CI's runner; the documented local invocation is -n 4.
                         run_text = run_text.replace("-n auto", "-n 4")
                 stages.append(
                     Stage(
-                        key=f"{job_name}:{name}{leg_suffix}",
+                        key=f"{job_name}:{position}:{name}{leg_suffix}",
                         job=job_name,
                         name=name,
                         run=run_text,
                         cwd=cwd,
                         env={**job_env, **step_env},
-                        skip_reason=_skip_reason(step),
+                        skip_reason=skip_reason,
                     )
                 )
     return stages
@@ -198,6 +204,7 @@ DEV_EXTRA_PROJECT = REPO_ROOT / "packages" / "tcip-mcp" / "pyproject.toml"
 def mypy_pin() -> str | None:
     """Return the mypy version pinned in tcip-mcp's ``dev`` extra, which CI installs."""
     import tomllib
+
     from packaging.requirements import Requirement
 
     project = tomllib.loads(DEV_EXTRA_PROJECT.read_text(encoding="utf-8"))
@@ -269,8 +276,8 @@ def _safe_filename(key: str) -> str:
 def main() -> int:
     """Run the parsed CI stages, write per-stage output and ``summary.json`` under ``--out``.
 
-    Returns 0 when every stage that ran exited 0, else 1. Refuses an ``--out`` that is the
-    recorded baseline, and an ``--only`` key the plan does not hold.
+    Returns 0 when every stage that ran exited 0, else 1. Refuses an ``--only`` key the plan
+    does not hold.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -284,17 +291,13 @@ def main() -> int:
         "--only",
         action="append",
         default=None,
-        help="a stage key to run instead of the full plan (job:name[leg]); "
+        help="a stage key to run instead of the full plan "
+        "(job:position:name[leg]); "
         "repeat --only for more than one, since a key may itself carry "
         "a comma",
     )
     args = parser.parse_args()
 
-    if args.out.resolve() == RECORDED_BASELINE.resolve():
-        parser.error(
-            f"{RECORDED_BASELINE} is the recorded baseline (a one-leg pytest run, not "
-            "comparable to this gate's run) and stays as history; pass a different --out."
-        )
     args.out.mkdir(parents=True, exist_ok=True)
 
     bash = _resolve_git_bash()

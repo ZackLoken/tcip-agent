@@ -28,7 +28,6 @@ import pathlib
 import shutil
 import subprocess
 import sys
-
 import tomllib
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -708,7 +707,8 @@ def main() -> int:
     parser.add_argument(
         "--out",
         type=pathlib.Path,
-        default=REPO_ROOT / "docs/audit/cross-family",
+        required=True,
+        help="Directory the runs are written under, as <out>/<question-id>/<condition>/.",
     )
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument(
@@ -738,7 +738,7 @@ def main() -> int:
         default=[],
         metavar="FAMILY=PATH",
         help="Override the shared --prompt-file for one family alone; repeatable, "
-        "e.g. --family-prompt codex=docs/audit/codex-only-prompt.txt. Every "
+        "e.g. --family-prompt codex=<path to codex's prompt>. Every "
         "other family still gets --prompt-file.",
     )
     args = parser.parse_args()
@@ -869,7 +869,7 @@ def main() -> int:
         print(
             f"{meta['family']:<14}{meta['exit_code']:>6}{meta['duration_s']:>9}"
             f"{meta['response_chars']:>9}  {meta['response_source']:<20}"
-            f"{f'{model} ({meta['effort_requested']})':<34}{meta['harness_version']}"
+            f"{f'{model} ({meta["effort_requested"]})':<34}{meta['harness_version']}"
         )
     recovered = [
         m["family"]

@@ -1,14 +1,11 @@
-# Platform-agnostic conda environment for TCIP Agent.
-#
-#   conda env create -f environment.yml
-#   conda activate tcip-agent
+# Platform-agnostic conda environment for TCIP Agent, created as README.md's Setup states.
 #
 # This installs conda-managed Python + Node, then via pip the four local packages, editable,
 # with the dependencies and extras each declares. Run it from the
 # repository root so the editable paths resolve.
 #
-# GPU note: the CUDA build (cu130) via --extra-index-url below; it runs without a GPU too, since
-# every device placement branches on torch.cuda.is_available(). CI installs its own CPU wheel.
+# torch is the CPU build while the CPU index and PyPI carry the same newest release, whose +cpu
+# build outranks PyPI's (a CUDA build on Linux); README.md's Setup names the CUDA line.
 name: tcip-agent
 channels:
   - conda-forge
@@ -19,7 +16,7 @@ dependencies:
   - nodejs==22.23.4
   - pip
   - pip:
-      - --extra-index-url https://download.pytorch.org/whl/cu130
+      - --extra-index-url https://download.pytorch.org/whl/cpu
       - -e ./packages/tcip-store
       - -e ./packages/tcip-annotation
       - -e ./packages/tcip-mcp[dev,hpo]

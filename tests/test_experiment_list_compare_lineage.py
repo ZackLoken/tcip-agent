@@ -229,7 +229,7 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
     strictly after the final status's ``ended`` are counted. A row stating no timestamp refuses
     the run's comparison, naming the row.
     """
-    from datetime import timedelta, timezone
+    from datetime import UTC, timedelta, timezone
 
     from tcip_mcp.experiments import (
         METRICS_FILE,
@@ -265,15 +265,15 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
         },  # before
         {
             "epoch": 3,
-            "timestamp": at(-1, timezone.utc).replace("+00:00", "Z"),
+            "timestamp": at(-1, UTC).replace("+00:00", "Z"),
             "loss": 0.3,
         },
         {
             "epoch": 4,
-            "timestamp": at(0, timezone.utc),
+            "timestamp": at(0, UTC),
             "loss": 0.4,
         },  # same instant: not after
-        {"epoch": 5, "timestamp": at(1, timezone.utc), "loss": 0.5},  # after
+        {"epoch": 5, "timestamp": at(1, UTC), "loss": 0.5},  # after
     ]
     for row in rows:
         append_row(run_dir / METRICS_FILE, MetricsRow.model_validate(row))

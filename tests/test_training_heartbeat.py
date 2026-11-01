@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from tests._verified_checkpoint_fixtures import detection_config, opened_run
@@ -95,7 +95,7 @@ def test_a_listed_row_carries_the_heartbeat_instant(tmp_path: Path) -> None:
     assert by_id["beating"]["state"] == "running"
     assert datetime.fromisoformat(
         by_id["beating"]["heartbeat"]
-    ) == datetime.fromtimestamp(instant, timezone.utc)
+    ) == datetime.fromtimestamp(instant, UTC)
 
 
 def test_configured_stale_window_agrees_across_run_list_compare_and_status(

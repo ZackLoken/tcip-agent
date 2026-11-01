@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable, Iterable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, NamedTuple
 
@@ -175,7 +175,7 @@ def remove_project(
         raise ValueError(conflict)
     removed = workspace / REMOVED_DIRNAME
     removed.mkdir(exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     archive_path = removed / f"{project.name}-{stamp}.zip"
     moved_to = removed / f"{project.name}-{stamp}"
     result = write_archive(

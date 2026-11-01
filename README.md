@@ -86,37 +86,66 @@ mapping), Annotate (labeling, review of model proposals, completion marks and fl
 (runs, an embedded TensorBoard, run comparison), Inference (jobs over photos or a mosaic), Results
 (deliveries and acknowledgments) and Meta (the project's friction reports and retrospectives). An
 agent terminal beside the tabs launches Claude Code, Codex or Antigravity on the open project; a
-conversation of the same harness resumes within that harness's documented prompt-cache window, and
-a switch of harness asks the running agent for a hand-off first.
+launch resumes the row's last conversation when the backend's rule allows it and tells the breeder
+why when it does not, and a switch of harness asks the running agent for a hand-off first.
 
 ## Setup
 
+A fresh machine needs these before the first command:
+
+- git, to clone the repository.
+- Miniforge, the conda installer with conda-forge as its only channel; Node comes from the
+  environment. Its installers are under
+  `https://github.com/conda-forge/miniforge/releases/latest/download/`, named in Miniforge's
+  README (`Miniforge3-Windows-x86_64.exe`, `Miniforge3-$(uname)-$(uname -m).sh`). A Miniconda
+  install adds the Anaconda channels, whose terms only you can accept, and `conda env create`
+  stops until you do.
+- On Linux, the libGL and GLib libraries the opencv-python wheel links (`libgl1` and
+  `libglib2.0-0` on Debian and Ubuntu).
+- For the agent terminal, the command line of each harness you will run, on `PATH` and signed in:
+  `claude` (Claude Code), `codex` (Codex) or `agy` (Antigravity).
+- Docker, for the container image alone.
+
+Every command below runs from the repository root, in a shell conda is initialized for, alike in
+bash and PowerShell except the one `export` line, whose PowerShell form sits beside it. Miniforge's
+README says the Windows installer's defaults leave `conda` in the Miniforge Prompt alone until
+`conda init` is run there ("conda/mamba usable in any terminals"), and that the Unix installer
+prompts to initialize your shell ("Unix-like platforms").
+
 ```bash
-# Python: creates the env and installs the four packages (editable); run from the repository root.
+# Python: creates the env and installs the four packages (editable).
 conda env create -f environment.yml
 conda activate tcip-agent
 
 # Frontend: install, then build the bundle the backend serves (the built bundle is not tracked).
-npm --prefix packages/tcip-web/frontend install
+npm --prefix packages/tcip-web/frontend ci
 npm --prefix packages/tcip-web/frontend run build
 ```
 
-The environment installs the CUDA (cu130) torch wheel by default; it runs without a GPU too.
+The torch build the environment installs, and the condition it holds under, is the one
+`environment.yml`'s header states. On a machine with an NVIDIA driver, this line in the activated
+environment replaces it with the CUDA 13.2 build, the one PyTorch's install page
+(`https://pytorch.org/get-started/locally/`) lists first for torch 2.15.0:
+
+```bash
+pip install --upgrade torch torchvision --index-url https://download.pytorch.org/whl/cu132
+```
 
 The build writes the bundle inside the `tcip-web` package, so the environment's editable install
 serves it at once; a wheel or the Docker image carries the bundle built before it was made.
 
 `docker build -f packages/tcip-web/Dockerfile -t tcip .` from the repository root, then `docker run
 --network host -e TCIP_WORKSPACE=<workspace> tcip`, builds and runs the platform as a container,
-serving the GUI on the host's loopback. The image carries no agent harness, so the GUI's agent
-terminal does not run inside it. A published port (`-p`) cannot serve the GUI, since its requests
-would arrive through a bridged address the backend's trust boundary refuses.
+serving the GUI on the host's loopback. The image carries the CPU build of torch and no agent
+harness, so the GUI's agent terminal does not run inside it. A published port (`-p`) cannot serve
+the GUI, since its requests would arrive through a bridged address the backend's trust boundary
+refuses.
 
 ## Running
 
 ```bash
 # Backend plus the built GUI at http://127.0.0.1:8765; it refuses to start without the workspace.
-export TCIP_WORKSPACE=<workspace>
+export TCIP_WORKSPACE=<workspace>      # PowerShell: $env:TCIP_WORKSPACE = "<workspace>"
 python -m tcip_web
 
 # Frontend dev server, proxying /api and /ws to the backend, at http://127.0.0.1:5173
@@ -136,15 +165,8 @@ An MCP client starts the server itself (see `.mcp.json`). A server acts on the p
 started for (`python -m tcip_mcp --project <path>`), or, started for none, on the first project its
 `initialize_project` creates; both need `TCIP_WORKSPACE`.
 
-Tests and gates:
-
-```bash
-pytest tests/ -n 4 --tb=short --timeout=300 -q
-ruff check packages tests tools
-mypy                                   # roots from mypy.ini, run from the repository root
-npm --prefix packages/tcip-web/frontend run format:check   # then lint, typecheck, test, build
-python tools/smoke_terminal_e2e.py claude   # one live run of a provider row (spends model turns)
-```
+The tests and gates are `CLAUDE.md`'s Commands block; `python tools/smoke_terminal_e2e.py claude`
+is one live run of a provider row, which spends model turns.
 
 ## From images to a delivered number
 
@@ -185,7 +207,7 @@ Built:
 - State-crossing milestones for any trait whose entry states a positive state and milestone
   fractions, delivered per plant from per-date buckets.
 - A physical-scale path for per-photo dimensional traits.
-- The in-app agent terminal for three harnesses, resume within each harness's cache window, and the
+- The in-app agent terminal for three harnesses, resume of a row's last conversation, and the
   hand-off on a switch.
 
 Not built yet:

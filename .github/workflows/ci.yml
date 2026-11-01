@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  # The only job that reads environment.yml. The pip jobs below install their own set, so without
-  # this a break in the documented install reaches an adopter before it reaches CI.
+  # The documented install, environment.yml through Miniforge. The pip jobs below install their own
+  # set, so without this a break in the documented install reaches an adopter before it reaches CI.
   environment:
     strategy:
       fail-fast: false
@@ -29,6 +29,8 @@ jobs:
 
       - uses: conda-incubator/setup-miniconda@v3
         with:
+          miniforge-version: latest
+          conda-remove-defaults: "true"
           environment-file: environment.yml
           activate-environment: tcip-agent
           auto-activate-base: false
@@ -168,6 +170,8 @@ jobs:
 
       - uses: conda-incubator/setup-miniconda@v3
         with:
+          miniforge-version: latest
+          conda-remove-defaults: "true"
           environment-file: environment.yml
           activate-environment: tcip-agent
           auto-activate-base: false
@@ -198,6 +202,8 @@ jobs:
 
       - uses: conda-incubator/setup-miniconda@v3
         with:
+          miniforge-version: latest
+          conda-remove-defaults: "true"
           environment-file: environment.yml
           activate-environment: tcip-agent
           auto-activate-base: false

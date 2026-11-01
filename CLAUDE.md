@@ -168,7 +168,7 @@ for general techniques only, never for a per-trait pipeline; the endpoint is a t
   since a suite that compares the platform only to itself proves nothing about the number. A
   change replacing a hand-written implementation with a library call lands with that test as
   its gate.
-- Gates before reporting a change done: `ruff check packages tests tools`, `mypy`, and the change's
+- Gates before reporting a change done: the Commands block's ruff and mypy lines, and the change's
   own test files. Never report a gate before its slowest part finishes; green means no detected
   breakage, never correctness. A test touching the filesystem outside `tmp_path` is the first reread
   on a break that only shows in CI.
@@ -197,12 +197,16 @@ for general techniques only, never for a per-trait pipeline; the endpoint is a t
 ## Commands
 
 ```bash
-conda activate tcip-agent          # Python 3.13; torch installs CUDA by default, runs without a GPU
+conda activate tcip-agent
 pytest tests/ -n 4 --tb=short --timeout=300 -q
 ruff check packages tests tools
 mypy                               # roots from mypy.ini, run from the repo root
 python tools/list_tools.py         # the MCP tool list (never hardcode counts in docs)
-npm --prefix packages/tcip-web/frontend run build   # lint, typecheck and test take the same prefix
+npm --prefix packages/tcip-web/frontend run format:check   # the frontend gate, whole and in order
+npm --prefix packages/tcip-web/frontend run lint
+npm --prefix packages/tcip-web/frontend run typecheck
+npm --prefix packages/tcip-web/frontend test
+npm --prefix packages/tcip-web/frontend run build
 python -m tcip_web                 # backend plus built UI at http://127.0.0.1:8765
 tcip dump-store <project> <out_dir>   # a project's records and logs written out as files
 ```

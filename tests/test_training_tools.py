@@ -489,7 +489,7 @@ def test_preflight_admits_the_run_once(tmp_path: Path) -> None:
     real_admit = label_queries.admit
 
     def counting_admit(
-        *args: Unpack[tuple[str | Path, str | Path | None]],
+        *args: *tuple[str | Path, str | Path | None],
         **kwargs: Unpack[_AdmitKeywords],
     ) -> Admission:
         calls.append(args)

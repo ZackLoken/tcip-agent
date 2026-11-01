@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias, get_args
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 if TYPE_CHECKING:
     import numpy as np
@@ -751,7 +751,7 @@ def derive_cross_tile_nms(regions: Sequence[Region]) -> float | None:
     return threshold
 
 
-MaskPair: TypeAlias = "tuple[np.ndarray, tuple[int, int], list]"
+type MaskPair = tuple[np.ndarray, tuple[int, int], list]
 """One detection matched to one ground-truth object: the detection's uncut soft mask over the part
 of its frame it spans, that part's ``(x, y)`` origin, and the object's rings in frame pixels."""
 

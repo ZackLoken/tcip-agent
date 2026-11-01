@@ -346,8 +346,8 @@ run_hyperparameter_search(
   in the sweep's input so a relaunch replays it; it is distinct from `data.split.seed`. The
   `17` above is an arbitrary example value.
 - `search_alg`: `random`/`grid` (native), plus `optuna`, `bayesopt`, `hyperopt`, all
-  installed by default. `grid` enumerates every discrete axis, and an `int` axis wider than
-  `hpo.GRID_AXIS_LIMIT` values refuses by name; every other search samples an `int` axis from
+  installed with `tcip-mcp`'s `hpo` extra. `grid` enumerates every discrete axis, and an `int`
+  axis wider than `hpo.GRID_AXIS_LIMIT` values refuses by name; every other search samples an `int` axis from
   its bounds. An uninstalled or unoffered pick errors clearly (never silently swapped),
   and so does `split_draws` above one with a backend pick.
   Call `available_search_algs` for the live list on this box.

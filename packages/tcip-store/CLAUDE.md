@@ -26,7 +26,5 @@ src/tcip_store/
   its key builder and nothing else. A file is addressed by the path its owning module computes.
 - A transaction is one commit over one root's records and logs: `txn.write`, `txn.delete` and
   `txn.append` land together or not at all.
-- Every process binds the backend once at its entry point with `tcip_store.bind()`.
-- `tcip dump-store` writes a project's records and logs out as files for a person to read; nothing
-  reads them back.
+- Nothing reads back the files `tcip dump-store` writes.
 - No dependency on `tcip-annotation`, `tcip-mcp`, or `tcip-web`.
