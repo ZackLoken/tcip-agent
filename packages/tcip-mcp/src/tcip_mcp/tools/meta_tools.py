@@ -7,7 +7,7 @@ first by the time each record states.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum, auto
 from pathlib import Path
 from typing import Any, Literal
@@ -267,7 +267,7 @@ def _bound_instant(bound: datetime | date, *, end_of_day: bool) -> datetime:
     """
     if isinstance(bound, datetime):
         return bound
-    start = datetime.combine(bound, time(), tzinfo=timezone.utc)
+    start = datetime.combine(bound, time(), tzinfo=UTC)
     return start + timedelta(days=1, microseconds=-1) if end_of_day else start
 
 

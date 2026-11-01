@@ -30,6 +30,5 @@ src/tcip_annotation/
   `iscrowd` is a region of unseparated objects, never one instance; a run-length mask arrives as
   rings. One per-record decoder (`json_io.annotation_of_record`) reads every record, and a supplied
   value that does not parse refuses rather than reading as absent.
-- A negative is an empty subject plus a person's completion mark in the same document (see root
-  `CLAUDE.md`'s measurement-integrity invariants); `LabelDocument.state` is the one reading of it,
-  and an empty label document alone is never a negative.
+- `LabelDocument.state` is the one reading of a negative as root `CLAUDE.md`'s
+  measurement-integrity invariants define it.

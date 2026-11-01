@@ -7,83 +7,91 @@ is the largest and the least bounded.
 
 ## Channel 1: the in-app agent, to the model provider
 
-The platform's central design is an agent driving the pipeline. The in-app terminal spawns a real
-Claude Code process granted the workspace of breeding projects through `--add-dir`, behind a
-permission fence that denies edits outside a narrow allowlist and denies a set of shell write verbs,
-but places no restriction on reading. Every prompt, every file the agent reads, and every image it
-views becomes model-provider context. Nothing in TCIP bounds, filters, or redacts what enters that
-context.
+The platform's central design is an agent driving the pipeline. The in-app terminal spawns one of
+three harnesses, Claude Code, Codex or Antigravity, with the workspace of breeding projects as its
+working directory; the Claude Code row also adds this repository through `--add-dir`. Each row's
+enforcement is the `confinement` its definition in `terminal.py`'s `PROVIDERS` states, recorded on
+every launch. Every prompt, every file the agent reads, and every image it views becomes
+model-provider context. Nothing in TCIP bounds, filters, or redacts what enters that context.
 
 Some of this leaves without the agent choosing to read anything. The session-start hook injects the
-active project's name into the first model turn, so project identity reaches the provider on turn
-one by construction.
+active project's name into the first model turn of a new conversation (a resumed one is told
+nothing), so project identity reaches the provider on that turn by construction.
 
 This is the largest egress channel and the platform does not control it. When you let the agent
 work, the breeding data it reads goes to the model provider, the same as if you pasted that data
-into a chat. The provider is whoever the operator authenticated Claude Code against; the platform
-holds no provider key of its own, so it inherits the operator's authentication.
+into a chat. The provider is whoever the operator authenticated the launched harness against; the
+platform holds no provider key of its own, so it inherits the operator's authentication.
 
-Two adjacent channels widen this. The fenced agent is allow-listed for `WebSearch` with no query
-constraint, so an agent-composed query can carry a crop, site, cultivar, or trait name to a search
-provider. And neither shell guard carries a network rule, so the same agent can `curl` or `wget`
-breeding data to any host. The fence's per-domain `WebFetch` scoping to academic sources is real for
-the `WebFetch` tool and does not constrain an agent that reaches the shell.
+Two adjacent channels widen this on the Claude Code row. Its agent is allow-listed for `WebSearch`
+with no query constraint, so an agent-composed query can carry a crop, site, cultivar, or trait name
+to a search provider. And neither of its shell guards carries a network rule, so the same agent can
+`curl` or `wget` breeding data to any host. The fence's per-domain `WebFetch` scoping to academic
+sources is real for the `WebFetch` tool and does not constrain an agent that reaches the shell.
 
-## Channel 2: the cross-family runner, to two more providers
+## Channel 2: the cross-family runner, to every provider it names
 
-`scripts/cross_family_ask.py` sends its prompt to Codex (OpenAI) and Antigravity (Google) on every
-invocation, in read-only mode. It is developer tooling rather than a platform feature, and the
-platform never invokes it on project data. But an adopter who runs cross-family work ships whatever
-the prompt carries to two additional providers. Shipped code reaches three providers in total:
-Anthropic by default, and OpenAI plus Google through this developer script.
+`tools/cross_family_ask.py` sends its prompt to the provider of every harness it is run against;
+its `BUILDERS` and their docstrings name the families and the mode each runs in, and its
+`--families` default the selection. It is developer tooling rather than a platform feature, and
+the platform never invokes it on project data. But an adopter who runs cross-family work ships
+whatever the prompt carries to every provider it names, where the in-app terminal reaches the one
+provider of the row it launched.
 
-## Channel 3: Ray usage statistics, phoning home by default
+## Channel 3: Ray usage statistics
 
-`run_hyperparameter_search` starts a Ray cluster whose usage-statistics reporter is enabled by
-default and posts periodically to `https://usage-stats.ray.io/`. The payload is machine and cluster
-metadata, not project data. It is the platform's one phone-home, and it is disabled with a single
-environment variable, `RAY_USAGE_STATS_ENABLED=0`, which the platform does not set for you. An
-adopter running hyperparameter optimization behind a firewall must either allow that host or set
-that variable.
+`run_hyperparameter_search` starts a local Ray cluster through `ray.init()` (`hpo._ray_session`).
+Ray's usage-statistics page (`https://docs.ray.io/en/latest/cluster/usage-stats.html`) states that
+collection "is not enabled when using local dev clusters started via `ray.init()` unless it's a
+nightly wheel"; a cluster that does collect reports to `https://usage-stats.ray.io/` every hour.
+The `hpo` extra installs Ray from PyPI (`ray[tune]`).
 
 ## Channel 4: inbound fetches a firewalled adopter must allow
 
-The platform reaches out at install and first use: conda and PyPI at environment creation,
-pretrained backbone weights from the timm and Hugging Face hosts on first backbone build, and the
-two proposal engines' checkpoints (`sam` and `grounding_dino`) from the Hugging Face host into the
-user-profile cache on each engine's first call. An adopter behind a restrictive firewall needs
-these hosts allow-listed, or the platform will fail at install, at first model build and at
-first proposal.
+The platform reaches out at install and first use: conda-forge, PyPI and PyTorch's wheel index
+(`download.pytorch.org`) at environment creation, pretrained backbone weights from the timm and
+Hugging Face hosts on first backbone build, and the two proposal engines' checkpoints (`sam` and
+`grounding_dino`) from the Hugging Face host into the user-profile cache on each engine's first
+call. An adopter behind a restrictive firewall needs these hosts allow-listed, or the platform will
+fail at install, at first model build and at first proposal.
 
 ## What does not phone home
 
-- The platform's own code carries no telemetry vendor, analytics, crash reporter, or update check.
-- The only HTTP client between platform components is the panel push from the MCP tools to the web
-  backend, which defaults to loopback (`127.0.0.1`). Its host is configurable, so repointing it
-  sends those panel events wherever it is pointed.
+- The platform's own code carries no telemetry vendor, analytics, crash reporter, or update check,
+  and connects outward only as Channels 3 and 4 state.
+- Three HTTP clients run between platform components. The panel push from the MCP tools posts to
+  the URL `web_client.backend_url` builds, the loopback address (`127.0.0.1`) at the port the
+  backend recorded in the workspace's store. The session hook posts to the URL it is given, which
+  every launch builds through that same function or leaves the hook to build so. The backend's
+  TensorBoard proxy forwards to the loopback address (`routes/training.py`).
 - The frontend contacts no external host; the GUI's annotation timing is loopback-only.
-- TensorBoard and the Ray dashboard bind loopback; MCP is stdio with no socket.
+- TensorBoard binds loopback; MCP is stdio with no socket.
 - The web package holds no provider SDK, so the GUI runs no direct provider API loop of its own; all
-  provider contact is through the operator's own Claude Code process.
+  provider contact is through the harness process the operator's terminal row launches.
 
 ## Agent transcripts sit outside TCIP retention
 
-Your agent's session transcripts are written by Claude Code to `~/.claude/projects/`, outside every
-TCIP retention or deletion control. Deleting a TCIP project deletes none of its transcripts.
+Your agent's session transcripts are written by its harness, outside every TCIP retention or
+deletion control: Claude Code writes them to `~/.claude/projects/`, Codex under its `CODEX_HOME`
+(its documentation's example is `~/.codex/history.jsonl`), and Antigravity where it chooses.
+Deleting a TCIP project deletes none of its transcripts.
 
 ## The trust boundary today, and where it stops holding
 
-The GUI binds to loopback (`127.0.0.1`) by default and is frictionless with no authentication. A
-connection is judged by the address it arrived on, not by the configured bind: one from this machine
-is served, one through a network address is refused until the operator sets
-`TCIP_WEB_ALLOW_INSECURE=1`, because an exposed GUI hands an unauthenticated network client
-filesystem reads and writes and an interactive agent terminal, which is keyboard access to Claude
-Code. A cross-site page cannot open a WebSocket and read GUI state (the Origin must be the request's
-own origin), and DNS rebinding is blocked because the Host header must name this backend as reached
-(its arrival address, its own hostname, or a name the operator advertised under the opt-in; there is
-no wildcard). A reverse proxy in front of the backend is an exposed deployment: the backend cannot
-see the proxied client, so it is served only under the opt-in with the proxy's name advertised.
-Token authentication for an intentionally exposed GUI is a planned follow-on.
+The GUI binds the loopback address (`127.0.0.1`) and has no authentication. Its boundary,
+`trust_boundary.py`, judges a connection by the address it arrived on: one through anything but the
+loopback address or a UNIX socket is refused, always, since the GUI hands its client filesystem
+reads and writes and an interactive agent terminal, which is keyboard access to the harness it
+launches. The Host header must name the loopback host at the port the connection arrived on, so a
+rebinding name is refused. Every WebSocket and every state-changing request (`POST`, `PUT`,
+`PATCH`, `DELETE`) must carry either no Origin, as a non-browser client such as the MCP tools does,
+or one naming the loopback host at any port, so a page another server on this machine serves
+passes that check too. A route that requires a JSON body model refuses any other body before its
+handler runs (`routes/_body_common.py`), and the backend answers no CORS preflight, which a browser
+sends first for a cross-origin JSON request, so that page's browser cannot call such a route. The
+TensorBoard proxy (`forward_to_board` in `routes/training.py`, for GET and POST) requires no body
+model and forwards the body it receives, so its requests are admitted by the boundary's checks
+alone: the arrival and Host checks, and for a POST the Origin check, which that page passes.
 
 What the platform records about who acted is a declaration, not a verification. The MCP server
 records which agent harness connected to it (the name and version the client declared in the MCP
@@ -113,12 +121,3 @@ component or file, the egress channel or trust boundary involved if one of the a
 steps, and what you were able to observe or access as a result.
 
 There is no bug bounty. Expect acknowledgement within 7 days of the report landing.
-
-## In one paragraph
-
-When you let the agent drive TCIP, the breeding data it reads is sent to your model provider, the
-same as pasting it into a chat; the platform does not redact or bound this. Your agent's session
-transcripts are written outside every TCIP retention control. Hyperparameter optimization phones
-home to Ray by default unless you set `RAY_USAGE_STATS_ENABLED=0`. The platform itself carries no
-telemetry and makes no other outbound connection beyond fetching dependencies and model weights at
-install and first use.

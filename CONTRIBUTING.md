@@ -10,30 +10,9 @@ as `python -m tcip_web.cli <command>` instead, so the test suite holds without t
 
 ## Gates a change must pass
 
-The commands below are CLAUDE.md's Commands block, verbatim, the same gate the project itself runs a
-change against:
-
-```bash
-conda activate tcip-agent          # Python 3.13; torch installs CUDA by default, runs without a GPU
-pytest tests/ -n 4 --tb=short --timeout=300 -q
-ruff check packages tests tools
-mypy                               # roots from mypy.ini, run from the repo root
-python tools/list_tools.py         # the MCP tool list (never hardcode counts in docs)
-npm --prefix packages/tcip-web/frontend run build   # lint, typecheck and test take the same prefix
-python -m tcip_web                 # backend plus built UI at http://127.0.0.1:8765
-tcip dump-store <project> <out_dir>   # a project's records and logs written out as files
-```
-
-`conda activate tcip-agent` is the environment every other line below runs inside, not a gate of its
-own. `pytest tests/` is the suite. `ruff check packages tests tools` and `mypy` are the lint and
-type gates. `python tools/list_tools.py` is how you find the current MCP tool count and names; never
-hardcode a count in a doc, comment, or commit message. `python tools/gate_baseline.py --out <dir>`
-runs the same stages `.github/workflows/ci.yml` declares, so a local pass predicts CI. The frontend
-line is the frontend's own gate, run only when a frontend file changed; `lint`, `typecheck` and
-`test` run under the same prefix. `python -m tcip_web` is how you confirm a change against the
-served app rather than tests alone. `tcip dump-store <project> <out_dir>` writes a project's records
-and logs out as files; run it, not a hand-written script, whenever a change needs to inspect a
-project's stored state.
+The gate is CLAUDE.md's Commands block, the same one the project itself runs a change against;
+this document does not restate it. `python tools/gate_baseline.py --out <dir>` is the local run of
+CI's jobs, whose module docstring says which steps it leaves to CI.
 
 ## Rules a contributor meets
 

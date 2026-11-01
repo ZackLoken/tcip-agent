@@ -1,11 +1,14 @@
-# The lint and format gate: CI runs `ruff check .` and `ruff format --check .`, a developer the
-# same over `packages tests tools`. The code follows PEP 8 strictly and this gate enforces it.
+# The lint and format gate. CI's `.` and CLAUDE.md's `packages tests tools` are one file set on
+# CI, whose checkout tracks no Python elsewhere. The code follows PEP 8 strictly.
 
 # Selected explicitly, never ruff's implicit default, which moves between releases; the preview
-# rules move too, so .github/workflows/ci.yml pins the ruff version this file was written against.
+# rules move too, so tcip-mcp's dev extra pins the ruff version this file was written against.
 
 # 79 columns for code, PEP 8's limit, which the formatter holds.
 line-length = 79
+
+# The packages' requires-python (>=3.12); ruff infers it only from a pyproject.toml beside this file.
+target-version = "py312"
 
 [format]
 docstring-code-format = true

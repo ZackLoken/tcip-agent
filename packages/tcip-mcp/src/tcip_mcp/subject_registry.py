@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, Protocol
 
 from pydantic import (
     BaseModel,
@@ -55,10 +55,7 @@ class _Named(Protocol):
     def name(self) -> str: ...
 
 
-_N = TypeVar("_N", bound=_Named)
-
-
-def named(records: Iterable[_N], name: str) -> _N | None:
+def named[N: _Named](records: Iterable[N], name: str) -> N | None:
     """Return the first of ``records`` named ``name``, or ``None`` when none is."""
     return next((r for r in records if r.name == name), None)
 

@@ -7,10 +7,10 @@ image build's ignore file each name that output, and the package's wheel carries
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
-import tomllib
 
 from tcip_web.app import ASSETS_DIR, STATIC_DIR
 from tests import FRONTEND, REPO_ROOT, VITE_CONFIG, printed_json

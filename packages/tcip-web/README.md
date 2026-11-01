@@ -50,9 +50,7 @@ proxies the API routes to the backend. On startup, the backend:
 MCP tools HTTP POST to `POST /api/events/{panel}` on the backend, which broadcasts those events to
 any browser subscribed to `/ws/panel/{panel}`.
 
-Port discovery inside MCP tools: the workspace root's port record, the port the backend bound,
-always at `127.0.0.1`; with no record, no backend serves the workspace and an event is not
-delivered.
+Port discovery inside MCP tools is `tcip_mcp.web_client.backend_url`'s.
 
 ## Keyboard map
 
@@ -68,11 +66,5 @@ Calls made for this single-operator desktop GUI:
   controls). Full ARIA/screen-reader support is not targeted for this local single-user tool.
 - Touch / pen: not supported. The annotation canvas is mouse-only (wheel-zoom, middle-drag pan,
   click-to-draw). Field-tablet (touch/pen) annotation is a known limitation and future work.
-- Trust boundary. A connection from this machine (a loopback address) is served with no auth; a
-  connection through a network address is refused, because the GUI hands its client filesystem reads
-  and writes and the interactive agent terminal (keyboard access to a coding agent) with no login.
-  The Host header must be a loopback name at the port the connection arrived on, and every WebSocket
-  connect and every state-changing HTTP request (`POST`/`PUT`/`PATCH`/`DELETE`) either carries no
-  Origin at all (the non-browser allowance; the MCP tools send none) or carries a loopback origin at
-  any port. Another local server's page is admitted by this layer too; only the JSON-body guard's
-  unanswered preflight stops its browser from mutating.
+- Trust boundary: the repository's `SECURITY.md`, "The trust boundary today, and where it stops
+  holding".

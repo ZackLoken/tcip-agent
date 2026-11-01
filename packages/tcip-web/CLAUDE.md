@@ -20,14 +20,10 @@ frontend/src/
   api/  components/  hooks/  lib/  store/  tabs/  test/
 ```
 
-## Frontend gate: run in CI order
+## Frontend gate
 
-A partial run misses `format:check`/`lint`:
-
-```bash
-cd packages/tcip-web/frontend
-npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
-```
+The root `CLAUDE.md`'s Commands block spells it in CI's order; a partial run misses
+`format:check` or `lint`.
 
 Use the `frontend-design` skill for IA/visual work.
 

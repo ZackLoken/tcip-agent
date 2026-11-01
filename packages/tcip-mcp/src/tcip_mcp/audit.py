@@ -12,9 +12,9 @@ import inspect
 import logging
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, TypeVar, overload
+from typing import Annotated, Any, overload
 
 from pydantic import AwareDatetime, BeforeValidator, ConfigDict, JsonValue
 from pydantic_core import to_jsonable_python
@@ -107,7 +107,7 @@ def acts_of(
 
 def now() -> datetime:
     """Return the current instant, in UTC."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _redact(args: dict[str, Any]) -> dict[str, Any]:
@@ -224,13 +224,12 @@ def dataset_scope_of(value: Path) -> Path | None:
     return dataset_root_of(value.parent if value.is_file() else value)
 
 
-_Door = TypeVar("_Door", bound=Callable[..., Any])
-
-
 @overload
-def audited(fn: _Door) -> _Door: ...
+def audited[Door: Callable[..., Any]](fn: Door) -> Door: ...
 @overload
-def audited(*, scope_arg: str | None = None) -> Callable[[_Door], _Door]: ...
+def audited[Door: Callable[..., Any]](
+    *, scope_arg: str | None = None
+) -> Callable[[Door], Door]: ...
 def audited(
     fn: Callable | None = None,
     *,

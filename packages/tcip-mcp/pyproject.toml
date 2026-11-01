@@ -45,9 +45,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# [default] adds the dashboard's own deps (aiohttp, grpcio); hpo._ray_session only requests it when importable.
 # bayesian-optimization<2: Ray Tune's BayesOptSearch (2.58) calls bayes_opt.UtilityFunction, removed in 2.0.
-hpo = ["ray[default,tune]>=2.9", "optuna>=3.0", "hyperopt", "bayesian-optimization<2"]
+hpo = ["ray[tune]>=2.9", "optuna>=3.0", "hyperopt", "bayesian-optimization<2"]
 # ruff and mypy pinned: ruff.toml runs pycodestyle's preview rules, which move between releases,
 # and a mypy release can redefine the gate's module discovery.
 dev = [

@@ -7,8 +7,8 @@ exact usage; this index only says what each does. CI and development tooling onl
 commands a breeder or an operator runs against a project are documented in `README.md` and
 `CONTRIBUTING.md` instead.
 
-- `gate_baseline.py` - runs the quality gate CI actually declares, parsed from
-  `.github/workflows/ci.yml` rather than restated by hand, so a local pass predicts a CI pass.
+- `gate_baseline.py` - runs CI's own jobs locally; its module docstring says which jobs and steps
+  it leaves out.
 - `prove_test_fails_before.py` - extracts a baseline revision with `git archive`, overlays the
   current test tree so conftest and helpers travel with the test, proves the baseline's own source
   is what gets imported, and reads pytest's per-test outcome to say whether a test actually fails
@@ -19,9 +19,8 @@ commands a breeder or an operator runs against a project are documented in `READ
   against the integration branch otherwise; the previous commit is not a baseline in a
   one-file-per-commit history, so pass `--baseline` when neither default applies. `--test-rev`
   checks a guard claim already in the history.
-- `cross_family_ask.py` - poses one identical question to several agent harnesses (claude, codex,
-  antigravity) and records comparable answers: the exact prompt, argv, stdout/stderr, the extracted
-  response, and run metadata describing what the harness was and how long it took.
+- `cross_family_ask.py` - poses one question to several agent harnesses and records comparable
+  answers; its module docstring and `--help` say which families it runs and what each run records.
 - `list_tools.py` - prints the live MCP tool registry (count + names); the single source of truth
   for "how many domain tools exist," since the count drifts as tools are added/renamed.
 - `line_delta.py` - sums a change's insertions and deletions by area (`packages/`, `tests/`, other)

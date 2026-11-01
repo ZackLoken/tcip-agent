@@ -75,28 +75,22 @@ is a derived view that can be regenerated, not a state change, and leaves none. 
 `@tool(description=...)` composes its client-visible description from the knowledge corpus at import
 time rather than leaving it as the bare docstring. A mutating door only an operator runs (an
 operator-only command module in `cli/` calls it, as `archive_project`) keeps `@audited` without
-registering. Run
-`python tools/list_tools.py` for the current tool list/count; never hardcode a count in a doc or
-comment.
+registering.
 
 ## Conventions specific to this package
 
-- `tools/` lazy-imports torch/torchvision and the `pipelines/` modules that carry them, inside
-  function bodies. `pipelines/` itself imports torch at module level; a pipeline module only loads
-  when a tool reaches into it.
+- `pipelines/` imports torch at module level, so `tools/` lazy-imports the `pipelines/` modules
+  too; a pipeline module loads only when a tool reaches into it.
 - Detectors are built via the plain `build_detector` (+ `_build_faster_rcnn` / `_build_fcos` /
   `_build_retinanet` / `_build_mask_rcnn`); bespoke model code imports these directly. There is no
   model spec or component registry; see the `toolkit-inventory` skill for the full composition
   surface (`build_detector`/`build_loss` task strings, heads/necks/backbones, derivations, the `ctx`
   craft library, and the `model_source`/`training_source`/`dataset_source` seams).
-- A one-off script the agent writes for one project lives with that project, in the project's own
-  directory, never in this repository. A standing capability the agent uses is a tool in `tools/`,
-  and every registered tool is also the `tcip` command of its own name (`cli.hyphenated`): the one
-  adapter `cli.run_tool` parses its arguments into the tool's advertised input schema and calls it
-  through the server `server.server_for` returns, its session bound to the parsed `--project` and
-  `--user`, so an operator runs the same tool the agent does.
-  A capability only an operator uses is an operator-only command module in `cli/` exposing
-  `main(argv)`, named in the `tcip_web.cli` dispatcher.
+- A standing capability lives in `tools/`, and every registered tool is also the `tcip` command of
+  its own name (`cli.hyphenated`): the one adapter `cli.run_tool` parses its arguments into the
+  tool's advertised input schema and calls it through the server `server.server_for` returns, its
+  session bound to the parsed `--project` and `--user`. An operator-only command is a module in
+  `cli/` exposing `main(argv)`, named in the `tcip_web.cli` dispatcher.
 - State mutations route through audited doors only, each leaving one line: an `@audited` tool or
   operator-only door, or a library function recording its own event through
   `record_event_or_raise`; the record is `audit_log`, one log addressed by `audit.audit_log_key`
